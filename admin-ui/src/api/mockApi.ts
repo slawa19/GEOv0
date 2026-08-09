@@ -276,17 +276,11 @@ async function getIncidentsDataset(): Promise<Incident[] | null> {
 }
 
 async function getGraphAuditLogDataset(): Promise<AuditLogEntry[]> {
-  if (mockAuditLog) return mockAuditLog
-  const raw = await loadOptionalJson<unknown | null>('datasets/audit-log.json', null)
-  if (raw === null) return []
   try {
-    const decoded = decodeAdminResponse(
-      AdminAuditLogSchema,
-      raw,
-      'mock GET /api/v1/admin/graph/snapshot audit-log',
-    )
-    mockAuditLog = decoded
-    return decoded
+    // Share the exact same in-flight owner as mutations and the dedicated audit
+    // endpoint. An older optional Graph read must never overwrite a newer audit
+    // mutation when its fetch resolves last.
+    return await getAuditLogDataset()
   } catch {
     // audit_log is an optional Graph snapshot component in fixture mode. The
     // dedicated audit endpoint remains strict and reports malformed fixtures.

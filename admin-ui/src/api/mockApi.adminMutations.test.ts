@@ -246,6 +246,43 @@ describe('mock Admin mutation state and audit contracts', () => {
     expect(new Set(audit.items.map((entry) => entry.object_id))).toEqual(new Set(['TX_A', 'TX_B']))
   })
 
+  it('shares one audit-load owner between a Graph snapshot and a concurrent mutation', async () => {
+    installFixtures()
+    let resolveAudit!: (response: Response) => void
+    const auditResponse = new Promise<Response>((resolve) => {
+      resolveAudit = resolve
+    })
+    let auditRequests = 0
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/scenarios/happy.json')) return jsonResponse({ name: 'happy', latency_ms: { min: 0, max: 0 } })
+      if (url.endsWith('/datasets/audit-log.json')) {
+        auditRequests += 1
+        return auditResponse
+      }
+      if (url.endsWith('/datasets/config.json')) return jsonResponse(config)
+      if (url.endsWith('/datasets/participants.json')) return jsonResponse([])
+      if (url.endsWith('/datasets/trustlines.json')) return jsonResponse([])
+      if (url.endsWith('/datasets/equivalents.json')) return jsonResponse([])
+      if (url.endsWith('/datasets/incidents.json')) return new Response('Not Found', { status: 404 })
+      if (url.endsWith('/datasets/debts.json')) return new Response('Not Found', { status: 404 })
+      if (url.endsWith('/datasets/transactions.json')) return new Response('Not Found', { status: 404 })
+      return new Response('Not Found', { status: 404 })
+    })
+
+    const graphPromise = mockApi.graphSnapshot()
+    const mutationPromise = mockApi.patchConfig({ ROUTING_MAX_PATHS: 4 })
+    await vi.waitFor(() => expect(auditRequests).toBe(1))
+    resolveAudit(jsonResponse([]))
+
+    const [graphEnvelope] = await Promise.all([graphPromise, mutationPromise])
+    expect(auditRequests).toBe(1)
+    expect(assertSuccess(graphEnvelope).audit_log.map((entry) => entry.action)).toEqual(['admin.config.patch'])
+    expect(assertSuccess(await mockApi.listAuditLog({})).items.map((entry) => entry.action)).toEqual([
+      'admin.config.patch',
+    ])
+  })
+
   it('retries an optional incident fixture after a transient failure', async () => {
     installFixtures()
     let incidentAttempts = 0
