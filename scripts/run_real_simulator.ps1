@@ -63,8 +63,10 @@ $script:backendOrigin = "http://${HostName}:$ApiPort"
 $script:apiDocsUrl = "${script:backendOrigin}/docs"
 $stateDir = Join-Path $repoRoot '.local-run'
 $fullStackOwnershipDir = Join-Path $stateDir 'full-stack'
-$runLocalBackendPidPath = Join-Path $stateDir 'backend.pid'
-$runLocalAdminUiPidPath = Join-Path $stateDir 'admin-ui.pid'
+$runRealOwnershipDir = Join-Path $stateDir 'run-real-simulator'
+$runRealSimulatorOwnershipPath = Join-Path $runRealOwnershipDir 'simulator-ui.owner.json'
+$runRealSimulatorOutLog = Join-Path $runRealOwnershipDir 'simulator-ui.out.log'
+$runRealSimulatorErrLog = Join-Path $runRealOwnershipDir 'simulator-ui.err.log'
 
 function Get-LauncherLifecycleLockName {
   param([string]$RepositoryRoot)
@@ -137,6 +139,23 @@ function Get-ProcessIdentityObservation {
     'Mismatch'
   }
   return [pscustomobject]@{ Status = $status; Fingerprint = $fingerprint }
+}
+
+function Get-ProcessStartTimeFingerprint {
+  param([int]$Id)
+  $identity = Get-ProcessIdentityObservation -Id $Id -ExpectedStartFingerprint ''
+  if ($identity.Status -in @('Missing', 'Unreadable')) { return $null }
+  return $identity.Fingerprint
+}
+
+function Stop-ProcessById {
+  param([int]$Id, [string]$ExpectedStartFingerprint)
+  $identity = Get-ProcessIdentityObservation -Id $Id -ExpectedStartFingerprint $ExpectedStartFingerprint
+  if ($identity.Status -eq 'Missing') { return }
+  if ($identity.Status -ne 'Exact') {
+    throw "Refusing to stop PID $Id because its exact process identity cannot be confirmed."
+  }
+  Stop-Process -Id $Id -Force -ErrorAction Stop
 }
 
 function Get-FullStackOwnershipMetadata {
@@ -462,148 +481,161 @@ function Get-ListeningPid {
   return $null
 }
 
-function Get-PidFromFile {
+function Get-RunRealRepositoryIdentity {
+  return Get-LauncherLifecycleLockName -RepositoryRoot $repoRoot
+}
+
+function Get-RunRealSimulatorService {
+  return [pscustomobject]@{
+    Name = 'Simulator UI'
+    OwnershipFile = $runRealSimulatorOwnershipPath
+    Port = $SimulatorUiPort
+  }
+}
+
+function Get-RunRealOwnershipMetadata {
   param([string]$Path)
   if (-not (Test-Path -LiteralPath $Path)) { return $null }
   try {
-    $raw = Get-Content -LiteralPath $Path -ErrorAction Stop | Select-Object -First 1
-    if ([string]$raw -match '^\s*(\d+)\s*$') { return [int]$Matches[1] }
-  } catch {}
-  return $null
-}
-
-function Get-ProcessCommandLine {
-  param([int]$Id)
-  try {
-    $process = Get-CimInstance Win32_Process -Filter "ProcessId=$Id" -ErrorAction Stop
-    if ($process -and $process.CommandLine) { return ([string]$process.CommandLine).Trim() }
-  } catch {}
-  return ''
-}
-
-function Test-IsExpectedRunLocalCommandLine {
-  param([string]$CommandLine, [string]$Kind, [string]$ContextDir)
-  if ([string]::IsNullOrWhiteSpace($CommandLine)) { return $false }
-  $commandLineLower = $CommandLine.ToLowerInvariant()
-  if ($Kind -eq 'backend') {
-    return ($commandLineLower -like '*uvicorn*' -and $commandLineLower -like '*app.main:app*')
+    $metadata = (Get-Content -LiteralPath $Path -Raw -ErrorAction Stop) | ConvertFrom-Json -ErrorAction Stop
+    $pidValue = 0
+    if (-not [int]::TryParse([string]$metadata.pid, [ref]$pidValue) -or $pidValue -le 0) { throw 'invalid pid' }
+    $fingerprint = [string]$metadata.process_start_fingerprint
+    if ($fingerprint -notmatch '^utc-ticks:\d+$') { throw 'invalid fingerprint' }
+    return [pscustomobject]@{
+      Valid = [bool]($metadata.version -eq 1)
+      RepositoryIdentity = [string]$metadata.repository_identity
+      ServiceName = [string]$metadata.service_name
+      Port = [int]$metadata.port
+      Pid = $pidValue
+      ProcessStartFingerprint = $fingerprint
+    }
+  } catch {
+    return [pscustomobject]@{ Valid = $false }
   }
-  $escapedDir = [WildcardPattern]::Escape($ContextDir.ToLowerInvariant())
-  return ($commandLineLower -like '*vite*' -and $commandLineLower -like "*$escapedDir*")
 }
 
-function Get-RunLocalPidStopPlan {
-  param([object[]]$Services)
-  $targets = @()
-  $pidFilesToRemove = @()
-  $conflicts = @()
-  foreach ($service in $Services) {
-    $pidFilePresent = Test-Path -LiteralPath $service.PidFile
-    $procId = Get-PidFromFile -Path $service.PidFile
-    if ($pidFilePresent -and -not $procId) {
-      $conflicts += "$($service.Name): PID metadata is unreadable and was retained"
-      continue
-    }
-    if (-not $procId) { continue }
+function Write-RunRealOwnershipMetadata {
+  param([object]$Service, [int]$Id, [string]$ProcessStartFingerprint)
+  if ($ProcessStartFingerprint -notmatch '^utc-ticks:\d+$') { throw 'Simulator UI process fingerprint is unavailable.' }
+  $metadata = [ordered]@{
+    version = 1
+    repository_identity = Get-RunRealRepositoryIdentity
+    service_name = [string]$Service.Name
+    port = [int]$Service.Port
+    pid = $Id
+    process_start_fingerprint = $ProcessStartFingerprint
+    recorded_at_utc = (Get-Date).ToUniversalTime().ToString('o')
+  }
+  $tempPath = "$($Service.OwnershipFile).tmp.$([Guid]::NewGuid().ToString('N'))"
+  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  try {
+    [System.IO.File]::WriteAllText($tempPath, ($metadata | ConvertTo-Json -Compress), $utf8NoBom)
+    Move-Item -LiteralPath $tempPath -Destination $Service.OwnershipFile -Force
+  } finally {
+    if (Test-Path -LiteralPath $tempPath) { Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue }
+  }
+}
 
-    $identity = Get-ProcessIdentityObservation -Id $procId -ExpectedStartFingerprint ''
-    if ($identity.Status -eq 'Missing') {
-      $pidFilesToRemove += $service.PidFile
-      continue
-    }
-    if ($identity.Status -eq 'Unreadable') {
-      $conflicts += "$($service.Name): PID $procId identity is unreadable"
-      continue
-    }
-    $commandLine = Get-ProcessCommandLine -Id $procId
-    if (-not (Test-IsExpectedRunLocalCommandLine `
-      -CommandLine $commandLine `
-      -Kind $service.Kind `
-      -ContextDir $service.ContextDir)) {
-      $conflicts += "$($service.Name): PID $procId command line does not match; metadata was retained"
-      continue
-    }
-    $targets += [pscustomobject]@{
-      Pid = [int]$procId
-      ProcessStartFingerprint = $identity.Fingerprint
-      CommandLine = $commandLine
-      PidFile = $service.PidFile
-    }
-    $pidFilesToRemove += $service.PidFile
+function Get-RunRealOwnershipState {
+  param([object]$Service)
+  $metadata = Get-RunRealOwnershipMetadata -Path $Service.OwnershipFile
+  $metadataPresent = $null -ne $metadata
+  $metadataMatches = [bool](
+    $metadataPresent -and $metadata.Valid -and
+    $metadata.RepositoryIdentity -eq (Get-RunRealRepositoryIdentity) -and
+    $metadata.ServiceName -eq $Service.Name -and $metadata.Port -gt 0
+  )
+  $effectivePort = if ($metadataMatches) { $metadata.Port } else { $Service.Port }
+  $listener = Get-ListeningPid -Port $effectivePort
+  $identity = if ($metadataMatches) {
+    Get-ProcessIdentityObservation -Id $metadata.Pid -ExpectedStartFingerprint $metadata.ProcessStartFingerprint
+  } else {
+    [pscustomobject]@{ Status = $(if ($metadataPresent) { 'Unreadable' } else { 'Missing' }); Fingerprint = $null }
+  }
+  $owned = [bool]($metadataMatches -and $identity.Status -eq 'Exact' -and $listener -eq $metadata.Pid)
+  $conflict = $false
+  $reason = $null
+  $staleOwnershipFile = $false
+  if ($listener -and -not $metadataPresent) {
+    $conflict = $true
+    $reason = "port $effectivePort has listener PID $listener without exact run_real ownership metadata"
+  } elseif ($metadataPresent -and -not $metadataMatches) {
+    $conflict = $true
+    $reason = 'run_real ownership metadata is invalid or belongs to another repository/service'
+  } elseif ($listener -and -not $owned) {
+    $conflict = $true
+    $reason = "listener PID $listener does not match the exact owned process instance"
+  } elseif (-not $listener -and $identity.Status -in @('Exact', 'Unreadable')) {
+    $conflict = $true
+    $reason = "owned PID $($metadata.Pid) is alive or unreadable but is not the expected listener"
+  } elseif (-not $listener -and $metadataPresent -and $identity.Status -in @('Missing', 'Mismatch')) {
+    $staleOwnershipFile = $true
   }
   return [pscustomobject]@{
-    Targets = @($targets)
-    PidFilesToRemove = @($pidFilesToRemove)
-    Conflicts = @($conflicts)
+    Service = $Service
+    MetadataPresent = $metadataPresent
+    SavedPid = if ($metadataMatches) { $metadata.Pid } else { $null }
+    SavedProcessStartFingerprint = if ($metadataMatches) { $metadata.ProcessStartFingerprint } else { $null }
+    ListenerPid = $listener
+    EffectivePort = $effectivePort
+    Owned = $owned
+    Conflict = $conflict
+    Reason = $reason
+    StaleOwnershipFile = $staleOwnershipFile
   }
 }
 
-function Test-RunLocalPidStopPlansEqual {
-  param([object]$InitialPlan, [object]$FinalPlan)
-  if ($InitialPlan.Targets.Count -ne $FinalPlan.Targets.Count) { return $false }
-  for ($index = 0; $index -lt $InitialPlan.Targets.Count; $index++) {
-    foreach ($property in @('Pid', 'ProcessStartFingerprint', 'CommandLine', 'PidFile')) {
-      if ($InitialPlan.Targets[$index].$property -ne $FinalPlan.Targets[$index].$property) { return $false }
+function Invoke-RunRealOwnershipStopPlan {
+  param([object]$Service)
+  $initial = Get-RunRealOwnershipState -Service $Service
+  if ($initial.Conflict) { throw "run_real stop refused before mutation: $($initial.Reason)" }
+  $final = Get-RunRealOwnershipState -Service $Service
+  if ($final.Conflict) { throw "run_real stop refused during final preflight: $($final.Reason)" }
+  foreach ($property in @('SavedPid','SavedProcessStartFingerprint','ListenerPid','EffectivePort','Owned','StaleOwnershipFile')) {
+    if ($initial.$property -ne $final.$property) { throw 'run_real stop refused because ownership changed during final preflight.' }
+  }
+  if ($final.Owned) {
+    $current = Get-RunRealOwnershipState -Service $Service
+    if (-not $current.Owned -or $current.SavedPid -ne $final.SavedPid -or
+      $current.SavedProcessStartFingerprint -ne $final.SavedProcessStartFingerprint) {
+      throw 'run_real stop refused because Simulator UI ownership changed before execution.'
+    }
+    Stop-ProcessById -Id $final.SavedPid -ExpectedStartFingerprint $final.SavedProcessStartFingerprint
+    Remove-Item -LiteralPath $Service.OwnershipFile -Force -ErrorAction Stop
+  } elseif ($final.StaleOwnershipFile) {
+    Remove-Item -LiteralPath $Service.OwnershipFile -Force -ErrorAction Stop
+  }
+}
+
+function Wait-ForRunRealSimulatorOwnership {
+  param([object]$Service, [object]$Process, [int]$TimeoutSec = 60)
+  if ($null -eq $Process -or -not $Process.Id) { throw 'Start-Process did not return the Simulator UI process.' }
+  $launchedPid = [int]$Process.Id
+  $fingerprint = Get-ProcessStartTimeFingerprint -Id $launchedPid
+  if ([string]::IsNullOrWhiteSpace($fingerprint)) { throw 'Simulator UI process identity is unavailable.' }
+  $persisted = $false
+  try {
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    while ((Get-Date) -lt $deadline) {
+      $identity = Get-ProcessIdentityObservation -Id $launchedPid -ExpectedStartFingerprint $fingerprint
+      if ($identity.Status -ne 'Exact') { throw 'Simulator UI process exited or changed during startup.' }
+      $listener = Get-ListeningPid -Port $Service.Port
+      if ($listener) {
+        if ($listener -ne $launchedPid) { throw "Simulator UI listener PID $listener is not launched PID $launchedPid." }
+        Write-RunRealOwnershipMetadata -Service $Service -Id $launchedPid -ProcessStartFingerprint $fingerprint
+        $persisted = $true
+        return [pscustomobject]@{ Pid = $launchedPid; ProcessStartFingerprint = $fingerprint }
+      }
+      Start-Sleep -Milliseconds 500
+    }
+    throw "Simulator UI did not listen on port $($Service.Port) within $TimeoutSec seconds."
+  } finally {
+    if (-not $persisted) {
+      $identity = Get-ProcessIdentityObservation -Id $launchedPid -ExpectedStartFingerprint $fingerprint
+      if ($identity.Status -eq 'Exact') { Stop-ProcessById -Id $launchedPid -ExpectedStartFingerprint $fingerprint }
     }
   }
-  return (($InitialPlan.PidFilesToRemove -join "`n") -eq ($FinalPlan.PidFilesToRemove -join "`n"))
-}
-
-function Invoke-RunLocalPidStopPlan {
-  param([object[]]$Services)
-  $initialPlan = Get-RunLocalPidStopPlan -Services $Services
-  if ($initialPlan.Conflicts.Count -gt 0) {
-    throw "run_local process stop refused before any stop: $($initialPlan.Conflicts -join '; ')"
-  }
-  $finalPlan = Get-RunLocalPidStopPlan -Services $Services
-  if ($finalPlan.Conflicts.Count -gt 0) {
-    throw "run_local process stop refused during final preflight: $($finalPlan.Conflicts -join '; ')"
-  }
-  if (-not (Test-RunLocalPidStopPlansEqual -InitialPlan $initialPlan -FinalPlan $finalPlan)) {
-    throw 'run_local process stop refused because ownership changed during final preflight.'
-  }
-
-  foreach ($target in $finalPlan.Targets) {
-    $identity = Get-ProcessIdentityObservation -Id $target.Pid -ExpectedStartFingerprint $target.ProcessStartFingerprint
-    $commandLine = Get-ProcessCommandLine -Id $target.Pid
-    if ($identity.Status -ne 'Exact' -or $commandLine -ne $target.CommandLine) {
-      throw "run_local process stop refused because PID $($target.Pid) changed before execution."
-    }
-  }
-  foreach ($target in $finalPlan.Targets) {
-    Stop-Process -Id $target.Pid -Force -ErrorAction Stop
-  }
-  foreach ($path in $finalPlan.PidFilesToRemove) {
-    if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force -ErrorAction Stop }
-  }
-}
-
-function Stop-RunLocalPidFileProcess {
-  param([string]$Path, [string]$Kind, [string]$ContextDir)
-  Invoke-RunLocalPidStopPlan -Services @([pscustomobject]@{
-    Name = $Kind
-    Kind = $Kind
-    ContextDir = $ContextDir
-    PidFile = $Path
-  })
-}
-
-function Stop-RunLocalProcesses {
-  $services = @(
-    [pscustomobject]@{
-      Name = 'Admin UI'
-      Kind = 'ui'
-      ContextDir = (Join-Path $repoRoot 'admin-ui')
-      PidFile = $runLocalAdminUiPidPath
-    },
-    [pscustomobject]@{
-      Name = 'Backend'
-      Kind = 'backend'
-      ContextDir = $null
-      PidFile = $runLocalBackendPidPath
-    }
-  )
-  Invoke-RunLocalPidStopPlan -Services $services
 }
 
 function Start-SimulatorUiReal() {
@@ -612,19 +644,33 @@ function Start-SimulatorUiReal() {
     return
   }
 
-  $uiScript = Join-Path $repoRoot 'scripts/run_simulator_ui.ps1'
+  $appDir = Join-Path $repoRoot 'simulator-ui/v2'
+  $viteCli = Join-Path $appDir 'node_modules/vite/bin/vite.js'
+  if (-not (Test-Path -LiteralPath (Join-Path $appDir 'node_modules'))) {
+    Write-Host 'Installing Simulator UI dependencies...'
+    & npm --prefix $appDir install
+    if ($LASTEXITCODE -ne 0) { throw "Simulator UI npm install failed (exit=$LASTEXITCODE)." }
+  }
+  if (-not (Test-Path -LiteralPath $viteCli -PathType Leaf)) { throw "Vite executable not found: $viteCli" }
+  $node = Get-Command node -ErrorAction Stop
   Write-Host ''
   Write-Host 'Starting Simulator UI v2 (Real Mode)...'
   Write-Host "Backend origin (for proxy): ${script:backendOrigin}"
   Write-Host "Open: http://${HostName}:${SimulatorUiPort}/?mode=real"
-  Write-Host 'If port 5176 is unavailable, Vite will pick another and print the actual URL.' -ForegroundColor DarkGray
   Write-Host ''
-
-  # Print links before starting Vite (it runs in foreground).
+  $env:VITE_API_MODE = 'real'
+  $env:VITE_GEO_BACKEND_ORIGIN = $script:backendOrigin
+  $arguments = @("`"$viteCli`"", '--host', $HostName, '--port', "$SimulatorUiPort", '--strictPort')
+  $process = Start-Process -FilePath $node.Source -ArgumentList $arguments -WorkingDirectory $appDir -PassThru -WindowStyle Hidden -RedirectStandardOutput $runRealSimulatorOutLog -RedirectStandardError $runRealSimulatorErrLog
+  $ownership = Wait-ForRunRealSimulatorOwnership -Service (Get-RunRealSimulatorService) -Process $process
+  Write-Host "Simulator UI started in background (PID $($ownership.Pid))." -ForegroundColor Green
   Write-UsefulLinks -IncludeSimulatorUi
+}
 
-  # Run in the current terminal (foreground) so logs are visible.
-  & $uiScript -Port $SimulatorUiPort -HostName $HostName -Mode real -BackendOrigin $script:backendOrigin
+function Stop-RunRealServices {
+  Invoke-RunRealOwnershipStopPlan -Service (Get-RunRealSimulatorService)
+  Write-Host 'Stopping Docker containers (app, redis, db)...'
+  Invoke-DockerCompose @('stop','app','redis','db') | Out-Host
 }
 
 if ($Action -eq 'doctor') {
@@ -645,23 +691,15 @@ $LifecycleLock = $null
 try {
 $LifecycleLock = Enter-LauncherLifecycleLock -RepositoryRoot $repoRoot -LauncherName 'run_real_simulator'
 Assert-NoActiveFullStackOwnership
+foreach ($directory in @($stateDir, $runRealOwnershipDir)) {
+  if (-not (Test-Path -LiteralPath $directory)) {
+    New-Item -ItemType Directory -Path $directory -Force | Out-Null
+  }
+}
 
 if ($Action -eq 'stop') {
   Write-Host 'Stopping all simulator services...'
-
-  # Only PID files written by run_local are eligible. Each PID is validated
-  # against its expected command line before any native stop is attempted.
-  Stop-RunLocalProcesses
-  
-  # Stop this launcher's named Docker Compose services.
-  $mode = Get-DockerMode
-  if ($mode -ne 'missing') {
-    Write-Host 'Stopping Docker containers (app, redis, db)...'
-    try { Invoke-DockerCompose @('stop','app','redis','db') | Out-Host } catch {}
-  } else {
-    Write-Host 'Docker not available, skipping container stop.' -ForegroundColor DarkGray
-  }
-  
+  Stop-RunRealServices
   Write-Host 'All simulator services stopped.' -ForegroundColor Green
   exit 0
 }
@@ -675,6 +713,7 @@ if ($Action -eq 'seed') {
 }
 
 # Action=start
+Invoke-RunRealOwnershipStopPlan -Service (Get-RunRealSimulatorService)
 Ensure-ComposeCore
 Seed-DbIfRequested
 Start-SimulatorUiReal
@@ -682,6 +721,8 @@ Start-SimulatorUiReal
 if ($NoSimulatorUi) {
   Write-Host 'OK: services started (UI skipped).'
   Write-UsefulLinks
+} else {
+  Write-Host 'OK: services and background Simulator UI started.'
 }
 } finally {
   Exit-LauncherLifecycleLock -LockHandle $LifecycleLock

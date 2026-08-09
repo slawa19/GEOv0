@@ -13,8 +13,8 @@
     Запуск всех сервисов.
 
 .EXAMPLE
-    .\run_local.ps1 -Action restart-backend -ReloadBackend
-    Перезапуск только бэкенда с флагом --reload.
+    .\run_local.ps1 -Action restart-backend
+    Перезапуск только бэкенда. Для exact process ownership launcher не использует --reload.
 
 .EXAMPLE
     .\run_local.ps1 -Action reset-db -SeedSource fixtures -FixturesCommunity riverside-town-50 -RegenerateFixtures
@@ -72,14 +72,25 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# Uvicorn reload delegates the listener to a child process, so it cannot satisfy
+# this launcher's exact launched-PID/listener ownership contract. Reject before
+# acquiring the lifecycle lock or stopping any healthy service.
+if ($ReloadBackend) {
+    throw '-ReloadBackend is not supported by exact single-process ownership. Run without this switch.'
+}
+
 # This entrypoint is explicitly for the permissive local-development profile.
-$env:ENV = 'dev'
-Remove-Item Env:ENVIRONMENT -ErrorAction SilentlyContinue
+# Status is observational and must not mutate even the caller's environment.
+if ($Action -ne 'status') {
+    $env:ENV = 'dev'
+    Remove-Item Env:ENVIRONMENT -ErrorAction SilentlyContinue
+}
 
 # --- Configuration & Paths ---
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $StateDir = Join-Path $RepoRoot '.local-run'
 $FullStackOwnershipDir = Join-Path $StateDir 'full-stack'
+$RunLocalOwnershipDir = Join-Path $StateDir 'run-local'
 $UiDir = Join-Path $RepoRoot 'admin-ui'
 $EnvLocalPath = Join-Path $UiDir '.env.local'
 $DefaultDatabaseUrl = 'sqlite+aiosqlite:///./.local-run/geov0.db'
@@ -87,19 +98,19 @@ $LegacyRootDatabaseUrl = 'sqlite+aiosqlite:///./geov0.db'
 $DefaultDatabasePath = Join-Path $StateDir 'geov0.db'
 $LegacyRootDatabasePath = Join-Path $RepoRoot 'geov0.db'
 
-# Создаем директорию для логов и PID-файлов
-if (-not (Test-Path $StateDir)) {
-    $null = New-Item -ItemType Directory -Force -Path $StateDir
-}
-
-# Пути к PID и логам
-$BackendPidPath = Join-Path $StateDir 'backend.pid'
-$UiPidPath = Join-Path $StateDir 'admin-ui.pid'
+# Versioned run_local ownership is isolated from both full-stack ownership and
+# the historical bare PID files. Bare files remain read-only conflict evidence.
+$BackendOwnershipPath = Join-Path $RunLocalOwnershipDir 'backend.owner.json'
+$UiOwnershipPath = Join-Path $RunLocalOwnershipDir 'admin-ui.owner.json'
+$LegacyBackendPidPath = Join-Path $StateDir 'backend.pid'
+$LegacyUiPidPath = Join-Path $StateDir 'admin-ui.pid'
 $FullStackBackendOwnershipPath = Join-Path $FullStackOwnershipDir 'backend.owner.json'
 $FullStackAdminUiOwnershipPath = Join-Path $FullStackOwnershipDir 'admin-ui.owner.json'
 $FullStackSimulatorUiOwnershipPath = Join-Path $FullStackOwnershipDir 'simulator-ui.owner.json'
 $BackendOutLog = Join-Path $StateDir 'backend.out.log'
 $BackendErrLog = Join-Path $StateDir 'backend.err.log'
+$UiOutLog = Join-Path $StateDir 'admin-ui.out.log'
+$UiErrLog = Join-Path $StateDir 'admin-ui.err.log'
 
 # --- Helper Functions ---
 
@@ -192,20 +203,6 @@ function Get-NullCoalesce {
     return $Value
 }
 
-function Get-PidFromFile {
-    param([string]$Path)
-    if (-not (Test-Path $Path)) { return $null }
-    
-    try {
-        $raw = Get-Content -Path $Path -ErrorAction Stop | Select-Object -First 1
-        if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
-        if ($raw.Trim() -match '^\d+$') { return [int]$raw }
-    } catch {
-        Write-Verbose "Could not read PID file ${Path}: $_"
-    }
-    return $null
-}
-
 function Stop-ProcessById {
     param([int]$Id, [string]$ExpectedStartFingerprint)
     if (-not $Id -or $Id -eq 0) { return }
@@ -219,130 +216,6 @@ function Stop-ProcessById {
 
     Write-Verbose "Stopping process with ID $Id..."
     Stop-Process -Id $Id -Force -ErrorAction Stop
-}
-
-function Get-ProcessCommandLine {
-    param([int]$Id)
-    if (-not $Id -or $Id -eq 0) { return '' }
-    
-    try {
-        # Win32_Process нужен для получения аргументов командной строки
-        $p = Get-CimInstance Win32_Process -Filter "ProcessId=$Id" -ErrorAction Stop
-        if ($null -eq $p -or $null -eq $p.CommandLine) { return '' }
-        return ($p.CommandLine | Out-String).Trim()
-    } catch {
-        Write-Verbose "Could not get command line for process ${Id}: $_"
-        return ''
-    }
-}
-
-function Test-IsOurBackend {
-    param([int]$Id)
-    $cmd = Get-ProcessCommandLine -Id $Id
-    if (-not $cmd) { return $false }
-    
-    $cmdLower = $cmd.ToLowerInvariant()
-    # Проверяем наличие ключевых маркеров запуска uvicorn и нашего приложения
-    return ($cmdLower -like '*uvicorn*' -and $cmdLower -like '*app.main:app*')
-}
-
-function Test-WslDockerAvailable {
-    try {
-        if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { return $false }
-        & wsl.exe -e bash -lc 'command -v docker >/dev/null 2>&1'
-        return ($LASTEXITCODE -eq 0)
-    } catch {
-        return $false
-    }
-}
-
-function Get-OurDockerContainersByPort {
-    param(
-        [int]$Port
-    )
-
-    $names = @()
-
-    # Native docker
-    if (Get-Command docker -ErrorAction SilentlyContinue) {
-        try {
-            $out = & docker ps --format '{{.Names}} {{.Ports}}' 2>$null
-            foreach ($line in ($out | Where-Object { $_ })) {
-                $text = $line.ToString()
-                if ($text -notmatch '^(\S+)\s+(.+)$') { continue }
-                $name = $Matches[1]
-                $ports = $Matches[2]
-                if ($name -notlike 'geov0-*') { continue }
-                if ($ports -like "*:$Port->*") { $names += $name }
-            }
-        } catch {
-            # ignore
-        }
-    }
-
-    if ($names.Count -gt 0) { return $names }
-
-    # WSL docker
-    if (Test-WslDockerAvailable) {
-        try {
-            $out = & wsl.exe -e bash -lc "docker ps --format '{{.Names}} {{.Ports}}'" 2>$null
-            foreach ($line in ($out | Where-Object { $_ })) {
-                $text = $line.ToString()
-                if ($text -notmatch '^(\S+)\s+(.+)$') { continue }
-                $name = $Matches[1]
-                $ports = $Matches[2]
-                if ($name -notlike 'geov0-*') { continue }
-                if ($ports -like "*:$Port->*") { $names += $name }
-            }
-        } catch {
-            # ignore
-        }
-    }
-
-    return $names
-}
-
-function Stop-OurDockerContainers {
-    param(
-        [string[]]$Names
-    )
-
-    $Names = @($Names | Where-Object { $_ })
-    if ($Names.Count -eq 0) { return }
-
-    Write-Host "Stopping repo docker containers: $($Names -join ', ')" -ForegroundColor Yellow
-
-    if (Get-Command docker -ErrorAction SilentlyContinue) {
-        try {
-            & docker stop @Names | Out-Null
-            return
-        } catch {
-            # fall through to WSL
-        }
-    }
-
-    if (Test-WslDockerAvailable) {
-        try {
-            $escaped = $Names | ForEach-Object { "'" + ($_.Replace("'", "'\\''")) + "'" }
-            $cmd = "docker stop " + ($escaped -join ' ')
-            & wsl.exe -e bash -lc "$cmd >/dev/null 2>&1 || true" | Out-Null
-        } catch {
-            # ignore
-        }
-    }
-}
-
-function Test-IsOurAdminUi {
-    param([int]$Id, [string]$TargetUiDir)
-    $cmd = Get-ProcessCommandLine -Id $Id
-    if (-not $cmd) { return $false }
-    
-    $cmdLower = $cmd.ToLowerInvariant()
-    # Экранируем специальные wildcard символы в пути для корректного -like сравнения
-    $escapedDir = [WildcardPattern]::Escape($TargetUiDir.ToLowerInvariant())
-    
-    # Проверяем, что это vite и путь к директории совпадает (защита от убийства чужих vite)
-    return ($cmdLower -like '*vite*' -and $cmdLower -like "*$escapedDir*")
 }
 
 function Get-ListeningPid {
@@ -392,168 +265,236 @@ function Get-ProcessStartTimeFingerprint {
     return $identity.Fingerprint
 }
 
-function Test-IsExpectedLegacyCommandLine {
-    param([string]$CommandLine, [string]$Kind, [string]$ContextDir)
-    if ([string]::IsNullOrWhiteSpace($CommandLine)) { return $false }
-    $commandLineLower = $CommandLine.ToLowerInvariant()
-    if ($Kind -eq 'backend') {
-        return ($commandLineLower -like '*uvicorn*' -and $commandLineLower -like '*app.main:app*')
-    }
-    $escapedDir = [WildcardPattern]::Escape($ContextDir.ToLowerInvariant())
-    return ($commandLineLower -like '*vite*' -and $commandLineLower -like "*$escapedDir*")
+function Get-RunLocalRepositoryIdentity {
+    return Get-LauncherLifecycleLockName -RepositoryRoot $RepoRoot
 }
 
-function Get-LegacyProcessStopPlan {
-    param([object[]]$Services)
-
-    $targets = @()
-    $targetPids = @{}
-    $pidFilesToRemove = @()
-    $conflicts = @()
-    foreach ($service in $Services) {
-        $candidates = @()
-        $pidFilePresent = [bool]($service.PidFile -and (Test-Path -LiteralPath $service.PidFile))
-        $savedPid = if ($service.PidFile) { Get-PidFromFile -Path $service.PidFile } else { $null }
-        if ($pidFilePresent -and -not $savedPid) {
-            $conflicts += "$($service.Name): PID metadata is unreadable and was retained"
-        } elseif ($savedPid) {
-            $candidates += [pscustomobject]@{ Pid = [int]$savedPid; Source = 'pid-file' }
+function Get-RunLocalOwnershipMetadata {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return $null }
+    try {
+        $metadata = (Get-Content -LiteralPath $Path -Raw -ErrorAction Stop) |
+            ConvertFrom-Json -ErrorAction Stop
+        $pidValue = 0
+        if (-not [int]::TryParse([string]$metadata.pid, [ref]$pidValue) -or $pidValue -le 0) {
+            throw 'invalid pid'
         }
-
-        if ($service.IncludeListener) {
-            $listenerPid = Get-ListeningPid -Port $service.Port
-            if ($listenerPid) {
-                $candidates += [pscustomobject]@{ Pid = [int]$listenerPid; Source = 'listener' }
-            }
+        $fingerprint = [string]$metadata.process_start_fingerprint
+        if ($fingerprint -notmatch '^utc-ticks:\d+$') { throw 'invalid fingerprint' }
+        return [pscustomobject]@{
+            Valid = [bool]($metadata.version -eq 1)
+            RepositoryIdentity = [string]$metadata.repository_identity
+            ServiceName = [string]$metadata.service_name
+            Port = [int]$metadata.port
+            Pid = $pidValue
+            ProcessStartFingerprint = $fingerprint
         }
+    } catch {
+        return [pscustomobject]@{ Valid = $false }
+    }
+}
 
-        foreach ($candidate in $candidates) {
-            $identity = Get-ProcessIdentityObservation -Id $candidate.Pid -ExpectedStartFingerprint ''
-            if ($identity.Status -eq 'Missing') {
-                if ($candidate.Source -eq 'pid-file') {
-                    $pidFilesToRemove += $service.PidFile
-                    continue
-                }
-                $conflicts += "$($service.Name): listener PID $($candidate.Pid) disappeared during preflight"
-                continue
-            }
-            if ($identity.Status -eq 'Unreadable') {
-                $conflicts += "$($service.Name): PID $($candidate.Pid) identity is unreadable"
-                continue
-            }
-
-            $commandLine = Get-ProcessCommandLine -Id $candidate.Pid
-            if (-not (Test-IsExpectedLegacyCommandLine `
-                -CommandLine $commandLine `
-                -Kind $service.Kind `
-                -ContextDir $service.ContextDir)) {
-                $conflicts += "$($service.Name): PID $($candidate.Pid) command line does not match; metadata was retained"
-                continue
-            }
-
-            $pidKey = [string]$candidate.Pid
-            if (-not $targetPids.ContainsKey($pidKey)) {
-                $targets += [pscustomobject]@{
-                    Pid = [int]$candidate.Pid
-                    ProcessStartFingerprint = $identity.Fingerprint
-                    CommandLine = $commandLine
-                }
-                $targetPids[$pidKey] = $true
-            }
-            if ($candidate.Source -eq 'pid-file') { $pidFilesToRemove += $service.PidFile }
+function Write-RunLocalOwnershipMetadata {
+    param([object]$Service, [int]$Id, [string]$ProcessStartFingerprint)
+    if ($ProcessStartFingerprint -notmatch '^utc-ticks:\d+$') {
+        throw 'Unable to persist run_local ownership because the process fingerprint is unavailable.'
+    }
+    $metadata = [ordered]@{
+        version = 1
+        repository_identity = Get-RunLocalRepositoryIdentity
+        service_name = [string]$Service.Name
+        port = [int]$Service.Port
+        pid = $Id
+        process_start_fingerprint = $ProcessStartFingerprint
+        recorded_at_utc = (Get-Date).ToUniversalTime().ToString('o')
+    }
+    $json = $metadata | ConvertTo-Json -Compress
+    $tempPath = "$($Service.OwnershipFile).tmp.$([Guid]::NewGuid().ToString('N'))"
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    try {
+        [System.IO.File]::WriteAllText($tempPath, $json, $utf8NoBom)
+        Move-Item -LiteralPath $tempPath -Destination $Service.OwnershipFile -Force
+    } finally {
+        if (Test-Path -LiteralPath $tempPath) {
+            Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
         }
+    }
+}
+
+function Get-RunLocalOwnershipState {
+    param([object]$Service)
+    $legacyPresent = [bool](Test-Path -LiteralPath $Service.LegacyPidFile)
+    $metadata = Get-RunLocalOwnershipMetadata -Path $Service.OwnershipFile
+    $metadataPresent = $null -ne $metadata
+    $metadataMatches = [bool](
+        $metadataPresent -and $metadata.Valid -and
+        $metadata.RepositoryIdentity -eq (Get-RunLocalRepositoryIdentity) -and
+        $metadata.ServiceName -eq $Service.Name -and
+        $metadata.Port -gt 0
+    )
+    $effectivePort = if ($metadataMatches) { $metadata.Port } else { $Service.Port }
+    $listener = Get-ListeningPid -Port $effectivePort
+    $identity = if ($metadataMatches) {
+        Get-ProcessIdentityObservation -Id $metadata.Pid -ExpectedStartFingerprint $metadata.ProcessStartFingerprint
+    } else {
+        [pscustomobject]@{ Status = $(if ($metadataPresent) { 'Unreadable' } else { 'Missing' }); Fingerprint = $null }
+    }
+    $owned = [bool]($metadataMatches -and $identity.Status -eq 'Exact' -and $listener -eq $metadata.Pid)
+    $conflict = $false
+    $reason = $null
+    $staleOwnershipFile = $false
+
+    if ($legacyPresent) {
+        $conflict = $true
+        $reason = "legacy PID evidence exists at $($Service.LegacyPidFile); it is read-only and requires explicit cleanup"
+    } elseif ($listener -and -not $metadataPresent) {
+        $conflict = $true
+        $reason = "port $effectivePort has listener PID $listener without exact run_local ownership metadata"
+    } elseif ($metadataPresent -and -not $metadataMatches) {
+        $conflict = $true
+        $reason = 'run_local ownership metadata is invalid or belongs to another repository/service'
+    } elseif ($listener -and -not $owned) {
+        $conflict = $true
+        $reason = "listener PID $listener does not match the exact owned process instance"
+    } elseif (-not $listener -and $identity.Status -in @('Exact', 'Unreadable')) {
+        $conflict = $true
+        $reason = "owned PID $($metadata.Pid) is alive or unreadable but is not the expected listener"
+    } elseif (-not $listener -and $metadataPresent -and $identity.Status -in @('Missing', 'Mismatch')) {
+        $staleOwnershipFile = $true
     }
 
     return [pscustomobject]@{
-        Targets = @($targets)
-        PidFilesToRemove = @($pidFilesToRemove | Select-Object -Unique)
-        Conflicts = @($conflicts)
+        Service = $Service
+        MetadataPresent = $metadataPresent
+        MetadataMatches = $metadataMatches
+        SavedPid = if ($metadataMatches) { $metadata.Pid } else { $null }
+        SavedProcessStartFingerprint = if ($metadataMatches) { $metadata.ProcessStartFingerprint } else { $null }
+        ProcessIdentityStatus = $identity.Status
+        ListenerPid = $listener
+        EffectivePort = $effectivePort
+        Owned = $owned
+        Conflict = $conflict
+        Reason = $reason
+        StaleOwnershipFile = $staleOwnershipFile
+        LegacyPidFilePresent = $legacyPresent
     }
 }
 
-function Test-LegacyProcessStopPlansEqual {
-    param([object]$InitialPlan, [object]$FinalPlan)
-    $initialTargets = @($InitialPlan.Targets | Sort-Object Pid)
-    $finalTargets = @($FinalPlan.Targets | Sort-Object Pid)
-    if ($initialTargets.Count -ne $finalTargets.Count) { return $false }
-    for ($index = 0; $index -lt $initialTargets.Count; $index++) {
-        foreach ($property in @('Pid', 'ProcessStartFingerprint', 'CommandLine')) {
-            if ($initialTargets[$index].$property -ne $finalTargets[$index].$property) { return $false }
-        }
-    }
-    $initialFiles = @($InitialPlan.PidFilesToRemove | Sort-Object)
-    $finalFiles = @($FinalPlan.PidFilesToRemove | Sort-Object)
-    return (($initialFiles -join "`n") -eq ($finalFiles -join "`n"))
-}
-
-function Invoke-LegacyProcessStopPlan {
+function Get-RunLocalOwnershipPlan {
     param([object[]]$Services)
+    return @($Services | ForEach-Object { Get-RunLocalOwnershipState -Service $_ })
+}
 
-    $initialPlan = Get-LegacyProcessStopPlan -Services $Services
-    if ($initialPlan.Conflicts.Count -gt 0) {
-        throw "Legacy process stop refused before any stop: $($initialPlan.Conflicts -join '; ')"
-    }
-    $finalPlan = Get-LegacyProcessStopPlan -Services $Services
-    if ($finalPlan.Conflicts.Count -gt 0) {
-        throw "Legacy process stop refused during final preflight: $($finalPlan.Conflicts -join '; ')"
-    }
-    if (-not (Test-LegacyProcessStopPlansEqual -InitialPlan $initialPlan -FinalPlan $finalPlan)) {
-        throw 'Legacy process stop refused because ownership changed during final preflight.'
-    }
-
-    # Revalidate every target immediately before the first destructive call.
-    foreach ($target in $finalPlan.Targets) {
-        $identity = Get-ProcessIdentityObservation `
-            -Id $target.Pid `
-            -ExpectedStartFingerprint $target.ProcessStartFingerprint
-        $commandLine = Get-ProcessCommandLine -Id $target.Pid
-        if ($identity.Status -ne 'Exact' -or $commandLine -ne $target.CommandLine) {
-            throw "Legacy process stop refused because PID $($target.Pid) changed before execution."
+function Test-RunLocalOwnershipPlansEqual {
+    param([object[]]$InitialPlan, [object[]]$FinalPlan)
+    if ($InitialPlan.Count -ne $FinalPlan.Count) { return $false }
+    for ($index = 0; $index -lt $InitialPlan.Count; $index++) {
+        foreach ($property in @(
+            'MetadataPresent', 'MetadataMatches', 'SavedPid', 'SavedProcessStartFingerprint',
+            'ProcessIdentityStatus', 'ListenerPid', 'EffectivePort', 'Owned', 'Conflict',
+            'StaleOwnershipFile', 'LegacyPidFilePresent'
+        )) {
+            if ($InitialPlan[$index].$property -ne $FinalPlan[$index].$property) { return $false }
         }
     }
+    return $true
+}
 
-    foreach ($target in $finalPlan.Targets) {
-        Stop-ProcessById -Id $target.Pid -ExpectedStartFingerprint $target.ProcessStartFingerprint
+function Invoke-RunLocalOwnershipStopPlan {
+    param([object[]]$Services)
+    $initialPlan = @(Get-RunLocalOwnershipPlan -Services $Services)
+    $conflicts = @($initialPlan | Where-Object { $_.Conflict })
+    if ($conflicts.Count -gt 0) {
+        throw "run_local stop refused before any mutation: $($conflicts.Reason -join '; ')"
     }
-    foreach ($path in $finalPlan.PidFilesToRemove) {
-        if (Test-Path -LiteralPath $path) {
-            Remove-Item -LiteralPath $path -Force -ErrorAction Stop
+    $finalPlan = @(Get-RunLocalOwnershipPlan -Services $Services)
+    $finalConflicts = @($finalPlan | Where-Object { $_.Conflict })
+    if ($finalConflicts.Count -gt 0) {
+        throw "run_local stop refused during final preflight: $($finalConflicts.Reason -join '; ')"
+    }
+    if (-not (Test-RunLocalOwnershipPlansEqual -InitialPlan $initialPlan -FinalPlan $finalPlan)) {
+        throw 'run_local stop refused because ownership changed during final preflight.'
+    }
+
+    $ownedStates = @($finalPlan | Where-Object { $_.Owned })
+    foreach ($state in $ownedStates) {
+        $current = Get-RunLocalOwnershipState -Service $state.Service
+        if (-not $current.Owned -or $current.SavedPid -ne $state.SavedPid -or
+            $current.SavedProcessStartFingerprint -ne $state.SavedProcessStartFingerprint) {
+            throw "run_local stop refused because $($state.Service.Name) changed before execution."
         }
+    }
+    foreach ($state in $ownedStates) {
+        Stop-ProcessById -Id $state.SavedPid -ExpectedStartFingerprint $state.SavedProcessStartFingerprint
+    }
+    foreach ($state in $ownedStates) {
+        Remove-Item -LiteralPath $state.Service.OwnershipFile -Force -ErrorAction Stop
+    }
+    foreach ($state in @($finalPlan | Where-Object { $_.StaleOwnershipFile })) {
+        Remove-Item -LiteralPath $state.Service.OwnershipFile -Force -ErrorAction Stop
     }
 }
 
-function Stop-OwnedPidFileProcess {
-    param([string]$Path, [string]$Kind, [string]$ContextDir)
-    Invoke-LegacyProcessStopPlan -Services @([pscustomobject]@{
-        Name = $Kind
-        Kind = $Kind
-        ContextDir = $ContextDir
-        PidFile = $Path
-        Port = 0
-        IncludeListener = $false
-    })
+function Wait-ForRunLocalServiceOwnership {
+    param([object]$Service, [object]$Process, [int]$TimeoutSec = 60)
+    if ($null -eq $Process -or -not $Process.Id) {
+        throw "Unable to start $($Service.Name): Start-Process did not return a process."
+    }
+    $launchedPid = [int]$Process.Id
+    $fingerprint = Get-ProcessStartTimeFingerprint -Id $launchedPid
+    if ([string]::IsNullOrWhiteSpace($fingerprint)) {
+        throw "Unable to start $($Service.Name): process identity is unavailable."
+    }
+    $persisted = $false
+    try {
+        $deadline = (Get-Date).AddSeconds($TimeoutSec)
+        while ((Get-Date) -lt $deadline) {
+            $identity = Get-ProcessIdentityObservation -Id $launchedPid -ExpectedStartFingerprint $fingerprint
+            if ($identity.Status -ne 'Exact') {
+                throw "Unable to start $($Service.Name): launched process exited or changed."
+            }
+            $listener = Get-ListeningPid -Port $Service.Port
+            if ($listener) {
+                if ($listener -ne $launchedPid) {
+                    throw "Unable to start $($Service.Name): listener PID $listener is not launched PID $launchedPid."
+                }
+                Write-RunLocalOwnershipMetadata -Service $Service -Id $launchedPid -ProcessStartFingerprint $fingerprint
+                $persisted = $true
+                return [pscustomobject]@{ Pid = $launchedPid; ProcessStartFingerprint = $fingerprint }
+            }
+            Start-Sleep -Milliseconds 500
+        }
+        throw "Unable to start $($Service.Name): listener did not appear on port $($Service.Port)."
+    } finally {
+        if (-not $persisted) {
+            $identity = Get-ProcessIdentityObservation -Id $launchedPid -ExpectedStartFingerprint $fingerprint
+            if ($identity.Status -eq 'Exact') {
+                Stop-ProcessById -Id $launchedPid -ExpectedStartFingerprint $fingerprint
+            }
+        }
+    }
 }
 
 function Get-RunLocalProcessServices {
-    param([switch]$BackendOnly, [switch]$IncludeListeners)
+    param(
+        [switch]$BackendOnly,
+        [int]$SelectedBackendPort = $BackendPort,
+        [int]$SelectedUiPort = $UiPort
+    )
     $services = @()
     if (-not $BackendOnly) {
         $services += [pscustomobject]@{
             Name = 'Admin UI'
-            Kind = 'ui'
-            ContextDir = $UiDir
-            PidFile = $UiPidPath
-            Port = $UiPort
-            IncludeListener = [bool]$IncludeListeners
+            OwnershipFile = $UiOwnershipPath
+            LegacyPidFile = $LegacyUiPidPath
+            Port = $SelectedUiPort
         }
     }
     $services += [pscustomobject]@{
         Name = 'Backend'
-        Kind = 'backend'
-        ContextDir = $null
-        PidFile = $BackendPidPath
-        Port = $BackendPort
-        IncludeListener = [bool]$IncludeListeners
+        OwnershipFile = $BackendOwnershipPath
+        LegacyPidFile = $LegacyBackendPidPath
+        Port = $SelectedBackendPort
     }
     return $services
 }
@@ -665,41 +606,6 @@ function Assert-NoActiveFullStackOwnership {
     }
 }
 
-function Stop-IfListeningAndOurs {
-    param(
-        [int]$Port,
-        [string]$Kind, # 'backend' or 'ui'
-        [string]$ContextDir # Needed for UI check
-    )
-
-    $procId = Get-ListeningPid -Port $Port
-    if (-not $procId) { return }
-
-    $isOurs = $false
-    if ($Kind -eq 'backend') { 
-        $isOurs = Test-IsOurBackend -Id $procId 
-    } elseif ($Kind -eq 'ui') { 
-        $isOurs = Test-IsOurAdminUi -Id $procId -TargetUiDir $ContextDir 
-    }
-
-    if ($isOurs) {
-        Write-Host "Stopping $Kind listening on port $Port (PID $procId)..."
-        Stop-ProcessById -Id $procId
-        return
-    } else {
-        # Extra dev convenience: if the port is held by OUR docker-compose stack (geov0-*), stop it.
-        # Never touch чужие containers.
-        $dockerNames = Get-OurDockerContainersByPort -Port $Port
-        if ($dockerNames.Count -gt 0) {
-            Stop-OurDockerContainers -Names $dockerNames
-            return
-        }
-
-        Write-Warning "Port $Port is in use by PID $procId, but it doesn't look like our $Kind. Skipping."
-        Write-Verbose "Command line was: $(Get-ProcessCommandLine -Id $procId)"
-    }
-}
-
 function Wait-ForPortToBeFree {
     param(
         [int]$Port,
@@ -714,17 +620,6 @@ function Wait-ForPortToBeFree {
         Start-Sleep -Milliseconds 300
     }
     return (-not (Get-ListeningPid -Port $Port))
-}
-
-function Remove-StalePidFile {
-    param([string]$Path)
-    $procId = Get-PidFromFile -Path $Path
-    if ($procId) {
-        if (-not (Get-Process -Id $procId -ErrorAction SilentlyContinue)) {
-            Write-Verbose "Removing stale PID file: $Path"
-            Remove-Item -Force $Path -ErrorAction SilentlyContinue
-        }
-    }
 }
 
 function Get-FreePort {
@@ -840,6 +735,7 @@ function Get-ProjectTools {
 
     return @{
         Python = $venvPython
+        Node = $node.Source
         Npm = $npm.Source
     }
 }
@@ -979,6 +875,7 @@ Write-Host ""
 
 $Tools = Get-ProjectTools
 Write-Host "[OK] Python: $($Tools.Python)" -ForegroundColor Green
+Write-Host "[OK] node: $($Tools.Node)" -ForegroundColor Green
 Write-Host "[OK] npm: $($Tools.Npm)" -ForegroundColor Green
 $Python = $Tools.Python
 $WindowStyle = if ($ShowWindows) { 'Normal' } else { 'Hidden' }
@@ -998,31 +895,29 @@ if ($RequiresLifecycleLock) {
 
 if ($RequiresLifecycleLock) {
     Assert-NoActiveFullStackOwnership
+    foreach ($directory in @($StateDir, $RunLocalOwnershipDir)) {
+        if (-not (Test-Path -LiteralPath $directory)) {
+            New-Item -ItemType Directory -Path $directory -Force | Out-Null
+        }
+    }
 }
 
 switch ($Action) {
     'status' {
-        Remove-StalePidFile $BackendPidPath
-        Remove-StalePidFile $UiPidPath
-
-        $bPid = Get-PidFromFile $BackendPidPath
-        $uPid = Get-PidFromFile $UiPidPath
-        $bListen = Get-ListeningPid -Port $BackendPort
-        $uListen = Get-ListeningPid -Port $UiPort
-
         Write-Host "--- Status ---" -ForegroundColor Cyan
-        Write-Host "Backend: PID File=$(Get-NullCoalesce $bPid 'None') | Port $BackendPort Listener=$(Get-NullCoalesce $bListen 'None')"
-        if ($bListen) { Write-Host "  Cmd: $(Get-ProcessCommandLine $bListen)" -ForegroundColor Gray }
-        
-        Write-Host "Admin UI: PID File=$(Get-NullCoalesce $uPid 'None') | Port $UiPort Listener=$(Get-NullCoalesce $uListen 'None')"
-        if ($uListen) { Write-Host "  Cmd: $(Get-ProcessCommandLine $uListen)" -ForegroundColor Gray }
+        $statusPlan = @(Get-RunLocalOwnershipPlan -Services (Get-RunLocalProcessServices))
+        foreach ($state in $statusPlan) {
+            $status = if ($state.Owned) { 'Owned' } elseif ($state.Conflict) { 'Conflict' } elseif ($state.StaleOwnershipFile) { 'Stale metadata' } else { 'Stopped' }
+            Write-Host "$($state.Service.Name): $status | Port $($state.EffectivePort) Listener=$(Get-NullCoalesce $state.ListenerPid 'None') | Owned PID=$(Get-NullCoalesce $state.SavedPid 'None')"
+            if ($state.Reason) { Write-Host "  $($state.Reason)" -ForegroundColor Yellow }
+        }
         exit 0
     }
 
     'stop' {
         Write-Host "Stopping services..." -ForegroundColor Yellow
-        $stopServices = Get-RunLocalProcessServices -IncludeListeners
-        Invoke-LegacyProcessStopPlan -Services $stopServices
+        $stopServices = Get-RunLocalProcessServices
+        Invoke-RunLocalOwnershipStopPlan -Services $stopServices
 
         Write-Host "Services stopped." -ForegroundColor Green
         exit 0
@@ -1092,7 +987,6 @@ switch ($Action) {
         }
         if ($AutoPorts) { $startParams['AutoPorts'] = $true }
         if ($NoInstall) { $startParams['NoInstall'] = $true }
-        if ($ReloadBackend) { $startParams['ReloadBackend'] = $true }
         if ($ShowWindows) { $startParams['ShowWindows'] = $true }
         
         & $PSCommandPath @startParams
@@ -1103,8 +997,8 @@ switch ($Action) {
         # Validate application settings before stopping a healthy backend.
         $null = Get-EffectiveDatabaseUrl -PythonExe $Python
         # Stop backend
-        $backendStopServices = Get-RunLocalProcessServices -BackendOnly -IncludeListeners
-        Invoke-LegacyProcessStopPlan -Services $backendStopServices
+        $backendStopServices = Get-RunLocalProcessServices -BackendOnly
+        Invoke-RunLocalOwnershipStopPlan -Services $backendStopServices
 
         # Start Backend
         $backendPortUsed = $BackendPort
@@ -1118,11 +1012,11 @@ switch ($Action) {
         }
 
         $backendArgs = @('-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', "$backendPortUsed")
-        if ($ReloadBackend) { $backendArgs += '--reload' }
-
         Write-Host "Restarting Backend on port $backendPortUsed..." -ForegroundColor Cyan
         $backendProc = Start-Process -FilePath $Python -ArgumentList $backendArgs -WorkingDirectory $RepoRoot -PassThru -WindowStyle $WindowStyle -RedirectStandardOutput $BackendOutLog -RedirectStandardError $BackendErrLog
-        $backendProc.Id | Out-File -Encoding ascii -FilePath $BackendPidPath
+        $backendService = @(Get-RunLocalProcessServices -BackendOnly -SelectedBackendPort $backendPortUsed)[0]
+        $backendOwnership = Wait-ForRunLocalServiceOwnership -Service $backendService -Process $backendProc
+        Write-Host "Backend PID: $($backendOwnership.Pid)" -ForegroundColor Gray
 
         if (-not (Test-HttpEndpoint -Url "http://127.0.0.1:$backendPortUsed/api/v1/health" -TimeoutSec 60)) {
             Write-Warning "Backend health check failed, but process is running. Check logs: $BackendErrLog"
@@ -1146,8 +1040,8 @@ switch ($Action) {
             $null
         }
         Write-Host "[1/7] Cleaning up old processes..." -ForegroundColor Yellow
-        $startCleanupServices = Get-RunLocalProcessServices -IncludeListeners:$(-not $AutoPorts)
-        Invoke-LegacyProcessStopPlan -Services $startCleanupServices
+        $startCleanupServices = Get-RunLocalProcessServices
+        Invoke-RunLocalOwnershipStopPlan -Services $startCleanupServices
         Write-Host "     Done." -ForegroundColor Gray
 
         Write-Host "[2/7] Checking database..." -ForegroundColor Yellow
@@ -1183,28 +1077,13 @@ switch ($Action) {
 
         Write-Host "[4/7] Starting Backend (uvicorn)..." -ForegroundColor Yellow
         
-        # Запускаем через cmd /c start /b для полной detach от родительского процесса
-        # Без redirect, т.к. redirect держит pipes открытыми и блокирует exit скрипта
-        $backendCmd = "`"$Python`" -m uvicorn app.main:app --host 127.0.0.1 --port $backendPortUsed"
-        if ($ReloadBackend) {
-            $backendCmd += " --reload"
-            Write-Host "     Hot-reload enabled" -ForegroundColor Gray
-        }
-        
-        $backendStartArgs = @('/c', 'start', '/b', 'cmd', '/c', $backendCmd)
-        $null = Start-Process -FilePath 'cmd.exe' -ArgumentList $backendStartArgs -WorkingDirectory $RepoRoot -WindowStyle $WindowStyle
+        $backendArgs = @('-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', "$backendPortUsed")
+        $backendProc = Start-Process -FilePath $Python -ArgumentList $backendArgs -WorkingDirectory $RepoRoot -PassThru -WindowStyle $WindowStyle -RedirectStandardOutput $BackendOutLog -RedirectStandardError $BackendErrLog
         Write-Host "     Waiting for uvicorn to start..." -ForegroundColor Gray
-
-        if (-not (Test-HttpEndpoint -Url "http://127.0.0.1:$backendPortUsed/api/v1/health" -TimeoutSec 60)) {
-            throw "Backend failed to start."
-        }
-        
-        # Сохраняем реальный PID uvicorn процесса (не cmd.exe)
-        $backendRealPid = Get-ListeningPid -Port $backendPortUsed
-        if ($backendRealPid) {
-            $backendRealPid | Out-File -Encoding ascii -FilePath $BackendPidPath
-            Write-Host "     Backend PID: $backendRealPid" -ForegroundColor Gray
-        }
+        $backendService = @(Get-RunLocalProcessServices -BackendOnly -SelectedBackendPort $backendPortUsed)[0]
+        $backendOwnership = Wait-ForRunLocalServiceOwnership -Service $backendService -Process $backendProc
+        if (-not (Test-HttpEndpoint -Url "http://127.0.0.1:$backendPortUsed/api/v1/health" -TimeoutSec 60)) { throw 'Backend health check failed.' }
+        Write-Host "     Backend PID: $($backendOwnership.Pid)" -ForegroundColor Gray
         Write-Host "     Backend is healthy!" -ForegroundColor Green
 
         Write-Host "[5/7] Configuring UI environment..." -ForegroundColor Yellow
@@ -1236,34 +1115,17 @@ switch ($Action) {
             Write-Host "     Using port $uiPortUsed" -ForegroundColor Gray
         }
 
-        # Используем --strictPort, чтобы vite не прыгал по портам сам
-        # ВАЖНО: Запускаем через cmd /c start для полной detach от родительского процесса
-        # Без redirect, т.к. redirect держит pipes открытыми и блокирует exit скрипта
-        $uiArgs = @('/c', 'start', '/b', 'npm', 'run', 'dev', '--', '--port', "$uiPortUsed", '--strictPort')
-        $null = Start-Process -FilePath 'cmd.exe' -ArgumentList $uiArgs -WorkingDirectory $UiDir -WindowStyle $WindowStyle
-
-        # Ждём пока Vite начнёт слушать порт (более надёжно чем TCP probe на localhost)
+        $viteCli = Join-Path $UiDir 'node_modules\vite\bin\vite.js'
+        if (-not (Test-Path -LiteralPath $viteCli -PathType Leaf)) {
+            throw "Vite executable not found: $viteCli"
+        }
+        $uiArgs = @("`"$viteCli`"", '--port', "$uiPortUsed", '--strictPort')
+        $uiProc = Start-Process -FilePath $Tools.Node -ArgumentList $uiArgs -WorkingDirectory $UiDir -PassThru -WindowStyle $WindowStyle -RedirectStandardOutput $UiOutLog -RedirectStandardError $UiErrLog
         Write-Host "     Waiting for Vite to start listening on port $uiPortUsed..." -NoNewline
-        $uiDeadline = (Get-Date).AddSeconds(60)
-        $uiStarted = $false
-        $uiRealPid = $null
-        while ((Get-Date) -lt $uiDeadline) {
-            $uiRealPid = Get-ListeningPid -Port $uiPortUsed
-            if ($uiRealPid) {
-                $uiStarted = $true
-                Write-Host " OK" -ForegroundColor Green
-                # Сохраняем реальный PID node процесса (не cmd.exe)
-                $uiRealPid | Out-File -Encoding ascii -FilePath $UiPidPath
-                Write-Host "     UI PID: $uiRealPid" -ForegroundColor Gray
-                break
-            }
-            Start-Sleep -Milliseconds 500
-            Write-Host "." -NoNewline
-        }
-        if (-not $uiStarted) {
-            Write-Host " Timeout!" -ForegroundColor Yellow
-            Write-Warning "UI did not start listening within 60s."
-        }
+        $uiService = @(Get-RunLocalProcessServices -SelectedBackendPort $backendPortUsed -SelectedUiPort $uiPortUsed | Where-Object { $_.Name -eq 'Admin UI' })[0]
+        $uiOwnership = Wait-ForRunLocalServiceOwnership -Service $uiService -Process $uiProc
+        Write-Host " OK" -ForegroundColor Green
+        Write-Host "     UI PID: $($uiOwnership.Pid)" -ForegroundColor Gray
 
         # Summary
         Write-Host ""

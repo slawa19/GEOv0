@@ -997,7 +997,7 @@ switch ($Action) {
     }
 
     'stop' {
-        $allStopped = Stop-AllServices -Services $Services
+        $allStopped = Stop-AllServices -Services $Services -FailOnConflict
         if ($allStopped) { exit 0 }
         exit 1
     }

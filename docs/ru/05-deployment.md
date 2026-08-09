@@ -15,34 +15,43 @@ production-ready HA, backup/restore, zero-downtime upgrade, TLS termination ил
 
 Актуальные параметры и команды `status`/`stop` смотрите в `Get-Help` и самих
 scripts. Они создают runtime-состояние под `.local-run/`, используют свободные
-порты согласно своим параметрам. `run_full_stack.ps1` сохраняет для каждого
-сервиса ownership metadata: PID, UTC-время старта процесса, имя сервиса и порт;
-он останавливает процесс только когда metadata всё ещё описывает тот же экземпляр
-и его PID является listener-ом настроенного порта. Чужой, повторно
-использованный, неподтверждённый или изменившийся PID/listener не
-останавливается. `run_local.ps1` сохраняет legacy PID-файлы и дополнительно
-проверяет executable command line перед остановкой PID из такого файла. Если PID
-уже принадлежит процессу с другой либо нечитаемой command line, процесс не
-останавливается, а PID-файл сохраняется для явного разбора. Все legacy PID-файлы
-и затронутые listener fallback сначала проверяются общим read-only plan; конфликт
-любого сервиса отменяет всю остановку до первого `Stop-Process`.
+порты согласно своим параметрам. `run_full_stack.ps1` и `run_local.ps1`
+сохраняют для каждого непосредственно запущенного сервиса versioned ownership
+metadata: repository identity, PID, UTC start fingerprint, имя сервиса и порт.
+Процесс останавливается только когда metadata всё ещё описывает тот же экземпляр,
+а его PID является listener-ом сохранённого порта. Чужой, повторно использованный,
+неподтверждённый или изменившийся PID/listener не останавливается. Обычная команда
+`run_full_stack stop`, как и cleanup перед start, сначала строит коллективный
+read-only plan по всем сервисам; конфликт любого сервиса отменяет всю остановку
+до первого `Stop-Process`. `run_local status` только читает metadata, legacy
+evidence и listener state: stale-файлы и каталоги эта команда не очищает и не
+создаёт.
 
 Mutating lifecycle `run_full_stack.ps1`, `run_local.ps1` и
 `run_real_simulator.ps1` взаимно исключается общим repository-scoped OS mutex.
 Он удерживается от ownership preflight до завершения stop/start/reset и
 автоматически освобождается ОС при crash launcher-а; конкурентная mutating
 команда завершается понятным отказом. `run_full_stack.ps1` хранит versioned JSON
-под `.local-run/full-stack/*.owner.json`, а legacy lifecycle `run_local.ps1`
-сохраняет свои PID-файлы непосредственно под `.local-run/`; эти пространства не
-пересекаются. При active exact или нечитаемом full-stack owner команды
+под `.local-run/full-stack/*.owner.json`, `run_local.ps1` — под
+`.local-run/run-local/*.owner.json`, а Simulator UI, запущенный
+`run_real_simulator.ps1`, — под
+`.local-run/run-real-simulator/simulator-ui.owner.json`; эти пространства не
+пересекаются. Исторические bare `.local-run/backend.pid` и
+`.local-run/admin-ui.pid` больше не являются доказательством владения: launcher
+считает их read-only конфликтом, не принимает sibling uvicorn/Vite по сходной
+command line и требует явного разбора legacy evidence. При active exact или
+нечитаемом full-stack owner команды
 `run_local start/stop/restart/restart-backend/reset-db` и недиагностический
 `cleanup-simulator` завершаются отказом и не пытаются эвристически принять,
 остановить либо изменить данные процесса. В обратную сторону full-stack launcher
-считает listener
-без своей exact metadata конфликтом и также ничего не останавливает.
-`run_real_simulator stop` не сканирует все uvicorn/Vite процессы: он может
-остановить legacy run_local PID только после проверки PID-файла и command line и
-отказывается при active/unreadable full-stack metadata. Для handoff сначала
+считает listener без своей exact metadata конфликтом и также ничего не
+останавливает. `run_real_simulator start` запускает свой Vite как непосредственно
+владеемый background-процесс и освобождает lifecycle mutex после startup;
+отдельный `run_real_simulator stop` сверяет его JSON, listener PID и start
+fingerprint, затем останавливает только этот UI и именованные Compose-сервисы
+`app`, `redis`, `db`. Он не останавливает процессы `run_local`; ошибка Compose
+stop передаётся вызывающему коду и не сопровождается ложным сообщением об успехе.
+Для handoff сначала
 остановите stack его собственным launcher-ом, проверьте `status`/порты, затем
 запускайте другой entrypoint. `run_local` может
 удалить full-stack metadata только после повторного доказательства, что процесс

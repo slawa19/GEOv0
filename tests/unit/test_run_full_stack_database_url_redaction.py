@@ -309,7 +309,7 @@ def test_full_stack_summary_uses_only_the_safe_database_display_value() -> None:
 
 def test_database_and_ownership_preflight_precede_first_main_stop() -> None:
     source = _RUN_FULL_STACK.read_text(encoding="utf-8-sig")
-    main = source[source.index("# --- Main Logic ---") :]
+    main = source[source.index("# --- START action ---") :]
 
     stop_index = main.index("Stop-AllServices -Services $Services -FailOnConflict")
     assert main.index("Get-EffectiveDatabaseUrl -PythonExe $Python") < stop_index
@@ -1110,9 +1110,11 @@ if ($script:RemovedOwnershipFiles.Count -ne 1 -or
 def test_launcher_ownership_namespaces_are_disjoint_and_actions_are_guarded() -> None:
     full_stack_source = _RUN_FULL_STACK.read_text(encoding="utf-8-sig")
     run_local_source = _RUN_LOCAL.read_text(encoding="utf-8-sig")
+    run_real_source = _RUN_REAL_SIMULATOR.read_text(encoding="utf-8-sig")
 
     assert "Join-Path $FullStackOwnershipDir 'backend.owner.json'" in full_stack_source
-    assert "Join-Path $StateDir 'backend.pid'" in run_local_source
+    assert "Join-Path $RunLocalOwnershipDir 'backend.owner.json'" in run_local_source
+    assert "Join-Path $runRealOwnershipDir 'simulator-ui.owner.json'" in run_real_source
     guard_index = run_local_source.index("if ($RequiresLifecycleLock)")
     assert run_local_source.index("Assert-NoActiveFullStackOwnership", guard_index) < (
         run_local_source.index("switch ($Action)", guard_index)
@@ -1245,61 +1247,65 @@ def test_all_mutating_launchers_share_lock_and_cover_destructive_actions() -> No
     )
     assert "Stop-ViteDevServers" not in real_simulator_source
     assert "Stop-LocalUvicornServers" not in real_simulator_source
-    assert run_local_source.count("Invoke-LegacyProcessStopPlan -Services") >= 4
+    assert "Invoke-LegacyProcessStopPlan" not in run_local_source
+    assert run_local_source.count("Invoke-RunLocalOwnershipStopPlan -Services") >= 3
     assert "Stop-IfListeningAndOurs -Port" not in run_local_source
-    assert "Invoke-RunLocalPidStopPlan -Services $services" in real_simulator_source
+    assert "Stop-RunLocalProcesses" not in real_simulator_source
+    assert "Invoke-RunRealOwnershipStopPlan" in real_simulator_source
+    assert "Start-Process -FilePath $node.Source" in real_simulator_source
+    assert "-PassThru" in real_simulator_source
+    assert "& $uiScript" not in real_simulator_source
+    assert (
+        "$allStopped = Stop-AllServices -Services $Services -FailOnConflict"
+        in full_stack_source
+    )
 
 
 @pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
 @pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
-def test_run_local_later_service_conflict_causes_zero_stops(
+def test_run_local_legacy_pid_evidence_causes_zero_stops(
     powershell: Path,
 ) -> None:
     command = (
         _AST_SETUP
         + r"""
-Invoke-Expression (Get-LauncherFunctionText -Name 'Test-IsExpectedLegacyCommandLine')
-Invoke-Expression (Get-LauncherFunctionText -Name 'Get-LegacyProcessStopPlan')
-Invoke-Expression (Get-LauncherFunctionText -Name 'Test-LegacyProcessStopPlansEqual')
-Invoke-Expression (Get-LauncherFunctionText -Name 'Invoke-LegacyProcessStopPlan')
+Invoke-Expression (Get-LauncherFunctionText -Name 'Get-RunLocalOwnershipState')
+Invoke-Expression (Get-LauncherFunctionText -Name 'Get-RunLocalOwnershipPlan')
+Invoke-Expression (Get-LauncherFunctionText -Name 'Test-RunLocalOwnershipPlansEqual')
+Invoke-Expression (Get-LauncherFunctionText -Name 'Invoke-RunLocalOwnershipStopPlan')
 $script:Stopped = @()
 $script:Removed = @()
-function Test-Path { param([string]$LiteralPath) return $true }
-function Get-PidFromFile {
+function Test-Path {
+    param([string]$LiteralPath)
+    return ($LiteralPath -eq 'backend.pid')
+}
+function Get-RunLocalOwnershipMetadata {
     param([string]$Path)
-    if ($Path -eq 'ui.pid') { return 101 }
-    return 202
+    return $null
 }
-function Get-ListeningPid { return $null }
-function Get-ProcessIdentityObservation {
-    param([int]$Id, [string]$ExpectedStartFingerprint)
-    $status = if ([string]::IsNullOrWhiteSpace($ExpectedStartFingerprint)) { 'Observed' } else { 'Exact' }
-    return [pscustomobject]@{ Status = $status; Fingerprint = "fingerprint-$Id" }
-}
-function Get-ProcessCommandLine {
-    param([int]$Id)
-    if ($Id -eq 101) { return 'node C:\repo\admin-ui\node_modules\vite' }
-    return 'unrelated python worker'
-}
+function Get-RunLocalRepositoryIdentity { return 'repo-a' }
+function Get-ListeningPid { param([int]$Port) return 202 }
 function Stop-ProcessById {
     param([int]$Id, [string]$ExpectedStartFingerprint)
     $script:Stopped += $Id
 }
 function Remove-Item { param([string]$LiteralPath, [switch]$Force, [object]$ErrorAction) $script:Removed += $LiteralPath }
-$services = @(
-    [pscustomobject]@{ Name = 'Admin UI'; Kind = 'ui'; ContextDir = 'C:\repo\admin-ui'; PidFile = 'ui.pid'; Port = 5173; IncludeListener = $true },
-    [pscustomobject]@{ Name = 'Backend'; Kind = 'backend'; ContextDir = $null; PidFile = 'backend.pid'; Port = 18000; IncludeListener = $true }
-)
+$services = @([pscustomobject]@{
+    Name = 'Backend'
+    OwnershipFile = 'run-local/backend.owner.json'
+    LegacyPidFile = 'backend.pid'
+    Port = 18000
+})
 try {
-    Invoke-LegacyProcessStopPlan -Services $services
-    throw 'Later backend conflict unexpectedly stopped the plan'
+    Invoke-RunLocalOwnershipStopPlan -Services $services
+    throw 'Legacy evidence unexpectedly permitted stop'
 } catch {
-    if ($_.Exception.Message -eq 'Later backend conflict unexpectedly stopped the plan') { throw }
-    if ($_.Exception.Message -notlike '*command line does not match*') { throw }
+    if ($_.Exception.Message -eq 'Legacy evidence unexpectedly permitted stop') { throw }
+    if ($_.Exception.Message -notlike '*legacy PID evidence exists*') { throw }
 }
-if ($script:Stopped.Count -ne 0) { throw 'UI stopped before backend conflict was rejected' }
-if ($script:Removed.Count -ne 0) { throw 'PID evidence was removed after collective conflict' }
-[Console]::Out.Write('run-local-collective-conflict-zero-stops')
+if ($script:Stopped.Count -ne 0) { throw 'Legacy sibling process was stopped' }
+if ($script:Removed.Count -ne 0) { throw 'Legacy evidence was mutated' }
+[Console]::Out.Write('run-local-legacy-conflict-zero-stops')
 """
     )
     result = _run_powershell(
@@ -1307,56 +1313,39 @@ if ($script:Removed.Count -ne 0) { throw 'PID evidence was removed after collect
         command,
         extra_env={"PHASE7_SCRIPT_PATH": str(_RUN_LOCAL)},
     )
-    assert result.stdout == "run-local-collective-conflict-zero-stops"
+    assert result.stdout == "run-local-legacy-conflict-zero-stops"
 
 
 @pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
 @pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
-def test_run_real_simulator_later_run_local_conflict_causes_zero_stops(
+def test_run_real_listener_without_metadata_causes_zero_stops(
     powershell: Path,
 ) -> None:
     command = (
         _AST_SETUP
         + r"""
-Invoke-Expression (Get-LauncherFunctionText -Name 'Test-IsExpectedRunLocalCommandLine')
-Invoke-Expression (Get-LauncherFunctionText -Name 'Get-RunLocalPidStopPlan')
-Invoke-Expression (Get-LauncherFunctionText -Name 'Test-RunLocalPidStopPlansEqual')
-Invoke-Expression (Get-LauncherFunctionText -Name 'Invoke-RunLocalPidStopPlan')
+Invoke-Expression (Get-LauncherFunctionText -Name 'Get-RunRealOwnershipState')
+Invoke-Expression (Get-LauncherFunctionText -Name 'Invoke-RunRealOwnershipStopPlan')
 $script:Stopped = @()
 $script:Removed = @()
-function Test-Path { param([string]$LiteralPath) return $true }
-function Get-PidFromFile {
-    param([string]$Path)
-    if ($Path -eq 'ui.pid') { return 101 }
-    return 202
-}
-function Get-ProcessIdentityObservation {
-    param([int]$Id, [string]$ExpectedStartFingerprint)
-    $status = if ([string]::IsNullOrWhiteSpace($ExpectedStartFingerprint)) { 'Observed' } else { 'Exact' }
-    return [pscustomobject]@{ Status = $status; Fingerprint = "fingerprint-$Id" }
-}
-function Get-ProcessCommandLine {
-    param([int]$Id)
-    if ($Id -eq 101) { return 'node C:\repo\admin-ui\node_modules\vite' }
-    return 'unrelated python worker'
-}
-function Stop-Process { param([int]$Id, [switch]$Force, [object]$ErrorAction) $script:Stopped += $Id }
+function Test-Path { param([string]$LiteralPath) return $false }
+function Get-RunRealOwnershipMetadata { param([string]$Path) return $null }
+function Get-RunRealRepositoryIdentity { return 'repo-a' }
+function Get-ListeningPid { param([int]$Port) return 303 }
+function Stop-ProcessById { param([int]$Id, [string]$ExpectedStartFingerprint) $script:Stopped += $Id }
 function Remove-Item { param([string]$LiteralPath, [switch]$Force, [object]$ErrorAction) $script:Removed += $LiteralPath }
-$services = @(
-    [pscustomobject]@{ Name = 'Admin UI'; Kind = 'ui'; ContextDir = 'C:\repo\admin-ui'; PidFile = 'ui.pid' },
-    [pscustomobject]@{ Name = 'Backend'; Kind = 'backend'; ContextDir = $null; PidFile = 'backend.pid' }
-)
+$service = [pscustomobject]@{ Name = 'Simulator UI'; OwnershipFile = 'run-real/simulator.owner.json'; Port = 5176 }
 try {
-    Invoke-RunLocalPidStopPlan -Services $services
-    throw 'Later backend conflict unexpectedly stopped the plan'
+    Invoke-RunRealOwnershipStopPlan -Service $service
+    throw 'Listener without metadata unexpectedly permitted stop'
 } catch {
-    if ($_.Exception.Message -eq 'Later backend conflict unexpectedly stopped the plan') { throw }
-    if ($_.Exception.Message -notlike '*command line does not match*') { throw }
+    if ($_.Exception.Message -eq 'Listener without metadata unexpectedly permitted stop') { throw }
+    if ($_.Exception.Message -notlike '*without exact run_real ownership metadata*') { throw }
 }
 if ($script:Stopped.Count -ne 0 -or $script:Removed.Count -ne 0) {
-    throw 'UI stopped or PID evidence changed before backend conflict rejection'
+    throw 'Foreign listener was stopped or metadata changed'
 }
-[Console]::Out.Write('run-real-collective-conflict-zero-stops')
+[Console]::Out.Write('run-real-listener-conflict-zero-stops')
 """
     )
     result = _run_powershell(
@@ -1364,7 +1353,7 @@ if ($script:Stopped.Count -ne 0 -or $script:Removed.Count -ne 0) {
         command,
         extra_env={"PHASE7_SCRIPT_PATH": str(_RUN_REAL_SIMULATOR)},
     )
-    assert result.stdout == "run-real-collective-conflict-zero-stops"
+    assert result.stdout == "run-real-listener-conflict-zero-stops"
 
 
 @pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
@@ -1432,3 +1421,187 @@ def test_full_stack_main_wires_late_failure_to_reverse_rollback() -> None:
     assert source.count("$StartedThisAttempt += [pscustomobject]@{") == 3
     assert "Undo-StartedServices -StartedServices $StartedThisAttempt" in source
     assert "$combinedFailure.Data['RollbackFailure']" in source
+
+
+def test_run_local_status_branch_is_filesystem_read_only() -> None:
+    source = _RUN_LOCAL.read_text(encoding="utf-8-sig")
+    status_branch = source.split("    'status' {", 1)[1].split("    'stop' {", 1)[0]
+
+    assert "if ($Action -ne 'status')" in source
+    for mutation in (
+        "Remove-StalePidFile",
+        "Remove-Item",
+        "New-Item",
+        "Move-Item",
+        "Set-Content",
+        "Out-File",
+    ):
+        assert mutation not in status_branch
+    assert "Get-RunLocalOwnershipPlan" in status_branch
+
+
+def test_run_local_rejects_reload_before_any_lifecycle_mutation() -> None:
+    source = _RUN_LOCAL.read_text(encoding="utf-8-sig")
+
+    rejection = source.index("if ($ReloadBackend) {")
+    lock = source.index("Enter-LauncherLifecycleLock", rejection)
+    action_switch = source.index("switch ($Action)", lock)
+    restart_stop = source.index("& $PSCommandPath @restartParams", action_switch)
+
+    assert rejection < lock < action_switch < restart_stop
+    assert "restart-backend -ReloadBackend" not in source[:rejection]
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+def test_run_local_start_metadata_supports_a_separate_exact_stop(
+    powershell: Path,
+    tmp_path: Path,
+) -> None:
+    command = (
+        _AST_SETUP
+        + r"""
+Invoke-Expression (Get-LauncherFunctionText -Name 'Get-LauncherLifecycleLockName')
+Invoke-Expression (Get-LauncherFunctionText -Name 'Get-RunLocalRepositoryIdentity')
+Invoke-Expression (Get-LauncherFunctionText -Name 'Get-RunLocalOwnershipMetadata')
+Invoke-Expression (Get-LauncherFunctionText -Name 'Write-RunLocalOwnershipMetadata')
+Invoke-Expression (Get-LauncherFunctionText -Name 'Get-RunLocalOwnershipState')
+Invoke-Expression (Get-LauncherFunctionText -Name 'Get-RunLocalOwnershipPlan')
+Invoke-Expression (Get-LauncherFunctionText -Name 'Test-RunLocalOwnershipPlansEqual')
+Invoke-Expression (Get-LauncherFunctionText -Name 'Invoke-RunLocalOwnershipStopPlan')
+Invoke-Expression (Get-LauncherFunctionText -Name 'Get-ProcessStartTimeFingerprint')
+Invoke-Expression (Get-LauncherFunctionText -Name 'Wait-ForRunLocalServiceOwnership')
+$RepoRoot = 'C:\repo-a'
+$script:Stopped = @()
+function Get-ProcessIdentityObservation {
+    param([int]$Id, [string]$ExpectedStartFingerprint)
+    return [pscustomobject]@{ Status = 'Exact'; Fingerprint = 'utc-ticks:638903664000000101' }
+}
+function Get-ListeningPid { param([int]$Port) return 101 }
+function Stop-ProcessById {
+    param([int]$Id, [string]$ExpectedStartFingerprint)
+    $script:Stopped += "$Id|$ExpectedStartFingerprint"
+}
+$service = [pscustomobject]@{
+    Name = 'Backend'
+    OwnershipFile = $env:PHASE7_OWNERSHIP_PATH
+    LegacyPidFile = "$($env:PHASE7_OWNERSHIP_PATH).legacy"
+    Port = 18000
+}
+$started = Wait-ForRunLocalServiceOwnership -Service $service -Process ([pscustomobject]@{ Id = 101 }) -TimeoutSec 1
+if ($started.Pid -ne 101) { throw 'Started PID was not returned' }
+$saved = Get-RunLocalOwnershipMetadata -Path $service.OwnershipFile
+if (-not $saved.Valid -or $saved.Pid -ne 101 -or $saved.Port -ne 18000 -or
+    $saved.RepositoryIdentity -ne (Get-RunLocalRepositoryIdentity)) {
+    throw 'Exact run_local ownership metadata was not persisted'
+}
+Invoke-RunLocalOwnershipStopPlan -Services @($service)
+if (($script:Stopped -join ',') -ne '101|utc-ticks:638903664000000101') {
+    throw 'Separate exact stop did not target the launched instance'
+}
+if (Test-Path -LiteralPath $service.OwnershipFile) { throw 'Ownership metadata survived exact stop' }
+[Console]::Out.Write('run-local-start-separate-stop-ok')
+"""
+    )
+    result = _run_powershell(
+        powershell,
+        command,
+        extra_env={
+            "PHASE7_SCRIPT_PATH": str(_RUN_LOCAL),
+            "PHASE7_OWNERSHIP_PATH": str(tmp_path / "backend.owner.json"),
+        },
+    )
+    assert result.stdout == "run-local-start-separate-stop-ok"
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+def test_run_real_start_metadata_supports_a_separate_exact_stop(
+    powershell: Path,
+    tmp_path: Path,
+) -> None:
+    command = (
+        _AST_SETUP
+        + r"""
+Invoke-Expression (Get-LauncherFunctionText -Name 'Get-LauncherLifecycleLockName')
+Invoke-Expression (Get-LauncherFunctionText -Name 'Get-RunRealRepositoryIdentity')
+Invoke-Expression (Get-LauncherFunctionText -Name 'Get-RunRealOwnershipMetadata')
+Invoke-Expression (Get-LauncherFunctionText -Name 'Write-RunRealOwnershipMetadata')
+Invoke-Expression (Get-LauncherFunctionText -Name 'Get-RunRealOwnershipState')
+Invoke-Expression (Get-LauncherFunctionText -Name 'Invoke-RunRealOwnershipStopPlan')
+Invoke-Expression (Get-LauncherFunctionText -Name 'Get-ProcessStartTimeFingerprint')
+Invoke-Expression (Get-LauncherFunctionText -Name 'Wait-ForRunRealSimulatorOwnership')
+$repoRoot = 'C:\repo-a'
+$script:Stopped = @()
+function Get-ProcessIdentityObservation {
+    param([int]$Id, [string]$ExpectedStartFingerprint)
+    return [pscustomobject]@{ Status = 'Exact'; Fingerprint = 'utc-ticks:638903664000000303' }
+}
+function Get-ListeningPid { param([int]$Port) return 303 }
+function Stop-ProcessById {
+    param([int]$Id, [string]$ExpectedStartFingerprint)
+    $script:Stopped += "$Id|$ExpectedStartFingerprint"
+}
+$service = [pscustomobject]@{
+    Name = 'Simulator UI'
+    OwnershipFile = $env:PHASE7_OWNERSHIP_PATH
+    Port = 5176
+}
+$started = Wait-ForRunRealSimulatorOwnership -Service $service -Process ([pscustomobject]@{ Id = 303 }) -TimeoutSec 1
+if ($started.Pid -ne 303) { throw 'Started PID was not returned' }
+$saved = Get-RunRealOwnershipMetadata -Path $service.OwnershipFile
+if (-not $saved.Valid -or $saved.Pid -ne 303 -or $saved.Port -ne 5176 -or
+    $saved.RepositoryIdentity -ne (Get-RunRealRepositoryIdentity)) {
+    throw 'Exact run_real ownership metadata was not persisted'
+}
+Invoke-RunRealOwnershipStopPlan -Service $service
+if (($script:Stopped -join ',') -ne '303|utc-ticks:638903664000000303') {
+    throw 'Separate exact stop did not target the launched Simulator UI instance'
+}
+if (Test-Path -LiteralPath $service.OwnershipFile) { throw 'Ownership metadata survived exact stop' }
+[Console]::Out.Write('run-real-start-separate-stop-ok')
+"""
+    )
+    result = _run_powershell(
+        powershell,
+        command,
+        extra_env={
+            "PHASE7_SCRIPT_PATH": str(_RUN_REAL_SIMULATOR),
+            "PHASE7_OWNERSHIP_PATH": str(tmp_path / "simulator-ui.owner.json"),
+        },
+    )
+    assert result.stdout == "run-real-start-separate-stop-ok"
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+def test_run_real_compose_stop_failure_propagates(powershell: Path) -> None:
+    command = (
+        _AST_SETUP
+        + r"""
+Invoke-Expression (Get-LauncherFunctionText -Name 'Stop-RunRealServices')
+$script:Calls = @()
+function Get-RunRealSimulatorService { return [pscustomobject]@{ Name = 'Simulator UI' } }
+function Invoke-RunRealOwnershipStopPlan { param([object]$Service) $script:Calls += 'ui-stop' }
+function Invoke-DockerCompose {
+    param([string[]]$composeArgs)
+    $script:Calls += 'compose-stop'
+    throw 'compose-stop-failed'
+}
+try {
+    Stop-RunRealServices
+    throw 'Compose failure was swallowed'
+} catch {
+    if ($_.Exception.Message -eq 'Compose failure was swallowed') { throw }
+    if ($_.Exception.Message -notlike '*compose-stop-failed*') { throw }
+}
+if (($script:Calls -join ',') -ne 'ui-stop,compose-stop') { throw 'Unexpected stop call order' }
+[Console]::Out.Write('run-real-compose-failure-propagated')
+"""
+    )
+    result = _run_powershell(
+        powershell,
+        command,
+        extra_env={"PHASE7_SCRIPT_PATH": str(_RUN_REAL_SIMULATOR)},
+    )
+    assert result.stdout.rstrip().endswith("run-real-compose-failure-propagated")
