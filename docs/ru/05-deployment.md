@@ -21,17 +21,30 @@ scripts. Они создают runtime-состояние под `.local-run/`, 
 и его PID является listener-ом настроенного порта. Чужой, повторно
 использованный, неподтверждённый или изменившийся PID/listener не
 останавливается. `run_local.ps1` сохраняет legacy PID-файлы и дополнительно
-проверяет executable command line перед остановкой своего процесса.
+проверяет executable command line перед остановкой PID из такого файла. Если PID
+уже принадлежит процессу с другой либо нечитаемой command line, процесс не
+останавливается, а PID-файл сохраняется для явного разбора. Все legacy PID-файлы
+и затронутые listener fallback сначала проверяются общим read-only plan; конфликт
+любого сервиса отменяет всю остановку до первого `Stop-Process`.
 
-Два launcher-а взаимно исключаются. `run_full_stack.ps1` хранит versioned JSON
+Mutating lifecycle `run_full_stack.ps1`, `run_local.ps1` и
+`run_real_simulator.ps1` взаимно исключается общим repository-scoped OS mutex.
+Он удерживается от ownership preflight до завершения stop/start/reset и
+автоматически освобождается ОС при crash launcher-а; конкурентная mutating
+команда завершается понятным отказом. `run_full_stack.ps1` хранит versioned JSON
 под `.local-run/full-stack/*.owner.json`, а legacy lifecycle `run_local.ps1`
 сохраняет свои PID-файлы непосредственно под `.local-run/`; эти пространства не
 пересекаются. При active exact или нечитаемом full-stack owner команды
-`run_local start/stop/restart/restart-backend` завершаются отказом и не пытаются
-эвристически принять либо остановить процесс. В обратную сторону full-stack
-launcher считает listener без своей exact metadata конфликтом и также ничего не
-останавливает. Для handoff сначала остановите stack его собственным launcher-ом,
-проверьте `status`/порты, затем запускайте другой entrypoint. `run_local` может
+`run_local start/stop/restart/restart-backend/reset-db` и недиагностический
+`cleanup-simulator` завершаются отказом и не пытаются эвристически принять,
+остановить либо изменить данные процесса. В обратную сторону full-stack launcher
+считает listener
+без своей exact metadata конфликтом и также ничего не останавливает.
+`run_real_simulator stop` не сканирует все uvicorn/Vite процессы: он может
+остановить legacy run_local PID только после проверки PID-файла и command line и
+отказывается при active/unreadable full-stack metadata. Для handoff сначала
+остановите stack его собственным launcher-ом, проверьте `status`/порты, затем
+запускайте другой entrypoint. `run_local` может
 удалить full-stack metadata только после повторного доказательства, что процесс
 отсутствует или fingerprint отличается и ожидаемый порт свободен; invalid или
 unreadable metadata сохраняется для явного разбора.
@@ -54,7 +67,10 @@ launcher в `finally` повторно
 сверяет start fingerprint и best-effort останавливает только свой точный процесс.
 Чужой или уже переиспользованный PID не останавливается; уже завершившийся child
 не считается ошибкой cleanup. Ошибка cleanup не скрывает исходную startup-ошибку:
-в диагностике сохраняются обе причины.
+в диагностике сохраняются обе причины. Если более поздний этап full-stack startup
+завершается ошибкой, launcher в обратном порядке откатывает только сервисы,
+которые успел запустить в этой попытке, и только после повторного exact identity
+proof; primary и rollback failure сохраняются раздельно.
 
 Без явного `DATABASE_URL` backend использует
 `sqlite+aiosqlite:///./.local-run/geov0.db`. Старый `./geov0.db` не мигрируется и

@@ -123,6 +123,52 @@ $WindowStyle = if ($ShowWindows) { 'Normal' } else { 'Hidden' }
 
 # --- Helper Functions ---
 
+function Get-LauncherLifecycleLockName {
+    param([string]$RepositoryRoot)
+    $normalizedRoot = [System.IO.Path]::GetFullPath($RepositoryRoot).TrimEnd([char[]]@('\', '/')).ToUpperInvariant()
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $digest = $sha256.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($normalizedRoot))
+    } finally {
+        $sha256.Dispose()
+    }
+    $digestText = -join ($digest | ForEach-Object { $_.ToString('x2') })
+    return "Local\GEOv0-LauncherLifecycle-$($digestText.Substring(0, 24))"
+}
+
+function Enter-LauncherLifecycleLock {
+    param([string]$RepositoryRoot, [string]$LauncherName)
+    $lockName = Get-LauncherLifecycleLockName -RepositoryRoot $RepositoryRoot
+    $createdNew = $false
+    $mutex = New-Object System.Threading.Mutex($false, $lockName, [ref]$createdNew)
+    $acquired = $false
+    try {
+        try {
+            $acquired = $mutex.WaitOne(0)
+        } catch [System.Threading.AbandonedMutexException] {
+            # The previous launcher crashed. The OS transferred the mutex to us.
+            $acquired = $true
+        }
+        if (-not $acquired) {
+            throw "Launcher lifecycle is busy for this repository; another mutating launcher owns $lockName."
+        }
+        return [pscustomobject]@{ Mutex = $mutex; Name = $lockName; Launcher = $LauncherName }
+    } catch {
+        if (-not $acquired) { $mutex.Dispose() }
+        throw
+    }
+}
+
+function Exit-LauncherLifecycleLock {
+    param([object]$LockHandle)
+    if ($null -eq $LockHandle -or $null -eq $LockHandle.Mutex) { return }
+    try {
+        $LockHandle.Mutex.ReleaseMutex()
+    } finally {
+        $LockHandle.Mutex.Dispose()
+    }
+}
+
 function Get-ServiceOwnershipMetadata {
     param([string]$Path)
     if (-not (Test-Path $Path)) { return $null }
@@ -598,6 +644,12 @@ function Get-ServiceStopState {
     } elseif ($listener -and -not $metadataMatchesService) {
         $conflict = $true
         $reason = "port $($Service.Port) is listening on PID $listener but ownership metadata is invalid or belongs to another service"
+    } elseif ($listener -and $identity.Status -eq 'Unreadable') {
+        $conflict = $true
+        $reason = "port $($Service.Port) is listening on PID $listener but owned PID $($metadata.Pid) identity is unreadable"
+    } elseif ($listener -and $identity.Status -eq 'Missing') {
+        $conflict = $true
+        $reason = "port $($Service.Port) is listening on PID $listener but saved PID $($metadata.Pid) is missing"
     } elseif ($listener -and -not $exactProcess) {
         $conflict = $true
         $reason = "port $($Service.Port) is listening on PID $listener but the saved process fingerprint does not match"
@@ -858,6 +910,37 @@ function Stop-AllServices {
     return $false
 }
 
+function Undo-StartedServices {
+    param([object[]]$StartedServices)
+
+    $cleanupFailures = @()
+    for ($index = $StartedServices.Count - 1; $index -ge 0; $index--) {
+        $started = $StartedServices[$index]
+        try {
+            $identity = Get-ProcessIdentityObservation `
+                -Id $started.Pid `
+                -ExpectedStartFingerprint $started.ProcessStartFingerprint
+            if ($identity.Status -eq 'Exact') {
+                Stop-ProcessById `
+                    -Id $started.Pid `
+                    -ExpectedStartFingerprint $started.ProcessStartFingerprint
+            } elseif ($identity.Status -eq 'Unreadable') {
+                throw "Unable to roll back $($started.Service.Name): process identity is unreadable."
+            }
+            # Missing means the child already exited; Mismatch proves PID reuse.
+            # Both allow removal of metadata written by this startup attempt.
+            if (Test-Path -LiteralPath $started.Service.PidFile) {
+                Remove-Item -LiteralPath $started.Service.PidFile -Force -ErrorAction Stop
+            }
+        } catch {
+            $cleanupFailures += "$($started.Service.Name): $($_.Exception.Message)"
+        }
+    }
+    if ($cleanupFailures.Count -gt 0) {
+        throw "Startup rollback failed: $($cleanupFailures -join '; ')"
+    }
+}
+
 # --- Main Logic ---
 
 Write-Host ""
@@ -869,6 +952,12 @@ $Services = @(Get-FullStackServices)
 $BackendService = $Services | Where-Object { $_.Name -eq 'Backend' } | Select-Object -First 1
 $AdminUiService = $Services | Where-Object { $_.Name -eq 'Admin UI' } | Select-Object -First 1
 $SimulatorUiService = $Services | Where-Object { $_.Name -eq 'Simulator UI' } | Select-Object -First 1
+
+$LifecycleLock = $null
+try {
+if ($Action -in @('start', 'stop', 'restart')) {
+    $LifecycleLock = Enter-LauncherLifecycleLock -RepositoryRoot $RepoRoot -LauncherName 'run_full_stack'
+}
 
 switch ($Action) {
     'status' {
@@ -915,6 +1004,12 @@ switch ($Action) {
 }
 
 # --- START action ---
+
+$StartedThisAttempt = @()
+$StartupComplete = $false
+$StartupFailure = $null
+$RollbackFailure = $null
+try {
 
 # Every fallible settings/summary/reset/ownership check completes before the
 # first process is stopped. This preserves a running stack when replacement
@@ -994,6 +1089,11 @@ if ([string]::IsNullOrWhiteSpace($env:SIMULATOR_REAL_ENABLE_INJECT)) {
 $backendArgs = @('-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', "$BackendPort")
 $backendProcess = Start-Process -FilePath $Python -ArgumentList $backendArgs -WorkingDirectory $RepoRoot -WindowStyle $WindowStyle -RedirectStandardOutput $BackendOutLogPath -RedirectStandardError $BackendErrLogPath -PassThru
 $backendOwnership = Wait-ForLaunchedServiceOwnership -Service $BackendService -Process $backendProcess -TimeoutSec 60
+$StartedThisAttempt += [pscustomobject]@{
+    Service = $BackendService
+    Pid = $backendOwnership.Pid
+    ProcessStartFingerprint = $backendOwnership.ProcessStartFingerprint
+}
 
 if (-not (Test-HttpEndpoint -Url "http://127.0.0.1:$BackendPort/api/v1/health" -TimeoutSec 60)) {
     throw "Backend failed to start on port $BackendPort"
@@ -1028,6 +1128,11 @@ $adminUiViteScript = Get-ViteScriptPath -ProjectDir $AdminUiDir
 $adminUiDirectArgs = @(('"{0}"' -f $adminUiViteScript), '--port', "$AdminUiPort", '--strictPort')
 $adminUiProcess = Start-Process -FilePath $Tools.Node -ArgumentList $adminUiDirectArgs -WorkingDirectory $AdminUiDir -WindowStyle $WindowStyle -RedirectStandardOutput $AdminUiOutLogPath -RedirectStandardError $AdminUiErrLogPath -PassThru
 $adminUiOwnership = Wait-ForLaunchedServiceOwnership -Service $AdminUiService -Process $adminUiProcess -TimeoutSec 60
+$StartedThisAttempt += [pscustomobject]@{
+    Service = $AdminUiService
+    Pid = $adminUiOwnership.Pid
+    ProcessStartFingerprint = $adminUiOwnership.ProcessStartFingerprint
+}
 Write-Host "     Admin UI PID: $($adminUiOwnership.Pid)" -ForegroundColor Gray
 
 Write-Host "[8/8] Starting Simulator UI (Vite on port $SimulatorUiPort)..." -ForegroundColor Yellow
@@ -1043,7 +1148,13 @@ $simulatorUiViteScript = Get-ViteScriptPath -ProjectDir $SimulatorUiDir
 $simulatorUiDirectArgs = @(('"{0}"' -f $simulatorUiViteScript), '--port', "$SimulatorUiPort", '--strictPort')
 $simulatorUiProcess = Start-Process -FilePath $Tools.Node -ArgumentList $simulatorUiDirectArgs -WorkingDirectory $SimulatorUiDir -WindowStyle $WindowStyle -RedirectStandardOutput $SimulatorUiOutLogPath -RedirectStandardError $SimulatorUiErrLogPath -PassThru
 $simulatorUiOwnership = Wait-ForLaunchedServiceOwnership -Service $SimulatorUiService -Process $simulatorUiProcess -TimeoutSec 60
+$StartedThisAttempt += [pscustomobject]@{
+    Service = $SimulatorUiService
+    Pid = $simulatorUiOwnership.Pid
+    ProcessStartFingerprint = $simulatorUiOwnership.ProcessStartFingerprint
+}
 Write-Host "     Simulator UI PID: $($simulatorUiOwnership.Pid)" -ForegroundColor Gray
+$StartupComplete = $true
 
 # Summary
 Write-Host ""
@@ -1063,5 +1174,28 @@ Write-Host "Changes made in Admin UI will be visible in Simulator and vice versa
 Write-Host ""
 Write-Host "To stop all services: .\scripts\run_full_stack.ps1 stop" -ForegroundColor Gray
 Write-Host ""
+} catch {
+    $StartupFailure = $_.Exception
+} finally {
+    if (-not $StartupComplete -and $StartedThisAttempt.Count -gt 0) {
+        try {
+            Undo-StartedServices -StartedServices $StartedThisAttempt
+        } catch {
+            $RollbackFailure = $_.Exception
+        }
+    }
+}
 
-[Environment]::Exit(0)
+if ($null -ne $StartupFailure -and $null -ne $RollbackFailure) {
+    $combinedMessage = "$($StartupFailure.Message) $($RollbackFailure.Message)"
+    $combinedFailure = New-Object System.InvalidOperationException($combinedMessage, $StartupFailure)
+    $combinedFailure.Data['RollbackFailure'] = $RollbackFailure.ToString()
+    throw $combinedFailure
+}
+if ($null -ne $StartupFailure) { throw $StartupFailure }
+if ($null -ne $RollbackFailure) { throw $RollbackFailure }
+} finally {
+    Exit-LauncherLifecycleLock -LockHandle $LifecycleLock
+}
+
+exit 0

@@ -61,6 +61,128 @@ $script:DevComposeFiles = @('-f', 'docker-compose.yml', '-f', 'docker-compose.de
 
 $script:backendOrigin = "http://${HostName}:$ApiPort"
 $script:apiDocsUrl = "${script:backendOrigin}/docs"
+$stateDir = Join-Path $repoRoot '.local-run'
+$fullStackOwnershipDir = Join-Path $stateDir 'full-stack'
+$runLocalBackendPidPath = Join-Path $stateDir 'backend.pid'
+$runLocalAdminUiPidPath = Join-Path $stateDir 'admin-ui.pid'
+
+function Get-LauncherLifecycleLockName {
+  param([string]$RepositoryRoot)
+  $normalizedRoot = [System.IO.Path]::GetFullPath($RepositoryRoot).TrimEnd([char[]]@('\', '/')).ToUpperInvariant()
+  $sha256 = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    $digest = $sha256.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($normalizedRoot))
+  } finally {
+    $sha256.Dispose()
+  }
+  $digestText = -join ($digest | ForEach-Object { $_.ToString('x2') })
+  return "Local\GEOv0-LauncherLifecycle-$($digestText.Substring(0, 24))"
+}
+
+function Enter-LauncherLifecycleLock {
+  param([string]$RepositoryRoot, [string]$LauncherName)
+  $lockName = Get-LauncherLifecycleLockName -RepositoryRoot $RepositoryRoot
+  $createdNew = $false
+  $mutex = New-Object System.Threading.Mutex($false, $lockName, [ref]$createdNew)
+  $acquired = $false
+  try {
+    try {
+      $acquired = $mutex.WaitOne(0)
+    } catch [System.Threading.AbandonedMutexException] {
+      $acquired = $true
+    }
+    if (-not $acquired) {
+      throw "Launcher lifecycle is busy for this repository; another mutating launcher owns $lockName."
+    }
+    return [pscustomobject]@{ Mutex = $mutex; Name = $lockName; Launcher = $LauncherName }
+  } catch {
+    if (-not $acquired) { $mutex.Dispose() }
+    throw
+  }
+}
+
+function Exit-LauncherLifecycleLock {
+  param([object]$LockHandle)
+  if ($null -eq $LockHandle -or $null -eq $LockHandle.Mutex) { return }
+  try {
+    $LockHandle.Mutex.ReleaseMutex()
+  } finally {
+    $LockHandle.Mutex.Dispose()
+  }
+}
+
+function Get-ProcessIdentityObservation {
+  param([int]$Id, [string]$ExpectedStartFingerprint)
+  if (-not $Id -or $Id -le 0) {
+    return [pscustomobject]@{ Status = 'Missing'; Fingerprint = $null }
+  }
+  try {
+    $process = [System.Diagnostics.Process]::GetProcessById($Id)
+  } catch [System.ArgumentException] {
+    return [pscustomobject]@{ Status = 'Missing'; Fingerprint = $null }
+  } catch {
+    return [pscustomobject]@{ Status = 'Unreadable'; Fingerprint = $null }
+  }
+  try {
+    $ticks = $process.StartTime.ToUniversalTime().Ticks.ToString([System.Globalization.CultureInfo]::InvariantCulture)
+    $fingerprint = "utc-ticks:$ticks"
+  } catch {
+    return [pscustomobject]@{ Status = 'Unreadable'; Fingerprint = $null }
+  }
+  $status = if ([string]::IsNullOrWhiteSpace($ExpectedStartFingerprint)) {
+    'Observed'
+  } elseif ($fingerprint -eq $ExpectedStartFingerprint) {
+    'Exact'
+  } else {
+    'Mismatch'
+  }
+  return [pscustomobject]@{ Status = $status; Fingerprint = $fingerprint }
+}
+
+function Get-FullStackOwnershipMetadata {
+  param([string]$Path)
+  if (-not (Test-Path -LiteralPath $Path)) { return $null }
+  try {
+    $metadata = (Get-Content -LiteralPath $Path -Raw -ErrorAction Stop) | ConvertFrom-Json -ErrorAction Stop
+    $pidValue = 0
+    if (-not [int]::TryParse([string]$metadata.pid, [ref]$pidValue) -or $pidValue -le 0) { throw 'invalid pid' }
+    $fingerprint = [string]$metadata.process_start_fingerprint
+    if ($fingerprint -notmatch '^utc-ticks:\d+$') { throw 'invalid fingerprint' }
+    return [pscustomobject]@{
+      Valid = [bool]($metadata.version -eq 1)
+      Pid = $pidValue
+      ProcessStartFingerprint = $fingerprint
+      ServiceName = [string]$metadata.service_name
+      Port = [int]$metadata.port
+    }
+  } catch {
+    return [pscustomobject]@{ Valid = $false }
+  }
+}
+
+function Assert-NoActiveFullStackOwnership {
+  foreach ($serviceName in @('Backend', 'Admin UI', 'Simulator UI')) {
+    $fileName = switch ($serviceName) {
+      'Backend' { 'backend.owner.json' }
+      'Admin UI' { 'admin-ui.owner.json' }
+      'Simulator UI' { 'simulator-ui.owner.json' }
+    }
+    $path = Join-Path $fullStackOwnershipDir $fileName
+    $metadata = Get-FullStackOwnershipMetadata -Path $path
+    if ($null -eq $metadata) { continue }
+    if (-not $metadata.Valid -or $metadata.ServiceName -ne $serviceName -or $metadata.Port -le 0) {
+      throw "$serviceName full-stack ownership metadata is unreadable or invalid; run_real_simulator refused."
+    }
+    $identity = Get-ProcessIdentityObservation -Id $metadata.Pid -ExpectedStartFingerprint $metadata.ProcessStartFingerprint
+    if ($identity.Status -in @('Exact', 'Unreadable')) {
+      throw "$serviceName full-stack ownership is active or unreadable; run_real_simulator refused."
+    }
+    $listener = Get-ListeningPid -Port $metadata.Port
+    if ($listener) {
+      throw "$serviceName full-stack metadata is stale but port $($metadata.Port) has listener PID $listener; run_real_simulator refused."
+    }
+  }
+}
 
 function Write-UsefulLinks([switch]$IncludeSimulatorUi) {
   Write-Host ''
@@ -331,103 +453,157 @@ function Seed-DbIfRequested() {
   Invoke-Docker (@('exec','geov0-app') + $args) | Out-Host
 }
 
-function Stop-LocalUvicornServers() {
-  # Stop local uvicorn processes (app.main:app) running outside Docker.
-  # These are typically started by run_local.ps1.
-  
-  Write-Host 'Stopping local uvicorn servers...'
-  
-  $stoppedCount = 0
-  $commonPorts = @(8000, 18000, 28000)
-  
+function Get-ListeningPid {
+  param([int]$Port)
   try {
-    $pythonProcesses = Get-CimInstance Win32_Process -Filter "Name='python.exe'" -ErrorAction SilentlyContinue
-    
-    foreach ($proc in $pythonProcesses) {
-      $cmdLine = $proc.CommandLine
-      if (-not $cmdLine) { continue }
-      
-      # Match uvicorn running app.main:app
-      if ($cmdLine -match 'uvicorn.*app\.main:app') {
-        try {
-          Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
-          $stoppedCount++
-          Write-Host " Stopped PID $($proc.ProcessId)" -ForegroundColor Yellow
-        } catch {
-          Write-Host " Failed to stop PID $($proc.ProcessId): $_" -ForegroundColor Red
-        }
-      }
+    $connection = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop | Select-Object -First 1
+    if ($connection -and $connection.OwningProcess) { return [int]$connection.OwningProcess }
+  } catch {}
+  return $null
+}
+
+function Get-PidFromFile {
+  param([string]$Path)
+  if (-not (Test-Path -LiteralPath $Path)) { return $null }
+  try {
+    $raw = Get-Content -LiteralPath $Path -ErrorAction Stop | Select-Object -First 1
+    if ([string]$raw -match '^\s*(\d+)\s*$') { return [int]$Matches[1] }
+  } catch {}
+  return $null
+}
+
+function Get-ProcessCommandLine {
+  param([int]$Id)
+  try {
+    $process = Get-CimInstance Win32_Process -Filter "ProcessId=$Id" -ErrorAction Stop
+    if ($process -and $process.CommandLine) { return ([string]$process.CommandLine).Trim() }
+  } catch {}
+  return ''
+}
+
+function Test-IsExpectedRunLocalCommandLine {
+  param([string]$CommandLine, [string]$Kind, [string]$ContextDir)
+  if ([string]::IsNullOrWhiteSpace($CommandLine)) { return $false }
+  $commandLineLower = $CommandLine.ToLowerInvariant()
+  if ($Kind -eq 'backend') {
+    return ($commandLineLower -like '*uvicorn*' -and $commandLineLower -like '*app.main:app*')
+  }
+  $escapedDir = [WildcardPattern]::Escape($ContextDir.ToLowerInvariant())
+  return ($commandLineLower -like '*vite*' -and $commandLineLower -like "*$escapedDir*")
+}
+
+function Get-RunLocalPidStopPlan {
+  param([object[]]$Services)
+  $targets = @()
+  $pidFilesToRemove = @()
+  $conflicts = @()
+  foreach ($service in $Services) {
+    $pidFilePresent = Test-Path -LiteralPath $service.PidFile
+    $procId = Get-PidFromFile -Path $service.PidFile
+    if ($pidFilePresent -and -not $procId) {
+      $conflicts += "$($service.Name): PID metadata is unreadable and was retained"
+      continue
     }
-  } catch {
-    Write-Host " Could not enumerate Python processes: $_" -ForegroundColor DarkGray
+    if (-not $procId) { continue }
+
+    $identity = Get-ProcessIdentityObservation -Id $procId -ExpectedStartFingerprint ''
+    if ($identity.Status -eq 'Missing') {
+      $pidFilesToRemove += $service.PidFile
+      continue
+    }
+    if ($identity.Status -eq 'Unreadable') {
+      $conflicts += "$($service.Name): PID $procId identity is unreadable"
+      continue
+    }
+    $commandLine = Get-ProcessCommandLine -Id $procId
+    if (-not (Test-IsExpectedRunLocalCommandLine `
+      -CommandLine $commandLine `
+      -Kind $service.Kind `
+      -ContextDir $service.ContextDir)) {
+      $conflicts += "$($service.Name): PID $procId command line does not match; metadata was retained"
+      continue
+    }
+    $targets += [pscustomobject]@{
+      Pid = [int]$procId
+      ProcessStartFingerprint = $identity.Fingerprint
+      CommandLine = $commandLine
+      PidFile = $service.PidFile
+    }
+    $pidFilesToRemove += $service.PidFile
   }
-  
-  # Also check by port listening (in case command line is not available)
-  foreach ($port in $commonPorts) {
-    try {
-      $conn = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
-      if ($conn -and $conn.OwningProcess) {
-        $pid = $conn.OwningProcess
-        $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$pid" -ErrorAction SilentlyContinue
-        if ($proc -and $proc.CommandLine -and $proc.CommandLine -match 'uvicorn.*app\.main:app') {
-          try {
-            Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
-            $stoppedCount++
-            Write-Host " Stopped PID $pid (port $port)" -ForegroundColor Yellow
-          } catch {}
-        }
-      }
-    } catch {}
-  }
-  
-  if ($stoppedCount -eq 0) {
-    Write-Host ' No local uvicorn servers found running.' -ForegroundColor DarkGray
-  } else {
-    Write-Host " Stopped $stoppedCount uvicorn process(es)." -ForegroundColor Green
+  return [pscustomobject]@{
+    Targets = @($targets)
+    PidFilesToRemove = @($pidFilesToRemove)
+    Conflicts = @($conflicts)
   }
 }
 
-function Stop-ViteDevServers() {
-  # Stop Node.js processes running Vite for simulator-ui and admin-ui.
-  # Identifies processes by command line containing vite.js and project paths.
-  
-  Write-Host 'Stopping Vite dev servers (simulator-ui, admin-ui)...'
-  
-  $stoppedCount = 0
-  
-  try {
-    $nodeProcesses = Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue
-    
-    foreach ($proc in $nodeProcesses) {
-      $cmdLine = $proc.CommandLine
-      if (-not $cmdLine) { continue }
-      
-      # Match vite processes for simulator-ui or admin-ui
-      $isSimulatorUiVite = $cmdLine -match 'simulator-ui[\\/]v2[\\/].*vite' -or $cmdLine -match 'simulator-ui[\\/]v2[\\/]node_modules'
-      $isAdminUiVite = $cmdLine -match 'admin-ui[\\/].*vite' -or $cmdLine -match 'admin-ui[\\/]node_modules[\\/].*vite'
-      $isNpmDevServer = ($cmdLine -match 'npm.*run\s+dev.*--port\s+(5173|5176|5174|5175)') -or ($cmdLine -match 'npm-cli\.js.*run\s+dev')
-      # Also match Playwright test server for admin-ui/simulator-ui
-      $isPlaywrightTestServer = $cmdLine -match '(admin-ui|simulator-ui)[\\/].*@playwright[\\/]test[\\/]cli\.js\s+test-server'
-      
-      if ($isSimulatorUiVite -or $isAdminUiVite -or $isNpmDevServer -or $isPlaywrightTestServer) {
-        try {
-          Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
-          $stoppedCount++
-          Write-Host " Stopped PID $($proc.ProcessId)" -ForegroundColor Yellow
-        } catch {
-          Write-Host " Failed to stop PID $($proc.ProcessId): $_" -ForegroundColor Red
-        }
-      }
+function Test-RunLocalPidStopPlansEqual {
+  param([object]$InitialPlan, [object]$FinalPlan)
+  if ($InitialPlan.Targets.Count -ne $FinalPlan.Targets.Count) { return $false }
+  for ($index = 0; $index -lt $InitialPlan.Targets.Count; $index++) {
+    foreach ($property in @('Pid', 'ProcessStartFingerprint', 'CommandLine', 'PidFile')) {
+      if ($InitialPlan.Targets[$index].$property -ne $FinalPlan.Targets[$index].$property) { return $false }
     }
-  } catch {
-    Write-Host " Could not enumerate Node processes: $_" -ForegroundColor DarkGray
   }
-  
-  if ($stoppedCount -eq 0) {
-    Write-Host ' No Vite dev servers found running.' -ForegroundColor DarkGray
-  } else {
-    Write-Host " Stopped $stoppedCount Vite dev server process(es)." -ForegroundColor Green
+  return (($InitialPlan.PidFilesToRemove -join "`n") -eq ($FinalPlan.PidFilesToRemove -join "`n"))
+}
+
+function Invoke-RunLocalPidStopPlan {
+  param([object[]]$Services)
+  $initialPlan = Get-RunLocalPidStopPlan -Services $Services
+  if ($initialPlan.Conflicts.Count -gt 0) {
+    throw "run_local process stop refused before any stop: $($initialPlan.Conflicts -join '; ')"
   }
+  $finalPlan = Get-RunLocalPidStopPlan -Services $Services
+  if ($finalPlan.Conflicts.Count -gt 0) {
+    throw "run_local process stop refused during final preflight: $($finalPlan.Conflicts -join '; ')"
+  }
+  if (-not (Test-RunLocalPidStopPlansEqual -InitialPlan $initialPlan -FinalPlan $finalPlan)) {
+    throw 'run_local process stop refused because ownership changed during final preflight.'
+  }
+
+  foreach ($target in $finalPlan.Targets) {
+    $identity = Get-ProcessIdentityObservation -Id $target.Pid -ExpectedStartFingerprint $target.ProcessStartFingerprint
+    $commandLine = Get-ProcessCommandLine -Id $target.Pid
+    if ($identity.Status -ne 'Exact' -or $commandLine -ne $target.CommandLine) {
+      throw "run_local process stop refused because PID $($target.Pid) changed before execution."
+    }
+  }
+  foreach ($target in $finalPlan.Targets) {
+    Stop-Process -Id $target.Pid -Force -ErrorAction Stop
+  }
+  foreach ($path in $finalPlan.PidFilesToRemove) {
+    if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force -ErrorAction Stop }
+  }
+}
+
+function Stop-RunLocalPidFileProcess {
+  param([string]$Path, [string]$Kind, [string]$ContextDir)
+  Invoke-RunLocalPidStopPlan -Services @([pscustomobject]@{
+    Name = $Kind
+    Kind = $Kind
+    ContextDir = $ContextDir
+    PidFile = $Path
+  })
+}
+
+function Stop-RunLocalProcesses {
+  $services = @(
+    [pscustomobject]@{
+      Name = 'Admin UI'
+      Kind = 'ui'
+      ContextDir = (Join-Path $repoRoot 'admin-ui')
+      PidFile = $runLocalAdminUiPidPath
+    },
+    [pscustomobject]@{
+      Name = 'Backend'
+      Kind = 'backend'
+      ContextDir = $null
+      PidFile = $runLocalBackendPidPath
+    }
+  )
+  Invoke-RunLocalPidStopPlan -Services $services
 }
 
 function Start-SimulatorUiReal() {
@@ -465,16 +641,19 @@ if ($Action -eq 'doctor') {
   exit 0
 }
 
+$LifecycleLock = $null
+try {
+$LifecycleLock = Enter-LauncherLifecycleLock -RepositoryRoot $repoRoot -LauncherName 'run_real_simulator'
+Assert-NoActiveFullStackOwnership
+
 if ($Action -eq 'stop') {
   Write-Host 'Stopping all simulator services...'
+
+  # Only PID files written by run_local are eligible. Each PID is validated
+  # against its expected command line before any native stop is attempted.
+  Stop-RunLocalProcesses
   
-  # 1. Stop Vite dev servers (simulator-ui, admin-ui) - no Docker required
-  Stop-ViteDevServers
-  
-  # 2. Stop local uvicorn servers (started by run_local.ps1)
-  Stop-LocalUvicornServers
-  
-  # 3. Stop Docker containers if Docker is available
+  # Stop this launcher's named Docker Compose services.
   $mode = Get-DockerMode
   if ($mode -ne 'missing') {
     Write-Host 'Stopping Docker containers (app, redis, db)...'
@@ -503,4 +682,7 @@ Start-SimulatorUiReal
 if ($NoSimulatorUi) {
   Write-Host 'OK: services started (UI skipped).'
   Write-UsefulLinks
+}
+} finally {
+  Exit-LauncherLifecycleLock -LockHandle $LifecycleLock
 }

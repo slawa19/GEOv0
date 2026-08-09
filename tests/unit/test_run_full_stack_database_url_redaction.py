@@ -11,6 +11,7 @@ import pytest
 _ROOT = Path(__file__).resolve().parents[2]
 _RUN_FULL_STACK = _ROOT / "scripts" / "run_full_stack.ps1"
 _RUN_LOCAL = _ROOT / "scripts" / "run_local.ps1"
+_RUN_REAL_SIMULATOR = _ROOT / "scripts" / "run_real_simulator.ps1"
 
 
 def _powershell_executables() -> tuple[Path, ...]:
@@ -160,7 +161,9 @@ $display = Get-SafeDatabaseDisplayUrl `
 
 @pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
 @pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
-@pytest.mark.parametrize("reserved", ("/", "?", "#"), ids=("slash", "query", "fragment"))
+@pytest.mark.parametrize(
+    "reserved", ("/", "?", "#"), ids=("slash", "query", "fragment")
+)
 def test_database_display_rejects_ambiguous_raw_reserved_credentials_without_leak(
     powershell: Path,
     reserved: str,
@@ -421,7 +424,12 @@ function New-TestMetadata {
         (101, None, "start-a", "start-a"),
         (101, 101, "start-a", "start-b"),
     ),
-    ids=("foreign", "mismatched-listener", "owned-not-listening", "pid-reused-listener"),
+    ids=(
+        "foreign",
+        "mismatched-listener",
+        "owned-not-listening",
+        "pid-reused-listener",
+    ),
 )
 def test_unproven_service_ownership_never_stops_a_process(
     powershell: Path,
@@ -822,7 +830,9 @@ try {
 
 @pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
 @pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
-def test_successful_startup_persists_ownership_without_cleanup(powershell: Path) -> None:
+def test_successful_startup_persists_ownership_without_cleanup(
+    powershell: Path,
+) -> None:
     command = (
         _AST_SETUP
         + r"""
@@ -1103,9 +1113,7 @@ def test_launcher_ownership_namespaces_are_disjoint_and_actions_are_guarded() ->
 
     assert "Join-Path $FullStackOwnershipDir 'backend.owner.json'" in full_stack_source
     assert "Join-Path $StateDir 'backend.pid'" in run_local_source
-    guard_index = run_local_source.index(
-        "if ($Action -in @('start', 'stop', 'restart', 'restart-backend'))"
-    )
+    guard_index = run_local_source.index("if ($RequiresLifecycleLock)")
     assert run_local_source.index("Assert-NoActiveFullStackOwnership", guard_index) < (
         run_local_source.index("switch ($Action)", guard_index)
     )
@@ -1132,3 +1140,295 @@ if ($script:StoppedPids.Count -ne 0) { throw 'run_local listener was stopped by 
 
     assert "full-stack-run-local-conflict-ok" in result.stdout
     assert "no ownership metadata exists" in result.stdout
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+def test_repository_lifecycle_lock_rejects_interleaving_and_is_crash_released(
+    powershell: Path,
+    tmp_path: Path,
+) -> None:
+    imports = (
+        _AST_SETUP
+        + r"""
+Invoke-Expression (Get-LauncherFunctionText -Name 'Get-LauncherLifecycleLockName')
+Invoke-Expression (Get-LauncherFunctionText -Name 'Enter-LauncherLifecycleLock')
+Invoke-Expression (Get-LauncherFunctionText -Name 'Exit-LauncherLifecycleLock')
+"""
+    )
+    holder_command = (
+        imports
+        + r"""
+$lock = Enter-LauncherLifecycleLock -RepositoryRoot $env:PHASE7_LOCK_ROOT -LauncherName 'holder'
+[Console]::Out.WriteLine('held')
+[Console]::Out.Flush()
+$null = [Console]::In.ReadLine()
+"""
+    )
+    environment = {
+        **os.environ,
+        "PHASE7_SCRIPT_PATH": str(_RUN_FULL_STACK),
+        "PHASE7_LOCK_ROOT": str(tmp_path),
+    }
+    holder = subprocess.Popen(
+        [str(powershell), "-NoProfile", "-NonInteractive", "-Command", holder_command],
+        cwd=_ROOT,
+        env=environment,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert holder.stdout is not None
+        assert holder.stdout.readline().strip() == "held"
+        contender = _run_powershell(
+            powershell,
+            imports
+            + r"""
+try {
+    Enter-LauncherLifecycleLock -RepositoryRoot $env:PHASE7_LOCK_ROOT -LauncherName 'contender'
+    throw 'Concurrent lifecycle mutation unexpectedly acquired the lock'
+} catch {
+    if ($_.Exception.Message -eq 'Concurrent lifecycle mutation unexpectedly acquired the lock') { throw }
+    [Console]::Out.Write($_.Exception.Message)
+}
+""",
+            extra_env={"PHASE7_LOCK_ROOT": str(tmp_path)},
+        )
+        assert "Launcher lifecycle is busy" in contender.stdout
+    finally:
+        holder.kill()
+        holder.wait(timeout=10)
+
+    recovered = _run_powershell(
+        powershell,
+        imports
+        + r"""
+$lock = Enter-LauncherLifecycleLock -RepositoryRoot $env:PHASE7_LOCK_ROOT -LauncherName 'after-crash'
+Exit-LauncherLifecycleLock -LockHandle $lock
+[Console]::Out.Write('crash-released')
+""",
+        extra_env={"PHASE7_LOCK_ROOT": str(tmp_path)},
+    )
+    assert recovered.stdout == "crash-released"
+
+
+def test_all_mutating_launchers_share_lock_and_cover_destructive_actions() -> None:
+    full_stack_source = _RUN_FULL_STACK.read_text(encoding="utf-8-sig")
+    run_local_source = _RUN_LOCAL.read_text(encoding="utf-8-sig")
+    real_simulator_source = _RUN_REAL_SIMULATOR.read_text(encoding="utf-8-sig")
+
+    lock_marker = "Local\\GEOv0-LauncherLifecycle-"
+    for source in (full_stack_source, run_local_source, real_simulator_source):
+        assert lock_marker in source
+        assert "Enter-LauncherLifecycleLock" in source
+        assert source.rindex("Exit-LauncherLifecycleLock -LockHandle") > source.rindex(
+            "$LifecycleLock = Enter-LauncherLifecycleLock"
+        )
+
+    requires_block = run_local_source.split("$RequiresLifecycleLock =", 1)[1].split(
+        "try {", 1
+    )[0]
+    for action in ("start", "stop", "restart", "restart-backend", "reset-db"):
+        assert f"'{action}'" in requires_block
+    assert "$Action -eq 'cleanup-simulator' -and -not $DryRun" in requires_block
+    run_local_acquire = run_local_source.index("Enter-LauncherLifecycleLock `")
+    assert run_local_acquire < run_local_source.index(
+        "Assert-NoActiveFullStackOwnership", run_local_acquire
+    )
+    real_simulator_acquire = real_simulator_source.index(
+        "$LifecycleLock = Enter-LauncherLifecycleLock -RepositoryRoot"
+    )
+    assert real_simulator_acquire < real_simulator_source.index(
+        "Assert-NoActiveFullStackOwnership", real_simulator_acquire
+    )
+    assert "Stop-ViteDevServers" not in real_simulator_source
+    assert "Stop-LocalUvicornServers" not in real_simulator_source
+    assert run_local_source.count("Invoke-LegacyProcessStopPlan -Services") >= 4
+    assert "Stop-IfListeningAndOurs -Port" not in run_local_source
+    assert "Invoke-RunLocalPidStopPlan -Services $services" in real_simulator_source
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+def test_run_local_later_service_conflict_causes_zero_stops(
+    powershell: Path,
+) -> None:
+    command = (
+        _AST_SETUP
+        + r"""
+Invoke-Expression (Get-LauncherFunctionText -Name 'Test-IsExpectedLegacyCommandLine')
+Invoke-Expression (Get-LauncherFunctionText -Name 'Get-LegacyProcessStopPlan')
+Invoke-Expression (Get-LauncherFunctionText -Name 'Test-LegacyProcessStopPlansEqual')
+Invoke-Expression (Get-LauncherFunctionText -Name 'Invoke-LegacyProcessStopPlan')
+$script:Stopped = @()
+$script:Removed = @()
+function Test-Path { param([string]$LiteralPath) return $true }
+function Get-PidFromFile {
+    param([string]$Path)
+    if ($Path -eq 'ui.pid') { return 101 }
+    return 202
+}
+function Get-ListeningPid { return $null }
+function Get-ProcessIdentityObservation {
+    param([int]$Id, [string]$ExpectedStartFingerprint)
+    $status = if ([string]::IsNullOrWhiteSpace($ExpectedStartFingerprint)) { 'Observed' } else { 'Exact' }
+    return [pscustomobject]@{ Status = $status; Fingerprint = "fingerprint-$Id" }
+}
+function Get-ProcessCommandLine {
+    param([int]$Id)
+    if ($Id -eq 101) { return 'node C:\repo\admin-ui\node_modules\vite' }
+    return 'unrelated python worker'
+}
+function Stop-ProcessById {
+    param([int]$Id, [string]$ExpectedStartFingerprint)
+    $script:Stopped += $Id
+}
+function Remove-Item { param([string]$LiteralPath, [switch]$Force, [object]$ErrorAction) $script:Removed += $LiteralPath }
+$services = @(
+    [pscustomobject]@{ Name = 'Admin UI'; Kind = 'ui'; ContextDir = 'C:\repo\admin-ui'; PidFile = 'ui.pid'; Port = 5173; IncludeListener = $true },
+    [pscustomobject]@{ Name = 'Backend'; Kind = 'backend'; ContextDir = $null; PidFile = 'backend.pid'; Port = 18000; IncludeListener = $true }
+)
+try {
+    Invoke-LegacyProcessStopPlan -Services $services
+    throw 'Later backend conflict unexpectedly stopped the plan'
+} catch {
+    if ($_.Exception.Message -eq 'Later backend conflict unexpectedly stopped the plan') { throw }
+    if ($_.Exception.Message -notlike '*command line does not match*') { throw }
+}
+if ($script:Stopped.Count -ne 0) { throw 'UI stopped before backend conflict was rejected' }
+if ($script:Removed.Count -ne 0) { throw 'PID evidence was removed after collective conflict' }
+[Console]::Out.Write('run-local-collective-conflict-zero-stops')
+"""
+    )
+    result = _run_powershell(
+        powershell,
+        command,
+        extra_env={"PHASE7_SCRIPT_PATH": str(_RUN_LOCAL)},
+    )
+    assert result.stdout == "run-local-collective-conflict-zero-stops"
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+def test_run_real_simulator_later_run_local_conflict_causes_zero_stops(
+    powershell: Path,
+) -> None:
+    command = (
+        _AST_SETUP
+        + r"""
+Invoke-Expression (Get-LauncherFunctionText -Name 'Test-IsExpectedRunLocalCommandLine')
+Invoke-Expression (Get-LauncherFunctionText -Name 'Get-RunLocalPidStopPlan')
+Invoke-Expression (Get-LauncherFunctionText -Name 'Test-RunLocalPidStopPlansEqual')
+Invoke-Expression (Get-LauncherFunctionText -Name 'Invoke-RunLocalPidStopPlan')
+$script:Stopped = @()
+$script:Removed = @()
+function Test-Path { param([string]$LiteralPath) return $true }
+function Get-PidFromFile {
+    param([string]$Path)
+    if ($Path -eq 'ui.pid') { return 101 }
+    return 202
+}
+function Get-ProcessIdentityObservation {
+    param([int]$Id, [string]$ExpectedStartFingerprint)
+    $status = if ([string]::IsNullOrWhiteSpace($ExpectedStartFingerprint)) { 'Observed' } else { 'Exact' }
+    return [pscustomobject]@{ Status = $status; Fingerprint = "fingerprint-$Id" }
+}
+function Get-ProcessCommandLine {
+    param([int]$Id)
+    if ($Id -eq 101) { return 'node C:\repo\admin-ui\node_modules\vite' }
+    return 'unrelated python worker'
+}
+function Stop-Process { param([int]$Id, [switch]$Force, [object]$ErrorAction) $script:Stopped += $Id }
+function Remove-Item { param([string]$LiteralPath, [switch]$Force, [object]$ErrorAction) $script:Removed += $LiteralPath }
+$services = @(
+    [pscustomobject]@{ Name = 'Admin UI'; Kind = 'ui'; ContextDir = 'C:\repo\admin-ui'; PidFile = 'ui.pid' },
+    [pscustomobject]@{ Name = 'Backend'; Kind = 'backend'; ContextDir = $null; PidFile = 'backend.pid' }
+)
+try {
+    Invoke-RunLocalPidStopPlan -Services $services
+    throw 'Later backend conflict unexpectedly stopped the plan'
+} catch {
+    if ($_.Exception.Message -eq 'Later backend conflict unexpectedly stopped the plan') { throw }
+    if ($_.Exception.Message -notlike '*command line does not match*') { throw }
+}
+if ($script:Stopped.Count -ne 0 -or $script:Removed.Count -ne 0) {
+    throw 'UI stopped or PID evidence changed before backend conflict rejection'
+}
+[Console]::Out.Write('run-real-collective-conflict-zero-stops')
+"""
+    )
+    result = _run_powershell(
+        powershell,
+        command,
+        extra_env={"PHASE7_SCRIPT_PATH": str(_RUN_REAL_SIMULATOR)},
+    )
+    assert result.stdout == "run-real-collective-conflict-zero-stops"
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+def test_full_stack_startup_rollback_is_reverse_order_and_exact_only(
+    powershell: Path,
+) -> None:
+    command = (
+        _AST_SETUP
+        + r"""
+Invoke-Expression (Get-LauncherFunctionText -Name 'Undo-StartedServices')
+$script:Stopped = @()
+$script:Removed = @()
+function Get-ProcessIdentityObservation {
+    param([int]$Id, [string]$ExpectedStartFingerprint)
+    $status = if ($Id -eq 202) { 'Mismatch' } else { 'Exact' }
+    return [pscustomobject]@{ Status = $status; Fingerprint = $ExpectedStartFingerprint }
+}
+function Stop-ProcessById {
+    param([int]$Id, [string]$ExpectedStartFingerprint)
+    $script:Stopped += $Id
+}
+function Test-Path { param([string]$LiteralPath) return $true }
+function Remove-Item {
+    param([string]$LiteralPath, [switch]$Force, [object]$ErrorAction)
+    $script:Removed += $LiteralPath
+}
+$started = @(
+    [pscustomobject]@{ Service = [pscustomobject]@{ Name = 'Backend'; PidFile = 'backend.owner.json' }; Pid = 101; ProcessStartFingerprint = 'start-a' },
+    [pscustomobject]@{ Service = [pscustomobject]@{ Name = 'Admin UI'; PidFile = 'admin.owner.json' }; Pid = 202; ProcessStartFingerprint = 'start-b' },
+    [pscustomobject]@{ Service = [pscustomobject]@{ Name = 'Simulator UI'; PidFile = 'sim.owner.json' }; Pid = 303; ProcessStartFingerprint = 'start-c' }
+)
+Undo-StartedServices -StartedServices $started
+if (($script:Stopped -join ',') -ne '303,101') { throw "Unexpected rollback stop order: $($script:Stopped -join ',')" }
+if (($script:Removed -join ',') -ne 'sim.owner.json,admin.owner.json,backend.owner.json') {
+    throw "Unexpected rollback metadata order: $($script:Removed -join ',')"
+}
+[Console]::Out.Write('startup-rollback-reverse-exact')
+"""
+    )
+    result = _run_powershell(powershell, command)
+    assert result.stdout == "startup-rollback-reverse-exact"
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+def test_status_reason_distinguishes_unreadable_identity_with_listener(
+    powershell: Path,
+) -> None:
+    body = r"""
+$service = New-TestService -Name 'Backend' -Port 18000 -PidFile 'backend.pid'
+$script:MetadataByFile['backend.pid'] = New-TestMetadata -Id 101 -StartTime 'start-a'
+$script:IdentityStatusByPid[101] = 'Unreadable'
+$script:ListenerByPort[18000] = 101
+$state = Get-ServiceStopState -Service $service
+if (-not $state.Conflict) { throw 'Unreadable listener identity was not a conflict' }
+[Console]::Out.Write($state.Reason)
+"""
+    result = _run_powershell(powershell, _ownership_command(body))
+    assert "identity is unreadable" in result.stdout
+
+
+def test_full_stack_main_wires_late_failure_to_reverse_rollback() -> None:
+    source = _RUN_FULL_STACK.read_text(encoding="utf-8-sig")
+    assert source.count("$StartedThisAttempt += [pscustomobject]@{") == 3
+    assert "Undo-StartedServices -StartedServices $StartedThisAttempt" in source
+    assert "$combinedFailure.Data['RollbackFailure']" in source

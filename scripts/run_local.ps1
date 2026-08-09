@@ -103,6 +103,85 @@ $BackendErrLog = Join-Path $StateDir 'backend.err.log'
 
 # --- Helper Functions ---
 
+function Get-LauncherLifecycleLockName {
+    param([string]$RepositoryRoot)
+    $normalizedRoot = [System.IO.Path]::GetFullPath($RepositoryRoot).TrimEnd([char[]]@('\', '/')).ToUpperInvariant()
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $digest = $sha256.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($normalizedRoot))
+    } finally {
+        $sha256.Dispose()
+    }
+    $digestText = -join ($digest | ForEach-Object { $_.ToString('x2') })
+    return "Local\GEOv0-LauncherLifecycle-$($digestText.Substring(0, 24))"
+}
+
+function Test-InheritedLauncherLifecycleLock {
+    param([string]$RepositoryRoot)
+    $expectedName = Get-LauncherLifecycleLockName -RepositoryRoot $RepositoryRoot
+    if ($env:GEO_LAUNCHER_LIFECYCLE_LOCK_NAME -ne $expectedName) { return $false }
+    if ([string]::IsNullOrWhiteSpace($env:GEO_LAUNCHER_LIFECYCLE_LOCK_TOKEN)) { return $false }
+    $ownerPid = 0
+    if (-not [int]::TryParse($env:GEO_LAUNCHER_LIFECYCLE_LOCK_OWNER_PID, [ref]$ownerPid) -or $ownerPid -le 0) {
+        return $false
+    }
+    $ownerFingerprint = [string]$env:GEO_LAUNCHER_LIFECYCLE_LOCK_OWNER_FINGERPRINT
+    if ($ownerFingerprint -notmatch '^utc-ticks:\d+$') { return $false }
+    $identity = Get-ProcessIdentityObservation -Id $ownerPid -ExpectedStartFingerprint $ownerFingerprint
+    return [bool]($identity.Status -eq 'Exact')
+}
+
+function Enter-LauncherLifecycleLock {
+    param([string]$RepositoryRoot, [string]$LauncherName, [switch]$AllowInherited)
+    $lockName = Get-LauncherLifecycleLockName -RepositoryRoot $RepositoryRoot
+    if ($AllowInherited -and (Test-InheritedLauncherLifecycleLock -RepositoryRoot $RepositoryRoot)) {
+        return [pscustomobject]@{ Mutex = $null; Name = $lockName; Launcher = $LauncherName; Inherited = $true }
+    }
+
+    $createdNew = $false
+    $mutex = New-Object System.Threading.Mutex($false, $lockName, [ref]$createdNew)
+    $acquired = $false
+    try {
+        try {
+            $acquired = $mutex.WaitOne(0)
+        } catch [System.Threading.AbandonedMutexException] {
+            $acquired = $true
+        }
+        if (-not $acquired) {
+            throw "Launcher lifecycle is busy for this repository; another mutating launcher owns $lockName."
+        }
+        $ownerFingerprint = Get-ProcessStartTimeFingerprint -Id $PID
+        if ([string]::IsNullOrWhiteSpace($ownerFingerprint)) {
+            throw 'Unable to establish launcher lifecycle lock owner identity.'
+        }
+        $env:GEO_LAUNCHER_LIFECYCLE_LOCK_NAME = $lockName
+        $env:GEO_LAUNCHER_LIFECYCLE_LOCK_OWNER_PID = [string]$PID
+        $env:GEO_LAUNCHER_LIFECYCLE_LOCK_OWNER_FINGERPRINT = $ownerFingerprint
+        $env:GEO_LAUNCHER_LIFECYCLE_LOCK_TOKEN = [Guid]::NewGuid().ToString('N')
+        return [pscustomobject]@{ Mutex = $mutex; Name = $lockName; Launcher = $LauncherName; Inherited = $false }
+    } catch {
+        if ($acquired) {
+            try { $mutex.ReleaseMutex() } catch {}
+        }
+        $mutex.Dispose()
+        throw
+    }
+}
+
+function Exit-LauncherLifecycleLock {
+    param([object]$LockHandle)
+    if ($null -eq $LockHandle -or $LockHandle.Inherited) { return }
+    Remove-Item Env:GEO_LAUNCHER_LIFECYCLE_LOCK_NAME -ErrorAction SilentlyContinue
+    Remove-Item Env:GEO_LAUNCHER_LIFECYCLE_LOCK_OWNER_PID -ErrorAction SilentlyContinue
+    Remove-Item Env:GEO_LAUNCHER_LIFECYCLE_LOCK_OWNER_FINGERPRINT -ErrorAction SilentlyContinue
+    Remove-Item Env:GEO_LAUNCHER_LIFECYCLE_LOCK_TOKEN -ErrorAction SilentlyContinue
+    try {
+        $LockHandle.Mutex.ReleaseMutex()
+    } finally {
+        $LockHandle.Mutex.Dispose()
+    }
+}
+
 function Get-NullCoalesce {
     <#
     .SYNOPSIS
@@ -128,15 +207,18 @@ function Get-PidFromFile {
 }
 
 function Stop-ProcessById {
-    param([int]$Id)
+    param([int]$Id, [string]$ExpectedStartFingerprint)
     if (-not $Id -or $Id -eq 0) { return }
-    
-    try {
-        Write-Verbose "Stopping process with ID $Id..."
-        Stop-Process -Id $Id -Force -ErrorAction Stop
-    } catch {
-        Write-Verbose "Process $Id not found or already stopped."
+
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedStartFingerprint)) {
+        $identity = Get-ProcessIdentityObservation -Id $Id -ExpectedStartFingerprint $ExpectedStartFingerprint
+        if ($identity.Status -ne 'Exact') {
+            throw "Refusing to stop PID $Id because its process identity changed after collective preflight."
+        }
     }
+
+    Write-Verbose "Stopping process with ID $Id..."
+    Stop-Process -Id $Id -Force -ErrorAction Stop
 }
 
 function Get-ProcessCommandLine {
@@ -293,8 +375,187 @@ function Get-ProcessIdentityObservation {
     } catch {
         return [pscustomobject]@{ Status = 'Unreadable'; Fingerprint = $null }
     }
-    $status = if ($fingerprint -eq $ExpectedStartFingerprint) { 'Exact' } else { 'Mismatch' }
+    $status = if ([string]::IsNullOrWhiteSpace($ExpectedStartFingerprint)) {
+        'Observed'
+    } elseif ($fingerprint -eq $ExpectedStartFingerprint) {
+        'Exact'
+    } else {
+        'Mismatch'
+    }
     return [pscustomobject]@{ Status = $status; Fingerprint = $fingerprint }
+}
+
+function Get-ProcessStartTimeFingerprint {
+    param([int]$Id)
+    $identity = Get-ProcessIdentityObservation -Id $Id -ExpectedStartFingerprint ''
+    if ($identity.Status -in @('Missing', 'Unreadable')) { return $null }
+    return $identity.Fingerprint
+}
+
+function Test-IsExpectedLegacyCommandLine {
+    param([string]$CommandLine, [string]$Kind, [string]$ContextDir)
+    if ([string]::IsNullOrWhiteSpace($CommandLine)) { return $false }
+    $commandLineLower = $CommandLine.ToLowerInvariant()
+    if ($Kind -eq 'backend') {
+        return ($commandLineLower -like '*uvicorn*' -and $commandLineLower -like '*app.main:app*')
+    }
+    $escapedDir = [WildcardPattern]::Escape($ContextDir.ToLowerInvariant())
+    return ($commandLineLower -like '*vite*' -and $commandLineLower -like "*$escapedDir*")
+}
+
+function Get-LegacyProcessStopPlan {
+    param([object[]]$Services)
+
+    $targets = @()
+    $targetPids = @{}
+    $pidFilesToRemove = @()
+    $conflicts = @()
+    foreach ($service in $Services) {
+        $candidates = @()
+        $pidFilePresent = [bool]($service.PidFile -and (Test-Path -LiteralPath $service.PidFile))
+        $savedPid = if ($service.PidFile) { Get-PidFromFile -Path $service.PidFile } else { $null }
+        if ($pidFilePresent -and -not $savedPid) {
+            $conflicts += "$($service.Name): PID metadata is unreadable and was retained"
+        } elseif ($savedPid) {
+            $candidates += [pscustomobject]@{ Pid = [int]$savedPid; Source = 'pid-file' }
+        }
+
+        if ($service.IncludeListener) {
+            $listenerPid = Get-ListeningPid -Port $service.Port
+            if ($listenerPid) {
+                $candidates += [pscustomobject]@{ Pid = [int]$listenerPid; Source = 'listener' }
+            }
+        }
+
+        foreach ($candidate in $candidates) {
+            $identity = Get-ProcessIdentityObservation -Id $candidate.Pid -ExpectedStartFingerprint ''
+            if ($identity.Status -eq 'Missing') {
+                if ($candidate.Source -eq 'pid-file') {
+                    $pidFilesToRemove += $service.PidFile
+                    continue
+                }
+                $conflicts += "$($service.Name): listener PID $($candidate.Pid) disappeared during preflight"
+                continue
+            }
+            if ($identity.Status -eq 'Unreadable') {
+                $conflicts += "$($service.Name): PID $($candidate.Pid) identity is unreadable"
+                continue
+            }
+
+            $commandLine = Get-ProcessCommandLine -Id $candidate.Pid
+            if (-not (Test-IsExpectedLegacyCommandLine `
+                -CommandLine $commandLine `
+                -Kind $service.Kind `
+                -ContextDir $service.ContextDir)) {
+                $conflicts += "$($service.Name): PID $($candidate.Pid) command line does not match; metadata was retained"
+                continue
+            }
+
+            $pidKey = [string]$candidate.Pid
+            if (-not $targetPids.ContainsKey($pidKey)) {
+                $targets += [pscustomobject]@{
+                    Pid = [int]$candidate.Pid
+                    ProcessStartFingerprint = $identity.Fingerprint
+                    CommandLine = $commandLine
+                }
+                $targetPids[$pidKey] = $true
+            }
+            if ($candidate.Source -eq 'pid-file') { $pidFilesToRemove += $service.PidFile }
+        }
+    }
+
+    return [pscustomobject]@{
+        Targets = @($targets)
+        PidFilesToRemove = @($pidFilesToRemove | Select-Object -Unique)
+        Conflicts = @($conflicts)
+    }
+}
+
+function Test-LegacyProcessStopPlansEqual {
+    param([object]$InitialPlan, [object]$FinalPlan)
+    $initialTargets = @($InitialPlan.Targets | Sort-Object Pid)
+    $finalTargets = @($FinalPlan.Targets | Sort-Object Pid)
+    if ($initialTargets.Count -ne $finalTargets.Count) { return $false }
+    for ($index = 0; $index -lt $initialTargets.Count; $index++) {
+        foreach ($property in @('Pid', 'ProcessStartFingerprint', 'CommandLine')) {
+            if ($initialTargets[$index].$property -ne $finalTargets[$index].$property) { return $false }
+        }
+    }
+    $initialFiles = @($InitialPlan.PidFilesToRemove | Sort-Object)
+    $finalFiles = @($FinalPlan.PidFilesToRemove | Sort-Object)
+    return (($initialFiles -join "`n") -eq ($finalFiles -join "`n"))
+}
+
+function Invoke-LegacyProcessStopPlan {
+    param([object[]]$Services)
+
+    $initialPlan = Get-LegacyProcessStopPlan -Services $Services
+    if ($initialPlan.Conflicts.Count -gt 0) {
+        throw "Legacy process stop refused before any stop: $($initialPlan.Conflicts -join '; ')"
+    }
+    $finalPlan = Get-LegacyProcessStopPlan -Services $Services
+    if ($finalPlan.Conflicts.Count -gt 0) {
+        throw "Legacy process stop refused during final preflight: $($finalPlan.Conflicts -join '; ')"
+    }
+    if (-not (Test-LegacyProcessStopPlansEqual -InitialPlan $initialPlan -FinalPlan $finalPlan)) {
+        throw 'Legacy process stop refused because ownership changed during final preflight.'
+    }
+
+    # Revalidate every target immediately before the first destructive call.
+    foreach ($target in $finalPlan.Targets) {
+        $identity = Get-ProcessIdentityObservation `
+            -Id $target.Pid `
+            -ExpectedStartFingerprint $target.ProcessStartFingerprint
+        $commandLine = Get-ProcessCommandLine -Id $target.Pid
+        if ($identity.Status -ne 'Exact' -or $commandLine -ne $target.CommandLine) {
+            throw "Legacy process stop refused because PID $($target.Pid) changed before execution."
+        }
+    }
+
+    foreach ($target in $finalPlan.Targets) {
+        Stop-ProcessById -Id $target.Pid -ExpectedStartFingerprint $target.ProcessStartFingerprint
+    }
+    foreach ($path in $finalPlan.PidFilesToRemove) {
+        if (Test-Path -LiteralPath $path) {
+            Remove-Item -LiteralPath $path -Force -ErrorAction Stop
+        }
+    }
+}
+
+function Stop-OwnedPidFileProcess {
+    param([string]$Path, [string]$Kind, [string]$ContextDir)
+    Invoke-LegacyProcessStopPlan -Services @([pscustomobject]@{
+        Name = $Kind
+        Kind = $Kind
+        ContextDir = $ContextDir
+        PidFile = $Path
+        Port = 0
+        IncludeListener = $false
+    })
+}
+
+function Get-RunLocalProcessServices {
+    param([switch]$BackendOnly, [switch]$IncludeListeners)
+    $services = @()
+    if (-not $BackendOnly) {
+        $services += [pscustomobject]@{
+            Name = 'Admin UI'
+            Kind = 'ui'
+            ContextDir = $UiDir
+            PidFile = $UiPidPath
+            Port = $UiPort
+            IncludeListener = [bool]$IncludeListeners
+        }
+    }
+    $services += [pscustomobject]@{
+        Name = 'Backend'
+        Kind = 'backend'
+        ContextDir = $null
+        PidFile = $BackendPidPath
+        Port = $BackendPort
+        IncludeListener = [bool]$IncludeListeners
+    }
+    return $services
 }
 
 function Get-FullStackOwnershipMetadata {
@@ -477,12 +738,6 @@ function Get-FreePort {
     for ($p = $StartPort; $p -le $MaxPort; $p++) {
         $listener = Get-ListeningPid -Port $p
         if (-not $listener) { return $p }
-
-        # Если порт занят нашим старым процессом, убиваем его и переиспользуем порт
-        Stop-IfListeningAndOurs -Port $p -Kind $Kind -ContextDir $ContextDir
-        Start-Sleep -Milliseconds 200
-        
-        if (-not (Get-ListeningPid -Port $p)) { return $p }
     }
     throw "No free port found for $Kind in range $StartPort..$MaxPort"
 }
@@ -728,7 +983,20 @@ Write-Host "[OK] npm: $($Tools.Npm)" -ForegroundColor Green
 $Python = $Tools.Python
 $WindowStyle = if ($ShowWindows) { 'Normal' } else { 'Hidden' }
 
-if ($Action -in @('start', 'stop', 'restart', 'restart-backend')) {
+$LifecycleLock = $null
+$RequiresLifecycleLock = [bool](
+    $Action -in @('start', 'stop', 'restart', 'restart-backend', 'reset-db') -or
+    ($Action -eq 'cleanup-simulator' -and -not $DryRun)
+)
+try {
+if ($RequiresLifecycleLock) {
+    $LifecycleLock = Enter-LauncherLifecycleLock `
+        -RepositoryRoot $RepoRoot `
+        -LauncherName 'run_local' `
+        -AllowInherited
+}
+
+if ($RequiresLifecycleLock) {
     Assert-NoActiveFullStackOwnership
 }
 
@@ -753,20 +1021,8 @@ switch ($Action) {
 
     'stop' {
         Write-Host "Stopping services..." -ForegroundColor Yellow
-        Remove-StalePidFile $BackendPidPath
-        Remove-StalePidFile $UiPidPath
-
-        $bPid = Get-PidFromFile $BackendPidPath
-        $uPid = Get-PidFromFile $UiPidPath
-
-        Stop-ProcessById $uPid
-        Stop-ProcessById $bPid
-
-        Stop-IfListeningAndOurs -Port $UiPort -Kind 'ui' -ContextDir $UiDir
-        Stop-IfListeningAndOurs -Port $BackendPort -Kind 'backend'
-
-        if (Test-Path $UiPidPath) { Remove-Item -Force $UiPidPath -ErrorAction SilentlyContinue }
-        if (Test-Path $BackendPidPath) { Remove-Item -Force $BackendPidPath -ErrorAction SilentlyContinue }
+        $stopServices = Get-RunLocalProcessServices -IncludeListeners
+        Invoke-LegacyProcessStopPlan -Services $stopServices
 
         Write-Host "Services stopped." -ForegroundColor Green
         exit 0
@@ -846,13 +1102,9 @@ switch ($Action) {
     'restart-backend' {
         # Validate application settings before stopping a healthy backend.
         $null = Get-EffectiveDatabaseUrl -PythonExe $Python
-        Remove-StalePidFile $BackendPidPath
-        
         # Stop backend
-        $bPid = Get-PidFromFile $BackendPidPath
-        Stop-ProcessById $bPid
-        Stop-IfListeningAndOurs -Port $BackendPort -Kind 'backend'
-        if (Test-Path $BackendPidPath) { Remove-Item -Force $BackendPidPath -ErrorAction SilentlyContinue }
+        $backendStopServices = Get-RunLocalProcessServices -BackendOnly -IncludeListeners
+        Invoke-LegacyProcessStopPlan -Services $backendStopServices
 
         # Start Backend
         $backendPortUsed = $BackendPort
@@ -894,16 +1146,8 @@ switch ($Action) {
             $null
         }
         Write-Host "[1/7] Cleaning up old processes..." -ForegroundColor Yellow
-        Remove-StalePidFile $BackendPidPath
-        Remove-StalePidFile $UiPidPath
-        
-        $bPid = Get-PidFromFile $BackendPidPath
-        $uPid = Get-PidFromFile $UiPidPath
-        Stop-ProcessById $uPid
-        Stop-ProcessById $bPid
-        
-        if (Test-Path $UiPidPath) { Remove-Item -Force $UiPidPath }
-        if (Test-Path $BackendPidPath) { Remove-Item -Force $BackendPidPath }
+        $startCleanupServices = Get-RunLocalProcessServices -IncludeListeners:$(-not $AutoPorts)
+        Invoke-LegacyProcessStopPlan -Services $startCleanupServices
         Write-Host "     Done." -ForegroundColor Gray
 
         Write-Host "[2/7] Checking database..." -ForegroundColor Yellow
@@ -928,7 +1172,6 @@ switch ($Action) {
             $backendPortUsed = Get-FreePort -StartPort $BackendPort -MaxPort ($BackendPort + 50) -Kind 'backend'
             Write-Host "     AutoPorts: selected port $backendPortUsed" -ForegroundColor Gray
         } else {
-            Stop-IfListeningAndOurs -Port $backendPortUsed -Kind 'backend'
             if (-not (Wait-ForPortToBeFree -Port $backendPortUsed -TimeoutSec 10)) {
                 $currentListener = Get-ListeningPid -Port $backendPortUsed
                 throw "Port $backendPortUsed is busy (PID: $currentListener). Use -AutoPorts or free the port."
@@ -986,7 +1229,6 @@ switch ($Action) {
             $uiPortUsed = Get-FreePort -StartPort $UiPort -MaxPort ($UiPort + 20) -Kind 'ui' -ContextDir $UiDir
             Write-Host "     AutoPorts: selected port $uiPortUsed" -ForegroundColor Gray
         } else {
-            Stop-IfListeningAndOurs -Port $uiPortUsed -Kind 'ui' -ContextDir $UiDir
             $currentListener = Get-ListeningPid -Port $uiPortUsed
             if ($currentListener) {
                 throw "Port $uiPortUsed is busy (PID: $currentListener). Use -AutoPorts or free the port."
@@ -1037,6 +1279,9 @@ switch ($Action) {
         Write-Host ""
         # Используем [Environment]::Exit для принудительного завершения,
         # т.к. обычный exit может ждать завершения child-процессов
-        [Environment]::Exit(0)
+        exit 0
     }
+}
+} finally {
+    Exit-LauncherLifecycleLock -LockHandle $LifecycleLock
 }
