@@ -2019,17 +2019,13 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
-  it('restores Close Line focus from a transition-retained edge detail to the trustline action', async () => {
+  it('restores Close Line focus to the trustline action after the original edge detail closes', async () => {
     setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'editing-trustline')
     setUrl('/?mode=real&ui=interact')
     stubMissingResizeObserver()
 
     const host = document.createElement('div')
-    const transitionOwner = document.createElement('div')
-    transitionOwner.dataset.winType = 'edge-detail'
-    const retainedButton = document.createElement('button')
-    transitionOwner.appendChild(retainedButton)
-    document.body.append(host, transitionOwner)
+    document.body.append(host)
     const app = mountSimulatorAppRoot(host)
     try {
       await nextTick()
@@ -2037,6 +2033,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
 
       const closeLine = host.querySelector('[data-testid="edge-close-line-btn"]') as HTMLButtonElement | null
       expect(closeLine?.disabled).toBe(false)
+      closeLine?.focus()
       closeLine?.click()
       await nextTick()
       closeLine?.click()
@@ -2046,9 +2043,6 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       busy.value = true
       getPhaseRef().value = 'idle'
       await nextTick()
-      retainedButton.focus()
-      expect(document.activeElement).toBe(retainedButton)
-
       busy.value = false
       await nextTick()
       await nextTick()
@@ -2057,8 +2051,49 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     } finally {
       app.unmount()
       host.remove()
-      transitionOwner.remove()
       clearGeoTestGlobals('__GEO_TEST_INTERACT_PHASE', '__GEO_TEST_INTERACT_CONFIRM_TRUSTLINE_CLOSE')
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('does not treat focus in a different edge-detail owner as the completed Close Line flow', async () => {
+    setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'editing-trustline')
+    setUrl('/?mode=real&ui=interact')
+    stubMissingResizeObserver()
+
+    const host = document.createElement('div')
+    const otherOwner = document.createElement('div')
+    otherOwner.dataset.winType = 'edge-detail'
+    const otherButton = document.createElement('button')
+    otherOwner.appendChild(otherButton)
+    document.body.append(host, otherOwner)
+    const app = mountSimulatorAppRoot(host)
+    try {
+      await nextTick()
+      await nextTick()
+
+      const closeLine = host.querySelector('[data-testid="edge-close-line-btn"]') as HTMLButtonElement | null
+      closeLine?.focus()
+      closeLine?.click()
+      await nextTick()
+      closeLine?.click()
+
+      const busy = getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_BUSY_REF')
+      busy.value = true
+      getPhaseRef().value = 'idle'
+      await nextTick()
+      otherButton.focus()
+
+      busy.value = false
+      await nextTick()
+      await nextTick()
+
+      expect(document.activeElement).toBe(otherButton)
+    } finally {
+      app.unmount()
+      host.remove()
+      otherOwner.remove()
+      clearGeoTestGlobals('__GEO_TEST_INTERACT_PHASE')
       vi.unstubAllGlobals()
     }
   })

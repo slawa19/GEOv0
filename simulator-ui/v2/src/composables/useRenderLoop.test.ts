@@ -290,6 +290,27 @@ describe('useRenderLoop deep idle / wakeUp / ensureRenderLoop invariants', () =>
     expect(win.__rafQueue.length).toBe(0)
   })
 
+  it('expires DOM floating labels even while snapshot rendering prerequisites are unavailable', () => {
+    let hasFloatingLabel = true
+    const pruneFloatingLabels = vi.fn((nowMs: number) => {
+      if (nowMs >= 3800) hasFloatingLabel = false
+    })
+    const loop = makeLoop({
+      getSnapshot: () => null,
+      hasFloatingLabels: () => hasFloatingLabel,
+      pruneFloatingLabels,
+    })
+    const win = getMockWindow()
+
+    loop.ensureRenderLoop()
+    win.__rafQueue.shift()!(1000)
+    expect(win.__rafQueue.length).toBe(1)
+
+    win.__rafQueue.shift()!(3800)
+    expect(pruneFloatingLabels).toHaveBeenLastCalledWith(3800)
+    expect(hasFloatingLabel).toBe(false)
+  })
+
   it('ensureRenderLoop() restores scheduling after deep idle (no user input required)', () => {
     const loop = makeLoop()
     const win = getMockWindow()

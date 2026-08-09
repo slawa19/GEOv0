@@ -790,16 +790,18 @@ function navigatorEdgeAnchor(link: GraphLink): Point {
 let interactFlowOpener: HTMLElement | null = null
 let interactFlowFallback: HTMLElement | null = null
 let interactFlowFocusOwnerType = 'interact-panel'
+let interactFlowStrictFocusOwner: Element | null = null
 
 function captureInteractFlowOpener(
   fallbackSelector?: string,
-  opts: { focusOwnerType?: 'interact-panel' | 'edge-detail'; preferFallback?: boolean } = {},
+  opts: { focusOwnerType?: 'interact-panel' | 'edge-detail'; preferFallback?: boolean; strictFocusOwner?: boolean } = {},
 ): void {
   const active = document.activeElement
   const fallback = fallbackSelector ? getHostEl()?.querySelector(fallbackSelector) : null
   interactFlowFallback = fallback instanceof HTMLElement ? fallback : null
   interactFlowOpener = opts.preferFallback ? null : active instanceof HTMLElement ? active : null
   interactFlowFocusOwnerType = opts.focusOwnerType ?? 'interact-panel'
+  interactFlowStrictFocusOwner = opts.strictFocusOwner && active instanceof Element ? active : null
 }
 
 function inspectNodeFromNavigator(nodeId: string): void {
@@ -807,7 +809,7 @@ function inspectNodeFromNavigator(nodeId: string): void {
 }
 
 function inspectEdgeFromNavigator(link: GraphLink): void {
-  if (apiMode.value !== 'real' || !isInteractUi.value) return
+  if (apiMode.value !== 'real' || !isInteractUi.value || interact.mode.busy.value) return
 
   const anchor = navigatorEdgeAnchor(link)
   interact.mode.selectEdge(keyEdge(link.source, link.target), anchor)
@@ -824,6 +826,7 @@ function cancelInteractWindowFromUi(): void {
     interactFlowOpener = null
     interactFlowFallback = null
     interactFlowFocusOwnerType = 'interact-panel'
+    interactFlowStrictFocusOwner = null
     void nextTick(() => {
       const target = opener?.isConnected && !opener.matches(':disabled') ? opener : fallback
       if (document.activeElement !== document.body || !target?.isConnected || target.matches(':disabled')) return
@@ -834,6 +837,7 @@ function cancelInteractWindowFromUi(): void {
   interactFlowOpener = null
   interactFlowFallback = null
   interactFlowFocusOwnerType = 'interact-panel'
+  interactFlowStrictFocusOwner = null
   interact.mode.cancel()
 }
 
@@ -943,6 +947,7 @@ function onEdgeDetailCloseLine() {
   captureInteractFlowOpener('[data-testid="actionbar-trustline"]', {
     focusOwnerType: 'edge-detail',
     preferFallback: true,
+    strictFocusOwner: true,
   })
   void interact.mode.confirmTrustlineClose()
 }
@@ -1070,14 +1075,18 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
     const opener = interactFlowOpener
     const fallback = interactFlowFallback
     const focusOwnerType = interactFlowFocusOwnerType
+    const strictFocusOwner = interactFlowStrictFocusOwner
     interactFlowOpener = null
     interactFlowFallback = null
     interactFlowFocusOwnerType = 'interact-panel'
+    interactFlowStrictFocusOwner = null
     void nextTick(() => {
       const target = opener?.isConnected && !opener.matches(':disabled') ? opener : fallback
       const active = document.activeElement
       const activeWindow = active instanceof Element ? active.closest('[data-win-type]') : null
-      const focusStillOwnedByFlow = activeWindow?.getAttribute('data-win-type') === focusOwnerType
+      const focusStillOwnedByFlow = strictFocusOwner
+        ? active === strictFocusOwner || (active instanceof Node && strictFocusOwner.contains(active))
+        : activeWindow?.getAttribute('data-win-type') === focusOwnerType
       if (
         (active !== document.body && !focusStillOwnedByFlow) ||
         !target?.isConnected ||
@@ -1175,7 +1184,7 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
         v-if="dataReady && !isE2eScreenshots"
         :nodes="state.snapshot?.nodes ?? []"
         :links="state.snapshot?.links ?? []"
-        :edge-inspect-disabled="apiMode !== 'real' || !isInteractUi"
+        :edge-inspect-disabled="apiMode !== 'real' || !isInteractUi || interact.mode.busy.value"
         @inspect-node="inspectNodeFromNavigator"
         @inspect-edge="inspectEdgeFromNavigator"
       />
