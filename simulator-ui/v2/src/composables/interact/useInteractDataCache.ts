@@ -246,6 +246,7 @@ export function useInteractDataCache(opts: {
   const paymentTargetsLastErrorByKey = ref(new Map<string, string>())
   const paymentTargetsFetchEpochByKey = new Map<string, number>()
   const paymentTargetsFetchedAtMsByKey = new Map<string, number>()
+  let paymentTargetsRequestSerial = 0
 
   // Prevent “forever stale” targets when the underlying graph changes over time.
   // Must be aligned with other dropdown caches in this file (participants=30s, trustlines=15s).
@@ -283,7 +284,9 @@ export function useInteractDataCache(opts: {
     }
 
     setPaymentTargetsLoading(key, true)
-    const myEpoch = (paymentTargetsFetchEpochByKey.get(key) ?? 0) + 1
+    // Request identities are process-monotonic. Cache invalidation may clear the
+    // per-key ownership map, but it must never make an old same-key request current again.
+    const myEpoch = ++paymentTargetsRequestSerial
     paymentTargetsFetchEpochByKey.set(key, myEpoch)
 
     try {

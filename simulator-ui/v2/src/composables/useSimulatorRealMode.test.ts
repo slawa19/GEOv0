@@ -136,6 +136,14 @@ function createSseCharacterizationHarness(opts?: {
   })
   const cleanupRealRunFxAndTimers = vi.fn<() => void>(() => undefined)
   const loadScene = vi.fn(opts?.loadScene ?? (async () => undefined))
+  const state = {
+    loading: false,
+    error: '',
+    sourcePath: '',
+    snapshot: null,
+    selectedNodeId: null,
+    flash: 0,
+  }
   const pushTxAmountLabel = vi.fn(() => undefined)
   const scheduleTimeout = vi.fn((_fn: () => void) => undefined)
   const runRealTxFx = vi.fn(() => undefined)
@@ -145,14 +153,7 @@ function createSseCharacterizationHarness(opts?: {
     isRealMode: computed(() => isRealModeRef.value),
     isLocalhost: false,
     effectiveEq: computed(() => 'EUR'),
-    state: {
-      loading: false,
-      error: '',
-      sourcePath: '',
-      snapshot: null,
-      selectedNodeId: null,
-      flash: 0,
-    },
+    state,
     real,
 
     ensureScenarioSelectionValid: () => undefined,
@@ -178,6 +179,7 @@ function createSseCharacterizationHarness(opts?: {
     h,
     isRealModeRef,
     real,
+    state,
     resetRunStats,
     cleanupRealRunFxAndTimers,
     loadScene,
@@ -1258,7 +1260,7 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
     }
   })
 
-  it('SSE 410 plus transient status failure stays reconnecting and retries without the stale cursor', async () => {
+  it('SSE 410 retries transient status recovery before reconnecting without the stale cursor', async () => {
     vi.useFakeTimers()
     const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5)
     const connectSseMock = vi.mocked(connectSse)
@@ -1268,8 +1270,10 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
     if (!prevGetRunImpl) throw new Error('expected getRun mock implementation')
     const secondConnection = deferred()
     const recoveryAttempted = deferred()
+    const recoverySnapshot = deferred()
     const seenCursors: Array<string | null | undefined> = []
     let statusCalls = 0
+    let snapshotCalls = 0
 
     connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
       seenCursors.push(opts.lastEventId)
@@ -1286,7 +1290,13 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
       return prevGetRunImpl(...args)
     })
 
-    const harness = createSseCharacterizationHarness({ lastEventId: 'evt_expired' })
+    const harness = createSseCharacterizationHarness({
+      lastEventId: 'evt_expired',
+      loadScene: async () => {
+        snapshotCalls += 1
+        if (snapshotCalls === 2) recoverySnapshot.resolve()
+      },
+    })
     try {
       harness.isRealModeRef.value = true
       await nextTick()
@@ -1297,8 +1307,11 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
       expect(harness.real.lastEventId).toBeNull()
       expect(harness.real.sseState).toBe('reconnecting')
       expect(harness.real.lastError).toContain('503')
+      expect(seenCursors).toEqual(['evt_expired'])
+      expect(snapshotCalls).toBe(1)
 
       await vi.advanceTimersByTimeAsync(1000)
+      await recoverySnapshot.promise
       await secondConnection.promise
       expect(seenCursors).toEqual(['evt_expired', null])
       expect(harness.real.sseState).toBe('open')
@@ -1306,6 +1319,148 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
       harness.h.stopSse()
       restoreConnectSseImplementation(prevConnectImpl)
       getRunMock.mockImplementation(prevGetRunImpl)
+      randomSpy.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
+  it('SSE 410 retries a failed snapshot before opening a cursorless connection', async () => {
+    vi.useFakeTimers()
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5)
+    const connectSseMock = vi.mocked(connectSse)
+    const prevConnectImpl = connectSseMock.getMockImplementation()
+    const secondConnection = deferred()
+    const failedSnapshot = deferred()
+    const recoveredSnapshot = deferred()
+    const seenCursors: Array<string | null | undefined> = []
+    let snapshotCalls = 0
+    let harness!: ReturnType<typeof createSseCharacterizationHarness>
+
+    connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
+      seenCursors.push(opts.lastEventId)
+      if (seenCursors.length === 1) throw new Error('SSE HTTP 410 Gone')
+      secondConnection.resolve()
+      await waitForAbort(opts.signal)
+    })
+
+    harness = createSseCharacterizationHarness({
+      lastEventId: 'evt_expired',
+      loadScene: async () => {
+        snapshotCalls += 1
+        if (snapshotCalls === 2) {
+          harness.state.error = 'HTTP 503 snapshot unavailable'
+          failedSnapshot.resolve()
+          return
+        }
+        harness.state.error = ''
+        if (snapshotCalls === 3) recoveredSnapshot.resolve()
+      },
+    })
+
+    try {
+      harness.isRealModeRef.value = true
+      await nextTick()
+      await failedSnapshot.promise
+      await Promise.resolve()
+
+      expect(harness.real.sseState).toBe('reconnecting')
+      expect(harness.real.lastError).toContain('503')
+      expect(seenCursors).toEqual(['evt_expired'])
+
+      await vi.advanceTimersByTimeAsync(1000)
+      await recoveredSnapshot.promise
+      await secondConnection.promise
+      expect(seenCursors).toEqual(['evt_expired', null])
+      expect(harness.real.sseState).toBe('open')
+    } finally {
+      harness.h.stopSse()
+      restoreConnectSseImplementation(prevConnectImpl)
+      randomSpy.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
+  it('SSE 410 awaits an in-flight snapshot and a fresh recovery snapshot before admitting deltas', async () => {
+    vi.useFakeTimers()
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5)
+    const connectSseMock = vi.mocked(connectSse)
+    const prevConnectImpl = connectSseMock.getMockImplementation()
+    const firstConnection = deferred()
+    const rejectFirstConnection = deferred()
+    const inFlightStarted = deferred()
+    const releaseInFlight = deferred()
+    const recoverySnapshotStarted = deferred()
+    const releaseRecoverySnapshot = deferred()
+    const secondConnection = deferred()
+    const seenCursors: Array<string | null | undefined> = []
+    let snapshotCalls = 0
+
+    connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
+      seenCursors.push(opts.lastEventId)
+      if (seenCursors.length === 1) {
+        firstConnection.resolve()
+        await rejectFirstConnection.promise
+        throw new Error('SSE HTTP 410 Gone')
+      }
+      emitSsePayload(opts, {
+        event_id: 'evt_r1_000999',
+        ts: '2026-01-01T00:00:00Z',
+        type: 'tx.updated',
+        equivalent: 'EUR',
+        from: 'A',
+        to: 'B',
+        amount: '1.00',
+        ttl_ms: 1200,
+        edges: [{ from: 'A', to: 'B' }],
+      })
+      secondConnection.resolve()
+      await waitForAbort(opts.signal)
+    })
+
+    const harness = createSseCharacterizationHarness({
+      lastEventId: 'evt_expired',
+      loadScene: async () => {
+        snapshotCalls += 1
+        if (snapshotCalls === 2) {
+          inFlightStarted.resolve()
+          await releaseInFlight.promise
+        } else if (snapshotCalls === 3) {
+          recoverySnapshotStarted.resolve()
+          await releaseRecoverySnapshot.promise
+        }
+      },
+    })
+
+    try {
+      harness.isRealModeRef.value = true
+      await nextTick()
+      await firstConnection.promise
+
+      const inFlightRefresh = harness.h.refreshSnapshot()
+      await inFlightStarted.promise
+      rejectFirstConnection.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+
+      expect(seenCursors).toEqual(['evt_expired'])
+      expect(harness.onAnySseEvent).toHaveBeenCalledTimes(0)
+
+      releaseInFlight.resolve()
+      await inFlightRefresh
+      await recoverySnapshotStarted.promise
+      expect(seenCursors).toEqual(['evt_expired'])
+      expect(harness.onAnySseEvent).toHaveBeenCalledTimes(0)
+
+      releaseRecoverySnapshot.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+      await vi.advanceTimersByTimeAsync(1000)
+      await secondConnection.promise
+      expect(seenCursors).toEqual(['evt_expired', null])
+      expect(harness.onAnySseEvent).toHaveBeenCalledTimes(1)
+    } finally {
+      harness.h.stopSse()
+      restoreConnectSseImplementation(prevConnectImpl)
       randomSpy.mockRestore()
       vi.useRealTimers()
     }

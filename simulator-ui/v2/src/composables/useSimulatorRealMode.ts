@@ -224,12 +224,14 @@ export function useSimulatorRealMode(opts: {
   let sseAbort: AbortController | null = null
   let sseSeq = 0
   let refreshRunStatusSeq = 0
+  let replayGapRecoveryRunId: string | null = null
 
   const replayOwner = createRealEventReplayOwner()
 
   // Debounce multiple rapid calls to refreshSnapshot (e.g., during startRun + watcher cascade).
   let refreshSnapshotDebounceTimer: ReturnType<typeof setTimeout> | null = null
-  let refreshSnapshotInFlight = false
+  type SnapshotRefreshOutcome = 'current' | 'stale' | 'transient' | 'superseded'
+  let refreshSnapshotActivePromise: Promise<SnapshotRefreshOutcome> | null = null
   let refreshSnapshotPending = false
 
   // Sequence id used to invalidate pending debounced refreshes and to guard against stale context.
@@ -312,6 +314,7 @@ export function useSimulatorRealMode(opts: {
     stopSse()
 
     replayOwner.reset()
+    replayGapRecoveryRunId = null
 
     if (resetOpts?.clearError ?? true) {
       real.lastError = ''
@@ -352,24 +355,7 @@ export function useSimulatorRealMode(opts: {
     await refreshRunStatusForCurrentContext()
   }
 
-  async function refreshSnapshot() {
-    // Guard: never refresh snapshots when real mode is not active or context is missing.
-    // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
-    if (!isRealMode.value) return
-    if (!real.runId && !real.selectedScenarioId) return
-
-    // If a refresh is already in flight, mark as pending and return — the current call will re-invoke.
-    if (refreshSnapshotInFlight) {
-      refreshSnapshotPending = true
-      return
-    }
-
-    // Debounce: if called within a short window, delay to coalesce multiple triggers.
-    if (refreshSnapshotDebounceTimer !== null) {
-      refreshSnapshotPending = true
-      return
-    }
-
+  function startSnapshotRefresh(opts?: { debounce?: boolean }): Promise<SnapshotRefreshOutcome> {
     const mySeq = ++refreshSnapshotSeq
     const runIdAtStart = real.runId
 
@@ -386,51 +372,108 @@ export function useSimulatorRealMode(opts: {
       return true
     }
 
-    refreshSnapshotDebounceTimer = setTimeout(() => {
-      refreshSnapshotDebounceTimer = null
+    if (opts?.debounce ?? true) {
+      refreshSnapshotDebounceTimer = setTimeout(() => {
+        refreshSnapshotDebounceTimer = null
 
-      // If context changed while we were debouncing, drop pending refresh safely.
-      if (!isContextStillValid()) {
-        refreshSnapshotPending = false
-        return
-      }
-
-      if (refreshSnapshotPending) {
-        refreshSnapshotPending = false
-        refreshSnapshot()
-      }
-    }, 80)
-
-    refreshSnapshotInFlight = true
-    try {
-      // If we got here via a delayed debounce call, ensure we still target the same context.
-      if (!isContextStillValid()) return
-
-      await loadScene()
-
-      // Context might have changed while loadScene() was in-flight.
-      if (!isContextStillValid()) return
-
-      // Snapshot change should be visible immediately even if deep idle stopped scheduling.
-      wakeUp?.()
-
-      // Scene loader stores errors in state.error; in real mode surface them in the HUD.
-      if (isRealMode.value && state.error) {
-        if (state.error.includes('HTTP 404')) {
-          resetStaleRun({ clearError: true })
+        // If context changed while we were debouncing, drop pending refresh safely.
+        if (!isContextStillValid()) {
+          refreshSnapshotPending = false
           return
         }
-        real.lastError = state.error
-      }
-    } finally {
-      refreshSnapshotInFlight = false
 
-      // If another call came in while we were loading, re-invoke.
-      if (refreshSnapshotPending) {
-        refreshSnapshotPending = false
-        refreshSnapshot()
-      }
+        if (refreshSnapshotPending) {
+          refreshSnapshotPending = false
+          void refreshSnapshot()
+        }
+      }, 80)
     }
+
+    let promise: Promise<SnapshotRefreshOutcome>
+    promise = Promise.resolve().then(async (): Promise<SnapshotRefreshOutcome> => {
+      try {
+        if (!isContextStillValid()) return 'superseded'
+
+        try {
+          await loadScene()
+        } catch (e: unknown) {
+          if (!isContextStillValid()) return 'superseded'
+          const message = getErrorMessage(e)
+          if (message.includes('HTTP 404')) {
+            resetStaleRun({ clearError: true })
+            return 'stale'
+          }
+          real.lastError = message
+          return 'transient'
+        }
+
+        // Context might have changed while loadScene() was in-flight.
+        if (!isContextStillValid()) return 'superseded'
+
+        // Snapshot change should be visible immediately even if deep idle stopped scheduling.
+        wakeUp?.()
+
+        // Scene loader stores errors in state.error; in real mode surface them in the HUD.
+        if (isRealMode.value && state.error) {
+          if (state.error.includes('HTTP 404')) {
+            resetStaleRun({ clearError: true })
+            return 'stale'
+          }
+          real.lastError = state.error
+          return 'transient'
+        }
+        return 'current'
+      } finally {
+        if (refreshSnapshotActivePromise === promise) {
+          refreshSnapshotActivePromise = null
+        }
+
+        // If another call came in while we were loading, re-invoke.
+        if (refreshSnapshotPending) {
+          refreshSnapshotPending = false
+          void refreshSnapshot()
+        }
+      }
+    })
+    refreshSnapshotActivePromise = promise
+    return promise
+  }
+
+  async function refreshSnapshot(): Promise<void> {
+    // Guard: never refresh snapshots when real mode is not active or context is missing.
+    // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
+    if (!isRealMode.value) return
+    if (!real.runId && !real.selectedScenarioId) return
+
+    // If a refresh is already in flight, mark as pending and return — the current call will re-invoke.
+    if (refreshSnapshotActivePromise) {
+      refreshSnapshotPending = true
+      await refreshSnapshotActivePromise
+      return
+    }
+
+    // Debounce: if called within a short window, delay to coalesce multiple triggers.
+    if (refreshSnapshotDebounceTimer !== null) {
+      refreshSnapshotPending = true
+      return
+    }
+    await startSnapshotRefresh()
+  }
+
+  async function refreshSnapshotForReplayRecovery(runId: string): Promise<SnapshotRefreshOutcome> {
+    // A pre-existing request may have started before the replay gap was known.
+    // Await it as an ownership barrier, then fetch once more for authoritative state.
+    cancelPendingRefreshSnapshotDebounce()
+    while (refreshSnapshotActivePromise) {
+      const active = refreshSnapshotActivePromise
+      const activeOutcome = await active
+      if (activeOutcome !== 'current') return activeOutcome
+      if (!isRealMode.value || real.runId !== runId) return 'superseded'
+      cancelPendingRefreshSnapshotDebounce()
+    }
+
+    if (!isRealMode.value || real.runId !== runId) return 'superseded'
+    return await startSnapshotRefresh({ debounce: false })
   }
 
   // Also surface initial scene-load errors (e.g., "No run started") that happen on mount.
@@ -457,6 +500,43 @@ export function useSimulatorRealMode(opts: {
     return Math.max(250, Math.round(base + jitter))
   }
 
+  async function recoverReplayGapForCurrentContext(input: {
+    runId: string
+    ctrl: AbortController
+    sseLoopSeq: number
+  }): Promise<'recovered' | 'retry' | 'stop'> {
+    const { runId, ctrl, sseLoopSeq } = input
+    if (replayGapRecoveryRunId !== runId) return 'recovered'
+
+    real.sseState = 'reconnecting'
+    const statusOutcome = await refreshRunStatusForCurrentContext()
+    if (
+      statusOutcome === 'stale' ||
+      statusOutcome === 'superseded' ||
+      ctrl.signal.aborted ||
+      sseLoopSeq !== sseSeq ||
+      real.runId !== runId
+    ) {
+      return 'stop'
+    }
+    if (statusOutcome === 'transient') return 'retry'
+
+    const snapshotOutcome = await refreshSnapshotForReplayRecovery(runId)
+    if (
+      snapshotOutcome === 'stale' ||
+      snapshotOutcome === 'superseded' ||
+      ctrl.signal.aborted ||
+      sseLoopSeq !== sseSeq ||
+      real.runId !== runId
+    ) {
+      return 'stop'
+    }
+    if (snapshotOutcome === 'transient') return 'retry'
+
+    replayGapRecoveryRunId = null
+    return 'recovered'
+  }
+
   async function runSseLoop(loopOpts?: { preserveLastError?: boolean }) {
     const mySeq = ++sseSeq
     stopSse()
@@ -477,6 +557,20 @@ export function useSimulatorRealMode(opts: {
       const activeRunId = real.runId
       if (!activeRunId) return
       const runId: string = activeRunId
+      if (replayGapRecoveryRunId !== null && replayGapRecoveryRunId !== runId) {
+        replayGapRecoveryRunId = null
+      }
+
+      if (replayGapRecoveryRunId === runId) {
+        const recoveryOutcome = await recoverReplayGapForCurrentContext({ runId, ctrl, sseLoopSeq: mySeq })
+        if (recoveryOutcome === 'stop') return
+        if (recoveryOutcome === 'retry') {
+          const delay = nextBackoff(attempt++)
+          await new Promise((r) => setTimeout(r, delay))
+          continue
+        }
+      }
+
       const eqNow = effectiveEq.value
       const url = `${real.apiBase.replace(/\/+$/, '')}/simulator/runs/${encodeURIComponent(runId)}/events?equivalent=${encodeURIComponent(
         eqNow,
@@ -598,20 +692,10 @@ export function useSimulatorRealMode(opts: {
         // Unrecoverable replay cursor: clear it and rebuild authoritative state.
         if (msg.includes(' 410 ') || msg.includes('HTTP 410') || msg.includes('status 410')) {
           real.lastEventId = null
+          replayGapRecoveryRunId = runId
           real.sseState = 'reconnecting'
-          const statusOutcome = await refreshRunStatusForCurrentContext()
-          if (
-            statusOutcome === 'stale' ||
-            statusOutcome === 'superseded' ||
-            ctrl.signal.aborted ||
-            mySeq !== sseSeq ||
-            real.runId !== runId
-          )
-            return
-          if (statusOutcome === 'current') {
-            await refreshSnapshot()
-            if (ctrl.signal.aborted || mySeq !== sseSeq || real.runId !== runId) return
-          }
+          const recoveryOutcome = await recoverReplayGapForCurrentContext({ runId, ctrl, sseLoopSeq: mySeq })
+          if (recoveryOutcome === 'stop') return
         }
 
         if (ctrl.signal.aborted || mySeq !== sseSeq || real.runId !== runId) return
@@ -698,6 +782,7 @@ export function useSimulatorRealMode(opts: {
 
       real.runStatus = null
       real.lastEventId = null
+      replayGapRecoveryRunId = null
       real.artifacts = []
 
       if (startOpts?.pauseImmediately) {
@@ -796,6 +881,7 @@ export function useSimulatorRealMode(opts: {
       real.runId = rid
       real.runStatus = null
       real.lastEventId = null
+      replayGapRecoveryRunId = null
       real.artifacts = []
 
       await refreshRunStatus()
