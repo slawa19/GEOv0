@@ -31,7 +31,9 @@ Mutating lifecycle `run_full_stack.ps1`, `run_local.ps1` и
 `run_real_simulator.ps1` взаимно исключается общим repository-scoped OS mutex.
 Он удерживается от ownership preflight до завершения stop/start/reset и
 автоматически освобождается ОС при crash launcher-а; конкурентная mutating
-команда завершается понятным отказом. `run_full_stack.ps1` хранит versioned JSON
+команда завершается понятным отказом. Переменная окружения не может считаться
+доказательством владения mutex; `run_local restart` выполняет stop/start внутри
+одного процесса и одной критической секции. `run_full_stack.ps1` хранит versioned JSON
 под `.local-run/full-stack/*.owner.json`, `run_local.ps1` — под
 `.local-run/run-local/*.owner.json`, а Simulator UI, запущенный
 `run_real_simulator.ps1`, — под
@@ -51,6 +53,16 @@ command line и требует явного разбора legacy evidence. Пр
 fingerprint, затем останавливает только этот UI и именованные Compose-сервисы
 `app`, `redis`, `db`. Он не останавливает процессы `run_local`; ошибка Compose
 stop передаётся вызывающему коду и не сопровождается ложным сообщением об успехе.
+При `run_real_simulator start` ownership-конфликт и зависимости UI проверяются до
+Compose mutation, а прежний exact-owned UI на том же порту останавливается только
+после успешных Compose readiness и seed, непосредственно перед заменой. Ошибка до
+этого момента сохраняет прежний UI. После начала same-port замены zero-downtime не
+обещается: при ошибке Vite новый exact-owned UI и только Compose-сервисы, которых
+не было в исходном running baseline, откатываются. Уже работавшие Compose-сервисы
+не останавливаются. Однако `docker compose up --build` может пересоздать уже
+работавший baseline-контейнер; launcher не восстанавливает его прежний image/config
+и при поздней ошибке оставляет этот контейнер в текущем наблюдаемом Compose-состоянии.
+Изменения данных от seed также не являются транзакцией launcher-а.
 Для handoff сначала
 остановите stack его собственным launcher-ом, проверьте `status`/порты, затем
 запускайте другой entrypoint. `run_local` может
@@ -79,7 +91,10 @@ launcher в `finally` повторно
 в диагностике сохраняются обе причины. Если более поздний этап full-stack startup
 завершается ошибкой, launcher в обратном порядке откатывает только сервисы,
 которые успел запустить в этой попытке, и только после повторного exact identity
-proof; primary и rollback failure сохраняются раздельно.
+proof; primary и rollback failure сохраняются раздельно. Тот же контракт
+действует для `run_local start` и `restart-backend`: после успешной фиксации
+ownership любой поздний health/config/UI failure откатывает только процессы
+текущей попытки в обратном порядке, сохраняя отдельно primary и rollback evidence.
 
 Без явного `DATABASE_URL` backend использует
 `sqlite+aiosqlite:///./.local-run/geov0.db`. Старый `./geov0.db` не мигрируется и

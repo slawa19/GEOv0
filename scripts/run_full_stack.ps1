@@ -136,6 +136,10 @@ function Get-LauncherLifecycleLockName {
     return "Local\GEOv0-LauncherLifecycle-$($digestText.Substring(0, 24))"
 }
 
+function Get-FullStackRepositoryIdentity {
+    return Get-LauncherLifecycleLockName -RepositoryRoot $RepoRoot
+}
+
 function Enter-LauncherLifecycleLock {
     param([string]$RepositoryRoot, [string]$LauncherName)
     $lockName = Get-LauncherLifecycleLockName -RepositoryRoot $RepositoryRoot
@@ -183,6 +187,7 @@ function Get-ServiceOwnershipMetadata {
         if ($fingerprint -notmatch '^utc-ticks:\d+$') { throw 'invalid process fingerprint' }
         return [pscustomobject]@{
             Valid = [bool]($metadata.version -eq 1)
+            RepositoryIdentity = [string]$metadata.repository_identity
             Pid = $pidValue
             ProcessStartFingerprint = $fingerprint
             ServiceName = [string]$metadata.service_name
@@ -191,6 +196,7 @@ function Get-ServiceOwnershipMetadata {
     } catch {
         return [pscustomobject]@{
             Valid = $false
+            RepositoryIdentity = $null
             Pid = $null
             ProcessStartFingerprint = $null
             ServiceName = $null
@@ -250,6 +256,7 @@ function Write-ServiceOwnershipMetadata {
 
     $metadata = [ordered]@{
         version = 1
+        repository_identity = Get-FullStackRepositoryIdentity
         service_name = [string]$Service.Name
         port = [int]$Service.Port
         pid = $Id
@@ -623,6 +630,7 @@ function Get-ServiceStopState {
     $metadataPresent = $null -ne $metadata
     $metadataMatchesService = [bool](
         $metadataPresent -and $metadata.Valid -and
+        $metadata.RepositoryIdentity -eq (Get-FullStackRepositoryIdentity) -and
         $metadata.ServiceName -eq $Service.Name -and
         $metadata.Port -eq $Service.Port
     )
@@ -786,6 +794,7 @@ function Wait-ForLaunchedServiceOwnership {
             $persistedMetadata = Get-ServiceOwnershipMetadata -Path $Service.PidFile
             $ownershipPersisted = [bool](
                 $persistedMetadata -and $persistedMetadata.Valid -and
+                $persistedMetadata.RepositoryIdentity -eq (Get-FullStackRepositoryIdentity) -and
                 $persistedMetadata.ServiceName -eq $Service.Name -and
                 $persistedMetadata.Port -eq $Service.Port -and
                 $persistedMetadata.Pid -eq $launchedPid -and

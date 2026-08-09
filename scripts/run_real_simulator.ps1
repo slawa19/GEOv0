@@ -169,6 +169,7 @@ function Get-FullStackOwnershipMetadata {
     if ($fingerprint -notmatch '^utc-ticks:\d+$') { throw 'invalid fingerprint' }
     return [pscustomobject]@{
       Valid = [bool]($metadata.version -eq 1)
+      RepositoryIdentity = [string]$metadata.repository_identity
       Pid = $pidValue
       ProcessStartFingerprint = $fingerprint
       ServiceName = [string]$metadata.service_name
@@ -189,7 +190,9 @@ function Assert-NoActiveFullStackOwnership {
     $path = Join-Path $fullStackOwnershipDir $fileName
     $metadata = Get-FullStackOwnershipMetadata -Path $path
     if ($null -eq $metadata) { continue }
-    if (-not $metadata.Valid -or $metadata.ServiceName -ne $serviceName -or $metadata.Port -le 0) {
+    if (-not $metadata.Valid -or
+      $metadata.RepositoryIdentity -ne (Get-LauncherLifecycleLockName -RepositoryRoot $repoRoot) -or
+      $metadata.ServiceName -ne $serviceName -or $metadata.Port -le 0) {
       throw "$serviceName full-stack ownership metadata is unreadable or invalid; run_real_simulator refused."
     }
     $identity = Get-ProcessIdentityObservation -Id $metadata.Pid -ExpectedStartFingerprint $metadata.ProcessStartFingerprint
@@ -335,6 +338,34 @@ function Invoke-DockerCompose([string[]]$composeArgs) {
 
   $out = Invoke-WslBash "cd '$wslRepoRoot' && ${envPrefix}docker compose $joined"
   Write-DockerComposeOutput $out
+}
+
+function Get-RunningComposeServices() {
+  $mode = Get-DockerMode
+  if ($mode -eq 'missing') { Warn-MissingDockerAndExit }
+  $composeArgs = @('--ansi','never') + $script:DevComposeFiles + @('ps','--status','running','--services')
+  if ($mode -eq 'native') {
+    $out = & docker compose @composeArgs 2>&1
+    if ($LASTEXITCODE -ne 0) { throw ("docker compose ps failed (exit=$LASTEXITCODE)`n" + ($out | Out-String)) }
+    return @($out | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
+  }
+
+  $wslRepoRoot = Convert-ToWslPath $repoRoot
+  $joined = ($composeArgs | ForEach-Object { "'" + ($_ -replace "'", "'\\''") + "'" }) -join ' '
+  $out = Invoke-WslBash "cd '$wslRepoRoot' && docker compose $joined"
+  return @($out | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
+}
+
+function Stop-ComposeServicesStartedThisAttempt {
+  param([string[]]$BaselineServices)
+  $baseline = @{}
+  foreach ($serviceName in @($BaselineServices)) { $baseline[[string]$serviceName] = $true }
+  $started = @(Get-RunningComposeServices | Where-Object {
+    $_ -in @('db','redis','app') -and -not $baseline.ContainsKey([string]$_)
+  })
+  if ($started.Count -gt 0) {
+    Invoke-DockerCompose (@('stop') + $started) | Out-Host
+  }
 }
 
 function Invoke-Docker([string[]]$dockerArgs) {
@@ -608,14 +639,22 @@ function Invoke-RunRealOwnershipStopPlan {
   }
 }
 
+function Assert-RunRealOwnershipForReplacement {
+  param([object]$Service)
+  $state = Get-RunRealOwnershipState -Service $Service
+  if ($state.Conflict) { throw "run_real start refused before mutation: $($state.Reason)" }
+  return $state
+}
+
 function Wait-ForRunRealSimulatorOwnership {
   param([object]$Service, [object]$Process, [int]$TimeoutSec = 60)
   if ($null -eq $Process -or -not $Process.Id) { throw 'Start-Process did not return the Simulator UI process.' }
   $launchedPid = [int]$Process.Id
-  $fingerprint = Get-ProcessStartTimeFingerprint -Id $launchedPid
-  if ([string]::IsNullOrWhiteSpace($fingerprint)) { throw 'Simulator UI process identity is unavailable.' }
+  $fingerprint = $null
   $persisted = $false
   try {
+    $fingerprint = Get-ProcessStartTimeFingerprint -Id $launchedPid
+    if ([string]::IsNullOrWhiteSpace($fingerprint)) { throw 'Simulator UI process identity is unavailable.' }
     $deadline = (Get-Date).AddSeconds($TimeoutSec)
     while ((Get-Date) -lt $deadline) {
       $identity = Get-ProcessIdentityObservation -Id $launchedPid -ExpectedStartFingerprint $fingerprint
@@ -632,18 +671,21 @@ function Wait-ForRunRealSimulatorOwnership {
     throw "Simulator UI did not listen on port $($Service.Port) within $TimeoutSec seconds."
   } finally {
     if (-not $persisted) {
-      $identity = Get-ProcessIdentityObservation -Id $launchedPid -ExpectedStartFingerprint $fingerprint
-      if ($identity.Status -eq 'Exact') { Stop-ProcessById -Id $launchedPid -ExpectedStartFingerprint $fingerprint }
+      if ([string]::IsNullOrWhiteSpace($fingerprint)) {
+        try {
+          if (-not $Process.HasExited) { $Process.Kill() }
+        } catch {
+          Write-Warning "Unable to clean up directly launched Simulator UI process: $($_.Exception.Message)"
+        }
+      } else {
+        $identity = Get-ProcessIdentityObservation -Id $launchedPid -ExpectedStartFingerprint $fingerprint
+        if ($identity.Status -eq 'Exact') { Stop-ProcessById -Id $launchedPid -ExpectedStartFingerprint $fingerprint }
+      }
     }
   }
 }
 
-function Start-SimulatorUiReal() {
-  if ($NoSimulatorUi) {
-    Write-Host 'Skipping Simulator UI (NoSimulatorUi=1).'
-    return
-  }
-
+function Get-SimulatorUiRealTools() {
   $appDir = Join-Path $repoRoot 'simulator-ui/v2'
   $viteCli = Join-Path $appDir 'node_modules/vite/bin/vite.js'
   if (-not (Test-Path -LiteralPath (Join-Path $appDir 'node_modules'))) {
@@ -653,6 +695,11 @@ function Start-SimulatorUiReal() {
   }
   if (-not (Test-Path -LiteralPath $viteCli -PathType Leaf)) { throw "Vite executable not found: $viteCli" }
   $node = Get-Command node -ErrorAction Stop
+  return [pscustomobject]@{ AppDir = $appDir; ViteCli = $viteCli; Node = $node.Source }
+}
+
+function Start-SimulatorUiReal {
+  param([object]$UiTools)
   Write-Host ''
   Write-Host 'Starting Simulator UI v2 (Real Mode)...'
   Write-Host "Backend origin (for proxy): ${script:backendOrigin}"
@@ -660,11 +707,63 @@ function Start-SimulatorUiReal() {
   Write-Host ''
   $env:VITE_API_MODE = 'real'
   $env:VITE_GEO_BACKEND_ORIGIN = $script:backendOrigin
-  $arguments = @("`"$viteCli`"", '--host', $HostName, '--port', "$SimulatorUiPort", '--strictPort')
-  $process = Start-Process -FilePath $node.Source -ArgumentList $arguments -WorkingDirectory $appDir -PassThru -WindowStyle Hidden -RedirectStandardOutput $runRealSimulatorOutLog -RedirectStandardError $runRealSimulatorErrLog
-  $ownership = Wait-ForRunRealSimulatorOwnership -Service (Get-RunRealSimulatorService) -Process $process
-  Write-Host "Simulator UI started in background (PID $($ownership.Pid))." -ForegroundColor Green
-  Write-UsefulLinks -IncludeSimulatorUi
+  $arguments = @("`"$($UiTools.ViteCli)`"", '--host', $HostName, '--port', "$SimulatorUiPort", '--strictPort')
+  $process = Start-Process -FilePath $UiTools.Node -ArgumentList $arguments -WorkingDirectory $UiTools.AppDir -PassThru -WindowStyle Hidden -RedirectStandardOutput $runRealSimulatorOutLog -RedirectStandardError $runRealSimulatorErrLog
+  $service = Get-RunRealSimulatorService
+  $ownership = Wait-ForRunRealSimulatorOwnership -Service $service -Process $process
+  return [pscustomobject]@{
+    Service = $service
+    Pid = $ownership.Pid
+    ProcessStartFingerprint = $ownership.ProcessStartFingerprint
+  }
+}
+
+function Undo-RunRealStartedUi {
+  param([object[]]$StartedUi)
+  $failures = @()
+  for ($index = $StartedUi.Count - 1; $index -ge 0; $index--) {
+    $started = $StartedUi[$index]
+    try {
+      $identity = Get-ProcessIdentityObservation -Id $started.Pid -ExpectedStartFingerprint $started.ProcessStartFingerprint
+      if ($identity.Status -eq 'Exact') {
+        Stop-ProcessById -Id $started.Pid -ExpectedStartFingerprint $started.ProcessStartFingerprint
+      } elseif ($identity.Status -eq 'Unreadable') {
+        throw 'process identity is unreadable'
+      }
+      if (Test-Path -LiteralPath $started.Service.OwnershipFile) {
+        $metadata = Get-RunRealOwnershipMetadata -Path $started.Service.OwnershipFile
+        $matches = [bool]($metadata -and $metadata.Valid -and
+          $metadata.RepositoryIdentity -eq (Get-RunRealRepositoryIdentity) -and
+          $metadata.ServiceName -eq $started.Service.Name -and
+          $metadata.Port -eq $started.Service.Port -and
+          $metadata.Pid -eq $started.Pid -and
+          $metadata.ProcessStartFingerprint -eq $started.ProcessStartFingerprint)
+        if (-not $matches) { throw 'ownership metadata changed' }
+        Remove-Item -LiteralPath $started.Service.OwnershipFile -Force -ErrorAction Stop
+      }
+    } catch {
+      $failures += "$($started.Service.Name): $($_.Exception.Message)"
+    }
+  }
+  if ($failures.Count -gt 0) { throw "run_real UI rollback failed: $($failures -join '; ')" }
+}
+
+function Invoke-RunRealStartupRollback {
+  param(
+    [System.Exception]$PrimaryFailure,
+    [object[]]$StartedUi,
+    [string[]]$BaselineComposeServices
+  )
+  $rollbackFailures = @()
+  try { Undo-RunRealStartedUi -StartedUi $StartedUi } catch { $rollbackFailures += $_.Exception.Message }
+  try { Stop-ComposeServicesStartedThisAttempt -BaselineServices $BaselineComposeServices } catch { $rollbackFailures += $_.Exception.Message }
+  if ($rollbackFailures.Count -gt 0) {
+    $rollbackFailure = $rollbackFailures -join '; '
+    $combined = New-Object System.Exception("$($PrimaryFailure.Message) Rollback failed: $rollbackFailure", $PrimaryFailure)
+    $combined.Data['RollbackFailure'] = $rollbackFailure
+    throw $combined
+  }
+  throw $PrimaryFailure
 }
 
 function Stop-RunRealServices {
@@ -712,17 +811,29 @@ if ($Action -eq 'seed') {
   exit 0
 }
 
-# Action=start
-Invoke-RunRealOwnershipStopPlan -Service (Get-RunRealSimulatorService)
-Ensure-ComposeCore
-Seed-DbIfRequested
-Start-SimulatorUiReal
-
-if ($NoSimulatorUi) {
-  Write-Host 'OK: services started (UI skipped).'
-  Write-UsefulLinks
-} else {
-  Write-Host 'OK: services and background Simulator UI started.'
+# Action=start. Complete all non-mutating/UI dependency preflight before replacing
+# a healthy same-port UI. Compose additions and the new UI are rolled back on failure.
+$simulatorService = Get-RunRealSimulatorService
+$null = Assert-RunRealOwnershipForReplacement -Service $simulatorService
+$uiTools = if ($NoSimulatorUi) { $null } else { Get-SimulatorUiRealTools }
+$baselineComposeServices = @(Get-RunningComposeServices)
+$startedUi = @()
+try {
+  Ensure-ComposeCore
+  Seed-DbIfRequested
+  Invoke-RunRealOwnershipStopPlan -Service $simulatorService
+  if ($NoSimulatorUi) {
+    Write-Host 'Skipping Simulator UI (NoSimulatorUi=1).'
+    Write-Host 'OK: services started (UI skipped).'
+    Write-UsefulLinks
+  } else {
+    $startedUi += Start-SimulatorUiReal -UiTools $uiTools
+    Write-Host "Simulator UI started in background (PID $($startedUi[-1].Pid))." -ForegroundColor Green
+    Write-UsefulLinks -IncludeSimulatorUi
+    Write-Host 'OK: services and background Simulator UI started.'
+  }
+} catch {
+  Invoke-RunRealStartupRollback -PrimaryFailure $_.Exception -StartedUi $startedUi -BaselineComposeServices $baselineComposeServices
 }
 } finally {
   Exit-LauncherLifecycleLock -LockHandle $LifecycleLock

@@ -359,6 +359,7 @@ function Get-ServiceOwnershipMetadata {
     param([string]$Path)
     return $script:MetadataByFile[$Path]
 }
+function Get-FullStackRepositoryIdentity { return 'repo-a' }
 function Get-ListeningPid {
     param([int]$Port)
     $value = $script:ListenerByPort[$Port]
@@ -399,10 +400,12 @@ function New-TestMetadata {
         [int]$Id,
         [string]$StartTime,
         [string]$ServiceName = 'Backend',
-        [int]$Port = 18000
+        [int]$Port = 18000,
+        [string]$RepositoryIdentity = 'repo-a'
     )
     return [pscustomobject]@{
         Valid = $true
+        RepositoryIdentity = $RepositoryIdentity
         Pid = $Id
         ProcessStartFingerprint = $StartTime
         ServiceName = $ServiceName
@@ -493,6 +496,25 @@ if ($script:RemovedPidFiles.Count -ne 1 -or $script:RemovedPidFiles[0] -ne 'back
     result = _run_powershell(powershell, _ownership_command(body))
 
     assert "owned-stop-ok" in result.stdout
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+def test_wrong_repository_identity_is_never_accepted_as_owned(
+    powershell: Path,
+) -> None:
+    body = r"""
+$service = New-TestService -Name 'Backend' -Port 18000 -PidFile 'backend.pid'
+$script:MetadataByFile['backend.pid'] = New-TestMetadata -Id 101 -StartTime 'start-a' -RepositoryIdentity 'repo-b'
+$script:ListenerByPort[18000] = 101
+$script:FingerprintByPid[101] = 'start-a'
+$state = Get-ServiceStopState -Service $service
+if (-not $state.Conflict) { throw 'Foreign repository metadata was accepted' }
+if ($script:StoppedPids.Count -ne 0) { throw 'Foreign repository process was stopped' }
+[Console]::Out.Write('foreign-repository-refused')
+"""
+    result = _run_powershell(powershell, _ownership_command(body))
+    assert result.stdout == "foreign-repository-refused"
 
 
 @pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
@@ -883,6 +905,7 @@ def test_versioned_ownership_metadata_round_trip(
         + r"""
 Invoke-Expression (Get-LauncherFunctionText -Name 'Get-ServiceOwnershipMetadata')
 Invoke-Expression (Get-LauncherFunctionText -Name 'Write-ServiceOwnershipMetadata')
+function Get-FullStackRepositoryIdentity { return 'repo-a' }
 $service = [pscustomobject]@{
     Name = 'Backend'
     Port = 18000
@@ -893,6 +916,7 @@ $metadata = Get-ServiceOwnershipMetadata -Path $service.PidFile
 if (-not $metadata.Valid -or $metadata.Pid -ne 101) { throw 'Ownership metadata did not round-trip' }
 if ($metadata.ServiceName -ne 'Backend' -or $metadata.Port -ne 18000) { throw 'Service binding was lost' }
 if ($metadata.ProcessStartFingerprint -ne 'utc-ticks:638903664000000000') { throw 'Fingerprint was lost' }
+if ($metadata.RepositoryIdentity -ne 'repo-a') { throw 'Repository identity was lost' }
 [Console]::Out.Write('ownership-round-trip-ok')
 """
     )
@@ -1006,6 +1030,7 @@ function Get-FullStackOwnershipMetadata {
     param([string]$Path)
     return $script:FullStackMetadata
 }
+function Get-RunLocalRepositoryIdentity { return 'repo-a' }
 function Get-ProcessIdentityObservation {
     param([int]$Id, [string]$ExpectedStartFingerprint)
     return [pscustomobject]@{ Status = $script:IdentityStatus; Fingerprint = $ExpectedStartFingerprint }
@@ -1022,6 +1047,7 @@ function Remove-Item {
 function New-FullStackMetadata {
     return [pscustomobject]@{
         Valid = $true
+        RepositoryIdentity = 'repo-a'
         Pid = 101
         ProcessStartFingerprint = 'utc-ticks:638903664000000000'
         ServiceName = 'Backend'
@@ -1188,6 +1214,10 @@ $null = [Console]::In.ReadLine()
             powershell,
             imports
             + r"""
+$env:GEO_LAUNCHER_LIFECYCLE_LOCK_NAME = Get-LauncherLifecycleLockName -RepositoryRoot $env:PHASE7_LOCK_ROOT
+$env:GEO_LAUNCHER_LIFECYCLE_LOCK_OWNER_PID = '1'
+$env:GEO_LAUNCHER_LIFECYCLE_LOCK_OWNER_FINGERPRINT = 'utc-ticks:1'
+$env:GEO_LAUNCHER_LIFECYCLE_LOCK_TOKEN = 'forged'
 try {
     Enter-LauncherLifecycleLock -RepositoryRoot $env:PHASE7_LOCK_ROOT -LauncherName 'contender'
     throw 'Concurrent lifecycle mutation unexpectedly acquired the lock'
@@ -1196,7 +1226,10 @@ try {
     [Console]::Out.Write($_.Exception.Message)
 }
 """,
-            extra_env={"PHASE7_LOCK_ROOT": str(tmp_path)},
+            extra_env={
+                "PHASE7_SCRIPT_PATH": str(_RUN_LOCAL),
+                "PHASE7_LOCK_ROOT": str(tmp_path),
+            },
         )
         assert "Launcher lifecycle is busy" in contender.stdout
     finally:
@@ -1252,7 +1285,7 @@ def test_all_mutating_launchers_share_lock_and_cover_destructive_actions() -> No
     assert "Stop-IfListeningAndOurs -Port" not in run_local_source
     assert "Stop-RunLocalProcesses" not in real_simulator_source
     assert "Invoke-RunRealOwnershipStopPlan" in real_simulator_source
-    assert "Start-Process -FilePath $node.Source" in real_simulator_source
+    assert "Start-Process -FilePath $UiTools.Node" in real_simulator_source
     assert "-PassThru" in real_simulator_source
     assert "& $uiScript" not in real_simulator_source
     assert (
@@ -1445,11 +1478,14 @@ def test_run_local_rejects_reload_before_any_lifecycle_mutation() -> None:
 
     rejection = source.index("if ($ReloadBackend) {")
     lock = source.index("Enter-LauncherLifecycleLock", rejection)
-    action_switch = source.index("switch ($Action)", lock)
-    restart_stop = source.index("& $PSCommandPath @restartParams", action_switch)
+    restart_stop = source.index("Invoke-RunLocalOwnershipStopPlan -Services", lock)
+    action_switch = source.index("switch ($Action)", restart_stop)
 
-    assert rejection < lock < action_switch < restart_stop
+    assert rejection < lock < restart_stop < action_switch
     assert "restart-backend -ReloadBackend" not in source[:rejection]
+    assert "$PSCommandPath" not in source
+    assert "AllowInherited" not in source
+    assert "GEO_LAUNCHER_LIFECYCLE_LOCK_TOKEN" not in source
 
 
 @pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
@@ -1605,3 +1641,163 @@ if (($script:Calls -join ',') -ne 'ui-stop,compose-stop') { throw 'Unexpected st
         extra_env={"PHASE7_SCRIPT_PATH": str(_RUN_REAL_SIMULATOR)},
     )
     assert result.stdout.rstrip().endswith("run-real-compose-failure-propagated")
+
+
+def test_runtime_metadata_and_transactional_start_wiring() -> None:
+    full_stack = _RUN_FULL_STACK.read_text(encoding="utf-8-sig")
+    run_local = _RUN_LOCAL.read_text(encoding="utf-8-sig")
+    run_real = _RUN_REAL_SIMULATOR.read_text(encoding="utf-8-sig")
+
+    assert "repository_identity = Get-FullStackRepositoryIdentity" in full_stack
+    assert "RepositoryIdentity = [string]$metadata.repository_identity" in full_stack
+    assert "Get-FullStackRepositoryIdentity" in full_stack.split(
+        "function Get-ServiceStopState", 1
+    )[1]
+    assert "RepositoryIdentity = [string]$metadata.repository_identity" in run_local
+    assert "RepositoryIdentity = [string]$metadata.repository_identity" in run_real
+
+    assert "AllowInherited" not in run_local
+    assert "GEO_LAUNCHER_LIFECYCLE_LOCK_TOKEN" not in run_local
+    assert "$PSCommandPath" not in run_local
+    assert run_local.index("Enter-LauncherLifecycleLock", run_local.index("$LifecycleLock")) < run_local.index(
+        "if ($Action -eq 'restart')"
+    )
+    assert run_local.count("$StartedThisAttempt += [pscustomobject]@{") == 3
+    assert "Invoke-RunLocalStartupRollback" in run_local
+
+    main = run_real.split("# Action=start.", 1)[1]
+    assert main.index("Assert-RunRealOwnershipForReplacement") < main.index(
+        "Get-SimulatorUiRealTools"
+    )
+    assert main.index("Get-SimulatorUiRealTools") < main.index(
+        "Get-RunningComposeServices"
+    )
+    assert main.index("Ensure-ComposeCore") < main.index("Seed-DbIfRequested")
+    assert main.index("Seed-DbIfRequested") < main.index(
+        "Invoke-RunRealOwnershipStopPlan"
+    )
+    assert main.index("Invoke-RunRealOwnershipStopPlan") < main.index(
+        "Start-SimulatorUiReal"
+    )
+    assert "Invoke-RunRealStartupRollback" in main
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+def test_run_local_startup_rollback_is_reverse_exact_and_keeps_both_failures(
+    powershell: Path,
+) -> None:
+    command = (
+        _AST_SETUP
+        + r"""
+Invoke-Expression (Get-LauncherFunctionText -Name 'Undo-RunLocalStartedServices')
+$script:Stopped = @()
+$script:Removed = @()
+function Get-RunLocalRepositoryIdentity { return 'repo-a' }
+function Get-ProcessIdentityObservation {
+    param([int]$Id, [string]$ExpectedStartFingerprint)
+    return [pscustomobject]@{ Status = 'Exact'; Fingerprint = $ExpectedStartFingerprint }
+}
+function Stop-ProcessById {
+    param([int]$Id, [string]$ExpectedStartFingerprint)
+    $script:Stopped += "$Id|$ExpectedStartFingerprint"
+}
+function Test-Path { param([string]$LiteralPath) return $true }
+function Get-RunLocalOwnershipMetadata {
+    param([string]$Path)
+    $id = if ($Path -eq 'ui.owner.json') { 202 } else { 101 }
+    $name = if ($Path -eq 'ui.owner.json') { 'Admin UI' } else { 'Backend' }
+    $port = if ($Path -eq 'ui.owner.json') { 5173 } else { 18000 }
+    $fingerprint = if ($id -eq 202) { 'start-b' } else { 'start-a' }
+    return [pscustomobject]@{ Valid=$true; RepositoryIdentity='repo-a'; ServiceName=$name; Port=$port; Pid=$id; ProcessStartFingerprint=$fingerprint }
+}
+function Remove-Item { param([string]$LiteralPath, [switch]$Force, [object]$ErrorAction); $script:Removed += $LiteralPath }
+$started = @(
+    [pscustomobject]@{ Service=[pscustomobject]@{Name='Backend';Port=18000;OwnershipFile='backend.owner.json'};Pid=101;ProcessStartFingerprint='start-a' },
+    [pscustomobject]@{ Service=[pscustomobject]@{Name='Admin UI';Port=5173;OwnershipFile='ui.owner.json'};Pid=202;ProcessStartFingerprint='start-b' }
+)
+Undo-RunLocalStartedServices -StartedServices $started
+if (($script:Stopped -join ',') -ne '202|start-b,101|start-a') { throw 'Rollback was not reverse/exact' }
+if (($script:Removed -join ',') -ne 'ui.owner.json,backend.owner.json') { throw 'Metadata cleanup order changed' }
+
+Invoke-Expression (Get-LauncherFunctionText -Name 'Invoke-RunLocalStartupRollback')
+function Undo-RunLocalStartedServices { throw 'cleanup-failed' }
+try {
+    Invoke-RunLocalStartupRollback -PrimaryFailure ([System.Exception]::new('primary-failed')) -StartedServices @($started[0])
+    throw 'Combined failure unexpectedly succeeded'
+} catch {
+    if ($_.Exception.Message -eq 'Combined failure unexpectedly succeeded') { throw }
+    if ($_.Exception.Message -notlike '*primary-failed*cleanup-failed*') { throw }
+    if ($_.Exception.Data['RollbackFailure'] -notlike '*cleanup-failed*') { throw 'Rollback evidence missing' }
+}
+[Console]::Out.Write('run-local-rollback-ok')
+"""
+    )
+    result = _run_powershell(
+        powershell,
+        command,
+        extra_env={"PHASE7_SCRIPT_PATH": str(_RUN_LOCAL)},
+    )
+    assert result.stdout == "run-local-rollback-ok"
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+def test_run_real_rollback_limits_compose_delta_and_keeps_primary_evidence(
+    powershell: Path,
+) -> None:
+    command = (
+        _AST_SETUP
+        + r"""
+Invoke-Expression (Get-LauncherFunctionText -Name 'Stop-ComposeServicesStartedThisAttempt')
+$script:ComposeArgs = @()
+function Get-RunningComposeServices { return @('db','redis','app','foreign') }
+function Invoke-DockerCompose { param([string[]]$composeArgs); $script:ComposeArgs = @($composeArgs) }
+Stop-ComposeServicesStartedThisAttempt -BaselineServices @('db')
+if (($script:ComposeArgs -join ',') -ne 'stop,redis,app') { throw "Wrong Compose rollback delta: $($script:ComposeArgs -join ',')" }
+
+Invoke-Expression (Get-LauncherFunctionText -Name 'Undo-RunRealStartedUi')
+$script:UiStopped = @()
+$script:UiRemoved = @()
+function Get-RunRealRepositoryIdentity { return 'repo-a' }
+function Get-ProcessIdentityObservation {
+    param([int]$Id, [string]$ExpectedStartFingerprint)
+    return [pscustomobject]@{ Status='Exact'; Fingerprint=$ExpectedStartFingerprint }
+}
+function Stop-ProcessById {
+    param([int]$Id, [string]$ExpectedStartFingerprint)
+    $script:UiStopped += "$Id|$ExpectedStartFingerprint"
+}
+function Test-Path { param([string]$LiteralPath) return $true }
+function Get-RunRealOwnershipMetadata {
+    param([string]$Path)
+    return [pscustomobject]@{ Valid=$true; RepositoryIdentity='repo-a'; ServiceName='Simulator UI'; Port=5176; Pid=303; ProcessStartFingerprint='start-c' }
+}
+function Remove-Item { param([string]$LiteralPath, [switch]$Force, [object]$ErrorAction); $script:UiRemoved += $LiteralPath }
+$lateUi = [pscustomobject]@{ Service=[pscustomobject]@{Name='Simulator UI';Port=5176;OwnershipFile='ui.owner.json'};Pid=303;ProcessStartFingerprint='start-c' }
+Undo-RunRealStartedUi -StartedUi @($lateUi)
+if (($script:UiStopped -join ',') -ne '303|start-c') { throw 'Late UI was not rolled back exactly' }
+if (($script:UiRemoved -join ',') -ne 'ui.owner.json') { throw 'Late UI metadata was not removed' }
+
+Invoke-Expression (Get-LauncherFunctionText -Name 'Invoke-RunRealStartupRollback')
+$script:RollbackCalls = @()
+function Undo-RunRealStartedUi { param([object[]]$StartedUi); $script:RollbackCalls += 'ui'; throw 'ui-cleanup-failed' }
+function Stop-ComposeServicesStartedThisAttempt { param([string[]]$BaselineServices); $script:RollbackCalls += 'compose'; throw 'compose-cleanup-failed' }
+try {
+    Invoke-RunRealStartupRollback -PrimaryFailure ([System.Exception]::new('primary-failed')) -StartedUi @() -BaselineComposeServices @('db')
+    throw 'Combined failure unexpectedly succeeded'
+} catch {
+    if ($_.Exception.Message -eq 'Combined failure unexpectedly succeeded') { throw }
+    if ($_.Exception.Message -notlike '*primary-failed*') { throw 'Primary evidence missing' }
+    if ($_.Exception.Data['RollbackFailure'] -notlike '*ui-cleanup-failed*compose-cleanup-failed*') { throw 'Rollback evidence missing' }
+}
+if (($script:RollbackCalls -join ',') -ne 'ui,compose') { throw 'Rollback order changed' }
+[Console]::Out.Write('run-real-rollback-ok')
+"""
+    )
+    result = _run_powershell(
+        powershell,
+        command,
+        extra_env={"PHASE7_SCRIPT_PATH": str(_RUN_REAL_SIMULATOR)},
+    )
+    assert result.stdout == "run-real-rollback-ok"

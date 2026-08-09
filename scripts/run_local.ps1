@@ -127,28 +127,9 @@ function Get-LauncherLifecycleLockName {
     return "Local\GEOv0-LauncherLifecycle-$($digestText.Substring(0, 24))"
 }
 
-function Test-InheritedLauncherLifecycleLock {
-    param([string]$RepositoryRoot)
-    $expectedName = Get-LauncherLifecycleLockName -RepositoryRoot $RepositoryRoot
-    if ($env:GEO_LAUNCHER_LIFECYCLE_LOCK_NAME -ne $expectedName) { return $false }
-    if ([string]::IsNullOrWhiteSpace($env:GEO_LAUNCHER_LIFECYCLE_LOCK_TOKEN)) { return $false }
-    $ownerPid = 0
-    if (-not [int]::TryParse($env:GEO_LAUNCHER_LIFECYCLE_LOCK_OWNER_PID, [ref]$ownerPid) -or $ownerPid -le 0) {
-        return $false
-    }
-    $ownerFingerprint = [string]$env:GEO_LAUNCHER_LIFECYCLE_LOCK_OWNER_FINGERPRINT
-    if ($ownerFingerprint -notmatch '^utc-ticks:\d+$') { return $false }
-    $identity = Get-ProcessIdentityObservation -Id $ownerPid -ExpectedStartFingerprint $ownerFingerprint
-    return [bool]($identity.Status -eq 'Exact')
-}
-
 function Enter-LauncherLifecycleLock {
-    param([string]$RepositoryRoot, [string]$LauncherName, [switch]$AllowInherited)
+    param([string]$RepositoryRoot, [string]$LauncherName)
     $lockName = Get-LauncherLifecycleLockName -RepositoryRoot $RepositoryRoot
-    if ($AllowInherited -and (Test-InheritedLauncherLifecycleLock -RepositoryRoot $RepositoryRoot)) {
-        return [pscustomobject]@{ Mutex = $null; Name = $lockName; Launcher = $LauncherName; Inherited = $true }
-    }
-
     $createdNew = $false
     $mutex = New-Object System.Threading.Mutex($false, $lockName, [ref]$createdNew)
     $acquired = $false
@@ -161,15 +142,7 @@ function Enter-LauncherLifecycleLock {
         if (-not $acquired) {
             throw "Launcher lifecycle is busy for this repository; another mutating launcher owns $lockName."
         }
-        $ownerFingerprint = Get-ProcessStartTimeFingerprint -Id $PID
-        if ([string]::IsNullOrWhiteSpace($ownerFingerprint)) {
-            throw 'Unable to establish launcher lifecycle lock owner identity.'
-        }
-        $env:GEO_LAUNCHER_LIFECYCLE_LOCK_NAME = $lockName
-        $env:GEO_LAUNCHER_LIFECYCLE_LOCK_OWNER_PID = [string]$PID
-        $env:GEO_LAUNCHER_LIFECYCLE_LOCK_OWNER_FINGERPRINT = $ownerFingerprint
-        $env:GEO_LAUNCHER_LIFECYCLE_LOCK_TOKEN = [Guid]::NewGuid().ToString('N')
-        return [pscustomobject]@{ Mutex = $mutex; Name = $lockName; Launcher = $LauncherName; Inherited = $false }
+        return [pscustomobject]@{ Mutex = $mutex; Name = $lockName; Launcher = $LauncherName }
     } catch {
         if ($acquired) {
             try { $mutex.ReleaseMutex() } catch {}
@@ -181,11 +154,7 @@ function Enter-LauncherLifecycleLock {
 
 function Exit-LauncherLifecycleLock {
     param([object]$LockHandle)
-    if ($null -eq $LockHandle -or $LockHandle.Inherited) { return }
-    Remove-Item Env:GEO_LAUNCHER_LIFECYCLE_LOCK_NAME -ErrorAction SilentlyContinue
-    Remove-Item Env:GEO_LAUNCHER_LIFECYCLE_LOCK_OWNER_PID -ErrorAction SilentlyContinue
-    Remove-Item Env:GEO_LAUNCHER_LIFECYCLE_LOCK_OWNER_FINGERPRINT -ErrorAction SilentlyContinue
-    Remove-Item Env:GEO_LAUNCHER_LIFECYCLE_LOCK_TOKEN -ErrorAction SilentlyContinue
+    if ($null -eq $LockHandle -or $null -eq $LockHandle.Mutex) { return }
     try {
         $LockHandle.Mutex.ReleaseMutex()
     } finally {
@@ -441,12 +410,13 @@ function Wait-ForRunLocalServiceOwnership {
         throw "Unable to start $($Service.Name): Start-Process did not return a process."
     }
     $launchedPid = [int]$Process.Id
-    $fingerprint = Get-ProcessStartTimeFingerprint -Id $launchedPid
-    if ([string]::IsNullOrWhiteSpace($fingerprint)) {
-        throw "Unable to start $($Service.Name): process identity is unavailable."
-    }
+    $fingerprint = $null
     $persisted = $false
     try {
+        $fingerprint = Get-ProcessStartTimeFingerprint -Id $launchedPid
+        if ([string]::IsNullOrWhiteSpace($fingerprint)) {
+            throw "Unable to start $($Service.Name): process identity is unavailable."
+        }
         $deadline = (Get-Date).AddSeconds($TimeoutSec)
         while ((Get-Date) -lt $deadline) {
             $identity = Get-ProcessIdentityObservation -Id $launchedPid -ExpectedStartFingerprint $fingerprint
@@ -467,12 +437,79 @@ function Wait-ForRunLocalServiceOwnership {
         throw "Unable to start $($Service.Name): listener did not appear on port $($Service.Port)."
     } finally {
         if (-not $persisted) {
-            $identity = Get-ProcessIdentityObservation -Id $launchedPid -ExpectedStartFingerprint $fingerprint
-            if ($identity.Status -eq 'Exact') {
-                Stop-ProcessById -Id $launchedPid -ExpectedStartFingerprint $fingerprint
+            if ([string]::IsNullOrWhiteSpace($fingerprint)) {
+                try {
+                    if (-not $Process.HasExited) { $Process.Kill() }
+                } catch {
+                    Write-Warning "Unable to clean up directly launched $($Service.Name) process: $($_.Exception.Message)"
+                }
+            } else {
+                $identity = Get-ProcessIdentityObservation -Id $launchedPid -ExpectedStartFingerprint $fingerprint
+                if ($identity.Status -eq 'Exact') {
+                    Stop-ProcessById -Id $launchedPid -ExpectedStartFingerprint $fingerprint
+                }
             }
         }
     }
+}
+
+function Undo-RunLocalStartedServices {
+    param([object[]]$StartedServices)
+    $cleanupFailures = @()
+    for ($index = $StartedServices.Count - 1; $index -ge 0; $index--) {
+        $started = $StartedServices[$index]
+        try {
+            $identity = Get-ProcessIdentityObservation `
+                -Id $started.Pid `
+                -ExpectedStartFingerprint $started.ProcessStartFingerprint
+            if ($identity.Status -eq 'Exact') {
+                Stop-ProcessById `
+                    -Id $started.Pid `
+                    -ExpectedStartFingerprint $started.ProcessStartFingerprint
+            } elseif ($identity.Status -eq 'Unreadable') {
+                throw "Unable to roll back $($started.Service.Name): process identity is unreadable."
+            }
+
+            if (Test-Path -LiteralPath $started.Service.OwnershipFile) {
+                $metadata = Get-RunLocalOwnershipMetadata -Path $started.Service.OwnershipFile
+                $metadataMatchesAttempt = [bool](
+                    $metadata -and $metadata.Valid -and
+                    $metadata.RepositoryIdentity -eq (Get-RunLocalRepositoryIdentity) -and
+                    $metadata.ServiceName -eq $started.Service.Name -and
+                    $metadata.Port -eq $started.Service.Port -and
+                    $metadata.Pid -eq $started.Pid -and
+                    $metadata.ProcessStartFingerprint -eq $started.ProcessStartFingerprint
+                )
+                if (-not $metadataMatchesAttempt) {
+                    throw "Unable to roll back $($started.Service.Name): ownership metadata changed."
+                }
+                Remove-Item -LiteralPath $started.Service.OwnershipFile -Force -ErrorAction Stop
+            }
+        } catch {
+            $cleanupFailures += "$($started.Service.Name): $($_.Exception.Message)"
+        }
+    }
+    if ($cleanupFailures.Count -gt 0) {
+        throw "run_local startup rollback failed: $($cleanupFailures -join '; ')"
+    }
+}
+
+function Invoke-RunLocalStartupRollback {
+    param([System.Exception]$PrimaryFailure, [object[]]$StartedServices)
+    $rollbackFailure = $null
+    if ($StartedServices.Count -gt 0) {
+        try {
+            Undo-RunLocalStartedServices -StartedServices $StartedServices
+        } catch {
+            $rollbackFailure = $_.Exception
+        }
+    }
+    if ($null -ne $rollbackFailure) {
+        $combined = New-Object System.Exception("$($PrimaryFailure.Message) $($rollbackFailure.Message)", $PrimaryFailure)
+        $combined.Data['RollbackFailure'] = $rollbackFailure.ToString()
+        throw $combined
+    }
+    throw $PrimaryFailure
 }
 
 function Get-RunLocalProcessServices {
@@ -513,6 +550,7 @@ function Get-FullStackOwnershipMetadata {
         if ($fingerprint -notmatch '^utc-ticks:\d+$') { throw 'invalid fingerprint' }
         return [pscustomobject]@{
             Valid = [bool]($metadata.version -eq 1)
+            RepositoryIdentity = [string]$metadata.repository_identity
             Pid = $pidValue
             ProcessStartFingerprint = $fingerprint
             ServiceName = [string]$metadata.service_name
@@ -542,7 +580,9 @@ function Get-FullStackOwnershipState {
             StaleOwnershipFile = $false
         }
     }
-    if (-not $metadata.Valid -or $metadata.ServiceName -ne $Service.Name -or $metadata.Port -le 0) {
+    if (-not $metadata.Valid -or
+        $metadata.RepositoryIdentity -ne (Get-RunLocalRepositoryIdentity) -or
+        $metadata.ServiceName -ne $Service.Name -or $metadata.Port -le 0) {
         return [pscustomobject]@{
             Service = $Service
             Conflict = $true
@@ -889,8 +929,7 @@ try {
 if ($RequiresLifecycleLock) {
     $LifecycleLock = Enter-LauncherLifecycleLock `
         -RepositoryRoot $RepoRoot `
-        -LauncherName 'run_local' `
-        -AllowInherited
+        -LauncherName 'run_local'
 }
 
 if ($RequiresLifecycleLock) {
@@ -900,6 +939,15 @@ if ($RequiresLifecycleLock) {
             New-Item -ItemType Directory -Path $directory -Force | Out-Null
         }
     }
+}
+
+if ($Action -eq 'restart') {
+    # Restart stays in this process and under this mutex. No environment marker
+    # can authorize a second launcher to bypass repository lifecycle exclusion.
+    $null = Get-EffectiveDatabaseUrl -PythonExe $Python
+    Invoke-RunLocalOwnershipStopPlan -Services (Get-RunLocalProcessServices)
+    Start-Sleep -Milliseconds 1000
+    $Action = 'start'
 }
 
 switch ($Action) {
@@ -969,36 +1017,14 @@ switch ($Action) {
         exit 0
     }
 
-    'restart' {
-        # Validate application settings before stopping healthy services.
-        $null = Get-EffectiveDatabaseUrl -PythonExe $Python
-        # Рекурсивный вызов скрипта для чистого рестарта
-        $restartParams = @{
-            Action = 'stop'
-            BackendPort = $BackendPort
-            UiPort = $UiPort
-        }
-        & $PSCommandPath @restartParams
-        
-        $startParams = @{
-            Action = 'start'
-            BackendPort = $BackendPort
-            UiPort = $UiPort
-        }
-        if ($AutoPorts) { $startParams['AutoPorts'] = $true }
-        if ($NoInstall) { $startParams['NoInstall'] = $true }
-        if ($ShowWindows) { $startParams['ShowWindows'] = $true }
-        
-        & $PSCommandPath @startParams
-        exit 0
-    }
-
     'restart-backend' {
-        # Validate application settings before stopping a healthy backend.
-        $null = Get-EffectiveDatabaseUrl -PythonExe $Python
-        # Stop backend
-        $backendStopServices = Get-RunLocalProcessServices -BackendOnly
-        Invoke-RunLocalOwnershipStopPlan -Services $backendStopServices
+        $StartedThisAttempt = @()
+        try {
+            # Validate application settings before stopping a healthy backend.
+            $null = Get-EffectiveDatabaseUrl -PythonExe $Python
+            # Stop backend
+            $backendStopServices = Get-RunLocalProcessServices -BackendOnly
+            Invoke-RunLocalOwnershipStopPlan -Services $backendStopServices
 
         # Start Backend
         $backendPortUsed = $BackendPort
@@ -1015,22 +1041,32 @@ switch ($Action) {
         Write-Host "Restarting Backend on port $backendPortUsed..." -ForegroundColor Cyan
         $backendProc = Start-Process -FilePath $Python -ArgumentList $backendArgs -WorkingDirectory $RepoRoot -PassThru -WindowStyle $WindowStyle -RedirectStandardOutput $BackendOutLog -RedirectStandardError $BackendErrLog
         $backendService = @(Get-RunLocalProcessServices -BackendOnly -SelectedBackendPort $backendPortUsed)[0]
-        $backendOwnership = Wait-ForRunLocalServiceOwnership -Service $backendService -Process $backendProc
-        Write-Host "Backend PID: $($backendOwnership.Pid)" -ForegroundColor Gray
+            $backendOwnership = Wait-ForRunLocalServiceOwnership -Service $backendService -Process $backendProc
+            $StartedThisAttempt += [pscustomobject]@{
+                Service = $backendService
+                Pid = $backendOwnership.Pid
+                ProcessStartFingerprint = $backendOwnership.ProcessStartFingerprint
+            }
+            Write-Host "Backend PID: $($backendOwnership.Pid)" -ForegroundColor Gray
 
-        if (-not (Test-HttpEndpoint -Url "http://127.0.0.1:$backendPortUsed/api/v1/health" -TimeoutSec 60)) {
-            Write-Warning "Backend health check failed, but process is running. Check logs: $BackendErrLog"
+            if (-not (Test-HttpEndpoint -Url "http://127.0.0.1:$backendPortUsed/api/v1/health" -TimeoutSec 60)) {
+                throw "Backend health check failed. Check logs: $BackendErrLog"
+            }
+
+            # Update UI config to point to new backend port
+            Update-EnvLocal -Path $EnvLocalPath -BaseUrl "http://127.0.0.1:$backendPortUsed"
+
+            Write-Host "Backend restarted." -ForegroundColor Green
+            Write-Host "Docs: http://127.0.0.1:$backendPortUsed/docs"
+            exit 0
+        } catch {
+            Invoke-RunLocalStartupRollback -PrimaryFailure $_.Exception -StartedServices $StartedThisAttempt
         }
-
-        # Update UI config to point to new backend port
-        Update-EnvLocal -Path $EnvLocalPath -BaseUrl "http://127.0.0.1:$backendPortUsed"
-
-        Write-Host "Backend restarted." -ForegroundColor Green
-        Write-Host "Docs: http://127.0.0.1:$backendPortUsed/docs"
-        exit 0
     }
 
     'start' {
+        $StartedThisAttempt = @()
+        try {
         $EffectiveDatabaseUrl = Get-EffectiveDatabaseUrl -PythonExe $Python
         $LocalDatabasePath = if ($EffectiveDatabaseUrl -eq $DefaultDatabaseUrl) {
             $DefaultDatabasePath
@@ -1082,6 +1118,11 @@ switch ($Action) {
         Write-Host "     Waiting for uvicorn to start..." -ForegroundColor Gray
         $backendService = @(Get-RunLocalProcessServices -BackendOnly -SelectedBackendPort $backendPortUsed)[0]
         $backendOwnership = Wait-ForRunLocalServiceOwnership -Service $backendService -Process $backendProc
+        $StartedThisAttempt += [pscustomobject]@{
+            Service = $backendService
+            Pid = $backendOwnership.Pid
+            ProcessStartFingerprint = $backendOwnership.ProcessStartFingerprint
+        }
         if (-not (Test-HttpEndpoint -Url "http://127.0.0.1:$backendPortUsed/api/v1/health" -TimeoutSec 60)) { throw 'Backend health check failed.' }
         Write-Host "     Backend PID: $($backendOwnership.Pid)" -ForegroundColor Gray
         Write-Host "     Backend is healthy!" -ForegroundColor Green
@@ -1124,6 +1165,11 @@ switch ($Action) {
         Write-Host "     Waiting for Vite to start listening on port $uiPortUsed..." -NoNewline
         $uiService = @(Get-RunLocalProcessServices -SelectedBackendPort $backendPortUsed -SelectedUiPort $uiPortUsed | Where-Object { $_.Name -eq 'Admin UI' })[0]
         $uiOwnership = Wait-ForRunLocalServiceOwnership -Service $uiService -Process $uiProc
+        $StartedThisAttempt += [pscustomobject]@{
+            Service = $uiService
+            Pid = $uiOwnership.Pid
+            ProcessStartFingerprint = $uiOwnership.ProcessStartFingerprint
+        }
         Write-Host " OK" -ForegroundColor Green
         Write-Host "     UI PID: $($uiOwnership.Pid)" -ForegroundColor Gray
 
@@ -1142,6 +1188,9 @@ switch ($Action) {
         # Используем [Environment]::Exit для принудительного завершения,
         # т.к. обычный exit может ждать завершения child-процессов
         exit 0
+        } catch {
+            Invoke-RunLocalStartupRollback -PrimaryFailure $_.Exception -StartedServices $StartedThisAttempt
+        }
     }
 }
 } finally {
