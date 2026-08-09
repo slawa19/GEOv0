@@ -67,10 +67,24 @@ $env:DATABASE_URL = 'sqlite+aiosqlite:///./geov0.db'
 
 ## Runtime-настройки Admin
 
-Часть операционных параметров изменяется через Admin API и хранится в БД. Их
-канонический перечень и валидация находятся в backend schemas/routes, а REST wire
-shape — в [`api/openapi.yaml`](../../api/openapi.yaml). Эти значения не следует
-дублировать в `.env` как второй источник состояния.
+**Current behavior.** `PATCH /admin/config` и `PATCH /admin/feature-flags`
+валидируют значения и изменяют объект настроек только в текущем backend-процессе.
+В БД сохраняется audit-запись о действии, но не само новое значение. Поэтому
+изменение не переживает restart и не синхронизируется между несколькими backend
+replicas. Канонический перечень изменяемых ключей и валидация находятся в backend
+schemas/routes, а REST wire shape — в
+[`api/openapi.yaml`](../../api/openapi.yaml).
+
+**Intended operational behavior.** После restart процесс снова читает значения из
+deployment environment/`.env`; именно там следует задавать устойчивую конфигурацию.
+Admin PATCH сейчас подходит только для временной настройки одного процесса, а
+audit log подтверждает факт и причину изменения, не восстанавливает его значение.
+
+**Optimal target.** Если продукту потребуется устойчивое runtime-управление для
+нескольких replicas, ему нужен отдельный DB-backed контракт с загрузкой при старте,
+атомарным обновлением, распространением/инвалидацией и behavioral tests. Такого
+контракта в текущей реализации нет; этот справочник не выдаёт audit persistence за
+configuration persistence.
 
 ## Тестовые overrides и артефакты
 

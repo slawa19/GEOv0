@@ -63,23 +63,24 @@ function Set-EnvOverrides {
     param([string[]]$Pairs)
     if (-not $Pairs -or $Pairs.Count -eq 0) { return }
 
-    foreach ($pair in $Pairs) {
+    for ($pairIndex = 0; $pairIndex -lt $Pairs.Count; $pairIndex++) {
+        $pair = $Pairs[$pairIndex]
         $p = [string]$pair
         if ([string]::IsNullOrWhiteSpace($p)) { continue }
 
         $idx = $p.IndexOf('=')
         if ($idx -lt 1) {
-            throw "Invalid -BackendEnv entry: '$p' (expected KEY=VALUE)"
+            throw "Invalid -BackendEnv entry at index $pairIndex (expected KEY=VALUE)."
         }
 
         $key = $p.Substring(0, $idx).Trim()
         $val = $p.Substring($idx + 1)
         if ([string]::IsNullOrWhiteSpace($key)) {
-            throw "Invalid -BackendEnv entry: '$p' (empty key)"
+            throw "Invalid -BackendEnv entry at index $pairIndex (empty key)."
         }
 
         Set-Item -Path ("Env:$key") -Value $val
-        Write-Host "     Env override: $key=$val" -ForegroundColor Gray
+        Write-Host "     Env override applied: $key" -ForegroundColor Gray
     }
 }
 
@@ -145,6 +146,19 @@ function Get-ListeningPid {
         if ($conn -and $conn.OwningProcess) { return [int]$conn.OwningProcess }
     } catch {}
     return $null
+}
+
+function Test-ProcessExists {
+    param([int]$Id)
+    if (-not $Id -or $Id -eq 0) { return $false }
+    return $null -ne (Get-Process -Id $Id -ErrorAction SilentlyContinue)
+}
+
+function Remove-ServicePidFile {
+    param([string]$Path)
+    if ($Path -and (Test-Path -LiteralPath $Path)) {
+        Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    }
 }
 
 function Ensure-LogFilePath {
@@ -357,21 +371,119 @@ function Get-EffectiveDatabaseUrl {
 }
 
 function Get-SafeDatabaseDisplayUrl {
-    param(
-        [string]$PythonExe,
-        [string]$DatabaseUrl
-    )
+    param([string]$DatabaseUrl)
 
-    # Keep credentials out of command arguments and launcher output. SQLAlchemy
-    # owns URL parsing; the displayed URL intentionally omits all userinfo and
-    # query parameters because either may contain secrets.
-    $output = @(
-        $DatabaseUrl | & $PythonExe -c 'import sys; from sqlalchemy.engine import URL, make_url; url = make_url(sys.stdin.read().rstrip("\r\n")); safe = URL.create(drivername=url.drivername, host=url.host, port=url.port, database=url.database); print(safe.render_as_string(hide_password=True))'
-    )
-    if ($LASTEXITCODE -ne 0 -or $output.Count -ne 1) {
+    # Keep credentials and query parameters out of command arguments as well as
+    # output. This parser intentionally uses only PowerShell/.NET string
+    # operations, avoiding the native `python -c` quoting differences between
+    # Windows PowerShell 5.1 and PowerShell 7.
+    if ([string]::IsNullOrWhiteSpace($DatabaseUrl)) {
         throw 'Unable to render a safe DATABASE_URL summary.'
     }
-    return ([string]$output[0]).Trim()
+
+    $schemeDelimiter = $DatabaseUrl.IndexOf('://')
+    if ($schemeDelimiter -lt 1) {
+        throw 'Unable to render a safe DATABASE_URL summary.'
+    }
+
+    $scheme = $DatabaseUrl.Substring(0, $schemeDelimiter)
+    if ($scheme -notmatch '^[A-Za-z][A-Za-z0-9+.-]*$') {
+        throw 'Unable to render a safe DATABASE_URL summary.'
+    }
+
+    $remainder = $DatabaseUrl.Substring($schemeDelimiter + 3)
+    $queryIndex = $remainder.IndexOf('?')
+    $fragmentIndex = $remainder.IndexOf('#')
+    $suffixIndex = -1
+    if ($queryIndex -ge 0) { $suffixIndex = $queryIndex }
+    if ($fragmentIndex -ge 0 -and ($suffixIndex -lt 0 -or $fragmentIndex -lt $suffixIndex)) {
+        $suffixIndex = $fragmentIndex
+    }
+    if ($suffixIndex -ge 0) {
+        $remainder = $remainder.Substring(0, $suffixIndex)
+    }
+
+    # Three slashes (for example SQLite) mean there is no authority/userinfo.
+    if (-not $remainder.StartsWith('/')) {
+        $pathIndex = $remainder.IndexOf('/')
+        $authority = if ($pathIndex -ge 0) {
+            $remainder.Substring(0, $pathIndex)
+        } else {
+            $remainder
+        }
+        $path = if ($pathIndex -ge 0) { $remainder.Substring($pathIndex) } else { '' }
+        $userinfoIndex = $authority.LastIndexOf('@')
+        if ($userinfoIndex -ge 0) {
+            $authority = $authority.Substring($userinfoIndex + 1)
+        }
+        if ([string]::IsNullOrWhiteSpace($authority)) {
+            throw 'Unable to render a safe DATABASE_URL summary.'
+        }
+        $remainder = "$authority$path"
+    }
+
+    return "${scheme}://$remainder"
+}
+
+function Get-FullStackServices {
+    return @(
+        [pscustomobject]@{ Name = 'Backend'; Port = $BackendPort; PidFile = $BackendPidPath },
+        [pscustomobject]@{ Name = 'Admin UI'; Port = $AdminUiPort; PidFile = $AdminUiPidPath },
+        [pscustomobject]@{ Name = 'Simulator UI'; Port = $SimulatorUiPort; PidFile = $SimulatorUiPidPath }
+    )
+}
+
+function Get-ServiceStopState {
+    param([object]$Service)
+
+    $savedProcId = Get-PidFromFile -Path $Service.PidFile
+    $listener = Get-ListeningPid -Port $Service.Port
+    $savedProcessExists = if ($savedProcId) { Test-ProcessExists -Id $savedProcId } else { $false }
+    $owned = $savedProcId -and $savedProcessExists -and $listener -and $savedProcId -eq $listener
+    $conflict = $false
+    $reason = $null
+
+    if ($listener -and -not $savedProcId) {
+        $conflict = $true
+        $reason = "port $($Service.Port) is listening on PID $listener but no service PID file establishes ownership"
+    } elseif ($listener -and -not $savedProcessExists) {
+        $conflict = $true
+        $reason = "port $($Service.Port) is listening on PID $listener but the saved service PID is missing or stale"
+    } elseif ($listener -and $savedProcId -ne $listener) {
+        $conflict = $true
+        $reason = "port $($Service.Port) is listening on PID $listener but the saved service PID is $savedProcId"
+    } elseif (-not $listener -and $savedProcessExists) {
+        $conflict = $true
+        $reason = "saved service PID $savedProcId exists but is not listening on port $($Service.Port)"
+    }
+
+    return [pscustomobject]@{
+        Service = $Service
+        SavedPid = $savedProcId
+        ListenerPid = $listener
+        Owned = [bool]$owned
+        Conflict = [bool]$conflict
+        Reason = $reason
+        StalePidFile = [bool]($savedProcId -and -not $savedProcessExists)
+    }
+}
+
+function Get-ServiceStopPlan {
+    param([object[]]$Services)
+    return @($Services | ForEach-Object { Get-ServiceStopState -Service $_ })
+}
+
+function Assert-ServiceOwnershipForReplacement {
+    param([object[]]$Services)
+
+    $plan = @(Get-ServiceStopPlan -Services $Services)
+    $conflicts = @($plan | Where-Object { $_.Conflict })
+    foreach ($state in $conflicts) {
+        Write-Warning "$($state.Service.Name): $($state.Reason). No process was stopped."
+    }
+    if ($conflicts.Count -gt 0) {
+        throw 'Full-stack start/restart refused because service ownership could not be proven.'
+    }
 }
 
 function Invoke-NpmInstall {
@@ -392,29 +504,50 @@ function Invoke-NpmInstall {
 }
 
 function Stop-AllServices {
+    param(
+        [object[]]$Services = @(Get-FullStackServices),
+        [switch]$FailOnConflict
+    )
+
     Write-Host "[STOP] Stopping all services..." -ForegroundColor Yellow
-    
-    # Stop by PID files
-    foreach ($pidFile in @($SimulatorUiPidPath, $AdminUiPidPath, $BackendPidPath)) {
-        Remove-StalePidFile $pidFile
-        $procId = Get-PidFromFile $pidFile
-        if ($procId) {
-            Stop-ProcessById $procId
-        }
-        if (Test-Path $pidFile) {
-            Remove-Item -Force $pidFile -ErrorAction SilentlyContinue
+
+    # Validate every service before stopping the first owned process. start and
+    # restart use FailOnConflict so an unrelated listener cannot cause a partial
+    # replacement or be mistaken for one of this launcher's children.
+    $plan = @(Get-ServiceStopPlan -Services $Services)
+    $conflicts = @($plan | Where-Object { $_.Conflict })
+    foreach ($state in $conflicts) {
+        Write-Warning "$($state.Service.Name): $($state.Reason). The listener was not stopped."
+    }
+    if ($FailOnConflict -and $conflicts.Count -gt 0) {
+        throw 'Full-stack replacement refused because service ownership could not be proven.'
+    }
+
+    foreach ($state in $plan) {
+        if ($state.Owned) {
+            # Re-check immediately before the destructive action so a listener
+            # change after the plan was built can never redirect the stop.
+            $currentListener = Get-ListeningPid -Port $state.Service.Port
+            if ($currentListener -eq $state.SavedPid -and (Test-ProcessExists -Id $state.SavedPid)) {
+                Stop-ProcessById -Id $state.SavedPid
+                Remove-ServicePidFile -Path $state.Service.PidFile
+            } else {
+                Write-Warning "$($state.Service.Name): ownership changed before stop; no process was stopped."
+                if ($FailOnConflict) {
+                    throw 'Full-stack replacement refused because service ownership changed during stop.'
+                }
+            }
+        } elseif ($state.StalePidFile -and -not $state.ListenerPid) {
+            Remove-ServicePidFile -Path $state.Service.PidFile
         }
     }
-    
-    # Stop by listening ports
-    foreach ($port in @($SimulatorUiPort, $AdminUiPort, $BackendPort)) {
-        $listener = Get-ListeningPid -Port $port
-        if ($listener) {
-            Stop-ProcessById $listener
-        }
+
+    if ($conflicts.Count -eq 0) {
+        Write-Host "     Owned services stopped." -ForegroundColor Green
+        return $true
     }
-    
-    Write-Host "     All services stopped." -ForegroundColor Green
+    Write-Warning 'One or more services were not stopped because ownership was not proven.'
+    return $false
 }
 
 # --- Main Logic ---
@@ -424,46 +557,28 @@ Write-Host "=== GEO Full Stack (Backend + Admin UI + Simulator UI) ===" -Foregro
 Write-Host "Action: $Action" -ForegroundColor Gray
 Write-Host ""
 
-$Tools = Get-ProjectTools
-Write-Host "[OK] Python: $($Tools.Python)" -ForegroundColor Green
-Write-Host "[OK] npm: $($Tools.Npm)" -ForegroundColor Green
-$Python = $Tools.Python
-$DatabasePreflightComplete = $false
-
-if ($Action -eq 'restart') {
-    Set-EnvOverrides -Pairs $BackendEnv
-    $EffectiveDatabaseUrl = Get-EffectiveDatabaseUrl -PythonExe $Python
-    if ($ResetDb -and $EffectiveDatabaseUrl -ne $DefaultDatabaseUrl) {
-        throw '-ResetDb is restricted to the default .local-run SQLite DB; legacy or custom DATABASE_URL values are never deleted.'
-    }
-    $DatabasePreflightComplete = $true
-}
+$Services = @(Get-FullStackServices)
 
 switch ($Action) {
     'status' {
         Write-Host ""
         Write-Host "--- Service Status ---" -ForegroundColor Cyan
         
-        $services = @(
-            @{ Name = "Backend"; Port = $BackendPort; PidFile = $BackendPidPath },
-            @{ Name = "Admin UI"; Port = $AdminUiPort; PidFile = $AdminUiPidPath },
-            @{ Name = "Simulator UI"; Port = $SimulatorUiPort; PidFile = $SimulatorUiPidPath }
-        )
-        
-        foreach ($svc in $services) {
+        foreach ($svc in $Services) {
             Remove-StalePidFile $svc.PidFile
-            $savedProcId = Get-PidFromFile $svc.PidFile
-            $listener = Get-ListeningPid -Port $svc.Port
+            $state = Get-ServiceStopState -Service $svc
 
             $status = $null
             $color = $null
 
-            if ($listener) {
-                $status = "Running (PID $listener)"
+            if ($state.Owned) {
+                $status = "Running (owned PID $($state.ListenerPid))"
                 $color = "Green"
-            } elseif ($savedProcId) {
-                # PID file exists and process is alive (stale files are cleaned in Remove-StalePidFile).
-                $status = "Starting / Not listening yet (PID $savedProcId)"
+            } elseif ($state.ListenerPid) {
+                $status = "Port occupied (unowned PID $($state.ListenerPid))"
+                $color = "Yellow"
+            } elseif ($state.SavedPid) {
+                $status = "Saved PID not listening ($($state.SavedPid))"
                 $color = "Yellow"
             } else {
                 $status = "Stopped"
@@ -480,27 +595,25 @@ switch ($Action) {
     }
 
     'stop' {
-        Stop-AllServices
-        exit 0
-    }
-
-    'restart' {
-        Stop-AllServices
-        Start-Sleep -Milliseconds 1000
-        # Fall through to 'start'
+        $allStopped = Stop-AllServices -Services $Services
+        if ($allStopped) { exit 0 }
+        exit 1
     }
 }
 
 # --- START action ---
 
-# Apply env overrides early so child processes inherit them.
-if (-not $DatabasePreflightComplete) {
-    Set-EnvOverrides -Pairs $BackendEnv
-    $EffectiveDatabaseUrl = Get-EffectiveDatabaseUrl -PythonExe $Python
-}
-$SafeDatabaseDisplayUrl = Get-SafeDatabaseDisplayUrl `
-    -PythonExe $Python `
-    -DatabaseUrl $EffectiveDatabaseUrl
+# Every fallible settings/summary/reset/ownership check completes before the
+# first process is stopped. This preserves a running stack when replacement
+# cannot safely proceed.
+$Tools = Get-ProjectTools
+Write-Host "[OK] Python: $($Tools.Python)" -ForegroundColor Green
+Write-Host "[OK] npm: $($Tools.Npm)" -ForegroundColor Green
+$Python = $Tools.Python
+
+Set-EnvOverrides -Pairs $BackendEnv
+$EffectiveDatabaseUrl = Get-EffectiveDatabaseUrl -PythonExe $Python
+$SafeDatabaseDisplayUrl = Get-SafeDatabaseDisplayUrl -DatabaseUrl $EffectiveDatabaseUrl
 
 $LocalDatabasePath = if ($EffectiveDatabaseUrl -eq $DefaultDatabaseUrl) {
     $DefaultDatabasePath
@@ -513,9 +626,19 @@ $LocalDatabasePath = if ($EffectiveDatabaseUrl -eq $DefaultDatabaseUrl) {
 if ($ResetDb -and $EffectiveDatabaseUrl -ne $DefaultDatabaseUrl) {
     throw '-ResetDb is restricted to the default .local-run SQLite DB; legacy or custom DATABASE_URL values are never deleted.'
 }
+if ($NoInstall -and -not (Test-Path (Join-Path $AdminUiDir 'node_modules'))) {
+    throw '-NoInstall used but admin-ui/node_modules not found. Run without -NoInstall once (or run npm install in admin-ui).'
+}
+if ($NoInstall -and -not (Test-Path (Join-Path $SimulatorUiDir 'node_modules'))) {
+    throw '-NoInstall used but simulator-ui/v2/node_modules not found. Run without -NoInstall once (or run npm install in simulator-ui/v2).'
+}
+Assert-ServiceOwnershipForReplacement -Services $Services
 
 Write-Host "[1/8] Cleaning up old processes..." -ForegroundColor Yellow
-Stop-AllServices
+$null = Stop-AllServices -Services $Services -FailOnConflict
+if ($Action -eq 'restart') {
+    Start-Sleep -Milliseconds 1000
+}
 
 if ($ResetDb) {
     Write-Host "[2/8] Resetting database..." -ForegroundColor Yellow
@@ -584,14 +707,6 @@ if (-not $NoInstall) {
     Write-Host "     Dependencies ready" -ForegroundColor Gray
 } else {
     Write-Host "     Skipped (-NoInstall)" -ForegroundColor Gray
-
-    # Guardrail: if we skip install but node_modules are missing, UI starts will fail silently.
-    if (-not (Test-Path (Join-Path $AdminUiDir 'node_modules'))) {
-        throw "-NoInstall used but admin-ui/node_modules not found. Run without -NoInstall once (or run npm install in admin-ui)."
-    }
-    if (-not (Test-Path (Join-Path $SimulatorUiDir 'node_modules'))) {
-        throw "-NoInstall used but simulator-ui/v2/node_modules not found. Run without -NoInstall once (or run npm install in simulator-ui/v2)."
-    }
 }
 
 Write-Host "[7/8] Starting Admin UI (Vite on port $AdminUiPort)..." -ForegroundColor Yellow

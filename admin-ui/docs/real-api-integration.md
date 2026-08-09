@@ -142,12 +142,18 @@ Pick a full community dataset (recommended for graph testing):
 ### 7.1 Start backend + DB (Docker Compose)
 From repo root:
 
-- `docker compose up -d --build`
+- Local development, with the repository's explicit dev defaults:
+  `docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build`
+- Production-like startup uses only `docker-compose.yml`, but first requires
+  non-placeholder `JWT_SECRET`, `ADMIN_TOKEN`, `SIMULATOR_SESSION_SECRET`, and a
+  valid `SIMULATOR_CSRF_ORIGIN_ALLOWLIST`. Running the base file without those
+  values is expected to fail fast.
 
 Migrations run automatically on container start (see `docker/docker-entrypoint.sh`).
 
 Optional seed:
-- `docker compose exec app python scripts/seed_db.py`
+- Local dev stack:
+  `docker compose -f docker-compose.yml -f docker-compose.dev.yml exec app python scripts/seed_db.py`
 
 ### 7.1b Start backend locally (no Docker)
 
