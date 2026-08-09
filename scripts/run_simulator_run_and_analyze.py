@@ -173,6 +173,11 @@ def main() -> int:
     ap.add_argument("--min-amount", type=float, default=50.0)
     ap.add_argument("--max-amount", type=float, default=1500.0)
     ap.add_argument("--out-dir", default=str(Path(".local-run") / "analysis"))
+    ap.add_argument(
+        "--db",
+        default=str(Path(".local-run") / "geov0.db"),
+        help="SQLite DB used for the post-run payment analysis",
+    )
     ap.add_argument("--timeout-sec", type=int, default=30, help="HTTP client timeout (seconds)")
     args = ap.parse_args()
 
@@ -339,7 +344,8 @@ def main() -> int:
         except Exception:
             print("run.counters=unavailable (failed to parse summary.json)")
 
-    db = sqlite3.connect("file:geov0.db?mode=ro", uri=True)
+    db_path = Path(args.db).resolve()
+    db = sqlite3.connect(f"file:{db_path.as_posix()}?mode=ro", uri=True)
     window = _load_run_window(db, run_id)
 
     if not window:

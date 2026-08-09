@@ -60,6 +60,36 @@ def test_settings_guardrail_test_allows_default_secrets() -> None:
     )
 
 
+def test_default_database_uses_ignored_runtime_root(monkeypatch) -> None:
+    from app.config import Settings
+
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    configured = Settings(_env_file=None, ENV="dev")
+
+    assert configured.DATABASE_URL == "sqlite+aiosqlite:///./.local-run/geov0.db"
+
+
+def test_explicit_legacy_root_database_override_is_preserved(monkeypatch) -> None:
+    from app.config import Settings
+
+    monkeypatch.setenv("DATABASE_URL", "sqlite+aiosqlite:///./geov0.db")
+    configured = Settings(_env_file=None, ENV="dev")
+
+    assert configured.DATABASE_URL == "sqlite+aiosqlite:///./geov0.db"
+
+
+def test_default_database_parent_is_created_on_clean_bootstrap(
+    tmp_path, monkeypatch
+) -> None:
+    from app.config import Settings
+    from app.db.session import _ensure_default_sqlite_parent
+
+    monkeypatch.chdir(tmp_path)
+    _ensure_default_sqlite_parent(Settings.DEFAULT_SQLITE_DATABASE_URL)
+
+    assert (tmp_path / ".local-run").is_dir()
+
+
 @pytest.mark.parametrize(
     ("alias", "canonical"),
     [

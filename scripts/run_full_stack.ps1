@@ -90,6 +90,10 @@ $AdminUiDir = Join-Path $RepoRoot 'admin-ui'
 $SimulatorUiDir = Join-Path $RepoRoot 'simulator-ui/v2'
 $AdminEnvLocalPath = Join-Path $AdminUiDir '.env.local'
 $SimulatorEnvLocalPath = Join-Path $SimulatorUiDir '.env.local'
+$DefaultDatabaseUrl = 'sqlite+aiosqlite:///./.local-run/geov0.db'
+$LegacyRootDatabaseUrl = 'sqlite+aiosqlite:///./geov0.db'
+$DefaultDatabasePath = Join-Path $StateDir 'geov0.db'
+$LegacyRootDatabasePath = Join-Path $RepoRoot 'geov0.db'
 
 # Create state directory
 if (-not (Test-Path $StateDir)) {
@@ -444,14 +448,28 @@ switch ($Action) {
 # Apply env overrides early so child processes inherit them.
 Set-EnvOverrides -Pairs $BackendEnv
 
+if ([string]::IsNullOrWhiteSpace($env:DATABASE_URL)) {
+    $env:DATABASE_URL = $DefaultDatabaseUrl
+}
+
+$LocalDatabasePath = if ($env:DATABASE_URL -eq $DefaultDatabaseUrl) {
+    $DefaultDatabasePath
+} elseif ($env:DATABASE_URL -eq $LegacyRootDatabaseUrl) {
+    $LegacyRootDatabasePath
+} else {
+    $null
+}
+
 Write-Host "[1/8] Cleaning up old processes..." -ForegroundColor Yellow
 Stop-AllServices
 
 if ($ResetDb) {
     Write-Host "[2/8] Resetting database..." -ForegroundColor Yellow
-    $dbPath = Join-Path $RepoRoot 'geov0.db'
-    if (Test-Path $dbPath) {
-        Remove-Item -Force $dbPath
+    if (-not $LocalDatabasePath) {
+        throw '-ResetDb supports only the default local SQLite DB or the documented legacy root override.'
+    }
+    if (Test-Path $LocalDatabasePath) {
+        Remove-Item -Force $LocalDatabasePath
         Write-Host "     Deleted existing DB" -ForegroundColor Gray
     }
     Invoke-PythonScript -PythonExe $Python -ScriptPath (Join-Path $RepoRoot 'scripts\init_sqlite_db.py') -Description "init_sqlite_db.py"
@@ -460,15 +478,16 @@ if ($ResetDb) {
     Write-Host "     DB initialized with $FixturesCommunity" -ForegroundColor Green
 } else {
     Write-Host "[2/8] Checking database..." -ForegroundColor Yellow
-    $dbPath = Join-Path $RepoRoot 'geov0.db'
-    if (-not (Test-Path $dbPath)) {
+    if (-not $LocalDatabasePath) {
+        Write-Host "     Using explicit DATABASE_URL; automatic SQLite initialization is skipped." -ForegroundColor Gray
+    } elseif (-not (Test-Path $LocalDatabasePath)) {
         Write-Host "     DB not found, initializing..." -ForegroundColor Gray
         Invoke-PythonScript -PythonExe $Python -ScriptPath (Join-Path $RepoRoot 'scripts\init_sqlite_db.py') -Description "init_sqlite_db.py"
         $seedArgs = @('--source', 'fixtures', '--community', $FixturesCommunity, '--regenerate-fixtures')
         Invoke-PythonScript -PythonExe $Python -ScriptPath (Join-Path $RepoRoot 'scripts\seed_db.py') -Arguments $seedArgs -Description "seed_db.py"
         Write-Host "     DB initialized with $FixturesCommunity" -ForegroundColor Green
     } else {
-        Write-Host "     DB exists: $dbPath" -ForegroundColor Gray
+        Write-Host "     DB exists: $LocalDatabasePath" -ForegroundColor Gray
     }
 }
 
@@ -597,7 +616,7 @@ Write-Host "  Backend API:   " -NoNewline; Write-Host "http://127.0.0.1:$Backend
 Write-Host "  Admin UI:      " -NoNewline; Write-Host "http://localhost:$AdminUiPort/" -ForegroundColor Cyan
 Write-Host "  Simulator UI:  " -NoNewline; Write-Host "http://localhost:$SimulatorUiPort/?mode=real" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "  Database:      " -NoNewline; Write-Host "$RepoRoot\geov0.db" -ForegroundColor Gray
+Write-Host "  Database URL:  " -NoNewline; Write-Host "$env:DATABASE_URL" -ForegroundColor Gray
 Write-Host "  Logs:          " -NoNewline; Write-Host "$StateDir" -ForegroundColor Gray
 Write-Host ""
 Write-Host "All UIs share the same backend and database." -ForegroundColor DarkGray

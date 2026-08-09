@@ -26,7 +26,7 @@
 
 .EXAMPLE
     .\run_local.ps1 -Action check-db
-    Быстро проверить целостность текущей SQLite DB (geov0.db).
+    Быстро проверить целостность текущей SQLite DB (.local-run/geov0.db).
 
 .EXAMPLE
     .\run_local.ps1 -Action status -Verbose
@@ -81,6 +81,22 @@ $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $StateDir = Join-Path $RepoRoot '.local-run'
 $UiDir = Join-Path $RepoRoot 'admin-ui'
 $EnvLocalPath = Join-Path $UiDir '.env.local'
+$DefaultDatabaseUrl = 'sqlite+aiosqlite:///./.local-run/geov0.db'
+$LegacyRootDatabaseUrl = 'sqlite+aiosqlite:///./geov0.db'
+$DefaultDatabasePath = Join-Path $StateDir 'geov0.db'
+$LegacyRootDatabasePath = Join-Path $RepoRoot 'geov0.db'
+
+if ([string]::IsNullOrWhiteSpace($env:DATABASE_URL)) {
+    $env:DATABASE_URL = $DefaultDatabaseUrl
+}
+
+$LocalDatabasePath = if ($env:DATABASE_URL -eq $DefaultDatabaseUrl) {
+    $DefaultDatabasePath
+} elseif ($env:DATABASE_URL -eq $LegacyRootDatabaseUrl) {
+    $LegacyRootDatabasePath
+} else {
+    $null
+}
 
 # Создаем директорию для логов и PID-файлов
 if (-not (Test-Path $StateDir)) {
@@ -612,10 +628,12 @@ switch ($Action) {
     }
 
     'reset-db' {
-        $dbPath = Join-Path $RepoRoot 'geov0.db'
-        if (Test-Path $dbPath) {
-            Remove-Item -Force $dbPath
-            Write-Host "Deleted existing DB: $dbPath"
+        if (-not $LocalDatabasePath) {
+            throw 'reset-db supports only the default local SQLite DB or the documented legacy root override.'
+        }
+        if (Test-Path $LocalDatabasePath) {
+            Remove-Item -Force $LocalDatabasePath
+            Write-Host "Deleted existing DB: $LocalDatabasePath"
         }
 
         Write-Host "Initializing DB..."
@@ -627,12 +645,14 @@ switch ($Action) {
     }
 
     'check-db' {
-        $dbPath = Join-Path $RepoRoot 'geov0.db'
-        if (-not (Test-Path $dbPath)) {
-            throw "DB not found: $dbPath. Run: .\scripts\run_local.ps1 reset-db"
+        if (-not $LocalDatabasePath) {
+            throw 'check-db supports only the default local SQLite DB or the documented legacy root override.'
+        }
+        if (-not (Test-Path $LocalDatabasePath)) {
+            throw "DB not found: $LocalDatabasePath. Run: .\scripts\run_local.ps1 reset-db"
         }
 
-        Invoke-PythonScript -PythonExe $Python -ScriptPath (Join-Path $RepoRoot 'scripts\check_sqlite_db.py') -Description "check_sqlite_db.py"
+        Invoke-PythonScript -PythonExe $Python -ScriptPath (Join-Path $RepoRoot 'scripts\check_sqlite_db.py') -Arguments @('--db', $LocalDatabasePath) -Description "check_sqlite_db.py"
         exit 0
     }
 
@@ -721,16 +741,17 @@ switch ($Action) {
         Write-Host "     Done." -ForegroundColor Gray
 
         Write-Host "[2/7] Checking database..." -ForegroundColor Yellow
-        $dbPath = Join-Path $RepoRoot 'geov0.db'
-        if (-not (Test-Path $dbPath)) {
+        if (-not $LocalDatabasePath) {
+            Write-Host "     Using explicit DATABASE_URL; automatic SQLite initialization is skipped." -ForegroundColor Gray
+        } elseif (-not (Test-Path $LocalDatabasePath)) {
             Write-Host "     DB not found, initializing..." -ForegroundColor Gray
             Invoke-PythonScript -PythonExe $Python -ScriptPath (Join-Path $RepoRoot 'scripts\init_sqlite_db.py') -Description "init_sqlite_db.py"
             $seedArgs = Get-SeedDbArgs -SeedSource $SeedSource -FixturesCommunity $FixturesCommunity -RegenerateFixtures:$RegenerateFixtures
             Invoke-PythonScript -PythonExe $Python -ScriptPath (Join-Path $RepoRoot 'scripts\seed_db.py') -Arguments $seedArgs -Description "seed_db.py"
             Write-Host "     DB initialized with seed source: $SeedSource" -ForegroundColor Gray
         } else {
-            Write-Host "     DB exists: $dbPath" -ForegroundColor Gray
-            if ($SeedSource -eq 'fixtures' -and (Test-DbLooksLikeTinyTestSeed -PythonExe $Python -DbPath $dbPath)) {
+            Write-Host "     DB exists: $LocalDatabasePath" -ForegroundColor Gray
+            if ($SeedSource -eq 'fixtures' -and (Test-DbLooksLikeTinyTestSeed -PythonExe $Python -DbPath $LocalDatabasePath)) {
                 Write-Warning "DB looks like a tiny '(Test)' seed set. For full Greenfield/Riverside data run: .\scripts\run_local.ps1 reset-db -SeedSource fixtures -FixturesCommunity greenfield-village-100"
             }
         }

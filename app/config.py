@@ -51,7 +51,10 @@ class Settings(BaseSettings):
     )
 
     # Database
-    DATABASE_URL: str = "sqlite+aiosqlite:///./geov0.db"
+    DEFAULT_SQLITE_DATABASE_URL: ClassVar[str] = (
+        "sqlite+aiosqlite:///./.local-run/geov0.db"
+    )
+    DATABASE_URL: str = DEFAULT_SQLITE_DATABASE_URL
 
     # Database pool (applies to client/server DBs like Postgres; SQLite uses NullPool)
     DB_POOL_PRE_PING: bool = True

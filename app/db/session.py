@@ -1,9 +1,21 @@
+from pathlib import Path
+
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy import event
 from sqlalchemy.pool import NullPool
 from sqlalchemy.engine.url import make_url
 
 from app.config import settings
+
+
+def _ensure_default_sqlite_parent(url: str) -> None:
+    """Create only the repository-owned parent for the default development DB."""
+
+    if url != settings.DEFAULT_SQLITE_DATABASE_URL:
+        return
+    database = make_url(url).database
+    if database:
+        Path(database).parent.mkdir(parents=True, exist_ok=True)
 
 
 def _create_engine():
@@ -15,6 +27,7 @@ def _create_engine():
 
     # SQLite (especially aiosqlite) is not well-served by connection pooling.
     if url.startswith("sqlite"):
+        _ensure_default_sqlite_parent(url)
         engine = create_async_engine(
             url,
             poolclass=NullPool,
