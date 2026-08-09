@@ -331,6 +331,7 @@ const {
  */
 
 const graphEffectRequests = useLatestRequest()
+let pendingGraphLoad: Promise<unknown> | null = null
 
 onMounted(async () => {
   restoreStorage()
@@ -362,15 +363,26 @@ function renderAnyway() {
   applyGraphView({ fit: true })
 }
 
-async function reloadGraph(rebuildOptions: { fit: boolean; preserveViewport?: boolean }) {
+function reloadGraph(rebuildOptions: { fit: boolean; preserveViewport?: boolean }) {
   const request = graphEffectRequests.begin()
-  await reloadGraphView({
+  const operation = reloadGraphView({
     loadData,
     isCurrent: request.isCurrent,
     afterLoad: async () => { await nextTick() },
     applyView: applyGraphView,
     rebuildOptions,
   })
+  let tracked!: Promise<boolean>
+  tracked = operation.finally(() => {
+    if (pendingGraphLoad === tracked) pendingGraphLoad = null
+  })
+  pendingGraphLoad = tracked
+  return tracked
+}
+
+async function waitForPendingGraphLoad() {
+  const pending = pendingGraphLoad
+  if (pending) await pending
 }
 
 function reloadAll() {
@@ -397,6 +409,7 @@ useGraphPageWatchers({
   refreshForFocusMode,
   refreshSnapshotForEq,
   refreshClearingCyclesForParticipant,
+  waitForPendingGraphLoad,
   selected,
   showLabels,
   labelModeBusiness,

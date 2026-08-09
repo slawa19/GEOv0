@@ -25,6 +25,7 @@ export function useGraphPageWatchers(opts: {
   refreshForFocusMode: () => Promise<boolean>
   refreshSnapshotForEq: () => Promise<boolean>
   refreshClearingCyclesForParticipant: (pid: string) => Promise<boolean>
+  waitForPendingGraphLoad?: () => Promise<void>
 
   selected: Ref<SelectedInfo | null>
 
@@ -93,6 +94,8 @@ export function useGraphPageWatchers(opts: {
     rebuildOptions: { fit: boolean },
   ) {
     const refreshRequest = watcherRefreshRequests.begin()
+    await opts.waitForPendingGraphLoad?.()
+    if (!refreshRequest.isCurrent()) return
     const applied = await refresh()
     if (!applied || !refreshRequest.isCurrent()) return
     // A watcher only supersedes an in-flight mount/manual render after its own

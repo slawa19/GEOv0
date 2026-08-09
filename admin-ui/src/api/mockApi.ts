@@ -212,6 +212,7 @@ let mockParticipants: Participant[] | null = null
 let mockEquivalents: Equivalent[] | null = null
 let mockAuditLog: AuditLogEntry[] | null = null
 let mockIncidents: Incident[] | null | undefined
+const mockAbortedTransactionIds = new Set<string>()
 
 function roleFromLocalStorage(): string {
   const v = (localStorage.getItem('admin-ui.role') || '').trim().toLowerCase()
@@ -255,9 +256,32 @@ async function getAuditLogDataset(): Promise<AuditLogEntry[]> {
 async function getIncidentsDataset(): Promise<Incident[] | null> {
   if (mockIncidents === undefined) {
     const dataset = await loadOptionalJson<{ items: Incident[] } | null>('datasets/incidents.json', null)
-    mockIncidents = dataset?.items ?? null
+    // A missing optional fixture is retried on the next request. Caching the
+    // fallback would turn one transient fetch failure into a session-long empty
+    // incident list.
+    if (dataset) mockIncidents = dataset.items
+    return dataset?.items ?? null
   }
   return mockIncidents
+}
+
+async function getGraphAuditLogDataset(): Promise<AuditLogEntry[]> {
+  if (mockAuditLog) return mockAuditLog
+  const raw = await loadOptionalJson<unknown | null>('datasets/audit-log.json', null)
+  if (raw === null) return []
+  try {
+    const decoded = decodeAdminResponse(
+      AdminAuditLogSchema,
+      raw,
+      'mock GET /api/v1/admin/graph/snapshot audit-log',
+    )
+    mockAuditLog = decoded
+    return decoded
+  } catch {
+    // audit_log is an optional Graph snapshot component in fixture mode. The
+    // dedicated audit endpoint remains strict and reports malformed fixtures.
+    return []
+  }
 }
 
 function normalizeEqCode(code: string): string {
@@ -778,12 +802,19 @@ export const mockApi = {
       }
       const updated = Object.keys(validatedPatch.data)
       const beforeState = Object.fromEntries(updated.map((key) => [key, mockConfig![key]]))
-      mockConfig = decodeAdminResponse(
+      const nextConfig = decodeAdminResponse(
         AdminConfigSchema,
         { ...mockConfig, ...validatedPatch.data },
         'mock PATCH /api/v1/admin/config',
       )
-      const afterState = Object.fromEntries(updated.map((key) => [key, mockConfig![key]]))
+      const afterState = Object.fromEntries(
+        updated.map((key) => [key, (nextConfig as Record<string, unknown>)[key]]),
+      )
+      const response = decodeAdminResponse(
+        AdminConfigPatchResponseSchema,
+        { updated },
+        'mock PATCH /api/v1/admin/config',
+      )
       await appendAuditLog({
         action: 'admin.config.patch',
         object_type: 'config',
@@ -792,13 +823,10 @@ export const mockApi = {
         before_state: beforeState,
         after_state: afterState,
       })
+      mockConfig = nextConfig
       return {
         success: true,
-        data: decodeAdminResponse(
-          AdminConfigPatchResponseSchema,
-          { updated },
-          'mock PATCH /api/v1/admin/config',
-        ),
+        data: response,
       }
     })
   },
@@ -831,7 +859,7 @@ export const mockApi = {
       for (const key of ['multipath_enabled', 'full_multipath_enabled', 'clearing_enabled'] as const) {
         if (typeof patch[key] === 'boolean') next[key] = patch[key]
       }
-      mockFlags = decodeAdminResponse(
+      const updated = decodeAdminResponse(
         AdminFeatureFlagsSchema,
         next,
         'mock PATCH /api/v1/admin/feature-flags',
@@ -842,9 +870,10 @@ export const mockApi = {
         object_id: null,
         reason: null,
         before_state: before,
-        after_state: { ...mockFlags },
+        after_state: { ...updated },
       })
-      return { success: true, data: mockFlags }
+      mockFlags = updated
+      return { success: true, data: updated }
     })
   },
 
@@ -1068,15 +1097,16 @@ export const mockApi = {
         { pid, status: 'suspended' },
         'mock POST /api/v1/admin/participants/{pid}/freeze',
       )
-      p.status = response.status
+      const after = { ...p, status: response.status }
       await appendAuditLog({
         action: 'admin.participants.freeze',
         object_type: 'participant',
         object_id: pid,
         reason,
         before_state: before,
-        after_state: { ...p },
+        after_state: after,
       })
+      Object.assign(p, after)
       return { success: true, data: response }
     })
   },
@@ -1093,15 +1123,16 @@ export const mockApi = {
         { pid, status: 'active' },
         'mock POST /api/v1/admin/participants/{pid}/unfreeze',
       )
-      p.status = response.status
+      const after = { ...p, status: response.status }
       await appendAuditLog({
         action: 'admin.participants.unfreeze',
         object_type: 'participant',
         object_id: pid,
         reason,
         before_state: before,
-        after_state: { ...p },
+        after_state: after,
       })
+      Object.assign(p, after)
       return { success: true, data: response }
     })
   },
@@ -1213,7 +1244,6 @@ export const mockApi = {
         }),
         'mock POST /api/v1/admin/equivalents',
       )
-      all.unshift(created)
       await appendAuditLog({
         action: 'admin.equivalents.create',
         object_type: 'equivalent',
@@ -1222,6 +1252,7 @@ export const mockApi = {
         before_state: null,
         after_state: created,
       })
+      all.unshift(created)
       return { success: true, data: { created } }
     })
   },
@@ -1246,15 +1277,15 @@ export const mockApi = {
         }),
         'mock PATCH /api/v1/admin/equivalents/{code}',
       )
-      Object.assign(eq, updated)
       await appendAuditLog({
         action: 'admin.equivalents.patch',
         object_type: 'equivalent',
         object_id: key,
         reason: 'update',
         before_state: before,
-        after_state: { ...eq },
+        after_state: updated,
       })
+      Object.assign(eq, updated)
       return { success: true, data: { updated } }
     })
   },
@@ -1272,15 +1303,15 @@ export const mockApi = {
         toMockEquivalentWire({ ...eq, is_active: Boolean(isActive) }),
         'mock PATCH /api/v1/admin/equivalents/{code}',
       )
-      Object.assign(eq, updated)
       await appendAuditLog({
         action: 'admin.equivalents.patch',
         object_type: 'equivalent',
         object_id: key,
         reason,
         before_state: before,
-        after_state: { ...eq },
+        after_state: updated,
       })
+      Object.assign(eq, updated)
       return { success: true, data: { updated } }
     })
   },
@@ -1326,8 +1357,6 @@ export const mockApi = {
         { deleted: key },
         'mock DELETE /api/v1/admin/equivalents/{code}',
       )
-      all.splice(idx, 1)
-
       await appendAuditLog({
         action: 'admin.equivalents.delete',
         object_type: 'equivalent',
@@ -1336,6 +1365,7 @@ export const mockApi = {
         before_state: before,
         after_state: null,
       })
+      all.splice(idx, 1)
 
       return { success: true, data: response }
     })
@@ -1353,20 +1383,23 @@ export const mockApi = {
       const incidentIndex = incidents?.findIndex((incident) => incident.tx_id === txId) ?? -1
       const transactions = await loadOptionalJson<Transaction[]>('datasets/transactions.json', [])
       const knownTransaction = transactions.find((transaction) => transaction.tx_id === txId)
+      const alreadyAborted = mockAbortedTransactionIds.has(txId)
+      if (incidentIndex < 0 && !knownTransaction && !alreadyAborted) {
+        return { success: false, error: { code: 'NOT_FOUND', message: 'transaction not found' } }
+      }
       if (knownTransaction?.state === 'COMMITTED') {
         return { success: false, error: { code: 'CONFLICT', message: 'Transaction is already committed' } }
       }
       const before = incidentIndex >= 0 && incidents
         ? { ...incidents[incidentIndex] }
-        : knownTransaction
+          : knownTransaction
           ? { state: knownTransaction.state, error: knownTransaction.error ?? null }
-          : { state: 'unknown', error: null }
+          : { state: 'ABORTED', error: null }
       const response = decodeAdminResponse(
         AdminAbortTxResponseSchema,
         { tx_id: txId, status: 'aborted' },
         'mock POST /api/v1/admin/transactions/{tx_id}/abort',
       )
-      if (incidentIndex >= 0) incidents?.splice(incidentIndex, 1)
       await appendAuditLog({
         action: 'admin.transactions.abort',
         object_type: 'transaction',
@@ -1375,6 +1408,14 @@ export const mockApi = {
         before_state: before,
         after_state: { state: 'ABORTED' },
       })
+      if (incidentIndex >= 0) incidents?.splice(incidentIndex, 1)
+      if (knownTransaction) {
+        knownTransaction.state = 'ABORTED'
+        knownTransaction.error = { code: 'E010', message: reason, details: {} }
+        knownTransaction.updated_at = nowIso()
+      } else {
+        mockAbortedTransactionIds.add(txId)
+      }
       return { success: true, data: response }
     })
   },
@@ -1392,7 +1433,7 @@ export const mockApi = {
         getIncidentsDataset().then((items) => items ?? []),
         loadJson<Equivalent[]>('datasets/equivalents.json'),
         loadOptionalJson<Debt[]>('datasets/debts.json', []),
-        getAuditLogDataset(),
+        getGraphAuditLogDataset(),
         loadOptionalJson<Transaction[]>('datasets/transactions.json', []),
       ])
 
@@ -1497,6 +1538,7 @@ export function __resetMockApiForTests() {
   mockEquivalents = null
   mockAuditLog = null
   mockIncidents = undefined
+  mockAbortedTransactionIds.clear()
   lastToastAt = 0
   lastToastMsg = ''
 }

@@ -86,11 +86,81 @@ describe('useGraphPageWatchers', () => {
     } else {
       expect(mountRequest.isCurrent()).toBe(true)
       expect(applyGraphView).not.toHaveBeenCalled()
-      applyGraphView({ fit: true })
-      expect(applyGraphView).toHaveBeenCalledTimes(1)
-      expect(applyGraphView).toHaveBeenLastCalledWith({ fit: true })
     }
 
+    scope.stop()
+  })
+
+  it('waits for the mount data owner before starting a watcher refresh', async () => {
+    const pendingMount = deferred<void>()
+    const refreshSnapshotForEq = vi.fn().mockResolvedValue(false)
+    const applyGraphView = vi.fn().mockReturnValue(true)
+    const eq = ref('')
+    const scope = effectScope()
+    let mountRequest!: LatestRequest
+
+    scope.run(() => {
+      const graphEffectRequests = useLatestRequest()
+      mountRequest = graphEffectRequests.begin()
+      useGraphPageWatchers({
+        isRealMode: computed(() => false),
+        eq,
+        statusFilter: ref<string[]>(['active']),
+        threshold: ref('0.10'),
+        showIncidents: ref(true),
+        hideIsolates: ref(true),
+        typeFilter: ref<string[]>([]),
+        minDegree: ref(0),
+        focusMode: ref(false),
+        focusDepth: ref<1 | 2>(1),
+        focusRootPid: ref(''),
+        ensureFocusRootPid: vi.fn(),
+        refreshForFocusMode: vi.fn().mockResolvedValue(false),
+        refreshSnapshotForEq,
+        refreshClearingCyclesForParticipant: vi.fn().mockResolvedValue(true),
+        waitForPendingGraphLoad: () => pendingMount.promise,
+        selected: ref<SelectedInfo | null>(null),
+        showLabels: ref(true),
+        labelModeBusiness: ref('name'),
+        labelModePerson: ref('name'),
+        autoLabelsByZoom: ref(true),
+        minZoomLabelsAll: ref(1),
+        minZoomLabelsPerson: ref(1),
+        searchQuery: ref(''),
+        focusPid: ref(''),
+        zoom: ref(1),
+        layoutName: ref('fcose'),
+        layoutSpacing: ref(1),
+        graphEffectRequests,
+        applyGraphView,
+        graphViz: {
+          rebuildGraph: vi.fn(),
+          runLayout: vi.fn(),
+          clearCycleHighlight: vi.fn(),
+          clearConnectionHighlight: vi.fn(),
+          applySelectedHighlight: vi.fn(),
+          applyStyle: vi.fn(),
+          updateLabelsForZoom: vi.fn(),
+          updateSearchHighlights: vi.fn(),
+          syncZoomFromControl: vi.fn(),
+        },
+      })
+    })
+
+    eq.value = 'UAH'
+    await nextTick()
+    expect(refreshSnapshotForEq).not.toHaveBeenCalled()
+    expect(mountRequest.isCurrent()).toBe(true)
+
+    applyGraphView({ fit: true })
+    pendingMount.resolve()
+    await pendingMount.promise
+    await nextTick()
+
+    expect(refreshSnapshotForEq).toHaveBeenCalledTimes(1)
+    expect(mountRequest.isCurrent()).toBe(true)
+    expect(applyGraphView).toHaveBeenCalledTimes(1)
+    expect(applyGraphView).toHaveBeenCalledWith({ fit: true })
     scope.stop()
   })
 

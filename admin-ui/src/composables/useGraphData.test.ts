@@ -159,6 +159,31 @@ describe('useGraphData', () => {
     expect(g.availableEquivalents.value).toEqual(['EUR', 'USD'])
   })
 
+  it('does not claim mock focus data is ready while the full snapshot is loading', async () => {
+    const snapshot = deferred<ReturnType<typeof snapshotEnvelope>>()
+    const cycles = deferred<ReturnType<typeof cyclesEnvelope>>()
+    apiMock.graphSnapshot.mockReturnValueOnce(snapshot.promise)
+    apiMock.clearingCycles.mockReturnValueOnce(cycles.promise)
+    const graph = useGraphData({
+      eq: ref('EUR'),
+      isRealMode: ref(false),
+      focusMode: ref(true),
+      focusRootPid: ref('PID_A'),
+      focusDepth: ref(1),
+      statusFilter: ref<string[]>([]),
+    })
+
+    const pending = graph.loadData()
+    expect(graph.loading.value).toBe(true)
+    await expect(graph.refreshForFocusMode()).resolves.toBe(false)
+
+    snapshot.resolve(snapshotEnvelope('READY'))
+    cycles.resolve(cyclesEnvelope('READY'))
+    await pending
+
+    await expect(graph.refreshForFocusMode()).resolves.toBe(true)
+  })
+
   it('keeps the newest graph load when an older load rejects last', async () => {
     const olderSnapshot = deferred<ReturnType<typeof snapshotEnvelope>>()
     const latestSnapshot = deferred<ReturnType<typeof snapshotEnvelope>>()

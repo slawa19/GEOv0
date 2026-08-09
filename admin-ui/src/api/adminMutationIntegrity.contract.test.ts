@@ -73,6 +73,15 @@ function useMockApiFixtures(overrides?: Record<string, unknown>) {
     'datasets/trustlines.json': [],
     'datasets/debts.json': [],
     'datasets/audit-log.json': [],
+    'datasets/transactions.json': [{
+      tx_id: 'TX_1',
+      type: 'PAYMENT',
+      initiator_pid: 'PID_A',
+      payload: {},
+      state: 'WAITING',
+      created_at: '2026-08-08T10:00:00Z',
+      updated_at: '2026-08-08T10:00:00Z',
+    }],
     'datasets/integrity-status.json': integrityStatus,
     ...overrides,
   }

@@ -242,7 +242,9 @@ export function useGraphData(opts: {
   }
 
   async function refreshForFocusMode(): Promise<boolean> {
-    if (!opts.isRealMode.value) return true
+    // Mock focus mode only rebuilds the already-loaded snapshot. While the
+    // initial/full load is pending there is no stable data for a watcher render.
+    if (!opts.isRealMode.value) return !loading.value
 
     const viewRequest = viewRequests.begin()
     const cycleRequest = cycleRequests.begin()

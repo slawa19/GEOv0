@@ -59,6 +59,19 @@ function installFixtures() {
   }) as unknown as typeof fetch)
 }
 
+function transactionFixture(txId: string, state = 'WAITING') {
+  return {
+    tx_id: txId,
+    type: 'PAYMENT',
+    initiator_pid: 'PID_A',
+    payload: {},
+    state,
+    error: null,
+    created_at: '2026-08-08T12:00:00Z',
+    updated_at: '2026-08-08T12:00:00Z',
+  }
+}
+
 afterEach(() => {
   vi.unstubAllGlobals()
   __resetMockApiForTests()
@@ -114,6 +127,106 @@ describe('mock Admin mutation state and audit contracts', () => {
       object_id: 'TX_STUCK_1',
       after_state: { state: 'ABORTED' },
     })
+
+    expect(assertSuccess(await mockApi.abortTx('TX_STUCK_1', 'repeat recovery'))).toEqual({
+      tx_id: 'TX_STUCK_1',
+      status: 'aborted',
+    })
+  })
+
+  it('rejects an unknown transaction without fabricating an audit entry', async () => {
+    installFixtures()
+
+    await expect(mockApi.abortTx('TX_UNKNOWN', 'operator recovery')).resolves.toEqual({
+      success: false,
+      error: { code: 'NOT_FOUND', message: 'transaction not found' },
+    })
+    expect(assertSuccess(await mockApi.listAuditLog({})).items).toEqual([])
+  })
+
+  it('updates the cached transaction state and abort reason', async () => {
+    installFixtures()
+    const tx = transactionFixture('TX_WAITING')
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/scenarios/happy.json')) return jsonResponse({ name: 'happy', latency_ms: { min: 0, max: 0 } })
+      if (url.endsWith('/datasets/transactions.json')) return jsonResponse([tx])
+      if (url.endsWith('/datasets/audit-log.json')) return jsonResponse([])
+      if (url.endsWith('/datasets/incidents.json')) return new Response('Not Found', { status: 404 })
+      if (url.endsWith('/datasets/participants.json')) return jsonResponse([])
+      if (url.endsWith('/datasets/trustlines.json')) return jsonResponse([])
+      if (url.endsWith('/datasets/equivalents.json')) return jsonResponse([])
+      if (url.endsWith('/datasets/debts.json')) return jsonResponse([])
+      return new Response('Not Found', { status: 404 })
+    })
+
+    assertSuccess(await mockApi.abortTx('TX_WAITING', 'operator recovery'))
+    const snapshot = assertSuccess(await mockApi.graphSnapshot())
+    expect(snapshot.transactions[0]).toMatchObject({
+      tx_id: 'TX_WAITING',
+      state: 'ABORTED',
+      error: { code: 'E010', message: 'operator recovery', details: {} },
+    })
+  })
+
+  it('does not mutate incident, transaction, or config state when audit validation fails', async () => {
+    installFixtures()
+    const tx = transactionFixture('TX_STUCK_1')
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/scenarios/happy.json')) return jsonResponse({ name: 'happy', latency_ms: { min: 0, max: 0 } })
+      if (url.endsWith('/datasets/incidents.json')) return jsonResponse(incidents)
+      if (url.endsWith('/datasets/transactions.json')) return jsonResponse([tx])
+      if (url.endsWith('/datasets/config.json')) return jsonResponse(config)
+      if (url.endsWith('/datasets/audit-log.json')) return jsonResponse({ malformed: true })
+      return new Response('Not Found', { status: 404 })
+    })
+
+    await expect(mockApi.abortTx('TX_STUCK_1', 'operator recovery')).rejects.toMatchObject({
+      code: 'INVALID_RESPONSE',
+    })
+    expect(assertSuccess(await mockApi.listIncidents({})).items.map((item) => item.tx_id)).toEqual(['TX_STUCK_1'])
+    expect(tx).toMatchObject({ state: 'WAITING', error: null })
+
+    await expect(mockApi.patchConfig({ ROUTING_MAX_PATHS: 4 })).rejects.toMatchObject({ code: 'INVALID_RESPONSE' })
+    expect(assertSuccess(await mockApi.getConfig()).ROUTING_MAX_PATHS).toBe(3)
+  })
+
+  it('retries an optional incident fixture after a transient failure', async () => {
+    installFixtures()
+    let incidentAttempts = 0
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/scenarios/happy.json')) return jsonResponse({ name: 'happy', latency_ms: { min: 0, max: 0 } })
+      if (url.endsWith('/datasets/incidents.json')) {
+        incidentAttempts += 1
+        return incidentAttempts === 1
+          ? new Response('temporary', { status: 503 })
+          : jsonResponse(incidents)
+      }
+      return new Response('Not Found', { status: 404 })
+    })
+
+    expect(assertSuccess(await mockApi.listIncidents({})).items).toEqual([])
+    expect(assertSuccess(await mockApi.listIncidents({})).items.map((item) => item.tx_id)).toEqual(['TX_STUCK_1'])
+  })
+
+  it('keeps graph snapshot available when its optional audit fixture is malformed', async () => {
+    installFixtures()
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/scenarios/happy.json')) return jsonResponse({ name: 'happy', latency_ms: { min: 0, max: 0 } })
+      if (url.endsWith('/datasets/audit-log.json')) return jsonResponse({ malformed: true })
+      if (url.endsWith('/datasets/participants.json')) return jsonResponse([])
+      if (url.endsWith('/datasets/trustlines.json')) return jsonResponse([])
+      if (url.endsWith('/datasets/equivalents.json')) return jsonResponse([])
+      if (url.endsWith('/datasets/incidents.json')) return new Response('Not Found', { status: 404 })
+      if (url.endsWith('/datasets/debts.json')) return new Response('Not Found', { status: 404 })
+      if (url.endsWith('/datasets/transactions.json')) return new Response('Not Found', { status: 404 })
+      return new Response('Not Found', { status: 404 })
+    })
+
+    expect(assertSuccess(await mockApi.graphSnapshot()).audit_log).toEqual([])
   })
 
   it('rejects aborting a transaction proven committed by the transaction fixture', async () => {
