@@ -2,9 +2,16 @@
 
 Дата: **2026-01-28**
 
+> **Классификация:** исторический target/test-design документ. Он не является
+> текущим реестром тестов или команд. Текущие файлы определяет tree, markers —
+> [`../../../../pytest.ini`](../../../../pytest.ini), canonical backend entrypoint —
+> [`../../../../scripts/verify_local.ps1`](../../../../scripts/verify_local.ps1),
+> UI scripts — `simulator-ui/v2/package.json`. Предложения ниже могут быть уже
+> реализованы, заменены или отклонены.
+
 Цель: описать **структуру тестов** (unit/integration/contract/e2e/perf), минимальные smoke-сценарии и правила запуска, чтобы выполнение критериев из `acceptance-criteria.md` было проверяемым и воспроизводимым.
 
-Source of truth:
+Контекст исходного плана:
 - `docs/ru/simulator/backend/acceptance-criteria.md`
 - `api/openapi.yaml`
 - `docs/ru/simulator/backend/ws-protocol.md`
@@ -225,18 +232,17 @@ Feature: Simulator UI Real Mode
     Then UI показывает stopped и прекращает сессию
 ```
 
-Реализация (предложение):
-- добавить файл `simulator-ui/v2/e2e/real-mode.spec.ts`.
-- по умолчанию **skip**, пока не будет реализован real mode:
-  - `test.skip(process.env.GEO_E2E_REAL_MODE !== '1', '...')`.
-- запускать при поднятом backend (`scripts/run_local.ps1 start`) и доступном порту UI.
+Текущее browser evidence находится в существующих specs, включая
+`scenario-switch-real-mode.spec.ts`, `manual-operations-interact.spec.ts` и
+Phase-5 smoke. Наличие этих тестов не превращает весь первоначальный план ниже в
+реализованный контракт.
 
 ---
 
 ## 7) Правила запуска и флаги
 
 ### 7.1 Pytest
-- Базовый запуск: `pytest`.
+- Базовый canonical запуск: `.\scripts\verify_local.ps1 -TaskSlug <unique-slug>`.
 - Для тестов, требующих внешние сервисы, использовать маркер `@pytest.mark.e2e` (см. `pytest.ini`).
 
 Окружение (важно):
@@ -246,7 +252,9 @@ Feature: Simulator UI Real Mode
 ### 7.2 Playwright (simulator-ui)
 - Unit: `npm --prefix simulator-ui/v2 run test:unit`
 - E2E fixtures scenes: `npm --prefix simulator-ui/v2 run test:e2e`
-- E2E real mode (когда появится): `GEO_E2E_REAL_MODE=1 npm --prefix simulator-ui/v2 run test:e2e`
+- Scoped real-mode E2E выбирается существующим spec/config и запускается с
+  уникальными портом и output root; несуществующий `GEO_E2E_REAL_MODE` не является
+  поддерживаемым флагом.
 
 Рекомендация по быстрым прогонам:
 - Для «быстрых проверок» UI (smoke/e2e без зависимости от БД и данных) используйте **sandbox/topology-only**:

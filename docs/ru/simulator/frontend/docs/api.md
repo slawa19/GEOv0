@@ -218,6 +218,11 @@ export type GraphLink = {
 ## 4) Events (готовые к анимации)
 
 ### 4.1 Общие требования
+- Полный текущий union: `run_status`, `tx.updated`, `tx.failed`,
+  `clearing.done`, `audit.drift`, `topology.changed`. Required fields и payload
+  каждого варианта определяет `SimulatorEvent` в
+  [`api/openapi.yaml`](../../../../../api/openapi.yaml); примеры ниже не являются
+  исчерпывающей схемой.
 - Любое событие должно иметь `event_id` и `ts` (идемпотентность/упорядочивание).
 - Клиент применяет событие без перерасчёта графа:
   - меняет overlays (подсветка/частицы/бейдж),
