@@ -182,10 +182,10 @@ const {
   precisionByEq,
   incidentRatioByPid: incidentRatioByPidAll,
   participantByPid,
-  loadData,
   refreshSnapshotForEq,
   refreshForFocusMode,
   refreshClearingCyclesForParticipant,
+  reloadCurrentView,
 } = useGraphData({
   eq,
   isRealMode,
@@ -367,7 +367,7 @@ function renderAnyway() {
 function reloadGraph(rebuildOptions: { fit: boolean; preserveViewport?: boolean }) {
   const request = graphEffectRequests.begin()
   const operation = reloadGraphView({
-    loadData,
+    loadData: reloadCurrentView,
     isCurrent: request.isCurrent,
     afterLoad: async () => { await nextTick() },
     applyView: applyGraphView,
@@ -719,7 +719,7 @@ const graphLiveAnnouncement = computed(() => {
     :threshold="threshold"
     :precision-by-eq="precisionByEq"
     :atoms-to-decimal="atomsToDecimal"
-    :load-data="reloadDrawer"
+    :reload-current-view="reloadDrawer"
     :money="money"
     :pct="pct"
     :selected-rank="selectedRank"
