@@ -3,6 +3,15 @@
 **Версия:** 0.1  
 **Дата:** Ноябрь 2025
 
+> **Классификация:** архитектурный vision/target-документ, а не снимок полностью
+> реализованного продукта. Текущие executable surfaces: backend `app/`, REST
+> schema [`api/openapi.yaml`](../../api/openapi.yaml), Admin UI `admin-ui/` и
+> Simulator UI `simulator-ui/v2/`. `simulator-ui/v1/` и каталоги `archive/` —
+> исторические/read-only по умолчанию. Конкретное current behavior устанавливают
+> код, runtime и тесты; принятые решения —
+> [`09-decisions-and-defaults.md`](09-decisions-and-defaults.md). Разделы ниже с
+> будущими этапами не являются обещанием реализованного deployment или feature.
+
 ---
 
 ## Содержание
@@ -105,11 +114,11 @@
 **Включено:**
 - Регистрация участников с Ed25519 ключами
 - Управление линиями доверия
-- Платежи с маршрутизацией (single + **limited multipath**; baseline 2–3 маршрута, параметры в [`docs/ru/config-reference.md`](docs/ru/config-reference.md:1))
-- **Full multipath** (опционально; экспериментальный режим для бенчмарков, включается только через `feature_flags.full_multipath_enabled`, см. [`docs/ru/02-protocol-spec.md`](docs/ru/02-protocol-spec.md:1) и [`docs/ru/config-reference.md`](docs/ru/config-reference.md:1))
-- Автоматический клиринг: **триггерный** поиск циклов 3–4 (по умолчанию) + **периодический** поиск 5–6 (опционально; параметры в [`docs/ru/config-reference.md`](docs/ru/config-reference.md:1))
+- Платежи с маршрутизацией (single + **limited multipath**; параметры в [`config-reference.md`](config-reference.md))
+- **Full multipath** (целевой экспериментальный режим; актуальный статус сверять с [`02-protocol-spec.md`](02-protocol-spec.md) и [`config-reference.md`](config-reference.md))
+- Автоматический клиринг: целевые политики и параметры описаны в [`config-reference.md`](config-reference.md)
 - REST API + WebSocket уведомления
-- Базовая админка (операторские функции и доступ к конфигу/feature flags — см. [`docs/ru/admin-ui/README.md`](docs/ru/admin-ui/README.md:1))
+- Базовая админка (операторские функции и feature flags — см. [`admin-ui/README.md`](admin-ui/README.md))
 - Web-клиент **PWA** (primary клиент для MVP)
 
 **Не включено (отложено):**
