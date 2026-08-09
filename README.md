@@ -335,6 +335,8 @@ Local databases, pytest cache/basetemp, logs, PID/NDJSON and browser-test output
 belong under the ignored `.local-run/` runtime root. An existing legacy
 `./geov0.db` is never moved or deleted automatically; set
 `DATABASE_URL=sqlite+aiosqlite:///./geov0.db` only when you intentionally need it.
+The runner's reset action is restricted to the new `.local-run` default and fails
+closed for this legacy override or any custom URL.
 
 GitHub Actions runs the same verifier with Python 3.11 and Node 22.12. PostgreSQL
 integration, simulator super-smoke, Admin E2E, and Windows Simulator visual E2E

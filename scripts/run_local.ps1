@@ -628,12 +628,12 @@ switch ($Action) {
     }
 
     'reset-db' {
-        if (-not $LocalDatabasePath) {
-            throw 'reset-db supports only the default local SQLite DB or the documented legacy root override.'
+        if ($env:DATABASE_URL -ne $DefaultDatabaseUrl) {
+            throw 'reset-db is restricted to the default .local-run SQLite DB; legacy or custom DATABASE_URL values are never deleted.'
         }
-        if (Test-Path $LocalDatabasePath) {
-            Remove-Item -Force $LocalDatabasePath
-            Write-Host "Deleted existing DB: $LocalDatabasePath"
+        if (Test-Path $DefaultDatabasePath) {
+            Remove-Item -Force $DefaultDatabasePath
+            Write-Host "Deleted existing DB: $DefaultDatabasePath"
         }
 
         Write-Host "Initializing DB..."

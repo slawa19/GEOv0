@@ -465,11 +465,11 @@ Stop-AllServices
 
 if ($ResetDb) {
     Write-Host "[2/8] Resetting database..." -ForegroundColor Yellow
-    if (-not $LocalDatabasePath) {
-        throw '-ResetDb supports only the default local SQLite DB or the documented legacy root override.'
+    if ($env:DATABASE_URL -ne $DefaultDatabaseUrl) {
+        throw '-ResetDb is restricted to the default .local-run SQLite DB; legacy or custom DATABASE_URL values are never deleted.'
     }
-    if (Test-Path $LocalDatabasePath) {
-        Remove-Item -Force $LocalDatabasePath
+    if (Test-Path $DefaultDatabasePath) {
+        Remove-Item -Force $DefaultDatabasePath
         Write-Host "     Deleted existing DB" -ForegroundColor Gray
     }
     Invoke-PythonScript -PythonExe $Python -ScriptPath (Join-Path $RepoRoot 'scripts\init_sqlite_db.py') -Description "init_sqlite_db.py"

@@ -32,6 +32,9 @@ engine; `.local-run/` — ignored runtime root, а не fixture и не част
 $env:DATABASE_URL = 'sqlite+aiosqlite:///./geov0.db'
 ```
 
+Команды `reset-db`/`-ResetDb` при таком override завершаются ошибкой: runner
+разрешает удаление только нового default-файла под `.local-run/`.
+
 В Compose приложение использует Postgres URL из `docker-compose.yml`. Настройки
 пула `DB_POOL_PRE_PING`, `DB_POOL_SIZE`, `DB_MAX_OVERFLOW`,
 `DB_POOL_TIMEOUT_SECONDS`, `DB_POOL_RECYCLE_SECONDS` и
