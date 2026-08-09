@@ -262,13 +262,18 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
        })
        setGeoTestGlobal('__GEO_TEST_INTERACT_START_CLEARING_FLOW', startClearingFlow)
 
+       const interactBusy = ref(false)
+       setGeoTestGlobal('__GEO_TEST_INTERACT_BUSY_REF', interactBusy)
+
        const selectEdge = vi.fn((edgeKey: string, anchor?: TestAnchor | null) => {
+         if (interactBusy.value) return false
          interactState.selectedEdgeKey = edgeKey
          interactState.edgeAnchor = anchor ?? null
          const [fromPid, toPid] = edgeKey.split('→')
          interactState.fromPid = fromPid || null
          interactState.toPid = toPid || null
          phase.value = 'editing-trustline'
+         return true
        })
 
        const setPaymentFromPid = vi.fn((pid: string | null) => {
@@ -312,9 +317,6 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
 
        const successMessage = ref<string | null>(null)
        setGeoTestGlobal('__GEO_TEST_INTERACT_SUCCESS_MESSAGE', successMessage)
-
-      const interactBusy = ref(false)
-      setGeoTestGlobal('__GEO_TEST_INTERACT_BUSY_REF', interactBusy)
 
       const trustlinesLoading = ref(false)
       setGeoTestGlobal('__GEO_TEST_TRUSTLINES_LOADING_REF', trustlinesLoading)
@@ -1708,6 +1710,16 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       expect(host.querySelector('[data-testid="graph-navigator-status"]')?.textContent).toContain(
         'Trustline details opened: alice → bob',
       )
+
+      const busy = getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_BUSY_REF')
+      busy.value = true
+      await nextTick()
+      expect(edgeButton?.disabled).toBe(true)
+      const selectedEdgeBeforeRejectedClick = getInteractState().selectedEdgeKey
+      edgeButton?.click()
+      await nextTick()
+      expect(getInteractState().selectedEdgeKey).toBe(selectedEdgeBeforeRejectedClick)
+      expect(host.querySelectorAll('.ws-shell[data-win-type="edge-detail"]')).toHaveLength(1)
     } finally {
       app.unmount()
       host.remove()
