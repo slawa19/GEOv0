@@ -31,7 +31,7 @@ function mountNavigator(edgeInspectDisabled = false, linkItems: GraphLink[] = li
 }
 
 describe('GraphNavigator', () => {
-  it('uses labelled native controls and announces keyboard-accessible node and edge inspection', async () => {
+  it('uses labelled native controls and announces node and edge inspection', async () => {
     const { app, host, inspectNode, inspectEdge } = mountNavigator()
     await nextTick()
 
@@ -53,7 +53,6 @@ describe('GraphNavigator', () => {
     nodeSelect.dispatchEvent(new Event('change', { bubbles: true }))
     await nextTick()
     const inspectNodeButton = Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Inspect node')
-    inspectNodeButton?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
     ;(inspectNodeButton as HTMLButtonElement).click()
     await nextTick()
     expect(inspectNode).toHaveBeenCalledWith('bob')
