@@ -412,6 +412,9 @@ function Wait-ForRunLocalServiceOwnership {
     $launchedPid = [int]$Process.Id
     $fingerprint = $null
     $persisted = $false
+    $ownershipResult = $null
+    $primaryFailure = $null
+    $cleanupFailure = $null
     try {
         $fingerprint = Get-ProcessStartTimeFingerprint -Id $launchedPid
         if ([string]::IsNullOrWhiteSpace($fingerprint)) {
@@ -430,27 +433,45 @@ function Wait-ForRunLocalServiceOwnership {
                 }
                 Write-RunLocalOwnershipMetadata -Service $Service -Id $launchedPid -ProcessStartFingerprint $fingerprint
                 $persisted = $true
-                return [pscustomobject]@{ Pid = $launchedPid; ProcessStartFingerprint = $fingerprint }
+                $ownershipResult = [pscustomobject]@{ Pid = $launchedPid; ProcessStartFingerprint = $fingerprint }
+                break
             }
             Start-Sleep -Milliseconds 500
         }
-        throw "Unable to start $($Service.Name): listener did not appear on port $($Service.Port)."
+        if (-not $persisted) {
+            throw "Unable to start $($Service.Name): listener did not appear on port $($Service.Port)."
+        }
+    } catch {
+        $primaryFailure = $_.Exception
     } finally {
         if (-not $persisted) {
-            if ([string]::IsNullOrWhiteSpace($fingerprint)) {
-                try {
+            try {
+                if ([string]::IsNullOrWhiteSpace($fingerprint)) {
                     if (-not $Process.HasExited) { $Process.Kill() }
-                } catch {
-                    Write-Warning "Unable to clean up directly launched $($Service.Name) process: $($_.Exception.Message)"
+                } else {
+                    $identity = Get-ProcessIdentityObservation -Id $launchedPid -ExpectedStartFingerprint $fingerprint
+                    if ($identity.Status -eq 'Exact') {
+                        Stop-ProcessById -Id $launchedPid -ExpectedStartFingerprint $fingerprint
+                    }
                 }
-            } else {
-                $identity = Get-ProcessIdentityObservation -Id $launchedPid -ExpectedStartFingerprint $fingerprint
-                if ($identity.Status -eq 'Exact') {
-                    Stop-ProcessById -Id $launchedPid -ExpectedStartFingerprint $fingerprint
+            } catch {
+                $cleanupFailure = $_.Exception
+                if ($null -eq $primaryFailure) {
+                    Write-Warning "Unable to clean up directly launched $($Service.Name) process: $($cleanupFailure.Message)"
                 }
             }
         }
     }
+
+    if ($null -ne $primaryFailure -and $null -ne $cleanupFailure) {
+        $combinedMessage = "$($primaryFailure.Message) Startup cleanup also failed: $($cleanupFailure.Message)"
+        $combinedFailure = New-Object System.InvalidOperationException($combinedMessage, $primaryFailure)
+        $combinedFailure.Data['CleanupFailure'] = $cleanupFailure.ToString()
+        throw $combinedFailure
+    }
+    if ($null -ne $primaryFailure) { throw $primaryFailure }
+    if ($null -ne $cleanupFailure) { throw $cleanupFailure }
+    return $ownershipResult
 }
 
 function Undo-RunLocalStartedServices {
@@ -1031,6 +1052,10 @@ switch ($Action) {
         if ($AutoPorts) {
             $backendPortUsed = Get-FreePort -StartPort $BackendPort -MaxPort ($BackendPort + 50) -Kind 'backend'
         } else {
+            if (-not (Wait-ForPortToBeFree -Port $backendPortUsed -TimeoutSec 10)) {
+                $currentListener = Get-ListeningPid -Port $backendPortUsed
+                throw "Port $backendPortUsed did not become free after stopping the owned backend (PID: $currentListener)."
+            }
             $currentListener = Get-ListeningPid -Port $backendPortUsed
             if ($currentListener) {
                 throw "Port $backendPortUsed is busy (PID: $currentListener). Use -AutoPorts or free the port."

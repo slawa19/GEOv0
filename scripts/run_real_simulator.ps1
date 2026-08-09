@@ -639,6 +639,16 @@ function Invoke-RunRealOwnershipStopPlan {
   }
 }
 
+function Wait-ForPortToBeFree {
+  param([int]$Port, [int]$TimeoutSec = 10)
+  $deadline = (Get-Date).AddSeconds($TimeoutSec)
+  while ((Get-Date) -lt $deadline) {
+    if (-not (Get-ListeningPid -Port $Port)) { return $true }
+    Start-Sleep -Milliseconds 300
+  }
+  return (-not (Get-ListeningPid -Port $Port))
+}
+
 function Assert-RunRealOwnershipForReplacement {
   param([object]$Service)
   $state = Get-RunRealOwnershipState -Service $Service
@@ -652,6 +662,9 @@ function Wait-ForRunRealSimulatorOwnership {
   $launchedPid = [int]$Process.Id
   $fingerprint = $null
   $persisted = $false
+  $ownershipResult = $null
+  $primaryFailure = $null
+  $cleanupFailure = $null
   try {
     $fingerprint = Get-ProcessStartTimeFingerprint -Id $launchedPid
     if ([string]::IsNullOrWhiteSpace($fingerprint)) { throw 'Simulator UI process identity is unavailable.' }
@@ -664,25 +677,43 @@ function Wait-ForRunRealSimulatorOwnership {
         if ($listener -ne $launchedPid) { throw "Simulator UI listener PID $listener is not launched PID $launchedPid." }
         Write-RunRealOwnershipMetadata -Service $Service -Id $launchedPid -ProcessStartFingerprint $fingerprint
         $persisted = $true
-        return [pscustomobject]@{ Pid = $launchedPid; ProcessStartFingerprint = $fingerprint }
+        $ownershipResult = [pscustomobject]@{ Pid = $launchedPid; ProcessStartFingerprint = $fingerprint }
+        break
       }
       Start-Sleep -Milliseconds 500
     }
-    throw "Simulator UI did not listen on port $($Service.Port) within $TimeoutSec seconds."
+    if (-not $persisted) {
+      throw "Simulator UI did not listen on port $($Service.Port) within $TimeoutSec seconds."
+    }
+  } catch {
+    $primaryFailure = $_.Exception
   } finally {
     if (-not $persisted) {
-      if ([string]::IsNullOrWhiteSpace($fingerprint)) {
-        try {
+      try {
+        if ([string]::IsNullOrWhiteSpace($fingerprint)) {
           if (-not $Process.HasExited) { $Process.Kill() }
-        } catch {
-          Write-Warning "Unable to clean up directly launched Simulator UI process: $($_.Exception.Message)"
+        } else {
+          $identity = Get-ProcessIdentityObservation -Id $launchedPid -ExpectedStartFingerprint $fingerprint
+          if ($identity.Status -eq 'Exact') { Stop-ProcessById -Id $launchedPid -ExpectedStartFingerprint $fingerprint }
         }
-      } else {
-        $identity = Get-ProcessIdentityObservation -Id $launchedPid -ExpectedStartFingerprint $fingerprint
-        if ($identity.Status -eq 'Exact') { Stop-ProcessById -Id $launchedPid -ExpectedStartFingerprint $fingerprint }
+      } catch {
+        $cleanupFailure = $_.Exception
+        if ($null -eq $primaryFailure) {
+          Write-Warning "Unable to clean up directly launched Simulator UI process: $($cleanupFailure.Message)"
+        }
       }
     }
   }
+
+  if ($null -ne $primaryFailure -and $null -ne $cleanupFailure) {
+    $combinedMessage = "$($primaryFailure.Message) Startup cleanup also failed: $($cleanupFailure.Message)"
+    $combinedFailure = New-Object System.InvalidOperationException($combinedMessage, $primaryFailure)
+    $combinedFailure.Data['CleanupFailure'] = $cleanupFailure.ToString()
+    throw $combinedFailure
+  }
+  if ($null -ne $primaryFailure) { throw $primaryFailure }
+  if ($null -ne $cleanupFailure) { throw $cleanupFailure }
+  return $ownershipResult
 }
 
 function Get-SimulatorUiRealTools() {
@@ -827,6 +858,10 @@ try {
     Write-Host 'OK: services started (UI skipped).'
     Write-UsefulLinks
   } else {
+    if (-not (Wait-ForPortToBeFree -Port $SimulatorUiPort -TimeoutSec 10)) {
+      $currentListener = Get-ListeningPid -Port $SimulatorUiPort
+      throw "Simulator UI port $SimulatorUiPort did not become free after stopping the owned process (PID: $currentListener)."
+    }
     $startedUi += Start-SimulatorUiReal -UiTools $uiTools
     Write-Host "Simulator UI started in background (PID $($startedUi[-1].Pid))." -ForegroundColor Green
     Write-UsefulLinks -IncludeSimulatorUi

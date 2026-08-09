@@ -140,6 +140,34 @@ $display = Get-SafeDatabaseDisplayUrl -DatabaseUrl $env:PHASE7_DATABASE_URL
 
 @pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
 @pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+def test_database_display_accepts_at_sign_inside_discarded_query(
+    powershell: Path,
+) -> None:
+    raw_url = (
+        "postgresql+asyncpg://phase7-user:phase7-password@db.example.test:5432/geov0"
+        "?application_name=operator@workstation&sslmode=require"
+    )
+    command = (
+        _AST_SETUP
+        + r"""
+Invoke-Expression (Get-LauncherFunctionText -Name 'Get-SafeDatabaseDisplayUrl')
+$display = Get-SafeDatabaseDisplayUrl -DatabaseUrl $env:PHASE7_DATABASE_URL
+[Console]::Out.Write($display)
+"""
+    )
+
+    result = _run_powershell(
+        powershell,
+        command,
+        extra_env={"PHASE7_DATABASE_URL": raw_url},
+    )
+
+    assert result.stdout == "postgresql+asyncpg://db.example.test:5432/geov0"
+    assert "operator@workstation" not in result.stdout
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
 def test_database_display_value_handles_sqlite_without_native_arguments(
     powershell: Path,
 ) -> None:
@@ -1486,6 +1514,162 @@ def test_run_local_rejects_reload_before_any_lifecycle_mutation() -> None:
     assert "$PSCommandPath" not in source
     assert "AllowInherited" not in source
     assert "GEO_LAUNCHER_LIFECYCLE_LOCK_TOKEN" not in source
+
+
+def test_replacement_paths_wait_for_owned_ports_to_be_released() -> None:
+    local_source = _RUN_LOCAL.read_text(encoding="utf-8-sig")
+    restart_backend = local_source.split("    'restart-backend' {", 1)[1].split(
+        "    'start' {", 1
+    )[0]
+    assert (
+        restart_backend.index(
+            "Invoke-RunLocalOwnershipStopPlan -Services $backendStopServices"
+        )
+        < restart_backend.index("Wait-ForPortToBeFree -Port $backendPortUsed")
+        < restart_backend.index("Start-Process -FilePath $Python")
+    )
+
+    real_source = _RUN_REAL_SIMULATOR.read_text(encoding="utf-8-sig")
+    start_block = real_source.split("# Action=start.", 1)[1]
+    assert (
+        start_block.index("Invoke-RunRealOwnershipStopPlan -Service $simulatorService")
+        < start_block.index("Wait-ForPortToBeFree -Port $SimulatorUiPort")
+        < start_block.index("Start-SimulatorUiReal -UiTools $uiTools")
+    )
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+@pytest.mark.parametrize(
+    "script_path",
+    (_RUN_LOCAL, _RUN_REAL_SIMULATOR),
+    ids=("run-local", "run-real"),
+)
+def test_launcher_port_release_wait_observes_until_listener_disappears(
+    powershell: Path,
+    script_path: Path,
+) -> None:
+    command = (
+        _AST_SETUP
+        + r"""
+Invoke-Expression (Get-LauncherFunctionText -Name 'Wait-ForPortToBeFree')
+$script:Observations = 0
+function Get-ListeningPid {
+    param([int]$Port)
+    $script:Observations += 1
+    if ($script:Observations -lt 3) { return 909 }
+    return $null
+}
+function Start-Sleep { param([int]$Milliseconds) }
+$released = Wait-ForPortToBeFree -Port 5176 -TimeoutSec 1
+if (-not $released) { throw 'Port release was not observed' }
+if ($script:Observations -lt 3) { throw 'Port wait did not retry' }
+[Console]::Out.Write('port-release-observed')
+"""
+    )
+
+    result = _run_powershell(
+        powershell,
+        command,
+        extra_env={"PHASE7_SCRIPT_PATH": str(script_path)},
+    )
+    assert result.stdout == "port-release-observed"
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+@pytest.mark.parametrize(
+    (
+        "script_path",
+        "function_name",
+        "service_name",
+        "launched_pid",
+        "primary_fragment",
+    ),
+    (
+        (
+            _RUN_LOCAL,
+            "Wait-ForRunLocalServiceOwnership",
+            "Backend",
+            101,
+            "listener PID 999 is not launched PID 101",
+        ),
+        (
+            _RUN_REAL_SIMULATOR,
+            "Wait-ForRunRealSimulatorOwnership",
+            "Simulator UI",
+            303,
+            "listener PID 999 is not launched PID 303",
+        ),
+    ),
+    ids=("run-local", "run-real"),
+)
+def test_launcher_startup_cleanup_preserves_primary_failure(
+    powershell: Path,
+    script_path: Path,
+    function_name: str,
+    service_name: str,
+    launched_pid: int,
+    primary_fragment: str,
+) -> None:
+    command = (
+        _AST_SETUP
+        + r"""
+$functionName = $env:PHASE7_FUNCTION_NAME
+Invoke-Expression (Get-LauncherFunctionText -Name $functionName)
+function Get-ProcessStartTimeFingerprint { param([int]$Id) return 'start-a' }
+function Get-ProcessIdentityObservation {
+    param([int]$Id, [string]$ExpectedStartFingerprint)
+    return [pscustomobject]@{ Status = 'Exact'; Fingerprint = 'start-a' }
+}
+function Get-ListeningPid { param([int]$Port) return 999 }
+function Stop-ProcessById {
+    param([int]$Id, [string]$ExpectedStartFingerprint)
+    throw 'cleanup-stop-failed'
+}
+function Write-RunLocalOwnershipMetadata { throw 'Ownership was unexpectedly persisted' }
+function Write-RunRealOwnershipMetadata { throw 'Ownership was unexpectedly persisted' }
+$service = [pscustomobject]@{
+    Name = $env:PHASE7_SERVICE_NAME
+    Port = 5176
+    OwnershipFile = 'unused.owner.json'
+}
+$process = [pscustomobject]@{ Id = [int]$env:PHASE7_LAUNCHED_PID }
+try {
+    & $functionName -Service $service -Process $process -TimeoutSec 1
+    throw 'Combined failure unexpectedly succeeded'
+} catch {
+    if ($_.Exception.Message -eq 'Combined failure unexpectedly succeeded') { throw }
+    if ($_.Exception.Message -notlike "*$($env:PHASE7_PRIMARY_FRAGMENT)*") {
+        throw 'Primary startup failure was masked'
+    }
+    if ($_.Exception.Message -notlike '*Startup cleanup also failed: cleanup-stop-failed*') {
+        throw 'Cleanup failure evidence was lost'
+    }
+    if ($null -eq $_.Exception.InnerException -or
+        $_.Exception.InnerException.Message -notlike "*$($env:PHASE7_PRIMARY_FRAGMENT)*") {
+        throw 'Primary failure was not preserved as the inner exception'
+    }
+    if ([string]$_.Exception.Data['CleanupFailure'] -notlike '*cleanup-stop-failed*') {
+        throw 'Cleanup failure detail was not preserved'
+    }
+}
+[Console]::Out.Write('startup-cleanup-evidence-ok')
+"""
+    )
+
+    result = _run_powershell(
+        powershell,
+        command,
+        extra_env={
+            "PHASE7_SCRIPT_PATH": str(script_path),
+            "PHASE7_FUNCTION_NAME": function_name,
+            "PHASE7_SERVICE_NAME": service_name,
+            "PHASE7_LAUNCHED_PID": str(launched_pid),
+            "PHASE7_PRIMARY_FRAGMENT": primary_fragment,
+        },
+    )
+    assert result.stdout == "startup-cleanup-evidence-ok"
 
 
 @pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")

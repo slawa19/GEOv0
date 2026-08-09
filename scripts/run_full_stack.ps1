@@ -562,16 +562,28 @@ function Get-SafeDatabaseDisplayUrl {
         throw 'Unable to render a safe DATABASE_URL summary.'
     }
 
-    # Raw '/', '?' and '#' terminate URI userinfo. If an '@' appears after one
-    # of them, the input is ambiguous (usually an unescaped credential). Never
-    # risk echoing that prefix as host/path; require percent-encoding instead.
-    $userinfoIndex = $remainder.LastIndexOf('@')
+    $queryIndex = $remainder.IndexOf('?')
+    $fragmentIndex = $remainder.IndexOf('#')
+    $suffixIndex = -1
+    if ($queryIndex -ge 0) { $suffixIndex = $queryIndex }
+    if ($fragmentIndex -ge 0 -and ($suffixIndex -lt 0 -or $fragmentIndex -lt $suffixIndex)) {
+        $suffixIndex = $fragmentIndex
+    }
+    $displayRemainder = if ($suffixIndex -ge 0) {
+        $remainder.Substring(0, $suffixIndex)
+    } else {
+        $remainder
+    }
+
+    # A raw '/' terminates URI userinfo. If an '@' still appears after it in
+    # the query-free display portion, the input is ambiguous (usually an
+    # unescaped credential). '@' inside query/fragment data is valid and is
+    # discarded before this check, together with the rest of that suffix.
+    $userinfoIndex = $displayRemainder.LastIndexOf('@')
     if ($userinfoIndex -ge 0) {
-        foreach ($delimiter in @('/', '?', '#')) {
-            $delimiterIndex = $remainder.IndexOf($delimiter)
-            if ($delimiterIndex -ge 0 -and $delimiterIndex -lt $userinfoIndex) {
-                throw 'Unable to render a safe DATABASE_URL summary.'
-            }
+        $pathDelimiterIndex = $displayRemainder.IndexOf('/')
+        if ($pathDelimiterIndex -ge 0 -and $pathDelimiterIndex -lt $userinfoIndex) {
+            throw 'Unable to render a safe DATABASE_URL summary.'
         }
     }
 
@@ -581,16 +593,7 @@ function Get-SafeDatabaseDisplayUrl {
         throw 'Unable to render a safe DATABASE_URL summary.'
     }
 
-    $queryIndex = $remainder.IndexOf('?')
-    $fragmentIndex = $remainder.IndexOf('#')
-    $suffixIndex = -1
-    if ($queryIndex -ge 0) { $suffixIndex = $queryIndex }
-    if ($fragmentIndex -ge 0 -and ($suffixIndex -lt 0 -or $fragmentIndex -lt $suffixIndex)) {
-        $suffixIndex = $fragmentIndex
-    }
-    if ($suffixIndex -ge 0) {
-        $remainder = $remainder.Substring(0, $suffixIndex)
-    }
+    $remainder = $displayRemainder
 
     # Three slashes (for example SQLite) mean there is no authority/userinfo.
     if (-not $remainder.StartsWith('/')) {
