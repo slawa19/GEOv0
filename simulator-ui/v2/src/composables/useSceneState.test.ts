@@ -31,6 +31,16 @@ function makeSnapshot(): GraphSnapshot {
   }
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
 describe('useSceneState', () => {
   it('loadScene loads snapshot and updates state', async () => {
     const eq = ref('UAH')
@@ -377,6 +387,85 @@ describe('useSceneState', () => {
     // Critical: no second relayout when only links changed.
     expect(resizeAndLayout).toHaveBeenCalledTimes(1)
   })
+
+  it.each(['resolve', 'reject'] as const)(
+    'does not let a direct watcher load that %s late overwrite a newer recovery load',
+    async (oldOutcome) => {
+      const eq = ref('UAH')
+      const scene = ref<'A' | 'B' | 'C'>('A')
+      const layoutMode = ref<'admin-force' | 'community-clusters' | 'balance-split' | 'type-split' | 'status-split'>(
+        'admin-force',
+      )
+      const effectiveEq = computed(() => eq.value)
+      const state = reactive({
+        loading: false,
+        error: '',
+        sourcePath: '',
+        snapshot: null as GraphSnapshot | null,
+        selectedNodeId: null as string | null,
+      })
+      const oldLoad = deferred<{ snapshot: GraphSnapshot; sourcePath: string }>()
+      const newLoad = deferred<{ snapshot: GraphSnapshot; sourcePath: string }>()
+      const oldSnapshot = { ...makeSnapshot(), generated_at: '2026-01-25T00:00:01Z' }
+      const newSnapshot = {
+        ...makeSnapshot(),
+        generated_at: '2026-01-25T00:00:02Z',
+        nodes: [makeNode('NEW_A'), makeNode('NEW_B')],
+        links: [makeLink('NEW_A', 'NEW_B')],
+      }
+      const loadSnapshot = vi.fn()
+        .mockImplementationOnce(() => oldLoad.promise)
+        .mockImplementationOnce(() => newLoad.promise)
+      const resetCamera = vi.fn()
+      const resetLayoutKeyCache = vi.fn()
+      const resetOverlays = vi.fn()
+      const resizeAndLayout = vi.fn()
+      const ensureRenderLoop = vi.fn()
+      const s = useSceneState({
+        eq,
+        scene,
+        layoutMode,
+        allowEqDeepLink: () => true,
+        isEqAllowed: () => true,
+        effectiveEq,
+        state,
+        loadSnapshot,
+        clearScheduledTimeouts: vi.fn(),
+        resetCamera,
+        resetLayoutKeyCache,
+        resetOverlays,
+        resizeAndLayout,
+        ensureRenderLoop,
+        setupResizeListener: vi.fn(),
+        teardownResizeListener: vi.fn(),
+        stopRenderLoop: vi.fn(),
+      })
+
+      eq.value = 'EUR'
+      await vi.waitFor(() => expect(loadSnapshot).toHaveBeenCalledTimes(1))
+      const recoveryLoad = s.loadScene()
+      newLoad.resolve({ snapshot: newSnapshot, sourcePath: 'new-recovery.json' })
+      await recoveryLoad
+
+      if (oldOutcome === 'resolve') {
+        oldLoad.resolve({ snapshot: oldSnapshot, sourcePath: 'old-watcher.json' })
+      } else {
+        oldLoad.reject(new Error('old watcher failed late'))
+      }
+      await Promise.resolve()
+      await Promise.resolve()
+
+      expect(state.snapshot).toEqual(newSnapshot)
+      expect(state.sourcePath).toBe('new-recovery.json')
+      expect(state.error).toBe('')
+      expect(state.loading).toBe(false)
+      expect(resetCamera).toHaveBeenCalledTimes(1)
+      expect(resetLayoutKeyCache).toHaveBeenCalledTimes(1)
+      expect(resetOverlays).toHaveBeenCalledTimes(1)
+      expect(resizeAndLayout).toHaveBeenCalledTimes(1)
+      expect(ensureRenderLoop).toHaveBeenCalledTimes(1)
+    },
+  )
 
   it('setup applies allow-listed eq and focuses existing node from URL', async () => {
     const eq = ref('UAH')

@@ -20,7 +20,7 @@ import type {
   ScenarioSummary,
   SimulatorMode,
 } from '../api/simulatorTypes'
-import { connectSse } from '../api/sse'
+import { connectSse, type SseParsedMessage } from '../api/sse'
 import { normalizeSimulatorEvent } from '../api/normalizeSimulatorEvent'
 import { ApiError, authHeaders } from '../api/http'
 
@@ -93,6 +93,8 @@ const DIAGNOSTIC_EVENT_TYPE_BUCKETS = new Set([
   'topology.changed',
   'audit.drift',
 ])
+
+const REPLAY_GAP_BUFFER_MAX_MESSAGES = 512
 
 function diagnosticEventTypeBucket(eventType: string | undefined): string {
   if (!eventType) return 'untyped'
@@ -431,7 +433,10 @@ export function useSimulatorRealMode(opts: {
         // If another call came in while we were loading, re-invoke.
         if (refreshSnapshotPending) {
           refreshSnapshotPending = false
-          void refreshSnapshot()
+          // Replay recovery already owns an authoritative refresh. Requests
+          // coalesced into it are redundant and must not start a competing
+          // snapshot between buffered-frame drain and live admission.
+          if (replayGapRecoveryRunId === null) void refreshSnapshot()
         }
       }
     })
@@ -461,17 +466,9 @@ export function useSimulatorRealMode(opts: {
   }
 
   async function refreshSnapshotForReplayRecovery(runId: string): Promise<SnapshotRefreshOutcome> {
-    // A pre-existing request may have started before the replay gap was known.
-    // Await it as an ownership barrier, then fetch once more for authoritative state.
+    // Start a new authoritative load immediately. SceneState owns latest-request
+    // application, so this invalidates both tracked and direct watcher loads.
     cancelPendingRefreshSnapshotDebounce()
-    while (refreshSnapshotActivePromise) {
-      const active = refreshSnapshotActivePromise
-      const activeOutcome = await active
-      if (activeOutcome !== 'current') return activeOutcome
-      if (!isRealMode.value || real.runId !== runId) return 'superseded'
-      cancelPendingRefreshSnapshotDebounce()
-    }
-
     if (!isRealMode.value || real.runId !== runId) return 'superseded'
     return await startSnapshotRefresh({ debounce: false })
   }
@@ -500,13 +497,250 @@ export function useSimulatorRealMode(opts: {
     return Math.max(250, Math.round(base + jitter))
   }
 
-  async function recoverReplayGapForCurrentContext(input: {
+  function handleSseMessage(input: {
+    msg: SseParsedMessage
+    signal: AbortSignal
+    runId: string
+    equivalent: string
+  }): void {
+    const { msg, signal, runId, equivalent } = input
+    if (signal.aborted) return
+    if (!msg.data) return
+
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(msg.data)
+    } catch {
+      diag.rx_messages += 1
+      diag.json_parse_errors += 1
+      return
+    }
+
+    diag.rx_messages += 1
+
+    const normalized = normalizeSimulatorEvent(parsed)
+    if (normalized.status === 'ignored') {
+      diag.normalize_dropped += 1
+      incDiag(
+        diag.rejected_by_reason,
+        `${normalized.kind}:${diagnosticEventTypeBucket(normalized.eventType)}:${normalized.diagnostic}`,
+      )
+      return
+    }
+
+    const evt = normalized.event
+    const admission = replayOwner.admit({
+      event: evt,
+      frameId: msg.id,
+      connectionRunId: runId,
+      activeRunId: real.runId,
+      connectionEquivalent: equivalent,
+      currentCursor: real.lastEventId,
+    })
+    if (admission.status === 'rejected') {
+      diag.normalize_dropped += 1
+      if (admission.diagnostic === 'frame_id_mismatch') diag.frame_id_mismatches += 1
+      incDiag(diag.rejected_by_reason, `${admission.kind}:${evt.type}:${admission.diagnostic}`)
+      return
+    }
+    if (admission.status === 'duplicate') return
+
+    const intents = applyAcceptedRealEvent(evt, runId, { real, state }, {
+      patchApplier: realPatchApplier,
+      isUserFacingRunError,
+      inc,
+    })
+    replayOwner.commit(evt.event_id, runId)
+    real.lastEventId = admission.cursor
+    incDiag(diag.events_by_type, evt.type)
+    executeRealEventIntents(intents, {
+      getActiveRunId: () => real.runId,
+      optionalFxEnabled,
+      onAnySseEvent,
+      refreshSnapshot: () => void refreshSnapshot(),
+      wakeUp,
+      runRealTxFx,
+      runRealClearingDoneFx,
+      pushTxAmountLabel,
+      clampRealTxTtlMs,
+      scheduleTimeout,
+      onIntentExecuted: (intent: RealEventIntent) => {
+        if (intent.type === 'amount-flyout-suppressed') diag.amount_flyout_suppressed += 1
+        else if (intent.type === 'burst-throttle') {
+          diag.burst_throttle_ms_last = intent.throttleMs
+          if (intent.throttleMs > 0) diag.burst_throttle_enabled_events += 1
+        } else if (intent.type === 'tx-label') diag.tx_sender_labels += 1
+        else if (intent.type === 'tx-label-delayed') diag.tx_receiver_scheduled += 1
+      },
+      onReceiverLabelPushed: () => {
+        diag.tx_receiver_labels += 1
+      },
+      onReceiverGuardDropped: () => {
+        diag.tx_receiver_guard_dropped += 1
+      },
+    })
+  }
+
+  function isReplayBootstrapFrame(msg: SseParsedMessage, runId: string): boolean {
+    if (!msg.data) return false
+    try {
+      const payload: unknown = JSON.parse(msg.data)
+      return isRecord(payload) && payload.type === 'run_status' && payload.run_id === runId
+    } catch {
+      return false
+    }
+  }
+
+  type SseConnectionOutcome = { status: 'ended' } | { status: 'error'; error: unknown }
+  type ReplayRecoveryConnectionOutcome = 'ended' | 'retry' | 'stop'
+
+  async function runReplayRecoveryConnection(input: {
     runId: string
     ctrl: AbortController
     sseLoopSeq: number
-  }): Promise<'recovered' | 'retry' | 'stop'> {
+    equivalent: string
+    url: string
+  }): Promise<ReplayRecoveryConnectionOutcome> {
+    const { runId, ctrl, sseLoopSeq, equivalent, url } = input
+    const isCurrentContext = () =>
+      !ctrl.signal.aborted && sseLoopSeq === sseSeq && isRealMode.value && real.runId === runId
+
+    if (!isCurrentContext()) return 'stop'
+
+    const connectionCtrl = new AbortController()
+    const abortConnection = () => connectionCtrl.abort()
+    ctrl.signal.addEventListener('abort', abortConnection, { once: true })
+
+    const bufferedMessages: SseParsedMessage[] = []
+    let buffering = true
+    let bufferOverflowed = false
+    let firstBootstrapResolved = false
+    let resolveFirstBootstrap!: () => void
+    let resolveBufferOverflow!: () => void
+    const firstBootstrap = new Promise<void>((resolve) => {
+      resolveFirstBootstrap = resolve
+    })
+    const bufferOverflow = new Promise<void>((resolve) => {
+      resolveBufferOverflow = resolve
+    })
+
+    const connectionOutcome: Promise<SseConnectionOutcome> = connectSse({
+      url,
+      headers: authHeaders(real.accessToken),
+      lastEventId: null,
+      signal: connectionCtrl.signal,
+      onMessage: (msg) => {
+        if (connectionCtrl.signal.aborted || !isCurrentContext()) return
+        if (!buffering) {
+          handleSseMessage({ msg, signal: connectionCtrl.signal, runId, equivalent })
+          return
+        }
+
+        if (bufferedMessages.length >= REPLAY_GAP_BUFFER_MAX_MESSAGES) {
+          if (!bufferOverflowed) {
+            bufferOverflowed = true
+            real.lastError = `SSE replay recovery buffer exceeded ${REPLAY_GAP_BUFFER_MAX_MESSAGES} messages`
+            resolveBufferOverflow()
+            connectionCtrl.abort()
+          }
+          return
+        }
+
+        bufferedMessages.push(msg)
+        if (!firstBootstrapResolved && isReplayBootstrapFrame(msg, runId)) {
+          firstBootstrapResolved = true
+          resolveFirstBootstrap()
+        }
+      },
+    }).then(
+      () => ({ status: 'ended' as const }),
+      (error: unknown) => ({ status: 'error' as const, error }),
+    )
+
+    const settleAfterAbort = async () => {
+      connectionCtrl.abort()
+      await connectionOutcome
+    }
+
+    try {
+      const bootstrapOutcome = await Promise.race([
+        firstBootstrap.then(() => ({ kind: 'bootstrap' as const })),
+        bufferOverflow.then(() => ({ kind: 'overflow' as const })),
+        connectionOutcome.then((outcome) => ({ kind: 'connection' as const, outcome })),
+      ])
+
+      if (bootstrapOutcome.kind === 'overflow') {
+        await settleAfterAbort()
+        return 'retry'
+      }
+      if (bootstrapOutcome.kind === 'connection') {
+        if (!isCurrentContext()) return 'stop'
+        if (bootstrapOutcome.outcome.status === 'error') throw bootstrapOutcome.outcome.error
+        real.lastError = 'SSE replay recovery connection ended before its bootstrap frame'
+        return 'retry'
+      }
+      if (bufferOverflowed) {
+        await settleAfterAbort()
+        return 'retry'
+      }
+      if (!isCurrentContext()) {
+        await settleAfterAbort()
+        return 'stop'
+      }
+
+      const snapshotPromise = refreshSnapshotForReplayRecovery(runId)
+      const snapshotOrConnection = await Promise.race([
+        snapshotPromise.then((outcome) => ({ kind: 'snapshot' as const, outcome })),
+        bufferOverflow.then(() => ({ kind: 'overflow' as const })),
+        connectionOutcome.then((outcome) => ({ kind: 'connection' as const, outcome })),
+      ])
+
+      if (snapshotOrConnection.kind === 'overflow') {
+        await settleAfterAbort()
+        return 'retry'
+      }
+      if (snapshotOrConnection.kind === 'connection') {
+        if (!isCurrentContext()) return 'stop'
+        if (snapshotOrConnection.outcome.status === 'error') throw snapshotOrConnection.outcome.error
+        real.lastError = 'SSE replay recovery connection ended before the authoritative snapshot completed'
+        return 'retry'
+      }
+      if (snapshotOrConnection.outcome === 'transient') {
+        await settleAfterAbort()
+        return 'retry'
+      }
+      if (snapshotOrConnection.outcome !== 'current' || !isCurrentContext()) {
+        await settleAfterAbort()
+        return 'stop'
+      }
+      if (bufferOverflowed) {
+        await settleAfterAbort()
+        return 'retry'
+      }
+
+      for (const msg of bufferedMessages) {
+        handleSseMessage({ msg, signal: connectionCtrl.signal, runId, equivalent })
+      }
+      bufferedMessages.length = 0
+      buffering = false
+      replayGapRecoveryRunId = null
+      real.sseState = 'open'
+
+      const finalOutcome = await connectionOutcome
+      if (finalOutcome.status === 'error') throw finalOutcome.error
+      return 'ended'
+    } finally {
+      ctrl.signal.removeEventListener('abort', abortConnection)
+    }
+  }
+
+  async function refreshReplayGapStatusForCurrentContext(input: {
+    runId: string
+    ctrl: AbortController
+    sseLoopSeq: number
+  }): Promise<'current' | 'retry' | 'stop'> {
     const { runId, ctrl, sseLoopSeq } = input
-    if (replayGapRecoveryRunId !== runId) return 'recovered'
+    if (replayGapRecoveryRunId !== runId) return 'current'
 
     real.sseState = 'reconnecting'
     const statusOutcome = await refreshRunStatusForCurrentContext()
@@ -520,21 +754,7 @@ export function useSimulatorRealMode(opts: {
       return 'stop'
     }
     if (statusOutcome === 'transient') return 'retry'
-
-    const snapshotOutcome = await refreshSnapshotForReplayRecovery(runId)
-    if (
-      snapshotOutcome === 'stale' ||
-      snapshotOutcome === 'superseded' ||
-      ctrl.signal.aborted ||
-      sseLoopSeq !== sseSeq ||
-      real.runId !== runId
-    ) {
-      return 'stop'
-    }
-    if (snapshotOutcome === 'transient') return 'retry'
-
-    replayGapRecoveryRunId = null
-    return 'recovered'
+    return 'current'
   }
 
   async function runSseLoop(loopOpts?: { preserveLastError?: boolean }) {
@@ -561,108 +781,44 @@ export function useSimulatorRealMode(opts: {
         replayGapRecoveryRunId = null
       }
 
-      if (replayGapRecoveryRunId === runId) {
-        const recoveryOutcome = await recoverReplayGapForCurrentContext({ runId, ctrl, sseLoopSeq: mySeq })
-        if (recoveryOutcome === 'stop') return
-        if (recoveryOutcome === 'retry') {
-          const delay = nextBackoff(attempt++)
-          await new Promise((r) => setTimeout(r, delay))
-          continue
-        }
-      }
-
       const eqNow = effectiveEq.value
       const url = `${real.apiBase.replace(/\/+$/, '')}/simulator/runs/${encodeURIComponent(runId)}/events?equivalent=${encodeURIComponent(
         eqNow,
       )}`
 
       try {
-        real.sseState = 'open'
-        await connectSse({
-          url,
-          headers: authHeaders(real.accessToken),
-          lastEventId: real.lastEventId,
-          signal: ctrl.signal,
-          onMessage: (msg) => {
-            if (ctrl.signal.aborted) return
-            if (!msg.data) return
+        if (replayGapRecoveryRunId === runId) {
+          const statusOutcome = await refreshReplayGapStatusForCurrentContext({ runId, ctrl, sseLoopSeq: mySeq })
+          if (statusOutcome === 'stop') return
+          if (statusOutcome === 'retry') {
+            const delay = nextBackoff(attempt++)
+            await new Promise((r) => setTimeout(r, delay))
+            continue
+          }
 
-            let parsed: unknown
-            try {
-              parsed = JSON.parse(msg.data)
-            } catch {
-              diag.rx_messages += 1
-              diag.json_parse_errors += 1
-              return
-            }
-
-            diag.rx_messages += 1
-
-            const normalized = normalizeSimulatorEvent(parsed)
-            if (normalized.status === 'ignored') {
-              diag.normalize_dropped += 1
-              incDiag(
-                diag.rejected_by_reason,
-                `${normalized.kind}:${diagnosticEventTypeBucket(normalized.eventType)}:${normalized.diagnostic}`,
-              )
-              return
-            }
-
-            const evt = normalized.event
-            const admission = replayOwner.admit({
-              event: evt,
-              frameId: msg.id,
-              connectionRunId: runId,
-              activeRunId: real.runId,
-              connectionEquivalent: eqNow,
-              currentCursor: real.lastEventId,
-            })
-            if (admission.status === 'rejected') {
-              diag.normalize_dropped += 1
-              if (admission.diagnostic === 'frame_id_mismatch') diag.frame_id_mismatches += 1
-              incDiag(diag.rejected_by_reason, `${admission.kind}:${evt.type}:${admission.diagnostic}`)
-              return
-            }
-            if (admission.status === 'duplicate') return
-
-            const intents = applyAcceptedRealEvent(evt, runId, { real, state }, {
-              patchApplier: realPatchApplier,
-              isUserFacingRunError,
-              inc,
-            })
-            replayOwner.commit(evt.event_id, runId)
-            real.lastEventId = admission.cursor
-            incDiag(diag.events_by_type, evt.type)
-            executeRealEventIntents(intents, {
-              getActiveRunId: () => real.runId,
-              optionalFxEnabled,
-              onAnySseEvent,
-              refreshSnapshot: () => void refreshSnapshot(),
-              wakeUp,
-              runRealTxFx,
-              runRealClearingDoneFx,
-              pushTxAmountLabel,
-              clampRealTxTtlMs,
-              scheduleTimeout,
-              onIntentExecuted: (intent: RealEventIntent) => {
-                if (intent.type === 'amount-flyout-suppressed') diag.amount_flyout_suppressed += 1
-                else if (intent.type === 'burst-throttle') {
-                  diag.burst_throttle_ms_last = intent.throttleMs
-                  if (intent.throttleMs > 0) diag.burst_throttle_enabled_events += 1
-                } else if (intent.type === 'tx-label') diag.tx_sender_labels += 1
-                else if (intent.type === 'tx-label-delayed') diag.tx_receiver_scheduled += 1
-              },
-              onReceiverLabelPushed: () => {
-                diag.tx_receiver_labels += 1
-              },
-              onReceiverGuardDropped: () => {
-                diag.tx_receiver_guard_dropped += 1
-              },
-            })
-            return
-
-          },
-        })
+          const recoveryConnectionOutcome = await runReplayRecoveryConnection({
+            runId,
+            ctrl,
+            sseLoopSeq: mySeq,
+            equivalent: eqNow,
+            url,
+          })
+          if (recoveryConnectionOutcome === 'stop') return
+          if (recoveryConnectionOutcome === 'retry') {
+            const delay = nextBackoff(attempt++)
+            await new Promise((r) => setTimeout(r, delay))
+            continue
+          }
+        } else {
+          real.sseState = 'open'
+          await connectSse({
+            url,
+            headers: authHeaders(real.accessToken),
+            lastEventId: real.lastEventId,
+            signal: ctrl.signal,
+            onMessage: (msg) => handleSseMessage({ msg, signal: ctrl.signal, runId, equivalent: eqNow }),
+          })
+        }
 
         await refreshRunStatus()
         // refreshRunStatus() owns stale-404 reset and may abort this loop,
@@ -694,8 +850,7 @@ export function useSimulatorRealMode(opts: {
           real.lastEventId = null
           replayGapRecoveryRunId = runId
           real.sseState = 'reconnecting'
-          const recoveryOutcome = await recoverReplayGapForCurrentContext({ runId, ctrl, sseLoopSeq: mySeq })
-          if (recoveryOutcome === 'stop') return
+          continue
         }
 
         if (ctrl.signal.aborted || mySeq !== sseSeq || real.runId !== runId) return

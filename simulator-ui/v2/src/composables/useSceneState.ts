@@ -59,6 +59,7 @@ type UseSceneStateReturn = {
 
 export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
   let deepLinkFocusNodeId: string | null = null
+  let loadSceneSeq = 0
 
   // Track loaded snapshot identity to detect "incremental" updates vs. full scene changes.
   // When node IDs are the same, we can skip costly resets (camera, overlays, layout animation).
@@ -122,6 +123,9 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
   }
 
   async function loadScene() {
+    const mySeq = ++loadSceneSeq
+    const isCurrent = () => loadSceneSeq === mySeq
+
     // IMPORTANT:
     // - `loadScene()` can be triggered by snapshot refreshes within the same run.
     // - We must NOT silently drop pending critical timers (e.g. delayed receiver amount labels).
@@ -133,6 +137,7 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
 
     try {
       const { snapshot, sourcePath } = await deps.loadSnapshot(deps.effectiveEq.value)
+      if (!isCurrent()) return
 
       // Detect if this is an "incremental" update (same node IDs) vs. a full scene change.
       // Incremental: skip camera reset, overlay clear, and layout cache invalidation.
@@ -182,9 +187,9 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
       }
       deps.ensureRenderLoop()
     } catch (error) {
-      deps.state.error = getErrorMessage(error)
+      if (isCurrent()) deps.state.error = getErrorMessage(error)
     } finally {
-      deps.state.loading = false
+      if (isCurrent()) deps.state.loading = false
     }
   }
 
@@ -236,6 +241,8 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
   }
 
   function teardown() {
+    loadSceneSeq += 1
+    deps.state.loading = false
     deps.teardownResizeListener()
     deps.clearScheduledTimeouts()
     deps.stopRenderLoop()
