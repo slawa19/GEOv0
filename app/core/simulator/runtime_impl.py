@@ -481,10 +481,10 @@ class _SimulatorRuntimeBase:
     def get_artifact_path(self, *, run_id: str, name: str) -> Path:
         return self._artifacts.get_artifact_path(run_id=run_id, name=name)
 
-    def publish_run_status(self, run_id: str) -> None:
+    def _build_run_status_event(self, run_id: str) -> dict[str, Any]:
         run = self.get_run(run_id)
         stall_ticks = int(run._real_consec_all_rejected_ticks or 0)
-        payload = SimulatorRunStatusEvent(
+        return SimulatorRunStatusEvent(
             event_id=self._sse.next_event_id(run),
             ts=_utc_now(),
             type="run_status",
@@ -506,7 +506,10 @@ class _SimulatorRuntimeBase:
             consec_all_rejected_ticks=(stall_ticks if stall_ticks > 0 else None),
         ).model_dump(mode="json", by_alias=True)
 
+    def publish_run_status(self, run_id: str) -> str:
+        payload = self._build_run_status_event(run_id)
         self._sse.broadcast(run_id, payload)
+        return str(payload["event_id"])
 
     def _ensure_run_accepts_actions(self, run_id: str) -> RunRecord:
         run = self.get_run(run_id)
@@ -803,6 +806,45 @@ class _SimulatorRuntimeBase:
                 except asyncio.QueueFull:
                     pass
         return sub
+
+    async def subscribe_with_status(
+        self, run_id: str, *, equivalent: str, after_event_id: Optional[str] = None
+    ) -> tuple[_Subscription, str]:
+        """Atomically enqueue replay + authoritative status before exposure."""
+        payload: dict[str, Any] | None = None
+
+        def build_status() -> dict[str, Any]:
+            nonlocal payload
+            payload = self._build_run_status_event(run_id)
+            return payload
+
+        sub = await self._sse.subscribe(
+            run_id,
+            equivalent=equivalent,
+            after_event_id=after_event_id,
+            bootstrap_event_factory=build_status,
+        )
+        if payload is None:  # pragma: no cover - defensive invariant
+            raise RuntimeError("SSE status bootstrap was not created")
+
+        # Preserve the existing fixtures-mode first-frame hint. It is queued only
+        # after the authoritative status and remains best-effort under queue pressure.
+        run = self.get_run(run_id)
+        if after_event_id is None and run.state == "running" and run.mode == "fixtures":
+            evt = self._fixtures_runner.maybe_make_tx_updated(
+                run_id=run_id, equivalent=equivalent
+            )
+            if evt is not None:
+                try:
+                    sub.queue.put_nowait(evt)
+                except asyncio.QueueFull:
+                    pass
+        return sub, str(payload["event_id"])
+
+    def finish_replay_bootstrap(
+        self, run_id: str, sub: _Subscription
+    ) -> list[dict[str, Any]]:
+        return self._sse.finish_replay_bootstrap(run_id=run_id, sub=sub)
 
     async def unsubscribe(self, run_id: str, sub: _Subscription) -> None:
         await self._sse.unsubscribe(run_id, sub)

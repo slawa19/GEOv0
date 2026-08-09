@@ -26,7 +26,8 @@ from app.core.payments.service import PaymentService
 from app.core.simulator.edge_patch_builder import EdgePatchBuilder
 from app.core.simulator.real_scenario_seeder import RealScenarioSeeder
 from app.core.simulator.scenario_equivalent import effective_equivalent
-from app.core.simulator.sse_broadcast import SseEventEmitter
+from app.core.simulator.models import _Subscription
+from app.core.simulator.sse_broadcast import SseEventEmitter, SseReplayUnavailable
 from app.core.simulator.viz_patch_helper import VizPatchHelper
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
@@ -2048,25 +2049,32 @@ async def _run_events_stream(
     equivalent: str,
     last_event_id: Optional[str] = None,
     stop_after_types: Optional[set[str]] = None,
+    subscription: Optional[_Subscription] = None,
+    initial_status_event_id: Optional[str] = None,
 ) -> AsyncIterator[str]:
-    # Subscribe first so we don't miss immediate events.
-    sub = await runtime.subscribe(run_id, equivalent=equivalent, after_event_id=last_event_id)
+    # Replay and the initial status are atomically queued before subscription exposure.
+    if subscription is None:
+        sub, status_event_id = await runtime.subscribe_with_status(
+            run_id, equivalent=equivalent, after_event_id=last_event_id
+        )
+    else:
+        sub = subscription
+        status_event_id = initial_status_event_id or runtime.publish_run_status(run_id)
     is_pytest = bool(os.environ.get("PYTEST_CURRENT_TEST"))
     try:
         # Always start with a status snapshot.
         # We emit it through the runtime so it has a normal sequential event_id
         # and lands in the replay buffer.
-        runtime.publish_run_status(run_id)
-
         prefetched: list[dict[str, Any]] = []
         seen_types: set[str] = set()
         status_evt: Optional[dict[str, Any]] = None
         try:
-            # Drain until we see the first run_status; preserve other events.
+            # Drain until we see the status emitted above. Older replay statuses are
+            # part of the replay prefix and must not be mistaken for this snapshot.
             deadline_sec = 1.0
             while True:
                 evt = await asyncio.wait_for(sub.queue.get(), timeout=deadline_sec)
-                if str(evt.get("type") or "") == "run_status":
+                if str(evt.get("event_id") or "") == status_event_id:
                     status_evt = evt
                     break
                 prefetched.append(evt)
@@ -2095,16 +2103,21 @@ async def _run_events_stream(
             ).model_dump(mode="json", by_alias=True)
             seen_types.add(str(init_event.get("type") or ""))
             yield _sse_format(payload=init_event, event_id=str(init_event["event_id"]))
+            bootstrap_tail = (
+                runtime.finish_replay_bootstrap(run_id, sub)
+                if sub.replay_bootstrap_pending
+                else []
+            )
+            if str(init_event.get("state") or "") in ("stopped", "error"):
+                return
         else:
-            event_id = str(status_evt.get("event_id") or "")
-            if not event_id:
-                event_id = f"evt_{secrets.token_hex(6)}"
+            status_id = str(status_evt.get("event_id") or "")
+            if not status_id:
+                status_id = f"evt_{secrets.token_hex(6)}"
                 status_evt = dict(status_evt)
-                status_evt["event_id"] = event_id
-            seen_types.add(str(status_evt.get("type") or ""))
-            yield _sse_format(payload=status_evt, event_id=event_id)
-
-            # Flush prefetched events after the initial status.
+                status_evt["event_id"] = status_id
+            # Replay and any already queued live tail must precede the new
+            # authoritative status snapshot.
             for evt in prefetched:
                 event_id = str(evt.get("event_id") or evt.get("event") or "")
                 if not event_id:
@@ -2113,6 +2126,32 @@ async def _run_events_stream(
                     evt["event_id"] = event_id
                 seen_types.add(str(evt.get("type") or ""))
                 yield _sse_format(payload=evt, event_id=event_id)
+
+            seen_types.add(str(status_evt.get("type") or ""))
+            yield _sse_format(payload=status_evt, event_id=status_id)
+            bootstrap_tail = (
+                runtime.finish_replay_bootstrap(run_id, sub)
+                if sub.replay_bootstrap_pending
+                else []
+            )
+
+            if str(status_evt.get("state") or "") in ("stopped", "error"):
+                return
+
+        # This list is the exact pre-finalization live tail. Future broadcasts
+        # now enter the normal queue and cannot be consumed in this flush.
+        for evt in bootstrap_tail:
+            event_id = str(evt.get("event_id") or evt.get("event") or "")
+            if not event_id:
+                event_id = f"evt_{secrets.token_hex(6)}"
+                evt = dict(evt)
+                evt["event_id"] = event_id
+            seen_types.add(str(evt.get("type") or ""))
+            yield _sse_format(payload=evt, event_id=event_id)
+            if str(evt.get("type") or "") == "run_status" and str(
+                evt.get("state") or ""
+            ) in ("stopped", "error"):
+                return
 
         # NOTE: httpx's in-process ASGI test transport can buffer streaming responses.
         # Under pytest we intentionally terminate the stream after emitting a minimal
@@ -2317,10 +2356,12 @@ async def events_stream_active_run(
         )
 
     last_event_id = request.headers.get("Last-Event-ID")
-    if last_event_id and runtime.is_sse_strict_replay_enabled() and runtime.is_replay_too_old(
-        run_id=run_id, after_event_id=last_event_id
-    ):
-        raise GoneException("Last-Event-ID is too old; please refresh state")
+    try:
+        sub, status_event_id = await runtime.subscribe_with_status(
+            run_id, equivalent=equivalent, after_event_id=last_event_id
+        )
+    except SseReplayUnavailable as exc:
+        raise GoneException("Last-Event-ID replay is unavailable; please refresh state") from exc
 
     return StreamingResponse(
         _run_events_stream(
@@ -2328,6 +2369,8 @@ async def events_stream_active_run(
             equivalent=equivalent,
             last_event_id=last_event_id,
             stop_after_types=_parse_stop_after_types(stop_after_types),
+            subscription=sub,
+            initial_status_event_id=status_event_id,
         ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
@@ -2522,10 +2565,12 @@ async def run_events_stream(
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
     _check_run_access(runtime.get_run(run_id), actor, run_id)
-    if last_event_id and runtime.is_sse_strict_replay_enabled() and runtime.is_replay_too_old(
-        run_id=run_id, after_event_id=last_event_id
-    ):
-        raise GoneException("Last-Event-ID is too old; please refresh state")
+    try:
+        sub, status_event_id = await runtime.subscribe_with_status(
+            run_id, equivalent=equivalent, after_event_id=last_event_id
+        )
+    except SseReplayUnavailable as exc:
+        raise GoneException("Last-Event-ID replay is unavailable; please refresh state") from exc
 
     return StreamingResponse(
         _run_events_stream(
@@ -2533,6 +2578,8 @@ async def run_events_stream(
             equivalent=equivalent,
             last_event_id=last_event_id,
             stop_after_types=_parse_stop_after_types(stop_after_types),
+            subscription=sub,
+            initial_status_event_id=status_event_id,
         ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},

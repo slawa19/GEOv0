@@ -1085,6 +1085,112 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
     }
   })
 
+  it('reverse-resolved status success from an old run cannot overwrite the active run', async () => {
+    const getRunMock = vi.mocked(getRun)
+    const prevGetRunImpl = getRunMock.getMockImplementation()
+    if (!prevGetRunImpl) throw new Error('expected getRun mock implementation')
+    type Status = Awaited<ReturnType<typeof getRun>>
+    let resolveOld!: (value: Status) => void
+    const oldStatus = new Promise<Status>((resolve) => {
+      resolveOld = resolve
+    })
+    const statusFor = (runId: string): Status => ({
+      run_id: runId,
+      scenario_id: 'sc1',
+      state: 'running',
+      sim_time_ms: 0,
+      intensity_percent: 0,
+      ops_sec: 0,
+      queue_depth: 0,
+      last_event_type: null,
+      current_phase: null,
+      last_error: null,
+    })
+    getRunMock.mockImplementation(async (_client, runId) =>
+      runId === 'r1' ? await oldStatus : statusFor(runId),
+    )
+    const harness = createSseCharacterizationHarness()
+
+    try {
+      const oldRefresh = harness.h.refreshRunStatus()
+      harness.real.runId = 'r2'
+      await harness.h.refreshRunStatus()
+      resolveOld(statusFor('r1'))
+      await oldRefresh
+
+      expect(harness.real.runId).toBe('r2')
+      expect(harness.real.runStatus?.run_id).toBe('r2')
+    } finally {
+      harness.h.stopSse()
+      getRunMock.mockImplementation(prevGetRunImpl)
+    }
+  })
+
+  it('reverse-resolved status 404 from an old run cannot reset the active run', async () => {
+    const getRunMock = vi.mocked(getRun)
+    const prevGetRunImpl = getRunMock.getMockImplementation()
+    if (!prevGetRunImpl) throw new Error('expected getRun mock implementation')
+    let rejectOld!: (reason: unknown) => void
+    const oldStatus = new Promise<never>((_resolve, reject) => {
+      rejectOld = reject
+    })
+    getRunMock.mockImplementation(async (_client, runId) => {
+      if (runId === 'r1') return await oldStatus
+      return await prevGetRunImpl(_client, runId)
+    })
+    const harness = createSseCharacterizationHarness()
+
+    try {
+      const oldRefresh = harness.h.refreshRunStatus()
+      harness.real.runId = 'r2'
+      await harness.h.refreshRunStatus()
+      rejectOld(new ApiError('HTTP 404 old run', { status: 404 }))
+      await oldRefresh
+
+      expect(harness.real.runId).toBe('r2')
+      expect(harness.real.runStatus).not.toBeNull()
+      expect(harness.resetRunStats).not.toHaveBeenCalled()
+    } finally {
+      harness.h.stopSse()
+      getRunMock.mockImplementation(prevGetRunImpl)
+    }
+  })
+
+  it('SSE 410 followed by status 404 resets to idle and does not continue reconnecting', async () => {
+    const connectSseMock = vi.mocked(connectSse)
+    const getRunMock = vi.mocked(getRun)
+    const prevConnectImpl = connectSseMock.getMockImplementation()
+    const prevGetRunImpl = getRunMock.getMockImplementation()
+    if (!prevGetRunImpl) throw new Error('expected getRun mock implementation')
+    const staleReset = deferred()
+    let statusCalls = 0
+
+    connectSseMock.mockResolvedValue(undefined)
+    connectSseMock.mockRejectedValueOnce(new Error('SSE HTTP 410 Gone'))
+    getRunMock.mockImplementation(async (...args) => {
+      statusCalls += 1
+      if (statusCalls === 1) return await prevGetRunImpl(...args)
+      throw new ApiError('HTTP 404 Not Found for /simulator/runs/r1', { status: 404 })
+    })
+    const harness = createSseCharacterizationHarness({ lastEventId: 'evt_expired' })
+    harness.cleanupRealRunFxAndTimers.mockImplementation(() => staleReset.resolve())
+
+    try {
+      harness.isRealModeRef.value = true
+      await nextTick()
+      await staleReset.promise
+      await nextTick()
+
+      expect(harness.real.runId).toBeNull()
+      expect(harness.real.sseState).toBe('idle')
+      expect(harness.real.lastEventId).toBeNull()
+    } finally {
+      harness.h.stopSse()
+      restoreConnectSseImplementation(prevConnectImpl)
+      getRunMock.mockImplementation(prevGetRunImpl)
+    }
+  })
+
   it('SSE 410 clears the cursor, refreshes status and snapshot, then reconnects without a cursor', async () => {
     vi.useFakeTimers()
     const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5)

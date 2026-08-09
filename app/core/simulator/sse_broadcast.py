@@ -19,6 +19,10 @@ from app.schemas.simulator import (
 from app.utils.exceptions import TooManyRequestsException
 
 
+class SseReplayUnavailable(Exception):
+    """The requested replay cannot be delivered as one ordered subscription prefix."""
+
+
 class SseBroadcast:
     def __init__(
         self,
@@ -150,6 +154,46 @@ class SseBroadcast:
             out.append(payload)
         return out
 
+    def _replay_events_locked(
+        self,
+        *,
+        run: RunRecord,
+        equivalent: str,
+        after_event_id: str,
+    ) -> list[dict[str, Any]]:
+        """Return a validated replay snapshot while the caller holds ``_lock``."""
+        after_seq = self.event_seq_from_event_id(
+            run_id=run.run_id, event_id=after_event_id
+        )
+        if after_seq is None:
+            raise SseReplayUnavailable("Last-Event-ID is not a runtime event id")
+
+        self.prune_event_buffer_locked(run)
+        current_seq = int(run._event_seq)
+        if after_seq > current_seq:
+            raise SseReplayUnavailable("Last-Event-ID is ahead of the run event sequence")
+
+        if after_seq < current_seq:
+            if not run._event_buffer:
+                raise SseReplayUnavailable("Requested replay is no longer retained")
+            oldest_seq = self.event_seq_from_event_id(
+                run_id=run.run_id, event_id=run._event_buffer[0][1]
+            )
+            # A cursor immediately before the oldest retained event is replayable.
+            if oldest_seq is None or after_seq < oldest_seq - 1:
+                raise SseReplayUnavailable("Requested replay is no longer retained")
+
+        out: list[dict[str, Any]] = []
+        for _ts, event_id, event_equivalent, payload in run._event_buffer:
+            seq = self.event_seq_from_event_id(run_id=run.run_id, event_id=event_id)
+            if seq is None or seq <= after_seq:
+                continue
+            event_type = str(payload.get("type") or "")
+            if event_type != "run_status" and event_equivalent != equivalent:
+                continue
+            out.append(payload)
+        return out
+
     def broadcast(self, run_id: str, payload: dict[str, Any]) -> None:
         """Broadcasts one event payload to current subscribers of the run."""
         run = self._runs.get(run_id)
@@ -159,8 +203,19 @@ class SseBroadcast:
         event_type = str(payload.get("type") or "")
         event_equivalent = str(payload.get("equivalent") or "")
 
-        # Record for best-effort replay.
-        self.append_to_event_buffer(run_id=run_id, payload=payload)
+        live_subs: list[_Subscription] = []
+        with self._lock:
+            # Buffer admission and bootstrap-tail ownership share one boundary.
+            # A broadcast is therefore wholly before or wholly after bootstrap
+            # finalization for every subscriber.
+            self.append_to_event_buffer(run_id=run_id, payload=payload)
+            for sub in run._subs:
+                if event_type != "run_status" and sub.equivalent != event_equivalent:
+                    continue
+                if sub.replay_bootstrap_pending:
+                    sub.replay_bootstrap_tail.append(payload)
+                else:
+                    live_subs.append(sub)
 
         # Best-effort raw events export.
         if event_type != "run_status":
@@ -171,12 +226,7 @@ class SseBroadcast:
                     "simulator.sse.enqueue_event_artifact_failed run_id=%s", run_id
                 )
 
-        with self._lock:
-            subs = list(run._subs)
-
-        for sub in subs:
-            if event_type != "run_status" and sub.equivalent != event_equivalent:
-                continue
+        for sub in live_subs:
             try:
                 sub.queue.put_nowait(payload)
             except asyncio.QueueFull:
@@ -230,7 +280,12 @@ class SseBroadcast:
                 continue
 
     async def subscribe(
-        self, run_id: str, *, equivalent: str, after_event_id: Optional[str] = None
+        self,
+        run_id: str,
+        *,
+        equivalent: str,
+        after_event_id: Optional[str] = None,
+        bootstrap_event_factory: Optional[Callable[[], dict[str, Any]]] = None,
     ) -> _Subscription:
         """Creates a new SSE subscription queue.
 
@@ -239,7 +294,11 @@ class SseBroadcast:
         """
         queue_max = max(1, int(self._get_sub_queue_max()))
         queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=queue_max)
-        sub = _Subscription(equivalent=equivalent, queue=queue)
+        sub = _Subscription(
+            equivalent=equivalent,
+            queue=queue,
+            replay_bootstrap_pending=bootstrap_event_factory is not None,
+        )
 
         with self._lock:
             run = self._runs.get(run_id)
@@ -269,18 +328,50 @@ class SseBroadcast:
                         },
                     )
 
+            replay: list[dict[str, Any]] = []
+            if after_event_id:
+                replay = self._replay_events_locked(
+                    run=run,
+                    equivalent=equivalent,
+                    after_event_id=after_event_id,
+                )
+                # Reserve one queue slot for the authoritative status published by
+                # the stream bootstrap. Silently truncating replay would advance the
+                # client cursor past state it never received.
+                if len(replay) + (1 if bootstrap_event_factory else 0) > queue_max:
+                    raise SseReplayUnavailable(
+                        "Requested replay does not fit the subscriber queue"
+                    )
+
+            bootstrap_event = (
+                bootstrap_event_factory() if bootstrap_event_factory is not None else None
+            )
+            if bootstrap_event is not None:
+                self.append_to_event_buffer(run_id=run_id, payload=bootstrap_event)
+
+            # Replay and its authoritative status are installed under the same lock
+            # that exposes the subscriber. Any broadcast that can see this
+            # subscription therefore queues after the complete bootstrap prefix.
+            for evt in replay:
+                sub.queue.put_nowait(evt)
+            if bootstrap_event is not None:
+                sub.queue.put_nowait(bootstrap_event)
             run._subs.append(sub)
 
-        if after_event_id:
-            for evt in self.replay_events(
-                run_id=run_id, equivalent=equivalent, after_event_id=after_event_id
-            ):
-                try:
-                    sub.queue.put_nowait(evt)
-                except asyncio.QueueFull:
-                    break
-
         return sub
+
+    def finish_replay_bootstrap(
+        self, *, run_id: str, sub: _Subscription
+    ) -> list[dict[str, Any]]:
+        """Freeze the pre-finalization live tail and expose future events to the queue."""
+        with self._lock:
+            run = self._runs.get(run_id)
+            if run is None or sub not in run._subs:
+                return []
+            tail = list(sub.replay_bootstrap_tail)
+            sub.replay_bootstrap_tail.clear()
+            sub.replay_bootstrap_pending = False
+            return tail
 
     async def unsubscribe(self, run_id: str, sub: _Subscription) -> None:
         """Removes a previously created subscription (best-effort)."""
@@ -313,7 +404,7 @@ class SseBroadcast:
         )
         if oldest_seq is None:
             return False
-        return after_seq < oldest_seq
+        return after_seq < oldest_seq - 1
 
 
 class SseEventEmitter:

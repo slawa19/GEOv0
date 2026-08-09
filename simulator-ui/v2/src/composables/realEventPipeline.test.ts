@@ -91,7 +91,7 @@ describe('realEventPipeline replay admission', () => {
     edges: [{ from: 'A', to: 'B' }],
   })
 
-  it('applies an unseen lower producer sequence once, keeps max cursor, and makes its duplicate a total no-op', () => {
+  it('rejects an unseen lower producer sequence before state/effects or cursor acknowledgement', () => {
     const owner = createRealEventReplayOwner()
     const input = (event: AcceptedSimulatorEvent, currentCursor: string | null) => ({
       event,
@@ -105,14 +105,53 @@ describe('realEventPipeline replay admission', () => {
     expect(owner.admit(input(tx('evt_run_1_20'), null))).toEqual({ status: 'accepted', cursor: 'evt_run_1_20' })
     owner.commit('evt_run_1_20', 'run_1')
     expect(owner.admit(input(tx('evt_run_1_10'), 'evt_run_1_20'))).toEqual({
-      status: 'accepted',
-      cursor: 'evt_run_1_20',
+      status: 'rejected',
+      kind: 'replay',
+      diagnostic: 'stale_event_id',
     })
-    owner.commit('evt_run_1_10', 'run_1')
-    expect(owner.admit(input(tx('evt_run_1_10'), 'evt_run_1_20'))).toEqual({
-      status: 'duplicate',
-      cursor: 'evt_run_1_20',
-    })
+  })
+
+  it('applies ordered replay before authoritative status without double-counting or cursor skip', () => {
+    const owner = createRealEventReplayOwner()
+    const draft = createDraft()
+    const trace: string[] = []
+    let cursor: string | null = 'evt_run_1_9'
+    const events: AcceptedSimulatorEvent[] = [
+      tx('evt_run_1_10'),
+      {
+        event_id: 'evt_run_1_11',
+        ts: TS,
+        type: 'run_status',
+        run_id: 'run_1',
+        scenario_id: 'scenario_1',
+        state: 'running',
+        attempts_total: 1,
+        committed_total: 1,
+        rejected_total: 0,
+        errors_total: 0,
+        timeouts_total: 0,
+        last_error: null,
+      },
+      tx('evt_run_1_10'),
+    ]
+
+    for (const event of events) {
+      const admission = owner.admit({
+        event,
+        frameId: event.event_id,
+        connectionRunId: 'run_1',
+        activeRunId: 'run_1',
+        connectionEquivalent: 'EUR',
+        currentCursor: cursor,
+      })
+      if (admission.status !== 'accepted') continue
+      applyAcceptedRealEvent(event, 'run_1', draft, createStateDeps(trace, draft))
+      owner.commit(event.event_id, 'run_1')
+      cursor = admission.cursor
+    }
+
+    expect(draft.real.runStats).toMatchObject({ attempts: 1, committed: 1 })
+    expect(cursor).toBe('evt_run_1_11')
   })
 
   it('does not suppress an accepted event until trusted state application commits it', () => {

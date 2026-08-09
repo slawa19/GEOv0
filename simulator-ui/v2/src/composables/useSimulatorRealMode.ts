@@ -223,6 +223,7 @@ export function useSimulatorRealMode(opts: {
 
   let sseAbort: AbortController | null = null
   let sseSeq = 0
+  let refreshRunStatusSeq = 0
 
   const replayOwner = createRealEventReplayOwner()
 
@@ -300,6 +301,7 @@ export function useSimulatorRealMode(opts: {
   }
 
   function resetStaleRun(resetOpts?: { clearError?: boolean }) {
+    refreshRunStatusSeq += 1
     teardownRefreshSnapshot()
     real.runId = null
     real.runStatus = null
@@ -320,21 +322,32 @@ export function useSimulatorRealMode(opts: {
     ensureScenarioSelectionValid()
   }
 
-  async function refreshRunStatus() {
+  async function refreshRunStatusForCurrentContext(): Promise<boolean> {
     // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
-    if (!real.runId) return
+    const runId = real.runId
+    if (!runId) return false
+    const mySeq = ++refreshRunStatusSeq
+    const isCurrent = () => refreshRunStatusSeq === mySeq && real.runId === runId
     try {
-      const st = await getRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId)
+      const st = await getRun({ apiBase: real.apiBase, accessToken: real.accessToken }, runId)
+      if (!isCurrent()) return false
       real.runStatus = st
       const le = st.last_error
       real.lastError = le && isUserFacingRunError(le.code) ? `${le.code}: ${le.message}` : ''
+      return true
     } catch (e: unknown) {
+      if (!isCurrent()) return false
       if (e instanceof ApiError && e.status === 404) {
         resetStaleRun({ clearError: true })
-        return
+        return false
       }
       real.lastError = getErrorMessage(e)
+      return false
     }
+  }
+
+  async function refreshRunStatus(): Promise<void> {
+    await refreshRunStatusForCurrentContext()
   }
 
   async function refreshSnapshot() {
@@ -570,6 +583,7 @@ export function useSimulatorRealMode(opts: {
         real.sseState = 'reconnecting'
       } catch (e: unknown) {
         if (ctrl.signal.aborted) return
+        if (mySeq !== sseSeq || real.runId !== runId) return
 
         const msg = getErrorMessage(e)
         if (msg.includes('SSE HTTP 404') || msg.includes('HTTP 404')) {
@@ -582,10 +596,13 @@ export function useSimulatorRealMode(opts: {
         // Strict replay mode: backend may return 410 → do a full refresh.
         if (msg.includes(' 410 ') || msg.includes('HTTP 410') || msg.includes('status 410')) {
           real.lastEventId = null
-          await refreshRunStatus()
+          const statusIsCurrent = await refreshRunStatusForCurrentContext()
+          if (!statusIsCurrent || ctrl.signal.aborted || mySeq !== sseSeq || real.runId !== runId) return
           await refreshSnapshot()
+          if (ctrl.signal.aborted || mySeq !== sseSeq || real.runId !== runId) return
         }
 
+        if (ctrl.signal.aborted || mySeq !== sseSeq || real.runId !== runId) return
         real.sseState = 'reconnecting'
       }
 

@@ -46,24 +46,33 @@ export function useInteractDataCache(opts: {
 
   const snapshotParticipants = ref<ParticipantInfo[]>([])
   const fetchedParticipants = ref<ParticipantInfo[] | null>(null)
+  const fetchedParticipantsRunId = ref<string>('')
   let participantsFetchedAtMs = 0
   let participantsFetchEpoch = 0
 
-  const participants = computed(() => fetchedParticipants.value ?? snapshotParticipants.value)
+  const participants = computed(() => {
+    const runId = normalizeRunId(opts.runId.value)
+    const fetchedOk = fetchedParticipantsRunId.value === runId && fetchedParticipants.value != null
+    return (fetchedOk ? fetchedParticipants.value : null) ?? snapshotParticipants.value
+  })
 
   async function refreshParticipants(o?: { force?: boolean }) {
     // Best-effort only: dropdowns can fall back to snapshot.
+    const runId = normalizeRunId(opts.runId.value)
+    if (!runId) return
     const now = Date.now()
-    if (!o?.force && fetchedParticipants.value && now - participantsFetchedAtMs < 30_000) return
+    const cachedForRun = fetchedParticipantsRunId.value === runId && fetchedParticipants.value != null
+    if (!o?.force && cachedForRun && now - participantsFetchedAtMs < 30_000) return
 
     const myEpoch = ++participantsFetchEpoch
     try {
       const items = await opts.actions.fetchParticipants()
       // Ignore stale result.
-      if (participantsFetchEpoch !== myEpoch) return
+      if (participantsFetchEpoch !== myEpoch || normalizeRunId(opts.runId.value) !== runId) return
       // Safety: don't replace snapshot-derived data with an empty list.
       if (Array.isArray(items) && items.length > 0) {
         fetchedParticipants.value = items
+        fetchedParticipantsRunId.value = runId
         participantsFetchedAtMs = now
       }
     } catch {
@@ -78,17 +87,21 @@ export function useInteractDataCache(opts: {
   const snapshotTrustlines = ref<TrustlineInfo[]>([])
   const fetchedTrustlines = ref<TrustlineInfo[] | null>(null)
   const fetchedTrustlinesEq = ref<string>('')
+  const fetchedTrustlinesRunId = ref<string>('')
   let trustlinesFetchedAtMs = 0
   let trustlinesFetchEpoch = 0
 
   const trustlinesLoadingRef = ref(false)
-  let trustlinesLoadingCount = 0
 
   const trustlinesLastErrorRef = ref<string | null>(null)
 
   const trustlines = computed(() => {
+    const runId = normalizeRunId(opts.runId.value)
     const eq = normalizeEq(opts.equivalent.value)
-    const fetchedOk = normalizeEq(fetchedTrustlinesEq.value) === eq && fetchedTrustlines.value != null
+    const fetchedOk =
+      fetchedTrustlinesRunId.value === runId &&
+      normalizeEq(fetchedTrustlinesEq.value) === eq &&
+      fetchedTrustlines.value != null
     return (fetchedOk ? fetchedTrustlines.value : null) ?? snapshotTrustlines.value
   })
 
@@ -97,6 +110,7 @@ export function useInteractDataCache(opts: {
     if (normalizeEq(fetchedTrustlinesEq.value) !== curEq) return
     fetchedTrustlines.value = null
     fetchedTrustlinesEq.value = ''
+    fetchedTrustlinesRunId.value = ''
     trustlinesFetchedAtMs = 0
   }
 
@@ -152,32 +166,53 @@ export function useInteractDataCache(opts: {
 
   async function refreshTrustlines(o?: { force?: boolean }) {
     // Best-effort only: dropdowns can fall back to snapshot.
+    const runId = normalizeRunId(opts.runId.value)
     const eq = normalizeEq(opts.equivalent.value)
+    if (!runId || !eq) return
     const now = Date.now()
-    const cachedForEq = normalizeEq(fetchedTrustlinesEq.value) === eq && !!fetchedTrustlines.value
-    if (!o?.force && cachedForEq && now - trustlinesFetchedAtMs < 15_000) return
+    const cachedForContext =
+      fetchedTrustlinesRunId.value === runId &&
+      normalizeEq(fetchedTrustlinesEq.value) === eq &&
+      fetchedTrustlines.value != null
+    if (!o?.force && cachedForContext && now - trustlinesFetchedAtMs < 15_000) return
 
-    trustlinesLoadingCount += 1
     trustlinesLoadingRef.value = true
 
     const myEpoch = ++trustlinesFetchEpoch
     try {
       const items = await opts.actions.fetchTrustlines(eq)
       // Ignore stale result.
-      if (trustlinesFetchEpoch !== myEpoch) return
+      if (
+        trustlinesFetchEpoch !== myEpoch ||
+        normalizeRunId(opts.runId.value) !== runId ||
+        normalizeEq(opts.equivalent.value) !== eq
+      )
+        return
       if (Array.isArray(items)) {
         fetchedTrustlines.value = items
         fetchedTrustlinesEq.value = eq
+        fetchedTrustlinesRunId.value = runId
         trustlinesFetchedAtMs = now
         trustlinesLastErrorRef.value = null
       }
     } catch (error) {
+      if (
+        trustlinesFetchEpoch !== myEpoch ||
+        normalizeRunId(opts.runId.value) !== runId ||
+        normalizeEq(opts.equivalent.value) !== eq
+      )
+        return
       // Best-effort: fall back on snapshot-derived trustlines.
       // Keep a lightweight error signal for UI hints/debugging.
       trustlinesLastErrorRef.value = getErrorMessage(error, 'Trustlines refresh failed')
     } finally {
-      trustlinesLoadingCount = Math.max(0, trustlinesLoadingCount - 1)
-      trustlinesLoadingRef.value = trustlinesLoadingCount > 0
+      if (
+        trustlinesFetchEpoch === myEpoch &&
+        normalizeRunId(opts.runId.value) === runId &&
+        normalizeEq(opts.equivalent.value) === eq
+      ) {
+        trustlinesLoadingRef.value = false
+      }
     }
   }
 
@@ -316,15 +351,34 @@ export function useInteractDataCache(opts: {
     return null
   }
 
-  // Keep trustlines cache keyed by equivalent.
+  // Keep participants cache scoped to the active run. Clearing snapshot-derived
+  // fallback prevents the previous run from leaking while its replacement loads.
   watch(
-    () => normalizeEq(opts.equivalent.value),
+    () => normalizeRunId(opts.runId.value),
     () => {
-      // Switching EQ changes the trustlines list semantics.
-      // Clear immediately so UI can't show stale trustlines while fetch is in-flight.
+      participantsFetchEpoch += 1
+      fetchedParticipants.value = null
+      fetchedParticipantsRunId.value = ''
+      participantsFetchedAtMs = 0
+      snapshotParticipants.value = []
+      void refreshParticipants()
+    },
+    { immediate: true },
+  )
+
+  // Trustlines are scoped by run and equivalent. Epoch invalidation also keeps
+  // late success/error/finally branches from publishing into the new context.
+  watch(
+    () => `${normalizeRunId(opts.runId.value)}::${normalizeEq(opts.equivalent.value)}`,
+    () => {
+      trustlinesFetchEpoch += 1
       fetchedTrustlines.value = null
       fetchedTrustlinesEq.value = ''
+      fetchedTrustlinesRunId.value = ''
       trustlinesFetchedAtMs = 0
+      trustlinesLoadingRef.value = false
+      trustlinesLastErrorRef.value = null
+      snapshotTrustlines.value = []
       void refreshTrustlines()
     },
     { immediate: true },

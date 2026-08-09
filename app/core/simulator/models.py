@@ -65,6 +65,8 @@ class ScenarioRecord:
 class _Subscription:
     equivalent: str
     queue: "asyncio.Queue[dict[str, Any]]"
+    replay_bootstrap_pending: bool = False
+    replay_bootstrap_tail: "deque[dict[str, Any]]" = field(default_factory=deque)
 
 
 @dataclass

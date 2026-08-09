@@ -108,5 +108,68 @@ describe('useInteractDataCache: payment-targets cache TTL/refresh-policy', () =>
 
     scope.stop()
   })
+
+  it('run switch publishes new participants even when the old fetch resolves last', async () => {
+    const { actions, runId, cache, scope } = mk()
+    await nextTick()
+    actions.fetchParticipants.mockClear()
+    let resolveOld!: (value: ParticipantsResult) => void
+    const oldFetch = new Promise<ParticipantsResult>((resolve) => {
+      resolveOld = resolve
+    })
+    actions.fetchParticipants
+      .mockImplementationOnce(async () => await oldFetch)
+      .mockResolvedValue([{ pid: 'new', name: 'New', type: 'person', status: 'active' }] as ParticipantsResult)
+
+    const oldRefresh = cache.refreshParticipants({ force: true })
+    runId.value = 'run_new'
+    await nextTick()
+    await Promise.resolve()
+    expect(cache.participants.value.map((item) => item.pid)).toEqual(['new'])
+
+    resolveOld([{ pid: 'old', name: 'Old', type: 'person', status: 'active' }] as ParticipantsResult)
+    await oldRefresh
+    expect(cache.participants.value.map((item) => item.pid)).toEqual(['new'])
+    scope.stop()
+  })
+
+  it('run switch ignores late trustline success/error/loading from the old run', async () => {
+    const { actions, runId, cache, scope } = mk()
+    await nextTick()
+    actions.fetchTrustlines.mockClear()
+    let rejectOld!: (reason: unknown) => void
+    const oldFetch = new Promise<TrustlinesResult>((_resolve, reject) => {
+      rejectOld = reject
+    })
+    const newTrustline = {
+      from_pid: 'new-a',
+      from_name: 'New A',
+      to_pid: 'new-b',
+      to_name: 'New B',
+      equivalent: 'UAH',
+      limit: '10',
+      used: '0',
+      available: '10',
+      status: 'active',
+    }
+    actions.fetchTrustlines
+      .mockImplementationOnce(async () => await oldFetch)
+      .mockResolvedValue([newTrustline] as TrustlinesResult)
+
+    const oldRefresh = cache.refreshTrustlines({ force: true })
+    expect(cache.trustlinesLoading.value).toBe(true)
+    runId.value = 'run_new'
+    await nextTick()
+    await Promise.resolve()
+    expect(cache.trustlines.value.map((item) => item.from_pid)).toEqual(['new-a'])
+    expect(cache.trustlinesLoading.value).toBe(false)
+
+    rejectOld(new Error('old run failed last'))
+    await oldRefresh
+    expect(cache.trustlines.value.map((item) => item.from_pid)).toEqual(['new-a'])
+    expect(cache.trustlinesLastError.value).toBeNull()
+    expect(cache.trustlinesLoading.value).toBe(false)
+    scope.stop()
+  })
 })
 
