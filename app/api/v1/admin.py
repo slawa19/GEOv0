@@ -290,13 +290,6 @@ def _add_audit_entry(
     return entry
 
 
-def _consume_required_audit_task(task: asyncio.Task[None]) -> None:
-    try:
-        task.result()
-    except BaseException:
-        pass
-
-
 async def _required_audit_and_publish(
     db: AsyncSession,
     *,
@@ -329,9 +322,18 @@ async def _required_audit_and_publish(
         try:
             await asyncio.shield(task)
         except asyncio.CancelledError as exc:
+            if task.done():
+                continue
+            current = asyncio.current_task()
+            if current is None or not current.cancelling():
+                continue
             if cancellation is not None:
-                task.add_done_callback(_consume_required_audit_task)
-                raise cancellation
+                # Keep the request session and runtime-config lock alive until
+                # the cancelled database operation has reached a terminal
+                # state. Detaching here would race dependency cleanup and let
+                # an older publish overwrite a newer patch.
+                task.cancel("repeated caller cancellation")
+                continue
             cancellation = exc
         except Exception:
             pass

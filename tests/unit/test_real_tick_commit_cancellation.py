@@ -200,7 +200,9 @@ async def test_repeated_cancellation_bounds_wait_and_marks_commit_unknown(bounda
     assert cancelled.value.args == ("first cancellation",)
 
     assert session.commits == 0
-    assert session.rollbacks == 0
+    # The cancelled commit is drained before the owner session can close, then
+    # the same session is rolled back to a terminal cleanup outcome.
+    assert session.rollbacks == 1
     assert resolution.commits == 0
     assert resolution.rollbacks == 0
     assert resolution.unknowns == 1

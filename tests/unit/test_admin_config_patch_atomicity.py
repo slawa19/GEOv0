@@ -323,6 +323,55 @@ async def test_config_patch_cancellation_waits_for_durable_audit_and_publish(
 
 
 @pytest.mark.asyncio
+async def test_repeated_config_patch_cancellation_cancels_audit_before_unlock(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(settings, "ROUTING_MAX_PATHS", 3)
+    monkeypatch.setattr(admin_api, "_runtime_config_lock", asyncio.Lock())
+    commit_started = asyncio.Event()
+    release_commit = asyncio.Event()
+    first_db = ControlledAuditDB(
+        commit_started=commit_started,
+        release_commit=release_commit,
+    )
+    second_db = ControlledAuditDB()
+
+    first_patch = asyncio.create_task(
+        admin_api.patch_admin_config(
+            AdminConfigPatchRequest(updates={"ROUTING_MAX_PATHS": 4}),
+            _config_request(),
+            first_db,
+        )
+    )
+    await asyncio.wait_for(commit_started.wait(), timeout=1.0)
+
+    second_patch = asyncio.create_task(
+        admin_api.patch_admin_config(
+            AdminConfigPatchRequest(updates={"ROUTING_MAX_PATHS": 5}),
+            _config_request(),
+            second_db,
+        )
+    )
+    await asyncio.sleep(0)
+    assert not second_patch.done()
+
+    first_patch.cancel("first cancellation")
+    await asyncio.sleep(0)
+    first_patch.cancel("second cancellation")
+    with pytest.raises(asyncio.CancelledError) as cancelled:
+        await asyncio.wait_for(first_patch, timeout=1.0)
+    assert cancelled.value.args == ("first cancellation",)
+
+    response = await asyncio.wait_for(second_patch, timeout=1.0)
+    assert response.updated == ["ROUTING_MAX_PATHS"]
+    assert settings.ROUTING_MAX_PATHS == 5
+    assert first_db.rollback_calls == 1
+    assert first_db.pending == []
+    assert first_db.durable == []
+    assert len(second_db.durable) == 1
+
+
+@pytest.mark.asyncio
 async def test_feature_flags_patch_keeps_both_readers_old_until_audit_is_durable(
     monkeypatch,
 ) -> None:

@@ -6,28 +6,31 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 
-def _consume_detached_task_result(task: asyncio.Task[Any]) -> None:
-    try:
-        task.result()
-    except BaseException:
-        pass
-
-
 async def _drain_task(
     task: asyncio.Task[Any],
     cancellation: asyncio.CancelledError | None,
 ) -> tuple[asyncio.CancelledError | None, bool]:
-    """Wait through one caller cancellation; detach on a repeated cancellation."""
+    """Wait through one caller cancellation; cancel the child on a repeated one.
+
+    The child must reach a terminal state before this function returns because
+    its database session is owned by the surrounding context. Detaching it
+    would let context cleanup race an in-flight commit or rollback.
+    """
 
     while not task.done():
         try:
             await asyncio.shield(task)
         except asyncio.CancelledError as exc:
+            # A shielded child can itself finish as cancelled without the
+            # caller being cancelled. Treat that as the child's terminal
+            # result, not as a cancellation request for this task.
+            if task.done():
+                continue
             current = asyncio.current_task()
             if current is not None and current.cancelling():
                 if cancellation is not None:
-                    task.add_done_callback(_consume_detached_task_result)
-                    return cancellation, False
+                    task.cancel("repeated caller cancellation")
+                    continue
                 cancellation = exc
         except Exception:
             # The child has reached a failed terminal state. Its exception is
@@ -108,9 +111,9 @@ async def resolve_commit_under_cancellation(
     """Resolve a commit from its terminal result, then restore cancellation.
 
     ``asyncio.shield`` keeps the database operation alive through the first
-    caller cancellation. A repeated cancellation bounds shutdown latency:
-    the operation is detached and the outcome is resolved as unknown. A failed
-    cleanup also selects unknown; caller cancellation keeps priority.
+    caller cancellation. A repeated cancellation requests cancellation of the
+    database operation but still drains it before the owner session can close.
+    A failed cleanup selects unknown; caller cancellation keeps priority.
     """
 
     cancellation: asyncio.CancelledError | None = None
