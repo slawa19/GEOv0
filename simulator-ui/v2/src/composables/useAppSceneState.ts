@@ -13,6 +13,10 @@ export function useAppSceneState(opts: {
   effectiveEq: ComputedRef<string>
   state: SimulatorAppState
   loadSnapshot: (eq: string) => Promise<{ snapshot: import('../types').GraphSnapshot; sourcePath: string }>
+  loadRecoverySnapshot?: (context: { runId: string; equivalent: string }) => Promise<{
+    snapshot: import('../types').GraphSnapshot
+    sourcePath: string
+  }>
   clearScheduledTimeouts: (opts?: { keepCritical?: boolean }) => void
   resetCamera: () => void
   resetLayoutKeyCache: () => void
@@ -34,6 +38,7 @@ export function useAppSceneState(opts: {
     effectiveEq: opts.effectiveEq,
     state: opts.state,
     loadSnapshot: opts.loadSnapshot,
+    loadRecoverySnapshot: opts.loadRecoverySnapshot,
     clearScheduledTimeouts: opts.clearScheduledTimeouts,
     resetCamera: opts.resetCamera,
     resetLayoutKeyCache: opts.resetLayoutKeyCache,

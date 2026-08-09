@@ -131,6 +131,11 @@ export function useSimulatorRealMode(opts: {
 
   // Scene loader integration (real mode uses snapshots via SceneState)
   loadScene: () => Promise<void>
+  loadRecoveryScene?: (context: {
+    runId: string
+    equivalent: string
+    isCurrent: () => boolean
+  }) => Promise<boolean>
 
   // Live patch application + FX hooks
   realPatchApplier: PatchApplier
@@ -182,6 +187,7 @@ export function useSimulatorRealMode(opts: {
     isUserFacingRunError,
     inc,
     loadScene,
+    loadRecoveryScene,
     realPatchApplier,
     pushTxAmountLabel,
     clampRealTxTtlMs,
@@ -357,7 +363,11 @@ export function useSimulatorRealMode(opts: {
     await refreshRunStatusForCurrentContext()
   }
 
-  function startSnapshotRefresh(opts?: { debounce?: boolean }): Promise<SnapshotRefreshOutcome> {
+  function startSnapshotRefresh(opts?: {
+    debounce?: boolean
+    load?: () => Promise<boolean | void>
+    isContextCurrent?: () => boolean
+  }): Promise<SnapshotRefreshOutcome> {
     const mySeq = ++refreshSnapshotSeq
     const runIdAtStart = real.runId
 
@@ -370,6 +380,8 @@ export function useSimulatorRealMode(opts: {
 
       // Prevent a delayed refresh from applying to a different run context.
       if (real.runId !== runIdAtStart) return false
+
+      if (opts?.isContextCurrent && !opts.isContextCurrent()) return false
 
       return true
     }
@@ -397,7 +409,8 @@ export function useSimulatorRealMode(opts: {
         if (!isContextStillValid()) return 'superseded'
 
         try {
-          await loadScene()
+          const applied = await (opts?.load ? opts.load() : loadScene())
+          if (applied === false) return 'superseded'
         } catch (e: unknown) {
           if (!isContextStillValid()) return 'superseded'
           const message = getErrorMessage(e)
@@ -465,12 +478,28 @@ export function useSimulatorRealMode(opts: {
     await startSnapshotRefresh()
   }
 
-  async function refreshSnapshotForReplayRecovery(runId: string): Promise<SnapshotRefreshOutcome> {
+  async function refreshSnapshotForReplayRecovery(input: {
+    runId: string
+    equivalent: string
+    isCurrent: () => boolean
+  }): Promise<SnapshotRefreshOutcome> {
     // Start a new authoritative load immediately. SceneState owns latest-request
     // application, so this invalidates both tracked and direct watcher loads.
     cancelPendingRefreshSnapshotDebounce()
-    if (!isRealMode.value || real.runId !== runId) return 'superseded'
-    return await startSnapshotRefresh({ debounce: false })
+    if (!isRealMode.value || real.runId !== input.runId || !input.isCurrent()) return 'superseded'
+    if (!loadRecoveryScene) {
+      real.lastError = 'Strict replay recovery snapshot loader is not configured'
+      return 'transient'
+    }
+    return await startSnapshotRefresh({
+      debounce: false,
+      isContextCurrent: input.isCurrent,
+      load: () => loadRecoveryScene({
+        runId: input.runId,
+        equivalent: input.equivalent,
+        isCurrent: input.isCurrent,
+      }),
+    })
   }
 
   // Also surface initial scene-load errors (e.g., "No run started") that happen on mount.
@@ -581,18 +610,20 @@ export function useSimulatorRealMode(opts: {
     })
   }
 
-  function isReplayBootstrapFrame(msg: SseParsedMessage, runId: string): boolean {
-    if (!msg.data) return false
+  function replayBootstrapFrame(msg: SseParsedMessage, runId: string): { terminal: boolean } | null {
+    if (!msg.data) return null
     try {
       const payload: unknown = JSON.parse(msg.data)
-      return isRecord(payload) && payload.type === 'run_status' && payload.run_id === runId
+      if (!isRecord(payload) || payload.type !== 'run_status' || payload.run_id !== runId) return null
+      const state = String(payload.state || '').trim().toLowerCase()
+      return { terminal: state === 'stopped' || state === 'error' }
     } catch {
-      return false
+      return null
     }
   }
 
   type SseConnectionOutcome = { status: 'ended' } | { status: 'error'; error: unknown }
-  type ReplayRecoveryConnectionOutcome = 'ended' | 'retry' | 'stop'
+  type ReplayRecoveryConnectionOutcome = 'ended' | 'terminal' | 'retry' | 'stop'
 
   async function runReplayRecoveryConnection(input: {
     runId: string
@@ -602,8 +633,13 @@ export function useSimulatorRealMode(opts: {
     url: string
   }): Promise<ReplayRecoveryConnectionOutcome> {
     const { runId, ctrl, sseLoopSeq, equivalent, url } = input
+    const equivalentKey = String(equivalent || '').trim().toUpperCase()
     const isCurrentContext = () =>
-      !ctrl.signal.aborted && sseLoopSeq === sseSeq && isRealMode.value && real.runId === runId
+      !ctrl.signal.aborted &&
+      sseLoopSeq === sseSeq &&
+      isRealMode.value &&
+      real.runId === runId &&
+      String(effectiveEq.value || '').trim().toUpperCase() === equivalentKey
 
     if (!isCurrentContext()) return 'stop'
 
@@ -614,6 +650,7 @@ export function useSimulatorRealMode(opts: {
     const bufferedMessages: SseParsedMessage[] = []
     let buffering = true
     let bufferOverflowed = false
+    let terminalBootstrap = false
     let firstBootstrapResolved = false
     let resolveFirstBootstrap!: () => void
     let resolveBufferOverflow!: () => void
@@ -647,8 +684,10 @@ export function useSimulatorRealMode(opts: {
         }
 
         bufferedMessages.push(msg)
-        if (!firstBootstrapResolved && isReplayBootstrapFrame(msg, runId)) {
+        const bootstrap = replayBootstrapFrame(msg, runId)
+        if (!firstBootstrapResolved && bootstrap) {
           firstBootstrapResolved = true
+          terminalBootstrap = bootstrap.terminal
           resolveFirstBootstrap()
         }
       },
@@ -688,7 +727,11 @@ export function useSimulatorRealMode(opts: {
         return 'stop'
       }
 
-      const snapshotPromise = refreshSnapshotForReplayRecovery(runId)
+      const snapshotPromise = refreshSnapshotForReplayRecovery({
+        runId,
+        equivalent,
+        isCurrent: isCurrentContext,
+      })
       const snapshotOrConnection = await Promise.race([
         snapshotPromise.then((outcome) => ({ kind: 'snapshot' as const, outcome })),
         bufferOverflow.then(() => ({ kind: 'overflow' as const })),
@@ -699,17 +742,23 @@ export function useSimulatorRealMode(opts: {
         await settleAfterAbort()
         return 'retry'
       }
+      let snapshotOutcome: SnapshotRefreshOutcome
       if (snapshotOrConnection.kind === 'connection') {
         if (!isCurrentContext()) return 'stop'
         if (snapshotOrConnection.outcome.status === 'error') throw snapshotOrConnection.outcome.error
-        real.lastError = 'SSE replay recovery connection ended before the authoritative snapshot completed'
-        return 'retry'
+        if (!terminalBootstrap) {
+          real.lastError = 'SSE replay recovery connection ended before the authoritative snapshot completed'
+          return 'retry'
+        }
+        snapshotOutcome = await snapshotPromise
+      } else {
+        snapshotOutcome = snapshotOrConnection.outcome
       }
-      if (snapshotOrConnection.outcome === 'transient') {
+      if (snapshotOutcome === 'transient') {
         await settleAfterAbort()
         return 'retry'
       }
-      if (snapshotOrConnection.outcome !== 'current' || !isCurrentContext()) {
+      if (snapshotOutcome !== 'current' || !isCurrentContext()) {
         await settleAfterAbort()
         return 'stop'
       }
@@ -724,7 +773,12 @@ export function useSimulatorRealMode(opts: {
       bufferedMessages.length = 0
       buffering = false
       replayGapRecoveryRunId = null
-      real.sseState = 'open'
+      real.sseState = terminalBootstrap ? 'closed' : 'open'
+
+      if (terminalBootstrap) {
+        await settleAfterAbort()
+        return 'terminal'
+      }
 
       const finalOutcome = await connectionOutcome
       if (finalOutcome.status === 'error') throw finalOutcome.error
@@ -754,6 +808,12 @@ export function useSimulatorRealMode(opts: {
       return 'stop'
     }
     if (statusOutcome === 'transient') return 'retry'
+    const state = String(real.runStatus?.state || '').trim().toLowerCase()
+    if (state === 'stopped' || state === 'error') {
+      replayGapRecoveryRunId = null
+      real.sseState = 'closed'
+      return 'stop'
+    }
     return 'current'
   }
 
@@ -804,6 +864,7 @@ export function useSimulatorRealMode(opts: {
             url,
           })
           if (recoveryConnectionOutcome === 'stop') return
+          if (recoveryConnectionOutcome === 'terminal') return
           if (recoveryConnectionOutcome === 'retry') {
             const delay = nextBackoff(attempt++)
             await new Promise((r) => setTimeout(r, delay))

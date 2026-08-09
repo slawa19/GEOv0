@@ -78,6 +78,32 @@ function getErrorMessage(err: unknown): string {
   return String(err)
 }
 
+export async function loadStrictRunRecoverySnapshot(input: {
+  apiBase: string
+  accessToken: string
+  runId: string
+  equivalent: string
+}): Promise<{ snapshot: GraphSnapshot; sourcePath: string }> {
+  const runId = String(input.runId || '').trim()
+  const equivalent = String(input.equivalent || '').trim().toUpperCase()
+  if (!runId || !equivalent) throw new Error('Replay recovery requires a run id and equivalent')
+
+  // Recovery after an unreplayable cursor must never fall back to a scenario
+  // preview or an empty graph: only this run-scoped snapshot can cover the gap.
+  const snapshot = await getSnapshot(
+    { apiBase: input.apiBase, accessToken: input.accessToken },
+    runId,
+    equivalent,
+  )
+  if (String(snapshot.equivalent || '').trim().toUpperCase() !== equivalent) {
+    throw new Error('Replay recovery snapshot equivalent does not match the requested context')
+  }
+  return {
+    snapshot,
+    sourcePath: `GET ${input.apiBase}/simulator/runs/${encodeURIComponent(runId)}/graph/snapshot?equivalent=${encodeURIComponent(equivalent)}`,
+  }
+}
+
 type RealModeApi = ReturnType<typeof useSimulatorRealMode>
 type AdminRunsPanelApi = ReturnType<typeof useAdminRunsPanel>
 type CookieSessionApi = ReturnType<typeof useCookieSessionBootstrap>
@@ -1436,6 +1462,12 @@ export function useSimulatorApp(opts?: {
     isTestMode: () => isTestMode.value,
     isEqAllowed: (v) => ALLOWED_EQS.has(String(v ?? '').toUpperCase()),
     loadSnapshot: loadSnapshotForUi,
+    loadRecoverySnapshot: ({ runId, equivalent }) => loadStrictRunRecoverySnapshot({
+      apiBase: real.apiBase,
+      accessToken: real.accessToken,
+      runId,
+      equivalent,
+    }),
     onIncrementalSnapshotLoaded: (snapshot) => syncLayoutFromSnapshot(snapshot),
     clearScheduledTimeouts,
     resetCamera,
@@ -1480,6 +1512,7 @@ export function useSimulatorApp(opts?: {
     isUserFacingRunError,
     inc,
     loadScene: () => sceneState.loadScene(),
+    loadRecoveryScene: (context) => sceneState.loadRecoveryScene(context),
     realPatchApplier,
     pushTxAmountLabel,
     runRealTxFx,

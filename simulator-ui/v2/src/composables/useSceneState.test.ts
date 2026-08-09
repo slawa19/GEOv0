@@ -409,13 +409,13 @@ describe('useSceneState', () => {
       const oldSnapshot = { ...makeSnapshot(), generated_at: '2026-01-25T00:00:01Z' }
       const newSnapshot = {
         ...makeSnapshot(),
+        equivalent: 'EUR',
         generated_at: '2026-01-25T00:00:02Z',
         nodes: [makeNode('NEW_A'), makeNode('NEW_B')],
         links: [makeLink('NEW_A', 'NEW_B')],
       }
-      const loadSnapshot = vi.fn()
-        .mockImplementationOnce(() => oldLoad.promise)
-        .mockImplementationOnce(() => newLoad.promise)
+      const loadSnapshot = vi.fn().mockImplementationOnce(() => oldLoad.promise)
+      const loadRecoverySnapshot = vi.fn().mockImplementationOnce(() => newLoad.promise)
       const resetCamera = vi.fn()
       const resetLayoutKeyCache = vi.fn()
       const resetOverlays = vi.fn()
@@ -430,6 +430,7 @@ describe('useSceneState', () => {
         effectiveEq,
         state,
         loadSnapshot,
+        loadRecoverySnapshot,
         clearScheduledTimeouts: vi.fn(),
         resetCamera,
         resetLayoutKeyCache,
@@ -443,8 +444,11 @@ describe('useSceneState', () => {
 
       eq.value = 'EUR'
       await vi.waitFor(() => expect(loadSnapshot).toHaveBeenCalledTimes(1))
-      const recoveryLoad = s.loadScene()
-      newLoad.resolve({ snapshot: newSnapshot, sourcePath: 'new-recovery.json' })
+      const recoveryLoad = s.loadRecoveryScene({ runId: 'run-1', equivalent: 'EUR', isCurrent: () => true })
+      newLoad.resolve({
+        snapshot: newSnapshot,
+        sourcePath: 'GET http://sim.test/simulator/runs/run-1/graph/snapshot?equivalent=EUR',
+      })
       await recoveryLoad
 
       if (oldOutcome === 'resolve') {
@@ -456,7 +460,7 @@ describe('useSceneState', () => {
       await Promise.resolve()
 
       expect(state.snapshot).toEqual(newSnapshot)
-      expect(state.sourcePath).toBe('new-recovery.json')
+      expect(state.sourcePath).toContain('/simulator/runs/run-1/graph/snapshot')
       expect(state.error).toBe('')
       expect(state.loading).toBe(false)
       expect(resetCamera).toHaveBeenCalledTimes(1)
@@ -466,6 +470,48 @@ describe('useSceneState', () => {
       expect(ensureRenderLoop).toHaveBeenCalledTimes(1)
     },
   )
+
+  it('rejects a recovery snapshot whose source does not match the requested run before applying it', async () => {
+    const eq = ref('EUR')
+    const state = reactive({
+      loading: false,
+      error: '',
+      sourcePath: 'existing.json',
+      snapshot: makeSnapshot() as GraphSnapshot | null,
+      selectedNodeId: null as string | null,
+    })
+    const resetCamera = vi.fn()
+    const s = useSceneState({
+      eq,
+      scene: ref<'A' | 'B' | 'C'>('A'),
+      layoutMode: ref<'admin-force'>('admin-force'),
+      allowEqDeepLink: () => true,
+      isEqAllowed: () => true,
+      effectiveEq: computed(() => eq.value),
+      state,
+      loadSnapshot: vi.fn(),
+      loadRecoverySnapshot: vi.fn(async () => ({
+        snapshot: { ...makeSnapshot(), equivalent: 'EUR' },
+        sourcePath: 'GET http://sim.test/simulator/runs/other-run/graph/snapshot?equivalent=EUR',
+      })),
+      clearScheduledTimeouts: vi.fn(),
+      resetCamera,
+      resetLayoutKeyCache: vi.fn(),
+      resetOverlays: vi.fn(),
+      resizeAndLayout: vi.fn(),
+      ensureRenderLoop: vi.fn(),
+      setupResizeListener: vi.fn(),
+      teardownResizeListener: vi.fn(),
+      stopRenderLoop: vi.fn(),
+    })
+
+    await expect(s.loadRecoveryScene({ runId: 'run-1', equivalent: 'EUR', isCurrent: () => true }))
+      .rejects.toThrow('does not match')
+
+    expect(state.sourcePath).toBe('existing.json')
+    expect(state.snapshot).toEqual(makeSnapshot())
+    expect(resetCamera).not.toHaveBeenCalled()
+  })
 
   it('setup applies allow-listed eq and focuses existing node from URL', async () => {
     const eq = ref('UAH')
