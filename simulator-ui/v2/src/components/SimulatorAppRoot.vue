@@ -812,7 +812,7 @@ function inspectEdgeFromNavigator(link: GraphLink): void {
   if (apiMode.value !== 'real' || !isInteractUi.value || interact.mode.busy.value) return
 
   const anchor = navigatorEdgeAnchor(link)
-  interact.mode.selectEdge(keyEdge(link.source, link.target), anchor)
+  if (!interact.mode.selectEdge(keyEdge(link.source, link.target), anchor)) return
   uiOpenOrUpdateEdgeDetail({ fromPid: link.source, toPid: link.target, anchor })
 }
 

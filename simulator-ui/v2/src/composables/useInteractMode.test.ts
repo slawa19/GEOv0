@@ -458,10 +458,34 @@ describe('useInteractMode', () => {
     const im = useInteractMode({ actions: mkActions(), runId, equivalent: computed(() => 'UAH'), snapshot })
 
     // selectEdge should set phase to 'editing-trustline'
-    im.selectEdge('alice→bob')
+    expect(im.selectEdge('alice→bob')).toBe(true)
     expect(im.phase.value).toBe('editing-trustline')
     expect(im.state.fromPid).toBe('alice')
     expect(im.state.toPid).toBe('bob')
+  })
+
+  it('rejects an edge switch while a trustline operation owns the busy state', async () => {
+    const snapshot = ref<GraphSnapshot | null>(null)
+    const actions = mkActions()
+    const close = deferred<TrustlineCloseResult>()
+    actions.closeTrustline.mockImplementationOnce(async () => close.promise)
+    const im = useInteractMode({
+      actions,
+      runId: computed(() => 'run_test'),
+      equivalent: computed(() => 'UAH'),
+      snapshot,
+    })
+
+    expect(im.selectEdge('alice→bob')).toBe(true)
+    const pendingClose = im.confirmTrustlineClose()
+    expect(im.busy.value).toBe(true)
+
+    expect(im.selectEdge('carol→dave')).toBe(false)
+    expect(im.state.fromPid).toBe('alice')
+    expect(im.state.toPid).toBe('bob')
+
+    close.resolve(trustlineCloseSuccess())
+    await pendingClose
   })
 
   it('successMessage is retriggered when the same toast text repeats (microtask reset)', async () => {

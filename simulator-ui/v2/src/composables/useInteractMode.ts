@@ -36,7 +36,7 @@ export function useInteractMode(opts: {
   startTrustlineFlowWithFrom: (fromPid: string) => void
   startClearingFlow: () => void
   selectNode: (nodeId: string) => void
-  selectEdge: (edgeKey: string, anchor?: { x: number; y: number } | null) => void
+  selectEdge: (edgeKey: string, anchor?: { x: number; y: number } | null) => boolean
   cancel: () => void
 
   // Actions
@@ -445,12 +445,13 @@ export function useInteractMode(opts: {
   }
 
   function selectEdge(edgeKey: string, anchor?: { x: number; y: number } | null) {
-    if (busyRef.value) return
+    if (busyRef.value) return false
     fsm.selectEdge(edgeKey, anchor)
 
     // Opening edit UI: try to have trustlines list ready for dropdown + accurate details.
     void refreshParticipants()
     void refreshTrustlines()
+    return true
   }
 
   async function runBusy<T>(

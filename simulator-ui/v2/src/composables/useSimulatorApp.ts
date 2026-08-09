@@ -1341,7 +1341,7 @@ export function useSimulatorApp(opts?: {
       // IMPORTANT: anchor must be in the same coordinate system as popup clamping/placement.
       // Use host-relative screen coordinates (clientToScreen).
       const anchor = hostEl.value ? clientToScreen(ptr.clientX, ptr.clientY) : { x: ptr.clientX, y: ptr.clientY }
-      interactMode.selectEdge(edge.key, anchor)
+      if (!interactMode.selectEdge(edge.key, anchor)) return false
 
       // Step 5 (WM): open/update edge-detail window.
       // `edge.*Id` values are participant ids in this UI; treat them as pids.
