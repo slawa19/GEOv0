@@ -15,9 +15,38 @@ import {
   pct,
   reloadGraphView,
   syncGraphCoreForView,
+  waitForLatestPendingGraphLoad,
 } from './graphPageHelpers'
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((res) => {
+    resolve = res
+  })
+  return { promise, resolve }
+}
+
 describe('graphPageHelpers', () => {
+  it('waits through a replacement graph load until the latest owner settles', async () => {
+    const older = deferred<void>()
+    const newer = deferred<void>()
+    let pending: Promise<unknown> | null = older.promise
+    const waiting = waitForLatestPendingGraphLoad(() => pending)
+
+    pending = newer.promise
+    older.resolve()
+    await older.promise
+    let settled = false
+    void waiting.then(() => { settled = true })
+    await Promise.resolve()
+    expect(settled).toBe(false)
+
+    pending = null
+    newer.resolve()
+    await waiting
+    expect(settled).toBe(true)
+  })
+
   it('makeMetricsKey is stable and trims inputs', () => {
     expect(makeMetricsKey(' alice ', 'USD', ' 0.2 ')).toBe('alice|USD|thr=0.2')
     expect(makeMetricsKey('alice', null, '')).toBe('alice|ALL|thr=')

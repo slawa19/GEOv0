@@ -132,6 +132,13 @@ describe('mock Admin mutation state and audit contracts', () => {
       tx_id: 'TX_STUCK_1',
       status: 'aborted',
     })
+    const repeatedAudit = assertSuccess(await mockApi.listAuditLog({ action: 'admin.transactions.abort' }))
+    expect(repeatedAudit.items).toHaveLength(2)
+    expect(repeatedAudit.items[0]).toMatchObject({
+      before_state: { state: 'ABORTED', error: null },
+      after_state: { state: 'ABORTED' },
+      reason: 'repeat recovery',
+    })
   })
 
   it('rejects an unknown transaction without fabricating an audit entry', async () => {
@@ -178,6 +185,13 @@ describe('mock Admin mutation state and audit contracts', () => {
       if (url.endsWith('/datasets/incidents.json')) return jsonResponse(incidents)
       if (url.endsWith('/datasets/transactions.json')) return jsonResponse([tx])
       if (url.endsWith('/datasets/config.json')) return jsonResponse(config)
+      if (url.endsWith('/datasets/feature-flags.json')) return jsonResponse(flags)
+      if (url.endsWith('/datasets/participants.json')) {
+        return jsonResponse([{ pid: 'PID_A', display_name: 'Alice', type: 'person', status: 'active' }])
+      }
+      if (url.endsWith('/datasets/equivalents.json')) return jsonResponse([])
+      if (url.endsWith('/datasets/trustlines.json')) return jsonResponse([])
+      if (url.endsWith('/datasets/debts.json')) return jsonResponse([])
       if (url.endsWith('/datasets/audit-log.json')) return jsonResponse({ malformed: true })
       return new Response('Not Found', { status: 404 })
     })
@@ -186,10 +200,50 @@ describe('mock Admin mutation state and audit contracts', () => {
       code: 'INVALID_RESPONSE',
     })
     expect(assertSuccess(await mockApi.listIncidents({})).items.map((item) => item.tx_id)).toEqual(['TX_STUCK_1'])
-    expect(tx).toMatchObject({ state: 'WAITING', error: null })
+    expect(assertSuccess(await mockApi.graphSnapshot()).transactions[0]).toMatchObject({ state: 'WAITING', error: null })
 
     await expect(mockApi.patchConfig({ ROUTING_MAX_PATHS: 4 })).rejects.toMatchObject({ code: 'INVALID_RESPONSE' })
     expect(assertSuccess(await mockApi.getConfig()).ROUTING_MAX_PATHS).toBe(3)
+
+    await expect(mockApi.patchFeatureFlags({ clearing_enabled: false })).rejects.toMatchObject({ code: 'INVALID_RESPONSE' })
+    expect(assertSuccess(await mockApi.getFeatureFlags()).clearing_enabled).toBe(true)
+
+    await expect(mockApi.freezeParticipant('PID_A', 'operator recovery')).rejects.toMatchObject({ code: 'INVALID_RESPONSE' })
+    expect(assertSuccess(await mockApi.listParticipants({})).items[0]?.status).toBe('active')
+
+    await expect(mockApi.createEquivalent({ code: 'TOK', precision: 2, description: 'Token' })).rejects.toMatchObject({
+      code: 'INVALID_RESPONSE',
+    })
+    expect(assertSuccess(await mockApi.listEquivalents({ include_inactive: true })).items).toEqual([])
+  })
+
+  it('serializes concurrent aborts so audit and incident state cannot diverge', async () => {
+    installFixtures()
+    const concurrentIncidents = {
+      items: [
+        { ...incidents.items[0], tx_id: 'TX_A' },
+        { ...incidents.items[0], tx_id: 'TX_B' },
+      ],
+    }
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/scenarios/happy.json')) return jsonResponse({ name: 'happy', latency_ms: { min: 0, max: 0 } })
+      if (url.endsWith('/datasets/incidents.json')) return jsonResponse(concurrentIncidents)
+      if (url.endsWith('/datasets/transactions.json')) return jsonResponse([])
+      if (url.endsWith('/datasets/audit-log.json')) return jsonResponse([])
+      return new Response('Not Found', { status: 404 })
+    })
+
+    const [first, second] = await Promise.all([
+      mockApi.abortTx('TX_A', 'abort A'),
+      mockApi.abortTx('TX_B', 'abort B'),
+    ])
+    expect(assertSuccess(first).status).toBe('aborted')
+    expect(assertSuccess(second).status).toBe('aborted')
+    expect(assertSuccess(await mockApi.listIncidents({})).items).toEqual([])
+    const audit = assertSuccess(await mockApi.listAuditLog({ action: 'admin.transactions.abort' }))
+    expect(audit.items).toHaveLength(2)
+    expect(new Set(audit.items.map((entry) => entry.object_id))).toEqual(new Set(['TX_A', 'TX_B']))
   })
 
   it('retries an optional incident fixture after a transient failure', async () => {

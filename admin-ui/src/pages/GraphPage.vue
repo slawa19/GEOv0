@@ -38,6 +38,7 @@ import {
   pct,
   reloadGraphView,
   syncGraphCoreForView,
+  waitForLatestPendingGraphLoad,
   type LabelPart,
 } from './graph/graphPageHelpers'
 import { useGraphConnections } from './graph/useGraphConnections'
@@ -381,8 +382,7 @@ function reloadGraph(rebuildOptions: { fit: boolean; preserveViewport?: boolean 
 }
 
 async function waitForPendingGraphLoad() {
-  const pending = pendingGraphLoad
-  if (pending) await pending
+  await waitForLatestPendingGraphLoad(() => pendingGraphLoad)
 }
 
 function reloadAll() {

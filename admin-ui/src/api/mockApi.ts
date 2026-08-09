@@ -211,8 +211,10 @@ let mockFlags: AdminFeatureFlags | null = null
 let mockParticipants: Participant[] | null = null
 let mockEquivalents: Equivalent[] | null = null
 let mockAuditLog: AuditLogEntry[] | null = null
+let mockAuditLogLoad: Promise<AuditLogEntry[]> | null = null
 let mockIncidents: Incident[] | null | undefined
 const mockAbortedTransactionIds = new Set<string>()
+let mockMutationTail: Promise<void> = Promise.resolve()
 
 function roleFromLocalStorage(): string {
   const v = (localStorage.getItem('admin-ui.role') || '').trim().toLowerCase()
@@ -244,13 +246,21 @@ async function getEquivalentsDataset(): Promise<Equivalent[]> {
 
 async function getAuditLogDataset(): Promise<AuditLogEntry[]> {
   if (mockAuditLog) return mockAuditLog
-  const decoded = decodeAdminResponse(
-    AdminAuditLogSchema,
-    await loadJson<unknown>('datasets/audit-log.json'),
-    'mock GET /api/v1/admin/audit-log',
-  )
-  mockAuditLog = decoded
-  return decoded
+  if (!mockAuditLogLoad) {
+    mockAuditLogLoad = (async () => decodeAdminResponse(
+      AdminAuditLogSchema,
+      await loadJson<unknown>('datasets/audit-log.json'),
+      'mock GET /api/v1/admin/audit-log',
+    ))()
+  }
+  const pending = mockAuditLogLoad
+  try {
+    const decoded = await pending
+    if (!mockAuditLog) mockAuditLog = decoded
+    return mockAuditLog
+  } finally {
+    if (mockAuditLogLoad === pending) mockAuditLogLoad = null
+  }
 }
 
 async function getIncidentsDataset(): Promise<Incident[] | null> {
@@ -428,6 +438,27 @@ async function withScenario<T>(pathname: string, handler: () => Promise<ApiEnvel
   }
 
   return await handler()
+}
+
+async function serializeMockMutation<T>(handler: () => Promise<ApiEnvelope<T>>): Promise<ApiEnvelope<T>> {
+  const previous = mockMutationTail
+  let release!: () => void
+  mockMutationTail = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  await previous
+  try {
+    return await handler()
+  } finally {
+    release()
+  }
+}
+
+function withScenarioMutation<T>(
+  pathname: string,
+  handler: () => Promise<ApiEnvelope<T>>,
+): Promise<ApiEnvelope<T>> {
+  return withScenario(pathname, () => serializeMockMutation(handler))
 }
 
 export const mockApi = {
@@ -781,7 +812,7 @@ export const mockApi = {
   },
 
   async patchConfig(patch: Record<string, unknown>): Promise<ApiEnvelope<AdminConfigPatchResponse>> {
-    return withScenario('/api/v1/admin/config', async () => {
+    return withScenarioMutation('/api/v1/admin/config', async () => {
       const validatedPatch = AdminConfigPatchSchema.safeParse(patch)
       if (!validatedPatch.success) {
         return {
@@ -845,7 +876,7 @@ export const mockApi = {
   },
 
   async patchFeatureFlags(patch: Record<string, unknown>): Promise<ApiEnvelope<AdminFeatureFlags>> {
-    return withScenario('/api/v1/admin/feature-flags', async () => {
+    return withScenarioMutation('/api/v1/admin/feature-flags', async () => {
       if (!mockFlags) {
         mockFlags = decodeAdminResponse(
           AdminFeatureFlagsSchema,
@@ -1086,7 +1117,7 @@ export const mockApi = {
   },
 
   async freezeParticipant(pid: string, reason: string): Promise<ApiEnvelope<AdminParticipantActionResponse>> {
-    return withScenario('/api/v1/admin/participants/freeze', async () => {
+    return withScenarioMutation('/api/v1/admin/participants/freeze', async () => {
       if (!reason.trim()) return { success: false, error: { code: 'VALIDATION_ERROR', message: 'reason is required' } }
       const all = await getParticipantsDataset()
       const p = all.find((x) => x.pid === pid)
@@ -1112,7 +1143,7 @@ export const mockApi = {
   },
 
   async unfreezeParticipant(pid: string, reason: string): Promise<ApiEnvelope<AdminParticipantActionResponse>> {
-    return withScenario('/api/v1/admin/participants/unfreeze', async () => {
+    return withScenarioMutation('/api/v1/admin/participants/unfreeze', async () => {
       if (!reason.trim()) return { success: false, error: { code: 'VALIDATION_ERROR', message: 'reason is required' } }
       const all = await getParticipantsDataset()
       const p = all.find((x) => x.pid === pid)
@@ -1223,7 +1254,7 @@ export const mockApi = {
     description: string
     is_active?: boolean
   }): Promise<ApiEnvelope<{ created: Equivalent }>> {
-    return withScenario('/api/v1/admin/equivalents', async () => {
+    return withScenarioMutation('/api/v1/admin/equivalents', async () => {
       const code = input.code
       if (!AdminEquivalentCodeSchema.safeParse(code).success) {
         return { success: false, error: { code: 'VALIDATION_ERROR', message: 'invalid equivalent code' } }
@@ -1258,7 +1289,7 @@ export const mockApi = {
   },
 
   async updateEquivalent(code: string, patch: Partial<Pick<Equivalent, 'precision' | 'description'>>): Promise<ApiEnvelope<{ updated: Equivalent }>> {
-    return withScenario('/api/v1/admin/equivalents', async () => {
+    return withScenarioMutation('/api/v1/admin/equivalents', async () => {
       if (patch.precision !== undefined && !AdminEquivalentPrecisionSchema.safeParse(patch.precision).success) {
         return { success: false, error: { code: 'VALIDATION_ERROR', message: 'precision must be an integer from 0 to 18' } }
       }
@@ -1291,7 +1322,7 @@ export const mockApi = {
   },
 
   async setEquivalentActive(code: string, isActive: boolean, reason: string): Promise<ApiEnvelope<{ updated: Equivalent }>> {
-    return withScenario('/api/v1/admin/equivalents/active', async () => {
+    return withScenarioMutation('/api/v1/admin/equivalents/active', async () => {
       if (!String(reason || '').trim()) return { success: false, error: { code: 'VALIDATION_ERROR', message: 'reason is required' } }
       const key = code
       const all = await getEquivalentsDataset()
@@ -1333,7 +1364,7 @@ export const mockApi = {
   },
 
   async deleteEquivalent(code: string, reason: string): Promise<ApiEnvelope<AdminEquivalentDeleteResponse>> {
-    return withScenario('/api/v1/admin/equivalents/delete', async () => {
+    return withScenarioMutation('/api/v1/admin/equivalents/delete', async () => {
       if (roleFromLocalStorage() === 'auditor') return { success: false, error: { code: 'FORBIDDEN', message: 'read-only' } }
       if (!String(reason || '').trim()) return { success: false, error: { code: 'VALIDATION_ERROR', message: 'reason is required' } }
 
@@ -1372,7 +1403,7 @@ export const mockApi = {
   },
 
   async abortTx(txId: string, reason: string): Promise<ApiEnvelope<AdminAbortTxResponse>> {
-    return withScenario('/api/v1/admin/transactions/abort', async () => {
+    return withScenarioMutation('/api/v1/admin/transactions/abort', async () => {
       if (!reason.trim()) {
         return {
           success: false,
@@ -1408,7 +1439,8 @@ export const mockApi = {
         before_state: before,
         after_state: { state: 'ABORTED' },
       })
-      if (incidentIndex >= 0) incidents?.splice(incidentIndex, 1)
+      const currentIncidentIndex = incidents?.findIndex((incident) => incident.tx_id === txId) ?? -1
+      if (currentIncidentIndex >= 0) incidents?.splice(currentIncidentIndex, 1)
       if (knownTransaction) {
         knownTransaction.state = 'ABORTED'
         knownTransaction.error = { code: 'E010', message: reason, details: {} }
@@ -1537,8 +1569,10 @@ export function __resetMockApiForTests() {
   mockParticipants = null
   mockEquivalents = null
   mockAuditLog = null
+  mockAuditLogLoad = null
   mockIncidents = undefined
   mockAbortedTransactionIds.clear()
+  mockMutationTail = Promise.resolve()
   lastToastAt = 0
   lastToastMsg = ''
 }

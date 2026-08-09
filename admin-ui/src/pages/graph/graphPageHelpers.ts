@@ -1,6 +1,17 @@
 import type { GraphRebuildOptions, LabelMode } from '../../composables/useGraphVisualization'
 import { formatDecimalFixed } from '../../utils/decimal'
 
+export async function waitForLatestPendingGraphLoad(
+  getPending: () => Promise<unknown> | null,
+): Promise<void> {
+  while (getPending()) {
+    const pending = getPending()
+    if (!pending) return
+    await pending
+    if (getPending() === pending) return
+  }
+}
+
 export function makeMetricsKey(pid: string, eqCode: string | null, threshold: string): string {
   const p = String(pid || '').trim()
   const eq = String(eqCode || 'ALL').trim() || 'ALL'
