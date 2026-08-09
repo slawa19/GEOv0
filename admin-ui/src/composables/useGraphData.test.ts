@@ -221,6 +221,29 @@ describe('useGraphData', () => {
     expect(g.loading.value).toBe(false)
   })
 
+  it('keeps a successful graph snapshot visible when clearing cycles fail', async () => {
+    apiMock.graphSnapshot.mockResolvedValueOnce(snapshotEnvelope('SNAPSHOT'))
+    apiMock.clearingCycles.mockResolvedValueOnce({
+      success: false,
+      error: { code: 'cycles_unavailable', message: 'clearing cycles unavailable' },
+    })
+    const g = useGraphData({
+      eq: ref('EUR'),
+      isRealMode: ref(true),
+      focusMode: ref(false),
+      focusRootPid: ref(''),
+      focusDepth: ref(1),
+      statusFilter: ref<string[]>([]),
+    })
+
+    await expect(g.loadData()).resolves.toBe(true)
+
+    expect(g.participants.value.map((participant) => participant.pid)).toEqual(['SNAPSHOT'])
+    expect(g.clearingCycles.value).toBeNull()
+    expect(g.error.value).toBe('clearing cycles unavailable')
+    expect(g.loading.value).toBe(false)
+  })
+
   it('guards snapshot and clearing-cycle state at their application owners', async () => {
     const olderSnapshot = deferred<ReturnType<typeof snapshotEnvelope>>()
     const latestSnapshot = deferred<ReturnType<typeof snapshotEnvelope>>()
@@ -297,6 +320,33 @@ describe('useGraphData', () => {
       expect(g.clearingCycles.value).toEqual(cyclesEnvelope('LOAD').data)
     },
   )
+
+  it('does not let a no-op participant deselection supersede pending load cycles', async () => {
+    const snapshot = deferred<ReturnType<typeof snapshotEnvelope>>()
+    const cycles = deferred<ReturnType<typeof cyclesEnvelope>>()
+    apiMock.graphSnapshot.mockReturnValueOnce(snapshot.promise)
+    apiMock.clearingCycles.mockReturnValueOnce(cycles.promise)
+    const g = useGraphData({
+      eq: ref('EUR'),
+      isRealMode: ref(true),
+      focusMode: ref(false),
+      focusRootPid: ref(''),
+      focusDepth: ref(1),
+      statusFilter: ref<string[]>([]),
+    })
+
+    const fullLoad = g.loadData()
+    await expect(g.refreshClearingCyclesForParticipant('')).resolves.toBe(true)
+    expect(apiMock.clearingCycles.mock.calls).toEqual([[]])
+
+    snapshot.resolve(snapshotEnvelope('LOAD'))
+    cycles.resolve(cyclesEnvelope('LOAD'))
+    await expect(fullLoad).resolves.toBe(true)
+
+    expect(g.participants.value.map((participant) => participant.pid)).toEqual(['LOAD'])
+    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('LOAD').data)
+    expect(g.error.value).toBeNull()
+  })
 
   it('keeps a failed equivalent refresh visible when an older full load resolves last', async () => {
     const olderSnapshot = deferred<ReturnType<typeof snapshotEnvelope>>()
@@ -382,6 +432,29 @@ describe('useGraphData', () => {
 
     expect(g.participants.value.map((participant) => participant.pid)).toEqual(['BASE'])
     expect(g.error.value).toBe('latest focus failed')
+    expect(g.loading.value).toBe(false)
+  })
+
+  it('keeps a successful focus snapshot visible when clearing cycles fail', async () => {
+    apiMock.graphEgo.mockResolvedValueOnce(snapshotEnvelope('FOCUS'))
+    apiMock.clearingCycles.mockResolvedValueOnce({
+      success: false,
+      error: { code: 'cycles_unavailable', message: 'focus cycles unavailable' },
+    })
+    const g = useGraphData({
+      eq: ref('EUR'),
+      isRealMode: ref(true),
+      focusMode: ref(true),
+      focusRootPid: ref('PID_A'),
+      focusDepth: ref(1),
+      statusFilter: ref<string[]>(['active']),
+    })
+
+    await expect(g.refreshForFocusMode()).resolves.toBe(true)
+
+    expect(g.participants.value.map((participant) => participant.pid)).toEqual(['FOCUS'])
+    expect(g.clearingCycles.value).toBeNull()
+    expect(g.error.value).toBe('focus cycles unavailable')
     expect(g.loading.value).toBe(false)
   })
 

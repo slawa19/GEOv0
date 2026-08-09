@@ -166,9 +166,12 @@ export function useGraphData(opts: {
     try {
       // First load without equivalent to get full trustlines list for primary equivalent computation
       const snapEq = normalizeEqCode(opts.eq.value)
-      const [snap, cc] = await Promise.all([
+      const [snap, cycleResult] = await Promise.all([
         api.graphSnapshot({ equivalent: snapEq || undefined }),
-        api.clearingCycles(),
+        api.clearingCycles().then(
+          (value) => ({ status: 'fulfilled' as const, value }),
+          (reason: unknown) => ({ status: 'rejected' as const, reason }),
+        ),
       ])
       const s = assertSuccess(snap)
       const payload: GraphSnapshotPayload = {
@@ -180,8 +183,6 @@ export function useGraphData(opts: {
         audit_log: (s.audit_log || []) as AuditLogEntry[],
         transactions: (s.transactions || []) as Transaction[],
       }
-
-      const nextClearingCycles = (assertSuccess(cc) as ClearingCycles | null) ?? null
 
       if (viewRequest.isCurrent()) {
         applySnapshotPayload(payload)
@@ -195,8 +196,17 @@ export function useGraphData(opts: {
       }
 
       if (cycleRequest.isCurrent()) {
-        clearingCycles.value = nextClearingCycles
-        fullClearingCycles = nextClearingCycles
+        try {
+          if (cycleResult.status === 'rejected') throw cycleResult.reason
+          const nextClearingCycles = (assertSuccess(cycleResult.value) as ClearingCycles | null) ?? null
+          clearingCycles.value = nextClearingCycles
+          fullClearingCycles = nextClearingCycles
+        } catch (e: unknown) {
+          if (viewRequest.isCurrent()) {
+            const msg = e instanceof Error ? e.message : String(e)
+            error.value = msg || t('graph.data.loadFailed')
+          }
+        }
       }
       return viewRequest.isCurrent()
     } catch (e: unknown) {
@@ -267,9 +277,12 @@ export function useGraphData(opts: {
     }
 
     try {
-      const [ego, cc] = await Promise.all([
+      const [ego, cycleResult] = await Promise.all([
         api.graphEgo({ pid: query.pid, depth: query.depth, equivalent: query.equivalent, status: query.status }),
-        api.clearingCycles({ participant_pid: query.participant_pid }),
+        api.clearingCycles({ participant_pid: query.participant_pid }).then(
+          (value) => ({ status: 'fulfilled' as const, value }),
+          (reason: unknown) => ({ status: 'rejected' as const, reason }),
+        ),
       ])
 
       const e = assertSuccess(ego) as Partial<GraphSnapshotPayload>
@@ -282,11 +295,21 @@ export function useGraphData(opts: {
         audit_log: (e.audit_log || []) as AuditLogEntry[],
         transactions: (e.transactions || []) as Transaction[],
       }
-      const nextClearingCycles = (assertSuccess(cc) as ClearingCycles | null) ?? null
-
       if (!viewRequest.isCurrent()) return false
       applySnapshotPayload(payload)
-      if (cycleRequest.isCurrent()) clearingCycles.value = nextClearingCycles
+      if (cycleRequest.isCurrent()) {
+        try {
+          if (cycleResult.status === 'rejected') throw cycleResult.reason
+          clearingCycles.value = (assertSuccess(cycleResult.value) as ClearingCycles | null) ?? null
+        } catch (e: unknown) {
+          if (viewRequest.isCurrent()) {
+            const msg = e instanceof Error ? e.message : String(e)
+            const failure = msg || t('graph.focusMode.loadFailed')
+            error.value = failure
+            ElMessage.warning(failure)
+          }
+        }
+      }
       return true
     } catch (e: unknown) {
       if (!viewRequest.isCurrent()) return false
@@ -301,8 +324,8 @@ export function useGraphData(opts: {
   }
 
   async function refreshClearingCyclesForParticipant(pid: string): Promise<boolean> {
-    const request = cycleRequests.begin()
     if (!pid) return true
+    const request = cycleRequests.begin()
     try {
       const cc = await api.clearingCycles({ participant_pid: pid })
       if (!request.isCurrent()) return false
