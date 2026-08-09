@@ -16,6 +16,41 @@ from app.db.models.transaction import Transaction
 
 
 @pytest.mark.asyncio
+async def test_recovery_stops_before_stale_phase_when_session_cannot_rollback(
+    monkeypatch,
+    caplog,
+):
+    stale_phase_called = False
+
+    class _BrokenSession:
+        async def rollback(self):
+            raise RuntimeError("rollback still unavailable")
+
+    async def _cleanup_fails(_session):
+        raise RuntimeError("cleanup failed")
+
+    async def _stale_phase(_session):
+        nonlocal stale_phase_called
+        stale_phase_called = True
+        return None
+
+    monkeypatch.setattr(
+        "app.core.recovery.cleanup_expired_prepare_locks",
+        _cleanup_fails,
+    )
+    monkeypatch.setattr(
+        "app.core.recovery.abort_stale_payment_transactions",
+        _stale_phase,
+    )
+    caplog.set_level("ERROR", logger="app.core.recovery")
+
+    assert await run_recovery_once(_BrokenSession()) is False
+    assert stale_phase_called is False
+    assert "cleanup_expired_prepare_locks_failed" in caplog.text
+    assert "cleanup_expired_prepare_locks_session_unusable" in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_cleanup_expired_prepare_locks_aborts_related_tx_and_deletes_locks(db_session):
     tx_id = str(uuid.uuid4())
 

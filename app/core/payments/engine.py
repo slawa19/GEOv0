@@ -1365,6 +1365,8 @@ class PaymentEngine:
         only after their outer transaction becomes durable.
         """
 
+        attempt_index = 0
+
         def _normalize_code(value: ErrorCode | str | None) -> ErrorCode:
             if value is None:
                 return ErrorCode.E010
@@ -1376,13 +1378,18 @@ class PaymentEngine:
                 return ErrorCode.E010
 
         async def _uow() -> bool:
+            nonlocal attempt_index
             logger.info("event=payment.abort tx_id=%s reason=%s", tx_id, reason)
             try:
                 PAYMENT_EVENTS_TOTAL.labels(event="abort", result="start").inc()
             except Exception:
                 pass
 
-            if not _tx_lock_already_held:
+            reuse_outer_tx_lock = _tx_lock_already_held and (
+                not commit or attempt_index == 0
+            )
+            attempt_index += 1
+            if not reuse_outer_tx_lock:
                 await self._acquire_tx_advisory_lock(tx_id)
             tx = await self._get_tx(tx_id)
             if tx and tx.state == "COMMITTED":

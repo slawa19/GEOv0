@@ -263,6 +263,11 @@ async def run_recovery_once(session: AsyncSession) -> bool:
     except Exception:
         succeeded = False
         logger.exception("recovery.cleanup_expired_prepare_locks_failed")
+        try:
+            await session.rollback()
+        except Exception:
+            logger.exception("recovery.cleanup_expired_prepare_locks_session_unusable")
+            return False
 
     try:
         stale_result = await abort_stale_payment_transactions(session)

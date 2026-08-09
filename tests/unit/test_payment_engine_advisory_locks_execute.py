@@ -157,6 +157,57 @@ async def test_all_payment_transitions_acquire_tx_key_before_first_tx_read(
     assert events == ["tx-key", "tx-read"]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("commit", "expected_reacquires"),
+    [(True, 1), (False, 0)],
+)
+async def test_abort_reacquires_preheld_tx_lock_only_after_outer_rollback_retry(
+    monkeypatch,
+    commit,
+    expected_reacquires,
+):
+    engine = PaymentEngine(SimpleNamespace(bind=None))
+    reacquires: list[str] = []
+    attempts = 0
+
+    class _Retry(RuntimeError):
+        pass
+
+    class _Stop(RuntimeError):
+        pass
+
+    async def _acquire_tx(tx_id):
+        reacquires.append(tx_id)
+
+    async def _get_tx(_tx_id):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise _Retry
+        raise _Stop
+
+    async def _run_twice(*, op, fn, use_savepoint=False):
+        assert op == ("abort" if commit else "abort_nocommit")
+        assert use_savepoint is (not commit)
+        with pytest.raises(_Retry):
+            await fn()
+        return await fn()
+
+    monkeypatch.setattr(engine, "_acquire_tx_advisory_lock", _acquire_tx)
+    monkeypatch.setattr(engine, "_get_tx", _get_tx)
+    monkeypatch.setattr(engine, "_run_uow_with_retry", _run_twice)
+
+    with pytest.raises(_Stop):
+        await engine.abort(
+            "tx-retry",
+            commit=commit,
+            _tx_lock_already_held=True,
+        )
+
+    assert reacquires == ["tx-retry"] * expected_reacquires
+
+
 def test_persisted_prepare_lock_parser_and_keys_share_validated_flows(monkeypatch):
     equivalent_id = uuid.uuid4()
     from_id = uuid.uuid4()
