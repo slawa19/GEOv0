@@ -182,7 +182,7 @@ async def _cancel_during_commit(task, session: _ControlledSession) -> None:
 
 @pytest.mark.parametrize("boundary", ["clearing", "persistence", "trust"])
 @pytest.mark.asyncio
-async def test_repeated_cancellation_waits_for_successful_commit_outcome(boundary: str):
+async def test_repeated_cancellation_bounds_wait_and_marks_commit_unknown(boundary: str):
     session = _ControlledSession()
     resolution = _Resolution()
     task = asyncio.create_task(_public_commit_path(boundary, session, resolution))
@@ -195,22 +195,24 @@ async def test_repeated_cancellation_waits_for_successful_commit_outcome(boundar
     await asyncio.sleep(0)
     await asyncio.sleep(0)
 
-    assert not task.done()
-    session.release_commit.set()
     with pytest.raises(asyncio.CancelledError) as cancelled:
         await task
     assert cancelled.value.args == ("first cancellation",)
 
-    assert session.commits == 1
+    assert session.commits == 0
     assert session.rollbacks == 0
-    assert resolution.commits == 1
+    assert resolution.commits == 0
     assert resolution.rollbacks == 0
-    assert resolution.unknowns == 0
+    assert resolution.unknowns == 1
+
+    session.release_commit.set()
+    await asyncio.wait_for(session.commit_started.wait(), timeout=1.0)
+    await asyncio.sleep(0)
 
 
 @pytest.mark.parametrize("boundary", ["clearing", "persistence", "trust"])
 @pytest.mark.asyncio
-async def test_commit_failure_drains_rollback_under_repeated_cancellation(boundary: str):
+async def test_repeated_cancellation_bounds_rollback_wait_and_marks_unknown(boundary: str):
     session = _ControlledSession(
         commit_error=RuntimeError("commit failed"),
         block_rollback=True,
@@ -227,18 +229,18 @@ async def test_commit_failure_drains_rollback_under_repeated_cancellation(bounda
     task.cancel("cancel during rollback")
     await asyncio.sleep(0)
     await asyncio.sleep(0)
-    assert not task.done()
-
-    session.release_rollback.set()
     with pytest.raises(asyncio.CancelledError) as cancelled:
         await task
     assert cancelled.value.args == ("cancel during commit",)
 
     assert session.commits == 0
-    assert session.rollbacks == 1
+    assert session.rollbacks == 0
     assert resolution.commits == 0
-    assert resolution.rollbacks == 1
-    assert resolution.unknowns == 0
+    assert resolution.rollbacks == 0
+    assert resolution.unknowns == 1
+
+    session.release_rollback.set()
+    await asyncio.sleep(0)
 
 
 @pytest.mark.asyncio

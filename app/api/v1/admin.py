@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -289,9 +290,17 @@ def _add_audit_entry(
     return entry
 
 
-async def _audit(
+def _consume_required_audit_task(task: asyncio.Task[None]) -> None:
+    try:
+        task.result()
+    except BaseException:
+        pass
+
+
+async def _required_audit_and_publish(
     db: AsyncSession,
     *,
+    publish: Callable[[], None],
     request: Request,
     action: str,
     object_type: str | None = None,
@@ -299,9 +308,8 @@ async def _audit(
     reason: str | None = None,
     before_state: dict[str, Any] | None = None,
     after_state: dict[str, Any] | None = None,
-    required: bool = False,
 ) -> None:
-    try:
+    async def _operation() -> None:
         _add_audit_entry(
             db,
             request=request,
@@ -313,13 +321,33 @@ async def _audit(
             after_state=after_state,
         )
         await db.commit()
-    except asyncio.CancelledError:
+        publish()
+
+    task = asyncio.create_task(_operation())
+    cancellation: asyncio.CancelledError | None = None
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError as exc:
+            if cancellation is not None:
+                task.add_done_callback(_consume_required_audit_task)
+                raise cancellation
+            cancellation = exc
+        except Exception:
+            pass
+
+    operation_error: BaseException | None = None
+    try:
+        task.result()
+    except BaseException as exc:
+        operation_error = exc
+
+    if operation_error is not None:
         await db.rollback()
-        raise
-    except Exception:
-        await db.rollback()
-        if required:
-            raise
+    if cancellation is not None:
+        raise cancellation
+    if operation_error is not None:
+        raise operation_error
 
 
 @router.get("/config", response_model=AdminConfigResponse, dependencies=[])
@@ -341,8 +369,18 @@ async def patch_admin_config(
         before = {key: getattr(settings, key) for key in validated}
         after = dict(validated)
 
-        await _audit(
+        def _publish() -> None:
+            try:
+                for key, value in validated.items():
+                    setattr(settings, key, value)
+            except BaseException:
+                for key, value in before.items():
+                    setattr(settings, key, value)
+                raise
+
+        await _required_audit_and_publish(
             db,
+            publish=_publish,
             request=request,
             action="admin.config.patch",
             object_type="config",
@@ -350,16 +388,7 @@ async def patch_admin_config(
             reason=body.reason,
             before_state=before or None,
             after_state=after or None,
-            required=True,
         )
-
-        try:
-            for key, value in validated.items():
-                setattr(settings, key, value)
-        except BaseException:
-            for key, value in before.items():
-                setattr(settings, key, value)
-            raise
 
         return AdminConfigPatchResponse(updated=list(validated))
 
@@ -399,8 +428,26 @@ async def patch_feature_flags(
         if body.clearing_enabled is not None:
             after["clearing_enabled"] = body.clearing_enabled
 
-        await _audit(
+        def _publish() -> None:
+            try:
+                settings.FEATURE_FLAGS_MULTIPATH_ENABLED = after["multipath_enabled"]
+                settings.FEATURE_FLAGS_FULL_MULTIPATH_ENABLED = after[
+                    "full_multipath_enabled"
+                ]
+                settings.CLEARING_ENABLED = after["clearing_enabled"]
+            except BaseException:
+                settings.FEATURE_FLAGS_MULTIPATH_ENABLED = before[
+                    "multipath_enabled"
+                ]
+                settings.FEATURE_FLAGS_FULL_MULTIPATH_ENABLED = before[
+                    "full_multipath_enabled"
+                ]
+                settings.CLEARING_ENABLED = before["clearing_enabled"]
+                raise
+
+        await _required_audit_and_publish(
             db,
+            publish=_publish,
             request=request,
             action="admin.feature_flags.patch",
             object_type="feature_flags",
@@ -408,23 +455,7 @@ async def patch_feature_flags(
             reason=body.reason,
             before_state=before,
             after_state=after,
-            required=True,
         )
-
-        try:
-            if body.multipath_enabled is not None:
-                settings.FEATURE_FLAGS_MULTIPATH_ENABLED = body.multipath_enabled
-            if body.full_multipath_enabled is not None:
-                settings.FEATURE_FLAGS_FULL_MULTIPATH_ENABLED = body.full_multipath_enabled
-            if body.clearing_enabled is not None:
-                settings.CLEARING_ENABLED = body.clearing_enabled
-        except BaseException:
-            settings.FEATURE_FLAGS_MULTIPATH_ENABLED = before["multipath_enabled"]
-            settings.FEATURE_FLAGS_FULL_MULTIPATH_ENABLED = before[
-                "full_multipath_enabled"
-            ]
-            settings.CLEARING_ENABLED = before["clearing_enabled"]
-            raise
 
         return AdminFeatureFlags(**after)
 

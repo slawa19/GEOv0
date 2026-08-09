@@ -102,6 +102,11 @@ class _Sse:
 class _ExplodingPaymentEffect:
     def __init__(self) -> None:
         self.calls = 0
+        self.cache_invalidations = 0
+
+    def invalidate_routing_cache_once(self) -> bool:
+        self.cache_invalidations += 1
+        return True
 
     def apply_once(self) -> bool:
         self.calls += 1
@@ -111,6 +116,11 @@ class _ExplodingPaymentEffect:
 class _CountingPaymentEffect:
     def __init__(self) -> None:
         self.calls = 0
+        self.cache_invalidations = 0
+
+    def invalidate_routing_cache_once(self) -> bool:
+        self.cache_invalidations += 1
+        return True
 
     def apply_once(self) -> bool:
         self.calls += 1
@@ -334,6 +344,7 @@ async def test_stop_requested_rollback_failure_resolves_unknown_once_and_propaga
 
     assert session.rollbacks == 1
     assert committed_effect.calls == 0
+    assert committed_effect.cache_invalidations == 1
     assert [event.get("type") for event in sse.events] == ["tx.failed"]
     assert run.committed_total == 0
     assert run.rejected_total == 1
@@ -342,7 +353,7 @@ async def test_stop_requested_rollback_failure_resolves_unknown_once_and_propaga
 
 
 @pytest.mark.asyncio
-async def test_stop_requested_double_cancellation_drains_successful_rollback():
+async def test_stop_requested_double_cancellation_bounds_rollback_wait():
     session = _ControlledRollbackSession()
     sse = _Sse()
     run = _run()
@@ -358,19 +369,20 @@ async def test_stop_requested_double_cancellation_drains_successful_rollback():
     task.cancel("second cancellation")
     await asyncio.sleep(0)
     await asyncio.sleep(0)
-    assert not task.done()
-
-    session.release_rollback.set()
     with pytest.raises(asyncio.CancelledError):
         await task
 
-    assert session.rollbacks == 1
+    assert session.rollbacks == 0
     assert committed_effect.calls == 0
+    assert committed_effect.cache_invalidations == 1
     assert [event.get("type") for event in sse.events] == ["tx.failed"]
     assert run.committed_total == 0
     assert run.rejected_total == 1
     assert deferred.apply_after_rollback() is False
     assert deferred.apply_after_unknown_transaction_outcome() is False
+
+    session.release_rollback.set()
+    await asyncio.sleep(0)
 
 
 @pytest.mark.asyncio

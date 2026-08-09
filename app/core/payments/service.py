@@ -50,13 +50,14 @@ class PaymentPostCommitEffects:
     invalidate_routing_cache: bool = True
     include_engine_success_metrics: bool = False
     _applied: bool = field(default=False, init=False, repr=False)
+    _cache_invalidated: bool = field(default=False, init=False, repr=False)
 
-    def apply_once(self) -> bool:
-        if self._applied:
+    def invalidate_routing_cache_once(self) -> bool:
+        """Discard possibly stale routes without publishing commit-only effects."""
+
+        if self._cache_invalidated:
             return False
-        # Mark first: these effects are process-local and cannot be made exactly-once
-        # across a crash without a transactional outbox.
-        self._applied = True
+        self._cache_invalidated = True
 
         if self.invalidate_routing_cache:
             try:
@@ -67,6 +68,15 @@ class PaymentPostCommitEffects:
                     self.equivalent,
                     exc_info=True,
                 )
+        return True
+
+    def apply_once(self) -> bool:
+        if self._applied:
+            return False
+        # Mark first: these effects are process-local and cannot be made exactly-once
+        # across a crash without a transactional outbox.
+        self._applied = True
+        self.invalidate_routing_cache_once()
 
         try:
             from app.utils.metrics import PAYMENT_EVENTS_TOTAL

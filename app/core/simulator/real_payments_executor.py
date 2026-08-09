@@ -75,6 +75,17 @@ class DeferredRealPaymentEffects:
 
         for item in sorted(self.items, key=lambda observation: observation.seq):
             if resolution != "commit" and item.outcome == "committed":
+                if resolution == "unknown" and item.payment_effects is not None:
+                    try:
+                        item.payment_effects.invalidate_routing_cache_once()
+                    except Exception:
+                        self.logger.warning(
+                            "simulator.real.payment_unknown_cache_invalidation_failed "
+                            "run_id=%s seq=%s",
+                            self.run_id,
+                            item.seq,
+                            exc_info=True,
+                        )
                 continue
             try:
                 self._apply_observation(item)
