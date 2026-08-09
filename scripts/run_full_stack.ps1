@@ -410,6 +410,16 @@ $Tools = Get-ProjectTools
 Write-Host "[OK] Python: $($Tools.Python)" -ForegroundColor Green
 Write-Host "[OK] npm: $($Tools.Npm)" -ForegroundColor Green
 $Python = $Tools.Python
+$DatabasePreflightComplete = $false
+
+if ($Action -eq 'restart') {
+    Set-EnvOverrides -Pairs $BackendEnv
+    $EffectiveDatabaseUrl = Get-EffectiveDatabaseUrl -PythonExe $Python
+    if ($ResetDb -and $EffectiveDatabaseUrl -ne $DefaultDatabaseUrl) {
+        throw '-ResetDb is restricted to the default .local-run SQLite DB; legacy or custom DATABASE_URL values are never deleted.'
+    }
+    $DatabasePreflightComplete = $true
+}
 
 switch ($Action) {
     'status' {
@@ -466,9 +476,11 @@ switch ($Action) {
 # --- START action ---
 
 # Apply env overrides early so child processes inherit them.
-Set-EnvOverrides -Pairs $BackendEnv
+if (-not $DatabasePreflightComplete) {
+    Set-EnvOverrides -Pairs $BackendEnv
+    $EffectiveDatabaseUrl = Get-EffectiveDatabaseUrl -PythonExe $Python
+}
 
-$EffectiveDatabaseUrl = Get-EffectiveDatabaseUrl -PythonExe $Python
 $LocalDatabasePath = if ($EffectiveDatabaseUrl -eq $DefaultDatabaseUrl) {
     $DefaultDatabasePath
 } elseif ($EffectiveDatabaseUrl -eq $LegacyRootDatabaseUrl) {

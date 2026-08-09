@@ -594,14 +594,6 @@ Write-Host "[OK] Python: $($Tools.Python)" -ForegroundColor Green
 Write-Host "[OK] npm: $($Tools.Npm)" -ForegroundColor Green
 $Python = $Tools.Python
 $WindowStyle = if ($ShowWindows) { 'Normal' } else { 'Hidden' }
-$EffectiveDatabaseUrl = Get-EffectiveDatabaseUrl -PythonExe $Python
-$LocalDatabasePath = if ($EffectiveDatabaseUrl -eq $DefaultDatabaseUrl) {
-    $DefaultDatabasePath
-} elseif ($EffectiveDatabaseUrl -eq $LegacyRootDatabaseUrl) {
-    $LegacyRootDatabasePath
-} else {
-    $null
-}
 
 switch ($Action) {
     'status' {
@@ -644,6 +636,7 @@ switch ($Action) {
     }
 
     'reset-db' {
+        $EffectiveDatabaseUrl = Get-EffectiveDatabaseUrl -PythonExe $Python
         if ($EffectiveDatabaseUrl -ne $DefaultDatabaseUrl) {
             throw 'reset-db is restricted to the default .local-run SQLite DB; legacy or custom DATABASE_URL values are never deleted.'
         }
@@ -661,6 +654,14 @@ switch ($Action) {
     }
 
     'check-db' {
+        $EffectiveDatabaseUrl = Get-EffectiveDatabaseUrl -PythonExe $Python
+        $LocalDatabasePath = if ($EffectiveDatabaseUrl -eq $DefaultDatabaseUrl) {
+            $DefaultDatabasePath
+        } elseif ($EffectiveDatabaseUrl -eq $LegacyRootDatabaseUrl) {
+            $LegacyRootDatabasePath
+        } else {
+            $null
+        }
         if (-not $LocalDatabasePath) {
             throw 'check-db supports only the default local SQLite DB or the documented legacy root override.'
         }
@@ -681,6 +682,8 @@ switch ($Action) {
     }
 
     'restart' {
+        # Validate application settings before stopping healthy services.
+        $null = Get-EffectiveDatabaseUrl -PythonExe $Python
         # Рекурсивный вызов скрипта для чистого рестарта
         $restartParams = @{
             Action = 'stop'
@@ -704,6 +707,8 @@ switch ($Action) {
     }
 
     'restart-backend' {
+        # Validate application settings before stopping a healthy backend.
+        $null = Get-EffectiveDatabaseUrl -PythonExe $Python
         Remove-StalePidFile $BackendPidPath
         
         # Stop backend
@@ -743,6 +748,14 @@ switch ($Action) {
     }
 
     'start' {
+        $EffectiveDatabaseUrl = Get-EffectiveDatabaseUrl -PythonExe $Python
+        $LocalDatabasePath = if ($EffectiveDatabaseUrl -eq $DefaultDatabaseUrl) {
+            $DefaultDatabasePath
+        } elseif ($EffectiveDatabaseUrl -eq $LegacyRootDatabaseUrl) {
+            $LegacyRootDatabasePath
+        } else {
+            $null
+        }
         Write-Host "[1/7] Cleaning up old processes..." -ForegroundColor Yellow
         Remove-StalePidFile $BackendPidPath
         Remove-StalePidFile $UiPidPath
