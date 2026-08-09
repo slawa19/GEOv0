@@ -211,7 +211,7 @@ let mockFlags: AdminFeatureFlags | null = null
 let mockParticipants: Participant[] | null = null
 let mockEquivalents: Equivalent[] | null = null
 let mockAuditLog: AuditLogEntry[] | null = null
-let mockAuditLogLoad: Promise<AuditLogEntry[]> | null = null
+let mockAuditLogLoad: Promise<unknown> | null = null
 let mockIncidents: Incident[] | null | undefined
 const mockAbortedTransactionIds = new Set<string>()
 let mockMutationTail: Promise<void> = Promise.resolve()
@@ -246,18 +246,32 @@ async function getEquivalentsDataset(): Promise<Equivalent[]> {
 
 async function getAuditLogDataset(): Promise<AuditLogEntry[]> {
   if (mockAuditLog) return mockAuditLog
+  let raw: unknown
+  try {
+    raw = await getSharedAuditLogRaw()
+  } catch {
+    // Dedicated audit/mutation paths retain the strict retry + toast contract.
+    raw = await loadJson<unknown>('datasets/audit-log.json')
+  }
+  const decoded = decodeAdminResponse(
+    AdminAuditLogSchema,
+    raw,
+    'mock GET /api/v1/admin/audit-log',
+  )
+  if (!mockAuditLog) mockAuditLog = decoded
+  return mockAuditLog
+}
+
+async function getSharedAuditLogRaw(): Promise<unknown> {
   if (!mockAuditLogLoad) {
-    mockAuditLogLoad = (async () => decodeAdminResponse(
-      AdminAuditLogSchema,
-      await loadJson<unknown>('datasets/audit-log.json'),
-      'mock GET /api/v1/admin/audit-log',
-    ))()
+    // One silent attempt is the common concurrency boundary. Strict callers
+    // retry with user feedback after this shared attempt fails; optional Graph
+    // callers return an empty component without a misleading toast.
+    mockAuditLogLoad = loadJson<unknown>('datasets/audit-log.json', { silent: true })
   }
   const pending = mockAuditLogLoad
   try {
-    const decoded = await pending
-    if (!mockAuditLog) mockAuditLog = decoded
-    return mockAuditLog
+    return await pending
   } finally {
     if (mockAuditLogLoad === pending) mockAuditLogLoad = null
   }
@@ -277,10 +291,14 @@ async function getIncidentsDataset(): Promise<Incident[] | null> {
 
 async function getGraphAuditLogDataset(): Promise<AuditLogEntry[]> {
   try {
-    // Share the exact same in-flight owner as mutations and the dedicated audit
-    // endpoint. An older optional Graph read must never overwrite a newer audit
-    // mutation when its fetch resolves last.
-    return await getAuditLogDataset()
+    if (mockAuditLog) return mockAuditLog
+    const decoded = decodeAdminResponse(
+      AdminAuditLogSchema,
+      await getSharedAuditLogRaw(),
+      'mock GET /api/v1/admin/graph/snapshot audit-log',
+    )
+    if (!mockAuditLog) mockAuditLog = decoded
+    return mockAuditLog
   } catch {
     // audit_log is an optional Graph snapshot component in fixture mode. The
     // dedicated audit endpoint remains strict and reports malformed fixtures.

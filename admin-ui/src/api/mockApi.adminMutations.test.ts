@@ -320,6 +320,26 @@ describe('mock Admin mutation state and audit contracts', () => {
     expect(assertSuccess(await mockApi.graphSnapshot()).audit_log).toEqual([])
   })
 
+  it('treats a missing Graph audit fixture as one silent optional attempt', async () => {
+    installFixtures()
+    let auditRequests = 0
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/scenarios/happy.json')) return jsonResponse({ name: 'happy', latency_ms: { min: 0, max: 0 } })
+      if (url.endsWith('/datasets/audit-log.json')) {
+        auditRequests += 1
+        return new Response('Not Found', { status: 404 })
+      }
+      if (url.endsWith('/datasets/participants.json')) return jsonResponse([])
+      if (url.endsWith('/datasets/trustlines.json')) return jsonResponse([])
+      if (url.endsWith('/datasets/equivalents.json')) return jsonResponse([])
+      return new Response('Not Found', { status: 404 })
+    })
+
+    expect(assertSuccess(await mockApi.graphSnapshot()).audit_log).toEqual([])
+    expect(auditRequests).toBe(1)
+  })
+
   it('rejects aborting a transaction proven committed by the transaction fixture', async () => {
     installFixtures()
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
