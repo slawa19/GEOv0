@@ -788,10 +788,13 @@ function navigatorEdgeAnchor(link: GraphLink): Point {
 }
 
 let interactFlowOpener: HTMLElement | null = null
+let interactFlowFallback: HTMLElement | null = null
 
-function captureInteractFlowOpener(): void {
+function captureInteractFlowOpener(fallbackSelector?: string): void {
   const active = document.activeElement
   interactFlowOpener = active instanceof HTMLElement ? active : null
+  const fallback = fallbackSelector ? getHostEl()?.querySelector(fallbackSelector) : null
+  interactFlowFallback = fallback instanceof HTMLElement ? fallback : null
 }
 
 function inspectNodeFromNavigator(nodeId: string): void {
@@ -812,14 +815,18 @@ function cancelInteractWindowFromUi(): void {
     // The WM interact-panel policy delegates action-close to the current FSM onClose owner.
     wm.close(interactWindow.id, 'action')
     const opener = interactFlowOpener
+    const fallback = interactFlowFallback
     interactFlowOpener = null
+    interactFlowFallback = null
     void nextTick(() => {
-      if (document.activeElement !== document.body || !opener?.isConnected || opener.matches(':disabled')) return
-      opener.focus({ preventScroll: true })
+      const target = opener?.isConnected && !opener.matches(':disabled') ? opener : fallback
+      if (document.activeElement !== document.body || !target?.isConnected || target.matches(':disabled')) return
+      target.focus({ preventScroll: true })
     })
     return
   }
   interactFlowOpener = null
+  interactFlowFallback = null
   interact.mode.cancel()
 }
 
@@ -905,6 +912,7 @@ function goInteract() {
 // Interact Mode state is provided by useSimulatorApp() (core-only; panels/picking wiring is a later task).
 
  function onEdgeDetailChangeLimit() {
+  captureInteractFlowOpener('[data-testid="actionbar-trustline"]')
   // MUST: anchor propagation from edge popup to interact-panel.
   wmEdgePopupAnchor.value = interact.mode.state.edgeAnchor ?? null
 
@@ -925,6 +933,7 @@ function goInteract() {
 function onEdgeDetailCloseLine() {
   // Delegate to mode action (will transition to idle on success).
   if (interactPhase.value !== 'editing-trustline') return
+  captureInteractFlowOpener('[data-testid="actionbar-trustline"]')
   void interact.mode.confirmTrustlineClose()
 }
 
@@ -933,6 +942,7 @@ function onEdgeDetailCloseLine() {
   const fromPid = interact.mode.state.fromPid
   const toPid = interact.mode.state.toPid
   if (!fromPid || !toPid) return
+  captureInteractFlowOpener('[data-testid="actionbar-payment"]')
 
   // MUST: if initiated from edge popup, propagate edge anchor to interact-panel.
   wmEdgePopupAnchor.value = interact.mode.state.edgeAnchor ?? null
@@ -1048,10 +1058,13 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
 
   if (p === 'idle' && !busy && interactFlowOpener) {
     const opener = interactFlowOpener
+    const fallback = interactFlowFallback
     interactFlowOpener = null
+    interactFlowFallback = null
     void nextTick(() => {
-      if (!opener.isConnected || opener.matches(':disabled')) return
-      opener.focus({ preventScroll: true })
+      const target = opener.isConnected && !opener.matches(':disabled') ? opener : fallback
+      if (!target?.isConnected || target.matches(':disabled')) return
+      target.focus({ preventScroll: true })
     })
   }
 })

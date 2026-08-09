@@ -1950,6 +1950,8 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
         | undefined
       expect(btn).toBeTruthy()
 
+      btn?.focus()
+      expect(document.activeElement).toBe(btn)
       btn?.click()
       await nextTick()
       await nextTick()
@@ -1957,6 +1959,15 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       // Edge detail must be closed; trustline panel must be visible.
       expect(host.querySelectorAll('[data-testid="edge-detail-popup"]').length).toBe(0)
       expect(host.querySelectorAll('[data-testid="trustline-panel"]').length).toBe(1)
+
+      const busy = getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_BUSY_REF')
+      busy.value = true
+      getPhaseRef().value = 'idle'
+      await nextTick()
+      busy.value = false
+      await nextTick()
+      await nextTick()
+      expect(document.activeElement).toBe(host.querySelector('[data-testid="actionbar-trustline"]'))
     } finally {
       app.unmount()
       host.remove()
@@ -2046,6 +2057,8 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       const sendBtn = host.querySelector('[data-testid="edge-send-payment"]') as HTMLButtonElement | null
       expect(sendBtn).toBeTruthy()
 
+      sendBtn?.focus()
+      expect(document.activeElement).toBe(sendBtn)
       sendBtn?.click()
       await nextTick()
       await nextTick()
@@ -2088,6 +2101,15 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       const zInteract = Number(interactShell!.style.zIndex || '0')
       const zInspector = Number(inspectorShell!.style.zIndex || '0')
       expect(zInteract).toBeGreaterThan(zInspector)
+
+      const busy = getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_BUSY_REF')
+      busy.value = true
+      getPhaseRef().value = 'idle'
+      await nextTick()
+      busy.value = false
+      await nextTick()
+      await nextTick()
+      expect(document.activeElement).toBe(host.querySelector('[data-testid="actionbar-payment"]'))
     } finally {
       app.unmount()
       host.remove()
