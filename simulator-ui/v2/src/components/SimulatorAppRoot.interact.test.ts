@@ -2085,10 +2085,12 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       await nextTick()
 
       const closeLine = host.querySelector('[data-testid="edge-close-line-btn"]') as HTMLButtonElement | null
+      expect(closeLine?.disabled).toBe(false)
       expect(document.activeElement).toBe(document.body)
       closeLine?.click()
       await nextTick()
       closeLine?.click()
+      expect(getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_CONFIRM_TRUSTLINE_CLOSE')).toHaveBeenCalledOnce()
 
       const busy = getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_BUSY_REF')
       busy.value = true
