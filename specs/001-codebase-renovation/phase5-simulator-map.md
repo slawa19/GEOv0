@@ -4,7 +4,9 @@
 - **Execution base:** `b714f1f1f6fb7ef4e2adcaf8088ca07c2bb74563`
 - **Branch:** `codex/codebase-renovation-phase5`
 - **Scope:** REN-012B2 plus REN-012C only
-- **Status:** IN PROGRESS — characterization frozen before product edits
+- **Accepted product behavior:** `ff53dbc1c070220ad7ddfdaf8a0aa5c8c1ccd157`
+- **Final test evidence:** `345991b47f15e2ed4080c7617f4f3430883f8b7b`
+- **Status:** COMPLETE locally — Phase 6 not started
 
 This ledger separates observed behavior from the owner-approved intent and the
 bounded target for Phase 5. It does not replace the wire contract, code, tests or
@@ -83,26 +85,71 @@ but the extracted contract must publish the wake intent after state mutation.
 No backend/OpenAPI/wire change is justified by this characterization. No visual
 snapshot update is planned.
 
-## Baseline tooling and gates
+## Completion evidence
+
+- `realEventPipeline.ts` now owns admission, monotonic replay cursor/dedup,
+  lifecycle/topology/payment/clearing state application and post-state intents.
+  `useSimulatorRealMode.ts` remains the transport/orchestration facade. A stale
+  run has one reset path, `410` refresh remains status → snapshot → reconnect, and
+  EOF cannot race a terminal `404` recovery into reconnecting a discarded run.
+- Duplicate, stale, malformed and rejected frames do not advance trusted state or
+  schedule FX. Accepted topology mutations update the owned snapshot in place so
+  the existing structural watcher can relayout without treating every patch as a
+  full snapshot/camera reset.
+- Render wakeup follows state application. Informational labels remain available
+  with reduced motion while optional canvas motion is suppressed; overlay expiry
+  keeps the render loop alive through TTL and prunes before snapshot/canvas early
+  returns.
+- `GraphNavigator.vue` supplies the bounded DOM node/edge route and opens the
+  existing inspectors. Edge selection uses explicit admission, including the
+  canvas path while an incompatible edge flow is busy. Window close restores
+  focus only to the owned opener, with a tested Close Line fallback and no
+  unrelated focus steal.
+- Changed lifecycle, clearing and interaction surfaces expose bounded status,
+  alert and busy semantics. Both canvases are decorative to assistive technology;
+  this is critical-path accessibility evidence, not WCAG certification.
+- Internal adversarial review rechecked event ordering, recovery, render/overlay
+  lifetime, reduced motion, focus ownership and both DOM/canvas edge admission.
+  Its final product and edge-admission passes reported no remaining finding.
+- Claude Code `2.1.226`, invoked read-only with `--model opus --effort high` from
+  fresh credential-free standalone clones, returned complete exit-`0` JSON and
+  resolved `claude-opus-5` for the product/remediation ranges. All reproduced
+  product findings were fixed. Its final `085caef..ff53dbc` review confirmed the
+  production delta and identified one vacuous focus-test risk; commit `345991b`
+  added the missing enabled-state and callback assertions and passed the targeted
+  component gate.
+
+## Tooling and gate evidence
 
 - Verified executable: `C:\nvm4w\nodejs\node.exe`, Node `v22.12.0`.
 - Host npm/npx version is `11.14.0`; the canonical wrappers are
   `C:\nvm4w\nodejs\npm.cmd` and `npx.cmd`.
 - Lock/runtime tools: Vitest `3.2.4`, Vite `7.3.1`, Playwright `1.57.0`,
   ESLint `8.57.1`, TypeScript `5.9.3`, Vue TSC package `3.2.2`.
-- Canonical package gates remain `lint`, `typecheck`, `test:unit`, `build` and
-  scoped `playwright test` under `simulator-ui/v2/package.json`.
+- Final product-content gates passed locally: Simulator lint exit `0`, typecheck
+  exit `0`, unit `701/701` across `99` files, build exit `0`, and scoped non-visual
+  Chromium `test:e2e:phase5` `5/5`. Strict demo-fixture sync produced no diff.
+- After the final test-only assertion commit, the targeted
+  `SimulatorAppRoot.interact.test.ts` gate passed `68/68`, and lint/typecheck again
+  exited `0`. Product behavior did not change after `ff53dbc`.
 - The PowerShell npm shim cannot resolve its install directory inside the current
   filesystem sandbox; direct local binaries resolve. This is environment evidence,
-  not a product defect. Canonical npm gates will be run with the required host
-  permission rather than replaced by debug-only commands.
-- Playwright discovery is available. Actual Chromium execution and the historical
-  broader visual baseline remain unverified at this characterization point. The
-  installed Playwright `1.57.0` resolves full Chromium to a missing
-  `chromium-1200\chrome-win64\chrome.exe`; the available headless-shell cache does
-  not yet prove the canonical browser launch.
-- The previously logged `ModuleNotFoundError: pydantic` is currently classified as
-  an environment/bootstrap observation: non-strict `predev` fixture sync can fall
-  back to cached fixtures, the repository `.venv` has Pydantic, and the system
-  Python does not. It is not a product defect without a reproduced Phase 5 gate
-  failure through the canonical entrypoint.
+  not a product defect. The required package gates used the resolved local runtime.
+- Chromium actually executed the scoped Phase 5 project. The earlier missing-full-
+  Chromium observation did not block the configured headless execution. The
+  repository `.venv` supplied Pydantic for strict fixture sync, so the earlier
+  system-Python `ModuleNotFoundError` did not reproduce through the accepted gate.
+- Build retains the known Vite mixed static/dynamic `fxRenderer` import warning;
+  exit was `0` and this slice did not change that ownership boundary.
+
+## Residual and deliberately unverified paths
+
+- No published workflow ran, so this is not a “CI green” claim.
+- The scoped Chromium tests use controlled HTTP/SSE fixtures; no live-backend SSE
+  browser session, visual snapshot suite or multi-browser matrix was run.
+- No manual screen-reader audit or full WCAG certification was attempted.
+- Real-browser `TransitionGroup` focus timing and the private busy-canvas callback
+  are covered through owner/component behavior rather than a dedicated direct
+  integration probe.
+- Backend, OpenAPI, PostgreSQL and Simulator v1 gates were not run because their
+  code and wire contracts did not change. Phase 6 cleanup remains paused.

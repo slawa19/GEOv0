@@ -1,7 +1,7 @@
 # GEOv0 Codebase Renovation Specification
 
 - **Date:** 2026-08-07
-- **Status:** PHASE 4 COMPLETE — PHASES 5–7 PAUSED
+- **Status:** PHASE 5 COMPLETE — PHASES 6–7 PAUSED
 - **Plan:** `specs/001-codebase-renovation/plan.md`
 - **Backlog:** `specs/001-codebase-renovation/tasks.md`
 - **Status authority:** this label is descriptive only and is not authoritative. Completion is established only by the success criteria, recorded evidence, and accepted review artifacts defined below. A future edit that changes `Status` without that evidence does not make the renovation complete.
@@ -218,6 +218,21 @@ scope. Optional diagnostics may be reported as `UNVERIFIED`, never as passing.
 
 ## Changelog
 
+- **2026-08-09:** Phase 5 completed locally at exact product-behavior commit
+  `ff53dbc1c070220ad7ddfdaf8a0aa5c8c1ccd157`; final test evidence is
+  `345991b47f15e2ed4080c7617f4f3430883f8b7b`. `phase5-simulator-map.md` records
+  the accepted replay/state/effect seam, critical Simulator v2 keyboard paths,
+  reviews, gates and residuals. Local Simulator gates passed lint, typecheck,
+  `701/701` unit tests across `99` files, build and scoped non-visual Chromium
+  `5/5`; the final test-only correction passed its `68/68` component selector and
+  lint/typecheck. Internal adversarial review ended without a remaining product
+  finding. Claude Code `2.1.226` reviewed the frozen product/remediation deltas
+  read-only from clean credential-free standalone clones with exit `0`, complete
+  JSON and resolved `claude-opus-5`; reproduced findings were fixed, and its sole
+  final test-quality suggestion was resolved by the evidence-only commit. No
+  published workflow ran, so this is not a “CI green” claim. Live-backend browser
+  SSE, visual/browser-matrix, screen-reader and direct private-canvas callback
+  probes remain unverified. No backend/OpenAPI/wire change or Phase 6 work occurred.
 - **2026-08-08:** Phase 4 completed locally at exact product commit
   `f0428f9996e511e723ce1980a24c2073b3adadb8`; Phase 5 was not started. The
   loader classification, Current / Intended / Optimal decisions, selected

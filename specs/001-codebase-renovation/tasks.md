@@ -23,7 +23,9 @@ Phase 2 completed on 2026-08-08 at product commit
 2026-08-08 at product commit
 `f8517bc90b119a3b156de0a2945019d1b9381118`. Phase 4 completed locally on
 2026-08-08 at product commit `f0428f9996e511e723ce1980a24c2073b3adadb8`;
-Phases 5–7 remain paused.
+Phase 5 completed locally on 2026-08-09 at product-behavior commit
+`ff53dbc1c070220ad7ddfdaf8a0aa5c8c1ccd157`, with final test evidence at
+`345991b47f15e2ed4080c7617f4f3430883f8b7b`; Phases 6–7 remain paused.
 
 ### Phase 1 evidence ledger
 
@@ -145,6 +147,32 @@ Local evidence recorded on 2026-08-07, before publication:
   remain manual cleanup. Participant/incident naive timestamps are sibling
   residuals outside the one confirmed audit path. Simulator E2E/bootstrap failures
   were not touched.
+
+### Phase 5 evidence ledger
+
+- Accepted product range:
+  `5ea8bd854e25075634edb4436359f73dcb22c704..ff53dbc1c070220ad7ddfdaf8a0aa5c8c1ccd157`;
+  final test evidence is `345991b47f15e2ed4080c7617f4f3430883f8b7b`.
+  `phase5-simulator-map.md` records the frozen event/UI decisions, implementation
+  boundary, exact gates, reviews and deliberately unverified paths.
+- Replay admission/cursor ownership and lifecycle, topology, payment and clearing
+  application are independently testable; accepted state precedes effect intents,
+  and stale/duplicate/malformed/rejected frames have no trusted state or FX effect.
+  Existing frontend facades and all backend/OpenAPI/wire shapes were preserved.
+- The bounded DOM graph navigator, focus ownership, busy/status semantics,
+  decorative canvases and reduced-motion policy cover the selected fixture/real/
+  interact flows without an ARIA-canvas rewrite or visual redesign.
+- Final local Simulator gates passed lint, typecheck, unit `701/701` across `99`
+  files, build and scoped non-visual Chromium `5/5`. The final test-only correction
+  passed `SimulatorAppRoot.interact.test.ts` `68/68` plus lint/typecheck. Strict
+  fixture sync produced no diff; the known Vite `fxRenderer` warning remains.
+- Internal adversarial review ended without a remaining product finding. Claude
+  Code `2.1.226` reviewed the frozen product/remediation deltas read-only from clean
+  credential-free standalone clones with exit `0`, complete JSON and resolved
+  `claude-opus-5`; all reproduced findings were fixed.
+- No published workflow ran, so this is not a “CI green” claim. Live-backend SSE
+  browser, visual/browser-matrix, screen-reader and direct private busy-canvas
+  callback probes remain unverified. Phase 6 was not started.
 
 GEOv0 is an MVP community hub/simulator for roughly 10–500 participants, not a
 banking or HA platform. The authoritative remaining sequence is:
@@ -784,8 +812,8 @@ used.
 - **Owner surface:** Simulator HTTP/SSE normalization, real-mode replay/state/effect
   path, existing frontend facades, selected UI/window primitives; backend router
   only when a confirmed transaction/contract fix needs an extraction seam.
-- **Status:** IN PROGRESS — REN-012A not triggered; REN-012B1 DONE (2026-08-08);
-  REN-012B2 and REN-012C remain planned for Phase 5.
+- **Status:** DONE (2026-08-09) — REN-012A was explicitly not triggered;
+  REN-012B1/B2 and REN-012C are complete.
 - **Rationale / value:** The material risk is not file length. It is that unchecked
   input, replay logic, state mutation and visual effects are difficult to verify
   independently, while canvas-only selection blocks keyboard use. The target is a
@@ -806,15 +834,21 @@ used.
 
 ### REN-012B — Frontend ingress, replay, state and effect seam
 
-- **Status:** IN PROGRESS. REN-012B1 contract/ingress is DONE (2026-08-08) at
+- **Status:** DONE. REN-012B1 contract/ingress completed on 2026-08-08 at
   `f8517bc90b119a3b156de0a2945019d1b9381118`; REN-012B2 replay/state/effect
-  migration remains planned and is owned by Phase 5.
+  migration completed on 2026-08-09 at product-behavior commit
+  `ff53dbc1c070220ad7ddfdaf8a0aa5c8c1ccd157`.
 - **REN-012B1 completion evidence:** `phase3-contract-map.md` records critical
   scenario/run/snapshot ingress, accepted-versus-ignored SSE semantics, replay
   cursor/duplicate/stale/`410` characterization and producer→decoder coverage.
   Published required Simulator gates passed `668` tests plus typecheck/build;
   the visual E2E set returned to the exact Phase 2 `6 failed / 13 passed`
   later-phase baseline after stale selected-contract mocks were corrected.
+- **REN-012B2 completion evidence:** `realEventPipeline.ts` owns explicit replay
+  admission/cursor and deterministic lifecycle/topology/payment/clearing state
+  application with post-state intents. Stale reset and `410` recovery remain behind
+  the existing facade. Unit, build, lint/typecheck, scoped Chromium and independent
+  review evidence is recorded in `phase5-simulator-map.md`.
 - **Exact sequence:**
   1. Characterize scenario/run-status/snapshot HTTP responses and lifecycle,
      topology, payment and clearing SSE families.
@@ -835,7 +869,9 @@ used.
 
 ### REN-012C — Critical Simulator functionality and accessibility
 
-- **Status:** PLANNED.
+- **Status:** DONE (2026-08-09) at product-behavior commit
+  `ff53dbc1c070220ad7ddfdaf8a0aa5c8c1ccd157`; final test evidence
+  `345991b47f15e2ed4080c7617f4f3430883f8b7b`.
 - **Functional paths:** fixture bootstrap/switch; real preview/stale recovery;
   start/stop/restart/error; payment success plus one rejection/cancel; trustline
   create/edit/blocked close; clearing preview/confirm/result; node/edge inspect.
@@ -845,6 +881,11 @@ used.
   hidden from assistive technology; reduced motion disables optional FX.
 - **Acceptance:** unit/component behavior plus a short non-visual Chromium keyboard
   smoke proves the named paths. Claims are limited to those paths.
+- **Completion evidence:** the DOM graph navigator, existing forms/windows, focus
+  ownership, busy/status announcements, decorative canvases and reduced-motion
+  optional-FX policy passed the bounded component/unit suite and scoped Chromium
+  `5/5`. Residual certification and direct-integration limits are recorded in
+  `phase5-simulator-map.md`.
 - **Stop:** no full WCAG/screen-reader/browser certification, no complex ARIA canvas
   model, no visual redesign and no manual audit of every overlay.
 

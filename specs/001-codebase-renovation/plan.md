@@ -10,7 +10,9 @@
   Phase 3 completed on 2026-08-08 at product commit
   `f8517bc90b119a3b156de0a2945019d1b9381118`; Phase 4 completed locally on
   2026-08-08 at product commit `f0428f9996e511e723ce1980a24c2073b3adadb8`;
-  Phases 5–7 remain paused.
+  Phase 5 completed locally on 2026-08-09 at product-behavior commit
+  `ff53dbc1c070220ad7ddfdaf8a0aa5c8c1ccd157`, with final test evidence at
+  `345991b47f15e2ed4080c7617f4f3430883f8b7b`; Phases 6–7 remain paused.
 
 ## 1. Objective and project fit
 
@@ -556,6 +558,19 @@ intentionally invalidate large-graph results until new explicit search input.
 No published workflow ran, so this local exit is not a “CI green” claim.
 
 ### Phase 5 — Make Simulator v2 behavior testable at its risky seam
+
+**Status:** completed locally on 2026-08-09. Accepted product behavior is
+`ff53dbc1c070220ad7ddfdaf8a0aa5c8c1ccd157`; final test evidence is
+`345991b47f15e2ed4080c7617f4f3430883f8b7b`. The event/state/effect seam and
+critical DOM/focus/status paths are recorded in `phase5-simulator-map.md`.
+Simulator lint, typecheck, all `701` unit tests, build and scoped Chromium `5/5`
+passed locally; the final test-only correction passed its `68/68` selector plus
+lint/typecheck. Internal adversarial review ended clean, and Claude Code `2.1.226`
+read-only reviews returned complete exit-`0` JSON with resolved `claude-opus-5`;
+all reproduced findings were fixed. No published workflow ran, so this is not a
+“CI green” claim. Live-backend SSE/browser, visual/browser-matrix, screen-reader
+and direct private-canvas callback probes remain outside the evidence. Backend,
+OpenAPI and wire contracts were unchanged, and Phase 6 was not started.
 
 **Purpose:** separate trusted event/state handling from visual effects only as far
 as needed for current real/fixture/interact workflows.
