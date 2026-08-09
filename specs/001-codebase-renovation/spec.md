@@ -1,7 +1,7 @@
 # GEOv0 Codebase Renovation Specification
 
 - **Date:** 2026-08-07
-- **Status:** PHASE 6 COMPLETE — PHASE 7 PAUSED
+- **Status:** PHASE 7 IN PROGRESS
 - **Plan:** `specs/001-codebase-renovation/plan.md`
 - **Backlog:** `specs/001-codebase-renovation/tasks.md`
 - **Status authority:** this label is descriptive only and is not authoritative. Completion is established only by the success criteria, recorded evidence, and accepted review artifacts defined below. A future edit that changes `Status` without that evidence does not make the renovation complete.

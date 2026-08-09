@@ -720,6 +720,11 @@ command scans for changed current documents, not all historical prose.
 
 **Maps to:** REN-015.
 
+**Status:** IN PROGRESS (authorized 2026-08-09) from exact Phase 6 closeout
+`579ad5769470b0d3bcdb4c59830362a7b9bd73bc`; the live evidence ledger is
+`phase7-closure-map.md`. Publication and `workflow_dispatch` remain separately
+unauthorized.
+
 #### MUST evidence matrix
 
 1. clean status and tracked secret/artifact scan;

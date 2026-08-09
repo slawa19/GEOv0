@@ -1070,7 +1070,9 @@ used.
 
 - **Priority:** P1
 - **Owner surface:** all changed surfaces, spec changelog, accepted-debt register
-- **Status:** PLANNED
+- **Status:** IN PROGRESS (2026-08-09; execution base
+  `579ad5769470b0d3bcdb4c59830362a7b9bd73bc`; evidence ledger
+  `phase7-closure-map.md`)
 - **Rationale / value:** Verify effects across sibling paths and catch regressions
   introduced by the renovation itself before declaring the old-code cleanup done.
 - **Evidence paths:** diffs and acceptance evidence for REN-001 through REN-014 and
