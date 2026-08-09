@@ -789,12 +789,17 @@ function navigatorEdgeAnchor(link: GraphLink): Point {
 
 let interactFlowOpener: HTMLElement | null = null
 let interactFlowFallback: HTMLElement | null = null
+let interactFlowFocusOwnerType = 'interact-panel'
 
-function captureInteractFlowOpener(fallbackSelector?: string): void {
+function captureInteractFlowOpener(
+  fallbackSelector?: string,
+  opts: { focusOwnerType?: 'interact-panel' | 'edge-detail'; preferFallback?: boolean } = {},
+): void {
   const active = document.activeElement
-  interactFlowOpener = active instanceof HTMLElement ? active : null
   const fallback = fallbackSelector ? getHostEl()?.querySelector(fallbackSelector) : null
   interactFlowFallback = fallback instanceof HTMLElement ? fallback : null
+  interactFlowOpener = opts.preferFallback ? null : active instanceof HTMLElement ? active : null
+  interactFlowFocusOwnerType = opts.focusOwnerType ?? 'interact-panel'
 }
 
 function inspectNodeFromNavigator(nodeId: string): void {
@@ -818,6 +823,7 @@ function cancelInteractWindowFromUi(): void {
     const fallback = interactFlowFallback
     interactFlowOpener = null
     interactFlowFallback = null
+    interactFlowFocusOwnerType = 'interact-panel'
     void nextTick(() => {
       const target = opener?.isConnected && !opener.matches(':disabled') ? opener : fallback
       if (document.activeElement !== document.body || !target?.isConnected || target.matches(':disabled')) return
@@ -827,6 +833,7 @@ function cancelInteractWindowFromUi(): void {
   }
   interactFlowOpener = null
   interactFlowFallback = null
+  interactFlowFocusOwnerType = 'interact-panel'
   interact.mode.cancel()
 }
 
@@ -933,7 +940,10 @@ function goInteract() {
 function onEdgeDetailCloseLine() {
   // Delegate to mode action (will transition to idle on success).
   if (interactPhase.value !== 'editing-trustline') return
-  captureInteractFlowOpener('[data-testid="actionbar-trustline"]')
+  captureInteractFlowOpener('[data-testid="actionbar-trustline"]', {
+    focusOwnerType: 'edge-detail',
+    preferFallback: true,
+  })
   void interact.mode.confirmTrustlineClose()
 }
 
@@ -1056,15 +1066,18 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
     useFullTrustlineEditor.value = false
   }
 
-  if (p === 'idle' && !busy && interactFlowOpener) {
+  if (p === 'idle' && !busy && (interactFlowOpener || interactFlowFallback)) {
     const opener = interactFlowOpener
     const fallback = interactFlowFallback
+    const focusOwnerType = interactFlowFocusOwnerType
     interactFlowOpener = null
     interactFlowFallback = null
+    interactFlowFocusOwnerType = 'interact-panel'
     void nextTick(() => {
-      const target = opener.isConnected && !opener.matches(':disabled') ? opener : fallback
+      const target = opener?.isConnected && !opener.matches(':disabled') ? opener : fallback
       const active = document.activeElement
-      const focusStillOwnedByFlow = active instanceof Element && Boolean(active.closest('[data-win-type="interact-panel"]'))
+      const activeWindow = active instanceof Element ? active.closest('[data-win-type]') : null
+      const focusStillOwnedByFlow = activeWindow?.getAttribute('data-win-type') === focusOwnerType
       if (
         (active !== document.body && !focusStillOwnedByFlow) ||
         !target?.isConnected ||

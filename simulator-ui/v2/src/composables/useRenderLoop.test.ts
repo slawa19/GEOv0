@@ -128,7 +128,7 @@ function makeCanvasWithCtx() {
   return { canvas, ctx }
 }
 
-function makeLoop() {
+function makeLoop(overrides: Partial<RenderLoopDeps> = {}) {
   const canvas = makeCanvas()
   const fxCanvas = makeCanvas()
 
@@ -153,6 +153,7 @@ function makeLoop() {
     getHiddenNodeId: () => null,
     beforeDraw: () => undefined,
     isAnimating: () => false,
+    ...overrides,
   })
 }
 
@@ -265,6 +266,28 @@ describe('useRenderLoop deep idle / wakeUp / ensureRenderLoop invariants', () =>
     // wakeUp() explicitly recovers by scheduling a RAF.
     loop.wakeUp()
     expect(win.__rafQueue.length).toBe(1)
+  })
+
+  it('keeps rendering while a DOM floating label is active, then permits deep idle after it expires', () => {
+    let hasFloatingLabel = true
+    const loop = makeLoop({
+      hasFloatingLabels: () => hasFloatingLabel,
+      pruneFloatingLabels: (nowMs) => {
+        if (nowMs >= 3800) hasFloatingLabel = false
+      },
+    })
+    const win = getMockWindow()
+
+    loop.ensureRenderLoop()
+    win.__rafQueue.shift()!(1000)
+    expect(win.__rafQueue.length).toBe(1)
+
+    win.__rafQueue.shift()!(3000)
+    expect(win.__rafQueue.length).toBe(1)
+
+    win.__rafQueue.shift()!(3800)
+    expect(hasFloatingLabel).toBe(false)
+    expect(win.__rafQueue.length).toBe(0)
   })
 
   it('ensureRenderLoop() restores scheduling after deep idle (no user input required)', () => {

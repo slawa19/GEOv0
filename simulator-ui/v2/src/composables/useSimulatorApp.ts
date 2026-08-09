@@ -970,6 +970,7 @@ export function useSimulatorApp(opts?: {
     pruneActiveEdges: fxOverlays.pruneActiveEdges,
     pruneActiveNodes: fxOverlays.pruneActiveNodes,
     pruneFloatingLabels: fxOverlays.pruneFloatingLabels,
+    hasFloatingLabels: fxOverlays.hasFloatingLabels,
     mapping: VIZ_MAPPING,
     fxState: fxOverlays.fxState,
     getSelectedNodeId: () => state.selectedNodeId,

@@ -19,6 +19,7 @@ export function useAppRenderLoop(opts: {
   pruneActiveEdges: (nowMs: number) => void
   pruneActiveNodes: (nowMs: number) => void
   pruneFloatingLabels: (nowMs: number) => void
+  hasFloatingLabels: () => boolean
   mapping: VizMapping
   fxState: FxState
   getSelectedNodeId: () => string | null
@@ -55,6 +56,7 @@ export function useAppRenderLoop(opts: {
     pruneActiveEdges: opts.pruneActiveEdges,
     pruneActiveNodes: opts.pruneActiveNodes,
     pruneFloatingLabels: opts.pruneFloatingLabels,
+    hasFloatingLabels: opts.hasFloatingLabels,
     drawBaseGraph,
     renderFxFrame,
     mapping: opts.mapping,

@@ -136,6 +136,7 @@ type UseRenderLoopDeps = {
   setFlash: (v: number) => void
 
   pruneFloatingLabels: (nowMs: number) => void
+  hasFloatingLabels?: () => boolean
 
   // Optional: keep overlay sets bounded over long sessions.
   pruneActiveEdges?: (nowMs: number) => void
@@ -557,6 +558,7 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
     if (deps.getFlash() > 0) return true
     if (deps.activeEdges && deps.activeEdges.size > 0) return true
     if (deps.activeNodes && deps.activeNodes.size > 0) return true
+    if (deps.hasFloatingLabels?.()) return true
 
     const fxState = deps.fxState
     const sparks = Array.isArray(fxState?.sparks) ? fxState.sparks.length : 0
