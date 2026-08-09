@@ -714,15 +714,14 @@ export function useSimulatorApp(opts?: {
 
   // Clearing FX is wired later (depends on fxState + overlays), but must be callable
   // from early wiring (e.g. Interact callbacks) without TDZ hazards.
-  let runClearingFxImpl: (params: ClearingFxParams) => void = () => undefined
+  let runClearingFxImpl: (params: ClearingFxParams, opts?: { animate?: boolean }) => void = () => undefined
   function runClearingFx(params: ClearingFxParams) {
-    if (opts?.optionalFxEnabled?.() === false) return
-    runClearingFxImpl(params)
+    runClearingFxImpl(params, { animate: opts?.optionalFxEnabled?.() !== false })
   }
 
-  let runRealClearingDoneFxImpl: (done: ClearingDoneEvent) => void = () => undefined
+  let runRealClearingDoneFxImpl: (done: ClearingDoneEvent, opts?: { animate?: boolean }) => void = () => undefined
   function runRealClearingDoneFx(done: ClearingDoneEvent) {
-    runRealClearingDoneFxImpl(done)
+    runRealClearingDoneFxImpl(done, { animate: opts?.optionalFxEnabled?.() !== false })
   }
 
   let resetClearingFxDedupImpl: () => void = () => undefined

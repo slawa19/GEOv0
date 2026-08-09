@@ -1063,7 +1063,13 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
     interactFlowFallback = null
     void nextTick(() => {
       const target = opener.isConnected && !opener.matches(':disabled') ? opener : fallback
-      if (!target?.isConnected || target.matches(':disabled')) return
+      const active = document.activeElement
+      const focusStillOwnedByFlow = active instanceof Element && Boolean(active.closest('[data-win-type="interact-panel"]'))
+      if (
+        (active !== document.body && !focusStillOwnedByFlow) ||
+        !target?.isConnected ||
+        target.matches(':disabled')
+      ) return
       target.focus({ preventScroll: true })
     })
   }

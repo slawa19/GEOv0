@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 
 import type { GraphLink, GraphNode } from '../types'
+import { keyEdge } from '../utils/edgeKey'
 
 type Props = {
   nodes: GraphNode[]
@@ -26,7 +27,7 @@ const sortedLinks = computed(() =>
 )
 
 const selectedNodeId = ref('')
-const selectedEdgeIndex = ref('')
+const selectedEdgeKey = ref('')
 const announcement = ref('')
 
 function nodeLabel(node: GraphNode): string {
@@ -49,9 +50,9 @@ watch(
 watch(
   sortedLinks,
   (links) => {
-    const index = Number(selectedEdgeIndex.value)
-    if (selectedEdgeIndex.value === '' || !Number.isInteger(index) || index < 0 || index >= links.length) {
-      selectedEdgeIndex.value = links.length ? '0' : ''
+    if (!links.some((link) => keyEdge(link.source, link.target) === selectedEdgeKey.value)) {
+      const first = links[0]
+      selectedEdgeKey.value = first ? keyEdge(first.source, first.target) : ''
     }
   },
   { immediate: true },
@@ -65,7 +66,7 @@ function inspectNode(): void {
 }
 
 function inspectEdge(): void {
-  const link = sortedLinks.value[Number(selectedEdgeIndex.value)]
+  const link = sortedLinks.value.find((candidate) => keyEdge(candidate.source, candidate.target) === selectedEdgeKey.value)
   if (!link || props.edgeInspectDisabled) return
   emit('inspectEdge', link)
   announcement.value = `Trustline details opened: ${edgeLabel(link)}`
@@ -73,10 +74,11 @@ function inspectEdge(): void {
 </script>
 
 <template>
-  <details class="graph-navigator ds-panel" role="region" aria-label="Graph navigator">
-    <summary>Inspect graph</summary>
+  <div class="graph-navigator ds-panel" role="region" aria-label="Graph navigator">
+    <details>
+      <summary>Inspect graph</summary>
 
-    <div class="graph-navigator__controls">
+      <div class="graph-navigator__controls">
       <label class="ds-label" for="graph-navigator-node">Node</label>
       <select
         id="graph-navigator-node"
@@ -93,35 +95,36 @@ function inspectEdge(): void {
       <label class="ds-label" for="graph-navigator-edge">Edge</label>
       <select
         id="graph-navigator-edge"
-        v-model="selectedEdgeIndex"
+        v-model="selectedEdgeKey"
         class="ds-select"
         :disabled="sortedLinks.length === 0"
       >
-        <option v-for="(link, index) in sortedLinks" :key="`${link.source}:${link.target}:${index}`" :value="String(index)">
+        <option v-for="link in sortedLinks" :key="keyEdge(link.source, link.target)" :value="keyEdge(link.source, link.target)">
           {{ edgeLabel(link) }}
         </option>
       </select>
       <button
         class="ds-btn ds-btn--secondary"
         type="button"
-        :disabled="selectedEdgeIndex === '' || edgeInspectDisabled"
+        :disabled="selectedEdgeKey === '' || edgeInspectDisabled"
         :title="edgeInspectDisabled ? 'Edge details are available in real Interact mode.' : ''"
         @click="inspectEdge"
       >
         Inspect edge
       </button>
-    </div>
+      </div>
 
-    <p
-      class="graph-navigator__status ds-help"
-      role="status"
-      aria-live="polite"
-      aria-atomic="true"
-      data-testid="graph-navigator-status"
-    >
-      {{ announcement }}
-    </p>
-  </details>
+      <p
+        class="graph-navigator__status ds-help"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        data-testid="graph-navigator-status"
+      >
+        {{ announcement }}
+      </p>
+    </details>
+  </div>
 </template>
 
 <style scoped>
@@ -130,7 +133,7 @@ function inspectEdge(): void {
   padding: 8px 10px;
 }
 
-.graph-navigator > summary {
+.graph-navigator > details > summary {
   cursor: pointer;
   font-weight: 600;
 }

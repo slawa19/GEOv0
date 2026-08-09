@@ -211,7 +211,7 @@ describe('realEventPipeline state-before-effect ordering', () => {
     expect(trace).toEqual(['state:node-patch', 'state:topology:5', 'effect:any:0', 'effect:wake'])
   })
 
-  it('topology structural changes request authoritative layout reconciliation after the local state commit', () => {
+  it('topology structural changes commit locally and leave relayout to the snapshot structural watcher', () => {
     const trace: string[] = []
     const draft = createDraft({ equivalent: 'EUR', generated_at: TS, nodes: [{ id: 'A' }], links: [] })
     const event: AcceptedSimulatorEvent = {
@@ -231,12 +231,7 @@ describe('realEventPipeline state-before-effect ordering', () => {
     trace.push(`state:topology:${draft.state.snapshot?.nodes.length}:${draft.state.snapshot?.links.length}`)
     execute(intents, draft, trace)
 
-    expect(trace).toEqual([
-      'state:topology:2:1',
-      'effect:any:0',
-      'effect:wake',
-      'effect:refresh',
-    ])
+    expect(trace).toEqual(['state:topology:2:1', 'effect:any:0', 'effect:wake'])
   })
 
   it('payment applies counters and graph patches before FX, wake and labels', () => {
@@ -333,8 +328,16 @@ describe('realEventPipeline state-before-effect ordering', () => {
     expect(intents).toEqual([{ type: 'accepted-event' }, { type: 'refresh-snapshot' }])
   })
 
-  it('optional FX policy suppresses visual intents without suppressing accepted notification or wake', () => {
+  it('optional FX policy suppresses animation while preserving labels, clearing information, notification and wake', () => {
     const trace: string[] = []
+    const clearing = {
+      event_id: 'evt_run_1_8',
+      ts: TS,
+      type: 'clearing.done' as const,
+      equivalent: 'EUR',
+      plan_id: 'plan_1',
+      cycle_edges: [{ from: 'A', to: 'B' }],
+    }
     executeRealEventIntents(
       [
         { type: 'accepted-event' },
@@ -349,6 +352,18 @@ describe('realEventPipeline state-before-effect ordering', () => {
             edges: [{ from: 'A', to: 'B' }],
           },
         },
+        { type: 'tx-label', role: 'sender', nodeId: 'A', signedAmount: '-1', unit: 'EUR', throttleMs: 0 },
+        {
+          type: 'tx-label-delayed',
+          role: 'receiver',
+          nodeId: 'B',
+          signedAmount: '+1',
+          unit: 'EUR',
+          throttleMs: 0,
+          delayMs: 10,
+          runId: 'run_1',
+        },
+        { type: 'clearing-fx', event: clearing },
         { type: 'wake' },
       ],
       {
@@ -358,12 +373,44 @@ describe('realEventPipeline state-before-effect ordering', () => {
         refreshSnapshot: vi.fn(),
         wakeUp: () => trace.push('wake'),
         runRealTxFx: () => trace.push('fx'),
-        runRealClearingDoneFx: vi.fn(),
-        pushTxAmountLabel: vi.fn(),
+        runRealClearingDoneFx: () => trace.push('clearing'),
+        pushTxAmountLabel: (_nodeId, amount) => trace.push(`label:${amount}`),
         clampRealTxTtlMs: () => 10,
-        scheduleTimeout: vi.fn(),
+        scheduleTimeout: (fn) => fn(),
       },
     )
-    expect(trace).toEqual(['any', 'wake'])
+    expect(trace).toEqual(['any', 'label:-1', 'label:+1', 'clearing', 'wake'])
+  })
+
+  it('reports an explicit amount flyout that lacks label data through an injectable contract warning', () => {
+    const trace: string[] = []
+    const draft = createDraft()
+    const event: AcceptedSimulatorEvent = {
+      event_id: 'evt_run_1_warning',
+      ts: TS,
+      type: 'tx.updated',
+      equivalent: 'EUR',
+      amount_flyout: true,
+      ttl_ms: 100,
+      edges: [],
+    }
+    const intents = applyAcceptedRealEvent(event, 'run_1', draft, createStateDeps(trace, draft))
+    const warnContract = vi.fn()
+
+    executeRealEventIntents(intents, {
+      getActiveRunId: () => 'run_1',
+      refreshSnapshot: vi.fn(),
+      runRealTxFx: vi.fn(),
+      runRealClearingDoneFx: vi.fn(),
+      pushTxAmountLabel: vi.fn(),
+      clampRealTxTtlMs: () => 10,
+      scheduleTimeout: vi.fn(),
+      warnContract,
+    })
+
+    expect(warnContract).toHaveBeenCalledWith(
+      'tx.updated amount_flyout contract violated (missing amount/endpoints)',
+      { event_id: event.event_id, amount: '', from: undefined, to: undefined, edges_len: 0 },
+    )
   })
 })

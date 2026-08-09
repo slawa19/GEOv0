@@ -118,6 +118,44 @@ describe('useRealClearingFx', () => {
     }
   })
 
+  it('keeps the clearing amount label but suppresses animated effects when animation is disabled', () => {
+    const pushClearingAmountOverlay = vi.fn()
+    const spawnEdgePulses = vi.fn()
+    const spawnNodeBursts = vi.fn()
+    const addActiveNode = vi.fn()
+    const addActiveEdge = vi.fn()
+    const setFlash = vi.fn()
+    const fx = useRealClearingFx({
+      fxState: {},
+      isTestMode: ref(false),
+      isWebDriver: false,
+      keyEdge: (from, to) => `${from}>${to}`,
+      seedFn: () => 0,
+      clearingColor: '#000',
+      addActiveNode,
+      addActiveEdge,
+      pushClearingAmountOverlay,
+      scheduleTimeout: (fn) => fn(),
+      getLayoutNodeById: (id) => (id === 'A' ? { __x: 0, __y: 0 } : { __x: 10, __y: 0 }),
+      setFlash,
+      spawnEdgePulses,
+      spawnNodeBursts,
+    })
+
+    fx.runClearingFx(
+      { edges: [{ from: 'A', to: 'B' }], totalAmount: '10.00', equivalent: 'UAH', planId: 'p-reduced' },
+      { animate: false },
+    )
+
+    expect(pushClearingAmountOverlay).toHaveBeenCalledOnce()
+    expect(pushClearingAmountOverlay.mock.calls[0]?.[0]).toMatchObject({ text: '−10.00 UAH' })
+    expect(spawnEdgePulses).not.toHaveBeenCalled()
+    expect(spawnNodeBursts).not.toHaveBeenCalled()
+    expect(addActiveNode).not.toHaveBeenCalled()
+    expect(addActiveEdge).not.toHaveBeenCalled()
+    expect(setFlash).not.toHaveBeenCalled()
+  })
+
   it('dedup reset: HTTP path (no planId) is suppressed until resetDedup()', () => {
     vi.useFakeTimers()
     vi.setSystemTime(0)

@@ -1,7 +1,8 @@
-import { createApp, h, nextTick, type Component } from 'vue'
+import { createApp, h, nextTick, reactive, type Component } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { GraphLink, GraphNode } from '../types'
+import { keyEdge } from '../utils/edgeKey'
 import GraphNavigator from './GraphNavigator.vue'
 
 const nodes: GraphNode[] = [
@@ -10,7 +11,7 @@ const nodes: GraphNode[] = [
 ]
 const links: GraphLink[] = [{ source: 'alice', target: 'bob', trust_limit: '100' }]
 
-function mountNavigator(edgeInspectDisabled = false) {
+function mountNavigator(edgeInspectDisabled = false, linkItems: GraphLink[] = links) {
   const host = document.createElement('div')
   document.body.appendChild(host)
   const inspectNode = vi.fn()
@@ -19,7 +20,7 @@ function mountNavigator(edgeInspectDisabled = false) {
     render: () =>
       h(GraphNavigator as Component, {
         nodes,
-        links,
+        links: linkItems,
         edgeInspectDisabled,
         onInspectNode: inspectNode,
         onInspectEdge: inspectEdge,
@@ -34,9 +35,11 @@ describe('GraphNavigator', () => {
     const { app, host, inspectNode, inspectEdge } = mountNavigator()
     await nextTick()
 
-    const region = host.querySelector('[role="region"][aria-label="Graph navigator"]') as HTMLDetailsElement | null
+    const region = host.querySelector('[role="region"][aria-label="Graph navigator"]') as HTMLElement | null
     expect(region).toBeTruthy()
-    region!.open = true
+    const disclosure = region?.querySelector('details') as HTMLDetailsElement | null
+    expect(disclosure).toBeTruthy()
+    disclosure!.open = true
 
     const nodeSelect = host.querySelector('#graph-navigator-node') as HTMLSelectElement
     const edgeSelect = host.querySelector('#graph-navigator-edge') as HTMLSelectElement
@@ -80,6 +83,31 @@ describe('GraphNavigator', () => {
     expect(button?.title).toContain('real Interact mode')
     button?.click()
     expect(inspectEdge).not.toHaveBeenCalled()
+
+    app.unmount()
+    host.remove()
+  })
+
+  it('retains the selected trustline by directional key when sorted topology changes', async () => {
+    const selected = { source: 'bob', target: 'carol', trust_limit: '50' }
+    const linkItems = reactive<GraphLink[]>([selected, links[0]!])
+    const { app, host, inspectEdge } = mountNavigator(false, linkItems)
+    await nextTick()
+
+    const edgeSelect = host.querySelector('#graph-navigator-edge') as HTMLSelectElement
+    edgeSelect.value = keyEdge(selected.source, selected.target)
+    edgeSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    await nextTick()
+
+    linkItems.push({ source: 'aaron', target: 'alice', trust_limit: '25' })
+    await nextTick()
+    expect(edgeSelect.value).toBe(keyEdge(selected.source, selected.target))
+
+    const inspectEdgeButton = Array.from(host.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Inspect edge',
+    )
+    ;(inspectEdgeButton as HTMLButtonElement).click()
+    expect(inspectEdge).toHaveBeenCalledWith(selected)
 
     app.unmount()
     host.remove()

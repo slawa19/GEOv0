@@ -159,6 +159,10 @@ export type RealEventIntent =
       runId: string
     }
   | { type: 'clearing-fx'; event: ClearingDoneEvent }
+  | {
+      type: 'amount-flyout-contract-warning'
+      context: { event_id: string; amount: string; from: unknown; to: unknown; edges_len: number }
+    }
   | { type: 'amount-flyout-suppressed' }
   | { type: 'burst-throttle'; throttleMs: number }
 
@@ -310,10 +314,6 @@ function applyTopologyEvent(
   deps.patchApplier.applyNodePatches(payload.node_patch)
   deps.patchApplier.applyEdgePatches(payload.edge_patch)
   intents.push({ type: 'wake' })
-  // Structural mutations also change the renderer-owned layout cardinality. A
-  // wake alone only repaints the existing raw layout objects, so reconcile via
-  // the authoritative snapshot path after committing the local trusted state.
-  intents.push({ type: 'refresh-snapshot' })
 }
 
 export function applyAcceptedRealEvent(
@@ -355,6 +355,18 @@ export function applyAcceptedRealEvent(
     if (!allowAmountFlyout) intents.push({ type: 'amount-flyout-suppressed' })
     const amount = String(event.amount ?? '').trim()
     const resolved = resolveTxDirection({ from: event.from, to: event.to, edges: event.edges ?? [] })
+    if (event.amount_flyout === true && (!amount || !resolved.from || !resolved.to)) {
+      intents.push({
+        type: 'amount-flyout-contract-warning',
+        context: {
+          event_id: event.event_id,
+          amount,
+          from: event.from,
+          to: event.to,
+          edges_len: event.edges?.length ?? 0,
+        },
+      })
+    }
     const throttleMs = burstLabelThrottleMs(draft.real.runStatus)
     intents.push({ type: 'burst-throttle', throttleMs })
     if (allowAmountFlyout && amount && resolved.from) {
@@ -426,6 +438,7 @@ export function executeRealEventIntents(
     onIntentExecuted?: (intent: RealEventIntent) => void
     onReceiverLabelPushed?: () => void
     onReceiverGuardDropped?: () => void
+    warnContract?: (message: string, context: Record<string, unknown>) => void
   },
 ) {
   const fxEnabled = () => deps.optionalFxEnabled?.() ?? true
@@ -435,13 +448,16 @@ export function executeRealEventIntents(
     else if (intent.type === 'refresh-snapshot') deps.refreshSnapshot()
     else if (intent.type === 'wake') deps.wakeUp?.()
     else if (intent.type === 'tx-fx' && fxEnabled()) deps.runRealTxFx(intent.event)
-    else if (intent.type === 'clearing-fx' && fxEnabled()) deps.runRealClearingDoneFx(intent.event)
-    else if (intent.type === 'tx-label' && fxEnabled()) {
+    else if (intent.type === 'clearing-fx') deps.runRealClearingDoneFx(intent.event)
+    else if (intent.type === 'amount-flyout-contract-warning') {
+      const warn = deps.warnContract ?? console.warn
+      warn('tx.updated amount_flyout contract violated (missing amount/endpoints)', intent.context)
+    } else if (intent.type === 'tx-label') {
       deps.pushTxAmountLabel(intent.nodeId, intent.signedAmount, intent.unit, { throttleMs: intent.throttleMs })
-    } else if (intent.type === 'tx-label-delayed' && fxEnabled()) {
+    } else if (intent.type === 'tx-label-delayed') {
       deps.scheduleTimeout(
         () => {
-          if (deps.getActiveRunId() !== intent.runId || !fxEnabled()) {
+          if (deps.getActiveRunId() !== intent.runId) {
             deps.onReceiverGuardDropped?.()
             return
           }

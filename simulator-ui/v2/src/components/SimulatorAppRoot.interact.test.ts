@@ -1615,6 +1615,47 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
+  it('does not steal focus from an unrelated control when a successful interact flow closes', async () => {
+    setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'idle')
+    setUrl('/?mode=real&ui=interact')
+    stubMissingResizeObserver()
+
+    const host = document.createElement('div')
+    const unrelated = document.createElement('button')
+    unrelated.textContent = 'Unrelated control'
+    document.body.append(host, unrelated)
+    const app = mountSimulatorAppRoot(host)
+    try {
+      await nextTick()
+      await nextTick()
+
+      const opener = host.querySelector('[data-testid="actionbar-clearing"]') as HTMLButtonElement | null
+      opener?.click()
+      await nextTick()
+      await nextTick()
+
+      const busy = getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_BUSY_REF')
+      busy.value = true
+      getPhaseRef().value = 'idle'
+      await nextTick()
+      unrelated.focus()
+      expect(document.activeElement).toBe(unrelated)
+
+      busy.value = false
+      await nextTick()
+      await nextTick()
+
+      expect(host.querySelector('[data-testid="clearing-panel"]')).toBeNull()
+      expect(document.activeElement).toBe(unrelated)
+    } finally {
+      app.unmount()
+      host.remove()
+      unrelated.remove()
+      clearGeoTestGlobals('__GEO_TEST_INTERACT_PHASE')
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('opens node and edge inspectors from the labelled DOM graph navigator', async () => {
     setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'idle')
     setGeoTestGlobal('__GEO_TEST_SELECTED_NODE', makeSelectedNode())
@@ -1635,9 +1676,11 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       await nextTick()
       await nextTick()
 
-      const navigator = host.querySelector('[role="region"][aria-label="Graph navigator"]') as HTMLDetailsElement | null
+      const navigator = host.querySelector('[role="region"][aria-label="Graph navigator"]') as HTMLElement | null
       expect(navigator).toBeTruthy()
-      navigator!.open = true
+      const disclosure = navigator?.querySelector('details') as HTMLDetailsElement | null
+      expect(disclosure).toBeTruthy()
+      disclosure!.open = true
 
       const nodeSelect = host.querySelector('#graph-navigator-node') as HTMLSelectElement
       nodeSelect.value = 'bob'
