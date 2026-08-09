@@ -648,6 +648,14 @@ This is a critical-path improvement, not complete WCAG certification.
 **Maps to:** REN-013B, REN-014 and REN-016. REN-004 remains complete historical
 cleanup evidence and is not reopened.
 
+**Status:** COMPLETE (2026-08-09) at accepted product HEAD
+`90ac5ef6197c184b5818fe52826a8e97dbb5f6d5`. Canonical mutable outputs now live
+under `.local-run/`, legacy user DB reset is fail-closed, the one proved no-op test
+step and Admin starter remnants were removed, current docs/classifications were
+reconciled, generated sync was no-diff, and internal plus Claude reviews have no
+open P1/P2. Exact commands, counts and residuals are recorded in
+[`phase6-cleanup-map.md`](phase6-cleanup-map.md). Phase 7 was not started.
+
 #### 6A. Test-value cleanup — MUST only where proven
 
 1. Delete a test only when it is pass-only, duplicated by stronger behavior proof

@@ -1,7 +1,7 @@
 # GEOv0 Codebase Renovation Specification
 
 - **Date:** 2026-08-07
-- **Status:** PHASE 5 COMPLETE — PHASES 6–7 PAUSED
+- **Status:** PHASE 6 COMPLETE — PHASE 7 PAUSED
 - **Plan:** `specs/001-codebase-renovation/plan.md`
 - **Backlog:** `specs/001-codebase-renovation/tasks.md`
 - **Status authority:** this label is descriptive only and is not authoritative. Completion is established only by the success criteria, recorded evidence, and accepted review artifacts defined below. A future edit that changes `Status` without that evidence does not make the renovation complete.
@@ -472,3 +472,14 @@ scope. Optional diagnostics may be reported as `UNVERIFIED`, never as passing.
   closed the `IncludeExpensive` bypass. No third external loop was opened. The
   final backend default tier passed (`687 passed`, `3 skipped`, `14`
   PostgreSQL/expensive deselected); live PostgreSQL remains unverified.
+- **2026-08-09:** Phase 6 completed only REN-013B, REN-014 and REN-016 from exact
+  execution base `d6e3e094d14422e20075a70839b0b288efe51bce` to accepted product
+  HEAD `90ac5ef6197c184b5818fe52826a8e97dbb5f6d5`. Mutable defaults moved below
+  `.local-run/`, legacy/custom DB reset is fail-closed, one no-op test step and
+  proven Admin starter remnants were removed, current docs and classifications
+  were reconciled, and generated sync was no-diff. The canonical milestone passed
+  backend `777`, Admin `154` and Simulator `701` tests plus required builds.
+  Independent adversarial review and Claude Code `2.1.226`/resolved
+  `claude-opus-5` high-effort reviews have no remaining P1/P2. Exact ranges,
+  commands and residuals are recorded in `phase6-cleanup-map.md`. Phase 7 was not
+  started and no branch was published.

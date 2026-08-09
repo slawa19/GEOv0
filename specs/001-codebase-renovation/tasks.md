@@ -900,7 +900,7 @@ used.
 - **Priority:** P1
 - **Owner surface:** `tests/`, `pytest.ini`, test fixtures, simulator/admin test
   configs, README testing section
-- **Status:** IN PROGRESS — REN-013A DONE (2026-08-08); REN-013B remains Phase 6.
+- **Status:** DONE (2026-08-09) — REN-013A and bounded REN-013B complete.
 - **Owning sub-slices:** REN-013A (Phase 1) owns truthful marker/gate selection and
   two-task-slug resource isolation. REN-013B (Phase 6) owns cleanup of false-signal
   or leaked-state tests touched by the accepted product slices.
@@ -918,7 +918,9 @@ used.
   passed all `10` tests with `86` deselected. Two canonical local task slugs each
   passed the same `11`-test selector with distinct DB, basetemp and artifact roots.
   Sequential Simulator unit tests passed `637` tests and its build exited `0`.
-  Broader false-signal/E2E cleanup remains explicitly owned by REN-013B.
+  REN-013B later removed only one unobserved GraphNavigator keyboard dispatch;
+  the stronger browser proof remains. Its focused test passed `3` tests and the
+  final Simulator unit tier passed `701`; no broad test cleanup was attempted.
 - **Rationale / value:** Tests named unit/integration/e2e currently mix TestClient,
   DB setup, placeholders, and dialect-specific semantics. A truthful taxonomy
   makes gates fast and prevents SQLite success from being reported as concurrency
@@ -927,7 +929,7 @@ used.
   historical `tests/test_e2e_example.py`; `tests/unit/`; `tests/integration/`;
   PostgreSQL selectors in `tests/integration/*postgres*.py`;
   `README.md:298-410`.
-- **Remaining exact scope:** keep the existing marker/DB guardrails; prove two
+- **Completed Phase 6 scope:** kept the existing marker/DB guardrails; proved two
   canonical runs with different task slugs do not share DB/temp/artifact state;
   repair leaked singleton/event-loop/timer/file state only in suites touched by the
   remaining plan; retire a duplicate/source-text test only when the changed
@@ -957,7 +959,7 @@ used.
 - **Priority:** P1
 - **Owner surface:** `README.md`, `docs/en/`, `docs/ru/`, `docs/pl/`, archive
   indexes, config/deployment/API/simulator architecture docs
-- **Status:** IN PROGRESS (2026-08-07)
+- **Status:** DONE (2026-08-09)
 - **Partial evidence (2026-08-07):** Root and documentation indexes now expose a
   single classified path to runtime, architecture intent, OpenAPI,
   configuration, canonical testing and Simulator domains. Current RU decision
@@ -969,6 +971,13 @@ used.
   adversarial review closed two stale README navigation/authority links. Broader
   architecture/config body reconciliation, archive successor mapping and
   per-document translation status remain; this entry does not complete REN-014.
+- **Completion evidence (2026-08-09):** current config/deployment/testing guides
+  now cite executable owners and the canonical verifier; architecture and dated
+  plans are classified; OpenAPI owns Simulator wire shapes; Admin/Simulator
+  current behavior is reconciled; EN/PL config copies declare unsynchronized
+  status. Independent review checked `98` local links in `23` changed Markdown
+  files with zero broken and closed all P1/P2. Archive bodies and translations
+  were not mechanically rewritten.
 - **Rationale / value:** Current architecture prose describes planned modules that
   do not exist, current and archived simulator specs coexist, and translations can
   drift independently. Operators and agents need navigation and status, not a
@@ -980,7 +989,7 @@ used.
   `docs/ru/03-architecture.md`; `docs/ru/config-reference.md:331-340`;
   `docs/ru/simulator/backend/`; `docs/**/archive/`;
   `docs/ru/documentation-rules.md`; `README.md:571-640`.
-- **Remaining exact scope:** update only current front-door, testing, deployment,
+- **Completed remaining scope:** updated only current front-door, testing, deployment,
   affected contract and affected Admin/Simulator architecture documents after the
   owning behavior is accepted. Correct the known Vitest/canonical-verifier drift;
   label translation lag and archives. Do not reconcile every historical body or
@@ -1012,7 +1021,16 @@ used.
 - **Owner surface:** `app/config.py`, local run scripts, `scripts/verify_local.ps1`,
   `pytest.ini`, `tests/conftest.py`, `.gitignore`, current runtime/testing docs,
   `simulator-ui/v1/`, generated fixture entrypoints and proven Admin starter files.
-- **Status:** PLANNED (Phase 6).
+- **Status:** DONE (2026-08-09).
+- **Completion evidence:** backend SQLite, direct/canonical pytest and Playwright
+  defaults now write below `.local-run/`; explicit process/`.env` overrides are
+  preserved, Python helpers use repo-root cwd, and reset deletes only the new
+  default DB. The existing root `geov0.db` remained untouched. Two concurrent
+  selectors passed `60` tests with `1` skip each using distinct task roots;
+  scoped Admin/Simulator Chromium smoke each passed; generated fixture sync was
+  no-diff; v1/archive/generated classifications are explicit. The full local
+  milestone passed backend `777`/Admin `154`/Simulator `701` tests plus builds.
+  Exact review evidence and residuals are in `phase6-cleanup-map.md`.
 - **Rationale / value:** Canonical commands and defaults still create or reference
   mutable DB/log/PID/test output in the repository root, contradicting the current
   repository policy and making parallel/repeated work less predictable. The same

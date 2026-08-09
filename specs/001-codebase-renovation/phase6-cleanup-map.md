@@ -4,7 +4,7 @@
 - **Execution base:** `d6e3e094d14422e20075a70839b0b288efe51bce`
 - **Branch:** `codex/codebase-renovation-phase6`
 - **Scope:** REN-013B, REN-014 and REN-016 only
-- **Status:** PRE-IMPLEMENTATION DECISIONS RECORDED
+- **Status:** COMPLETE — accepted product HEAD `90ac5ef6197c184b5818fe52826a8e97dbb5f6d5`
 
 This ledger was written before Phase 6 implementation. It separates observed
 behavior from accepted intent and the bounded target. Code, runtime state, tests,
@@ -229,3 +229,77 @@ restore its prior behavior. Runtime relocation never mutates the old root DB, so
 the manual legacy `DATABASE_URL` override remains an immediate data-preserving
 fallback. Deleted tracked starter files remain recoverable from Git. Existing
 ignored artifacts are not part of any commit and are not removed.
+
+## Completion evidence (2026-08-09)
+
+Phase 6 completed only REN-013B, REN-014 and REN-016 from execution base
+`d6e3e094d14422e20075a70839b0b288efe51bce` through accepted product HEAD
+`90ac5ef6197c184b5818fe52826a8e97dbb5f6d5`.
+
+### Delivered decisions
+
+- Removed only the unobserved Enter dispatch from `GraphNavigator.test.ts`; the
+  browser keyboard proof remains. The PostgreSQL duplicate, explicit
+  source-policy guard and unique positive-boundary tests were retained.
+- Moved default backend SQLite, direct/canonical pytest state and Playwright
+  outputs below `.local-run/`; explicit env/`.env` overrides resolve through
+  application Settings from repo-root cwd.
+- Reset deletes only `.local-run/geov0.db`; legacy/custom URLs fail closed before
+  healthy services stop. Root `geov0.db` remained untouched (5,894,144 bytes;
+  SHA-256 `7B85C428F6FAD644D716FE953747ED9B767F6C178A51F2332E03AA1339A9E7F3`).
+- Classified Simulator v1 as historical/read-only, retained archives and cached
+  fixtures, and removed only Admin starter files `HelloWorld.vue`, `vue.svg` and
+  `public/vite.svg` plus its Vite favicon reference. Deleted tracked files are
+  recoverable with Git; no ignored runtime/user file was deleted or moved.
+- Reconciled current runtime/config/testing/deployment/Admin/Simulator docs,
+  marked EN/PL config copies unsynchronized and repaired changed local links.
+
+### Verification ledger
+
+- Focused GraphNavigator: exit `0`, 1 file / 3 tests.
+- Settings/runtime selector: exit `0`, `60 passed, 1 skipped`; two concurrent
+  canonical slugs produced the same counts with distinct DB/pytest/cache/artifact
+  roots. Direct-pytest fallback probe: exit `0`, `10 passed`.
+- Admin cleanup: exit `0`, `28` files / `154` tests; build, fixture sync and
+  validation passed. Reference scan after deletion: zero.
+- Playwright discovery: Admin `7` tests / `3` files; Simulator default and HUD
+  `24` / `7`; Phase 5 `5` / `1`, all exit `0`. Scoped Chromium smoke: Admin and
+  Simulator each `1 passed`; output observed below `.local-run/playwright`.
+- Generated fixtures: Admin sync/validate and strict Simulator UAH sync exited
+  `0`; no Git diff. EUR/HOUR cached copies were retained, not claimed freshly
+  regenerated.
+- Full canonical milestone
+  `.\scripts\verify_local.ps1 -TaskSlug phase6_full_milestone`: exit `0`;
+  backend `777 passed, 3 skipped, 15 deselected`; Alembic head
+  `017_add_owner_to_simulator_runs`; Admin lint `0` errors / `116` existing
+  warnings, unit `154 passed`, build passed; Simulator lint/typecheck passed,
+  unit `701 passed`, build passed. After review remediation the settings selector
+  again passed `60`, skipped `1`; PowerShell parse errors were zero and unsafe
+  legacy/custom reset delete references were zero.
+- Adversarial changed-current-doc scan: `98` local links in `23` Markdown files,
+  zero broken. Final scan including the three program files and this ledger:
+  `99` local links in `26` changed Markdown files, zero broken;
+  `git diff --check` exit `0`.
+
+### Reviews
+
+- Independent adversarial review found reset-protection, canonical-gate and
+  Simulator-doc drift; accepted fixes and final deltas were re-reviewed with no
+  remaining P1/P2.
+- Claude Code CLI `2.1.226`, `opus`, effort `high`, read-only plan mode in a clean
+  standalone filesystem-origin clone reviewed exact runtime range
+  `d14f73eab7ad636e01c6a4f30d3969c492380aaf..d772d081b77451c97074dcacc81e36d8bb086d40`:
+  exit `0`, complete JSON, `is_error=false`, resolved `claude-opus-5`.
+- The single remediation review covered
+  `24f22aedaaf9be4f548cb961b7bdcc4d4de8f841..c8edccc8fbda112027bb342f6df6830cbfe0a8f6`:
+  exit `0`, complete JSON, `is_error=false`, resolved `claude-opus-5`. Its one
+  service-control finding was fixed in `90ac5ef` and accepted internally; no
+  second external loop was opened.
+
+### Explicit residuals
+
+No live PostgreSQL/Docker/concurrency tier, visual browser matrix, external-link
+or Markdown-anchor scan, archive-body rewrite, destructive reset execution, or
+published CI run was performed. Old ignored root DB/test/log/PID/NDJSON/report
+artifacts remain owner data pending separate cleanup approval. Phase 7/REN-015 was
+not started.
