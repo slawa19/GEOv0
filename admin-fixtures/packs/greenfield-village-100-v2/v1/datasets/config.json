@@ -1,9 +1,14 @@
 {
-  "routing": {
-    "max_paths_per_payment": 6,
-    "max_hops": 6
-  },
-  "clearing": {
-    "max_cycle_len": 6
-  }
+  "LOG_LEVEL": "INFO",
+  "RATE_LIMIT_ENABLED": true,
+  "ROUTING_MAX_HOPS": 6,
+  "ROUTING_MAX_PATHS": 3,
+  "INTEGRITY_CHECKPOINT_ENABLED": true,
+  "INTEGRITY_CHECKPOINT_INTERVAL_SECONDS": 300,
+  "RECOVERY_ENABLED": true,
+  "RECOVERY_INTERVAL_SECONDS": 60,
+  "PAYMENT_TX_STUCK_TIMEOUT_SECONDS": 120,
+  "FEATURE_FLAGS_MULTIPATH_ENABLED": true,
+  "FEATURE_FLAGS_FULL_MULTIPATH_ENABLED": false,
+  "CLEARING_ENABLED": true
 }

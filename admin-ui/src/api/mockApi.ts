@@ -211,7 +211,7 @@ let mockFlags: AdminFeatureFlags | null = null
 let mockParticipants: Participant[] | null = null
 let mockEquivalents: Equivalent[] | null = null
 let mockAuditLog: AuditLogEntry[] | null = null
-let mockIncidents: Incident[] | null = null
+let mockIncidents: Incident[] | null | undefined
 
 function roleFromLocalStorage(): string {
   const v = (localStorage.getItem('admin-ui.role') || '').trim().toLowerCase()
@@ -252,10 +252,10 @@ async function getAuditLogDataset(): Promise<AuditLogEntry[]> {
   return decoded
 }
 
-async function getIncidentsDataset(): Promise<Incident[]> {
-  if (!mockIncidents) {
-    const dataset = await loadJson<{ items: Incident[] }>('datasets/incidents.json')
-    mockIncidents = dataset.items
+async function getIncidentsDataset(): Promise<Incident[] | null> {
+  if (mockIncidents === undefined) {
+    const dataset = await loadOptionalJson<{ items: Incident[] } | null>('datasets/incidents.json', null)
+    mockIncidents = dataset?.items ?? null
   }
   return mockIncidents
 }
@@ -1173,7 +1173,7 @@ export const mockApi = {
 
   async listIncidents(params: { page?: number; per_page?: number }): Promise<ApiEnvelope<Paginated<Incident>>> {
     return withScenario('/api/v1/admin/incidents', async () => {
-      const incidents = await getIncidentsDataset()
+      const incidents = (await getIncidentsDataset()) ?? []
       return { success: true, data: paginate(incidents, params.page ?? 1, params.per_page ?? 20) }
     })
   },
@@ -1350,17 +1350,23 @@ export const mockApi = {
         }
       }
       const incidents = await getIncidentsDataset()
-      const incidentIndex = incidents.findIndex((incident) => incident.tx_id === txId)
-      if (incidentIndex < 0) {
-        return { success: false, error: { code: 'NOT_FOUND', message: 'transaction incident not found' } }
+      const incidentIndex = incidents?.findIndex((incident) => incident.tx_id === txId) ?? -1
+      const transactions = await loadOptionalJson<Transaction[]>('datasets/transactions.json', [])
+      const knownTransaction = transactions.find((transaction) => transaction.tx_id === txId)
+      if (knownTransaction?.state === 'COMMITTED') {
+        return { success: false, error: { code: 'CONFLICT', message: 'Transaction is already committed' } }
       }
-      const before = { ...incidents[incidentIndex] }
+      const before = incidentIndex >= 0 && incidents
+        ? { ...incidents[incidentIndex] }
+        : knownTransaction
+          ? { state: knownTransaction.state, error: knownTransaction.error ?? null }
+          : { state: 'unknown', error: null }
       const response = decodeAdminResponse(
         AdminAbortTxResponseSchema,
         { tx_id: txId, status: 'aborted' },
         'mock POST /api/v1/admin/transactions/{tx_id}/abort',
       )
-      incidents.splice(incidentIndex, 1)
+      if (incidentIndex >= 0) incidents?.splice(incidentIndex, 1)
       await appendAuditLog({
         action: 'admin.transactions.abort',
         object_type: 'transaction',
@@ -1383,10 +1389,10 @@ export const mockApi = {
 
       const [trustlines, incidents, equivalents, debts, auditLog, transactions] = await Promise.all([
         loadJson<Trustline[]>('datasets/trustlines.json'),
-        getIncidentsDataset(),
+        getIncidentsDataset().then((items) => items ?? []),
         loadJson<Equivalent[]>('datasets/equivalents.json'),
         loadOptionalJson<Debt[]>('datasets/debts.json', []),
-        loadOptionalJson<AuditLogEntry[]>('datasets/audit-log.json', []),
+        getAuditLogDataset(),
         loadOptionalJson<Transaction[]>('datasets/transactions.json', []),
       ])
 
@@ -1490,7 +1496,7 @@ export function __resetMockApiForTests() {
   mockParticipants = null
   mockEquivalents = null
   mockAuditLog = null
-  mockIncidents = null
+  mockIncidents = undefined
   lastToastAt = 0
   lastToastMsg = ''
 }

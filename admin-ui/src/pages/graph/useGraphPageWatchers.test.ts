@@ -2,6 +2,7 @@ import { computed, effectScope, nextTick, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { SelectedInfo } from '../../composables/useGraphVisualization'
+import { useLatestRequest, type LatestRequest } from '../../composables/useLatestRequest'
 import { useGraphPageWatchers } from './useGraphPageWatchers'
 
 function deferred<T>() {
@@ -13,6 +14,86 @@ function deferred<T>() {
 }
 
 describe('useGraphPageWatchers', () => {
+  it.each([
+    { name: 'renders the successful eq refresh and supersedes the mount render', applied: true },
+    { name: 'preserves the successful mount render when the eq refresh fails', applied: false },
+  ])('$name', async ({ applied }) => {
+    const pendingEqRefresh = deferred<boolean>()
+    const applyGraphView = vi.fn().mockReturnValue(true)
+    const eq = ref('')
+    const scope = effectScope()
+    let mountRequest!: LatestRequest
+
+    scope.run(() => {
+      const graphEffectRequests = useLatestRequest()
+      mountRequest = graphEffectRequests.begin()
+      useGraphPageWatchers({
+        isRealMode: computed(() => false),
+        eq,
+        statusFilter: ref<string[]>(['active']),
+        threshold: ref('0.10'),
+        showIncidents: ref(true),
+        hideIsolates: ref(true),
+        typeFilter: ref<string[]>([]),
+        minDegree: ref(0),
+        focusMode: ref(false),
+        focusDepth: ref<1 | 2>(1),
+        focusRootPid: ref(''),
+        ensureFocusRootPid: vi.fn(),
+        refreshForFocusMode: vi.fn().mockResolvedValue(true),
+        refreshSnapshotForEq: vi.fn().mockReturnValue(pendingEqRefresh.promise),
+        refreshClearingCyclesForParticipant: vi.fn().mockResolvedValue(true),
+        selected: ref<SelectedInfo | null>(null),
+        showLabels: ref(true),
+        labelModeBusiness: ref('name'),
+        labelModePerson: ref('name'),
+        autoLabelsByZoom: ref(true),
+        minZoomLabelsAll: ref(1),
+        minZoomLabelsPerson: ref(1),
+        searchQuery: ref(''),
+        focusPid: ref(''),
+        zoom: ref(1),
+        layoutName: ref('fcose'),
+        layoutSpacing: ref(1),
+        graphEffectRequests,
+        applyGraphView,
+        graphViz: {
+          rebuildGraph: vi.fn(),
+          runLayout: vi.fn(),
+          clearCycleHighlight: vi.fn(),
+          clearConnectionHighlight: vi.fn(),
+          applySelectedHighlight: vi.fn(),
+          applyStyle: vi.fn(),
+          updateLabelsForZoom: vi.fn(),
+          updateSearchHighlights: vi.fn(),
+          syncZoomFromControl: vi.fn(),
+        },
+      })
+    })
+
+    eq.value = 'UAH'
+    await nextTick()
+    expect(mountRequest.isCurrent()).toBe(true)
+
+    pendingEqRefresh.resolve(applied)
+    await pendingEqRefresh.promise
+    await nextTick()
+
+    if (applied) {
+      expect(mountRequest.isCurrent()).toBe(false)
+      expect(applyGraphView).toHaveBeenCalledTimes(1)
+      expect(applyGraphView).toHaveBeenLastCalledWith({ fit: false })
+    } else {
+      expect(mountRequest.isCurrent()).toBe(true)
+      expect(applyGraphView).not.toHaveBeenCalled()
+      applyGraphView({ fit: true })
+      expect(applyGraphView).toHaveBeenCalledTimes(1)
+      expect(applyGraphView).toHaveBeenLastCalledWith({ fit: true })
+    }
+
+    scope.stop()
+  })
+
   it('refreshes normalized focus filters and only rebuilds for the latest request', async () => {
     const older = deferred<boolean>()
     const latest = deferred<boolean>()

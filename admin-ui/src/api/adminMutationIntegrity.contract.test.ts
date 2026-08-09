@@ -58,7 +58,9 @@ function equivalentWire(overrides: Record<string, unknown> = {}) {
 
 function useMockApiFixtures(overrides?: Record<string, unknown>) {
   const url = new URL('http://localhost/?scenario=happy')
-  vi.stubGlobal('window', { ...window, location: url } as unknown as Window)
+  const mockWindow = Object.create(window) as Window
+  Object.defineProperty(mockWindow, 'location', { value: url })
+  vi.stubGlobal('window', mockWindow)
 
   const fixtures: Record<string, unknown> = {
     'scenarios/happy.json': { name: 'happy', latency_ms: { min: 0, max: 0 } },

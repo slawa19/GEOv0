@@ -40,7 +40,9 @@ function jsonResponse(data: unknown): Response {
 }
 
 function installFixtures() {
-  vi.stubGlobal('window', { ...window, location: new URL('http://localhost/?scenario=happy') } as unknown as Window)
+  const mockWindow = Object.create(window) as Window
+  Object.defineProperty(mockWindow, 'location', { value: new URL('http://localhost/?scenario=happy') })
+  vi.stubGlobal('window', mockWindow)
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input)
     if (url.endsWith('/scenarios/happy.json')) return jsonResponse({ name: 'happy', latency_ms: { min: 0, max: 0 } })
@@ -48,6 +50,11 @@ function installFixtures() {
     if (url.endsWith('/datasets/feature-flags.json')) return jsonResponse(flags)
     if (url.endsWith('/datasets/audit-log.json')) return jsonResponse([])
     if (url.endsWith('/datasets/incidents.json')) return jsonResponse(incidents)
+    if (url.endsWith('/datasets/participants.json')) return jsonResponse([])
+    if (url.endsWith('/datasets/equivalents.json')) return jsonResponse([])
+    if (url.endsWith('/datasets/trustlines.json')) return jsonResponse([])
+    if (url.endsWith('/datasets/debts.json')) return jsonResponse([])
+    if (url.endsWith('/datasets/transactions.json')) return jsonResponse([])
     return new Response('Not Found', { status: 404 })
   }) as unknown as typeof fetch)
 }
@@ -81,6 +88,12 @@ describe('mock Admin mutation state and audit contracts', () => {
       after_state: { clearing_enabled: false },
     })
     expect(audit.items.every((entry) => /^[0-9a-f-]{36}$/i.test(entry.id) && Boolean(entry.timestamp))).toBe(true)
+
+    const snapshot = assertSuccess(await mockApi.graphSnapshot())
+    expect(snapshot.audit_log.map((entry) => entry.action)).toEqual([
+      'admin.feature_flags.patch',
+      'admin.config.patch',
+    ])
   })
 
   it('removes an aborted terminal incident from subsequent reloads and records the canonical action', async () => {
@@ -101,5 +114,33 @@ describe('mock Admin mutation state and audit contracts', () => {
       object_id: 'TX_STUCK_1',
       after_state: { state: 'ABORTED' },
     })
+  })
+
+  it('rejects aborting a transaction proven committed by the transaction fixture', async () => {
+    installFixtures()
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/scenarios/happy.json')) return jsonResponse({ name: 'happy', latency_ms: { min: 0, max: 0 } })
+      if (url.endsWith('/datasets/incidents.json')) return new Response('Not Found', { status: 404 })
+      if (url.endsWith('/datasets/transactions.json')) {
+        return jsonResponse([{
+          tx_id: 'TX_COMMITTED',
+          type: 'PAYMENT',
+          initiator_pid: 'PID_A',
+          payload: {},
+          state: 'COMMITTED',
+          created_at: '2026-08-08T12:00:00Z',
+          updated_at: '2026-08-08T12:00:00Z',
+        }])
+      }
+      if (url.endsWith('/datasets/audit-log.json')) return jsonResponse([])
+      return new Response('Not Found', { status: 404 })
+    })
+
+    await expect(mockApi.abortTx('TX_COMMITTED', 'operator recovery')).resolves.toEqual({
+      success: false,
+      error: { code: 'CONFLICT', message: 'Transaction is already committed' },
+    })
+    expect(assertSuccess(await mockApi.listAuditLog({})).items).toEqual([])
   })
 })

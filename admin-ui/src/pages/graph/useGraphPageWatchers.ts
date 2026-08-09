@@ -61,6 +61,7 @@ export function useGraphPageWatchers(opts: {
   }
 }) {
   const graphEffectRequests = opts.graphEffectRequests ?? useLatestRequest()
+  const watcherRefreshRequests = useLatestRequest()
   const applyGraphView = opts.applyGraphView ?? ((rebuildOptions: GraphRebuildOptions) => {
     opts.graphViz.rebuildGraph(rebuildOptions)
     return true
@@ -91,9 +92,13 @@ export function useGraphPageWatchers(opts: {
     refresh: () => Promise<boolean>,
     rebuildOptions: { fit: boolean },
   ) {
-    const request = graphEffectRequests.begin()
+    const refreshRequest = watcherRefreshRequests.begin()
     const applied = await refresh()
-    if (!applied || !request.isCurrent()) return
+    if (!applied || !refreshRequest.isCurrent()) return
+    // A watcher only supersedes an in-flight mount/manual render after its own
+    // data refresh has actually won and applied. Failed/stale watcher fetches
+    // must leave the successful load's render ownership intact.
+    graphEffectRequests.begin()
     applyGraphView(rebuildOptions)
   }
 
