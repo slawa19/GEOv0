@@ -28,6 +28,7 @@ export function useAppSceneState(opts: {
   teardownResizeListener: () => void
   stopRenderLoop: () => void
   skipInitialLoad?: () => boolean
+  onSceneContextChange?: () => Promise<void>
 }) {
   return useSceneState({
     eq: opts.eq,
@@ -50,5 +51,6 @@ export function useAppSceneState(opts: {
     teardownResizeListener: opts.teardownResizeListener,
     stopRenderLoop: opts.stopRenderLoop,
     skipInitialLoad: opts.skipInitialLoad,
+    onSceneContextChange: opts.onSceneContextChange,
   })
 }

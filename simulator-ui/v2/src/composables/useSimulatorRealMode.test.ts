@@ -1,4 +1,4 @@
-import { computed, effectScope, nextTick, ref } from 'vue'
+import { computed, effectScope, nextTick, ref, type Ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
 import { useSimulatorRealMode, type RealModeState } from './useSimulatorRealMode'
@@ -139,6 +139,7 @@ function createSseCharacterizationHarness(opts?: {
   lastEventId?: string | null
   loadScene?: () => Promise<void>
   loadRecoveryScene?: (context: { runId: string; equivalent: string; isCurrent: () => boolean }) => Promise<boolean>
+  effectiveEq?: Ref<string>
 }) {
   const isRealModeRef = ref(false)
   const real = createRealState()
@@ -175,11 +176,12 @@ function createSseCharacterizationHarness(opts?: {
   const scheduleTimeout = vi.fn((_fn: () => void) => undefined)
   const runRealTxFx = vi.fn(() => undefined)
   const onAnySseEvent = vi.fn(() => undefined)
+  const effectiveEq = opts?.effectiveEq ?? ref('EUR')
 
   const h = useSimulatorRealMode({
     isRealMode: computed(() => isRealModeRef.value),
     isLocalhost: false,
-    effectiveEq: computed(() => 'EUR'),
+    effectiveEq: computed(() => effectiveEq.value),
     state,
     real,
 
@@ -216,6 +218,7 @@ function createSseCharacterizationHarness(opts?: {
     scheduleTimeout,
     runRealTxFx,
     onAnySseEvent,
+    effectiveEq,
   }
 }
 
@@ -1647,6 +1650,253 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
       expect(harness.runRealTxFx).toHaveBeenCalledTimes(0)
     } finally {
       releaseRecoverySnapshot.resolve()
+      harness.h.stopSse()
+      restoreConnectSseImplementation(prevConnectImpl)
+    }
+  })
+
+  it('waits for the newest generic scene load before replacing recovery with an ordinary SSE lifecycle', async () => {
+    const connectSseMock = vi.mocked(connectSse)
+    const prevConnectImpl = connectSseMock.getMockImplementation()
+    const strictSnapshotStarted = deferred()
+    const releaseStrictSnapshot = deferred()
+    const firstGenericLoadStarted = deferred()
+    const releaseFirstGenericLoad = deferred()
+    const currentGenericLoadStarted = deferred()
+    const releaseCurrentGenericLoad = deferred()
+    const freshConnectionStarted = deferred()
+    let connectionCalls = 0
+    let replacementLoadCalls = 0
+    let staleSnapshotApplied = 0
+    let recoveryStarted = false
+    let harness!: ReturnType<typeof createSseCharacterizationHarness>
+
+    connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
+      connectionCalls += 1
+      if (connectionCalls === 1) throw new Error('SSE HTTP 410 Gone')
+      if (connectionCalls === 2) {
+        emitRunStatusBootstrap(opts, 'evt_r1_000510')
+        await waitForAbort(opts.signal)
+        return
+      }
+      expect(opts.lastEventId).toBeNull()
+      expect(opts.url).toContain('equivalent=UAH')
+      freshConnectionStarted.resolve()
+      emitSsePayload(opts, {
+        event_id: 'evt_r1_000511',
+        ts: '2026-01-01T00:00:00Z',
+        type: 'tx.updated',
+        equivalent: 'UAH',
+        from: 'A',
+        to: 'B',
+        amount: '1.00',
+        ttl_ms: 1200,
+        edges: [{ from: 'A', to: 'B' }],
+      })
+      await waitForAbort(opts.signal)
+    })
+
+    harness = createSseCharacterizationHarness({
+      lastEventId: 'evt_expired',
+      loadScene: async () => {
+        if (!recoveryStarted) return
+        replacementLoadCalls += 1
+        if (replacementLoadCalls === 1) {
+          firstGenericLoadStarted.resolve()
+          await releaseFirstGenericLoad.promise
+          return
+        }
+        currentGenericLoadStarted.resolve()
+        await releaseCurrentGenericLoad.promise
+      },
+      loadRecoveryScene: async (context) => {
+        recoveryStarted = true
+        strictSnapshotStarted.resolve()
+        await releaseStrictSnapshot.promise
+        if (!context.isCurrent()) return false
+        staleSnapshotApplied += 1
+        return true
+      },
+    })
+
+    try {
+      harness.isRealModeRef.value = true
+      await nextTick()
+      await strictSnapshotStarted.promise
+
+      const staleReplacement = harness.h.handleSceneContextChange()
+      await firstGenericLoadStarted.promise
+      expect(connectionCalls).toBe(2)
+
+      harness.effectiveEq.value = 'UAH'
+      await nextTick()
+      await currentGenericLoadStarted.promise
+
+      releaseFirstGenericLoad.resolve()
+      await staleReplacement
+      await Promise.resolve()
+      expect(connectionCalls).toBe(2)
+
+      releaseCurrentGenericLoad.resolve()
+      await freshConnectionStarted.promise
+      releaseStrictSnapshot.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+
+      expect(connectionCalls).toBe(3)
+      expect(replacementLoadCalls).toBe(2)
+      expect(harness.loadRecoveryScene).toHaveBeenCalledTimes(1)
+      expect(staleSnapshotApplied).toBe(0)
+      expect(harness.real.lastEventId).toBe('evt_r1_000511')
+      expect(harness.onAnySseEvent).toHaveBeenCalledTimes(1)
+      expect(harness.runRealTxFx).toHaveBeenCalledTimes(1)
+    } finally {
+      releaseStrictSnapshot.resolve()
+      releaseFirstGenericLoad.resolve()
+      releaseCurrentGenericLoad.resolve()
+      harness.h.stopSse()
+      restoreConnectSseImplementation(prevConnectImpl)
+    }
+  })
+
+  it('invalidates a detached strict snapshot when nonterminal recovery EOF wins', async () => {
+    vi.useFakeTimers()
+    const connectSseMock = vi.mocked(connectSse)
+    const prevConnectImpl = connectSseMock.getMockImplementation()
+    const strictSnapshotStarted = deferred()
+    const releaseStrictSnapshot = deferred()
+    let recoverySignal: AbortSignal | undefined
+    let staleSnapshotApplied = 0
+
+    connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
+      if (opts.lastEventId !== null) throw new Error('SSE HTTP 410 Gone')
+      recoverySignal = opts.signal
+      emitRunStatusBootstrap(opts, 'evt_r1_000520')
+      return
+    })
+
+    const harness = createSseCharacterizationHarness({
+      lastEventId: 'evt_expired',
+      loadRecoveryScene: async (context) => {
+        strictSnapshotStarted.resolve()
+        await releaseStrictSnapshot.promise
+        if (!context.isCurrent()) return false
+        staleSnapshotApplied += 1
+        return true
+      },
+    })
+
+    try {
+      harness.isRealModeRef.value = true
+      await nextTick()
+      await strictSnapshotStarted.promise
+      await vi.waitFor(() => expect(recoverySignal?.aborted).toBe(true))
+
+      releaseStrictSnapshot.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+
+      expect(staleSnapshotApplied).toBe(0)
+      expect(harness.real.lastEventId).toBeNull()
+      expect(harness.onAnySseEvent).not.toHaveBeenCalled()
+      expect(harness.runRealTxFx).not.toHaveBeenCalled()
+      expect(harness.real.sseState).toBe('reconnecting')
+    } finally {
+      releaseStrictSnapshot.resolve()
+      harness.h.stopSse()
+      restoreConnectSseImplementation(prevConnectImpl)
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not treat a terminal frame-id mismatch as a recovery bootstrap', async () => {
+    vi.useFakeTimers()
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5)
+    const connectSseMock = vi.mocked(connectSse)
+    const prevConnectImpl = connectSseMock.getMockImplementation()
+    let connectionCalls = 0
+
+    connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
+      connectionCalls += 1
+      if (connectionCalls === 1) throw new Error('SSE HTTP 410 Gone')
+      if (connectionCalls === 2) {
+        opts.onMessage({
+          id: 'evt_r1_wrong',
+          data: JSON.stringify({
+            event_id: 'evt_r1_000530',
+            ts: '2026-01-01T00:00:00Z',
+            type: 'run_status',
+            run_id: 'r1',
+            scenario_id: 'sc1',
+            state: 'stopped',
+          }),
+        })
+        return
+      }
+      emitRunStatusBootstrap(opts, 'evt_r1_000531', 'r1', 'stopped')
+    })
+
+    const harness = createSseCharacterizationHarness({ lastEventId: 'evt_expired' })
+    try {
+      harness.isRealModeRef.value = true
+      await nextTick()
+      await vi.waitFor(() => expect(connectionCalls).toBe(2))
+
+      expect(harness.loadRecoveryScene).not.toHaveBeenCalled()
+      expect(harness.real.lastEventId).toBeNull()
+      expect(harness.real.sseState).toBe('reconnecting')
+
+      await vi.advanceTimersByTimeAsync(1000)
+      await vi.waitFor(() => expect(harness.real.sseState).toBe('closed'))
+      expect(connectionCalls).toBe(3)
+      expect(harness.loadRecoveryScene).toHaveBeenCalledTimes(1)
+      expect(harness.real.lastEventId).toBe('evt_r1_000531')
+    } finally {
+      harness.h.stopSse()
+      restoreConnectSseImplementation(prevConnectImpl)
+      randomSpy.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
+  it('drops an ordinary queued SSE callback after the effective equivalent changes', async () => {
+    const connectSseMock = vi.mocked(connectSse)
+    const prevConnectImpl = connectSseMock.getMockImplementation()
+    const connected = deferred()
+    const effectiveEq = ref('EUR')
+    let ordinaryConnection: SseConnectOpts | null = null
+
+    connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
+      ordinaryConnection = opts
+      connected.resolve()
+      await waitForAbort(opts.signal)
+    })
+
+    const harness = createSseCharacterizationHarness({ effectiveEq })
+    try {
+      harness.isRealModeRef.value = true
+      await nextTick()
+      await connected.promise
+
+      effectiveEq.value = 'UAH'
+      const staleConnection = ordinaryConnection
+      if (!staleConnection) throw new Error('ordinary SSE connection was not captured')
+      emitSsePayload(staleConnection, {
+        event_id: 'evt_r1_000540',
+        ts: '2026-01-01T00:00:00Z',
+        type: 'tx.updated',
+        equivalent: 'EUR',
+        from: 'A',
+        to: 'B',
+        amount: '1.00',
+        ttl_ms: 1200,
+        edges: [{ from: 'A', to: 'B' }],
+      })
+
+      expect(harness.real.lastEventId).toBeNull()
+      expect(harness.onAnySseEvent).not.toHaveBeenCalled()
+      expect(harness.runRealTxFx).not.toHaveBeenCalled()
+    } finally {
       harness.h.stopSse()
       restoreConnectSseImplementation(prevConnectImpl)
     }

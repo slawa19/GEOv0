@@ -471,6 +471,73 @@ describe('useSceneState', () => {
     },
   )
 
+  it('lets a newer scene watcher supersede an in-flight strict recovery load', async () => {
+    const eq = ref('EUR')
+    const scene = ref<'A' | 'B' | 'C'>('A')
+    const recovery = deferred<{ snapshot: GraphSnapshot; sourcePath: string }>()
+    const watcher = deferred<{ snapshot: GraphSnapshot; sourcePath: string }>()
+    const recoverySnapshot = {
+      ...makeSnapshot(),
+      equivalent: 'EUR',
+      generated_at: '2026-01-25T00:00:01Z',
+    }
+    const watcherSnapshot = {
+      ...makeSnapshot(),
+      equivalent: 'EUR',
+      generated_at: '2026-01-25T00:00:02Z',
+      nodes: [makeNode('WATCHER_A'), makeNode('WATCHER_B')],
+      links: [makeLink('WATCHER_A', 'WATCHER_B')],
+    }
+    const state = reactive({
+      loading: false,
+      error: '',
+      sourcePath: '',
+      snapshot: null as GraphSnapshot | null,
+      selectedNodeId: null as string | null,
+    })
+    let s!: ReturnType<typeof useSceneState>
+    const onSceneContextChange = vi.fn(async () => await s.loadScene())
+    const loadSnapshot = vi.fn(() => watcher.promise)
+    s = useSceneState({
+      eq,
+      scene,
+      layoutMode: ref<'admin-force'>('admin-force'),
+      allowEqDeepLink: () => true,
+      isEqAllowed: () => true,
+      effectiveEq: computed(() => eq.value),
+      state,
+      loadSnapshot,
+      loadRecoverySnapshot: vi.fn(() => recovery.promise),
+      clearScheduledTimeouts: vi.fn(),
+      resetCamera: vi.fn(),
+      resetLayoutKeyCache: vi.fn(),
+      resetOverlays: vi.fn(),
+      resizeAndLayout: vi.fn(),
+      ensureRenderLoop: vi.fn(),
+      setupResizeListener: vi.fn(),
+      teardownResizeListener: vi.fn(),
+      stopRenderLoop: vi.fn(),
+      onSceneContextChange,
+    })
+
+    const recoveryLoad = s.loadRecoveryScene({ runId: 'run-1', equivalent: 'EUR', isCurrent: () => true })
+    await Promise.resolve()
+    scene.value = 'B'
+    await vi.waitFor(() => expect(loadSnapshot).toHaveBeenCalledTimes(1))
+    expect(onSceneContextChange).toHaveBeenCalledTimes(1)
+
+    watcher.resolve({ snapshot: watcherSnapshot, sourcePath: 'newer-scene-watcher.json' })
+    await vi.waitFor(() => expect(state.snapshot).toEqual(watcherSnapshot))
+    recovery.resolve({
+      snapshot: recoverySnapshot,
+      sourcePath: 'GET http://sim.test/simulator/runs/run-1/graph/snapshot?equivalent=EUR',
+    })
+
+    await expect(recoveryLoad).resolves.toBe(false)
+    expect(state.snapshot).toEqual(watcherSnapshot)
+    expect(state.sourcePath).toBe('newer-scene-watcher.json')
+  })
+
   it('rejects a recovery snapshot whose source does not match the requested run before applying it', async () => {
     const eq = ref('EUR')
     const state = reactive({

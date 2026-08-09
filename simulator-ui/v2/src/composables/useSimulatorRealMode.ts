@@ -159,6 +159,7 @@ export function useSimulatorRealMode(opts: {
   optionalFxEnabled?: () => boolean
 }): {
   stopSse: () => void
+  handleSceneContextChange: () => Promise<void>
   resetStaleRun: (opts?: { clearError?: boolean }) => void
   refreshRunStatus: () => Promise<void>
   refreshSnapshot: () => Promise<void>
@@ -233,6 +234,14 @@ export function useSimulatorRealMode(opts: {
   let sseSeq = 0
   let refreshRunStatusSeq = 0
   let replayGapRecoveryRunId: string | null = null
+  let sceneContextRefreshSeq = 0
+  let sceneContextRefresh: {
+    seq: number
+    runId: string | null
+    accessToken: string
+    equivalent: string
+    apiBase: string
+  } | null = null
 
   const replayOwner = createRealEventReplayOwner()
 
@@ -295,12 +304,61 @@ export function useSimulatorRealMode(opts: {
     cancelPendingRefreshSnapshotDebounce()
   }
 
-  function stopSse() {
+  function stopSse(stopOpts?: { preserveSceneRefresh?: boolean }) {
+    if (!stopOpts?.preserveSceneRefresh) {
+      sceneContextRefreshSeq += 1
+      sceneContextRefresh = null
+    }
     // Ensure no delayed refreshSnapshot() can fire after SSE stop/teardown.
     cancelPendingRefreshSnapshotDebounce()
     sseAbort?.abort()
     sseAbort = null
     real.sseState = 'idle'
+  }
+
+  function currentSceneContext() {
+    return {
+      runId: real.runId,
+      accessToken: real.accessToken,
+      equivalent: String(effectiveEq.value || '').trim().toUpperCase(),
+      apiBase: real.apiBase,
+    }
+  }
+
+  function isSceneContextCurrent(context: ReturnType<typeof currentSceneContext>): boolean {
+    const current = currentSceneContext()
+    return current.runId === context.runId &&
+      current.accessToken === context.accessToken &&
+      current.equivalent === context.equivalent &&
+      current.apiBase === context.apiBase
+  }
+
+  async function replaceSceneSnapshotBeforeSse(): Promise<void> {
+    const seq = ++sceneContextRefreshSeq
+    const context = currentSceneContext()
+    sceneContextRefresh = { seq, ...context }
+    replayGapRecoveryRunId = null
+    teardownRefreshSnapshot()
+    stopSse({ preserveSceneRefresh: true })
+    try {
+      await loadScene()
+    } catch (error: unknown) {
+      if (sceneContextRefreshSeq === seq && isSceneContextCurrent(context)) {
+        real.lastError = getErrorMessage(error)
+      }
+    }
+
+    if (sceneContextRefreshSeq !== seq || !isSceneContextCurrent(context)) return
+    sceneContextRefresh = null
+    if (isRealMode.value && real.runId) void runSseLoop()
+  }
+
+  async function handleSceneContextChange(): Promise<void> {
+    if (!isRealMode.value) {
+      await loadScene()
+      return
+    }
+    await replaceSceneSnapshotBeforeSse()
   }
 
   if (getCurrentScope()) {
@@ -534,6 +592,7 @@ export function useSimulatorRealMode(opts: {
   }): void {
     const { msg, signal, runId, equivalent } = input
     if (signal.aborted) return
+    if (String(effectiveEq.value || '').trim().toUpperCase() !== String(equivalent || '').trim().toUpperCase()) return
     if (!msg.data) return
 
     let parsed: unknown
@@ -610,12 +669,26 @@ export function useSimulatorRealMode(opts: {
     })
   }
 
-  function replayBootstrapFrame(msg: SseParsedMessage, runId: string): { terminal: boolean } | null {
+  function replayBootstrapFrame(
+    msg: SseParsedMessage,
+    runId: string,
+    equivalent: string,
+  ): { terminal: boolean } | null {
     if (!msg.data) return null
     try {
       const payload: unknown = JSON.parse(msg.data)
-      if (!isRecord(payload) || payload.type !== 'run_status' || payload.run_id !== runId) return null
-      const state = String(payload.state || '').trim().toLowerCase()
+      const normalized = normalizeSimulatorEvent(payload)
+      if (normalized.status !== 'accepted' || normalized.event.type !== 'run_status') return null
+      const admission = replayOwner.admit({
+        event: normalized.event,
+        frameId: msg.id,
+        connectionRunId: runId,
+        activeRunId: real.runId,
+        connectionEquivalent: equivalent,
+        currentCursor: real.lastEventId,
+      })
+      if (admission.status !== 'accepted') return null
+      const state = String(normalized.event.state || '').trim().toLowerCase()
       return { terminal: state === 'stopped' || state === 'error' }
     } catch {
       return null
@@ -634,8 +707,10 @@ export function useSimulatorRealMode(opts: {
   }): Promise<ReplayRecoveryConnectionOutcome> {
     const { runId, ctrl, sseLoopSeq, equivalent, url } = input
     const equivalentKey = String(equivalent || '').trim().toUpperCase()
+    const connectionCtrl = new AbortController()
     const isCurrentContext = () =>
       !ctrl.signal.aborted &&
+      !connectionCtrl.signal.aborted &&
       sseLoopSeq === sseSeq &&
       isRealMode.value &&
       real.runId === runId &&
@@ -643,7 +718,6 @@ export function useSimulatorRealMode(opts: {
 
     if (!isCurrentContext()) return 'stop'
 
-    const connectionCtrl = new AbortController()
     const abortConnection = () => connectionCtrl.abort()
     ctrl.signal.addEventListener('abort', abortConnection, { once: true })
 
@@ -684,7 +758,7 @@ export function useSimulatorRealMode(opts: {
         }
 
         bufferedMessages.push(msg)
-        const bootstrap = replayBootstrapFrame(msg, runId)
+        const bootstrap = replayBootstrapFrame(msg, runId, equivalent)
         if (!firstBootstrapResolved && bootstrap) {
           firstBootstrapResolved = true
           terminalBootstrap = bootstrap.terminal
@@ -748,6 +822,7 @@ export function useSimulatorRealMode(opts: {
         if (snapshotOrConnection.outcome.status === 'error') throw snapshotOrConnection.outcome.error
         if (!terminalBootstrap) {
           real.lastError = 'SSE replay recovery connection ended before the authoritative snapshot completed'
+          await settleAfterAbort()
           return 'retry'
         }
         snapshotOutcome = await snapshotPromise
@@ -926,6 +1001,14 @@ export function useSimulatorRealMode(opts: {
   watch(
     () => [real.runId, real.accessToken, effectiveEq.value, real.apiBase] as const,
     () => {
+      if (sceneContextRefresh) {
+        if (!isSceneContextCurrent(sceneContextRefresh)) void replaceSceneSnapshotBeforeSse()
+        return
+      }
+      if (replayGapRecoveryRunId !== null) {
+        void replaceSceneSnapshotBeforeSse()
+        return
+      }
       if (!isRealMode.value) {
         stopSse()
         return
@@ -1273,6 +1356,7 @@ export function useSimulatorRealMode(opts: {
 
   return {
     stopSse,
+    handleSceneContextChange,
     resetStaleRun,
     refreshRunStatus,
     refreshSnapshot,

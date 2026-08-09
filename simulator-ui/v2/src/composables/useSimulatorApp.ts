@@ -1453,6 +1453,7 @@ export function useSimulatorApp(opts?: {
     }
   }
 
+  let handleRealSceneContextChange: () => Promise<void> = async () => undefined
   const sceneState = useAppSceneState({
     eq,
     scene,
@@ -1482,6 +1483,7 @@ export function useSimulatorApp(opts?: {
     // immediate watcher (refreshScenarios → refreshSnapshot). Skipping the duplicate
     // loadScene() in setup() eliminates a redundant "Loading…" flash on page open.
     skipInitialLoad: () => isRealMode.value,
+    onSceneContextChange: () => handleRealSceneContextChange(),
   })
 
   function cleanupRealRunFxAndTimers() {
@@ -1523,6 +1525,7 @@ export function useSimulatorApp(opts?: {
     onAnySseEvent: markDemoActivity,
     optionalFxEnabled: opts?.optionalFxEnabled,
   })
+  handleRealSceneContextChange = realMode.handleSceneContextChange
   resetStaleRunOwner = realMode.resetStaleRun
 
   // Real mode: if intensity ends up 0 (common after legacy Interact UI persistence),

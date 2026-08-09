@@ -59,6 +59,9 @@ type UseSceneStateDeps = {
   // When true, setup() skips the initial loadScene() call.
   // Useful when another subsystem (e.g. real-mode boot) is responsible for the first load.
   skipInitialLoad?: () => boolean
+  // A scene/equivalent watcher supersedes any replay-recovery snapshot that
+  // might currently own the SSE lifecycle.
+  onSceneContextChange?: () => Promise<void>
 }
 
 type UseSceneStateReturn = {
@@ -244,7 +247,11 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
   }
 
   watch([deps.eq, deps.scene], () => {
-    loadScene()
+    if (deps.onSceneContextChange) {
+      void deps.onSceneContextChange()
+      return
+    }
+    void loadScene()
   })
 
   function setup() {
