@@ -140,3 +140,48 @@ async def test_scenario_upload_rejects_noncanonical_equivalent_before_storage(
     ]
     assert scenario_id not in registry._scenarios
     assert not (tmp_path / "scenarios" / scenario_id).exists()
+
+
+@pytest.mark.asyncio
+async def test_scenario_upload_bounds_noncanonical_equivalent_errors(
+    client,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    scenario_id = "many-invalid-equivalents"
+    scenario = {
+        "schema_version": "scenario/1",
+        "scenario_id": scenario_id,
+        "participants": [{"id": "P1", "type": "person"}],
+        "trustlines": [],
+        "equivalents": [f"INVALID-{index}" for index in range(60)],
+    }
+    registry = ScenarioRegistry(
+        lock=threading.RLock(),
+        scenarios={},
+        fixtures_dir=tmp_path / "fixtures",
+        schema_path=(
+            Path(__file__).resolve().parents[2]
+            / "fixtures"
+            / "simulator"
+            / "scenario.schema.json"
+        ),
+        local_state_dir=tmp_path,
+        utc_now=lambda: datetime.now(timezone.utc),
+        logger=logging.getLogger(__name__),
+    )
+    monkeypatch.setattr(runtime, "_scenario_registry", registry)
+
+    response = await client.post(
+        "/api/v1/simulator/scenarios",
+        headers=_admin_headers(),
+        json={"scenario": scenario},
+    )
+
+    assert response.status_code == 400, response.text
+    errors = response.json()["error"]["details"]["errors"]
+    assert len(errors) == 50
+    assert errors[0]["path"] == "equivalents/0"
+    assert errors[-1]["path"] == "equivalents/49"
+    assert scenario_id not in registry._scenarios
+    assert not (tmp_path / "scenarios" / scenario_id).exists()

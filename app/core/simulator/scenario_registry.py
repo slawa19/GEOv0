@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -65,25 +66,23 @@ def validate_scenario_or_400(*, raw: dict[str, Any], schema_path: Path) -> None:
     )
 
 
-def _scenario_equivalent_sources(raw: dict[str, Any]) -> list[tuple[str, str]]:
-    sources: list[tuple[str, str]] = []
-
+def _scenario_equivalent_sources(raw: dict[str, Any]) -> Iterator[tuple[str, str]]:
     for index, value in enumerate(raw.get("equivalents") or []):
         code = str(value).strip().upper()
         if code:
-            sources.append((f"equivalents/{index}", code))
+            yield f"equivalents/{index}", code
 
     default_code = scenario_default_equivalent(raw)
     if default_code:
         default_path = "baseEquivalent" if raw.get("baseEquivalent") else "equivalent"
-        sources.append((default_path, default_code))
+        yield default_path, default_code
 
     for index, trustline in enumerate(raw.get("trustlines") or []):
         if not isinstance(trustline, dict):
             continue
         code = str(trustline.get("equivalent") or "").strip().upper()
         if code:
-            sources.append((f"trustlines/{index}/equivalent", code))
+            yield f"trustlines/{index}/equivalent", code
 
     for event_index, event in enumerate(raw.get("events") or []):
         if not isinstance(event, dict):
@@ -93,9 +92,7 @@ def _scenario_equivalent_sources(raw: dict[str, Any]) -> list[tuple[str, str]]:
                 continue
             code = str(effect.get("equivalent") or "").strip().upper()
             if code:
-                sources.append(
-                    (f"events/{event_index}/effects/{effect_index}/equivalent", code)
-                )
+                yield f"events/{event_index}/effects/{effect_index}/equivalent", code
             for trustline_index, trustline in enumerate(
                 effect.get("initial_trustlines") or []
             ):
@@ -103,15 +100,11 @@ def _scenario_equivalent_sources(raw: dict[str, Any]) -> list[tuple[str, str]]:
                     continue
                 code = str(trustline.get("equivalent") or "").strip().upper()
                 if code:
-                    sources.append(
-                        (
-                            f"events/{event_index}/effects/{effect_index}/"
-                            f"initial_trustlines/{trustline_index}/equivalent",
-                            code,
-                        )
+                    yield (
+                        f"events/{event_index}/effects/{effect_index}/"
+                        f"initial_trustlines/{trustline_index}/equivalent",
+                        code,
                     )
-
-    return sources
 
 
 def _validate_scenario_equivalent_codes(raw: dict[str, Any]) -> None:
@@ -126,6 +119,8 @@ def _validate_scenario_equivalent_codes(raw: dict[str, Any]) -> None:
                     "message": f"Noncanonical equivalent code: {code}",
                 }
             )
+            if len(errors) == 50:
+                break
 
     if errors:
         raise BadRequestException(
