@@ -1,8 +1,15 @@
 # Стандарты разработки GEO v0
 
+> **Статус:** накопленный engineering guide, не единый исполнимый policy-файл.
+> Обязательный контракт агента — [`AGENTS.md`](../../AGENTS.md); test discovery —
+> [`pytest.ini`](../../pytest.ini); required local entrypoint —
+> [`scripts/verify_local.ps1`](../../scripts/verify_local.ps1). Раздел 3 ниже
+> сохраняет общие принципы, но его прямые `pytest`/package-команды не заменяют
+> verifier. Ruff/Black сейчас non-blocking diagnostics, mypy не настроен как gate.
+
 ## Введение
 
-Этот документ описывает стандарты разработки проекта GEO v0. Он является единым источником правды для всех правил, конвенций и best practices.
+Этот документ описывает накопленные стандарты и best practices проекта GEO v0.
 
 Документ создан на основе анализа архитектурных ошибок, выявленных в ходе рефакторинга (март 2026), и обобщает существующие стандарты из [`docs/ru/06-contributing.md`](06-contributing.md), [`simulator-ui/v2/src/ui-kit/AI-AGENT-GUIDE.md`](../../simulator-ui/v2/src/ui-kit/AI-AGENT-GUIDE.md) и [`docs/ru/documentation-rules.md`](documentation-rules.md).
 

@@ -5,6 +5,13 @@
 
 Краткая сводка ключевых архитектурных решений и рекомендуемых дефолтов для MVP.
 
+> **Локальный runtime root:** изменяемое состояние по умолчанию размещается под
+> ignored-каталогом `.local-run/`: SQLite backend — `.local-run/geov0.db`, test
+> DB/cache/basetemp — `.local-run/test-runs/<TaskSlug>/`, Playwright output —
+> `.local-run/playwright/`. Корневой `geov0.db` считается legacy/user data и не
+> переносится или не удаляется автоматически; его использование требует явного
+> `DATABASE_URL`. Tracked fixtures не смешиваются с runtime output.
+
 ---
 
 ## 1. Ключевые решения MVP
@@ -151,8 +158,8 @@
 Каноничные входные артефакты и доки:
 - RU обзор (для пользователей + для технарей): [simulator/scenarios-and-engine.md](simulator/scenarios-and-engine.md)
 - Индекс документации симулятора: [simulator/README.md](simulator/README.md)
-- JSON Schema сценария: [fixtures/simulator/scenario.schema.json](fixtures/simulator/scenario.schema.json)
-- Примеры сценариев: [fixtures/simulator/](fixtures/simulator/)
+- JSON Schema сценария: [`../../fixtures/simulator/scenario.schema.json`](../../fixtures/simulator/scenario.schema.json)
+- Примеры сценариев: [`../../fixtures/simulator/`](../../fixtures/simulator/)
 
 Дефолты runtime (env‑override допускается):
 - `SIMULATOR_TICK_MS_BASE=1000`
@@ -219,7 +226,7 @@ Real mode: артефакты (dev perf)
 - Для CLI/автотестов вводим admin-only owner override через `X-Simulator-Owner`.
 - Для cookie-mode: обязателен `SIMULATOR_SESSION_SECRET` (guardrail вне dev/test) и CSRF защита минимум через `Origin` allowlist.
 
-Каноничная спецификация: [simulator/backend/anonymous-visitors-cookie-runs-spec.md](simulator/backend/anonymous-visitors-cookie-runs-spec.md)
+Историческая спецификация решения: [simulator/backend/archive/anonymous-visitors-cookie-runs-spec.md](simulator/backend/archive/anonymous-visitors-cookie-runs-spec.md)
 
 ---
 
@@ -290,4 +297,4 @@ Real mode: артефакты (dev perf)
 - [config-reference.md](config-reference.md) — полный реестр параметров с описанием
 - [02-protocol-spec.md](02-protocol-spec.md) — спецификация протокола
 - [03-architecture.md](03-architecture.md) — архитектура системы
-- [admin/specs/archive/admin-console-minimal-spec.md](admin/specs/archive/admin-console-minimal-spec.md) — спецификация админки
+- [admin-ui/specs/archive/admin-console-minimal-spec.md](admin-ui/specs/archive/admin-console-minimal-spec.md) — историческая спецификация админки

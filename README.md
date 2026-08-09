@@ -293,7 +293,7 @@ If Docker is unavailable, you can run the backend locally using SQLite (developm
 ```powershell
 $env:ENV = 'dev'
 
-# 1) Initialize SQLite schema (creates ./geov0.db)
+# 1) Initialize SQLite schema (creates ./.local-run/geov0.db)
 python scripts/init_sqlite_db.py
 
 # 2) Seed demo data (from ./seeds/*.json)
@@ -313,7 +313,7 @@ Health endpoints (also available as `/api/v1/*` aliases):
 The canonical required local gate is the root PowerShell verifier. It runs the
 default backend pytest tier (excluding `slow`/`e2e`), asserts a single Alembic
 head, and runs Admin UI lint/unit/build plus Simulator UI v2
-typecheck/unit/build:
+lint/typecheck/unit/build:
 
 ```powershell
 # One-time setup
@@ -330,6 +330,11 @@ npm --prefix simulator-ui/v2 ci
 The verifier gives pytest a task-specific SQLite DB and basetemp by default. Parallel
 agents must pass a unique slug, for example
 `.\scripts\verify_local.ps1 -TaskSlug agent_contract_review`.
+
+Local databases, pytest cache/basetemp, logs, PID/NDJSON and browser-test output
+belong under the ignored `.local-run/` runtime root. An existing legacy
+`./geov0.db` is never moved or deleted automatically; set
+`DATABASE_URL=sqlite+aiosqlite:///./geov0.db` only when you intentionally need it.
 
 GitHub Actions runs the same verifier with Python 3.11 and Node 22.12. PostgreSQL
 integration, simulator super-smoke, Admin E2E, and Windows Simulator visual E2E
