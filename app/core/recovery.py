@@ -81,8 +81,12 @@ async def cleanup_expired_prepare_locks(session: AsyncSession) -> int:
         pass
 
     if abort_failures:
-        raise RuntimeError(
-            f"failed to abort {abort_failures} transaction(s) with expired prepare locks"
+        logger.warning(
+            "recovery.cleanup_expired_prepare_locks_partial "
+            "expired_locks_deleted=%s transactions_aborted=%s abort_failures=%s",
+            expired_count,
+            len(tx_ids) - abort_failures,
+            abort_failures,
         )
 
     return int(expired_count)
@@ -140,12 +144,20 @@ async def abort_stale_payment_transactions(session: AsyncSession) -> int:
         pass
 
     if abort_failures:
-        raise RuntimeError(f"failed to abort {abort_failures} stale payment transaction(s)")
+        logger.warning(
+            "recovery.abort_stale_payment_transactions_partial "
+            "transactions_aborted=%s abort_failures=%s",
+            aborted,
+            abort_failures,
+        )
 
     return aborted
 
 
 async def run_recovery_once(session: AsyncSession) -> bool:
+    # Per-item abort failures are retryable and are reported by the helpers via
+    # exception logs and partial_error metrics. Only a batch/infrastructure
+    # failure degrades recovery health; committed progress remains observable.
     deleted = 0
     aborted = 0
     succeeded = True

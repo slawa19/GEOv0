@@ -240,7 +240,11 @@ class Settings(BaseSettings):
     def _normalize_legacy_environment(cls, value: object) -> str | None:
         if value is None:
             return None
-        return cls._normalize_environment(value)
+        # ENVIRONMENT is a compatibility input shared with unrelated tooling in
+        # some deployments. Only values from our documented legacy vocabulary
+        # participate in alias resolution; canonical ENV remains strict.
+        raw = str(value or "").strip().lower()
+        return cls._ENV_ALIASES.get(raw)
 
     def model_post_init(self, __context: Any) -> None:
         # Runs on every Settings() instantiation (including module-level `settings = Settings()`).
@@ -288,22 +292,27 @@ class Settings(BaseSettings):
         """
         env = (self.ENV or "").strip().lower()
         allowlist_raw = (self.SIMULATOR_CSRF_ORIGIN_ALLOWLIST or "").strip()
-        if not allowlist_raw and env in self._SAFE_ENVS:
-            return
-        normalized_origins: list[str] = []
-        for raw_origin in allowlist_raw.split(","):
-            normalized_origin = canonicalize_http_origin(raw_origin)
-            if normalized_origin is None:
-                normalized_origins = []
-                break
-            if normalized_origin not in normalized_origins:
-                normalized_origins.append(normalized_origin)
-        if not normalized_origins:
+        if not allowlist_raw:
+            if env in self._SAFE_ENVS:
+                return
             raise RuntimeError(
                 "SIMULATOR_CSRF_ORIGIN_ALLOWLIST must be set in non-dev environment. "
                 f"Got ENV={self.ENV!r}. "
                 "Set explicit origins via SIMULATOR_CSRF_ORIGIN_ALLOWLIST env var."
             )
+        normalized_origins: list[str] = []
+        for entry_index, raw_origin in enumerate(allowlist_raw.split(","), start=1):
+            normalized_origin = canonicalize_http_origin(raw_origin)
+            if normalized_origin is None:
+                raise RuntimeError(
+                    "SIMULATOR_CSRF_ORIGIN_ALLOWLIST "
+                    f"entry {entry_index} is invalid. "
+                    "Each entry must be an exact HTTP(S) origin with scheme, host, "
+                    "and optional port, without credentials, whitespace, path "
+                    "(including a trailing slash), query, or fragment."
+                )
+            if normalized_origin not in normalized_origins:
+                normalized_origins.append(normalized_origin)
         self.SIMULATOR_CSRF_ORIGIN_ALLOWLIST = ",".join(normalized_origins)
 
     def _guardrail_default_secrets(self) -> None:

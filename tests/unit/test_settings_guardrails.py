@@ -179,6 +179,30 @@ def test_conflicting_environment_keys_fail_startup() -> None:
         Settings(_env_file=None, ENV="dev", ENVIRONMENT="prod")
 
 
+def test_unrelated_ambient_legacy_environment_does_not_override_canonical_env(
+    monkeypatch,
+) -> None:
+    from app.config import Settings
+
+    monkeypatch.setenv("ENVIRONMENT", "qa")
+
+    configured = Settings(_env_file=None, ENV="prod", **_SECURE_NON_DEV_SETTINGS)
+
+    assert configured.ENV == "prod"
+    assert configured.LEGACY_ENVIRONMENT is None
+
+
+def test_supported_ambient_legacy_environment_still_conflicts_with_canonical_env(
+    monkeypatch,
+) -> None:
+    from app.config import Settings
+
+    monkeypatch.setenv("ENVIRONMENT", "production")
+
+    with pytest.raises(RuntimeError, match="ENV and legacy ENVIRONMENT"):
+        Settings(_env_file=None, ENV="dev")
+
+
 @pytest.mark.parametrize(
     ("field", "placeholder"),
     [
@@ -271,6 +295,35 @@ def test_non_dev_rejects_non_origin_csrf_allowlist_entries(allowlist: str) -> No
 
     values = {**_SECURE_NON_DEV_SETTINGS, "SIMULATOR_CSRF_ORIGIN_ALLOWLIST": allowlist}
     with pytest.raises(RuntimeError, match="SIMULATOR_CSRF_ORIGIN_ALLOWLIST"):
+        Settings(_env_file=None, ENV="prod", **values)
+
+
+@pytest.mark.parametrize("environment", ["dev", "prod"])
+def test_settings_reports_the_precise_invalid_csrf_allowlist_entry_without_broadening(
+    environment: str,
+) -> None:
+    from app.config import Settings
+
+    values = {} if environment == "dev" else {**_SECURE_NON_DEV_SETTINGS}
+    values["SIMULATOR_CSRF_ORIGIN_ALLOWLIST"] = (
+        "https://simulator.example.com,http://localhost:5176/"
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"entry 2 is invalid.*trailing slash",
+    ) as exc_info:
+        Settings(_env_file=None, ENV=environment, **values)
+
+    assert "must be set" not in str(exc_info.value)
+
+
+def test_non_dev_empty_csrf_allowlist_remains_a_missing_configuration_error() -> None:
+    from app.config import Settings
+
+    values = {**_SECURE_NON_DEV_SETTINGS, "SIMULATOR_CSRF_ORIGIN_ALLOWLIST": "  "}
+
+    with pytest.raises(RuntimeError, match="must be set in non-dev environment"):
         Settings(_env_file=None, ENV="prod", **values)
 
 
