@@ -356,6 +356,24 @@ function Get-EffectiveDatabaseUrl {
     }
 }
 
+function Get-SafeDatabaseDisplayUrl {
+    param(
+        [string]$PythonExe,
+        [string]$DatabaseUrl
+    )
+
+    # Keep credentials out of command arguments and launcher output. SQLAlchemy
+    # owns URL parsing; the displayed URL intentionally omits all userinfo and
+    # query parameters because either may contain secrets.
+    $output = @(
+        $DatabaseUrl | & $PythonExe -c 'import sys; from sqlalchemy.engine import URL, make_url; url = make_url(sys.stdin.read().rstrip("\r\n")); safe = URL.create(drivername=url.drivername, host=url.host, port=url.port, database=url.database); print(safe.render_as_string(hide_password=True))'
+    )
+    if ($LASTEXITCODE -ne 0 -or $output.Count -ne 1) {
+        throw 'Unable to render a safe DATABASE_URL summary.'
+    }
+    return ([string]$output[0]).Trim()
+}
+
 function Invoke-NpmInstall {
     param([string]$Dir, [string]$NpmExe)
     
@@ -480,6 +498,9 @@ if (-not $DatabasePreflightComplete) {
     Set-EnvOverrides -Pairs $BackendEnv
     $EffectiveDatabaseUrl = Get-EffectiveDatabaseUrl -PythonExe $Python
 }
+$SafeDatabaseDisplayUrl = Get-SafeDatabaseDisplayUrl `
+    -PythonExe $Python `
+    -DatabaseUrl $EffectiveDatabaseUrl
 
 $LocalDatabasePath = if ($EffectiveDatabaseUrl -eq $DefaultDatabaseUrl) {
     $DefaultDatabasePath
@@ -646,7 +667,7 @@ Write-Host "  Backend API:   " -NoNewline; Write-Host "http://127.0.0.1:$Backend
 Write-Host "  Admin UI:      " -NoNewline; Write-Host "http://localhost:$AdminUiPort/" -ForegroundColor Cyan
 Write-Host "  Simulator UI:  " -NoNewline; Write-Host "http://localhost:$SimulatorUiPort/?mode=real" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "  Database URL:  " -NoNewline; Write-Host "$EffectiveDatabaseUrl" -ForegroundColor Gray
+Write-Host "  Database URL:  " -NoNewline; Write-Host "$SafeDatabaseDisplayUrl" -ForegroundColor Gray
 Write-Host "  Logs:          " -NoNewline; Write-Host "$StateDir" -ForegroundColor Gray
 Write-Host ""
 Write-Host "All UIs share the same backend and database." -ForegroundColor DarkGray
