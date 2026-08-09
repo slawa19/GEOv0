@@ -35,6 +35,14 @@ async def _use_read_committed(session) -> None:
     assert str(isolation).lower() == "read committed"
 
 
+async def _use_serializable(session) -> None:
+    # tests.conftest owns a deliberately generic test engine; opt this
+    # regression into the production PostgreSQL isolation contract explicitly.
+    await session.connection(execution_options={"isolation_level": "SERIALIZABLE"})
+    isolation = (await session.execute(text("SHOW transaction_isolation"))).scalar_one()
+    assert str(isolation).lower() == "serializable"
+
+
 async def _seed_prepared_payment(
     *,
     include_waiter: bool,
@@ -317,14 +325,8 @@ async def test_concurrent_same_transaction_commit_applies_effects_once_postgres(
     exercise_completed = False
 
     async with TestingSessionLocal() as holder_session, TestingSessionLocal() as waiter_session:
-        holder_isolation = (
-            await holder_session.execute(text("SHOW transaction_isolation"))
-        ).scalar_one()
-        waiter_isolation = (
-            await waiter_session.execute(text("SHOW transaction_isolation"))
-        ).scalar_one()
-        assert str(holder_isolation).lower() == "serializable"
-        assert str(waiter_isolation).lower() == "serializable"
+        await _use_serializable(holder_session)
+        await _use_serializable(waiter_session)
         holder_engine = PaymentEngine(holder_session)
         waiter_engine = PaymentEngine(waiter_session)
         holder_engine._retry_base_delay_s = 0.0
