@@ -147,9 +147,16 @@ export function useGraphData(opts: {
 
   let fullSnapshot: GraphSnapshotPayload | null = null
   let fullClearingCycles: ClearingCycles | null = null
+  let activeParticipantPid = ''
   const viewRequests = useLatestRequest()
   const cycleRequests = useLatestRequest()
   const participantCycleRequests = useLatestRequest()
+
+  function resetParticipantCycleVisibility() {
+    activeParticipantPid = ''
+    participantCycleRequests.invalidate()
+    clearingCycles.value = fullClearingCycles
+  }
 
   function applySnapshotPayload(p: GraphSnapshotPayload) {
     participants.value = p.participants || []
@@ -164,7 +171,7 @@ export function useGraphData(opts: {
   async function loadData(): Promise<boolean> {
     const viewRequest = viewRequests.begin()
     const cycleRequest = cycleRequests.begin()
-    participantCycleRequests.invalidate()
+    resetParticipantCycleVisibility()
     loading.value = true
     viewError.value = null
     cycleError.value = null
@@ -204,8 +211,8 @@ export function useGraphData(opts: {
         try {
           if (cycleResult.status === 'rejected') throw cycleResult.reason
           const nextClearingCycles = (assertSuccess(cycleResult.value) as ClearingCycles | null) ?? null
-          clearingCycles.value = nextClearingCycles
           fullClearingCycles = nextClearingCycles
+          if (!activeParticipantPid) clearingCycles.value = nextClearingCycles
           cycleError.value = null
         } catch (e: unknown) {
           const msg = e instanceof Error ? e.message : String(e)
@@ -262,7 +269,7 @@ export function useGraphData(opts: {
 
     const viewRequest = viewRequests.begin()
     const cycleRequest = cycleRequests.begin()
-    participantCycleRequests.invalidate()
+    resetParticipantCycleVisibility()
     loading.value = true
     viewError.value = null
     cycleError.value = null
@@ -306,7 +313,9 @@ export function useGraphData(opts: {
       if (cycleRequest.isCurrent()) {
         try {
           if (cycleResult.status === 'rejected') throw cycleResult.reason
-          clearingCycles.value = (assertSuccess(cycleResult.value) as ClearingCycles | null) ?? null
+          if (!activeParticipantPid) {
+            clearingCycles.value = (assertSuccess(cycleResult.value) as ClearingCycles | null) ?? null
+          }
           cycleError.value = null
         } catch (e: unknown) {
           if (viewRequest.isCurrent()) {
@@ -332,19 +341,19 @@ export function useGraphData(opts: {
 
   async function refreshClearingCyclesForParticipant(pid: string): Promise<boolean> {
     if (!pid) {
-      participantCycleRequests.invalidate()
+      resetParticipantCycleVisibility()
       return true
     }
-    const request = cycleRequests.begin()
+    activeParticipantPid = pid
     const participantRequest = participantCycleRequests.begin()
     try {
       const cc = await api.clearingCycles({ participant_pid: pid })
-      if (!request.isCurrent() || !participantRequest.isCurrent()) return false
+      if (!participantRequest.isCurrent() || activeParticipantPid !== pid) return false
       clearingCycles.value = (assertSuccess(cc) as ClearingCycles | null) ?? null
       cycleError.value = null
       return true
     } catch {
-      return request.isCurrent() && participantRequest.isCurrent()
+      return participantRequest.isCurrent() && activeParticipantPid === pid
     }
   }
 
