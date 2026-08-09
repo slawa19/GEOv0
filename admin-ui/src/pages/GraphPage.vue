@@ -185,6 +185,7 @@ const {
   refreshSnapshotForEq,
   refreshForFocusMode,
   refreshClearingCyclesForParticipant,
+  invalidateDataOwnership,
   reloadCurrentView,
 } = useGraphData({
   eq,
@@ -409,6 +410,7 @@ useGraphPageWatchers({
   refreshForFocusMode,
   refreshSnapshotForEq,
   refreshClearingCyclesForParticipant,
+  invalidateDataOwnership,
   waitForPendingGraphLoad,
   selected,
   showLabels,

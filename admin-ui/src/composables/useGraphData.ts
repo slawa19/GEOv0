@@ -100,9 +100,13 @@ export function useGraphData(opts: {
   const participantCycleError = ref<string | null>(null)
   const activeParticipantPid = ref('')
   const participantCycleState = ref<'idle' | 'pending' | 'visible' | 'fallback'>('idle')
+  const cycleDisplayOwner = ref<{ kind: 'full' } | { kind: 'participant'; pid: string }>({ kind: 'full' })
   const cycleError = computed(() => {
     if (opts.focusMode.value) return focusCycleError.value
-    if (activeParticipantPid.value) return participantCycleError.value
+    if (cycleDisplayOwner.value.kind === 'participant') return participantCycleError.value
+    if (participantCycleState.value === 'fallback' && activeParticipantPid.value) {
+      return participantCycleError.value ?? fullCycleError.value
+    }
     return fullCycleError.value
   })
   const error = computed(() => viewError.value ?? cycleError.value)
@@ -164,8 +168,16 @@ export function useGraphData(opts: {
     activeParticipantPid.value = ''
     participantCycleState.value = 'idle'
     participantCycleError.value = null
+    cycleDisplayOwner.value = { kind: 'full' }
     participantCycleRequests.invalidate()
     clearingCycles.value = fullClearingCycles
+  }
+
+  function invalidateDataOwnership() {
+    viewRequests.invalidate()
+    cycleRequests.invalidate()
+    participantCycleRequests.invalidate()
+    loading.value = false
   }
 
   function applySnapshotPayload(p: GraphSnapshotPayload) {
@@ -184,7 +196,6 @@ export function useGraphData(opts: {
     resetParticipantCycleVisibility()
     loading.value = true
     viewError.value = null
-    fullCycleError.value = null
     try {
       // First load without equivalent to get full trustlines list for primary equivalent computation
       const snapEq = normalizeEqCode(opts.eq.value)
@@ -222,7 +233,7 @@ export function useGraphData(opts: {
           if (cycleResult.status === 'rejected') throw cycleResult.reason
           const nextClearingCycles = (assertSuccess(cycleResult.value) as ClearingCycles | null) ?? null
           fullClearingCycles = nextClearingCycles
-          if (!activeParticipantPid.value || participantCycleState.value === 'fallback') {
+          if (cycleDisplayOwner.value.kind === 'full') {
             clearingCycles.value = nextClearingCycles
           }
           fullCycleError.value = null
@@ -295,7 +306,19 @@ export function useGraphData(opts: {
     })
 
     if (!query) {
-      if (viewRequest.isCurrent() && fullSnapshot) applySnapshotPayload(fullSnapshot)
+      if (viewRequest.isCurrent() && !fullSnapshot) {
+        applySnapshotPayload({
+          participants: [],
+          trustlines: [],
+          incidents: [],
+          equivalents: [],
+          debts: [],
+          audit_log: [],
+          transactions: [],
+        })
+        return await loadData()
+      }
+      if (viewRequest.isCurrent()) applySnapshotPayload(fullSnapshot!)
       if (cycleRequest.isCurrent()) clearingCycles.value = fullClearingCycles
       if (viewRequest.isCurrent()) loading.value = false
       return viewRequest.isCurrent()
@@ -356,23 +379,33 @@ export function useGraphData(opts: {
       resetParticipantCycleVisibility()
       return true
     }
-    const participantChanged = activeParticipantPid.value !== pid
+    const retainsParticipantCycles =
+      cycleDisplayOwner.value.kind === 'participant' && cycleDisplayOwner.value.pid === pid
     activeParticipantPid.value = pid
     participantCycleState.value = 'pending'
     participantCycleError.value = null
-    if (participantChanged) clearingCycles.value = fullClearingCycles
+    if (!retainsParticipantCycles) {
+      cycleDisplayOwner.value = { kind: 'full' }
+      clearingCycles.value = fullClearingCycles
+    }
     const participantRequest = participantCycleRequests.begin()
     try {
       const cc = await api.clearingCycles({ participant_pid: pid })
       if (!participantRequest.isCurrent() || activeParticipantPid.value !== pid) return false
       clearingCycles.value = (assertSuccess(cc) as ClearingCycles | null) ?? null
+      cycleDisplayOwner.value = { kind: 'participant', pid }
       participantCycleState.value = 'visible'
       participantCycleError.value = null
       return true
     } catch (e: unknown) {
       if (!participantRequest.isCurrent() || activeParticipantPid.value !== pid) return false
-      participantCycleState.value = 'fallback'
-      clearingCycles.value = fullClearingCycles
+      if (retainsParticipantCycles) {
+        participantCycleState.value = 'visible'
+      } else {
+        participantCycleState.value = 'fallback'
+        cycleDisplayOwner.value = { kind: 'full' }
+        clearingCycles.value = fullClearingCycles
+      }
       const msg = e instanceof Error ? e.message : String(e)
       participantCycleError.value = msg || t('graph.data.loadFailed')
       return false
@@ -406,6 +439,7 @@ export function useGraphData(opts: {
     refreshSnapshotForEq,
     refreshForFocusMode,
     refreshClearingCyclesForParticipant,
+    invalidateDataOwnership,
     reloadCurrentView,
   }
 }

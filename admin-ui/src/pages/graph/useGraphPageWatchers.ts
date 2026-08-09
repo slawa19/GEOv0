@@ -25,6 +25,7 @@ export function useGraphPageWatchers(opts: {
   refreshForFocusMode: () => Promise<boolean>
   refreshSnapshotForEq: () => Promise<boolean>
   refreshClearingCyclesForParticipant: (pid: string) => Promise<boolean>
+  invalidateDataOwnership: () => void
   waitForPendingGraphLoad?: () => Promise<void>
 
   selected: Ref<SelectedInfo | null>
@@ -92,9 +93,12 @@ export function useGraphPageWatchers(opts: {
   async function refreshGraph(
     refresh: () => Promise<boolean>,
     rebuildOptions: { fit: boolean },
+    refreshOptions?: { waitForPendingGraphLoad?: boolean },
   ) {
     const refreshRequest = watcherRefreshRequests.begin()
-    await opts.waitForPendingGraphLoad?.()
+    if (refreshOptions?.waitForPendingGraphLoad !== false) {
+      await opts.waitForPendingGraphLoad?.()
+    }
     if (!refreshRequest.isCurrent()) return
     const applied = await refresh()
     if (!applied || !refreshRequest.isCurrent()) return
@@ -116,7 +120,8 @@ export function useGraphPageWatchers(opts: {
 
   watch([opts.focusMode, opts.focusDepth, opts.focusRootPid], () => {
     if (opts.focusMode.value) opts.ensureFocusRootPid()
-    void refreshGraph(opts.refreshForFocusMode, { fit: true })
+    opts.invalidateDataOwnership()
+    void refreshGraph(opts.refreshForFocusMode, { fit: true }, { waitForPendingGraphLoad: false })
   })
 
   watch(

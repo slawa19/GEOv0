@@ -43,6 +43,7 @@ describe('useGraphPageWatchers', () => {
         refreshForFocusMode: vi.fn().mockResolvedValue(true),
         refreshSnapshotForEq: vi.fn().mockReturnValue(pendingEqRefresh.promise),
         refreshClearingCyclesForParticipant: vi.fn().mockResolvedValue(true),
+        invalidateDataOwnership: vi.fn(),
         selected: ref<SelectedInfo | null>(null),
         showLabels: ref(true),
         labelModeBusiness: ref('name'),
@@ -118,6 +119,7 @@ describe('useGraphPageWatchers', () => {
         refreshForFocusMode: vi.fn().mockResolvedValue(false),
         refreshSnapshotForEq,
         refreshClearingCyclesForParticipant: vi.fn().mockResolvedValue(true),
+        invalidateDataOwnership: vi.fn(),
         waitForPendingGraphLoad: () => pendingMount.promise,
         selected: ref<SelectedInfo | null>(null),
         showLabels: ref(true),
@@ -192,6 +194,7 @@ describe('useGraphPageWatchers', () => {
         refreshForFocusMode,
         refreshSnapshotForEq: vi.fn().mockResolvedValue(true),
         refreshClearingCyclesForParticipant: vi.fn().mockResolvedValue(true),
+        invalidateDataOwnership: vi.fn(),
         selected: ref<SelectedInfo | null>(null),
         showLabels: ref(true),
         labelModeBusiness: ref('name'),
@@ -243,6 +246,92 @@ describe('useGraphPageWatchers', () => {
     scope.stop()
   })
 
+  it('refreshes focus exit without waiting for a hung mount data owner', async () => {
+    const pendingFocus = deferred<boolean>()
+    const exitFocus = deferred<boolean>()
+    const blockedMount = deferred<void>()
+    const focusMode = ref(false)
+    const waitForPendingGraphLoad = vi.fn(() => blockedMount.promise)
+    const invalidateDataOwnership = vi.fn()
+    const refreshForFocusMode = vi.fn()
+      .mockReturnValueOnce(pendingFocus.promise)
+      .mockReturnValueOnce(exitFocus.promise)
+    const applyGraphView = vi.fn().mockReturnValue(true)
+    const scope = effectScope()
+
+    scope.run(() => {
+      useGraphPageWatchers({
+        isRealMode: computed(() => true),
+        eq: ref('EUR'),
+        statusFilter: ref<string[]>(['active']),
+        threshold: ref('0.10'),
+        showIncidents: ref(true),
+        hideIsolates: ref(true),
+        typeFilter: ref<string[]>([]),
+        minDegree: ref(0),
+        focusMode,
+        focusDepth: ref<1 | 2>(1),
+        focusRootPid: ref('PID_A'),
+        ensureFocusRootPid: vi.fn(),
+        refreshForFocusMode,
+        refreshSnapshotForEq: vi.fn().mockResolvedValue(true),
+        refreshClearingCyclesForParticipant: vi.fn().mockResolvedValue(true),
+        invalidateDataOwnership,
+        waitForPendingGraphLoad,
+        selected: ref<SelectedInfo | null>(null),
+        showLabels: ref(true),
+        labelModeBusiness: ref('name'),
+        labelModePerson: ref('name'),
+        autoLabelsByZoom: ref(true),
+        minZoomLabelsAll: ref(1),
+        minZoomLabelsPerson: ref(1),
+        searchQuery: ref(''),
+        focusPid: ref(''),
+        zoom: ref(1),
+        layoutName: ref('fcose'),
+        layoutSpacing: ref(1),
+        applyGraphView,
+        graphViz: {
+          rebuildGraph: vi.fn(),
+          runLayout: vi.fn(),
+          clearCycleHighlight: vi.fn(),
+          clearConnectionHighlight: vi.fn(),
+          applySelectedHighlight: vi.fn(),
+          applyStyle: vi.fn(),
+          updateLabelsForZoom: vi.fn(),
+          updateSearchHighlights: vi.fn(),
+          syncZoomFromControl: vi.fn(),
+        },
+      })
+    })
+
+    focusMode.value = true
+    await nextTick()
+    expect(refreshForFocusMode).toHaveBeenCalledTimes(1)
+
+    focusMode.value = false
+    await nextTick()
+
+    expect(invalidateDataOwnership).toHaveBeenCalledTimes(2)
+    expect(waitForPendingGraphLoad).not.toHaveBeenCalled()
+    expect(refreshForFocusMode).toHaveBeenCalledTimes(2)
+
+    exitFocus.resolve(true)
+    await exitFocus.promise
+    await nextTick()
+    expect(applyGraphView).toHaveBeenCalledTimes(1)
+    expect(applyGraphView).toHaveBeenCalledWith({ fit: true })
+
+    pendingFocus.resolve(true)
+    await pendingFocus.promise
+    await nextTick()
+    expect(applyGraphView).toHaveBeenCalledTimes(1)
+
+    scope.stop()
+    blockedMount.resolve()
+    await blockedMount.promise
+  })
+
   it.each(['older-first', 'latest-first'] as const)(
     'keeps the latest visual selection when cycle refreshes resolve %s',
     async (resolutionOrder) => {
@@ -274,6 +363,7 @@ describe('useGraphPageWatchers', () => {
           refreshForFocusMode: vi.fn().mockResolvedValue(true),
           refreshSnapshotForEq: vi.fn().mockResolvedValue(true),
           refreshClearingCyclesForParticipant,
+          invalidateDataOwnership: vi.fn(),
           selected,
           showLabels: ref(true),
           labelModeBusiness: ref('name'),
@@ -352,6 +442,7 @@ describe('useGraphPageWatchers', () => {
         refreshForFocusMode: vi.fn().mockResolvedValue(true),
         refreshSnapshotForEq,
         refreshClearingCyclesForParticipant: vi.fn().mockResolvedValue(true),
+        invalidateDataOwnership: vi.fn(),
         selected: ref<SelectedInfo | null>(null),
         showLabels: ref(true),
         labelModeBusiness: ref('name'),
