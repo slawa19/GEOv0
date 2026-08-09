@@ -101,7 +101,8 @@ if (-not (Test-Path $StateDir)) {
     $null = New-Item -ItemType Directory -Force -Path $StateDir
 }
 
-# PID file paths
+# Per-service ownership metadata paths. The historical *.pid names are retained
+# for compatibility, but the contents are versioned JSON rather than a bare PID.
 $BackendPidPath = Join-Path $StateDir 'backend.pid'
 $AdminUiPidPath = Join-Path $StateDir 'admin-ui.pid'
 $SimulatorUiPidPath = Join-Path $StateDir 'simulator-ui.pid'
@@ -117,26 +118,98 @@ $WindowStyle = if ($ShowWindows) { 'Normal' } else { 'Hidden' }
 
 # --- Helper Functions ---
 
-function Get-PidFromFile {
+function Get-ServiceOwnershipMetadata {
     param([string]$Path)
     if (-not (Test-Path $Path)) { return $null }
     try {
-        $raw = Get-Content -Path $Path -ErrorAction Stop | Select-Object -First 1
-        if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
-        if ($raw.Trim() -match '^\d+$') { return [int]$raw }
-    } catch {}
-    return $null
+        $raw = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop
+        $metadata = $raw | ConvertFrom-Json -ErrorAction Stop
+        $pidValue = 0
+        if (-not [int]::TryParse([string]$metadata.pid, [ref]$pidValue) -or $pidValue -le 0) {
+            throw 'invalid pid'
+        }
+        $fingerprint = [string]$metadata.process_start_fingerprint
+        if ($fingerprint -notmatch '^utc-ticks:\d+$') { throw 'invalid process fingerprint' }
+        return [pscustomobject]@{
+            Valid = [bool]($metadata.version -eq 1)
+            Pid = $pidValue
+            ProcessStartFingerprint = $fingerprint
+            ServiceName = [string]$metadata.service_name
+            Port = [int]$metadata.port
+        }
+    } catch {
+        return [pscustomobject]@{
+            Valid = $false
+            Pid = $null
+            ProcessStartFingerprint = $null
+            ServiceName = $null
+            Port = 0
+        }
+    }
+}
+
+function Get-ProcessStartTimeFingerprint {
+    param([int]$Id)
+    if (-not $Id -or $Id -le 0) { return $null }
+    try {
+        $process = Get-Process -Id $Id -ErrorAction Stop
+        $ticks = $process.StartTime.ToUniversalTime().Ticks.ToString([System.Globalization.CultureInfo]::InvariantCulture)
+        return "utc-ticks:$ticks"
+    } catch {
+        return $null
+    }
+}
+
+function Write-ServiceOwnershipMetadata {
+    param([object]$Service, [int]$Id, [string]$ProcessStartFingerprint)
+    if ($ProcessStartFingerprint -notmatch '^utc-ticks:\d+$') {
+        throw 'Unable to persist service ownership because the process fingerprint is unavailable.'
+    }
+
+    $metadata = [ordered]@{
+        version = 1
+        service_name = [string]$Service.Name
+        port = [int]$Service.Port
+        pid = $Id
+        process_start_fingerprint = $ProcessStartFingerprint
+        launcher_pid = $PID
+        recorded_at_utc = (Get-Date).ToUniversalTime().ToString('o')
+    }
+    $json = $metadata | ConvertTo-Json -Compress
+    $tempPath = "$($Service.PidFile).tmp.$([Guid]::NewGuid().ToString('N'))"
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    try {
+        [System.IO.File]::WriteAllText($tempPath, $json, $utf8NoBom)
+        Move-Item -LiteralPath $tempPath -Destination $Service.PidFile -Force
+    } finally {
+        if (Test-Path -LiteralPath $tempPath) {
+            Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 function Stop-ProcessById {
-    param([int]$Id)
-    if (-not $Id -or $Id -eq 0) { return }
-    try {
-        Stop-Process -Id $Id -Force -ErrorAction Stop
-        Write-Host "     Stopped PID $Id" -ForegroundColor Gray
-    } catch {
-        Write-Verbose "Process $Id not found or already stopped."
+    param([int]$Id, [string]$ExpectedStartFingerprint)
+    if (-not $Id -or $Id -le 0 -or [string]::IsNullOrWhiteSpace($ExpectedStartFingerprint)) {
+        throw 'Unable to stop service because its exact process identity is unavailable.'
     }
+
+    $currentFingerprint = Get-ProcessStartTimeFingerprint -Id $Id
+    if ($currentFingerprint -ne $ExpectedStartFingerprint) {
+        throw 'Unable to stop service because its process identity changed.'
+    }
+
+    Stop-Process -Id $Id -Force -ErrorAction Stop
+    $deadline = (Get-Date).AddSeconds(5)
+    while ((Get-Date) -lt $deadline) {
+        $currentFingerprint = Get-ProcessStartTimeFingerprint -Id $Id
+        if ($currentFingerprint -ne $ExpectedStartFingerprint) {
+            Write-Host "     Stopped PID $Id" -ForegroundColor Gray
+            return
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    throw "Owned process PID $Id did not stop."
 }
 
 function Get-ListeningPid {
@@ -146,12 +219,6 @@ function Get-ListeningPid {
         if ($conn -and $conn.OwningProcess) { return [int]$conn.OwningProcess }
     } catch {}
     return $null
-}
-
-function Test-ProcessExists {
-    param([int]$Id)
-    if (-not $Id -or $Id -eq 0) { return $false }
-    return $null -ne (Get-Process -Id $Id -ErrorAction SilentlyContinue)
 }
 
 function Remove-ServicePidFile {
@@ -181,16 +248,6 @@ function Ensure-LogFilePath {
     }
 
     return $Path
-}
-
-function Remove-StalePidFile {
-    param([string]$Path)
-    $procId = Get-PidFromFile -Path $Path
-    if ($procId) {
-        if (-not (Get-Process -Id $procId -ErrorAction SilentlyContinue)) {
-            Remove-Item -Force $Path -ErrorAction SilentlyContinue
-        }
-    }
 }
 
 function Test-HttpEndpoint {
@@ -311,6 +368,14 @@ function Get-ProjectTools {
         throw "npm not found in PATH"
     }
 
+    $node = Get-Command node.exe -ErrorAction SilentlyContinue
+    if (-not $node) {
+        $node = Get-Command node -ErrorAction SilentlyContinue
+    }
+    if (-not $node) {
+        throw "Node.js not found in PATH"
+    }
+
     $npmPath = $npm.Source
     if ($npmPath -and $npmPath.ToLowerInvariant().EndsWith('.ps1')) {
         $npmDir = Split-Path -Parent $npmPath
@@ -328,7 +393,17 @@ function Get-ProjectTools {
     return @{
         Python = $venvPython
         Npm = $npmPath
+        Node = $node.Source
     }
+}
+
+function Get-ViteScriptPath {
+    param([string]$ProjectDir)
+    $viteScript = Join-Path $ProjectDir 'node_modules\vite\bin\vite.js'
+    if (-not (Test-Path -LiteralPath $viteScript -PathType Leaf)) {
+        throw "Vite entrypoint not found in $ProjectDir. Run npm install first."
+    }
+    return $viteScript
 }
 
 function Invoke-PythonScript {
@@ -392,6 +467,29 @@ function Get-SafeDatabaseDisplayUrl {
     }
 
     $remainder = $DatabaseUrl.Substring($schemeDelimiter + 3)
+    if ([string]::IsNullOrWhiteSpace($remainder) -or $remainder -match '[\r\n\t]') {
+        throw 'Unable to render a safe DATABASE_URL summary.'
+    }
+
+    # Raw '/', '?' and '#' terminate URI userinfo. If an '@' appears after one
+    # of them, the input is ambiguous (usually an unescaped credential). Never
+    # risk echoing that prefix as host/path; require percent-encoding instead.
+    $userinfoIndex = $remainder.LastIndexOf('@')
+    if ($userinfoIndex -ge 0) {
+        foreach ($delimiter in @('/', '?', '#')) {
+            $delimiterIndex = $remainder.IndexOf($delimiter)
+            if ($delimiterIndex -ge 0 -and $delimiterIndex -lt $userinfoIndex) {
+                throw 'Unable to render a safe DATABASE_URL summary.'
+            }
+        }
+    }
+
+    $parsedUri = $null
+    if (-not [Uri]::TryCreate($DatabaseUrl, [UriKind]::Absolute, [ref]$parsedUri) -or
+        $parsedUri.Scheme -ne $scheme) {
+        throw 'Unable to render a safe DATABASE_URL summary.'
+    }
+
     $queryIndex = $remainder.IndexOf('?')
     $fragmentIndex = $remainder.IndexOf('#')
     $suffixIndex = -1
@@ -416,7 +514,7 @@ function Get-SafeDatabaseDisplayUrl {
         if ($userinfoIndex -ge 0) {
             $authority = $authority.Substring($userinfoIndex + 1)
         }
-        if ([string]::IsNullOrWhiteSpace($authority)) {
+        if ([string]::IsNullOrWhiteSpace($authority) -or $authority -match '\s') {
             throw 'Unable to render a safe DATABASE_URL summary.'
         }
         $remainder = "$authority$path"
@@ -436,35 +534,63 @@ function Get-FullStackServices {
 function Get-ServiceStopState {
     param([object]$Service)
 
-    $savedProcId = Get-PidFromFile -Path $Service.PidFile
+    $metadata = Get-ServiceOwnershipMetadata -Path $Service.PidFile
     $listener = Get-ListeningPid -Port $Service.Port
-    $savedProcessExists = if ($savedProcId) { Test-ProcessExists -Id $savedProcId } else { $false }
-    $owned = $savedProcId -and $savedProcessExists -and $listener -and $savedProcId -eq $listener
+    $metadataPresent = $null -ne $metadata
+    $metadataMatchesService = [bool](
+        $metadataPresent -and $metadata.Valid -and
+        $metadata.ServiceName -eq $Service.Name -and
+        $metadata.Port -eq $Service.Port
+    )
+    $currentFingerprint = if ($metadataMatchesService) {
+        Get-ProcessStartTimeFingerprint -Id $metadata.Pid
+    } else {
+        $null
+    }
+    $exactProcess = [bool](
+        $metadataMatchesService -and $currentFingerprint -and
+        $currentFingerprint -eq $metadata.ProcessStartFingerprint
+    )
+    $owned = [bool]($exactProcess -and $listener -and $metadata.Pid -eq $listener)
     $conflict = $false
     $reason = $null
+    $staleOwnershipFile = $false
 
-    if ($listener -and -not $savedProcId) {
+    if ($listener -and -not $metadataPresent) {
         $conflict = $true
-        $reason = "port $($Service.Port) is listening on PID $listener but no service PID file establishes ownership"
-    } elseif ($listener -and -not $savedProcessExists) {
+        $reason = "port $($Service.Port) is listening on PID $listener but no ownership metadata exists"
+    } elseif ($listener -and -not $metadataMatchesService) {
         $conflict = $true
-        $reason = "port $($Service.Port) is listening on PID $listener but the saved service PID is missing or stale"
-    } elseif ($listener -and $savedProcId -ne $listener) {
+        $reason = "port $($Service.Port) is listening on PID $listener but ownership metadata is invalid or belongs to another service"
+    } elseif ($listener -and -not $exactProcess) {
         $conflict = $true
-        $reason = "port $($Service.Port) is listening on PID $listener but the saved service PID is $savedProcId"
-    } elseif (-not $listener -and $savedProcessExists) {
+        $reason = "port $($Service.Port) is listening on PID $listener but the saved process fingerprint does not match"
+    } elseif ($listener -and $metadata.Pid -ne $listener) {
         $conflict = $true
-        $reason = "saved service PID $savedProcId exists but is not listening on port $($Service.Port)"
+        $reason = "port $($Service.Port) is listening on PID $listener but owned PID $($metadata.Pid) was expected"
+    } elseif (-not $listener -and $exactProcess) {
+        $conflict = $true
+        $reason = "owned PID $($metadata.Pid) is alive but is not listening on port $($Service.Port)"
+    } elseif (-not $listener -and $metadataPresent) {
+        # It is safe to remove metadata only when it cannot identify the exact
+        # currently-live process instance. PID reuse is never a reason to kill.
+        $staleOwnershipFile = $true
+        $reason = "stale ownership metadata does not identify a listener or the exact live process"
     }
 
     return [pscustomobject]@{
         Service = $Service
-        SavedPid = $savedProcId
+        MetadataPresent = $metadataPresent
+        MetadataValid = [bool]($metadataPresent -and $metadata.Valid)
+        MetadataMatchesService = $metadataMatchesService
+        SavedPid = if ($metadataMatchesService) { $metadata.Pid } else { $null }
+        SavedProcessStartFingerprint = if ($metadataMatchesService) { $metadata.ProcessStartFingerprint } else { $null }
+        CurrentProcessStartFingerprint = $currentFingerprint
         ListenerPid = $listener
         Owned = [bool]$owned
         Conflict = [bool]$conflict
         Reason = $reason
-        StalePidFile = [bool]($savedProcId -and -not $savedProcessExists)
+        StaleOwnershipFile = [bool]$staleOwnershipFile
     }
 }
 
@@ -484,6 +610,131 @@ function Assert-ServiceOwnershipForReplacement {
     if ($conflicts.Count -gt 0) {
         throw 'Full-stack start/restart refused because service ownership could not be proven.'
     }
+}
+
+function Test-ServiceStopPlansEqual {
+    param([object[]]$InitialPlan, [object[]]$FinalPlan)
+    if ($InitialPlan.Count -ne $FinalPlan.Count) { return $false }
+    for ($i = 0; $i -lt $InitialPlan.Count; $i++) {
+        $before = $InitialPlan[$i]
+        $after = $FinalPlan[$i]
+        foreach ($property in @(
+            'MetadataPresent', 'MetadataValid', 'MetadataMatchesService',
+            'SavedPid', 'SavedProcessStartFingerprint', 'CurrentProcessStartFingerprint',
+            'ListenerPid', 'Owned', 'Conflict', 'StaleOwnershipFile'
+        )) {
+            if ($before.$property -ne $after.$property) { return $false }
+        }
+    }
+    return $true
+}
+
+function Remove-StaleServiceOwnershipMetadata {
+    param([object]$State)
+    if (-not $State.StaleOwnershipFile -or $State.ListenerPid) {
+        throw 'Refusing to remove ownership metadata that is not proven stale.'
+    }
+    Remove-ServicePidFile -Path $State.Service.PidFile
+}
+
+function Wait-ForLaunchedServiceOwnership {
+    param([object]$Service, [object]$Process, [int]$TimeoutSec = 60)
+
+    $launchedPid = 0
+    $launchedFingerprint = $null
+    $ownershipPersisted = $false
+    $ownershipResult = $null
+    $primaryFailure = $null
+    $cleanupFailure = $null
+    try {
+        if ($null -eq $Process -or -not $Process.Id) {
+            throw "Unable to start $($Service.Name): Start-Process did not return a process."
+        }
+        $launchedPid = [int]$Process.Id
+        $launchedFingerprint = Get-ProcessStartTimeFingerprint -Id $launchedPid
+        if ([string]::IsNullOrWhiteSpace($launchedFingerprint)) {
+            throw "Unable to start $($Service.Name): launched process identity is unavailable."
+        }
+
+        $deadline = (Get-Date).AddSeconds($TimeoutSec)
+        while ((Get-Date) -lt $deadline) {
+            $currentFingerprint = Get-ProcessStartTimeFingerprint -Id $launchedPid
+            if ($currentFingerprint -ne $launchedFingerprint) {
+                throw "Unable to start $($Service.Name): launched process exited before ownership was established."
+            }
+            $listener = Get-ListeningPid -Port $Service.Port
+            if ($listener) {
+                if ($listener -ne $launchedPid) {
+                    throw "Unable to start $($Service.Name): port $($Service.Port) is owned by a different process."
+                }
+                $confirmedFingerprint = Get-ProcessStartTimeFingerprint -Id $launchedPid
+                if ($confirmedFingerprint -ne $launchedFingerprint) {
+                    throw "Unable to start $($Service.Name): process identity changed before ownership was persisted."
+                }
+                Write-ServiceOwnershipMetadata -Service $Service -Id $launchedPid -ProcessStartFingerprint $launchedFingerprint
+                $ownershipPersisted = $true
+                $ownershipResult = [pscustomobject]@{ Pid = $launchedPid; ProcessStartFingerprint = $launchedFingerprint }
+                break
+            }
+            Start-Sleep -Milliseconds 500
+        }
+        if (-not $ownershipPersisted) {
+            throw "Unable to start $($Service.Name): launched process did not listen on port $($Service.Port)."
+        }
+    } catch {
+        $primaryFailure = $_.Exception
+    } finally {
+        # finally also runs for pipeline interruption/Ctrl-C. Until ownership is
+        # durably persisted, clean up only the exact launched process instance.
+        # Re-read the file to close the interruption window between its atomic
+        # rename and the in-memory ownershipPersisted assignment.
+        if (-not $ownershipPersisted -and $launchedPid -gt 0 -and
+            (Test-Path -LiteralPath $Service.PidFile)) {
+            $persistedMetadata = Get-ServiceOwnershipMetadata -Path $Service.PidFile
+            $ownershipPersisted = [bool](
+                $persistedMetadata -and $persistedMetadata.Valid -and
+                $persistedMetadata.ServiceName -eq $Service.Name -and
+                $persistedMetadata.Port -eq $Service.Port -and
+                $persistedMetadata.Pid -eq $launchedPid -and
+                $persistedMetadata.ProcessStartFingerprint -eq $launchedFingerprint
+            )
+        }
+        if (-not $ownershipPersisted -and $launchedPid -gt 0) {
+            try {
+                if ([string]::IsNullOrWhiteSpace($launchedFingerprint)) {
+                    throw 'Exact launched process identity was unavailable for startup cleanup.'
+                }
+                $cleanupFingerprint = Get-ProcessStartTimeFingerprint -Id $launchedPid
+                if ([string]::IsNullOrWhiteSpace($cleanupFingerprint)) {
+                    throw 'Exact launched process could not be re-identified for startup cleanup.'
+                }
+                if ($cleanupFingerprint -eq $launchedFingerprint) {
+                    Stop-ProcessById -Id $launchedPid -ExpectedStartFingerprint $launchedFingerprint
+                }
+                # A different non-empty fingerprint proves PID reuse. The exact
+                # launched process is gone; the replacement must never be killed.
+            } catch {
+                $cleanupFailure = $_.Exception
+                if ($null -eq $primaryFailure) {
+                    Write-Warning "Startup cleanup failed: $($cleanupFailure.Message)"
+                }
+            }
+        }
+    }
+
+    if ($null -ne $primaryFailure -and $null -ne $cleanupFailure) {
+        $combinedMessage = "$($primaryFailure.Message) Startup cleanup also failed: $($cleanupFailure.Message)"
+        $combinedFailure = New-Object System.InvalidOperationException($combinedMessage, $primaryFailure)
+        $combinedFailure.Data['CleanupFailure'] = $cleanupFailure.ToString()
+        throw $combinedFailure
+    }
+    if ($null -ne $primaryFailure) {
+        throw $primaryFailure
+    }
+    if ($null -ne $cleanupFailure) {
+        throw $cleanupFailure
+    }
+    return $ownershipResult
 }
 
 function Invoke-NpmInstall {
@@ -511,9 +762,9 @@ function Stop-AllServices {
 
     Write-Host "[STOP] Stopping all services..." -ForegroundColor Yellow
 
-    # Validate every service before stopping the first owned process. start and
-    # restart use FailOnConflict so an unrelated listener cannot cause a partial
-    # replacement or be mistaken for one of this launcher's children.
+    # Build an initial plan, then repeat every ownership check immediately before
+    # the destructive loop. A late conflict in any service aborts replacement
+    # before the first process is stopped.
     $plan = @(Get-ServiceStopPlan -Services $Services)
     $conflicts = @($plan | Where-Object { $_.Conflict })
     foreach ($state in $conflicts) {
@@ -523,26 +774,37 @@ function Stop-AllServices {
         throw 'Full-stack replacement refused because service ownership could not be proven.'
     }
 
-    foreach ($state in $plan) {
-        if ($state.Owned) {
-            # Re-check immediately before the destructive action so a listener
-            # change after the plan was built can never redirect the stop.
-            $currentListener = Get-ListeningPid -Port $state.Service.Port
-            if ($currentListener -eq $state.SavedPid -and (Test-ProcessExists -Id $state.SavedPid)) {
-                Stop-ProcessById -Id $state.SavedPid
-                Remove-ServicePidFile -Path $state.Service.PidFile
-            } else {
-                Write-Warning "$($state.Service.Name): ownership changed before stop; no process was stopped."
-                if ($FailOnConflict) {
-                    throw 'Full-stack replacement refused because service ownership changed during stop.'
-                }
-            }
-        } elseif ($state.StalePidFile -and -not $state.ListenerPid) {
-            Remove-ServicePidFile -Path $state.Service.PidFile
+    $finalPlan = @(Get-ServiceStopPlan -Services $Services)
+    if (-not (Test-ServiceStopPlansEqual -InitialPlan $plan -FinalPlan $finalPlan)) {
+        Write-Warning 'Service ownership changed during final preflight. No process was stopped.'
+        if ($FailOnConflict) {
+            throw 'Full-stack replacement refused because service ownership changed during final preflight.'
         }
+        return $false
+    }
+    $finalConflicts = @($finalPlan | Where-Object { $_.Conflict })
+    if ($FailOnConflict -and $finalConflicts.Count -gt 0) {
+        throw 'Full-stack replacement refused because service ownership could not be proven.'
     }
 
-    if ($conflicts.Count -eq 0) {
+    $ownedStates = @($finalPlan | Where-Object { $_.Owned })
+    foreach ($state in $ownedStates) {
+        # Stop-ProcessById performs one last exact-instance fingerprint check.
+        # A change after the collective preflight is an unavoidable OS race; it
+        # fails closed, but an earlier service may already have stopped.
+        Stop-ProcessById -Id $state.SavedPid -ExpectedStartFingerprint $state.SavedProcessStartFingerprint
+    }
+
+    # Retain every ownership file until every owned stop succeeds. This leaves
+    # recoverable evidence when a later stop fails.
+    foreach ($state in $ownedStates) {
+        Remove-ServicePidFile -Path $state.Service.PidFile
+    }
+    foreach ($state in @($finalPlan | Where-Object { $_.StaleOwnershipFile -and -not $_.ListenerPid })) {
+        Remove-StaleServiceOwnershipMetadata -State $state
+    }
+
+    if ($finalConflicts.Count -eq 0) {
         Write-Host "     Owned services stopped." -ForegroundColor Green
         return $true
     }
@@ -558,6 +820,9 @@ Write-Host "Action: $Action" -ForegroundColor Gray
 Write-Host ""
 
 $Services = @(Get-FullStackServices)
+$BackendService = $Services | Where-Object { $_.Name -eq 'Backend' } | Select-Object -First 1
+$AdminUiService = $Services | Where-Object { $_.Name -eq 'Admin UI' } | Select-Object -First 1
+$SimulatorUiService = $Services | Where-Object { $_.Name -eq 'Simulator UI' } | Select-Object -First 1
 
 switch ($Action) {
     'status' {
@@ -565,7 +830,6 @@ switch ($Action) {
         Write-Host "--- Service Status ---" -ForegroundColor Cyan
         
         foreach ($svc in $Services) {
-            Remove-StalePidFile $svc.PidFile
             $state = Get-ServiceStopState -Service $svc
 
             $status = $null
@@ -576,6 +840,9 @@ switch ($Action) {
                 $color = "Green"
             } elseif ($state.ListenerPid) {
                 $status = "Port occupied (unowned PID $($state.ListenerPid))"
+                $color = "Yellow"
+            } elseif ($state.StaleOwnershipFile) {
+                $status = "Stale ownership metadata (run stop to clean safely)"
                 $color = "Yellow"
             } elseif ($state.SavedPid) {
                 $status = "Saved PID not listening ($($state.SavedPid))"
@@ -609,6 +876,7 @@ switch ($Action) {
 $Tools = Get-ProjectTools
 Write-Host "[OK] Python: $($Tools.Python)" -ForegroundColor Green
 Write-Host "[OK] npm: $($Tools.Npm)" -ForegroundColor Green
+Write-Host "[OK] Node.js: $($Tools.Node)" -ForegroundColor Green
 $Python = $Tools.Python
 
 Set-EnvOverrides -Pairs $BackendEnv
@@ -678,17 +946,14 @@ if ([string]::IsNullOrWhiteSpace($env:SIMULATOR_REAL_ENABLE_INJECT)) {
 }
 
 $backendArgs = @('-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', "$BackendPort")
-$null = Start-Process -FilePath $Python -ArgumentList $backendArgs -WorkingDirectory $RepoRoot -WindowStyle $WindowStyle -RedirectStandardOutput $BackendOutLogPath -RedirectStandardError $BackendErrLogPath
+$backendProcess = Start-Process -FilePath $Python -ArgumentList $backendArgs -WorkingDirectory $RepoRoot -WindowStyle $WindowStyle -RedirectStandardOutput $BackendOutLogPath -RedirectStandardError $BackendErrLogPath -PassThru
+$backendOwnership = Wait-ForLaunchedServiceOwnership -Service $BackendService -Process $backendProcess -TimeoutSec 60
 
 if (-not (Test-HttpEndpoint -Url "http://127.0.0.1:$BackendPort/api/v1/health" -TimeoutSec 60)) {
     throw "Backend failed to start on port $BackendPort"
 }
 
-$backendRealPid = Get-ListeningPid -Port $BackendPort
-if ($backendRealPid) {
-    $backendRealPid | Out-File -Encoding ascii -FilePath $BackendPidPath
-    Write-Host "     Backend PID: $backendRealPid" -ForegroundColor Gray
-}
+Write-Host "     Backend PID: $($backendOwnership.Pid)" -ForegroundColor Gray
 
 $backendUrl = "http://127.0.0.1:$BackendPort"
 
@@ -713,30 +978,11 @@ Write-Host "[7/8] Starting Admin UI (Vite on port $AdminUiPort)..." -ForegroundC
 $AdminUiOutLogPath = Ensure-LogFilePath -Path $AdminUiOutLogPath
 $AdminUiErrLogPath = Ensure-LogFilePath -Path $AdminUiErrLogPath
 
-$adminUiArgs = @('run', 'dev', '--', '--port', "$AdminUiPort", '--strictPort')
-$adminUiCmdArgs = @('/c', 'npm') + $adminUiArgs
-$null = Start-Process -FilePath 'cmd.exe' -ArgumentList $adminUiCmdArgs -WorkingDirectory $AdminUiDir -WindowStyle $WindowStyle -RedirectStandardOutput $AdminUiOutLogPath -RedirectStandardError $AdminUiErrLogPath
-
-# Wait for Admin UI
-$adminUiDeadline = (Get-Date).AddSeconds(60)
-Write-Host "     Waiting for Admin UI..." -NoNewline
-while ((Get-Date) -lt $adminUiDeadline) {
-    $adminUiPid = Get-ListeningPid -Port $AdminUiPort
-    if ($adminUiPid) {
-        Write-Host " OK" -ForegroundColor Green
-        $adminUiPid | Out-File -Encoding ascii -FilePath $AdminUiPidPath
-        Write-Host "     Admin UI PID: $adminUiPid" -ForegroundColor Gray
-        break
-    }
-    Start-Sleep -Milliseconds 500
-    Write-Host "." -NoNewline
-}
-if (-not (Get-ListeningPid -Port $AdminUiPort)) {
-    Write-Host " Timeout!" -ForegroundColor Yellow
-    Write-Host "     See logs: $AdminUiOutLogPath and $AdminUiErrLogPath" -ForegroundColor Gray
-    Show-RecentLog -Path $AdminUiErrLogPath -Tail 80 -Title 'admin-ui.err.log'
-    Show-RecentLog -Path $AdminUiOutLogPath -Tail 40 -Title 'admin-ui.out.log'
-}
+$adminUiViteScript = Get-ViteScriptPath -ProjectDir $AdminUiDir
+$adminUiDirectArgs = @(('"{0}"' -f $adminUiViteScript), '--port', "$AdminUiPort", '--strictPort')
+$adminUiProcess = Start-Process -FilePath $Tools.Node -ArgumentList $adminUiDirectArgs -WorkingDirectory $AdminUiDir -WindowStyle $WindowStyle -RedirectStandardOutput $AdminUiOutLogPath -RedirectStandardError $AdminUiErrLogPath -PassThru
+$adminUiOwnership = Wait-ForLaunchedServiceOwnership -Service $AdminUiService -Process $adminUiProcess -TimeoutSec 60
+Write-Host "     Admin UI PID: $($adminUiOwnership.Pid)" -ForegroundColor Gray
 
 Write-Host "[8/8] Starting Simulator UI (Vite on port $SimulatorUiPort)..." -ForegroundColor Yellow
 
@@ -747,30 +993,11 @@ $env:VITE_GEO_BACKEND_ORIGIN = $backendUrl
 $SimulatorUiOutLogPath = Ensure-LogFilePath -Path $SimulatorUiOutLogPath
 $SimulatorUiErrLogPath = Ensure-LogFilePath -Path $SimulatorUiErrLogPath
 
-$simulatorUiArgs = @('run', 'dev', '--', '--port', "$SimulatorUiPort", '--strictPort')
-$simulatorUiCmdArgs = @('/c', 'npm') + $simulatorUiArgs
-$null = Start-Process -FilePath 'cmd.exe' -ArgumentList $simulatorUiCmdArgs -WorkingDirectory $SimulatorUiDir -WindowStyle $WindowStyle -RedirectStandardOutput $SimulatorUiOutLogPath -RedirectStandardError $SimulatorUiErrLogPath
-
-# Wait for Simulator UI
-$simulatorUiDeadline = (Get-Date).AddSeconds(60)
-Write-Host "     Waiting for Simulator UI..." -NoNewline
-while ((Get-Date) -lt $simulatorUiDeadline) {
-    $simulatorUiPid = Get-ListeningPid -Port $SimulatorUiPort
-    if ($simulatorUiPid) {
-        Write-Host " OK" -ForegroundColor Green
-        $simulatorUiPid | Out-File -Encoding ascii -FilePath $SimulatorUiPidPath
-        Write-Host "     Simulator UI PID: $simulatorUiPid" -ForegroundColor Gray
-        break
-    }
-    Start-Sleep -Milliseconds 500
-    Write-Host "." -NoNewline
-}
-if (-not (Get-ListeningPid -Port $SimulatorUiPort)) {
-    Write-Host " Timeout!" -ForegroundColor Yellow
-    Write-Host "     See logs: $SimulatorUiOutLogPath and $SimulatorUiErrLogPath" -ForegroundColor Gray
-    Show-RecentLog -Path $SimulatorUiErrLogPath -Tail 80 -Title 'simulator-ui.err.log'
-    Show-RecentLog -Path $SimulatorUiOutLogPath -Tail 40 -Title 'simulator-ui.out.log'
-}
+$simulatorUiViteScript = Get-ViteScriptPath -ProjectDir $SimulatorUiDir
+$simulatorUiDirectArgs = @(('"{0}"' -f $simulatorUiViteScript), '--port', "$SimulatorUiPort", '--strictPort')
+$simulatorUiProcess = Start-Process -FilePath $Tools.Node -ArgumentList $simulatorUiDirectArgs -WorkingDirectory $SimulatorUiDir -WindowStyle $WindowStyle -RedirectStandardOutput $SimulatorUiOutLogPath -RedirectStandardError $SimulatorUiErrLogPath -PassThru
+$simulatorUiOwnership = Wait-ForLaunchedServiceOwnership -Service $SimulatorUiService -Process $simulatorUiProcess -TimeoutSec 60
+Write-Host "     Simulator UI PID: $($simulatorUiOwnership.Pid)" -ForegroundColor Gray
 
 # Summary
 Write-Host ""

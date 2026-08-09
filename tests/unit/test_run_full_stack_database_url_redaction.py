@@ -159,6 +159,80 @@ $display = Get-SafeDatabaseDisplayUrl `
 
 @pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
 @pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+@pytest.mark.parametrize("reserved", ("/", "?", "#"), ids=("slash", "query", "fragment"))
+def test_database_display_rejects_ambiguous_raw_reserved_credentials_without_leak(
+    powershell: Path,
+    reserved: str,
+) -> None:
+    secret = f"phase7-before{reserved}phase7-after"
+    raw_url = f"postgresql+asyncpg://operator:{secret}@db.test/geov0"
+    command = (
+        _AST_SETUP
+        + r"""
+Invoke-Expression (Get-LauncherFunctionText -Name 'Get-SafeDatabaseDisplayUrl')
+try {
+    Get-SafeDatabaseDisplayUrl -DatabaseUrl $env:PHASE7_DATABASE_URL
+    throw 'Ambiguous URL unexpectedly succeeded'
+} catch {
+    if ($_.Exception.Message -eq 'Ambiguous URL unexpectedly succeeded') { throw }
+    [Console]::Out.Write($_.Exception.Message)
+}
+"""
+    )
+
+    result = _run_powershell(
+        powershell,
+        command,
+        extra_env={"PHASE7_DATABASE_URL": raw_url},
+    )
+    combined_output = result.stdout + result.stderr
+
+    assert result.stdout == "Unable to render a safe DATABASE_URL summary."
+    assert raw_url not in combined_output
+    assert "phase7-before" not in combined_output
+    assert "phase7-after" not in combined_output
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+@pytest.mark.parametrize(
+    "raw_url",
+    (
+        "not-a-url-phase7-secret",
+        "postgresql+asyncpg://",
+        "1bad://phase7-secret",
+        "postgresql+asyncpg://operator:phase7-secret/path",
+    ),
+)
+def test_database_display_rejects_malformed_urls_with_generic_error(
+    powershell: Path,
+    raw_url: str,
+) -> None:
+    command = (
+        _AST_SETUP
+        + r"""
+Invoke-Expression (Get-LauncherFunctionText -Name 'Get-SafeDatabaseDisplayUrl')
+try {
+    Get-SafeDatabaseDisplayUrl -DatabaseUrl $env:PHASE7_DATABASE_URL
+    throw 'Malformed URL unexpectedly succeeded'
+} catch {
+    if ($_.Exception.Message -eq 'Malformed URL unexpectedly succeeded') { throw }
+    [Console]::Out.Write($_.Exception.Message)
+}
+"""
+    )
+    result = _run_powershell(
+        powershell,
+        command,
+        extra_env={"PHASE7_DATABASE_URL": raw_url},
+    )
+
+    assert result.stdout == "Unable to render a safe DATABASE_URL summary."
+    assert raw_url not in result.stderr
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
 def test_env_overrides_never_print_values_or_invalid_raw_entries(
     powershell: Path,
 ) -> None:
@@ -252,6 +326,8 @@ def test_database_and_ownership_preflight_precede_first_main_stop() -> None:
 _OWNERSHIP_FUNCTIONS = (
     "Get-ServiceStopState",
     "Get-ServiceStopPlan",
+    "Test-ServiceStopPlansEqual",
+    "Remove-StaleServiceOwnershipMetadata",
     "Stop-AllServices",
     "Assert-ServiceOwnershipForReplacement",
 )
@@ -266,16 +342,17 @@ def _ownership_command(body: str) -> str:
         _AST_SETUP
         + imports
         + r"""
-$script:PidByFile = @{}
+$script:MetadataByFile = @{}
 $script:ListenerByPort = @{}
-$script:ExistingPids = @{}
+$script:FingerprintByPid = @{}
 $script:ListenerCalls = @{}
 $script:StoppedPids = @()
 $script:RemovedPidFiles = @()
+$script:FailStopPid = 0
 
-function Get-PidFromFile {
+function Get-ServiceOwnershipMetadata {
     param([string]$Path)
-    return $script:PidByFile[$Path]
+    return $script:MetadataByFile[$Path]
 }
 function Get-ListeningPid {
     param([int]$Port)
@@ -288,12 +365,13 @@ function Get-ListeningPid {
     }
     return $value
 }
-function Test-ProcessExists {
+function Get-ProcessStartTimeFingerprint {
     param([int]$Id)
-    return [bool]$script:ExistingPids[$Id]
+    return $script:FingerprintByPid[$Id]
 }
 function Stop-ProcessById {
-    param([int]$Id)
+    param([int]$Id, [string]$ExpectedStartFingerprint)
+    if ($Id -eq $script:FailStopPid) { throw 'simulated stop failure' }
     $script:StoppedPids += $Id
 }
 function Remove-ServicePidFile {
@@ -304,6 +382,21 @@ function New-TestService {
     param([string]$Name, [int]$Port, [string]$PidFile)
     return [pscustomobject]@{ Name = $Name; Port = $Port; PidFile = $PidFile }
 }
+function New-TestMetadata {
+    param(
+        [int]$Id,
+        [string]$StartTime,
+        [string]$ServiceName = 'Backend',
+        [int]$Port = 18000
+    )
+    return [pscustomobject]@{
+        Valid = $true
+        Pid = $Id
+        ProcessStartFingerprint = $StartTime
+        ServiceName = $ServiceName
+        Port = $Port
+    }
+}
 """
         + body
     )
@@ -312,27 +405,30 @@ function New-TestService {
 @pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
 @pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
 @pytest.mark.parametrize(
-    ("saved_pid", "listener_pid", "saved_exists"),
+    ("saved_pid", "listener_pid", "saved_fingerprint", "current_fingerprint"),
     (
-        (None, 202, False),
-        (101, 202, True),
-        (101, None, True),
-        (101, 101, False),
+        (None, 202, None, None),
+        (101, 202, "start-a", "start-a"),
+        (101, None, "start-a", "start-a"),
+        (101, 101, "start-a", "start-b"),
     ),
-    ids=("foreign", "mismatched", "missing-listener", "stale-owner"),
+    ids=("foreign", "mismatched-listener", "owned-not-listening", "pid-reused-listener"),
 )
 def test_unproven_service_ownership_never_stops_a_process(
     powershell: Path,
     saved_pid: int | None,
     listener_pid: int | None,
-    saved_exists: bool,
+    saved_fingerprint: str | None,
+    current_fingerprint: str | None,
 ) -> None:
     body = r"""
 $service = New-TestService -Name 'Backend' -Port 18000 -PidFile 'backend.pid'
 if ($env:PHASE7_SAVED_PID) {
     $saved = [int]$env:PHASE7_SAVED_PID
-    $script:PidByFile['backend.pid'] = $saved
-    $script:ExistingPids[$saved] = $env:PHASE7_SAVED_EXISTS -eq '1'
+    $script:MetadataByFile['backend.pid'] = New-TestMetadata `
+        -Id $saved `
+        -StartTime $env:PHASE7_SAVED_FINGERPRINT
+    $script:FingerprintByPid[$saved] = $env:PHASE7_CURRENT_FINGERPRINT
 }
 if ($env:PHASE7_LISTENER_PID) {
     $script:ListenerByPort[18000] = [int]$env:PHASE7_LISTENER_PID
@@ -348,7 +444,8 @@ if ($script:StoppedPids.Count -ne 0) { throw 'An unowned process was stopped' }
         extra_env={
             "PHASE7_SAVED_PID": "" if saved_pid is None else str(saved_pid),
             "PHASE7_LISTENER_PID": "" if listener_pid is None else str(listener_pid),
-            "PHASE7_SAVED_EXISTS": "1" if saved_exists else "0",
+            "PHASE7_SAVED_FINGERPRINT": saved_fingerprint or "",
+            "PHASE7_CURRENT_FINGERPRINT": current_fingerprint or "",
         },
     )
 
@@ -363,9 +460,9 @@ def test_matching_pid_file_and_listener_stops_only_owned_process(
 ) -> None:
     body = r"""
 $service = New-TestService -Name 'Backend' -Port 18000 -PidFile 'backend.pid'
-$script:PidByFile['backend.pid'] = 101
+$script:MetadataByFile['backend.pid'] = New-TestMetadata -Id 101 -StartTime 'start-a'
 $script:ListenerByPort[18000] = 101
-$script:ExistingPids[101] = $true
+$script:FingerprintByPid[101] = 'start-a'
 $result = Stop-AllServices -Services @($service)
 if (-not $result) { throw 'Owned process was not reported as stopped' }
 if ($script:StoppedPids.Count -ne 1 -or $script:StoppedPids[0] -ne 101) {
@@ -389,8 +486,8 @@ def test_fail_on_conflict_checks_all_services_before_any_stop(
     body = r"""
 $owned = New-TestService -Name 'Backend' -Port 18000 -PidFile 'backend.pid'
 $foreign = New-TestService -Name 'Admin UI' -Port 5173 -PidFile 'admin.pid'
-$script:PidByFile['backend.pid'] = 101
-$script:ExistingPids[101] = $true
+$script:MetadataByFile['backend.pid'] = New-TestMetadata -Id 101 -StartTime 'start-a'
+$script:FingerprintByPid[101] = 'start-a'
 $script:ListenerByPort[18000] = 101
 $script:ListenerByPort[5173] = 202
 try {
@@ -410,24 +507,304 @@ if ($script:StoppedPids.Count -ne 0) { throw 'Owned process stopped before confl
 
 @pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
 @pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
-def test_listener_change_between_plan_and_stop_is_never_killed(
+def test_pid_reuse_without_listener_cleans_only_stale_metadata(
     powershell: Path,
 ) -> None:
     body = r"""
 $service = New-TestService -Name 'Backend' -Port 18000 -PidFile 'backend.pid'
-$script:PidByFile['backend.pid'] = 101
-$script:ExistingPids[101] = $true
-$script:ListenerByPort[18000] = @(101, 202)
-try {
-    Stop-AllServices -Services @($service) -FailOnConflict
-    throw 'Listener race unexpectedly succeeded'
-} catch {
-    if ($_.Exception.Message -eq 'Listener race unexpectedly succeeded') { throw }
+$script:MetadataByFile['backend.pid'] = New-TestMetadata -Id 101 -StartTime 'old-start'
+$script:FingerprintByPid[101] = 'reused-start'
+$result = Stop-AllServices -Services @($service) -FailOnConflict
+if (-not $result) { throw 'Safe stale metadata cleanup failed' }
+if ($script:StoppedPids.Count -ne 0) { throw 'Reused PID was stopped' }
+if ($script:RemovedPidFiles.Count -ne 1 -or $script:RemovedPidFiles[0] -ne 'backend.pid') {
+    throw 'Stale metadata was not removed'
 }
-if ($script:StoppedPids.Count -ne 0) { throw 'Listener race stopped a process' }
-[Console]::Out.Write('listener-race-safe')
+[Console]::Out.Write('pid-reuse-cleanup-safe')
 """
     result = _run_powershell(powershell, _ownership_command(body))
 
-    assert "listener-race-safe" in result.stdout
-    assert "ownership changed" in result.stdout
+    assert "pid-reuse-cleanup-safe" in result.stdout
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+def test_stop_failure_propagates_and_retains_all_ownership_files(
+    powershell: Path,
+) -> None:
+    body = r"""
+$backend = New-TestService -Name 'Backend' -Port 18000 -PidFile 'backend.pid'
+$admin = New-TestService -Name 'Admin UI' -Port 5173 -PidFile 'admin.pid'
+$script:MetadataByFile['backend.pid'] = New-TestMetadata -Id 101 -StartTime 'start-a'
+$script:MetadataByFile['admin.pid'] = New-TestMetadata -Id 202 -StartTime 'start-b' -ServiceName 'Admin UI' -Port 5173
+$script:FingerprintByPid[101] = 'start-a'
+$script:FingerprintByPid[202] = 'start-b'
+$script:ListenerByPort[18000] = 101
+$script:ListenerByPort[5173] = 202
+$script:FailStopPid = 202
+try {
+    Stop-AllServices -Services @($backend, $admin) -FailOnConflict
+    throw 'Stop failure unexpectedly succeeded'
+} catch {
+    if ($_.Exception.Message -eq 'Stop failure unexpectedly succeeded') { throw }
+    if ($_.Exception.Message -ne 'simulated stop failure') { throw }
+}
+if ($script:StoppedPids.Count -ne 1 -or $script:StoppedPids[0] -ne 101) {
+    throw 'Unexpected stop sequence before failure'
+}
+if ($script:RemovedPidFiles.Count -ne 0) { throw 'Ownership metadata removed after stop failure' }
+[Console]::Out.Write('stop-failure-retained')
+"""
+    result = _run_powershell(powershell, _ownership_command(body))
+
+    assert "stop-failure-retained" in result.stdout
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+def test_multi_service_late_conflict_is_detected_before_any_stop(
+    powershell: Path,
+) -> None:
+    body = r"""
+$backend = New-TestService -Name 'Backend' -Port 18000 -PidFile 'backend.pid'
+$admin = New-TestService -Name 'Admin UI' -Port 5173 -PidFile 'admin.pid'
+$script:MetadataByFile['backend.pid'] = New-TestMetadata -Id 101 -StartTime 'start-a'
+$script:MetadataByFile['admin.pid'] = New-TestMetadata -Id 202 -StartTime 'start-b' -ServiceName 'Admin UI' -Port 5173
+$script:FingerprintByPid[101] = 'start-a'
+$script:FingerprintByPid[202] = 'start-b'
+$script:ListenerByPort[18000] = @(101, 101)
+$script:ListenerByPort[5173] = @(202, 303)
+try {
+    Stop-AllServices -Services @($backend, $admin) -FailOnConflict
+    throw 'Late multi-service conflict unexpectedly succeeded'
+} catch {
+    if ($_.Exception.Message -eq 'Late multi-service conflict unexpectedly succeeded') { throw }
+}
+if ($script:StoppedPids.Count -ne 0) { throw 'A service stopped before collective final preflight completed' }
+[Console]::Out.Write('late-conflict-preflight-safe')
+"""
+    result = _run_powershell(powershell, _ownership_command(body))
+
+    assert "late-conflict-preflight-safe" in result.stdout
+    assert "final preflight" in result.stdout
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+def test_startup_never_adopts_a_listener_other_than_launched_process(
+    powershell: Path,
+) -> None:
+    command = (
+        _AST_SETUP
+        + r"""
+Invoke-Expression (Get-LauncherFunctionText -Name 'Wait-ForLaunchedServiceOwnership')
+$script:OwnershipWrites = @()
+$script:StoppedPids = @()
+function Get-ProcessStartTimeFingerprint { param([int]$Id) return 'start-a' }
+function Get-ListeningPid { param([int]$Port) return 202 }
+function Write-ServiceOwnershipMetadata {
+    param([object]$Service, [int]$Id, [string]$ProcessStartFingerprint)
+    $script:OwnershipWrites += $Id
+}
+function Stop-ProcessById {
+    param([int]$Id, [string]$ExpectedStartFingerprint)
+    if ($ExpectedStartFingerprint -ne 'start-a') { throw 'Wrong cleanup fingerprint' }
+    $script:StoppedPids += $Id
+}
+function Start-Sleep { param([int]$Milliseconds) }
+$service = [pscustomobject]@{ Name = 'Backend'; Port = 18000; PidFile = 'backend.pid' }
+$process = [pscustomobject]@{ Id = 101 }
+try {
+    Wait-ForLaunchedServiceOwnership -Service $service -Process $process -TimeoutSec 1
+    throw 'Foreign listener was adopted'
+} catch {
+    if ($_.Exception.Message -eq 'Foreign listener was adopted') { throw }
+}
+if ($script:OwnershipWrites.Count -ne 0) { throw 'Foreign listener ownership was persisted' }
+if ($script:StoppedPids.Count -ne 1 -or $script:StoppedPids[0] -ne 101) {
+    throw 'Exact launched process was not cleaned up'
+}
+[Console]::Out.Write('startup-non-adoption-safe')
+"""
+    )
+    result = _run_powershell(powershell, command)
+
+    assert "startup-non-adoption-safe" in result.stdout
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+def test_startup_timeout_cleans_up_exact_launched_process(powershell: Path) -> None:
+    command = (
+        _AST_SETUP
+        + r"""
+Invoke-Expression (Get-LauncherFunctionText -Name 'Wait-ForLaunchedServiceOwnership')
+$script:StoppedPids = @()
+function Get-ProcessStartTimeFingerprint { param([int]$Id) return 'start-a' }
+function Get-ListeningPid { param([int]$Port) return $null }
+function Stop-ProcessById {
+    param([int]$Id, [string]$ExpectedStartFingerprint)
+    if ($ExpectedStartFingerprint -ne 'start-a') { throw 'Wrong cleanup fingerprint' }
+    $script:StoppedPids += $Id
+}
+$service = [pscustomobject]@{ Name = 'Backend'; Port = 18000; PidFile = 'backend.pid' }
+$process = [pscustomobject]@{ Id = 101 }
+try {
+    Wait-ForLaunchedServiceOwnership -Service $service -Process $process -TimeoutSec 0
+    throw 'Startup timeout unexpectedly succeeded'
+} catch {
+    if ($_.Exception.Message -eq 'Startup timeout unexpectedly succeeded') { throw }
+    if ($_.Exception.Message -notlike '*did not listen*') { throw }
+}
+if ($script:StoppedPids.Count -ne 1 -or $script:StoppedPids[0] -ne 101) {
+    throw 'Timed-out launched process was not cleaned up'
+}
+[Console]::Out.Write('startup-timeout-cleanup-safe')
+"""
+    )
+    result = _run_powershell(powershell, command)
+
+    assert result.stdout == "startup-timeout-cleanup-safe"
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+def test_startup_cleanup_failure_preserves_primary_and_cleanup_evidence(
+    powershell: Path,
+) -> None:
+    command = (
+        _AST_SETUP
+        + r"""
+Invoke-Expression (Get-LauncherFunctionText -Name 'Wait-ForLaunchedServiceOwnership')
+function Get-ProcessStartTimeFingerprint { param([int]$Id) return 'start-a' }
+function Get-ListeningPid { param([int]$Port) return 202 }
+function Stop-ProcessById {
+    param([int]$Id, [string]$ExpectedStartFingerprint)
+    throw 'cleanup-stop-failed'
+}
+$service = [pscustomobject]@{ Name = 'Backend'; Port = 18000; PidFile = 'backend.pid' }
+$process = [pscustomobject]@{ Id = 101 }
+try {
+    Wait-ForLaunchedServiceOwnership -Service $service -Process $process -TimeoutSec 1
+    throw 'Cleanup failure unexpectedly succeeded'
+} catch {
+    if ($_.Exception.Message -eq 'Cleanup failure unexpectedly succeeded') { throw }
+    if ($_.Exception.Message -notlike 'Unable to start Backend: port 18000 is owned by a different process.*') {
+        throw 'Primary startup failure was masked'
+    }
+    if ($_.Exception.Message -notlike '*Startup cleanup also failed: cleanup-stop-failed*') {
+        throw 'Cleanup failure evidence was lost'
+    }
+    if ($null -eq $_.Exception.InnerException -or
+        $_.Exception.InnerException.Message -notlike '*owned by a different process*') {
+        throw 'Primary failure was not preserved as the inner exception'
+    }
+    if ([string]$_.Exception.Data['CleanupFailure'] -notlike '*cleanup-stop-failed*') {
+        throw 'Cleanup failure detail was not preserved'
+    }
+}
+[Console]::Out.Write('startup-cleanup-failure-evidence-ok')
+"""
+    )
+    result = _run_powershell(powershell, command)
+
+    assert result.stdout == "startup-cleanup-failure-evidence-ok"
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+def test_successful_startup_persists_ownership_without_cleanup(powershell: Path) -> None:
+    command = (
+        _AST_SETUP
+        + r"""
+Invoke-Expression (Get-LauncherFunctionText -Name 'Wait-ForLaunchedServiceOwnership')
+$script:OwnershipWrites = @()
+function Get-ProcessStartTimeFingerprint { param([int]$Id) return 'start-a' }
+function Get-ListeningPid { param([int]$Port) return 101 }
+function Write-ServiceOwnershipMetadata {
+    param([object]$Service, [int]$Id, [string]$ProcessStartFingerprint)
+    $script:OwnershipWrites += "$Id|$ProcessStartFingerprint"
+}
+function Stop-ProcessById { throw 'Successful startup attempted cleanup' }
+$service = [pscustomobject]@{ Name = 'Backend'; Port = 18000; PidFile = 'backend.pid' }
+$process = [pscustomobject]@{ Id = 101 }
+$ownership = Wait-ForLaunchedServiceOwnership -Service $service -Process $process -TimeoutSec 1
+if ($ownership.Pid -ne 101 -or $ownership.ProcessStartFingerprint -ne 'start-a') {
+    throw 'Successful ownership result changed'
+}
+if ($script:OwnershipWrites.Count -ne 1 -or $script:OwnershipWrites[0] -ne '101|start-a') {
+    throw 'Successful ownership was not persisted exactly once'
+}
+[Console]::Out.Write('startup-success-unchanged')
+"""
+    )
+    result = _run_powershell(powershell, command)
+
+    assert result.stdout == "startup-success-unchanged"
+
+
+def test_launcher_uses_direct_pass_thru_processes_for_all_listeners() -> None:
+    source = _RUN_FULL_STACK.read_text(encoding="utf-8-sig")
+
+    assert source.count("-PassThru") == 3
+    assert source.count("-FilePath $Tools.Node") == 2
+    assert "Start-Process -FilePath 'cmd.exe'" not in source
+    assert "Write-ServiceOwnershipMetadata -Service $Service" in source
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+def test_versioned_ownership_metadata_round_trip(
+    powershell: Path,
+    tmp_path: Path,
+) -> None:
+    ownership_path = tmp_path / "backend.pid"
+    command = (
+        _AST_SETUP
+        + r"""
+Invoke-Expression (Get-LauncherFunctionText -Name 'Get-ServiceOwnershipMetadata')
+Invoke-Expression (Get-LauncherFunctionText -Name 'Write-ServiceOwnershipMetadata')
+$service = [pscustomobject]@{
+    Name = 'Backend'
+    Port = 18000
+    PidFile = $env:PHASE7_OWNERSHIP_PATH
+}
+Write-ServiceOwnershipMetadata -Service $service -Id 101 -ProcessStartFingerprint 'utc-ticks:638903664000000000'
+$metadata = Get-ServiceOwnershipMetadata -Path $service.PidFile
+if (-not $metadata.Valid -or $metadata.Pid -ne 101) { throw 'Ownership metadata did not round-trip' }
+if ($metadata.ServiceName -ne 'Backend' -or $metadata.Port -ne 18000) { throw 'Service binding was lost' }
+if ($metadata.ProcessStartFingerprint -ne 'utc-ticks:638903664000000000') { throw 'Fingerprint was lost' }
+[Console]::Out.Write('ownership-round-trip-ok')
+"""
+    )
+    result = _run_powershell(
+        powershell,
+        command,
+        extra_env={"PHASE7_OWNERSHIP_PATH": str(ownership_path)},
+    )
+
+    assert result.stdout == "ownership-round-trip-ok"
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+def test_native_stop_failure_is_not_swallowed(powershell: Path) -> None:
+    command = (
+        _AST_SETUP
+        + r"""
+Invoke-Expression (Get-LauncherFunctionText -Name 'Stop-ProcessById')
+function Get-ProcessStartTimeFingerprint { param([int]$Id) return 'start-a' }
+function Stop-Process { param([int]$Id, [switch]$Force, [object]$ErrorAction); throw 'native-stop-failed' }
+try {
+    Stop-ProcessById -Id 101 -ExpectedStartFingerprint 'start-a'
+    throw 'Native stop failure unexpectedly succeeded'
+} catch {
+    if ($_.Exception.Message -eq 'Native stop failure unexpectedly succeeded') { throw }
+    if ($_.Exception.Message -ne 'native-stop-failed') { throw }
+}
+[Console]::Out.Write('native-stop-failure-propagated')
+"""
+    )
+    result = _run_powershell(powershell, command)
+
+    assert result.stdout == "native-stop-failure-propagated"
