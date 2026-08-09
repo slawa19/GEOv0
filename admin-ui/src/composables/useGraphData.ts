@@ -94,7 +94,9 @@ export function useGraphData(opts: {
   statusFilter: Ref<string[]>
 }) {
   const loading = ref(false)
-  const error = ref<string | null>(null)
+  const viewError = ref<string | null>(null)
+  const cycleError = ref<string | null>(null)
+  const error = computed(() => viewError.value ?? cycleError.value)
 
   const participants = ref<Participant[]>([])
   const trustlines = ref<Trustline[]>([])
@@ -147,6 +149,7 @@ export function useGraphData(opts: {
   let fullClearingCycles: ClearingCycles | null = null
   const viewRequests = useLatestRequest()
   const cycleRequests = useLatestRequest()
+  const participantCycleRequests = useLatestRequest()
 
   function applySnapshotPayload(p: GraphSnapshotPayload) {
     participants.value = p.participants || []
@@ -161,8 +164,10 @@ export function useGraphData(opts: {
   async function loadData(): Promise<boolean> {
     const viewRequest = viewRequests.begin()
     const cycleRequest = cycleRequests.begin()
+    participantCycleRequests.invalidate()
     loading.value = true
-    error.value = null
+    viewError.value = null
+    cycleError.value = null
     try {
       // First load without equivalent to get full trustlines list for primary equivalent computation
       const snapEq = normalizeEqCode(opts.eq.value)
@@ -201,18 +206,17 @@ export function useGraphData(opts: {
           const nextClearingCycles = (assertSuccess(cycleResult.value) as ClearingCycles | null) ?? null
           clearingCycles.value = nextClearingCycles
           fullClearingCycles = nextClearingCycles
+          cycleError.value = null
         } catch (e: unknown) {
-          if (viewRequest.isCurrent()) {
-            const msg = e instanceof Error ? e.message : String(e)
-            error.value = msg || t('graph.data.loadFailed')
-          }
+          const msg = e instanceof Error ? e.message : String(e)
+          cycleError.value = msg || t('graph.data.loadFailed')
         }
       }
       return viewRequest.isCurrent()
     } catch (e: unknown) {
       if (!viewRequest.isCurrent()) return false
       const msg = e instanceof Error ? e.message : String(e)
-      error.value = msg || t('graph.data.loadFailed')
+      viewError.value = msg || t('graph.data.loadFailed')
       return false
     } finally {
       if (viewRequest.isCurrent()) loading.value = false
@@ -223,7 +227,7 @@ export function useGraphData(opts: {
     if (opts.focusMode.value) return false
     const request = viewRequests.begin()
     loading.value = true
-    error.value = null
+    viewError.value = null
     try {
       const snapEq = normalizeEqCode(opts.eq.value)
       const snap = await api.graphSnapshot({ equivalent: snapEq || undefined })
@@ -244,7 +248,7 @@ export function useGraphData(opts: {
     } catch (e: unknown) {
       if (!request.isCurrent()) return false
       const msg = e instanceof Error ? e.message : String(e)
-      error.value = msg || t('graph.data.loadFailed')
+      viewError.value = msg || t('graph.data.loadFailed')
       return false
     } finally {
       if (request.isCurrent()) loading.value = false
@@ -258,8 +262,10 @@ export function useGraphData(opts: {
 
     const viewRequest = viewRequests.begin()
     const cycleRequest = cycleRequests.begin()
+    participantCycleRequests.invalidate()
     loading.value = true
-    error.value = null
+    viewError.value = null
+    cycleError.value = null
 
     const query = buildFocusModeQuery({
       enabled: Boolean(opts.focusMode.value),
@@ -301,11 +307,12 @@ export function useGraphData(opts: {
         try {
           if (cycleResult.status === 'rejected') throw cycleResult.reason
           clearingCycles.value = (assertSuccess(cycleResult.value) as ClearingCycles | null) ?? null
+          cycleError.value = null
         } catch (e: unknown) {
           if (viewRequest.isCurrent()) {
             const msg = e instanceof Error ? e.message : String(e)
             const failure = msg || t('graph.focusMode.loadFailed')
-            error.value = failure
+            cycleError.value = failure
             ElMessage.warning(failure)
           }
         }
@@ -315,7 +322,7 @@ export function useGraphData(opts: {
       if (!viewRequest.isCurrent()) return false
       const msg = e instanceof Error ? e.message : String(e)
       const failure = msg || t('graph.focusMode.loadFailed')
-      error.value = failure
+      viewError.value = failure
       ElMessage.warning(failure)
       return false
     } finally {
@@ -324,15 +331,20 @@ export function useGraphData(opts: {
   }
 
   async function refreshClearingCyclesForParticipant(pid: string): Promise<boolean> {
-    if (!pid) return true
+    if (!pid) {
+      participantCycleRequests.invalidate()
+      return true
+    }
     const request = cycleRequests.begin()
+    const participantRequest = participantCycleRequests.begin()
     try {
       const cc = await api.clearingCycles({ participant_pid: pid })
-      if (!request.isCurrent()) return false
+      if (!request.isCurrent() || !participantRequest.isCurrent()) return false
       clearingCycles.value = (assertSuccess(cc) as ClearingCycles | null) ?? null
+      cycleError.value = null
       return true
     } catch {
-      return request.isCurrent()
+      return request.isCurrent() && participantRequest.isCurrent()
     }
   }
 

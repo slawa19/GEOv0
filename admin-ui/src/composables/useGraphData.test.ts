@@ -348,6 +348,62 @@ describe('useGraphData', () => {
     expect(g.error.value).toBeNull()
   })
 
+  it('invalidates pending participant cycles when the participant is deselected', async () => {
+    const participantCycles = deferred<ReturnType<typeof cyclesEnvelope>>()
+    apiMock.graphSnapshot.mockResolvedValueOnce(snapshotEnvelope('BASE'))
+    apiMock.clearingCycles
+      .mockResolvedValueOnce(cyclesEnvelope('FULL'))
+      .mockReturnValueOnce(participantCycles.promise)
+    const g = useGraphData({
+      eq: ref('EUR'),
+      isRealMode: ref(true),
+      focusMode: ref(false),
+      focusRootPid: ref(''),
+      focusDepth: ref(1),
+      statusFilter: ref<string[]>([]),
+    })
+    await g.loadData()
+
+    const pendingParticipant = g.refreshClearingCyclesForParticipant('PID_A')
+    await expect(g.refreshClearingCyclesForParticipant('')).resolves.toBe(true)
+    participantCycles.resolve(cyclesEnvelope('PARTICIPANT'))
+
+    await expect(pendingParticipant).resolves.toBe(false)
+    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('FULL').data)
+    expect(apiMock.clearingCycles.mock.calls).toEqual([[], [{ participant_pid: 'PID_A' }]])
+  })
+
+  it('keeps a cycle-owned error across an initial primary-equivalent snapshot refresh', async () => {
+    const eq = ref('')
+    apiMock.graphSnapshot
+      .mockResolvedValueOnce(snapshotEnvelope('INITIAL'))
+      .mockResolvedValueOnce(snapshotEnvelope('PRIMARY_EQ'))
+    apiMock.clearingCycles.mockResolvedValueOnce({
+      success: false,
+      error: { code: 'cycles_unavailable', message: 'clearing cycles unavailable' },
+    })
+    const g = useGraphData({
+      eq,
+      isRealMode: ref(true),
+      focusMode: ref(false),
+      focusRootPid: ref(''),
+      focusDepth: ref(1),
+      statusFilter: ref<string[]>([]),
+    })
+
+    await expect(g.loadData()).resolves.toBe(true)
+    expect(eq.value).toBe('EUR')
+    expect(g.error.value).toBe('clearing cycles unavailable')
+
+    await expect(g.refreshSnapshotForEq()).resolves.toBe(true)
+
+    expect(apiMock.graphSnapshot.mock.calls).toEqual([[{ equivalent: undefined }], [{ equivalent: 'EUR' }]])
+    expect(g.participants.value.map((participant) => participant.pid)).toEqual(['PRIMARY_EQ'])
+    expect(g.clearingCycles.value).toBeNull()
+    expect(g.error.value).toBe('clearing cycles unavailable')
+    expect(g.loading.value).toBe(false)
+  })
+
   it('keeps a failed equivalent refresh visible when an older full load resolves last', async () => {
     const olderSnapshot = deferred<ReturnType<typeof snapshotEnvelope>>()
     const olderCycles = deferred<ReturnType<typeof cyclesEnvelope>>()
