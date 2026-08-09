@@ -580,6 +580,17 @@ function Get-SafeDatabaseDisplayUrl {
     # unescaped credential). '@' inside query/fragment data is valid and is
     # discarded before this check, together with the rest of that suffix.
     $userinfoIndex = $displayRemainder.LastIndexOf('@')
+    $suffixAtIndex = if ($suffixIndex -ge 0) {
+        $remainder.IndexOf('@', $suffixIndex)
+    } else {
+        -1
+    }
+    if ($suffixAtIndex -ge 0 -and $userinfoIndex -lt 0) {
+        # Without an authority-level '@', `host:port?query@...` is
+        # indistinguishable from a raw '?' or '#' embedded in userinfo. Fail
+        # closed rather than echoing a possible username/password prefix.
+        throw 'Unable to render a safe DATABASE_URL summary.'
+    }
     if ($userinfoIndex -ge 0) {
         $pathDelimiterIndex = $displayRemainder.IndexOf('/')
         if ($pathDelimiterIndex -ge 0 -and $pathDelimiterIndex -lt $userinfoIndex) {

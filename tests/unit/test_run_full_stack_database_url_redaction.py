@@ -168,6 +168,46 @@ $display = Get-SafeDatabaseDisplayUrl -DatabaseUrl $env:PHASE7_DATABASE_URL
 
 @pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
 @pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+@pytest.mark.parametrize(
+    "raw_url",
+    (
+        "postgresql+asyncpg://operator:5432?secret@db.test/geov0",
+        "postgresql+asyncpg://operator:2024#winter@db.test/geov0",
+    ),
+    ids=("numeric-query-password-prefix", "numeric-fragment-password-prefix"),
+)
+def test_database_display_rejects_ambiguous_numeric_credential_prefixes(
+    powershell: Path,
+    raw_url: str,
+) -> None:
+    command = (
+        _AST_SETUP
+        + r"""
+Invoke-Expression (Get-LauncherFunctionText -Name 'Get-SafeDatabaseDisplayUrl')
+try {
+    Get-SafeDatabaseDisplayUrl -DatabaseUrl $env:PHASE7_DATABASE_URL
+    throw 'Ambiguous URL unexpectedly succeeded'
+} catch {
+    if ($_.Exception.Message -eq 'Ambiguous URL unexpectedly succeeded') { throw }
+    [Console]::Out.Write($_.Exception.Message)
+}
+"""
+    )
+
+    result = _run_powershell(
+        powershell,
+        command,
+        extra_env={"PHASE7_DATABASE_URL": raw_url},
+    )
+    combined_output = result.stdout + result.stderr
+
+    assert result.stdout == "Unable to render a safe DATABASE_URL summary."
+    for secret_part in ("operator", "5432", "2024", "secret", "winter"):
+        assert secret_part not in combined_output
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
 def test_database_display_value_handles_sqlite_without_native_arguments(
     powershell: Path,
 ) -> None:
