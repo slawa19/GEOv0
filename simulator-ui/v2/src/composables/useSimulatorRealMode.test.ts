@@ -1046,6 +1046,45 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
     }
   })
 
+  it('SSE EOF followed by a status 404 preserves the stale reset idle state', async () => {
+    const connectSseMock = vi.mocked(connectSse)
+    const getRunMock = vi.mocked(getRun)
+    const prevConnectImpl = connectSseMock.getMockImplementation()
+    const prevGetRunImpl = getRunMock.getMockImplementation()
+    if (!prevGetRunImpl) throw new Error('expected getRun mock implementation')
+    const staleReset = deferred()
+    let statusCalls = 0
+
+    connectSseMock.mockClear()
+    getRunMock.mockClear()
+    connectSseMock.mockResolvedValue(undefined)
+    getRunMock.mockImplementation(async (...args) => {
+      statusCalls += 1
+      if (statusCalls === 1) return await prevGetRunImpl(...args)
+      throw new ApiError('HTTP 404 Not Found for /simulator/runs/r1', { status: 404 })
+    })
+
+    const harness = createSseCharacterizationHarness()
+    harness.cleanupRealRunFxAndTimers.mockImplementation(() => staleReset.resolve())
+    try {
+      harness.isRealModeRef.value = true
+      await nextTick()
+      await staleReset.promise
+      await nextTick()
+
+      expect(connectSseMock).toHaveBeenCalledTimes(1)
+      expect(statusCalls).toBe(2)
+      expect(harness.real.runId).toBeNull()
+      expect(harness.real.runStatus).toBeNull()
+      expect(harness.real.sseState).toBe('idle')
+      expect(harness.real.lastError).toBe('')
+    } finally {
+      harness.h.stopSse()
+      restoreConnectSseImplementation(prevConnectImpl)
+      getRunMock.mockImplementation(prevGetRunImpl)
+    }
+  })
+
   it('SSE 410 clears the cursor, refreshes status and snapshot, then reconnects without a cursor', async () => {
     vi.useFakeTimers()
     const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5)

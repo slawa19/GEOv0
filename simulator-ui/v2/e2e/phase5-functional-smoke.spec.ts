@@ -129,6 +129,7 @@ async function installRealMocks(
     initialRunId?: string | null
     initialRunState?: RunState
     staleRunIds?: string[]
+    holdClearing?: boolean
   } = {},
 ) {
   let currentRunId = options.initialRunId ?? null
@@ -136,6 +137,10 @@ async function installRealMocks(
   let runSequence = 0
   let rejectNextPayment = false
   let failNextCreate = false
+  let releaseClearingGate: () => void = () => undefined
+  const clearingGate = new Promise<void>((resolve) => {
+    releaseClearingGate = resolve
+  })
 
   const staleRunIds = new Set(options.staleRunIds ?? [])
   const unhandledPaths: string[] = []
@@ -377,6 +382,7 @@ async function installRealMocks(
 
     if (suffix === '/actions/clearing-real' && method === 'POST') {
       clearingRequests.push(await requestJson(route))
+      if (options.holdClearing) await clearingGate
       await fulfillJson(route, 200, {
         ok: true,
         equivalent: 'UAH',
@@ -415,6 +421,9 @@ async function installRealMocks(
     },
     failOneCreate() {
       failNextCreate = true
+    },
+    releaseClearing() {
+      releaseClearingGate()
     },
   }
 }
@@ -541,6 +550,7 @@ test.describe('Phase 5 frozen non-visual functional matrix', () => {
     await amount.fill('1.00')
     await amount.press('Enter')
     await expect(page.getByLabel('Success notification')).toContainText('Payment sent: 1.00 UAH')
+    await expect(page.locator('[data-testid="actionbar-payment"]')).toBeFocused()
     expect(mock.paymentRequests).toHaveLength(1)
 
     mock.rejectOnePayment()
@@ -559,6 +569,7 @@ test.describe('Phase 5 frozen non-visual functional matrix', () => {
     await page.getByLabel('Limit').fill('15.00')
     await activateButton(page, 'Create')
     await expect(page.getByLabel('Success notification')).toContainText('Trustline created: alice → carol')
+    await expect(page.locator('[data-testid="actionbar-trustline"]')).toBeFocused()
     expect(mock.trustlineCreateRequests).toHaveLength(1)
 
     await activateButton(page, 'Manage Trustline')
@@ -567,6 +578,7 @@ test.describe('Phase 5 frozen non-visual functional matrix', () => {
     await page.getByLabel('New limit').fill('20.00')
     await activateButton(page, 'Update')
     await expect(page.getByLabel('Success notification')).toContainText('Limit updated: 20.00 UAH')
+    await expect(page.locator('[data-testid="actionbar-trustline"]')).toBeFocused()
     expect(mock.trustlineUpdateRequests).toHaveLength(1)
 
     await activateButton(page, 'Manage Trustline')
@@ -603,5 +615,47 @@ test.describe('Phase 5 frozen non-visual functional matrix', () => {
     await inspectEdge.focus()
     await inspectEdge.press('Enter')
     await expect(page.getByRole('region', { name: 'Trustline details: alice to bob' })).toBeVisible()
+  })
+
+  test('reduced motion disables HUD and clearing progress animations in Chromium', async ({ page }) => {
+    test.setTimeout(45_000)
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    const mock = await installRealMocks(page, { holdClearing: true })
+
+    try {
+      await page.goto('/?mode=real&e2eReal=1')
+      await waitReady(page)
+      await expect(page.locator('.root')).toHaveAttribute('data-motion', 'reduced')
+
+      await page.locator('.root').evaluate((root) => {
+        const panel = document.createElement('section')
+        panel.id = 'phase5-reduced-motion-panel'
+        panel.className = 'ds-panel--elevated'
+        const header = document.createElement('header')
+        header.className = 'ds-panel__header'
+        panel.appendChild(header)
+        root.appendChild(panel)
+      })
+      const hudPanel = page.locator('#phase5-reduced-motion-panel')
+      await expect(hudPanel).toBeVisible()
+      await expect
+        .poll(() => hudPanel.evaluate((element) => getComputedStyle(element).animationName))
+        .toBe('none')
+      const hudHeader = hudPanel.locator('.ds-panel__header')
+      await expect
+        .poll(() => hudHeader.evaluate((element) => getComputedStyle(element, '::before').animationName))
+        .toBe('none')
+
+      await activateButton(page, 'Start')
+      await page.goto('/?mode=real&ui=interact&e2eReal=1')
+      await waitReady(page)
+      await activateButton(page, 'Run Clearing')
+      await activateButton(page, 'Confirm')
+      const spinner = page.locator('[data-testid="clearing-panel"] .cp-spinner')
+      await expect(spinner).toBeVisible()
+      await expect.poll(() => spinner.evaluate((element) => getComputedStyle(element).animationName)).toBe('none')
+    } finally {
+      mock.releaseClearing()
+    }
   })
 })

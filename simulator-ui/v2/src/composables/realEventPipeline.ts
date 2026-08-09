@@ -310,6 +310,10 @@ function applyTopologyEvent(
   deps.patchApplier.applyNodePatches(payload.node_patch)
   deps.patchApplier.applyEdgePatches(payload.edge_patch)
   intents.push({ type: 'wake' })
+  // Structural mutations also change the renderer-owned layout cardinality. A
+  // wake alone only repaints the existing raw layout objects, so reconcile via
+  // the authoritative snapshot path after committing the local trusted state.
+  intents.push({ type: 'refresh-snapshot' })
 }
 
 export function applyAcceptedRealEvent(

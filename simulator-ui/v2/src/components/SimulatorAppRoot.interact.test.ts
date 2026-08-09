@@ -1568,6 +1568,53 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
+  it('restores keyboard focus to the ActionBar opener after a successful interact flow closes', async () => {
+    setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'idle')
+    setUrl('/?mode=real&ui=interact')
+    stubMissingResizeObserver()
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = mountSimulatorAppRoot(host)
+    try {
+      await nextTick()
+      await nextTick()
+
+      const opener = host.querySelector('[data-testid="actionbar-clearing"]') as HTMLButtonElement | null
+      expect(opener).toBeTruthy()
+      opener?.focus()
+      opener?.click()
+      await nextTick()
+      await nextTick()
+
+      const confirmBtn = host.querySelector('[data-testid="clearing-panel"] button.ds-btn--primary') as
+        | HTMLButtonElement
+        | null
+      expect(confirmBtn).toBeTruthy()
+      confirmBtn?.focus()
+      expect(document.activeElement).toBe(confirmBtn)
+
+      const busy = getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_BUSY_REF')
+      busy.value = true
+      getPhaseRef().value = 'idle'
+      await nextTick()
+      await nextTick()
+      expect(document.activeElement).not.toBe(opener)
+
+      busy.value = false
+      await nextTick()
+      await nextTick()
+
+      expect(host.querySelector('[data-testid="clearing-panel"]')).toBeNull()
+      expect(document.activeElement).toBe(opener)
+    } finally {
+      app.unmount()
+      host.remove()
+      clearGeoTestGlobals('__GEO_TEST_INTERACT_PHASE')
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('opens node and edge inspectors from the labelled DOM graph navigator', async () => {
     setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'idle')
     setGeoTestGlobal('__GEO_TEST_SELECTED_NODE', makeSelectedNode())

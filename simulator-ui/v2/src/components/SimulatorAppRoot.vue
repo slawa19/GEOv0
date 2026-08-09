@@ -1040,10 +1040,19 @@ function onActionStartClearingFlow() {
 // so the NEXT edge click shows EdgeDetailPopup (not full editor).
 // NOTE: do NOT reset when transitioning between trustline sub-phases
 // (e.g. picking-trustline-to → editing-trustline) to preserve the ActionBar intent.
-watch(interactPhase, (phase) => {
+watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
   const p = toLower(phase)
   if (!p.includes('trustline')) {
     useFullTrustlineEditor.value = false
+  }
+
+  if (p === 'idle' && !busy && interactFlowOpener) {
+    const opener = interactFlowOpener
+    interactFlowOpener = null
+    void nextTick(() => {
+      if (!opener.isConnected || opener.matches(':disabled')) return
+      opener.focus({ preventScroll: true })
+    })
   }
 })
 </script>

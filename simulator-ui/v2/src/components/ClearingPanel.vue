@@ -171,6 +171,16 @@ const busyUi = computed(() => props.busy || isRunning.value)
   vertical-align: -2px;
 }
 
+:global([data-motion='reduced']) .cp-spinner {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cp-spinner {
+    animation: none;
+  }
+}
+
 @keyframes cp-spin {
   from {
     transform: rotate(0deg);

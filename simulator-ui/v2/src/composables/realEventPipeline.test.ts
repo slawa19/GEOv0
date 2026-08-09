@@ -211,6 +211,34 @@ describe('realEventPipeline state-before-effect ordering', () => {
     expect(trace).toEqual(['state:node-patch', 'state:topology:5', 'effect:any:0', 'effect:wake'])
   })
 
+  it('topology structural changes request authoritative layout reconciliation after the local state commit', () => {
+    const trace: string[] = []
+    const draft = createDraft({ equivalent: 'EUR', generated_at: TS, nodes: [{ id: 'A' }], links: [] })
+    const event: AcceptedSimulatorEvent = {
+      event_id: 'evt_run_1_structural',
+      ts: '2026-01-01T00:00:01Z',
+      type: 'topology.changed',
+      equivalent: 'EUR',
+      payload: {
+        added_nodes: [{ pid: 'B', name: 'Node B', type: 'person' }],
+        removed_nodes: [],
+        added_edges: [{ from_pid: 'A', to_pid: 'B', equivalent_code: 'EUR', limit: '10' }],
+        removed_edges: [],
+      },
+    }
+
+    const intents = applyAcceptedRealEvent(event, 'run_1', draft, createStateDeps(trace, draft))
+    trace.push(`state:topology:${draft.state.snapshot?.nodes.length}:${draft.state.snapshot?.links.length}`)
+    execute(intents, draft, trace)
+
+    expect(trace).toEqual([
+      'state:topology:2:1',
+      'effect:any:0',
+      'effect:wake',
+      'effect:refresh',
+    ])
+  })
+
   it('payment applies counters and graph patches before FX, wake and labels', () => {
     const trace: string[] = []
     const draft = createDraft({ equivalent: 'EUR', generated_at: TS, nodes: [{ id: 'A' }, { id: 'B' }], links: [] })

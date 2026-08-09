@@ -459,7 +459,9 @@ export function useSimulatorRealMode(opts: {
     if (!loopOpts?.preserveLastError) real.lastError = ''
 
     while (!ctrl.signal.aborted && mySeq === sseSeq) {
-      const runId = real.runId
+      const activeRunId = real.runId
+      if (!activeRunId) return
+      const runId: string = activeRunId
       const eqNow = effectiveEq.value
       const url = `${real.apiBase.replace(/\/+$/, '')}/simulator/runs/${encodeURIComponent(runId)}/events?equivalent=${encodeURIComponent(
         eqNow,
@@ -554,6 +556,10 @@ export function useSimulatorRealMode(opts: {
         })
 
         await refreshRunStatus()
+        // refreshRunStatus() owns stale-404 reset and may abort this loop,
+        // advance its sequence, and clear runId. Do not overwrite the resulting
+        // idle state with a reconnecting state from the obsolete connection.
+        if (ctrl.signal.aborted || mySeq !== sseSeq || real.runId !== runId) return
 
         const st = String(real.runStatus?.state ?? '')
         if (st === 'stopped' || st === 'error') {
