@@ -232,7 +232,9 @@ $idx
 
 ```powershell
 $artifactName = "graph.json"
-Invoke-WebRequest -Method Get -Uri "$BaseUrl/simulator/runs/$runId/artifacts/$artifactName" -Headers $Headers -OutFile ".\\.artifacts\\$artifactName"
+$artifactOutputDir = ".\\.local-run\\api-artifacts"
+New-Item -ItemType Directory -Path $artifactOutputDir -Force | Out-Null
+Invoke-WebRequest -Method Get -Uri "$BaseUrl/simulator/runs/$runId/artifacts/$artifactName" -Headers $Headers -OutFile (Join-Path $artifactOutputDir $artifactName)
 ```
 
 ## 6) Типовые ошибки и быстрые проверки

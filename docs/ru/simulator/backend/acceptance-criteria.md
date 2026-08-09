@@ -67,7 +67,7 @@
 
 | ID | Критерий | Приоритет | Метод проверки |
 |---:|---|:---:|---|
-| INT-01 | Прогон эталонного сценария `fixtures/simulator/greenfield-village-100/scenario.json`: старт → `run_status: running` → поток доменных событий → UI визуализирует без падений | MUST | e2e |
+| INT-01 | Прогон эталонного сценария `fixtures/simulator/greenfield-village-100-realistic-v2/scenario.json`: старт → `run_status: running` → поток доменных событий → UI визуализирует без падений | MUST | e2e |
 | INT-01a | Прогон сценария `fixtures/simulator/greenfield-village-100-realistic-v2/scenario.json` в real mode при `SIMULATOR_REAL_AMOUNT_CAP>=500`: суммы в `tx.updated` перестают быть ограничены 1–3, регулярно видны `clearing.done` (ориентир 2–5/min), и появляется заметный P2P (households↔households) | SHOULD | manual + integration |
 | INT-02 | Pause/Resume в UI на живом run: во время `paused` нет доменных событий (кроме `run_status/keep-alive`), после resume поток продолжается | MUST | e2e |
 | INT-03 | Stop в UI: сервер завершает run, UI получает `run_status: stopped` (или `error` при ошибке) и корректно завершает сессию | MUST | e2e |
@@ -88,7 +88,7 @@
 
 > Последнее обновление: **2026-02-18** (Фаза 12 — финальная документация)
 
-- Спецификация: [`anonymous-visitors-cookie-runs-spec.md`](anonymous-visitors-cookie-runs-spec.md)
+- Историческая спецификация: [`archive/anonymous-visitors-cookie-runs-spec.md`](archive/anonymous-visitors-cookie-runs-spec.md)
 - Статус: ✅ **Полностью реализовано** (11 фаз завершены)
 - Детали: см. §15 спецификации
 

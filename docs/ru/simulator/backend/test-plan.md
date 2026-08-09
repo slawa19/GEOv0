@@ -157,7 +157,7 @@ tests/performance/simulator/
 Цель: быстро проверить «живость» системы без UI.
 
 Псевдосценарий (REST+SSE):
-1) `POST /api/v1/simulator/scenarios` с телом `fixtures/simulator/greenfield-village-100/scenario.json` → получить `scenario_id`.
+1) `POST /api/v1/simulator/scenarios` с телом `fixtures/simulator/greenfield-village-100-realistic-v2/scenario.json` → получить `scenario_id`.
 2) `POST /api/v1/simulator/runs` → получить `run_id`.
 3) Подключиться к `GET /api/v1/simulator/runs/{run_id}/events?equivalent=UAH`.
 4) В течение 2 секунд получить минимум 1 событие `type=run_status` со `state=running`.
