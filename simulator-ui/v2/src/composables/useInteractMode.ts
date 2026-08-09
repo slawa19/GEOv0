@@ -1,6 +1,7 @@
 import { computed, ref, watch, type ComputedRef, type Reactive, type Ref } from 'vue'
 
 import type { GraphSnapshot } from '../types'
+import { extractErrorMessage } from '../utils/errorMessage'
 import { parseAmountNumber, parseAmountStringOrNull } from '../utils/numberFormat'
 import type { ParticipantInfo, SimulatorActionClearingRealResponse, TrustlineInfo } from '../api/simulatorTypes'
 import { useInteractActions } from './useInteractActions'
@@ -94,11 +95,6 @@ export function useInteractMode(opts: {
   // UX: keep the clearing preview visible long enough to be noticed/read.
   const CLEARING_PREVIEW_DWELL_MS = 800
   const CLEARING_RUNNING_DWELL_MS = 200
-
-  function getErrorMessage(error: unknown): string {
-    if (error instanceof Error) return error.message
-    return String(error)
-  }
 
   // NOTE: payment targets are backend-first (Phase 2.5) and include multi-hop reachability.
   // IMPORTANT: capacity shown in the UI is best-effort only (direct-hop hint).
@@ -483,7 +479,7 @@ export function useInteractMode(opts: {
     } catch (error) {
       // Don't leak errors into already-cancelled state.
       if (isCurrent()) {
-        const msg = getErrorMessage(error)
+        const msg = extractErrorMessage(error)
         // Ensure repeated identical errors still retrigger the ErrorToast timer.
         if (state.error === msg) {
           state.error = null

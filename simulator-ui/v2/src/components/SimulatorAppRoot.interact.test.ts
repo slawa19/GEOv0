@@ -82,6 +82,9 @@ type GeoTestGlobals = {
   __GEO_TEST_PAYMENT_TARGETS_LAST_ERROR_REF?: Ref<string | null>
   __GEO_TEST_PAYMENT_TO_TARGET_IDS_REF?: Ref<Set<string> | undefined>
   __GEO_TEST_INTERACT_STATE?: TestInteractState
+  __GEO_TEST_SNAPSHOT?: GraphSnapshot | null
+  __GEO_TEST_STATE_LOADING?: boolean
+  __GEO_TEST_STATE_ERROR?: string
 }
 
 function setGeoTestGlobal<K extends keyof GeoTestGlobals>(key: K, value: GeoTestGlobals[K]): void {
@@ -259,6 +262,15 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
        })
        setGeoTestGlobal('__GEO_TEST_INTERACT_START_CLEARING_FLOW', startClearingFlow)
 
+       const selectEdge = vi.fn((edgeKey: string, anchor?: TestAnchor | null) => {
+         interactState.selectedEdgeKey = edgeKey
+         interactState.edgeAnchor = anchor ?? null
+         const [fromPid, toPid] = edgeKey.split('→')
+         interactState.fromPid = fromPid || null
+         interactState.toPid = toPid || null
+         phase.value = 'editing-trustline'
+       })
+
        const setPaymentFromPid = vi.fn((pid: string | null) => {
          const st = getGeoTestGlobal('__GEO_TEST_INTERACT_STATE')
          if (st) st.fromPid = pid
@@ -400,10 +412,10 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
 
         // state + prefs
         state: reactive({
-          loading: false,
-          error: '',
+          loading: Boolean(getGeoTestGlobal('__GEO_TEST_STATE_LOADING') ?? false),
+          error: String(getGeoTestGlobal('__GEO_TEST_STATE_ERROR') ?? ''),
           sourcePath: '',
-          snapshot: null as GraphSnapshot | null,
+          snapshot: getGeoTestGlobal('__GEO_TEST_SNAPSHOT') ?? null,
           selectedNodeId: null as string | null,
           flash: 0,
         }),
@@ -443,6 +455,7 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
               setTrustlineFromPid,
               setTrustlineToPid,
              selectTrustline: vi.fn(),
+             selectEdge,
 
              startPaymentFlow: startPaymentFlow,
              startPaymentFlowWithFrom,
@@ -829,6 +842,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
 
       const canvas = host.querySelector('canvas.canvas') as HTMLCanvasElement | null
       expect(canvas).toBeTruthy()
+      expect(host.querySelectorAll('canvas[aria-hidden="true"]')).toHaveLength(2)
 
       canvas?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
       canvas?.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 16 }))
@@ -1540,12 +1554,112 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       confirmBtn?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }))
       await nextTick()
       expect(document.activeElement).toBe(cancelBtn)
+
+      cancelBtn?.click()
+      await nextTick()
+      await nextTick()
+      expect(getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_CANCEL')).toHaveBeenCalledTimes(1)
+      expect(document.activeElement).toBe(opener)
     } finally {
       app.unmount()
       host.remove()
-      clearGeoTestGlobals('__GEO_TEST_INTERACT_PHASE')
+      clearGeoTestGlobals('__GEO_TEST_INTERACT_PHASE', '__GEO_TEST_INTERACT_CANCEL')
       vi.unstubAllGlobals()
     }
+  })
+
+  it('opens node and edge inspectors from the labelled DOM graph navigator', async () => {
+    setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'idle')
+    setGeoTestGlobal('__GEO_TEST_SELECTED_NODE', makeSelectedNode())
+    setGeoTestGlobal('__GEO_TEST_NODE_SCREEN_CENTER', { x: 100, y: 160 })
+    setGeoTestGlobal('__GEO_TEST_SNAPSHOT', {
+      equivalent: 'UAH',
+      generated_at: '2026-08-09T00:00:00Z',
+      nodes: [makeSelectedNode('alice', 'Alice'), makeSelectedNode('bob', 'Bob')],
+      links: [{ source: 'alice', target: 'bob', trust_limit: '100', used: '25', available: '75' }],
+    })
+    setUrl('/?mode=real&ui=interact')
+    stubMissingResizeObserver()
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = mountSimulatorAppRoot(host)
+    try {
+      await nextTick()
+      await nextTick()
+
+      const navigator = host.querySelector('[role="region"][aria-label="Graph navigator"]') as HTMLDetailsElement | null
+      expect(navigator).toBeTruthy()
+      navigator!.open = true
+
+      const nodeSelect = host.querySelector('#graph-navigator-node') as HTMLSelectElement
+      nodeSelect.value = 'bob'
+      nodeSelect.dispatchEvent(new Event('change', { bubbles: true }))
+      await nextTick()
+      const nodeButton = Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Inspect node') as
+        | HTMLButtonElement
+        | undefined
+      nodeButton?.focus()
+      nodeButton?.click()
+      await nextTick()
+      await nextTick()
+      expect(host.querySelector('.ws-shell[data-win-type="node-card"]')).toBeTruthy()
+      expect(host.querySelector('[data-testid="graph-navigator-status"]')?.textContent).toContain('Node details opened: Bob')
+
+      const edgeButton = Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Inspect edge') as
+        | HTMLButtonElement
+        | undefined
+      expect(edgeButton?.disabled).toBe(false)
+      edgeButton?.focus()
+      edgeButton?.click()
+      await nextTick()
+      await nextTick()
+      expect(host.querySelector('.ws-shell[data-win-type="edge-detail"]')).toBeTruthy()
+      expect(host.querySelector('[data-testid="graph-navigator-status"]')?.textContent).toContain(
+        'Trustline details opened: alice → bob',
+      )
+    } finally {
+      app.unmount()
+      host.remove()
+      clearGeoTestGlobals(
+        '__GEO_TEST_INTERACT_PHASE',
+        '__GEO_TEST_SELECTED_NODE',
+        '__GEO_TEST_NODE_SCREEN_CENTER',
+        '__GEO_TEST_SNAPSHOT',
+      )
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('exposes root loading and error lifecycle semantics without duplicating toast roles', async () => {
+    setGeoTestGlobal('__GEO_TEST_STATE_LOADING', true)
+    setUrl('/?mode=real&ui=interact')
+    stubMissingResizeObserver()
+
+    const loadingHost = document.createElement('div')
+    document.body.appendChild(loadingHost)
+    const loadingApp = mountSimulatorAppRoot(loadingHost)
+    await nextTick()
+    expect(loadingHost.querySelector('.root')?.getAttribute('aria-busy')).toBe('true')
+    const loading = loadingHost.querySelector('.ds-ov-inset[role="status"]')
+    expect(loading?.getAttribute('aria-live')).toBe('polite')
+    expect(loading?.getAttribute('aria-atomic')).toBe('true')
+    loadingApp.unmount()
+    loadingHost.remove()
+    clearGeoTestGlobals('__GEO_TEST_STATE_LOADING')
+
+    setGeoTestGlobal('__GEO_TEST_STATE_ERROR', 'Snapshot unavailable')
+    const errorHost = document.createElement('div')
+    document.body.appendChild(errorHost)
+    const errorApp = mountSimulatorAppRoot(errorHost)
+    await nextTick()
+    const error = errorHost.querySelector('.ds-ov-inset[role="alert"]')
+    expect(error?.getAttribute('aria-atomic')).toBe('true')
+    expect(error?.textContent).toContain('Snapshot unavailable')
+    errorApp.unmount()
+    errorHost.remove()
+    clearGeoTestGlobals('__GEO_TEST_STATE_ERROR')
+    vi.unstubAllGlobals()
   })
 
   it('renders EdgeDetailPopup through WindowLayer (WindowShell)', async () => {

@@ -2,6 +2,7 @@ import { createApp, h, nextTick, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
 import { provideTopBarContext, type TopBarContext } from '../composables/useTopBarContext'
+import type { RunStatus } from '../api/simulatorTypes'
 import TopBar from './TopBar.vue'
 
 function createTopBarContext(overrides: Partial<TopBarContext> = {}): TopBarContext {
@@ -76,6 +77,30 @@ async function mountTopBar(overrides: Partial<TopBarContext> = {}) {
 }
 
 describe('TopBar dropdown focus contract', () => {
+  it('announces run lifecycle changes and exposes the current run error as an alert', async () => {
+    const runStatus = ref<RunStatus | null>(null)
+    const lastError = ref<string | null>(null)
+    const { app, host } = await mountTopBar({ runStatus, lastError })
+
+    const lifecycle = host.querySelector('[aria-label="Run state"]')
+    expect(lifecycle?.getAttribute('role')).toBe('status')
+    expect(lifecycle?.getAttribute('aria-live')).toBe('polite')
+    expect(lifecycle?.getAttribute('aria-atomic')).toBe('true')
+
+    runStatus.value = { run_id: 'run-1', scenario_id: 'scenario-1', state: 'running' }
+    lastError.value = 'Run failed to reconnect'
+    await nextTick()
+
+    expect(lifecycle?.textContent).toContain('running')
+    const error = host.querySelector('[aria-label="Error"]')
+    expect(error?.getAttribute('role')).toBe('alert')
+    expect(error?.getAttribute('aria-atomic')).toBe('true')
+    expect(error?.textContent).toContain('Run failed to reconnect')
+
+    app.unmount()
+    host.remove()
+  })
+
   it('moves keyboard-opened focus inside Advanced and traps Tab until Escape closes it', async () => {
     const { app, host } = await mountTopBar()
 

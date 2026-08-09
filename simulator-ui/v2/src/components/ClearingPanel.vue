@@ -61,6 +61,7 @@ const busyUi = computed(() => props.busy || isRunning.value)
     :style="rootStyle"
     data-testid="clearing-panel"
     aria-label="Clearing panel"
+    :aria-busy="busyUi ? 'true' : 'false'"
   >
     <div class="ds-panel__header">
       <div class="ds-h2">
@@ -80,7 +81,13 @@ const busyUi = computed(() => props.busy || isRunning.value)
       <div v-if="state.error" class="ds-alert ds-alert--err ds-mono" data-testid="clearing-error">{{ state.error }}</div>
 
       <template v-if="isConfirm">
-        <div class="ds-help" data-testid="clearing-confirm-help">
+        <div
+          class="ds-help"
+          data-testid="clearing-confirm-help"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        >
           <template v-if="busyUi">
             Running clearing… <span class="cp-spinner" aria-hidden="true" />
           </template>
@@ -96,10 +103,17 @@ const busyUi = computed(() => props.busy || isRunning.value)
       </template>
 
       <template v-else-if="isPreview">
-        <div v-if="!last" class="ds-help" data-testid="clearing-preview-loading">
+        <div
+          v-if="!last"
+          class="ds-help"
+          data-testid="clearing-preview-loading"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        >
           Preparing preview… <span class="cp-spinner" aria-hidden="true" />
         </div>
-        <div v-else class="ds-stack cp-preview-stack">
+        <div v-else class="ds-stack cp-preview-stack" role="status" aria-live="polite" aria-atomic="true">
           <div class="ds-label">
             Cycles: <span class="ds-mono">{{ cyclesCount }}</span>
           </div>
@@ -116,7 +130,7 @@ const busyUi = computed(() => props.busy || isRunning.value)
       </template>
 
       <template v-else>
-        <div class="ds-help">Running…</div>
+        <div class="ds-help" role="status" aria-live="polite" aria-atomic="true">Running…</div>
       </template>
 
       <div v-if="!isConfirm" class="ds-row ds-row--actions cp-actions">
@@ -173,4 +187,3 @@ const busyUi = computed(() => props.busy || isRunning.value)
   overflow: auto;
 }
 </style>
-

@@ -1,4 +1,4 @@
-import { watch, type ComputedRef } from 'vue'
+import { getCurrentScope, onScopeDispose, watch, type ComputedRef } from 'vue'
 
 import {
   artifactDownloadUrl,
@@ -19,22 +19,21 @@ import type {
   RunStatus,
   ScenarioSummary,
   SimulatorMode,
-  TopologyChangedEvent,
 } from '../api/simulatorTypes'
 import { connectSse } from '../api/sse'
-import {
-  normalizeSimulatorEvent,
-  type AcceptedSimulatorEvent,
-  type NormalizedRunStatusEvent,
-  type NormalizedTxFailedEvent,
-} from '../api/normalizeSimulatorEvent'
+import { normalizeSimulatorEvent } from '../api/normalizeSimulatorEvent'
 import { ApiError, authHeaders } from '../api/http'
 
-import type { ClearingDoneEvent, EdgePatch, GraphLink, GraphNode, NodePatch, TxUpdatedEvent } from '../types'
+import type { ClearingDoneEvent, EdgePatch, NodePatch, TxUpdatedEvent } from '../types'
 import type { SimulatorAppState } from '../types/simulatorApp'
-import { resolveTxDirection } from '../utils/txDirection'
 import { incCounter } from '../utils/counters'
-import { toLower, toLowerTrim } from '../utils/stringHelpers'
+import { toLower } from '../utils/stringHelpers'
+import {
+  applyAcceptedRealEvent,
+  createRealEventReplayOwner,
+  executeRealEventIntents,
+  type RealEventIntent,
+} from './realEventPipeline'
 
 export type RealModeState = {
   apiBase: string
@@ -114,22 +113,6 @@ function extractRunId(v: ActiveRunResponse | null | undefined): string {
   return String(v?.run_id ?? '').trim()
 }
 
-function isRunStatusEvent(evt: AcceptedSimulatorEvent): evt is NormalizedRunStatusEvent {
-  return evt.type === 'run_status'
-}
-
-function isTxUpdatedEvent(evt: AcceptedSimulatorEvent): evt is TxUpdatedEvent {
-  return evt.type === 'tx.updated'
-}
-
-function isTxFailedEvent(evt: AcceptedSimulatorEvent): evt is NormalizedTxFailedEvent {
-  return evt.type === 'tx.failed'
-}
-
-function isTopologyChangedEvent(evt: AcceptedSimulatorEvent): evt is TopologyChangedEvent {
-  return evt.type === 'topology.changed'
-}
-
 export function useSimulatorRealMode(opts: {
   isRealMode: ComputedRef<boolean>
   isLocalhost: boolean
@@ -165,6 +148,8 @@ export function useSimulatorRealMode(opts: {
 
   // Optional: notify on any SSE event (used to keep Demo UI render loop awake).
   onAnySseEvent?: () => void
+  // Optional visual-effects policy seam (e.g. reduced-motion integration).
+  optionalFxEnabled?: () => boolean
 }): {
   stopSse: () => void
   resetStaleRun: (opts?: { clearError?: boolean }) => void
@@ -203,6 +188,7 @@ export function useSimulatorRealMode(opts: {
     runRealClearingDoneFx,
     wakeUp,
     onAnySseEvent,
+    optionalFxEnabled,
   } = opts
 
   // -----------------
@@ -231,17 +217,6 @@ export function useSimulatorRealMode(opts: {
 
   const incDiag = incCounter
 
-  function getBurstLabelThrottleMs(): number {
-    const ops = Number(real.runStatus?.ops_sec ?? 0)
-    const qd = Number(real.runStatus?.queue_depth ?? 0)
-
-    // Degradation policy (P2.2): when backend indicates bursts/overload, enable
-    // overlay throttling to reduce cap evictions and perceived dropouts.
-    if (ops >= 40 || qd >= 200) return 240
-    if (ops >= 20 || qd >= 100) return 120
-    return 0
-  }
-
   // -----------------
   // Real Mode: SSE loop
   // -----------------
@@ -249,41 +224,7 @@ export function useSimulatorRealMode(opts: {
   let sseAbort: AbortController | null = null
   let sseSeq = 0
 
-  // Best-effort event de-duplication: prevents duplicate UI effects (labels/FX)
-  // when backend replays events after SSE reconnect.
-  const processedEventIds = new Map<string, true>()
-  let processedEventIdsRunId: string | null = null
-
-  // Bound memory while keeping enough history to dedup large SSE replays.
-  // Too small -> duplicates slip through -> extra labels -> cap eviction -> perceived dropouts.
-  const PROCESSED_EVENT_IDS_MAX = 5000
-  const PROCESSED_EVENT_IDS_PRUNE_BATCH = 500
-
-  function markEventProcessed(runId: string, eventId: string): boolean {
-    const rid = runId
-    const eid = eventId
-    if (!rid || !eid) return true
-
-    if (processedEventIdsRunId !== rid) {
-      processedEventIdsRunId = rid
-      processedEventIds.clear()
-    }
-
-    if (processedEventIds.has(eid)) return false
-    processedEventIds.set(eid, true)
-
-    // Bound memory: keep only the most recent event IDs (Map preserves insertion order).
-    // Prune in batches to keep the loop cheap under bursts.
-    if (processedEventIds.size > PROCESSED_EVENT_IDS_MAX) {
-      const targetSize = Math.max(0, PROCESSED_EVENT_IDS_MAX - PROCESSED_EVENT_IDS_PRUNE_BATCH)
-      while (processedEventIds.size > targetSize) {
-        const firstKey = processedEventIds.keys().next().value as string | undefined
-        if (!firstKey) break
-        processedEventIds.delete(firstKey)
-      }
-    }
-    return true
-  }
+  const replayOwner = createRealEventReplayOwner()
 
   // Debounce multiple rapid calls to refreshSnapshot (e.g., during startRun + watcher cascade).
   let refreshSnapshotDebounceTimer: ReturnType<typeof setTimeout> | null = null
@@ -351,6 +292,13 @@ export function useSimulatorRealMode(opts: {
     real.sseState = 'idle'
   }
 
+  if (getCurrentScope()) {
+    onScopeDispose(() => {
+      teardownRefreshSnapshot()
+      stopSse()
+    })
+  }
+
   function resetStaleRun(resetOpts?: { clearError?: boolean }) {
     teardownRefreshSnapshot()
     real.runId = null
@@ -361,8 +309,7 @@ export function useSimulatorRealMode(opts: {
     resetRunStats()
     stopSse()
 
-    processedEventIdsRunId = null
-    processedEventIds.clear()
+    replayOwner.reset()
 
     if (resetOpts?.clearError ?? true) {
       real.lastError = ''
@@ -495,7 +442,7 @@ export function useSimulatorRealMode(opts: {
     return Math.max(250, Math.round(base + jitter))
   }
 
-  async function runSseLoop() {
+  async function runSseLoop(loopOpts?: { preserveLastError?: boolean }) {
     const mySeq = ++sseSeq
     stopSse()
 
@@ -509,7 +456,7 @@ export function useSimulatorRealMode(opts: {
 
     let attempt = 0
     real.sseState = 'connecting'
-    real.lastError = ''
+    if (!loopOpts?.preserveLastError) real.lastError = ''
 
     while (!ctrl.signal.aborted && mySeq === sseSeq) {
       const runId = real.runId
@@ -551,347 +498,58 @@ export function useSimulatorRealMode(opts: {
             }
 
             const evt = normalized.event
-
-            // The wire protocol requires the SSE frame id to match payload.event_id.
-            // A mismatch is not an accepted event and must not advance cursor/dedup or run effects.
-            if (msg.id !== undefined && msg.id !== evt.event_id) {
+            const admission = replayOwner.admit({
+              event: evt,
+              frameId: msg.id,
+              connectionRunId: runId,
+              activeRunId: real.runId,
+              connectionEquivalent: eqNow,
+              currentCursor: real.lastEventId,
+            })
+            if (admission.status === 'rejected') {
               diag.normalize_dropped += 1
-              diag.frame_id_mismatches += 1
-              incDiag(diag.rejected_by_reason, `malformed:${evt.type}:frame_id_mismatch`)
+              if (admission.diagnostic === 'frame_id_mismatch') diag.frame_id_mismatches += 1
+              incDiag(diag.rejected_by_reason, `${admission.kind}:${evt.type}:${admission.diagnostic}`)
               return
             }
+            if (admission.status === 'duplicate') return
 
-            // Bind a normalized frame to the connection context before it can
-            // advance replay state, enter dedup, or trigger observable effects.
-            if (real.runId !== runId) {
-              diag.normalize_dropped += 1
-              incDiag(diag.rejected_by_reason, `context:${evt.type}:active_run_changed`)
-              return
-            }
-            if (isRunStatusEvent(evt)) {
-              if (evt.run_id !== runId) {
-                diag.normalize_dropped += 1
-                incDiag(diag.rejected_by_reason, `context:${evt.type}:run_id_mismatch`)
-                return
-              }
-            } else if (evt.equivalent.trim().toUpperCase() !== eqNow.trim().toUpperCase()) {
-              diag.normalize_dropped += 1
-              incDiag(diag.rejected_by_reason, `context:${evt.type}:equivalent_mismatch`)
-              return
-            }
+            const intents = applyAcceptedRealEvent(evt, runId, { real, state }, {
+              patchApplier: realPatchApplier,
+              isUserFacingRunError,
+              inc,
+            })
+            replayOwner.commit(evt.event_id, runId)
+            real.lastEventId = admission.cursor
+            incDiag(diag.events_by_type, evt.type)
+            executeRealEventIntents(intents, {
+              getActiveRunId: () => real.runId,
+              optionalFxEnabled,
+              onAnySseEvent,
+              refreshSnapshot: () => void refreshSnapshot(),
+              wakeUp,
+              runRealTxFx,
+              runRealClearingDoneFx,
+              pushTxAmountLabel,
+              clampRealTxTtlMs,
+              scheduleTimeout,
+              onIntentExecuted: (intent: RealEventIntent) => {
+                if (intent.type === 'amount-flyout-suppressed') diag.amount_flyout_suppressed += 1
+                else if (intent.type === 'burst-throttle') {
+                  diag.burst_throttle_ms_last = intent.throttleMs
+                  if (intent.throttleMs > 0) diag.burst_throttle_enabled_events += 1
+                } else if (intent.type === 'tx-label') diag.tx_sender_labels += 1
+                else if (intent.type === 'tx-label-delayed') diag.tx_receiver_scheduled += 1
+              },
+              onReceiverLabelPushed: () => {
+                diag.tx_receiver_labels += 1
+              },
+              onReceiverGuardDropped: () => {
+                diag.tx_receiver_guard_dropped += 1
+              },
+            })
+            return
 
-            incDiag(diag.events_by_type, String(evt.type ?? 'unknown'))
-
-            // Prefer payload event_id when present.
-            real.lastEventId = evt.event_id
-
-            // Drop duplicates (SSE replay after reconnect).
-            if (!markEventProcessed(runId, evt.event_id)) return
-
-            onAnySseEvent?.()
-
-            if (isRunStatusEvent(evt)) {
-              // Metrics are nullable/optional in the canonical producer contract. Preserve
-              // the latest accepted value when a heartbeat omits one; first-frame fallback
-              // remains deterministic for the existing concrete RunStatus state shape.
-              const st: RunStatus = {
-                ...evt,
-                sim_time_ms: evt.sim_time_ms ?? real.runStatus?.sim_time_ms ?? 0,
-                intensity_percent: evt.intensity_percent ?? real.runStatus?.intensity_percent ?? 0,
-                ops_sec: evt.ops_sec ?? real.runStatus?.ops_sec ?? 0,
-                queue_depth: evt.queue_depth ?? real.runStatus?.queue_depth ?? 0,
-              }
-              real.runStatus = st
-              const le = st.last_error
-              real.lastError = le && isUserFacingRunError(le.code) ? `${le.code}: ${le.message}` : ''
-
-              // Backend-first: sync cumulative stats from authoritative run_status.
-              // This overwrites optimistic local increments, ensuring SSE reconnect
-              // does not lose history and classification stays consistent.
-              if (typeof st.attempts_total === 'number') real.runStats.attempts = st.attempts_total
-              if (typeof st.committed_total === 'number') real.runStats.committed = st.committed_total
-              if (typeof st.rejected_total === 'number') real.runStats.rejected = st.rejected_total
-              if (typeof st.errors_total === 'number') real.runStats.errors = st.errors_total
-              if (typeof st.timeouts_total === 'number') real.runStats.timeouts = st.timeouts_total
-              return
-            }
-
-            if (isTxUpdatedEvent(evt)) {
-              real.runStats.attempts += 1
-              real.runStats.committed += 1
-
-              const tx = evt
-              // Backward compatible:
-              // - amount_flyout === false -> do not emit amount labels (even if amount is present)
-              // - amount_flyout === true/undefined -> best-effort emit based on amount+endpoints
-              const allowAmountFlyout = tx.amount_flyout !== false
-              const edges = Array.isArray(tx.edges) ? tx.edges : []
-              const resolved = resolveTxDirection({ from: tx.from, to: tx.to, edges })
-              const senderId = resolved.from
-              const receiverId = resolved.to
-
-              // Backend-first: labels require explicit amount.
-              const amount = String(tx.amount ?? '').trim()
-
-              // Contract diagnostic: amount_flyout=true should always include enough data
-              // for both labels. This should never trigger in healthy backend runs.
-              if (tx.amount_flyout === true && (!amount || !senderId || !receiverId)) {
-                // eslint-disable-next-line no-console
-                console.warn('tx.updated amount_flyout contract violated (missing amount/endpoints)', {
-                  event_id: tx.event_id,
-                  amount,
-                  from: tx.from,
-                  to: tx.to,
-                  edges_len: edges.length,
-                })
-              }
-
-              // Apply patches to keep snapshot authoritative.
-              if (tx.node_patch) realPatchApplier.applyNodePatches(tx.node_patch)
-              if (tx.edge_patch) realPatchApplier.applyEdgePatches(tx.edge_patch)
-
-              // Run spark FX first so we can align timing with ttl_ms clamping logic.
-              runRealTxFx(tx)
-
-              // Ensure canvas updates even if render loop entered deep idle.
-              wakeUp?.()
-
-              const labelThrottleMs = getBurstLabelThrottleMs()
-              diag.burst_throttle_ms_last = labelThrottleMs
-              if (labelThrottleMs > 0) diag.burst_throttle_enabled_events += 1
-
-              if (!allowAmountFlyout) {
-                diag.amount_flyout_suppressed += 1
-              }
-
-              if (allowAmountFlyout && amount && senderId) {
-                pushTxAmountLabel(senderId, `-${amount}`, tx.equivalent, { throttleMs: labelThrottleMs })
-                diag.tx_sender_labels += 1
-              }
-
-              // Note: self-payment (senderId === receiverId) intentionally does not emit a receiver label.
-              if (allowAmountFlyout && amount && receiverId && receiverId !== senderId) {
-                const ttlMs = clampRealTxTtlMs(tx.ttl_ms)
-
-                const runIdAtEvent = runId
-
-                diag.tx_receiver_scheduled += 1
-                scheduleTimeout(
-                  () => {
-                    // IMPORTANT: do NOT guard on ctrl.signal.aborted.
-                    // AbortSignal is tied to the fetch/SSE-loop lifecycle; on reconnect we abort
-                    // the old connection, but UI timers for still-valid events should still fire.
-                    if (real.runId !== runIdAtEvent) {
-                      diag.tx_receiver_guard_dropped += 1
-                      return
-                    }
-                    pushTxAmountLabel(receiverId, `+${amount}`, tx.equivalent, { throttleMs: labelThrottleMs })
-                    diag.tx_receiver_labels += 1
-                  },
-                  ttlMs,
-                  { critical: true },
-                )
-              }
-              return
-            }
-
-            if (isTxFailedEvent(evt)) {
-              const failed = evt
-              const code = String(failed.error?.code ?? 'TX_FAILED')
-              real.runStats.attempts += 1
-              if (code.toUpperCase() === 'PAYMENT_TIMEOUT') {
-                real.runStats.timeouts += 1
-                real.runStats.errors += 1
-                inc(real.runStats.errorsByCode, code)
-              } else if (isUserFacingRunError(code)) {
-                real.runStats.errors += 1
-                inc(real.runStats.errorsByCode, code)
-              } else {
-                real.runStats.rejected += 1
-                inc(real.runStats.rejectedByCode, code)
-              }
-              return
-            }
-
-
-            if (evt.type === 'clearing.done') {
-              const done = evt as ClearingDoneEvent
-
-              if (done.node_patch) realPatchApplier.applyNodePatches(done.node_patch)
-              if (done.edge_patch) realPatchApplier.applyEdgePatches(done.edge_patch)
-
-              runRealClearingDoneFx(done)
-              wakeUp?.()
-              return
-            }
-
-            if (isTopologyChangedEvent(evt)) {
-              const t = evt
-              const payload = t.payload
-
-              const hasPatches = (payload.node_patch?.length ?? 0) > 0 || (payload.edge_patch?.length ?? 0) > 0
-
-              const isEmptyPayload =
-                payload.added_nodes.length === 0 &&
-                payload.removed_nodes.length === 0 &&
-                (payload.frozen_nodes?.length ?? 0) === 0 &&
-                payload.added_edges.length === 0 &&
-                payload.removed_edges.length === 0 &&
-                (payload.frozen_edges?.length ?? 0) === 0 &&
-                !hasPatches
-
-              if ((isEmptyPayload && !hasPatches) || !state.snapshot) {
-                void refreshSnapshot()
-                return
-              }
-
-              // Incremental topology patch: update snapshot in-place.
-              const snap = state.snapshot
-              if (String(snap.equivalent ?? '').toUpperCase() !== String(t.equivalent ?? '').toUpperCase()) {
-                // If the event is for a different equivalent than the current scene,
-                // keep behavior safe and let the next refresh/load handle it.
-                return
-              }
-
-              // Patch-only event (e.g. trust drift / inject_debt): apply patches and return.
-              if (
-                hasPatches &&
-                payload.added_nodes.length === 0 &&
-                payload.removed_nodes.length === 0 &&
-                (payload.frozen_nodes?.length ?? 0) === 0 &&
-                payload.added_edges.length === 0 &&
-                payload.removed_edges.length === 0 &&
-                (payload.frozen_edges?.length ?? 0) === 0
-              ) {
-                if (payload.node_patch) realPatchApplier.applyNodePatches(payload.node_patch)
-                if (payload.edge_patch) realPatchApplier.applyEdgePatches(payload.edge_patch)
-                snap.generated_at = String(t.ts ?? new Date().toISOString())
-                wakeUp?.()
-                return
-              }
-
-              const nodeColorKey = (type?: string | null, status?: string | null): string => {
-                const st = toLowerTrim(status ?? '')
-                if (st === 'suspended' || st === 'left' || st === 'deleted') return st
-                const tp = toLowerTrim(type ?? '')
-                if (tp === 'business' || tp === 'person') return tp
-                return 'unknown'
-              }
-
-              const ensureNodeDefaults = (n: GraphNode) => {
-                if (!n) return
-                const tp = toLowerTrim(String(n.type ?? ''))
-                const isBiz = tp === 'business'
-                if (!n.viz_shape_key) n.viz_shape_key = isBiz ? 'rounded-rect' : 'circle'
-                if (!n.viz_size) n.viz_size = isBiz ? { w: 26, h: 22 } : { w: 16, h: 16 }
-                if (!n.viz_color_key) n.viz_color_key = nodeColorKey(n.type, n.status)
-              }
-
-              const nodesById = new Map(snap.nodes.map((n) => [n.id, n] as const))
-
-              const removedNodes = new Set<string>(payload.removed_nodes ?? [])
-              const frozenNodes = new Set<string>(payload.frozen_nodes ?? [])
-
-              // Apply node additions.
-              for (const r of payload.added_nodes ?? []) {
-                const id = String(r?.pid ?? '').trim()
-                if (!id || nodesById.has(id)) continue
-                const node: GraphNode = {
-                  id,
-                  name: r?.name ?? undefined,
-                  type: r?.type ?? undefined,
-                  status: 'active',
-                }
-                ensureNodeDefaults(node)
-                snap.nodes.push(node)
-                nodesById.set(id, node)
-              }
-
-              // Apply node freeze (status change).
-              for (const id of frozenNodes) {
-                const node = nodesById.get(id)
-                if (!node) continue
-                node.status = 'suspended'
-                node.viz_color_key = nodeColorKey(node.type, node.status)
-              }
-
-              // Apply node removals.
-              if (removedNodes.size) {
-                snap.nodes = snap.nodes.filter((n) => !removedNodes.has(n.id))
-                // Remove incident links too.
-                snap.links = snap.links.filter((l) => !removedNodes.has(String(l.source)) && !removedNodes.has(String(l.target)))
-              }
-
-              // Links: use (source,target) as identity.
-              const keyEdge = (s: string, d: string) => `${s}→${d}`
-              const linksByKey = new Map(snap.links.map((l) => [keyEdge(String(l.source), String(l.target)), l] as const))
-
-              // Apply edge additions.
-              for (const r of payload.added_edges ?? []) {
-                const s = String(r?.from_pid ?? '').trim()
-                const d = String(r?.to_pid ?? '').trim()
-                if (!s || !d) continue
-                const k = keyEdge(s, d)
-                if (linksByKey.has(k)) continue
-                const limit = r?.limit ?? undefined
-                const link: GraphLink = {
-                  source: s,
-                  target: d,
-                  trust_limit: limit,
-                  used: 0,
-                  available: limit,
-                  status: 'active',
-                  viz_width_key: 'thin',
-                  viz_alpha_key: 'active',
-                }
-                snap.links.push(link)
-                linksByKey.set(k, link)
-              }
-
-              // Apply frozen edges.
-              for (const r of payload.frozen_edges ?? []) {
-                const s = String(r?.from_pid ?? '').trim()
-                const d = String(r?.to_pid ?? '').trim()
-                if (!s || !d) continue
-                const link = linksByKey.get(keyEdge(s, d))
-                if (!link) continue
-                link.status = 'frozen'
-                link.viz_alpha_key = 'muted'
-              }
-
-              // Apply removed edges.
-              const removedEdgeKeys = new Set<string>()
-              for (const r of payload.removed_edges ?? []) {
-                const s = String(r?.from_pid ?? '').trim()
-                const d = String(r?.to_pid ?? '').trim()
-                if (!s || !d) continue
-                removedEdgeKeys.add(keyEdge(s, d))
-              }
-              if (removedEdgeKeys.size) {
-                snap.links = snap.links.filter((l) => !removedEdgeKeys.has(keyEdge(String(l.source), String(l.target))))
-              }
-
-              // Recompute links_count.
-              const counts: Record<string, number> = {}
-              for (const l of snap.links) {
-                const s = String(l.source)
-                const d = String(l.target)
-                counts[s] = (counts[s] ?? 0) + 1
-                counts[d] = (counts[d] ?? 0) + 1
-              }
-              for (const n of snap.nodes) {
-                n.links_count = counts[n.id] ?? 0
-              }
-
-              // Bump generated_at so layout coordinator can detect updates.
-              snap.generated_at = String(t.ts ?? new Date().toISOString())
-
-              // Apply backend-authoritative patches (limits/used/available/viz keys) if provided.
-              if (payload.node_patch) realPatchApplier.applyNodePatches(payload.node_patch)
-              if (payload.edge_patch) realPatchApplier.applyEdgePatches(payload.edge_patch)
-
-              wakeUp?.()
-            }
           },
         })
 
@@ -1083,6 +741,9 @@ export function useSimulatorRealMode(opts: {
       }
 
       real.lastError = msg
+      // The stop request was not confirmed. The backend run may still be live,
+      // so restore observation instead of leaving the UI permanently detached.
+      if (isRealMode.value && real.runId) void runSseLoop({ preserveLastError: true })
     }
   }
 

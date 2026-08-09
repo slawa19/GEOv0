@@ -461,7 +461,13 @@ function onApplyIntensity() {
             <span :class="['ds-badge', `ds-badge--${sseTone}`]" aria-label="SSE">
               <span class="ds-dot" aria-hidden="true" /> SSE
             </span>
-            <span :class="['ds-badge', `ds-badge--${runTone}`]" aria-label="Run state">
+            <span
+              :class="['ds-badge', `ds-badge--${runTone}`]"
+              aria-label="Run state"
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+            >
               <span class="ds-dot" aria-hidden="true" /> Run {{ ctx.runStatus.value?.state ?? (ctx.runId.value ? '…' : '—') }}
             </span>
 
@@ -585,7 +591,13 @@ function onApplyIntensity() {
         </div>
       </HudBar>
 
-      <div v-if="ctx.lastError.value" class="ds-alert ds-alert--err" aria-label="Error">
+      <div
+        v-if="ctx.lastError.value"
+        class="ds-alert ds-alert--err"
+        aria-label="Error"
+        role="alert"
+        aria-atomic="true"
+      >
         <span class="ds-alert__icon">✕</span>
         <span class="ds-label">Error</span>
         <span class="ds-value ds-mono tb-fade-92">{{ short(String(ctx.lastError.value), 160) }}</span>

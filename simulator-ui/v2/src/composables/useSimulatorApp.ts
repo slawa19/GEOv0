@@ -327,6 +327,9 @@ export function useSimulatorApp(opts?: {
 
   /** Step 5 (WM): whether node-card inspector window is currently open (WM source of truth). */
   uiIsNodeCardOpen?: () => boolean
+
+  /** Policy seam for non-essential animation and canvas effects. */
+  optionalFxEnabled?: () => boolean
 }): SimulatorAppApi {
   const eq = ref('UAH')
   const scene = ref<SceneId>('A')
@@ -691,16 +694,21 @@ export function useSimulatorApp(opts?: {
       real.runId = next ? next : null
     },
   })
+  let resetStaleRunOwner: ((opts?: { clearError?: boolean }) => void) | null = null
+  function resetStaleRunThroughOwner(opts?: { clearError?: boolean }) {
+    if (resetStaleRunOwner) {
+      resetStaleRunOwner(opts)
+      return
+    }
+    // Real-mode boot is asynchronous, while the owner is wired later in setup.
+    // Defer the extremely early completion case instead of duplicating reset policy here.
+    queueMicrotask(() => resetStaleRunOwner?.(opts))
+  }
   const interactActions = useInteractActions({
     httpConfig: interactHttpConfig,
     runId: interactRunId,
     onStaleRunId: () => {
-      real.runId = null
-      real.runStatus = null
-      real.lastEventId = null
-      real.artifacts = []
-      real.lastError = ''
-      state.error = ''
+      resetStaleRunThroughOwner({ clearError: true })
     },
   })
 
@@ -708,6 +716,7 @@ export function useSimulatorApp(opts?: {
   // from early wiring (e.g. Interact callbacks) without TDZ hazards.
   let runClearingFxImpl: (params: ClearingFxParams) => void = () => undefined
   function runClearingFx(params: ClearingFxParams) {
+    if (opts?.optionalFxEnabled?.() === false) return
     runClearingFxImpl(params)
   }
 
@@ -1379,9 +1388,7 @@ export function useSimulatorApp(opts?: {
         if (e instanceof ApiError && e.status === 404) {
           // Stale runId (e.g. deleted/expired). Clear it so we don't keep calling
           // run-scoped endpoints like /runs/:id/actions/* and /runs/:id.
-          real.runId = null
-          real.runStatus = null
-          real.lastEventId = null
+          resetStaleRunThroughOwner({ clearError: true })
         }
         // Non-fatal: if run snapshot is unreachable (401/404/stale), fall back to scenario preview.
         console.warn('Failed to load run snapshot; falling back to scenario preview:', e)
@@ -1479,7 +1486,9 @@ export function useSimulatorApp(opts?: {
     scheduleTimeout,
     wakeUp,
     onAnySseEvent: markDemoActivity,
+    optionalFxEnabled: opts?.optionalFxEnabled,
   })
+  resetStaleRunOwner = realMode.resetStaleRun
 
   // Real mode: if intensity ends up 0 (common after legacy Interact UI persistence),
   // reset to a sensible default so a newly started run actually produces events.

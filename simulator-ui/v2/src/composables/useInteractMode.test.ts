@@ -190,6 +190,29 @@ describe('useInteractMode', () => {
     expect(im.state.fromPid).toBe(null)
   })
 
+  it('surfaces the message from a structured InteractActionError instead of [object Object]', async () => {
+    const snapshot = ref<GraphSnapshot | null>(null)
+    const actions = mkActions()
+    actions.sendPayment.mockRejectedValueOnce({
+      status: 422,
+      code: 'NO_ROUTE',
+      message: 'No route between selected participants',
+    })
+    const im = useInteractMode({
+      actions,
+      runId: computed(() => 'run_test'),
+      equivalent: computed(() => 'UAH'),
+      snapshot,
+    })
+
+    im.startPaymentFlow()
+    im.selectNode('alice')
+    im.selectNode('bob')
+    await im.confirmPayment('1.00')
+
+    expect(im.state.error).toBe('No route between selected participants')
+  })
+
   it('cancel keeps busy=true until in-flight action settles; cancelled error does not leak', async () => {
     const snapshot = ref<GraphSnapshot | null>(null)
     const actions = mkActions()

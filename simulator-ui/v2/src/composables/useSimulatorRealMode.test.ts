@@ -1,4 +1,4 @@
-import { computed, nextTick, ref } from 'vue'
+import { computed, effectScope, nextTick, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
 import { useSimulatorRealMode, type RealModeState } from './useSimulatorRealMode'
@@ -1013,6 +1013,10 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
     })
 
     const harness = createSseCharacterizationHarness({ lastEventId: 'evt_previous' })
+    harness.real.artifacts = [{ name: 'stale.json', url: '/stale.json' }]
+    harness.real.runStats.attempts = 9
+    harness.real.runStats.committed = 8
+    harness.real.runStats.rejected = 1
     harness.cleanupRealRunFxAndTimers.mockImplementation(() => staleReset.resolve())
 
     try {
@@ -1023,9 +1027,12 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
       expect(harness.real.runId).toBeNull()
       expect(harness.real.runStatus).toBeNull()
       expect(harness.real.lastEventId).toBeNull()
+      expect(harness.real.artifacts).toEqual([])
       expect(harness.real.sseState).toBe('idle')
       expect(harness.real.lastError).toBe('')
       expect(harness.resetRunStats).toHaveBeenCalledTimes(1)
+      expect(harness.cleanupRealRunFxAndTimers).toHaveBeenCalledTimes(1)
+      expect(harness.real.runStats).toMatchObject({ attempts: 0, committed: 0, rejected: 0 })
       expect(harness.scheduleTimeout).toHaveBeenCalledTimes(1)
 
       const delayedReceiver = harness.scheduleTimeout.mock.calls[0]?.[0]
@@ -1103,6 +1110,76 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
       getRunMock.mockImplementation(prevGetRunImpl)
       randomSpy.mockRestore()
       vi.useRealTimers()
+    }
+  })
+
+  it('restores SSE observation when stop fails without a terminal 404', async () => {
+    const connectSseMock = vi.mocked(connectSse)
+    const stopRunMock = vi.mocked(stopRun)
+    const prevConnectImpl = connectSseMock.getMockImplementation()
+    const prevStopImpl = stopRunMock.getMockImplementation()
+    if (!prevStopImpl) throw new Error('expected stopRun mock implementation')
+    const firstConnection = deferred()
+    const secondConnection = deferred()
+    const signals: AbortSignal[] = []
+
+    connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
+      if (opts.signal) signals.push(opts.signal)
+      if (signals.length === 1) firstConnection.resolve()
+      if (signals.length === 2) secondConnection.resolve()
+      await waitForAbort(opts.signal)
+    })
+    stopRunMock.mockRejectedValueOnce(new Error('HTTP 500 stop failed'))
+
+    const harness = createSseCharacterizationHarness()
+    try {
+      harness.isRealModeRef.value = true
+      await nextTick()
+      await firstConnection.promise
+
+      await harness.h.stop()
+      await secondConnection.promise
+
+      expect(signals).toHaveLength(2)
+      expect(signals[0]?.aborted).toBe(true)
+      expect(signals[1]?.aborted).toBe(false)
+      expect(harness.real.sseState).toBe('open')
+    } finally {
+      harness.h.stopSse()
+      restoreConnectSseImplementation(prevConnectImpl)
+      stopRunMock.mockImplementation(prevStopImpl)
+    }
+  })
+
+  it('scope disposal aborts the stream and cancels pending snapshot work', async () => {
+    const connectSseMock = vi.mocked(connectSse)
+    const prevConnectImpl = connectSseMock.getMockImplementation()
+    const connected = deferred()
+    let signal: AbortSignal | undefined
+    connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
+      signal = opts.signal
+      connected.resolve()
+      await waitForAbort(opts.signal)
+    })
+
+    const scope = effectScope()
+    let harness!: ReturnType<typeof createSseCharacterizationHarness>
+    scope.run(() => {
+      harness = createSseCharacterizationHarness()
+    })
+    try {
+      harness.isRealModeRef.value = true
+      await nextTick()
+      await connected.promise
+      expect(signal?.aborted).toBe(false)
+
+      scope.stop()
+
+      expect(signal?.aborted).toBe(true)
+      expect(harness.real.sseState).toBe('idle')
+    } finally {
+      scope.stop()
+      restoreConnectSseImplementation(prevConnectImpl)
     }
   })
 })

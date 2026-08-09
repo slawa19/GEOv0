@@ -1,0 +1,87 @@
+import { createApp, h, nextTick, type Component } from 'vue'
+import { describe, expect, it, vi } from 'vitest'
+
+import type { GraphLink, GraphNode } from '../types'
+import GraphNavigator from './GraphNavigator.vue'
+
+const nodes: GraphNode[] = [
+  { id: 'bob', name: 'Bob' },
+  { id: 'alice', name: 'Alice' },
+]
+const links: GraphLink[] = [{ source: 'alice', target: 'bob', trust_limit: '100' }]
+
+function mountNavigator(edgeInspectDisabled = false) {
+  const host = document.createElement('div')
+  document.body.appendChild(host)
+  const inspectNode = vi.fn()
+  const inspectEdge = vi.fn()
+  const app = createApp({
+    render: () =>
+      h(GraphNavigator as Component, {
+        nodes,
+        links,
+        edgeInspectDisabled,
+        onInspectNode: inspectNode,
+        onInspectEdge: inspectEdge,
+      }),
+  })
+  app.mount(host)
+  return { app, host, inspectNode, inspectEdge }
+}
+
+describe('GraphNavigator', () => {
+  it('uses labelled native controls and announces keyboard-accessible node and edge inspection', async () => {
+    const { app, host, inspectNode, inspectEdge } = mountNavigator()
+    await nextTick()
+
+    const region = host.querySelector('[role="region"][aria-label="Graph navigator"]') as HTMLDetailsElement | null
+    expect(region).toBeTruthy()
+    region!.open = true
+
+    const nodeSelect = host.querySelector('#graph-navigator-node') as HTMLSelectElement
+    const edgeSelect = host.querySelector('#graph-navigator-edge') as HTMLSelectElement
+    expect(host.querySelector('label[for="graph-navigator-node"]')?.textContent).toBe('Node')
+    expect(host.querySelector('label[for="graph-navigator-edge"]')?.textContent).toBe('Edge')
+    expect(nodeSelect.tagName).toBe('SELECT')
+    expect(edgeSelect.tagName).toBe('SELECT')
+    expect(nodeSelect.options[0]?.textContent).toContain('Alice')
+
+    nodeSelect.value = 'bob'
+    nodeSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    await nextTick()
+    const inspectNodeButton = Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Inspect node')
+    inspectNodeButton?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    ;(inspectNodeButton as HTMLButtonElement).click()
+    await nextTick()
+    expect(inspectNode).toHaveBeenCalledWith('bob')
+    expect(host.querySelector('[data-testid="graph-navigator-status"]')?.textContent).toContain('Node details opened: Bob')
+
+    const inspectEdgeButton = Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Inspect edge')
+    ;(inspectEdgeButton as HTMLButtonElement).click()
+    await nextTick()
+    expect(inspectEdge).toHaveBeenCalledWith(links[0])
+    const status = host.querySelector('[data-testid="graph-navigator-status"]')
+    expect(status?.getAttribute('role')).toBe('status')
+    expect(status?.getAttribute('aria-live')).toBe('polite')
+    expect(status?.textContent).toContain('Trustline details opened: alice → bob')
+
+    app.unmount()
+    host.remove()
+  })
+
+  it('explains and disables edge inspection outside real Interact mode', async () => {
+    const { app, host, inspectEdge } = mountNavigator(true)
+    await nextTick()
+
+    const button = Array.from(host.querySelectorAll('button')).find((candidate) => candidate.textContent?.trim() === 'Inspect edge') as
+      | HTMLButtonElement
+      | undefined
+    expect(button?.disabled).toBe(true)
+    expect(button?.title).toContain('real Interact mode')
+    button?.click()
+    expect(inspectEdge).not.toHaveBeenCalled()
+
+    app.unmount()
+    host.remove()
+  })
+})

@@ -46,6 +46,9 @@ describe('ClearingPanel', () => {
     expect(help).toBeTruthy()
     expect(help?.textContent ?? '').toContain('Running clearing…')
     expect(help?.querySelector('.cp-spinner')).toBeTruthy()
+    expect(host.querySelector('[data-testid="clearing-panel"]')?.getAttribute('aria-busy')).toBe('true')
+    expect(help?.getAttribute('role')).toBe('status')
+    expect(help?.getAttribute('aria-live')).toBe('polite')
 
     const btnConfirm = host.querySelector('button.ds-btn--primary') as HTMLButtonElement | null
     expect(btnConfirm).toBeTruthy()
@@ -153,6 +156,51 @@ describe('ClearingPanel', () => {
     expect(loading).toBeTruthy()
     expect(loading?.textContent ?? '').toContain('Preparing preview')
     expect(loading?.querySelector('.cp-spinner')).toBeTruthy()
+    expect(loading?.getAttribute('role')).toBe('status')
+    expect(loading?.getAttribute('aria-live')).toBe('polite')
+
+    app.unmount()
+    host.remove()
+  })
+
+  it('announces the completed preview result without adding an alert', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const state = reactive({
+      phase: 'clearing-preview' as InteractPhase,
+      fromPid: null as string | null,
+      toPid: null as string | null,
+      initiatedWithPrefilledFrom: false,
+      selectedEdgeKey: null as string | null,
+      edgeAnchor: null as { x: number; y: number } | null,
+      error: null as string | null,
+      lastClearing: {
+        ok: true,
+        equivalent: 'EQ',
+        cleared_cycles: 1,
+        total_cleared_amount: '12',
+        cycles: [{ cleared_amount: '12', edges: [] }],
+      } as unknown as SimulatorActionClearingRealResponse,
+    })
+    const app = createApp({
+      render: () =>
+        h(ClearingPanel, {
+          phase: 'clearing-preview',
+          state,
+          busy: false,
+          equivalent: 'EQ',
+          confirmClearing: vi.fn(),
+          cancel: vi.fn(),
+        }),
+    })
+    app.mount(host)
+    await nextTick()
+
+    const result = host.querySelector('.cp-preview-stack')
+    expect(result?.getAttribute('role')).toBe('status')
+    expect(result?.getAttribute('aria-live')).toBe('polite')
+    expect(result?.textContent).toContain('Total cleared')
+    expect(result?.querySelector('[role="alert"]')).toBeNull()
 
     app.unmount()
     host.remove()

@@ -80,6 +80,9 @@ describe('ActionBar', () => {
     const hint = host.querySelector('[data-testid="actionbar-busy-hint"]') as HTMLElement | null
     expect(hint).toBeTruthy()
     expect(hint?.textContent ?? '').toContain('please wait')
+    expect(hint?.getAttribute('role')).toBe('status')
+    expect(hint?.getAttribute('aria-live')).toBe('polite')
+    expect(hint?.getAttribute('aria-atomic')).toBe('true')
 
     // Safety: clicks must be blocked.
     btnPay.click()

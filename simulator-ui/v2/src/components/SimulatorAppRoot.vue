@@ -15,6 +15,7 @@ import DevPerfOverlay from './DevPerfOverlay.vue'
 import ErrorToast from './ErrorToast.vue'
 import SuccessToast from './SuccessToast.vue'
 import InteractHistoryLog from './InteractHistoryLog.vue'
+import GraphNavigator from './GraphNavigator.vue'
 
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 
@@ -27,9 +28,11 @@ import { provideActivePanelState } from '../composables/useActivePanelState'
  import { normalizeUiThemeId, type UiThemeId } from '../types/uiPrefs'
  import { toLower } from '../utils/stringHelpers'
  import { extractErrorMessage } from '../utils/errorMessage'
+ import { useReducedMotionPreference } from '../composables/useReducedMotionPreference'
 
 // TD-1: all localStorage access is delegated to this composable.
 const simulatorStorage = useSimulatorStorage()
+const reducedMotion = useReducedMotionPreference()
 
 function readThemeFromUrl(): UiThemeId {
   try {
@@ -199,6 +202,7 @@ const app = useSimulatorApp({
   uiOpenOrUpdateEdgeDetail,
   uiOpenOrUpdateNodeCard,
   uiIsNodeCardOpen: () => wm.windows.value.some((w) => w.type === 'node-card'),
+  optionalFxEnabled: () => !reducedMotion.value,
 })
 
 // MVP safety: ensure viewport isn't 0×0 even before `.root` ref is available.
@@ -771,6 +775,54 @@ function getActionBarAnchor(): Point | null {
   return { x, y }
 }
 
+function navigatorEdgeAnchor(link: GraphLink): Point {
+  const source = getNodeScreenCenter(link.source)
+  const target = getNodeScreenCenter(link.target)
+  if (source && target) {
+    return {
+      x: (source.x + target.x) / 2,
+      y: (source.y + target.y) / 2,
+    }
+  }
+  return source ?? target ?? getActionBarAnchor() ?? { x: 24, y: 120 }
+}
+
+let interactFlowOpener: HTMLElement | null = null
+
+function captureInteractFlowOpener(): void {
+  const active = document.activeElement
+  interactFlowOpener = active instanceof HTMLElement ? active : null
+}
+
+function inspectNodeFromNavigator(nodeId: string): void {
+  uiOpenOrUpdateNodeCard({ nodeId, anchor: getNodeScreenCenter(nodeId) })
+}
+
+function inspectEdgeFromNavigator(link: GraphLink): void {
+  if (apiMode.value !== 'real' || !isInteractUi.value) return
+
+  const anchor = navigatorEdgeAnchor(link)
+  interact.mode.selectEdge(keyEdge(link.source, link.target), anchor)
+  uiOpenOrUpdateEdgeDetail({ fromPid: link.source, toPid: link.target, anchor })
+}
+
+function cancelInteractWindowFromUi(): void {
+  const interactWindow = wm.windows.value.find((win) => win.type === 'interact-panel' && win.state !== 'closing')
+  if (interactWindow) {
+    // The WM interact-panel policy delegates action-close to the current FSM onClose owner.
+    wm.close(interactWindow.id, 'action')
+    const opener = interactFlowOpener
+    interactFlowOpener = null
+    void nextTick(() => {
+      if (document.activeElement !== document.body || !opener?.isConnected || opener.matches(':disabled')) return
+      opener.focus({ preventScroll: true })
+    })
+    return
+  }
+  interactFlowOpener = null
+  interact.mode.cancel()
+}
+
 /** Computed: should TrustlineManagementPanel be shown? */
 const showTrustlinePanel = computed(() => {
   if (activePanelType.value !== 'trustline') return false
@@ -903,6 +955,7 @@ function startFlowFromNodeCard(opts: {
   openEditor?: boolean
   start: () => void
 }) {
+  captureInteractFlowOpener()
   // Not an edge-popup initiated action.
   wmEdgePopupAnchor.value = null
   // Snapshot NodeCard node screen center BEFORE phase changes.
@@ -916,6 +969,7 @@ function startFlowFromNodeCard(opts: {
 }
 
 function startFlowFromActionBar(opts: { openEditor?: boolean; start: () => void }) {
+  captureInteractFlowOpener()
   // Not an edge-popup initiated action.
   wmEdgePopupAnchor.value = null
   // Snapshot ActionBar anchor BEFORE opts.start() changes the phase.
@@ -1000,7 +1054,8 @@ watch(interactPhase, (phase) => {
     class="root ds-ov-vars"
     :data-theme="uiTheme"
     data-density="comfortable"
-    data-motion="full"
+    :data-motion="reducedMotion ? 'reduced' : 'full'"
+    :aria-busy="state.loading || real.loadingScenarios || interact.mode.busy.value ? 'true' : 'false'"
     :data-ready="!state.loading && !state.error && state.snapshot ? '1' : '0'"
     :data-scene="scene"
     :data-layout="layoutMode"
@@ -1012,6 +1067,7 @@ watch(interactPhase, (phase) => {
     <canvas
       ref="canvasEl"
       class="canvas"
+      aria-hidden="true"
       :style="{ cursor: isInteractPickingPhase ? 'crosshair' : 'default' }"
       @click="onCanvasClick"
       @dblclick.prevent="onCanvasDblClick"
@@ -1022,7 +1078,7 @@ watch(interactPhase, (phase) => {
       @pointerleave="clearHoveredEdge"
       @wheel.prevent="onCanvasWheel"
     />
-    <canvas ref="fxCanvasEl" class="canvas canvas-fx" />
+    <canvas ref="fxCanvasEl" class="canvas canvas-fx" aria-hidden="true" />
 
     <div ref="dragPreviewEl" class="drag-preview" aria-hidden="true" />
 
@@ -1071,7 +1127,17 @@ watch(interactPhase, (phase) => {
           :start-trustline-flow="onActionStartTrustlineFlow"
           :start-clearing-flow="onActionStartClearingFlow"
         />
+
       </template>
+
+      <GraphNavigator
+        v-if="dataReady && !isE2eScreenshots"
+        :nodes="state.snapshot?.nodes ?? []"
+        :links="state.snapshot?.links ?? []"
+        :edge-inspect-disabled="apiMode !== 'real' || !isInteractUi"
+        @inspect-node="inspectNodeFromNavigator"
+        @inspect-edge="inspectEdgeFromNavigator"
+      />
     </TopBar>
 
     <!-- Step 2: WindowLayer (renders migrated windows from WM state). -->
@@ -1161,7 +1227,7 @@ watch(interactPhase, (phase) => {
           :confirm-payment="interact.mode.confirmPayment"
           :set-from-pid="interact.mode.setPaymentFromPid"
           :set-to-pid="interact.mode.setPaymentToPid"
-          :cancel="interact.mode.cancel"
+          :cancel="cancelInteractWindowFromUi"
         />
 
         <TrustlineManagementPanel
@@ -1182,7 +1248,7 @@ watch(interactPhase, (phase) => {
           :set-from-pid="interact.mode.setTrustlineFromPid"
           :set-to-pid="interact.mode.setTrustlineToPid"
           :select-trustline="interact.mode.selectTrustline"
-          :cancel="interact.mode.cancel"
+          :cancel="cancelInteractWindowFromUi"
         />
 
         <ClearingPanel
@@ -1192,7 +1258,7 @@ watch(interactPhase, (phase) => {
           :busy="interact.mode.busy.value"
           :equivalent="effectiveEq"
           :confirm-clearing="interact.mode.confirmClearing"
-          :cancel="interact.mode.cancel"
+          :cancel="cancelInteractWindowFromUi"
         />
       </WindowShell>
     </TransitionGroup>
@@ -1235,12 +1301,18 @@ watch(interactPhase, (phase) => {
     <!-- Loading / error overlay (fail-fast, but non-intrusive).
          Hide the overlay during incremental updates (when we already have a snapshot)
          to avoid a visible "Loading…" flash on preview → run transitions. -->
-    <div v-if="state.loading && !state.snapshot" class="ds-ov-inset">
+    <div
+      v-if="state.loading && !state.snapshot"
+      class="ds-ov-inset"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+    >
       <div class="ds-ov-message">
         <div class="ds-ov-message__title">Loading…</div>
       </div>
     </div>
-    <div v-else-if="state.error" class="ds-ov-inset">
+    <div v-else-if="state.error" class="ds-ov-inset" role="alert" aria-atomic="true">
       <div class="ds-ov-message">
         <div class="ds-ov-message__title">Error</div>
         <div class="ds-ov-message__text">{{ state.error }}</div>
