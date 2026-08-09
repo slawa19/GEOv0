@@ -25,7 +25,11 @@ Phase 2 completed on 2026-08-08 at product commit
 2026-08-08 at product commit `f0428f9996e511e723ce1980a24c2073b3adadb8`;
 Phase 5 completed locally on 2026-08-09 at product-behavior commit
 `ff53dbc1c070220ad7ddfdaf8a0aa5c8c1ccd157`, with final test evidence at
-`345991b47f15e2ed4080c7617f4f3430883f8b7b`; Phases 6–7 remain paused.
+`345991b47f15e2ed4080c7617f4f3430883f8b7b`. Phase 6 completed on
+2026-08-09 at `579ad5769470b0d3bcdb4c59830362a7b9bd73bc`; Phase 7 and REN-015
+completed on 2026-08-09 at accepted product/test HEAD
+`f5a86ae369c563ae32d2b306ada3e6b8f48f21e2` with published Quality run
+`31329706963`.
 
 ### Phase 1 evidence ledger
 
@@ -1070,9 +1074,10 @@ used.
 
 - **Priority:** P1
 - **Owner surface:** all changed surfaces, spec changelog, accepted-debt register
-- **Status:** IN PROGRESS (2026-08-09; execution base
-  `579ad5769470b0d3bcdb4c59830362a7b9bd73bc`; evidence ledger
-  `phase7-closure-map.md`)
+- **Status:** DONE (2026-08-09; execution base
+  `579ad5769470b0d3bcdb4c59830362a7b9bd73bc`; accepted product/test HEAD
+  `f5a86ae369c563ae32d2b306ada3e6b8f48f21e2`; passing published Quality run
+  `31329706963`; evidence ledger `phase7-closure-map.md`)
 - **Rationale / value:** Verify effects across sibling paths and catch regressions
   introduced by the renovation itself before declaring the old-code cleanup done.
 - **Evidence paths:** diffs and acceptance evidence for REN-001 through REN-014 and

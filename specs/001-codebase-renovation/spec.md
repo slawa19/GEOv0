@@ -1,7 +1,7 @@
 # GEOv0 Codebase Renovation Specification
 
 - **Date:** 2026-08-07
-- **Status:** PHASE 7 IN PROGRESS
+- **Status:** COMPLETE (2026-08-09)
 - **Plan:** `specs/001-codebase-renovation/plan.md`
 - **Backlog:** `specs/001-codebase-renovation/tasks.md`
 - **Status authority:** this label is descriptive only and is not authoritative. Completion is established only by the success criteria, recorded evidence, and accepted review artifacts defined below. A future edit that changes `Status` without that evidence does not make the renovation complete.
@@ -217,6 +217,25 @@ scope. Optional diagnostics may be reported as `UNVERIFIED`, never as passing.
 - **Documentation churn:** translating unstable documents multiplies drift. Mitigation: update canonical source first; translate only after acceptance and mark generated/lagging copies.
 
 ## Changelog
+
+- **2026-08-09:** Phase 7 and REN-015 completed from exact Phase 6 closeout
+  `579ad5769470b0d3bcdb4c59830362a7b9bd73bc` to accepted product/test HEAD
+  `f5a86ae369c563ae32d2b306ada3e6b8f48f21e2`. The bounded review reproduced
+  and fixed runtime ownership/credential, Admin UTC/selection, scenario error
+  bounding, payment SERIALIZABLE/advisory-lock/recovery and cancellation/session
+  ownership defects without modifying protected v1, archives or migrations.
+  Local canonical backend validation passed `932` tests with `3` skipped and
+  `15` deselected. Published
+  [Quality run 31329706963](https://github.com/slawa19/GEOv0/actions/runs/31329706963)
+  completed all eight jobs successfully on that exact HEAD: required backend
+  `933` passed, Admin `200` unit plus `7` E2E, Simulator `729` unit plus `24`
+  E2E, disposable PostgreSQL concurrency `3` and marker tier `11`, container/
+  migration smoke, active Chromium smoke and super-smoke all passed. Required
+  Claude Code 2.1.226 reviews used exact read-only ranges, OS exit `0`, complete
+  JSON and resolved `claude-opus-5`; all confirmed in-scope P1/P2 were fixed and
+  manually verified. The bounded residuals and complete twelve-criterion mapping
+  are recorded in `phase7-closure-map.md`. The renovation stops here; further
+  work requires a new owner-approved specification.
 
 - **2026-08-09:** Phase 5 completed locally at exact product-behavior commit
   `ff53dbc1c070220ad7ddfdaf8a0aa5c8c1ccd157`; final test evidence is

@@ -12,7 +12,11 @@
   2026-08-08 at product commit `f0428f9996e511e723ce1980a24c2073b3adadb8`;
   Phase 5 completed locally on 2026-08-09 at product-behavior commit
   `ff53dbc1c070220ad7ddfdaf8a0aa5c8c1ccd157`, with final test evidence at
-  `345991b47f15e2ed4080c7617f4f3430883f8b7b`; Phases 6–7 remain paused.
+  `345991b47f15e2ed4080c7617f4f3430883f8b7b`; Phase 6 completed on
+  2026-08-09 at `579ad5769470b0d3bcdb4c59830362a7b9bd73bc`; Phase 7 and the
+  renovation program completed on 2026-08-09 at accepted product/test HEAD
+  `f5a86ae369c563ae32d2b306ada3e6b8f48f21e2` with published Quality run
+  `31329706963`.
 
 ## 1. Objective and project fit
 
@@ -654,7 +658,9 @@ under `.local-run/`, legacy user DB reset is fail-closed, the one proved no-op t
 step and Admin starter remnants were removed, current docs/classifications were
 reconciled, generated sync was no-diff, and internal plus Claude reviews have no
 open P1/P2. Exact commands, counts and residuals are recorded in
-[`phase6-cleanup-map.md`](phase6-cleanup-map.md). Phase 7 was not started.
+[`phase6-cleanup-map.md`](phase6-cleanup-map.md). At that Phase 6 closeout,
+Phase 7 had not started; its current status is authoritative in the section
+below.
 
 #### 6A. Test-value cleanup — MUST only where proven
 
@@ -720,10 +726,11 @@ command scans for changed current documents, not all historical prose.
 
 **Maps to:** REN-015.
 
-**Status:** IN PROGRESS (authorized 2026-08-09) from exact Phase 6 closeout
-`579ad5769470b0d3bcdb4c59830362a7b9bd73bc`; the live evidence ledger is
-`phase7-closure-map.md`. Publication and `workflow_dispatch` remain separately
-unauthorized.
+**Status:** COMPLETE (2026-08-09) from exact Phase 6 closeout
+`579ad5769470b0d3bcdb4c59830362a7b9bd73bc` to accepted product/test HEAD
+`f5a86ae369c563ae32d2b306ada3e6b8f48f21e2`. The complete evidence and
+residual ledger is `phase7-closure-map.md`; published Quality run
+`31329706963` passed all eight jobs on that exact HEAD.
 
 #### MUST evidence matrix
 
