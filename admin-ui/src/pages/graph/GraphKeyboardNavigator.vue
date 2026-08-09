@@ -1,8 +1,9 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { t } from '../../i18n'
 import type { GraphElementOption } from '../../composables/useGraphVisualization'
 
-defineProps<{
+const props = defineProps<{
   options: GraphElementOption[]
   busy: boolean
   hintId?: string
@@ -10,6 +11,9 @@ defineProps<{
 
 const selectedKey = defineModel<string>({ required: true })
 const emit = defineEmits<{ open: []; search: [query: string] }>()
+const selectedKeyIsVisible = computed(() => (
+  props.options.some((option) => option.key === selectedKey.value)
+))
 
 function search(query: string) {
   emit('search', query)
@@ -48,7 +52,7 @@ function search(query: string) {
       />
     </el-select>
     <el-button
-      :disabled="busy || !selectedKey"
+      :disabled="busy || !selectedKey || !selectedKeyIsVisible"
       data-testid="graph-element-open"
       @click="emit('open')"
     >

@@ -137,6 +137,15 @@ class AdminIncidentItem(BaseModel):
     sla_seconds: StrictInt = Field(..., ge=0)
     created_at: Optional[datetime] = None
 
+    @field_validator("created_at")
+    @classmethod
+    def attach_utc_to_naive_database_timestamp(
+        cls, value: Optional[datetime]
+    ) -> Optional[datetime]:
+        if value is not None and value.utcoffset() is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
+
 
 class AdminIncidentsListResponse(AdminPaginatedMeta):
     items: list[AdminIncidentItem]

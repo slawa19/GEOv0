@@ -28,4 +28,25 @@ describe('GraphKeyboardNavigator', () => {
 
     expect(wrapper.emitted('search')).toContainEqual(['PI'])
   })
+
+  it('disables details when a filtered graph no longer contains the selection', async () => {
+    const wrapper = mount(GraphKeyboardNavigator, {
+      props: {
+        modelValue: 'edge:stale',
+        options: [],
+        busy: false,
+      },
+      global: {
+        components: { ElButton, ElOption, ElSelect },
+      },
+    })
+
+    expect(wrapper.get('[data-testid="graph-element-open"]').attributes('disabled')).toBeDefined()
+
+    await wrapper.setProps({
+      options: [{ key: 'edge:stale', kind: 'edge', label: 'A → B' }],
+    })
+
+    expect(wrapper.get('[data-testid="graph-element-open"]').attributes('disabled')).toBeUndefined()
+  })
 })
