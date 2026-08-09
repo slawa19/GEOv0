@@ -89,8 +89,9 @@ shape — в [`api/openapi.yaml`](../../api/openapi.yaml). Эти значени
 
 Admin UI использует `VITE_API_MODE` и `VITE_API_BASE_URL`; локальный runner пишет
 `admin-ui/.env.local`. Playwright output можно изолировать через
-`GEO_ADMIN_PLAYWRIGHT_OUTPUT_DIR`, `GEO_ADMIN_PLAYWRIGHT_REPORT_DIR` и
-`GEO_SIMULATOR_PLAYWRIGHT_OUTPUT_DIR`; дефолты находятся под `.local-run/`.
+`GEO_ADMIN_PLAYWRIGHT_OUTPUT_DIR`, `GEO_ADMIN_PLAYWRIGHT_REPORT_DIR`,
+`GEO_SIMULATOR_PLAYWRIGHT_OUTPUT_DIR` и отдельный
+`GEO_SIMULATOR_HUD_QA_OUTPUT_DIR`; дефолты находятся под `.local-run/`.
 
 Секреты, `.env`, локальные БД, логи, PID, NDJSON и test output не являются
 каноническими данными и не коммитятся.

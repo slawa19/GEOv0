@@ -86,18 +86,6 @@ $LegacyRootDatabaseUrl = 'sqlite+aiosqlite:///./geov0.db'
 $DefaultDatabasePath = Join-Path $StateDir 'geov0.db'
 $LegacyRootDatabasePath = Join-Path $RepoRoot 'geov0.db'
 
-if ([string]::IsNullOrWhiteSpace($env:DATABASE_URL)) {
-    $env:DATABASE_URL = $DefaultDatabaseUrl
-}
-
-$LocalDatabasePath = if ($env:DATABASE_URL -eq $DefaultDatabaseUrl) {
-    $DefaultDatabasePath
-} elseif ($env:DATABASE_URL -eq $LegacyRootDatabaseUrl) {
-    $LegacyRootDatabasePath
-} else {
-    $null
-}
-
 # Создаем директорию для логов и PID-файлов
 if (-not (Test-Path $StateDir)) {
     $null = New-Item -ItemType Directory -Force -Path $StateDir
@@ -485,14 +473,34 @@ function Invoke-PythonScript {
     }
     
     Write-Verbose "Running: $Description"
-    if ($Arguments.Count -gt 0) {
-        & $PythonExe $ScriptPath @Arguments
-    } else {
-        & $PythonExe $ScriptPath
+    Push-Location $RepoRoot
+    try {
+        if ($Arguments.Count -gt 0) {
+            & $PythonExe $ScriptPath @Arguments
+        } else {
+            & $PythonExe $ScriptPath
+        }
+    } finally {
+        Pop-Location
     }
     
     if ($LASTEXITCODE -ne 0) {
         throw "$Description failed with exit code $LASTEXITCODE"
+    }
+}
+
+function Get-EffectiveDatabaseUrl {
+    param([string]$PythonExe)
+
+    Push-Location $RepoRoot
+    try {
+        $output = @(& $PythonExe -c 'from app.config import Settings; print(Settings().DATABASE_URL)')
+        if ($LASTEXITCODE -ne 0 -or $output.Count -ne 1) {
+            throw 'Unable to resolve DATABASE_URL from the application settings.'
+        }
+        return ([string]$output[0]).Trim()
+    } finally {
+        Pop-Location
     }
 }
 
@@ -586,6 +594,14 @@ Write-Host "[OK] Python: $($Tools.Python)" -ForegroundColor Green
 Write-Host "[OK] npm: $($Tools.Npm)" -ForegroundColor Green
 $Python = $Tools.Python
 $WindowStyle = if ($ShowWindows) { 'Normal' } else { 'Hidden' }
+$EffectiveDatabaseUrl = Get-EffectiveDatabaseUrl -PythonExe $Python
+$LocalDatabasePath = if ($EffectiveDatabaseUrl -eq $DefaultDatabaseUrl) {
+    $DefaultDatabasePath
+} elseif ($EffectiveDatabaseUrl -eq $LegacyRootDatabaseUrl) {
+    $LegacyRootDatabasePath
+} else {
+    $null
+}
 
 switch ($Action) {
     'status' {
@@ -628,7 +644,7 @@ switch ($Action) {
     }
 
     'reset-db' {
-        if ($env:DATABASE_URL -ne $DefaultDatabaseUrl) {
+        if ($EffectiveDatabaseUrl -ne $DefaultDatabaseUrl) {
             throw 'reset-db is restricted to the default .local-run SQLite DB; legacy or custom DATABASE_URL values are never deleted.'
         }
         if (Test-Path $DefaultDatabasePath) {

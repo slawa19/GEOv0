@@ -13,7 +13,7 @@ export default defineConfig({
   expect: {
     timeout: 10_000,
   },
-  outputDir: process.env.GEO_SIMULATOR_PLAYWRIGHT_OUTPUT_DIR
+  outputDir: process.env.GEO_SIMULATOR_HUD_QA_OUTPUT_DIR
     ?? fileURLToPath(new URL('../../.local-run/playwright/simulator/hud-qa-results/', import.meta.url)),
   use: {
     baseURL: 'http://127.0.0.1:5176',

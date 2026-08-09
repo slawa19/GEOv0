@@ -325,14 +325,34 @@ function Invoke-PythonScript {
         [string]$Description = "Python script"
     )
     
-    if ($Arguments.Count -gt 0) {
-        & $PythonExe $ScriptPath @Arguments
-    } else {
-        & $PythonExe $ScriptPath
+    Push-Location $RepoRoot
+    try {
+        if ($Arguments.Count -gt 0) {
+            & $PythonExe $ScriptPath @Arguments
+        } else {
+            & $PythonExe $ScriptPath
+        }
+    } finally {
+        Pop-Location
     }
     
     if ($LASTEXITCODE -ne 0) {
         throw "$Description failed with exit code $LASTEXITCODE"
+    }
+}
+
+function Get-EffectiveDatabaseUrl {
+    param([string]$PythonExe)
+
+    Push-Location $RepoRoot
+    try {
+        $output = @(& $PythonExe -c 'from app.config import Settings; print(Settings().DATABASE_URL)')
+        if ($LASTEXITCODE -ne 0 -or $output.Count -ne 1) {
+            throw 'Unable to resolve DATABASE_URL from the application settings.'
+        }
+        return ([string]$output[0]).Trim()
+    } finally {
+        Pop-Location
     }
 }
 
@@ -448,16 +468,17 @@ switch ($Action) {
 # Apply env overrides early so child processes inherit them.
 Set-EnvOverrides -Pairs $BackendEnv
 
-if ([string]::IsNullOrWhiteSpace($env:DATABASE_URL)) {
-    $env:DATABASE_URL = $DefaultDatabaseUrl
-}
-
-$LocalDatabasePath = if ($env:DATABASE_URL -eq $DefaultDatabaseUrl) {
+$EffectiveDatabaseUrl = Get-EffectiveDatabaseUrl -PythonExe $Python
+$LocalDatabasePath = if ($EffectiveDatabaseUrl -eq $DefaultDatabaseUrl) {
     $DefaultDatabasePath
-} elseif ($env:DATABASE_URL -eq $LegacyRootDatabaseUrl) {
+} elseif ($EffectiveDatabaseUrl -eq $LegacyRootDatabaseUrl) {
     $LegacyRootDatabasePath
 } else {
     $null
+}
+
+if ($ResetDb -and $EffectiveDatabaseUrl -ne $DefaultDatabaseUrl) {
+    throw '-ResetDb is restricted to the default .local-run SQLite DB; legacy or custom DATABASE_URL values are never deleted.'
 }
 
 Write-Host "[1/8] Cleaning up old processes..." -ForegroundColor Yellow
@@ -465,9 +486,6 @@ Stop-AllServices
 
 if ($ResetDb) {
     Write-Host "[2/8] Resetting database..." -ForegroundColor Yellow
-    if ($env:DATABASE_URL -ne $DefaultDatabaseUrl) {
-        throw '-ResetDb is restricted to the default .local-run SQLite DB; legacy or custom DATABASE_URL values are never deleted.'
-    }
     if (Test-Path $DefaultDatabasePath) {
         Remove-Item -Force $DefaultDatabasePath
         Write-Host "     Deleted existing DB" -ForegroundColor Gray
@@ -616,7 +634,7 @@ Write-Host "  Backend API:   " -NoNewline; Write-Host "http://127.0.0.1:$Backend
 Write-Host "  Admin UI:      " -NoNewline; Write-Host "http://localhost:$AdminUiPort/" -ForegroundColor Cyan
 Write-Host "  Simulator UI:  " -NoNewline; Write-Host "http://localhost:$SimulatorUiPort/?mode=real" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "  Database URL:  " -NoNewline; Write-Host "$env:DATABASE_URL" -ForegroundColor Gray
+Write-Host "  Database URL:  " -NoNewline; Write-Host "$EffectiveDatabaseUrl" -ForegroundColor Gray
 Write-Host "  Logs:          " -NoNewline; Write-Host "$StateDir" -ForegroundColor Gray
 Write-Host ""
 Write-Host "All UIs share the same backend and database." -ForegroundColor DarkGray
