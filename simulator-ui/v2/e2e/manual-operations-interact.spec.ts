@@ -146,7 +146,7 @@ async function hitTestAt(page: Page, point: { x: number; y: number }): Promise<{
 
 async function getSelectValues(page: Page, css: string): Promise<string[]> {
   const loc = page.locator(css)
-  await expect(loc).toBeVisible()
+  await expect(loc).toBeAttached()
   return await loc.evaluate((el: Element) => {
     const sel = el as HTMLSelectElement
     return Array.from(sel.options)
@@ -157,8 +157,28 @@ async function getSelectValues(page: Page, css: string): Promise<string[]> {
 
 async function getSelectValue(page: Page, css: string): Promise<string> {
   const loc = page.locator(css)
-  await expect(loc).toBeVisible()
+  await expect(loc).toBeAttached()
   return await loc.evaluate((el: Element) => String((el as HTMLSelectElement).value ?? ''))
+}
+
+async function chooseOverlayOption(
+  page: Page,
+  selectId: string,
+  optionValue: string,
+  selectMayDisappear = false,
+) {
+  const trigger = page.locator(`#${selectId}__trigger`)
+  await expect(trigger).toBeVisible()
+  await expect(trigger).toBeEnabled()
+  await trigger.click()
+
+  const option = page.locator(
+    `#${selectId}__surface [role="option"][data-option-value="${optionValue}"]`,
+  )
+  await expect(option).toBeVisible()
+  await option.click()
+  const mirror = page.locator(`#${selectId}`)
+  if (!selectMayDisappear || (await mirror.count()) > 0) await expect(mirror).toHaveValue(optionValue)
 }
 
 async function mockRealInteractApp(page: Page, o: {
@@ -473,7 +493,7 @@ test.describe('Manual operations UI — Playwright E2E (Interact, mocked backend
     await page.locator('[data-testid="actionbar-payment"]').click()
     await expect(page.locator('[data-testid="manual-payment-panel"]')).toBeVisible()
 
-    await page.locator('#mp-from').selectOption('shop')
+    await chooseOverlayOption(page, 'mp-from', 'shop')
 
     await expect.poll(async () => await getSelectValues(page, '#mp-to')).toEqual(['alice', 'bob'])
   })
@@ -522,9 +542,9 @@ test.describe('Manual operations UI — Playwright E2E (Interact, mocked backend
     await page.locator('[data-testid="actionbar-payment"]').click()
     await expect(page.locator('[data-testid="manual-payment-panel"]')).toBeVisible()
 
-    await page.locator('#mp-from').selectOption('alice')
+    await chooseOverlayOption(page, 'mp-from', 'alice')
     await expect.poll(async () => await getSelectValues(page, '#mp-to')).toEqual(['bob'])
-    await page.locator('#mp-to').selectOption('bob')
+    await chooseOverlayOption(page, 'mp-to', 'bob')
 
     // Confirm step should be active.
     await expect(page.locator('[data-testid="mp-direct-capacity-help"]')).toBeVisible()
@@ -533,9 +553,9 @@ test.describe('Manual operations UI — Playwright E2E (Interact, mocked backend
     await page.locator('[data-testid="manual-payment-confirm"]').click()
 
     // Success toast visible; no ErrorToast with NO_ROUTE.
-    await expect(page.getByRole('status')).toContainText('Payment sent: 1.00')
-    await expect(page.getByRole('alert')).toBeHidden()
-    await expect(page.getByRole('status')).not.toContainText('NO_ROUTE')
+    await expect(page.getByLabel('Success notification')).toContainText('Payment sent: 1.00 UAH')
+    await expect(page.getByLabel('Error notification')).toBeHidden()
+    await expect(page.getByLabel('Success notification')).not.toContainText('NO_ROUTE')
   })
 
   test('E-3: Trustline panel — newLimit < used -> Update disabled + warning visible', async ({ page }) => {
@@ -571,8 +591,8 @@ test.describe('Manual operations UI — Playwright E2E (Interact, mocked backend
     await expect(page.locator('[data-testid="trustline-panel"]')).toBeVisible()
 
     // Pick existing trustline: alice -> bob.
-    await page.locator('#tl-from').selectOption('alice')
-    await page.locator('#tl-to').selectOption('bob')
+    await chooseOverlayOption(page, 'tl-from', 'alice', true)
+    await chooseOverlayOption(page, 'tl-to', 'bob', true)
 
     await expect(page.locator('#tl-new-limit')).toBeVisible()
     await page.locator('#tl-new-limit').fill('4.99')
@@ -651,7 +671,7 @@ test.describe('Manual operations UI — Playwright E2E (Interact, mocked backend
 
     // Confirm step should be opened with prefilled pids (trustline to→from).
     await expect(page.locator('[data-testid="mp-direct-capacity-help"]')).toBeVisible()
-    await expect(page.locator('[aria-label="Manual payment panel"]')).toContainText('Manual payment: bob → alice')
+    await expect(page.locator('[data-testid="manual-payment-panel"]')).toContainText('Manual payment: bob → alice')
     await expect.poll(async () => await getSelectValue(page, '#mp-from')).toBe('bob')
     await expect.poll(async () => await getSelectValue(page, '#mp-to')).toBe('alice')
   })
@@ -693,8 +713,8 @@ test.describe('Manual operations UI — Playwright E2E (Interact, mocked backend
     await page.locator('[data-testid="actionbar-trustline"]').click()
     await expect(page.locator('[data-testid="trustline-panel"]')).toBeVisible()
 
-    await page.locator('#tl-from').selectOption('alice')
-    await page.locator('#tl-to').selectOption('bob')
+    await chooseOverlayOption(page, 'tl-from', 'alice', true)
+    await chooseOverlayOption(page, 'tl-to', 'bob', true)
 
     const closeBtn = page.locator('[data-testid="trustline-close-btn"]')
     await expect(closeBtn).toBeVisible()
@@ -704,8 +724,8 @@ test.describe('Manual operations UI — Playwright E2E (Interact, mocked backend
     await closeBtn.click()
     await closeBtn.click()
 
-    await expect(page.getByRole('alert')).toBeVisible()
-    await expect(page.getByRole('alert')).toContainText('Cannot close trustline: reverse_used > 0')
+    await expect(page.getByLabel('Error notification')).toBeVisible()
+    await expect(page.getByLabel('Error notification')).toContainText('Cannot close trustline: reverse_used > 0')
   })
 })
 
