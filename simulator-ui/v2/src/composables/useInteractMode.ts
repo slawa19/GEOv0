@@ -196,8 +196,6 @@ export function useInteractMode(opts: {
   const invalidateTrustlinesCache = dataCache.invalidateTrustlinesCache
   const findActiveTrustline = dataCache.findActiveTrustline
 
-  const paymentTargetsLastError = dataCache.paymentTargetsLastError
-
   function normalizeEq(v: unknown): string {
     return String(v ?? '').trim().toUpperCase()
   }
@@ -226,6 +224,11 @@ export function useInteractMode(opts: {
     const fromPid = normalizePid(state.fromPid)
     if (!runId || !eq || !fromPid) return null
     return dataCache.paymentTargetsKey({ runId, eq, fromPid, maxHops: PAYMENT_TARGETS_MAX_HOPS })
+  })
+
+  const paymentTargetsLastError = computed(() => {
+    const key = paymentTargetsActiveKey.value
+    return key ? (dataCache.paymentTargetsLastErrorByKey.value.get(key) ?? null) : null
   })
 
   const paymentTargetsLoading = computed(() => {

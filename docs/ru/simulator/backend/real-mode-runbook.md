@@ -202,7 +202,12 @@ Production-like запуск использует только base Compose, н�
 SSE replay buffer (best-effort):
 - `SIMULATOR_EVENT_BUFFER_SIZE` (по умолчанию 2000)
 - `SIMULATOR_EVENT_BUFFER_TTL_SEC` (по умолчанию 600)
-- `SIMULATOR_SSE_STRICT_REPLAY=1` — возвращать `HTTP 410`, если `Last-Event-ID` слишком старый
+- `SIMULATOR_SSE_SUB_QUEUE_MAX` (по умолчанию 500)
+
+`HTTP 410` для invalid/future/pruned/oversized `Last-Event-ID` включён всегда и
+не имеет отдельного env-переключателя. После `410` или закрытия stream из-за
+queue overflow клиент обязан переподключиться; snapshot refresh используется
+для восстановления materialized UI state.
 
 Real Mode guardrails:
 - `SIMULATOR_REAL_MAX_IN_FLIGHT` (по умолчанию 1)

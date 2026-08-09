@@ -446,7 +446,11 @@ flowchart TD
 SSE replay buffer:
 - `SIMULATOR_EVENT_BUFFER_SIZE`
 - `SIMULATOR_EVENT_BUFFER_TTL_SEC`
-- `SIMULATOR_SSE_STRICT_REPLAY`
+- `SIMULATOR_SSE_SUB_QUEUE_MAX`
+
+Replay correctness не переключается env-флагом: любой переданный
+`Last-Event-ID`, который нельзя полностью и упорядоченно восстановить, всегда
+получает `HTTP 410`.
 
 Real mode guardrails:
 - `SIMULATOR_REAL_MAX_IN_FLIGHT`

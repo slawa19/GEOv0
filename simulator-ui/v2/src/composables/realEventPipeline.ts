@@ -11,13 +11,8 @@ import { toLowerTrim } from '../utils/stringHelpers'
 
 export type RealEventReplayRejection = {
   status: 'rejected'
-  kind: 'malformed' | 'context' | 'replay'
-  diagnostic:
-    | 'frame_id_mismatch'
-    | 'active_run_changed'
-    | 'run_id_mismatch'
-    | 'equivalent_mismatch'
-    | 'stale_event_id'
+  kind: 'malformed' | 'context'
+  diagnostic: 'frame_id_mismatch' | 'active_run_changed' | 'run_id_mismatch' | 'equivalent_mismatch'
 }
 
 export type RealEventReplayAdmission =
@@ -93,12 +88,6 @@ export function createRealEventReplayOwner(opts?: { maxIds?: number; pruneBatch?
     if (processedEventIds.has(event.event_id)) {
       return { status: 'duplicate', cursor: currentCursor }
     }
-    const currentSeq = producerSequence(currentCursor, connectionRunId)
-    const eventSeq = producerSequence(event.event_id, connectionRunId)
-    if (currentSeq !== null && eventSeq !== null && eventSeq < currentSeq) {
-      return { status: 'rejected', kind: 'replay', diagnostic: 'stale_event_id' }
-    }
-
     return {
       status: 'accepted',
       cursor: monotonicCursor(currentCursor, event.event_id, connectionRunId),

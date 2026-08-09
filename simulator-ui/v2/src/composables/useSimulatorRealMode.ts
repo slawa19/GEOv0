@@ -322,27 +322,29 @@ export function useSimulatorRealMode(opts: {
     ensureScenarioSelectionValid()
   }
 
-  async function refreshRunStatusForCurrentContext(): Promise<boolean> {
+  type RunStatusRefreshOutcome = 'current' | 'stale' | 'transient' | 'superseded'
+
+  async function refreshRunStatusForCurrentContext(): Promise<RunStatusRefreshOutcome> {
     // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
     const runId = real.runId
-    if (!runId) return false
+    if (!runId) return 'superseded'
     const mySeq = ++refreshRunStatusSeq
     const isCurrent = () => refreshRunStatusSeq === mySeq && real.runId === runId
     try {
       const st = await getRun({ apiBase: real.apiBase, accessToken: real.accessToken }, runId)
-      if (!isCurrent()) return false
+      if (!isCurrent()) return 'superseded'
       real.runStatus = st
       const le = st.last_error
       real.lastError = le && isUserFacingRunError(le.code) ? `${le.code}: ${le.message}` : ''
-      return true
+      return 'current'
     } catch (e: unknown) {
-      if (!isCurrent()) return false
+      if (!isCurrent()) return 'superseded'
       if (e instanceof ApiError && e.status === 404) {
         resetStaleRun({ clearError: true })
-        return false
+        return 'stale'
       }
       real.lastError = getErrorMessage(e)
-      return false
+      return 'transient'
     }
   }
 
@@ -593,13 +595,23 @@ export function useSimulatorRealMode(opts: {
 
         real.lastError = msg
 
-        // Strict replay mode: backend may return 410 → do a full refresh.
+        // Unrecoverable replay cursor: clear it and rebuild authoritative state.
         if (msg.includes(' 410 ') || msg.includes('HTTP 410') || msg.includes('status 410')) {
           real.lastEventId = null
-          const statusIsCurrent = await refreshRunStatusForCurrentContext()
-          if (!statusIsCurrent || ctrl.signal.aborted || mySeq !== sseSeq || real.runId !== runId) return
-          await refreshSnapshot()
-          if (ctrl.signal.aborted || mySeq !== sseSeq || real.runId !== runId) return
+          real.sseState = 'reconnecting'
+          const statusOutcome = await refreshRunStatusForCurrentContext()
+          if (
+            statusOutcome === 'stale' ||
+            statusOutcome === 'superseded' ||
+            ctrl.signal.aborted ||
+            mySeq !== sseSeq ||
+            real.runId !== runId
+          )
+            return
+          if (statusOutcome === 'current') {
+            await refreshSnapshot()
+            if (ctrl.signal.aborted || mySeq !== sseSeq || real.runId !== runId) return
+          }
         }
 
         if (ctrl.signal.aborted || mySeq !== sseSeq || real.runId !== runId) return

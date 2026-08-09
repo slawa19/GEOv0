@@ -34,7 +34,8 @@ export function useInteractDataCache(opts: {
   paymentTargetsByKey: Ref<Map<string, Set<string>>>
   /** Loading flags per key. Key must match paymentTargetsByKey key. */
   paymentTargetsLoadingByKey: Ref<Map<string, boolean>>
-  paymentTargetsLastError: ComputedRef<string | null>
+  /** Error per cache key; stale failures cannot degrade a different active sender. */
+  paymentTargetsLastErrorByKey: Ref<Map<string, string>>
   paymentTargetsKey: (o: { runId: string; eq: string; fromPid: string; maxHops: number }) => string
   invalidateTrustlinesCache: (eq?: string) => void
   patchTrustlineLimitLocal: (from: string, to: string, newLimit: string, eq?: string) => void
@@ -242,8 +243,7 @@ export function useInteractDataCache(opts: {
   // NOTE: keep Maps in refs and replace on update so consumers can depend on ref identity.
   const paymentTargetsByKey = ref(new Map<string, Set<string>>())
   const paymentTargetsLoadingByKey = ref(new Map<string, boolean>())
-  const paymentTargetsLastErrorRef = ref<string | null>(null)
-  const paymentTargetsLastError = computed(() => paymentTargetsLastErrorRef.value)
+  const paymentTargetsLastErrorByKey = ref(new Map<string, string>())
   const paymentTargetsFetchEpochByKey = new Map<string, number>()
   const paymentTargetsFetchedAtMsByKey = new Map<string, number>()
 
@@ -256,6 +256,13 @@ export function useInteractDataCache(opts: {
     if (loading) next.set(key, true)
     else next.delete(key)
     paymentTargetsLoadingByKey.value = next
+  }
+
+  function setPaymentTargetsError(key: string, error: string | null) {
+    const next = new Map(paymentTargetsLastErrorByKey.value)
+    if (error) next.set(key, error)
+    else next.delete(key)
+    paymentTargetsLastErrorByKey.value = next
   }
 
   async function refreshPaymentTargets(o: { fromPid: string; maxHops: number; force?: boolean }) {
@@ -294,7 +301,7 @@ export function useInteractDataCache(opts: {
       const next = new Map(paymentTargetsByKey.value)
       next.set(key, ids)
       paymentTargetsByKey.value = next
-      paymentTargetsLastErrorRef.value = null
+      setPaymentTargetsError(key, null)
       paymentTargetsFetchedAtMsByKey.set(key, now)
     } catch (error) {
       // Ignore stale error for the same key.
@@ -304,7 +311,7 @@ export function useInteractDataCache(opts: {
       const next = new Map(paymentTargetsByKey.value)
       next.set(key, new Set())
       paymentTargetsByKey.value = next
-      paymentTargetsLastErrorRef.value = getErrorMessage(error, 'Payment targets refresh failed')
+      setPaymentTargetsError(key, getErrorMessage(error, 'Payment targets refresh failed'))
       // Treat error response as “known” for UI determinism, but still revalidate after TTL.
       paymentTargetsFetchedAtMsByKey.set(key, now)
     } finally {
@@ -321,7 +328,7 @@ export function useInteractDataCache(opts: {
     () => {
       paymentTargetsByKey.value = new Map()
       paymentTargetsLoadingByKey.value = new Map()
-      paymentTargetsLastErrorRef.value = null
+      paymentTargetsLastErrorByKey.value = new Map()
       paymentTargetsFetchEpochByKey.clear()
       paymentTargetsFetchedAtMsByKey.clear()
     },
@@ -335,7 +342,7 @@ export function useInteractDataCache(opts: {
     () => {
       paymentTargetsByKey.value = new Map()
       paymentTargetsLoadingByKey.value = new Map()
-      paymentTargetsLastErrorRef.value = null
+      paymentTargetsLastErrorByKey.value = new Map()
       paymentTargetsFetchEpochByKey.clear()
       paymentTargetsFetchedAtMsByKey.clear()
     },
@@ -446,7 +453,7 @@ export function useInteractDataCache(opts: {
     refreshPaymentTargets,
     paymentTargetsByKey,
     paymentTargetsLoadingByKey,
-    paymentTargetsLastError,
+    paymentTargetsLastErrorByKey,
     paymentTargetsKey,
     invalidateTrustlinesCache,
     patchTrustlineLimitLocal,

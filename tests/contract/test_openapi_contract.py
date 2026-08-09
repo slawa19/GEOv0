@@ -44,7 +44,7 @@ SUCCESS_SCHEMA_DRIFT_SHA256 = (
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 71
 ERROR_RESPONSE_DRIFT_SHA256 = (
-    "d16771d2d600ecb2a9e35ced36e5d3a84412bc5f080f835b26b0f74bde9acff2"
+    "1d38320dcdf7e8581072ec23115577a0ce668a3697b8d45881c52936166b4092"
 )
 ERROR_RESPONSE_DRIFT_COUNT = 84
 SECURITY_DRIFT_SHA256 = (
@@ -737,39 +737,46 @@ def test_simulator_event_union_tracks_producer_families_and_wire_aliases() -> No
 def test_simulator_events_documents_replay_cursor_and_gone_response() -> None:
     spec = _load_openapi_yaml()
     generated = _load_fastapi_openapi()
-    path_item = spec["paths"]["/simulator/runs/{run_id}/events"]
-    operation = path_item["get"]
-    generated_item = generated["paths"]["/api/v1/simulator/runs/{run_id}/events"]
-    generated_operation = generated_item["get"]
+    for canonical_path, generated_path in (
+        ("/simulator/events", "/api/v1/simulator/events"),
+        (
+            "/simulator/runs/{run_id}/events",
+            "/api/v1/simulator/runs/{run_id}/events",
+        ),
+    ):
+        path_item = spec["paths"][canonical_path]
+        operation = path_item["get"]
+        generated_item = generated["paths"][generated_path]
+        generated_operation = generated_item["get"]
 
-    parameters = _normalized_parameters(operation, path_item, spec)
-    assert parameters[("header", "Last-Event-ID")] == {
-        "required": False,
-        "schema": {"type": "string"},
-    }
-    assert _normalized_parameters(
-        generated_operation, generated_item, generated
-    )[("header", "Last-Event-ID")] == parameters[("header", "Last-Event-ID")]
+        parameters = _normalized_parameters(operation, path_item, spec)
+        assert parameters[("header", "Last-Event-ID")] == {
+            "required": False,
+            "schema": {"type": "string"},
+        }
+        assert _normalized_parameters(
+            generated_operation, generated_item, generated
+        )[("header", "Last-Event-ID")] == parameters[("header", "Last-Event-ID")]
 
-    responses = _normalized_responses(operation, spec)
-    assert responses["410"]["content"]["application/json"] == _normalize_schema(
-        {"$ref": "#/components/schemas/ErrorEnvelope"}, spec
-    )
-    assert generated_operation["responses"]["410"]["content"]["application/json"][
-        "schema"
-    ] == {"$ref": "#/components/schemas/ErrorEnvelope"}
+        responses = _normalized_responses(operation, spec)
+        assert responses["410"]["content"]["application/json"] == _normalize_schema(
+            {"$ref": "#/components/schemas/ErrorEnvelope"}, spec
+        )
+        assert generated_operation["responses"]["410"]["content"]["application/json"][
+            "schema"
+        ] == {"$ref": "#/components/schemas/ErrorEnvelope"}
 
-    without_cursor = copy.deepcopy(operation)
-    without_cursor["parameters"] = [
-        parameter
-        for parameter in without_cursor["parameters"]
-        if parameter.get("name") != "Last-Event-ID"
-    ]
-    assert parameters != _normalized_parameters(without_cursor, path_item, spec)
+        without_cursor = copy.deepcopy(operation)
+        without_cursor["parameters"] = [
+            parameter
+            for parameter in without_cursor["parameters"]
+            if parameter.get("name") != "Last-Event-ID"
+        ]
+        assert parameters != _normalized_parameters(without_cursor, path_item, spec)
 
-    without_gone = copy.deepcopy(operation)
-    del without_gone["responses"]["410"]
-    assert responses != _normalized_responses(without_gone, spec)
+        without_gone = copy.deepcopy(operation)
+        del without_gone["responses"]["410"]
+        assert responses != _normalized_responses(without_gone, spec)
 
 
 def test_payment_create_declares_exact_response_statuses_and_error_envelopes() -> None:

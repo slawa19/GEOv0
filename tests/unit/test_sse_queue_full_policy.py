@@ -9,7 +9,9 @@ from app.core.simulator.sse_broadcast import SseBroadcast
 
 
 @pytest.mark.asyncio
-async def test_sse_queue_full_drops_non_run_status(caplog: pytest.LogCaptureFixture) -> None:
+async def test_sse_queue_overflow_closes_stream_before_any_higher_id_is_delivered(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     lock = threading.RLock()
     runs: dict[str, RunRecord] = {}
     run = RunRecord(run_id="run_1", scenario_id="s", mode="fixtures", state="running")
@@ -48,19 +50,41 @@ async def test_sse_queue_full_drops_non_run_status(caplog: pytest.LogCaptureFixt
     with caplog.at_level(logging.WARNING):
         sse.broadcast("run_1", evt2)
 
-    # Still full with the first event; second tx.updated is dropped.
+    # The gap invalidates this live stream: pending data is discarded and a
+    # close marker wakes the consumer. Later events cannot reach this queue.
     assert sub.queue.qsize() == 1
     got = sub.queue.get_nowait()
-    assert got.get("event_id") == evt1["event_id"]
+    assert got.get("type") == "__subscription_closed__"
+    assert sub.closed is True
+    assert sub not in run._subs
+
+    evt3 = {
+        "event_id": sse.next_event_id(run),
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "type": "tx.updated",
+        "equivalent": "UAH",
+    }
+    sse.broadcast("run_1", evt3)
+    assert sub.queue.empty()
+
+    sse._get_sub_queue_max = lambda: 8  # type: ignore[method-assign]
+    recovered = await sse.subscribe(
+        "run_1", equivalent="UAH", after_event_id="evt_run_1_000000"
+    )
+    assert [recovered.queue.get_nowait()["event_id"] for _ in range(3)] == [
+        evt1["event_id"],
+        evt2["event_id"],
+        evt3["event_id"],
+    ]
 
     assert any(
-        rec.name == logger.name and "simulator.sse.queue_full_drop" in str(rec.message)
+        rec.name == logger.name and "simulator.sse.queue_overflow_close" in str(rec.message)
         for rec in caplog.records
     )
 
 
 @pytest.mark.asyncio
-async def test_sse_queue_full_keeps_run_status_by_eviction() -> None:
+async def test_sse_queue_full_run_status_terminates_instead_of_skipping_lower_event() -> None:
     lock = threading.RLock()
     runs: dict[str, RunRecord] = {}
     run = RunRecord(run_id="run_1", scenario_id="s", mode="fixtures", state="running")
@@ -88,7 +112,7 @@ async def test_sse_queue_full_keeps_run_status_by_eviction() -> None:
     sse.broadcast("run_1", evt1)
     assert sub.queue.qsize() == 1
 
-    # run_status must not be skipped: it should evict one queued item.
+    # Even a high-priority status cannot jump over a dropped lower event.
     rs = {
         "event_id": sse.next_event_id(run),
         "ts": datetime.now(timezone.utc).isoformat(),
@@ -105,12 +129,12 @@ async def test_sse_queue_full_keeps_run_status_by_eviction() -> None:
 
     assert sub.queue.qsize() == 1
     got = sub.queue.get_nowait()
-    assert got.get("type") == "run_status"
-    assert got.get("event_id") == rs["event_id"]
+    assert got.get("type") == "__subscription_closed__"
+    assert sub.closed is True
 
 
 @pytest.mark.asyncio
-async def test_sse_queue_full_prioritizes_amount_flyout_tx_updated() -> None:
+async def test_sse_queue_full_amount_flyout_terminates_instead_of_skipping_lower_event() -> None:
     lock = threading.RLock()
     runs: dict[str, RunRecord] = {}
     run = RunRecord(run_id="run_1", scenario_id="s", mode="fixtures", state="running")
@@ -149,10 +173,10 @@ async def test_sse_queue_full_prioritizes_amount_flyout_tx_updated() -> None:
     sse.broadcast("run_1", low)
     assert sub.queue.qsize() == 1
 
-    # Queue is full: amount_flyout=true should evict and be enqueued.
+    # Priority cannot violate the replay cursor: reconnect must recover both.
     sse.broadcast("run_1", hi)
 
     assert sub.queue.qsize() == 1
     got = sub.queue.get_nowait()
-    assert got.get("event_id") == hi["event_id"]
-    assert got.get("amount_flyout") is True
+    assert got.get("type") == "__subscription_closed__"
+    assert sub.closed is True

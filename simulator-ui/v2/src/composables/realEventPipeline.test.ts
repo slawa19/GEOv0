@@ -91,7 +91,7 @@ describe('realEventPipeline replay admission', () => {
     edges: [{ from: 'A', to: 'B' }],
   })
 
-  it('rejects an unseen lower producer sequence before state/effects or cursor acknowledgement', () => {
+  it('accepts an unseen lower producer sequence without regressing the reconnect cursor', () => {
     const owner = createRealEventReplayOwner()
     const input = (event: AcceptedSimulatorEvent, currentCursor: string | null) => ({
       event,
@@ -105,9 +105,8 @@ describe('realEventPipeline replay admission', () => {
     expect(owner.admit(input(tx('evt_run_1_20'), null))).toEqual({ status: 'accepted', cursor: 'evt_run_1_20' })
     owner.commit('evt_run_1_20', 'run_1')
     expect(owner.admit(input(tx('evt_run_1_10'), 'evt_run_1_20'))).toEqual({
-      status: 'rejected',
-      kind: 'replay',
-      diagnostic: 'stale_event_id',
+      status: 'accepted',
+      cursor: 'evt_run_1_20',
     })
   })
 

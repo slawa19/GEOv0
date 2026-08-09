@@ -1258,6 +1258,59 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
     }
   })
 
+  it('SSE 410 plus transient status failure stays reconnecting and retries without the stale cursor', async () => {
+    vi.useFakeTimers()
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5)
+    const connectSseMock = vi.mocked(connectSse)
+    const getRunMock = vi.mocked(getRun)
+    const prevConnectImpl = connectSseMock.getMockImplementation()
+    const prevGetRunImpl = getRunMock.getMockImplementation()
+    if (!prevGetRunImpl) throw new Error('expected getRun mock implementation')
+    const secondConnection = deferred()
+    const recoveryAttempted = deferred()
+    const seenCursors: Array<string | null | undefined> = []
+    let statusCalls = 0
+
+    connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
+      seenCursors.push(opts.lastEventId)
+      if (seenCursors.length === 1) throw new Error('SSE HTTP 410 Gone')
+      secondConnection.resolve()
+      await waitForAbort(opts.signal)
+    })
+    getRunMock.mockImplementation(async (...args) => {
+      statusCalls += 1
+      if (statusCalls === 2) {
+        recoveryAttempted.resolve()
+        throw new ApiError('HTTP 503 status unavailable', { status: 503 })
+      }
+      return prevGetRunImpl(...args)
+    })
+
+    const harness = createSseCharacterizationHarness({ lastEventId: 'evt_expired' })
+    try {
+      harness.isRealModeRef.value = true
+      await nextTick()
+      await recoveryAttempted.promise
+      await Promise.resolve()
+
+      expect(harness.real.runId).toBe('r1')
+      expect(harness.real.lastEventId).toBeNull()
+      expect(harness.real.sseState).toBe('reconnecting')
+      expect(harness.real.lastError).toContain('503')
+
+      await vi.advanceTimersByTimeAsync(1000)
+      await secondConnection.promise
+      expect(seenCursors).toEqual(['evt_expired', null])
+      expect(harness.real.sseState).toBe('open')
+    } finally {
+      harness.h.stopSse()
+      restoreConnectSseImplementation(prevConnectImpl)
+      getRunMock.mockImplementation(prevGetRunImpl)
+      randomSpy.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
   it('restores SSE observation when stop fails without a terminal 404', async () => {
     const connectSseMock = vi.mocked(connectSse)
     const stopRunMock = vi.mocked(stopRun)

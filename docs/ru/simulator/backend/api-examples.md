@@ -190,7 +190,12 @@ $lastEventId = "<event_id_from_previous_stream>"
 curl.exe -N -H "Accept: text/event-stream" -H "Authorization: Bearer $accessToken" -H "Last-Event-ID: $lastEventId" "$eventsUrl"
 ```
 
-Примечание: при включённом строгом режиме replay (`SIMULATOR_SSE_STRICT_REPLAY=1`) backend может вернуть `HTTP 410`, если `Last-Event-ID` слишком старый (вне окна ring-buffer). В этом случае делайте full refresh через `GET /simulator/runs/{run_id}` + `GET snapshot`.
+Backend всегда возвращает `HTTP 410`, если `Last-Event-ID` невалиден, относится
+к другому run, опережает текущую последовательность, вышел из окна ring-buffer
+или replay не помещается целиком в bootstrap queue. В этом случае очистите
+cursor, обновите `GET /simulator/runs/{run_id}` + snapshot и переподключитесь.
+Transient ошибка status/snapshot не означает stale run: сохраните run context и
+повторите reconnect; только подтверждённый `404` завершает этот контекст.
 
 Ожидаемое поведение: сервер периодически присылает `run_status` (heartbeat) во время `running`.
 

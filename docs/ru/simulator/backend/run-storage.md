@@ -204,5 +204,8 @@ WHERE created_at < NOW() - INTERVAL '30 days';
 
 ## 5) TODO (для закрытия документа)
 - Replay buffer для `Last-Event-ID` уже реализован как in-memory ring-buffer (best-effort).
-  - env: `SIMULATOR_EVENT_BUFFER_SIZE`, `SIMULATOR_EVENT_BUFFER_TTL_SEC`
-  - строгий режим: `SIMULATOR_SSE_STRICT_REPLAY=1` (возвращает 410 при слишком старом `Last-Event-ID`)
+  - env: `SIMULATOR_EVENT_BUFFER_SIZE`, `SIMULATOR_EVENT_BUFFER_TTL_SEC`, `SIMULATOR_SSE_SUB_QUEUE_MAX`
+  - replay correctness безусловна: любой cursor, который нельзя полностью
+    восстановить (invalid/future/pruned/oversized), возвращает `HTTP 410`;
+  - переполнение subscriber queue закрывает stream, после чего клиент
+    восстанавливает gap через reconnect/replay.

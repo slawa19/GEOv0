@@ -649,6 +649,50 @@ describe('useInteractMode', () => {
     expect(ids.has('carol')).toBe(false)
   })
 
+  it('payment-targets: late failure for another sender does not degrade the active sender key', async () => {
+    const snapshot = ref<GraphSnapshot | null>({
+      equivalent: 'UAH',
+      generated_at: '2026-01-01T00:00:00Z',
+      nodes: [
+        { id: 'alice', status: 'active' },
+        { id: 'bob', status: 'active' },
+        { id: 'carol', status: 'active' },
+      ],
+      links: [],
+    })
+    const actions = mkActions()
+    const aliceTargets = deferred<PaymentTargetsResult>()
+    const bobTargets = deferred<PaymentTargetsResult>()
+    actions.fetchPaymentTargets
+      .mockImplementationOnce(() => aliceTargets.promise)
+      .mockImplementationOnce(() => bobTargets.promise)
+
+    const im = useInteractMode({
+      actions,
+      runId: computed(() => 'run_test'),
+      equivalent: computed(() => 'UAH'),
+      snapshot,
+    })
+    im.startPaymentFlow()
+    im.setPaymentFromPid('alice')
+    im.cancel()
+    im.startPaymentFlow()
+    im.setPaymentFromPid('bob')
+
+    bobTargets.resolve([{ to_pid: 'carol', hops: 1 }] as PaymentTargetsResult)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(im.paymentTargetsLastError.value).toBeNull()
+    expect(im.paymentToTargetIds.value).toEqual(new Set(['carol']))
+
+    aliceTargets.reject(new Error('alice request failed late'))
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(im.state.fromPid).toBe('bob')
+    expect(im.paymentTargetsLastError.value).toBeNull()
+    expect(im.paymentToTargetIds.value).toEqual(new Set(['carol']))
+  })
+
   it('availableCapacity computed from snapshot link', () => {
     const snapshot = ref<GraphSnapshot | null>({
       equivalent: 'UAH',

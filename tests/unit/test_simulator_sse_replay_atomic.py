@@ -49,8 +49,13 @@ async def test_atomic_subscribe_queues_complete_replay_before_live_tail() -> Non
 
     bootstrap: dict[str, object] = {}
 
-    def build_status():
-        event = _event(sse, run, event_type="run_status")
+    def build_status(event_id: str):
+        event = {
+            "event_id": event_id,
+            "type": "run_status",
+            "run_id": run.run_id,
+            "state": run.state,
+        }
         bootstrap.update(event)
         return event
 
@@ -96,7 +101,12 @@ async def test_subscribe_rejects_replay_that_cannot_fit_without_exposing_subscri
             run.run_id,
             equivalent="EUR",
             after_event_id=str(cursor["event_id"]),
-            bootstrap_event_factory=lambda: _event(sse, run, event_type="run_status"),
+            bootstrap_event_factory=lambda event_id: {
+                "event_id": event_id,
+                "type": "run_status",
+                "run_id": run.run_id,
+                "state": run.state,
+            },
         )
 
     assert run._subs == []
@@ -115,7 +125,12 @@ async def test_live_priority_event_follows_full_pending_replay_bootstrap() -> No
         run.run_id,
         equivalent="EUR",
         after_event_id=str(cursor["event_id"]),
-        bootstrap_event_factory=lambda: _event(sse, run, event_type="run_status"),
+        bootstrap_event_factory=lambda event_id: {
+            "event_id": event_id,
+            "type": "run_status",
+            "run_id": run.run_id,
+            "state": run.state,
+        },
     )
     priority_live = _event(sse, run)
     priority_live["amount_flyout"] = True
@@ -142,8 +157,13 @@ async def test_stream_emits_single_bootstrap_tail_in_producer_order(monkeypatch)
 
     bootstrap: dict[str, object] = {}
 
-    def build_status():
-        event = _event(sse, run, event_type="run_status")
+    def build_status(event_id: str):
+        event = {
+            "event_id": event_id,
+            "type": "run_status",
+            "run_id": run.run_id,
+            "state": run.state,
+        }
         bootstrap.update(event)
         return event
 
@@ -213,6 +233,132 @@ async def test_subscribe_rejects_pruned_replay_but_accepts_cursor_before_oldest(
     assert [sub.queue.get_nowait()["event_id"] for _ in range(2)] == [
         events[2]["event_id"],
         events[3]["event_id"],
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "cursor, message",
+    [
+        ("", "not a runtime event id"),
+        ("not-an-event-id", "not a runtime event id"),
+        ("evt_other_run_000001", "not a runtime event id"),
+        (f"evt_run_atomic_{'9' * 5000}", "not a runtime event id"),
+        ("evt_run_atomic_999999", "ahead of the run event sequence"),
+    ],
+)
+async def test_subscribe_rejects_invalid_future_and_oversized_cursors(
+    cursor: str, message: str
+) -> None:
+    sse, run = _make_sse()
+    sse.publish_event(
+        run_id=run.run_id,
+        payload_factory=lambda event_id: {
+            "event_id": event_id,
+            "type": "tx.updated",
+            "equivalent": "EUR",
+        },
+    )
+
+    with pytest.raises(SseReplayUnavailable, match=message):
+        await sse.subscribe(run.run_id, equivalent="EUR", after_event_id=cursor)
+    assert run._subs == []
+
+
+@pytest.mark.asyncio
+async def test_atomic_publish_serializes_id_buffer_and_subscriber_order_across_producers() -> None:
+    sse, run = _make_sse()
+    sub = await sse.subscribe(run.run_id, equivalent="EUR")
+    entered = threading.Event()
+    release = threading.Event()
+    published: list[str] = []
+
+    def slow_factory(event_id: str) -> dict[str, object]:
+        entered.set()
+        assert release.wait(timeout=2)
+        return {"event_id": event_id, "type": "tx.updated", "equivalent": "EUR"}
+
+    def publish_slow() -> None:
+        payload = sse.publish_event(run_id=run.run_id, payload_factory=slow_factory)
+        assert payload is not None
+        published.append(str(payload["event_id"]))
+
+    def publish_fast() -> None:
+        payload = sse.publish_event(
+            run_id=run.run_id,
+            payload_factory=lambda event_id: {
+                "event_id": event_id,
+                "type": "run_status",
+                "run_id": run.run_id,
+                "state": run.state,
+            },
+        )
+        assert payload is not None
+        published.append(str(payload["event_id"]))
+
+    slow = threading.Thread(target=publish_slow)
+    fast = threading.Thread(target=publish_fast)
+    slow.start()
+    assert entered.wait(timeout=2)
+    fast.start()
+    release.set()
+    slow.join(timeout=2)
+    fast.join(timeout=2)
+
+    assert not slow.is_alive()
+    assert not fast.is_alive()
+    assert published == ["evt_run_atomic_000001", "evt_run_atomic_000002"]
+    assert [item[1] for item in run._event_buffer] == published
+    assert [sub.queue.get_nowait()["event_id"] for _ in range(2)] == published
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_tail_overflow_closes_subscription_and_replay_recovers_gap() -> None:
+    sse, run = _make_sse(queue_max=2, buffer_max=16)
+    sub = await sse.subscribe(
+        run.run_id,
+        equivalent="EUR",
+        bootstrap_event_factory=lambda event_id: {
+            "event_id": event_id,
+            "type": "run_status",
+            "run_id": run.run_id,
+            "state": run.state,
+        },
+    )
+    cursor = str(sub.queue.get_nowait()["event_id"])
+
+    for _ in range(3):
+        sse.publish_event(
+            run_id=run.run_id,
+            payload_factory=lambda event_id: {
+                "event_id": event_id,
+                "type": "tx.updated",
+                "equivalent": "EUR",
+            },
+        )
+
+    assert sub.closed is True
+    assert sub.close_reason == "replay_bootstrap_overflow"
+    assert sub not in run._subs
+    assert sub.queue.get_nowait()["type"] == "__subscription_closed__"
+
+    sse._get_sub_queue_max = lambda: 8  # type: ignore[method-assign]
+    recovered = await sse.subscribe(
+        run.run_id,
+        equivalent="EUR",
+        after_event_id=cursor,
+        bootstrap_event_factory=lambda event_id: {
+            "event_id": event_id,
+            "type": "run_status",
+            "run_id": run.run_id,
+            "state": run.state,
+        },
+    )
+    assert [recovered.queue.get_nowait()["event_id"] for _ in range(4)] == [
+        "evt_run_atomic_000002",
+        "evt_run_atomic_000003",
+        "evt_run_atomic_000004",
+        "evt_run_atomic_000005",
     ]
 
 

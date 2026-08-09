@@ -27,7 +27,11 @@ from app.core.simulator.edge_patch_builder import EdgePatchBuilder
 from app.core.simulator.real_scenario_seeder import RealScenarioSeeder
 from app.core.simulator.scenario_equivalent import effective_equivalent
 from app.core.simulator.models import _Subscription
-from app.core.simulator.sse_broadcast import SseEventEmitter, SseReplayUnavailable
+from app.core.simulator.sse_broadcast import (
+    SSE_SUBSCRIPTION_CLOSED_TYPE,
+    SseEventEmitter,
+    SseReplayUnavailable,
+)
 from app.core.simulator.viz_patch_helper import VizPatchHelper
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
@@ -2074,6 +2078,8 @@ async def _run_events_stream(
             deadline_sec = 1.0
             while True:
                 evt = await asyncio.wait_for(sub.queue.get(), timeout=deadline_sec)
+                if str(evt.get("type") or "") == SSE_SUBSCRIPTION_CLOSED_TYPE:
+                    return
                 if str(evt.get("event_id") or "") == status_event_id:
                     status_evt = evt
                     break
@@ -2108,6 +2114,8 @@ async def _run_events_stream(
                 if sub.replay_bootstrap_pending
                 else []
             )
+            if bootstrap_tail is None:
+                return
             if str(init_event.get("state") or "") in ("stopped", "error"):
                 return
         else:
@@ -2134,6 +2142,8 @@ async def _run_events_stream(
                 if sub.replay_bootstrap_pending
                 else []
             )
+            if bootstrap_tail is None:
+                return
 
             if str(status_evt.get("state") or "") in ("stopped", "error"):
                 return
@@ -2177,6 +2187,9 @@ async def _run_events_stream(
                     nxt = await asyncio.wait_for(sub.queue.get(), timeout=0.25)
                 except asyncio.TimeoutError:
                     continue
+
+                if str(nxt.get("type") or "") == SSE_SUBSCRIPTION_CLOSED_TYPE:
+                    return
 
                 nxt_type = str(nxt.get("type") or "")
                 if nxt_type == "run_status":
@@ -2261,6 +2274,9 @@ async def _run_events_stream(
                 yield ": keep-alive\n\n"
                 continue
 
+            if str(evt.get("type") or "") == SSE_SUBSCRIPTION_CLOSED_TYPE:
+                return
+
             event_id = str(evt.get("event_id") or evt.get("event") or "")
             if not event_id:
                 event_id = f"evt_{secrets.token_hex(6)}"
@@ -2325,11 +2341,19 @@ async def ego_snapshot_active_run(
     return await runtime.build_ego_snapshot(run_id=run_id, equivalent=equivalent, pid=pid, depth=depth, session=db)
 
 
-@router.get("/events")
+@router.get(
+    "/events",
+    responses={
+        410: {
+            "model": ErrorEnvelope,
+            "description": "Replay cursor is invalid, unavailable, or cannot fit the subscriber queue",
+        }
+    },
+)
 async def events_stream_active_run(
-    request: Request,
     equivalent: str = Query(...),
     stop_after_types: Optional[str] = Query(None),
+    last_event_id: Optional[str] = Header(None, alias="Last-Event-ID"),
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
     run_id = runtime.get_active_run_id(owner_id=actor.owner_id)
@@ -2343,6 +2367,10 @@ async def events_stream_active_run(
             run_id = None
 
     if run_id is None:
+        if last_event_id is not None:
+            raise GoneException(
+                "Last-Event-ID replay is unavailable; please refresh state"
+            )
 
         async def idle_stream() -> AsyncIterator[str]:
             while True:
@@ -2355,7 +2383,6 @@ async def events_stream_active_run(
             headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
         )
 
-    last_event_id = request.headers.get("Last-Event-ID")
     try:
         sub, status_event_id = await runtime.subscribe_with_status(
             run_id, equivalent=equivalent, after_event_id=last_event_id
@@ -2553,7 +2580,7 @@ async def set_run_intensity(
     responses={
         410: {
             "model": ErrorEnvelope,
-            "description": "Replay cursor is older than the retained SSE buffer",
+            "description": "Replay cursor is invalid, unavailable, or cannot fit the subscriber queue",
         }
     },
 )

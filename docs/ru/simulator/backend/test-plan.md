@@ -96,7 +96,7 @@
 Расположение (фактически в репозитории сейчас):
 - `tests/integration/test_simulator_sse_smoke.py`
 - `tests/integration/test_simulator_sse_real_smoke.py`
-- `tests/integration/test_simulator_sse_strict_replay_410.py`
+- `tests/integration/test_simulator_sse_replay_410.py`
 - `tests/integration/test_simulator_sse_tx_failed_timeout.py`
 - `tests/integration/test_simulator_sse_fixtures_clearing_animation_pair.py`
 - `tests/integration/test_simulator_artifacts_events_ndjson.py`
