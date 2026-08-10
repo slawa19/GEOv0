@@ -152,33 +152,42 @@ preserved exact terminal states and monetary/audit counts. The staged loser roll
 back rather than leaving a partial effect. No double application, trust-limit
 violation or durable partial route was observed.
 
-### Independent P1 registration — not program 002 scope
+### Independent P2 registration — not program 002 scope
 
 `ClearingService.execute_clearing_with_amount` commits directly at
 `app/core/clearing/service.py:1079`, while real-simulator progress and publication
 occur only after the service returns. A read-only audit reproduced a commit that
 became durable and then raised `CancelledError`: the clearing transaction was
 durably `COMMITTED`, but the caller observed cancellation and did not publish the
-cycle result. This is an ambiguous durable-commit boundary with financial/runtime
-reporting impact.
+cycle result. This confirms an ambiguous durable-commit and runtime-publication
+boundary. It does not yet demonstrate a duplicate clearing, monetary corruption
+or a supported caller retry, so Phase 0 does not elevate it to P1. Program 001
+likewise classified analogous cancelled durable audit/publication outcomes as P2
+(`specs/001-codebase-renovation/spec.md:433-441`).
 
 Owner: clearing service plus simulator commit-resolution/publication.
 
 Disposition: register for a separate owner-approved program; do not fix or expand
 program 002. No tracked reproducer or product edit was made in Phase 0.
 
-## 7. Other residuals, not accepted work
+## 7. Other residuals and scope disposition
 
-- clearing and payment do not share an advisory domain; the current PrepareLock
-  snapshot has a TOCTOU window (directly addressed only by Phase 2 scope);
+- **Accepted in-program P2:** clearing and payment do not share an advisory domain;
+  the current PrepareLock snapshot has a TOCTOU window. The active contract says
+  clearing avoids active prepared pairs
+  (`docs/ru/simulator/backend/payment-integration.md:70`), and Phase 2 owns this
+  bounded serialization/revalidation boundary.
+Recorded outside program 002:
+
 - clearing early `None` paths can retain caller transaction/row locks;
 - real simulator may publish a stale candidate clearing amount instead of the
   row-locked actual amount;
 - trust growth mutates in-memory history/scenario before commit;
 - recovery can issue redundant lock cleanup after `abort` already cleaned it.
 
-Only the first overlaps this program's resource boundary. The remaining items are
-recorded evidence, not silently authorized backlog.
+Only the explicitly accepted clearing/payment P2 overlaps this program's resource
+boundary. The remaining items are recorded evidence, not silently authorized
+backlog.
 
 ## 8. Unverified paths
 
@@ -191,6 +200,7 @@ recorded evidence, not silently authorized backlog.
 
 These are explicit Phase 1/2 acceptance inputs or separately owned residuals; no
 claim of full payment/clearing correctness is made by Phase 0.
+
 ## 9. Independent audit ledger
 
 Three read-only agents separately covered:
@@ -202,5 +212,20 @@ Three read-only agents separately covered:
 The orchestrator independently reran the canonical unit and PostgreSQL selectors
 and the real reproducer. Agent reports were treated as leads rather than gates.
 
-Internal adversarial and external Claude review results are appended during Phase
-0 closeout; their absence means the phase is not yet closed.
+The separate read-only adversarial review examined exact range
+`296719d9055c14f6b463ddb7d8a3651c88087d76..f294c01`. It found no P1, four
+documentation P2s and one citation P3. The orchestrator confirmed each P2 against
+the implementation and active contracts before remediation:
+
+- mixed-version compatibility now requires canonical plus both directed legacy
+  keys, or coordinated quiescence;
+- the independent clearing ambiguous outcome is P2, not an evidenced P1;
+- the owner inventory now includes Admin staged abort and both recovery loops;
+- the clearing/payment snapshot race is explicitly accepted as the Phase 2 P2.
+
+Reviewer checks: exact-range `git diff --check` exit `0`; changed-surface and
+relative-link scans exit `0`; targeted unit selector exit `0` (`6 passed`). No
+files were edited by the reviewer.
+
+External Claude review results are appended during Phase 0 closeout; their absence
+means the phase is not yet closed.

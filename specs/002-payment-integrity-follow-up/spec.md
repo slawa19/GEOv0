@@ -95,7 +95,8 @@ The active contracts require:
 - route capacity cannot be oversubscribed;
 - prepare, commit and abort remain idempotent by `tx_id`;
 - a timeout, retry or cancellation cannot double-apply or partially apply money;
-- prepared segments are not cleared underneath an active payment;
+- prepared segments are not cleared underneath an active payment
+  (`docs/ru/simulator/backend/payment-integration.md:70`);
 - transaction ownership remains explicit: `commit=False` never commits or rolls
   back the caller's outer transaction.
 
@@ -200,6 +201,21 @@ historical migrations.
 No API, schema, migration or UI dependency is currently expected. Discovery of
 one reopens planning before implementation.
 
+### 7.1 Transaction-owner inventory
+
+| Caller | Engine operation | Commit mode | Transaction owner |
+|---|---|---|---|
+| Public/internal `PaymentService` | prepare/commit/abort | `commit=True` | payment service/engine UoW |
+| Real simulator payment batch | staged payment | `commit=False` | real tick payment coordinator/executor |
+| Admin transaction abort | abort plus audit | `commit=False` | Admin endpoint session (`app/api/v1/admin.py:1026-1033`) |
+| Expired PrepareLock recovery | abort | `commit=True` default | recovery item (`app/core/recovery.py:107-122`) |
+| Stale-payment recovery | abort | `commit=True` default | recovery item (`app/core/recovery.py:212-226`) |
+| Clearing service | clearing mutation | separate raw commit | clearing service; no shared payment advisory identity |
+
+Phase 1 must re-run this inventory before selecting a compatibility or staged
+acquisition mechanism; every owner that can coexist during rollout participates
+in the old/new concurrency matrix.
+
 ## 8. Anti-regression acceptance
 
 The delivery phases must prove, with deterministic barriers rather than sleeps:
@@ -224,8 +240,13 @@ only after the PostgreSQL matrix passes on the exact commit.
 Rollback is `git revert` of the affected delivery commit. During mixed-version
 rollout, old and new processes would use different advisory identities; therefore
 rolling deployment is unsafe unless the chosen implementation supplies an
-explicit compatibility bridge. Phase 1 must either acquire both identities in a
-safe order during transition or require a coordinated stop-the-world deployment.
+explicit compatibility bridge. A valid bridge must acquire the canonical key and
+**both** legacy directional keys for every unordered pair in one globally defined
+order; acquiring only the caller's directed legacy key still permits an old
+reverse-direction worker to bypass it. The old/new × both-directions PostgreSQL
+matrix must include service, staged, Admin-abort and recovery owners. Otherwise
+Phase 1 requires coordinated quiescence, and Phase 2 rollback inherits that
+deployment constraint.
 
 ## 10. Stop rule
 

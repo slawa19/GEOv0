@@ -22,13 +22,13 @@ Status legend: `[x]` complete, `[ ]` pending, `[!]` blocked/not authorized.
 - [x] P009 Run the existing targeted PostgreSQL selectors.
 - [x] P010 Run an ignored deterministic reverse-direction reproducer for direct
   keys, inverse commit, staged acquisition, timeout and cancellation.
-- [x] P011 Classify the residual as confirmed P2 and register the independent
-  clearing ambiguous-commit P1 without expanding scope.
+- [x] P011 Classify the payment residual as confirmed P2 and register the
+  independent clearing ambiguous-commit P2 without expanding scope.
 - [x] P012 Write `spec.md`, `plan.md`, `tasks.md` and the evidence map.
-- [ ] P013 Run governance checks and commit the initial evidence/specification.
-- [ ] P014 Assign a separate read-only adversarial reviewer; reproduce every
+- [x] P013 Run governance checks and commit the initial evidence/specification.
+- [x] P014 Assign a separate read-only adversarial reviewer; reproduce every
   reported P1/P2 before editing.
-- [ ] P015 Commit only confirmed review remediation, if needed.
+- [x] P015 Commit only confirmed review remediation, if needed.
 - [ ] P016 Run required Claude Code `/code-review high` against the exact frozen
   governance range from a credential-free standalone clone.
 - [ ] P017 Resolve confirmed external findings; allow at most one fix-delta review.
@@ -52,7 +52,9 @@ All tasks are pending owner authorization.
   business/audit semantics.
 - [!] P105 Implement transaction-wide acquisition for staged owners; a retry-count
   increase is forbidden.
-- [!] P106 Define and test mixed-version deployment compatibility.
+- [!] P106 Define and test mixed-version deployment compatibility across service,
+  staged, Admin-abort and recovery owners. A bridge must acquire canonical plus
+  both legacy directional keys in one global order; otherwise require quiescence.
 - [!] P107 Run existing same-direction, same-tx, idempotency, timeout, cancellation
   and recovery selectors.
 - [!] P108 Update stable RU payment and decision documentation.
@@ -82,5 +84,5 @@ The following findings are not tasks in program 002:
 - cleanup-expired-lock redundant post-abort commit;
 - general clearing early-return transaction cleanup.
 
-The first is registered as an independent P1 under the clearing/simulator owner.
+The first is registered as an independent P2 under the clearing/simulator owner.
 It requires a separately approved program rather than silent scope expansion.

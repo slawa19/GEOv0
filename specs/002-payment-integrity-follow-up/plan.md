@@ -57,7 +57,8 @@ Vertical slice:
    identity while retaining directed business/audit data;
 3. inventory every `commit=False` owner and implement a transaction-wide lock-set
    or stable coarse-owner protocol before the first staged monetary mutation;
-4. define mixed-version deployment compatibility;
+4. define mixed-version deployment compatibility: either coordinated quiescence,
+   or canonical plus both legacy directional keys in one global order;
 5. rerun same-direction bottleneck, same-tx transition, idempotency, timeout,
    cancellation and recovery selectors;
 6. update stable payment/decision documentation for the selected mechanism;
@@ -77,9 +78,9 @@ old/new key identities without the compatibility mechanism selected in the slice
 
 Not authorized by Phase 0.
 
-Goal: close only the shared payment/clearing resource boundary and then close the
-program. The independent clearing ambiguous-commit finding is not folded into
-this phase.
+Goal: close the accepted in-program P2 at the shared payment/clearing resource
+boundary and then close the program. The independent clearing ambiguous-commit
+P2 is not folded into this phase.
 
 Vertical slice:
 
