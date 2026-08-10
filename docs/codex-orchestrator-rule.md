@@ -2,7 +2,9 @@
 
 Status: current operational rule  
 Owner surface: repository-wide review and refactoring  
-Companion sources: `../AGENTS.md`, `../specs/001-codebase-renovation/`
+Companion sources: `../AGENTS.md`, `../specs/002-payment-integrity-follow-up/`
+
+Completed history: `../specs/001-codebase-renovation/`
 
 Этот файл читается вместе с корневым `AGENTS.md` каждый раз, когда Codex работает
 как оркестратор. Он не заменяет продуктовые контракты и не разрешает менять код

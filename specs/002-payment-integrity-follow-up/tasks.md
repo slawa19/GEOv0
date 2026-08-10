@@ -31,10 +31,10 @@ Status legend: `[x]` complete, `[ ]` pending, `[!]` blocked/not authorized.
 - [x] P015 Commit only confirmed review remediation, if needed.
 - [x] P016 Run required Claude Code `/code-review high` against the exact frozen
   governance range from a credential-free standalone clone.
-- [ ] P017 Resolve confirmed external findings; allow at most one fix-delta review.
-- [ ] P018 Update repository front doors only after Phase 0 acceptance.
-- [ ] P019 Run final diff/link/scope/artifact/secret checks.
-- [ ] P020 Commit governance closeout, push the branch, verify remote SHA and report
+- [x] P017 Resolve confirmed external findings; allow at most one fix-delta review.
+- [x] P018 Update repository front doors only after Phase 0 acceptance.
+- [x] P019 Run final diff/link/scope/artifact/secret checks.
+- [x] P020 Commit governance closeout, push the branch, verify remote SHA and report
   automatically triggered CI without claiming an unobserved gate.
 
 ## Phase 1 — Payment serialization owner
@@ -55,8 +55,9 @@ All tasks are pending owner authorization.
 - [!] P106 Define and test mixed-version deployment compatibility across service,
   staged, Admin-abort and recovery owners. A bridge must acquire canonical plus
   both legacy directional keys in one global order; otherwise require quiescence.
-- [!] P107 Run existing same-direction, same-tx, commit-only `23505`, idempotency,
-  timeout, cancellation and recovery selectors.
+- [!] P107 Add deterministic real PostgreSQL characterization of commit-only
+  `23505` after a SERIALIZABLE advisory wait, then run existing same-direction,
+  same-tx, idempotency, timeout, cancellation and recovery selectors.
 - [!] P108 Update stable RU payment and decision documentation.
 - [!] P109 Complete adversarial/external reviews and publish the exact-head evidence.
 

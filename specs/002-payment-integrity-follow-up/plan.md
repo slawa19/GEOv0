@@ -1,6 +1,6 @@
 # 002 — Delivery plan
 
-Status: Phase 0 only
+Status: Phase 0 complete; later phases require owner authorization
 
 Contract: [spec.md](spec.md)
 
@@ -59,8 +59,9 @@ Vertical slice:
    or stable coarse-owner protocol before the first staged monetary mutation;
 4. define mixed-version deployment compatibility: either coordinated quiescence,
    or canonical plus both legacy directional keys in one global order;
-5. rerun same-direction bottleneck, same-tx transition, idempotency, timeout,
-   cancellation and recovery selectors;
+5. add real PostgreSQL characterization for commit-only `23505` after a
+   SERIALIZABLE advisory wait, then rerun same-direction bottleneck, same-tx
+   transition, idempotency, timeout, cancellation and recovery selectors;
 6. update stable payment/decision documentation for the selected mechanism;
 7. perform independent adversarial and external review of the frozen product diff.
 

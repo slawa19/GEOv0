@@ -6,7 +6,7 @@ Baseline: `296719d9055c14f6b463ddb7d8a3651c88087d76`
 
 Branch: `codex/payment-integrity-follow-up-phase0`
 
-Decision: confirmed P2; Phase 1 is specified but not authorized
+Decision: Phase 0 complete; confirmed P2; Phase 1 is specified but not authorized
 
 ## 1. Baseline and history
 
@@ -34,7 +34,8 @@ behavior correct.
 | Segment identity is directed | `app/core/payments/engine.py:82-93` |
 | Reverse keys are intentionally unequal in current unit coverage | `tests/unit/test_payment_engine_advisory_lock_key.py:13-18` |
 | One call sorts/deduplicates its supplied keys | `app/core/payments/engine.py:115-150` |
-| Retry handles `40P01`/`40001`; staged retry uses a savepoint | `app/core/payments/engine.py:263-348` |
+| Retry predicate handles `40P01`/`40001` and commit-only `23505` | `app/core/payments/engine.py:231-251` |
+| Retry loop uses whole-UoW rollback or a staged savepoint | `app/core/payments/engine.py:263-348` |
 | One flow mutates reciprocal debt state | `app/core/payments/engine.py:1182-1255` |
 | Staged payment is an explicit service path | `app/core/payments/service.py:221-250` |
 | Real simulator invokes staged payment | `app/core/simulator/real_payments_executor.py:369` |
@@ -251,3 +252,26 @@ checked before remediation:
 
 The fix-delta receives the single remediation review allowed by the orchestrator
 rule before Phase 0 closeout.
+
+## 11. External fix-delta review and closeout
+
+Claude Code `2.1.226` reviewed exact fix range
+`c2a0974e158f064dbd6da89f1e78d5a2e2a3622d..0d6cb010d9cf4092afecb58b48c25133474b7ae7`
+from the same clean credential-free standalone clone with `opus`, effort `high`,
+plan permissions and edit/write tools disabled. Result: exit `0`, complete JSON,
+`is_error=false`, resolved model `claude-opus-5`.
+
+It confirmed the retry-override disclosure, `23505` predicate claim and rendered
+scope separation. It then reported one medium wording ambiguity and three low
+traceability/plan gaps. Manual source verification confirmed all four:
+
+- staged failure semantics now name only `40P01`/`40001` and explicitly exclude
+  commit-only `23505`;
+- the evidence table traces the retry predicate separately from the loop;
+- plan and tasks both require a real PostgreSQL `23505` characterization;
+- the acceptance matrix no longer treats a predicate unit test as lock evidence.
+
+The orchestrator rule permits no third external remediation pass. Final local
+scope, link, diff, artifact and secret scans cover this governance-only closeout.
+No unresolved in-program P1 remains. The confirmed payment and clearing P2s are
+the explicitly unauthorized Phase 1 and Phase 2 delivery backlog.

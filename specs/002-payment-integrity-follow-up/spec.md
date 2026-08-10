@@ -1,6 +1,6 @@
 # 002 — Payment integrity follow-up
 
-Status: Phase 0 evidence complete; implementation is not authorized in this phase
+Status: Phase 0 complete; Phase 1 implementation is not authorized
 
 Owner surfaces: `app/core/payments/`, payment callers, the payment/clearing boundary
 
@@ -145,9 +145,10 @@ the monetary mutation.
 - `40P01`/`40001` before a transaction-owned commit: retry the whole owned UoW.
 - Commit-only `23505` after an invisible concurrent insert: preserve the existing
   whole-commit retry so the terminal `tx_id` state resolves idempotently.
-- The same errors in staged work: retry only when the conflicting lock set is
+- `40P01`/`40001` in staged work: retry only when the conflicting lock set is
   contained in the savepoint; otherwise fail deterministically to the outer owner
-  or restart the whole outer UoW.
+  or restart the whole outer UoW. Commit-only `23505` is not retryable for the
+  staged `commit_nocommit` operation.
 - `55P03`: map to the existing bounded timeout contract.
 - Cancellation: propagate after rollback/cleanup owned by the applicable layer.
 - Ambiguous commit acknowledgement: resolve from durable state before publishing
@@ -228,7 +229,8 @@ The delivery phases must prove, with deterministic barriers rather than sleeps:
 - inverse single- and multi-segment prepare/commit cannot bypass serialization;
 - both route start orders have the same bounded outcome;
 - same-direction bottleneck and same-`tx_id` idempotency coverage remain green;
-- commit-only `23505` retry after a SERIALIZABLE lock wait remains covered;
+- commit-only `23505` retry after a SERIALIZABLE lock wait has deterministic real
+  PostgreSQL characterization in addition to its predicate unit guard;
 - staged multi-payment owners cannot exhaust savepoint retry on retained locks;
 - timeout and cancellation release owned locks without partial/double effect;
 - final reciprocal debts, trust limits, transaction states, PrepareLock count and
