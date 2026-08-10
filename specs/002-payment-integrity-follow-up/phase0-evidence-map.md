@@ -126,7 +126,7 @@ Observed result, exit `0`:
 | Inverse multi-flow commit, left first | Real `40P01`; retry completed both transactions. |
 | Inverse multi-flow commit, right first | Real `40P01`; retry completed both transactions. |
 | Durable results | Both states `COMMITTED`; reciprocal debts `9.00000000`; zero PrepareLocks; two audit rows. |
-| Staged inverse acquisition | One outer transaction committed; the other received `40P01` on all four attempts and failed. |
+| Staged inverse acquisition | With a deliberate four-attempt zero-delay override, one outer transaction committed; the other received `40P01` on every attempt and failed. Production defaults to three attempts. |
 | Lock timeout | PostgreSQL lock timeout mapped to `asyncio.TimeoutError`. |
 | Cancellation | `CancelledError` propagated; the lock was acquirable after rollback. |
 
@@ -177,6 +177,7 @@ program 002. No tracked reproducer or product edit was made in Phase 0.
   clearing avoids active prepared pairs
   (`docs/ru/simulator/backend/payment-integration.md:70`), and Phase 2 owns this
   bounded serialization/revalidation boundary.
+
 Recorded outside program 002:
 
 - clearing early `None` paths can retain caller transaction/row locks;
@@ -229,3 +230,24 @@ files were edited by the reviewer.
 
 External Claude review results are appended during Phase 0 closeout; their absence
 means the phase is not yet closed.
+
+## 10. Initial external review
+
+Claude Code `2.1.226` reviewed frozen range
+`296719d9055c14f6b463ddb7d8a3651c88087d76..c2a0974e158f064dbd6da89f1e78d5a2e2a3622d`
+from a clean credential-free standalone clone. Command policy was `opus`, effort
+`high`, plan permissions, and disallowed `Edit,Write,NotebookEdit`. Result: exit
+`0`, complete JSON, `is_error=false`, resolved model `claude-opus-5`.
+
+The reviewer confirmed the docs-only scope, all cited call-sites/history and the
+P2 severity decisions. It reported three documentation findings, all manually
+checked before remediation:
+
+1. disclose the reproducer's deliberate four-attempt override versus the
+   production default of three;
+2. separate the accepted clearing P2 from the rendered out-of-scope residual list;
+3. preserve the existing commit-only `23505` idempotency retry in the Phase 1
+   failure and acceptance matrix.
+
+The fix-delta receives the single remediation review allowed by the orchestrator
+rule before Phase 0 closeout.

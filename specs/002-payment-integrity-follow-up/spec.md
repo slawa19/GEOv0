@@ -24,9 +24,10 @@ Phase 0 reproduced three distinct facts on PostgreSQL 16:
 2. inverse multi-segment `commit=True` payments can enter a real row-level
    deadlock (`40P01`), after which whole-UoW retry preserves exactly-once effects;
 3. inverse lock accumulation across multiple `commit=False` calls in two outer
-   transactions can repeat `40P01` until one staged operation exhausts all four
-   attempts. A savepoint rollback cannot release an advisory transaction lock
-   acquired before that savepoint.
+   transactions can repeat `40P01` until one staged operation exhausts every
+   configured attempt. The temporary characterization used four zero-delay
+   attempts to expose persistence; the production default is three. A savepoint
+   rollback cannot release an advisory transaction lock acquired before it.
 
 This is a confirmed P2 serialization and liveness defect. The checked production
 default, PostgreSQL `SERIALIZABLE`, prevented a partial or duplicated monetary
@@ -64,9 +65,10 @@ flow and audit direction remain directed.
 
 - Public payment calls own their transaction; internal staged calls pass
   `commit=False` (`app/core/payments/service.py:160-250`).
-- Whole-UoW retry handles `40P01` and `40001`; the staged variant uses a savepoint
-  and deliberately does not roll back the caller's outer transaction
-  (`app/core/payments/engine.py:263-348`).
+- Whole-UoW retry handles `40P01` and `40001`; commit additionally retries `23505`
+  after an invisible concurrent insert following a SERIALIZABLE advisory-lock
+  wait. The staged variant uses a savepoint and deliberately does not roll back
+  the caller's outer transaction (`app/core/payments/engine.py:245-348`).
 - Real simulator payment batching calls the staged service from
   `app/core/simulator/real_payments_executor.py:369`.
 - The service owns a total timeout and shielded abort paths
@@ -141,6 +143,8 @@ the monetary mutation.
 ### 4.4 Failure semantics
 
 - `40P01`/`40001` before a transaction-owned commit: retry the whole owned UoW.
+- Commit-only `23505` after an invisible concurrent insert: preserve the existing
+  whole-commit retry so the terminal `tx_id` state resolves idempotently.
 - The same errors in staged work: retry only when the conflicting lock set is
   contained in the savepoint; otherwise fail deterministically to the outer owner
   or restart the whole outer UoW.
@@ -224,6 +228,7 @@ The delivery phases must prove, with deterministic barriers rather than sleeps:
 - inverse single- and multi-segment prepare/commit cannot bypass serialization;
 - both route start orders have the same bounded outcome;
 - same-direction bottleneck and same-`tx_id` idempotency coverage remain green;
+- commit-only `23505` retry after a SERIALIZABLE lock wait remains covered;
 - staged multi-payment owners cannot exhaust savepoint retry on retained locks;
 - timeout and cancellation release owned locks without partial/double effect;
 - final reciprocal debts, trust limits, transaction states, PrepareLock count and

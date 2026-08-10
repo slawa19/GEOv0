@@ -29,7 +29,7 @@ Status legend: `[x]` complete, `[ ]` pending, `[!]` blocked/not authorized.
 - [x] P014 Assign a separate read-only adversarial reviewer; reproduce every
   reported P1/P2 before editing.
 - [x] P015 Commit only confirmed review remediation, if needed.
-- [ ] P016 Run required Claude Code `/code-review high` against the exact frozen
+- [x] P016 Run required Claude Code `/code-review high` against the exact frozen
   governance range from a credential-free standalone clone.
 - [ ] P017 Resolve confirmed external findings; allow at most one fix-delta review.
 - [ ] P018 Update repository front doors only after Phase 0 acceptance.
@@ -55,8 +55,8 @@ All tasks are pending owner authorization.
 - [!] P106 Define and test mixed-version deployment compatibility across service,
   staged, Admin-abort and recovery owners. A bridge must acquire canonical plus
   both legacy directional keys in one global order; otherwise require quiescence.
-- [!] P107 Run existing same-direction, same-tx, idempotency, timeout, cancellation
-  and recovery selectors.
+- [!] P107 Run existing same-direction, same-tx, commit-only `23505`, idempotency,
+  timeout, cancellation and recovery selectors.
 - [!] P108 Update stable RU payment and decision documentation.
 - [!] P109 Complete adversarial/external reviews and publish the exact-head evidence.
 
