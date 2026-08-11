@@ -91,6 +91,24 @@ class ClearingService:
             raise caller_cancellation
 
     @classmethod
+    async def _close_checked_out_connection(
+        cls,
+        connection: AsyncConnection,
+    ) -> asyncio.CancelledError | None:
+        """Return a pre-lock connection to its pool despite caller cancellation."""
+
+        async def _cleanup() -> None:
+            try:
+                await connection.close()
+            except BaseException:
+                # No advisory lock exists at this stage, but a connection whose
+                # close status is unknown must still not return to the pool.
+                await connection.invalidate()
+                await connection.close()
+
+        return await cls._drain_task(asyncio.create_task(_cleanup()))
+
+    @classmethod
     async def _release_interlock_session(
         cls,
         work_session: AsyncSession,
@@ -1089,11 +1107,19 @@ class ClearingService:
             )
         except asyncio.TimeoutError as exc:
             raise TimeoutException("Clearing interlock timed out") from exc
-        except asyncio.CancelledError:
+        except asyncio.CancelledError as exc:
+            if connection is not None:
+                try:
+                    await self._close_checked_out_connection(connection)
+                except BaseException as cleanup_error:
+                    exc.add_note(
+                        "Clearing pre-lock connection cleanup failed: "
+                        f"{type(cleanup_error).__name__}: {cleanup_error}"
+                    )
             raise
         except Exception as exc:
             if connection is not None:
-                await connection.close()
+                await self._close_checked_out_connection(connection)
             await self._raise_unexpected_execution(exc)
 
         if connection is None:

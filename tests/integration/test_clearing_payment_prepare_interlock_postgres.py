@@ -9,7 +9,12 @@ from decimal import Decimal
 
 import pytest
 from sqlalchemy import delete, select, text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncConnection,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 
 pytestmark = pytest.mark.postgres
@@ -612,6 +617,78 @@ async def test_clearing_interlock_completes_with_single_connection_pool_postgres
         assert amount == Decimal("30.00000000")
         assert not clearing_session.in_transaction()
     finally:
+        await clearing_session.rollback()
+        await clearing_session.close()
+        await one_connection_engine.dispose()
+        await _cleanup_interlock_case(seed)
+
+
+@pytest.mark.asyncio
+async def test_cancellation_after_interlock_checkout_returns_connection_postgres(
+    db_session,
+    monkeypatch,
+):
+    """Cancellation between checkout and isolation setup must not exhaust the pool."""
+
+    _require_postgres(db_session)
+
+    from app.core.clearing.service import ClearingService
+    from tests.conftest import TEST_DATABASE_URL
+
+    seed = await _seed_interlock_case()
+    one_connection_engine = create_async_engine(
+        TEST_DATABASE_URL,
+        isolation_level="SERIALIZABLE",
+        pool_size=1,
+        max_overflow=0,
+        pool_timeout=0.25,
+    )
+    sessions = async_sessionmaker(
+        bind=one_connection_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autoflush=False,
+    )
+    clearing_session = sessions()
+    isolation_setup_entered = asyncio.Event()
+    hold_isolation_setup = asyncio.Event()
+    original_execution_options = AsyncConnection.execution_options
+
+    async def _pause_after_checkout(connection, *args, **kwargs):
+        if (
+            connection.engine is one_connection_engine
+            and kwargs.get("isolation_level") is not None
+        ):
+            isolation_setup_entered.set()
+            await hold_isolation_setup.wait()
+        return await original_execution_options(connection, *args, **kwargs)
+
+    monkeypatch.setattr(
+        AsyncConnection,
+        "execution_options",
+        _pause_after_checkout,
+    )
+    task = None
+    try:
+        task = asyncio.create_task(
+            ClearingService(clearing_session).execute_clearing_with_amount(
+                seed["cycle"]
+            )
+        )
+        await asyncio.wait_for(isolation_setup_entered.wait(), timeout=3.0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=3.0)
+
+        assert not clearing_session.in_transaction()
+        assert one_connection_engine.pool.checkedout() == 0
+        async with one_connection_engine.connect() as probe:
+            assert await probe.scalar(text("SELECT 1")) == 1
+    finally:
+        hold_isolation_setup.set()
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.wait([task], timeout=2.0)
         await clearing_session.rollback()
         await clearing_session.close()
         await one_connection_engine.dispose()
