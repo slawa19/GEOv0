@@ -109,7 +109,7 @@ class TrustLineService:
             equivalent_id=equivalent.id,
         )
         invariants_status = checkpoint_after.invariants_status or {}
-        passed = bool(invariants_status.get("passed", True))
+        passed = bool(invariants_status.get("passed", False))
         before_sum = checkpoint_before.checksum if checkpoint_before else ""
         after_sum = checkpoint_after.checksum or before_sum
 
@@ -195,7 +195,7 @@ class TrustLineService:
             equivalent_id=trustline.equivalent_id,
         )
         invariants_status = checkpoint_after.invariants_status or {}
-        passed = bool(invariants_status.get("passed", True))
+        passed = bool(invariants_status.get("passed", False))
         before_sum = checkpoint_before.checksum if checkpoint_before else ""
         after_sum = checkpoint_after.checksum or before_sum
 
@@ -294,7 +294,7 @@ class TrustLineService:
             equivalent_id=trustline.equivalent_id,
         )
         invariants_status = checkpoint_after.invariants_status or {}
-        passed = bool(invariants_status.get("passed", True))
+        passed = bool(invariants_status.get("passed", False))
         before_sum = checkpoint_before.checksum if checkpoint_before else ""
         after_sum = checkpoint_after.checksum or before_sum
 

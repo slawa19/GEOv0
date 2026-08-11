@@ -4,10 +4,28 @@ from decimal import Decimal
 import pytest
 
 from app.core.integrity import compute_integrity_checkpoint_for_equivalent
+from app.core.invariants import InvariantChecker
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
+
+
+@pytest.mark.asyncio
+async def test_integrity_checkpoint_propagates_unavailable_invariant_checker(
+    db_session,
+    monkeypatch,
+):
+    async def _checker_unavailable(*_args, **_kwargs):
+        raise RuntimeError("invariant checker unavailable")
+
+    monkeypatch.setattr(InvariantChecker, "check_zero_sum", _checker_unavailable)
+
+    with pytest.raises(RuntimeError, match="invariant checker unavailable"):
+        await compute_integrity_checkpoint_for_equivalent(
+            db_session,
+            equivalent_id=uuid.uuid4(),
+        )
 
 
 @pytest.mark.asyncio

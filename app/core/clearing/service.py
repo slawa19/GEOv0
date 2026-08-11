@@ -1506,7 +1506,7 @@ class ClearingService:
                     if checkpoint_after
                     else {}
                 )
-                passed = bool(invariants_status.get("passed", True))
+                passed = bool(invariants_status.get("passed", False))
 
                 self.session.add(
                     IntegrityAuditLog(

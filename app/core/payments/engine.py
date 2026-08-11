@@ -1320,7 +1320,7 @@ class PaymentEngine:
                         invariants_status = (
                             getattr(cp_after, "invariants_status", {}) or {}
                         )
-                        passed = bool(invariants_status.get("passed", True))
+                        passed = bool(invariants_status.get("passed", False))
 
                         self.session.add(
                             IntegrityAuditLog(

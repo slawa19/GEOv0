@@ -55,62 +55,59 @@ async def compute_integrity_checkpoint_for_equivalent(
     }
 
     # FIX-010: protocol-aligned invariant checks recorded in the checkpoint.
-    # We record failures rather than raising, so operators can inspect history.
+    # Expected invariant violations are recorded for operators. An unavailable
+    # checker is not a successful verification and must fail the owning UoW.
+    from app.core.invariants import InvariantChecker
+    from app.utils.exceptions import IntegrityViolationException
+
+    checker = InvariantChecker(session)
+    checks: dict[str, dict] = {}
+    alerts: list[str] = []
+
+    overall_status = "healthy"
+
+    # zero-sum (critical)
     try:
-        from app.core.invariants import InvariantChecker
-        from app.utils.exceptions import IntegrityViolationException
+        await checker.check_zero_sum(equivalent_id=equivalent_id)
+        checks["zero_sum"] = {"passed": True}
+    except IntegrityViolationException as exc:
+        checks["zero_sum"] = {"passed": False, "details": exc.details}
+        overall_status = "critical"
+        alerts.append("zero_sum")
 
-        checker = InvariantChecker(session)
-        checks: dict[str, dict] = {}
-        alerts: list[str] = []
+    # trust limits (critical)
+    try:
+        await checker.check_trust_limits(equivalent_id=equivalent_id)
+        checks["trust_limits"] = {"passed": True, "violations": 0}
+    except IntegrityViolationException as exc:
+        violations = (exc.details or {}).get("violations") or []
+        checks["trust_limits"] = {
+            "passed": False,
+            "violations": len(violations),
+            "details": exc.details,
+        }
+        overall_status = "critical"
+        alerts.append("trust_limits")
 
-        overall_status = "healthy"
+    # debt symmetry (warning)
+    try:
+        await checker.check_debt_symmetry(equivalent_id=equivalent_id)
+        checks["debt_symmetry"] = {"passed": True, "violations": 0}
+    except IntegrityViolationException as exc:
+        violations = (exc.details or {}).get("violations") or []
+        checks["debt_symmetry"] = {
+            "passed": False,
+            "violations": len(violations),
+            "details": exc.details,
+        }
+        if overall_status == "healthy":
+            overall_status = "warning"
+        alerts.append("debt_symmetry")
 
-        # zero-sum (critical)
-        try:
-            await checker.check_zero_sum(equivalent_id=equivalent_id)
-            checks["zero_sum"] = {"passed": True}
-        except IntegrityViolationException as exc:
-            checks["zero_sum"] = {"passed": False, "details": exc.details}
-            overall_status = "critical"
-            alerts.append("zero_sum")
-
-        # trust limits (critical)
-        try:
-            await checker.check_trust_limits(equivalent_id=equivalent_id)
-            checks["trust_limits"] = {"passed": True, "violations": 0}
-        except IntegrityViolationException as exc:
-            violations = (exc.details or {}).get("violations") or []
-            checks["trust_limits"] = {
-                "passed": False,
-                "violations": len(violations),
-                "details": exc.details,
-            }
-            overall_status = "critical"
-            alerts.append("trust_limits")
-
-        # debt symmetry (warning)
-        try:
-            await checker.check_debt_symmetry(equivalent_id=equivalent_id)
-            checks["debt_symmetry"] = {"passed": True, "violations": 0}
-        except IntegrityViolationException as exc:
-            violations = (exc.details or {}).get("violations") or []
-            checks["debt_symmetry"] = {
-                "passed": False,
-                "violations": len(violations),
-                "details": exc.details,
-            }
-            if overall_status == "healthy":
-                overall_status = "warning"
-            alerts.append("debt_symmetry")
-
-        invariants_status["status"] = overall_status
-        invariants_status["checks"] = checks
-        invariants_status["alerts"] = alerts
-        invariants_status["passed"] = overall_status == "healthy"
-    except Exception:
-        # Best-effort: checkpointing should not fail hard due to optional checks.
-        pass
+    invariants_status["status"] = overall_status
+    invariants_status["checks"] = checks
+    invariants_status["alerts"] = alerts
+    invariants_status["passed"] = overall_status == "healthy"
 
     return IntegrityCheckpoint(
         equivalent_id=equivalent_id,
