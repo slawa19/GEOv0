@@ -331,6 +331,12 @@ sequence (что требует протокольного поля), либо �
   `"pytest.mark.e2e"` носителем. Guard исправлен на AST-role check; production/tooling target не
   менялся между попытками.
 
+**2026-08-12 / T611 correction:** внешнее ревью обнаружило второй пустой marker `scenario`,
+оставленный зарегистрированным без единого носителя. Он удалён из `pytest.ini`; policy guard теперь
+AST-проверяет отсутствие `pytest.mark.scenario`, а активные EN/PL testing guides больше не рекомендуют
+несуществующий marker. Canonical `wave5_extrem_verification_policy` — exit `0`, `26 passed` вместе с
+Ruff-policy и OpenAPI contract selectors; pinned Ruff и diff-check — exit `0`.
+
 ### 2026-08-11 — T605
 
 - Перед правкой finding воспроизведена на текущем коде. **Current:** прямой
@@ -479,3 +485,10 @@ sequence (что требует протокольного поля), либо �
   contract test — exit `0`; `git diff --check` на test/decision/spec — exit `0`. После финального
   wording correction канонический `wave5_t610_final` повторён: exit `0`, `23 passed`;
   pinned Ruff и diff-check повторно exit `0`.
+
+**2026-08-12 / T611 correction:** фраза `identities/requiredness` выше была шире фактического
+гейта. Exact проверяются business parameter identities и request-body presence/requiredness;
+auth transport header identity/requiredness входят в count+digest ratchet. Node id уточнён до
+`business_parameter_identities`, а датированное решение синхронизировано без изменения baselines.
+Canonical contract selector в `wave5_extrem_verification_policy` — exit `0`; полный contract file
+собрал `23 passed` в предшествующем финальном verification.

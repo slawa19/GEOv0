@@ -356,7 +356,7 @@ tests/artifacts/
 
 ### 8.1. run_id / scenario_id
 - `run_id` — session-level fixture (UUID)
-- `scenario_id` — marker `@pytest.mark.scenario("TS-12")` or derivation from test name
+- `scenario_id` — a fixture/value or derivation from the test name; no `scenario` pytest marker is registered
 
 ### 8.2. HTTP Client
 Client (httpx) must:

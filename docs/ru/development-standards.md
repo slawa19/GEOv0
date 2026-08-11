@@ -5,7 +5,8 @@
 > [`pytest.ini`](../../pytest.ini); required local entrypoint —
 > [`scripts/verify_local.ps1`](../../scripts/verify_local.ps1). Раздел 3 ниже
 > сохраняет общие принципы, но его прямые `pytest`/package-команды не заменяют
-> verifier. Ruff/Black сейчас non-blocking diagnostics, mypy не настроен как gate.
+> verifier. Пиннутый Ruff для `app migrations` блокирует CI; Black остаётся
+> non-blocking diagnostic, mypy не настроен как gate.
 
 ## Введение
 
@@ -600,7 +601,7 @@ function fitToViewport(nodes: Node[], width: number, height: number) {
 
 **Краткая выжимка:**
 - Formatter: **Black**, `line-length = 100` (пока non-blocking diagnostic)
-- Linter: **Ruff** (пока non-blocking diagnostic)
+- Linter: **Ruff** (пиннутая версия и `app migrations` — blocking CI gate)
 - Типы: mypy не настроен как repository gate
 - Именование: snake_case для функций/переменных, PascalCase для классов
 - Async: SQLAlchemy async sessions, `async def` для всех endpoint handlers

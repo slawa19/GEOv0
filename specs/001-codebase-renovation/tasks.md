@@ -274,6 +274,12 @@ evidence to a local disposable run when it executes the same frozen selector.
 Configured, skipped or cancelled jobs are not evidence. Phase 1 owns adding the
 missing container-smoke job and the 016→head PostgreSQL step.
 
+**2026-08-12 / T611 correction:** сохранённый выше `BACKEND-LINT-DIAGNOSTIC` описывает
+историческое состояние до T608. Сейчас pinned Ruff из `requirements-dev.txt` на области
+`app migrations` является blocking CI gate и проходит с exit `0`; только Black остаётся
+non-blocking diagnostic. Локальный `-StaticDiagnostics` по-прежнему не меняет exit code,
+поэтому его нельзя путать с политикой CI.
+
 Commands above describe repository intent. REN-003 owns making them unambiguous
 and CI-reproducible; until it lands, record the exact executable and environment
 used.

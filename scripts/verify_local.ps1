@@ -160,7 +160,7 @@ try {
         }
 
         if ($StaticDiagnostics) {
-            Write-Host "`nRuff and Black have known repository-wide debt and are reported without gating." -ForegroundColor Yellow
+            Write-Host "`nLocal diagnostics do not gate this command; CI separately requires pinned Ruff while Black remains non-blocking." -ForegroundColor Yellow
             Write-Host 'Mypy is not configured in this repository and is not run.' -ForegroundColor Yellow
             Invoke-DiagnosticStep -Name 'Ruff' -Command {
                 & $pythonExe -m ruff check app migrations --no-cache

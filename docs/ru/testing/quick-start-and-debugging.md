@@ -85,4 +85,6 @@ Playwright требует уникального порта. Его default outp
 ## Как сообщать результат
 
 Запишите точную команду, exit code, число тестов и пропущенные tiers. Не называйте
-локальный прогон «CI green». Ruff/Black сейчас diagnostics, mypy не является gate.
+локальный прогон «CI green». Локальный `-StaticDiagnostics` только печатает оба
+результата; в CI pinned Ruff для `app migrations` блокирует, Black остаётся
+non-blocking diagnostic, mypy не является gate.

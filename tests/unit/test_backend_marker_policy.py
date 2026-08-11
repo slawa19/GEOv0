@@ -30,6 +30,10 @@ def test_backend_e2e_is_not_a_registered_or_filtered_empty_tier() -> None:
 
 def test_backend_scenario_is_not_a_registered_empty_tier() -> None:
     pytest_config = (_ROOT / "pytest.ini").read_text(encoding="utf-8")
+    active_testing_docs = [
+        _ROOT / "docs" / "en" / "10-testing-framework.md",
+        _ROOT / "docs" / "pl" / "10-testing-framework.md",
+    ]
     scenario_markers: list[Path] = []
     for path in sorted((_ROOT / "tests").rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -46,3 +50,7 @@ def test_backend_scenario_is_not_a_registered_empty_tier() -> None:
 
     assert "scenario(" not in pytest_config
     assert scenario_markers == []
+    assert all(
+        "pytest.mark.scenario" not in path.read_text(encoding="utf-8")
+        for path in active_testing_docs
+    )

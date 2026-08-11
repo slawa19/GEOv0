@@ -310,7 +310,7 @@ tests/artifacts/
 
 ### 8.1. run_id / scenario_id
 - `run_id` — fixture na poziomie sesji (UUID)
-- `scenario_id` — marker `@pytest.mark.scenario("TS-12")` lub derywacja z nazwy testu
+- `scenario_id` — fixture/wartość lub derywacja z nazwy testu; marker pytest `scenario` nie jest zarejestrowany
 
 ### 8.2. Klient HTTP
 Klient (httpx) musi:
