@@ -104,7 +104,7 @@ severity, а не за откладывание.
 | T300 | Детерминированный PG-репродьюсер удержания блокировок на skip-пути | `[x]` |
 | T301 | Инвентаризация всех веток выхода `clearing/service.py`, явное решение по владению транзакцией | `[x]` |
 | T302 | Реализация выбранной границы владения; все ветви выхода завершают транзакцию | `[x]` |
-| T303 | Идемпотентный протокол подтверждения коммита клиринга | `[!]` |
+| T303 | Идемпотентный протокол подтверждения коммита клиринга | `[x]` |
 | T304 | Публикация реально заблокированной суммы вместо кандидата: перевести `real_clearing_engine.py:290` с bool-обёртки `execute_clearing` на `execute_clearing_with_amount` и провести возвращённую сумму в `:318-319` и `:334-336` (F-003-3) | `[!]` |
 | T305 | Устранение повторной очистки lock в recovery (`recovery.py:131-136`) и исправление ложного комментария `recovery.py:126-128`; тест-дабл `tests/unit/test_recovery_cleanup.py:355-381` привести в соответствие с реальным поведением `abort` (F-003-4) | `[!]` |
 | T306 | Синхронизация `docs/ru/simulator/backend/payment-integration.md` и решений в `docs/ru/09-decisions-and-defaults.md` | `[!]` |
@@ -180,3 +180,30 @@ severity, а не за откладывание.
   — exit `0`, `8 passed`, восемь ожидаемых nodeids.
 - Caller/unit matrix `wave4_003_t302_units` (восемь clearing/interact/real-engine selectors) —
   exit `0`, `64 passed`. Pinned Ruff на трёх изменённых файлах и `git diff --check` — exit `0`.
+
+### 2026-08-11 — T303
+
+- Implementation commit: `94fe24f`. До изменения каждая попытка создавала случайный clearing
+  `tx_id`, напрямую ожидала `session.commit()` и возвращала amount только после подтверждения
+  (`app/core/clearing/service.py` до коммита: прежние `:1076-1094`); после потери подтверждения
+  тот же цикл видел уже удалённую Debt и возвращал `None`.
+- После: unordered set Debt UUID получает стабильный UUIDv5 execution identity
+  (`app/core/clearing/service.py:64-66`), а durable `Transaction.payload.amount` разрешается до
+  повторного эффекта и после ожидания row locks (`:68-87,891-899,917-925`). `Transaction.tx_id` и
+  `idempotency_key` используют эту identity (`:1064-1071`), поэтому audit и денежный эффект имеют
+  одну occurrence-запись.
+- Commit дренируется отдельно от caller cancellation (`service.py:89-105,1168`); если commit уже
+  durable, вызывающий получает типизированный `ClearingCommittedAfterCancellation` с `tx_id` и
+  фактическим `cleared_amount` (`:29-36,1183-1187`). Это сохраняет cancellation-сигнал и даёт T304
+  точный результат для публикации, не угадывая его по candidate.
+- Real-PG test `tests/integration/test_clearing_commit_replay_postgres.py:18-214` сначала выполняет
+  настоящий commit, задерживает только возврат подтверждения, отменяет caller и повторяет тот же
+  Debt-ID-set в обратном порядке. RED `wave4_003_t303_red` — exit `1`, `1 failed`, exact
+  `assert None == Decimal('30.00000000')`; одновременно pinned Ruff честно нашёл и затем был
+  исправлен один `F401` в новом тесте.
+- GREEN `wave4_003_t303_green1` — exit `0`, `1 passed`: replay возвращает `30`, создаёт ровно одну
+  первую Transaction/audit/effect; новый cycle с новым Debt UUID возвращает `5`, поэтому
+  idempotency не поглощает новую occurrence (`test:152-178,206-214`).
+- Финальный PostgreSQL milestone `wave4_003_t303_pg_exact` по commit-replay, всем skip branches и
+  clearing/payment contention — exit `0`, `9 passed`; unit/caller matrix
+  `wave4_003_t303_units` — exit `0`, `64 passed`. Pinned Ruff и `git diff --check` — exit `0`.
