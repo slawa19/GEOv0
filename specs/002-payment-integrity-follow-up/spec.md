@@ -1,6 +1,6 @@
 # 002 — Payment integrity follow-up
 
-Status: Phase 0 complete; Phase 1 implementation is not authorized
+Status: Phase 0 complete; Phase 1 IN PROGRESS (owner-authorized 2026-08-11)
 
 Owner surfaces: `app/core/payments/`, payment callers, the payment/clearing boundary
 
@@ -265,3 +265,22 @@ The program closes after Phase 2 only when the exact-head PostgreSQL acceptance
 matrix is green, stable docs match runtime, no P1/P2 remains in scope, and all
 unverified paths are explicitly accepted or assigned to a new owner-approved
 program.
+
+## 11. Phase 1 implementation evidence (append-only)
+
+### 2026-08-11 — P100
+
+- Перед правкой current anchors подтверждены на `39f960e`: направленный key material остаётся в
+  `app/core/payments/engine.py:82-93`, acquisition сортирует лишь уже полученные ключи на
+  `:115-150`, а `tests/unit/test_payment_engine_advisory_lock_key.py:13-18` требует reverse-key
+  inequality. Wave 2 меняла в `engine.py` только audit exception blocks; finding подтверждён.
+- Добавлен реальный PostgreSQL 16 reproducer
+  `tests/integration/test_payment_pair_advisory_locks_postgres.py:1-63`. Holder берёт `A→B`, waiter
+  просит `B→A` с bounded DB lock timeout; ожидаемый target — PostgreSQL `55P03` на одной advisory
+  identity. Никакой synthetic `DBAPIError` не создаётся.
+- Canonical RED на отдельной проверенной БД `geov0_test_wave3`:
+  `DEBUG=false; .\\scripts\\verify_local.ps1 -TaskSlug wave3_p100_red -BackendOnly -BackendMarker postgres -BackendSelector tests/integration/test_payment_pair_advisory_locks_postgres.py`
+  — exit `1`, `1 failed`, exact `Failed: DID NOT RAISE <class 'sqlalchemy.exc.DBAPIError'>`.
+- До P104 тест помечен `xfail(strict=True)` (`:22-25`): target improvement обязан дать XPASS.
+  Та же canonical команда с `-TaskSlug wave3_p100` — exit `0`, `1 xfailed`; pinned Ruff и
+  `git diff --check` — exit `0`. Test commit: `678d300`.

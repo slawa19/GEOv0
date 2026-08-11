@@ -1,6 +1,6 @@
 # 002 — Delivery plan
 
-Status: Phase 0 complete; later phases require owner authorization
+Status: Phase 0 complete; Phase 1 IN PROGRESS (owner-authorized 2026-08-11)
 
 Contract: [spec.md](spec.md)
 
@@ -44,7 +44,7 @@ Exit criteria:
 
 ## Phase 1 — Payment serialization owner
 
-Not authorized by Phase 0.
+Authorized by the owner for Wave 3 on 2026-08-11.
 
 Goal: make payment concurrency use the real reciprocal-debt resource identity and
 eliminate incremental staged lock-order deadlocks.
