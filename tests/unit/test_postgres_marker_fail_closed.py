@@ -15,6 +15,7 @@ def _collect_postgres_tier(*, database_url: str, allow_reset: bool) -> subproces
     env["ENV"] = "test"
     env["DEBUG"] = "false"
     env["TEST_DATABASE_URL"] = database_url
+    env.pop("GEO_TEST_USE_MIGRATED_SCHEMA", None)
     if allow_reset:
         env["GEO_TEST_ALLOW_DB_RESET"] = "1"
     else:
@@ -40,10 +41,7 @@ def _collect_postgres_tier(*, database_url: str, allow_reset: bool) -> subproces
 
 def test_direct_postgres_marker_fails_closed_on_sqlite() -> None:
     result = _collect_postgres_tier(
-        database_url=(
-            "sqlite+aiosqlite:///./.local-run/test-runs/"
-            "wave5_t605_policy_sqlite/test.db"
-        ),
+        database_url="sqlite+aiosqlite:///:memory:",
         allow_reset=False,
     )
 

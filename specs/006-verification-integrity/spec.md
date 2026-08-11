@@ -361,3 +361,9 @@ sequence (что требует протокольного поля), либо �
   после `DROP DATABASE` запись отсутствует. README, `docs/ru/10-testing-framework.md` и текущий
   AGENTS marker contract обновлены: direct wrong-backend run больше не описывается как допустимый
   skip/debug result.
+- Независимая проверка hook timing на pytest `7.4.4` подтвердила, что `trylast=True` видит один
+  выбранный postgres item при `-m postgres` и ноль при `-m 'not postgres'`; результаты — exit `4`
+  и exit `0` соответственно. По review subprocess guard дополнительно изолирован от унаследованного
+  `GEO_TEST_USE_MIGRATED_SCHEMA`, а SQLite probe переведён на `:memory:`; это исключает ложный ранний
+  отказ до проверяемого hook. Повторный canonical `wave5_t605_fail_closed_isolated` — exit `0`,
+  `24 passed, 1 skipped`.
