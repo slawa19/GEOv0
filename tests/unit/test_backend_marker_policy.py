@@ -400,8 +400,6 @@ def _created_database_name(command: str) -> str | None:
 
 def _parse_verifier_arguments(arguments: str) -> dict[str, str | bool] | None:
     candidate = arguments.strip()
-    if candidate.endswith("`"):
-        candidate = candidate[:-1].rstrip()
     tokens = [
         token.strip("\"'")
         for token in re.findall(r""""[^"]*"|'[^']*'|\S+""", candidate)
@@ -1007,6 +1005,14 @@ $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
 ./scripts/verify_local.ps1 -BackendMarker postgres `
   -DefinitelyNotAParameter x
+```
+""",
+        """
+```powershell
+createdb -U geo geov0_test_dangling_continuation
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_dangling_continuation"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+./scripts/verify_local.ps1 -BackendMarker postgres `
 ```
 """,
         """
