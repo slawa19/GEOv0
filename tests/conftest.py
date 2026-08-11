@@ -46,12 +46,12 @@ settings.RECOVERY_ENABLED = False
 settings.INTEGRITY_CHECKPOINT_ENABLED = False
 
 
-@pytest.hookimpl(trylast=True)
-def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+def pytest_collection_finish(session: pytest.Session) -> None:
     """Fail closed when selected PostgreSQL tests use another DB backend."""
-    del config
     selected_postgres = [
-        item.nodeid for item in items if item.get_closest_marker("postgres") is not None
+        item.nodeid
+        for item in session.items
+        if item.get_closest_marker("postgres") is not None
     ]
     if selected_postgres and _validated_test_database_url.get_backend_name() != "postgresql":
         raise pytest.UsageError(

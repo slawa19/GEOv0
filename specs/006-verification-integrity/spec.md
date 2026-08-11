@@ -341,8 +341,8 @@ sequence (что требует протокольного поля), либо �
   fail-closed через `--require-backend postgresql` (`scripts/verify_local.ps1:105-111`).
   **Intended:** выбранный postgres-marked test никогда не считается зелёным на другом backend.
   **Optimal:** collection hook после builtin marker deselection, а не разбор literal `-m`.
-- `tests/conftest.py:49-63` добавляет `pytest_collection_modifyitems(..., trylast=True)`: только если
-  среди оставшихся items есть marker `postgres`, non-PostgreSQL URL даёт `pytest.UsageError` с
+- `tests/conftest.py:49-63` добавляет `pytest_collection_finish`: только если среди окончательно
+  собранных после deselection items есть marker `postgres`, non-PostgreSQL URL даёт `pytest.UsageError` с
   инструкцией про dedicated `geov0_test_*` и reset opt-in. Поэтому canonical default
   `not slow and not postgres` не false-fail, а прямой selector postgres-файла без `-m` тоже защищён.
   Subprocess guard `tests/unit/test_postgres_marker_fail_closed.py:41-68` доказывает обе стороны:
@@ -367,3 +367,8 @@ sequence (что требует протокольного поля), либо �
   `GEO_TEST_USE_MIGRATED_SCHEMA`, а SQLite probe переведён на `:memory:`; это исключает ложный ранний
   отказ до проверяемого hook. Повторный canonical `wave5_t605_fail_closed_isolated` — exit `0`,
   `24 passed, 1 skipped`.
+- Финальное упрощение по review: guard перенесён из order-зависимого
+  `pytest_collection_modifyitems(..., trylast=True)` в `pytest_collection_finish(session)`, который
+  получает уже окончательный `session.items`. Повторный canonical
+  `wave5_t605_collection_finish` — exit `0`, `24 passed, 1 skipped`; прямой SQLite postgres selector
+  сохранил exit `4`, а safe PostgreSQL collect — exit `0`.
