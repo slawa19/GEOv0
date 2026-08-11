@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import uuid
 from decimal import Decimal
@@ -21,6 +22,17 @@ from app.core.invariants import InvariantChecker
 from app.core.integrity import compute_integrity_checkpoint_for_equivalent
 
 logger = logging.getLogger(__name__)
+
+_CLEARING_REPLAY_NAMESPACE = uuid.UUID("7438b16f-c629-4aeb-8b97-4bf113704c93")
+
+
+class ClearingCommittedAfterCancellation(asyncio.CancelledError):
+    """Cancellation raised only after the clearing commit became durable."""
+
+    def __init__(self, *, tx_id: str, cleared_amount: Decimal):
+        super().__init__("Clearing committed while cancellation was pending")
+        self.tx_id = tx_id
+        self.cleared_amount = cleared_amount
 
 
 class ClearingService:
@@ -47,6 +59,48 @@ class ClearingService:
         except Exception as exc:
             logger.exception("event=clearing.skip_rollback_failed")
             raise GeoException() from exc
+
+    @staticmethod
+    def _execution_tx_id(debt_ids: List[uuid.UUID]) -> str:
+        canonical_debt_set = ":".join(sorted({str(debt_id) for debt_id in debt_ids}))
+        return str(uuid.uuid5(_CLEARING_REPLAY_NAMESPACE, canonical_debt_set))
+
+    async def _committed_execution_amount(self, tx_id: str) -> Decimal | None:
+        transaction = (
+            await self.session.execute(
+                select(Transaction).where(
+                    Transaction.tx_id == tx_id,
+                    Transaction.type == "CLEARING",
+                )
+            )
+        ).scalar_one_or_none()
+        if transaction is None or transaction.state != "COMMITTED":
+            return None
+        try:
+            amount = Decimal(str((transaction.payload or {})["amount"]))
+        except Exception as exc:
+            logger.error("event=clearing.replay_payload_invalid tx_id=%s", tx_id)
+            raise GeoException() from exc
+        if amount <= 0:
+            logger.error("event=clearing.replay_amount_invalid tx_id=%s", tx_id)
+            raise GeoException()
+        return amount
+
+    async def _commit_to_terminal(self) -> asyncio.CancelledError | None:
+        """Drain the session commit and report caller cancellation separately."""
+        commit_task = asyncio.create_task(self.session.commit())
+        caller_cancellation: asyncio.CancelledError | None = None
+        while not commit_task.done():
+            try:
+                await asyncio.shield(commit_task)
+            except asyncio.CancelledError as exc:
+                if caller_cancellation is None:
+                    caller_cancellation = exc
+            except Exception:
+                # The task is terminal; surface its exact result below.
+                pass
+        commit_task.result()
+        return caller_cancellation
 
     def _dialect_name(self) -> str | None:
         try:
@@ -834,6 +888,15 @@ class ClearingService:
             await self._rollback_skipped_execution()
             return None
 
+        execution_tx_id = self._execution_tx_id(debt_ids)
+        try:
+            replay_amount = await self._committed_execution_amount(execution_tx_id)
+        except Exception as exc:
+            await self._raise_unexpected_execution(exc)
+        if replay_amount is not None:
+            await self._rollback_skipped_execution()
+            return replay_amount
+
         try:
             debts = (
                 (
@@ -848,6 +911,17 @@ class ClearingService:
             await self._raise_unexpected_execution(exc)
 
         if len(debts) != len(debt_ids):
+            # A concurrent owner may have committed this exact occurrence while
+            # we waited for its Debt rows. Resolve that durable result before skip.
+            try:
+                replay_amount = await self._committed_execution_amount(
+                    execution_tx_id
+                )
+            except Exception as exc:
+                await self._raise_unexpected_execution(exc)
+            if replay_amount is not None:
+                await self._rollback_skipped_execution()
+                return replay_amount
             await self._rollback_skipped_execution()
             return None
 
@@ -987,12 +1061,13 @@ class ClearingService:
         # Let's pick the first debtor.
         initiator_id = debts[0].debtor_id
 
-        tx_uuid = uuid.uuid4()
-        tx_id_str = str(tx_uuid)
+        tx_uuid = uuid.UUID(execution_tx_id)
+        tx_id_str = execution_tx_id
 
         new_tx = Transaction(
             id=tx_uuid,
             tx_id=tx_id_str,
+            idempotency_key=f"clearing:{tx_id_str}",
             type="CLEARING",
             initiator_id=initiator_id,
             payload={
@@ -1090,7 +1165,7 @@ class ClearingService:
             # 4. Commit
             new_tx.state = "COMMITTED"
             self.session.add(new_tx)
-            await self.session.commit()
+            commit_cancellation = await self._commit_to_terminal()
 
             # Debts changed: invalidate any TTL routing graph cache.
             try:
@@ -1105,6 +1180,11 @@ class ClearingService:
                 CLEARING_EVENTS_TOTAL.labels(event="execute", result="success").inc()
             except Exception:
                 pass
+            if commit_cancellation is not None:
+                raise ClearingCommittedAfterCancellation(
+                    tx_id=tx_id_str,
+                    cleared_amount=clear_amount,
+                ) from commit_cancellation
             return clear_amount
 
         except Exception as exc:
