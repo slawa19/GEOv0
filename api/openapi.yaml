@@ -48,6 +48,27 @@ paths:
                     minimum: 0
                   timestamp:
                     type: string
+        '503':
+          description: Service degraded
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, version, uptime_seconds, timestamp]
+                properties:
+                  status:
+                    type: string
+                    enum: [ok, degraded]
+                  version:
+                    type: string
+                  environment:
+                    type: string
+                    nullable: true
+                  uptime_seconds:
+                    type: integer
+                    minimum: 0
+                  timestamp:
+                    type: string
 
   /healthz:
     get:

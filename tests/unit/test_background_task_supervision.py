@@ -283,11 +283,13 @@ async def test_root_and_versioned_health_report_background_degradation(
         root_liveness = await client.get("/healthz")
         versioned_liveness = await client.get("/api/v1/healthz")
 
-    assert root_health.status_code == 200
+    assert root_health.status_code == 503
     assert root_health.json()["status"] == "degraded"
-    assert versioned_health.status_code == 200
+    assert versioned_health.status_code == 503
     assert versioned_health.json()["status"] == "degraded"
+    assert root_liveness.status_code == 200
     assert root_liveness.json() == {"status": "ok"}
+    assert versioned_liveness.status_code == 200
     assert versioned_liveness.json() == {"status": "ok"}
 
 

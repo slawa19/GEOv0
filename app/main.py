@@ -548,10 +548,18 @@ if getattr(settings, "METRICS_ENABLED", True):
         return Response(content=payload, media_type=content_type)
 
 
-@app.get("/health", response_model=HealthResponse, response_model_exclude_none=True)
-async def health_check():
+@app.get(
+    "/health",
+    response_model=HealthResponse,
+    response_model_exclude_none=True,
+    responses={503: {"model": HealthResponse, "description": "Service degraded"}},
+)
+async def health_check(response: Response):
+    status = background_health_status(app)
+    if status == "degraded":
+        response.status_code = 503
     return {
-        "status": background_health_status(app),
+        "status": status,
         "version": _best_effort_version(),
         "uptime_seconds": int(max(0.0, time.time() - _START_TIME)),
         "timestamp": _utc_now_iso(),

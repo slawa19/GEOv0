@@ -66,6 +66,16 @@ def test_dockerfiles_have_distinct_documented_roles() -> None:
     assert 'CMD ["uvicorn", "app.main:app"' in dev_dockerfile
 
 
+def test_both_images_consume_readiness_health() -> None:
+    canonical_dockerfile = _read_text("docker/Dockerfile")
+    dev_dockerfile = _read_text("Dockerfile")
+
+    for dockerfile in (canonical_dockerfile, dev_dockerfile):
+        assert "HEALTHCHECK" in dockerfile
+        assert "http://127.0.0.1:8000/health" in dockerfile
+    assert "urllib.request.urlopen" in canonical_dockerfile
+
+
 def test_dev_image_content_gate_excludes_runtime_and_dependency_trees() -> None:
     dockerignore = {
         line.strip()

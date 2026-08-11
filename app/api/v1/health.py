@@ -5,7 +5,7 @@ import time
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Header, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy import text
 from sqlalchemy.engine.url import make_url
 
@@ -38,10 +38,18 @@ def _best_effort_environment() -> str:
     return (os.getenv("GEO_ENV") or os.getenv("ENV") or "dev").strip() or "dev"
 
 
-@router.get("/health", response_model=HealthResponse, response_model_exclude_none=True)
-async def health_check(request: Request):
+@router.get(
+    "/health",
+    response_model=HealthResponse,
+    response_model_exclude_none=True,
+    responses={503: {"model": HealthResponse, "description": "Service degraded"}},
+)
+async def health_check(request: Request, response: Response):
+    status = background_health_status(request.app)
+    if status == "degraded":
+        response.status_code = 503
     return {
-        "status": background_health_status(request.app),
+        "status": status,
         "version": _best_effort_version(),
         "environment": _best_effort_environment(),
         "uptime_seconds": int(max(0.0, time.time() - _START_TIME)),
