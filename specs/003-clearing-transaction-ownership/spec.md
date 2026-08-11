@@ -106,7 +106,7 @@ severity, а не за откладывание.
 | T302 | Реализация выбранной границы владения; все ветви выхода завершают транзакцию | `[x]` |
 | T303 | Идемпотентный протокол подтверждения коммита клиринга | `[x]` |
 | T304 | Публикация реально заблокированной суммы вместо кандидата: перевести `real_clearing_engine.py:290` с bool-обёртки `execute_clearing` на `execute_clearing_with_amount` и провести возвращённую сумму в `:318-319` и `:334-336` (F-003-3) | `[x]` |
-| T305 | Устранение повторной очистки lock в recovery (`recovery.py:131-136`) и исправление ложного комментария `recovery.py:126-128`; тест-дабл `tests/unit/test_recovery_cleanup.py:355-381` привести в соответствие с реальным поведением `abort` (F-003-4) | `[!]` |
+| T305 | Устранение повторной очистки lock в recovery (`recovery.py:131-136`) и исправление ложного комментария `recovery.py:126-128`; тест-дабл `tests/unit/test_recovery_cleanup.py:355-381` привести в соответствие с реальным поведением `abort` (F-003-4) | `[x]` |
 | T306 | Синхронизация `docs/ru/simulator/backend/payment-integration.md` и решений в `docs/ru/09-decisions-and-defaults.md` | `[!]` |
 | T307 | Независимое ревью и публикация evidence на точном HEAD | `[!]` |
 
@@ -233,3 +233,20 @@ severity, а не за откладывание.
 - Targeted GREEN `wave4_003_t304_green2` — exit `0`, `34 passed`; отдельный amount-surface selector
   `wave4_003_t304_amount_surfaces` — exit `0`, `5 passed`; финальная восьмифайловая caller matrix
   `wave4_003_t304_units_exact` — exit `0`, `66 passed`. Pinned Ruff и `git diff --check` — exit `0`.
+
+### 2026-08-11 — T305
+
+- Implementation commit: `356a09e`. Перед изменением текущие Phase-1 anchors проверены заново:
+  обе `already_committed` ветви `PaymentEngine.abort` удаляют все `PrepareLock` по `tx_id` и при
+  `commit=True` коммитят до возврата (`app/core/payments/engine.py:1668-1685,1736-1753`). Recovery
+  после этого повторно удалял observed subset и ещё раз коммитил на прежних
+  `app/core/recovery.py:126-148`.
+- После: recovery делегирует terminal lock ownership engine один раз и только учитывает заранее
+  observed IDs (`app/core/recovery.py:109-131`). Ложный комментарий заменён точным контрактом на
+  `:126-129`; лишние DELETE/commit и ставший мёртвым import удалены. PaymentEngine не менялся.
+- Test double теперь воспроизводит реальный `abort`: и `success`, и `already_committed` удаляют все
+  locks и durable-коммитят (`tests/unit/test_recovery_cleanup.py:384-391`). Счётчик SQL DELETE
+  (`:372-402`) — anti-vacuum: ровно два engine-owned вызова для двух tx, не ноль.
+- RED `wave4_003_t305_red` — exit `1`, `1 failed`, exact `assert 3 == 2`: третий DELETE принадлежал
+  recovery. GREEN selector по полному recovery-файлу и реальному payment terminal countercheck
+  `wave4_003_t305_green` — exit `0`, `9 passed`. Pinned Ruff и `git diff --check` — exit `0`.
