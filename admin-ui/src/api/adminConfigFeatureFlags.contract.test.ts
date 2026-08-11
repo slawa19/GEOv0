@@ -1,8 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { __resetApiErrorToastForTests } from './errorToast'
 import { assertSuccess } from './envelope'
 import { __resetMockApiForTests, mockApi } from './mockApi'
 import { realApi } from './realApi'
+
+vi.mock('element-plus', () => ({
+  ElMessage: {
+    error: vi.fn(),
+  },
+}))
 
 function jsonResponse(data: unknown): Response {
   return new Response(JSON.stringify(data), {
@@ -56,6 +63,7 @@ function useMockApiEnv(fixtures: { config?: unknown; featureFlags?: unknown }) {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  __resetApiErrorToastForTests()
   __resetMockApiForTests()
 })
 
