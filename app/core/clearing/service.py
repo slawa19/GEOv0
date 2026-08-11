@@ -1020,6 +1020,9 @@ class ClearingService:
                 .scalars()
                 .all()
             )
+        except asyncio.CancelledError:
+            await self._rollback_before_interlock(self.session)
+            raise
         except Exception as exc:
             await self._raise_unexpected_execution(exc)
 
@@ -1044,6 +1047,9 @@ class ClearingService:
         try:
             caller_connection = await self.session.connection()
             isolation_level = await caller_connection.get_isolation_level()
+        except asyncio.CancelledError:
+            await self._rollback_before_interlock(self.session)
+            raise
         except Exception as exc:
             await self._raise_unexpected_execution(exc)
 

@@ -78,6 +78,25 @@ async def _wait_for_matching_advisory_wait(
         return False
 
 
+async def _wait_for_exact_blocker(
+    observer,
+    *,
+    waiter_pid: int,
+    holder_pid: int,
+) -> bool:
+    try:
+        async with asyncio.timeout(3.0):
+            while True:
+                blockers = await observer.scalar(
+                    text("SELECT pg_blocking_pids(:waiter_pid)"),
+                    {"waiter_pid": waiter_pid},
+                )
+                if holder_pid in (blockers or []):
+                    return True
+    except asyncio.TimeoutError:
+        return False
+
+
 async def _seed_interlock_case():
     from app.db.models.debt import Debt
     from app.db.models.equivalent import Equivalent
@@ -692,6 +711,49 @@ async def test_cancellation_during_interlocked_work_rolls_back_before_unlock_pos
                 await session.rollback()
                 await session.close()
         await _cleanup_interlock_case(seed)
+
+
+@pytest.mark.asyncio
+async def test_cancellation_during_preflight_select_rolls_back_caller_postgres(
+    db_session,
+):
+    """Cancellation before pinned ownership must still end the caller UoW."""
+
+    _require_postgres(db_session)
+
+    from app.core.clearing.service import ClearingService
+    from tests.conftest import TestingSessionLocal
+
+    clearing_session = TestingSessionLocal()
+    holder_session = TestingSessionLocal()
+    observer_session = TestingSessionLocal()
+    task = None
+    try:
+        clearing_pid = await _use_serializable(clearing_session)
+        holder_pid = await _use_serializable(holder_session)
+        await holder_session.execute(text("LOCK TABLE debts IN ACCESS EXCLUSIVE MODE"))
+
+        task = asyncio.create_task(
+            ClearingService(clearing_session).execute_clearing_with_amount(
+                [{"debt_id": str(uuid.uuid4())}]
+            )
+        )
+        assert await _wait_for_exact_blocker(
+            observer_session,
+            waiter_pid=clearing_pid,
+            holder_pid=holder_pid,
+        )
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=5.0)
+        assert not clearing_session.in_transaction()
+    finally:
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.wait([task], timeout=2.0)
+        for session in (clearing_session, holder_session, observer_session):
+            await session.rollback()
+            await session.close()
 
 
 @pytest.mark.asyncio
