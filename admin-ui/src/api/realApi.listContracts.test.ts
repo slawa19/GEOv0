@@ -45,11 +45,15 @@ const trustline = {
 const auditEntry = {
   id: 'audit-1',
   timestamp: '2026-08-12T00:00:00Z',
-  actor_id: 'admin',
+  actor_id: null,
   actor_role: 'admin',
   action: 'test.action',
-  object_type: 'participant',
-  object_id: 'alice',
+  object_type: null,
+  object_id: null,
+  reason: null,
+  request_id: null,
+  ip_address: null,
+  user_agent: null,
 }
 
 const equivalent = {
@@ -115,6 +119,11 @@ describe('realApi list response contracts', () => {
     {
       label: 'audit item identity',
       payload: { items: [{ ...auditEntry, id: 1 }], page: 1, per_page: 50, total: 1 },
+      call: () => realApi.listAuditLog({ page: 1, per_page: 50 }),
+    },
+    {
+      label: 'audit nullable actor type',
+      payload: { items: [{ ...auditEntry, actor_id: 42 }], page: 1, per_page: 50, total: 1 },
       call: () => realApi.listAuditLog({ page: 1, per_page: 50 }),
     },
     {

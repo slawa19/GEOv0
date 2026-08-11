@@ -157,16 +157,17 @@ const AuditLogEntrySchema = z
   .object({
     id: z.string(),
     timestamp: z.string(),
-    actor_id: z.string(),
-    actor_role: z.string(),
+    actor_id: z.string().nullable().optional(),
+    actor_role: z.string().nullable().optional(),
     action: z.string(),
-    object_type: z.string(),
-    object_id: z.string(),
+    object_type: z.string().nullable().optional(),
+    object_id: z.string().nullable().optional(),
     reason: z.string().nullable().optional(),
     before_state: z.unknown().optional(),
     after_state: z.unknown().optional(),
-    request_id: z.string().optional(),
-    ip_address: z.string().optional(),
+    request_id: z.string().nullable().optional(),
+    ip_address: z.string().nullable().optional(),
+    user_agent: z.string().nullable().optional(),
   })
   .passthrough()
 
