@@ -95,7 +95,7 @@ liveness без деталей и аутентифицированный diagnos
 | T502 | Переписать `.dockerignore` (гигиена сборки dev-образа, не security); добавить в CI проверку содержимого образа | `[x]` |
 | T503 | `compare_digest` для admin-токена | `[x]` |
 | T504 | Ограничить рост структуры rate-limiter | `[x]` |
-| T505 | Решение и реализация по `/health` degraded + HEALTHCHECK-потребителю | `[!]` |
+| T505 | Решение и реализация по `/health` degraded + HEALTHCHECK-потребителю | `[x]` |
 | T506 | `/api/v1/health` читает окружение через Settings | `[!]` |
 | T507 | Синхронизация `docs/ru/05-deployment.md`, `config-reference.md`, `09-decisions-and-defaults.md` | `[!]` |
 | T508 | Независимое внешнее ревью и evidence на точном HEAD (триггер AGENTS.md §15: периметр безопасности) | `[!]` |
@@ -200,3 +200,26 @@ liveness без деталей и аутентифицированный diagnos
 - Тот же selector после исправления с `-TaskSlug wave1_t504`: exit `0`, `3 passed`. Проверены bound
   на потоке уникальных host, сохранение активно используемого host при eviction и контрпроверка,
   что реальный host по-прежнему получает `TooManyRequestsException` после лимита.
+
+### 2026-08-11 — T505
+
+- Implementation commit: `cfa637ecaa9a6ada31e4c6104d81122968e2a20e`.
+- До: root readiness `app/main.py:551-558` и versioned alias возвращали HTTP 200 с
+  `status: degraded`; dev `Dockerfile:51-52` имел HEALTHCHECK, но production topology собирала
+  `docker/Dockerfile` без HEALTHCHECK.
+- После: оба readiness handler выставляют HTTP 503 при degraded (`app/main.py:551-566`,
+  `app/api/v1/health.py:41-57`), оба liveness alias остаются 200; dev и production images используют
+  stdlib-Python HEALTHCHECK на `/health` (`Dockerfile:50-51`, `docker/Dockerfile:34-35`). Решение и
+  граница «unhealthy не обещает restart» записаны в
+  `docs/ru/09-decisions-and-defaults.md:249-258`.
+- Red canonical selector с background-health test и deployment policy (`-TaskSlug wave1_t505_red`):
+  exit `1`, `2 failed, 7 passed, 1 skipped`; actual readiness был `200`, production HEALTHCHECK
+  отсутствовал.
+- После исправления тот же selector с `-TaskSlug wave1_t505`: exit `0`, `9 passed, 1 skipped`;
+  OpenAPI selector с `-TaskSlug wave1_t505_contract`: exit `0`, `23 passed`.
+- Реальный production image собран через WSL Docker командой
+  `docker build --quiet --file docker/Dockerfile --tag geov0-wave1-t505-local:verify .` (exit `0`,
+  image `sha256:710af3d22b14d59546d9287a38b073f7f137d168881347c879a71facc228e281`).
+  `docker image inspect --format '{{json .Config.Healthcheck}}'` подтвердил command `/health`,
+  interval `30s`, timeout `10s`, start period `5s`, retries `3`; task-local image удалён
+  (`IMAGE_CLEANED`).
