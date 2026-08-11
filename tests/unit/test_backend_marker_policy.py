@@ -55,6 +55,13 @@ def test_backend_scenario_is_not_a_registered_empty_tier() -> None:
         "pytest.mark.scenario" not in path.read_text(encoding="utf-8")
         for path in active_testing_docs
     )
+    assert all(
+        not any(
+            re.match(r"^pytest(?:\s|$)", line.strip())
+            for line in path.read_text(encoding="utf-8").splitlines()
+        )
+        for path in active_testing_docs
+    )
 
 
 def test_stable_contributor_guide_uses_canonical_backend_tiers() -> None:

@@ -366,8 +366,9 @@ Client (httpx) must:
 
 ### 8.3. Selective Execution
 Example:
-```bash
-pytest -k TS_12
+```powershell
+.\scripts\verify_local.ps1 -TaskSlug scenario_ts12 -BackendOnly `
+  -BackendSelector <test-path-for-TS-12>
 ```
 
 ---

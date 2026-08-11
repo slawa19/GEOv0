@@ -320,8 +320,9 @@ Klient (httpx) musi:
 
 ### 8.3. Selektywne uruchamianie
 Przykład:
-```bash
-pytest -k TS_12
+```powershell
+.\scripts\verify_local.ps1 -TaskSlug scenario_ts12 -BackendOnly `
+  -BackendSelector <ścieżka-testu-TS-12>
 ```
 
 ---
