@@ -527,3 +527,36 @@ record находится в `spec.md:348-394`, executable selection — в `pla
   Отдельное предположение audit о late terminal pair lock после tx было отозвано самим reviewer:
   на поддерживаемых одноверсионных paths matching equivalent owner уже удерживается, новый owner
   после tx не приобретается.
+
+### 2026-08-11 — P107 STOP: real SQLSTATE расходится с записанным target
+
+#### Current / Intended / Optimal
+
+- **Current.** Predicate всё ещё считает любой `23505` retryable только для `op="commit"`
+  (`app/core/payments/engine.py:333-353`), а unit test проверяет эту таблицу синтетическим exception
+  (`tests/unit/test_payment_engine_retry_savepoint_nocommit.py:91-103`). Но два независимых real
+  PostgreSQL 16 schedule после P105 не подтвердили записанный SQLSTATE. Same-`tx_id` waiter и
+  two-`tx_id` waiter оба начали `SERIALIZABLE` snapshot до equivalent-owner wait; holder затем
+  durable-вставил отсутствующий Debt. В обоих случаях настоящий waiter
+  `INSERT INTO debts (...) RETURNING ...` получил `40001`, не `23505`.
+- **Intended.** P107 и §4.4 требуют deterministic real `23505` после `SERIALIZABLE` advisory wait и
+  whole-commit retry. Predicate/unit не могут заменить это runtime evidence. Same-`tx_id` target
+  дополнительно должен разрешиться через durable `COMMITTED` без второго money/audit effect.
+- **Optimal.** Для фактического production path PostgreSQL 16 естественный target — оставить
+  доказанный whole-UoW `40001` retry и либо удалить/сузить недоказанный broad commit-`23505`
+  predicate, либо предоставить другой реальный production schedule, в котором именно commit-owned
+  UoW действительно получает `23505`. Подмена на `READ COMMITTED`, искусственный UUID collision или
+  synthetic DBAPI не удовлетворяет текущей спеке. Эти варианты меняют failure contract по-разному,
+  поэтому требуется решение владельца до изменения кода или P107 target.
+
+Evidence сохранено без переписывания провалов:
+
+- `wave3_p107_23505_target` (same `tx_id`) — exit `1`, exact actual/target
+  `assert '40001' == '23505'`; holder/waiter schedule использовал real ungranted advisory row из
+  `pg_locks`.
+- `wave3_p107_23505_twotx2` — exit `1`, exact actual/target
+  `assert ['40001'] == ['23505']`.
+- debug-only повтор двух `tx_id` записал actual tuple
+  `('40001', 'INSERT INTO debts (...) RETURNING debts.created_at, debts.updated_at')`; exit `1`.
+
+P107 остаётся `[!]`; экспериментальные test changes не закоммичены, product predicate не менялся.
