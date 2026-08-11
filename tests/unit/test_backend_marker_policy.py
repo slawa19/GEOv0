@@ -111,6 +111,7 @@ def _split_powershell_statements(line: str) -> list[str]:
 def _iter_documented_commands_from_content(content: str):
     fence_language: str | None = None
     in_powershell_block_comment = False
+    powershell_block_comment_line: int | None = None
     powershell_here_string_end: str | None = None
     powershell_here_string_line: int | None = None
     pending_powershell_command: tuple[int, str] | None = None
@@ -121,6 +122,12 @@ def _iter_documented_commands_from_content(content: str):
         stripped = line.strip()
         fence = re.match(r"^```\s*([A-Za-z0-9_-]*)", stripped)
         if fence is not None:
+            if in_powershell_block_comment:
+                yield (
+                    powershell_block_comment_line or line_number,
+                    f"{_POWERSHELL_SYNTAX_ERROR}: unclosed block comment",
+                    fence_language,
+                )
             if powershell_here_string_end is not None:
                 yield (
                     powershell_here_string_line or line_number,
@@ -134,6 +141,7 @@ def _iter_documented_commands_from_content(content: str):
                 None if fence_language is not None else fence.group(1).lower()
             )
             in_powershell_block_comment = False
+            powershell_block_comment_line = None
             powershell_here_string_end = None
             powershell_here_string_line = None
             continue
@@ -149,10 +157,15 @@ def _iter_documented_commands_from_content(content: str):
                 if not stripped:
                     continue
                 line = stripped
+            was_in_block_comment = in_powershell_block_comment
             visible, in_powershell_block_comment = _strip_powershell_block_comments(
                 line,
                 in_powershell_block_comment,
             )
+            if in_powershell_block_comment and not was_in_block_comment:
+                powershell_block_comment_line = line_number
+            elif not in_powershell_block_comment:
+                powershell_block_comment_line = None
             here_string_start = re.search(r"@(['\"])\s*$", visible)
             if here_string_start is not None:
                 powershell_here_string_end = f"{here_string_start.group(1)}@"
@@ -204,6 +217,12 @@ def _iter_documented_commands_from_content(content: str):
         yield (
             powershell_here_string_line or 1,
             f"{_POWERSHELL_SYNTAX_ERROR}: unclosed here-string",
+            fence_language,
+        )
+    if in_powershell_block_comment:
+        yield (
+            powershell_block_comment_line or 1,
+            f"{_POWERSHELL_SYNTAX_ERROR}: unclosed block comment",
             fence_language,
         )
 
@@ -1171,6 +1190,15 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 ./scripts/verify_local.ps1 -BackendMarker postgres
 $ignored = @'
 not executable
+```
+""",
+        """
+```powershell
+createdb -U geo geov0_test_missing_block_end
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_missing_block_end"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+./scripts/verify_local.ps1 -BackendMarker postgres
+Write-Host "before"; <# unclosed comment
 ```
 """,
         """
