@@ -676,3 +676,22 @@ P107 остаётся `[!]`; экспериментальные test changes н�
   требует отдельного кода и end-to-end schedules; его нельзя вывести как техническую поправку.
 
 P108 снова `[!]`, P109 не закрывается до выбора владельца и повторного exact-head external review.
+
+### 2026-08-11 — P108 owner resolution
+
+- Владелец выбрал вариант A: сохранить реализованный fail-fast rollback. До решения stable docs
+  обещали повтор той же единицы работы/batch на новой session
+  (`docs/ru/09-decisions-and-defaults.md:234-235`,
+  `docs/ru/simulator/backend/payment-integration.md:160-162` до commit ниже), что противоречило
+  runtime regression.
+- После решения decision owner разделяет engine-owned whole-UoW retry и staged real-tick fail-fast:
+  tick откатывается, получает `REAL_MODE_TICK_FAILED`, тот же batch не переигрывается, следующий
+  heartbeat планирует новый tick (`docs/ru/09-decisions-and-defaults.md:234-237`). Simulator payment
+  owner фиксирует тот же контракт в `docs/ru/simulator/backend/payment-integration.md:160-164,203-207`.
+- Canonical runtime selector:
+  `DEBUG=false; .\scripts\verify_local.ps1 -TaskSlug wave3_p108_failfast_contract -BackendOnly -BackendSelector tests/unit/test_real_tick_orchestrator_rollback_resolution.py::test_retryable_payment_conflict_rolls_back_tick_transaction`
+  — exit `0`, `1 passed`. Проверка четырёх обязательных contract-фраз —
+  `P108_FAILFAST_DOCS_OK`, exit `0`; `git diff --check` для двух stable docs — exit `0`.
+  Normative docs commit: `d1937e4221e88634ddeeb9eeb74cb25a05593a1c`. Пользовательский metadata-hunk
+  в начале decision owner снова исключён из commit и сохранён в рабочем дереве. P108 закрыта;
+  требуется финальный exact-head review P109.
