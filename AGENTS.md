@@ -105,11 +105,11 @@ git grep -n $contractMarker
 
 Canonical path — задокументированный repo entrypoint или точный selector, который требуется задачей. Прямой вызов внутреннего helper — debug path и не заменяет canonical path. Всегда маркируйте debug-only результат.
 
-В репозитории определён `.github/workflows/quality.yml`, а `scripts/verify_local.ps1` является canonical local entrypoint. До успешного выполнения workflow на опубликованной ветке это доказывает наличие конфигурации, но не статус «CI green». Mypy не настроен как gate; Ruff и Black пока выполняются только как явно non-blocking diagnostics, отделённые от `required-quality`, из-за известного repository-wide debt. Поэтому:
+В репозитории определён `.github/workflows/quality.yml`, а `scripts/verify_local.ps1` является canonical local entrypoint. До успешного выполнения workflow на опубликованной ветке это доказывает наличие конфигурации, но не статус «CI green». Mypy не настроен как gate. Пиннутый Ruff для `app migrations` является блокирующим CI-гейтом; Black остаётся non-blocking diagnostic с известным repository-wide debt. Локальный `-StaticDiagnostics` только выводит оба результата и не меняет exit code. Поэтому:
 
 - не заявляйте «CI green» или «все gates green»;
-- не превращайте текущие Ruff/Mypy findings в блокер несвязанной задачи без согласованного baseline;
-- статические проверки запускайте и сообщайте как диагностические, пока отдельный foundational slice не сделает их воспроизводимыми gates;
+- не превращайте текущие Black/Mypy findings в блокер несвязанной задачи без согласованного baseline;
+- не называйте локальный diagnostic-run доказательством CI; Ruff обязан проходить свой blocking job, Black может оставаться красным;
 - перечисляйте точные команды, exit code и непройденные surfaces.
 
 ### Cheap gates — после каждого безопасного micro-batch
@@ -121,7 +121,7 @@ Backend, с узким selector:
 .\scripts\verify_local.ps1 -TaskSlug agent_payments_review -BackendOnly -BackendSelector tests/contract/test_openapi_contract.py
 ```
 
-Вторую команду запускайте только при изменении API/schema/serialization. Ruff можно запускать диагностически на изменённых Python-файлах, но результат нужно назвать диагностикой, а не существующим зелёным gate.
+Вторую команду запускайте только при изменении API/schema/serialization. Локальный Ruff-run указывайте точной командой и exit code; CI-политика требует зелёный pinned Ruff для `app migrations`.
 
 Admin UI:
 
