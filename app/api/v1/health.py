@@ -35,7 +35,7 @@ def _best_effort_version() -> str:
 
 def _best_effort_environment() -> str:
     # Optional, but useful for the Admin UI cards.
-    return (os.getenv("GEO_ENV") or os.getenv("ENV") or "dev").strip() or "dev"
+    return settings.ENV or "dev"
 
 
 @router.get(

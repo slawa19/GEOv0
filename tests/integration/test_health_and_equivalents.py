@@ -84,6 +84,21 @@ async def test_health_endpoints(client: AsyncClient):
     assert resp.json()["status"] == "ok"
 
 
+@pytest.mark.asyncio
+async def test_versioned_health_uses_resolved_settings_environment(
+    client: AsyncClient,
+    monkeypatch,
+):
+    monkeypatch.setenv("GEO_ENV", "prod")
+    monkeypatch.setenv("ENV", "dev")
+    monkeypatch.setattr(settings, "ENV", "staging")
+
+    response = await client.get("/api/v1/health")
+
+    assert response.status_code == 200
+    assert response.json()["environment"] == "staging"
+
+
 class _FailingConnectionContext:
     def __init__(self, message: str) -> None:
         self.message = message
