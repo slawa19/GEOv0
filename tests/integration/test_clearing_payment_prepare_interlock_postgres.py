@@ -792,6 +792,8 @@ async def test_interlock_timeout_rolls_back_work_and_releases_owner_postgres(
     holder_session = TestingSessionLocal()
     clearing_session = TestingSessionLocal()
     retry_session = None
+    original_commit_timeout = settings.COMMIT_TIMEOUT_SECONDS
+    original_total_timeout = settings.PAYMENT_TOTAL_TIMEOUT_SECONDS
     monkeypatch.setattr(settings, "COMMIT_TIMEOUT_SECONDS", 0.05)
     monkeypatch.setattr(settings, "PAYMENT_TOTAL_TIMEOUT_SECONDS", 0.05)
     try:
@@ -805,6 +807,16 @@ async def test_interlock_timeout_rolls_back_work_and_releases_owner_postgres(
         assert not clearing_session.in_transaction()
 
         await holder_session.rollback()
+        monkeypatch.setattr(
+            settings,
+            "COMMIT_TIMEOUT_SECONDS",
+            original_commit_timeout,
+        )
+        monkeypatch.setattr(
+            settings,
+            "PAYMENT_TOTAL_TIMEOUT_SECONDS",
+            original_total_timeout,
+        )
         retry_session = TestingSessionLocal()
         amount = await asyncio.wait_for(
             ClearingService(retry_session).execute_clearing_with_amount(seed["cycle"]),
