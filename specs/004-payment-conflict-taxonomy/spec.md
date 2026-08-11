@@ -1,7 +1,7 @@
 # 004 — Payment conflict and cancellation taxonomy
 
 - **Date:** 2026-08-11
-- **Status:** IN PROGRESS — T400 закрыта; T401-T408 авторизованы 2026-08-11
+- **Status:** COMPLETE — T400-T408 закрыты 2026-08-11
 - **Status authority:** метка описательная; завершённость устанавливают success criteria и записанные evidence.
 - **Owner surface:** `app/core/payments/service.py`, `app/core/payments/engine.py` (только обработка ошибок, **не** идентичность блокировок), `app/main.py` exception handlers, `app/api/v1/payments.py`, `app/api/v1/simulator.py:1472-1520` (вызов `create_payment_internal` и три его обработчика: `RoutingException` `:1482`, `TimeoutException` `:1506`, `GeoException` `:1513`), `app/core/simulator/real_payments_executor.py:365-374` (staged-вызов)
 - **Severity driver:** содержит **A/F1** — P2, не упомянутый ни в одном документе репозитория до этой спеки. Механизм находки проверяем статически по коду и на этом стоит целиком. Runtime-прогон по нему был записан агентом аудита (`_audit/reports/slice_a.md:24`), но производивших его скриптов (`probe_reverse.py` и инлайновый скрипт захвата) в репозитории нет — цифру нельзя перегенерировать, поэтому она цитируется как **историческое evidence, а не как воспроизводимое измерение** (`AGENTS.md:98`: `_audit/` — «историческое evidence, не текущая спецификация»).
@@ -172,7 +172,7 @@ retryable-конфликта вместо `E010`; (3) `finally`-гарантия
 | T405 | Симметричное логирование timeout-abort в обеих ветках | `[x]` |
 | T406 | Решение по ретраю/маппингу для trustlines и integrity сервисов | `[x]` |
 | T407 | Синхронизация `docs/ru/09-decisions-and-defaults.md` и платёжной RU-документации | `[x]` |
-| T408 | Независимое ревью и evidence на точном HEAD | `[!]` |
+| T408 | Независимое ревью и evidence на точном HEAD | `[x]` |
 
 ### T403 — подход и критерии приёмки
 
@@ -393,3 +393,34 @@ retryable-конфликта вместо `E010`; (3) `finally`-гарантия
   ссылалось на него. Коммит `6916320` публикует canonical backlog registry; ownerless transaction
   poison/audit-loss instances находятся в `specs/BACKLOG.md:42-70`. Раздел продуктовых решений
   не реализовывался и sibling-код trustlines/integrity/clearing не менялся.
+
+### 2026-08-11 — T408 и закрытие Волны 2
+
+- Remediation-review выполнен независимым Codex `gpt-5.6-sol` в новом standalone clone без
+  remote/credential helper на exact HEAD
+  `4ff343455a7cb96b51ef577c6f1147a18c85705b`; range
+  `b4d167383ff6165a57e25ef4fbaaa5ec804ebb08..4ff343455a7cb96b51ef577c6f1147a18c85705b`.
+  Вердикт `VERDICT-CLEAN`, дополнительных P1/P2 нет. Adversarial probe с пятью дополнительными
+  cancel pulses дал cancellation/timeout `ABORTED`, `abort_calls=1`, а committed-path —
+  `COMMITTED`, `abort_calls=0`; exit `0`. Внешние canonical selectors: `35 passed`, `82 passed`,
+  regression/OpenAPI/locks `68 passed`, PostgreSQL `8 passed`; все exit `0`.
+- Финальный verification-plan после remediation:
+  `DEBUG=false; .\\scripts\\verify_local.ps1 -TaskSlug wave2_t408_remediation_targeted -BackendOnly -BackendSelector <13 payment/simulator files>`
+  — exit `0`, `137 passed`; тот же wrapper с `-BackendMarker postgres` и пятью PostgreSQL-файлами
+  (`wave2_t408_remediation_postgres`, отдельная проверенная `geov0_test_wave2`) — exit `0`,
+  `10 passed`; OpenAPI (`wave2_t408_remediation_contract`) — exit `0`, `23 passed`; pinned
+  `python -m ruff check app migrations` и `git diff --check 5631c02..HEAD` — exit `0`.
+- Первый repository-wide post-remediation attempt
+  `DEBUG=false; .\\scripts\\verify_local.ps1 -TaskSlug wave2_t408_remediation_full` честно
+  зафиксирован как exit `1`: `1 failed, 971 passed, 3 skipped, 16 deselected`, единственный actual
+  `tests/integration/test_simulator_real_snapshot_db_enrichment.py:35: assert eq is not None`.
+  Файл и его owner surface Wave 2 не меняла. Два независимых canonical isolated probe
+  `wave2_full_failure_probe1/2` — exit `0`, по `1 passed`; полный backend repeat
+  `wave2_t408_remediation_backend_repeat` — exit `0`, `972 passed, 3 skipped, 16 deselected`.
+- UI surfaces на том же code HEAD проверены отдельно после backend repeat. Первая команда без
+  явного `DEBUG=false` не засчитана: fixture generator получил внешний `DEBUG=release` и завершился
+  Pydantic bool-parsing error. С явным `DEBUG=false` Admin `lint/test/build` — exit `0`,
+  `201 passed` (lint: 0 errors, 116 baseline warnings); Simulator `lint/typecheck/test:unit/build` —
+  exit `0`, `729 passed`.
+- Все success criteria и T400-T408 закрыты; Program 004 / Волна 2 — `COMPLETE`. История первого
+  `VERDICT-FINDINGS`, remediation и неудачных verification attempts сохранена append-only выше.

@@ -24,7 +24,7 @@
 | 001 | [codebase-renovation](001-codebase-renovation/spec.md) | ✅ **ЗАКРЫТА** 2026-08-09 | — | весь репозиторий |
 | 002 | [payment-integrity-follow-up](002-payment-integrity-follow-up/spec.md) | 🟡 Phase 0 закрыта; Phase 1–2 авторизованы для Волн 3–4 | 2 × P2 | `app/core/payments/`, `app/core/clearing/` (interlock) |
 | 003 | [clearing-transaction-ownership](003-clearing-transaction-ownership/spec.md) | 🟡 авторизована для Волны 4 | 2 × P2, 2 × P3 | `app/core/clearing/`, `app/core/recovery.py`, `real_clearing_engine.py` |
-| 004 | [payment-conflict-taxonomy](004-payment-conflict-taxonomy/spec.md) | 🟡 авторизована; следующая Волна 2 | 1 × P2, 6 × P3 | `payments/service.py`, `main.py` handlers |
+| 004 | [payment-conflict-taxonomy](004-payment-conflict-taxonomy/spec.md) | ✅ **ЗАКРЫТА** 2026-08-11 (T400-T408) | 1 × P2, 6 × P3 | `payments/service.py`, `main.py` handlers |
 | 005 | [runtime-security-hygiene](005-runtime-security-hygiene/spec.md) | ✅ **ЗАКРЫТА** 2026-08-11 | 2 × P2, 5 × P3 | `api/deps.py`, `main.py`, `health.py`, `docker/` |
 | 006 | [verification-integrity](006-verification-integrity/spec.md) | 🟡 срез Волны 1 закрыт; остаток авторизован для Волны 5 | 1 × P2, 9 × P3 | `tests/`, CI, SSE-ветвление |
 | 007 | [simulator-analytics-surface](007-simulator-analytics-surface/spec.md) | 🔴 **ЗАБЛОКИРОВАНА** предусловием F-007-1 | 1 × P2 (предусловие) + фича | `simulator-ui/v2/`, `app/core/simulator/metrics_bottlenecks.py` |
@@ -51,7 +51,8 @@
 007  ─── НЕ АВТОРИЗОВАНА: отдельная разблокировка F-007-1 ───────────────────┘
 ```
 
-**Статус волн на 2026-08-11:** Волна 1 закрыта; следующая — Волна 2, программа 004 (T400–T408).
+**Статус волн на 2026-08-11:** Волны 1–2 закрыты; следующая — Волна 3, программа 002 Phase 1
+(P100–P109).
 
 **Почему такой порядок**
 
@@ -122,7 +123,7 @@ scope». Его выводы были независимо перепровер�
 
 Владелец 2026-08-11 авторизовал последовательную реализацию программ 002–006 по волнам выше:
 004 → 002 Phase 1 → 003 + 002 Phase 2 → остаток 006 и только раздел BACKLOG «Узкие правки — не
-требуют спеки». Волна 1 уже закрыта. Авторизация не распространяется на программу 007, раздел
+требуют спеки». Волны 1–2 уже закрыты. Авторизация не распространяется на программу 007, раздел
 BACKLOG «Требуют продуктового решения», архивы, `_audit*` и `plans/`.
 
 ## Что закрыто и не требует действий
