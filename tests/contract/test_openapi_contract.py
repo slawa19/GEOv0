@@ -1,4 +1,4 @@
-"""Semantic contract between canonical ``api/openapi.yaml`` and FastAPI.
+"""Selected exact contracts and drift ratchets between canonical OpenAPI and FastAPI.
 
 The YAML file is the reviewed public contract. FastAPI's generated OpenAPI is a
 runtime projection with OpenAPI 3.1 nullable/title noise and incomplete custom
@@ -992,7 +992,9 @@ def test_root_health_and_versioned_api_are_explicitly_classified() -> None:
         ) == _normalized_security(versioned_operation, versioned_item, generated)
 
 
-def test_openapi_paths_methods_parameters_and_required_bodies_match_app() -> None:
+def test_openapi_paths_methods_parameter_identities_and_required_bodies_match_and_schemas_are_ratcheted() -> (
+    None
+):
     canonical = _load_openapi_yaml()
     generated = _load_fastapi_openapi()
 

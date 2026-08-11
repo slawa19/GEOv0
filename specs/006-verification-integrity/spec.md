@@ -41,7 +41,7 @@
 | **F-006-5 (C6)** | P3 | Отладочный путь `pytest -m postgres` skip-зелёный на SQLite; fail-closed только у канонического раннера | `verify_local.ps1:105-111` |
 | **F-006-6 (C8)** | P3 | `container-smoke` только по `workflow_dispatch`, никогда не по расписанию и не на PR | `.github/workflows/quality.yml:169` |
 | **F-006-7 (B-1)** | P3 | Admin vitest недетерминирован: реальные rAF-переходы тоста Element Plus текут → 200/200 passed при exit code 1 | `admin-ui/src/test/setup.ts` (только `vi.restoreAllMocks()`, без teardown rAF/тостов); `errorToast.ts:22-32`; `adminConfigFeatureFlags.contract.test.ts` без `vi.mock('element-plus')` |
-| **F-006-8 (B1/F1)** | P3 | «OpenAPI semantic parity» реализована как ratchet по зафиксированному дрейфу; независимый пересчёт: полностью чист от дрейфа только `GET /health` из 87 операций | `tests/contract/test_openapi_contract.py:29-53` |
+| **F-006-8 (B1/F1)** | P3 | «OpenAPI semantic parity» реализована как ratchet по зафиксированному дрейфу; исходный пересчёт видел только `GET /health` из 87 операций. После T501 свежий baseline — 2 из 88 (`GET /health`, `GET /admin/health/db`); суть finding подтверждена | `tests/contract/test_openapi_contract.py:29-53,290-305,1004-1186` |
 | **F-006-9** | P3 | Ruff/Black — `continue-on-error`. Измеренный долг на **пиннутых** версиях (`ruff==0.1.14`, `black==24.1.1`) в гейтируемой области `app migrations`: **ruff — 24 находки** (19 `F401`, 3 `F841`, 1 `E712`, 1 `E741`), из них **19 чинятся безопасным `--fix`**, ещё **4 (3× `F841`, 1× `E712`) только под `--unsafe-fixes`**, а **1 (`E741`) не автофиксится вовсе**. **Black — 98 файлов под переформатирование, 43 без изменений**; `black --diff` даёт **11248 строк raw diff**, из них **4931 строк с префиксом `+`/`-`** (включая 196 заголовков файлов → 4735 содержательных). По всему репозиторию: ruff 118 находок, black 253 файла. Отдельно: `F821 Undefined name 'NoReturn'` (`scripts/generate_scenario_events.py:77`) — вне гейтируемой области | `.github/workflows/quality.yml:87-93`; `requirements-dev.txt:6-7`; перемеряно 2026-08-11 в песочнице с теми же пиннутыми версиями и тем же скоупом |
 | **F-006-10** | P3 | `001_initial_schema.py` — единственная миграция с **незащищённым по диалекту** Postgres-специфичным DDL; во всех последующих миграциях образец guard уже применён (`004:34,44`, `005:27,141`, `006:27,43`, `007:29,41,51,53`, `011`, `012`, `014`, `017`). Из-за этого `alembic upgrade head` не выполняется на SQLite. **Находка во многом мутная:** ни один путь проекта не создаёт SQLite dev-БД через alembic | `migrations/versions/001_initial_schema.py:25` (`op.execute('CREATE EXTENSION IF NOT EXISTS pgcrypto')`); воспроизведено 2026-08-11: `alembic upgrade head` на `sqlite+aiosqlite` → `sqlite3.OperationalError: near "EXTENSION": syntax error` |
 
@@ -172,7 +172,7 @@ sequence (что требует протокольного поля), либо �
 | T608a | Ruff на пиннутых версиях: `--fix` (19 находок), затем 5 ручных случаев (3× `F841` и 1× `E712` под `--unsafe-fixes`, 1× `E741` вручную); перевод ruff-джоба в блокирующий. Ограниченный объём: одна команда + 5 правок | `[x]` |
 | T608b | Black **остаётся неблокирующей диагностикой**: переформатирование 98 файлов / 4931 `+`/`-`-строк уничтожит `git blame`. Перевод в блокирующий — только после отдельного датированного решения | `[x]` |
 | T609 | Диалектный guard вокруг `CREATE EXTENSION pgcrypto` в миграции 001 по образцу миграций 004-017. **Не однострочник:** отдельно оценить `postgresql.JSONB`, `gen_random_uuid()` и 7× `ALTER TABLE … ADD CONSTRAINT`, которые SQLite тоже не примет. Приоритет низкий: alembic не используется для создания dev-SQLite | `[x]` |
-| T610 | Решение по OpenAPI-ratchet: план сокращения дрейфа либо честное переименование гейта | `[!]` |
+| T610 | Решение по OpenAPI-ratchet: план сокращения дрейфа либо честное переименование гейта | `[x]` |
 | T611 | Независимое внешнее ревью и evidence на точном HEAD (триггер AGENTS.md §15: программа меняет сам механизм проверки, поэтому самопроверка гейта не является доказательством) | `[!]` |
 
 ## Changelog
@@ -454,3 +454,28 @@ sequence (что требует протокольного поля), либо �
   без обязательного preflight честно сохранена: exit `1`,
   `StringDataRightTruncationError ... character varying(32)` на длинном revision 011; её DB также
   удалена при `0` connections. Pinned Ruff `0.1.14` и `git diff --check` на env/test/spec — exit `0`.
+
+### 2026-08-11 — T610
+
+- Перед правкой анкоры сверены заново. **Current:** шесть category ratchets в
+  `tests/contract/test_openapi_contract.py:29-55,290-305` уже были двусторонними
+  count+digest храповиками, но имя первого широкого теста обещало `match_app`.
+  Свежий read-only пересчёт дал `operations=88 clean=2 dirty=86`; чисты только
+  `GET /health` и `GET /admin/health/db`. Тем самым исходные 1/87 устарели после
+  T501, но суть F-006-8 подтверждена.
+- **Intended / Optimal:** gate честно называет то, что доказывает. Выбран узкий
+  rename: module docstring теперь говорит `Selected exact contracts and drift ratchets`, а test node id явно
+  разделяет exact paths/methods/identities/requiredness и ratcheted schemas
+  (`tests/contract/test_openapi_contract.py:1,995`). Сами baselines, OpenAPI и product code не
+  менялись. Датированное решение и правило постепенного сокращения долга
+  записаны в `docs/ru/09-decisions-and-defaults.md:383-403`; активная REN-009 completion
+  phrase уточнена append-only в `specs/001-codebase-renovation/tasks.md:586-591` без изменения
+  её датированной истории.
+- Первая verification-попытка передала pytest и file selector, и node selector одновременно;
+  pytest-asyncio рекурсивно собрал один модуль дважды: `wave5_t610_after` — exit `1`,
+  `RecursionError` на collection. Это harness error, не product failure; история не скрыта.
+- После разделения selectors: `wave5_t610_node` — exit `0`, `1 passed` по точному
+  новому node id; `wave5_t610_full` — exit `0`, `23 passed`. Pinned Ruff `0.1.14` на
+  contract test — exit `0`; `git diff --check` на test/decision/spec — exit `0`. После финального
+  wording correction канонический `wave5_t610_final` повторён: exit `0`, `23 passed`;
+  pinned Ruff и diff-check повторно exit `0`.

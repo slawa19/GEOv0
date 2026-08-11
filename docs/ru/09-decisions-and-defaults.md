@@ -374,6 +374,20 @@ exit `0`, 11529 raw output lines; 4991 строк начинаются с `+`/`-
 чистым деревом, полным verification и review; улучшение нельзя молча смешивать с функциональным
 изменением.
 
+### 1.19. OpenAPI: semantic drift ratchet, а не parity-gate
+
+**Решение 2026-08-11:** контрактный тест между `api/openapi.yaml` и generated FastAPI
+OpenAPI называется **exact semantic-drift ratchet**, а не проверкой semantic parity.
+Он строго сверяет paths, methods, parameter identities, request-body presence и success
+status codes, а остальной известный дрейф фиксирует двусторонними count+digest
+храповиками: тест падает и при ухудшении, и при незаписанном улучшении.
+
+Свежий пересчёт после T501: полностью совпадают 2 из 88 operations — `GET /health` и
+`GET /admin/health/db`; 86 operations имеют минимум одну зафиксированную категорию
+дрейфа. Это не parity. Сокращение долга делается узкими contract slices: каждая
+правка в wire/schema снижает соответствующий ratchet и обновляет count+digest в том же
+срезе. Массовое приведение 86 operations к parity в программу 006 не входит.
+
 ---
 
 ## 2. Дефолты и лимиты

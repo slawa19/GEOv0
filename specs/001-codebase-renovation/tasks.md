@@ -583,6 +583,12 @@ used.
   `23` tests; published required backend validation passed `775` tests and the
   affected Admin/Simulator gates passed. `phase3-contract-map.md` records the
   selected operations and explicit non-scope.
+- **2026-08-11 / T610 clarification:** the dated phrase “semantic parity” above
+  means mutation-sensitive ratchets over all maintained operations plus exact
+  parity only for the selected Phase 3 contracts. It does **not** claim
+  repository-wide parity between generated FastAPI schemas and
+  `api/openapi.yaml`; the remaining category drift is deliberately count+digest
+  ratcheted.
 - **Working-tree evidence (2026-08-07):** the contract compares semantic
   parameters (including full auth transport shape), request/response media and
   schemas, statuses, error envelopes and security OR/AND/scopes under exact
@@ -604,7 +610,8 @@ used.
 - **Non-scope:** Rewriting every schema for stylistic parity, changing public API
   semantics to match stale prose, requiring byte-identical generated YAML, or
   testing descriptions/examples as behavior.
-- **Dependencies:** REN-002; REN-003 for CI. Semantic parity has already landed;
+- **Dependencies:** REN-002; REN-003 for CI. The REN-009 selected exact contracts
+  and all-operation drift ratchets have landed;
   REN-010A may proceed, but any change to a maintained REST payload must extend the
   REN-009 contract test in the same commit. REN-012B1 remains the selected
   frontend-ingress continuation.
@@ -731,9 +738,9 @@ used.
 - **Non-scope:** Replacing SQLAlchemy, changing routing/clearing algorithms,
   relaxing invariants, combining independent failures, or optimizing before
   correctness is locked.
-- **Dependencies:** REN-006 and REN-003. Existing REN-009 semantic parity is
-  sufficient to begin REN-010A; any maintained REST payload change extends the
-  REN-009 contract test in the same commit.
+- **Dependencies:** REN-006 and REN-003. Existing REN-009 selected-contract guards
+  and all-operation drift ratchets are sufficient to begin REN-010A; any maintained
+  REST payload change extends the REN-009 contract test in the same commit.
 - **Acceptance criteria:**
   - Each listed supported write path has a compact owner/effect map and a `FIX` or
     `KEEP` decision; unrelated writes are not pulled into the slice.
