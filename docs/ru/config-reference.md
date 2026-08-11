@@ -15,6 +15,9 @@ YAML-файла конфигурации приложения.
   поддерживаемым значением legacy-alias останавливает запуск; неподдерживаемое
   legacy-значение игнорируется. Без `ENV` неподдерживаемый alias вызывает точную
   startup-ошибку конфигурации.
+- `GEO_ENV` не является входом `Settings`. Поле `environment` в
+  `/api/v1/health` возвращает уже разрешённый `settings.ENV`, поэтому не может
+  расходиться с startup guard из-за позднего чтения process environment.
 - Небезопасные значения `JWT_SECRET`, `ADMIN_TOKEN` и
   `SIMULATOR_SESSION_SECRET` допустимы только в `dev`/`test`. В остальных средах
   startup guard завершает процесс ошибкой.
@@ -62,6 +65,12 @@ $env:DATABASE_URL = 'sqlite+aiosqlite:///./geov0.db'
   `SIMULATOR_SESSION_*`, `SIMULATOR_MAX_ACTIVE_RUNS_PER_OWNER`,
   `SIMULATOR_CSRF_ORIGIN_ALLOWLIST`;
 - Admin graph include limits: `ADMIN_GRAPH_INCLUDE_MAX_*`.
+
+In-memory fallback rate limiter хранит не более `10_000` bucket/host-записей
+(`app/api/deps.py`, константа `_RATE_LIMIT_MAX_ENTRIES`). Это защитный внутренний
+потолок, а не дополнительная environment-настройка: `RATE_LIMIT_*` по-прежнему
+задают окно и число запросов. Для общего лимита нескольких replicas нужен Redis;
+локальный fallback не является распределённым rate limiter.
 
 Не переносите дефолты из этого документа в новый параллельный конфиг: изменение
 контракта выполняется согласованно в `app/config.py`, Compose/env-примере, тестах и

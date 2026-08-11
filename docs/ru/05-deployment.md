@@ -124,6 +124,28 @@ Compose создаёт persistent named volume `postgres_data`. Его удал�
 явном `ENV`, но без `ENV` приводит к точной startup-ошибке конфигурации. Это
 правило одинаково для process environment, `.env` и constructor input Pydantic.
 
+Base Compose собирает канонический production-like образ из `docker/Dockerfile`:
+он копирует приложение по явному allowlist. Dev overlay переключается на корневой
+`Dockerfile` с `COPY . .` для reload; его context ограничивает `.dockerignore`, в
+том числе для `.local-run`, `.venv`, любых `node_modules` и `*.db`. Blocking CI job
+`dev-image-content` перед сборкой создаёт sentinel-файлы этих классов и проверяет
+содержимое `/app` внутри готового образа. Зелёный source-policy тест без фактической
+сборки не заменяет этот job.
+
+### Health и perimeter transport
+
+- `/healthz` и `/api/v1/healthz` — liveness: HTTP 200, пока процесс отвечает.
+- `/health` и `/api/v1/health` — readiness: `status: degraded` сопровождается
+  HTTP 503. Оба Docker-образа используют этот путь в `HEALTHCHECK`; Docker
+  помечает контейнер `unhealthy`, но сам по себе не обещает restart.
+- `/health/db` и `/api/v1/health/db` публично сообщают только reachable/latency и
+  не возвращают exception text или dialect. Полная диагностика доступна как
+  `GET /api/v1/admin/health/db` только с `X-Admin-Token`.
+- WebSocket `/api/v1/ws` принимает access token через
+  `Sec-WebSocket-Protocol: bearer, <access_token>`. Legacy `?token=` отклоняется,
+  потому что uvicorn/proxy могут журналировать request path. Для браузера:
+  `new WebSocket(url, ["bearer", accessToken])`.
+
 ## Миграции и данные
 
 Alembic управляет схемой. Уже применённые migrations не переписываются; новая
