@@ -1,4 +1,5 @@
 import ast
+import re
 from pathlib import Path
 
 
@@ -54,3 +55,22 @@ def test_backend_scenario_is_not_a_registered_empty_tier() -> None:
         "pytest.mark.scenario" not in path.read_text(encoding="utf-8")
         for path in active_testing_docs
     )
+
+
+def test_stable_contributor_guide_uses_canonical_backend_tiers() -> None:
+    contributor_guide = (_ROOT / "docs" / "ru" / "06-contributing.md").read_text(
+        encoding="utf-8"
+    )
+    vocabulary = (
+        _ROOT / "specs" / "001-codebase-renovation" / "tasks.md"
+    ).read_text(encoding="utf-8")
+
+    bare_pytest_commands = [
+        line.strip()
+        for line in contributor_guide.splitlines()
+        if re.match(r"^pytest(?:\s|$)", line.strip())
+    ]
+    assert bare_pytest_commands == []
+    assert '-m "not slow"' not in contributor_guide
+    assert "slow`/`postgres` tiers" in vocabulary
+    assert "explicit `slow` selector" in vocabulary
