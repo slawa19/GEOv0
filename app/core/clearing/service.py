@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Dict, List, Set
 
 from sqlalchemy import select, and_, func, text
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
@@ -65,9 +65,13 @@ class ClearingService:
         canonical_debt_set = ":".join(sorted({str(debt_id) for debt_id in debt_ids}))
         return str(uuid.uuid5(_CLEARING_REPLAY_NAMESPACE, canonical_debt_set))
 
-    async def _committed_execution_amount(self, tx_id: str) -> Decimal | None:
+    @staticmethod
+    async def _read_committed_execution_amount(
+        session: AsyncSession,
+        tx_id: str,
+    ) -> Decimal | None:
         transaction = (
-            await self.session.execute(
+            await session.execute(
                 select(Transaction).where(
                     Transaction.tx_id == tx_id,
                     Transaction.type == "CLEARING",
@@ -86,7 +90,70 @@ class ClearingService:
             raise GeoException()
         return amount
 
-    async def _commit_to_terminal(self) -> asyncio.CancelledError | None:
+    async def _committed_execution_amount(self, tx_id: str) -> Decimal | None:
+        return await self._read_committed_execution_amount(self.session, tx_id)
+
+    @staticmethod
+    def _is_retryable_concurrency_error(exc: BaseException) -> bool:
+        pending: list[BaseException] = [exc]
+        seen: set[int] = set()
+        while pending:
+            current = pending.pop()
+            if id(current) in seen:
+                continue
+            seen.add(id(current))
+            for attr in ("sqlstate", "pgcode", "code"):
+                value = getattr(current, attr, None)
+                if value is not None and str(value).strip() in {"40001", "40P01"}:
+                    return True
+            for linked in (
+                getattr(current, "orig", None),
+                current.__cause__,
+                current.__context__,
+            ):
+                if isinstance(linked, BaseException):
+                    pending.append(linked)
+        return False
+
+    async def _reconcile_committed_execution(self, tx_id: str) -> Decimal | None:
+        """Resolve one ambiguous occurrence from a fresh transaction snapshot."""
+        try:
+            await self.session.rollback()
+        except Exception:
+            logger.exception("event=clearing.reconcile_rollback_failed tx_id=%s", tx_id)
+
+        bind = getattr(self.session, "bind", None)
+        if bind is None:
+            raise GeoException()
+        session_factory = async_sessionmaker(
+            bind=bind,
+            class_=AsyncSession,
+            expire_on_commit=False,
+            autoflush=False,
+        )
+        last_error: Exception | None = None
+        for attempt in range(3):
+            try:
+                async with session_factory() as recovery_session:
+                    amount = await self._read_committed_execution_amount(
+                        recovery_session,
+                        tx_id,
+                    )
+            except Exception as exc:
+                last_error = exc
+            else:
+                last_error = None
+                if amount is not None:
+                    return amount
+            if attempt < 2:
+                await asyncio.sleep(0.01 * (attempt + 1))
+        if last_error is not None:
+            raise last_error
+        return None
+
+    async def _commit_to_terminal(
+        self,
+    ) -> tuple[asyncio.CancelledError | None, BaseException | None]:
         """Drain the session commit and report caller cancellation separately."""
         commit_task = asyncio.create_task(self.session.commit())
         caller_cancellation: asyncio.CancelledError | None = None
@@ -99,8 +166,12 @@ class ClearingService:
             except Exception:
                 # The task is terminal; surface its exact result below.
                 pass
-        commit_task.result()
-        return caller_cancellation
+        commit_error: BaseException | None = None
+        try:
+            commit_task.result()
+        except (Exception, asyncio.CancelledError) as exc:
+            commit_error = exc
+        return caller_cancellation, commit_error
 
     def _dialect_name(self) -> str | None:
         try:
@@ -892,6 +963,15 @@ class ClearingService:
         try:
             replay_amount = await self._committed_execution_amount(execution_tx_id)
         except Exception as exc:
+            if self._is_retryable_concurrency_error(exc):
+                try:
+                    replay_amount = await self._reconcile_committed_execution(
+                        execution_tx_id
+                    )
+                except Exception as reconciliation_error:
+                    await self._raise_unexpected_execution(reconciliation_error)
+                if replay_amount is not None:
+                    return replay_amount
             await self._raise_unexpected_execution(exc)
         if replay_amount is not None:
             await self._rollback_skipped_execution()
@@ -908,6 +988,15 @@ class ClearingService:
                 .all()
             )
         except Exception as exc:
+            if self._is_retryable_concurrency_error(exc):
+                try:
+                    replay_amount = await self._reconcile_committed_execution(
+                        execution_tx_id
+                    )
+                except Exception as reconciliation_error:
+                    await self._raise_unexpected_execution(reconciliation_error)
+                if replay_amount is not None:
+                    return replay_amount
             await self._raise_unexpected_execution(exc)
 
         if len(debts) != len(debt_ids):
@@ -1165,7 +1254,21 @@ class ClearingService:
             # 4. Commit
             new_tx.state = "COMMITTED"
             self.session.add(new_tx)
-            commit_cancellation = await self._commit_to_terminal()
+            commit_cancellation, commit_error = await self._commit_to_terminal()
+            if commit_error is not None:
+                if (
+                    commit_cancellation is None
+                    and isinstance(commit_error, asyncio.CancelledError)
+                ):
+                    commit_cancellation = commit_error
+                reconciled_amount = await self._reconcile_committed_execution(
+                    tx_id_str
+                )
+                if reconciled_amount is None:
+                    if commit_cancellation is not None:
+                        raise commit_cancellation
+                    raise commit_error
+                clear_amount = reconciled_amount
 
             # Debts changed: invalidate any TTL routing graph cache.
             try:
@@ -1188,6 +1291,15 @@ class ClearingService:
             return clear_amount
 
         except Exception as exc:
+            if self._is_retryable_concurrency_error(exc):
+                try:
+                    replay_amount = await self._reconcile_committed_execution(
+                        execution_tx_id
+                    )
+                except Exception as reconciliation_error:
+                    await self._raise_unexpected_execution(reconciliation_error)
+                if replay_amount is not None:
+                    return replay_amount
             await self._raise_unexpected_execution(exc)
 
     async def auto_clear(self, equivalent_code: str, *, max_depth: int = 6) -> int:

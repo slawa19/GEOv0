@@ -8,16 +8,271 @@ import uuid
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 
 
 pytestmark = pytest.mark.postgres
 
 
 @pytest.mark.asyncio
-async def test_post_commit_cancellation_replays_once_and_new_cycle_still_executes_postgres(
+async def test_concurrent_same_cycle_serializable_resolves_one_durable_occurrence_postgres(
+    db_session,
+):
+    """A real 40001 loser resolves the winner's deterministic clearing result."""
+
+    dialect = db_session.get_bind().dialect.name
+    if dialect not in {"postgresql", "postgres"}:
+        pytest.skip("Postgres-only: SERIALIZABLE clearing reconciliation")
+
+    from app.core.clearing.service import ClearingService
+    from app.db.models.audit_log import IntegrityAuditLog
+    from app.db.models.debt import Debt
+    from app.db.models.equivalent import Equivalent
+    from app.db.models.participant import Participant
+    from app.db.models.prepare_lock import PrepareLock
+    from app.db.models.transaction import Transaction
+    from app.db.models.trustline import TrustLine
+    from tests.conftest import TestingSessionLocal
+
+    nonce = uuid.uuid4().hex[:10]
+    equivalent_id = uuid.uuid4()
+    equivalent_code = f"CC{nonce}".upper()
+    participant_ids = [uuid.uuid4() for _ in range(3)]
+    a_id, b_id, c_id = participant_ids
+    debt_ids = [uuid.uuid4() for _ in range(3)]
+    cycle = [{"debt_id": str(debt_id)} for debt_id in debt_ids]
+    sessions = []
+    workers = []
+
+    try:
+        async with TestingSessionLocal() as setup:
+            setup.add(
+                Equivalent(
+                    id=equivalent_id,
+                    code=equivalent_code,
+                    description="Concurrent clearing replay test",
+                    precision=2,
+                )
+            )
+            setup.add_all(
+                [
+                    Participant(
+                        id=participant_id,
+                        pid=f"{label}_CC_{nonce}",
+                        display_name=label,
+                        public_key=f"pk_{label}_{nonce}",
+                        type="person",
+                        status="active",
+                    )
+                    for participant_id, label in zip(
+                        participant_ids,
+                        ("A", "B", "C"),
+                        strict=True,
+                    )
+                ]
+            )
+            setup.add_all(
+                [
+                    TrustLine(
+                        from_participant_id=creditor_id,
+                        to_participant_id=debtor_id,
+                        equivalent_id=equivalent_id,
+                        limit=Decimal("200.00"),
+                        policy={"auto_clearing": True},
+                        status="active",
+                    )
+                    for debtor_id, creditor_id in (
+                        (a_id, b_id),
+                        (b_id, c_id),
+                        (c_id, a_id),
+                    )
+                ]
+            )
+            setup.add_all(
+                [
+                    Debt(
+                        id=debt_id,
+                        debtor_id=debtor_id,
+                        creditor_id=creditor_id,
+                        equivalent_id=equivalent_id,
+                        amount=Decimal(amount),
+                    )
+                    for debt_id, debtor_id, creditor_id, amount in (
+                        (debt_ids[0], a_id, b_id, "100.00"),
+                        (debt_ids[1], b_id, c_id, "30.00"),
+                        (debt_ids[2], c_id, a_id, "40.00"),
+                    )
+                ]
+            )
+            await setup.commit()
+
+        barrier = asyncio.Barrier(2)
+        observed_retryable_sqlstates: list[str] = []
+
+        class _CoordinatedClearingService(ClearingService):
+            def __init__(self, session):
+                super().__init__(session)
+                self._initial_replay_read = True
+
+            async def _committed_execution_amount(self, tx_id: str):
+                amount = await super()._committed_execution_amount(tx_id)
+                if self._initial_replay_read:
+                    self._initial_replay_read = False
+                    assert amount is None
+                    await barrier.wait()
+                return amount
+
+            def _is_retryable_concurrency_error(self, exc: BaseException) -> bool:
+                is_retryable = super()._is_retryable_concurrency_error(exc)
+                if is_retryable:
+                    pending = [exc]
+                    seen: set[int] = set()
+                    while pending:
+                        current = pending.pop()
+                        if id(current) in seen:
+                            continue
+                        seen.add(id(current))
+                        for attr in ("sqlstate", "pgcode", "code"):
+                            value = getattr(current, attr, None)
+                            if str(value or "").strip() in {"40001", "40P01"}:
+                                observed_retryable_sqlstates.append(str(value))
+                        for linked in (
+                            getattr(current, "orig", None),
+                            current.__cause__,
+                            current.__context__,
+                        ):
+                            if isinstance(linked, BaseException):
+                                pending.append(linked)
+                return is_retryable
+
+        for _ in range(2):
+            session = TestingSessionLocal()
+            sessions.append(session)
+            await session.connection(
+                execution_options={"isolation_level": "SERIALIZABLE"}
+            )
+            isolation = (await session.execute(text("SHOW transaction_isolation"))).scalar_one()
+            assert str(isolation).lower() == "serializable"
+
+        workers = [
+            asyncio.create_task(
+                _CoordinatedClearingService(session).execute_clearing_with_amount(
+                    ordered_cycle
+                )
+            )
+            for session, ordered_cycle in zip(
+                sessions,
+                (cycle, list(reversed(cycle))),
+                strict=True,
+            )
+        ]
+        results = await asyncio.wait_for(
+            asyncio.gather(*workers, return_exceptions=True),
+            timeout=15.0,
+        )
+
+        assert results == [Decimal("30.00000000"), Decimal("30.00000000")]
+        assert observed_retryable_sqlstates
+        assert set(observed_retryable_sqlstates) == {"40001"}
+        assert all(not session.in_transaction() for session in sessions)
+
+        async with TestingSessionLocal() as verify:
+            clearing_transactions = (
+                await verify.scalars(
+                    select(Transaction).where(
+                        Transaction.type == "CLEARING",
+                        Transaction.initiator_id.in_(participant_ids),
+                    )
+                )
+            ).all()
+            clearing_audits = (
+                await verify.scalars(
+                    select(IntegrityAuditLog).where(
+                        IntegrityAuditLog.operation_type == "CLEARING",
+                        IntegrityAuditLog.equivalent_code == equivalent_code,
+                    )
+                )
+            ).all()
+            remaining_debts = {
+                debt.id: debt.amount
+                for debt in (
+                    await verify.scalars(
+                        select(Debt).where(Debt.equivalent_id == equivalent_id)
+                    )
+                ).all()
+            }
+
+        assert len(clearing_transactions) == 1
+        assert clearing_transactions[0].state == "COMMITTED"
+        assert len(clearing_audits) == 1
+        assert remaining_debts == {
+            debt_ids[0]: Decimal("70.00000000"),
+            debt_ids[2]: Decimal("10.00000000"),
+        }
+    finally:
+        primary_error = sys.exc_info()[1]
+        try:
+            pending = [worker for worker in workers if not worker.done()]
+            for worker in pending:
+                worker.cancel()
+            if pending:
+                await asyncio.wait(pending, timeout=2.0)
+            for worker in workers:
+                if worker.done() and not worker.cancelled():
+                    worker.exception()
+
+            async with asyncio.timeout(5.0):
+                for session in sessions:
+                    await session.rollback()
+                    await session.close()
+                async with TestingSessionLocal() as cleanup:
+                    await cleanup.execute(
+                        delete(IntegrityAuditLog).where(
+                            IntegrityAuditLog.equivalent_code == equivalent_code
+                        )
+                    )
+                    await cleanup.execute(
+                        delete(PrepareLock).where(
+                            PrepareLock.participant_id.in_(participant_ids)
+                        )
+                    )
+                    await cleanup.execute(
+                        delete(Transaction).where(
+                            Transaction.initiator_id.in_(participant_ids)
+                        )
+                    )
+                    await cleanup.execute(
+                        delete(Debt).where(Debt.equivalent_id == equivalent_id)
+                    )
+                    await cleanup.execute(
+                        delete(TrustLine).where(
+                            TrustLine.equivalent_id == equivalent_id
+                        )
+                    )
+                    await cleanup.execute(
+                        delete(Participant).where(
+                            Participant.id.in_(participant_ids)
+                        )
+                    )
+                    await cleanup.execute(
+                        delete(Equivalent).where(Equivalent.id == equivalent_id)
+                    )
+                    await cleanup.commit()
+        except BaseException as teardown_error:
+            if primary_error is None:
+                raise
+            primary_error.add_note(
+                "Concurrent clearing replay teardown also failed: "
+                f"{type(teardown_error).__name__}: {teardown_error}"
+            )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("boundary_kind", ["cancellation", "ack_loss"])
+async def test_post_commit_boundary_reconciles_and_new_cycle_still_executes_postgres(
     db_session,
     monkeypatch,
+    boundary_kind,
 ):
     dialect = db_session.get_bind().dialect.name
     if dialect not in {"postgresql", "postgres"}:
@@ -121,7 +376,7 @@ async def test_post_commit_cancellation_replays_once_and_new_cycle_still_execute
 
         service_session = TestingSessionLocal()
         await service_session.connection(
-            execution_options={"isolation_level": "READ COMMITTED"}
+            execution_options={"isolation_level": "SERIALIZABLE"}
         )
         service = ClearingService(service_session)
         real_commit = service_session.commit
@@ -129,6 +384,8 @@ async def test_post_commit_cancellation_replays_once_and_new_cycle_still_execute
         async def _commit_then_delay_ack():
             await real_commit()
             commit_completed.set()
+            if boundary_kind == "ack_loss":
+                raise RuntimeError("commit acknowledgement lost")
             await release_commit_ack.wait()
 
         monkeypatch.setattr(service_session, "commit", _commit_then_delay_ack)
@@ -138,23 +395,26 @@ async def test_post_commit_cancellation_replays_once_and_new_cycle_still_execute
             name="clearing-post-commit-cancellation",
         )
         await asyncio.wait_for(commit_completed.wait(), timeout=5.0)
-        service_task.cancel()
-        await asyncio.sleep(0)
-        release_commit_ack.set()
-
-        with pytest.raises(ClearingCommittedAfterCancellation) as cancellation:
-            await asyncio.wait_for(service_task, timeout=5.0)
+        if boundary_kind == "cancellation":
+            service_task.cancel()
+            await asyncio.sleep(0)
+            release_commit_ack.set()
+            with pytest.raises(ClearingCommittedAfterCancellation) as cancellation:
+                await asyncio.wait_for(service_task, timeout=5.0)
+            boundary_amount = cancellation.value.cleared_amount
+        else:
+            boundary_amount = await asyncio.wait_for(service_task, timeout=5.0)
 
         replay_session = TestingSessionLocal()
         await replay_session.connection(
-            execution_options={"isolation_level": "READ COMMITTED"}
+            execution_options={"isolation_level": "SERIALIZABLE"}
         )
         replay_amount = await ClearingService(
             replay_session
         ).execute_clearing_with_amount(list(reversed(cycle)))
 
         assert replay_amount == Decimal("30.00000000")
-        assert cancellation.value.cleared_amount == replay_amount
+        assert boundary_amount == replay_amount
         assert not replay_session.in_transaction()
 
         # Anti-vacuum: a genuinely new occurrence has a new Debt-ID set and must
