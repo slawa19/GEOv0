@@ -163,7 +163,7 @@ retryable-конфликта вместо `E010`; (3) `finally`-гарантия
 | T401 | Вынести/классифицировать best-effort audit-блок; убрать `except Exception: continue/pass` | `[x]` |
 | T402 | Единый классификатор ошибок БД на границе сервиса + типизированный retryable-код | `[x]` |
 | T403 | Расширить guard вставки tx-строки за пределы `IntegrityError` — **одним guard'ом внутри `PaymentService`** вокруг `service.py:543-568` в `_create_payment_impl` (`:258`), который наследуют все **три** потребителя. Подробности и критерии приёмки — ниже | `[x]` |
-| T404 | `finally`-гарантия терминального состояния для отмены и таймаута (staged и non-staged) | `[!]` |
+| T404 | `finally`-гарантия терминального состояния для отмены и таймаута (staged и non-staged) | `[x]` |
 | T405 | Симметричное логирование timeout-abort в обеих ветках | `[!]` |
 | T406 | Решение по ретраю/маппингу для trustlines и integrity сервисов | `[!]` |
 | T407 | Синхронизация `docs/ru/09-decisions-and-defaults.md` и платёжной RU-документации | `[!]` |
@@ -290,3 +290,27 @@ retryable-конфликта вместо `E010`; (3) `finally`-гарантия
   приведено к фактической schema. Повтор `wave2_t403_fix` — exit `0`, `74 passed`; real-PG
   regression `wave2_t403_pg` — exit `0`, `2 passed`; OpenAPI selector `wave2_t403_contract` —
   exit `0`, `23 passed`; pinned Ruff и `git diff --check` — exit `0`.
+
+### 2026-08-11 — T404
+
+- Implementation commit: `f914ddd`. До изменения outer boundary ловил только timeout
+  (`app/core/payments/service.py:811`), `CancelledError` обходил cleanup, а timeout использовал
+  недренируемый bare `asyncio.shield` на `:847-873`. Существующий тест прямо фиксировал старый
+  дефект как «abort не вызывается».
+- `_drain_payment_cleanup` (`app/core/payments/service.py:97-123`) теперь доводит session-owned
+  rollback/abort до terminal result: первая отмена сохраняется, повторная отменяет child, но child
+  всё равно дренируется до завершения. Флаг возможной записи tx выставляется до commit/flush
+  (`:498,625`), поэтому покрыта неоднозначная отмена самой вставки, а не только поздние фазы.
+- Cancellation boundary (`service.py:916-954`) сохраняет исходный `CancelledError`, но сначала
+  rollback/read-before-abort для commit-path либо staged abort для caller-owned outer transaction.
+  Уже `COMMITTED` состояние не регрессирует. Timeout boundary использует тот же terminal drain
+  (`:957-1019`) вместо detached shield.
+- Behavioral coverage: insert/prepare/commit cancellation и durable ABORTED —
+  `tests/integration/test_payment_prepare_error_taxonomy.py:1017-1113`; staged prepare abort до
+  outer rollback — `:1116-1167`; одинарная/повторная cancellation дренирования —
+  `tests/unit/test_payment_cleanup_cancellation.py:11-61`. Старое ложное ожидание намеренно
+  переписано под инвариант.
+- Первый canonical selector `wave2_t404_initial` подтвердил смену поведения: exit `1`,
+  `1 failed, 32 passed`, только старое ожидание `abort_called is False`. После обновления tests
+  `wave2_t404` и финальный `wave2_t404_final` — exit `0`, каждый `38 passed`; pinned Ruff и
+  `git diff --check` — exit `0`.
