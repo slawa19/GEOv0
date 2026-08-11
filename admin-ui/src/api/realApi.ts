@@ -288,6 +288,23 @@ const LiquiditySummarySchema = z
   })
   .passthrough()
 
+function paginatedSchema(itemSchema: ZodTypeAny) {
+  return z
+    .object({
+      items: z.array(itemSchema),
+      page: z.number().int().min(1),
+      per_page: z.number().int().min(1).max(200),
+      total: z.number().int().min(0),
+    })
+    .passthrough()
+}
+
+const ParticipantsListSchema = paginatedSchema(ParticipantSchema)
+const TrustlinesListSchema = paginatedSchema(TrustlineSchema)
+const AuditLogListSchema = paginatedSchema(AuditLogEntrySchema)
+const IncidentsListSchema = paginatedSchema(IncidentSchema)
+const EquivalentsListSchema = z.object({ items: z.array(EquivalentSchema) }).passthrough()
+
 function isProdBuild(): boolean {
   const forced = (globalThis as unknown as { __GEO_ADMINUI_FORCE_PROD__?: unknown })?.__GEO_ADMINUI_FORCE_PROD__
   if (forced === true) return true
@@ -538,16 +555,6 @@ export async function requestJson<T>(
   }
 }
 
-function bestEffortTotal(page: number, perPage: number, itemsLen: number): number {
-  const p = Math.max(1, page || 1)
-  const pp = Math.max(1, perPage || 1)
-  const offset = (p - 1) * pp
-  // Backend list endpoints currently don't return total. We approximate:
-  // - if last page (itemsLen < pp) => total = offset + itemsLen
-  // - else => total = offset + itemsLen + 1 (signals “has next page”)
-  return itemsLen < pp ? offset + itemsLen : offset + itemsLen + 1
-}
-
 export function buildQuery(pathname: string, params: Record<string, unknown>): string {
   const rawBase = baseUrl()
 
@@ -677,11 +684,11 @@ export const realApi = {
 
     const payload = await requestJson<Paginated<Participant>>(
       buildQuery('/api/v1/admin/participants', { ...params, status: status || undefined, page, per_page }),
-      { admin: true },
+      { admin: true, schema: ParticipantsListSchema },
     )
 
     const backend = assertSuccess(payload)
-    const items = (backend.items || []).map((p) => ({
+    const items = backend.items.map((p) => ({
       ...p,
       status: normalizeAdminStatusToUi(p.status),
     }))
@@ -690,9 +697,9 @@ export const realApi = {
       success: true,
       data: {
         items,
-        page: backend.page ?? page,
-        per_page: backend.per_page ?? per_page,
-        total: typeof backend.total === 'number' ? backend.total : bestEffortTotal(page, per_page, items.length),
+        page: backend.page,
+        per_page: backend.per_page,
+        total: backend.total,
       },
     }
   },
@@ -765,17 +772,16 @@ export const realApi = {
 
     const payload = await requestJson<Paginated<Trustline>>(
       buildQuery('/api/v1/admin/trustlines', { ...params, page, per_page }),
-      { admin: true },
+      { admin: true, schema: TrustlinesListSchema },
     )
     const backend = assertSuccess(payload)
-    const items = backend.items || []
     return {
       success: true,
       data: {
-        items,
-        page: backend.page ?? page,
-        per_page: backend.per_page ?? per_page,
-        total: typeof backend.total === 'number' ? backend.total : bestEffortTotal(page, per_page, items.length),
+        items: backend.items,
+        page: backend.page,
+        per_page: backend.per_page,
+        total: backend.total,
       },
     }
   },
@@ -792,17 +798,16 @@ export const realApi = {
     const per_page = params.per_page ?? 50
     const payload = await requestJson<Paginated<AuditLogEntry>>(
       buildQuery('/api/v1/admin/audit-log', { ...params, page, per_page }),
-      { admin: true },
+      { admin: true, schema: AuditLogListSchema },
     )
     const backend = assertSuccess(payload)
-    const items = backend.items || []
     return {
       success: true,
       data: {
-        items,
-        page: backend.page ?? page,
-        per_page: backend.per_page ?? per_page,
-        total: typeof backend.total === 'number' ? backend.total : bestEffortTotal(page, per_page, items.length),
+        items: backend.items,
+        page: backend.page,
+        per_page: backend.per_page,
+        total: backend.total,
       },
     }
   },
@@ -812,9 +817,9 @@ export const realApi = {
       buildQuery('/api/v1/admin/equivalents', {
         include_inactive: params.include_inactive ? true : undefined,
       }),
-      { admin: true },
+      { admin: true, schema: EquivalentsListSchema },
     )
-    const items = assertSuccess(payload).items || []
+    const items = assertSuccess(payload).items
     return { success: true, data: { items } }
   },
 
@@ -885,7 +890,7 @@ export const realApi = {
     const per_page = params.per_page ?? 20
     return requestJson<Paginated<Incident>>(
       buildQuery('/api/v1/admin/incidents', { page, per_page }),
-      { admin: true },
+      { admin: true, schema: IncidentsListSchema },
     )
   },
 
