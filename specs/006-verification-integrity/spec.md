@@ -164,7 +164,7 @@ sequence (что требует протокольного поля), либо �
 | T600 | **VERIFY FIRST.** Доказать на `sse_broadcast.py`, может ли бэкенд доставить не виденное ранее более старое patch-событие. По итогу — либо гейт применения patch по producer sequence (нужно протокольное поле seq/version/ts в `NodePatch`/`EdgePatch`), либо датированное решение о приемлемости устаревших абсолютных patch | `[x]` |
 | T601 | Убрать ветвление по `PYTEST_CURRENT_TEST` из production SSE (F-006-2, P2) | `[x]` |
 | T602 | Решить судьбу `stop_after_types`: сделать работающим вне pytest или убрать из контракта и сигнатур (F-006-2b, P3) | `[x]` |
-| T603 | Включить rate limiter в тестах; покрыть 429/окно/fallback | `[!]` |
+| T603 | Включить rate limiter в тестах; покрыть 429/окно/fallback | `[x]` |
 | T604 | Привести маркеры `pytest.ini` в соответствие с носителями | `[!]` |
 | T605 | Сделать `pytest -m postgres` fail-closed вне канонического раннера | `[!]` |
 | T606 | Добавить `container-smoke` в регулярное расписание | `[!]` |
@@ -282,3 +282,25 @@ sequence (что требует протокольного поля), либо �
   отсутствуют, stable SSE docs обещают terminal event/client disconnect, а история `ee355dbe` и
   `e712bfd` связывает параметр только с удалённым pytest harness. Stop-level anchor drift и P1/P2
   не обнаружены.
+
+### 2026-08-11 — T603
+
+- Перед правкой anchor `tests/conftest.py:44` подтвердился: глобальный fixture по-прежнему выключает
+  limiter для основного suite. При этом **Current** уточнился после Program005: прямые unit-тесты
+  уже включали in-memory fallback и проверяли bound/429 (`tests/unit/test_rate_limit_memory_bound.py:
+  18-74`), поэтому исходное «ни одним тестом» стало частично историческим; HTTP envelope, переход
+  окна и Redis path всё ещё не измерялись. **Intended:** основной suite остаётся изолированным от
+  best-effort throttling, но отдельный набор явно включает production dependency. **Optimal:** два
+  узких HTTP-теста без изменения runtime/config defaults.
+- Новый `tests/integration/test_http_rate_limit.py:26-91` локально включает limiter. Первый тест
+  оставляет `REDIS_ENABLED=True`, но убирает client, тем самым проходит реальный in-memory fallback:
+  два `200`, затем `429/E009` с точными `window_seconds`/`limit`, после перехода bucket снова `200`
+  (`:42-67`). Второй ставит минимальный async Redis double и доказывает production Redis branch:
+  `INCR`, единственный `EXPIRE` на `window+1`, затем HTTP 429; in-memory counters остаются пустыми
+  (`:70-91`).
+- Canonical targeted gate:
+  `$env:DEBUG='false'; $env:ENV='test'; $selectors=@('tests/integration/test_http_rate_limit.py',
+  'tests/unit/test_rate_limit_memory_bound.py'); .\scripts\verify_local.ps1 -TaskSlug
+  wave5_t603_rate_limit -BackendOnly -BackendSelector $selectors -Python
+  .\.venv\Scripts\python.exe` — exit `0`, `5 passed`. Pinned Ruff `0.1.14` на новом файле — exit
+  `0`; `git diff --check` — exit `0`.
