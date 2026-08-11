@@ -208,6 +208,135 @@ async def test_retryable_database_failure_uses_e008_at_service_boundary(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("entrypoint", ["public", "internal"])
+async def test_insert_serialization_failure_is_typed_before_any_tx_is_persisted(
+    db_session,
+    monkeypatch,
+    entrypoint: str,
+) -> None:
+    service, sender, request, tx_id = await _build_direct_payment(
+        db_session,
+        suffix=f"insert_{entrypoint}",
+    )
+
+    async def build_graph(equivalent_code: str, **kwargs) -> None:
+        return None
+
+    def find_flow_routes(from_pid: str, to_pid: str, amount: Decimal, **kwargs):
+        return [([from_pid, to_pid], amount)]
+
+    async def fail_insert_commit() -> None:
+        raise _serialization_failure()
+
+    monkeypatch.setattr(service.router, "build_graph", build_graph)
+    monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
+    monkeypatch.setattr(db_session, "commit", fail_insert_commit)
+
+    with pytest.raises(RetryablePaymentConflictException):
+        if entrypoint == "public":
+            await service.create_payment(sender.id, request)
+        else:
+            await service.create_payment_internal(
+                sender.id,
+                to_pid=request.to,
+                equivalent=request.equivalent,
+                amount=request.amount,
+                idempotency_key=tx_id,
+            )
+
+    transaction = (
+        await db_session.execute(select(Transaction).where(Transaction.tx_id == tx_id))
+    ).scalar_one_or_none()
+    assert transaction is None
+
+
+@pytest.mark.asyncio
+async def test_http_insert_serialization_failure_returns_declared_conflict(
+    client,
+    db_session,
+    monkeypatch,
+) -> None:
+    sender, receiver = await _seed_http_payment(
+        client,
+        db_session,
+        suffix="insert_http",
+    )
+    tx_id = str(uuid.uuid4())
+
+    async def build_graph(self, equivalent_code: str, **kwargs) -> None:
+        return None
+
+    def find_flow_routes(self, from_pid: str, to_pid: str, amount: Decimal, **kwargs):
+        return [([from_pid, to_pid], amount)]
+
+    async def fail_insert_commit() -> None:
+        raise _serialization_failure()
+
+    monkeypatch.setattr(PaymentRouter, "build_graph", build_graph)
+    monkeypatch.setattr(PaymentRouter, "find_flow_routes", find_flow_routes)
+    monkeypatch.setattr(db_session, "commit", fail_insert_commit)
+
+    response = await client.post(
+        "/api/v1/payments",
+        headers=sender["headers"],
+        json=_signed_payment_body(sender, receiver, tx_id=tx_id),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"] == {
+        "code": "E008",
+        "message": "State conflict",
+        "details": {
+            "retryable": True,
+            "conflict_kind": "database_concurrency",
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_staged_insert_serialization_failure_propagates_without_local_rollback(
+    db_session,
+    monkeypatch,
+) -> None:
+    service, sender, request, tx_id = await _build_direct_payment(
+        db_session,
+        suffix="insert_staged",
+    )
+
+    async def build_graph(equivalent_code: str, **kwargs) -> None:
+        return None
+
+    def find_flow_routes(from_pid: str, to_pid: str, amount: Decimal, **kwargs):
+        return [([from_pid, to_pid], amount)]
+
+    async def fail_insert_flush(*args, **kwargs) -> None:
+        raise _serialization_failure()
+
+    rollback_calls = 0
+
+    async def track_rollback() -> None:
+        nonlocal rollback_calls
+        rollback_calls += 1
+
+    monkeypatch.setattr(service.router, "build_graph", build_graph)
+    monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
+    monkeypatch.setattr(db_session, "flush", fail_insert_flush)
+    monkeypatch.setattr(db_session, "rollback", track_rollback)
+
+    with pytest.raises(RetryablePaymentConflictException):
+        await service.create_payment_internal_staged(
+            sender.id,
+            to_pid=request.to,
+            equivalent=request.equivalent,
+            amount=request.amount,
+            idempotency_key=tx_id,
+        )
+
+    assert rollback_calls == 0
+    assert db_session.in_transaction()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("route_count", "error_factory", "expected_status", "expected_code"),
     [

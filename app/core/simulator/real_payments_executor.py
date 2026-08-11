@@ -17,7 +17,11 @@ from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter
 from app.core.simulator.viz_patch_helper import VizPatchHelper
 from app.core.simulator.models import RunRecord
 from app.db.models.participant import Participant
-from app.utils.exceptions import GeoException, TimeoutException
+from app.utils.exceptions import (
+    GeoException,
+    RetryablePaymentConflictException,
+    TimeoutException,
+)
 
 
 @dataclass(frozen=True)
@@ -407,6 +411,11 @@ class RealPaymentsExecutor:
                         route_edges,
                         staged.post_commit_effects,
                     )
+                except RetryablePaymentConflictException:
+                    # The outer tick transaction is no longer safe to use. Do not
+                    # count a transient conflict as a terminal payment rejection;
+                    # propagate so the tick-level rollback/replay policy owns it.
+                    raise
                 except Exception as e:
                     code = "INTERNAL_ERROR"
                     status = None

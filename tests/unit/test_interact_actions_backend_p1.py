@@ -22,7 +22,11 @@ from app.schemas.simulator import (
     SimulatorGraphNode,
     SimulatorGraphSnapshot,
 )
-from app.utils.exceptions import GeoException, RoutingException
+from app.utils.exceptions import (
+    GeoException,
+    RetryablePaymentConflictException,
+    RoutingException,
+)
 
 
 @pytest.fixture
@@ -774,6 +778,48 @@ async def test_action_payment_real_no_route_mocked(client, db_session, interact_
     assert r.status_code == 409
     payload = r.json()
     assert payload.get("code") == "NO_ROUTE"
+
+
+@pytest.mark.asyncio
+async def test_action_payment_real_retryable_conflict_is_not_rejected(
+    client,
+    db_session,
+    interact_actions_enabled,
+    monkeypatch,
+):
+    await _seed_alice_bob_uah(db_session)
+    headers = {"X-Admin-Token": settings.ADMIN_TOKEN}
+
+    async def _retryable_conflict(self, *_args, **_kwargs):
+        raise RetryablePaymentConflictException()
+
+    monkeypatch.setattr(
+        interact_actions_enabled.PaymentService,
+        "create_payment_internal",
+        _retryable_conflict,
+    )
+
+    response = await client.post(
+        "/api/v1/simulator/runs/test-run/actions/payment-real",
+        headers=headers,
+        json={
+            "from_pid": "alice",
+            "to_pid": "bob",
+            "equivalent": "UAH",
+            "amount": "1",
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "code": "CONFLICT",
+        "message": "State conflict",
+        "details": {
+            "retryable": True,
+            "conflict_kind": "database_concurrency",
+        },
+    }
+    assert response.json()["code"] != "PAYMENT_REJECTED"
 
 
 @pytest.mark.asyncio

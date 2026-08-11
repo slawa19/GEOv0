@@ -88,6 +88,7 @@ from app.utils.exceptions import (
     GeoException,
     GoneException,
     NotFoundException,
+    RetryablePaymentConflictException,
     RoutingException,
     TimeoutException,
 )
@@ -1477,6 +1478,13 @@ async def action_payment_real(
             amount=req.amount,
             idempotency_key=None,
             commit=True,
+        )
+    except RetryablePaymentConflictException as exc:
+        return _action_error(
+            status_code=exc.status_code,
+            code="CONFLICT",
+            message=exc.message,
+            details=exc.details,
         )
     except RoutingException as exc:
         if any_path_exists is False:

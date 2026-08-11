@@ -17,6 +17,7 @@ from app.core.simulator.real_tick_orchestrator import RealTickOrchestrator
 from app.core.simulator.real_tick_payments_coordinator import (
     RealTickPaymentsPhaseResult,
 )
+from app.utils.exceptions import RetryablePaymentConflictException
 
 
 class TickFailure(RuntimeError):
@@ -45,6 +46,11 @@ class _BlockingRollbackSession(_Session):
     async def rollback(self) -> None:
         self.rollback_started.set()
         await self.release_rollback.wait()
+        self.rollback_calls += 1
+
+
+class _SuccessfulRollbackSession(_Session):
+    async def rollback(self) -> None:
         self.rollback_calls += 1
 
 
@@ -94,6 +100,15 @@ class _PaymentsCoordinator:
 
     async def run_payments_phase(self, **_kwargs):
         return self.phase, False
+
+
+class _RetryableConflictPaymentsCoordinator:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def run_payments_phase(self, **_kwargs):
+        self.calls += 1
+        raise RetryablePaymentConflictException()
 
 
 class _ClearingCoordinator:
@@ -220,6 +235,36 @@ def _run_with_phase(
         deferred_effects=deferred,
     )
     return run, phase, emitter, committed_effect
+
+
+@pytest.mark.asyncio
+async def test_retryable_payment_conflict_rolls_back_tick_transaction(
+    monkeypatch,
+) -> None:
+    logger = logging.getLogger("test.retryable_payment_conflict")
+    run, phase, emitter, committed_effect = _run_with_phase(
+        logger=logger,
+        run_id="retryable-payment-conflict",
+    )
+    runner = _Runner(run=run, phase=phase, logger=logger)
+    coordinator = _RetryableConflictPaymentsCoordinator()
+    runner._real_tick_payments_coordinator = coordinator
+    session = _SuccessfulRollbackSession()
+    monkeypatch.setattr(
+        orchestrator_module.db_session,
+        "AsyncSessionLocal",
+        lambda: _SessionContext(session),
+    )
+
+    await RealTickOrchestrator(runner).tick_real_mode(run.run_id)  # type: ignore[arg-type]
+
+    assert coordinator.calls == 1
+    assert session.rollback_calls == 1
+    assert committed_effect.calls == 0
+    assert emitter.updated == 0
+    assert run.last_error is not None
+    assert run.last_error["code"] == "REAL_MODE_TICK_FAILED"
+    assert run.last_error["message"] == "State conflict"
 
 
 @pytest.mark.asyncio

@@ -620,6 +620,27 @@ class PaymentService:
                             request_fingerprint=request_fingerprint,
                         )
                     raise
+                except DBAPIError as exc:
+                    public_error = _classify_payment_db_error(exc)
+                    if not isinstance(
+                        public_error, RetryablePaymentConflictException
+                    ):
+                        raise
+                    if commit:
+                        try:
+                            await self.session.rollback()
+                        except Exception as rollback_error:
+                            logger.error(
+                                "event=payment.insert_rollback_failed "
+                                "tx_id=%s error_type=%s",
+                                tx_id_str,
+                                type(rollback_error).__name__,
+                            )
+                            raise GeoException() from rollback_error
+                    # In staged mode the caller owns the outer transaction. A
+                    # serialization failure invalidates that scope, so propagate
+                    # the typed conflict and let the tick rollback/replay it.
+                    raise public_error from exc
                 tx_persisted = True
 
                 # 4. Engine Prepare

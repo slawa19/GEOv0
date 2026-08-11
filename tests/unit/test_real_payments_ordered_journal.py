@@ -21,7 +21,11 @@ from app.core.simulator.real_tick_payments_coordinator import (
 )
 from app.core.simulator.sse_broadcast import SseEventEmitter
 from app.schemas.payment import PaymentResult
-from app.utils.exceptions import BadRequestException, TimeoutException
+from app.utils.exceptions import (
+    BadRequestException,
+    RetryablePaymentConflictException,
+    TimeoutException,
+)
 
 
 @dataclass(frozen=True)
@@ -174,6 +178,43 @@ def _run() -> RunRecord:
     run.tick_index = 1
     run.sim_time_ms = 1000
     return run
+
+
+@pytest.mark.asyncio
+async def test_retryable_staged_conflict_propagates_without_rejection_observation(
+    monkeypatch,
+):
+    session = _Session()
+    sse = _Sse()
+    run = _run()
+
+    async def _staged(self, _sender_id, **_kwargs):
+        raise RetryablePaymentConflictException()
+
+    monkeypatch.setattr(
+        PaymentService,
+        "create_payment_internal_staged",
+        _staged,
+        raising=True,
+    )
+
+    with pytest.raises(RetryablePaymentConflictException):
+        await _executor(sse).execute_planned_payments(
+            session=session,
+            run_id=run.run_id,
+            run=run,
+            planned=[_Action(0, "UAH", "A", "B", "1.00")],
+            equivalents=["UAH"],
+            sender_id_by_pid={"A": uuid.uuid4()},
+            max_in_flight=1,
+            max_timeouts_per_tick=0,
+            fail_run=lambda *_args: None,
+        )
+
+    assert session.rollbacks == 0
+    assert run.rejected_total == 0
+    assert run.errors_total == 0
+    assert sse.events == []
 
 
 @pytest.mark.asyncio
