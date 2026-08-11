@@ -473,10 +473,15 @@ def _parse_verifier_arguments(arguments: str) -> dict[str, str | bool] | None:
 
 def _canonical_verifier_arguments(command: str) -> dict[str, str | bool] | None:
     candidate = command.strip()
+    uses_call_operator = False
     if candidate.startswith("&"):
+        uses_call_operator = True
         candidate = candidate[1:].lstrip()
     token = re.match(r"""^("[^"]+"|'[^']+'|\S+)(.*)$""", candidate)
     if token is None:
+        return None
+    executable_was_quoted = token.group(1).startswith(('"', "'"))
+    if executable_was_quoted and not uses_call_operator:
         return None
     executable_path = token.group(1).strip("\"'").replace("\\", "/").lower()
     arguments = token.group(2).lstrip()
@@ -815,6 +820,7 @@ def test_contributor_venv_guard_rejects_missing_executable_setup_roles(
     ("command", "expected"),
     [
         (r".\scripts\verify_local.ps1 -BackendMarker postgres", True),
+        (r'& ".\scripts\verify_local.ps1" -BackendMarker postgres', True),
         (
             "powershell.exe -NoProfile -File ./scripts/verify_local.ps1 "
             "-BackendMarker postgres",
@@ -823,6 +829,12 @@ def test_contributor_venv_guard_rejects_missing_executable_setup_roles(
         (r".\other\verify_local.ps1 -BackendMarker postgres", False),
         (r"C:\temp\verify_local.ps1 -BackendMarker postgres", False),
         ("verify_local.ps1 -BackendMarker postgres", False),
+        ('"./scripts/verify_local.ps1" -BackendMarker postgres', False),
+        (
+            '"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" '
+            "-NoProfile -File ./scripts/verify_local.ps1 -BackendMarker postgres",
+            False,
+        ),
         (
             "powershell -Command Write-Host -File ./scripts/verify_local.ps1 "
             "-BackendMarker postgres",
