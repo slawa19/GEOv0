@@ -19,10 +19,6 @@ def _sqlstate(exc: DBAPIError) -> str | None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-    reason="P104: reverse directions still use distinct advisory identities",
-    strict=True,
-)
 async def test_reverse_segments_contend_on_one_advisory_resource_postgres(
     db_session,
 ) -> None:

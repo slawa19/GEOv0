@@ -228,10 +228,6 @@ async def _wait_for_advisory_wait(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("holder_direction", ["forward", "reverse"])
-@pytest.mark.xfail(
-    reason="P104: inverse multi-segment commits still use directional pair keys",
-    strict=True,
-)
 async def test_inverse_multisegment_commits_serialize_and_preserve_invariants_postgres(
     db_session,
     monkeypatch,

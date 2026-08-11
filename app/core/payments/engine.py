@@ -82,13 +82,17 @@ class PaymentEngine:
     def _segment_lock_key(
         *, equivalent_id: UUID, from_participant_id: UUID, to_participant_id: UUID
     ) -> int:
-        """Compute a stable BIGINT advisory lock key for a segment.
+        """Compute a stable BIGINT advisory lock key for a reciprocal pair.
 
-        Key material: equivalent UUID + from UUID + to UUID (bytes), hashed via SHA-256.
-        Uses first 8 bytes as signed big-endian int (Postgres BIGINT).
+        Lock identity is intentionally unordered because both payment directions
+        mutate the same reciprocal Debt resource. Persisted flow direction remains
+        unchanged. The first 8 SHA-256 bytes form a signed Postgres BIGINT.
         """
+        participant_a, participant_b = sorted(
+            (from_participant_id.bytes, to_participant_id.bytes)
+        )
         digest = hashlib.sha256(
-            equivalent_id.bytes + from_participant_id.bytes + to_participant_id.bytes
+            equivalent_id.bytes + participant_a + participant_b
         ).digest()
         return int.from_bytes(digest[:8], byteorder="big", signed=True)
 

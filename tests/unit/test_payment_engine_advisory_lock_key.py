@@ -7,15 +7,33 @@ from app.core.payments.engine import PaymentEngine
 
 def test_segment_lock_key_is_deterministic_and_bigint_range():
     eq = uuid.uuid4()
+    other_eq = uuid.uuid4()
     a = uuid.uuid4()
     b = uuid.uuid4()
+    c = uuid.uuid4()
 
     k1 = PaymentEngine._segment_lock_key(equivalent_id=eq, from_participant_id=a, to_participant_id=b)
     k2 = PaymentEngine._segment_lock_key(equivalent_id=eq, from_participant_id=a, to_participant_id=b)
-    k3 = PaymentEngine._segment_lock_key(equivalent_id=eq, from_participant_id=b, to_participant_id=a)
+    reverse = PaymentEngine._segment_lock_key(
+        equivalent_id=eq,
+        from_participant_id=b,
+        to_participant_id=a,
+    )
+    other_pair = PaymentEngine._segment_lock_key(
+        equivalent_id=eq,
+        from_participant_id=a,
+        to_participant_id=c,
+    )
+    other_equivalent = PaymentEngine._segment_lock_key(
+        equivalent_id=other_eq,
+        from_participant_id=a,
+        to_participant_id=b,
+    )
 
     assert k1 == k2
-    assert k1 != k3
+    assert k1 == reverse
+    assert k1 != other_pair
+    assert k1 != other_equivalent
 
     assert -(2**63) <= k1 <= (2**63 - 1)
 
