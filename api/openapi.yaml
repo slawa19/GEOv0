@@ -1042,11 +1042,6 @@ paths:
           required: true
           schema:
             $ref: '#/components/schemas/EquivalentCode'
-        - in: query
-          name: stop_after_types
-          required: false
-          schema:
-            type: string
         - in: header
           name: Last-Event-ID
           required: false
@@ -1522,11 +1517,6 @@ paths:
       parameters:
         - $ref: '#/components/parameters/RunIdPath'
         - $ref: '#/components/parameters/EquivalentQuery'
-        - in: query
-          name: stop_after_types
-          required: false
-          schema:
-            type: string
         - in: header
           name: Last-Event-ID
           required: false

@@ -2059,20 +2059,11 @@ def _sse_format(*, payload: dict[str, Any], event_id: str) -> str:
     return f"id: {event_id}\nevent: simulator.event\ndata: {data}\n\n"
 
 
-def _parse_stop_after_types(raw: Optional[str]) -> Optional[set[str]]:
-    if raw is None:
-        return None
-    parts = [p.strip() for p in str(raw).split(",")]
-    parts = [p for p in parts if p]
-    return set(parts) if parts else None
-
-
 async def _run_events_stream(
     *,
     run_id: str,
     equivalent: str,
     last_event_id: Optional[str] = None,
-    stop_after_types: Optional[set[str]] = None,
     subscription: Optional[_Subscription] = None,
     initial_status_event_id: Optional[str] = None,
 ) -> AsyncIterator[str]:
@@ -2259,7 +2250,6 @@ async def ego_snapshot_active_run(
 )
 async def events_stream_active_run(
     equivalent: str = Query(...),
-    stop_after_types: Optional[str] = Query(None),
     last_event_id: Optional[str] = Header(None, alias="Last-Event-ID"),
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
@@ -2302,7 +2292,6 @@ async def events_stream_active_run(
             run_id=run_id,
             equivalent=equivalent,
             last_event_id=last_event_id,
-            stop_after_types=_parse_stop_after_types(stop_after_types),
             subscription=sub,
             initial_status_event_id=status_event_id,
         ),
@@ -2494,7 +2483,6 @@ async def set_run_intensity(
 async def run_events_stream(
     run_id: str,
     equivalent: str = Query(...),
-    stop_after_types: Optional[str] = Query(None),
     last_event_id: Optional[str] = Header(None, alias="Last-Event-ID"),
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
@@ -2511,7 +2499,6 @@ async def run_events_stream(
             run_id=run_id,
             equivalent=equivalent,
             last_event_id=last_event_id,
-            stop_after_types=_parse_stop_after_types(stop_after_types),
             subscription=sub,
             initial_status_event_id=status_event_id,
         ),

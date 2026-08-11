@@ -163,7 +163,7 @@ sequence (что требует протокольного поля), либо �
 |---|---|---|
 | T600 | **VERIFY FIRST.** Доказать на `sse_broadcast.py`, может ли бэкенд доставить не виденное ранее более старое patch-событие. По итогу — либо гейт применения patch по producer sequence (нужно протокольное поле seq/version/ts в `NodePatch`/`EdgePatch`), либо датированное решение о приемлемости устаревших абсолютных patch | `[x]` |
 | T601 | Убрать ветвление по `PYTEST_CURRENT_TEST` из production SSE (F-006-2, P2) | `[x]` |
-| T602 | Решить судьбу `stop_after_types`: сделать работающим вне pytest или убрать из контракта и сигнатур (F-006-2b, P3) | `[!]` |
+| T602 | Решить судьбу `stop_after_types`: сделать работающим вне pytest или убрать из контракта и сигнатур (F-006-2b, P3) | `[x]` |
 | T603 | Включить rate limiter в тестах; покрыть 429/окно/fallback | `[!]` |
 | T604 | Привести маркеры `pytest.ini` в соответствие с носителями | `[!]` |
 | T605 | Сделать `pytest -m postgres` fail-closed вне канонического раннера | `[!]` |
@@ -253,3 +253,32 @@ sequence (что требует протокольного поля), либо �
   доказывает atomic producer ordering, replay/bootstrap/live-tail и overflow recovery; второй
   сохраняет event-id deduplication и monotonic reconnect cursor. До/после: patch schema и
   применитель неизменны; новый owner record — `docs/ru/09-decisions-and-defaults.md` §1.11.1.
+
+### 2026-08-11 — T602
+
+- Перед правкой finding повторно подтверждена по текущим anchors. **Current:** публичный
+  `stop_after_types` оставался в двух OpenAPI operations (`api/openapi.yaml:1042-1050,1517-1525`),
+  двух endpoint-сигнатурах и pass-through (`app/api/v1/simulator.py:2259-2305,2494-2514` до
+  изменения), однако после T601 генератор только принимал значение и нигде его не использовал.
+  **Intended:** история T601 фиксирует параметр как часть удалённого pytest-only finite-stream
+  harness, а не как обещанное production-поведение. **Optimal:** удалить инертный параметр из
+  wire-контракта и сигнатур вместо введения нового публичного механизма серверного закрытия SSE.
+- После: `_run_events_stream` больше не принимает параметр (`app/api/v1/simulator.py:2062`), обе
+  endpoint-сигнатуры содержат только рабочие `equivalent`/`Last-Event-ID` параметры
+  (`:2251-2253`, `:2483-2486`), а OpenAPI переходит непосредственно от equivalent к
+  `Last-Event-ID` (`api/openapi.yaml:1042-1048,1517-1523`).
+  `rg -n "stop_after_types" app api docs tests simulator-ui/v2/src` — exit `1`, ноль совпадений.
+- Canonical targeted gate:
+  `$env:DEBUG='false'; $env:ENV='test'; $selectors=@('tests/contract/test_openapi_contract.py',
+  'tests/unit/test_simulator_sse_replay_atomic.py','tests/integration/test_simulator_sse_smoke.py',
+  'tests/integration/test_simulator_sse_real_smoke.py'); .\scripts\verify_local.ps1 -TaskSlug
+  wave5_t602_remove_stop_after_final -BackendOnly -BackendSelector $selectors -Python
+  .\.venv\Scripts\python.exe` — exit `0`, `38 passed`. Pinned Ruff `0.1.14` на
+  `app/api/v1/simulator.py` — exit `0`; `git diff --check` на product/contract-файлах — exit `0`.
+- Неудачная инфраструктурная попытка сохранена: запуск с внешним лимитом управляющего вызова был
+  оборван через 3.6 s (`exit 124`), после чего pytest получил закрытый stdout (`OSError: [Errno 22]
+  Invalid argument`). Это не product/test failure; та же canonical-команда выше завершилась штатно.
+- Независимый read-only preflight на exact `27e0024` подтвердил `REMOVE`: runtime/callers/tests/UI
+  отсутствуют, stable SSE docs обещают terminal event/client disconnect, а история `ee355dbe` и
+  `e712bfd` связывает параметр только с удалённым pytest harness. Stop-level anchor drift и P1/P2
+  не обнаружены.
