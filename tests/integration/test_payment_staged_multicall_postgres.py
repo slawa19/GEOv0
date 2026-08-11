@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.exc import DBAPIError
 
 from app.core.payments.engine import PaymentEngine
@@ -207,6 +207,32 @@ async def test_staged_multicall_batches_do_not_exhaust_retry_on_retained_locks_p
     first_calls_ready = asyncio.Event()
     first_calls_count = 0
     first_calls_guard = asyncio.Lock()
+    backend_pids: set[int] = set()
+
+    async def _release_barrier_for_current_or_coarse_owner(observer) -> None:
+        for _ in range(2000):
+            async with first_calls_guard:
+                ready_count = first_calls_count
+                pids = list(backend_pids)
+            if ready_count == 2:
+                first_calls_ready.set()
+                return
+            if ready_count == 1 and len(pids) == 2:
+                owner_waiting = await observer.scalar(
+                    text(
+                        "SELECT EXISTS ("
+                        "SELECT 1 FROM pg_locks "
+                        "WHERE pid = ANY(:pids) "
+                        "AND locktype = 'advisory' AND NOT granted"
+                        ")"
+                    ),
+                    {"pids": pids},
+                )
+                if owner_waiting:
+                    first_calls_ready.set()
+                    return
+            await asyncio.sleep(0.01)
+        raise AssertionError("staged barrier did not observe a safe release condition")
 
     async def _run_batch(first_tx_id: str, second_tx_id: str) -> bool:
         nonlocal first_calls_count
@@ -214,8 +240,13 @@ async def test_staged_multicall_batches_do_not_exhaust_retry_on_retained_locks_p
             await session.connection(
                 execution_options={"isolation_level": "SERIALIZABLE"}
             )
+            backend_pid = int(
+                (await session.execute(text("SELECT pg_backend_pid()"))).scalar_one()
+            )
+            async with first_calls_guard:
+                backend_pids.add(backend_pid)
             engine = PaymentEngine(session)
-            engine._retry_attempts = 3
+            assert engine._retry_attempts == 3
             engine._retry_base_delay_s = 0.0
             engine._retry_max_delay_s = 0.0
             try:
@@ -233,16 +264,23 @@ async def test_staged_multicall_batches_do_not_exhaust_retry_on_retained_locks_p
                 raise
 
     try:
-        results = await asyncio.wait_for(
-            asyncio.gather(
-                _run_batch(seed["tx_ids"]["left_ab"], seed["tx_ids"]["left_bc"]),
-                _run_batch(
-                    seed["tx_ids"]["right_bc"], seed["tx_ids"]["right_ab"]
+        async with TestingSessionLocal() as observer:
+            barrier_task = asyncio.create_task(
+                _release_barrier_for_current_or_coarse_owner(observer)
+            )
+            results = await asyncio.wait_for(
+                asyncio.gather(
+                    _run_batch(
+                        seed["tx_ids"]["left_ab"], seed["tx_ids"]["left_bc"]
+                    ),
+                    _run_batch(
+                        seed["tx_ids"]["right_bc"], seed["tx_ids"]["right_ab"]
+                    ),
+                    return_exceptions=True,
                 ),
-                return_exceptions=True,
-            ),
-            timeout=20.0,
-        )
+                timeout=20.0,
+            )
+            await barrier_task
         failures = [result for result in results if isinstance(result, BaseException)]
         assert failures == [], (
             "staged owner exhausted retry while retaining its first pair lock: "
@@ -297,5 +335,13 @@ async def test_staged_multicall_batches_do_not_exhaust_retry_on_retained_locks_p
                 )
                 == 4
             )
+            limits = (
+                await verify.scalars(
+                    select(TrustLine.limit).where(
+                        TrustLine.equivalent_id == seed["equivalent_id"]
+                    )
+                )
+            ).all()
+            assert limits == [Decimal("50.00000000")] * 2
     finally:
         await _cleanup_seed(seed)
