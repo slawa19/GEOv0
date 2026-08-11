@@ -60,7 +60,7 @@ Owner-authorized for Wave 3 on 2026-08-11; execute sequentially.
   then run existing same-direction,
   same-tx, idempotency, timeout, cancellation and recovery selectors.
 - [x] P108 Update stable RU payment and decision documentation.
-- [!] P109 Complete adversarial/external reviews and publish the exact-head evidence.
+- [x] P109 Complete adversarial/external reviews and publish the exact-head evidence.
 
 ## Phase 2 — Clearing interlock and closure
 

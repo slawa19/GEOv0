@@ -695,3 +695,47 @@ P108 снова `[!]`, P109 не закрывается до выбора вла
   Normative docs commit: `d1937e4221e88634ddeeb9eeb74cb25a05593a1c`. Пользовательский metadata-hunk
   в начале decision owner снова исключён из commit и сохранён в рабочем дереве. P108 закрыта;
   требуется финальный exact-head review P109.
+
+### 2026-08-11 — P109 final exact-head review
+
+- Review lifecycle сохранён полностью: первый Option A docs commit `d1937e4` исправил основной
+  раздел, но оставил вторую положительную фразу «мог переиграть»; внешний reviewer нашёл её на
+  `4552d42737108994e9ef7aae2ba8b24a88aa0168`. Узкий docs-only commit
+  `6227fc58a58bc69efbe4fc3d97da28b661b36d66` заменил дубликат на rollback,
+  `REAL_MODE_TICK_FAILED`, отсутствие same-batch replay и новый tick следующего heartbeat.
+  `P108_DECISION_DUPLICATE_OK` и `git diff --check` — exit `0`.
+- Обязательный внешний reviewer — авторизованный владельцем Codex `gpt-5.6-sol` (resolved runtime
+  model ID интерфейс не раскрывает). Он проверил exact range
+  `39f960e0f2a5581374396871c1018b040c990036..6227fc58a58bc69efbe4fc3d97da28b661b36d66`
+  в standalone clone `E:\Temp\geov0-wave3-final-review-73a2b30722114d5686b3c61df4eaf60f`:
+  отдельный `.git`, remote отсутствует, local credential helper пуст, tracked status clean; shared
+  tree не менялся. Вердикт **CLEAN**, открытых P1/P2 нет.
+- External canonical checks на exact `6227fc5`: fail-fast selector
+  `scripts/verify_local.ps1 -TaskSlug wave3_ext_final_failfast_6227 -BackendOnly -BackendSelector tests/unit/test_real_tick_orchestrator_rollback_resolution.py::test_retryable_payment_conflict_rolls_back_tick_transaction`
+  — exit `0`, `1 passed`; lock-timeout PG selector
+  `scripts/verify_local.ps1 -TaskSlug wave3_ext_final_timeout_6227 -BackendOnly -BackendMarker postgres -BackendSelector tests/integration/test_payment_staged_multicall_postgres.py::test_staged_owner_restores_outer_transaction_lock_timeout_postgres`
+  — exit `0`, `1 passed`; targeted unit/Admin/recovery/cancellation matrix с `-TaskSlug
+  wave3_ext_final_unit_matrix_6227` — exit `0`, `71 passed` и 71 cache nodeids; семь PG owner
+  selectors с `-TaskSlug wave3_ext_final_pg_matrix_6227 -BackendMarker postgres` — exit `0`,
+  `16 passed` и 16 nodeids. Stable-doc
+  forbidden-positive-replay check и full-range `git diff --check` — exit `0`. Его disposable DB
+  `geov0_test_wave3_finalrev_73a2b307` создана после absence check и удалена после active=`0`.
+- Финальный локальный canonical milestone после product remediation:
+  `DEBUG=false; .\scripts\verify_local.ps1 -TaskSlug wave3_phase1_final_exact` — exit `0`; backend
+  `978 passed, 3 skipped, 23 deselected`, один Alembic head; Admin UI lint/test/build и Simulator UI
+  lint/typecheck/unit/build прошли, Simulator unit — `729 passed`. Прогон начался на `4552d42`; до
+  reviewed `6227fc5` менялись только normative Markdown, product/test tree идентичен. Exact-head docs
+  и targeted runtime/PG checks выполнены внешним reviewer выше.
+
+P109 закрыта; Phase 1 не имеет открытых P1/P2 и готова к последовательной Волне 4.
+
+## Changelog
+
+### 2026-08-11 — Волна 3 / Program 002 Phase 1 закрыта
+
+- P100–P109 завершены: reverse pair contention, inverse/staged real-PG schedules, canonical unordered
+  pair key, equivalent-owner protocol, quiescent rollout, узкий Debt-`23505`, stable RU docs и
+  exact-head review.
+- Adversarial review выявил и закрыл staged `lock_timeout` leak; владелец выбрал fail-fast tick
+  semantics без same-batch replay. Финальный внешний вердикт на `6227fc5` — CLEAN.
+- Phase 2 остаётся авторизованной частью Волны 4 и выполняется только после программы 003.
