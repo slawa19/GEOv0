@@ -266,3 +266,39 @@ severity, а не за откладывание.
   — exit `0`, все шесть контрактов найдены. `git diff --check` для обоих документов — exit `0`.
   Пользовательский metadata-hunk в начале `09-decisions-and-defaults.md` намеренно не вошёл в
   commit и остаётся в рабочем дереве.
+
+### 2026-08-11 — первое внешнее ревью T307, findings и remediation
+
+- Независимый Codex `gpt-5.6-sol` проверил frozen range
+  `5b09e43e3779d63de5aeb8fb5352f668874d399e..a97e1a98063e6c7980fc4b4b0395671165d28218`
+  в standalone `--no-local` clone с отдельным `.git`, без remote и credential helper. Вердикт:
+  `FINDINGS`, два P2, P1 нет; T307 не закрыта. Runbook отсутствовал в frozen commit и был прочитан
+  read-only из untracked owner tree только как процедура — это не выдано за commit evidence.
+- P2-1: T303 принудительно проверял replay в `READ COMMITTED`, тогда как production Postgres —
+  `SERIALIZABLE`. Два caller после синхронизированных реальных initial replay SELECT получили
+  `Decimal('30.00000000')` и `GeoException(E010)` с настоящим SQLSTATE `40001`; durable DB при этом
+  имела ровно одну Transaction/audit/effect. P2-2: wrapper `real commit -> acknowledgement error`
+  также становился E010; production callers затем refetch'или уже исчезнувший cycle и не могли
+  вручную повторить старый Debt-ID-set, поэтому durable accounting/SSE терялся.
+- Tracked RED для ack-loss:
+  `$env:DEBUG='false'; $env:ENV='test'; $env:TEST_DATABASE_URL='postgresql+asyncpg://geo:geo@127.0.0.1:55433/geov0_test_wave4_003'; $env:GEO_TEST_ALLOW_DB_RESET='1'; .\scripts\verify_local.ps1 -TaskSlug wave4_003_review_ack_red -BackendOnly -BackendMarker postgres -BackendSelector tests/integration/test_clearing_commit_replay_postgres.py`
+  — exit `1`, `1 failed, 1 passed`, actual `GeoException: Internal server error` после точного
+  `RuntimeError: commit acknowledgement lost`. SERIALIZABLE RED получен reviewer'ом реальным
+  barrier schedule: actual `E010 + Decimal(30)`, exit `0` у самого диагностического probe.
+- Remediation commit: `7cc3ad3`. Fresh reader и bounded reconciliation находятся в
+  `app/core/clearing/service.py:69-152`; classifier принимает только `40001/40P01` из driver chain
+  (`:97-116`). Poisoned owner session сначала rollback'ится, затем deterministic tx читается в
+  новой session/snapshot. Commit task раздельно возвращает cancellation и ack error (`:154-174`),
+  а commit boundary возвращает amount только после свежего доказательства `COMMITTED`
+  (`:1257-1270`). При отсутствии matching committed tx успех не синтезируется.
+- Реальный tracked SERIALIZABLE schedule находится в
+  `tests/integration/test_clearing_commit_replay_postgres.py:18-211`: оба initial SELECT видят
+  отсутствие tx до barrier, loser наблюдает настоящий `40001`, оба caller возвращают `30`, а DB
+  содержит одну Transaction/audit/effect. Ack-loss/cancellation и new-Debt-set anti-vacuum —
+  `test:271-472`.
+- GREEN `wave4_003_review_reconcile_green1` — exit `0`, `3 passed`. Следующая instrumented попытка
+  `green2` честно была exit `1`: тест ожидал один `40001`, но один exception chain содержит три
+  driver/wrapper attributes с тем же code; expectation исправлен на непустое множество
+  `{'40001'}`. `green3` — exit `0`, `3 passed`. Полная remediation unit matrix
+  `wave4_003_review_fix_units` — exit `0`, `81 passed`; PG matrix
+  `wave4_003_review_fix_pg` — exit `0`, `11 passed`; pinned Ruff и `git diff --check` — exit `0`.
