@@ -227,9 +227,12 @@ def _is_venv_dependency_install_command(command: str) -> bool:
     arguments = token.group(2).lstrip()
     return bool(
         executable_path == "./.venv/scripts/python.exe"
-        and re.match(r"^-m\s+pip\s+install(?:\s|$)", arguments, re.IGNORECASE)
-        and re.search(r"(?:^|\s)-r\s+requirements\.txt(?:\s|$)", arguments)
-        and re.search(r"(?:^|\s)-r\s+requirements-dev\.txt(?:\s|$)", arguments)
+        and re.fullmatch(
+            r"-m\s+pip\s+install\s+-r\s+requirements\.txt\s+"
+            r"-r\s+requirements-dev\.txt",
+            arguments,
+            re.IGNORECASE,
+        )
     )
 
 
@@ -274,6 +277,8 @@ def _contributor_venv_violations(content: str) -> list[str]:
     if not install_indexes:
         violations.append("missing executable venv dependency install")
     consumer_indexes = tool_indexes + verifier_indexes
+    if not consumer_indexes:
+        violations.append("missing canonical verifier or Python-owned tool consumer")
     if (
         creation_indexes
         and install_indexes
@@ -380,7 +385,7 @@ def _is_canonical_verifier_command(command: str) -> bool:
         return False
     file_invocation = re.fullmatch(
         r"(?:(?:-NoProfile|-NonInteractive)\s+|"
-        r"-ExecutionPolicy\s+\S+\s+)*"
+        r"-ExecutionPolicy\s+Bypass\s+)*"
         r"-File\s+(\"[^\"]+\"|'[^']+'|\S+)(?:\s+.*)?",
         arguments,
         re.IGNORECASE,
@@ -658,6 +663,19 @@ py -m venv .venv
 .\.venv\Scripts\python.exe -m ruff check app migrations
 ```
 """,
+        r"""
+```powershell
+py -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --dry-run -r requirements.txt -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m ruff check app migrations
+```
+""",
+        r"""
+```powershell
+py -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
+```
+""",
     ],
 )
 def test_contributor_venv_guard_rejects_missing_executable_setup_roles(
@@ -681,6 +699,11 @@ def test_contributor_venv_guard_rejects_missing_executable_setup_roles(
         (
             "powershell -Command Write-Host -File ./scripts/verify_local.ps1 "
             "-BackendMarker postgres",
+            False,
+        ),
+        (
+            "powershell.exe -ExecutionPolicy DefinitelyNotAPolicy "
+            "-File ./scripts/verify_local.ps1 -BackendMarker postgres",
             False,
         ),
     ],
