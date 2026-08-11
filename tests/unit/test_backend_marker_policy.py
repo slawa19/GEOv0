@@ -171,14 +171,18 @@ def _iter_documented_commands_from_content(content: str):
                     continue
                 line = stripped
             was_in_block_comment = in_powershell_block_comment
+            line_for_block_comments = (
+                line if in_powershell_block_comment else _strip_shell_comment(line)
+            )
             visible, in_powershell_block_comment = _strip_powershell_block_comments(
-                line,
+                line_for_block_comments,
                 in_powershell_block_comment,
             )
             if in_powershell_block_comment and not was_in_block_comment:
                 powershell_block_comment_line = line_number
             elif not in_powershell_block_comment:
                 powershell_block_comment_line = None
+            visible = _strip_shell_comment(visible)
             here_string_start = re.search(r"@(['\"])\s*$", visible)
             if (
                 here_string_start is not None
@@ -451,7 +455,12 @@ def _strip_shell_comment(command: str) -> str:
             quote = (
                 None if quote == character else character if quote is None else quote
             )
-        elif character == "#" and quote is None:
+        elif (
+            character == "#"
+            and quote is None
+            and not (index > 0 and command[index - 1] == "<")
+            and not (index + 1 < len(command) and command[index + 1] == ">")
+        ):
             return command[:index].rstrip()
     return command.rstrip()
 
@@ -1081,6 +1090,31 @@ Write-Host 'before'; <# ignored #>; pytest.exe after_comment
 
     assert "pytest.exe after_quoted_marker" in commands
     assert "pytest.exe after_comment" in commands
+
+
+def test_powershell_line_comments_cannot_hide_following_pytest_commands() -> None:
+    commands = [
+        command
+        for _, command, _ in _iter_documented_commands_from_content(
+            """
+```powershell
+Write-Host "visible" # `
+pytest.exe after_commented_backtick
+# @'
+pytest.exe after_commented_here_marker
+'@
+# <#
+pytest.exe after_commented_block_marker
+#>
+```
+"""
+        )
+    ]
+
+    assert "pytest.exe after_commented_backtick" in commands
+    assert "pytest.exe after_commented_here_marker" in commands
+    assert "pytest.exe after_commented_block_marker" in commands
+    assert any(command.startswith(_POWERSHELL_SYNTAX_ERROR) for command in commands)
 
 
 def test_powershell_parser_preserves_here_string_terminator_suffix() -> None:
