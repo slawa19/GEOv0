@@ -855,3 +855,45 @@ P109 закрыта; Phase 1 не имеет открытых P1/P2 и гото�
   изменения файлов. Исправленный scan распознаёт repo-relative path и `:line` — exit `0`,
   `RELATIVE_LINKS_OK`; stale-interlock phrase scan — exit `0`,
   `STALE_INTERLOCK_WORDING_ABSENT`; `git diff --check` — exit `0`.
+
+### 2026-08-11 — P205 review round 1 и remediation
+
+- Internal adversarial и обязательный внешний Codex `gpt-5.6-sol` независимо дали **NOT CLEAN** на
+  frozen `62b9fee93ce535cb723e9eef0ea09f0e6ea69f17`. Внешний review работал в standalone
+  `--no-local` clone `E:\Temp\geov0-wave4-p205-review-5517d640a8de49a7b29ee33b33f76de1`, с
+  отдельным `.git`, без remote и credential helper; shared tree не менял. Оба reviewer подтвердили:
+  поздняя cancellation в cleanup теряла уже durable amount/carrier; cancellation и реальный
+  `55P03` оставляли preflight/money transaction открытой после освобождения owner; две одновременные
+  connection на попытку создавали pool starvation; per-connection SERIALIZABLE override теста
+  терялся после rollback; два старых `pg_locks` helper принимали чужой waiter со всего сервера.
+  Internal классифицировал первые два как P1, external — как P2 по принятой severity ambiguous
+  publication; независимо от severity все пять приняты как blocking и исправлены.
+- До product-правки добавлены четыре deterministic real-PG countertest. Canonical
+  `$env:DEBUG='false'; $env:ENV='test'; $env:TEST_DATABASE_URL='postgresql+asyncpg://geo:geo@127.0.0.1:55433/geov0_test_wave4_p200_a5c0'; $env:GEO_TEST_ALLOW_DB_RESET='1'; $selectors=@('tests/integration/test_clearing_payment_prepare_interlock_postgres.py::test_clearing_interlock_completes_with_single_connection_pool_postgres','tests/integration/test_clearing_payment_prepare_interlock_postgres.py::test_cancellation_during_interlocked_work_rolls_back_before_unlock_postgres','tests/integration/test_clearing_payment_prepare_interlock_postgres.py::test_cancellation_during_interlock_release_preserves_durable_amount_postgres','tests/integration/test_clearing_payment_prepare_interlock_postgres.py::test_interlock_timeout_rolls_back_work_and_releases_owner_postgres'); .\scripts\verify_local.ps1 -TaskSlug wave4_002_p205_review_red -BackendOnly -BackendMarker postgres -BackendSelector $selectors`
+  — exit `1`, `4 failed`: exact pool error `QueuePool limit of size 1 overflow 0 reached`; precommit
+  cancellation и timeout оба `in_transaction()==True`; late cancellation была plain
+  `CancelledError`, не `ClearingCommittedAfterCancellation`.
+- Remediation commit `27fce16`: `PaymentEngine` даёт session-level acquire/release той же exact
+  equivalent-owner identity (`app/core/payments/engine.py:171-213`). Clearing сначала cancellation-safe
+  завершает caller preflight, затем использует одну pinned `AsyncConnection`, переносит фактический
+  isolation level, берёт session lock, откатывает acquisition transaction для свежего snapshot и
+  исполняет authoritative UoW на той же connection (`app/core/clearing/service.py:1046-1131`). Cleanup
+  сначала дренирует money rollback, затем exact unlock/zero-lock check; неподтверждённое состояние
+  инвалидирует physical connection (`:94-132`). Late cancellation после ненулевого durable result
+  преобразуется в carrier (`:1134-1163`). Unknown acquisition errors снова sanitized E010.
+- Тесты теперь доказывают pool-size `1`, precommit unchanged Debt/version/tx/audit, post-durable
+  carrier+owner reacquisition, real `55P03` rollback/retry, SERIALIZABLE внутри post-lock hook,
+  exact PID/current-database advisory joins и physical-connection loss после реального commit
+  (`tests/integration/test_clearing_payment_prepare_interlock_postgres.py:563-802`,
+  `test_clearing_commit_replay_postgres.py:18-229,659-733`,
+  `test_concurrent_clearing_payment_lost_update_postgres.py:17-245`). Canonical core matrix после
+  remediation с `-TaskSlug wave4_002_p205_core4_remediation3` — exit `0`, `18 passed`; cheap unit
+  matrix `wave4_002_p205_remediation_units` — exit `0`, `89 passed`; pinned Ruff и
+  `git diff --check` — exit `0`.
+- P201/P204 прежние строки про отдельную transaction-scoped lock-only сессию сохранены как
+  историческое evidence первого implementation. Актуальная correction: runtime/stable docs теперь
+  фиксируют одну pinned connection + session-level exact lock + fresh snapshot +
+  unlock-or-invalidate; `docs/ru/09-decisions-and-defaults.md:239-255`,
+  `docs/ru/02-protocol-spec.md:1139-1158`,
+  `docs/ru/simulator/backend/payment-integration.md:81-89,264-268` и append-only residual ledger
+  `phase0-evidence-map.md:279-291`.

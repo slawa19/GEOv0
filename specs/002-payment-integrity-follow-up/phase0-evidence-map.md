@@ -278,9 +278,10 @@ the explicitly unauthorized Phase 1 and Phase 2 delivery backlog.
 
 ## 12. Phase 2 residual closure — 2026-08-11
 
-- Принятый in-program P2 из §7 закрыт общим equivalent-owner boundary: clearing держит lock в
-  отдельной transaction-scoped lock-only сессии, после acquisition сбрасывает прежний рабочий
-  snapshot и повторяет authoritative Debt/PrepareLock reads. Оба порядка подтверждены real
+- Принятый in-program P2 из §7 закрыт общим equivalent-owner boundary: clearing на одной pinned
+  physical connection держит session-level lock той же Phase-1 identity, после acquisition
+  откатывает acquisition-транзакцию и повторяет authoritative Debt/PrepareLock reads со свежим
+  snapshot. Оба порядка подтверждены real
   PostgreSQL schedule; newly prepared pair больше не пересекает clearing decision/mutation window.
 - Пункт §8 «clearing versus a newly prepared reverse payment» теперь verified. Non-default
   isolation за пределами production `SERIALIZABLE`, production-scale starvation/telemetry и

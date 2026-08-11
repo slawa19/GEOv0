@@ -230,12 +230,14 @@ configured equivalents, а executor перед staged actions фиксирует
 записывает `REAL_MODE_TICK_FAILED` и не переигрывает тот же batch. Следующий heartbeat планирует
 новый tick.
 
-Clearing участвует в том же equivalent-owner domain. Перед authoritative чтением долгов отдельная
-lock-only DB-транзакция берёт transaction-scoped lock эквивалента через `PaymentEngine`; только после
-этого рабочая clearing-сессия откатывает прежний snapshot и заново читает `Debt FOR UPDATE` и
-`PrepareLock`. Lock-only транзакция удерживается до terminal commit/rollback рабочей попытки. Поэтому
-уже подготовленный payment виден clearing после ожидания, а новый prepare не может пройти между
-пустым conflict snapshot и денежной мутацией. Ожидание ограничено общим advisory budget; PostgreSQL
+Clearing участвует в том же equivalent-owner domain на одной явно закреплённой физической DB
+connection. После preflight рабочая транзакция завершается; на pinned connection берётся
+session-level lock той же canonical identity, acquisition-транзакция откатывается для свежего
+`SERIALIZABLE` snapshot, затем там же заново читаются `Debt FOR UPDATE` и `PrepareLock`. Денежный UoW
+завершается до exact unlock; неопределённый unlock приводит к invalidation/физическому закрытию
+connection, а не возврату её в pool. Поэтому уже подготовленный payment виден clearing после
+ожидания, новый prepare не проходит между пустым conflict snapshot и денежной мутацией, и одна
+попытка не требует двух pool connections. Ожидание ограничено общим advisory budget; PostgreSQL
 `55P03` отображается в существующий timeout contract. Направление Debt/TrustLine и payload не
 канонизируется и не меняется.
 

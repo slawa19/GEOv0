@@ -78,12 +78,13 @@ Source of truth:
 - Идентичность occurrence — UUIDv5 от канонического неупорядоченного набора Debt UUID. Повтор того
   же набора после потери подтверждения возвращает сохранённый `Transaction.payload.amount`, не
   применяя эффект повторно; новый набор с новым Debt UUID считается новой occurrence.
-- Clearing входит в общий с payment equivalent-owner domain. Отдельная lock-only транзакция берёт
-  transaction-scoped lock эквивалента; после возможного ожидания рабочая clearing-сессия откатывает
-  старый snapshot и повторяет authoritative Debt/PrepareLock reads. Lock удерживается до terminal
-  commit/rollback clearing. Поэтому committed `PrepareLock` после ожидания виден, а новый prepare не
-  пересекает уже принятое clearing conflict decision. `55P03` остаётся bounded timeout, направление
-  долгов и payload не меняется.
+- Clearing входит в общий с payment equivalent-owner domain на одной pinned physical connection.
+  После preflight берётся session-level lock той же identity, acquisition-транзакция откатывается
+  для свежего snapshot, и authoritative Debt/PrepareLock reads выполняются на этой же connection.
+  Денежный UoW завершается до exact unlock; при неподтверждённом unlock connection инвалидируется и
+  физически закрывается. Поэтому committed `PrepareLock` после ожидания виден, новый prepare не
+  пересекает уже принятое clearing conflict decision, а попытка не занимает две pool connections.
+  `55P03` остаётся bounded timeout, направление долгов и payload не меняется.
 
 ---
 
@@ -263,7 +264,8 @@ Guardrails:
 - учитывать, что `ClearingService` пропускает циклы, затрагивающие пары участников из активных
   payment prepare locks;
 - не обходить общий equivalent-owner interlock прямой денежной мутацией или чтением старого
-  snapshot: только service-owned попытка удерживает lock до terminal commit/rollback.
+  snapshot: только service-owned попытка на pinned connection завершает денежный UoW перед exact
+  unlock либо инвалидирует connection при неопределённом состоянии lock.
 
 ---
 

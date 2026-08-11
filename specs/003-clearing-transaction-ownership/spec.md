@@ -114,6 +114,18 @@ severity, а не за откладывание.
 
 ## Changelog
 
+### 2026-08-11 — Cross-program correction from Program 002 Phase 2
+
+- Исторические T303/T307 результаты не переписаны. После Program 003 общий payment/clearing
+  boundary потребовал перенести execution на одну pinned connection с session-level owner lock.
+  Поэтому прежняя real-PG имитация defensive `Debt.amount <= 0` через грязный ORM identity-map больше
+  не является допустимым cross-rollback доказательством: production CHECK всё равно запрещает
+  committed `amount <= 0`, а defensive branch сохранён unit anti-vacuum тестом. Concurrent same-cycle
+  replay теперь обычно сериализуется на owner lock до Debt write; отдельный tracked test продолжает
+  создавать настоящий unmatched `40001` после свежего post-lock snapshot и требует E010, тогда как
+  ack-loss/cancellation/physical-connection-loss возвращают единственный durable amount. Актуальные
+  команды и результаты записаны append-only в Program 002 P205 evidence.
+
 ### 2026-08-11 — T300
 
 - RED-test commit: `eb4cac2`. Перед добавлением теста актуальные анкоры подтвердились без
