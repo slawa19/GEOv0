@@ -90,8 +90,8 @@ npm --prefix admin-ui run dev
 ### 1.5. Проверка установки
 
 ```bash
-# Запустить тесты
-pytest
+# Запустить canonical backend gate (PowerShell)
+.\scripts\verify_local.ps1 -TaskSlug contributor_install -BackendOnly
 
 # Проверить blocking Ruff scope (версия закреплена в requirements-dev.txt)
 python -m ruff check app migrations --no-cache
@@ -413,21 +413,20 @@ tests/
 
 ### 5.2. Запуск тестов
 
-```bash
-# Все тесты
-pytest
+```powershell
+# Backend tier по умолчанию: исключает slow и postgres
+.\scripts\verify_local.ps1 -TaskSlug contributor_backend -BackendOnly
 
-# С покрытием
-pytest --cov=app --cov-report=html
+# Конкретный модуль через canonical selector
+.\scripts\verify_local.ps1 -TaskSlug contributor_payments -BackendOnly `
+  -BackendSelector tests/unit/test_payments_2pc.py
 
-# Конкретный модуль
-pytest tests/unit/core/test_routing.py
+# Явный slow milestone; postgres по-прежнему исключён
+.\scripts\verify_local.ps1 -TaskSlug contributor_super_smoke -BackendOnly `
+  -BackendSelector tests/integration/test_simulator_super_smoke.py -IncludeExpensive
 
-# По маркерам
-pytest -m "not slow"
-
-# Параллельно
-pytest -n auto
+# Debug-only coverage (не заменяет canonical gate)
+.\.venv\Scripts\python.exe -m pytest -m "not slow and not postgres" --cov=app --cov-report=html
 ```
 
 ### 5.3. Fixtures
@@ -527,10 +526,11 @@ class TestRoutingService:
 python -m ruff check app migrations --no-cache
 
 # 1. Запустить Super Smoke (обязательно!)
-pytest tests/integration/test_simulator_super_smoke.py -vv
+.\scripts\verify_local.ps1 -TaskSlug contributor_pr_super_smoke -BackendOnly `
+  -BackendSelector tests/integration/test_simulator_super_smoke.py -IncludeExpensive
 
-# 2. Запустить все тесты
-pytest
+# 2. Запустить canonical full gate
+.\scripts\verify_local.ps1 -TaskSlug contributor_pr_full
 
 # Commit с понятным сообщением
 git commit -m "feat(payments): add multi-path routing support
