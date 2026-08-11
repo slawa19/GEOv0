@@ -162,7 +162,7 @@ retryable-конфликта вместо `E010`; (3) `finally`-гарантия
 | T400 | PG-репродьюсер F-004-1 (`25P02` после проглоченного `40001`) | `[x]` |
 | T401 | Вынести/классифицировать best-effort audit-блок; убрать `except Exception: continue/pass` | `[x]` |
 | T402 | Единый классификатор ошибок БД на границе сервиса + типизированный retryable-код | `[x]` |
-| T403 | Расширить guard вставки tx-строки за пределы `IntegrityError` — **одним guard'ом внутри `PaymentService`** вокруг `service.py:543-568` в `_create_payment_impl` (`:258`), который наследуют все **три** потребителя. Подробности и критерии приёмки — ниже | `[!]` |
+| T403 | Расширить guard вставки tx-строки за пределы `IntegrityError` — **одним guard'ом внутри `PaymentService`** вокруг `service.py:543-568` в `_create_payment_impl` (`:258`), который наследуют все **три** потребителя. Подробности и критерии приёмки — ниже | `[x]` |
 | T404 | `finally`-гарантия терминального состояния для отмены и таймаута (staged и non-staged) | `[!]` |
 | T405 | Симметричное логирование timeout-abort в обеих ветках | `[!]` |
 | T406 | Решение по ретраю/маппингу для trustlines и integrity сервисов | `[!]` |
@@ -265,3 +265,28 @@ retryable-конфликта вместо `E010`; (3) `finally`-гарантия
   `.code='dbapi'` ошибочно перекрывал driver SQLSTATE; история сохранена, обход исправлен.
 - После исправления canonical selector `wave2_t402_boundary` — exit `0`, `40 passed`; OpenAPI
   selector `wave2_t402_contract` — exit `0`, `23 passed`; pinned Ruff и `git diff --check` — exit `0`.
+
+### 2026-08-11 — T403
+
+- Implementation commit: `21753fd`. Перед изменением общий insertion guard подтвердился на
+  `app/core/payments/service.py:543-568`: он ловил только `IntegrityError`; три entrypoint оставались
+  `create_payment` `:160-173`, `create_payment_internal` `:175-219` и staged `:221-256`.
+- Один общий DBAPI guard теперь находится в `app/core/payments/service.py:623-646`. Для commit-path
+  он rollback'ит отравленную сессию и поднимает sanitized `RetryablePaymentConflictException`; для
+  staged-path намеренно не делает локальный rollback, а передаёт владение внешней транзакцией тика.
+  Nonretryable DBAPI ошибки не переклассифицируются.
+- REST использует уже объявленный 409/E008. Interactive simulator имеет отдельную ветку
+  `app/api/v1/simulator.py:1482-1489` с code `CONFLICT`, а не `PAYMENT_REJECTED`. Staged executor
+  пробрасывает subtype до tick boundary (`app/core/simulator/real_payments_executor.py:414-419`),
+  поэтому clearing/trust-drift/persistence на отравленной сессии не продолжаются; существующий
+  tick rollback подтверждён тестом.
+- Acceptance cases: public/internal/staged insertion guard и HTTP response —
+  `tests/integration/test_payment_prepare_error_taxonomy.py:212-330`; interactive mapping —
+  `tests/unit/test_interact_actions_backend_p1.py:784`; executor propagation —
+  `tests/unit/test_real_payments_ordered_journal.py:184`; outer tick rollback —
+  `tests/unit/test_real_tick_orchestrator_rollback_resolution.py:241`.
+- Первый targeted run `wave2_t403` завершился exit `1`, `1 failed, 73 passed`: тест ошибочно ожидал
+  поле `ok` в существующем `SimulatorActionError`; production response был корректен, ожидание
+  приведено к фактической schema. Повтор `wave2_t403_fix` — exit `0`, `74 passed`; real-PG
+  regression `wave2_t403_pg` — exit `0`, `2 passed`; OpenAPI selector `wave2_t403_contract` —
+  exit `0`, `23 passed`; pinned Ruff и `git diff --check` — exit `0`.
