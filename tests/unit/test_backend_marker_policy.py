@@ -293,8 +293,11 @@ def _contributor_venv_violations(content: str) -> list[str]:
     verifier_indexes: list[int] = []
     violations: list[str] = []
     for index, command in enumerate(commands):
-        if _is_canonical_verifier_command(command):
-            verifier_indexes.append(index)
+        if _looks_like_verifier_command(command):
+            if _is_canonical_verifier_command(command):
+                verifier_indexes.append(index)
+            else:
+                violations.append(f"invalid canonical verifier invocation: {command}")
         module = _python_tool_module(command)
         if module is None:
             continue
@@ -396,6 +399,27 @@ def _created_database_name(command: str) -> str | None:
         return None
     database_names = re.findall(r"\b(geov0_test_[A-Za-z0-9_-]*)\b", createdb.group(1))
     return database_names[-1] if database_names else None
+
+
+def _looks_like_verifier_command(command: str) -> bool:
+    candidate = command.strip()
+    if candidate.startswith("&"):
+        candidate = candidate[1:].lstrip()
+    token = re.match(r"""^("[^"]+"|'[^']+'|\S+)(.*)$""", candidate)
+    if token is None:
+        return False
+    executable_path = token.group(1).strip("\"'").replace("\\", "/").lower()
+    executable = executable_path.rsplit("/", 1)[-1]
+    if executable == "verify_local.ps1":
+        return True
+    return bool(
+        executable in {"powershell", "powershell.exe", "pwsh", "pwsh.exe"}
+        and re.search(
+            r"(?:^|[\s\"'])[^\s\"']*verify_local\.ps1(?:[\s\"']|$)",
+            token.group(2),
+            re.I,
+        )
+    )
 
 
 def _parse_verifier_arguments(arguments: str) -> dict[str, str | bool] | None:
@@ -533,13 +557,13 @@ def _postgres_example_violations(
         if reset_assignment is not None:
             reset_values.append(reset_assignment.group(1))
             reset_indexes.append(command_index)
-        verifier_arguments = _canonical_verifier_arguments(command)
-        if (
-            verifier_arguments is not None
-            and verifier_arguments.get("-backendmarker") == "postgres"
-        ):
-            postgres_verifiers.append(command)
-            verifier_indexes.append(command_index)
+        if _looks_like_verifier_command(command):
+            verifier_arguments = _canonical_verifier_arguments(command)
+            if verifier_arguments is None:
+                violations.append(f"{path}: invalid verifier invocation: {command}")
+            elif verifier_arguments.get("-backendmarker") == "postgres":
+                postgres_verifiers.append(command)
+                verifier_indexes.append(command_index)
 
     if not database_urls:
         violations.append(f"{path}: no PostgreSQL test URL")
@@ -738,6 +762,14 @@ $help = @'
 py -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
 '@
+.\.venv\Scripts\python.exe -m ruff check app migrations
+```
+""",
+        r"""
+```powershell
+py -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
+.\scripts\verify_local.ps1 -DefinitelyNotAParameter x -BackendOnly
 .\.venv\Scripts\python.exe -m ruff check app migrations
 ```
 """,
@@ -1013,6 +1045,15 @@ createdb -U geo geov0_test_dangling_continuation
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_dangling_continuation"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
 ./scripts/verify_local.ps1 -BackendMarker postgres `
+```
+""",
+        """
+```powershell
+createdb -U geo geov0_test_invalid_sibling
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_invalid_sibling"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+./scripts/verify_local.ps1 -DefinitelyNotAParameter x -BackendMarker postgres
+./scripts/verify_local.ps1 -BackendMarker postgres
 ```
 """,
         """
