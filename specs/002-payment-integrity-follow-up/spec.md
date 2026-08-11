@@ -739,3 +739,9 @@ P109 закрыта; Phase 1 не имеет открытых P1/P2 и гото�
 - Adversarial review выявил и закрыл staged `lock_timeout` leak; владелец выбрал fail-fast tick
   semantics без same-batch replay. Финальный внешний вердикт на `6227fc5` — CLEAN.
 - Phase 2 остаётся авторизованной частью Волны 4 и выполняется только после программы 003.
+- Remote branch после closeout указывала на `b0f10d61f59f14c46bbc9b4487ca120aff9d78e7` (локальный SHA и
+  `git ls-remote` совпали). Manual Quality run `31513434549` на этом exact SHA завершился success:
+  required local-equivalent gates, active UI Chromium smoke, blocking Ruff diagnostics, PostgreSQL
+  integration, development-image content policy, production-like container/schema smoke, Admin E2E,
+  Simulator visual E2E и super-smoke — каждый job success. Единственная annotation — предупреждение
+  GitHub о принудительном Node 24 для action runtime; product gate не падал.
