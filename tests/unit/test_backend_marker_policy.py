@@ -49,7 +49,7 @@ def test_backend_scenario_is_not_a_registered_empty_tier() -> None:
             ):
                 scenario_markers.append(path.relative_to(_ROOT))
 
-    assert "scenario(" not in pytest_config
+    assert re.search(r"(?m)^\s*scenario(?:\([^)]*\))?\s*:", pytest_config) is None
     assert scenario_markers == []
     assert all(
         "pytest.mark.scenario" not in path.read_text(encoding="utf-8")
