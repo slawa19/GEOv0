@@ -568,6 +568,88 @@ class PaymentEngine:
             )
         ).scalar_one_or_none()
 
+    async def _get_segment_capacity_and_reserved_usage(
+        self,
+        *,
+        tx_id: str,
+        sender_id: UUID,
+        receiver_id: UUID,
+        equivalent_id: UUID,
+    ) -> tuple[Decimal, Decimal]:
+        """Return current capacity and persisted reservations for one flow edge."""
+        trustline = (
+            await self.session.execute(
+                select(TrustLine).where(
+                    and_(
+                        TrustLine.from_participant_id == receiver_id,
+                        TrustLine.to_participant_id == sender_id,
+                        TrustLine.equivalent_id == equivalent_id,
+                        TrustLine.status == "active",
+                    )
+                )
+            )
+        ).scalar_one_or_none()
+        limit = trustline.limit if trustline else Decimal("0")
+
+        debt_r_s = (
+            await self.session.execute(
+                select(Debt).where(
+                    and_(
+                        Debt.debtor_id == receiver_id,
+                        Debt.creditor_id == sender_id,
+                        Debt.equivalent_id == equivalent_id,
+                    )
+                )
+            )
+        ).scalar_one_or_none()
+        amount_r_owes_s = debt_r_s.amount if debt_r_s else Decimal("0")
+
+        debt_s_r = (
+            await self.session.execute(
+                select(Debt).where(
+                    and_(
+                        Debt.debtor_id == sender_id,
+                        Debt.creditor_id == receiver_id,
+                        Debt.equivalent_id == equivalent_id,
+                    )
+                )
+            )
+        ).scalar_one_or_none()
+        amount_s_owes_r = debt_s_r.amount if debt_s_r else Decimal("0")
+
+        relevant_locks = (
+            (
+                await self.session.execute(
+                    select(PrepareLock).where(
+                        and_(
+                            PrepareLock.participant_id == sender_id,
+                            PrepareLock.expires_at > func.now(),
+                        )
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        reserved_usage = Decimal("0")
+        for lock in relevant_locks:
+            if lock.tx_id == tx_id:
+                continue
+            for flow in (lock.effects or {}).get("flows", []):
+                try:
+                    if UUID(flow["equivalent"]) != equivalent_id:
+                        continue
+                    flow_sender_id = UUID(flow["from"])
+                    flow_receiver_id = UUID(flow["to"])
+                    flow_amount = Decimal(str(flow["amount"]))
+                except Exception:
+                    continue
+                if flow_sender_id == sender_id and flow_receiver_id == receiver_id:
+                    reserved_usage += flow_amount
+
+        available_capacity = limit - amount_s_owes_r + amount_r_owes_s
+        return available_capacity, reserved_usage
+
     async def prepare(
         self,
         tx_id: str,
@@ -668,73 +750,14 @@ class PaymentEngine:
                 sender_id = participant_map[sender_pid]
                 receiver_id = participant_map[receiver_pid]
 
-                # For payment flow Sender -> Receiver, capacity is controlled by TrustLine (Receiver -> Sender)
-                tl_stmt = select(TrustLine).where(
-                    and_(
-                        TrustLine.from_participant_id == receiver_id,
-                        TrustLine.to_participant_id == sender_id,
-                        TrustLine.equivalent_id == equivalent_id,
-                        TrustLine.status == "active",
+                available_capacity, reserved_usage = (
+                    await self._get_segment_capacity_and_reserved_usage(
+                        tx_id=tx_id,
+                        sender_id=sender_id,
+                        receiver_id=receiver_id,
+                        equivalent_id=equivalent_id,
                     )
                 )
-                tl_res = await self.session.execute(tl_stmt)
-                trustline = tl_res.scalar_one_or_none()
-
-                limit = trustline.limit if trustline else Decimal("0")
-
-                # Fetch Debts
-                debt_r_s_stmt = select(Debt).where(
-                    and_(
-                        Debt.debtor_id == receiver_id,
-                        Debt.creditor_id == sender_id,
-                        Debt.equivalent_id == equivalent_id,
-                    )
-                )
-                debt_r_s = (
-                    await self.session.execute(debt_r_s_stmt)
-                ).scalar_one_or_none()
-                amount_r_owes_s = debt_r_s.amount if debt_r_s else Decimal("0")
-
-                debt_s_r_stmt = select(Debt).where(
-                    and_(
-                        Debt.debtor_id == sender_id,
-                        Debt.creditor_id == receiver_id,
-                        Debt.equivalent_id == equivalent_id,
-                    )
-                )
-                debt_s_r = (
-                    await self.session.execute(debt_s_r_stmt)
-                ).scalar_one_or_none()
-                amount_s_owes_r = debt_s_r.amount if debt_s_r else Decimal("0")
-
-                # Reserved usage from other prepared transactions on this edge.
-                locks_query = select(PrepareLock).where(
-                    and_(
-                        PrepareLock.participant_id == sender_id,
-                        PrepareLock.expires_at > func.now(),
-                    )
-                )
-                relevant_locks = (
-                    await self.session.execute(locks_query)
-                ).scalars().all()
-
-                reserved_usage = Decimal("0")
-                for lock in relevant_locks:
-                    if lock.tx_id == tx_id:
-                        continue
-                    for flow in (lock.effects or {}).get("flows", []):
-                        try:
-                            if UUID(flow["equivalent"]) != equivalent_id:
-                                continue
-                            f_s = UUID(flow["from"])
-                            f_r = UUID(flow["to"])
-                            f_a = Decimal(str(flow["amount"]))
-                        except Exception:
-                            continue
-                        if f_s == sender_id and f_r == receiver_id:
-                            reserved_usage += f_a
-
-                available_capacity = limit - amount_s_owes_r + amount_r_owes_s
 
                 if available_capacity < (amount + reserved_usage):
                     raise RoutingException(
@@ -906,79 +929,18 @@ class PaymentEngine:
                     sender_id = participant_map[sender_pid]
                     receiver_id = participant_map[receiver_pid]
 
-                    # TrustLine enabling S -> R is TL R -> S.
-                    trustline = (
-                        await self.session.execute(
-                            select(TrustLine).where(
-                                and_(
-                                    TrustLine.from_participant_id == receiver_id,
-                                    TrustLine.to_participant_id == sender_id,
-                                    TrustLine.equivalent_id == equivalent_id,
-                                    TrustLine.status == "active",
-                                )
-                            )
-                        )
-                    ).scalar_one_or_none()
-
-                    limit = trustline.limit if trustline else Decimal("0")
-
-                    # Debts
-                    debt_r_s = (
-                        await self.session.execute(
-                            select(Debt).where(
-                                and_(
-                                    Debt.debtor_id == receiver_id,
-                                    Debt.creditor_id == sender_id,
-                                    Debt.equivalent_id == equivalent_id,
-                                )
-                            )
-                        )
-                    ).scalar_one_or_none()
-                    amount_r_owes_s = debt_r_s.amount if debt_r_s else Decimal("0")
-
-                    debt_s_r = (
-                        await self.session.execute(
-                            select(Debt).where(
-                                and_(
-                                    Debt.debtor_id == sender_id,
-                                    Debt.creditor_id == receiver_id,
-                                    Debt.equivalent_id == equivalent_id,
-                                )
-                            )
-                        )
-                    ).scalar_one_or_none()
-                    amount_s_owes_r = debt_s_r.amount if debt_s_r else Decimal("0")
-
-                    # Reserved usage from other prepared transactions on this edge (same equivalent).
-                    locks_query = select(PrepareLock).where(
-                        and_(
-                            PrepareLock.participant_id == sender_id,
-                            PrepareLock.expires_at > func.now(),
+                    available_capacity, reserved_usage = (
+                        await self._get_segment_capacity_and_reserved_usage(
+                            tx_id=tx_id,
+                            sender_id=sender_id,
+                            receiver_id=receiver_id,
+                            equivalent_id=equivalent_id,
                         )
                     )
-                    relevant_locks = (
-                        (await self.session.execute(locks_query)).scalars().all()
-                    )
-                    reserved_usage = Decimal("0")
-                    for lock in relevant_locks:
-                        if lock.tx_id == tx_id:
-                            continue
-                        for flow in (lock.effects or {}).get("flows", []):
-                            try:
-                                if UUID(flow["equivalent"]) != equivalent_id:
-                                    continue
-                                f_s = UUID(flow["from"])
-                                f_r = UUID(flow["to"])
-                                f_a = Decimal(str(flow["amount"]))
-                            except Exception:
-                                continue
-                            if f_s == sender_id and f_r == receiver_id:
-                                reserved_usage += f_a
 
                     local_key = (sender_id, receiver_id, equivalent_id)
                     reserved_usage += local_reserved.get(local_key, Decimal("0"))
 
-                    available_capacity = limit - amount_s_owes_r + amount_r_owes_s
                     if available_capacity < (route_amount + reserved_usage):
                         raise RoutingException(
                             f"Insufficient capacity between {sender_pid} and {receiver_pid}. "
