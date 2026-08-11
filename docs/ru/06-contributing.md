@@ -247,9 +247,11 @@ python -m ruff check app migrations --no-cache
 # (опционально)
 # mypy app/
 
-# Автоисправление
+# Автоисправление Ruff в blocking scope
 python -m ruff check --fix app migrations
-python -m black app migrations
+
+# Black пока только non-blocking diagnostic; массовое форматирование требует отдельного среза
+python -m black --check app migrations
 ```
 
 ### 4.2. Конфигурация (pyproject.toml)
