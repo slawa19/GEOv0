@@ -338,6 +338,38 @@ describe('mounted non-Graph list request ownership', () => {
     expect({ summary: state.summary, error: state.error, loading: state.loading }).toEqual(beforeUnmount)
   })
 
+  it('Liquidity does not render fabricated KPI zeros when summary loading fails', async () => {
+    apiMock.listEquivalents.mockResolvedValue(ok({ items: [equivalentNew] }))
+    apiMock.liquiditySummary.mockRejectedValueOnce(new Error('summary unavailable'))
+    const wrapper = mountPage(LiquidityPage, '/liquidity')
+    await settle()
+    await settle()
+    const state = setupState(wrapper)
+
+    expect(state.summary).toBeNull()
+    expect(state.error).toBe('summary unavailable')
+    expect(state.activeTrustlinesCount).toBeUndefined()
+    expect(state.totalLimit).toBeNull()
+
+    apiMock.liquiditySummary.mockResolvedValueOnce(ok({
+      updated_at: '2026-08-08T11:00:00Z',
+      active_trustlines: 0,
+      bottlenecks: 0,
+      incidents_over_sla: 0,
+      total_limit: '0',
+      total_used: '0',
+      total_available: '0',
+    }))
+    await state.load()
+    await nextTick()
+
+    expect(state.error).toBeNull()
+    expect(state.summary).not.toBeNull()
+    expect(state.activeTrustlinesCount).toBe(0)
+    expect(state.totalLimit).toBe('0')
+    wrapper.unmount()
+  })
+
   it('cancels pending page debounces on unmount before they can start late requests', async () => {
     vi.useFakeTimers()
     apiMock.listParticipants.mockResolvedValue(paginated([participantNew]))

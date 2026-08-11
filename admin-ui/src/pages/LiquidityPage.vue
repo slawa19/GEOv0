@@ -136,9 +136,9 @@ const selectedEq = computed(() => {
   return k === 'ALL' ? null : k
 })
 
-const activeTrustlinesCount = computed(() => summary.value?.active_trustlines ?? 0)
-const bottlenecksCount = computed(() => summary.value?.bottlenecks ?? 0)
-const incidentsOverSlaCount = computed(() => summary.value?.incidents_over_sla ?? 0)
+const activeTrustlinesCount = computed(() => summary.value?.active_trustlines)
+const bottlenecksCount = computed(() => summary.value?.bottlenecks)
+const incidentsOverSlaCount = computed(() => summary.value?.incidents_over_sla)
 
 const selectedPrecision = computed(() => {
   const k = selectedEq.value
@@ -146,9 +146,9 @@ const selectedPrecision = computed(() => {
   return precisionByEq.value.get(k) ?? 2
 })
 
-const totalLimit = computed(() => String(summary.value?.total_limit ?? '0'))
-const totalUsed = computed(() => String(summary.value?.total_used ?? '0'))
-const totalAvailable = computed(() => String(summary.value?.total_available ?? '0'))
+const totalLimit = computed(() => (summary.value ? String(summary.value.total_limit) : null))
+const totalUsed = computed(() => (summary.value ? String(summary.value.total_used) : null))
+const totalAvailable = computed(() => (summary.value ? String(summary.value.total_available) : null))
 
 const topCreditors = computed(() => summary.value?.top_creditors ?? [])
 const topDebtors = computed(() => summary.value?.top_debtors ?? [])
@@ -157,13 +157,14 @@ const topBottleneckEdges = computed(() => (summary.value?.top_bottleneck_edges ?
 
 const adviceItems = computed(() => {
   if (!summary.value) return []
+  const current = summary.value
   return buildLiquidityAdvice({
     ctx: {
       eq: selectedEq.value,
       threshold: threshold.value,
-      trustlinesTotal: activeTrustlinesCount.value,
-      bottlenecks: bottlenecksCount.value,
-      incidentsOverSla: incidentsOverSlaCount.value,
+      trustlinesTotal: current.active_trustlines,
+      bottlenecks: current.bottlenecks,
+      incidentsOverSla: current.incidents_over_sla,
     },
     baseQuery: route.query,
   })
@@ -295,7 +296,10 @@ function money(v: string): string {
 
     <el-divider />
 
-    <el-row :gutter="12">
+    <el-row
+      v-if="summary"
+      :gutter="12"
+    >
       <el-col :span="8">
         <el-statistic
           :title="t('liquidity.kpi.activeTrustlines')"
@@ -318,7 +322,10 @@ function money(v: string): string {
 
     <el-divider />
 
-    <el-row :gutter="12">
+    <el-row
+      v-if="summary"
+      :gutter="12"
+    >
       <el-col :span="8">
         <el-statistic
           :title="t('liquidity.kpi.totalLimit')"
