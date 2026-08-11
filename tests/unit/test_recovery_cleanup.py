@@ -368,16 +368,27 @@ async def test_expired_lock_cleanup_counts_observed_resolved_ids_for_terminal_ou
     )
     await db_session.commit()
 
+    real_execute = db_session.execute
+    prepare_lock_delete_calls = 0
+
+    async def count_prepare_lock_deletes(statement, *args, **kwargs):
+        nonlocal prepare_lock_delete_calls
+        if getattr(statement, "is_delete", False) and getattr(
+            getattr(statement, "table", None), "name", None
+        ) == PrepareLock.__tablename__:
+            prepare_lock_delete_calls += 1
+        return await real_execute(statement, *args, **kwargs)
+
+    monkeypatch.setattr(db_session, "execute", count_prepare_lock_deletes)
+
     async def abort_with_outcomes(self, tx_id, *args, **kwargs):
         assert kwargs["return_outcome"] is True
-        if tx_id == success_tx_id:
+        if tx_id in {success_tx_id, terminal_tx_id}:
             await self.session.execute(
                 delete(PrepareLock).where(PrepareLock.tx_id == tx_id)
             )
             await self.session.commit()
-            return "success"
-        if tx_id == terminal_tx_id:
-            return "already_committed"
+            return "success" if tx_id == success_tx_id else "already_committed"
         raise AssertionError(f"unexpected tx_id {tx_id}")
 
     monkeypatch.setattr(PaymentEngine, "abort", abort_with_outcomes)
@@ -388,6 +399,7 @@ async def test_expired_lock_cleanup_counts_observed_resolved_ids_for_terminal_ou
     assert result.transactions_aborted == 1
     assert result.terminal_transactions_seen == 1
     assert result.item_failures == 0
+    assert prepare_lock_delete_calls == 2
     remaining_locks = (
         await db_session.execute(select(func.count()).select_from(PrepareLock))
     ).scalar_one()

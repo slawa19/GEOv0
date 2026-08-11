@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -123,29 +123,11 @@ async def cleanup_expired_prepare_locks(
             )
             continue
 
-        # PaymentEngine removes locks durably for a new/already-aborted outcome.
-        # An already-committed transaction returns before that cleanup, so delete
-        # only the exact expired IDs observed for this terminal transaction.
+        # PaymentEngine durably removes every lock for all successful terminal
+        # outcomes, including already_committed. Recovery only accounts for the
+        # expired IDs it observed before delegating ownership to the engine.
         transactions_aborted += newly_aborted
         terminal_transactions_seen += terminal_seen
-        if outcome == "already_committed":
-            try:
-                await session.execute(
-                    delete(PrepareLock).where(PrepareLock.id.in_(expired_lock_ids))
-                )
-                await session.commit()
-            except Exception:
-                item_failures += 1
-                logger.exception(
-                    "recovery.cleanup_terminal_prepare_lock_tx_failed tx_id=%s",
-                    tx_id,
-                )
-                await _rollback_failed_recovery_item(
-                    session,
-                    operation="cleanup_terminal_prepare_lock_tx",
-                    tx_id=tx_id,
-                )
-                continue
         expired_lock_ids_resolved += len(expired_lock_ids)
 
     try:
