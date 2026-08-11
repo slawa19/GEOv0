@@ -158,6 +158,8 @@ const selectedPrecision = computed(() => {
 const totalLimit = computed(() => (summary.value ? String(summary.value.total_limit) : null))
 const totalUsed = computed(() => (summary.value ? String(summary.value.total_used) : null))
 const totalAvailable = computed(() => (summary.value ? String(summary.value.total_available) : null))
+const showCountKpis = computed(() => summary.value !== null)
+const showMoneyKpis = computed(() => summary.value !== null && selectedPrecision.value !== null)
 
 const topCreditors = computed(() => summary.value?.top_creditors ?? [])
 const topDebtors = computed(() => summary.value?.top_debtors ?? [])
@@ -319,7 +321,8 @@ function money(v: string, equivalent: unknown = selectedEq.value): string {
     />
 
     <el-row
-      v-if="summary && selectedPrecision !== null"
+      v-if="showCountKpis"
+      data-testid="liquidity-count-kpis"
       :gutter="12"
     >
       <el-col :span="8">
@@ -345,7 +348,8 @@ function money(v: string, equivalent: unknown = selectedEq.value): string {
     <el-divider />
 
     <el-row
-      v-if="summary"
+      v-if="showMoneyKpis"
+      data-testid="liquidity-money-kpis"
       :gutter="12"
     >
       <el-col :span="8">

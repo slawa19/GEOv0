@@ -398,11 +398,15 @@ describe('mounted non-Graph list request ownership', () => {
     expect(state.selectedEq).toBe('NEW')
     expect(state.selectedPrecision).toBe(4)
     expect(state.money('0.0001')).toBe('0.0001')
+    expect(state.showCountKpis).toBe(true)
+    expect(state.showMoneyKpis).toBe(true)
 
     state.equivalentsList = []
     await nextTick()
     expect(state.selectedPrecision).toBeNull()
     expect(state.money('0.0001')).toBe('—')
+    expect(state.showCountKpis).toBe(true)
+    expect(state.showMoneyKpis).toBe(false)
     wrapper.unmount()
   })
 
