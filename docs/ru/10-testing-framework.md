@@ -85,9 +85,10 @@ API/event payload, DOM/a11y или visual contract — а не только су
 в source. Assertion-free тест допустим лишь как явно именованная граница
 «операция не падает»; no-op steps удаляются.
 
-Ruff и Black пока являются non-blocking diagnostics с известным repository-wide
-debt; mypy не настроен как gate. Их можно запустить через
-`verify_local.ps1 -StaticDiagnostics`, но нельзя выдавать за required-quality.
+Пиннутый Ruff для `app migrations` является блокирующим CI-гейтом; Black остаётся
+non-blocking diagnostic с известным repository-wide debt, mypy не настроен как gate.
+Локальный `verify_local.ps1 -StaticDiagnostics` только выводит результаты обоих
+инструментов и не меняет exit code; это не отменяет блокирующую семантику Ruff в CI.
 
 ## Владение контрактами
 

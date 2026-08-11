@@ -26,3 +26,23 @@ def test_backend_e2e_is_not_a_registered_or_filtered_empty_tier() -> None:
     assert e2e_markers == []
     assert "not slow and not postgres" in verifier
     assert "not e2e" not in verifier
+
+
+def test_backend_scenario_is_not_a_registered_empty_tier() -> None:
+    pytest_config = (_ROOT / "pytest.ini").read_text(encoding="utf-8")
+    scenario_markers: list[Path] = []
+    for path in sorted((_ROOT / "tests").rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Attribute)
+                and node.attr == "scenario"
+                and isinstance(node.value, ast.Attribute)
+                and node.value.attr == "mark"
+                and isinstance(node.value.value, ast.Name)
+                and node.value.value.id == "pytest"
+            ):
+                scenario_markers.append(path.relative_to(_ROOT))
+
+    assert "scenario(" not in pytest_config
+    assert scenario_markers == []

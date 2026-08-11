@@ -992,7 +992,7 @@ def test_root_health_and_versioned_api_are_explicitly_classified() -> None:
         ) == _normalized_security(versioned_operation, versioned_item, generated)
 
 
-def test_openapi_paths_methods_parameter_identities_and_required_bodies_match_and_schemas_are_ratcheted() -> (
+def test_openapi_paths_methods_business_parameter_identities_and_required_bodies_match_and_schemas_are_ratcheted() -> (
     None
 ):
     canonical = _load_openapi_yaml()
