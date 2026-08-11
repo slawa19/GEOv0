@@ -93,7 +93,7 @@ liveness без деталей и аутентифицированный diagnos
 | T500 | Перенести токен WebSocket из query string; решение по совместимости задокументированного URL | `[x]` |
 | T501 | Убрать `str(exc)` из публичного health; разделить liveness и diagnostic | `[x]` |
 | T502 | Переписать `.dockerignore` (гигиена сборки dev-образа, не security); добавить в CI проверку содержимого образа | `[x]` |
-| T503 | `compare_digest` для admin-токена | `[!]` |
+| T503 | `compare_digest` для admin-токена | `[x]` |
 | T504 | Ограничить рост структуры rate-limiter | `[!]` |
 | T505 | Решение и реализация по `/health` degraded + HEALTHCHECK-потребителю | `[!]` |
 | T506 | `/api/v1/health` читает окружение через Settings | `[!]` |
@@ -168,3 +168,20 @@ liveness без деталей и аутентифицированный diagnos
   и `docker run --rm --entrypoint sh ...` с теми же проверками путей/`find`. Exit `0`, image
   `sha256:6ec5f6ce0026fa21a2cf171421e8ee20629f2f750811a7fec930c86f01ec7fb7`,
   `DEV_IMAGE_CONTENT_OK`; trap удалил task-local tag (`IMAGE_CLEANED`).
+
+### 2026-08-11 — T503
+
+- Implementation commit: `6673e9b747a22abd59bdd774d548559859399cbf`.
+- До: три независимых сравнения `x_admin_token != settings.ADMIN_TOKEN` находились в
+  `app/api/deps.py:136,169,257`.
+- После: bytes-based `secrets.compare_digest` инкапсулирован в
+  `app/api/deps.py:29-33`; participant-or-admin, strict admin и simulator actor call-sites используют
+  его на `:144`, `:177`, `:265`. `tests/unit/test_admin_token_comparison.py:18-67` проверяет и
+  сам primitive, и прохождение всех трёх путей через общий helper.
+- Red canonical selector
+  `$env:DEBUG='false'; .\scripts\verify_local.ps1 -TaskSlug wave1_t503_red -BackendOnly -BackendSelector tests/unit/test_admin_token_comparison.py`:
+  exit `1`, `2 failed` (`deps.secrets` и `_admin_token_matches` отсутствовали).
+- Первая multi-selector попытка не запустила pytest: без массива PowerShell привязал второй путь к
+  `-BackendMarker`, selector guard отклонил аргумент. Повтор с явным `$selectors = @(...)` и
+  `-TaskSlug wave1_t503` прошёл: exit `0`, `40 passed`; охвачены новый policy test и существующие
+  admin/simulator/integrity consumers.
