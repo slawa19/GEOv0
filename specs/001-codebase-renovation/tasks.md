@@ -249,11 +249,11 @@ findings:
 
 - `BACKEND-TARGETED`: `.\scripts\verify_local.ps1 -TaskSlug <unique-task> -BackendOnly -BackendSelector <selectors>`
 - `BACKEND-DEFAULT`: `.\scripts\verify_local.ps1 -TaskSlug <unique-task> -BackendOnly`;
-  runs all backend tests except the explicitly marked `slow`/`e2e` tiers.
-- `BACKEND-EXPENSIVE`: add `-IncludeExpensive` with an explicit slow/e2e selector;
-  it is not part of the default tier.
-- `BACKEND-LINT-DIAGNOSTIC`: `.\.venv\Scripts\python.exe -m ruff check app migrations --no-cache`;
-  this is known-red and non-blocking until a baseline/ratchet is accepted.
+  runs all backend tests except the explicitly marked `slow`/`postgres` tiers.
+- `BACKEND-EXPENSIVE`: add `-IncludeExpensive` with an explicit `slow` selector;
+  slow joins the run, while `postgres` remains excluded and owned by its dedicated tier.
+- `BACKEND-RUFF`: `.\.venv\Scripts\python.exe -m ruff check app migrations --no-cache`;
+  pinned Ruff is blocking in CI and must exit `0`.
 - `OPENAPI`: `.\scripts\verify_local.ps1 -TaskSlug <unique-task> -BackendOnly -BackendSelector tests/contract/test_openapi_contract.py`
 - `ALEMBIC-HEADS`: `.\.venv\Scripts\python.exe scripts/check_alembic_heads.py`
 - `ADMIN-UNIT`: `npm --prefix admin-ui run test`
@@ -264,8 +264,8 @@ findings:
 - `SIM-UNIT`: `npm --prefix simulator-ui/v2 run test:unit`
 - `SIM-BUILD`: `npm --prefix simulator-ui/v2 run build`
 - `SIM-E2E`: `npm --prefix simulator-ui/v2 run test:e2e`
-- `REPO-FULL`: `.\scripts\verify_local.ps1 -TaskSlug <unique-task>`; Ruff/Black
-  remain separately reported diagnostics and are not described as enforced.
+- `REPO-FULL`: `.\scripts\verify_local.ps1 -TaskSlug <unique-task>`; CI separately enforces
+  pinned Ruff, while Black remains a non-blocking diagnostic.
 - `POSTGRES-CONCURRENCY`: the named selector against a dedicated disposable
   PostgreSQL database only; never point `TEST_DATABASE_URL` at developer data.
 
