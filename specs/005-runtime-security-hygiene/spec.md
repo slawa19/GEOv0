@@ -92,7 +92,7 @@ liveness без деталей и аутентифицированный diagnos
 |---|---|---|
 | T500 | Перенести токен WebSocket из query string; решение по совместимости задокументированного URL | `[x]` |
 | T501 | Убрать `str(exc)` из публичного health; разделить liveness и diagnostic | `[x]` |
-| T502 | Переписать `.dockerignore` (гигиена сборки dev-образа, не security); добавить в CI проверку содержимого образа | `[!]` |
+| T502 | Переписать `.dockerignore` (гигиена сборки dev-образа, не security); добавить в CI проверку содержимого образа | `[x]` |
 | T503 | `compare_digest` для admin-токена | `[!]` |
 | T504 | Ограничить рост структуры rate-limiter | `[!]` |
 | T505 | Решение и реализация по `/health` degraded + HEALTHCHECK-потребителю | `[!]` |
@@ -145,3 +145,26 @@ liveness без деталей и аутентифицированный diagnos
 - Финальный canonical contract selector
   `$env:DEBUG='false'; .\scripts\verify_local.ps1 -TaskSlug wave1_t501_contract5 -BackendOnly -BackendSelector tests/contract/test_openapi_contract.py`:
   exit `0`, `23 passed`.
+
+### 2026-08-11 — T502
+
+- Implementation commit: `f5846ba7764401b01e91e14e302f8336dfe78751`.
+- До: `.dockerignore:1-9` не исключал `.local-run`, `.venv`, `node_modules` и `*.db`, при этом
+  dev `Dockerfile:41` копировал весь build context в `/app`; CI собирал только production allowlist
+  image в manual `container-smoke`.
+- После: `.dockerignore:10-15` закрывает каждый класс; blocking job
+  `.github/workflows/quality.yml:95-154` запускается на всех триггерах workflow, перед сборкой
+  создаёт пять sentinel-артефактов, собирает dev runtime target и проверяет фактическое содержимое
+  `/app` через `docker run`/`find`. Policy guard —
+  `tests/unit/test_deployment_config.py:71-101`.
+- Red canonical selector
+  `$env:DEBUG='false'; .\scripts\verify_local.ps1 -TaskSlug wave1_t502_red -BackendOnly -BackendSelector tests/unit/test_deployment_config.py`:
+  exit `1`, `1 failed, 6 passed, 1 skipped`; required ignore rules отсутствовали.
+- После исправления тот же selector с `-TaskSlug wave1_t502_fix`: exit `0`,
+  `7 passed, 1 skipped`; отдельный `yaml.safe_load(.github/workflows/quality.yml)` дал `YAML_OK`.
+- Реальный image-content gate выполнен через доступный WSL Docker 29.4.1:
+  `wsl.exe --cd (Get-Location).Path --exec sh -lc $wslScript`, где script выполнял
+  `docker build --quiet --file Dockerfile --target runtime --tag geov0-wave1-t502-local:verify .`
+  и `docker run --rm --entrypoint sh ...` с теми же проверками путей/`find`. Exit `0`, image
+  `sha256:6ec5f6ce0026fa21a2cf171421e8ee20629f2f750811a7fec930c86f01ec7fb7`,
+  `DEV_IMAGE_CONTENT_OK`; trap удалил task-local tag (`IMAGE_CLEANED`).
