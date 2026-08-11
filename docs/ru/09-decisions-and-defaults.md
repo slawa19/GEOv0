@@ -378,8 +378,9 @@ exit `0`, 11529 raw output lines; 4991 строк начинаются с `+`/`-
 
 **Решение 2026-08-11:** контрактный тест между `api/openapi.yaml` и generated FastAPI
 OpenAPI называется **exact semantic-drift ratchet**, а не проверкой semantic parity.
-Он строго сверяет paths, methods, parameter identities, request-body presence и success
-status codes, а остальной известный дрейф фиксирует двусторонними count+digest
+Он строго сверяет paths, methods, **business** parameter identities, request-body presence/
+requiredness и selected success-status contracts. Auth transport headers (включая identity и
+requiredness), schemas, остальные responses и security фиксируются двусторонними count+digest
 храповиками: тест падает и при ухудшении, и при незаписанном улучшении.
 
 Свежий пересчёт после T501: полностью совпадают 2 из 88 operations — `GET /health` и

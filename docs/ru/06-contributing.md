@@ -93,8 +93,8 @@ npm --prefix admin-ui run dev
 # Запустить тесты
 pytest
 
-# Проверить линтеры
-ruff check .
+# Проверить blocking Ruff scope (версия закреплена в requirements-dev.txt)
+python -m ruff check app migrations --no-cache
 
 # (опционально)
 # mypy app/
@@ -236,20 +236,20 @@ alembic -c migrations/alembic.ini history
 ### 4.1. Python
 
 Используем:
-- **Ruff** — линтер (замена flake8, isort, pyupgrade)
-- **Black** — форматирование (через ruff format)
+- **Ruff** — blocking CI-линтер для `app migrations` (замена flake8, isort, pyupgrade)
+- **Black** — пока non-blocking formatting diagnostic
 - **mypy** — опционально (не закреплён в зависимостях репозитория)
 
 ```bash
 # Проверка
-ruff check .
+python -m ruff check app migrations --no-cache
 
 # (опционально)
 # mypy app/
 
 # Автоисправление
-ruff check --fix .
-ruff format .
+python -m ruff check --fix app migrations
+python -m black app migrations
 ```
 
 ### 4.2. Конфигурация (pyproject.toml)
@@ -524,7 +524,7 @@ class TestRoutingService:
 
 ```bash
 # Убедиться, что все проверки проходят
-ruff check .
+python -m ruff check app migrations --no-cache
 
 # 1. Запустить Super Smoke (обязательно!)
 pytest tests/integration/test_simulator_super_smoke.py -vv
