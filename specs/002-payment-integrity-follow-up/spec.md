@@ -65,10 +65,12 @@ flow and audit direction remain directed.
 
 - Public payment calls own their transaction; internal staged calls pass
   `commit=False` (`app/core/payments/service.py:160-250`).
-- Whole-UoW retry handles `40P01` and `40001`; commit additionally retries `23505`
-  after an invisible concurrent insert following a SERIALIZABLE advisory-lock
-  wait. The staged variant uses a savepoint and deliberately does not roll back
-  the caller's outer transaction (`app/core/payments/engine.py:245-348`).
+- Whole-UoW retry handles `40P01` and `40001`. PostgreSQL may expose the same
+  invisible concurrent Debt insert after a SERIALIZABLE advisory-lock wait as
+  either `40001` or `23505`; commit retries `23505` only for the exact Debt
+  business-key INSERT/constraint. The staged variant uses a savepoint and
+  deliberately does not roll back the caller's outer transaction
+  (`app/core/payments/engine.py:333-500`).
 - Real simulator payment batching calls the staged service from
   `app/core/simulator/real_payments_executor.py:369`.
 - The service owns a total timeout and shielded abort paths
@@ -143,8 +145,10 @@ the monetary mutation.
 ### 4.4 Failure semantics
 
 - `40P01`/`40001` before a transaction-owned commit: retry the whole owned UoW.
-- Commit-only `23505` after an invisible concurrent insert: preserve the existing
-  whole-commit retry so the terminal `tx_id` state resolves idempotently.
+- A commit-owned invisible concurrent Debt insert may surface as `40001` or
+  `23505`: retry the whole UoW. The `23505` exception is retryable only when both
+  the statement is `INSERT INTO debts` and the constraint is
+  `uq_debts_debtor_creditor_equivalent`; all other unique violations fail closed.
 - `40P01`/`40001` in staged work: retry only when the conflicting lock set is
   contained in the savepoint; otherwise fail deterministically to the outer owner
   or restart the whole outer UoW. Commit-only `23505` is not retryable for the
@@ -229,8 +233,9 @@ The delivery phases must prove, with deterministic barriers rather than sleeps:
 - inverse single- and multi-segment prepare/commit cannot bypass serialization;
 - both route start orders have the same bounded outcome;
 - same-direction bottleneck and same-`tx_id` idempotency coverage remain green;
-- commit-only `23505` retry after a SERIALIZABLE lock wait has deterministic real
-  PostgreSQL characterization in addition to its predicate unit guard;
+- concurrent Debt insert after a SERIALIZABLE lock wait has bounded real
+  PostgreSQL characterization for the server-selected `40001`/narrow `23505`
+  outcome in addition to predicate anti-vacuum guards;
 - staged multi-payment owners cannot exhaust savepoint retry on retained locks;
 - timeout and cancellation release owned locks without partial/double effect;
 - final reciprocal debts, trust limits, transaction states, PrepareLock count and
@@ -560,3 +565,42 @@ Evidence сохранено без переписывания провалов:
   `('40001', 'INSERT INTO debts (...) RETURNING debts.created_at, debts.updated_at')`; exit `1`.
 
 P107 остаётся `[!]`; экспериментальные test changes не закоммичены, product predicate не менялся.
+
+### 2026-08-11 — P107 resolution
+
+- Владелец разрешил скорректировать target по runtime evidence и удалить либо сузить broad
+  commit-`23505` predicate. Первая реализация полностью удалила `23505`; unit
+  `wave3_p107_unit` — exit `0`, `14 passed`. Однако следующий combined real-PG run
+  `wave3_p107_real40001` честно завершился exit `1`, `1 failed, 1 passed`: тот же two-`tx_id`
+  schedule на этот раз получил настоящий
+  `UniqueViolationError ... uq_debts_debtor_creditor_equivalent`, то есть допустимый серверный
+  исход действительно меняется между `40001` и `23505`. Полное удаление отменено до commit.
+- Финальный classifier сохраняет whole-UoW retry для `40P01/40001`, а `23505` принимает только при
+  одновременном совпадении `op="commit"`, `INSERT INTO debts` и constraint
+  `uq_debts_debtor_creditor_equivalent`; extractor поддерживает asyncpg cause chain и psycopg
+  `diag.constraint_name` (`app/core/payments/engine.py:333-382`). Unit anti-vacuum
+  `tests/unit/test_payment_engine_retry_savepoint_nocommit.py:83-127` доказывает положительный
+  Debt case и отрицательные staged/prepare/abort, другой constraint и другую таблицу.
+- Два real schedules используют явный `SERIALIZABLE`, owner-attempt events и фактическую
+  ungranted advisory row из `pg_locks`, ошибки не инъецируют. Same-`tx_id` regression
+  (`tests/integration/test_payment_commit_advisory_locks_postgres.py:342-505`) требует один rollback,
+  два preflight, один Debt `8`, отсутствие reciprocal Debt/PrepareLocks, один PAYMENT audit,
+  неизменный trust limit и terminal `COMMITTED` без error. Two-`tx_id` regression
+  (`tests/integration/test_payment_engine_uow_retry_postgres.py:196-438`) требует один реальный
+  `INSERT INTO debts` conflict из `{40001,23505}`, один whole-UoW retry, два `COMMITTED`, Debt `6`,
+  два audits, ноль locks и неизменный limit.
+- После корректировки narrow assertion первый полный PG milestone
+  `wave3_p107_pg` завершился exit `1`, `1 failed, 9 passed`: same-`tx_id` получил `23505` вместо
+  излишне точного ожидания `40001`, при этом product retry уже прошёл. Это дополнительное runtime
+  evidence двух допустимых SQLSTATE; ожидание исправлено на bounded set без ослабления финальных
+  инвариантов.
+- Финальный PostgreSQL 16 milestone:
+  `DEBUG=false; TEST_DATABASE_URL=postgresql+asyncpg://geo:geo@localhost:55433/geov0_test_wave3; GEO_TEST_ALLOW_DB_RESET=1; $selectors=@('tests/integration/test_payment_commit_advisory_locks_postgres.py','tests/integration/test_concurrent_prepare_routes_bottleneck_postgres.py','tests/integration/test_payment_idempotency_postgres.py','tests/integration/test_payment_engine_uow_retry_postgres.py'); .\scripts\verify_local.ps1 -TaskSlug wave3_p107_pg_final -BackendOnly -BackendMarker postgres -BackendSelector $selectors`
+  — exit `0`, `10 passed`. Cache artifact просмотрен: ровно 10 nodeids, включая оба real conflict
+  schedules, весь same-tx/commit-abort файл, два bottleneck paths и concurrent idempotency.
+- Отдельный timeout/cancellation/recovery gate:
+  `DEBUG=false; $selectors=@('tests/unit/test_payment_engine_retry_savepoint_nocommit.py','tests/unit/test_payment_timeouts.py','tests/unit/test_payment_cleanup_cancellation.py','tests/unit/test_recovery_cleanup.py','tests/integration/test_payment_prepare_error_taxonomy.py::test_prepare_cancellation_preserves_cancel_and_durably_aborts','tests/integration/test_payment_prepare_error_taxonomy.py::test_cancellation_at_other_payment_phases_has_terminal_state','tests/integration/test_payment_prepare_error_taxonomy.py::test_staged_prepare_cancellation_aborts_before_outer_rollback','tests/integration/test_payment_prepare_error_taxonomy.py::test_repeated_cancellation_during_recovery_read_still_aborts'); .\scripts\verify_local.ps1 -TaskSlug wave3_p107_siblings -BackendOnly -BackendSelector $selectors`
+  — exit `0`, `22 passed`; cache artifact содержит все 22 ожидаемых nodeids. Pinned Ruff
+  `0.1.14` по четырём изменённым code/test files и `git diff --check` — exit `0`.
+  Implementation commit: `1a9cc63e54df1f0b493fdcb1773a501396e84cbc`; P107 task закрыт в
+  `tasks.md:58-61`. Предыдущая STOP-запись и все неудачные попытки выше сохранены.

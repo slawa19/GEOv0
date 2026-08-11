@@ -60,8 +60,9 @@ Vertical slice:
    mutation; the real tick pre-acquires its complete sorted equivalent set;
 4. define mixed-version deployment compatibility: either coordinated quiescence,
    or canonical plus both legacy directional keys in one global order;
-5. add real PostgreSQL characterization for commit-only `23505` after a
-   SERIALIZABLE advisory wait, then rerun same-direction bottleneck, same-tx
+5. add real PostgreSQL characterization for the server-selected `40001` or exact
+   Debt business-key `23505` after a SERIALIZABLE advisory wait, then rerun
+   same-direction bottleneck, same-tx
    transition, idempotency, timeout, cancellation and recovery selectors;
 6. update stable payment/decision documentation for the selected mechanism;
 7. perform independent adversarial and external review of the frozen product diff.
