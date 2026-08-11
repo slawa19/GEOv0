@@ -635,7 +635,7 @@ export function useInteractMode(opts: {
       fsm.setLastClearing(res)
 
       // BUG-5: log to history
-      const clearedCycles = res.cleared_cycles ?? 0
+      const clearedCycles = res.cleared_cycles
       const clearedAmt = res.total_cleared_amount ?? '0'
       if (clearedCycles > 0) {
         pushHistory('🌀', `Clearing: ${clearedCycles} cycle(s), −${clearedAmt} ${opts.equivalent.value}`)
@@ -667,8 +667,8 @@ export function useInteractMode(opts: {
       await new Promise((r) => setTimeout(r, CLEARING_RUNNING_DWELL_MS))
       if (!isCurrent()) return
 
-      const settled = res?.cleared_cycles ?? 0
-      const total = Array.isArray(res?.cycles) ? res.cycles.length : settled
+      const settled = res.cleared_cycles
+      const total = res.cycles.length
       successMessage.value = `Clearing done: ${settled}/${total} cycles`
 
       resetToIdle()

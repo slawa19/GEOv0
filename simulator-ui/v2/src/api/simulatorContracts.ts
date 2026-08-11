@@ -1,6 +1,13 @@
 import type { GraphLink, GraphNode } from '../types'
 import { ApiError } from './http'
-import type { RunError, RunStatus, ScenarioSummary, ScenariosListResponse, SimulatorGraphSnapshot } from './simulatorTypes'
+import type {
+  RunError,
+  RunStatus,
+  ScenarioSummary,
+  ScenariosListResponse,
+  SimulatorActionClearingRealResponse,
+  SimulatorGraphSnapshot,
+} from './simulatorTypes'
 
 const SIMULATOR_API_VERSION = 'simulator-api/1'
 
@@ -349,6 +356,54 @@ function decodeSnapshot(value: unknown, path: string): SimulatorGraphSnapshot {
   return snapshot
 }
 
+function decodeClearingEdge(value: unknown, path: string): { from: string; to: string } {
+  const raw = objectAt(value, path)
+  onlyKeys(raw, path, ['from', 'to'])
+  return {
+    from: stringAt(raw.from, `${path}.from`),
+    to: stringAt(raw.to, `${path}.to`),
+  }
+}
+
+function decodeClearingCycle(
+  value: unknown,
+  path: string,
+): SimulatorActionClearingRealResponse['cycles'][number] {
+  const raw = objectAt(value, path)
+  onlyKeys(raw, path, ['cleared_amount', 'edges'])
+  return {
+    cleared_amount: stringAt(raw.cleared_amount, `${path}.cleared_amount`),
+    edges: arrayAt(raw.edges, `${path}.edges`).map((edge, index) =>
+      decodeClearingEdge(edge, `${path}.edges[${index}]`),
+    ),
+  }
+}
+
+function decodeClearingReal(value: unknown, path: string): SimulatorActionClearingRealResponse {
+  const raw = objectAt(value, path)
+  onlyKeys(raw, path, [
+    'ok',
+    'equivalent',
+    'cleared_cycles',
+    'total_cleared_amount',
+    'cycles',
+    'client_action_id',
+  ])
+  if (raw.ok !== true) fail(`${path}.ok`, 'expected true')
+
+  const clientActionId = optionalString(raw, 'client_action_id', path)
+  return {
+    ok: true,
+    equivalent: stringAt(raw.equivalent, `${path}.equivalent`),
+    cleared_cycles: numberAt(raw.cleared_cycles, `${path}.cleared_cycles`, { integer: true, min: 0 }),
+    total_cleared_amount: stringAt(raw.total_cleared_amount, `${path}.total_cleared_amount`),
+    cycles: arrayAt(raw.cycles, `${path}.cycles`).map((cycle, index) =>
+      decodeClearingCycle(cycle, `${path}.cycles[${index}]`),
+    ),
+    ...(clientActionId !== undefined ? { client_action_id: clientActionId } : {}),
+  }
+}
+
 export function decodeSimulatorResponse<T>(contract: string, value: unknown, decoder: ContractDecoder<T>): T {
   try {
     return decoder(value, '$')
@@ -372,4 +427,8 @@ export function decodeRunStatusResponse(value: unknown): RunStatus {
 
 export function decodeGraphSnapshotResponse(value: unknown): SimulatorGraphSnapshot {
   return decodeSimulatorResponse('graph-snapshot', value, decodeSnapshot)
+}
+
+export function decodeSimulatorActionClearingRealResponse(value: unknown): SimulatorActionClearingRealResponse {
+  return decodeSimulatorResponse('action-clearing-real', value, decodeClearingReal)
 }

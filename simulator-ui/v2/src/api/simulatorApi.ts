@@ -4,6 +4,7 @@ import {
   decodeRunStatusResponse,
   decodeScenariosListResponse,
   decodeScenarioSummaryResponse,
+  decodeSimulatorActionClearingRealResponse,
 } from './simulatorContracts'
 import type {
   ActiveRunResponse,
@@ -269,11 +270,16 @@ export function actionClearingReal(
   req: SimulatorActionClearingRealRequest,
   init?: RequestInit,
 ): Promise<SimulatorActionClearingRealResponse> {
-  return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/actions/clearing-real`, {
-    ...(init ?? {}),
-    method: 'POST',
-    body: JSON.stringify(req),
-  })
+  return simulatorContractJson(
+    cfg,
+    `/simulator/runs/${encodeURIComponent(runId)}/actions/clearing-real`,
+    decodeSimulatorActionClearingRealResponse,
+    {
+      ...(init ?? {}),
+      method: 'POST',
+      body: JSON.stringify(req),
+    },
+  )
 }
 
 export function getParticipantsList(cfg: HttpConfig, runId: string): Promise<SimulatorActionParticipantsListResponse> {

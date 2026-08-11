@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { SimulatorContractError } from './simulatorContracts'
-import { getRun, getScenario, getScenarioPreview, getSnapshot, listScenarios } from './simulatorApi'
+import { actionClearingReal, getRun, getScenario, getScenarioPreview, getSnapshot, listScenarios } from './simulatorApi'
 
 const cfg = { apiBase: 'http://simulator.test/api/v1', accessToken: 'test-token' }
 
@@ -83,6 +83,15 @@ const snapshot = {
   limits: { max_nodes: null, max_links: 100, max_particles: 220 },
 }
 
+const clearingRealResponse = {
+  ok: true as const,
+  equivalent: 'UAH',
+  cleared_cycles: 0,
+  total_cleared_amount: '0',
+  cycles: [],
+  client_action_id: null,
+}
+
 function respondWith(payload: unknown): void {
   vi.stubGlobal(
     'fetch',
@@ -134,6 +143,12 @@ describe('Simulator critical REST response contracts', () => {
     })
   })
 
+  it('accepts an honest zero-cycle clearing action response', async () => {
+    respondWith(clearingRealResponse)
+
+    await expect(actionClearingReal(cfg, 'run-1', { equivalent: 'UAH' })).resolves.toEqual(clearingRealResponse)
+  })
+
   it.each([
     {
       label: 'scenario list item',
@@ -183,6 +198,38 @@ describe('Simulator critical REST response contracts', () => {
       call: () => getSnapshot(cfg, 'run-1', 'UAH'),
       contract: 'graph-snapshot',
       diagnostic: '$.links[0].source',
+    },
+    {
+      label: 'clearing action missing cycle count',
+      payload: {
+        ok: true,
+        equivalent: 'UAH',
+        total_cleared_amount: '0',
+        cycles: [],
+        client_action_id: null,
+      },
+      call: () => actionClearingReal(cfg, 'run-1', { equivalent: 'UAH' }),
+      contract: 'action-clearing-real',
+      diagnostic: '$.cleared_cycles',
+    },
+    {
+      label: 'clearing action string cycle count',
+      payload: { ...clearingRealResponse, cleared_cycles: '0' },
+      call: () => actionClearingReal(cfg, 'run-1', { equivalent: 'UAH' }),
+      contract: 'action-clearing-real',
+      diagnostic: '$.cleared_cycles',
+    },
+    {
+      label: 'clearing action non-canonical edge alias',
+      payload: {
+        ...clearingRealResponse,
+        cleared_cycles: 1,
+        total_cleared_amount: '1.00',
+        cycles: [{ cleared_amount: '1.00', edges: [{ from_: 'alice', to: 'bob' }] }],
+      },
+      call: () => actionClearingReal(cfg, 'run-1', { equivalent: 'UAH' }),
+      contract: 'action-clearing-real',
+      diagnostic: '$.cycles[0].edges[0].from',
     },
   ])('rejects malformed 2xx $label before returning trusted data', async ({ payload, call, contract, diagnostic }) => {
     respondWith(payload)
