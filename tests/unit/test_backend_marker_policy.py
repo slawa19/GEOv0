@@ -147,11 +147,20 @@ def _iter_documented_commands_from_content(content: str):
             continue
         powershell_statements: list[str] | None = None
         powershell_line_continues = False
+        here_string_start: re.Match[str] | None = None
         if fence_language in {"powershell", "pwsh"}:
             if powershell_here_string_end is not None:
                 if not line.startswith(powershell_here_string_end):
                     continue
-                stripped = line[len(powershell_here_string_end) :].lstrip(" ;")
+                here_string_suffix = line[len(powershell_here_string_end) :]
+                if here_string_suffix.strip() and not re.match(
+                    r"^\s*;",
+                    here_string_suffix,
+                ):
+                    continue
+                stripped = here_string_suffix.lstrip()
+                if stripped.startswith(";"):
+                    stripped = stripped[1:].lstrip()
                 powershell_here_string_end = None
                 powershell_here_string_line = None
                 if not stripped:
@@ -210,7 +219,18 @@ def _iter_documented_commands_from_content(content: str):
             ):
                 pending_powershell_command = (command_line, command)
             elif command and not command.startswith("#"):
-                yield command_line, command, fence_language
+                if (
+                    fence_language in {"powershell", "pwsh"}
+                    and here_string_start is None
+                    and _tokenize_powershell_arguments(command) is None
+                ):
+                    yield (
+                        command_line,
+                        f"{_POWERSHELL_SYNTAX_ERROR}: invalid quoting or escape",
+                        fence_language,
+                    )
+                else:
+                    yield command_line, command, fence_language
     if pending_powershell_command is not None:
         yield (*pending_powershell_command, fence_language)
     if powershell_here_string_end is not None:
@@ -1158,6 +1178,14 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 ./scripts/verify_local.ps1 -BackendMarker "postgres
 ```
 """,
+        """
+```powershell
+createdb -U geo geov0_test_unbalanced_url
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_unbalanced_url
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+./scripts/verify_local.ps1 -BackendMarker postgres
+```
+""",
         (
             """
 ```powershell
@@ -1199,6 +1227,49 @@ $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
 ./scripts/verify_local.ps1 -BackendMarker postgres
 Write-Host "before"; <# unclosed comment
+```
+""",
+        """
+```powershell
+createdb -U geo geov0_test_unbalanced_executable
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_unbalanced_executable"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+"./scripts/verify_local.ps1 -BackendMarker postgres
+```
+""",
+        """
+```powershell
+createdb -U geo geov0_test_unbalanced_file
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_unbalanced_file"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+powershell -File "./scripts/verify_local.ps1 -BackendMarker postgres
+```
+""",
+        """
+```powershell
+createdb -U geo geov0_test_unbalanced_reset
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_unbalanced_reset"
+$env:GEO_TEST_ALLOW_DB_RESET = "1
+./scripts/verify_local.ps1 -BackendMarker postgres
+```
+""",
+        """
+```powershell
+createdb -U geo "geov0_test_unbalanced_createdb
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_unbalanced_createdb"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+./scripts/verify_local.ps1 -BackendMarker postgres
+```
+""",
+        """
+```powershell
+createdb -U geo geov0_test_invalid_here_suffix
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_invalid_here_suffix"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+./scripts/verify_local.ps1 -BackendMarker postgres
+$ignored = @'
+not executable
+'@Write-Output "invalid suffix"
 ```
 """,
         """
