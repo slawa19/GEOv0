@@ -58,7 +58,7 @@
 
 | # | Место | Что именно проглатывается | Класс |
 |---|---|---|---|
-| 1 | `app/core/trustlines/service.py:81-82` | `except Exception: checkpoint_before = None` в `create()`, **до любой записи** — самый мягкий экземпляр: терять нечего, транзакция ещё чиста | (а), слабо |
+| 1 — `[x]` 2026-08-11 | `app/core/trustlines/service.py:75-78` | До правки `create()` проглатывал ошибку initial checkpoint до любой записи. Теперь failure пропагируется до `TrustLine`/commit; `tests/unit/test_trustline_audit_fail_closed.py:19-75` доказывает exception, `commit.assert_not_awaited()` и ноль строк после rollback. Canonical `wave5_backlog_trustline_precheckpoint` — exit `0`, `8 passed`; pinned Ruff и diff-check — exit `0` | (а), закрыто |
 | 2 | `app/core/trustlines/service.py:137-138` | **Сильнейший экземпляр в файле.** Голый `except Exception: pass` накрывает сразу и запрос чекпоинта (`:112-115`), и вставку `IntegrityAuditLog` (`:121-136`); сразу за ним — `await self.session.commit()` (`:140`). Trustline создаётся, аудит-запись может бесследно исчезнуть. **Внешнее ревью этот пункт пропустило** | (а) **и** (б) |
 | 3 | `app/core/trustlines/service.py:242-243` | `update()`: `flush()` на `:202` уже сбросил мутацию `limit` (`:192`) и `policy` (`:200`); проглатывание — между ним и `commit()` на `:250` | (а) и (б) |
 | 4 | `app/core/trustlines/service.py:335-336` | `close()`: `flush()` на `:296` уже зафиксировал `status = 'closed'` (присвоение `:294`); `commit()` — на `:343` | (а) и (б) |

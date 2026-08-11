@@ -72,14 +72,10 @@ class TrustLineService:
         if not equivalent:
             raise NotFoundException(f"Equivalent '{data.equivalent}' not found")
 
-        checkpoint_before = None
-        try:
-            checkpoint_before = await compute_integrity_checkpoint_for_equivalent(
-                self.session,
-                equivalent_id=equivalent.id,
-            )
-        except Exception:
-            checkpoint_before = None
+        checkpoint_before = await compute_integrity_checkpoint_for_equivalent(
+            self.session,
+            equivalent_id=equivalent.id,
+        )
 
         # Check for duplicate active trustline
         stmt = select(TrustLine).where(
