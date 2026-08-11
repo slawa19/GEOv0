@@ -77,6 +77,7 @@ export const RU: Record<string, string> = {
 
   'liquidity.title': 'Ликвидность',
   'liquidity.loadFailed': 'Не удалось загрузить снимок ликвидности',
+  'liquidity.precisionUnavailable': 'Выберите эквивалент с загруженной точностью для отображения денежных итогов.',
   'liquidity.controls.equivalent': 'Эквивалент',
   'liquidity.controls.threshold': 'Порог bottleneck',
   'liquidity.controls.note': 'Режим',

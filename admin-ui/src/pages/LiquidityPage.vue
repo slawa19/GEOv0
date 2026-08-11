@@ -133,7 +133,9 @@ const equivalents = computed(() => (equivalentsList.value || []).filter((e) => e
 const precisionByEq = computed(() => {
   const m = new Map<string, number>()
   for (const e of equivalentsList.value || []) {
-    m.set(String(e.code || '').toUpperCase(), Number(e.precision ?? 2) || 2)
+    const code = String(e.code || '').trim().toUpperCase()
+    const precision = Number(e.precision)
+    if (code && Number.isInteger(precision) && precision >= 0) m.set(code, precision)
   }
   return m
 })
@@ -149,8 +151,8 @@ const incidentsOverSlaCount = computed(() => summary.value?.incidents_over_sla)
 
 const selectedPrecision = computed(() => {
   const k = selectedEq.value
-  if (!k) return 2
-  return precisionByEq.value.get(k) ?? 2
+  if (!k) return null
+  return precisionByEq.value.get(k) ?? null
 })
 
 const totalLimit = computed(() => (summary.value ? String(summary.value.total_limit) : null))
@@ -210,8 +212,10 @@ const lastUpdatedLabel = computed(() => {
   return formatIsoInTimeZone(lastLoadedAt.value.toISOString(), timeZone.value)
 })
 
-function money(v: string): string {
-  return formatDecimalFixed(v, selectedPrecision.value)
+function money(v: string, equivalent: unknown = selectedEq.value): string {
+  const code = String(equivalent || '').trim().toUpperCase()
+  const precision = code ? precisionByEq.value.get(code) : undefined
+  return precision === undefined ? '—' : formatDecimalFixed(v, precision)
 }
 </script>
 
@@ -305,8 +309,17 @@ function money(v: string): string {
 
     <el-divider />
 
+    <el-alert
+      v-if="summary && selectedPrecision === null"
+      type="warning"
+      show-icon
+      :closable="false"
+      class="mb"
+      :title="t('liquidity.precisionUnavailable')"
+    />
+
     <el-row
-      v-if="summary"
+      v-if="summary && selectedPrecision !== null"
       :gutter="12"
     >
       <el-col :span="8">
@@ -425,7 +438,7 @@ function money(v: string): string {
               width="120"
             >
               <template #default="scope">
-                <el-text type="danger">{{ money(scope.row.available) }}</el-text>
+                <el-text type="danger">{{ money(scope.row.available, scope.row.equivalent) }}</el-text>
               </template>
             </el-table-column>
 
@@ -434,7 +447,7 @@ function money(v: string): string {
               :label="t('trustlines.limit')"
               width="120"
             >
-              <template #default="scope">{{ money(scope.row.limit) }}</template>
+              <template #default="scope">{{ money(scope.row.limit, scope.row.equivalent) }}</template>
             </el-table-column>
 
             <el-table-column

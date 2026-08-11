@@ -77,6 +77,7 @@ export const EN: Record<string, string> = {
 
   'liquidity.title': 'Liquidity analytics',
   'liquidity.loadFailed': 'Failed to load liquidity snapshot',
+  'liquidity.precisionUnavailable': 'Select an equivalent with loaded precision to display monetary totals.',
   'liquidity.controls.equivalent': 'Equivalent',
   'liquidity.controls.threshold': 'Bottleneck threshold',
   'liquidity.controls.thresholdPlaceholder': '0.10',

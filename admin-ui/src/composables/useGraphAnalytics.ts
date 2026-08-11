@@ -26,6 +26,11 @@ function normEq(v: string): string {
   return String(v || '').trim().toUpperCase()
 }
 
+export function equivalentPrecision(precisionByEq: Map<string, number>, eqCode: string): number | null {
+  const precision = precisionByEq.get(normEq(eqCode))
+  return Number.isInteger(precision) && Number(precision) >= 0 ? Number(precision) : null
+}
+
 function parseIsoMillis(ts?: string | null): number | null {
   const s = String(ts || '').trim()
   if (!s) return null
@@ -61,6 +66,16 @@ export function atomsToDecimal(atoms: bigint, precision: number): string {
 type CounterpartySplitRow = NonNullable<NonNullable<ParticipantMetrics['counterparty']>['creditors']>[number]
 
 type BalanceRow = NonNullable<ParticipantMetrics['balance_rows']>[number]
+
+function emptyCounterpartySplit() {
+  return {
+    eq: null as string | null,
+    totalDebtAtoms: 0n,
+    totalCreditAtoms: 0n,
+    creditors: [] as CounterpartySplitRow[],
+    debtors: [] as CounterpartySplitRow[],
+  }
+}
 
 type NetDist = {
   eq: string
@@ -112,7 +127,12 @@ export function useGraphAnalytics(opts: {
   const metricsRequests = useLatestRequest()
 
   const selectedPid = computed(() => (opts.selected.value && opts.selected.value.kind === 'node' ? opts.selected.value.pid : ''))
-  const selectedEqCode = computed(() => opts.analyticsEq.value)
+  const selectedEqCode = computed(() => {
+    const eqCode = normEq(opts.analyticsEq.value || '')
+    return eqCode || null
+  })
+
+  const precisionOf = (eqCode: string) => equivalentPrecision(opts.precisionByEq.value, eqCode)
 
   const selectedMetrics = computed(() => {
     const pid = selectedPid.value
@@ -178,15 +198,14 @@ export function useGraphAnalytics(opts: {
     if (m?.balance_rows) return m.balance_rows
     if (!opts.selected.value || opts.selected.value.kind !== 'node') return []
     const pid = opts.selected.value.pid
-    const precOf = (eqCode: string) => opts.precisionByEq.value.get(eqCode) ?? 2
-
     const debtAtomsByEq = new Map<string, bigint>()
     const creditAtomsByEq = new Map<string, bigint>()
 
     for (const d of opts.debts.value || []) {
       const eqCode = normEq(d.equivalent)
       if (!eqCode) continue
-      const p = precOf(eqCode)
+      const p = precisionOf(eqCode)
+      if (p === null) continue
       const amt = decimalToAtoms(d.amount, p)
       if (d.debtor === pid) debtAtomsByEq.set(eqCode, (debtAtomsByEq.get(eqCode) || 0n) + amt)
       if (d.creditor === pid) creditAtomsByEq.set(eqCode, (creditAtomsByEq.get(eqCode) || 0n) + amt)
@@ -200,7 +219,8 @@ export function useGraphAnalytics(opts: {
     for (const t of opts.trustlines.value || []) {
       const eqCode = normEq(t.equivalent)
       if (!eqCode) continue
-      const p = precOf(eqCode)
+      const p = precisionOf(eqCode)
+      if (p === null) continue
       const lim = decimalToAtoms(t.limit, p)
       const used = decimalToAtoms(t.used, p)
       if (t.from === pid) {
@@ -213,12 +233,13 @@ export function useGraphAnalytics(opts: {
       }
     }
 
-    const eqs = (opts.availableEquivalents.value || []).filter((x) => x !== 'ALL')
-    const wanted = opts.analyticsEq.value ? [opts.analyticsEq.value] : eqs
+    const eqs = (opts.availableEquivalents.value || []).map(normEq).filter((x) => x && x !== 'ALL')
+    const wanted = selectedEqCode.value ? [selectedEqCode.value] : eqs
 
     return wanted
-      .map((eqCode) => {
-        const p = precOf(eqCode)
+      .flatMap((eqCode) => {
+        const p = precisionOf(eqCode)
+        if (p === null) return []
         const debt = debtAtomsByEq.get(eqCode) || 0n
         const credit = creditAtomsByEq.get(eqCode) || 0n
         const net = credit - debt
@@ -234,8 +255,9 @@ export function useGraphAnalytics(opts: {
         }
       })
       .filter((r) => {
-        if (opts.analyticsEq.value) return true
-        const p = precOf(r.equivalent)
+        if (selectedEqCode.value) return true
+        const p = precisionOf(r.equivalent)
+        if (p === null) return false
         return !(
           decimalToAtoms(r.outgoing_limit, p) === 0n &&
           decimalToAtoms(r.incoming_limit, p) === 0n &&
@@ -248,8 +270,9 @@ export function useGraphAnalytics(opts: {
   const selectedCounterpartySplit = computed(() => {
     const m = selectedMetrics.value
     if (m?.counterparty && m.counterparty.eq) {
-      const eqCode = m.counterparty.eq
-      const prec = opts.precisionByEq.value.get(eqCode) ?? 2
+      const eqCode = normEq(m.counterparty.eq)
+      const prec = precisionOf(eqCode)
+      if (prec === null) return emptyCounterpartySplit()
       return {
         eq: eqCode,
         totalDebtAtoms: decimalToAtoms(m.counterparty.totalDebt, prec),
@@ -259,29 +282,14 @@ export function useGraphAnalytics(opts: {
       }
     }
 
-    if (!opts.selected.value || opts.selected.value.kind !== 'node') {
-      return {
-        eq: null as string | null,
-        totalDebtAtoms: 0n,
-        totalCreditAtoms: 0n,
-        creditors: [] as CounterpartySplitRow[],
-        debtors: [] as CounterpartySplitRow[],
-      }
-    }
+    if (!opts.selected.value || opts.selected.value.kind !== 'node') return emptyCounterpartySplit()
 
-    const eqCode = opts.analyticsEq.value
-    if (!eqCode) {
-      return {
-        eq: null as string | null,
-        totalDebtAtoms: 0n,
-        totalCreditAtoms: 0n,
-        creditors: [] as CounterpartySplitRow[],
-        debtors: [] as CounterpartySplitRow[],
-      }
-    }
+    const eqCode = selectedEqCode.value
+    if (!eqCode) return emptyCounterpartySplit()
 
     const pid = opts.selected.value.pid
-    const prec = opts.precisionByEq.value.get(eqCode) ?? 2
+    const prec = precisionOf(eqCode)
+    if (prec === null) return emptyCounterpartySplit()
 
     const creditors = new Map<string, bigint>()
     const debtors = new Map<string, bigint>()
@@ -381,10 +389,11 @@ export function useGraphAnalytics(opts: {
       }
     }
 
-    const eqCode = opts.analyticsEq.value
+    const eqCode = selectedEqCode.value
     if (!eqCode) return null
 
-    const prec = opts.precisionByEq.value.get(eqCode) ?? 2
+    const prec = precisionOf(eqCode)
+    if (prec === null) return null
     const net = new Map<string, bigint>()
 
     for (const p of opts.participants.value || []) {
@@ -451,28 +460,32 @@ export function useGraphAnalytics(opts: {
     const rank = idx + 1
     const n = dist.n
     const percentile = n <= 1 ? 1 : (n - rank) / (n - 1)
+    const precision = precisionOf(dist.eq)
+    if (precision === null) return null
     return {
       eq: dist.eq,
       rank,
       n,
       percentile,
-      net: atomsToDecimal(dist.netAtomsByPid.get(opts.selected.value.pid) || 0n, opts.precisionByEq.value.get(dist.eq) ?? 2),
+      net: atomsToDecimal(dist.netAtomsByPid.get(opts.selected.value.pid) || 0n, precision),
     }
   })
 
   const selectedCapacity = computed(() => {
     const m = selectedMetrics.value
     if (m?.capacity && m.capacity.eq) {
+      const precision = precisionOf(m.capacity.eq)
+      if (precision === null) return null
       return {
         eq: m.capacity.eq,
         out: {
-          limit: decimalToAtoms(m.capacity.out.limit, opts.precisionByEq.value.get(m.capacity.eq) ?? 2),
-          used: decimalToAtoms(m.capacity.out.used, opts.precisionByEq.value.get(m.capacity.eq) ?? 2),
+          limit: decimalToAtoms(m.capacity.out.limit, precision),
+          used: decimalToAtoms(m.capacity.out.used, precision),
           pct: Number(m.capacity.out.pct || 0),
         },
         inc: {
-          limit: decimalToAtoms(m.capacity.inc.limit, opts.precisionByEq.value.get(m.capacity.eq) ?? 2),
-          used: decimalToAtoms(m.capacity.inc.used, opts.precisionByEq.value.get(m.capacity.eq) ?? 2),
+          limit: decimalToAtoms(m.capacity.inc.limit, precision),
+          used: decimalToAtoms(m.capacity.inc.used, precision),
           pct: Number(m.capacity.inc.pct || 0),
         },
         bottlenecks: (m.capacity.bottlenecks || []).map((b) => ({ dir: b.dir, other: b.other, t: b.trustline })),
@@ -481,8 +494,7 @@ export function useGraphAnalytics(opts: {
 
     if (!opts.selected.value || opts.selected.value.kind !== 'node') return null
     const pid = opts.selected.value.pid
-    const eqCode = opts.analyticsEq.value
-    const precOf = (eqc: string) => opts.precisionByEq.value.get(eqc) ?? 2
+    const eqCode = selectedEqCode.value
 
     let outLimit = 0n
     let outUsed = 0n
@@ -494,7 +506,8 @@ export function useGraphAnalytics(opts: {
     for (const t of opts.trustlines.value || []) {
       const e = normEq(t.equivalent)
       if (eqCode && e !== eqCode) continue
-      const p = precOf(e)
+      const p = precisionOf(e)
+      if (p === null) return null
       const lim = decimalToAtoms(t.limit, p)
       const used = decimalToAtoms(t.used, p)
       if (t.from === pid) {
@@ -536,7 +549,7 @@ export function useGraphAnalytics(opts: {
 
     if (!opts.selected.value || opts.selected.value.kind !== 'node') return null
     const pid = opts.selected.value.pid
-    const eqCode = opts.analyticsEq.value
+    const eqCode = selectedEqCode.value
 
     const tsCandidates: number[] = []
     for (const t of opts.trustlines.value || []) {
@@ -655,7 +668,7 @@ export function useGraphAnalytics(opts: {
 
   const selectedCycles = computed(() => {
     if (!opts.selected.value || opts.selected.value.kind !== 'node') return []
-    const eqCode = opts.analyticsEq.value
+    const eqCode = selectedEqCode.value
     if (!eqCode) return []
     const pid = opts.selected.value.pid
 

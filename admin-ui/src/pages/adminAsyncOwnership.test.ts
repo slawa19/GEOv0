@@ -372,6 +372,40 @@ describe('mounted non-Graph list request ownership', () => {
     wrapper.unmount()
   })
 
+  it('Liquidity formats with normalized loaded precision and degrades when it is missing', async () => {
+    apiMock.listEquivalents.mockResolvedValue(ok({
+      items: [{ code: 'NEW', precision: 4, description: 'New', is_active: true }],
+    }))
+    apiMock.liquiditySummary.mockResolvedValue(ok({
+      equivalent: 'NEW',
+      updated_at: '2026-08-11T12:00:00Z',
+      active_trustlines: 0,
+      bottlenecks: 0,
+      incidents_over_sla: 0,
+      total_limit: '1.2345',
+      total_used: '0.0001',
+      total_available: '1.2344',
+      top_creditors: [],
+      top_debtors: [],
+      top_by_abs_net: [],
+      top_bottleneck_edges: [],
+    }))
+    const wrapper = mountPage(LiquidityPage, '/liquidity', { equivalent: 'new' })
+    await settle()
+    await settle()
+    const state = setupState(wrapper)
+
+    expect(state.selectedEq).toBe('NEW')
+    expect(state.selectedPrecision).toBe(4)
+    expect(state.money('0.0001')).toBe('0.0001')
+
+    state.equivalentsList = []
+    await nextTick()
+    expect(state.selectedPrecision).toBeNull()
+    expect(state.money('0.0001')).toBe('—')
+    wrapper.unmount()
+  })
+
   it('blocks invalid Liquidity thresholds and preserves a valid high-precision threshold', async () => {
     const wrapper = mountPage(LiquidityPage, '/liquidity', { threshold: '1.00000000000000001' })
     await settle()

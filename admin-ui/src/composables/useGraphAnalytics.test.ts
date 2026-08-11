@@ -353,4 +353,62 @@ describe('useGraphAnalytics (fixtures-first)', () => {
     expect(graph.selectedBalanceRows.value[0]?.net).not.toBe('9.00')
     expect(graph.metricsError.value).toBeNull()
   })
+
+  it('normalizes equivalent keys and preserves non-default precision in fixture analytics', () => {
+    const participants = ref<Participant[]>([
+      { pid: 'PID_A', display_name: 'Alice' },
+      { pid: 'PID_B', display_name: 'Bob' },
+    ])
+    const graph = useGraphAnalytics({
+      isRealMode: computed(() => false),
+      threshold: ref('0.10'),
+      analyticsEq: computed(() => ' eur '),
+      precisionByEq: computed(() => new Map([['EUR', 4]])),
+      availableEquivalents: computed(() => ['eur']),
+      participantByPid: computed(() => new Map(participants.value.map((participant) => [participant.pid, participant]))),
+      participants,
+      trustlines: ref<Trustline[]>([]),
+      debts: ref<Debt[]>([{ debtor: 'PID_A', creditor: 'PID_B', equivalent: 'eur', amount: '0.0001' }]),
+      incidents: ref<Incident[]>([]),
+      auditLog: ref<AuditLogEntry[]>([]),
+      transactions: ref<Transaction[]>([]),
+      clearingCycles: ref<ClearingCycles | null>(null),
+      selected: ref<SelectedInfo | null>({ kind: 'node', pid: 'PID_A', degree: 0, inDegree: 0, outDegree: 0 }),
+    })
+
+    expect(graph.selectedBalanceRows.value).toEqual([
+      expect.objectContaining({ equivalent: 'EUR', total_debt: '0.0001', net: '-0.0001' }),
+    ])
+    expect(graph.netDistribution.value?.min).toBe(-1n)
+  })
+
+  it('fails closed when equivalent precision is unavailable', () => {
+    const participants = ref<Participant[]>([
+      { pid: 'PID_A', display_name: 'Alice' },
+      { pid: 'PID_B', display_name: 'Bob' },
+    ])
+    const graph = useGraphAnalytics({
+      isRealMode: computed(() => false),
+      threshold: ref('0.10'),
+      analyticsEq: computed(() => 'EUR'),
+      precisionByEq: computed(() => new Map()),
+      availableEquivalents: computed(() => ['EUR']),
+      participantByPid: computed(() => new Map(participants.value.map((participant) => [participant.pid, participant]))),
+      participants,
+      trustlines: ref<Trustline[]>([
+        { from: 'PID_A', to: 'PID_B', equivalent: 'EUR', limit: '1.0000', used: '0.0001', available: '0.9999', status: 'active', created_at: 't' },
+      ]),
+      debts: ref<Debt[]>([{ debtor: 'PID_A', creditor: 'PID_B', equivalent: 'EUR', amount: '0.0001' }]),
+      incidents: ref<Incident[]>([]),
+      auditLog: ref<AuditLogEntry[]>([]),
+      transactions: ref<Transaction[]>([]),
+      clearingCycles: ref<ClearingCycles | null>(null),
+      selected: ref<SelectedInfo | null>({ kind: 'node', pid: 'PID_A', degree: 0, inDegree: 0, outDegree: 0 }),
+    })
+
+    expect(graph.selectedBalanceRows.value).toEqual([])
+    expect(graph.selectedCounterpartySplit.value.eq).toBeNull()
+    expect(graph.netDistribution.value).toBeNull()
+    expect(graph.selectedCapacity.value).toBeNull()
+  })
 })
