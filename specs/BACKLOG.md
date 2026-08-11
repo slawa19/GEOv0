@@ -113,15 +113,18 @@ Guard'ов вида `String(… ?? '')` в simulator-ui — **96** (91 вне т
 
 | # | file:line | Что не так |
 |---|---|---|
-| 1 | `simulator-ui/v2/src/composables/interact/useInteractDataCache.ts:438` | `limit: opts.parseAmountStringOrNull(l.trust_limit) ?? ''` — неразобранная десятичная строка становится пустой; несогласовано с `:120`, где тот же парс делает `?? s` и сохраняет исходное значение |
-| 2 | `…useInteractDataCache.ts:439` | `used: … ?? ''` — далее `Number(used ?? NaN)` на `:124` → NaN → `recomputeAvailable` молча возвращает `null` |
-| 3 | `…useInteractDataCache.ts:441` | `available: … ?? ''` — то же |
+| 1 | `[x]` `simulator-ui/v2/src/composables/interact/useInteractDataCache.ts:118,438` | 2026-08-11: `normalizeAmount(unknown)` сохраняет trimmed исходную строку, если decimal-parser её отверг, и по-прежнему нормализует валидное значение. Контрпроверки обоих путей — `useInteractDataCache.snapshotTrustlines.test.ts:127-167`. Targeted Vitest — exit `0`, `3 passed`; Simulator typecheck — exit `0`; первый build остановился до компиляции на внешнем `DEBUG=release` (exit `1`, Pydantic bool parsing), повтор `DEBUG=false; npm --prefix simulator-ui/v2 run build` — exit `0` |
+| 2 | `[x]` `…useInteractDataCache.ts:439` | 2026-08-11: snapshot `used` проходит через тот же `normalizeAmount`; невалидное непустое значение больше не превращается в `''`. Evidence и gates — пункт 1 |
+| 3 | `[x]` `…useInteractDataCache.ts:441` | 2026-08-11: snapshot `available` проходит через тот же `normalizeAmount`; невалидное непустое значение больше не превращается в `''`. Evidence и gates — пункт 1 |
 | 4 | `simulator-ui/v2/src/composables/useInteractMode.ts:638` | `const clearedCycles = res.cleared_cycles ?? 0` — отсутствующее поле неотличимо от честного нуля циклов |
 | 5 | `…useInteractMode.ts:670` | `const settled = res?.cleared_cycles ?? 0` — «Clearing done: 0/0 cycles» на некорректном ответе |
 | 6-8 | `admin-ui/src/pages/LiquidityPage.vue:139,140,141` | `active_trustlines / bottlenecks / incidents_over_sla ?? 0` в незащищённом `el-statistic` (блок KPI без `v-if` — `<el-row :gutter="12">` открывается на `:298`, блок `:298-317`) — при упавшей загрузке `summary` остаётся `null` и рядом с алертом об ошибке показывается жёсткий `0` |
 | 9-11 | `admin-ui/src/pages/LiquidityPage.vue:149,150,151` | `String(total_limit / total_used / total_available ?? '0')` — «нет данных» превращается в денежный `0.00`. Точки отрисовки — `:value` на `:325`, `:332`, `:339` (не `:331`/`:338` — это `:title=`) |
 | 12 | `admin-ui/src/composables/useGraphAnalytics.ts:464,465,469,470` (плюс `:176,247,279,382,454,480`) | **худший пункт набора**: `precisionByEq.value.get(eq) ?? 2` подаётся в `decimalToAtoms(value, prec)` (`:36`). Если список эквивалентов не загрузился или код разошёлся с нормализованным ключом карты (`useGraphData.ts:133` кладёт через `normalizeEqCode`, `useGraphAnalytics` ищет по сырому `eqCode`), эквивалент с precision ≠ 2 даёт порядок атомов, смещённый на 10^n, — молча портит агрегаты net/capacity |
 | 13 | `admin-ui/src/pages/LiquidityPage.vue:146` | `precisionByEq.value.get(k) ?? 2` — тот же класс на стороне отображения; карта строится только из **активных** эквивалентов (`:103`, `listEquivalents({ include_inactive: false })`; `:108` — это уже вызов `liquiditySummary`), влияет на все денежные KPI |
+
+На 2026-08-11 закрыт только независимый M20-срез 1–3; пункты 4–13 остаются открытыми и не входят
+в evidence этого коммита.
 
 ### Не является дефектом — не поднимать заново
 

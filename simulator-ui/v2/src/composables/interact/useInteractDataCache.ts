@@ -115,7 +115,7 @@ export function useInteractDataCache(opts: {
     trustlinesFetchedAtMs = 0
   }
 
-  function normalizeAmount(v: string): string {
+  function normalizeAmount(v: unknown): string {
     const s = String(v ?? '').trim()
     return opts.parseAmountStringOrNull(s) ?? s
   }
@@ -435,10 +435,10 @@ export function useInteractDataCache(opts: {
           to_pid: to,
           to_name: nameByPid.get(to) ?? to,
           equivalent: eq,
-          limit: opts.parseAmountStringOrNull(l.trust_limit) ?? '',
-          used: opts.parseAmountStringOrNull(l.used) ?? '',
+          limit: normalizeAmount(l.trust_limit),
+          used: normalizeAmount(l.used),
           ...(reverseUsed != null ? { reverse_used: reverseUsed } : {}),
-          available: opts.parseAmountStringOrNull(l.available) ?? '',
+          available: normalizeAmount(l.available),
           status: l.status ?? 'active',
         }
       })

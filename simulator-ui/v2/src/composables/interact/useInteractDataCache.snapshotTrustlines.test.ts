@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { effectScope, nextTick, ref } from 'vue'
 
 import type { GraphSnapshot } from '../../types'
+import { parseAmountStringOrNull } from '../../utils/numberFormat'
 import { useInteractDataCache } from './useInteractDataCache'
 
 type CacheActions = Parameters<typeof useInteractDataCache>[0]['actions']
@@ -50,10 +51,7 @@ describe('useInteractDataCache: snapshot→trustlines mapping', () => {
         runId,
         equivalent,
         snapshot,
-        parseAmountStringOrNull: (v: unknown) => {
-          const s = String(v ?? '').trim()
-          return s ? s : null
-        },
+        parseAmountStringOrNull,
       }),
     )!
 
@@ -88,7 +86,10 @@ describe('useInteractDataCache: snapshot→trustlines mapping', () => {
       from_pid: 'alice',
       to_pid: 'bob',
       equivalent: 'UAH',
+      limit: '10.00',
+      used: '0.00',
       reverse_used: '0.01',
+      available: '9.99',
     })
 
     scope.stop()
@@ -119,6 +120,50 @@ describe('useInteractDataCache: snapshot→trustlines mapping', () => {
     const tl = cache.trustlines.value[0]!
     expect(tl.reverse_used).toBeUndefined()
     expect(Object.prototype.hasOwnProperty.call(tl, 'reverse_used')).toBe(false)
+
+    scope.stop()
+  })
+
+  it('normalizes valid snapshot amounts and preserves non-empty malformed source values', async () => {
+    const { cache, scope } = mk({
+      equivalent: 'UAH',
+      generated_at: '2026-01-01T00:00:00Z',
+      nodes: [
+        { id: 'alice', name: 'Alice' },
+        { id: 'bob', name: 'Bob' },
+      ],
+      links: [
+        {
+          source: 'alice',
+          target: 'bob',
+          trust_limit: ' 10,50 ',
+          used: 0,
+          available: ' 10.50 ',
+          status: 'active',
+        },
+        {
+          source: 'bob',
+          target: 'alice',
+          trust_limit: ' invalid-limit ',
+          used: '1e3',
+          available: 'unknown',
+          status: 'active',
+        },
+      ],
+    })
+
+    await nextTick()
+
+    expect(cache.trustlines.value[0]).toMatchObject({
+      limit: '10.50',
+      used: '0',
+      available: '10.50',
+    })
+    expect(cache.trustlines.value[1]).toMatchObject({
+      limit: 'invalid-limit',
+      used: '1e3',
+      available: 'unknown',
+    })
 
     scope.stop()
   })
