@@ -309,3 +309,38 @@ program.
   последнего test change с `-TaskSlug wave3_p101_final` — exit `0`, `2 xfailed`; pinned
   `ruff==0.1.14` и `git diff --check` — exit `0`. Test commit:
   `6a12c47980b05d3aa9b3c95b2feae13829479219`.
+
+### 2026-08-11 — P102
+
+- Перед правкой staged-owner anchors подтверждены: public staged entrypoint передаёт
+  `commit=False` в `app/core/payments/service.py:304-333`; real executor держит один outer session
+  и вызывает его под savepoint на `app/core/simulator/real_payments_executor.py:365-379`.
+  `PaymentEngine._run_uow_with_retry` на `engine.py:263-348` откатывает лишь текущий savepoint, не
+  transaction advisory lock успешного предыдущего staged call; finding подтверждён.
+- Добавлен реальный PostgreSQL 16 regression
+  `tests/integration/test_payment_staged_multicall_postgres.py:195-345`. Две независимые
+  `SERIALIZABLE` outer sessions сначала сохраняют противоположный порядок pair locks через
+  успешные `commit=False`, затем одновременно просят удерживаемую другой стороной пару
+  (`:203-280`). Используется production retry count `3`, который test проверяет, но не подменяет;
+  для детерминизма обнулены только задержки (`:241-251`). Test не создаёт `DBAPIError` и не
+  подменяет SQLSTATE.
+- Canonical RED на отдельной проверенной БД `geov0_test_wave3`:
+  `DEBUG=false; TEST_DATABASE_URL=postgresql+asyncpg://geo:geo@localhost:55433/geov0_test_wave3; GEO_TEST_ALLOW_DB_RESET=1; .\scripts\verify_local.ps1 -TaskSlug wave3_p102_red -BackendOnly -BackendMarker postgres -BackendSelector tests/integration/test_payment_staged_multicall_postgres.py`
+  — exit `1`, `1 failed`; exact assertion
+  `staged owner exhausted retry while retaining its first pair lock: sqlstates=['40P01']`.
+  PostgreSQL вернул реальный `DeadlockDetectedError`; captured logs зафиксировали attempts `1/3`
+  и `2/3`, после третьего `40P01` вышел наружу.
+- Target после P105 требует оба outer batch успешными и проверяет четыре `COMMITTED`, долги
+  `3.00000000` на `A→B` и `B→C`, ноль `PrepareLock`, четыре payment audit rows и неизменные trust
+  limits (`:284-345`). До
+  P105 test помечен `xfail(strict=True)` (`:195-198`); canonical повтор с `-TaskSlug wave3_p102`
+  — exit `0`, `1 xfailed`. Pinned `ruff==0.1.14` и `git diff --check` — exit `0`. Test commit:
+  `a68aed09ec272cd4e03ea805790da45fb2f88c3f`.
+- Независимый read-only review подтвердил реальный engine/savepoint reproducer, но нашёл будущий
+  false-negative: coarse owner lock заблокирует второй batch ещё до завершения его первого call.
+  Harness расширен PostgreSQL `pg_locks` barrier: он выпускает holder либо после двух current-path
+  first calls, либо когда видит реальное ожидание нового advisory owner lock (`:212-234`). Добавлена
+  countercheck неизменных trust limits и зафиксирован production retry count. Повторный unmarked
+  RED `wave3_p102_red_reviewfix` — exit `1`, тот же единственный настоящий `40P01`; строгий final
+  selector `wave3_p102_final` — exit `0`, `1 xfailed`; Ruff/diff — exit `0`. Review-remediation
+  commit: `52273f0f86abe3a01c43bff39841bdbd70d040ed`.

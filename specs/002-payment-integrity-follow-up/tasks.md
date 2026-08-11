@@ -44,7 +44,7 @@ Owner-authorized for Wave 3 on 2026-08-11; execute sequentially.
 - [x] P100 Add a PG test proving reverse directions contend on one resource.
 - [x] P101 Add inverse multi-segment tests for both start orders and final monetary,
   state, PrepareLock and audit invariants.
-- [!] P102 Add a real staged multi-call deadlock regression test; do not inject a
+- [x] P102 Add a real staged multi-call deadlock regression test; do not inject a
   synthetic DBAPI error.
 - [!] P103 Inventory all staged owners and choose complete-lock-set or coarser-owner
   acquisition with explicit transaction ownership.
