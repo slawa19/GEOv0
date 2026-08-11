@@ -217,6 +217,28 @@ Real mode: артефакты (dev perf)
 - `asyncio.shield` запрещён для длинных операций в `RealTickOrchestrator`.
 - Задачи клиринга, не уложившиеся в time budget, отменяются (`task.cancel()`) и ожидаются, чтобы гарантировать освобождение ресурсов БД до начала следующей фазы платежей.
 
+**Решение 2026-08-11 для payment serialization:** lock identity денежного сегмента —
+`(equivalent, unordered participant UUID pair)`. Канонизация применяется только к advisory-lock;
+направление flow, trustline и audit остаётся бизнес-направлением `creditor -> debtor`.
+
+Для всех payment transitions действует единый порядок захвата: полный отсортированный набор
+equivalent-owner locks → transaction lock → канонические pair locks. Service, Admin abort и recovery
+входят в этот протокол через `PaymentEngine`. Real tick до денежной работы захватывает полный набор
+configured equivalents, а executor перед staged actions фиксирует полный отсортированный planned set.
+Конфликт внешнего `SERIALIZABLE` snapshot не ретраится внутри savepoint: владелец внешней транзакции
+откатывает и повторяет всю единицу работы на новой сессии.
+
+Протокол не имеет mixed-version bridge. Upgrade и rollback требуют coordinated quiescence:
+остановить API payment writers, real ticks, Admin abort и recovery; дождаться завершения или отката
+их DB-транзакций и освобождения advisory locks; развернуть одну версию на всех owner surfaces; затем
+возобновить writers. Одновременная работа старого directional и нового canonical протоколов не
+поддерживается.
+
+Текущий clearing guard, который пропускает пары из активных `PrepareLock`, не является общей
+serialization boundary между новым payment prepare и clearing. Этот interlock остаётся открытой
+задачей программы 002 Phase 2; до её закрытия Defence in Depth выше не следует трактовать как
+доказательство полной payment/clearing сериализации.
+
 ### 1.13. Simulator (prod demo): анонимные посетители через cookie (per-owner runs)
 
 Решение: для прод-демо симулятора без логина используем **анонимную cookie-сессию**, которая задаёт `owner_id` для run’ов. Все control-plane эндпоинты симулятора работают в семантике **per-owner active run**.
@@ -271,6 +293,12 @@ dialect, пользователь, host и имя базы в публичный
 контракт HTTP 409 / `E008`; `details` содержит только `retryable: true` и
 `conflict_kind: database_concurrency`. Текст драйвера и SQLSTATE в публичный ответ не попадают.
 Новый HTTP 503 или новый business code не вводятся.
+
+После ожидания advisory lock PostgreSQL может представить невидимый конкурентный insert Debt как
+`40001` либо как `23505`. `23505` считается временным конфликтом только для операции `commit`, SQL
+`INSERT INTO debts` и точного constraint `uq_debts_debtor_creditor_equivalent`; любой другой unique
+violation остаётся неретраимым. Это узкое исключение не публикует имя constraint, SQL или детали
+драйвера клиенту и не расширяет общий retry-предикат для `prepare`, `abort` или staged savepoint.
 
 Interactive-действие симулятора отвечает code `CONFLICT`, а не `PAYMENT_REJECTED`. В real tick тот
 же конфликт не засчитывается как терминальный отказ отдельного платежа: он прерывает tick, чтобы

@@ -29,6 +29,11 @@ Source of truth:
 Ключевые свойства:
 - Поддержан `Idempotency-Key` (заголовок).
 - На уровне API есть distributed lock по ключу: `dlock:payment:{sender_id}:{equivalent}`.
+- В PostgreSQL денежный segment lock использует каноническую identity
+  `(equivalent, unordered participant UUID pair)`; направление flow, trustline и audit не меняется.
+- Все payment owners соблюдают порядок: полный sorted equivalent-owner set → transaction lock →
+  canonical pair locks. Real tick захватывает configured set до денежной работы, executor — точный
+  planned set до запуска staged actions.
 - В `PaymentService.create_payment()` есть:
   - поиск маршрута (routing)
   - 2PC-like prepare/commit (через `PaymentEngine`)
@@ -68,6 +73,8 @@ Source of truth:
 - Guardrail: `CLEARING_ENABLED` может выключать clearing.
 - Есть distributed lock: `dlock:clearing:{equivalent}`.
 - `ClearingService` избегает пар участников, затронутых активными prepared payment flows (см. `_locked_pairs_for_equivalent`).
+- Этот snapshot-guard не является общей serialization boundary с новым payment prepare. Полный
+  payment/clearing interlock остаётся открытой задачей программы 002 Phase 2.
 
 ---
 
@@ -148,6 +155,16 @@ Runner действует как «виртуальный клиент»:
 - на run держать `max_in_flight` (см. `runner-algorithm.md` guardrails)
 - дополнительно учитывать lock в API: платежи для одного sender+equivalent сериализуются через redis lock.
 
+### 3.4 Владение транзакцией и retry
+
+- Savepoint не является границей retry для конфликта внешнего `SERIALIZABLE` snapshot. В real mode
+  такой конфликт пробрасывается владельцу tick: вся внешняя транзакция откатывается и batch
+  повторяется на новой сессии.
+- Mixed-version payment workers не поддерживаются. При upgrade и rollback оператор останавливает API
+  payment writers, real ticks, Admin abort и recovery, дожидается завершения/отката DB-транзакций и
+  освобождения advisory locks, разворачивает одну версию на всех owner surfaces и только затем
+  возобновляет работу.
+
 ---
 
 ## 4) Маппинг ошибок payment → события симулятора
@@ -180,6 +197,9 @@ UI не читает внутренние состояния платежей; �
 
 - `40001`/`40P01` маппятся в существующий `ConflictException`-контракт `409/E008` с
   `details.retryable=true`; driver text и SQLSTATE не публикуются.
+- После `SERIALIZABLE` advisory wait PostgreSQL может вернуть `23505` вместо `40001`. Ретраится только
+  точный Debt business-key conflict: операция `commit`, `INSERT INTO debts`, constraint
+  `uq_debts_debtor_creditor_equivalent`. Любой другой `23505` остаётся неретраимым.
 - Interact action отвечает `CONFLICT`, не `PAYMENT_REJECTED`.
 - В real tick конфликт пробрасывается до владельца внешней транзакции: весь tick откатывается;
   продолжать clearing/trust drift на отравленной session запрещено.
@@ -221,6 +241,8 @@ MVP правило:
 
 Guardrails:
 - учитывать, что `ClearingService` пропускает циклы, затрагивающие пары участников из активных payment prepare locks.
+- не считать это полной сериализацией с конкурентным новым prepare: общий interlock будет реализован
+  отдельно в программе 002 Phase 2.
 
 ---
 
