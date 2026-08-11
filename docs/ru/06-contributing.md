@@ -24,7 +24,7 @@
 
 ### 1.1. Требования
 
-- Python 3.11+
+- Python 3.11+ с Windows Python Launcher (`py`)
 - PostgreSQL 16+ (для прод и для dev через Docker Compose)
 - Redis 7+ (опционально; используется в текущем dev-стеке через Docker Compose)
 - Git

@@ -25,6 +25,8 @@
 
 - Проверить, что у вас WSL2:
   - `wsl -l -v` (в колонке VERSION должно быть 2)
+- Для canonical test path из раздела 7 нужен также Windows CPython 3.11+ и Python Launcher:
+  - `py --version` должен завершиться успешно и показать поддерживаемую версию.
 
 Дальше команды выполняются в терминале WSL (Ubuntu/Debian и т.д.), кроме явно
 отмеченных Windows PowerShell-команд в разделе 7.

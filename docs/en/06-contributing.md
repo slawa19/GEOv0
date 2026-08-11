@@ -24,7 +24,7 @@
 
 ### 1.1. Requirements
 
-- Python 3.11+
+- Python 3.11+ with the Windows Python Launcher (`py`)
 - PostgreSQL 15+
 - Redis 7+
 - Git
