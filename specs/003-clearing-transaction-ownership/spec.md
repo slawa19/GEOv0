@@ -103,7 +103,7 @@ severity, а не за откладывание.
 |---|---|---|
 | T300 | Детерминированный PG-репродьюсер удержания блокировок на skip-пути | `[x]` |
 | T301 | Инвентаризация всех веток выхода `clearing/service.py`, явное решение по владению транзакцией | `[x]` |
-| T302 | Реализация выбранной границы владения; все ветви выхода завершают транзакцию | `[!]` |
+| T302 | Реализация выбранной границы владения; все ветви выхода завершают транзакцию | `[x]` |
 | T303 | Идемпотентный протокол подтверждения коммита клиринга | `[!]` |
 | T304 | Публикация реально заблокированной суммы вместо кандидата: перевести `real_clearing_engine.py:290` с bool-обёртки `execute_clearing` на `execute_clearing_with_amount` и провести возвращённую сумму в `:318-319` и `:334-336` (F-003-3) | `[!]` |
 | T305 | Устранение повторной очистки lock в recovery (`recovery.py:131-136`) и исправление ложного комментария `recovery.py:126-128`; тест-дабл `tests/unit/test_recovery_cleanup.py:355-381` привести в соответствие с реальным поведением `abort` (F-003-4) | `[!]` |
@@ -155,3 +155,28 @@ severity, а не за откладывание.
   `specs/003-clearing-transaction-ownership/spec.md:132-157`; отдельный caller-risk для T302:
   rollback истекает ORM state, поэтому interactive path должен кэшировать `eq.code` до первого
   вызова сервиса. `git diff --check -- specs/003-clearing-transaction-ownership/spec.md` — exit `0`.
+
+### 2026-08-11 — T302
+
+- Implementation commit: `f3857ff`. До изменения `FOR UPDATE` был на
+  `app/core/clearing/service.py:831`, а шесть `None`-выходов на `:801,825,841,847,876,894` не
+  завершали service-owned attempt. После изменения единый rollback boundary находится на
+  `app/core/clearing/service.py:43-50`; все выходы вызывают его на
+  `:809,834,851,858,888,907` перед `return None`.
+- Interactive caller больше не читает expired ORM после rollback: строковый code кэшируется на
+  `app/api/v1/simulator.py:1620` и используется во всех дальнейших find/publish/log/response paths.
+- Real-PG coverage находится в
+  `tests/integration/test_clearing_skip_releases_locks_postgres.py:23-163,167-378`. Параметры
+  `empty/malformed/missing/nonpositive/locked/policy` доказывают отсутствие активной транзакции;
+  `nonpositive` использует реальную production-конфигурацию `autoflush=False` и dirty identity-map,
+  не нарушая PostgreSQL `CHECK amount > 0`. Отдельное расписание доказывает реальный concurrent
+  payment effect `Debt 100 -> 105`, поэтому rollback-проверка не проходит вхолостую.
+- Первый GREEN-attempt с hostname `localhost` (`wave4_003_t302_t300_green`) сохранён как exit `1`:
+  reconnect в `PaymentEngine.commit` был отменён внутри `asyncpg.connect` по total timeout, и тест
+  снова наблюдал E007. Это не было принято как доказательство исправления. Тот же canonical selector
+  с явным `127.0.0.1` (`wave4_003_t302_t300_green_ipv4`) — exit `0`, `1 passed`.
+- Финальный PG milestone:
+  `$env:DEBUG='false'; $env:ENV='test'; $env:TEST_DATABASE_URL='postgresql+asyncpg://geo:geo@127.0.0.1:55433/geov0_test_wave4_003'; $env:GEO_TEST_ALLOW_DB_RESET='1'; $selectors=@('tests/integration/test_clearing_skip_releases_locks_postgres.py','tests/integration/test_concurrent_clearing_payment_lost_update_postgres.py'); .\scripts\verify_local.ps1 -TaskSlug wave4_003_t302_pg_exact -BackendOnly -BackendMarker postgres -BackendSelector $selectors`
+  — exit `0`, `8 passed`, восемь ожидаемых nodeids.
+- Caller/unit matrix `wave4_003_t302_units` (восемь clearing/interact/real-engine selectors) —
+  exit `0`, `64 passed`. Pinned Ruff на трёх изменённых файлах и `git diff --check` — exit `0`.
