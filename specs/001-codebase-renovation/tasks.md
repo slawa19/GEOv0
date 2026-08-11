@@ -354,6 +354,11 @@ used.
   reported `10 passed`, `86 deselected`. Ruff/Black remain visible non-blocking
   diagnostics; the completed workflow is not called green because the broader
   scheduled/manual E2E jobs retain known failures assigned to later phases.
+- **2026-08-12 / T611 supersession:** эта completion evidence описывает policy на дату
+  REN-003 и не является текущей инструкцией. T608 очистил pinned Ruff scope `app migrations`
+  и убрал для него `continue-on-error`; теперь Ruff blocking, Black по-прежнему diagnostic.
+  Сохранённые ниже формулировки scope/acceptance также читаются только в историческом контексте
+  REN-003; актуальный owner — Program006 T608 и `tests/unit/test_static_diagnostics_policy.py`.
 - **Rationale / value:** A workflow and aggregate runner now exist in the working
   tree, but they are not accepted until clean-checkout jobs and every required
   surface complete. Ruff/Black debt is visible diagnostic evidence, not an

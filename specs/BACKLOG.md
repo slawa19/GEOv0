@@ -82,6 +82,13 @@ checkpoint. Новые counterchecks ломают именно `InvariantChecker
 отсутствие commit и отсутствие TrustLine. Canonical `wave5_extrem_integrity` — exit `0`, `25 passed`;
 pinned Ruff `0.1.14` и scoped diff-check — exit `0`.
 
+Повторное ревью нашло соседний batch false-green: `compute_and_store_integrity_checkpoints()` всё
+ещё проглатывал тот же отказ, коммитил пустой batch и позволял background supervisor опубликовать
+`*_success`. Batch теперь откатывается и повторно выбрасывает любой `BaseException`; существующий
+supervisor переводит job в `failed/*_error`. Countercheck с настоящим inner checker доказывает
+исключение и terminal rollback. Canonical `wave5_extrem_integrity_batch2` — exit `0`, `31 passed`;
+pinned Ruff и diff-check — exit `0`.
+
 **`integrity.py:284-285` — это НЕ тот паттерн, и внешнее ревью его переоценило.** Там `try`
 накрывает только `db.add(IntegrityAuditLog(...))` и `model_dump()` — чисто in-memory операции,
 никакого IO. Отравить транзакцию они не могут; максимум — скрыть ошибку сериализации. Держать в
@@ -151,6 +158,11 @@ Guard'ов вида `String(… ?? '')` в simulator-ui — **96** (91 вне т
 на денежную строку; count KPI остаются видимыми при загруженном summary. Countercheck фиксирует обе
 ветки через `showCountKpis`/`showMoneyKpis`. Targeted Admin Vitest — exit `0`, `28 passed`; Admin build
 — exit `0`; scoped diff-check — exit `0`.
+
+Повторное ревью показало, что первый remediation-test смотрел только exposed computed и оставался бы
+зелёным при обратной перестановке template bindings. Тест теперь рендерит default slot root-card и
+проверяет оба `data-testid`: count-row остаётся, money-row исчезает без precision. Targeted Vitest —
+exit `0`, `17 passed`; перестановка guard'ов больше не может пройти вхолостую.
 
 ### Не является дефектом — не поднимать заново
 
