@@ -164,7 +164,7 @@ retryable-конфликта вместо `E010`; (3) `finally`-гарантия
 | T402 | Единый классификатор ошибок БД на границе сервиса + типизированный retryable-код | `[x]` |
 | T403 | Расширить guard вставки tx-строки за пределы `IntegrityError` — **одним guard'ом внутри `PaymentService`** вокруг `service.py:543-568` в `_create_payment_impl` (`:258`), который наследуют все **три** потребителя. Подробности и критерии приёмки — ниже | `[x]` |
 | T404 | `finally`-гарантия терминального состояния для отмены и таймаута (staged и non-staged) | `[x]` |
-| T405 | Симметричное логирование timeout-abort в обеих ветках | `[!]` |
+| T405 | Симметричное логирование timeout-abort в обеих ветках | `[x]` |
 | T406 | Решение по ретраю/маппингу для trustlines и integrity сервисов | `[!]` |
 | T407 | Синхронизация `docs/ru/09-decisions-and-defaults.md` и платёжной RU-документации | `[!]` |
 | T408 | Независимое ревью и evidence на точном HEAD | `[!]` |
@@ -313,4 +313,22 @@ retryable-конфликта вместо `E010`; (3) `finally`-гарантия
 - Первый canonical selector `wave2_t404_initial` подтвердил смену поведения: exit `1`,
   `1 failed, 32 passed`, только старое ожидание `abort_called is False`. После обновления tests
   `wave2_t404` и финальный `wave2_t404_final` — exit `0`, каждый `38 passed`; pinned Ruff и
+  `git diff --check` — exit `0`.
+
+### 2026-08-11 — T405
+
+- Implementation commit: `99cf45b`. Перед правкой non-staged timeout-abort логировал
+  `payment.timeout_abort_failed`, а staged branch после terminal drain возвращал timeout без записи
+  причины abort failure.
+- Обе ветки теперь используют один event name и одинаковый sanitized payload `tx_id/error_type`
+  (`app/core/payments/service.py:1002-1007,1020-1025`); raw exception text и `exc_info` наружу не
+  попадают. Staged timeout сохраняет исходный `TimeoutException`, а caller-owned savepoint
+  откатывает незавершённый tx.
+- Countercheck `tests/integration/test_payment_prepare_error_taxonomy.py:1384-1437` заставляет
+  staged abort упасть с sentinel и проверяет наличие `error_type=RuntimeError`, отсутствие sentinel
+  и отсутствие tx после outer rollback.
+- Первый `wave2_t405` — exit `1`, `1 failed, 34 passed`: read-after-timeout получил stale identity-map
+  `NEW` после реально закоммиченного состояния и попытался abort. Оба ambiguity reads переведены на
+  `populate_existing=True` (`service.py:928,977`); targeted `wave2_t405_timeout_fix` — exit `0`,
+  `2 passed`, полный `wave2_t405_final` — exit `0`, `39 passed`. Pinned Ruff и
   `git diff --check` — exit `0`.
