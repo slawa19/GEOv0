@@ -17,6 +17,7 @@ _ACTIVE_OPERATIONAL_DOCS = (
     _ROOT / "docs" / "ru" / "06-contributing.md",
     _ROOT / "docs" / "ru" / "10-testing-framework.md",
     _ROOT / "docs" / "ru" / "runbook-dev-wsl2-docker-no-desktop.md",
+    _ROOT / "docs" / "ru" / "testing" / "quick-start-and-debugging.md",
     _ROOT / "docs" / "en" / "06-contributing.md",
     _ROOT / "docs" / "en" / "10-testing-framework.md",
     _ROOT / "docs" / "pl" / "06-contributing.md",
@@ -28,10 +29,10 @@ _POSTGRES_EXAMPLE_DOCS = (
 )
 
 
-def _iter_documented_commands(path: Path):
+def _iter_documented_commands_from_content(content: str):
     fence_language: str | None = None
     for line_number, line in enumerate(
-        path.read_text(encoding="utf-8").splitlines(),
+        content.splitlines(),
         start=1,
     ):
         stripped = line.strip()
@@ -41,12 +42,27 @@ def _iter_documented_commands(path: Path):
                 None if fence_language is not None else fence.group(1).lower()
             )
             continue
-        inline_command = re.fullmatch(r"-\s*`([^`]+)`", stripped)
-        if fence_language is None and inline_command is None:
+        inline_command = re.fullmatch(
+            r"(?:[-*+]|\d+[.)])\s*`([^`]+)`",
+            stripped,
+        )
+        prose_command = re.fullmatch(r"[^`]+:\s*`([^`]+)`", stripped)
+        indented_command = line.startswith(("    ", "\t"))
+        if (
+            fence_language is None
+            and inline_command is None
+            and prose_command is None
+            and not indented_command
+        ):
             continue
-        command = inline_command.group(1).strip() if inline_command else stripped
+        command_match = inline_command or prose_command
+        command = command_match.group(1).strip() if command_match else stripped
         if command and not command.startswith("#"):
             yield line_number, command, fence_language
+
+
+def _iter_documented_commands(path: Path):
+    yield from _iter_documented_commands_from_content(path.read_text(encoding="utf-8"))
 
 
 def _command_executable(command: str) -> tuple[str, str]:
@@ -79,6 +95,18 @@ def _shell_contract_violation(command: str, fence_language: str | None) -> bool:
         re.IGNORECASE,
     ):
         return True
+    if fence_language in {"bash", "sh", "shell"} and re.match(
+        r"^\$env:(?:TEST_DATABASE_URL|GEO_TEST_ALLOW_DB_RESET)\s*=",
+        command,
+        re.IGNORECASE,
+    ):
+        return True
+    if fence_language in {"powershell", "pwsh"} and re.match(
+        r"^export\s+(?:TEST_DATABASE_URL|GEO_TEST_ALLOW_DB_RESET)\s*=",
+        command,
+        re.IGNORECASE,
+    ):
+        return True
     return bool(
         fence_language in {"bash", "sh", "shell"}
         and re.match(r"^(?:&\s*)?[.\\/]+scripts[\\/]verify_local\.ps1", command)
@@ -87,35 +115,63 @@ def _shell_contract_violation(command: str, fence_language: str | None) -> bool:
 
 def _postgres_example_violations(path: Path, content: str) -> list[str]:
     violations: list[str] = []
-    created_names = set(
-        re.findall(
-            r"\bcreatedb\b[^\r\n`]*\b(geov0_test_[A-Za-z0-9_-]*)\b",
-            content,
+    commands = [
+        command for _, command, _ in _iter_documented_commands_from_content(content)
+    ]
+    created_names: set[str] = set()
+    database_urls: list[str] = []
+    reset_values: list[str] = []
+    postgres_verifiers: list[str] = []
+    for command in commands:
+        created_names.update(
+            re.findall(
+                r"\bcreatedb\b[^\r\n`]*\b(geov0_test_[A-Za-z0-9_-]*)\b",
+                command,
+            )
         )
-    )
-    urls = re.findall(
-        r"postgresql\+asyncpg://[^\s`\"']+/([A-Za-z0-9_-]+)",
-        content,
-    )
-    if not urls:
+        url_assignment = re.match(
+            r"^(?:\$env:|export\s+)?TEST_DATABASE_URL\s*=\s*[\"']?" r"([^\s\"']+)",
+            command,
+            re.IGNORECASE,
+        )
+        if url_assignment is not None:
+            database_urls.append(url_assignment.group(1))
+        reset_assignment = re.match(
+            r"^(?:\$env:|export\s+)?GEO_TEST_ALLOW_DB_RESET\s*=\s*[\"']?"
+            r"([^\s\"']+)",
+            command,
+            re.IGNORECASE,
+        )
+        if reset_assignment is not None:
+            reset_values.append(reset_assignment.group(1))
+        if "verify_local.ps1" in command.lower() and re.search(
+            r"-BackendMarker\s+postgres(?:\s|$)", command
+        ):
+            postgres_verifiers.append(command)
+
+    if not database_urls:
         violations.append(f"{path}: no PostgreSQL test URL")
-    for database_name in urls:
-        database_url = f"postgresql+asyncpg://geo:geo@localhost:5432/{database_name}"
+    database_names: set[str] = set()
+    for database_url in database_urls:
         try:
-            assert_safe_test_database_url(
+            parsed_url = assert_safe_test_database_url(
                 database_url,
                 allow_destructive_reset="1",
                 repo_root=_ROOT,
                 required_backend="postgresql",
             )
         except UnsafeTestDatabaseError as exc:
-            violations.append(f"{path}: {database_name}: {exc}")
-    if created_names != set(urls):
+            violations.append(f"{path}: {database_url}: {exc}")
+        else:
+            database_names.add(parsed_url.database or "")
+    if created_names != database_names:
         violations.append(
             f"{path}: created databases {sorted(created_names)} != URL databases "
-            f"{sorted(set(urls))}"
+            f"{sorted(database_names)}"
         )
-    if "-BackendMarker postgres" not in content:
+    if not reset_values or any(value != "1" for value in reset_values):
+        violations.append(f"{path}: missing executable GEO_TEST_ALLOW_DB_RESET=1")
+    if not postgres_verifiers:
         violations.append(f"{path}: missing -BackendMarker postgres")
     return violations
 
@@ -234,6 +290,11 @@ def test_direct_pytest_guard_recognizes_supported_launcher_shapes(command: str) 
         (r".\scripts\verify_local.ps1 -TaskSlug invalid_bash", "bash"),
         ("TEST_DATABASE_URL=postgresql://localhost/geov0_test_shell", "bash"),
         ("GEO_TEST_ALLOW_DB_RESET=1", "powershell"),
+        (
+            '$env:TEST_DATABASE_URL = "postgresql://localhost/geov0_test_shell"',
+            "bash",
+        ),
+        ("export GEO_TEST_ALLOW_DB_RESET=1", "powershell"),
     ],
 )
 def test_shell_guard_rejects_non_executable_documented_commands(
@@ -243,18 +304,64 @@ def test_shell_guard_rejects_non_executable_documented_commands(
     assert _shell_contract_violation(command, fence_language)
 
 
+def test_document_command_parser_covers_markdown_command_roles() -> None:
+    commands = {
+        command
+        for _, command, _ in _iter_documented_commands_from_content(
+            """
+```powershell
+pytest.exe fenced
+```
+- `pytest.exe bullet`
+1. `pytest.exe numbered`
+Run this command: `pytest.exe prose`
+    pytest.exe indented
+"""
+        )
+    }
+
+    assert commands == {
+        "pytest.exe fenced",
+        "pytest.exe bullet",
+        "pytest.exe numbered",
+        "pytest.exe prose",
+        "pytest.exe indented",
+    }
+
+
 @pytest.mark.parametrize(
     "content",
     [
         """
+```powershell
 createdb -U geo geov0_test_
-TEST_DATABASE_URL=postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
 verify_local.ps1 -BackendMarker postgres
+```
 """,
         """
+```powershell
 createdb -U geo geov0_test_created
-TEST_DATABASE_URL=postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_other
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_other"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
 verify_local.ps1 -BackendMarker postgres
+```
+""",
+        """
+```powershell
+# createdb -U geo geov0_test_comment
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_comment"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+# verify_local.ps1 -BackendMarker postgres
+```
+""",
+        """
+```powershell
+createdb -U geo geov0_test_missing_reset
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_missing_reset"
+verify_local.ps1 -BackendMarker postgres
+```
 """,
     ],
 )

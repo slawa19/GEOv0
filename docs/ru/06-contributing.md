@@ -46,16 +46,14 @@ git remote add upstream https://github.com/geo-protocol/geo-hub.git
 
 ### 1.3. Настройка окружения
 
-```bash
+Создайте окружение для canonical verifier из PowerShell:
+
+```powershell
 # Создать виртуальное окружение
-python3.11 -m venv venv
-source venv/bin/activate
+py -3.11 -m venv .venv
 
 # Установить зависимости (runtime + dev)
-python -m pip install -r requirements.txt -r requirements-dev.txt
-
-# pre-commit (опционально)
-# Репозиторий использует линтеры/форматтеры, но pre-commit не обязателен для начала.
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
 ```
 
 ### 1.4. Запуск через Docker
@@ -96,7 +94,7 @@ npm --prefix admin-ui run dev
 .\scripts\verify_local.ps1 -TaskSlug contributor_install -BackendOnly
 
 # Проверить blocking Ruff scope (версия закреплена в requirements-dev.txt)
-python -m ruff check app migrations --no-cache
+.\.venv\Scripts\python.exe -m ruff check app migrations --no-cache
 
 # (опционально)
 # mypy app/
@@ -529,7 +527,7 @@ class TestRoutingService:
 
 ```powershell
 # Убедиться, что все проверки проходят
-python -m ruff check app migrations --no-cache
+.\.venv\Scripts\python.exe -m ruff check app migrations --no-cache
 
 # 1. Запустить Super Smoke (обязательно!)
 .\scripts\verify_local.ps1 -TaskSlug contributor_pr_super_smoke -BackendOnly `

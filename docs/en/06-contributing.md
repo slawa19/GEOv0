@@ -45,16 +45,14 @@ git remote add upstream https://github.com/geo-protocol/geo-hub.git
 
 ### 1.3. Environment setup
 
-```bash
+Create the environment used by the canonical verifier from PowerShell:
+
+```powershell
 # Create virtual environment
-python3.11 -m venv venv
-source venv/bin/activate
+py -3.11 -m venv .venv
 
-# Install dependencies (including dev)
-pip install -e ".[dev]"
-
-# Setup pre-commit hooks
-pre-commit install
+# Install runtime and development dependencies
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
 ```
 
 ### 1.4. Run via Docker
@@ -77,7 +75,7 @@ Run the verification commands from PowerShell:
 .\scripts\verify_local.ps1 -TaskSlug contributor_en_install -BackendOnly
 
 # Check blocking Ruff scope
-python -m ruff check app migrations --no-cache
+.\.venv\Scripts\python.exe -m ruff check app migrations --no-cache
 
 # Open documentation (Swagger UI)
 Start-Process http://localhost:8000/docs
@@ -498,7 +496,7 @@ Run the required gates from PowerShell:
 
 ```powershell
 # Ensure all checks pass
-python -m ruff check app migrations --no-cache
+.\.venv\Scripts\python.exe -m ruff check app migrations --no-cache
 .\scripts\verify_local.ps1 -TaskSlug contributor_en_pr_full
 ```
 

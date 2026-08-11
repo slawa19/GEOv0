@@ -26,7 +26,8 @@
 - Проверить, что у вас WSL2:
   - `wsl -l -v` (в колонке VERSION должно быть 2)
 
-Дальше все команды из runbook выполняйте в терминале WSL (Ubuntu/Debian и т.д.).
+Дальше команды выполняются в терминале WSL (Ubuntu/Debian и т.д.), кроме явно
+отмеченных Windows PowerShell-команд в разделе 7.
 
 ---
 
@@ -207,7 +208,16 @@ Health endpoints (есть также алиасы `/api/v1/*`):
 - `requirements.txt`
 - `requirements-dev.txt`
 
-Запуск из PowerShell:
+Canonical verifier — PowerShell-скрипт. Для раздела 7 откройте Windows PowerShell в том же
+checkout (для каталога внутри WSL используйте путь `\\wsl.localhost\<distro>\...`) и один раз
+создайте отдельное Windows-окружение:
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
+```
+
+Запуск из Windows PowerShell:
 - `.\scripts\verify_local.ps1 -TaskSlug runbook_backend -BackendOnly`
 
 ### 7.2 OpenAPI contract test
@@ -222,6 +232,8 @@ Health endpoints (есть также алиасы `/api/v1/*`):
 
 2) Выбрать уникальное имя, проверить отсутствие БД и только затем создать её внутри контейнера:
 - `docker exec geov0-db createdb -U geo geov0_test_runbook`
+
+Шаги 1–2 выполняются в WSL. Шаги 3–4 — в Windows PowerShell из того же checkout.
 
 3) Указать переменные окружения тестов:
 
