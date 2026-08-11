@@ -4,14 +4,15 @@ import os
 import time
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Header, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.engine.url import make_url
 
+from app.api import deps
 from app.db.session import engine
 from app.config import settings
-from app.schemas.common import HealthResponse
+from app.schemas.common import ErrorEnvelope, HealthResponse
 from app.utils.background_jobs import background_health_status
 
 
@@ -55,6 +56,44 @@ async def healthz_check():
 
 @router.get("/health/db")
 async def health_db_check():
+    try:
+        t0 = time.perf_counter()
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        latency_ms = int(round((time.perf_counter() - t0) * 1000.0))
+
+        return {
+            "status": "ok",
+            "db": {
+                "reachable": True,
+                "latency_ms": latency_ms,
+            },
+            "timestamp": _utc_now_iso(),
+        }
+    except Exception:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "error",
+                "db": {"reachable": False, "latency_ms": None},
+                "timestamp": _utc_now_iso(),
+            },
+        )
+
+
+@router.get(
+    "/admin/health/db",
+    tags=["Admin"],
+    responses={
+        403: {"model": ErrorEnvelope, "description": "Admin token required"},
+        503: {"description": "Database unavailable"},
+    },
+)
+async def health_db_diagnostic(
+    request: Request,
+    x_admin_token: str = Header(alias="X-Admin-Token"),
+):
+    await deps.require_admin(request, x_admin_token)
     try:
         t0 = time.perf_counter()
         async with engine.connect() as conn:

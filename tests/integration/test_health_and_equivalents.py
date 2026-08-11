@@ -5,6 +5,9 @@ from httpx import AsyncClient
 from nacl.signing import SigningKey
 from sqlalchemy import select
 
+import app.main as main_module
+from app.api.v1 import health as health_module
+from app.config import settings
 from app.core.auth.canonical import canonical_json
 from app.core.auth.crypto import generate_keypair
 from app.db.models.equivalent import Equivalent
@@ -72,6 +75,80 @@ async def test_health_endpoints(client: AsyncClient):
     resp = await client.get("/api/v1/health/db")
     assert resp.status_code == 200
     assert resp.json()["status"] == "ok"
+
+    resp = await client.get(
+        "/api/v1/admin/health/db",
+        headers={"X-Admin-Token": settings.ADMIN_TOKEN},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "ok"
+
+
+class _FailingConnectionContext:
+    def __init__(self, message: str) -> None:
+        self.message = message
+
+    async def __aenter__(self):
+        raise RuntimeError(self.message)
+
+    async def __aexit__(self, exc_type, exc, traceback) -> None:
+        return None
+
+
+class _FailingEngine:
+    def __init__(self, message: str) -> None:
+        self.message = message
+
+    def connect(self) -> _FailingConnectionContext:
+        return _FailingConnectionContext(self.message)
+
+
+@pytest.mark.asyncio
+async def test_public_db_health_hides_exception_details(
+    client: AsyncClient,
+    monkeypatch,
+):
+    leaked_details = "postgresql+asyncpg://private_user@db.internal/private_database"
+    failing_engine = _FailingEngine(leaked_details)
+    monkeypatch.setattr(main_module, "engine", failing_engine)
+    monkeypatch.setattr(health_module, "engine", failing_engine)
+
+    for path in ("/health/db", "/api/v1/health/db"):
+        public_response = await client.get(path)
+        assert public_response.status_code == 503
+        assert public_response.json() == {
+            "status": "error",
+            "db": {"reachable": False, "latency_ms": None},
+            "timestamp": public_response.json()["timestamp"],
+        }
+        assert leaked_details not in public_response.text
+
+
+@pytest.mark.asyncio
+async def test_db_health_diagnostic_requires_admin(
+    client: AsyncClient,
+    monkeypatch,
+):
+    leaked_details = "postgresql+asyncpg://private_user@db.internal/private_database"
+    failing_engine = _FailingEngine(leaked_details)
+    monkeypatch.setattr(health_module, "engine", failing_engine)
+
+    unauthenticated_diagnostic = await client.get("/api/v1/admin/health/db")
+    assert unauthenticated_diagnostic.status_code == 422
+    assert leaked_details not in unauthenticated_diagnostic.text
+
+    invalid_diagnostic = await client.get(
+        "/api/v1/admin/health/db",
+        headers={"X-Admin-Token": "invalid"},
+    )
+    assert invalid_diagnostic.status_code == 403
+
+    diagnostic_response = await client.get(
+        "/api/v1/admin/health/db",
+        headers={"X-Admin-Token": settings.ADMIN_TOKEN},
+    )
+    assert diagnostic_response.status_code == 503
+    assert diagnostic_response.json()["details"] == leaked_details
 
 
 @pytest.mark.asyncio

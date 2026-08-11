@@ -95,8 +95,64 @@ paths:
                   status:
                     type: string
                     enum: [error]
-                  details:
-                    type: string
+
+  /admin/health/db:
+    get:
+      tags: [Health, Admin]
+      summary: Authenticated database diagnostic
+      security: []
+      parameters:
+        - in: header
+          name: X-Admin-Token
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: DB OK
+          content:
+            application/json:
+              schema: {}
+        '403':
+          description: Admin token required
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: object
+                    required: [code, message]
+                    properties:
+                      code:
+                        type: string
+                      message:
+                        type: string
+                      details:
+                        type: object
+                        nullable: true
+        '503':
+          description: Database unavailable
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: object
+                    required: [code, message]
+                    properties:
+                      code:
+                        type: string
+                      message:
+                        type: string
+                      details:
+                        type: object
+                        nullable: true
 
   /admin/config:
     get:

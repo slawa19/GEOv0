@@ -43,8 +43,10 @@ SUCCESS_SCHEMA_DRIFT_SHA256 = (
     "a3645ea4ab2e8502738119175566c4b591b516b33e4a2b0e7dac155466af6e44"
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 71
+# 2026-08-11 / T501: public DB health no longer declares exception details;
+# the new admin diagnostic operation matches generated responses, so count stays 84.
 ERROR_RESPONSE_DRIFT_SHA256 = (
-    "1d38320dcdf7e8581072ec23115577a0ce668a3697b8d45881c52936166b4092"
+    "06a5e6bab85152ba1ca004666a311842217feafcf053deb4ebba3da2043dfb8c"
 )
 ERROR_RESPONSE_DRIFT_COUNT = 84
 SECURITY_DRIFT_SHA256 = (

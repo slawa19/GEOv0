@@ -575,13 +575,12 @@ async def health_db_check():
             "db": {"reachable": True, "latency_ms": latency_ms},
             "timestamp": _utc_now_iso(),
         }
-    except Exception as exc:
+    except Exception:
         return JSONResponse(
             status_code=503,
             content={
                 "status": "error",
                 "db": {"reachable": False, "latency_ms": None},
-                "details": str(exc),
                 "timestamp": _utc_now_iso(),
             },
         )
