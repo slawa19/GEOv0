@@ -1136,6 +1136,21 @@ def apply_clearing(cycle, amount, equivalent):
             update_debt(debtor, creditor, equivalent, new_debt)
 ```
 
+#### 7.6.1. Конкурентная граница с payment prepare
+
+Payment и clearing одного эквивалента сериализуются на общем transaction-scoped advisory owner
+lock. Clearing берёт этот lock в отдельной lock-only DB-транзакции, после ожидания сбрасывает прежний
+snapshot рабочей сессии и заново читает фактические `Debt` и активные `PrepareLock`. Lock удерживается
+до commit/rollback попытки clearing. Следствия:
+
+- уже подготовленный payment заставляет clearing вернуть skip без денежного эффекта;
+- после пустого conflict snapshot новый prepare ждёт завершения clearing;
+- ожидание ограничено timeout budget, а отмена/ошибка освобождает lock через rollback;
+- advisory identity не меняет направление Debt, TrustLine, flow или audit payload.
+
+Поскольку старые процессы не участвовали в этой общей границе, rolling mixed-version deployment не
+поддерживается: upgrade и rollback выполняются с coordinated quiescence payment и clearing writers.
+
 ### 7.7. Стейт-машина CLEARING
 
 ```

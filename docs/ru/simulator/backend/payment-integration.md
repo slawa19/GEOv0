@@ -78,8 +78,12 @@ Source of truth:
 - Идентичность occurrence — UUIDv5 от канонического неупорядоченного набора Debt UUID. Повтор того
   же набора после потери подтверждения возвращает сохранённый `Transaction.payload.amount`, не
   применяя эффект повторно; новый набор с новым Debt UUID считается новой occurrence.
-- Этот snapshot-guard не является общей serialization boundary с новым payment prepare. Полный
-  payment/clearing interlock остаётся открытой задачей программы 002 Phase 2.
+- Clearing входит в общий с payment equivalent-owner domain. Отдельная lock-only транзакция берёт
+  transaction-scoped lock эквивалента; после возможного ожидания рабочая clearing-сессия откатывает
+  старый snapshot и повторяет authoritative Debt/PrepareLock reads. Lock удерживается до terminal
+  commit/rollback clearing. Поэтому committed `PrepareLock` после ожидания виден, а новый prepare не
+  пересекает уже принятое clearing conflict decision. `55P03` остаётся bounded timeout, направление
+  долгов и payload не меняется.
 
 ---
 
@@ -166,10 +170,10 @@ Runner действует как «виртуальный клиент»:
   такой конфликт пробрасывается владельцу tick: вся внешняя транзакция откатывается, tick получает
   `REAL_MODE_TICK_FAILED`, а тот же batch автоматически не переигрывается. Следующий heartbeat
   планирует новый tick.
-- Mixed-version payment workers не поддерживаются. При upgrade и rollback оператор останавливает API
-  payment writers, real ticks, Admin abort и recovery, дожидается завершения/отката DB-транзакций и
-  освобождения advisory locks, разворачивает одну версию на всех owner surfaces и только затем
-  возобновляет работу.
+- Mixed-version payment/clearing workers не поддерживаются. При upgrade и rollback оператор
+  останавливает API payment writers, clearing workers, real ticks, Admin abort и recovery,
+  дожидается завершения/отката DB-транзакций и освобождения advisory locks, разворачивает одну версию
+  на всех owner surfaces и только затем возобновляет работу.
 
 ---
 
@@ -256,9 +260,10 @@ Interact publishers сначала учитывают этот durable result и
 повторно распространяют cancellation. Обычная отмена до подтверждённого commit не выдаётся за успех.
 
 Guardrails:
-- учитывать, что `ClearingService` пропускает циклы, затрагивающие пары участников из активных payment prepare locks.
-- не считать это полной сериализацией с конкурентным новым prepare: общий interlock будет реализован
-  отдельно в программе 002 Phase 2.
+- учитывать, что `ClearingService` пропускает циклы, затрагивающие пары участников из активных
+  payment prepare locks;
+- не обходить общий equivalent-owner interlock прямой денежной мутацией или чтением старого
+  snapshot: только service-owned попытка удерживает lock до terminal commit/rollback.
 
 ---
 

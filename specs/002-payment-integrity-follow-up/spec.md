@@ -834,3 +834,24 @@ P109 закрыта; Phase 1 не имеет открытых P1/P2 и гото�
   unmatched-`40001`, acknowledgement-loss/cancellation replay, все skip branches, reverse pair,
   inverse multisegment, staged multi-owner/timeout restoration, same-tx/abort/prepare contention,
   idempotency, retry-UoW и audit-conflict. Отсутствующих измерений и marker-deselection нет.
+
+### 2026-08-11 — P204
+
+- Stable contract синхронизирован с runtime: decision record
+  `docs/ru/09-decisions-and-defaults.md:239-253` фиксирует общую equivalent-owner границу,
+  отдельную lock-only транзакцию, post-wait fresh snapshot, `55P03` timeout и coordinated
+  quiescence payment+clearing writers; профильный simulator документ
+  `docs/ru/simulator/backend/payment-integration.md:81-87,262-266` заменяет прежнее «Phase 2 open»
+  на тот же действующий протокол и guardrail; нормативная protocol spec добавляет границу и
+  deployment rule в `docs/ru/02-protocol-spec.md:1139-1153`.
+- Residual ledger закрыт append-only в
+  `specs/002-payment-integrity-follow-up/phase0-evidence-map.md:279-291`: accepted in-program P2 и
+  reverse-prepare unverified path отмечены закрытыми; непроверенные non-default isolation,
+  starvation telemetry и mixed-version execution не выданы за проверенные; independently-owned
+  trust-drift остаётся в BACKLOG и не менялся этой программой.
+- Docs verification: первая и вторая debug-попытки относительного link scan дали false positive на
+  уже существующих ссылках формата `docs/ru/02-protocol-spec.md:line` (сначала не убрали суффикс
+  строки, затем ошибочно присоединили repo-relative path к каталогу документа), обе exit `1` без
+  изменения файлов. Исправленный scan распознаёт repo-relative path и `:line` — exit `0`,
+  `RELATIVE_LINKS_OK`; stale-interlock phrase scan — exit `0`,
+  `STALE_INTERLOCK_WORDING_ABSENT`; `git diff --check` — exit `0`.

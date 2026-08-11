@@ -275,3 +275,17 @@ The orchestrator rule permits no third external remediation pass. Final local
 scope, link, diff, artifact and secret scans cover this governance-only closeout.
 No unresolved in-program P1 remains. The confirmed payment and clearing P2s are
 the explicitly unauthorized Phase 1 and Phase 2 delivery backlog.
+
+## 12. Phase 2 residual closure — 2026-08-11
+
+- Принятый in-program P2 из §7 закрыт общим equivalent-owner boundary: clearing держит lock в
+  отдельной transaction-scoped lock-only сессии, после acquisition сбрасывает прежний рабочий
+  snapshot и повторяет authoritative Debt/PrepareLock reads. Оба порядка подтверждены real
+  PostgreSQL schedule; newly prepared pair больше не пересекает clearing decision/mutation window.
+- Пункт §8 «clearing versus a newly prepared reverse payment» теперь verified. Non-default
+  isolation за пределами production `SERIALIZABLE`, production-scale starvation/telemetry и
+  mixed-version execution не объявляются проверенными; mixed-version deployment запрещён и требует
+  coordinated quiescence.
+- Остальные separately-owned residuals §7 не присвоены программе 002. Clearing ownership,
+  acknowledgement/publication и redundant cleanup были закрыты программой 003; trust-drift остаётся
+  отдельным P3 в `specs/BACKLOG.md` и кодом этой программы не менялся.

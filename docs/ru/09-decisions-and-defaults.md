@@ -230,16 +230,20 @@ configured equivalents, а executor перед staged actions фиксирует
 записывает `REAL_MODE_TICK_FAILED` и не переигрывает тот же batch. Следующий heartbeat планирует
 новый tick.
 
-Протокол не имеет mixed-version bridge. Upgrade и rollback требуют coordinated quiescence:
-остановить API payment writers, real ticks, Admin abort и recovery; дождаться завершения или отката
-их DB-транзакций и освобождения advisory locks; развернуть одну версию на всех owner surfaces; затем
-возобновить writers. Одновременная работа старого directional и нового canonical протоколов не
-поддерживается.
+Clearing участвует в том же equivalent-owner domain. Перед authoritative чтением долгов отдельная
+lock-only DB-транзакция берёт transaction-scoped lock эквивалента через `PaymentEngine`; только после
+этого рабочая clearing-сессия откатывает прежний snapshot и заново читает `Debt FOR UPDATE` и
+`PrepareLock`. Lock-only транзакция удерживается до terminal commit/rollback рабочей попытки. Поэтому
+уже подготовленный payment виден clearing после ожидания, а новый prepare не может пройти между
+пустым conflict snapshot и денежной мутацией. Ожидание ограничено общим advisory budget; PostgreSQL
+`55P03` отображается в существующий timeout contract. Направление Debt/TrustLine и payload не
+канонизируется и не меняется.
 
-Текущий clearing guard, который пропускает пары из активных `PrepareLock`, не является общей
-serialization boundary между новым payment prepare и clearing. Этот interlock остаётся открытой
-задачей программы 002 Phase 2; до её закрытия Defence in Depth выше не следует трактовать как
-доказательство полной payment/clearing сериализации.
+Протокол не имеет mixed-version bridge. Upgrade и rollback требуют coordinated quiescence:
+остановить API payment writers, clearing workers, real ticks, Admin abort и recovery; дождаться
+завершения или отката их DB-транзакций и освобождения advisory locks; развернуть одну версию на всех
+owner surfaces; затем возобновить writers. Одновременная работа старого directional/неinterlocked и
+нового общего протоколов не поддерживается.
 
 #### 1.12.1. Владение и подтверждение транзакции клиринга
 
