@@ -13,10 +13,6 @@ from sqlalchemy.exc import DBAPIError
 pytestmark = pytest.mark.postgres
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="T401: swallowed audit 40001 degrades into non-retryable 25P02",
-)
 @pytest.mark.asyncio
 async def test_audit_serialization_failure_retries_before_transaction_is_poisoned(
     db_session, monkeypatch
@@ -140,6 +136,11 @@ async def test_audit_serialization_failure_retries_before_transaction_is_poisone
                 .where(Equivalent.id == equivalent_id)
                 .values(description="payment")
             )
+
+        # Countercheck: after the database retry, a non-database diagnostics
+        # failure remains best-effort and must not fail the payment.
+        if checkpoint_calls == 3:
+            raise ValueError("non-database audit diagnostics failure")
 
         return SimpleNamespace(
             checksum="",

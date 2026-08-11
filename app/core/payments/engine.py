@@ -982,9 +982,28 @@ class PaymentEngine:
                                 equivalent_id=eq_id,
                             )
                         )
-                    except Exception:
+                    except DBAPIError:
+                        # PostgreSQL aborts the whole transaction after a database
+                        # error. Let the UoW retry classifier see the original
+                        # SQLSTATE instead of continuing into a misleading 25P02.
+                        raise
+                    except Exception as exc:
+                        logger.warning(
+                            "event=payment.audit_checkpoint_before_failed "
+                            "tx_id=%s error_type=%s",
+                            tx_id,
+                            type(exc).__name__,
+                        )
                         continue
-            except Exception:
+            except DBAPIError:
+                raise
+            except Exception as exc:
+                logger.warning(
+                    "event=payment.audit_checkpoint_before_failed "
+                    "tx_id=%s error_type=%s",
+                    tx_id,
+                    type(exc).__name__,
+                )
                 checkpoints_before = {}
 
             # 1a. TTL validation: any expired lock aborts the transaction.
@@ -1146,10 +1165,25 @@ class PaymentEngine:
                                 error_details=None if passed else invariants_status,
                             )
                         )
-                    except Exception:
+                    except DBAPIError:
+                        # A swallowed DB error poisons the live transaction. The
+                        # retry wrapper must receive the original SQLSTATE.
+                        raise
+                    except Exception as exc:
+                        logger.warning(
+                            "event=payment.audit_log_failed tx_id=%s error_type=%s",
+                            tx_id,
+                            type(exc).__name__,
+                        )
                         continue
-            except Exception:
-                pass
+            except DBAPIError:
+                raise
+            except Exception as exc:
+                logger.warning(
+                    "event=payment.audit_log_failed tx_id=%s error_type=%s",
+                    tx_id,
+                    type(exc).__name__,
+                )
 
             # 3. Delete Locks
             delete_stmt = delete(PrepareLock).where(PrepareLock.tx_id == tx_id)
