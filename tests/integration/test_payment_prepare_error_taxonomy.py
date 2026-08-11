@@ -12,7 +12,7 @@ import pytest
 from httpx import AsyncClient
 from nacl.signing import SigningKey
 from sqlalchemy import select
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import DBAPIError, OperationalError
 
 from app.config import settings
 from app.core.auth.crypto import generate_keypair, get_pid_from_public_key
@@ -23,7 +23,12 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.transaction import Transaction
 from app.schemas.payment import PaymentCreateRequest
-from app.utils.exceptions import ConflictException, GeoException, RoutingException
+from app.utils.exceptions import (
+    ConflictException,
+    GeoException,
+    RetryablePaymentConflictException,
+    RoutingException,
+)
 from tests.integration.test_scenarios import register_and_login, _sign_payment_request
 
 
@@ -137,6 +142,69 @@ async def _build_direct_payment(db_session, *, suffix: str):
         ),
     )
     return PaymentService(db_session), sender, request, tx_id
+
+
+def _serialization_failure() -> DBAPIError:
+    class _DriverSerializationFailure(Exception):
+        sqlstate = "40001"
+
+    return DBAPIError(
+        statement="SERIALIZABLE payment phase",
+        params=None,
+        orig=_DriverSerializationFailure("serialization failure"),
+        connection_invalidated=False,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["prepare", "commit"])
+async def test_retryable_database_failure_uses_e008_at_service_boundary(
+    db_session,
+    monkeypatch,
+    phase: str,
+) -> None:
+    service, sender, request, tx_id = await _build_direct_payment(
+        db_session,
+        suffix=f"retryable_{phase}",
+    )
+
+    async def build_graph(equivalent_code: str, **kwargs) -> None:
+        return None
+
+    def find_flow_routes(from_pid: str, to_pid: str, amount: Decimal, **kwargs):
+        return [([from_pid, to_pid], amount)]
+
+    async def prepare(*args, **kwargs) -> None:
+        if phase == "prepare":
+            raise _serialization_failure()
+
+    async def commit(*args, **kwargs) -> None:
+        if phase == "commit":
+            raise _serialization_failure()
+
+    monkeypatch.setattr(service.router, "build_graph", build_graph)
+    monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
+    monkeypatch.setattr(service.engine, "prepare", prepare)
+    monkeypatch.setattr(service.engine, "commit", commit)
+
+    with pytest.raises(RetryablePaymentConflictException) as raised:
+        await service.create_payment(sender.id, request)
+
+    assert raised.value.status_code == 409
+    assert raised.value.code == "E008"
+    assert raised.value.details == {
+        "retryable": True,
+        "conflict_kind": "database_concurrency",
+    }
+    transaction = (
+        await db_session.execute(select(Transaction).where(Transaction.tx_id == tx_id))
+    ).scalar_one()
+    assert transaction.state == "ABORTED"
+    assert transaction.error == {
+        "code": "E008",
+        "message": "State conflict",
+        "details": raised.value.details,
+    }
 
 
 @pytest.mark.asyncio

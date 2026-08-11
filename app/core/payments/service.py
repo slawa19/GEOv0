@@ -8,7 +8,7 @@ from typing import List, Literal
 
 from sqlalchemy import select, and_, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from app.core.payments.engine import PaymentEngine
 from app.core.payments.router import PaymentRouter
@@ -30,6 +30,7 @@ from app.utils.exceptions import (
     BadRequestException,
     GeoException,
     ConflictException,
+    RetryablePaymentConflictException,
     InvalidSignatureException,
     RoutingException,
     TimeoutException,
@@ -38,6 +39,59 @@ from app.utils.error_codes import ErrorCode
 from app.utils.validation import validate_equivalent_code, validate_tx_id, parse_amount_decimal
 
 logger = logging.getLogger(__name__)
+
+
+_RETRYABLE_PAYMENT_SQLSTATES = frozenset({"40001", "40P01"})
+
+
+def _iter_exception_chain(exc: BaseException):
+    pending = [exc]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        marker = id(current)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        yield current
+
+        for related in (
+            getattr(current, "orig", None),
+            current.__cause__,
+            current.__context__,
+        ):
+            if isinstance(related, BaseException):
+                pending.append(related)
+
+
+def _payment_db_sqlstate(exc: BaseException) -> str | None:
+    chain = list(_iter_exception_chain(exc))
+    for attribute in ("sqlstate", "pgcode"):
+        for current in chain:
+            value = getattr(current, attribute, None)
+            if value:
+                return str(value)
+    for current in chain:
+        # SQLAlchemy's wrapper-level `.code` identifies its documentation page
+        # (for example "dbapi"), not PostgreSQL SQLSTATE. Driver exceptions may
+        # expose SQLSTATE as `.code`, so inspect only non-wrapper nodes here.
+        if isinstance(current, DBAPIError):
+            continue
+        value = getattr(current, "code", None)
+        if value:
+            return str(value)
+    return None
+
+
+def _classify_payment_db_error(exc: BaseException) -> GeoException:
+    """Map database concurrency failures without exposing driver details."""
+
+    for current in _iter_exception_chain(exc):
+        if not isinstance(current, DBAPIError):
+            continue
+        if _payment_db_sqlstate(current) in _RETRYABLE_PAYMENT_SQLSTATES:
+            return RetryablePaymentConflictException()
+    return GeoException()
 
 
 @dataclass
@@ -615,7 +669,9 @@ class PaymentService:
                     is_client_error = isinstance(e, GeoException) and 400 <= int(
                         getattr(e, "status_code", 500) or 500
                     ) < 500
-                    public_error = e if is_client_error else GeoException()
+                    public_error = (
+                        e if is_client_error else _classify_payment_db_error(e)
+                    )
                     abort_reason = str(public_error.message)
                     abort_code = getattr(public_error, "code", ErrorCode.E010)
                     abort_details = getattr(public_error, "details", None) or {}
@@ -745,7 +801,7 @@ class PaymentService:
 
                     # Under uncertainty (e.g. DB/network errors), commit may have succeeded even if
                     # the caller sees an exception. Read-before-abort to avoid COMMITTED -> ABORTED.
-                    public_error = GeoException()
+                    public_error = _classify_payment_db_error(e)
                     if commit:
                         try:
                             await self.session.rollback()
@@ -781,8 +837,8 @@ class PaymentService:
                             await self.engine.abort(
                                 tx_id_str,
                                 reason=public_error.message,
-                                error_code=ErrorCode.E010,
-                                details={},
+                                error_code=public_error.code,
+                                details=public_error.details,
                                 commit=True,
                             )
                         except Exception as abort_error:
@@ -797,8 +853,8 @@ class PaymentService:
                             await self.engine.abort(
                                 tx_id_str,
                                 reason=public_error.message,
-                                error_code=ErrorCode.E010,
-                                details={},
+                                error_code=public_error.code,
+                                details=public_error.details,
                                 commit=False,
                             )
                         except Exception as abort_error:

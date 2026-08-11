@@ -69,6 +69,19 @@ class ConflictException(GeoException):
         super().__init__(message, code=ErrorCode.E008, details=details, status_code=409)
 
 
+class RetryablePaymentConflictException(ConflictException):
+    """Transient database conflict using the existing public E008 contract."""
+
+    def __init__(self, message: str | None = None):
+        super().__init__(
+            message,
+            details={
+                "retryable": True,
+                "conflict_kind": "database_concurrency",
+            },
+        )
+
+
 class TooManyRequestsException(GeoException):
     def __init__(self, message: str | None = None, *, details: Optional[dict[str, Any]] = None):
         super().__init__(message or "Too many requests", code=ErrorCode.E009, details=details, status_code=429)
