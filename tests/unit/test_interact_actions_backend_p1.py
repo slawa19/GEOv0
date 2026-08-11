@@ -10,6 +10,7 @@ import pytest
 from sqlalchemy import select
 
 from app.config import settings
+from app.core.clearing.service import ClearingCommittedAfterCancellation
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
@@ -1174,7 +1175,13 @@ async def test_action_clearing_real_total_cleared_amount_is_actual_not_precalc(
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "failure_kind",
-    ["geo", "unexpected", "cancelled_execute", "cancelled_finalize"],
+    [
+        "geo",
+        "unexpected",
+        "cancelled_execute",
+        "cancelled_finalize",
+        "committed_cancel",
+    ],
 )
 async def test_action_clearing_real_emits_durable_partial_done_before_sanitized_failure(
     client,
@@ -1217,6 +1224,11 @@ async def test_action_clearing_real_emits_durable_partial_done_before_sanitized_
     async def _execute_clearing(self, cycle):
         nonlocal execute_calls
         execute_calls += 1
+        if failure_kind == "committed_cancel" and execute_calls == 1:
+            raise ClearingCommittedAfterCancellation(
+                tx_id="clearing-committed",
+                cleared_amount=Decimal("2.5"),
+            )
         if execute_calls == 1:
             assert cycle is cycles[0]
             return Decimal("2.5")
@@ -1268,7 +1280,7 @@ async def test_action_clearing_real_emits_durable_partial_done_before_sanitized_
 
     monkeypatch.setattr(interact_actions_enabled, "SseEventEmitter", _FakeEmitter)
 
-    if failure_kind.startswith("cancelled"):
+    if failure_kind.startswith("cancelled") or failure_kind == "committed_cancel":
         with pytest.raises(asyncio.CancelledError):
             await interact_actions_enabled.action_clearing_real(
                 "test-run",
@@ -1304,17 +1316,17 @@ async def test_action_clearing_real_emits_durable_partial_done_before_sanitized_
             "details": expected_details,
         }
         assert "raw clearing failure secret" not in response.text
-    assert execute_calls == 2
+    assert execute_calls == (1 if failure_kind == "committed_cancel" else 2)
     assert len(emitted) == 1
     assert emitted[0]["type"] == "clearing.done"
     assert emitted[0]["equivalent"] == "UAH"
     assert emitted[0]["cleared_cycles"] == 1
     assert emitted[0]["cleared_amount"] == "2.5"
     assert "raw clearing failure secret" not in str(emitted[0])
-    if failure_kind.startswith("cancelled"):
+    if failure_kind.startswith("cancelled") or failure_kind == "committed_cancel":
         assert emitted[0]["node_patch"] is None
         assert emitted[0]["edge_patch"] is None
-    if failure_kind == "cancelled_execute":
+    if failure_kind in {"cancelled_execute", "committed_cancel"}:
         assert patch_calls == 0
     else:
         assert patch_calls == 1

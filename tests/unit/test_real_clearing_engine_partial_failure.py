@@ -4,10 +4,12 @@ import asyncio
 import logging
 import threading
 from datetime import datetime, timezone
+from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
 
+from app.core.clearing.service import ClearingCommittedAfterCancellation
 from app.core.simulator.models import RunRecord
 from app.core.simulator.real_clearing_engine import RealClearingEngine
 from app.utils.exceptions import GeoException
@@ -72,7 +74,8 @@ class _SuccessThenE010Service:
             {
                 "debtor": "alice",
                 "creditor": "bob",
-                "amount": "5.00",
+                # Deliberately stale candidate: the service result is authoritative.
+                "amount": "11.00",
             }
         ]
         type(self).instance = self
@@ -86,21 +89,38 @@ class _SuccessThenE010Service:
             return []
         return [self.cycle]
 
-    async def execute_clearing(self, _cycle) -> bool:
+    async def _execute(self):
         self.execute_calls += 1
+        if self.failure_kind == "committed_cancel" and self.execute_calls == 1:
+            raise ClearingCommittedAfterCancellation(
+                tx_id="clearing-committed",
+                cleared_amount=Decimal("5.00"),
+            )
         if self.execute_calls == 1:
-            return True
+            return Decimal("5.00")
         if self.failure_kind == "cancelled_execute":
             raise asyncio.CancelledError
         failure = GeoException("private clearing failure detail")
         assert failure.code == "E010"
         raise failure
 
+    async def execute_clearing(self, _cycle) -> bool:
+        return (await self._execute()) is not None
+
+    async def execute_clearing_with_amount(self, _cycle) -> Decimal | None:
+        return await self._execute()
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "failure_kind",
-    ["geo", "cancelled_find", "cancelled_execute", "cancelled_finalize"],
+    [
+        "geo",
+        "cancelled_find",
+        "cancelled_execute",
+        "cancelled_finalize",
+        "committed_cancel",
+    ],
 )
 async def test_partial_clearing_is_finalized_before_failure_propagates(
     failure_kind: str,
@@ -130,9 +150,10 @@ async def test_partial_clearing_is_finalized_before_failure_propagates(
 
     trust_growth_calls = 0
 
-    async def _apply_trust_growth(**_kwargs):
+    async def _apply_trust_growth(**kwargs):
         nonlocal trust_growth_calls
         trust_growth_calls += 1
+        assert kwargs["cleared_amount_per_edge"] == {("bob", "alice"): 5.0}
         if failure_kind == "cancelled_finalize":
             raise asyncio.CancelledError
         return SimpleNamespace(updated_count=0)
@@ -154,7 +175,7 @@ async def test_partial_clearing_is_finalized_before_failure_propagates(
         async_session_local=lambda: _SessionContext(),
         clearing_service_cls=_SuccessThenE010Service,
     )
-    if failure_kind.startswith("cancelled"):
+    if failure_kind.startswith("cancelled") or failure_kind == "committed_cancel":
         with pytest.raises(asyncio.CancelledError):
             await call
     else:
@@ -165,14 +186,16 @@ async def test_partial_clearing_is_finalized_before_failure_propagates(
     expected_execute_calls = 1 if failure_kind in {
         "cancelled_find",
         "cancelled_finalize",
+        "committed_cancel",
     } else 2
     assert _SuccessThenE010Service.instance.execute_calls == expected_execute_calls
     expected_growth_calls = 0 if failure_kind in {
         "cancelled_find",
         "cancelled_execute",
+        "committed_cancel",
     } else 1
     assert trust_growth_calls == expected_growth_calls
-    if failure_kind.startswith("cancelled"):
+    if failure_kind.startswith("cancelled") or failure_kind == "committed_cancel":
         assert run.errors_total == 0
         assert run.last_error is None
     else:

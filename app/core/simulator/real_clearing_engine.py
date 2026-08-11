@@ -13,7 +13,10 @@ from sqlalchemy import select
 
 import app.db.session as db_session
 from app.config import settings
-from app.core.clearing.service import ClearingService
+from app.core.clearing.service import (
+    ClearingCommittedAfterCancellation,
+    ClearingService,
+)
 from app.core.simulator.edge_patch_builder import EdgePatchBuilder
 from app.core.simulator.models import RunRecord
 from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter
@@ -263,7 +266,9 @@ class RealClearingEngine:
                                         amts.append(Decimal(str(edge.get("amount"))))
                                     else:
                                         amts.append(Decimal(str(getattr(edge, "amount"))))
-                                clear_amount = min(amts) if amts else Decimal("0")
+                                candidate_amount = (
+                                    min(amts) if amts else Decimal("0")
+                                )
                             except Exception:
                                 if self._should_warn_this_tick(
                                     run, f"clearing_clear_amount_parse_failed:{eq}"
@@ -275,19 +280,25 @@ class RealClearingEngine:
                                         str(eq),
                                         exc_info=True,
                                     )
-                                clear_amount = Decimal("0")
+                                candidate_amount = Decimal("0")
 
                             self._logger.warning(
-                                "simulator.real.clearing_execute_start run_id=%s tick=%s eq=%s clear_amount=%s cycle_len=%s",
+                                "simulator.real.clearing_execute_start run_id=%s tick=%s eq=%s candidate_amount=%s cycle_len=%s",
                                 str(run.run_id),
                                 int(run.tick_index),
                                 str(eq),
-                                str(clear_amount),
+                                str(candidate_amount),
                                 int(len(cycle or [])),
                             )
                             _exec_t0 = time.monotonic()
+                            commit_cancellation = None
                             try:
-                                success = await service.execute_clearing(cycle)
+                                actual_amount = (
+                                    await service.execute_clearing_with_amount(cycle)
+                                )
+                            except ClearingCommittedAfterCancellation as exc:
+                                actual_amount = exc.cleared_amount
+                                commit_cancellation = exc
                             except asyncio.CancelledError:
                                 raise
                             except Exception as exc:
@@ -301,7 +312,7 @@ class RealClearingEngine:
                                 str(run.run_id),
                                 int(run.tick_index),
                                 str(eq),
-                                bool(success),
+                                actual_amount is not None,
                                 int(_exec_ms),
                             )
                             if _exec_ms > 500:
@@ -313,10 +324,12 @@ class RealClearingEngine:
                                     int(_exec_ms),
                                 )
 
-                            if success:
+                            if actual_amount is not None:
+                                actual_amount = Decimal(str(actual_amount))
+                                if actual_amount <= 0:
+                                    raise GeoException()
                                 cleared_cycles += 1
-                                if clear_amount > 0:
-                                    cleared_amount_dec += clear_amount
+                                cleared_amount_dec += actual_amount
 
                                 try:
                                     for edge in cycle:
@@ -333,7 +346,7 @@ class RealClearingEngine:
                                             edge_key = (creditor_pid, debtor_pid)
                                             cleared_amount_per_edge[edge_key] = (
                                                 cleared_amount_per_edge.get(edge_key, 0.0)
-                                                + float(clear_amount)
+                                                + float(actual_amount)
                                             )
                                 except Exception:
                                     if self._should_warn_this_tick(
@@ -347,6 +360,8 @@ class RealClearingEngine:
                                             exc_info=True,
                                         )
                                 executed = True
+                                if commit_cancellation is not None:
+                                    raise commit_cancellation
                                 break
 
                         if not executed:

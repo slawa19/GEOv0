@@ -20,7 +20,10 @@ from sqlalchemy import and_, func, select
 from app.api import deps
 from app.config import settings
 from app.core.simulator.runtime import runtime
-from app.core.clearing.service import ClearingService
+from app.core.clearing.service import (
+    ClearingCommittedAfterCancellation,
+    ClearingService,
+)
 from app.core.payments.router import PaymentRouter
 from app.core.payments.service import PaymentService
 from app.core.simulator.edge_patch_builder import EdgePatchBuilder
@@ -1659,7 +1662,12 @@ async def action_clearing_real(
 
             executed_this_round = False
             for cycle in cycles:
-                clear_amt = await service.execute_clearing_with_amount(cycle)
+                commit_cancellation = None
+                try:
+                    clear_amt = await service.execute_clearing_with_amount(cycle)
+                except ClearingCommittedAfterCancellation as exc:
+                    clear_amt = exc.cleared_amount
+                    commit_cancellation = exc
                 if clear_amt is None:
                     continue
 
@@ -1686,6 +1694,8 @@ async def action_clearing_real(
                         edges=edges,
                     )
                 )
+                if commit_cancellation is not None:
+                    raise commit_cancellation
                 break
 
             if not executed_this_round:
