@@ -160,7 +160,7 @@ retryable-конфликта вместо `E010`; (3) `finally`-гарантия
 | ID | Задача | Статус |
 |---|---|---|
 | T400 | PG-репродьюсер F-004-1 (`25P02` после проглоченного `40001`) | `[x]` |
-| T401 | Вынести/классифицировать best-effort audit-блок; убрать `except Exception: continue/pass` | `[!]` |
+| T401 | Вынести/классифицировать best-effort audit-блок; убрать `except Exception: continue/pass` | `[x]` |
 | T402 | Единый классификатор ошибок БД на границе сервиса + типизированный retryable-код | `[!]` |
 | T403 | Расширить guard вставки tx-строки за пределы `IntegrityError` — **одним guard'ом внутри `PaymentService`** вокруг `service.py:543-568` в `_create_payment_impl` (`:258`), который наследуют все **три** потребителя. Подробности и критерии приёмки — ниже | `[!]` |
 | T404 | `finally`-гарантия терминального состояния для отмены и таймаута (staged и non-staged) | `[!]` |
@@ -222,3 +222,21 @@ retryable-конфликта вместо `E010`; (3) `finally`-гарантия
 - До T401 репродьюсер помечен `xfail(strict=True)` (`:16-19`): улучшение немедленно даст XPASS и
   потребует снять маркер. Та же canonical команда с `-TaskSlug wave2_t400` — exit `0`,
   `1 xfailed`; pinned Ruff для файла и `git diff --check` — exit `0`.
+
+### 2026-08-11 — T401
+
+- Implementation commit: `c10a61a`. До изменения оба audit checkpoint блока проглатывали любые
+  исключения (`app/core/payments/engine.py:985-988,1149-1152`), поэтому исходный PostgreSQL
+  `40001` терялся до следующего statement.
+- После изменения DBAPI-ошибки немедленно пробрасываются в существующий whole-UoW classifier
+  (`app/core/payments/engine.py:985-998,1168-1184`); non-DB ошибки диагностики остаются явно
+  best-effort, но теперь логируются с `tx_id` и `error_type`. Добавлять симптом `25P02` в retry-set
+  не потребовалось, и lock-identity surface 002 не менялась.
+- Anti-vacuum countercheck на `tests/integration/test_payment_engine_audit_conflict_postgres.py:140-143`
+  бросает `ValueError` уже после настоящего database retry и доказывает, что безопасная non-DB
+  ошибка аудита не отменяет платёж. `xfail(strict=True)` снят.
+- Canonical PostgreSQL gate на реальном репродьюсере и существующем whole-UoW test
+  (`-TaskSlug wave2_t401_pg_counter -BackendOnly -BackendMarker postgres`) — exit `0`, `2 passed`.
+  Canonical SQLite regression selector
+  (`-TaskSlug wave2_t401_unit`, savepoint retry + payments 2PC + prepare taxonomy) — exit `0`,
+  `32 passed`. Pinned Ruff на изменённых файлах и `git diff --check` — exit `0`.
