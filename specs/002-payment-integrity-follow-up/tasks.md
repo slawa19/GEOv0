@@ -48,7 +48,7 @@ Owner-authorized for Wave 3 on 2026-08-11; execute sequentially.
   synthetic DBAPI error.
 - [x] P103 Inventory all staged owners and choose complete-lock-set or coarser-owner
   acquisition with explicit transaction ownership.
-- [!] P104 Implement canonical unordered pair identity without changing directed
+- [x] P104 Implement canonical unordered pair identity without changing directed
   business/audit semantics.
 - [!] P105 Implement transaction-wide acquisition for staged owners; a retry-count
   increase is forbidden.

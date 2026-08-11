@@ -394,3 +394,29 @@ program.
 `spec.md`, `plan.md`, `tasks.md` — exit `0`; product code в P103 не менялся. После задачи decision
 record находится в `spec.md:348-394`, executable selection — в `plan.md:58-60`, P103 status — в
 `tasks.md:49-50`.
+
+### 2026-08-11 — P104
+
+- Перед правкой повторно подтверждено: `app/core/payments/engine.py:82-93` хешировал
+  `equivalent + from + to`, а unit contract требовал reverse inequality. Unit test сначала изменён
+  на canonical equality с anti-vacuum counterchecks для другой пары и другого equivalent
+  (`tests/unit/test_payment_engine_advisory_lock_key.py:8-36`). Canonical RED:
+  `DEBUG=false; .\scripts\verify_local.ps1 -TaskSlug wave3_p104_unit_red -BackendOnly -BackendSelector tests/unit/test_payment_engine_advisory_lock_key.py`
+  — exit `1`, `1 failed, 1 passed`, exact actual/target
+  `assert 4826006079362130129 == 9181403266758904393`.
+- Минимальная product-правка на `app/core/payments/engine.py:82-98` сортирует только UUID bytes двух
+  участников перед SHA-256. `equivalent_id` остаётся частью key material; method arguments,
+  persisted flows, trustline direction, audit payload и wire schema не менялись. Canonical unit
+  повтор с `-TaskSlug wave3_p104_unit` — exit `0`, `2 passed`; counterchecks `other_pair` и
+  `other_equivalent` остались неравны canonical key.
+- Временные `xfail(strict=True)` сняты с P100/P101 (`test_payment_pair_advisory_locks_postgres.py:22`
+  и `test_payment_inverse_multisegment_postgres.py:231`). Canonical PostgreSQL 16 milestone:
+  `DEBUG=false; TEST_DATABASE_URL=postgresql+asyncpg://geo:geo@localhost:55433/geov0_test_wave3; GEO_TEST_ALLOW_DB_RESET=1; $selectors=@('tests/integration/test_payment_pair_advisory_locks_postgres.py','tests/integration/test_payment_inverse_multisegment_postgres.py','tests/integration/test_payment_commit_advisory_locks_postgres.py'); .\scripts\verify_local.ps1 -TaskSlug wave3_p104_pg -BackendOnly -BackendMarker postgres -BackendSelector $selectors`
+  — exit `0`, `8 passed`. Оба start orders теперь реально ждут один pair lock и затем дают два
+  `COMMITTED`, направленные net debts `1.00000000`, ноль PrepareLocks, две audit rows и неизменные
+  limits (`test_payment_inverse_multisegment_postgres.py:300-384`).
+- P102 после P104 намеренно остаётся открытым до P105: canonical
+  `wave3_p104_staged_guard` на `test_payment_staged_multicall_postgres.py` — exit `0`, `1 xfailed`.
+  Это доказывает, что pair canonicalization не подменяет transaction-wide owner fix. Pinned
+  `ruff==0.1.14` и `git diff --check` — exit `0`. Implementation commit:
+  `2b00246b8106e15ec8f2e73857847d77fdd2e739`.
