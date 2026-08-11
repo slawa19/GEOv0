@@ -29,6 +29,13 @@ async def test_simulator_fixtures_mode_emits_clearing_done_with_plan_id(
     )
     assert resp.status_code == 200, resp.text
 
+    # Make the in-process ASGI response finite through the normal terminal
+    # run_status path. Production streaming code must not branch on pytest.
+    stop_resp = await client.post(
+        f"/api/v1/simulator/runs/{run_id}/stop", headers=auth_headers
+    )
+    assert stop_resp.status_code == 200, stop_resp.text
+
     url = f"/api/v1/simulator/runs/{run_id}/events"
 
     plan_id: str | None = None
@@ -38,7 +45,7 @@ async def test_simulator_fixtures_mode_emits_clearing_done_with_plan_id(
         "GET",
         url,
         headers={**auth_headers, "Last-Event-ID": f"evt_{run_id}_000000"},
-        params={"equivalent": "UAH", "stop_after_types": "clearing.done"},
+        params={"equivalent": "UAH"},
     ) as r:
         assert r.status_code == 200
 
@@ -67,6 +74,3 @@ async def test_simulator_fixtures_mode_emits_clearing_done_with_plan_id(
         await asyncio.wait_for(_read_until(), timeout=8.0)
 
     assert seen_done
-
-    # Cleanup: stop run to avoid background heartbeats affecting other tests.
-    await client.post(f"/api/v1/simulator/runs/{run_id}/stop", headers=auth_headers)

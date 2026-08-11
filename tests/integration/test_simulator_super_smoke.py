@@ -12,6 +12,8 @@ from typing import Any, Callable, Optional
 import pytest
 from httpx import AsyncClient
 
+from app.core.simulator.runtime import runtime
+
 
 pytestmark = pytest.mark.slow
 
@@ -88,7 +90,6 @@ async def _read_sse_events(
     run_id: str,
     eq: str,
     auth_headers: dict[str, str],
-    stop_after_types_param: Optional[str] = None,
     stop_when: Optional[Callable[[dict[str, Any], set[str]], bool]] = None,
     last_event_id: Optional[str] = None,
     timeout_sec: float = 10.0,
@@ -103,8 +104,34 @@ async def _read_sse_events(
     seen_types: set[str] = set()
 
     params: dict[str, Any] = {"equivalent": eq}
-    if stop_after_types_param is not None:
-        params["stop_after_types"] = stop_after_types_param
+
+    if stop_when is not None:
+        # Debug-path coordinator for the buffering ASGI test transport: wait
+        # for a real runtime event, then close the run through the same terminal
+        # run_status path used in production. The SSE generator stays identical
+        # under pytest and outside it.
+        observer = await runtime.subscribe(
+            run_id,
+            equivalent=eq,
+            after_event_id=last_event_id,
+        )
+        observer_seen = {"run_status"}
+        try:
+            async with asyncio.timeout(timeout_sec):
+                while True:
+                    event = await observer.queue.get()
+                    event_type = event.get("type")
+                    if isinstance(event_type, str) and event_type:
+                        observer_seen.add(event_type)
+                    if stop_when(event, observer_seen):
+                        await runtime.stop(run_id)
+                        break
+        except TimeoutError:
+            raise _SuperSimFailure(
+                f"SSE coordinator timeout after {timeout_sec}s; types={sorted(observer_seen)}"
+            )
+        finally:
+            await runtime.unsubscribe(run_id, observer)
 
     try:
         async with asyncio.timeout(timeout_sec):
@@ -527,7 +554,6 @@ async def test_super_smoke_part1_fixtures_http_visual_contract(
                 eq=eq,
                 auth_headers=auth_headers,
                 last_event_id=f"evt_{cap.run_id}_000000",
-                stop_after_types_param="clearing.done",
                 stop_when=_stop_when,
                 timeout_sec=12.0,
             )
@@ -928,7 +954,6 @@ async def test_super_smoke_part3_real_mode_http_startup(
                 eq=eq,
                 auth_headers=auth_headers,
                 last_event_id=f"evt_{cap.run_id}_000000",
-                stop_after_types_param=None,
                 stop_when=_stop_when,
                 timeout_sec=12.0,
             )

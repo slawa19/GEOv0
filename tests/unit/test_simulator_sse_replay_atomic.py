@@ -174,6 +174,9 @@ async def test_stream_emits_single_bootstrap_tail_in_producer_order(monkeypatch)
         bootstrap_event_factory=build_status,
     )
     live_tail = [_event(sse, run) for _ in range(3)]
+    terminal = _event(sse, run, event_type="run_status")
+    terminal["state"] = "stopped"
+    live_tail.append(terminal)
     for event in live_tail:
         sse.broadcast(run.run_id, event)
 
@@ -199,7 +202,6 @@ async def test_stream_emits_single_bootstrap_tail_in_producer_order(monkeypatch)
             run_id=run.run_id,
             equivalent="EUR",
             last_event_id=str(cursor["event_id"]),
-            stop_after_types={"tx.updated"},
             subscription=sub,
             initial_status_event_id=str(bootstrap["event_id"]),
         )
