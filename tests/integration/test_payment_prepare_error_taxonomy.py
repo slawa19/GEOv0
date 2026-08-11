@@ -11,7 +11,7 @@ from decimal import Decimal
 import pytest
 from httpx import AsyncClient
 from nacl.signing import SigningKey
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import DBAPIError, OperationalError
 
 from app.config import settings
@@ -1014,11 +1014,11 @@ async def test_commit_cleanup_failure_is_safe_and_ordered(
 
 
 @pytest.mark.asyncio
-async def test_prepare_cancellation_is_not_converted_or_aborted(
+async def test_prepare_cancellation_preserves_cancel_and_durably_aborts(
     db_session,
     monkeypatch,
 ) -> None:
-    service, sender, request, _ = await _build_direct_payment(
+    service, sender, request, tx_id = await _build_direct_payment(
         db_session,
         suffix="cancelled",
     )
@@ -1032,21 +1032,138 @@ async def test_prepare_cancellation_is_not_converted_or_aborted(
     async def cancel_prepare(*args, **kwargs):
         raise asyncio.CancelledError
 
-    abort_called = False
-
-    async def forbidden_abort(*args, **kwargs):
-        nonlocal abort_called
-        abort_called = True
-
     monkeypatch.setattr(service.router, "build_graph", build_graph)
     monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
     monkeypatch.setattr(service.engine, "prepare", cancel_prepare)
-    monkeypatch.setattr(service.engine, "abort", forbidden_abort)
 
     with pytest.raises(asyncio.CancelledError):
         await service.create_payment(sender.id, request)
 
-    assert abort_called is False
+    transaction = (
+        await db_session.execute(select(Transaction).where(Transaction.tx_id == tx_id))
+    ).scalar_one()
+    assert transaction.state == "ABORTED"
+    assert transaction.error == {
+        "code": "E007",
+        "message": "Payment cancelled",
+        "details": {},
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["insert", "commit"])
+async def test_cancellation_at_other_payment_phases_has_terminal_state(
+    db_session,
+    monkeypatch,
+    phase: str,
+) -> None:
+    service, sender, request, tx_id = await _build_direct_payment(
+        db_session,
+        suffix=f"cancel_{phase}",
+    )
+
+    async def build_graph(equivalent_code: str, **kwargs) -> None:
+        return None
+
+    def find_flow_routes(from_pid: str, to_pid: str, amount: Decimal, **kwargs):
+        return [([from_pid, to_pid], amount)]
+
+    monkeypatch.setattr(service.router, "build_graph", build_graph)
+    monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
+
+    if phase == "insert":
+        original_commit = db_session.commit
+        commit_calls = 0
+
+        async def commit_then_cancel_once() -> None:
+            nonlocal commit_calls
+            commit_calls += 1
+            await original_commit()
+            if commit_calls == 1:
+                raise asyncio.CancelledError
+
+        monkeypatch.setattr(db_session, "commit", commit_then_cancel_once)
+    else:
+        async def prepare(tx_id_value: str, *args, **kwargs) -> None:
+            await db_session.execute(
+                update(Transaction)
+                .where(Transaction.tx_id == tx_id_value)
+                .values(state="PREPARED")
+            )
+            await db_session.commit()
+
+        async def cancel_commit(*args, **kwargs) -> None:
+            raise asyncio.CancelledError
+
+        monkeypatch.setattr(service.engine, "prepare", prepare)
+        monkeypatch.setattr(service.engine, "commit", cancel_commit)
+
+    with pytest.raises(asyncio.CancelledError):
+        await service.create_payment(sender.id, request)
+
+    transaction = (
+        await db_session.execute(select(Transaction).where(Transaction.tx_id == tx_id))
+    ).scalar_one()
+    assert transaction.state == "ABORTED"
+    assert transaction.error == {
+        "code": "E007",
+        "message": "Payment cancelled",
+        "details": {},
+    }
+
+
+@pytest.mark.asyncio
+async def test_staged_prepare_cancellation_aborts_before_outer_rollback(
+    db_session,
+    monkeypatch,
+) -> None:
+    service, sender, request, tx_id = await _build_direct_payment(
+        db_session,
+        suffix="cancel_staged_prepare",
+    )
+
+    async def build_graph(equivalent_code: str, **kwargs) -> None:
+        return None
+
+    def find_flow_routes(from_pid: str, to_pid: str, amount: Decimal, **kwargs):
+        return [([from_pid, to_pid], amount)]
+
+    async def cancel_prepare(*args, **kwargs) -> None:
+        raise asyncio.CancelledError
+
+    observed_states: list[str] = []
+    original_abort = service.engine.abort
+
+    async def tracked_abort(*args, **kwargs):
+        result = await original_abort(*args, **kwargs)
+        state = (
+            await db_session.execute(
+                select(Transaction.state).where(Transaction.tx_id == tx_id)
+            )
+        ).scalar_one()
+        observed_states.append(state)
+        return result
+
+    monkeypatch.setattr(service.router, "build_graph", build_graph)
+    monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
+    monkeypatch.setattr(service.engine, "prepare", cancel_prepare)
+    monkeypatch.setattr(service.engine, "abort", tracked_abort)
+
+    with pytest.raises(asyncio.CancelledError):
+        async with db_session.begin_nested():
+            await service.create_payment_internal_staged(
+                sender.id,
+                to_pid=request.to,
+                equivalent=request.equivalent,
+                amount=request.amount,
+                idempotency_key=tx_id,
+            )
+
+    assert observed_states == ["ABORTED"]
+    transaction = (
+        await db_session.execute(select(Transaction).where(Transaction.tx_id == tx_id))
+    ).scalar_one_or_none()
+    assert transaction is None
 
 
 @pytest.mark.asyncio
