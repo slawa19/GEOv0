@@ -203,6 +203,22 @@ Real mode: артефакты (dev perf)
 - Демо-кнопки (Single TX / Run Clearing) реализуются как backend actions, которые эмитят те же `tx.updated` / `clearing.*`.
 - Спецификация: [simulator/backend/backend-driven-demo-mode-spec.md](simulator/backend/backend-driven-demo-mode-spec.md)
 
+#### 1.11.1. Порядок SSE replay и абсолютных patch
+
+**Решение 2026-08-11:** отдельное поле `seq`/`version`/`ts` в `NodePatch`/`EdgePatch` не вводится.
+Production backend не может доставить ранее не виденное patch-событие после события с большим
+producer sequence: `publish_event()` выделяет id, пишет replay buffer и доставляет подписчикам под
+одним lock; подписка под тем же lock устанавливает полный replay-prefix и status, а возникший во
+время bootstrap live-tail сохраняется в producer order. При переполнении подписка закрывается и
+восстанавливает полный суффикс от последнего доставленного `Last-Event-ID`; если суффикс уже не
+сохранён или не помещается, backend отвечает replay-unavailable/410, а не выдаёт разрыв.
+
+Все production producers используют `publish_event`; `broadcast()` с заранее выданным id остаётся
+compatibility-path только для узких test doubles. Поэтому никогда не виденное событие с меньшим id
+не является поддерживаемым wire outcome, а producer-sequence gate в UI дублировал бы backend
+ordering contract и ошибочно отбрасывал бы данные при нестандартном id. Дедупликация по `event_id`
+и монотонный reconnect cursor сохраняются.
+
 ### 1.12. Защита конкурентных платежей и клиринга (Concurrency Control)
 
 Для предотвращения Lost Update при одновременной работе фонового клиринга и пользовательских платежей принята стратегия **Defence in Depth**:

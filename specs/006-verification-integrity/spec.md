@@ -161,7 +161,7 @@ sequence (что требует протокольного поля), либо �
 
 | ID | Задача | Статус |
 |---|---|---|
-| T600 | **VERIFY FIRST.** Доказать на `sse_broadcast.py`, может ли бэкенд доставить не виденное ранее более старое patch-событие. По итогу — либо гейт применения patch по producer sequence (нужно протокольное поле seq/version/ts в `NodePatch`/`EdgePatch`), либо датированное решение о приемлемости устаревших абсолютных patch | `[!]` |
+| T600 | **VERIFY FIRST.** Доказать на `sse_broadcast.py`, может ли бэкенд доставить не виденное ранее более старое patch-событие. По итогу — либо гейт применения patch по producer sequence (нужно протокольное поле seq/version/ts в `NodePatch`/`EdgePatch`), либо датированное решение о приемлемости устаревших абсолютных patch | `[x]` |
 | T601 | Убрать ветвление по `PYTEST_CURRENT_TEST` из production SSE (F-006-2, P2) | `[x]` |
 | T602 | Решить судьбу `stop_after_types`: сделать работающим вне pytest или убрать из контракта и сигнатур (F-006-2b, P3) | `[!]` |
 | T603 | Включить rate limiter в тестах; покрыть 429/окно/fallback | `[!]` |
@@ -227,3 +227,29 @@ sequence (что требует протокольного поля), либо �
   `945 passed, 3 skipped, 15 deselected`, Alembic head `017`, Admin lint/test/build и Simulator
   lint/typecheck/test/build прошли, Simulator unit — `729 passed`; финальная строка
   `Required local validation passed.`
+
+### 2026-08-11 — T600
+
+- Перед изменением finding сверена по актуальным anchors. **Current:** patch-применитель действительно
+  не имеет собственного sequence guard (`simulator-ui/v2/src/demo/patches.ts:44-62`), но production
+  transport выделяет id, добавляет buffer и dispatch'ит событие атомарно под одним `RLock`
+  (`app/core/simulator/sse_broadcast.py:247-276`); replay snapshot, bootstrap status и регистрация
+  подписчика устанавливаются под тем же lock (`:303-384`), live-tail замораживается в порядке
+  producer (`:387-399`). Queue overflow закрывает подписку, а reconnect либо восстанавливает полный
+  суффикс, либо fail-closed (`:134-170,175-190,199-239`). Runtime-вызовов compatibility
+  `broadcast()`/`next_event_id()` в `app/` нет: production emitter выбирает `publish_event`
+  (`:431-445`), run-status делает то же в `runtime_impl.py:495`.
+- **Intended:** ранее не виденный меньший producer id не должен появляться после большего; отсутствие
+  measurement нельзя было подменять UI-фильтром. **Optimal:** сохранить единый ordering-owner в
+  backend и не добавлять протокольное поле/клиентский gate для невозможного canonical outcome.
+  Датированное решение добавлено в `docs/ru/09-decisions-and-defaults.md` §1.11.1; product code и
+  wire schema не менялись.
+- Evidence: `rg -n "\.broadcast\(|next_event_id\(" app tests -g "*.py"` — exit `0`, совпадения в
+  `app/` только внутри compatibility implementation, все прямые callers — tests; canonical
+  `DEBUG=false; ENV=test; .\scripts\verify_local.ps1 -TaskSlug wave5_t600_replay_order
+  -BackendOnly -BackendSelector tests/unit/test_simulator_sse_replay_atomic.py
+  -Python .\.venv\Scripts\python.exe` — exit `0`, `13 passed`; `npm --prefix simulator-ui/v2 run
+  test:unit -- src/composables/realEventPipeline.test.ts` — exit `0`, `13 passed`. Первый selector
+  доказывает atomic producer ordering, replay/bootstrap/live-tail и overflow recovery; второй
+  сохраняет event-id deduplication и monotonic reconnect cursor. До/после: patch schema и
+  применитель неизменны; новый owner record — `docs/ru/09-decisions-and-defaults.md` §1.11.1.
