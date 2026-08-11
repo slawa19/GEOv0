@@ -165,7 +165,7 @@ retryable-конфликта вместо `E010`; (3) `finally`-гарантия
 | T403 | Расширить guard вставки tx-строки за пределы `IntegrityError` — **одним guard'ом внутри `PaymentService`** вокруг `service.py:543-568` в `_create_payment_impl` (`:258`), который наследуют все **три** потребителя. Подробности и критерии приёмки — ниже | `[x]` |
 | T404 | `finally`-гарантия терминального состояния для отмены и таймаута (staged и non-staged) | `[x]` |
 | T405 | Симметричное логирование timeout-abort в обеих ветках | `[x]` |
-| T406 | Решение по ретраю/маппингу для trustlines и integrity сервисов | `[!]` |
+| T406 | Решение по ретраю/маппингу для trustlines и integrity сервисов | `[x]` |
 | T407 | Синхронизация `docs/ru/09-decisions-and-defaults.md` и платёжной RU-документации | `[!]` |
 | T408 | Независимое ревью и evidence на точном HEAD | `[!]` |
 
@@ -332,3 +332,19 @@ retryable-конфликта вместо `E010`; (3) `finally`-гарантия
   `populate_existing=True` (`service.py:928,977`); targeted `wave2_t405_timeout_fix` — exit `0`,
   `2 passed`, полный `wave2_t405_final` — exit `0`, `39 passed`. Pinned Ruff и
   `git diff --check` — exit `0`.
+
+### 2026-08-11 — T406
+
+- Fresh owner scan
+  `rg -n "except Exception|await .*commit|compute_integrity_checkpoint" app/core/trustlines/service.py app/api/v1/integrity.py app/core/clearing/service.py`
+  — exit `0`; подтвердил trustlines `:81-82,137-140,242-250,335-343`, integrity
+  `:260-261 -> :287` и clearing siblings `:964-969,1022-1027`. F-004-7 остаётся подтверждённой.
+- **Current:** clearing уже имеет собственный mapper и принадлежит 003; trustlines/integrity не
+  имеют owner-программы и смешивают два разных риска — poisoned transaction и потерю audit row.
+  **Intended:** не расширять payment Wave 2 на sibling services. **Optimal:** будущий owner-slice
+  отдельно проектирует transaction guard и политику полноты аудита; один savepoint не выдаётся за
+  решение обоих рисков.
+- Регистрация уже присутствовала в пользовательском `specs/BACKLOG.md`, раздел
+  «Проглатывание исключений: экземпляры без владельца», с пятью подтверждёнными инстансами и явным
+  разделением классов (а)/(б). Поэтому BACKLOG повторно не переписывался, код trustlines,
+  integrity и clearing не менялся. T406 закрыта как решение/маршрутизация, не как фиктивный fix.
