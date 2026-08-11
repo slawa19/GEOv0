@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -174,6 +175,69 @@ async def test_admin_abort_tx_uses_lock_protected_already_aborted_metric(
     assert _abort_metric_value('already_aborted') - already_aborted_before == 1
     await db_session.refresh(tx)
     assert tx.state == 'ABORTED'
+
+
+@pytest.mark.asyncio
+async def test_admin_abort_tx_bounds_staged_owner_wait_and_rolls_back(
+    client,
+    db_session,
+    monkeypatch,
+):
+    alice = Participant(
+        pid='abort-timeout-alice',
+        display_name='Alice',
+        public_key='T' * 64,
+        type='person',
+        status='active',
+    )
+    db_session.add(alice)
+    await db_session.flush()
+    tx = Transaction(
+        tx_id='TX_ABORT_OWNER_TIMEOUT',
+        type='PAYMENT',
+        initiator_id=alice.id,
+        payload={'from': 'alice', 'to': 'bob', 'amount': '1.00', 'equivalent': 'UAH', 'routes': []},
+        state='WAITING',
+    )
+    db_session.add(tx)
+    await db_session.commit()
+
+    abort_cancelled = asyncio.Event()
+
+    async def _block_abort(*_args, **_kwargs):
+        try:
+            await asyncio.Event().wait()
+        finally:
+            abort_cancelled.set()
+
+    monkeypatch.setattr(
+        'app.api.v1.admin.PaymentEngine.abort',
+        _block_abort,
+    )
+    monkeypatch.setattr(settings, 'PAYMENT_TOTAL_TIMEOUT_SECONDS', 0.02)
+    monkeypatch.setattr(settings, 'COMMIT_TIMEOUT_SECONDS', 0.01)
+
+    response = await client.post(
+        '/api/v1/admin/transactions/TX_ABORT_OWNER_TIMEOUT/abort',
+        headers={'X-Admin-Token': settings.ADMIN_TOKEN},
+        json={'reason': 'bounded owner wait'},
+    )
+
+    assert response.status_code == 504
+    assert response.json()['error']['code'] == 'E007'
+    assert abort_cancelled.is_set()
+    await db_session.refresh(tx)
+    assert tx.state == 'WAITING'
+    assert tx.error is None
+    row = (
+        await db_session.execute(
+            AuditLog.__table__.select().where(
+                AuditLog.action == 'admin.transactions.abort',
+                AuditLog.object_id == 'TX_ABORT_OWNER_TIMEOUT',
+            )
+        )
+    ).first()
+    assert row is None
 
 
 @pytest.mark.asyncio

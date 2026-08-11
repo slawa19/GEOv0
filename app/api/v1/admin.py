@@ -66,7 +66,12 @@ from app.core.clearing.service import ClearingService
 from app.core.admin.metrics import compute_participant_metrics
 from app.core.trustlines.service import TrustLineService
 from app.core.payments.engine import PaymentEngine
-from app.utils.exceptions import BadRequestException, ConflictException, NotFoundException
+from app.utils.exceptions import (
+    BadRequestException,
+    ConflictException,
+    NotFoundException,
+    TimeoutException,
+)
 from app.utils.metrics import PAYMENT_EVENTS_TOTAL
 from app.utils.request_id import new_request_id, request_id_var, validate_request_id
 from app.utils.validation import validate_equivalent_code, validate_equivalent_precision
@@ -1026,12 +1031,25 @@ async def abort_transaction(
         # Establish the outer transaction before PaymentEngine opens its retry
         # savepoint; neither the staged abort nor this audit is durable yet.
         await db.flush()
-        abort_outcome = await engine.abort(
-            tx_id,
-            reason=body.reason,
-            commit=False,
-            return_outcome=True,
+        abort_timeout_s = max(
+            0.001,
+            min(
+                float(settings.PAYMENT_TOTAL_TIMEOUT_SECONDS or 10),
+                float(settings.COMMIT_TIMEOUT_SECONDS or 5),
+            ),
         )
+        try:
+            abort_outcome = await asyncio.wait_for(
+                engine.abort(
+                    tx_id,
+                    reason=body.reason,
+                    commit=False,
+                    return_outcome=True,
+                ),
+                timeout=abort_timeout_s,
+            )
+        except asyncio.TimeoutError as exc:
+            raise TimeoutException("Admin transaction abort timed out") from exc
 
         tx2 = (
             await db.execute(

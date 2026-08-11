@@ -505,3 +505,25 @@ record находится в `spec.md:348-394`, executable selection — в `pla
 `owner → tx → first tx read`; это не пустой selector. `rg -n "PaymentEngine\\(|await engine\\.abort|create_payment_internal_staged|acquire_staged_equivalent_owner_locks"` по пяти owner files — exit `0` и
 подтвердил перечисленные anchors. Product code в P106 не менялся; stable RU deployment wording
 переносится без изменения решения в P108. `git diff --check` для `spec.md`/`tasks.md` — exit `0`.
+
+### 2026-08-11 — P105 review remediation
+
+- Независимый read-only audit exact HEAD
+  `f6f082a43ded38586b84b3061ca1e58d4f8a953e` подтвердил lock order, staged outer restart,
+  executor/tick coverage и monetary counterchecks, но нашёл два P2. Первый — опечатка в evidence
+  выше: SHA `4ca910c77f29509e6d0e89a798563d92aba29bb6` не существует; правильный implementation commit —
+  `4ca910c42baf10c865339663e43c2244a43d7242`. Историческая строка сохранена, это append-only
+  correction.
+- Второй P2: Admin owner вызывал `abort(commit=False)` без внешней deadline, тогда как staged
+  `_run_uow_with_retry` намеренно не устанавливает `SET LOCAL lock_timeout`. Теперь Admin оборачивает
+  весь staged abort в bounded `asyncio.wait_for`, использует тот же минимум payment-total/commit
+  budget и при истечении возвращает существующий `504/E007`; общий `BaseException` rollback
+  по-прежнему атомарно откатывает audit+abort (`app/api/v1/admin.py:1031-1059`). Regression
+  `tests/unit/test_admin_abort_tx.py:180-239` удерживает abort бесконечно, наблюдает cancellation,
+  `504/E007`, исходный `WAITING` и отсутствие durable audit.
+- Canonical remediation gate:
+  `DEBUG=false; $selectors=@('tests/unit/test_admin_abort_tx.py','tests/contract/test_openapi_contract.py'); .\scripts\verify_local.ps1 -TaskSlug wave3_p105_admin_timeout_final -BackendOnly -BackendSelector $selectors`
+  — exit `0`, `33 passed`; pinned Ruff и `git diff --check` по Admin source/test — exit `0`.
+  Отдельное предположение audit о late terminal pair lock после tx было отозвано самим reviewer:
+  на поддерживаемых одноверсионных paths matching equivalent owner уже удерживается, новый owner
+  после tx не приобретается.
