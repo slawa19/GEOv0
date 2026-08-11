@@ -71,7 +71,7 @@ All tasks are pending successful Phase 1 and owner authorization.
   boundary; avoid unrelated clearing refactoring.
 - [x] P202 Assert final debt, versions, trust limits, actual locked clearing amount,
   PrepareLocks and emitted/audit effects relevant to the boundary.
-- [!] P203 Run the exact-head payment/clearing PostgreSQL matrix.
+- [x] P203 Run the exact-head payment/clearing PostgreSQL matrix.
 - [!] P204 Synchronize stable docs and residual ledger.
 - [!] P205 Complete final reviews, rollback evidence, remote verification and
   program closeout.

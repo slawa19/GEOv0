@@ -821,3 +821,16 @@ P109 закрыта; Phase 1 не имеет открытых P1/P2 и гото�
 - Canonical команда:
   `$env:DEBUG='false'; $env:ENV='test'; $env:TEST_DATABASE_URL='postgresql+asyncpg://geo:geo@127.0.0.1:55433/geov0_test_wave4_p200_a5c0'; $env:GEO_TEST_ALLOW_DB_RESET='1'; $selectors=@('tests/integration/test_clearing_payment_prepare_interlock_postgres.py','tests/integration/test_concurrent_clearing_payment_lost_update_postgres.py'); .\scripts\verify_local.ps1 -TaskSlug wave4_002_p202_effects -BackendOnly -BackendMarker postgres -BackendSelector $selectors`
   — exit `0`, `3 passed`.
+
+### 2026-08-11 — P203
+
+- Exact product/test HEAD `0ceaab76df5d3caf19a536b94bda18c9eff0b433` проверен общей payment/clearing
+  PostgreSQL матрицей на заранее проверенной disposable DB
+  `geov0_test_wave4_p200_a5c0`. В selector вошли семь Phase-1 payment owner файлов, Wave-2 audit
+  conflict, четыре clearing ownership/interlock файла:
+  `$env:DEBUG='false'; $env:ENV='test'; $env:TEST_DATABASE_URL='postgresql+asyncpg://geo:geo@127.0.0.1:55433/geov0_test_wave4_p200_a5c0'; $env:GEO_TEST_ALLOW_DB_RESET='1'; $selectors=@('tests/integration/test_payment_pair_advisory_locks_postgres.py','tests/integration/test_payment_inverse_multisegment_postgres.py','tests/integration/test_payment_staged_multicall_postgres.py','tests/integration/test_payment_commit_advisory_locks_postgres.py','tests/integration/test_concurrent_prepare_routes_bottleneck_postgres.py','tests/integration/test_payment_idempotency_postgres.py','tests/integration/test_payment_engine_uow_retry_postgres.py','tests/integration/test_payment_engine_audit_conflict_postgres.py','tests/integration/test_clearing_payment_prepare_interlock_postgres.py','tests/integration/test_concurrent_clearing_payment_lost_update_postgres.py','tests/integration/test_clearing_skip_releases_locks_postgres.py','tests/integration/test_clearing_commit_replay_postgres.py'); .\scripts\verify_local.ps1 -TaskSlug wave4_002_p203_pg_matrix -BackendOnly -BackendMarker postgres -BackendSelector $selectors`
+  — exit `0`, `30 passed`.
+- Фактический pytest cache открыт, а не принят по summary: ровно 30 nodeids, включая оба P200 order,
+  unmatched-`40001`, acknowledgement-loss/cancellation replay, все skip branches, reverse pair,
+  inverse multisegment, staged multi-owner/timeout restoration, same-tx/abort/prepare contention,
+  idempotency, retry-UoW и audit-conflict. Отсутствующих измерений и marker-deselection нет.
