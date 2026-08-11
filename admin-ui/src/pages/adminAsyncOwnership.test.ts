@@ -86,7 +86,12 @@ async function settle() {
   await Promise.resolve()
 }
 
-function mountPage(component: Parameters<typeof shallowMount>[0], path: string, query: Record<string, unknown> = {}) {
+function mountPage(
+  component: Parameters<typeof shallowMount>[0],
+  path: string,
+  query: Record<string, unknown> = {},
+  renderCardContent = false,
+) {
   routing.route = reactive({ path, query })
   return shallowMount(component, {
     global: {
@@ -95,7 +100,7 @@ function mountPage(component: Parameters<typeof shallowMount>[0], path: string, 
       stubs: {
         ElAlert: true,
         ElButton: true,
-        ElCard: true,
+        ElCard: renderCardContent ? { template: '<div><slot /></div>' } : true,
         ElCol: true,
         ElDescriptions: true,
         ElDescriptionsItem: true,
@@ -390,7 +395,7 @@ describe('mounted non-Graph list request ownership', () => {
       top_by_abs_net: [],
       top_bottleneck_edges: [],
     }))
-    const wrapper = mountPage(LiquidityPage, '/liquidity', { equivalent: 'new' })
+    const wrapper = mountPage(LiquidityPage, '/liquidity', { equivalent: 'new' }, true)
     await settle()
     await settle()
     const state = setupState(wrapper)
@@ -400,6 +405,8 @@ describe('mounted non-Graph list request ownership', () => {
     expect(state.money('0.0001')).toBe('0.0001')
     expect(state.showCountKpis).toBe(true)
     expect(state.showMoneyKpis).toBe(true)
+    expect(wrapper.find('[data-testid="liquidity-count-kpis"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="liquidity-money-kpis"]').exists()).toBe(true)
 
     state.equivalentsList = []
     await nextTick()
@@ -407,6 +414,8 @@ describe('mounted non-Graph list request ownership', () => {
     expect(state.money('0.0001')).toBe('—')
     expect(state.showCountKpis).toBe(true)
     expect(state.showMoneyKpis).toBe(false)
+    expect(wrapper.find('[data-testid="liquidity-count-kpis"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="liquidity-money-kpis"]').exists()).toBe(false)
     wrapper.unmount()
   })
 
