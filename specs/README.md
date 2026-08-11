@@ -23,7 +23,7 @@
 |---|---|---|---|---|
 | 001 | [codebase-renovation](001-codebase-renovation/spec.md) | ✅ **ЗАКРЫТА** 2026-08-09 | — | весь репозиторий |
 | 002 | [payment-integrity-follow-up](002-payment-integrity-follow-up/spec.md) | 🟡 Phase 1 закрыта 2026-08-11; Phase 2 авторизована для Волны 4 | 2 × P2 | `app/core/payments/`, `app/core/clearing/` (interlock) |
-| 003 | [clearing-transaction-ownership](003-clearing-transaction-ownership/spec.md) | 🟡 авторизована для Волны 4 | 2 × P2, 2 × P3 | `app/core/clearing/`, `app/core/recovery.py`, `real_clearing_engine.py` |
+| 003 | [clearing-transaction-ownership](003-clearing-transaction-ownership/spec.md) | ✅ **ЗАКРЫТА** 2026-08-11 (T300–T307) | 2 × P2, 2 × P3 | `app/core/clearing/`, `app/core/recovery.py`, `real_clearing_engine.py` |
 | 004 | [payment-conflict-taxonomy](004-payment-conflict-taxonomy/spec.md) | ✅ **ЗАКРЫТА** 2026-08-11 (T400-T408) | 1 × P2, 6 × P3 | `payments/service.py`, `main.py` handlers |
 | 005 | [runtime-security-hygiene](005-runtime-security-hygiene/spec.md) | ✅ **ЗАКРЫТА** 2026-08-11 | 2 × P2, 5 × P3 | `api/deps.py`, `main.py`, `health.py`, `docker/` |
 | 006 | [verification-integrity](006-verification-integrity/spec.md) | 🟡 срез Волны 1 закрыт; остаток авторизован для Волны 5 | 1 × P2, 9 × P3 | `tests/`, CI, SSE-ветвление |
@@ -51,8 +51,8 @@
 007  ─── НЕ АВТОРИЗОВАНА: отдельная разблокировка F-007-1 ───────────────────┘
 ```
 
-**Статус волн на 2026-08-11:** Волны 1–3 закрыты; следующая — Волна 4, программа 003 целиком,
-затем программа 002 Phase 2 (payment/clearing interlock).
+**Статус волн на 2026-08-11:** Волны 1–3 и программа 003 из Волны 4 закрыты; следующая — программа
+002 Phase 2 (payment/clearing interlock), после неё Волна 4 будет закрыта целиком.
 
 **Почему такой порядок**
 

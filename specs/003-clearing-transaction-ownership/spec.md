@@ -1,7 +1,7 @@
 # 003 — Clearing transaction ownership and durable commit
 
 - **Date:** 2026-08-11
-- **Status:** IN PROGRESS — Wave 4 authorized by owner on 2026-08-11; T300 complete
+- **Status:** COMPLETE — T300–T307 closed on 2026-08-11; external verdict CLEAN on exact reviewed product/evidence HEAD
 - **Status authority:** эта метка описательная. Завершённость устанавливают только success criteria, записанные evidence и принятые review-артефакты ниже.
 - **Owner surface:** `app/core/clearing/`, `app/core/recovery.py`, публикация клиринга в `app/core/simulator/`
 - **Origin:** программа 002 явно вынесла эти находки за свой скоуп (`specs/002-payment-integrity-follow-up/tasks.md:78-89`) с формулировкой «requires a separately approved program rather than silent scope expansion». Эта спека — тот самый отдельный дом.
@@ -108,7 +108,7 @@ severity, а не за откладывание.
 | T304 | Публикация реально заблокированной суммы вместо кандидата: перевести `real_clearing_engine.py:290` с bool-обёртки `execute_clearing` на `execute_clearing_with_amount` и провести возвращённую сумму в `:318-319` и `:334-336` (F-003-3) | `[x]` |
 | T305 | Устранение повторной очистки lock в recovery (`recovery.py:131-136`) и исправление ложного комментария `recovery.py:126-128`; тест-дабл `tests/unit/test_recovery_cleanup.py:355-381` привести в соответствие с реальным поведением `abort` (F-003-4) | `[x]` |
 | T306 | Синхронизация `docs/ru/simulator/backend/payment-integration.md` и решений в `docs/ru/09-decisions-and-defaults.md` | `[x]` |
-| T307 | Независимое ревью и публикация evidence на точном HEAD | `[!]` |
+| T307 | Независимое ревью и публикация evidence на точном HEAD | `[x]` |
 
 Легенда: `[x]` выполнено, `[ ]` в работе, `[!]` заблокировано/не авторизовано.
 
@@ -322,3 +322,31 @@ severity, а не за откладывание.
   tests/integration/test_clearing_commit_replay_postgres.py` — exit `0`, `4 passed`; cache перечисляет
   оба post-commit boundary (`ack_loss`, `cancellation`), same-cycle `40001 -> COMMITTED` и новый
   отрицательный `40001 -> E010`. Pinned `ruff==0.1.14` для файла и `git diff --check` — exit `0`.
+
+### 2026-08-11 — T307 закрыта, финальная verification программы 003
+
+- Повторное независимое ревью Codex `gpt-5.6-sol` проверило exact HEAD
+  `320cf46a29b2a97e2398529824820cf5f5540c71`, delta
+  `88989eb9d0111740b087460717aad5d8b7bcffb0..320cf46a29b2a97e2398529824820cf5f5540c71`
+  в новом standalone `--no-local` clone с отдельным `.git`, без remote и credential helper.
+  Вердикт: `VERDICT-CLEAN`, открытых P1/P2 нет. Reviewer canonical selector нового negative
+  schedule — exit `0`, `1 passed`, collect-only — exit `0` и ровно один nodeid; PostgreSQL 16.9
+  наблюдал настоящий `40001`, E010, ноль clearing Transaction/audit и durable Debt `101/30/40`.
+  Reviewer pinned Ruff `0.1.14`, delta и whole-range `git diff --check` — exit `0`.
+- Финальная PostgreSQL verification plan:
+  `$env:DEBUG='false'; $env:ENV='test'; $env:TEST_DATABASE_URL='postgresql+asyncpg://geo:geo@127.0.0.1:55433/geov0_test_wave4_t303_negative_88989eb'; $env:GEO_TEST_ALLOW_DB_RESET='1'; $selectors=@('tests/integration/test_clearing_skip_releases_locks_postgres.py','tests/integration/test_clearing_commit_replay_postgres.py','tests/integration/test_concurrent_clearing_payment_lost_update_postgres.py'); .\scripts\verify_local.ps1 -TaskSlug wave4_003_t307_pg_final -BackendOnly -BackendMarker postgres -BackendSelector $selectors`
+  — exit `0`, `12 passed`; cache содержит ровно 12 ожидаемых nodeids по всем skip/replay/commit
+  boundary и clearing/payment contention путям.
+- Canonical caller/unit matrix из десяти selector'ов T301 — `wave4_003_t307_units_final`, exit `0`,
+  `81 passed`. Первый full-run `wave4_003_t307_full` был остановлен внешним shell timeout после
+  124 секунд (exit `124`) до результата и не принят как product evidence; запись сохранена, а не
+  заменена молча.
+- Повторный полный canonical gate
+  `$env:DEBUG='false'; $env:ENV='test'; Remove-Item Env:TEST_DATABASE_URL -ErrorAction SilentlyContinue; Remove-Item Env:GEO_TEST_ALLOW_DB_RESET -ErrorAction SilentlyContinue; .\scripts\verify_local.ps1 -TaskSlug wave4_003_t307_full_final`
+  — exit `0` за 494.2 s: backend `980 passed, 3 skipped, 34 deselected`; Alembic head
+  `017_add_owner_to_simulator_runs`; Admin lint без errors (`116 warnings`), unit/build успешно;
+  Simulator lint/typecheck, `729 passed`, build успешно. Runner завершил `Required local validation
+  passed`.
+- Финальный pinned `ruff==0.1.14` по всем изменённым Python owner/test surfaces и
+  `git diff --check 5b09e43e3779d63de5aeb8fb5352f668874d399e..320cf46a29b2a97e2398529824820cf5f5540c71`
+  — exit `0`. T300–T307 и все пять пунктов verification plan закрыты; программа 003 завершена.
