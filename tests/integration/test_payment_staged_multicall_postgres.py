@@ -435,3 +435,51 @@ async def test_staged_owner_sorts_multi_equivalent_sets_without_global_serializa
             await holder_session.rollback()
             await waiter_session.rollback()
             await independent_session.rollback()
+
+
+@pytest.mark.asyncio
+async def test_staged_owner_restores_outer_transaction_lock_timeout_postgres(
+    db_session,
+) -> None:
+    _require_postgres(db_session)
+
+    from tests.conftest import TestingSessionLocal
+
+    unrelated_lock_key = int.from_bytes(uuid.uuid4().bytes[:8], "big", signed=True)
+    blocked_task = None
+
+    async with (
+        TestingSessionLocal() as holder_session,
+        TestingSessionLocal() as staged_session,
+    ):
+        await holder_session.execute(
+            text("SELECT pg_advisory_xact_lock(:key)"),
+            {"key": unrelated_lock_key},
+        )
+        before = await staged_session.scalar(text("SHOW lock_timeout"))
+        assert before == "0"
+
+        engine = PaymentEngine(staged_session)
+        engine._advisory_lock_budget_s = 0.05
+
+        try:
+            await engine.acquire_staged_equivalent_owner_locks([uuid.uuid4()])
+            after = await staged_session.scalar(text("SHOW lock_timeout"))
+            assert after == before
+
+            blocked_task = asyncio.create_task(
+                staged_session.execute(
+                    text("SELECT pg_advisory_xact_lock(:key)"),
+                    {"key": unrelated_lock_key},
+                )
+            )
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(asyncio.shield(blocked_task), timeout=0.20)
+            assert not blocked_task.done()
+        finally:
+            if blocked_task is not None and not blocked_task.done():
+                blocked_task.cancel()
+            if blocked_task is not None:
+                await asyncio.gather(blocked_task, return_exceptions=True)
+            await staged_session.rollback()
+            await holder_session.rollback()

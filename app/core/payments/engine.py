@@ -147,7 +147,26 @@ class PaymentEngine:
         equivalent_ids: set[UUID] | list[UUID] | tuple[UUID, ...],
     ) -> None:
         """Acquire a caller-owned staged batch's complete equivalent set."""
-        await self._acquire_equivalent_owner_locks(equivalent_ids)
+        if not self._is_postgres():
+            return
+
+        previous_lock_timeout = await self.session.scalar(text("SHOW lock_timeout"))
+        acquired = False
+        try:
+            await self._acquire_equivalent_owner_locks(equivalent_ids)
+            acquired = True
+        finally:
+            # Staged callers own a larger outer transaction. The payment owner-lock
+            # deadline must not become the timeout policy for later clearing,
+            # drift or persistence statements in that transaction. If acquisition
+            # itself fails/cancels, the outer owner rolls back the unusable UoW.
+            if acquired:
+                await self.session.execute(
+                    text(
+                        "SELECT set_config('lock_timeout', :lock_timeout, true)"
+                    ),
+                    {"lock_timeout": str(previous_lock_timeout)},
+                )
 
     async def _acquire_tx_advisory_lock(self, tx_id: str) -> None:
         """Serialize all state transitions for one tx before authoritative reads."""
