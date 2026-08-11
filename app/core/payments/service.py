@@ -925,7 +925,7 @@ class PaymentService:
                                 await self.session.execute(
                                     select(Transaction).where(
                                         Transaction.tx_id == tx_id_str
-                                    )
+                                    ).execution_options(populate_existing=True)
                                 )
                             ).scalar_one_or_none()
                             committed_after_cancellation = (
@@ -974,7 +974,7 @@ class PaymentService:
                             await self.session.execute(
                                 select(Transaction).where(
                                     Transaction.tx_id == tx_id_str
-                                )
+                                ).execution_options(populate_existing=True)
                             )
                         ).scalar_one_or_none()
                     except Exception as read_error:
@@ -1016,6 +1016,11 @@ class PaymentService:
                         )
                     )
                     if abort_error is not None:
+                        logger.error(
+                            "event=payment.timeout_abort_failed tx_id=%s error_type=%s",
+                            tx_id_str,
+                            type(abort_error).__name__,
+                        )
                         if isinstance(abort_error, asyncio.CancelledError):
                             raise abort_error
             raise TimeoutException("Payment timed out")

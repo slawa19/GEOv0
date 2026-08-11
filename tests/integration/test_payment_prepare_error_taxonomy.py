@@ -28,6 +28,7 @@ from app.utils.exceptions import (
     GeoException,
     RetryablePaymentConflictException,
     RoutingException,
+    TimeoutException,
 )
 from tests.integration.test_scenarios import register_and_login, _sign_payment_request
 
@@ -1377,6 +1378,61 @@ async def test_timeout_abort_failure_is_safe_after_recovery_read(
     assert "error_type=RuntimeError" in abort_log.getMessage()
     assert raw_sentinel not in abort_log.getMessage()
     assert abort_log.exc_info is None
+
+
+@pytest.mark.asyncio
+async def test_staged_timeout_abort_failure_has_symmetric_safe_log(
+    db_session,
+    monkeypatch,
+    caplog,
+) -> None:
+    service, sender, request, tx_id = await _build_direct_payment(
+        db_session,
+        suffix="staged_timeout_abort_failure",
+    )
+    monkeypatch.setattr(settings, "PREPARE_TIMEOUT_SECONDS", 0.01, raising=False)
+    raw_sentinel = "staged-timeout-abort-secret"
+
+    async def build_graph(equivalent_code: str, **kwargs) -> None:
+        return None
+
+    def find_flow_routes(from_pid: str, to_pid: str, amount: Decimal, **kwargs):
+        return [([from_pid, to_pid], amount)]
+
+    async def slow_prepare(*args, **kwargs) -> None:
+        await asyncio.sleep(0.05)
+
+    async def fail_abort(*args, **kwargs) -> None:
+        raise RuntimeError(raw_sentinel)
+
+    monkeypatch.setattr(service.router, "build_graph", build_graph)
+    monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
+    monkeypatch.setattr(service.engine, "prepare", slow_prepare)
+    monkeypatch.setattr(service.engine, "abort", fail_abort)
+    caplog.set_level(logging.ERROR, logger="app.core.payments.service")
+
+    with pytest.raises(TimeoutException):
+        async with db_session.begin_nested():
+            await service.create_payment_internal_staged(
+                sender.id,
+                to_pid=request.to,
+                equivalent=request.equivalent,
+                amount=request.amount,
+                idempotency_key=tx_id,
+            )
+
+    abort_log = next(
+        record
+        for record in caplog.records
+        if "event=payment.timeout_abort_failed" in record.getMessage()
+    )
+    assert "error_type=RuntimeError" in abort_log.getMessage()
+    assert raw_sentinel not in abort_log.getMessage()
+    assert abort_log.exc_info is None
+    transaction = (
+        await db_session.execute(select(Transaction).where(Transaction.tx_id == tx_id))
+    ).scalar_one_or_none()
+    assert transaction is None
 
 
 @pytest.mark.asyncio
