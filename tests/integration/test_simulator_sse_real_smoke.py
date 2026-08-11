@@ -4,6 +4,8 @@ import json
 import pytest
 from httpx import AsyncClient
 
+from app.core.simulator.runtime import runtime
+
 
 @pytest.mark.asyncio
 async def test_simulator_run_events_sse_real_mode_has_run_status_and_tx_updated(
@@ -22,6 +24,42 @@ async def test_simulator_run_events_sse_real_mode_has_run_status_and_tx_updated(
     assert resp.status_code == 200, resp.text
     run_id = resp.json()["run_id"]
 
+    # Wait on the real runtime broadcast until the event under test is fully
+    # patched, then terminate the run through its normal lifecycle. This makes
+    # the in-process ASGI response finite without changing production behavior.
+    observer = await runtime.subscribe(
+        run_id,
+        equivalent="UAH",
+        after_event_id=f"evt_{run_id}_000000",
+    )
+    try:
+        async def _wait_for_patched_tx() -> None:
+            while True:
+                event = await observer.queue.get()
+                if event.get("type") != "tx.updated":
+                    continue
+                edges = event.get("edges")
+                edge_patch = event.get("edge_patch")
+                node_patch = event.get("node_patch")
+                if (
+                    isinstance(edges, list)
+                    and edges
+                    and isinstance(edge_patch, list)
+                    and edge_patch
+                    and isinstance(node_patch, list)
+                    and node_patch
+                ):
+                    return
+
+        await asyncio.wait_for(_wait_for_patched_tx(), timeout=10.0)
+    finally:
+        await runtime.unsubscribe(run_id, observer)
+
+    stop_resp = await client.post(
+        f"/api/v1/simulator/runs/{run_id}/stop", headers=auth_headers
+    )
+    assert stop_resp.status_code == 200, stop_resp.text
+
     url = f"/api/v1/simulator/runs/{run_id}/events"
 
     seen_run_status = False
@@ -33,7 +71,7 @@ async def test_simulator_run_events_sse_real_mode_has_run_status_and_tx_updated(
         async with client.stream(
             "GET",
             url,
-            headers=auth_headers,
+            headers={**auth_headers, "Last-Event-ID": f"evt_{run_id}_000000"},
             params={"equivalent": "UAH"},
         ) as r:
             assert r.status_code == 200

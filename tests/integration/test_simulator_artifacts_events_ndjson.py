@@ -4,6 +4,8 @@ import json
 import pytest
 from httpx import AsyncClient
 
+from app.core.simulator.runtime import runtime
+
 
 @pytest.mark.asyncio
 async def test_simulator_artifacts_include_events_ndjson(
@@ -22,12 +24,32 @@ async def test_simulator_artifacts_include_events_ndjson(
     assert resp.status_code == 200, resp.text
     run_id = resp.json()["run_id"]
 
-    # Connect to SSE once to trigger at least one event emission.
+    # Trigger a real fixtures event, then close the run through the normal
+    # terminal status so HTTPX's buffering ASGI transport receives a finite
+    # production SSE response.
+    observer = await runtime.subscribe(run_id, equivalent="UAH")
+    try:
+        async def _wait_for_domain_event() -> None:
+            while True:
+                event = await observer.queue.get()
+                if event.get("type") != "run_status":
+                    return
+
+        await asyncio.wait_for(_wait_for_domain_event(), timeout=5.0)
+    finally:
+        await runtime.unsubscribe(run_id, observer)
+
+    stop_resp = await client.post(
+        f"/api/v1/simulator/runs/{run_id}/stop", headers=auth_headers
+    )
+    assert stop_resp.status_code == 200, stop_resp.text
+
+    # Exercise the actual HTTP replay path after the domain event is journaled.
     url = f"/api/v1/simulator/runs/{run_id}/events"
     async with client.stream(
         "GET",
         url,
-        headers=auth_headers,
+        headers={**auth_headers, "Last-Event-ID": f"evt_{run_id}_000000"},
         params={"equivalent": "UAH"},
     ) as r:
         assert r.status_code == 200
