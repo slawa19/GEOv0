@@ -97,7 +97,7 @@ liveness без деталей и аутентифицированный diagnos
 | T504 | Ограничить рост структуры rate-limiter | `[x]` |
 | T505 | Решение и реализация по `/health` degraded + HEALTHCHECK-потребителю | `[x]` |
 | T506 | `/api/v1/health` читает окружение через Settings | `[x]` |
-| T507 | Синхронизация `docs/ru/05-deployment.md`, `config-reference.md`, `09-decisions-and-defaults.md` | `[!]` |
+| T507 | Синхронизация `docs/ru/05-deployment.md`, `config-reference.md`, `09-decisions-and-defaults.md` | `[x]` |
 | T508 | Независимое внешнее ревью и evidence на точном HEAD (триггер AGENTS.md §15: периметр безопасности) | `[!]` |
 
 ## Changelog
@@ -237,3 +237,20 @@ liveness без деталей и аутентифицированный diagnos
   `$env:DEBUG='false'; .\scripts\verify_local.ps1 -TaskSlug wave1_t506_red -BackendOnly -BackendSelector tests/integration/test_health_and_equivalents.py`:
   exit `1`, `1 failed, 4 passed`; actual environment был `prod`, expected `staging`.
 - Тот же selector после исправления с `-TaskSlug wave1_t506`: exit `0`, `5 passed`.
+
+### 2026-08-11 — T507
+
+- Documentation commit: `564b42f97c4735027b3a24848d75ff83c3b14afa`.
+- До: `docs/ru/05-deployment.md` не описывал новые WS/health/image contracts;
+  `docs/ru/config-reference.md` не связывал health с resolved `Settings.ENV` и не фиксировал
+  внутренний cap rate-limit fallback; `docs/ru/09-decisions-and-defaults.md` не разделял public DB
+  readiness и admin diagnostic.
+- После: deployment contracts записаны в `docs/ru/05-deployment.md:127-148`, Settings/rate-limit
+  границы — в `docs/ru/config-reference.md:18-21,70-75`, решение DB health — в
+  `docs/ru/09-decisions-and-defaults.md:260-270`.
+- Red reference scan
+  `rg -n -e '/api/v1/admin/health/db' -e 'Sec-WebSocket-Protocol' -e 'dev-image-content' -e 'RATE_LIMIT_MAX_ENTRIES' docs/ru/05-deployment.md docs/ru/config-reference.md`:
+  exit `1`, совпадений не было. После синхронизации тот же scan с добавленным
+  `docs/ru/09-decisions-and-defaults.md`: exit `0`, все четыре контракта найдены.
+- `git diff --check -- docs/ru/05-deployment.md docs/ru/config-reference.md docs/ru/09-decisions-and-defaults.md`:
+  exit `0`; локальный scan Markdown targets для трёх файлов: `DOC_LINKS_OK`, exit `0`.
