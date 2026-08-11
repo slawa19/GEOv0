@@ -140,6 +140,76 @@ def _python_tool_module(command: str) -> str | None:
     return None
 
 
+def _is_venv_creation_command(command: str) -> bool:
+    executable, arguments = _command_executable(command)
+    return bool(
+        executable in {"py", "py.exe"}
+        and re.fullmatch(r"-m\s+venv\s+\.venv", arguments, re.IGNORECASE)
+    )
+
+
+def _is_venv_dependency_install_command(command: str) -> bool:
+    candidate = command.strip()
+    token = re.match(r"""^("[^"]+"|'[^']+'|\S+)(.*)$""", candidate)
+    if token is None:
+        return False
+    executable_path = token.group(1).strip("\"'").replace("\\", "/").lower()
+    arguments = token.group(2).lstrip()
+    return bool(
+        executable_path == "./.venv/scripts/python.exe"
+        and re.match(r"^-m\s+pip\s+install(?:\s|$)", arguments, re.IGNORECASE)
+        and re.search(r"(?:^|\s)-r\s+requirements\.txt(?:\s|$)", arguments)
+        and re.search(r"(?:^|\s)-r\s+requirements-dev\.txt(?:\s|$)", arguments)
+    )
+
+
+def _is_prepared_venv_tool_command(command: str, module: str) -> bool:
+    return bool(
+        re.match(
+            rf"^\.\\\.venv\\Scripts\\python\.exe\s+-m\s+{module}(?:\s|$)",
+            command,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _contributor_venv_violations(content: str) -> list[str]:
+    commands = [
+        command for _, command, _ in _iter_documented_commands_from_content(content)
+    ]
+    creation_indexes = [
+        index
+        for index, command in enumerate(commands)
+        if _is_venv_creation_command(command)
+    ]
+    install_indexes = [
+        index
+        for index, command in enumerate(commands)
+        if _is_venv_dependency_install_command(command)
+    ]
+    tool_indexes: list[int] = []
+    violations: list[str] = []
+    for index, command in enumerate(commands):
+        module = _python_tool_module(command)
+        if module is None:
+            continue
+        tool_indexes.append(index)
+        if not _is_prepared_venv_tool_command(command, module):
+            violations.append(f"tool does not use prepared venv: {command}")
+    if not creation_indexes:
+        violations.append("missing executable py -m venv .venv")
+    if not install_indexes:
+        violations.append("missing executable venv dependency install")
+    if (
+        creation_indexes
+        and install_indexes
+        and tool_indexes
+        and not min(creation_indexes) < min(install_indexes) < min(tool_indexes)
+    ):
+        violations.append("venv creation and install must precede Python-owned tools")
+    return violations
+
+
 def _shell_contract_violation(command: str, fence_language: str | None) -> bool:
     if re.match(
         r"^(?:TEST_DATABASE_URL|GEO_TEST_ALLOW_DB_RESET)\s*=",
@@ -441,20 +511,8 @@ def test_active_operational_docs_do_not_bypass_the_canonical_pytest_runner() -> 
 def test_contributor_guides_keep_python_tools_on_the_prepared_venv() -> None:
     for path in _CONTRIBUTOR_GUIDES:
         content = path.read_text(encoding="utf-8")
-        commands = [command for _, command, _ in _iter_documented_commands(path)]
-
-        assert "py -m venv .venv" in content
         assert "py -3.11 -m venv" not in content
-        assert r".\.venv\Scripts\python.exe -m pip" in content
-        assert r".\.venv\Scripts\python.exe -m ruff" in content
-        for command in commands:
-            module = _python_tool_module(command)
-            if module is not None:
-                assert re.match(
-                    rf"^\.\\\.venv\\Scripts\\python\.exe\s+-m\s+{module}(?:\s|$)",
-                    command,
-                    re.IGNORECASE,
-                )
+        assert _contributor_venv_violations(content) == []
 
 
 @pytest.mark.parametrize(
@@ -486,6 +544,31 @@ def test_python_tool_guard_recognizes_all_supported_launcher_shapes(
     module: str,
 ) -> None:
     assert _python_tool_module(command) == module
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        r"""
+```powershell
+# py -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m ruff check app migrations
+```
+""",
+        r"""
+```powershell
+py -m venv .venv
+Write-Host ".\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt"
+.\.venv\Scripts\python.exe -m ruff check app migrations
+```
+""",
+    ],
+)
+def test_contributor_venv_guard_rejects_missing_executable_setup_roles(
+    content: str,
+) -> None:
+    assert _contributor_venv_violations(content)
 
 
 @pytest.mark.parametrize(
