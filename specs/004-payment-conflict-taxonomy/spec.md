@@ -161,7 +161,7 @@ retryable-конфликта вместо `E010`; (3) `finally`-гарантия
 |---|---|---|
 | T400 | PG-репродьюсер F-004-1 (`25P02` после проглоченного `40001`) | `[x]` |
 | T401 | Вынести/классифицировать best-effort audit-блок; убрать `except Exception: continue/pass` | `[x]` |
-| T402 | Единый классификатор ошибок БД на границе сервиса + типизированный retryable-код | `[!]` |
+| T402 | Единый классификатор ошибок БД на границе сервиса + типизированный retryable-код | `[x]` |
 | T403 | Расширить guard вставки tx-строки за пределы `IntegrityError` — **одним guard'ом внутри `PaymentService`** вокруг `service.py:543-568` в `_create_payment_impl` (`:258`), который наследуют все **три** потребителя. Подробности и критерии приёмки — ниже | `[!]` |
 | T404 | `finally`-гарантия терминального состояния для отмены и таймаута (staged и non-staged) | `[!]` |
 | T405 | Симметричное логирование timeout-abort в обеих ветках | `[!]` |
@@ -240,3 +240,28 @@ retryable-конфликта вместо `E010`; (3) `finally`-гарантия
   Canonical SQLite regression selector
   (`-TaskSlug wave2_t401_unit`, savepoint retry + payments 2PC + prepare taxonomy) — exit `0`,
   `32 passed`. Pinned Ruff на изменённых файлах и `git diff --check` — exit `0`.
+
+### 2026-08-11 — T402
+
+- Implementation commit: `c5589d2`. Анкоры перед изменением подтвердились: generic prepare error
+  схлопывался в `GeoException/E010` на `app/core/payments/service.py:600-668`, generic commit error —
+  на `:683-810`; в `app/main.py:490,495` по-прежнему только GeoException и validation handlers.
+- Решение по границе записано явно. **Current:** PostgreSQL `40001/40P01` теряли тип и становились
+  500/E010. **Intended:** клиент и оба simulator-пути должны отличать transient conflict от
+  терминального rejection. **Optimal в разрешённом скоупе:** переиспользовать объявленный wire
+  contract HTTP `409` + `E008`, добавить только sanitized details
+  `retryable=true, conflict_kind=database_concurrency`; не вводить отсутствующие в OpenAPI 503 или
+  новый business code. Interactive/staged mapping этого типа принадлежит следующей T403.
+- Единый classifier расположен в `app/core/payments/service.py:44-95`: он обходит `orig`,
+  `__cause__`, `__context__`, понимает driver attributes `sqlstate`/`pgcode`/`code` и не принимает
+  SQLAlchemy wrapper `.code='dbapi'` за SQLSTATE. Типизированный подкласс существующего E008 —
+  `app/utils/exceptions.py:72-84`. Prepare/commit boundaries используют classifier на
+  `service.py:672-674,804`, а durable abort сохраняет тот же безопасный code/details на
+  `:840-857`.
+- Unit matrix `tests/unit/test_payment_db_error_classifier.py:25-68` покрывает `40001`, `40P01`,
+  три driver attribute, cause chain и контрпримеры `25P02/23505/08006`; integration cases prepare
+  и commit находятся в `tests/integration/test_payment_prepare_error_taxonomy.py:152-210`.
+  Первая реализация classifier дала canonical exit `1`, `7 failed, 31 passed`: wrapper
+  `.code='dbapi'` ошибочно перекрывал driver SQLSTATE; история сохранена, обход исправлен.
+- После исправления canonical selector `wave2_t402_boundary` — exit `0`, `40 passed`; OpenAPI
+  selector `wave2_t402_contract` — exit `0`, `23 passed`; pinned Ruff и `git diff --check` — exit `0`.
