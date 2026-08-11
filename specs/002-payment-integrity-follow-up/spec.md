@@ -1,6 +1,6 @@
 # 002 — Payment integrity follow-up
 
-Status: Phase 0 and Phase 1 complete; Phase 2 IN PROGRESS (owner-authorized 2026-08-11)
+Status: COMPLETE — Phases 0–2 closed 2026-08-11
 
 Owner surfaces: `app/core/payments/`, payment callers, the payment/clearing boundary
 
@@ -746,6 +746,16 @@ P109 закрыта; Phase 1 не имеет открытых P1/P2 и гото�
   Simulator visual E2E и super-smoke — каждый job success. Единственная annotation — предупреждение
   GitHub о принудительном Node 24 для action runtime; product gate не падал.
 
+### 2026-08-11 — Волна 4 / Program 002 Phase 2 закрыта
+
+- P200–P205 завершены: общий payment/clearing equivalent-owner boundary, оба порядка конкурентного
+  schedule, полные monetary/audit invariants, stable docs и exact-head review.
+- Adversarial review сохранил все неудачные попытки и выявил cleanup/pool/evidence gaps; они закрыты
+  узкими countertests и remediation commits. Финальный внешний Codex `gpt-5.6-sol` verdict на
+  `765bf962bde032f831446a49dd836e7b901889b4` — CLEAN, открытых P1/P2 нет.
+- Волна 4 закрыта; следующая авторизованная работа — Волна 5, остаток Program 006 и только узкие
+  правки разрешённого раздела `specs/BACKLOG.md`.
+
 ## 12. Phase 2 implementation evidence (append-only)
 
 ### 2026-08-11 — P200
@@ -897,3 +907,60 @@ P109 закрыта; Phase 1 не имеет открытых P1/P2 и гото�
   `docs/ru/02-protocol-spec.md:1139-1158`,
   `docs/ru/simulator/backend/payment-integration.md:81-89,264-268` и append-only residual ledger
   `phase0-evidence-map.md:279-291`.
+
+### 2026-08-11 — P205 review rounds 2–final
+
+- После первой remediation матрица `wave4_002_p205_final_pg1` завершилась exit `1`, `34 passed,
+  1 failed`: test-only `50ms` advisory budget остался включён для post-holder control connection.
+  После восстановления budget commit `2a80161` та же матрица (`wave4_002_p205_final_pg2`) — exit
+  `0`, `35 passed`. Это сохранённая harness-проблема, не product timeout.
+- На `2a80161` internal/external review нашли ещё одну cancellation seam: отмена initial preflight
+  SELECT/isolation discovery оставляла caller transaction активной. Real ACCESS EXCLUSIVE RED
+  `wave4_002_p205_preflight_cancel_red` — exit `1`, exact actual `in_transaction()==True`;
+  remediation `96f53bb` и тот же selector `wave4_002_p205_preflight_cancel_green` — exit `0`,
+  `1 passed`. Полная 12-file PG матрица `wave4_002_p205_final_pg3` — exit `0`, `36 passed`.
+- Review exact `96f53bb` затем честно вернул FINDINGS по трём P2: cancellation после physical
+  checkout могла оставить pool slot; cancellation во время fresh reconciliation после уже durable
+  commit теряла carrier; external-connection fixture делала skip evidence вакуумным. Исправления
+  доставлены отдельными commits: `53313fb` закрывает/дренирует pre-lock connection и имеет real
+  pool-size-1 countertest; `d0ed81e` дренирует ambiguous-commit reconciliation и сохраняет
+  `ClearingCommittedAfterCancellation`; `765bf96` вводит fail-closed engine-bound PostgreSQL
+  contract, переводит skip setup на committed engine-bound sessions и добавляет witnesses веток
+  `locked`/`policy`. Stable contract: `app/core/clearing/service.py:93-109,1025-1038,1116-1129,
+  1556-1572`, `docs/ru/09-decisions-and-defaults.md:239-250`,
+  `docs/ru/simulator/backend/payment-integration.md:81-90`.
+- Targeted canonical evidence: `wave4_002_p205_checkout_cancel` — exit `0`, `1 passed`;
+  `wave4_002_p205_reconcile_cancel` — exit `0`, `1 passed`; первая combined external-bind/skip
+  попытка `wave4_002_p205_engine_bound_contract` — exit `1`, `6 passed, 1 failed` из-за слишком
+  узкого test-only connect budget на Windows `localhost`; retry одного policy selector с default
+  budget — exit `0`, `1 passed`; финальный `wave4_002_p205_engine_bound_contract_final` — exit `0`,
+  `7 passed`.
+- Локальная full PG попытка через `localhost`, `wave4_002_p205_final_pg_765bf96`, была остановлена
+  timeout инструмента через `304s` без pytest result; процесс и DB соединение были завершены. Точная
+  повторная команда с IPv4 `127.0.0.1`, новой заранее проверенной disposable DB
+  `geov0_test_wave4_p205_765bf96_final2`, `-TaskSlug wave4_002_p205_final_pg_765bf96_ipv4`,
+  `-BackendMarker postgres` и двенадцатью P203 selectors — exit `0`, `39 passed`. Unit/recovery
+  matrix `wave4_002_p205_final_units_765bf96` — exit `0`, `97 passed`. Pinned `ruff 0.1.14 check app
+  migrations` и `git diff --check` — exit `0`.
+- Первая full-local попытка `wave4_002_p205_final_full_765bf96` была остановлена внешним timeout
+  `481.6s` после успешно завершённых backend (`981 passed, 3 skipped, 44 deselected`), Alembic и
+  Admin lint/test/build; Simulator UI не был измерен. Повтор exact product/test HEAD:
+  `DEBUG=false; ENV=test; .\scripts\verify_local.ps1 -TaskSlug
+  wave4_002_p205_final_full_765bf96_retry -Python .\.venv\Scripts\python.exe` — exit `0`; backend
+  `981 passed, 3 skipped, 44 deselected`, единственный Alembic head, Admin lint/test/build и
+  Simulator lint/typecheck/unit/build завершены canonical runner.
+- Internal exact-head review `765bf962bde032f831446a49dd836e7b901889b4` — CLEAN: отдельная DB,
+  core `22 passed`, 12-file PG `39 passed`, clearing/invariants `29 passed`, pinned Ruff и
+  diff-check exit `0`; DB удалена после active=`0`.
+- Обязательный внешний reviewer Codex `gpt-5.6-sol` проверил range
+  `a5c0f64e180b381e856786360f7ac937f4b63fa3..765bf962bde032f831446a49dd836e7b901889b4`
+  в standalone `--no-local` clone `E:\Temp\geov0-p205-final-review-765bf96-a84a7262`: отдельный
+  `.git`, remote отсутствует, credential helper пуст, tracked status clean. Verdict **CLEAN**, P1/P2
+  нет. Targeted remediation — exit `0`, `5 passed`; 12-file PG — exit `0`, `39 passed` и ровно 39
+  cache nodeids; unit — exit `0`, `116 passed`; pinned Ruff/diff-check — exit `0`. Disposable DB
+  `geov0_test_p205_final_a84a7262` удалена после active=`0`, remaining=`0`.
+- Product/review HEAD опубликован в `origin/codex/payment-integrity-follow-up-phase0`: `git push`
+  exit `0`; локальный `git rev-parse HEAD` и `git ls-remote origin` совпали на
+  `765bf962bde032f831446a49dd836e7b901889b4`.
+
+P205 закрыта; Program 002 и Волна 4 не имеют открытых P1/P2 в авторизованном скоупе.

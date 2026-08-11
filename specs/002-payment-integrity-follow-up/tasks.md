@@ -64,8 +64,7 @@ Owner-authorized for Wave 3 on 2026-08-11; execute sequentially.
 
 ## Phase 2 — Clearing interlock and closure
 
-Phase 1 is complete and Phase 2 was owner-authorized on 2026-08-11. P200-P204 are
-complete; P205 remains open until exact-head remediation review and closeout.
+Phase 2 and Program 002 were closed on 2026-08-11 after exact-head remediation review.
 
 - [x] P200 Add deterministic clearing-versus-new-prepare schedules for both orders.
 - [x] P201 Select and implement the smallest shared serialization or revalidation
@@ -74,7 +73,7 @@ complete; P205 remains open until exact-head remediation review and closeout.
   PrepareLocks and emitted/audit effects relevant to the boundary.
 - [x] P203 Run the exact-head payment/clearing PostgreSQL matrix.
 - [x] P204 Synchronize stable docs and residual ledger.
-- [!] P205 Complete final reviews, rollback evidence, remote verification and
+- [x] P205 Complete final reviews, rollback evidence, remote verification and
   program closeout.
 
 ## Explicitly separate work

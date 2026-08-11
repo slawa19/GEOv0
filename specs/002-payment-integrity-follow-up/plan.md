@@ -1,6 +1,6 @@
 # 002 — Delivery plan
 
-Status: Phase 0 and Phase 1 complete; Phase 2 IN PROGRESS (owner-authorized 2026-08-11)
+Status: COMPLETE — Phases 0–2 closed 2026-08-11
 
 Contract: [spec.md](spec.md)
 
