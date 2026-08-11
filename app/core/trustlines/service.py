@@ -280,58 +280,63 @@ class TrustLineService:
         if used > 0 or reverse_used > 0:
             raise BadRequestException("Cannot close trustline with non-zero debt")
 
-        checkpoint_before = None
-        try:
-            checkpoint_before = await compute_integrity_checkpoint_for_equivalent(
-                self.session,
-                equivalent_id=trustline.equivalent_id,
-            )
-        except Exception:
-            checkpoint_before = None
+        checkpoint_before = await compute_integrity_checkpoint_for_equivalent(
+            self.session,
+            equivalent_id=trustline.equivalent_id,
+        )
 
         trustline.status = 'closed'
 
         await self.session.flush()
 
-        try:
-            checkpoint_after = await compute_integrity_checkpoint_for_equivalent(
-                self.session,
-                equivalent_id=trustline.equivalent_id,
-            )
-            invariants_status = checkpoint_after.invariants_status or {}
-            passed = bool(invariants_status.get("passed", True))
-            before_sum = checkpoint_before.checksum if checkpoint_before else ""
-            after_sum = checkpoint_after.checksum or before_sum
+        checkpoint_after = await compute_integrity_checkpoint_for_equivalent(
+            self.session,
+            equivalent_id=trustline.equivalent_id,
+        )
+        invariants_status = checkpoint_after.invariants_status or {}
+        passed = bool(invariants_status.get("passed", True))
+        before_sum = checkpoint_before.checksum if checkpoint_before else ""
+        after_sum = checkpoint_after.checksum or before_sum
 
-            from_pid = (
-                await self.session.execute(select(Participant.pid).where(Participant.id == trustline.from_participant_id))
-            ).scalar_one_or_none()
-            to_pid = (
-                await self.session.execute(select(Participant.pid).where(Participant.id == trustline.to_participant_id))
-            ).scalar_one_or_none()
-            eq_code = (
-                await self.session.execute(select(Equivalent.code).where(Equivalent.id == trustline.equivalent_id))
-            ).scalar_one_or_none()
-
-            self.session.add(
-                IntegrityAuditLog(
-                    operation_type="TRUST_LINE_CLOSE",
-                    tx_id=None,
-                    equivalent_code=str(eq_code or trustline.equivalent_id),
-                    state_checksum_before=before_sum,
-                    state_checksum_after=after_sum,
-                    affected_participants={
-                        "from": str(from_pid or trustline.from_participant_id),
-                        "to": str(to_pid or trustline.to_participant_id),
-                        "trustline_id": str(trustline_id),
-                    },
-                    invariants_checked=invariants_status.get("checks") or invariants_status,
-                    verification_passed=passed,
-                    error_details=None if passed else invariants_status,
+        from_pid = (
+            await self.session.execute(
+                select(Participant.pid).where(
+                    Participant.id == trustline.from_participant_id
                 )
             )
-        except Exception:
-            pass
+        ).scalar_one_or_none()
+        to_pid = (
+            await self.session.execute(
+                select(Participant.pid).where(
+                    Participant.id == trustline.to_participant_id
+                )
+            )
+        ).scalar_one_or_none()
+        eq_code = (
+            await self.session.execute(
+                select(Equivalent.code).where(
+                    Equivalent.id == trustline.equivalent_id
+                )
+            )
+        ).scalar_one_or_none()
+
+        self.session.add(
+            IntegrityAuditLog(
+                operation_type="TRUST_LINE_CLOSE",
+                tx_id=None,
+                equivalent_code=str(eq_code or trustline.equivalent_id),
+                state_checksum_before=before_sum,
+                state_checksum_after=after_sum,
+                affected_participants={
+                    "from": str(from_pid or trustline.from_participant_id),
+                    "to": str(to_pid or trustline.to_participant_id),
+                    "trustline_id": str(trustline_id),
+                },
+                invariants_checked=invariants_status.get("checks") or invariants_status,
+                verification_passed=passed,
+                error_details=None if passed else invariants_status,
+            )
+        )
 
         equivalent_code = (
             await self.session.execute(
