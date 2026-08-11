@@ -23,6 +23,7 @@ pytestmark = pytest.mark.postgres
 async def test_skip_ends_service_owned_transaction_postgres(
     db_session,
     skip_branch,
+    monkeypatch,
 ):
     """Every None result must end the service-owned attempt."""
 
@@ -37,6 +38,7 @@ async def test_skip_ends_service_owned_transaction_postgres(
     from app.db.models.prepare_lock import PrepareLock
     from app.db.models.transaction import Transaction
     from app.db.models.trustline import TrustLine
+    from tests.conftest import TestingSessionLocal
 
     nonce = uuid.uuid4().hex[:10]
     equivalent_id = uuid.uuid4()
@@ -44,7 +46,8 @@ async def test_skip_ends_service_owned_transaction_postgres(
     a_id, b_id, c_id = participant_ids
     debt_ids = [uuid.uuid4() for _ in range(3)]
 
-    db_session.add(
+    session = TestingSessionLocal()
+    session.add(
         Equivalent(
             id=equivalent_id,
             code=f"SO{nonce}".upper(),
@@ -52,7 +55,7 @@ async def test_skip_ends_service_owned_transaction_postgres(
             precision=2,
         )
     )
-    db_session.add_all(
+    session.add_all(
         [
             Participant(
                 id=participant_id,
@@ -69,7 +72,7 @@ async def test_skip_ends_service_owned_transaction_postgres(
             )
         ]
     )
-    db_session.add_all(
+    session.add_all(
         [
             TrustLine(
                 from_participant_id=creditor_id,
@@ -90,7 +93,7 @@ async def test_skip_ends_service_owned_transaction_postgres(
             )
         ]
     )
-    db_session.add_all(
+    session.add_all(
         [
             Debt(
                 id=debt_id,
@@ -109,7 +112,7 @@ async def test_skip_ends_service_owned_transaction_postgres(
 
     if skip_branch == "locked":
         tx_id = str(uuid.uuid4())
-        db_session.add(
+        session.add(
             Transaction(
                 id=uuid.uuid4(),
                 tx_id=tx_id,
@@ -119,8 +122,8 @@ async def test_skip_ends_service_owned_transaction_postgres(
                 state="PREPARED",
             )
         )
-        await db_session.flush()
-        db_session.add(
+        await session.flush()
+        session.add(
             PrepareLock(
                 tx_id=tx_id,
                 participant_id=a_id,
@@ -138,27 +141,90 @@ async def test_skip_ends_service_owned_transaction_postgres(
             )
         )
 
-    await db_session.commit()
+    await session.commit()
 
-    cycle = [{"debt_id": str(debt_id)} for debt_id in debt_ids]
-    if skip_branch in {"empty", "malformed"}:
-        # Prove that even a pre-SQL rejection closes a transaction already opened
-        # by the caller's candidate lookup.
-        await db_session.execute(select(Debt.id).limit(1))
-        assert db_session.in_transaction()
-        cycle = [] if skip_branch == "empty" else [{"debt_id": "not-a-uuid"}]
-    elif skip_branch == "missing":
-        cycle[-1] = {"debt_id": str(uuid.uuid4())}
-    result = await ClearingService(db_session).execute_clearing_with_amount(cycle)
+    try:
+        cycle = [{"debt_id": str(debt_id)} for debt_id in debt_ids]
+        if skip_branch in {"empty", "malformed"}:
+            # Prove that even a pre-SQL rejection closes a transaction already
+            # opened by the caller's candidate lookup.
+            await session.execute(select(Debt.id).limit(1))
+            assert session.in_transaction()
+            cycle = [] if skip_branch == "empty" else [{"debt_id": "not-a-uuid"}]
+        elif skip_branch == "missing":
+            cycle[-1] = {"debt_id": str(uuid.uuid4())}
 
-    assert result is None
-    assert not db_session.in_transaction(), f"skip_branch={skip_branch}"
+        service = ClearingService(session)
+        branch_witness = False
+        if skip_branch == "locked":
+            original_locked_pairs = service._locked_pairs_for_equivalent
+
+            async def _witness_locked(equivalent):
+                nonlocal branch_witness
+                pairs = await original_locked_pairs(equivalent)
+                assert pairs
+                branch_witness = True
+                return pairs
+
+            monkeypatch.setattr(
+                service,
+                "_locked_pairs_for_equivalent",
+                _witness_locked,
+            )
+        elif skip_branch == "policy":
+            original_policy = service._cycle_respects_auto_clearing
+
+            async def _witness_policy(debts):
+                nonlocal branch_witness
+                allowed = await original_policy(debts)
+                assert allowed is False
+                branch_witness = True
+                return allowed
+
+            monkeypatch.setattr(
+                service,
+                "_cycle_respects_auto_clearing",
+                _witness_policy,
+            )
+
+        result = await service.execute_clearing_with_amount(cycle)
+
+        assert result is None
+        assert not session.in_transaction(), f"skip_branch={skip_branch}"
+        if skip_branch in {"locked", "policy"}:
+            assert branch_witness, f"skip_branch={skip_branch} was not reached"
+    finally:
+        await session.rollback()
+        await session.close()
+        async with TestingSessionLocal() as cleanup:
+            await cleanup.execute(
+                delete(PrepareLock).where(
+                    PrepareLock.participant_id.in_(participant_ids)
+                )
+            )
+            await cleanup.execute(
+                delete(Transaction).where(
+                    Transaction.initiator_id.in_(participant_ids)
+                )
+            )
+            await cleanup.execute(
+                delete(Debt).where(Debt.equivalent_id == equivalent_id)
+            )
+            await cleanup.execute(
+                delete(TrustLine).where(TrustLine.equivalent_id == equivalent_id)
+            )
+            await cleanup.execute(
+                delete(Participant).where(Participant.id.in_(participant_ids))
+            )
+            await cleanup.execute(
+                delete(Equivalent).where(Equivalent.id == equivalent_id)
+            )
+            await cleanup.commit()
 
 
 @pytest.mark.asyncio
 async def test_policy_skip_releases_debt_rows_before_concurrent_payment_postgres(
     db_session,
-    monkeypatch,
 ):
     dialect = None
     try:
@@ -168,7 +234,6 @@ async def test_policy_skip_releases_debt_rows_before_concurrent_payment_postgres
     if dialect not in {"postgresql", "postgres"}:
         pytest.skip("Postgres-only: clearing skip-path row-lock ownership")
 
-    from app.config import settings
     from app.core.clearing.service import ClearingService
     from app.core.payments.router import PaymentRouter
     from app.core.payments.service import PaymentService
@@ -182,10 +247,6 @@ async def test_policy_skip_releases_debt_rows_before_concurrent_payment_postgres
     from app.schemas.payment import PaymentConstraints
     from app.utils.exceptions import TimeoutException
     from tests.conftest import TestingSessionLocal
-
-    # Keep the real database wait bounded without injecting a synthetic DBAPI error.
-    monkeypatch.setattr(settings, "COMMIT_TIMEOUT_SECONDS", 2)
-    monkeypatch.setattr(settings, "PAYMENT_TOTAL_TIMEOUT_SECONDS", 3)
 
     nonce = uuid.uuid4().hex[:10]
     equivalent_id = uuid.uuid4()

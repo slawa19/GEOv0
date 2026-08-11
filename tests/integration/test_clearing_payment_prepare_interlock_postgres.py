@@ -624,6 +624,44 @@ async def test_clearing_interlock_completes_with_single_connection_pool_postgres
 
 
 @pytest.mark.asyncio
+async def test_postgres_clearing_rejects_external_connection_bind_postgres(
+    db_session,
+):
+    """The one-connection boundary accepts engine-bound sessions only."""
+
+    _require_postgres(db_session)
+
+    from app.core.clearing.service import ClearingService
+    from app.utils.exceptions import GeoException
+    from tests.conftest import TEST_DATABASE_URL
+
+    one_connection_engine = create_async_engine(
+        TEST_DATABASE_URL,
+        isolation_level="SERIALIZABLE",
+        pool_size=1,
+        max_overflow=0,
+        pool_timeout=0.25,
+    )
+    try:
+        async with one_connection_engine.connect() as external_connection:
+            async with AsyncSession(bind=external_connection) as external_session:
+                with pytest.raises(GeoException):
+                    await ClearingService(
+                        external_session
+                    ).execute_clearing_with_amount(
+                        [{"debt_id": str(uuid.uuid4())}]
+                    )
+                assert not external_session.in_transaction()
+                assert one_connection_engine.pool.checkedout() == 1
+
+        assert one_connection_engine.pool.checkedout() == 0
+        async with one_connection_engine.connect() as probe:
+            assert await probe.scalar(text("SELECT 1")) == 1
+    finally:
+        await one_connection_engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_cancellation_after_interlock_checkout_returns_connection_postgres(
     db_session,
     monkeypatch,

@@ -239,7 +239,9 @@ connection, а не возврату её в pool. Поэтому уже под�
 ожидания, новый prepare не проходит между пустым conflict snapshot и денежной мутацией, и одна
 попытка не требует двух pool connections. Ожидание ограничено общим advisory budget; PostgreSQL
 `55P03` отображается в существующий timeout contract. Направление Debt/TrustLine и payload не
-канонизируется и не меняется.
+канонизируется и не меняется. Эта PostgreSQL-граница принимает только `AsyncSession`, привязанную к
+`AsyncEngine`: externally bound `AsyncConnection` отклоняется до preflight, потому что сервис не
+может вернуть чужое соединение в pool перед захватом своей единственной pinned connection.
 
 Протокол не имеет mixed-version bridge. Upgrade и rollback требуют coordinated quiescence:
 остановить API payment writers, clearing workers, real ticks, Admin abort и recovery; дождаться

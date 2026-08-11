@@ -84,7 +84,9 @@ Source of truth:
   Денежный UoW завершается до exact unlock; при неподтверждённом unlock connection инвалидируется и
   физически закрывается. Поэтому committed `PrepareLock` после ожидания виден, новый prepare не
   пересекает уже принятое clearing conflict decision, а попытка не занимает две pool connections.
-  `55P03` остаётся bounded timeout, направление долгов и payload не меняется.
+  `55P03` остаётся bounded timeout, направление долгов и payload не меняется. На PostgreSQL входная
+  `AsyncSession` должна быть привязана к `AsyncEngine`; externally bound `AsyncConnection` сервис
+  отклоняет до preflight, чтобы не требовать второе соединение из pool.
 
 ---
 

@@ -1022,6 +1022,21 @@ class ClearingService:
         if self._dialect_name() not in {"postgresql", "postgres"} or not cycle:
             return await self._execute_clearing_with_amount(cycle)
 
+        bind = getattr(self.session, "bind", None)
+        if isinstance(bind, AsyncConnection):
+            # PostgreSQL clearing owns a one-connection interlock boundary. An
+            # externally owned connection cannot be returned before the pinned
+            # work connection is acquired, so accepting it could exhaust even
+            # a valid single-connection pool.
+            await self._rollback_before_interlock(self.session)
+            logger.error("event=clearing.external_connection_bind_unsupported")
+            raise GeoException() from RuntimeError(
+                "PostgreSQL clearing requires an engine-bound AsyncSession"
+            )
+        if not isinstance(bind, AsyncEngine):
+            await self._raise_unexpected_execution(GeoException())
+        lock_bind = bind
+
         try:
             debt_ids = [uuid.UUID(str(edge["debt_id"])) for edge in cycle]
         except Exception:
@@ -1071,15 +1086,6 @@ class ClearingService:
         except Exception as exc:
             await self._raise_unexpected_execution(exc)
 
-        bind = getattr(self.session, "bind", None)
-        if bind is None:
-            await self._raise_unexpected_execution(GeoException())
-        if isinstance(bind, AsyncConnection):
-            lock_bind: AsyncEngine = bind.engine
-        elif isinstance(bind, AsyncEngine):
-            lock_bind = bind
-        else:
-            await self._raise_unexpected_execution(GeoException())
         try:
             await self._rollback_before_interlock(self.session)
         except asyncio.CancelledError:
