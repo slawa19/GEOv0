@@ -12,16 +12,18 @@ lightweight RealRunner with mocked DB session for async methods.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import threading
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
+from app.core.payments.router import PaymentRouter
 from app.core.simulator.models import EdgeClearingHistory, RunRecord, TrustDriftConfig
 from app.core.simulator.real_runner import RealRunner
 
@@ -347,6 +349,13 @@ class TestApplyTrustGrowth:
 
         current_limit = 1000.0
         session = _make_growth_session(current_limit=current_limit)
+        observed_limit_at_commit: list[float] = []
+
+        async def commit() -> None:
+            observed_limit_at_commit.append(float(scenario["trustlines"][0]["limit"]))
+
+        session.commit = AsyncMock(side_effect=commit)
+        PaymentRouter._graph_cache["UAH"] = object()
 
         touched_edges: set[tuple[str, str]] = {("alice", "bob")}
         cleared_amounts: dict[tuple[str, str], float] = {("alice", "bob"): 200.0}
@@ -366,6 +375,72 @@ class TestApplyTrustGrowth:
             if t["from"] == "alice" and t["to"] == "bob"
         )
         assert ab_tl["limit"] == expected_limit
+        assert observed_limit_at_commit == [1000.0]
+        assert "UAH" not in PaymentRouter._graph_cache
+
+    async def test_growth_commit_failure_keeps_scenario_and_cache_unchanged(self) -> None:
+        scenario = _make_scenario(trust_drift={"enabled": True, "growth_rate": 0.05})
+        runner = _make_runner(scenario=scenario)
+        run = _make_run()
+        runner._init_trust_drift(run, scenario)
+        session = _make_growth_session(current_limit=1000.0)
+        session.commit = AsyncMock(side_effect=RuntimeError("growth commit failed"))
+        session.rollback = AsyncMock()
+        PaymentRouter._graph_cache["UAH"] = object()
+
+        with pytest.raises(RuntimeError, match="growth commit failed"):
+            await runner._apply_trust_growth(
+                run,
+                session,
+                {("alice", "bob")},
+                "UAH",
+                tick_index=8,
+                cleared_amount_per_edge={("alice", "bob"): 200.0},
+            )
+
+        assert scenario["trustlines"][0]["limit"] == 1000
+        assert "UAH" in PaymentRouter._graph_cache
+        session.rollback.assert_awaited_once()
+        history = run._edge_clearing_history["alice:bob:UAH"]
+        assert history.clearing_count == 1
+        assert history.last_clearing_tick == 8
+        assert history.cleared_volume == Decimal("200.00")
+        PaymentRouter._graph_cache.pop("UAH", None)
+
+    async def test_growth_cancellation_after_commit_applies_committed_effects(self) -> None:
+        scenario = _make_scenario(trust_drift={"enabled": True, "growth_rate": 0.05})
+        runner = _make_runner(scenario=scenario)
+        run = _make_run()
+        runner._init_trust_drift(run, scenario)
+        session = _make_growth_session(current_limit=1000.0)
+        commit_started = asyncio.Event()
+        release_commit = asyncio.Event()
+
+        async def commit() -> None:
+            commit_started.set()
+            await release_commit.wait()
+
+        session.commit = AsyncMock(side_effect=commit)
+        PaymentRouter._graph_cache["UAH"] = object()
+        task = asyncio.create_task(
+            runner._apply_trust_growth(
+                run,
+                session,
+                {("alice", "bob")},
+                "UAH",
+                tick_index=9,
+                cleared_amount_per_edge={("alice", "bob"): 200.0},
+            )
+        )
+
+        await commit_started.wait()
+        task.cancel("growth cancelled")
+        release_commit.set()
+        with pytest.raises(asyncio.CancelledError, match="growth cancelled"):
+            await task
+
+        assert scenario["trustlines"][0]["limit"] == 1050.0
+        assert "UAH" not in PaymentRouter._graph_cache
 
     async def test_growth_capped_by_max_growth(self) -> None:
         """When limit already near cap, growth is bounded by original_limit × max_growth."""
@@ -484,6 +559,7 @@ class TestApplyTrustDecay:
         }
 
         session = _make_decay_session()
+        PaymentRouter._graph_cache["UAH"] = object()
 
         res = await runner._apply_trust_decay(
             run, session, tick_index=10, debt_snapshot=debt_snapshot,
@@ -491,6 +567,13 @@ class TestApplyTrustDecay:
         )
 
         assert res.updated_count == 1
+        assert scenario["trustlines"][0]["limit"] == 1000
+        assert "UAH" in PaymentRouter._graph_cache
+        runner._trust_drift_engine.apply_committed_effects(
+            scenario=scenario,
+            result=res,
+        )
+        assert "UAH" not in PaymentRouter._graph_cache
         # new_limit = max(1000 * (1 - 0.02), 1000 * 0.3) = max(980, 300) = 980.0
         expected = round(1000.0 * (1 - 0.02), 2)
         ab_tl = next(
@@ -545,6 +628,11 @@ class TestApplyTrustDecay:
         )
 
         assert res.updated_count == 1
+        assert scenario["trustlines"][0]["limit"] == 350
+        runner._trust_drift_engine.apply_committed_effects(
+            scenario=scenario,
+            result=res,
+        )
         # new_limit = max(350 * (1 - 0.5), 1000 * 0.3) = max(175, 300) = 300.0
         ab_tl = scenario["trustlines"][0]
         assert ab_tl["limit"] == 300.0

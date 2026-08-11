@@ -80,9 +80,19 @@ class RealTickTrustDriftCoordinator:
         if not decay_res.updated_count:
             return
 
+        def apply_committed_effects() -> None:
+            self._apply_callback(on_commit, kind="post_commit")
+            self._apply_callback(
+                lambda: trust_drift_engine.apply_committed_effects(
+                    scenario=scenario,
+                    result=decay_res,
+                ),
+                kind="trust_drift_post_commit",
+            )
+
         await self._commit_and_resolve(
             session,
-            on_commit=on_commit,
+            on_commit=apply_committed_effects,
             on_rollback=on_rollback,
             on_unknown=on_unknown,
         )

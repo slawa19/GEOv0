@@ -8,10 +8,12 @@ from typing import Any, Callable
 from sqlalchemy import select, update
 
 from app.core.payments.router import PaymentRouter
+from app.core.simulator.commit_resolution import resolve_commit_under_cancellation
 from app.core.simulator.models import (
     EdgeClearingHistory,
     RunRecord,
     TrustDriftConfig,
+    TrustDriftLimitUpdate,
     TrustDriftResult,
 )
 from app.core.simulator.scenario_equivalent import effective_equivalent
@@ -99,6 +101,37 @@ class TrustDriftEngine:
         self._logger = logger
         self._get_scenario_raw = get_scenario_raw
 
+    def apply_committed_effects(
+        self,
+        *,
+        scenario: dict[str, Any],
+        result: TrustDriftResult,
+    ) -> None:
+        """Publish staged limit changes to in-memory owners after DB commit."""
+
+        updates = tuple(result.committed_limit_updates or ())
+        if not updates:
+            return
+
+        trustlines = scenario.get("trustlines") or []
+        for update_item in updates:
+            for trustline in trustlines:
+                if (
+                    str(trustline.get("from") or "").strip()
+                    == update_item.creditor_pid
+                    and str(trustline.get("to") or "").strip()
+                    == update_item.debtor_pid
+                    and str(effective_equivalent(scenario, trustline) or "")
+                    .strip()
+                    .upper()
+                    == update_item.equivalent
+                ):
+                    trustline["limit"] = float(update_item.new_limit)
+                    break
+
+        for equivalent in result.touched_equivalents:
+            PaymentRouter._graph_cache.pop(str(equivalent).strip().upper(), None)
+
     def init_trust_drift(self, run: RunRecord, scenario: dict[str, Any]) -> None:
         """Initialize trust drift config and edge clearing history from scenario."""
 
@@ -182,6 +215,10 @@ class TrustDriftEngine:
 
         updated = 0
         updated_edges: set[tuple[str, str]] = set()
+        committed_limit_updates: list[TrustDriftLimitUpdate] = []
+        scenario = getattr(run, "_scenario_raw", None) or self._get_scenario_raw(
+            run.scenario_id
+        )
         for creditor_pid, debtor_pid in touched_edges:
             key = f"{creditor_pid}:{debtor_pid}:{eq_upper}"
             hist = run._edge_clearing_history.get(key)
@@ -250,22 +287,14 @@ class TrustDriftEngine:
                     .values(limit=new_limit)
                 )
 
-                # Update scenario trustlines in-memory
-                scenario = getattr(run, "_scenario_raw", None) or self._get_scenario_raw(
-                    run.scenario_id
+                committed_limit_updates.append(
+                    TrustDriftLimitUpdate(
+                        creditor_pid=creditor_pid,
+                        debtor_pid=debtor_pid,
+                        equivalent=eq_upper,
+                        new_limit=new_limit,
+                    )
                 )
-                s_tls = scenario.get("trustlines") or []
-                for s_tl in s_tls:
-                    if (
-                        str(s_tl.get("from") or "").strip() == creditor_pid
-                        and str(s_tl.get("to") or "").strip() == debtor_pid
-                        and str(effective_equivalent(scenario, s_tl) or "")
-                        .strip()
-                        .upper()
-                        == eq_upper
-                    ):
-                        s_tl["limit"] = float(new_limit)
-                        break
 
                 self._logger.info(
                     "simulator.real.trust_drift.growth key=%s old=%s new=%s",
@@ -276,18 +305,27 @@ class TrustDriftEngine:
                 updated += 1
                 updated_edges.add((creditor_pid, debtor_pid))
 
-        if updated:
-            # Trust drift changes limits and must invalidate routing cache.
-            PaymentRouter._graph_cache.pop(eq_upper, None)
-            await clearing_session.commit()
-
         touched_eqs = {eq_upper} if updated_edges else set()
         touched_edges_by_eq = {eq_upper: updated_edges} if updated_edges else {}
-        return TrustDriftResult(
+        result = TrustDriftResult(
             updated_count=int(updated),
             touched_equivalents=touched_eqs,
             touched_edges_by_eq=touched_edges_by_eq,
+            committed_limit_updates=tuple(committed_limit_updates),
         )
+        if updated:
+            await resolve_commit_under_cancellation(
+                commit=clearing_session.commit,
+                rollback=clearing_session.rollback,
+                on_commit=lambda: self.apply_committed_effects(
+                    scenario=scenario,
+                    result=result,
+                ),
+                on_rollback=lambda: None,
+                on_unknown=lambda: None,
+                logger=self._logger,
+            )
+        return result
 
     async def apply_trust_decay(
         self,
@@ -315,6 +353,7 @@ class TrustDriftEngine:
         updated = 0
         touched_eq_codes: set[str] = set()
         touched_edges_by_eq: dict[str, set[tuple[str, str]]] = {}
+        committed_limit_updates: list[TrustDriftLimitUpdate] = []
         trustlines = scenario.get("trustlines") or []
 
         for tl in trustlines:
@@ -412,8 +451,14 @@ class TrustDriftEngine:
                 .values(limit=new_limit)
             )
 
-            # Update scenario trustlines in-memory
-            tl["limit"] = float(new_limit)
+            committed_limit_updates.append(
+                TrustDriftLimitUpdate(
+                    creditor_pid=creditor_pid,
+                    debtor_pid=debtor_pid,
+                    equivalent=eq_code,
+                    new_limit=new_limit,
+                )
+            )
             touched_eq_codes.add(eq_code)
             touched_edges_by_eq.setdefault(eq_code, set()).add((creditor_pid, debtor_pid))
 
@@ -426,14 +471,11 @@ class TrustDriftEngine:
             )
             updated += 1
 
-        if touched_eq_codes:
-            for eq in touched_eq_codes:
-                PaymentRouter._graph_cache.pop(str(eq).strip().upper(), None)
-
         return TrustDriftResult(
             updated_count=int(updated),
             touched_equivalents=set(touched_eq_codes),
             touched_edges_by_eq={k: set(v) for k, v in touched_edges_by_eq.items()},
+            committed_limit_updates=tuple(committed_limit_updates),
         )
 
     def broadcast_trust_drift_changed(

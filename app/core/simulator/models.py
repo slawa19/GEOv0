@@ -29,10 +29,19 @@ class InjectResult:
 
 
 @dataclass(frozen=True)
+class TrustDriftLimitUpdate:
+    creditor_pid: str
+    debtor_pid: str
+    equivalent: str
+    new_limit: Decimal
+
+
+@dataclass(frozen=True)
 class TrustDriftResult:
     updated_count: int
     touched_equivalents: set[str] = field(default_factory=set)
     touched_edges_by_eq: dict[str, set[tuple[str, str]]] = field(default_factory=dict)
+    committed_limit_updates: tuple[TrustDriftLimitUpdate, ...] = ()
 
 
 @dataclass(frozen=True)
