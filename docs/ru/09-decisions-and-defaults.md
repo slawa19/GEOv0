@@ -241,6 +241,25 @@ serialization boundary между новым payment prepare и clearing. Это
 задачей программы 002 Phase 2; до её закрытия Defence in Depth выше не следует трактовать как
 доказательство полной payment/clearing сериализации.
 
+#### 1.12.1. Владение и подтверждение транзакции клиринга
+
+**Решение 2026-08-11:** `ClearingService.execute_clearing_with_amount()` владеет execution-UoW.
+Возвращённый положительный amount означает durable commit; любой skip (`None`) завершает attempt
+rollback и освобождает его row locks. Caller-owned режим `commit=False` для клиринга не вводится.
+
+Occurrence имеет стабильный UUIDv5 от канонического неупорядоченного набора Debt UUID. После потери
+подтверждения повтор того же набора возвращает durable `Transaction.payload.amount` и не создаёт
+второй Transaction, audit или денежный эффект. Набор с новым Debt UUID — новая occurrence и не
+поглощается replay-защитой. Это внутренний протокол; новый HTTP idempotency contract для
+`POST /clearing/auto` не вводится.
+
+Commit дренируется до terminal result. Если cancellation пришла после durable commit, внутренний
+`ClearingCommittedAfterCancellation` несёт `tx_id` и фактическую сумму: Real/Interact publisher
+сначала учитывает результат и выпускает partial `clearing.done`, затем сохраняет cancellation.
+Candidate amount не является источником accounting; aggregate, per-edge trust growth и SSE получают
+только фактическую сумму сервиса. Очисткой `PrepareLock` для terminal payment abort целиком владеет
+`PaymentEngine`; recovery не повторяет его DELETE/commit.
+
 ### 1.13. Simulator (prod demo): анонимные посетители через cookie (per-owner runs)
 
 Решение: для прод-демо симулятора без логина используем **анонимную cookie-сессию**, которая задаёт `owner_id` для run’ов. Все control-plane эндпоинты симулятора работают в семантике **per-owner active run**.

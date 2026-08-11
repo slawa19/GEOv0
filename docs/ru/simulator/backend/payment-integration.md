@@ -73,6 +73,11 @@ Source of truth:
 - Guardrail: `CLEARING_ENABLED` может выключать clearing.
 - Есть distributed lock: `dlock:clearing:{equivalent}`.
 - `ClearingService` избегает пар участников, затронутых активными prepared payment flows (см. `_locked_pairs_for_equivalent`).
+- `execute_clearing_with_amount()` владеет одной попыткой целиком: успешный amount уже durable,
+  любой `None` завершает попытку rollback и не оставляет row locks вызывающему.
+- Идентичность occurrence — UUIDv5 от канонического неупорядоченного набора Debt UUID. Повтор того
+  же набора после потери подтверждения возвращает сохранённый `Transaction.payload.amount`, не
+  применяя эффект повторно; новый набор с новым Debt UUID считается новой occurrence.
 - Этот snapshot-guard не является общей serialization boundary с новым payment prepare. Полный
   payment/clearing interlock остаётся открытой задачей программы 002 Phase 2.
 
@@ -240,6 +245,15 @@ MVP правило:
 Визуализация:
 - по результату:
   - эмитить `clearing.done` с `cycle_edges` (список затронутых рёбер `{from,to}` для FX) и `cleared_amount`.
+
+`cleared_amount` берётся только из результата `execute_clearing_with_amount()`, полученного после
+блокировки строк; предварительный minimum из candidate edges используется лишь для диагностики.
+Тот же actual amount используется в aggregate, per-edge trust-growth и SSE.
+
+Если caller отменён после того, как commit уже стал durable, сервис поднимает
+`ClearingCommittedAfterCancellation` (подкласс `CancelledError`) с `tx_id` и actual amount. Real и
+Interact publishers сначала учитывают этот durable result и выпускают partial `clearing.done`, затем
+повторно распространяют cancellation. Обычная отмена до подтверждённого commit не выдаётся за успех.
 
 Guardrails:
 - учитывать, что `ClearingService` пропускает циклы, затрагивающие пары участников из активных payment prepare locks.
