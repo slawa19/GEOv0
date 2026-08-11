@@ -9,22 +9,50 @@ from decimal import Decimal
 
 import pytest
 from sqlalchemy import delete, select, text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 
 pytestmark = pytest.mark.postgres
 
 
+async def _wait_for_matching_advisory_wait(observer) -> bool:
+    try:
+        async with asyncio.timeout(5.0):
+            while True:
+                waiting = await observer.scalar(
+                    text(
+                        "SELECT EXISTS ("
+                        "SELECT 1 FROM pg_locks holder "
+                        "JOIN pg_locks waiter ON "
+                        "waiter.locktype = holder.locktype "
+                        "AND waiter.database IS NOT DISTINCT FROM holder.database "
+                        "AND waiter.classid IS NOT DISTINCT FROM holder.classid "
+                        "AND waiter.objid IS NOT DISTINCT FROM holder.objid "
+                        "AND waiter.objsubid IS NOT DISTINCT FROM holder.objsubid "
+                        "WHERE holder.locktype = 'advisory' AND holder.granted "
+                        "AND waiter.pid <> holder.pid AND NOT waiter.granted"
+                        ")"
+                    )
+                )
+                if waiting:
+                    return True
+    except asyncio.TimeoutError:
+        return False
+
+
 @pytest.mark.asyncio
 async def test_concurrent_same_cycle_serializable_resolves_one_durable_occurrence_postgres(
     db_session,
+    monkeypatch,
 ):
-    """A real 40001 loser resolves the winner's deterministic clearing result."""
+    """Equivalent ownership serializes one occurrence and its durable replay."""
 
     dialect = db_session.get_bind().dialect.name
     if dialect not in {"postgresql", "postgres"}:
         pytest.skip("Postgres-only: SERIALIZABLE clearing reconciliation")
 
     from app.core.clearing.service import ClearingService
+    from app.core.payments.engine import PaymentEngine
     from app.db.models.audit_log import IntegrityAuditLog
     from app.db.models.debt import Debt
     from app.db.models.equivalent import Equivalent
@@ -32,7 +60,7 @@ async def test_concurrent_same_cycle_serializable_resolves_one_durable_occurrenc
     from app.db.models.prepare_lock import PrepareLock
     from app.db.models.transaction import Transaction
     from app.db.models.trustline import TrustLine
-    from tests.conftest import TestingSessionLocal
+    from tests.conftest import TestingSessionLocal, engine as test_engine
 
     nonce = uuid.uuid4().hex[:10]
     equivalent_id = uuid.uuid4()
@@ -43,6 +71,7 @@ async def test_concurrent_same_cycle_serializable_resolves_one_durable_occurrenc
     cycle = [{"debt_id": str(debt_id)} for debt_id in debt_ids]
     sessions = []
     workers = []
+    observer = None
 
     try:
         async with TestingSessionLocal() as setup:
@@ -106,57 +135,46 @@ async def test_concurrent_same_cycle_serializable_resolves_one_durable_occurrenc
             )
             await setup.commit()
 
-        barrier = asyncio.Barrier(2)
-        observed_retryable_sqlstates: list[str] = []
+        first_owner_acquired = asyncio.Event()
+        release_first_owner = asyncio.Event()
+        acquisition_count = 0
+        original_acquire = PaymentEngine.acquire_staged_equivalent_owner_locks
 
-        class _CoordinatedClearingService(ClearingService):
-            def __init__(self, session):
-                super().__init__(session)
-                self._initial_replay_read = True
+        async def _coordinate_owner_acquisition(engine, equivalent_ids):
+            nonlocal acquisition_count
+            acquisition_count += 1
+            call_number = acquisition_count
+            result = await original_acquire(engine, equivalent_ids)
+            if call_number == 1:
+                first_owner_acquired.set()
+                await release_first_owner.wait()
+            return result
 
-            async def _committed_execution_amount(self, tx_id: str):
-                amount = await super()._committed_execution_amount(tx_id)
-                if self._initial_replay_read:
-                    self._initial_replay_read = False
-                    assert amount is None
-                    await barrier.wait()
-                return amount
+        monkeypatch.setattr(
+            PaymentEngine,
+            "acquire_staged_equivalent_owner_locks",
+            _coordinate_owner_acquisition,
+        )
 
-            def _is_retryable_concurrency_error(self, exc: BaseException) -> bool:
-                is_retryable = super()._is_retryable_concurrency_error(exc)
-                if is_retryable:
-                    pending = [exc]
-                    seen: set[int] = set()
-                    while pending:
-                        current = pending.pop()
-                        if id(current) in seen:
-                            continue
-                        seen.add(id(current))
-                        for attr in ("sqlstate", "pgcode", "code"):
-                            value = getattr(current, attr, None)
-                            if str(value or "").strip() in {"40001", "40P01"}:
-                                observed_retryable_sqlstates.append(str(value))
-                        for linked in (
-                            getattr(current, "orig", None),
-                            current.__cause__,
-                            current.__context__,
-                        ):
-                            if isinstance(linked, BaseException):
-                                pending.append(linked)
-                return is_retryable
-
+        serializable_sessions = async_sessionmaker(
+            bind=test_engine.execution_options(isolation_level="SERIALIZABLE"),
+            class_=AsyncSession,
+            expire_on_commit=False,
+            autoflush=False,
+        )
         for _ in range(2):
-            session = TestingSessionLocal()
+            session = serializable_sessions()
             sessions.append(session)
             await session.connection(
                 execution_options={"isolation_level": "SERIALIZABLE"}
             )
             isolation = (await session.execute(text("SHOW transaction_isolation"))).scalar_one()
             assert str(isolation).lower() == "serializable"
+        observer = TestingSessionLocal()
 
         workers = [
             asyncio.create_task(
-                _CoordinatedClearingService(session).execute_clearing_with_amount(
+                ClearingService(session).execute_clearing_with_amount(
                     ordered_cycle
                 )
             )
@@ -166,14 +184,16 @@ async def test_concurrent_same_cycle_serializable_resolves_one_durable_occurrenc
                 strict=True,
             )
         ]
+        await asyncio.wait_for(first_owner_acquired.wait(), timeout=5.0)
+        assert await _wait_for_matching_advisory_wait(observer)
+        release_first_owner.set()
         results = await asyncio.wait_for(
             asyncio.gather(*workers, return_exceptions=True),
             timeout=15.0,
         )
 
         assert results == [Decimal("30.00000000"), Decimal("30.00000000")]
-        assert observed_retryable_sqlstates
-        assert set(observed_retryable_sqlstates) == {"40001"}
+        assert acquisition_count == 2
         assert all(not session.in_transaction() for session in sessions)
 
         async with TestingSessionLocal() as verify:
@@ -225,6 +245,9 @@ async def test_concurrent_same_cycle_serializable_resolves_one_durable_occurrenc
                 for session in sessions:
                     await session.rollback()
                     await session.close()
+                if observer is not None:
+                    await observer.rollback()
+                    await observer.close()
                 async with TestingSessionLocal() as cleanup:
                     await cleanup.execute(
                         delete(IntegrityAuditLog).where(
@@ -286,7 +309,7 @@ async def test_serializable_conflict_without_committed_occurrence_stays_failure_
     from app.db.models.transaction import Transaction
     from app.db.models.trustline import TrustLine
     from app.utils.exceptions import GeoException
-    from tests.conftest import TestingSessionLocal
+    from tests.conftest import TestingSessionLocal, engine as test_engine
 
     nonce = uuid.uuid4().hex[:10]
     equivalent_id = uuid.uuid4()
@@ -297,6 +320,9 @@ async def test_serializable_conflict_without_committed_occurrence_stays_failure_
     cycle = [{"debt_id": str(debt_id)} for debt_id in debt_ids]
     execution_tx_id = ClearingService._execution_tx_id(debt_ids)
     owner_session = None
+    owner_task = None
+    snapshot_fixed = asyncio.Event()
+    release_writer = asyncio.Event()
     observed_retryable_sqlstates: list[str] = []
 
     try:
@@ -362,6 +388,19 @@ async def test_serializable_conflict_without_committed_occurrence_stays_failure_
             await setup.commit()
 
         class _ObservedClearingService(ClearingService):
+            def __init__(self, session):
+                super().__init__(session)
+                self._pause_initial_replay = True
+
+            async def _committed_execution_amount(self, tx_id: str):
+                amount = await super()._committed_execution_amount(tx_id)
+                if self._pause_initial_replay:
+                    self._pause_initial_replay = False
+                    assert amount is None
+                    snapshot_fixed.set()
+                    await release_writer.wait()
+                return amount
+
             def _is_retryable_concurrency_error(self, exc: BaseException) -> bool:
                 is_retryable = super()._is_retryable_concurrency_error(exc)
                 if is_retryable:
@@ -385,7 +424,13 @@ async def test_serializable_conflict_without_committed_occurrence_stays_failure_
                                 pending.append(linked)
                 return is_retryable
 
-        owner_session = TestingSessionLocal()
+        serializable_sessions = async_sessionmaker(
+            bind=test_engine.execution_options(isolation_level="SERIALIZABLE"),
+            class_=AsyncSession,
+            expire_on_commit=False,
+            autoflush=False,
+        )
+        owner_session = serializable_sessions()
         await owner_session.connection(
             execution_options={"isolation_level": "SERIALIZABLE"}
         )
@@ -395,17 +440,19 @@ async def test_serializable_conflict_without_committed_occurrence_stays_failure_
         assert str(isolation).lower() == "serializable"
         service = _ObservedClearingService(owner_session)
 
-        # Establish the owner's SERIALIZABLE snapshot before the independent
-        # writer changes a Debt. No deterministic clearing transaction exists.
-        assert await service._committed_execution_amount(execution_tx_id) is None
+        # Establish the fresh post-interlock work snapshot, then let a writer
+        # change a Debt without creating the deterministic clearing occurrence.
+        owner_task = asyncio.create_task(service.execute_clearing_with_amount(cycle))
+        await asyncio.wait_for(snapshot_fixed.wait(), timeout=5.0)
         async with TestingSessionLocal() as writer:
             debt = await writer.get(Debt, debt_ids[0])
             assert debt is not None
             debt.amount = Decimal("101.00")
             await writer.commit()
+        release_writer.set()
 
         with pytest.raises(GeoException) as failure:
-            await service.execute_clearing_with_amount(cycle)
+            await asyncio.wait_for(owner_task, timeout=10.0)
 
         assert failure.value.code == "E010"
         assert observed_retryable_sqlstates
@@ -448,6 +495,12 @@ async def test_serializable_conflict_without_committed_occurrence_stays_failure_
     finally:
         primary_error = sys.exc_info()[1]
         try:
+            release_writer.set()
+            if owner_task is not None and not owner_task.done():
+                owner_task.cancel()
+                await asyncio.wait([owner_task], timeout=2.0)
+            if owner_task is not None and owner_task.done() and not owner_task.cancelled():
+                owner_task.exception()
             if owner_session is not None:
                 await owner_session.rollback()
                 await owner_session.close()

@@ -771,3 +771,34 @@ P109 закрыта; Phase 1 не имеет открытых P1/P2 и гото�
 - До P201 оба теста помечены `xfail(strict=True)`. Та же canonical команда с `-TaskSlug
   wave4_002_p200_characterization` — exit `0`, `2 xfailed`; cache содержит ровно два ожидаемых
   nodeid. Pinned `ruff==0.1.14` и `git diff --check` — exit `0`.
+
+### 2026-08-11 — P201
+
+- Перед implementation повторно разделены свидетельства по AGENTS.md §1. **Current:** clearing
+  читал `Debt FOR UPDATE`, затем `PrepareLock`, не участвуя в payment owner domain; P200 дал два
+  реальных forbidden schedule. **Intended:** новый prepare не может появиться между clearing
+  decision и mutation (`§4.3`, `§8`). **Optimal:** отдельная lock-only транзакция берёт уже
+  существующий Phase-1 equivalent-owner lock, после ожидания рабочая сессия откатывает прежний
+  snapshot и делает authoritative replay/read заново; lock-транзакция живёт до terminal
+  commit/rollback clearing. Это минимальный общий boundary без schema/API/migration и без изменения
+  направленной денежной семантики. Work-session `pg_try_advisory_xact_lock` был отвергнут до commit:
+  сам SELECT мог зафиксировать SERIALIZABLE snapshot до освобождения lock и пропустить новый
+  `PrepareLock`.
+- Реализация: cancellation-safe release lock-only session
+  `app/core/clearing/service.py:70-92`; PostgreSQL preflight, отдельный `AsyncEngine` bind,
+  `PaymentEngine.acquire_staged_equivalent_owner_locks`, post-wait rollback/fresh execution и
+  `55P03`→существующий timeout contract — `:959-1039`; authoritative equivalent revalidation после
+  `Debt FOR UPDATE` — `:1107-1145`. Порядок остаётся payment/clearing owner → рабочие Debt rows;
+  clearing не держит Debt row во время ожидания owner lock.
+- Старые Program-003 replay/skip tests адаптированы к новому boundary, не ослаблены:
+  `tests/integration/test_clearing_commit_replay_postgres.py:17-232` доказывает один durable effect
+  и replay двух SERIALIZABLE callers через реальный granted/ungranted advisory join; `:293-492`
+  фиксирует настоящий `40001` после свежего post-lock snapshot и доказывает, что без matching
+  clearing transaction он остаётся `E010`. Недостижимый в валидной PostgreSQL схеме defensive
+  `amount <= 0` больше не имитируется грязным ORM state через service-owned rollback; его локальная
+  anti-vacuum проверка сохранена в `tests/unit/test_clearing_additional_cases.py:714-735`.
+- Canonical real-PG core matrix на изолированной БД:
+  `$env:DEBUG='false'; $env:ENV='test'; $env:TEST_DATABASE_URL='postgresql+asyncpg://geo:geo@127.0.0.1:55433/geov0_test_wave4_p200_a5c0'; $env:GEO_TEST_ALLOW_DB_RESET='1'; $selectors=@('tests/integration/test_clearing_payment_prepare_interlock_postgres.py','tests/integration/test_concurrent_clearing_payment_lost_update_postgres.py','tests/integration/test_clearing_skip_releases_locks_postgres.py','tests/integration/test_clearing_commit_replay_postgres.py'); .\scripts\verify_local.ps1 -TaskSlug wave4_002_p201_core4b -BackendOnly -BackendMarker postgres -BackendSelector $selectors`
+  — exit `0`, `13 passed`. SQLite clearing unit matrix с `-TaskSlug wave4_002_p201_units` — exit
+  `0`, `37 passed`; отдельный defensive nonpositive selector с `-TaskSlug
+  wave4_002_p201_nonpositive_unit` — exit `0`, `1 passed`.

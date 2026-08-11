@@ -14,6 +14,31 @@ from sqlalchemy import delete, select, text
 pytestmark = pytest.mark.postgres
 
 
+async def _wait_for_matching_advisory_wait(observer) -> bool:
+    try:
+        async with asyncio.timeout(5.0):
+            while True:
+                waiting = await observer.scalar(
+                    text(
+                        "SELECT EXISTS ("
+                        "SELECT 1 FROM pg_locks holder "
+                        "JOIN pg_locks waiter ON "
+                        "waiter.locktype = holder.locktype "
+                        "AND waiter.database IS NOT DISTINCT FROM holder.database "
+                        "AND waiter.classid IS NOT DISTINCT FROM holder.classid "
+                        "AND waiter.objid IS NOT DISTINCT FROM holder.objid "
+                        "AND waiter.objsubid IS NOT DISTINCT FROM holder.objsubid "
+                        "WHERE holder.locktype = 'advisory' AND holder.granted "
+                        "AND waiter.pid <> holder.pid AND NOT waiter.granted"
+                        ")"
+                    )
+                )
+                if waiting:
+                    return True
+    except asyncio.TimeoutError:
+        return False
+
+
 @pytest.mark.asyncio
 async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_postgres(
     db_session,
@@ -59,11 +84,11 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
 
     clearing_lock_scan_done = asyncio.Event()
     release_clearing = asyncio.Event()
-    payment_apply_entered = asyncio.Event()
     clearing_task = None
     payment_task = None
     clearing_session = None
     payment_session = None
+    observer_session = None
 
     try:
         equivalent = Equivalent(
@@ -144,6 +169,7 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
 
         clearing_session = TestingSessionLocal()
         payment_session = TestingSessionLocal()
+        observer_session = TestingSessionLocal()
         for session in (clearing_session, payment_session):
             await session.connection(
                 execution_options={"isolation_level": "READ COMMITTED"}
@@ -152,11 +178,9 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
                 await session.execute(text("SHOW transaction_isolation"))
             ).scalar_one()
             assert str(isolation).lower() == "read committed"
-
         clearing_service = ClearingService(clearing_session)
         payment_service = PaymentService(payment_session)
         original_locked_pairs = clearing_service._locked_pairs_for_equivalent
-        original_apply_flow = payment_service.engine._apply_flow
 
         async def _hold_after_lock_scan(current_equivalent_id):
             locked_pairs = await original_locked_pairs(current_equivalent_id)
@@ -165,30 +189,10 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
             await release_clearing.wait()
             return locked_pairs
 
-        async def _observe_payment_apply(
-            from_id,
-            to_id,
-            amount,
-            current_equivalent_id,
-        ):
-            if from_id == a_id and to_id == b_id:
-                payment_apply_entered.set()
-            return await original_apply_flow(
-                from_id,
-                to_id,
-                amount,
-                current_equivalent_id,
-            )
-
         monkeypatch.setattr(
             clearing_service,
             "_locked_pairs_for_equivalent",
             _hold_after_lock_scan,
-        )
-        monkeypatch.setattr(
-            payment_service.engine,
-            "_apply_flow",
-            _observe_payment_apply,
         )
 
         clearing_task = asyncio.create_task(
@@ -205,7 +209,16 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
                 idempotency_key=payment_tx_id,
             )
         )
-        await asyncio.wait_for(payment_apply_entered.wait(), timeout=5.0)
+        payment_waiting = await _wait_for_matching_advisory_wait(observer_session)
+        payment_error = (
+            payment_task.exception()
+            if payment_task.done() and not payment_task.cancelled()
+            else None
+        )
+        assert payment_waiting, (
+            "payment did not wait on clearing owner: "
+            f"done={payment_task.done()} error={payment_error!r}"
+        )
         assert not clearing_task.done()
         assert not payment_task.done()
 
@@ -298,7 +311,11 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
                 )
 
             async with asyncio.timeout(5.0):
-                for session in (clearing_session, payment_session):
+                for session in (
+                    clearing_session,
+                    payment_session,
+                    observer_session,
+                ):
                     if session is not None:
                         await session.rollback()
                         await session.close()

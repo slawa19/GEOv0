@@ -17,7 +17,7 @@ pytestmark = pytest.mark.postgres
 
 @pytest.mark.parametrize(
     "skip_branch",
-    ["empty", "malformed", "missing", "nonpositive", "locked", "policy"],
+    ["empty", "malformed", "missing", "locked", "policy"],
 )
 @pytest.mark.asyncio
 async def test_skip_ends_service_owned_transaction_postgres(
@@ -149,14 +149,6 @@ async def test_skip_ends_service_owned_transaction_postgres(
         cycle = [] if skip_branch == "empty" else [{"debt_id": "not-a-uuid"}]
     elif skip_branch == "missing":
         cycle[-1] = {"debt_id": str(uuid.uuid4())}
-    elif skip_branch == "nonpositive":
-        dirty_debt = await db_session.get(Debt, debt_ids[1])
-        assert dirty_debt is not None
-        # Production sessions use autoflush=False. This exercises the defensive
-        # branch against a dirty identity-map value while the stored PG row still
-        # satisfies chk_debt_amount_positive.
-        dirty_debt.amount = Decimal("0")
-
     result = await ClearingService(db_session).execute_clearing_with_amount(cycle)
 
     assert result is None

@@ -28,20 +28,53 @@ async def _use_serializable(session) -> int:
 
 
 async def _wait_for_advisory_wait(observer, *, backend_pid: int) -> bool:
-    for _ in range(300):
-        waiting = await observer.scalar(
-            text(
-                "SELECT EXISTS ("
-                "SELECT 1 FROM pg_locks "
-                "WHERE pid = :pid AND locktype = 'advisory' AND NOT granted"
-                ")"
-            ),
-            {"pid": backend_pid},
-        )
-        if waiting:
-            return True
-        await asyncio.sleep(0.01)
-    return False
+    try:
+        async with asyncio.timeout(3.0):
+            while True:
+                waiting = await observer.scalar(
+                    text(
+                        "SELECT EXISTS ("
+                        "SELECT 1 FROM pg_locks "
+                        "WHERE pid = :pid AND locktype = 'advisory' AND NOT granted"
+                        ")"
+                    ),
+                    {"pid": backend_pid},
+                )
+                if waiting:
+                    return True
+    except asyncio.TimeoutError:
+        return False
+
+
+async def _wait_for_matching_advisory_wait(
+    observer,
+    *,
+    holder_pid: int,
+) -> bool:
+    try:
+        async with asyncio.timeout(3.0):
+            while True:
+                waiting = await observer.scalar(
+                    text(
+                        "SELECT EXISTS ("
+                        "SELECT 1 FROM pg_locks holder "
+                        "JOIN pg_locks waiter ON "
+                        "waiter.locktype = holder.locktype "
+                        "AND waiter.database IS NOT DISTINCT FROM holder.database "
+                        "AND waiter.classid IS NOT DISTINCT FROM holder.classid "
+                        "AND waiter.objid IS NOT DISTINCT FROM holder.objid "
+                        "AND waiter.objsubid IS NOT DISTINCT FROM holder.objsubid "
+                        "WHERE holder.pid = :holder_pid "
+                        "AND holder.locktype = 'advisory' AND holder.granted "
+                        "AND waiter.pid <> holder.pid AND NOT waiter.granted"
+                        ")"
+                    ),
+                    {"holder_pid": holder_pid},
+                )
+                if waiting:
+                    return True
+    except asyncio.TimeoutError:
+        return False
 
 
 async def _seed_interlock_case():
@@ -197,10 +230,6 @@ async def _cleanup_interlock_case(seed) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-    reason="P200: clearing does not yet share the payment equivalent-owner lock",
-    strict=True,
-)
 async def test_clearing_owner_blocks_new_reverse_prepare_after_empty_snapshot_postgres(
     db_session,
     monkeypatch,
@@ -337,10 +366,6 @@ async def test_clearing_owner_blocks_new_reverse_prepare_after_empty_snapshot_po
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-    reason="P200: clearing does not yet share the payment equivalent-owner lock",
-    strict=True,
-)
 async def test_uncommitted_reverse_prepare_blocks_clearing_until_visible_postgres(
     db_session,
 ):
@@ -366,8 +391,8 @@ async def test_uncommitted_reverse_prepare_blocks_clearing_until_visible_postgre
         clearing_session = TestingSessionLocal()
         payment_session = TestingSessionLocal()
         observer_session = TestingSessionLocal()
-        clearing_pid = await _use_serializable(clearing_session)
-        await _use_serializable(payment_session)
+        await _use_serializable(clearing_session)
+        payment_pid = await _use_serializable(payment_session)
 
         prepared = await PaymentEngine(payment_session).prepare(
             seed["payment_tx_id"],
@@ -385,10 +410,10 @@ async def test_uncommitted_reverse_prepare_blocks_clearing_until_visible_postgre
             ),
             name="clearing-after-uncommitted-prepare",
         )
-        assert await _wait_for_advisory_wait(
+        assert await _wait_for_matching_advisory_wait(
             observer_session,
-            backend_pid=clearing_pid,
-        ), "clearing bypassed the uncommitted reverse prepare owner"
+            holder_pid=payment_pid,
+        ), "clearing did not wait on the prepared payment's exact owner lock"
         assert not clearing_task.done()
 
         await payment_session.commit()
@@ -454,7 +479,11 @@ async def test_uncommitted_reverse_prepare_blocks_clearing_until_visible_postgre
                 await asyncio.wait([clearing_task], timeout=2.0)
             if clearing_task is not None and clearing_task.done() and not clearing_task.cancelled():
                 clearing_task.exception()
-            for session in (clearing_session, payment_session, observer_session):
+            for session in (
+                clearing_session,
+                payment_session,
+                observer_session,
+            ):
                 if session is not None:
                     await session.rollback()
                     await session.close()

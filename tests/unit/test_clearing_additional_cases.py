@@ -713,6 +713,26 @@ async def test_execute_clearing_policy_skip_remains_non_exceptional(db_session):
 
 
 @pytest.mark.asyncio
+async def test_execute_clearing_nonpositive_defensive_skip_rolls_back(db_session):
+    eq, _ = await _setup_committed_triangle(db_session, code_prefix="N")
+    service = ClearingService(db_session)
+    cycles = await service.find_cycles(eq.code, max_depth=3)
+    assert cycles
+
+    debt_id = uuid.UUID(str(cycles[0][0]["debt_id"]))
+    dirty_debt = await db_session.get(Debt, debt_id)
+    assert dirty_debt is not None
+    # The database CHECK makes a committed nonpositive Debt impossible. Keep
+    # the defensive branch covered through the non-flushed identity map only.
+    dirty_debt.amount = Decimal("0")
+
+    result = await service.execute_clearing_with_amount(cycles[0])
+
+    assert result is None
+    assert not db_session.in_transaction()
+
+
+@pytest.mark.asyncio
 async def test_execute_clearing_commit_failure_rolls_back_without_visible_effects(
     db_session,
     monkeypatch,

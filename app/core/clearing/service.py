@@ -5,7 +5,12 @@ from decimal import Decimal
 from typing import Dict, List, Set
 
 from sqlalchemy import select, and_, func, text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import (
+    AsyncConnection,
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+)
 
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
@@ -15,8 +20,9 @@ from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.db.models.audit_log import IntegrityAuditLog
 from app.utils.error_codes import ErrorCode
-from app.utils.exceptions import GeoException
+from app.utils.exceptions import GeoException, TimeoutException
 from app.utils.metrics import CLEARING_EVENTS_TOTAL
+from app.core.payments.engine import PaymentEngine
 from app.core.payments.router import PaymentRouter
 from app.core.invariants import InvariantChecker
 from app.core.integrity import compute_integrity_checkpoint_for_equivalent
@@ -61,6 +67,31 @@ class ClearingService:
             raise GeoException() from exc
 
     @staticmethod
+    async def _release_interlock_session(lock_session: AsyncSession) -> None:
+        """Drain rollback/close so cancellation cannot strand an advisory lock."""
+
+        async def _cleanup() -> None:
+            try:
+                await lock_session.rollback()
+            finally:
+                await lock_session.close()
+
+        cleanup_task = asyncio.create_task(_cleanup())
+        caller_cancellation: asyncio.CancelledError | None = None
+        while not cleanup_task.done():
+            try:
+                await asyncio.shield(cleanup_task)
+            except asyncio.CancelledError as exc:
+                if caller_cancellation is None:
+                    caller_cancellation = exc
+            except Exception:
+                # The task is terminal; surface its exact result below.
+                pass
+        cleanup_task.result()
+        if caller_cancellation is not None:
+            raise caller_cancellation
+
+    @staticmethod
     def _execution_tx_id(debt_ids: List[uuid.UUID]) -> str:
         canonical_debt_set = ":".join(sorted({str(debt_id) for debt_id in debt_ids}))
         return str(uuid.uuid5(_CLEARING_REPLAY_NAMESPACE, canonical_debt_set))
@@ -94,9 +125,10 @@ class ClearingService:
         return await self._read_committed_execution_amount(self.session, tx_id)
 
     @staticmethod
-    def _is_retryable_concurrency_error(exc: BaseException) -> bool:
+    def _postgres_error_codes(exc: BaseException) -> set[str]:
         pending: list[BaseException] = [exc]
         seen: set[int] = set()
+        codes: set[str] = set()
         while pending:
             current = pending.pop()
             if id(current) in seen:
@@ -104,8 +136,8 @@ class ClearingService:
             seen.add(id(current))
             for attr in ("sqlstate", "pgcode", "code"):
                 value = getattr(current, attr, None)
-                if value is not None and str(value).strip() in {"40001", "40P01"}:
-                    return True
+                if value is not None:
+                    codes.add(str(value).strip())
             for linked in (
                 getattr(current, "orig", None),
                 current.__cause__,
@@ -113,7 +145,11 @@ class ClearingService:
             ):
                 if isinstance(linked, BaseException):
                     pending.append(linked)
-        return False
+        return codes
+
+    @classmethod
+    def _is_retryable_concurrency_error(cls, exc: BaseException) -> bool:
+        return bool(cls._postgres_error_codes(exc) & {"40001", "40P01"})
 
     async def _reconcile_committed_execution(self, tx_id: str) -> Decimal | None:
         """Resolve one ambiguous occurrence from a fresh transaction snapshot."""
@@ -921,6 +957,93 @@ class ClearingService:
         return (await self.execute_clearing_with_amount(cycle)) is not None
 
     async def execute_clearing_with_amount(self, cycle: List[Dict]) -> Decimal | None:
+        """Execute one clearing attempt inside the shared payment owner domain."""
+        if self._dialect_name() not in {"postgresql", "postgres"} or not cycle:
+            return await self._execute_clearing_with_amount(cycle)
+
+        try:
+            debt_ids = [uuid.UUID(str(edge["debt_id"])) for edge in cycle]
+        except Exception:
+            return await self._execute_clearing_with_amount(cycle)
+
+        execution_tx_id = self._execution_tx_id(debt_ids)
+        try:
+            preflight_debts = (
+                (
+                    await self.session.execute(
+                        select(Debt).where(Debt.id.in_(debt_ids))
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        except Exception as exc:
+            await self._raise_unexpected_execution(exc)
+
+        if len(preflight_debts) != len(debt_ids):
+            try:
+                replay_amount = await self._reconcile_committed_execution(
+                    execution_tx_id
+                )
+            except Exception as exc:
+                await self._raise_unexpected_execution(exc)
+            if replay_amount is not None:
+                return replay_amount
+            return await self._execute_clearing_with_amount(cycle)
+
+        equivalent_ids = {debt.equivalent_id for debt in preflight_debts}
+        if len(equivalent_ids) != 1:
+            await self._raise_unexpected_execution(
+                GeoException("Clearing cycle spans multiple equivalents")
+            )
+        equivalent_id = next(iter(equivalent_ids))
+
+        bind = getattr(self.session, "bind", None)
+        if bind is None:
+            await self._raise_unexpected_execution(GeoException())
+        if isinstance(bind, AsyncConnection):
+            lock_bind: AsyncEngine = bind.engine
+        elif isinstance(bind, AsyncEngine):
+            lock_bind = bind
+        else:
+            await self._raise_unexpected_execution(GeoException())
+        lock_session_factory = async_sessionmaker(
+            bind=lock_bind,
+            class_=AsyncSession,
+            expire_on_commit=False,
+            autoflush=False,
+        )
+        lock_session = lock_session_factory()
+        try:
+            try:
+                await PaymentEngine(
+                    lock_session
+                ).acquire_staged_equivalent_owner_locks([equivalent_id])
+            except Exception as exc:
+                if "55P03" in self._postgres_error_codes(exc):
+                    raise TimeoutException("Clearing interlock timed out") from exc
+                await self._raise_unexpected_execution(exc)
+
+            # The lock-only transaction may have waited on a payment snapshot.
+            # Restart the work session only after it owns the equivalent, so all
+            # authoritative reads observe the holder's committed PrepareLock.
+            try:
+                await self.session.rollback()
+            except Exception as exc:
+                await self._raise_unexpected_execution(exc)
+            return await self._execute_clearing_with_amount(
+                cycle,
+                interlocked_equivalent_id=equivalent_id,
+            )
+        finally:
+            await self._release_interlock_session(lock_session)
+
+    async def _execute_clearing_with_amount(
+        self,
+        cycle: List[Dict],
+        *,
+        interlocked_equivalent_id: uuid.UUID | None = None,
+    ) -> Decimal | None:
         """Execute clearing for a specific cycle and return the *actual* cleared amount.
 
         Returns:
@@ -1013,6 +1136,13 @@ class ClearingService:
                 return replay_amount
             await self._rollback_skipped_execution()
             return None
+
+        if interlocked_equivalent_id is not None and any(
+            debt.equivalent_id != interlocked_equivalent_id for debt in debts
+        ):
+            await self._raise_unexpected_execution(
+                GeoException("Clearing cycle identity changed after interlock")
+            )
 
         # 1. Determine clearing amount (min amount in cycle)
         clear_amount = min([d.amount for d in debts])
