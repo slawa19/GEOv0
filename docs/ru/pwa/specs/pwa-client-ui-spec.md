@@ -271,8 +271,10 @@ UI (минимум):
 
 Подключение:
 - `new WebSocket("wss://{hub_base_url}/api/v1/ws", ["bearer", access_token])`
-- URL с `?token={access_token}` больше не поддерживается: сервер закрывает такое соединение с
-  кодом `1008`, если токен не передан через `Sec-WebSocket-Protocol`.
+- URL с `?token={access_token}` больше не поддерживается: сервер отклоняет handshake до принятия,
+  если токен не передан через `Sec-WebSocket-Protocol`. ASGI TestClient представляет этот отказ как
+  WebSocket close `1008`, а uvicorn на wire — как HTTP `403`; клиент не должен зависеть от конкретного
+  transport-представления pre-accept отказа.
 
 Ограничения (важно для UI/ожиданий):
 - Уведомления **best-effort**: возможны пропуски/дубликаты (at-most-once).
@@ -354,4 +356,3 @@ Reconnect стратегия (нормативно):
 
 ### 10.3. Key / wallet storage
 > "Напиши сервис на TypeScript для хранения секрета кошелька в IndexedDB в зашифрованном виде: PBKDF2(SHA-256) + AES-GCM. Функции: setupPin(pin, secret), unlock(pin) -> secret, lock(), isUnlocked(), rotatePin(oldPin,newPin)."
-
