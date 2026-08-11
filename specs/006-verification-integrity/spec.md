@@ -1,7 +1,7 @@
 # 006 — Verification integrity
 
 - **Date:** 2026-08-11
-- **Status:** IN PROGRESS — только T601, T607 и T608a авторизованы 2026-08-11
+- **Status:** IN PROGRESS — срез Волны 1 (T601, T607, T608a) закрыт 2026-08-11; остаток авторизован для Волны 5
 - **Status authority:** метка описательная; завершённость устанавливают success criteria и evidence.
 - **Owner surface:** `tests/`, `pytest.ini`, `tests/conftest.py`, `.github/workflows/quality.yml`, `scripts/verify_local.ps1`, `admin-ui/src/test/`, SSE-ветвление в `app/api/v1/simulator.py`, а также применение patch в `simulator-ui/v2/src/demo/patches.ts` (F-006-1)
 - **Почему это отдельная и ранняя программа:** пока гейты сообщают неправду, любое «зелено» из программ 002–005, 007 недоказуемо. AGENTS.md §5 уже запрещает заявлять «CI green»; эта программа делает так, чтобы запрет перестал быть нужен.
@@ -161,7 +161,7 @@ sequence (что требует протокольного поля), либо �
 
 | ID | Задача | Статус |
 |---|---|---|
-| T600 | **VERIFY FIRST.** Доказать на `sse_broadcast.py`, может ли бэкенд доставить не виденное ранее более старое patch-событие. По итогу — либо гейт применения patch по producer sequence (нужно протокольное поле seq/version/ts в `NodePatch`/`EdgePatch`), либо датированное решение о приемлемости устаревших абсолютных patch | `[!]` не авторизовано |
+| T600 | **VERIFY FIRST.** Доказать на `sse_broadcast.py`, может ли бэкенд доставить не виденное ранее более старое patch-событие. По итогу — либо гейт применения patch по producer sequence (нужно протокольное поле seq/version/ts в `NodePatch`/`EdgePatch`), либо датированное решение о приемлемости устаревших абсолютных patch | `[!]` |
 | T601 | Убрать ветвление по `PYTEST_CURRENT_TEST` из production SSE (F-006-2, P2) | `[x]` |
 | T602 | Решить судьбу `stop_after_types`: сделать работающим вне pytest или убрать из контракта и сигнатур (F-006-2b, P3) | `[!]` |
 | T603 | Включить rate limiter в тестах; покрыть 429/окно/fallback | `[!]` |
@@ -175,7 +175,7 @@ sequence (что требует протокольного поля), либо �
 | T610 | Решение по OpenAPI-ratchet: план сокращения дрейфа либо честное переименование гейта | `[!]` |
 | T611 | Независимое внешнее ревью и evidence на точном HEAD (триггер AGENTS.md §15: программа меняет сам механизм проверки, поэтому самопроверка гейта не является доказательством) | `[!]` |
 
-## Implementation evidence
+## Changelog
 
 ### 2026-08-11 — T601
 
@@ -200,3 +200,30 @@ sequence (что требует протокольного поля), либо �
 - **CI:** коммит `acbcd25c3f15b8225d6aacc58efb3f9bc1d1bd4f` убрал `continue-on-error` только у Ruff (`.github/workflows/quality.yml:87-88`), тогда как Black явно остаётся неблокирующим (`:90-92`). Двусторонний policy guard — `tests/unit/test_static_diagnostics_policy.py:9`.
 - **После:** pinned `.venv\Scripts\python.exe -m ruff check app migrations --no-cache` — exit 0; canonical `wave1_t608a` на policy/auth/quantiles/snapshot selectors — exit 0, `5 passed`; `.venv\Scripts\python.exe scripts\check_alembic_heads.py` — exit 0 (`017_add_owner_to_simulator_runs`); `git diff --check` — exit 0.
 - **Adversarial remediation:** внутреннее read-only review обнаружило, что safe `--fix` также удалил два намеренных re-export/monkeypatch surface из `app/core/simulator/real_runner.py`, несмотря на защитный комментарий. Коммит `19dab80` вернул `simulator_storage` и `_RealPaymentAction` с локальными `# noqa: F401`; pinned Ruff остался чистым (exit 0), canonical `wave1_t608a_review_fix` на обоих потребителях и CI-policy — exit 0, `3 passed`. Таким образом, исторический вывод команды «19 fixed» сохранён, но итоговый diff намеренно восстанавливает два compatibility import.
+
+### 2026-08-11 — закрытие среза Волны 1
+
+- Полный verification plan сверён по всем восьми пунктам. В этом срезе закрыты пункты 2, 6 и 7:
+  `rg -n "PYTEST_CURRENT_TEST" app` — exit `1`, ноль совпадений; полный расширенный SSE selector
+  `wave1_t601_all_siblings` — exit `0`, `19 passed`; 20 последовательных полных Admin Vitest
+  прогонов — общий exit `0`, каждый `201 passed`; pinned
+  `.venv\Scripts\python.exe -m ruff check app migrations --no-cache` — exit `0`, а Ruff step в
+  `.github/workflows/quality.yml:87-88` блокирующий. Пункты 1, 3-5 остаются явной работой
+  T600/T602-T605 Волны 5, а не ложным зелёным результатом.
+- Пункт 8 подтверждён без изменения политики:
+  `.venv\Scripts\python.exe -m black --check app migrations` — exit `1`, `98 files would be
+  reformatted, 43 files would be left unchanged`; Black остаётся `continue-on-error` в
+  `.github/workflows/quality.yml:90-92` до T608b.
+- Независимый внешний `Codex gpt-5.6-sol` review range
+  `ea9cde9161c3f7444495ede13871c901abbba811..200a09b` вынес два P2: Ruff удалил два
+  monkeypatch/re-export surface, а три default-tier ASGI SSE sibling зависели от удалённого
+  pytest-only finite stream. Исправления доставлены коммитами `19dab80` и
+  `5b100d58db2022e35ed859065f4555438c26bcff`; targeted gates дали соответственно `3 passed` и
+  `3 passed`, расширенный sibling gate — `19 passed`. Повторный независимый review remediation
+  delta `200a09b..c19cb5f1b108325c88f4420cd62ce20a313e61ac` завершился `VERDICT-CLEAN` без новых
+  P1/P2. История первого провала сохранена; T611 остаётся открытой до финала всей программы 006.
+- Canonical milestone на итоговой реализации:
+  `$env:DEBUG='false'; .\scripts\verify_local.ps1 -TaskSlug wave1_final_full` — exit `0`; backend
+  `945 passed, 3 skipped, 15 deselected`, Alembic head `017`, Admin lint/test/build и Simulator
+  lint/typecheck/test/build прошли, Simulator unit — `729 passed`; финальная строка
+  `Required local validation passed.`
