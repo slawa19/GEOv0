@@ -116,6 +116,11 @@ surface **003** и должны разбираться там. Инстансы 
 в [`../BACKLOG.md`](../BACKLOG.md) — их туда нужно внести (владелец `BACKLOG.md` — не 004).
 Формулировка «этим займётся другая программа» здесь была бы неправдой: такой программы нет.
 
+**Доставка T406.** Формулировка выше фиксирует состояние на момент создания спеки. Реестр был
+подготовлен в рабочем дереве, но первое внешнее ревью справедливо обнаружило, что на review HEAD
+`b4d1673` сам `specs/BACKLOG.md` отсутствовал. Canonical artifact опубликован отдельным коммитом
+`6916320`; ownerless-инстансы теперь находятся в `specs/BACKLOG.md:42-70`.
+
 ## Current / Intended / Optimal
 
 **Current.** Ретрай работает ровно в границах whole-UoW движка и только для кодов из предиката
@@ -364,3 +369,27 @@ retryable-конфликта вместо `E010`; (3) `finally`-гарантия
   `rg -n "1\\.17|40001|40P01|retryable|CONFLICT|terminal result|read-before-abort|прерыв" docs/ru/09-decisions-and-defaults.md docs/ru/02-protocol-spec.md docs/ru/simulator/backend/payment-integration.md`
   и `git diff --check -- <эти три файла>` — exit `0`. Пользовательский metadata-hunk в начале
   `09-decisions-and-defaults.md` намеренно не вошёл в коммит и остаётся в рабочем дереве.
+
+### 2026-08-11 — первое внешнее ревью T408, findings и remediation
+
+- Независимый Codex `gpt-5.6-sol` проверил frozen range
+  `5631c02bc8a7eaf9ffeb7b8812cf66a2a276ec0a..b4d167383ff6165a57e25ef4fbaaa5ec804ebb08`
+  в standalone clone без remote/credentials. Вердикт: `VERDICT-FINDINGS`, два P2; T408 не
+  закрывалась.
+- P2 T404: rollback и abort дренировались раздельно, а recovery read выполнялся в caller task.
+  Повторная отмена на чтении оставляла долговечный `NEW` и не вызывала abort. Canonical RED:
+  `DEBUG=false; .\\scripts\\verify_local.ps1 -TaskSlug wave2_review_red -BackendOnly -BackendSelector 'tests/integration/test_payment_prepare_error_taxonomy.py::test_repeated_cancellation_during_recovery_read_still_aborts'`
+  — exit `1`, `2 failed`, actual `NEW` против `ABORTED` для cancellation и timeout.
+- Remediation commit `cfde960`: rollback → read-before-abort → abort объединены в одну session-owned
+  terminalization sequence (`app/core/payments/service.py:920-986`), а повторные caller cancellation
+  больше не отменяют child (`:97-123`). Контрпроверки —
+  `tests/integration/test_payment_prepare_error_taxonomy.py:1170-1250` и
+  `tests/unit/test_payment_cleanup_cancellation.py:37-65`. Canonical GREEN `wave2_review_fix` —
+  exit `0`, `2 passed`; `wave2_review_fix_regression3` — exit `0`, `41 passed`; pinned Ruff и
+  `git diff --check` — exit `0`. Промежуточный `wave2_review_fix_regression` честно сохранил
+  exit `1`, `1 failed, 40 passed`: staged abort failure ошибочно стал E010; ветка восстановлена к
+  исходному `TimeoutException`, после чего повторный прогон зелёный.
+- P2 verification-integrity T406: на review HEAD `specs/BACKLOG.md` не был tracked, хотя evidence
+  ссылалось на него. Коммит `6916320` публикует canonical backlog registry; ownerless transaction
+  poison/audit-loss instances находятся в `specs/BACKLOG.md:42-70`. Раздел продуктовых решений
+  не реализовывался и sibling-код trustlines/integrity/clearing не менялся.
