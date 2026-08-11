@@ -66,7 +66,7 @@ Owner-authorized for Wave 3 on 2026-08-11; execute sequentially.
 
 All tasks are pending successful Phase 1 and owner authorization.
 
-- [!] P200 Add deterministic clearing-versus-new-prepare schedules for both orders.
+- [x] P200 Add deterministic clearing-versus-new-prepare schedules for both orders.
 - [!] P201 Select and implement the smallest shared serialization or revalidation
   boundary; avoid unrelated clearing refactoring.
 - [!] P202 Assert final debt, versions, trust limits, actual locked clearing amount,

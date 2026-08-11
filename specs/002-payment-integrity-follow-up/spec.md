@@ -1,6 +1,6 @@
 # 002 — Payment integrity follow-up
 
-Status: Phase 0 complete; Phase 1 IN PROGRESS (owner-authorized 2026-08-11)
+Status: Phase 0 and Phase 1 complete; Phase 2 IN PROGRESS (owner-authorized 2026-08-11)
 
 Owner surfaces: `app/core/payments/`, payment callers, the payment/clearing boundary
 
@@ -745,3 +745,29 @@ P109 закрыта; Phase 1 не имеет открытых P1/P2 и гото�
   integration, development-image content policy, production-like container/schema smoke, Admin E2E,
   Simulator visual E2E и super-smoke — каждый job success. Единственная annotation — предупреждение
   GitHub о принудительном Node 24 для action runtime; product gate не падал.
+
+## 12. Phase 2 implementation evidence (append-only)
+
+### 2026-08-11 — P200
+
+- Перед test-правкой finding повторно подтверждён на `a5c0f64`: после программы 003 clearing
+  завершает skip/commit корректно, но shared payment lock всё ещё не берёт. Current order:
+  replay read → `Debt FOR UPDATE` (`app/core/clearing/service.py:962-1000`) → единственный
+  PrepareLock snapshot (`:1030-1052`) → mutation/commit (`:1182-1257`). Payment prepare делает
+  equivalent-owner → tx → canonical pair (`app/core/payments/engine.py:556-618`) до записи
+  PrepareLock/state (`:620-739`). Старые anchors §2.4 сдвинулись, но находка полностью
+  подтверждается; stop-level drift нет.
+- Добавлен реальный PostgreSQL schedule commit `d2ea68f`, без synthetic DBAPI errors:
+  `tests/integration/test_clearing_payment_prepare_interlock_postgres.py:204-314` держит clearing
+  после фактического пустого snapshot и запускает reverse prepare; `:344-452` держит
+  `commit=False` reverse prepare невидимой и запускает clearing. Оба используют независимые
+  SERIALIZABLE sessions, server-side advisory-wait observation, bounded tasks и проверяют terminal
+  state/locks/debt versions.
+- Canonical unmarked RED:
+  `$env:DEBUG='false'; $env:ENV='test'; $env:TEST_DATABASE_URL='postgresql+asyncpg://geo:geo@127.0.0.1:55433/geov0_test_wave4_p200_a5c0'; $env:GEO_TEST_ALLOW_DB_RESET='1'; .\scripts\verify_local.ps1 -TaskSlug wave4_002_p200_red -BackendOnly -BackendMarker postgres -BackendSelector tests/integration/test_clearing_payment_prepare_interlock_postgres.py`
+  — exit `1`, `2 failed`. Exact actual/target: `reverse prepare crossed clearing's empty conflict
+  decision` и `clearing bypassed the uncommitted reverse prepare owner`. Это два порядка одной
+  подтверждённой shared-boundary причины, а не timeout harness.
+- До P201 оба теста помечены `xfail(strict=True)`. Та же canonical команда с `-TaskSlug
+  wave4_002_p200_characterization` — exit `0`, `2 xfailed`; cache содержит ровно два ожидаемых
+  nodeid. Pinned `ruff==0.1.14` и `git diff --check` — exit `0`.

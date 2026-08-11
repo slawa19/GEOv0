@@ -1,6 +1,6 @@
 # 002 — Delivery plan
 
-Status: Phase 0 complete; Phase 1 IN PROGRESS (owner-authorized 2026-08-11)
+Status: Phase 0 and Phase 1 complete; Phase 2 IN PROGRESS (owner-authorized 2026-08-11)
 
 Contract: [spec.md](spec.md)
 
@@ -79,7 +79,7 @@ old/new key identities without the compatibility mechanism selected in the slice
 
 ## Phase 2 — Clearing interlock and program closure
 
-Not authorized by Phase 0.
+Owner-authorized for Wave 4 on 2026-08-11; execute after Program 003 closeout.
 
 Goal: close the accepted in-program P2 at the shared payment/clearing resource
 boundary and then close the program. The independent clearing ambiguous-commit
