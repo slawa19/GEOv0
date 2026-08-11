@@ -52,7 +52,7 @@ Owner-authorized for Wave 3 on 2026-08-11; execute sequentially.
   business/audit semantics.
 - [x] P105 Implement transaction-wide acquisition for staged owners; a retry-count
   increase is forbidden.
-- [!] P106 Define and test mixed-version deployment compatibility across service,
+- [x] P106 Define and test mixed-version deployment compatibility across service,
   staged, Admin-abort and recovery owners. A bridge must acquire canonical plus
   both legacy directional keys in one global order; otherwise require quiescence.
 - [!] P107 Add deterministic real PostgreSQL characterization of commit-only

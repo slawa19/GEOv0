@@ -473,3 +473,35 @@ record находится в `spec.md:348-394`, executable selection — в `pla
   paths и `git diff --check` — exit `0`. Implementation commit:
   `4ca910c77f29509e6d0e89a798563d92aba29bb6`; task/evidence находятся в
   `tasks.md:53-54` и этой append-only записи.
+
+### 2026-08-11 — P106
+
+#### Current / Intended / Optimal
+
+- **Current.** После P105 все одноверсионные owners входят в новый protocol через один engine:
+  public/internal service создаёт `PaymentEngine` на `app/core/payments/service.py:196`; staged tick
+  pre-acquire расположен на `real_tick_orchestrator.py:275-283` и
+  `real_payments_executor.py:290-300`; Admin abort использует `PaymentEngine.abort(commit=False)` на
+  `app/api/v1/admin.py:1014,1029-1034`; expired-lock и stale-payment recovery используют тот же
+  `abort(commit=True)` на `app/core/recovery.py:102-122,208-226`. Legacy процессы знают только
+  directed pair keys, а новый код — equivalent-owner плюс canonical unordered pair keys; общего
+  persisted version marker или runtime negotiation нет.
+- **Intended.** Mixed-version workers не должны одновременно изменять payments: old reverse worker
+  может обойти canonical pair identity, а old staged owner не участвует в equivalent-owner domain.
+  Нельзя называть обычный rolling deploy совместимым без bridge, описанного в §9.
+- **Optimal bounded target.** Выбран **coordinated quiescence**, а не compatibility bridge. В
+  репозитории нет zero-downtime deployment requirement; bridge добавил бы canonical и оба legacy
+  directional keys каждому pair во всех service/staged/Admin/recovery paths и заметно расширил бы
+  механизм P105. Поэтому upgrade и rollback Phase 1/Phase 2 выполняются только так: остановить все
+  payment writers и real ticks/recovery, дождаться завершения или отката их DB transactions и
+  отсутствия advisory-lock holders, развернуть одну версию на всех owner surfaces, затем возобновить
+  writers. Rollback требует той же quiescence. Совместная работа old/new версий **не поддерживается
+  и не тестировалась**.
+
+Одноверсионная owner-матрица проверена canonical командой
+`DEBUG=false; $selectors=@('tests/unit/test_payments_2pc.py','tests/unit/test_real_payments_ordered_journal.py','tests/unit/test_admin_abort_tx.py','tests/unit/test_recovery_cleanup.py','tests/unit/test_payment_engine_advisory_locks_execute.py'); .\scripts\verify_local.ps1 -TaskSlug wave3_p106_owner_matrix -BackendOnly -BackendSelector $selectors`
+— exit `0`, `58 passed`. Фактический cache artifact содержит 58 nodeids, включая 9 Admin-abort,
+6 recovery, executor pre-acquire и параметризованную матрицу всех четырёх engine transitions
+`owner → tx → first tx read`; это не пустой selector. `rg -n "PaymentEngine\\(|await engine\\.abort|create_payment_internal_staged|acquire_staged_equivalent_owner_locks"` по пяти owner files — exit `0` и
+подтвердил перечисленные anchors. Product code в P106 не менялся; stable RU deployment wording
+переносится без изменения решения в P108. `git diff --check` для `spec.md`/`tasks.md` — exit `0`.
