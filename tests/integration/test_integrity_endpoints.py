@@ -1,15 +1,19 @@
 from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import select
+from sqlalchemy import func, select
 
+import app.api.v1.integrity as integrity_api
+from app.db.models.audit_log import IntegrityAuditLog
 from app.core.integrity import compute_and_store_integrity_checkpoints
 from app.db.models.equivalent import Equivalent
 from app.schemas.integrity import (
     EquivalentIntegrityStatus,
     IntegrityAuditLogItem,
     IntegrityChecksumResponse,
+    IntegrityVerifyRequest,
 )
 from tests.integration.test_scenarios import register_and_login
 
@@ -144,3 +148,36 @@ async def test_integrity_status_and_verify_serialize_sqlite_checkpoint_as_utc(
     assert verify.status_code == 200, verify.text
     verify_last_verified = verify.json()["equivalents"]["TZCHK"]["last_verified"]
     _assert_datetime_has_offset(verify_last_verified)
+
+
+@pytest.mark.asyncio
+async def test_integrity_verify_checkpoint_failure_is_not_swallowed_or_committed(
+    db_session,
+    monkeypatch,
+) -> None:
+    await _seed_equivalent(db_session, "AUDITFAIL")
+
+    async def _fail_checkpoint(*_args, **_kwargs):
+        raise RuntimeError("forced integrity checkpoint failure")
+
+    monkeypatch.setattr(
+        integrity_api,
+        "compute_integrity_checkpoint_for_equivalent",
+        _fail_checkpoint,
+    )
+    commit = AsyncMock()
+    monkeypatch.setattr(db_session, "commit", commit)
+
+    with pytest.raises(RuntimeError, match="forced integrity checkpoint failure"):
+        await integrity_api.verify_integrity(
+            IntegrityVerifyRequest(equivalent="AUDITFAIL"),
+            db_session,
+            None,
+        )
+
+    commit.assert_not_awaited()
+    await db_session.rollback()
+    assert (
+        await db_session.scalar(select(func.count()).select_from(IntegrityAuditLog))
+        == 0
+    )

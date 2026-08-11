@@ -254,11 +254,11 @@ async def verify_integrity(
         )
 
         # FIX-014: integrity audit trail entry (verify operation).
-        try:
-            computed = await compute_integrity_checkpoint_for_equivalent(db, equivalent_id=eq.id)
-            checksum = computed.checksum
-        except Exception:
-            checksum = checkpoint.checksum if checkpoint else ""
+        computed = await compute_integrity_checkpoint_for_equivalent(
+            db,
+            equivalent_id=eq.id,
+        )
+        checksum = computed.checksum
 
         try:
             passed = status == "healthy"
