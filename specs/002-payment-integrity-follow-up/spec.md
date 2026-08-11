@@ -623,3 +623,56 @@ P107 остаётся `[!]`; экспериментальные test changes н�
   — exit `0`. Документальный implementation commit:
   `fcb8cf7f121bc45f2fb1fcf57e3cae204ba14f70`. Независимый пользовательский metadata-hunk в начале
   `docs/ru/09-decisions-and-defaults.md` сохранён в рабочем дереве и не попал в commit.
+
+### 2026-08-11 — P109 review: staged `lock_timeout` remediation
+
+- **Current на frozen `303e17572a5dad27a7a938addd4650b671c5cdee`.** Публичный staged helper
+  вызывал owner acquisition напрямую (`app/core/payments/engine.py:145-150`), а тот выполнял
+  `SET LOCAL lock_timeout` (`:203-215`) без восстановления. Два независимых read-only PostgreSQL 16
+  probe получили `before=0; after=5s`; при budget `100ms` последующее независимое advisory wait
+  завершилось `55P03` через `0.094s`. Targeted unit gate при этом был false-green: canonical
+  `wave3_p109_internal_review` — exit `0`, `48 passed`.
+- **Intended / Optimal.** Payment deadline ограничивает только acquisition; staged caller владеет
+  остальной внешней транзакцией. После полного успеха helper должен точно восстановить прежний
+  transaction-local timeout; после `55P03`/cancellation он не маскирует исходную ошибку и оставляет
+  rollback outer owner.
+- Remediation `7d8d1e2c756cb9485a4062beffefc499ced05680` сохраняет `SHOW lock_timeout`, захватывает полный
+  owner set и восстанавливает значение через transaction-local `set_config`
+  (`app/core/payments/engine.py:145-170`). PG anti-vacuum test
+  (`tests/integration/test_payment_staged_multicall_postgres.py:441-487`) проверяет `0` до/после и
+  доказывает, что независимое ожидание остаётся активным через `200ms` при payment budget `50ms`.
+  Canonical `wave3_p109_timeout_restore` — exit `0`, `1 passed`; unit owner matrix
+  `wave3_p109_timeout_restore_unit` — exit `0`, `65 passed`; полный post-remediation PG matrix
+  `wave3_p109_pg_remediation` — exit `0`, `16 passed`.
+- Internal reviewer exact `7d8d1e2` — CLEAN: отдельный PG probe сохранил custom `750ms`, а downstream
+  wait получил timeout через `0.750s`, не `0.050s`. External Codex `gpt-5.6-sol` remediation review
+  также CLEAN по этому P2: isolated disposable DB сохранила custom `73ms`; `git diff --check
+  303e175..7d8d1e2` — exit `0`. Новых P1/P2 в fix delta не найдено.
+- Неблокирующая append-only correction: прежняя P102 evidence-строка `spec.md:338-340` называла
+  debts `3.00000000`; фактический regression на текущем target требует `4.00000000`
+  (`tests/integration/test_payment_staged_multicall_postgres.py:321-330`). Исходная историческая
+  строка сохранена.
+
+### 2026-08-11 — P108/P109 STOP: runtime и stable docs выбрали разные tick semantics
+
+#### Current / Intended / Optimal
+
+- **Current behavior.** Staged retryable conflict пробрасывается из executor, payments coordinator
+  вызывается один раз (`app/core/simulator/real_tick_orchestrator.py:295-313`), затем tick делает
+  rollback и записывает `REAL_MODE_TICK_FAILED` (`:502-572`). Regression
+  `tests/unit/test_real_tick_orchestrator_rollback_resolution.py:240-267` явно требует
+  `coordinator.calls == 1`. Следующий heartbeat сначала увеличивает `tick_index`
+  (`app/core/simulator/runtime_impl.py:916-933`) и планирует новую работу; это не replay того же batch.
+- **Intended behavior.** Спека §4.4 разрешает два target: детерминированно вернуть конфликт outer
+  owner **или** повторить весь outer UoW. Реализация и старый regression выбрали первый, но P108
+  stable docs теперь обещают второй: повтор batch на новой session
+  (`docs/ru/09-decisions-and-defaults.md:231-235`,
+  `docs/ru/simulator/backend/payment-integration.md:158-162`). Canonical selector
+  `wave3_ext_review_outer_retry` — exit `0`, `1 passed`, тем самым подтверждает именно fail-fast.
+- **Optimal target требует решения владельца.** Вариант A сохраняет проверенный fail-fast: откатить
+  tick, не переигрывать тот же batch, исправить обе stable docs и P108 evidence. Вариант B добавляет
+  bounded retry выше создания session и повторяет тот же детерминированный batch с сохранёнными
+  idempotency/observation semantics. B меняет availability, error accounting и tick semantics и
+  требует отдельного кода и end-to-end schedules; его нельзя вывести как техническую поправку.
+
+P108 снова `[!]`, P109 не закрывается до выбора владельца и повторного exact-head external review.
