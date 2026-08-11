@@ -247,13 +247,21 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
             clearing_tx = clearing_transactions[0]
             assert clearing_tx.state == "COMMITTED"
 
-            final_shared_debt = await verify.scalar(
-                select(Debt.amount).where(
-                    Debt.debtor_id == a_id,
-                    Debt.creditor_id == b_id,
-                    Debt.equivalent_id == equivalent_id,
+            final_debts = {
+                debt.id: (debt.amount, debt.version)
+                for debt in (
+                    await verify.scalars(
+                        select(Debt).where(Debt.equivalent_id == equivalent_id)
+                    )
+                ).all()
+            }
+            trust_limits = (
+                await verify.scalars(
+                    select(TrustLine.limit).where(
+                        TrustLine.equivalent_id == equivalent_id
+                    )
                 )
-            )
+            ).all()
             remaining_locks = (
                 await verify.scalars(
                     select(PrepareLock).where(PrepareLock.tx_id == payment_tx_id)
@@ -269,8 +277,14 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
                 )
             ).all()
 
-            assert final_shared_debt == Decimal("120.00000000")
-            assert final_shared_debt <= Decimal("200.00")
+            assert Decimal(str(clearing_tx.payload["amount"])) == Decimal(
+                "30.00000000"
+            )
+            assert final_debts == {
+                debt_ids[0]: (Decimal("120.00000000"), 3),
+                debt_ids[2]: (Decimal("10.00000000"), 2),
+            }
+            assert trust_limits == [Decimal("200.00000000")] * 3
             assert remaining_locks == []
             assert {
                 (audit.operation_type, audit.tx_id, audit.verification_passed)

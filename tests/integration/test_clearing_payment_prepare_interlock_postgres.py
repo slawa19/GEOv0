@@ -240,9 +240,11 @@ async def test_clearing_owner_blocks_new_reverse_prepare_after_empty_snapshot_po
 
     from app.core.clearing.service import ClearingService
     from app.core.payments.engine import PaymentEngine
+    from app.db.models.audit_log import IntegrityAuditLog
     from app.db.models.debt import Debt
     from app.db.models.prepare_lock import PrepareLock
     from app.db.models.transaction import Transaction
+    from app.db.models.trustline import TrustLine
     from tests.conftest import TestingSessionLocal
 
     seed = await _seed_interlock_case()
@@ -319,6 +321,22 @@ async def test_clearing_owner_blocks_new_reverse_prepare_after_empty_snapshot_po
                     )
                 )
             ).all()
+            clearing_transactions = (
+                await verify.scalars(
+                    select(Transaction).where(
+                        Transaction.type == "CLEARING",
+                        Transaction.initiator_id.in_(seed["participant_ids"]),
+                    )
+                )
+            ).all()
+            audits = (
+                await verify.scalars(
+                    select(IntegrityAuditLog).where(
+                        IntegrityAuditLog.equivalent_code
+                        == seed["equivalent_code"]
+                    )
+                )
+            ).all()
             debts = {
                 debt.id: (debt.amount, debt.version)
                 for debt in (
@@ -329,13 +347,32 @@ async def test_clearing_owner_blocks_new_reverse_prepare_after_empty_snapshot_po
                     )
                 ).all()
             }
+            trust_limits = (
+                await verify.scalars(
+                    select(TrustLine.limit).where(
+                        TrustLine.equivalent_id == seed["equivalent_id"]
+                    )
+                )
+            ).all()
 
         assert payment_tx is not None and payment_tx.state == "PREPARED"
         assert len(locks) == 1
+        assert len(clearing_transactions) == 1
+        clearing_tx = clearing_transactions[0]
+        assert clearing_tx.state == "COMMITTED"
+        assert Decimal(str(clearing_tx.payload["amount"])) == Decimal("30.00000000")
+        assert set(clearing_tx.payload["cycle"]) == {
+            str(debt_id) for debt_id in seed["debt_ids"]
+        }
+        assert {
+            (audit.operation_type, audit.tx_id, audit.verification_passed)
+            for audit in audits
+        } == {("CLEARING", clearing_tx.tx_id, True)}
         assert debts == {
             seed["debt_ids"][0]: (Decimal("70.00000000"), 2),
             seed["debt_ids"][2]: (Decimal("10.00000000"), 2),
         }
+        assert trust_limits == [Decimal("200.00000000")] * 4
     finally:
         primary_error = sys.exc_info()[1]
         release_clearing.set()
@@ -379,6 +416,7 @@ async def test_uncommitted_reverse_prepare_blocks_clearing_until_visible_postgre
     from app.db.models.debt import Debt
     from app.db.models.prepare_lock import PrepareLock
     from app.db.models.transaction import Transaction
+    from app.db.models.trustline import TrustLine
     from tests.conftest import TestingSessionLocal
 
     seed = await _seed_interlock_case()
@@ -451,6 +489,14 @@ async def test_uncommitted_reverse_prepare_blocks_clearing_until_visible_postgre
                     )
                 )
             ).all()
+            all_boundary_audits = (
+                await verify.scalars(
+                    select(IntegrityAuditLog).where(
+                        IntegrityAuditLog.equivalent_code
+                        == seed["equivalent_code"]
+                    )
+                )
+            ).all()
             debts = {
                 debt.id: (debt.amount, debt.version)
                 for debt in (
@@ -461,16 +507,25 @@ async def test_uncommitted_reverse_prepare_blocks_clearing_until_visible_postgre
                     )
                 ).all()
             }
+            trust_limits = (
+                await verify.scalars(
+                    select(TrustLine.limit).where(
+                        TrustLine.equivalent_id == seed["equivalent_id"]
+                    )
+                )
+            ).all()
 
         assert payment_tx is not None and payment_tx.state == "PREPARED"
         assert len(locks) == 1
         assert clearing_transactions == []
         assert clearing_audits == []
+        assert all_boundary_audits == []
         assert debts == {
             seed["debt_ids"][0]: (Decimal("100.00000000"), 1),
             seed["debt_ids"][1]: (Decimal("30.00000000"), 1),
             seed["debt_ids"][2]: (Decimal("40.00000000"), 1),
         }
+        assert trust_limits == [Decimal("200.00000000")] * 4
     finally:
         primary_error = sys.exc_info()[1]
         try:

@@ -802,3 +802,22 @@ P109 закрыта; Phase 1 не имеет открытых P1/P2 и гото�
   — exit `0`, `13 passed`. SQLite clearing unit matrix с `-TaskSlug wave4_002_p201_units` — exit
   `0`, `37 passed`; отдельный defensive nonpositive selector с `-TaskSlug
   wave4_002_p201_nonpositive_unit` — exit `0`, `1 passed`.
+
+### 2026-08-11 — P202
+
+- Оба порядка P200 теперь проверяют полный boundary outcome. Clearing-first в
+  `tests/integration/test_clearing_payment_prepare_interlock_postgres.py:304-375` фиксирует
+  фактический locked amount `30`, один `COMMITTED` clearing с тем же `payload.amount` и исходным
+  множеством Debt UUID, один verified CLEARING audit и ноль PAYMENT audit, ровно один reverse
+  `PrepareLock`, оставшиеся Debts `70/version 2` и `10/version 2`, четыре неизменных trust limits.
+  Payment-first в `:458-528` фиксирует `None`, durable `PREPARED`+один lock, отсутствие clearing
+  transaction и любых boundary audits, все три исходных Debt amounts/versions и четыре неизменных
+  limits.
+- Сквозной payment-after-clearing schedule сохранён отдельно и усилен:
+  `tests/integration/test_concurrent_clearing_payment_lost_update_postgres.py:226-299` проверяет
+  actual clearing amount/payload `30`, итоговые Debts `120/version 3` и `10/version 2`, неизменные
+  три limits, ноль PrepareLocks, ровно по одному verified PAYMENT/CLEARING audit и ровно одну
+  `payment.received` publication для terminal payment.
+- Canonical команда:
+  `$env:DEBUG='false'; $env:ENV='test'; $env:TEST_DATABASE_URL='postgresql+asyncpg://geo:geo@127.0.0.1:55433/geov0_test_wave4_p200_a5c0'; $env:GEO_TEST_ALLOW_DB_RESET='1'; $selectors=@('tests/integration/test_clearing_payment_prepare_interlock_postgres.py','tests/integration/test_concurrent_clearing_payment_lost_update_postgres.py'); .\scripts\verify_local.ps1 -TaskSlug wave4_002_p202_effects -BackendOnly -BackendMarker postgres -BackendSelector $selectors`
+  — exit `0`, `3 passed`.

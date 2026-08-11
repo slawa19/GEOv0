@@ -69,7 +69,7 @@ All tasks are pending successful Phase 1 and owner authorization.
 - [x] P200 Add deterministic clearing-versus-new-prepare schedules for both orders.
 - [x] P201 Select and implement the smallest shared serialization or revalidation
   boundary; avoid unrelated clearing refactoring.
-- [!] P202 Assert final debt, versions, trust limits, actual locked clearing amount,
+- [x] P202 Assert final debt, versions, trust limits, actual locked clearing amount,
   PrepareLocks and emitted/audit effects relevant to the boundary.
 - [!] P203 Run the exact-head payment/clearing PostgreSQL matrix.
 - [!] P204 Synchronize stable docs and residual ledger.
