@@ -121,14 +121,14 @@ async def compute_and_store_integrity_checkpoints(session: AsyncSession) -> int:
     if not equivalents:
         return 0
 
-    created = 0
-    for eq_id in equivalents:
-        try:
+    try:
+        created = 0
+        for eq_id in equivalents:
             cp = await compute_integrity_checkpoint_for_equivalent(session, equivalent_id=eq_id)
             session.add(cp)
             created += 1
-        except Exception:
-            logger.exception("integrity.checkpoint_failed equivalent_id=%s", eq_id)
-
-    await session.commit()
-    return created
+        await session.commit()
+        return created
+    except BaseException:
+        await session.rollback()
+        raise
