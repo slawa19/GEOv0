@@ -16,9 +16,11 @@ from app.schemas.trustline import TrustLineCreateRequest
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("fail_on_call", [1, 2])
 async def test_create_checkpoint_failure_is_not_swallowed_or_committed(
     db_session,
     monkeypatch,
+    fail_on_call: int,
 ) -> None:
     equivalent = Equivalent(code="USD", precision=2, is_active=True)
     sender = Participant(
@@ -44,18 +46,27 @@ async def test_create_checkpoint_failure_is_not_swallowed_or_committed(
 
     monkeypatch.setattr(trustline_service_module, "verify_signature", lambda *_args: None)
 
-    async def _fail_checkpoint(*_args, **_kwargs):
-        raise RuntimeError("forced checkpoint read failure")
+    original_checkpoint = (
+        trustline_service_module.compute_integrity_checkpoint_for_equivalent
+    )
+    checkpoint_calls = 0
+
+    async def _fail_selected_checkpoint(*args, **kwargs):
+        nonlocal checkpoint_calls
+        checkpoint_calls += 1
+        if checkpoint_calls == fail_on_call:
+            raise RuntimeError(f"forced checkpoint failure {fail_on_call}")
+        return await original_checkpoint(*args, **kwargs)
 
     monkeypatch.setattr(
         trustline_service_module,
         "compute_integrity_checkpoint_for_equivalent",
-        _fail_checkpoint,
+        _fail_selected_checkpoint,
     )
     commit = AsyncMock()
     monkeypatch.setattr(db_session, "commit", commit)
 
-    with pytest.raises(RuntimeError, match="forced checkpoint read failure"):
+    with pytest.raises(RuntimeError, match=f"forced checkpoint failure {fail_on_call}"):
         await TrustLineService(db_session).create(
             sender.id,
             TrustLineCreateRequest(

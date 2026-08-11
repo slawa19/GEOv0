@@ -104,34 +104,31 @@ class TrustLineService:
 
         await self.session.flush()
 
-        try:
-            checkpoint_after = await compute_integrity_checkpoint_for_equivalent(
-                self.session,
-                equivalent_id=equivalent.id,
-            )
-            invariants_status = checkpoint_after.invariants_status or {}
-            passed = bool(invariants_status.get("passed", True))
-            before_sum = checkpoint_before.checksum if checkpoint_before else ""
-            after_sum = checkpoint_after.checksum or before_sum
+        checkpoint_after = await compute_integrity_checkpoint_for_equivalent(
+            self.session,
+            equivalent_id=equivalent.id,
+        )
+        invariants_status = checkpoint_after.invariants_status or {}
+        passed = bool(invariants_status.get("passed", True))
+        before_sum = checkpoint_before.checksum if checkpoint_before else ""
+        after_sum = checkpoint_after.checksum or before_sum
 
-            self.session.add(
-                IntegrityAuditLog(
-                    operation_type="TRUST_LINE_CREATE",
-                    tx_id=None,
-                    equivalent_code=equivalent.code,
-                    state_checksum_before=before_sum,
-                    state_checksum_after=after_sum,
-                    affected_participants={
-                        "from": from_participant.pid,
-                        "to": to_participant.pid,
-                    },
-                    invariants_checked=invariants_status.get("checks") or invariants_status,
-                    verification_passed=passed,
-                    error_details=None if passed else invariants_status,
-                )
+        self.session.add(
+            IntegrityAuditLog(
+                operation_type="TRUST_LINE_CREATE",
+                tx_id=None,
+                equivalent_code=equivalent.code,
+                state_checksum_before=before_sum,
+                state_checksum_after=after_sum,
+                affected_participants={
+                    "from": from_participant.pid,
+                    "to": to_participant.pid,
+                },
+                invariants_checked=invariants_status.get("checks") or invariants_status,
+                verification_passed=passed,
+                error_details=None if passed else invariants_status,
             )
-        except Exception:
-            pass
+        )
 
         await self.session.commit()
         PaymentRouter.invalidate_cache(equivalent.code)
