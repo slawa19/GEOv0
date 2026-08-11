@@ -1,5 +1,6 @@
 import asyncio
 import re
+import secrets
 import time
 from dataclasses import dataclass
 from typing import AsyncGenerator, Literal, Optional
@@ -23,6 +24,13 @@ from app.config import canonicalize_http_origin, settings
 
 reusable_oauth2 = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 optional_oauth2 = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
+
+
+def _admin_token_matches(candidate: str) -> bool:
+    return secrets.compare_digest(
+        candidate.encode("utf-8"),
+        settings.ADMIN_TOKEN.encode("utf-8"),
+    )
 
 
 _rate_limit_lock = asyncio.Lock()
@@ -133,7 +141,7 @@ async def require_participant_or_admin(
 ) -> Participant | None:
     # Admin token allows calling protected endpoints without participant auth.
     if x_admin_token is not None:
-        if x_admin_token != settings.ADMIN_TOKEN:
+        if not _admin_token_matches(x_admin_token):
             raise ForbiddenException("Admin token required")
         return None
 
@@ -166,7 +174,7 @@ async def require_admin(
 ) -> None:
     # Strict token path (preferred)
     if x_admin_token is not None:
-        if x_admin_token != settings.ADMIN_TOKEN:
+        if not _admin_token_matches(x_admin_token):
             raise ForbiddenException("Admin token required")
         return
 
@@ -254,7 +262,7 @@ async def require_simulator_actor(
 
     # 1. Admin token
     if x_admin_token is not None:
-        if x_admin_token != settings.ADMIN_TOKEN:
+        if not _admin_token_matches(x_admin_token):
             raise ForbiddenException("Admin token required")
         if x_simulator_owner is not None:
             # FIX-7: trim whitespace before validation (§9)
