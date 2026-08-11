@@ -111,6 +111,7 @@ def _iter_documented_commands_from_content(content: str):
     fence_language: str | None = None
     in_powershell_block_comment = False
     powershell_here_string_end: str | None = None
+    pending_powershell_command: tuple[int, str] | None = None
     for line_number, line in enumerate(
         content.splitlines(),
         start=1,
@@ -118,6 +119,9 @@ def _iter_documented_commands_from_content(content: str):
         stripped = line.strip()
         fence = re.match(r"^```\s*([A-Za-z0-9_-]*)", stripped)
         if fence is not None:
+            if pending_powershell_command is not None:
+                yield (*pending_powershell_command, fence_language)
+                pending_powershell_command = None
             fence_language = (
                 None if fence_language is not None else fence.group(1).lower()
             )
@@ -127,9 +131,13 @@ def _iter_documented_commands_from_content(content: str):
         powershell_statements: list[str] | None = None
         if fence_language in {"powershell", "pwsh"}:
             if powershell_here_string_end is not None:
-                if stripped == powershell_here_string_end:
-                    powershell_here_string_end = None
-                continue
+                if not stripped.startswith(powershell_here_string_end):
+                    continue
+                stripped = stripped[len(powershell_here_string_end) :].lstrip(" ;")
+                powershell_here_string_end = None
+                if not stripped:
+                    continue
+                line = stripped
             visible, in_powershell_block_comment = _strip_powershell_block_comments(
                 line,
                 in_powershell_block_comment,
@@ -164,8 +172,20 @@ def _iter_documented_commands_from_content(content: str):
             continue
         commands = powershell_statements or [stripped]
         for command in commands:
-            if command and not command.startswith("#"):
-                yield line_number, command, fence_language
+            command_line = line_number
+            if pending_powershell_command is not None:
+                command_line, pending = pending_powershell_command
+                command = f"{pending[:-1].rstrip()} {command.lstrip()}"
+                pending_powershell_command = None
+            if command.rstrip().endswith("`") and fence_language in {
+                "powershell",
+                "pwsh",
+            }:
+                pending_powershell_command = (command_line, command)
+            elif command and not command.startswith("#"):
+                yield command_line, command, fence_language
+    if pending_powershell_command is not None:
+        yield (*pending_powershell_command, fence_language)
 
 
 def _iter_documented_commands(path: Path):
@@ -378,7 +398,7 @@ def _created_database_name(command: str) -> str | None:
     return database_names[-1] if database_names else None
 
 
-def _valid_verifier_arguments(arguments: str) -> bool:
+def _parse_verifier_arguments(arguments: str) -> dict[str, str | bool] | None:
     candidate = arguments.strip()
     if candidate.endswith("`"):
         candidate = candidate[:-1].rstrip()
@@ -395,34 +415,54 @@ def _valid_verifier_arguments(arguments: str) -> bool:
         "-backendonly": 0,
         "-python": 1,
     }
+    parsed: dict[str, str | bool] = {}
     index = 0
     while index < len(tokens):
         parameter = tokens[index].lower()
         arity = parameter_arity.get(parameter)
-        if arity is None:
-            return False
+        if arity is None or parameter in parsed:
+            return None
         if arity == 1:
             if index + 1 >= len(tokens) or tokens[index + 1].startswith("-"):
-                return False
+                return None
             index += 1
+            parsed[parameter] = tokens[index]
+        else:
+            parsed[parameter] = True
         index += 1
-    return True
+    task_slug = parsed.get("-taskslug")
+    if (
+        isinstance(task_slug, str)
+        and re.fullmatch(r"[A-Za-z0-9_-]+", task_slug) is None
+    ):
+        return None
+    backend_marker = parsed.get("-backendmarker")
+    if (
+        isinstance(backend_marker, str)
+        and re.fullmatch(
+            r"[A-Za-z_][A-Za-z0-9_]*",
+            backend_marker,
+        )
+        is None
+    ):
+        return None
+    return parsed
 
 
-def _is_canonical_verifier_command(command: str) -> bool:
+def _canonical_verifier_arguments(command: str) -> dict[str, str | bool] | None:
     candidate = command.strip()
     if candidate.startswith("&"):
         candidate = candidate[1:].lstrip()
     token = re.match(r"""^("[^"]+"|'[^']+'|\S+)(.*)$""", candidate)
     if token is None:
-        return False
+        return None
     executable_path = token.group(1).strip("\"'").replace("\\", "/").lower()
     arguments = token.group(2).lstrip()
     if executable_path in {"./scripts/verify_local.ps1", "scripts/verify_local.ps1"}:
-        return _valid_verifier_arguments(arguments)
+        return _parse_verifier_arguments(arguments)
     executable = executable_path.rsplit("/", 1)[-1]
     if executable not in {"powershell", "powershell.exe", "pwsh", "pwsh.exe"}:
-        return False
+        return None
     file_invocation = re.fullmatch(
         r"(?:(?:-NoProfile|-NonInteractive)\s+|"
         r"-ExecutionPolicy\s+Bypass\s+)*"
@@ -431,12 +471,15 @@ def _is_canonical_verifier_command(command: str) -> bool:
         re.IGNORECASE,
     )
     if file_invocation is None:
-        return False
+        return None
     verifier_path = file_invocation.group(1).strip("\"'").replace("\\", "/").lower()
-    return bool(
-        verifier_path in {"./scripts/verify_local.ps1", "scripts/verify_local.ps1"}
-        and _valid_verifier_arguments(file_invocation.group(2))
-    )
+    if verifier_path not in {"./scripts/verify_local.ps1", "scripts/verify_local.ps1"}:
+        return None
+    return _parse_verifier_arguments(file_invocation.group(2))
+
+
+def _is_canonical_verifier_command(command: str) -> bool:
+    return _canonical_verifier_arguments(command) is not None
 
 
 def _postgres_example_violations(
@@ -492,8 +535,10 @@ def _postgres_example_violations(
         if reset_assignment is not None:
             reset_values.append(reset_assignment.group(1))
             reset_indexes.append(command_index)
-        if _is_canonical_verifier_command(command) and re.search(
-            r"-BackendMarker\s+postgres(?:\s|$)", command
+        verifier_arguments = _canonical_verifier_arguments(command)
+        if (
+            verifier_arguments is not None
+            and verifier_arguments.get("-backendmarker") == "postgres"
         ):
             postgres_verifiers.append(command)
             verifier_indexes.append(command_index)
@@ -763,6 +808,19 @@ def test_contributor_venv_guard_rejects_missing_executable_setup_roles(
             "-BackendMarker postgres",
             False,
         ),
+        (
+            "./scripts/verify_local.ps1 -TaskSlug bad.slug -BackendMarker postgres",
+            False,
+        ),
+        (
+            "./scripts/verify_local.ps1 -BackendMarker postgres "
+            "-BackendMarker postgres",
+            False,
+        ),
+        (
+            './scripts/verify_local.ps1 -TaskSlug "safe -BackendMarker postgres "',
+            False,
+        ),
     ],
 )
 def test_canonical_verifier_guard_requires_repository_script_path(
@@ -838,6 +896,23 @@ Write-Host 'before'; <# ignored #>; pytest.exe after_comment
 
     assert "pytest.exe after_quoted_marker" in commands
     assert "pytest.exe after_comment" in commands
+
+
+def test_powershell_parser_preserves_here_string_terminator_suffix() -> None:
+    commands = [
+        command
+        for _, command, _ in _iter_documented_commands_from_content(
+            """
+```powershell
+$help = @'
+not executable
+'@; pytest.exe after_here_string
+```
+"""
+        )
+    ]
+
+    assert "pytest.exe after_here_string" in commands
 
 
 @pytest.mark.parametrize(
@@ -923,6 +998,15 @@ createdb -U geo geov0_test_command_mode
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_command_mode"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
 powershell -Command Write-Host -File ./scripts/verify_local.ps1 -BackendMarker postgres
+```
+""",
+        """
+```powershell
+createdb -U geo geov0_test_bad_continuation
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_bad_continuation"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+./scripts/verify_local.ps1 -BackendMarker postgres `
+  -DefinitelyNotAParameter x
 ```
 """,
         """
