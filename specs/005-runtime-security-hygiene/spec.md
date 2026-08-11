@@ -91,7 +91,7 @@ liveness без деталей и аутентифицированный diagnos
 | ID | Задача | Статус |
 |---|---|---|
 | T500 | Перенести токен WebSocket из query string; решение по совместимости задокументированного URL | `[x]` |
-| T501 | Убрать `str(exc)` из публичного health; разделить liveness и diagnostic | `[!]` |
+| T501 | Убрать `str(exc)` из публичного health; разделить liveness и diagnostic | `[x]` |
 | T502 | Переписать `.dockerignore` (гигиена сборки dev-образа, не security); добавить в CI проверку содержимого образа | `[!]` |
 | T503 | `compare_digest` для admin-токена | `[!]` |
 | T504 | Ограничить рост структуры rate-limiter | `[!]` |
@@ -120,3 +120,28 @@ liveness без деталей и аутентифицированный diagnos
 - Та же canonical проверка после исправления с `-TaskSlug wave1_t500`: exit `0`, `3 passed`;
   live-uvicorn проверка подтверждает, что токен отсутствует во всех собранных строках
   `uvicorn.error`/`uvicorn.access`.
+
+### 2026-08-11 — T501
+
+- Implementation commit: `2813c34712e7937009ffe6807baa14932b3b665b`.
+- До: оба публичных обработчика возвращали `details: str(exc)` — `app/main.py:578-585` в прежней
+  нумерации (`details` на `:584`) и `app/api/v1/health.py:74-81`; versioned alias дополнительно
+  раскрывал dialect.
+- После: public root `app/main.py:566-586` и versioned alias `app/api/v1/health.py:57-81`
+  возвращают одинаковый санитизированный 503; authenticated diagnostic вынесен в
+  `app/api/v1/health.py:84-122` (`GET /api/v1/admin/health/db`) и описан в
+  `api/openapi.yaml:99`.
+- Red canonical selector
+  `$env:DEBUG='false'; .\scripts\verify_local.ps1 -TaskSlug wave1_t501_red2 -BackendOnly -BackendSelector tests/integration/test_health_and_equivalents.py`:
+  exit `1`, `2 failed, 2 passed`; actual public body содержал sentinel URL, а анонимный diagnostic
+  alias отвечал `503` вместо ожидаемого auth failure.
+- Target correction: попытка превратить versioned alias в diagnostic нарушила явную alias-классификацию
+  OpenAPI (`Transport header drift expected=59; actual=60`). После выделения admin path поведенческий
+  selector с `-TaskSlug wave1_t501_fix` прошёл: exit `0`, `4 passed`.
+- OpenAPI ratchet честно зафиксировал изменение public 503: промежуточно
+  `Error response drift expected=84; actual=85`, затем при совпавшем count — новый digest. T610 не
+  выполнялся: новый operation приведён к generated-схеме, а существующий count остался `84`;
+  датированная причина записана рядом с константой.
+- Финальный canonical contract selector
+  `$env:DEBUG='false'; .\scripts\verify_local.ps1 -TaskSlug wave1_t501_contract5 -BackendOnly -BackendSelector tests/contract/test_openapi_contract.py`:
+  exit `0`, `23 passed`.
