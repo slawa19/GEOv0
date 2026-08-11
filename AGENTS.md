@@ -162,9 +162,10 @@ SQLite не доказывает advisory locks, concurrent writers, FK/isolatio
 $taskSlug = "agent_payments_review"
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_$taskSlug"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-.\scripts\verify_local.ps1 -TaskSlug $taskSlug -BackendOnly -BackendSelector tests/integration/test_payment_engine_uow_retry_postgres.py
+.\scripts\verify_local.ps1 -TaskSlug $taskSlug -BackendOnly -BackendMarker postgres -BackendSelector tests/integration/test_payment_engine_uow_retry_postgres.py
 ```
 
+Прямой pytest с фактически выбранным `postgres` test fail-closed завершает collection с UsageError/exit `4`, если `TEST_DATABASE_URL` использует другой backend; зелёный SQLite skip не является evidence.
 Никогда не выставляйте `GEO_TEST_ALLOW_DB_RESET=1`, пока фактически не проверили, что URL указывает на отдельную тестовую DB. Не используйте developer/prod DB.
 
 ### E2E и дорогие проверки

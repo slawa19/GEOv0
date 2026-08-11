@@ -388,12 +388,15 @@ docker compose up -d db
 docker exec geov0-db createdb -U geo "geov0_test_$taskSlug" 2>$null
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_$taskSlug"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-.\scripts\verify_local.ps1 -TaskSlug $taskSlug -BackendOnly -BackendSelector tests/integration/test_concurrent_prepare_routes_bottleneck_postgres.py
+.\scripts\verify_local.ps1 -TaskSlug $taskSlug -BackendOnly -BackendMarker postgres -BackendSelector tests/integration/test_concurrent_prepare_routes_bottleneck_postgres.py
 ```
 
 The harness rejects non-SQLite databases unless both the database name matches
 `geov0_test_*` and `GEO_TEST_ALLOW_DB_RESET=1`. The opt-in flag cannot override
-an unsafe name. Never point it at developer, shared, staging, or production data.
+an unsafe name. Direct pytest also fails during collection whenever a selected
+`postgres` test uses a non-PostgreSQL `TEST_DATABASE_URL`; a skipped SQLite run is
+not accepted as evidence. Never point it at developer, shared, staging, or
+production data.
 
 #### UI commands and E2E
 

@@ -45,6 +45,22 @@ settings.RATE_LIMIT_ENABLED = False
 settings.RECOVERY_ENABLED = False
 settings.INTEGRITY_CHECKPOINT_ENABLED = False
 
+
+@pytest.hookimpl(trylast=True)
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Fail closed when selected PostgreSQL tests use another DB backend."""
+    del config
+    selected_postgres = [
+        item.nodeid for item in items if item.get_closest_marker("postgres") is not None
+    ]
+    if selected_postgres and _validated_test_database_url.get_backend_name() != "postgresql":
+        raise pytest.UsageError(
+            "PostgreSQL-marked tests were selected, but TEST_DATABASE_URL does not use "
+            "PostgreSQL. Set a dedicated geov0_test_* PostgreSQL URL and "
+            "GEO_TEST_ALLOW_DB_RESET=1, or deselect the postgres marker."
+        )
+
+
 _is_sqlite = _validated_test_database_url.get_backend_name() == "sqlite"
 if _is_sqlite:
     sqlite_database = _validated_test_database_url.database

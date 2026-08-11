@@ -166,7 +166,7 @@ sequence (что требует протокольного поля), либо �
 | T602 | Решить судьбу `stop_after_types`: сделать работающим вне pytest или убрать из контракта и сигнатур (F-006-2b, P3) | `[x]` |
 | T603 | Включить rate limiter в тестах; покрыть 429/окно/fallback | `[x]` |
 | T604 | Привести маркеры `pytest.ini` в соответствие с носителями | `[x]` |
-| T605 | Сделать `pytest -m postgres` fail-closed вне канонического раннера | `[!]` |
+| T605 | Сделать `pytest -m postgres` fail-closed вне канонического раннера | `[x]` |
 | T606 | Добавить `container-smoke` в регулярное расписание | `[!]` |
 | T607 | Устранить rAF/тост-флак в admin vitest setup | `[x]` |
 | T608a | Ruff на пиннутых версиях: `--fix` (19 находок), затем 5 ручных случаев (3× `F841` и 1× `E712` под `--unsafe-fixes`, 1× `E741` вручную); перевод ruff-джоба в блокирующий. Ограниченный объём: одна команда + 5 правок | `[x]` |
@@ -330,3 +330,34 @@ sequence (что требует протокольного поля), либо �
   exit `1` (`1 failed, 3 passed`), потому что строковый scan счёл собственный literal
   `"pytest.mark.e2e"` носителем. Guard исправлен на AST-role check; production/tooling target не
   менялся между попытками.
+
+### 2026-08-11 — T605
+
+- Перед правкой finding воспроизведена на текущем коде. **Current:** прямой
+  `$env:TEST_DATABASE_URL='sqlite+aiosqlite:///./.local-run/test-runs/wave5_t605_red/test.db';
+  .\.venv\Scripts\python.exe -m pytest -q -m postgres
+  tests/integration/test_payment_engine_uow_retry_postgres.py` завершался exit `0`, `2 skipped`;
+  независимый полный collect/run видел `40 skipped, 991 deselected`. Canonical runner уже
+  fail-closed через `--require-backend postgresql` (`scripts/verify_local.ps1:105-111`).
+  **Intended:** выбранный postgres-marked test никогда не считается зелёным на другом backend.
+  **Optimal:** collection hook после builtin marker deselection, а не разбор literal `-m`.
+- `tests/conftest.py:49-63` добавляет `pytest_collection_modifyitems(..., trylast=True)`: только если
+  среди оставшихся items есть marker `postgres`, non-PostgreSQL URL даёт `pytest.UsageError` с
+  инструкцией про dedicated `geov0_test_*` и reset opt-in. Поэтому canonical default
+  `not slow and not postgres` не false-fail, а прямой selector postgres-файла без `-m` тоже защищён.
+  Subprocess guard `tests/unit/test_postgres_marker_fail_closed.py:41-68` доказывает обе стороны:
+  SQLite → exit `4`/точное сообщение; безопасно именованный PostgreSQL URL → collection exit `0`,
+  `2 tests collected`, без сетевого подключения.
+- После: тот же прямой SQLite selector завершился exit `4`, `no tests ran`, с
+  `ERROR: PostgreSQL-marked tests were selected, but TEST_DATABASE_URL does not use PostgreSQL`.
+  Canonical non-PG gate `wave5_t605_fail_closed` на новом guard, taxonomy и DB-safety tests — exit
+  `0`, `24 passed, 1 skipped`. Pinned Ruff `0.1.14` на двух изменённых Python-файлах и
+  `git diff --check` — exit `0`.
+- Реальный anti-vacuum milestone: заранее проверена отсутствующая disposable DB
+  `geov0_test_wave5_t605_663bd2f`; canonical
+  `.\scripts\verify_local.ps1 -TaskSlug wave5_t605_postgres -BackendOnly -BackendMarker postgres
+  -BackendSelector tests/integration/test_payment_engine_uow_retry_postgres.py -Python
+  .\.venv\Scripts\python.exe` — exit `0`, `2 passed`. Перед удалением active connections `0`,
+  после `DROP DATABASE` запись отсутствует. README, `docs/ru/10-testing-framework.md` и текущий
+  AGENTS marker contract обновлены: direct wrong-backend run больше не описывается как допустимый
+  skip/debug result.

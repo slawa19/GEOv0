@@ -49,6 +49,10 @@ $env:GEO_TEST_ALLOW_DB_RESET = '1'
 .\scripts\verify_local.ps1 -TaskSlug $taskSlug -BackendOnly -BackendMarker postgres
 ```
 
+Fail-closed действует и для диагностического прямого pytest: если после marker-
+фильтрации выбран хотя бы один `postgres` test, а `TEST_DATABASE_URL` использует
+другой backend, collection завершается UsageError/exit `4`, а не зелёным skip.
+
 ## UI и дорогие проверки
 
 Для узкого цикла используйте scripts соответствующего package:
