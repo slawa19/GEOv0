@@ -49,7 +49,7 @@ Create the environment used by the canonical verifier from PowerShell:
 
 ```powershell
 # Create virtual environment
-py -3.11 -m venv .venv
+py -m venv .venv
 
 # Install runtime and development dependencies
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
@@ -180,30 +180,32 @@ git checkout -b feature/my-feature
 
 ### 3.3. Run in development mode
 
-```bash
-export ENV=dev
+```powershell
+$env:ENV = "dev"
 
 # Start with hot reload
-uvicorn app.main:app --reload --host 0.0.0.0 --port 18000
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 0.0.0.0 --port 18000
 
 # Debug logging
-DEBUG=true LOG_LEVEL=DEBUG uvicorn app.main:app --reload --host 0.0.0.0 --port 18000
+$env:DEBUG = "true"
+$env:LOG_LEVEL = "DEBUG"
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 0.0.0.0 --port 18000
 ```
 
 ### 3.4. Working with database
 
-```bash
+```powershell
 # Create new migration
-alembic -c migrations/alembic.ini revision --autogenerate -m "Add column X to table Y"
+.\.venv\Scripts\python.exe -m alembic -c migrations/alembic.ini revision --autogenerate -m "Add column X to table Y"
 
 # Apply migrations
-alembic -c migrations/alembic.ini upgrade head
+.\.venv\Scripts\python.exe -m alembic -c migrations/alembic.ini upgrade head
 
 # Rollback last migration
-alembic -c migrations/alembic.ini downgrade -1
+.\.venv\Scripts\python.exe -m alembic -c migrations/alembic.ini downgrade -1
 
 # View history
-alembic -c migrations/alembic.ini history
+.\.venv\Scripts\python.exe -m alembic -c migrations/alembic.ini history
 ```
 
 ---
@@ -217,13 +219,13 @@ We use:
 - **Black** — non-blocking formatting diagnostic
 - **mypy** — not configured as a repository gate
 
-```bash
+```powershell
 # Check
-python -m ruff check app migrations --no-cache
+.\.venv\Scripts\python.exe -m ruff check app migrations --no-cache
 
 # Auto-fix
-python -m ruff check --fix app migrations
-python -m black --check app migrations
+.\.venv\Scripts\python.exe -m ruff check --fix app migrations
+.\.venv\Scripts\python.exe -m black --check app migrations
 ```
 
 ### 4.2. Configuration (pyproject.toml)

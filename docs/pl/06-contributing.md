@@ -49,7 +49,7 @@ Utwórz środowisko używane przez kanoniczny verifier z PowerShell:
 
 ```powershell
 # Utwórz wirtualne środowisko
-py -3.11 -m venv .venv
+py -m venv .venv
 
 # Zainstaluj zależności runtime i dev
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
@@ -180,30 +180,32 @@ git checkout -b feature/my-feature
 
 ### 3.3. Uruchomienie w trybie deweloperskim
 
-```bash
-export ENV=dev
+```powershell
+$env:ENV = "dev"
 
 # Uruchom z hot reload
-uvicorn app.main:app --reload --host 0.0.0.0 --port 18000
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 0.0.0.0 --port 18000
 
 # Logowanie w trybie debug
-DEBUG=true LOG_LEVEL=DEBUG uvicorn app.main:app --reload --host 0.0.0.0 --port 18000
+$env:DEBUG = "true"
+$env:LOG_LEVEL = "DEBUG"
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 0.0.0.0 --port 18000
 ```
 
 ### 3.4. Praca z bazą danych
 
-```bash
+```powershell
 # Utwórz nową migrację
-alembic -c migrations/alembic.ini revision --autogenerate -m "Add column X to table Y"
+.\.venv\Scripts\python.exe -m alembic -c migrations/alembic.ini revision --autogenerate -m "Add column X to table Y"
 
 # Zastosuj migracje
-alembic -c migrations/alembic.ini upgrade head
+.\.venv\Scripts\python.exe -m alembic -c migrations/alembic.ini upgrade head
 
 # Cofnij ostatnią migrację
-alembic -c migrations/alembic.ini downgrade -1
+.\.venv\Scripts\python.exe -m alembic -c migrations/alembic.ini downgrade -1
 
 # Pokaż historię
-alembic -c migrations/alembic.ini history
+.\.venv\Scripts\python.exe -m alembic -c migrations/alembic.ini history
 ```
 
 ---
@@ -218,13 +220,13 @@ Używamy:
 - **Black** — non-blocking diagnostyka formatowania
 - **mypy** — nie jest skonfigurowany jako bramka repozytorium
 
-```bash
+```powershell
 # Sprawdzenie
-python -m ruff check app migrations --no-cache
+.\.venv\Scripts\python.exe -m ruff check app migrations --no-cache
 
 # Automatyczne poprawki
-python -m ruff check --fix app migrations
-python -m black --check app migrations
+.\.venv\Scripts\python.exe -m ruff check --fix app migrations
+.\.venv\Scripts\python.exe -m black --check app migrations
 ```
 
 ### 4.2. Konfiguracja (pyproject.toml)

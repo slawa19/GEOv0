@@ -24,8 +24,16 @@ _ACTIVE_OPERATIONAL_DOCS = (
     _ROOT / "docs" / "pl" / "10-testing-framework.md",
 )
 _POSTGRES_EXAMPLE_DOCS = (
+    _ROOT / "README.md",
+    _ROOT / "AGENTS.md",
+    _ROOT / "docs" / "ru" / "10-testing-framework.md",
     _ROOT / "docs" / "ru" / "runbook-dev-wsl2-docker-no-desktop.md",
     _ROOT / "docs" / "en" / "10-testing-framework.md",
+)
+_CONTRIBUTOR_GUIDES = (
+    _ROOT / "docs" / "ru" / "06-contributing.md",
+    _ROOT / "docs" / "en" / "06-contributing.md",
+    _ROOT / "docs" / "pl" / "06-contributing.md",
 )
 
 
@@ -42,21 +50,28 @@ def _iter_documented_commands_from_content(content: str):
                 None if fence_language is not None else fence.group(1).lower()
             )
             continue
-        inline_command = re.fullmatch(
-            r"(?:[-*+]|\d+[.)])\s*`([^`]+)`",
-            stripped,
+        inline_commands = re.findall(r"`([^`]+)`", stripped)
+        has_command_role = bool(
+            re.match(r"^(?:[-*+]|\d+[.)])\s*`", stripped)
+            or re.search(
+                r"(?<![-./])\b(?:run|execute|command|запуст\w*|выполн\w*|команд\w*|"
+                r"uruchom\w*|polecen\w*)\b",
+                stripped,
+                re.IGNORECASE,
+            )
         )
-        prose_command = re.fullmatch(r"[^`]+:\s*`([^`]+)`", stripped)
+        explicitly_debug_only = bool(
+            re.search(r"debug[- ]path|отладочн\w*|диагностическ\w*", stripped, re.I)
+        )
         indented_command = line.startswith(("    ", "\t"))
-        if (
-            fence_language is None
-            and inline_command is None
-            and prose_command is None
-            and not indented_command
-        ):
+        if fence_language is None and not indented_command:
+            if not has_command_role or explicitly_debug_only:
+                continue
+            for command in inline_commands:
+                if command.strip():
+                    yield line_number, command.strip(), None
             continue
-        command_match = inline_command or prose_command
-        command = command_match.group(1).strip() if command_match else stripped
+        command = stripped
         if command and not command.startswith("#"):
             yield line_number, command, fence_language
 
@@ -101,6 +116,11 @@ def _shell_contract_violation(command: str, fence_language: str | None) -> bool:
         re.IGNORECASE,
     ):
         return True
+    if fence_language in {"bash", "sh", "shell"} and re.match(
+        r"^(?:&\s*)?[\"']?\.\\",
+        command,
+    ):
+        return True
     if fence_language in {"powershell", "pwsh"} and re.match(
         r"^export\s+(?:TEST_DATABASE_URL|GEO_TEST_ALLOW_DB_RESET)\s*=",
         command,
@@ -113,22 +133,73 @@ def _shell_contract_violation(command: str, fence_language: str | None) -> bool:
     )
 
 
+def _strip_shell_comment(command: str) -> str:
+    quote: str | None = None
+    for index, character in enumerate(command):
+        if character in {'"', "'"}:
+            quote = (
+                None if quote == character else character if quote is None else quote
+            )
+        elif character == "#" and quote is None:
+            return command[:index].rstrip()
+    return command.rstrip()
+
+
+def _expand_powershell_variables(command: str, variables: dict[str, str]) -> str:
+    return re.sub(
+        r"\$([A-Za-z_][A-Za-z0-9_]*)",
+        lambda match: variables.get(match.group(1).lower(), match.group(0)),
+        command,
+    )
+
+
+def _created_database_name(command: str) -> str | None:
+    createdb = re.match(
+        r"^(?:(?:wsl(?:\.exe)?\s+)?docker(?:\.exe)?\s+exec\s+\S+\s+)?"
+        r"createdb(?:\.exe)?\b(.*)$",
+        command,
+        re.IGNORECASE,
+    )
+    if createdb is None:
+        return None
+    database_names = re.findall(r"\b(geov0_test_[A-Za-z0-9_-]*)\b", createdb.group(1))
+    return database_names[-1] if database_names else None
+
+
+def _is_canonical_verifier_command(command: str) -> bool:
+    executable, arguments = _command_executable(command)
+    if executable == "verify_local.ps1":
+        return True
+    return bool(
+        executable in {"powershell", "powershell.exe", "pwsh", "pwsh.exe"}
+        and re.search(r"(?:^|\s)-File\s+\S*verify_local\.ps1(?:\s|$)", arguments, re.I)
+    )
+
+
 def _postgres_example_violations(path: Path, content: str) -> list[str]:
     violations: list[str] = []
-    commands = [
-        command for _, command, _ in _iter_documented_commands_from_content(content)
-    ]
+    variables: dict[str, str] = {}
+    commands: list[str] = []
+    for _, raw_command, _ in _iter_documented_commands_from_content(content):
+        command = _strip_shell_comment(raw_command)
+        variable_assignment = re.match(
+            r"^\$([A-Za-z_][A-Za-z0-9_]*)\s*=\s*[\"']([^\"']+)[\"']$",
+            command,
+        )
+        if variable_assignment is not None:
+            variables[variable_assignment.group(1).lower()] = variable_assignment.group(
+                2
+            )
+        commands.append(_expand_powershell_variables(command, variables))
+
     created_names: set[str] = set()
     database_urls: list[str] = []
     reset_values: list[str] = []
     postgres_verifiers: list[str] = []
     for command in commands:
-        created_names.update(
-            re.findall(
-                r"\bcreatedb\b[^\r\n`]*\b(geov0_test_[A-Za-z0-9_-]*)\b",
-                command,
-            )
-        )
+        created_name = _created_database_name(command)
+        if created_name is not None:
+            created_names.add(created_name)
         url_assignment = re.match(
             r"^(?:\$env:|export\s+)?TEST_DATABASE_URL\s*=\s*[\"']?" r"([^\s\"']+)",
             command,
@@ -144,7 +215,7 @@ def _postgres_example_violations(path: Path, content: str) -> list[str]:
         )
         if reset_assignment is not None:
             reset_values.append(reset_assignment.group(1))
-        if "verify_local.ps1" in command.lower() and re.search(
+        if _is_canonical_verifier_command(command) and re.search(
             r"-BackendMarker\s+postgres(?:\s|$)", command
         ):
             postgres_verifiers.append(command)
@@ -152,11 +223,12 @@ def _postgres_example_violations(path: Path, content: str) -> list[str]:
     if not database_urls:
         violations.append(f"{path}: no PostgreSQL test URL")
     database_names: set[str] = set()
+    reset_value = reset_values[0] if len(set(reset_values)) == 1 else None
     for database_url in database_urls:
         try:
             parsed_url = assert_safe_test_database_url(
                 database_url,
-                allow_destructive_reset="1",
+                allow_destructive_reset=reset_value,
                 repo_root=_ROOT,
                 required_backend="postgresql",
             )
@@ -164,7 +236,7 @@ def _postgres_example_violations(path: Path, content: str) -> list[str]:
             violations.append(f"{path}: {database_url}: {exc}")
         else:
             database_names.add(parsed_url.database or "")
-    if created_names != database_names:
+    if created_names and created_names != database_names:
         violations.append(
             f"{path}: created databases {sorted(created_names)} != URL databases "
             f"{sorted(database_names)}"
@@ -269,6 +341,23 @@ def test_active_operational_docs_do_not_bypass_the_canonical_pytest_runner() -> 
     assert postgres_violations == []
 
 
+def test_contributor_guides_keep_python_tools_on_the_prepared_venv() -> None:
+    bare_python_tool = re.compile(
+        r"^(?:uvicorn|alembic|python(?:\.exe)?\s+-m\s+(?:uvicorn|alembic|ruff|black))"
+        r"(?:\s|$)",
+        re.IGNORECASE,
+    )
+    for path in _CONTRIBUTOR_GUIDES:
+        content = path.read_text(encoding="utf-8")
+        commands = [command for _, command, _ in _iter_documented_commands(path)]
+
+        assert "py -m venv .venv" in content
+        assert "py -3.11 -m venv" not in content
+        assert r".\.venv\Scripts\python.exe -m pip" in content
+        assert r".\.venv\Scripts\python.exe -m ruff" in content
+        assert not any(bare_python_tool.match(command) for command in commands)
+
+
 @pytest.mark.parametrize(
     "command",
     [
@@ -295,6 +384,7 @@ def test_direct_pytest_guard_recognizes_supported_launcher_shapes(command: str) 
             "bash",
         ),
         ("export GEO_TEST_ALLOW_DB_RESET=1", "powershell"),
+        (r".\.venv\Scripts\python.exe -m ruff check app", "bash"),
     ],
 )
 def test_shell_guard_rejects_non_executable_documented_commands(
@@ -315,6 +405,8 @@ pytest.exe fenced
 - `pytest.exe bullet`
 1. `pytest.exe numbered`
 Run this command: `pytest.exe prose`
+Run `pytest.exe prose trailing` now.
+1. Run `pytest.exe numbered prose`
     pytest.exe indented
 """
         )
@@ -325,6 +417,8 @@ Run this command: `pytest.exe prose`
         "pytest.exe bullet",
         "pytest.exe numbered",
         "pytest.exe prose",
+        "pytest.exe prose trailing",
+        "pytest.exe numbered prose",
         "pytest.exe indented",
     }
 
@@ -361,6 +455,22 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 createdb -U geo geov0_test_missing_reset
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_missing_reset"
 verify_local.ps1 -BackendMarker postgres
+```
+""",
+        """
+```powershell
+Write-Host "createdb -U geo geov0_test_echo"
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_echo"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+Write-Host "verify_local.ps1 -BackendMarker postgres"
+```
+""",
+        """
+```powershell
+createdb -U geo geov0_test_trailing_comment
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_trailing_comment"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+Write-Host "not a verifier" # verify_local.ps1 -BackendMarker postgres
 ```
 """,
     ],

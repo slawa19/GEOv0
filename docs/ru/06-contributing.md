@@ -50,7 +50,7 @@ git remote add upstream https://github.com/geo-protocol/geo-hub.git
 
 ```powershell
 # Создать виртуальное окружение
-py -3.11 -m venv .venv
+py -m venv .venv
 
 # Установить зависимости (runtime + dev)
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
@@ -203,30 +203,32 @@ git checkout -b feature/my-feature
 
 ### 3.3. Запуск в режиме разработки
 
-```bash
-export ENV=dev
+```powershell
+$env:ENV = "dev"
 
 # Запустить с hot reload
-uvicorn app.main:app --reload --host 0.0.0.0 --port 18000
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 0.0.0.0 --port 18000
 
 # Логирование в debug режиме
-DEBUG=true LOG_LEVEL=DEBUG uvicorn app.main:app --reload --host 0.0.0.0 --port 18000
+$env:DEBUG = "true"
+$env:LOG_LEVEL = "DEBUG"
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 0.0.0.0 --port 18000
 ```
 
 ### 3.4. Работа с базой данных
 
-```bash
+```powershell
 # Создать новую миграцию
-alembic -c migrations/alembic.ini revision --autogenerate -m "Add column X to table Y"
+.\.venv\Scripts\python.exe -m alembic -c migrations/alembic.ini revision --autogenerate -m "Add column X to table Y"
 
 # Применить миграции
-alembic -c migrations/alembic.ini upgrade head
+.\.venv\Scripts\python.exe -m alembic -c migrations/alembic.ini upgrade head
 
 # Откатить последнюю миграцию
-alembic -c migrations/alembic.ini downgrade -1
+.\.venv\Scripts\python.exe -m alembic -c migrations/alembic.ini downgrade -1
 
 # Просмотреть историю
-alembic -c migrations/alembic.ini history
+.\.venv\Scripts\python.exe -m alembic -c migrations/alembic.ini history
 ```
 
 ---
@@ -240,18 +242,18 @@ alembic -c migrations/alembic.ini history
 - **Black** — пока non-blocking formatting diagnostic
 - **mypy** — опционально (не закреплён в зависимостях репозитория)
 
-```bash
+```powershell
 # Проверка
-python -m ruff check app migrations --no-cache
+.\.venv\Scripts\python.exe -m ruff check app migrations --no-cache
 
 # (опционально)
 # mypy app/
 
 # Автоисправление Ruff в blocking scope
-python -m ruff check --fix app migrations
+.\.venv\Scripts\python.exe -m ruff check --fix app migrations
 
 # Black пока только non-blocking diagnostic; массовое форматирование требует отдельного среза
-python -m black --check app migrations
+.\.venv\Scripts\python.exe -m black --check app migrations
 ```
 
 ### 4.2. Конфигурация (pyproject.toml)

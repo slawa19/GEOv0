@@ -213,7 +213,7 @@ checkout (для каталога внутри WSL используйте пут
 создайте отдельное Windows-окружение:
 
 ```powershell
-py -3.11 -m venv .venv
+py -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
 ```
 
