@@ -1615,6 +1615,9 @@ async def action_clearing_real(
     if err is not None:
         return err
     assert eq is not None
+    # A skipped clearing rolls back its service-owned attempt, which expires ORM
+    # instances. Keep the wire identifier independent of that session state.
+    eq_code = str(eq.code)
 
     service = ClearingService(db)
 
@@ -1628,7 +1631,7 @@ async def action_clearing_real(
                 run_id=run_id,
                 run=run,
                 db=db,
-                equivalent_code=eq.code,
+                equivalent_code=eq_code,
                 executed=executed,
                 cleared_count=cleared_count,
                 total=total,
@@ -1640,7 +1643,7 @@ async def action_clearing_real(
             _emit_interact_clearing_done_without_patches_best_effort(
                 run_id=run_id,
                 run=run,
-                equivalent_code=eq.code,
+                equivalent_code=eq_code,
                 executed=executed,
                 cleared_count=cleared_count,
                 total=total,
@@ -1650,7 +1653,7 @@ async def action_clearing_real(
     try:
         # Auto-clear loop: best-effort match ClearingService.auto_clear(), but keep per-cycle details.
         for _ in range(0, 100):
-            cycles = await service.find_cycles(eq.code, max_depth=int(req.max_depth))
+            cycles = await service.find_cycles(eq_code, max_depth=int(req.max_depth))
             if not cycles:
                 break
 
@@ -1692,7 +1695,7 @@ async def action_clearing_real(
             _emit_interact_clearing_done_without_patches_best_effort(
                 run_id=run_id,
                 run=run,
-                equivalent_code=eq.code,
+                equivalent_code=eq_code,
                 executed=executed,
                 cleared_count=cleared_count,
                 total=total,
@@ -1703,7 +1706,7 @@ async def action_clearing_real(
             "event=simulator.interact.clearing_failed run_id=%s "
             "equivalent=%s cleared_cycles=%s",
             run_id,
-            eq.code,
+            eq_code,
             cleared_count,
         )
         details = dict(exc.details or {}) if isinstance(exc, GeoException) else {}
@@ -1725,7 +1728,7 @@ async def action_clearing_real(
     await _emit_known_progress()
 
     return SimulatorActionClearingRealResponse(
-        equivalent=eq.code,
+        equivalent=eq_code,
         cleared_cycles=int(cleared_count),
         total_cleared_amount=_fmt_decimal_for_api(total),
         cycles=executed,

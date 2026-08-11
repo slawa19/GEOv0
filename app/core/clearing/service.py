@@ -40,6 +40,14 @@ class ClearingService:
             logger.exception("event=clearing.rollback_failed")
         raise GeoException() from exc
 
+    async def _rollback_skipped_execution(self) -> None:
+        """End a service-owned clearing attempt before returning a skip result."""
+        try:
+            await self.session.rollback()
+        except Exception as exc:
+            logger.exception("event=clearing.skip_rollback_failed")
+            raise GeoException() from exc
+
     def _dialect_name(self) -> str | None:
         try:
             return self.session.get_bind().dialect.name
@@ -798,6 +806,7 @@ class ClearingService:
         application's sanitized internal-error path.
         """
         if not cycle:
+            await self._rollback_skipped_execution()
             return None
 
         logger.info("event=clearing.execute cycle_len=%s", len(cycle))
@@ -822,6 +831,7 @@ class ClearingService:
                     "event=clearing.metrics_inc_failed metric=CLEARING_EVENTS_TOTAL label=execute.bad_request",
                     exc_info=True,
                 )
+            await self._rollback_skipped_execution()
             return None
 
         try:
@@ -838,12 +848,14 @@ class ClearingService:
             await self._raise_unexpected_execution(exc)
 
         if len(debts) != len(debt_ids):
+            await self._rollback_skipped_execution()
             return None
 
         # 1. Determine clearing amount (min amount in cycle)
         clear_amount = min([d.amount for d in debts])
 
         if clear_amount <= 0:
+            await self._rollback_skipped_execution()
             return None
 
         logger.info(
@@ -873,6 +885,7 @@ class ClearingService:
                             "event=clearing.metrics_inc_failed metric=CLEARING_EVENTS_TOTAL label=execute.skip_locked",
                             exc_info=True,
                         )
+                    await self._rollback_skipped_execution()
                     return None
 
         # FIX-017: enforce auto_clearing policy on every edge in the cycle.
@@ -891,6 +904,7 @@ class ClearingService:
                     "event=clearing.metrics_inc_failed metric=CLEARING_EVENTS_TOTAL label=execute.skip_policy",
                     exc_info=True,
                 )
+            await self._rollback_skipped_execution()
             return None
 
         # FIX-011: capture net positions BEFORE clearing (clearing neutrality invariant).

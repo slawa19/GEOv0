@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import sys
 import uuid
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -12,6 +13,154 @@ from sqlalchemy import delete, select, text
 
 
 pytestmark = pytest.mark.postgres
+
+
+@pytest.mark.parametrize(
+    "skip_branch",
+    ["empty", "malformed", "missing", "nonpositive", "locked", "policy"],
+)
+@pytest.mark.asyncio
+async def test_skip_ends_service_owned_transaction_postgres(
+    db_session,
+    skip_branch,
+):
+    """Every None result must end the service-owned attempt."""
+
+    dialect = db_session.get_bind().dialect.name
+    if dialect not in {"postgresql", "postgres"}:
+        pytest.skip("Postgres-only: clearing skip-path transaction ownership")
+
+    from app.core.clearing.service import ClearingService
+    from app.db.models.debt import Debt
+    from app.db.models.equivalent import Equivalent
+    from app.db.models.participant import Participant
+    from app.db.models.prepare_lock import PrepareLock
+    from app.db.models.transaction import Transaction
+    from app.db.models.trustline import TrustLine
+
+    nonce = uuid.uuid4().hex[:10]
+    equivalent_id = uuid.uuid4()
+    participant_ids = [uuid.uuid4() for _ in range(3)]
+    a_id, b_id, c_id = participant_ids
+    debt_ids = [uuid.uuid4() for _ in range(3)]
+
+    db_session.add(
+        Equivalent(
+            id=equivalent_id,
+            code=f"SO{nonce}".upper(),
+            description=f"Clearing {skip_branch} ownership test",
+            precision=2,
+        )
+    )
+    db_session.add_all(
+        [
+            Participant(
+                id=participant_id,
+                pid=f"{label}_SO_{nonce}",
+                display_name=label,
+                public_key=f"pk_{label}_{nonce}",
+                type="person",
+                status="active",
+            )
+            for participant_id, label in zip(
+                participant_ids,
+                ("A", "B", "C"),
+                strict=True,
+            )
+        ]
+    )
+    db_session.add_all(
+        [
+            TrustLine(
+                from_participant_id=creditor_id,
+                to_participant_id=debtor_id,
+                equivalent_id=equivalent_id,
+                limit=Decimal("200.00"),
+                policy={
+                    "auto_clearing": not (
+                        skip_branch == "policy" and creditor_id == c_id
+                    )
+                },
+                status="active",
+            )
+            for debtor_id, creditor_id in (
+                (a_id, b_id),
+                (b_id, c_id),
+                (c_id, a_id),
+            )
+        ]
+    )
+    db_session.add_all(
+        [
+            Debt(
+                id=debt_id,
+                debtor_id=debtor_id,
+                creditor_id=creditor_id,
+                equivalent_id=equivalent_id,
+                amount=Decimal(amount),
+            )
+            for debt_id, debtor_id, creditor_id, amount in (
+                (debt_ids[0], a_id, b_id, "100.00"),
+                (debt_ids[1], b_id, c_id, "30.00"),
+                (debt_ids[2], c_id, a_id, "40.00"),
+            )
+        ]
+    )
+
+    if skip_branch == "locked":
+        tx_id = str(uuid.uuid4())
+        db_session.add(
+            Transaction(
+                id=uuid.uuid4(),
+                tx_id=tx_id,
+                type="PAYMENT",
+                initiator_id=a_id,
+                payload={"from": str(a_id), "to": str(b_id)},
+                state="PREPARED",
+            )
+        )
+        await db_session.flush()
+        db_session.add(
+            PrepareLock(
+                tx_id=tx_id,
+                participant_id=a_id,
+                effects={
+                    "flows": [
+                        {
+                            "from": str(a_id),
+                            "to": str(b_id),
+                            "amount": "5.00",
+                            "equivalent": str(equivalent_id),
+                        }
+                    ]
+                },
+                expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+            )
+        )
+
+    await db_session.commit()
+
+    cycle = [{"debt_id": str(debt_id)} for debt_id in debt_ids]
+    if skip_branch in {"empty", "malformed"}:
+        # Prove that even a pre-SQL rejection closes a transaction already opened
+        # by the caller's candidate lookup.
+        await db_session.execute(select(Debt.id).limit(1))
+        assert db_session.in_transaction()
+        cycle = [] if skip_branch == "empty" else [{"debt_id": "not-a-uuid"}]
+    elif skip_branch == "missing":
+        cycle[-1] = {"debt_id": str(uuid.uuid4())}
+    elif skip_branch == "nonpositive":
+        dirty_debt = await db_session.get(Debt, debt_ids[1])
+        assert dirty_debt is not None
+        # Production sessions use autoflush=False. This exercises the defensive
+        # branch against a dirty identity-map value while the stored PG row still
+        # satisfies chk_debt_amount_positive.
+        dirty_debt.amount = Decimal("0")
+
+    result = await ClearingService(db_session).execute_clearing_with_amount(cycle)
+
+    assert result is None
+    assert not db_session.in_transaction(), f"skip_branch={skip_branch}"
 
 
 @pytest.mark.asyncio
