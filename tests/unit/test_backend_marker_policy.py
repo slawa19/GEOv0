@@ -189,9 +189,26 @@ def _iter_documented_commands_from_content(content: str):
                 powershell_here_string_line = line_number
             else:
                 here_string_start = None
+            if pending_powershell_command is not None and (
+                not visible.strip() or visible.lstrip().startswith("#")
+            ):
+                yield (
+                    pending_powershell_command[0],
+                    f"{_POWERSHELL_SYNTAX_ERROR}: interrupted continuation",
+                    fence_language,
+                )
+                pending_powershell_command = None
+                continue
             powershell_line_continues = visible.endswith("`")
             powershell_statements = _split_powershell_statements(visible)
             if not powershell_statements:
+                if pending_powershell_command is not None:
+                    yield (
+                        pending_powershell_command[0],
+                        f"{_POWERSHELL_SYNTAX_ERROR}: interrupted continuation",
+                        fence_language,
+                    )
+                    pending_powershell_command = None
                 continue
             stripped = powershell_statements[0]
         inline_commands = re.findall(r"`([^`]+)`", stripped)
@@ -232,7 +249,7 @@ def _iter_documented_commands_from_content(content: str):
                 if (
                     fence_language in {"powershell", "pwsh"}
                     and here_string_start is None
-                    and _tokenize_powershell_arguments(command) is None
+                    and not _powershell_inline_syntax_is_valid(command)
                 ):
                     yield (
                         command_line,
@@ -533,6 +550,39 @@ def _tokenize_powershell_arguments(candidate: str) -> list[str] | None:
     if current:
         tokens.append("".join(current))
     return tokens
+
+
+def _powershell_inline_syntax_is_valid(command: str) -> bool:
+    if _tokenize_powershell_arguments(command) is None:
+        return False
+    quote: str | None = None
+    delimiters: list[str] = []
+    matching = {")": "(", "]": "[", "}": "{"}
+    index = 0
+    while index < len(command):
+        character = command[index]
+        if character == "`":
+            if index + 1 >= len(command):
+                return False
+            index += 2
+            continue
+        if character in {'"', "'"}:
+            if quote is None:
+                quote = character
+            elif quote == character:
+                quote = None
+            index += 1
+            continue
+        if quote is None:
+            if character in matching.values():
+                delimiters.append(character)
+            elif character in matching:
+                if not delimiters or delimiters.pop() != matching[character]:
+                    return False
+        index += 1
+    if quote is not None or delimiters:
+        return False
+    return not command.rstrip().endswith("|")
 
 
 def _parse_verifier_arguments(arguments: str) -> dict[str, str | bool] | None:
@@ -1303,6 +1353,43 @@ $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
 ./scripts/verify_local.ps1 -BackendMarker postgres
 Write-Host "incomplete" `
+```
+""",
+        """
+```powershell
+createdb -U geo geov0_test_continuation_blank
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_continuation_blank"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+./scripts/verify_local.ps1 -BackendMarker postgres `
+
+  -BackendOnly
+```
+""",
+        """
+```powershell
+createdb -U geo geov0_test_continuation_comment
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_continuation_comment"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+./scripts/verify_local.ps1 -BackendMarker postgres `
+# continuation interrupted
+  -BackendOnly
+```
+""",
+        """
+```powershell
+createdb -U geo geov0_test_unbalanced_delimiter
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_unbalanced_delimiter")
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+./scripts/verify_local.ps1 -BackendMarker postgres
+```
+""",
+        """
+```powershell
+createdb -U geo geov0_test_incomplete_pipeline
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_incomplete_pipeline"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+./scripts/verify_local.ps1 -BackendMarker postgres
+Write-Output "incomplete" |
 ```
 """,
         """
