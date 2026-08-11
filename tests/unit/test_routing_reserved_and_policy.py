@@ -181,11 +181,11 @@ async def test_build_graph_subtracts_reserved_capacity_and_respects_policy():
     assert "B" in graph and "C" in graph["B"]
 
     # Still, max_hops=1 should forbid A->B->C.
-    paths = router.find_paths("A", "C", Decimal("1"), max_hops=1, k=3)
-    assert paths == []
+    routes = router.find_flow_routes("A", "C", Decimal("1"), max_hops=1, max_paths=3)
+    assert routes == []
 
 
-def test_find_paths_blocks_intermediate_when_policy_false():
+def test_find_flow_routes_blocks_intermediate_when_policy_false():
     # Construct a graph directly (no DB stubs): A -> B -> C.
     # If edge policy for A->B disallows intermediates, then B cannot be used as an intermediate node
     # on a path from A to C.
@@ -201,14 +201,16 @@ def test_find_paths_blocks_intermediate_when_policy_false():
         "C": {},
     }
 
-    assert router.find_paths("A", "C", Decimal("1"), max_hops=6, k=3) == []
+    assert router.find_flow_routes("A", "C", Decimal("1"), max_hops=6, max_paths=3) == []
 
     # Allow intermediates on A->B, now the path should exist.
     router.edge_can_be_intermediate["A"]["B"] = True
-    assert router.find_paths("A", "C", Decimal("1"), max_hops=6, k=3) == [["A", "B", "C"]]
+    assert router.find_flow_routes(
+        "A", "C", Decimal("1"), max_hops=6, max_paths=3
+    ) == [(["A", "B", "C"], Decimal("1"))]
 
 
-def test_find_paths_blocks_blocked_participants_as_intermediate_node():
+def test_find_flow_routes_blocks_blocked_participants_as_intermediate_node():
     # Graph: A -> B -> C. If policy on edge A->B blocks B, then B cannot be used as intermediate.
     router = PaymentRouter(None)
     router.graph = {
@@ -227,10 +229,10 @@ def test_find_paths_blocks_blocked_participants_as_intermediate_node():
         "C": {},
     }
 
-    assert router.find_paths("A", "C", Decimal("1"), max_hops=6, k=3) == []
+    assert router.find_flow_routes("A", "C", Decimal("1"), max_hops=6, max_paths=3) == []
 
 
-def test_find_paths_allows_blocked_participants_as_destination():
+def test_find_flow_routes_allows_blocked_participants_as_destination():
     # blocked_participants forbids intermediate nodes only; destination is allowed.
     router = PaymentRouter(None)
     router.graph = {
@@ -249,4 +251,6 @@ def test_find_paths_allows_blocked_participants_as_destination():
         "C": {},
     }
 
-    assert router.find_paths("A", "C", Decimal("1"), max_hops=6, k=3) == [["A", "B", "C"]]
+    assert router.find_flow_routes(
+        "A", "C", Decimal("1"), max_hops=6, max_paths=3
+    ) == [(["A", "B", "C"], Decimal("1"))]

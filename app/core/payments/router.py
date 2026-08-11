@@ -1,5 +1,4 @@
 import logging
-import heapq
 import time
 from collections import deque
 from datetime import datetime, timezone
@@ -548,86 +547,6 @@ class PaymentRouter:
         if remaining > 0:
             return []
         return routes
-
-    def find_paths(
-        self,
-        from_pid: str,
-        to_pid: str,
-        amount: Decimal,
-        max_hops: int = 6,
-        k: int = 3,
-    ) -> List[List[str]]:
-        """Find up to k shortest (by hops) simple paths with capacity >= amount.
-
-        Implements Yen's algorithm for k-shortest simple paths, using BFS as the
-        shortest-path oracle (unweighted edges => shortest by hop count).
-
-        Tie-break: among equal hop-count candidates, prefer higher bottleneck.
-        """
-
-        if k <= 0:
-            return []
-
-        first = self._bfs_single_path(from_pid, to_pid, amount, max_hops=max_hops)
-        if not first:
-            return []
-
-        def _path_bottleneck_for_sort(path: List[str]) -> Decimal:
-            return self._path_bottleneck(path, graph=self.graph)
-
-        shortest_paths: List[List[str]] = [first]
-        # Min-heap of candidates: (hop_len, -bottleneck, path_tuple)
-        candidate_heap: List[Tuple[int, Decimal, Tuple[str, ...]]] = []
-        candidate_set: Set[Tuple[str, ...]] = set()
-
-        for _ in range(1, k):
-            prev = shortest_paths[-1]
-
-            for j in range(len(prev) - 1):
-                root_path = prev[: j + 1]
-                spur_node = prev[j]
-
-                # Forbid edges that would recreate any previously accepted path
-                # that shares the same root.
-                forbidden_edges: Set[Tuple[str, str]] = set()
-                for p in shortest_paths:
-                    if len(p) > j and p[: j + 1] == root_path:
-                        forbidden_edges.add((p[j], p[j + 1]))
-
-                # Forbid nodes in root_path except spur_node to enforce simple paths.
-                forbidden_nodes: Set[str] = set(root_path[:-1])
-
-                spur_path = self._bfs_single_path(
-                    spur_node,
-                    to_pid,
-                    amount,
-                    max_hops=max_hops - j,
-                    forbidden_edges=forbidden_edges,
-                    forbidden_nodes=forbidden_nodes,
-                )
-                if not spur_path:
-                    continue
-
-                candidate = root_path[:-1] + spur_path
-                candidate_t = tuple(candidate)
-                if candidate_t in candidate_set:
-                    continue
-                if candidate in shortest_paths:
-                    continue
-
-                hop_len = len(candidate)
-                bn = _path_bottleneck_for_sort(candidate)
-                heapq.heappush(candidate_heap, (hop_len, -bn, candidate_t))
-                candidate_set.add(candidate_t)
-
-            if not candidate_heap:
-                break
-
-            hop_len, neg_bn, best = heapq.heappop(candidate_heap)
-            candidate_set.discard(best)
-            shortest_paths.append(list(best))
-
-        return shortest_paths
 
     def check_capacity(self, from_pid: str, to_pid: str, amount: Decimal) -> CapacityResponse:
         routes = self.find_flow_routes(

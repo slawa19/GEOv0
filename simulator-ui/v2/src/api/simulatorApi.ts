@@ -125,12 +125,6 @@ export function stopRun(
   )
 }
 
-export function restartRun(cfg: HttpConfig, runId: string): Promise<RunStatus> {
-  return simulatorContractJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/restart`, decodeRunStatusResponse, {
-    method: 'POST',
-  })
-}
-
 export function setIntensity(cfg: HttpConfig, runId: string, intensity_percent: number): Promise<RunStatus> {
   return simulatorContractJson(
     cfg,
