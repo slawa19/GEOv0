@@ -57,7 +57,7 @@ def test_backend_scenario_is_not_a_registered_empty_tier() -> None:
     )
     assert all(
         not any(
-            re.match(r"^pytest(?:\s|$)", line.strip())
+            re.match(r"^(?:python\s+-m\s+)?pytest(?:\s|$)", line.strip())
             for line in path.read_text(encoding="utf-8").splitlines()
         )
         for path in active_testing_docs
@@ -75,9 +75,16 @@ def test_stable_contributor_guide_uses_canonical_backend_tiers() -> None:
     bare_pytest_commands = [
         line.strip()
         for line in contributor_guide.splitlines()
-        if re.match(r"^pytest(?:\s|$)", line.strip())
+        if re.match(r"^(?:python\s+-m\s+)?pytest(?:\s|$)", line.strip())
     ]
     assert bare_pytest_commands == []
     assert '-m "not slow"' not in contributor_guide
     assert "slow`/`postgres` tiers" in vocabulary
     assert "explicit `slow` selector" in vocabulary
+
+    english_guide = (_ROOT / "docs" / "en" / "10-testing-framework.md").read_text(
+        encoding="utf-8"
+    )
+    assert "geov0_test_docs_en" in english_guide
+    assert 'localhost:5432/geov0"' not in english_guide
+    assert "-BackendMarker postgres" in english_guide

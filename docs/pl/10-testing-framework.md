@@ -19,7 +19,8 @@ Powiązane dokumenty:
 ## 0. Jak uruchomić testy lokalnie (venv + komendy)
 
 Projekt używa wirtualnego środowiska Python (`.venv`) i zależności z [`requirements.txt`](../../requirements.txt) oraz [`requirements-dev.txt`](../../requirements-dev.txt).
-Na Windows **nie polegaj na `pytest` w PATH**: użyj `python -m pytest`, aby uruchomić testy na właściwym interpreterze.
+Na Windows używaj kanonicznego skryptu PowerShell repozytorium; wybiera on interpreter
+i izoluje artefakty za pomocą `TaskSlug`.
 
 ### 0.1. Windows PowerShell
 
@@ -30,11 +31,12 @@ py -m venv .venv
 python -m pip install -r requirements.txt
 python -m pip install -r requirements-dev.txt
 
-# Wszystkie testy (w tym OpenAPI contract test)
-python -m pytest -q
+# Pełna kanoniczna bramka lokalna
+.\scripts\verify_local.ps1 -TaskSlug docs_pl_full
 
 # Tylko OpenAPI contract test
-python -m pytest -q tests/contract/test_openapi_contract.py
+.\scripts\verify_local.ps1 -TaskSlug docs_pl_openapi -BackendOnly `
+  -BackendSelector tests/contract/test_openapi_contract.py
 ```
 
 ### 0.2. Windows CMD
@@ -45,7 +47,7 @@ call .\.venv\Scripts\activate.bat
 
 python -m pip install -r requirements.txt
 python -m pip install -r requirements-dev.txt
-python -m pytest -q
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify_local.ps1 -TaskSlug docs_pl_cmd
 ```
 
 ### 0.3. Rozwiązywanie problemów

@@ -19,7 +19,8 @@ Related documents:
 ## 0. Local test execution (how to run)
 
 This repo uses a Python virtual environment (`.venv`) and dependencies from [`requirements.txt`](../../requirements.txt) and [`requirements-dev.txt`](../../requirements-dev.txt).
-On Windows, **do not rely on `pytest` being on PATH**: use `python -m pytest` to ensure the correct interpreter is used.
+On Windows, use the repository's canonical PowerShell verifier; it selects the
+configured interpreter and isolates test artifacts by `TaskSlug`.
 
 ### 0.1. Windows PowerShell
 
@@ -30,11 +31,12 @@ py -m venv .venv
 python -m pip install -r requirements.txt
 python -m pip install -r requirements-dev.txt
 
-# Run all tests (includes OpenAPI contract test)
-python -m pytest -q
+# Run the canonical full local gate
+.\scripts\verify_local.ps1 -TaskSlug docs_en_full
 
 # Run only the OpenAPI contract test
-python -m pytest -q tests/contract/test_openapi_contract.py
+.\scripts\verify_local.ps1 -TaskSlug docs_en_openapi -BackendOnly `
+  -BackendSelector tests/contract/test_openapi_contract.py
 ```
 
 ### 0.2. Windows CMD
@@ -45,7 +47,7 @@ call .\.venv\Scripts\activate.bat
 
 python -m pip install -r requirements.txt
 python -m pip install -r requirements-dev.txt
-python -m pytest -q
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify_local.ps1 -TaskSlug docs_en_cmd
 ```
 
 ### 0.3. Troubleshooting
@@ -68,7 +70,7 @@ python -m pytest -q
 
 Some scenarios (notably TS-23) require a real Postgres database to validate concurrency/locking semantics.
 
-1) Start Postgres (docker-compose example; any Postgres instance works):
+1) Start Postgres. Never point the test reset opt-in at developer or production data:
 
 ```powershell
 docker compose up -d db
@@ -79,33 +81,27 @@ If Docker is not available, start a local Postgres service (or use a remote Post
 2) Ensure a dedicated test database exists (recommended):
 
 ```powershell
-# Creates `geov0_test` inside the docker-compose Postgres container (safe to run multiple times).
-docker exec geov0-db createdb -U geo geov0_test 2>$null
+# Use a unique disposable name and verify it does not already exist before creating it.
+docker exec geov0-db createdb -U geo geov0_test_docs_en
 ```
 
-If you are using a non-docker Postgres instance, create a separate database manually (e.g. `geov0_test`) and use it in `TEST_DATABASE_URL`.
+If you are using a non-docker Postgres instance, create a unique database whose name starts
+with `geov0_test_`, verify that it is absent first, and use only that database below.
 
 3) Point tests at a dedicated test database and allow schema reset:
 
 ```powershell
-$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0"
-$env:GEO_TEST_ALLOW_DB_RESET = "1"
-
-python -m pytest -q
-```
-
-Recommended for this repository:
-
-```powershell
-$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test"
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_docs_en"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
 
 # Run only TS-23 (Postgres-only)
-python -m pytest -q tests/integration/test_concurrent_prepare_routes_bottleneck_postgres.py
+.\scripts\verify_local.ps1 -TaskSlug docs_en_ts23 -BackendOnly -BackendMarker postgres `
+  -BackendSelector tests/integration/test_concurrent_prepare_routes_bottleneck_postgres.py
 ```
 
-Safety note: when `TEST_DATABASE_URL` is non-SQLite, the test harness will DROP/CREATE schema.
-It refuses to do this unless `GEO_TEST_ALLOW_DB_RESET=1`.
+Safety note: the guard requires both a dedicated `geov0_test_*` database name and
+`GEO_TEST_ALLOW_DB_RESET=1`. Confirm the exact URL before setting the opt-in, and drop only
+the disposable database after all connections are closed.
 
 VS Code tasks:
 - `Postgres: ensure running (docker compose)`
