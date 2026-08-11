@@ -3,15 +3,14 @@ import time
 import uuid
 from collections import OrderedDict
 from decimal import Decimal
-from typing import List, Dict, Optional
+from typing import Dict
 
-from sqlalchemy import select, and_, or_
+from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.db.models.debt import Debt
 from app.db.models.trustline import TrustLine
-from app.db.models.participant import Participant
 from app.db.models.equivalent import Equivalent
 from app.schemas.balance import BalanceSummary, BalanceEquivalent, DebtsDetails, OutgoingDebt, IncomingDebt
 from app.utils.exceptions import NotFoundException

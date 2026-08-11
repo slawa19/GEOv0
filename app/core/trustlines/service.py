@@ -1,6 +1,6 @@
 from uuid import UUID
 from decimal import Decimal
-from typing import List, Optional, Literal
+from typing import List, Literal
 from sqlalchemy import func, select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.utils.exceptions import (

@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-from typing import Any
 
 # Keep these module-level imports: tests monkeypatch through this module.
-import app.core.simulator.storage as simulator_storage
 import app.db.session as db_session
 from app.core.clearing.service import ClearingService
 from app.core.simulator.models import RunRecord
-from app.core.simulator.real_payment_action import _RealPaymentAction
 from app.core.simulator.real_runner_impl import RealRunnerImpl as _RealRunnerImpl
 
 

@@ -2,7 +2,6 @@ from typing import List, Optional, Any, Dict
 
 from pydantic import BaseModel, ConfigDict, Field
 from datetime import datetime
-from decimal import Decimal
 
 class CapacityResponse(BaseModel):
     can_pay: bool

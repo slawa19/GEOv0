@@ -54,7 +54,7 @@ class AuthService:
         stmt = select(AuthChallenge).where(
             AuthChallenge.pid == pid,
             AuthChallenge.challenge == challenge,
-            AuthChallenge.used == False,
+            AuthChallenge.used.is_(False),
             AuthChallenge.expires_at > now
         )
         result = await self.db.execute(stmt)

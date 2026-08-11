@@ -13,7 +13,7 @@ from app.schemas.trustline import (
     TrustLinesList,
 )
 from app.db.models.participant import Participant
-from app.utils.exceptions import BadRequestException, NotFoundException
+from app.utils.exceptions import NotFoundException
 
 router = APIRouter()
 

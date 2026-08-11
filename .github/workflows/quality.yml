@@ -64,7 +64,7 @@ jobs:
           -TaskSlug ci-required
 
   static-diagnostics:
-    name: Known-red Python static diagnostics (non-blocking)
+    name: Python static diagnostics (Ruff blocking, Black non-blocking)
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -85,7 +85,6 @@ jobs:
         run: python -m pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Ruff diagnostics
-        continue-on-error: true
         run: python -m ruff check app migrations --no-cache
 
       - name: Black diagnostics

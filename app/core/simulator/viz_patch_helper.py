@@ -3,7 +3,7 @@ from __future__ import annotations
 import bisect
 import uuid
 from dataclasses import dataclass, field
-from decimal import Decimal, InvalidOperation, ROUND_DOWN
+from decimal import Decimal, ROUND_DOWN
 from typing import Any, Iterable
 
 from sqlalchemy import func, select
@@ -65,7 +65,6 @@ class VizPatchHelper:
             return
 
         precision = int(self.precision)
-        scale10 = Decimal(10) ** precision
 
         debt_rows = (
             await session.execute(

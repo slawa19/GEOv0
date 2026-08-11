@@ -304,11 +304,6 @@ class MetricsBottlenecks:
             dst = str(tl.get("to") or "").strip()
             if not src or not dst:
                 continue
-            limit_raw = tl.get("limit")
-            try:
-                limit_value = float(limit_raw)
-            except Exception:
-                limit_value = 0.0
 
             # Synthetic used fraction: increases with intensity and time.
             wobble = abs(seed_f(run_id, equivalent, src, dst, str(t)) - 0.5) * 2.0
