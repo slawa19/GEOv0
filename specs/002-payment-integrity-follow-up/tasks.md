@@ -59,7 +59,7 @@ Owner-authorized for Wave 3 on 2026-08-11; execute sequentially.
   `40001` or exact Debt business-key `23505` after a SERIALIZABLE advisory wait,
   then run existing same-direction,
   same-tx, idempotency, timeout, cancellation and recovery selectors.
-- [!] P108 Update stable RU payment and decision documentation.
+- [x] P108 Update stable RU payment and decision documentation.
 - [!] P109 Complete adversarial/external reviews and publish the exact-head evidence.
 
 ## Phase 2 — Clearing interlock and closure

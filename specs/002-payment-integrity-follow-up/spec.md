@@ -604,3 +604,22 @@ P107 остаётся `[!]`; экспериментальные test changes н�
   `0.1.14` по четырём изменённым code/test files и `git diff --check` — exit `0`.
   Implementation commit: `1a9cc63e54df1f0b493fdcb1773a501396e84cbc`; P107 task закрыт в
   `tasks.md:58-61`. Предыдущая STOP-запись и все неудачные попытки выше сохранены.
+
+### 2026-08-11 — P108
+
+- До изменения stable decision surface описывал только общий Defence in Depth и payment error
+  mapping (`docs/ru/09-decisions-and-defaults.md:212-225,273-289`), а simulator payment owner —
+  Redis sender/equivalent lock, timeout и `40001/40P01`
+  (`docs/ru/simulator/backend/payment-integration.md:29-35,68-70,146-149,179-185,222-223`). В этих
+  анкорах отсутствовали canonical unordered pair identity, equivalent-owner order, mixed-version
+  rollout, узкий Debt-`23505` и явный статус clearing interlock.
+- После изменения decision surface фиксирует lock-only canonical pair, порядок полного owner set →
+  tx → pair, outer-UoW retry, обязательную coordinated quiescence и открытый Phase 2 interlock
+  (`docs/ru/09-decisions-and-defaults.md:226-246`), а также server-selected `40001`/узкий exact
+  Debt-`23505` без утечки SQL/constraint наружу (`:303-308`). Simulator payment owner синхронизирован
+  в `docs/ru/simulator/backend/payment-integration.md:29-38,73-77,155-166,197-205,241-246`.
+- Проверка обязательных фраз и всех относительных Markdown links в двух изменённых документах —
+  `P108_DOC_CONTRACT_OK`, exit `0`; `git diff --check -- docs/ru/09-decisions-and-defaults.md docs/ru/simulator/backend/payment-integration.md`
+  — exit `0`. Документальный implementation commit:
+  `fcb8cf7f121bc45f2fb1fcf57e3cae204ba14f70`. Независимый пользовательский metadata-hunk в начале
+  `docs/ru/09-decisions-and-defaults.md` сохранён в рабочем дереве и не попал в commit.
