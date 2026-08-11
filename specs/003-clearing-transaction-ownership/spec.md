@@ -107,7 +107,7 @@ severity, а не за откладывание.
 | T303 | Идемпотентный протокол подтверждения коммита клиринга | `[x]` |
 | T304 | Публикация реально заблокированной суммы вместо кандидата: перевести `real_clearing_engine.py:290` с bool-обёртки `execute_clearing` на `execute_clearing_with_amount` и провести возвращённую сумму в `:318-319` и `:334-336` (F-003-3) | `[x]` |
 | T305 | Устранение повторной очистки lock в recovery (`recovery.py:131-136`) и исправление ложного комментария `recovery.py:126-128`; тест-дабл `tests/unit/test_recovery_cleanup.py:355-381` привести в соответствие с реальным поведением `abort` (F-003-4) | `[x]` |
-| T306 | Синхронизация `docs/ru/simulator/backend/payment-integration.md` и решений в `docs/ru/09-decisions-and-defaults.md` | `[!]` |
+| T306 | Синхронизация `docs/ru/simulator/backend/payment-integration.md` и решений в `docs/ru/09-decisions-and-defaults.md` | `[x]` |
 | T307 | Независимое ревью и публикация evidence на точном HEAD | `[!]` |
 
 Легенда: `[x]` выполнено, `[ ]` в работе, `[!]` заблокировано/не авторизовано.
@@ -250,3 +250,19 @@ severity, а не за откладывание.
 - RED `wave4_003_t305_red` — exit `1`, `1 failed`, exact `assert 3 == 2`: третий DELETE принадлежал
   recovery. GREEN selector по полному recovery-файлу и реальному payment terminal countercheck
   `wave4_003_t305_green` — exit `0`, `9 passed`. Pinned Ruff и `git diff --check` — exit `0`.
+
+### 2026-08-11 — T306
+
+- Documentation commit: `8dfc6a9`. До изменения профильный документ описывал только endpoints,
+  PrepareLock snapshot guard и общий `clearing.done` (`payment-integration.md:68-77,235-247`), а
+  decision registry не фиксировал owner/replay/amount contracts.
+- После: service-owned UoW и UUIDv5 replay identity записаны в
+  `docs/ru/simulator/backend/payment-integration.md:73-82`; actual amount и post-commit cancellation
+  publication — на `:246-257`. Каноническое решение находится в
+  `docs/ru/09-decisions-and-defaults.md:250-267` и также фиксирует единственного owner очистки
+  terminal PrepareLock — `PaymentEngine`.
+- Reference scan
+  `rg -n "владеет одной попыткой|UUIDv5|ClearingCommittedAfterCancellation|actual amount|1\\.12\\.1|recovery не повторяет" docs/ru/simulator/backend/payment-integration.md docs/ru/09-decisions-and-defaults.md`
+  — exit `0`, все шесть контрактов найдены. `git diff --check` для обоих документов — exit `0`.
+  Пользовательский metadata-hunk в начале `09-decisions-and-defaults.md` намеренно не вошёл в
+  commit и остаётся в рабочем дереве.
