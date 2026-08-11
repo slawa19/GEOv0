@@ -268,6 +268,230 @@ async def test_concurrent_same_cycle_serializable_resolves_one_durable_occurrenc
 
 
 @pytest.mark.asyncio
+async def test_serializable_conflict_without_committed_occurrence_stays_failure_postgres(
+    db_session,
+):
+    """A real 40001 must not become success without the deterministic transaction."""
+
+    dialect = db_session.get_bind().dialect.name
+    if dialect not in {"postgresql", "postgres"}:
+        pytest.skip("Postgres-only: SERIALIZABLE clearing reconciliation")
+
+    from app.core.clearing.service import ClearingService
+    from app.db.models.audit_log import IntegrityAuditLog
+    from app.db.models.debt import Debt
+    from app.db.models.equivalent import Equivalent
+    from app.db.models.participant import Participant
+    from app.db.models.prepare_lock import PrepareLock
+    from app.db.models.transaction import Transaction
+    from app.db.models.trustline import TrustLine
+    from app.utils.exceptions import GeoException
+    from tests.conftest import TestingSessionLocal
+
+    nonce = uuid.uuid4().hex[:10]
+    equivalent_id = uuid.uuid4()
+    equivalent_code = f"CN{nonce}".upper()
+    participant_ids = [uuid.uuid4() for _ in range(3)]
+    a_id, b_id, c_id = participant_ids
+    debt_ids = [uuid.uuid4() for _ in range(3)]
+    cycle = [{"debt_id": str(debt_id)} for debt_id in debt_ids]
+    execution_tx_id = ClearingService._execution_tx_id(debt_ids)
+    owner_session = None
+    observed_retryable_sqlstates: list[str] = []
+
+    try:
+        async with TestingSessionLocal() as setup:
+            setup.add(
+                Equivalent(
+                    id=equivalent_id,
+                    code=equivalent_code,
+                    description="Unmatched serialization conflict test",
+                    precision=2,
+                )
+            )
+            setup.add_all(
+                [
+                    Participant(
+                        id=participant_id,
+                        pid=f"{label}_CN_{nonce}",
+                        display_name=label,
+                        public_key=f"pk_{label}_{nonce}",
+                        type="person",
+                        status="active",
+                    )
+                    for participant_id, label in zip(
+                        participant_ids,
+                        ("A", "B", "C"),
+                        strict=True,
+                    )
+                ]
+            )
+            setup.add_all(
+                [
+                    TrustLine(
+                        from_participant_id=creditor_id,
+                        to_participant_id=debtor_id,
+                        equivalent_id=equivalent_id,
+                        limit=Decimal("200.00"),
+                        policy={"auto_clearing": True},
+                        status="active",
+                    )
+                    for debtor_id, creditor_id in (
+                        (a_id, b_id),
+                        (b_id, c_id),
+                        (c_id, a_id),
+                    )
+                ]
+            )
+            setup.add_all(
+                [
+                    Debt(
+                        id=debt_id,
+                        debtor_id=debtor_id,
+                        creditor_id=creditor_id,
+                        equivalent_id=equivalent_id,
+                        amount=Decimal(amount),
+                    )
+                    for debt_id, debtor_id, creditor_id, amount in (
+                        (debt_ids[0], a_id, b_id, "100.00"),
+                        (debt_ids[1], b_id, c_id, "30.00"),
+                        (debt_ids[2], c_id, a_id, "40.00"),
+                    )
+                ]
+            )
+            await setup.commit()
+
+        class _ObservedClearingService(ClearingService):
+            def _is_retryable_concurrency_error(self, exc: BaseException) -> bool:
+                is_retryable = super()._is_retryable_concurrency_error(exc)
+                if is_retryable:
+                    pending = [exc]
+                    seen: set[int] = set()
+                    while pending:
+                        current = pending.pop()
+                        if id(current) in seen:
+                            continue
+                        seen.add(id(current))
+                        for attr in ("sqlstate", "pgcode", "code"):
+                            value = getattr(current, attr, None)
+                            if str(value or "").strip() in {"40001", "40P01"}:
+                                observed_retryable_sqlstates.append(str(value))
+                        for linked in (
+                            getattr(current, "orig", None),
+                            current.__cause__,
+                            current.__context__,
+                        ):
+                            if isinstance(linked, BaseException):
+                                pending.append(linked)
+                return is_retryable
+
+        owner_session = TestingSessionLocal()
+        await owner_session.connection(
+            execution_options={"isolation_level": "SERIALIZABLE"}
+        )
+        isolation = (
+            await owner_session.execute(text("SHOW transaction_isolation"))
+        ).scalar_one()
+        assert str(isolation).lower() == "serializable"
+        service = _ObservedClearingService(owner_session)
+
+        # Establish the owner's SERIALIZABLE snapshot before the independent
+        # writer changes a Debt. No deterministic clearing transaction exists.
+        assert await service._committed_execution_amount(execution_tx_id) is None
+        async with TestingSessionLocal() as writer:
+            debt = await writer.get(Debt, debt_ids[0])
+            assert debt is not None
+            debt.amount = Decimal("101.00")
+            await writer.commit()
+
+        with pytest.raises(GeoException) as failure:
+            await service.execute_clearing_with_amount(cycle)
+
+        assert failure.value.code == "E010"
+        assert observed_retryable_sqlstates
+        assert set(observed_retryable_sqlstates) == {"40001"}
+        assert not owner_session.in_transaction()
+
+        async with TestingSessionLocal() as verify:
+            clearing_transactions = (
+                await verify.scalars(
+                    select(Transaction).where(
+                        Transaction.tx_id == execution_tx_id,
+                        Transaction.type == "CLEARING",
+                    )
+                )
+            ).all()
+            clearing_audits = (
+                await verify.scalars(
+                    select(IntegrityAuditLog).where(
+                        IntegrityAuditLog.operation_type == "CLEARING",
+                        IntegrityAuditLog.equivalent_code == equivalent_code,
+                    )
+                )
+            ).all()
+            remaining_debts = {
+                debt.id: debt.amount
+                for debt in (
+                    await verify.scalars(
+                        select(Debt).where(Debt.equivalent_id == equivalent_id)
+                    )
+                ).all()
+            }
+
+        assert clearing_transactions == []
+        assert clearing_audits == []
+        assert remaining_debts == {
+            debt_ids[0]: Decimal("101.00000000"),
+            debt_ids[1]: Decimal("30.00000000"),
+            debt_ids[2]: Decimal("40.00000000"),
+        }
+    finally:
+        primary_error = sys.exc_info()[1]
+        try:
+            if owner_session is not None:
+                await owner_session.rollback()
+                await owner_session.close()
+            async with TestingSessionLocal() as cleanup:
+                await cleanup.execute(
+                    delete(IntegrityAuditLog).where(
+                        IntegrityAuditLog.equivalent_code == equivalent_code
+                    )
+                )
+                await cleanup.execute(
+                    delete(PrepareLock).where(
+                        PrepareLock.participant_id.in_(participant_ids)
+                    )
+                )
+                await cleanup.execute(
+                    delete(Transaction).where(
+                        Transaction.initiator_id.in_(participant_ids)
+                    )
+                )
+                await cleanup.execute(
+                    delete(Debt).where(Debt.equivalent_id == equivalent_id)
+                )
+                await cleanup.execute(
+                    delete(TrustLine).where(
+                        TrustLine.equivalent_id == equivalent_id
+                    )
+                )
+                await cleanup.execute(
+                    delete(Participant).where(Participant.id.in_(participant_ids))
+                )
+                await cleanup.execute(
+                    delete(Equivalent).where(Equivalent.id == equivalent_id)
+                )
+                await cleanup.commit()
+        except BaseException as teardown_error:
+            if primary_error is None:
+                raise
+            primary_error.add_note(
+                "Unmatched serialization-conflict teardown also failed: "
+                f"{type(teardown_error).__name__}: {teardown_error}"
+            )
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("boundary_kind", ["cancellation", "ack_loss"])
 async def test_post_commit_boundary_reconciles_and_new_cycle_still_executes_postgres(
     db_session,
