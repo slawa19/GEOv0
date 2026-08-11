@@ -456,6 +456,18 @@ def _strip_shell_comment(command: str) -> str:
     return command.rstrip()
 
 
+def _assignment_value(command: str, name: str) -> str | None:
+    assignment = re.fullmatch(
+        rf"(?:\$env:|export\s+)?{re.escape(name)}\s*=\s*"
+        r"(?:(['\"])([^'\"]+)\1|([^\s'\"]+))\s*",
+        command,
+        re.IGNORECASE,
+    )
+    if assignment is None:
+        return None
+    return assignment.group(2) or assignment.group(3)
+
+
 def _expand_powershell_variables(command: str, variables: dict[str, str]) -> str:
     expanded: list[str] = []
     quote: str | None = None
@@ -553,36 +565,10 @@ def _tokenize_powershell_arguments(candidate: str) -> list[str] | None:
 
 
 def _powershell_inline_syntax_is_valid(command: str) -> bool:
-    if _tokenize_powershell_arguments(command) is None:
+    command_without_comment = _strip_shell_comment(command)
+    if _tokenize_powershell_arguments(command_without_comment) is None:
         return False
-    quote: str | None = None
-    delimiters: list[str] = []
-    matching = {")": "(", "]": "[", "}": "{"}
-    index = 0
-    while index < len(command):
-        character = command[index]
-        if character == "`":
-            if index + 1 >= len(command):
-                return False
-            index += 2
-            continue
-        if character in {'"', "'"}:
-            if quote is None:
-                quote = character
-            elif quote == character:
-                quote = None
-            index += 1
-            continue
-        if quote is None:
-            if character in matching.values():
-                delimiters.append(character)
-            elif character in matching:
-                if not delimiters or delimiters.pop() != matching[character]:
-                    return False
-        index += 1
-    if quote is not None or delimiters:
-        return False
-    return not command.rstrip().endswith("|")
+    return not command_without_comment.rstrip().endswith(("|", "&&", "||"))
 
 
 def _parse_verifier_arguments(arguments: str) -> dict[str, str | bool] | None:
@@ -686,14 +672,14 @@ def _postgres_example_violations(
         if command.startswith(_POWERSHELL_SYNTAX_ERROR):
             violations.append(f"{path}: {command}")
             continue
-        variable_assignment = re.match(
-            r"^\$([A-Za-z_][A-Za-z0-9_]*)\s*=\s*[\"']([^\"']+)[\"']$",
+        variable_assignment = re.fullmatch(
+            r"\$([A-Za-z_][A-Za-z0-9_]*)\s*=\s*" r"(?:(['\"])([^'\"]+)\2|([^\s'\"]+))",
             command,
         )
         if variable_assignment is not None:
             variables[variable_assignment.group(1).lower()] = variable_assignment.group(
-                2
-            )
+                3
+            ) or variable_assignment.group(4)
         commands.append(_expand_powershell_variables(command, variables))
 
     created_names: set[str] = set()
@@ -709,22 +695,13 @@ def _postgres_example_violations(
         if created_name is not None:
             created_names.add(created_name)
             created_indexes.append(command_index)
-        url_assignment = re.match(
-            r"^(?:\$env:|export\s+)?TEST_DATABASE_URL\s*=\s*[\"']?" r"([^\s\"']+)",
-            command,
-            re.IGNORECASE,
-        )
-        if url_assignment is not None:
-            database_urls.append(url_assignment.group(1))
+        url_value = _assignment_value(command, "TEST_DATABASE_URL")
+        if url_value is not None:
+            database_urls.append(url_value)
             url_indexes.append(command_index)
-        reset_assignment = re.match(
-            r"^(?:\$env:|export\s+)?GEO_TEST_ALLOW_DB_RESET\s*=\s*[\"']?"
-            r"([^\s\"']+)",
-            command,
-            re.IGNORECASE,
-        )
-        if reset_assignment is not None:
-            reset_values.append(reset_assignment.group(1))
+        reset_value = _assignment_value(command, "GEO_TEST_ALLOW_DB_RESET")
+        if reset_value is not None:
+            reset_values.append(reset_value)
             reset_indexes.append(command_index)
         if _looks_like_verifier_command(command):
             verifier_arguments = _canonical_verifier_arguments(command)
@@ -1390,6 +1367,40 @@ $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
 ./scripts/verify_local.ps1 -BackendMarker postgres
 Write-Output "incomplete" |
+```
+""",
+        """
+```powershell
+createdb -U geo geov0_test_pipeline_comment
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_pipeline_comment"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+./scripts/verify_local.ps1 -BackendMarker postgres
+Write-Output "incomplete" | # no pipeline target
+```
+""",
+        """
+```powershell
+createdb -U geo geov0_test_incomplete_chain
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_incomplete_chain"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+./scripts/verify_local.ps1 -BackendMarker postgres
+Write-Output "incomplete" &&
+```
+""",
+        """
+```powershell
+createdb -U geo geov0_test_url_suffix
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_url_suffix" definitely_invalid
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+./scripts/verify_local.ps1 -BackendMarker postgres
+```
+""",
+        """
+```powershell
+createdb -U geo geov0_test_reset_suffix
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_reset_suffix"
+$env:GEO_TEST_ALLOW_DB_RESET = "1" definitely_invalid
+./scripts/verify_local.ps1 -BackendMarker postgres
 ```
 """,
         """
