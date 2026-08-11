@@ -9,6 +9,7 @@ from decimal import Decimal
 
 import pytest
 from sqlalchemy import delete, select, text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 
 pytestmark = pytest.mark.postgres
@@ -267,6 +268,10 @@ async def test_clearing_owner_blocks_new_reverse_prepare_after_empty_snapshot_po
         original_locked_pairs = clearing_service._locked_pairs_for_equivalent
 
         async def _pause_after_empty_snapshot(equivalent_id):
+            isolation = await clearing_service.session.scalar(
+                text("SHOW transaction_isolation")
+            )
+            assert str(isolation).lower() == "serializable"
             locked_pairs = await original_locked_pairs(equivalent_id)
             assert locked_pairs == set()
             empty_snapshot_seen.set()
@@ -550,3 +555,265 @@ async def test_uncommitted_reverse_prepare_blocks_clearing_until_visible_postgre
                 "Payment-first interlock teardown also failed: "
                 f"{type(teardown_error).__name__}: {teardown_error}"
             )
+
+
+@pytest.mark.asyncio
+async def test_clearing_interlock_completes_with_single_connection_pool_postgres(
+    db_session,
+):
+    """The shared boundary must not require two simultaneous pool connections."""
+
+    _require_postgres(db_session)
+
+    from app.core.clearing.service import ClearingService
+    from tests.conftest import TEST_DATABASE_URL
+
+    seed = await _seed_interlock_case()
+    one_connection_engine = create_async_engine(
+        TEST_DATABASE_URL,
+        isolation_level="SERIALIZABLE",
+        pool_size=1,
+        max_overflow=0,
+        pool_timeout=0.25,
+    )
+    sessions = async_sessionmaker(
+        bind=one_connection_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autoflush=False,
+    )
+    clearing_session = sessions()
+    try:
+        amount = await asyncio.wait_for(
+            ClearingService(clearing_session).execute_clearing_with_amount(
+                seed["cycle"]
+            ),
+            timeout=3.0,
+        )
+        assert amount == Decimal("30.00000000")
+        assert not clearing_session.in_transaction()
+    finally:
+        await clearing_session.rollback()
+        await clearing_session.close()
+        await one_connection_engine.dispose()
+        await _cleanup_interlock_case(seed)
+
+
+@pytest.mark.asyncio
+async def test_cancellation_during_interlocked_work_rolls_back_before_unlock_postgres(
+    db_session,
+    monkeypatch,
+):
+    _require_postgres(db_session)
+
+    from app.core.clearing.service import ClearingService
+    from app.core.payments.engine import PaymentEngine
+    from app.db.models.audit_log import IntegrityAuditLog
+    from app.db.models.debt import Debt
+    from app.db.models.transaction import Transaction
+    from tests.conftest import TestingSessionLocal
+
+    seed = await _seed_interlock_case()
+    clearing_session = TestingSessionLocal()
+    probe_session = None
+    task = None
+    work_entered = asyncio.Event()
+    never_release = asyncio.Event()
+    service = ClearingService(clearing_session)
+    original_locked_pairs = service._locked_pairs_for_equivalent
+
+    async def _pause_inside_money_uow(equivalent_id):
+        locked_pairs = await original_locked_pairs(equivalent_id)
+        work_entered.set()
+        await never_release.wait()
+        return locked_pairs
+
+    monkeypatch.setattr(
+        service,
+        "_locked_pairs_for_equivalent",
+        _pause_inside_money_uow,
+    )
+    try:
+        task = asyncio.create_task(service.execute_clearing_with_amount(seed["cycle"]))
+        await asyncio.wait_for(work_entered.wait(), timeout=5.0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=5.0)
+
+        assert not clearing_session.in_transaction()
+        async with TestingSessionLocal() as verify:
+            final_debts = {
+                debt.id: (debt.amount, debt.version)
+                for debt in (
+                    await verify.scalars(
+                        select(Debt).where(
+                            Debt.equivalent_id == seed["equivalent_id"]
+                        )
+                    )
+                ).all()
+            }
+            clearing_transactions = (
+                await verify.scalars(
+                    select(Transaction).where(
+                        Transaction.type == "CLEARING",
+                        Transaction.initiator_id.in_(seed["participant_ids"]),
+                    )
+                )
+            ).all()
+            audits = (
+                await verify.scalars(
+                    select(IntegrityAuditLog).where(
+                        IntegrityAuditLog.equivalent_code
+                        == seed["equivalent_code"]
+                    )
+                )
+            ).all()
+        assert final_debts == {
+            seed["debt_ids"][0]: (Decimal("100.00000000"), 1),
+            seed["debt_ids"][1]: (Decimal("30.00000000"), 1),
+            seed["debt_ids"][2]: (Decimal("40.00000000"), 1),
+        }
+        assert clearing_transactions == []
+        assert audits == []
+        probe_session = TestingSessionLocal()
+        await asyncio.wait_for(
+            PaymentEngine(probe_session).acquire_staged_equivalent_owner_locks(
+                [seed["equivalent_id"]]
+            ),
+            timeout=2.0,
+        )
+    finally:
+        never_release.set()
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.wait([task], timeout=2.0)
+        for session in (clearing_session, probe_session):
+            if session is not None:
+                await session.rollback()
+                await session.close()
+        await _cleanup_interlock_case(seed)
+
+
+@pytest.mark.asyncio
+async def test_cancellation_during_interlock_release_preserves_durable_amount_postgres(
+    db_session,
+    monkeypatch,
+):
+    _require_postgres(db_session)
+
+    from app.core.clearing.service import (
+        ClearingCommittedAfterCancellation,
+        ClearingService,
+    )
+    from app.core.payments.engine import PaymentEngine
+    from app.db.models.transaction import Transaction
+    from tests.conftest import TestingSessionLocal
+
+    seed = await _seed_interlock_case()
+    clearing_session = TestingSessionLocal()
+    probe_session = None
+    task = None
+    cleanup_entered = asyncio.Event()
+    hold_cleanup = asyncio.Event()
+    original_release = ClearingService._release_interlock_session
+
+    async def _hold_after_durable_work(*args, **kwargs):
+        cleanup_task = asyncio.create_task(original_release(*args, **kwargs))
+        cleanup_entered.set()
+        try:
+            await hold_cleanup.wait()
+        except asyncio.CancelledError:
+            await asyncio.shield(cleanup_task)
+            raise
+        return await cleanup_task
+
+    monkeypatch.setattr(
+        ClearingService,
+        "_release_interlock_session",
+        staticmethod(_hold_after_durable_work),
+    )
+    try:
+        task = asyncio.create_task(
+            ClearingService(clearing_session).execute_clearing_with_amount(
+                seed["cycle"]
+            )
+        )
+        await asyncio.wait_for(cleanup_entered.wait(), timeout=5.0)
+        task.cancel()
+        with pytest.raises(ClearingCommittedAfterCancellation) as committed:
+            await asyncio.wait_for(task, timeout=5.0)
+        assert committed.value.cleared_amount == Decimal("30.00000000")
+
+        async with TestingSessionLocal() as verify:
+            transactions = (
+                await verify.scalars(
+                    select(Transaction).where(
+                        Transaction.type == "CLEARING",
+                        Transaction.initiator_id.in_(seed["participant_ids"]),
+                    )
+                )
+            ).all()
+        assert len(transactions) == 1
+        assert transactions[0].state == "COMMITTED"
+        probe_session = TestingSessionLocal()
+        await asyncio.wait_for(
+            PaymentEngine(probe_session).acquire_staged_equivalent_owner_locks(
+                [seed["equivalent_id"]]
+            ),
+            timeout=2.0,
+        )
+    finally:
+        hold_cleanup.set()
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.wait([task], timeout=2.0)
+        await clearing_session.rollback()
+        await clearing_session.close()
+        if probe_session is not None:
+            await probe_session.rollback()
+            await probe_session.close()
+        await _cleanup_interlock_case(seed)
+
+
+@pytest.mark.asyncio
+async def test_interlock_timeout_rolls_back_work_and_releases_owner_postgres(
+    db_session,
+    monkeypatch,
+):
+    _require_postgres(db_session)
+
+    from app.config import settings
+    from app.core.clearing.service import ClearingService
+    from app.core.payments.engine import PaymentEngine
+    from app.utils.exceptions import TimeoutException
+    from tests.conftest import TestingSessionLocal
+
+    seed = await _seed_interlock_case()
+    holder_session = TestingSessionLocal()
+    clearing_session = TestingSessionLocal()
+    retry_session = None
+    monkeypatch.setattr(settings, "COMMIT_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(settings, "PAYMENT_TOTAL_TIMEOUT_SECONDS", 0.05)
+    try:
+        await PaymentEngine(holder_session).acquire_staged_equivalent_owner_locks(
+            [seed["equivalent_id"]]
+        )
+        with pytest.raises(TimeoutException):
+            await ClearingService(clearing_session).execute_clearing_with_amount(
+                seed["cycle"]
+            )
+        assert not clearing_session.in_transaction()
+
+        await holder_session.rollback()
+        retry_session = TestingSessionLocal()
+        amount = await asyncio.wait_for(
+            ClearingService(retry_session).execute_clearing_with_amount(seed["cycle"]),
+            timeout=3.0,
+        )
+        assert amount == Decimal("30.00000000")
+    finally:
+        for session in (holder_session, clearing_session, retry_session):
+            if session is not None:
+                await session.rollback()
+                await session.close()
+        await _cleanup_interlock_case(seed)

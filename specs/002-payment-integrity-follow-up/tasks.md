@@ -64,7 +64,8 @@ Owner-authorized for Wave 3 on 2026-08-11; execute sequentially.
 
 ## Phase 2 — Clearing interlock and closure
 
-All tasks are pending successful Phase 1 and owner authorization.
+Phase 1 is complete and Phase 2 was owner-authorized on 2026-08-11. P200-P204 are
+complete; P205 remains open until exact-head remediation review and closeout.
 
 - [x] P200 Add deterministic clearing-versus-new-prepare schedules for both orders.
 - [x] P201 Select and implement the smallest shared serialization or revalidation

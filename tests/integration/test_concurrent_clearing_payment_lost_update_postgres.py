@@ -14,7 +14,7 @@ from sqlalchemy import delete, select, text
 pytestmark = pytest.mark.postgres
 
 
-async def _wait_for_matching_advisory_wait(observer) -> bool:
+async def _wait_for_matching_advisory_wait(observer, *, waiter_pid: int) -> bool:
     try:
         async with asyncio.timeout(5.0):
             while True:
@@ -29,9 +29,12 @@ async def _wait_for_matching_advisory_wait(observer) -> bool:
                         "AND waiter.objid IS NOT DISTINCT FROM holder.objid "
                         "AND waiter.objsubid IS NOT DISTINCT FROM holder.objsubid "
                         "WHERE holder.locktype = 'advisory' AND holder.granted "
-                        "AND waiter.pid <> holder.pid AND NOT waiter.granted"
+                        "AND holder.database = (SELECT oid FROM pg_database "
+                        "WHERE datname = current_database()) "
+                        "AND waiter.pid = :waiter_pid AND NOT waiter.granted"
                         ")"
-                    )
+                    ),
+                    {"waiter_pid": waiter_pid},
                 )
                 if waiting:
                     return True
@@ -53,6 +56,7 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
         pytest.skip("Postgres-only: clearing/payment row-lock and retry semantics")
 
     from app.core.clearing.service import ClearingService
+    from app.core.payments.engine import PaymentEngine
     from app.core.payments.service import PaymentService
     from app.db.models.audit_log import IntegrityAuditLog
     from app.db.models.debt import Debt
@@ -181,6 +185,9 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
         clearing_service = ClearingService(clearing_session)
         payment_service = PaymentService(payment_session)
         original_locked_pairs = clearing_service._locked_pairs_for_equivalent
+        original_payment_owner = PaymentEngine._acquire_equivalent_owner_locks
+        payment_owner_attempted = asyncio.Event()
+        payment_owner_pid: int | None = None
 
         async def _hold_after_lock_scan(current_equivalent_id):
             locked_pairs = await original_locked_pairs(current_equivalent_id)
@@ -193,6 +200,20 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
             clearing_service,
             "_locked_pairs_for_equivalent",
             _hold_after_lock_scan,
+        )
+
+        async def _observe_payment_owner(engine, equivalent_ids):
+            nonlocal payment_owner_pid
+            payment_owner_pid = int(
+                await engine.session.scalar(text("SELECT pg_backend_pid()"))
+            )
+            payment_owner_attempted.set()
+            return await original_payment_owner(engine, equivalent_ids)
+
+        monkeypatch.setattr(
+            PaymentEngine,
+            "_acquire_equivalent_owner_locks",
+            _observe_payment_owner,
         )
 
         clearing_task = asyncio.create_task(
@@ -209,7 +230,12 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
                 idempotency_key=payment_tx_id,
             )
         )
-        payment_waiting = await _wait_for_matching_advisory_wait(observer_session)
+        await asyncio.wait_for(payment_owner_attempted.wait(), timeout=5.0)
+        assert payment_owner_pid is not None
+        payment_waiting = await _wait_for_matching_advisory_wait(
+            observer_session,
+            waiter_pid=payment_owner_pid,
+        )
         payment_error = (
             payment_task.exception()
             if payment_task.done() and not payment_task.cancelled()

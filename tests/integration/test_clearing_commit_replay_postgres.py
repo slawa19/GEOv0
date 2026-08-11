@@ -9,13 +9,18 @@ from decimal import Decimal
 
 import pytest
 from sqlalchemy import delete, select, text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker
 
 
 pytestmark = pytest.mark.postgres
 
 
-async def _wait_for_matching_advisory_wait(observer) -> bool:
+async def _wait_for_matching_advisory_wait(
+    observer,
+    *,
+    holder_pid: int,
+    waiter_pid: int,
+) -> bool:
     try:
         async with asyncio.timeout(5.0):
             while True:
@@ -29,10 +34,17 @@ async def _wait_for_matching_advisory_wait(observer) -> bool:
                         "AND waiter.classid IS NOT DISTINCT FROM holder.classid "
                         "AND waiter.objid IS NOT DISTINCT FROM holder.objid "
                         "AND waiter.objsubid IS NOT DISTINCT FROM holder.objsubid "
-                        "WHERE holder.locktype = 'advisory' AND holder.granted "
-                        "AND waiter.pid <> holder.pid AND NOT waiter.granted"
+                        "WHERE holder.pid = :holder_pid "
+                        "AND holder.locktype = 'advisory' AND holder.granted "
+                        "AND holder.database = (SELECT oid FROM pg_database "
+                        "WHERE datname = current_database()) "
+                        "AND waiter.pid = :waiter_pid AND NOT waiter.granted"
                         ")"
-                    )
+                    ),
+                    {
+                        "holder_pid": holder_pid,
+                        "waiter_pid": waiter_pid,
+                    },
                 )
                 if waiting:
                     return True
@@ -136,15 +148,22 @@ async def test_concurrent_same_cycle_serializable_resolves_one_durable_occurrenc
             await setup.commit()
 
         first_owner_acquired = asyncio.Event()
+        second_owner_attempted = asyncio.Event()
         release_first_owner = asyncio.Event()
         acquisition_count = 0
-        original_acquire = PaymentEngine.acquire_staged_equivalent_owner_locks
+        acquisition_pids: dict[int, int] = {}
+        original_acquire = PaymentEngine.acquire_session_equivalent_owner_lock
 
-        async def _coordinate_owner_acquisition(engine, equivalent_ids):
+        async def _coordinate_owner_acquisition(engine, equivalent_id):
             nonlocal acquisition_count
             acquisition_count += 1
             call_number = acquisition_count
-            result = await original_acquire(engine, equivalent_ids)
+            acquisition_pids[call_number] = int(
+                await engine.session.scalar(text("SELECT pg_backend_pid()"))
+            )
+            if call_number == 2:
+                second_owner_attempted.set()
+            result = await original_acquire(engine, equivalent_id)
             if call_number == 1:
                 first_owner_acquired.set()
                 await release_first_owner.wait()
@@ -152,7 +171,7 @@ async def test_concurrent_same_cycle_serializable_resolves_one_durable_occurrenc
 
         monkeypatch.setattr(
             PaymentEngine,
-            "acquire_staged_equivalent_owner_locks",
+            "acquire_session_equivalent_owner_lock",
             _coordinate_owner_acquisition,
         )
 
@@ -185,7 +204,12 @@ async def test_concurrent_same_cycle_serializable_resolves_one_durable_occurrenc
             )
         ]
         await asyncio.wait_for(first_owner_acquired.wait(), timeout=5.0)
-        assert await _wait_for_matching_advisory_wait(observer)
+        await asyncio.wait_for(second_owner_attempted.wait(), timeout=5.0)
+        assert await _wait_for_matching_advisory_wait(
+            observer,
+            holder_pid=acquisition_pids[1],
+            waiter_pid=acquisition_pids[2],
+        )
         release_first_owner.set()
         results = await asyncio.wait_for(
             asyncio.gather(*workers, return_exceptions=True),
@@ -545,7 +569,10 @@ async def test_serializable_conflict_without_committed_occurrence_stays_failure_
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("boundary_kind", ["cancellation", "ack_loss"])
+@pytest.mark.parametrize(
+    "boundary_kind",
+    ["cancellation", "ack_loss", "connection_loss"],
+)
 async def test_post_commit_boundary_reconciles_and_new_cycle_still_executes_postgres(
     db_session,
     monkeypatch,
@@ -656,16 +683,26 @@ async def test_post_commit_boundary_reconciles_and_new_cycle_still_executes_post
             execution_options={"isolation_level": "SERIALIZABLE"}
         )
         service = ClearingService(service_session)
-        real_commit = service_session.commit
+        real_commit = AsyncSession.commit
+        boundary_commit_seen = False
 
-        async def _commit_then_delay_ack():
-            await real_commit()
+        async def _commit_then_delay_ack(session):
+            nonlocal boundary_commit_seen
+            await real_commit(session)
+            if boundary_commit_seen:
+                return
+            boundary_commit_seen = True
             commit_completed.set()
             if boundary_kind == "ack_loss":
                 raise RuntimeError("commit acknowledgement lost")
+            if boundary_kind == "connection_loss":
+                bind = session.bind
+                assert isinstance(bind, AsyncConnection)
+                await bind.invalidate()
+                raise ConnectionError("connection lost after commit")
             await release_commit_ack.wait()
 
-        monkeypatch.setattr(service_session, "commit", _commit_then_delay_ack)
+        monkeypatch.setattr(AsyncSession, "commit", _commit_then_delay_ack)
 
         service_task = asyncio.create_task(
             service.execute_clearing_with_amount(cycle),

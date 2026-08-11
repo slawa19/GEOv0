@@ -168,6 +168,46 @@ class PaymentEngine:
                     {"lock_timeout": str(previous_lock_timeout)},
                 )
 
+    async def acquire_session_equivalent_owner_lock(
+        self,
+        equivalent_id: UUID,
+    ) -> None:
+        """Acquire the shared owner identity beyond a transaction rollback.
+
+        Clearing pins the physical connection, rolls back the acquisition
+        transaction to obtain a fresh SERIALIZABLE snapshot, and explicitly
+        releases this session-level lock before returning the connection.
+        """
+        if not self._is_postgres():
+            return
+
+        await self._set_local_advisory_lock_timeout()
+        await self.session.execute(
+            text("SELECT pg_advisory_lock(:namespace, :key)"),
+            {
+                "namespace": _EQUIVALENT_OWNER_LOCK_NAMESPACE,
+                "key": self._equivalent_owner_lock_key(equivalent_id),
+            },
+        )
+
+    async def release_session_equivalent_owner_lock(
+        self,
+        equivalent_id: UUID,
+    ) -> bool:
+        """Release one session-level owner lock from a pinned connection."""
+        if not self._is_postgres():
+            return True
+
+        return bool(
+            await self.session.scalar(
+                text("SELECT pg_advisory_unlock(:namespace, :key)"),
+                {
+                    "namespace": _EQUIVALENT_OWNER_LOCK_NAMESPACE,
+                    "key": self._equivalent_owner_lock_key(equivalent_id),
+                },
+            )
+        )
+
     async def _acquire_tx_advisory_lock(self, tx_id: str) -> None:
         """Serialize all state transitions for one tx before authoritative reads."""
         if not self._is_postgres():

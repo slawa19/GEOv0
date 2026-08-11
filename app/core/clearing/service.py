@@ -67,29 +67,72 @@ class ClearingService:
             raise GeoException() from exc
 
     @staticmethod
-    async def _release_interlock_session(lock_session: AsyncSession) -> None:
-        """Drain rollback/close so cancellation cannot strand an advisory lock."""
+    async def _drain_task(task: asyncio.Task) -> asyncio.CancelledError | None:
+        """Wait through repeated caller cancellation and return its first pulse."""
 
-        async def _cleanup() -> None:
-            try:
-                await lock_session.rollback()
-            finally:
-                await lock_session.close()
-
-        cleanup_task = asyncio.create_task(_cleanup())
         caller_cancellation: asyncio.CancelledError | None = None
-        while not cleanup_task.done():
+        while not task.done():
             try:
-                await asyncio.shield(cleanup_task)
+                await asyncio.shield(task)
             except asyncio.CancelledError as exc:
                 if caller_cancellation is None:
                     caller_cancellation = exc
             except Exception:
                 # The task is terminal; surface its exact result below.
                 pass
-        cleanup_task.result()
+        task.result()
+        return caller_cancellation
+
+    @classmethod
+    async def _rollback_before_interlock(cls, session: AsyncSession) -> None:
+        rollback_task = asyncio.create_task(session.rollback())
+        caller_cancellation = await cls._drain_task(rollback_task)
         if caller_cancellation is not None:
             raise caller_cancellation
+
+    @classmethod
+    async def _release_interlock_session(
+        cls,
+        work_session: AsyncSession,
+        connection: AsyncConnection,
+        equivalent_id: uuid.UUID,
+        *,
+        lock_was_acquired: bool,
+    ) -> asyncio.CancelledError | None:
+        """Rollback work, release the session lock, then return the connection."""
+
+        async def _cleanup() -> None:
+            try:
+                await work_session.rollback()
+                unlocked = await PaymentEngine(
+                    work_session
+                ).release_session_equivalent_owner_lock(equivalent_id)
+                if lock_was_acquired and not unlocked:
+                    logger.warning(
+                        "event=clearing.interlock_unlock_unconfirmed"
+                    )
+                    await connection.invalidate()
+                    return
+                remaining = await work_session.scalar(
+                    text(
+                        "SELECT count(*) FROM pg_locks "
+                        "WHERE pid = pg_backend_pid() "
+                        "AND locktype = 'advisory'"
+                    )
+                )
+                if int(remaining or 0) != 0:
+                    raise RuntimeError("Clearing connection retained advisory locks")
+            except BaseException:
+                # Never return a connection with uncertain session-lock state.
+                logger.exception("event=clearing.interlock_cleanup_invalidated")
+                await connection.invalidate()
+            finally:
+                try:
+                    await work_session.close()
+                finally:
+                    await connection.close()
+
+        return await cls._drain_task(asyncio.create_task(_cleanup()))
 
     @staticmethod
     def _execution_tx_id(debt_ids: List[uuid.UUID]) -> str:
@@ -998,6 +1041,12 @@ class ClearingService:
             )
         equivalent_id = next(iter(equivalent_ids))
 
+        try:
+            caller_connection = await self.session.connection()
+            isolation_level = await caller_connection.get_isolation_level()
+        except Exception as exc:
+            await self._raise_unexpected_execution(exc)
+
         bind = getattr(self.session, "bind", None)
         if bind is None:
             await self._raise_unexpected_execution(GeoException())
@@ -1007,36 +1056,111 @@ class ClearingService:
             lock_bind = bind
         else:
             await self._raise_unexpected_execution(GeoException())
-        lock_session_factory = async_sessionmaker(
-            bind=lock_bind,
-            class_=AsyncSession,
+        try:
+            await self._rollback_before_interlock(self.session)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            await self._raise_unexpected_execution(exc)
+
+        from app.config import settings
+
+        connection_budget_s = max(
+            0.001,
+            min(
+                float(settings.PAYMENT_TOTAL_TIMEOUT_SECONDS or 10),
+                float(settings.COMMIT_TIMEOUT_SECONDS or 5),
+            ),
+        )
+        connection: AsyncConnection | None = None
+        try:
+            connection = await asyncio.wait_for(
+                lock_bind.connect(),
+                timeout=connection_budget_s,
+            )
+            connection = await connection.execution_options(
+                isolation_level=isolation_level,
+            )
+        except asyncio.TimeoutError as exc:
+            raise TimeoutException("Clearing interlock timed out") from exc
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            if connection is not None:
+                await connection.close()
+            await self._raise_unexpected_execution(exc)
+
+        if connection is None:
+            await self._raise_unexpected_execution(GeoException())
+
+        work_session = AsyncSession(
+            bind=connection,
             expire_on_commit=False,
             autoflush=False,
         )
-        lock_session = lock_session_factory()
+        lock_was_acquired = False
+        result: Decimal | None = None
+        result_available = False
+        primary_error: BaseException | None = None
+        original_session = self.session
         try:
             try:
                 await PaymentEngine(
-                    lock_session
-                ).acquire_staged_equivalent_owner_locks([equivalent_id])
+                    work_session
+                ).acquire_session_equivalent_owner_lock(equivalent_id)
+                lock_was_acquired = True
             except Exception as exc:
                 if "55P03" in self._postgres_error_codes(exc):
                     raise TimeoutException("Clearing interlock timed out") from exc
-                await self._raise_unexpected_execution(exc)
+                logger.exception("event=clearing.interlock_acquire_failed")
+                raise GeoException() from exc
 
-            # The lock-only transaction may have waited on a payment snapshot.
-            # Restart the work session only after it owns the equivalent, so all
-            # authoritative reads observe the holder's committed PrepareLock.
+            # The session lock survives this rollback, while the next statement
+            # gets a snapshot newer than the payment holder we may have awaited.
+            await self._rollback_before_interlock(work_session)
+            self.session = work_session
             try:
-                await self.session.rollback()
-            except Exception as exc:
-                await self._raise_unexpected_execution(exc)
-            return await self._execute_clearing_with_amount(
-                cycle,
-                interlocked_equivalent_id=equivalent_id,
+                result = await self._execute_clearing_with_amount(
+                    cycle,
+                    interlocked_equivalent_id=equivalent_id,
+                )
+                result_available = True
+            finally:
+                self.session = original_session
+        except BaseException as exc:
+            primary_error = exc
+
+        try:
+            cleanup_cancellation = await self._release_interlock_session(
+                work_session,
+                connection,
+                equivalent_id,
+                lock_was_acquired=lock_was_acquired,
             )
-        finally:
-            await self._release_interlock_session(lock_session)
+        except asyncio.CancelledError as exc:
+            # The production helper drains cleanup and returns cancellation.
+            # Keep the outer boundary correct if cancellation is delivered in
+            # the final await after cleanup has already become terminal.
+            cleanup_cancellation = exc
+        except BaseException as cleanup_error:
+            if primary_error is not None:
+                primary_error.add_note(
+                    "Clearing interlock cleanup also failed: "
+                    f"{type(cleanup_error).__name__}: {cleanup_error}"
+                )
+                raise primary_error
+            raise
+
+        if primary_error is not None:
+            raise primary_error
+        if cleanup_cancellation is not None:
+            if result_available and result is not None:
+                raise ClearingCommittedAfterCancellation(
+                    tx_id=execution_tx_id,
+                    cleared_amount=result,
+                ) from cleanup_cancellation
+            raise cleanup_cancellation
+        return result
 
     async def _execute_clearing_with_amount(
         self,
