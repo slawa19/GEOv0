@@ -42,7 +42,7 @@ const WINDOW_SHELL_FOCUSABLE = [
   '[tabindex]:not([tabindex="-1"]):not([disabled])',
 ].join(', ')
 
-// TODO-ESC: expose per-window DOM container element for nested ESC consumers.
+// Nested keyboard consumers bind to this window's DOM boundary.
 provideWindowContainerEl(shellRef)
 
 const shellStyle = computed(() => {

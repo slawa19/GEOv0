@@ -62,7 +62,7 @@ export function useDestructiveConfirmation(options: UseDestructiveConfirmationOp
   const escEventName = options.esc?.eventName ?? 'keydown'
   const escConsume = options.esc?.consume ?? true
 
-  // TODO-ESC: bind ESC handling to the per-window container element (provided by WindowShell).
+  // Bind ESC handling to the per-window container element provided by WindowShell.
   const injectedContainerEl = useWindowContainerEl()
   const containerEl = injectedContainerEl ?? ref<HTMLElement | null>(null)
 
