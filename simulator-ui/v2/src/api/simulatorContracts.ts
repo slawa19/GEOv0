@@ -1,12 +1,21 @@
 import type { GraphLink, GraphNode } from '../types'
 import { ApiError } from './http'
 import type {
+  ClearingOnceResponse,
   RunError,
   RunStatus,
   ScenarioSummary,
   ScenariosListResponse,
   SimulatorActionClearingRealResponse,
+  SimulatorActionParticipantsListResponse,
+  SimulatorActionPaymentRealResponse,
+  SimulatorActionTrustlineCloseResponse,
+  SimulatorActionTrustlineCreateResponse,
+  SimulatorActionTrustlineUpdateResponse,
+  SimulatorActionTrustlinesListResponse,
   SimulatorGraphSnapshot,
+  SimulatorPaymentTargetsResponse,
+  TxOnceResponse,
 } from './simulatorTypes'
 
 const SIMULATOR_API_VERSION = 'simulator-api/1'
@@ -48,6 +57,18 @@ function arrayAt(value: unknown, path: string): unknown[] {
 function stringAt(value: unknown, path: string): string {
   if (typeof value !== 'string') fail(path, 'expected string')
   return value
+}
+
+const CANONICAL_DECIMAL_STRING = /^-?\d+(?:\.(\d+))?$/
+
+function decimalStringAt(value: unknown, path: string): string {
+  const text = stringAt(value, path)
+  const match = CANONICAL_DECIMAL_STRING.exec(text)
+  const digitCount = text.replace(/[-.]/g, '').length
+  if (!match || digitCount > 50 || (match[1]?.length ?? 0) > 18) {
+    fail(path, 'expected bounded plain decimal string')
+  }
+  return text
 }
 
 const CANONICAL_ISO_DATE_TIME =
@@ -104,6 +125,12 @@ function optionalString(value: JsonObject, key: string, path: string): string | 
   const item = value[key]
   if (item === undefined || item === null) return item
   return stringAt(item, `${path}.${key}`)
+}
+
+function optionalDecimalString(value: JsonObject, key: string, path: string): string | null | undefined {
+  const item = value[key]
+  if (item === undefined || item === null) return item
+  return decimalStringAt(item, `${path}.${key}`)
 }
 
 function optionalDateTime(value: JsonObject, key: string, path: string): string | null | undefined {
@@ -365,6 +392,180 @@ function decodeClearingEdge(value: unknown, path: string): { from: string; to: s
   }
 }
 
+function clientActionId(value: JsonObject, path: string): { client_action_id?: string | null } {
+  const item = optionalString(value, 'client_action_id', path)
+  return item !== undefined ? { client_action_id: item } : {}
+}
+
+function requireOk(value: JsonObject, path: string): void {
+  if (value.ok !== true) fail(`${path}.ok`, 'expected true')
+}
+
+function decodeTxOnce(value: unknown, path: string): TxOnceResponse {
+  const raw = objectAt(value, path)
+  onlyKeys(raw, path, ['ok', 'emitted_event_id', 'client_action_id'])
+  requireOk(raw, path)
+  return {
+    ok: true,
+    emitted_event_id: stringAt(raw.emitted_event_id, `${path}.emitted_event_id`),
+    ...clientActionId(raw, path),
+  }
+}
+
+function decodeClearingOnce(value: unknown, path: string): ClearingOnceResponse {
+  const raw = objectAt(value, path)
+  onlyKeys(raw, path, ['ok', 'plan_id', 'done_event_id', 'client_action_id'])
+  requireOk(raw, path)
+  return {
+    ok: true,
+    plan_id: stringAt(raw.plan_id, `${path}.plan_id`),
+    done_event_id: stringAt(raw.done_event_id, `${path}.done_event_id`),
+    ...clientActionId(raw, path),
+  }
+}
+
+function decodeTrustlineCreate(value: unknown, path: string): SimulatorActionTrustlineCreateResponse {
+  const raw = objectAt(value, path)
+  onlyKeys(raw, path, [
+    'ok',
+    'trustline_id',
+    'from_pid',
+    'to_pid',
+    'equivalent',
+    'limit',
+    'client_action_id',
+  ])
+  requireOk(raw, path)
+  return {
+    ok: true,
+    trustline_id: stringAt(raw.trustline_id, `${path}.trustline_id`),
+    from_pid: stringAt(raw.from_pid, `${path}.from_pid`),
+    to_pid: stringAt(raw.to_pid, `${path}.to_pid`),
+    equivalent: stringAt(raw.equivalent, `${path}.equivalent`),
+    limit: decimalStringAt(raw.limit, `${path}.limit`),
+    ...clientActionId(raw, path),
+  }
+}
+
+function decodeTrustlineUpdate(value: unknown, path: string): SimulatorActionTrustlineUpdateResponse {
+  const raw = objectAt(value, path)
+  onlyKeys(raw, path, ['ok', 'trustline_id', 'old_limit', 'new_limit', 'client_action_id'])
+  requireOk(raw, path)
+  return {
+    ok: true,
+    trustline_id: stringAt(raw.trustline_id, `${path}.trustline_id`),
+    old_limit: decimalStringAt(raw.old_limit, `${path}.old_limit`),
+    new_limit: decimalStringAt(raw.new_limit, `${path}.new_limit`),
+    ...clientActionId(raw, path),
+  }
+}
+
+function decodeTrustlineClose(value: unknown, path: string): SimulatorActionTrustlineCloseResponse {
+  const raw = objectAt(value, path)
+  onlyKeys(raw, path, ['ok', 'trustline_id', 'client_action_id'])
+  requireOk(raw, path)
+  return {
+    ok: true,
+    trustline_id: stringAt(raw.trustline_id, `${path}.trustline_id`),
+    ...clientActionId(raw, path),
+  }
+}
+
+function decodePaymentReal(value: unknown, path: string): SimulatorActionPaymentRealResponse {
+  const raw = objectAt(value, path)
+  onlyKeys(raw, path, [
+    'ok',
+    'payment_id',
+    'from_pid',
+    'to_pid',
+    'equivalent',
+    'amount',
+    'status',
+    'client_action_id',
+  ])
+  requireOk(raw, path)
+  return {
+    ok: true,
+    payment_id: stringAt(raw.payment_id, `${path}.payment_id`),
+    from_pid: stringAt(raw.from_pid, `${path}.from_pid`),
+    to_pid: stringAt(raw.to_pid, `${path}.to_pid`),
+    equivalent: stringAt(raw.equivalent, `${path}.equivalent`),
+    amount: decimalStringAt(raw.amount, `${path}.amount`),
+    status: stringAt(raw.status, `${path}.status`),
+    ...clientActionId(raw, path),
+  }
+}
+
+function decodeParticipantsList(value: unknown, path: string): SimulatorActionParticipantsListResponse {
+  const raw = objectAt(value, path)
+  onlyKeys(raw, path, ['items'])
+  return {
+    items: arrayAt(raw.items, `${path}.items`).map((item, index) => {
+      const itemPath = `${path}.items[${index}]`
+      const participant = objectAt(item, itemPath)
+      onlyKeys(participant, itemPath, ['pid', 'name', 'type', 'status'])
+      return {
+        pid: stringAt(participant.pid, `${itemPath}.pid`),
+        name: stringAt(participant.name, `${itemPath}.name`),
+        type: stringAt(participant.type, `${itemPath}.type`),
+        status: stringAt(participant.status, `${itemPath}.status`),
+      }
+    }),
+  }
+}
+
+function decodeTrustlinesList(value: unknown, path: string): SimulatorActionTrustlinesListResponse {
+  const raw = objectAt(value, path)
+  onlyKeys(raw, path, ['items'])
+  return {
+    items: arrayAt(raw.items, `${path}.items`).map((item, index) => {
+      const itemPath = `${path}.items[${index}]`
+      const trustline = objectAt(item, itemPath)
+      onlyKeys(trustline, itemPath, [
+        'from_pid',
+        'from_name',
+        'to_pid',
+        'to_name',
+        'equivalent',
+        'limit',
+        'used',
+        'reverse_used',
+        'available',
+        'status',
+      ])
+      return {
+        from_pid: stringAt(trustline.from_pid, `${itemPath}.from_pid`),
+        from_name: stringAt(trustline.from_name, `${itemPath}.from_name`),
+        to_pid: stringAt(trustline.to_pid, `${itemPath}.to_pid`),
+        to_name: stringAt(trustline.to_name, `${itemPath}.to_name`),
+        equivalent: stringAt(trustline.equivalent, `${itemPath}.equivalent`),
+        limit: decimalStringAt(trustline.limit, `${itemPath}.limit`),
+        used: decimalStringAt(trustline.used, `${itemPath}.used`),
+        reverse_used: decimalStringAt(trustline.reverse_used, `${itemPath}.reverse_used`),
+        available: decimalStringAt(trustline.available, `${itemPath}.available`),
+        status: stringAt(trustline.status, `${itemPath}.status`),
+      }
+    }),
+  }
+}
+
+function decodePaymentTargets(value: unknown, path: string): SimulatorPaymentTargetsResponse {
+  const raw = objectAt(value, path)
+  onlyKeys(raw, path, ['items'])
+  return {
+    items: arrayAt(raw.items, `${path}.items`).map((item, index) => {
+      const itemPath = `${path}.items[${index}]`
+      const target = objectAt(item, itemPath)
+      onlyKeys(target, itemPath, ['to_pid', 'hops', 'max_available'])
+      return {
+        to_pid: stringAt(target.to_pid, `${itemPath}.to_pid`),
+        hops: numberAt(target.hops, `${itemPath}.hops`, { integer: true, min: 1 }),
+        max_available: optionalDecimalString(target, 'max_available', itemPath),
+      }
+    }),
+  }
+}
+
 function decodeClearingCycle(
   value: unknown,
   path: string,
@@ -431,4 +632,50 @@ export function decodeGraphSnapshotResponse(value: unknown): SimulatorGraphSnaps
 
 export function decodeSimulatorActionClearingRealResponse(value: unknown): SimulatorActionClearingRealResponse {
   return decodeSimulatorResponse('action-clearing-real', value, decodeClearingReal)
+}
+
+export function decodeTxOnceResponse(value: unknown): TxOnceResponse {
+  return decodeSimulatorResponse('action-tx-once', value, decodeTxOnce)
+}
+
+export function decodeClearingOnceResponse(value: unknown): ClearingOnceResponse {
+  return decodeSimulatorResponse('action-clearing-once', value, decodeClearingOnce)
+}
+
+export function decodeSimulatorActionTrustlineCreateResponse(
+  value: unknown,
+): SimulatorActionTrustlineCreateResponse {
+  return decodeSimulatorResponse('action-trustline-create', value, decodeTrustlineCreate)
+}
+
+export function decodeSimulatorActionTrustlineUpdateResponse(
+  value: unknown,
+): SimulatorActionTrustlineUpdateResponse {
+  return decodeSimulatorResponse('action-trustline-update', value, decodeTrustlineUpdate)
+}
+
+export function decodeSimulatorActionTrustlineCloseResponse(
+  value: unknown,
+): SimulatorActionTrustlineCloseResponse {
+  return decodeSimulatorResponse('action-trustline-close', value, decodeTrustlineClose)
+}
+
+export function decodeSimulatorActionPaymentRealResponse(value: unknown): SimulatorActionPaymentRealResponse {
+  return decodeSimulatorResponse('action-payment-real', value, decodePaymentReal)
+}
+
+export function decodeSimulatorActionParticipantsListResponse(
+  value: unknown,
+): SimulatorActionParticipantsListResponse {
+  return decodeSimulatorResponse('action-participants-list', value, decodeParticipantsList)
+}
+
+export function decodeSimulatorActionTrustlinesListResponse(
+  value: unknown,
+): SimulatorActionTrustlinesListResponse {
+  return decodeSimulatorResponse('action-trustlines-list', value, decodeTrustlinesList)
+}
+
+export function decodeSimulatorPaymentTargetsResponse(value: unknown): SimulatorPaymentTargetsResponse {
+  return decodeSimulatorResponse('payment-targets', value, decodePaymentTargets)
 }

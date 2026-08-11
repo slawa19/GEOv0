@@ -1,7 +1,23 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { SimulatorContractError } from './simulatorContracts'
-import { actionClearingReal, getRun, getScenario, getScenarioPreview, getSnapshot, listScenarios } from './simulatorApi'
+import {
+  actionClearingOnce,
+  actionClearingReal,
+  actionPaymentReal,
+  actionTrustlineClose,
+  actionTrustlineCreate,
+  actionTrustlineUpdate,
+  actionTxOnce,
+  getParticipantsList,
+  getPaymentTargets,
+  getRun,
+  getScenario,
+  getScenarioPreview,
+  getSnapshot,
+  getTrustlinesList,
+  listScenarios,
+} from './simulatorApi'
 
 const cfg = { apiBase: 'http://simulator.test/api/v1', accessToken: 'test-token' }
 
@@ -92,6 +108,115 @@ const clearingRealResponse = {
   client_action_id: null,
 }
 
+const uncheckedActionCases = [
+  {
+    label: 'tx-once',
+    payload: { ok: true, emitted_event_id: 'evt-1', client_action_id: null },
+    call: () => actionTxOnce(cfg, 'run-1', { equivalent: 'UAH' }),
+  },
+  {
+    label: 'clearing-once',
+    payload: { ok: true, plan_id: 'plan-1', done_event_id: 'evt-2', client_action_id: null },
+    call: () => actionClearingOnce(cfg, 'run-1', { equivalent: 'UAH' }),
+  },
+  {
+    label: 'trustline-create',
+    payload: {
+      ok: true,
+      trustline_id: 'tl-1',
+      from_pid: 'alice',
+      to_pid: 'bob',
+      equivalent: 'UAH',
+      limit: '0001.2300',
+      client_action_id: null,
+    },
+    call: () =>
+      actionTrustlineCreate(cfg, 'run-1', {
+        from_pid: 'alice',
+        to_pid: 'bob',
+        equivalent: 'UAH',
+        limit: '100',
+      }),
+  },
+  {
+    label: 'trustline-update',
+    payload: {
+      ok: true,
+      trustline_id: 'tl-1',
+      old_limit: '100.00000000',
+      new_limit: '125.00000000',
+      client_action_id: null,
+    },
+    call: () =>
+      actionTrustlineUpdate(cfg, 'run-1', {
+        from_pid: 'alice',
+        to_pid: 'bob',
+        equivalent: 'UAH',
+        new_limit: '125',
+      }),
+  },
+  {
+    label: 'trustline-close',
+    payload: { ok: true, trustline_id: 'tl-1', client_action_id: null },
+    call: () =>
+      actionTrustlineClose(cfg, 'run-1', {
+        from_pid: 'alice',
+        to_pid: 'bob',
+        equivalent: 'UAH',
+      }),
+  },
+  {
+    label: 'payment-real',
+    payload: {
+      ok: true,
+      payment_id: 'payment-1',
+      from_pid: 'alice',
+      to_pid: 'bob',
+      equivalent: 'UAH',
+      amount: '12.50000000',
+      status: 'committed',
+      client_action_id: null,
+    },
+    call: () =>
+      actionPaymentReal(cfg, 'run-1', {
+        from_pid: 'alice',
+        to_pid: 'bob',
+        equivalent: 'UAH',
+        amount: '12.5',
+      }),
+  },
+  {
+    label: 'participants-list',
+    payload: { items: [{ pid: 'alice', name: 'Alice', type: 'person', status: 'active' }] },
+    call: () => getParticipantsList(cfg, 'run-1'),
+  },
+  {
+    label: 'trustlines-list',
+    payload: {
+      items: [
+        {
+          from_pid: 'alice',
+          from_name: 'Alice',
+          to_pid: 'bob',
+          to_name: 'Bob',
+          equivalent: 'UAH',
+          limit: '100.00000000',
+          used: '5.00000000',
+          reverse_used: '0',
+          available: '95.00000000',
+          status: 'active',
+        },
+      ],
+    },
+    call: () => getTrustlinesList(cfg, 'run-1', 'UAH'),
+  },
+  {
+    label: 'payment-targets',
+    payload: { items: [{ to_pid: 'bob', hops: 2, max_available: '95.00000000' }] },
+    call: () => getPaymentTargets(cfg, 'run-1', 'UAH', 'alice'),
+  },
+] as const
+
 function respondWith(payload: unknown): void {
   vi.stubGlobal(
     'fetch',
@@ -147,6 +272,90 @@ describe('Simulator critical REST response contracts', () => {
     respondWith(clearingRealResponse)
 
     await expect(actionClearingReal(cfg, 'run-1', { equivalent: 'UAH' })).resolves.toEqual(clearingRealResponse)
+  })
+
+  it.each(uncheckedActionCases)('accepts canonical $label response', async ({ payload, call }) => {
+    respondWith(payload)
+    await expect(call()).resolves.toEqual(payload)
+  })
+
+  it.each([
+    {
+      label: 'tx-once event id',
+      payload: { ok: true, emitted_event_id: 1, client_action_id: null },
+      call: uncheckedActionCases[0].call,
+      contract: 'action-tx-once',
+      diagnostic: '$.emitted_event_id',
+    },
+    {
+      label: 'clearing-once plan id',
+      payload: { ok: true, plan_id: 1, done_event_id: 'evt-2', client_action_id: null },
+      call: uncheckedActionCases[1].call,
+      contract: 'action-clearing-once',
+      diagnostic: '$.plan_id',
+    },
+    {
+      label: 'trustline-create decimal limit',
+      payload: { ...uncheckedActionCases[2].payload, limit: 100 },
+      call: uncheckedActionCases[2].call,
+      contract: 'action-trustline-create',
+      diagnostic: '$.limit',
+    },
+    {
+      label: 'trustline-update non-canonical decimal',
+      payload: { ...uncheckedActionCases[3].payload, new_limit: '1e3' },
+      call: uncheckedActionCases[3].call,
+      contract: 'action-trustline-update',
+      diagnostic: '$.new_limit',
+    },
+    {
+      label: 'trustline-close missing id',
+      payload: { ok: true, client_action_id: null },
+      call: uncheckedActionCases[4].call,
+      contract: 'action-trustline-close',
+      diagnostic: '$.trustline_id',
+    },
+    {
+      label: 'payment-real decimal amount',
+      payload: { ...uncheckedActionCases[5].payload, amount: 12.5 },
+      call: uncheckedActionCases[5].call,
+      contract: 'action-payment-real',
+      diagnostic: '$.amount',
+    },
+    {
+      label: 'participants-list item',
+      payload: { items: [{ pid: 1, name: 'Alice', type: 'person', status: 'active' }] },
+      call: uncheckedActionCases[6].call,
+      contract: 'action-participants-list',
+      diagnostic: '$.items[0].pid',
+    },
+    {
+      label: 'trustlines-list alias',
+      payload: {
+        items: [{ ...uncheckedActionCases[7].payload.items[0], from_pid: undefined, from: 'alice' }],
+      },
+      call: uncheckedActionCases[7].call,
+      contract: 'action-trustlines-list',
+      diagnostic: '$.items[0].from',
+    },
+    {
+      label: 'payment-targets hops',
+      payload: { items: [{ to_pid: 'bob', hops: 0, max_available: '95' }] },
+      call: uncheckedActionCases[8].call,
+      contract: 'payment-targets',
+      diagnostic: '$.items[0].hops',
+    },
+  ])('rejects malformed 2xx $label response', async ({ payload, call, contract, diagnostic }) => {
+    respondWith(payload)
+
+    try {
+      await call()
+      throw new Error('expected contract rejection')
+    } catch (error) {
+      expect(error).toBeInstanceOf(SimulatorContractError)
+      expect(error).toMatchObject({ status: 200, contract })
+      expect((error as SimulatorContractError).diagnostic).toContain(diagnostic)
+    }
   })
 
   it.each([
