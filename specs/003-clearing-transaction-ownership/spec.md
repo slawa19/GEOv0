@@ -102,7 +102,7 @@ severity, а не за откладывание.
 | ID | Задача | Статус |
 |---|---|---|
 | T300 | Детерминированный PG-репродьюсер удержания блокировок на skip-пути | `[x]` |
-| T301 | Инвентаризация всех веток выхода `clearing/service.py`, явное решение по владению транзакцией | `[!]` |
+| T301 | Инвентаризация всех веток выхода `clearing/service.py`, явное решение по владению транзакцией | `[x]` |
 | T302 | Реализация выбранной границы владения; все ветви выхода завершают транзакцию | `[!]` |
 | T303 | Идемпотентный протокол подтверждения коммита клиринга | `[!]` |
 | T304 | Публикация реально заблокированной суммы вместо кандидата: перевести `real_clearing_engine.py:290` с bool-обёртки `execute_clearing` на `execute_clearing_with_amount` и провести возвращённую сумму в `:318-319` и `:334-336` (F-003-3) | `[!]` |
@@ -128,3 +128,30 @@ severity, а не за откладывание.
   — exit `1`, `1 failed`; точный actual:
   `clearing policy skip retained Debt row locks: actual=TimeoutException code=E007 status=504`.
   Cache собрал один ожидаемый nodeid. Pinned Ruff для нового файла и `git diff --check` — exit `0`.
+
+### 2026-08-11 — T301
+
+- Повторная проверка на текущем HEAD:
+  `rg -n "execute_clearing\\(|execute_clearing_with_amount\\(|auto_clear\\(" app --glob '*.py'`
+  и
+  `rg -n "return None|with_for_update|await self\\.session\\.(commit|rollback)" app/core/clearing/service.py`
+  — обе команды exit `0`. Production-callers исчерпываются REST `app/api/v1/clearing.py:31-44`,
+  interactive simulator `app/api/v1/simulator.py:1651-1659`, real background clearing
+  `app/core/simulator/real_clearing_engine.py:113-126,290` и compatibility wrapper/loop
+  `app/core/clearing/service.py:786-788,1099-1181`.
+- Полный inventory выходов `execute_clearing_with_amount`: pre-SQL `None` на
+  `app/core/clearing/service.py:801,825`; `FOR UPDATE` на `:831`; post-lock `None` на
+  `:841,847,876,894`; success-коммит и durable return на `:1079,1094`; ordinary exception идёт
+  через rollback helper `:27-40,1096-1097`; `CancelledError` локально не терминализируется.
+- **Current:** сервис уже владеет успешной транзакцией и ordinary-failure rollback, а все три
+  caller surface трактуют возвращённый amount/bool как durable; незавершёнными остаются `None` и
+  cancellation/commit-ack paths. **Intended:** каждая попытка клиринга имеет одну явную границу,
+  освобождает блокировки на любом исходе и не публикует неподтверждённый результат. **Optimal:**
+  сохранить service-owned UoW без `commit=False`: success означает durable commit, каждый skip
+  rollback'ит attempt, ambiguous commit разрешается внутри сервиса. Caller-owned вариант отвергнут
+  как более широкий: он потребовал бы менять все три owners и превратил бы существующий amount в
+  provisional result без продуктовой выгоды.
+- Product code до/после T301 не менялся. Решение закреплено этой записью в
+  `specs/003-clearing-transaction-ownership/spec.md:132-157`; отдельный caller-risk для T302:
+  rollback истекает ORM state, поэтому interactive path должен кэшировать `eq.code` до первого
+  вызова сервиса. `git diff --check -- specs/003-clearing-transaction-ownership/spec.md` — exit `0`.
