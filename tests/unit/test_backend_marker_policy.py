@@ -42,6 +42,71 @@ _CONTRIBUTOR_GUIDES = (
 )
 
 
+def _strip_powershell_block_comments(
+    line: str,
+    in_block_comment: bool,
+) -> tuple[str, bool]:
+    visible: list[str] = []
+    quote: str | None = None
+    index = 0
+    while index < len(line):
+        if in_block_comment:
+            block_end = line.find("#>", index)
+            if block_end < 0:
+                return "".join(visible), True
+            in_block_comment = False
+            index = block_end + 2
+            continue
+        character = line[index]
+        if character == "`" and index + 1 < len(line):
+            visible.extend((character, line[index + 1]))
+            index += 2
+            continue
+        if character in {'"', "'"}:
+            quote = (
+                None if quote == character else character if quote is None else quote
+            )
+            visible.append(character)
+            index += 1
+            continue
+        if quote is None and line.startswith("<#", index):
+            in_block_comment = True
+            index += 2
+            continue
+        visible.append(character)
+        index += 1
+    return "".join(visible), in_block_comment
+
+
+def _split_powershell_statements(line: str) -> list[str]:
+    statements: list[str] = []
+    current: list[str] = []
+    quote: str | None = None
+    index = 0
+    while index < len(line):
+        character = line[index]
+        if character == "`" and index + 1 < len(line):
+            current.extend((character, line[index + 1]))
+            index += 2
+            continue
+        if character in {'"', "'"}:
+            quote = (
+                None if quote == character else character if quote is None else quote
+            )
+        if character == ";" and quote is None:
+            statement = "".join(current).strip()
+            if statement:
+                statements.append(statement)
+            current = []
+        else:
+            current.append(character)
+        index += 1
+    statement = "".join(current).strip()
+    if statement:
+        statements.append(statement)
+    return statements
+
+
 def _iter_documented_commands_from_content(content: str):
     fence_language: str | None = None
     in_powershell_block_comment = False
@@ -57,18 +122,16 @@ def _iter_documented_commands_from_content(content: str):
             )
             in_powershell_block_comment = False
             continue
+        powershell_statements: list[str] | None = None
         if fence_language in {"powershell", "pwsh"}:
-            if in_powershell_block_comment:
-                if "#>" in stripped:
-                    in_powershell_block_comment = False
+            visible, in_powershell_block_comment = _strip_powershell_block_comments(
+                line,
+                in_powershell_block_comment,
+            )
+            powershell_statements = _split_powershell_statements(visible)
+            if not powershell_statements:
                 continue
-            block_comment_start = stripped.find("<#")
-            if block_comment_start >= 0:
-                comment = stripped[block_comment_start + 2 :]
-                in_powershell_block_comment = "#>" not in comment
-                stripped = stripped[:block_comment_start].rstrip(" ;")
-                if not stripped:
-                    continue
+            stripped = powershell_statements[0]
         inline_commands = re.findall(r"`([^`]+)`", stripped)
         has_command_role = bool(
             re.match(r"^(?:[-*+]|\d+[.)])\s*`", stripped)
@@ -90,9 +153,10 @@ def _iter_documented_commands_from_content(content: str):
                 if command.strip():
                     yield line_number, command.strip(), None
             continue
-        command = stripped
-        if command and not command.startswith("#"):
-            yield line_number, command, fence_language
+        commands = powershell_statements or [stripped]
+        for command in commands:
+            if command and not command.startswith("#"):
+                yield line_number, command, fence_language
 
 
 def _iter_documented_commands(path: Path):
@@ -194,8 +258,11 @@ def _contributor_venv_violations(content: str) -> list[str]:
         if _is_venv_dependency_install_command(command)
     ]
     tool_indexes: list[int] = []
+    verifier_indexes: list[int] = []
     violations: list[str] = []
     for index, command in enumerate(commands):
+        if _is_canonical_verifier_command(command):
+            verifier_indexes.append(index)
         module = _python_tool_module(command)
         if module is None:
             continue
@@ -206,11 +273,12 @@ def _contributor_venv_violations(content: str) -> list[str]:
         violations.append("missing executable py -m venv .venv")
     if not install_indexes:
         violations.append("missing executable venv dependency install")
+    consumer_indexes = tool_indexes + verifier_indexes
     if (
         creation_indexes
         and install_indexes
-        and tool_indexes
-        and not min(creation_indexes) < min(install_indexes) < min(tool_indexes)
+        and consumer_indexes
+        and not min(creation_indexes) < min(install_indexes) < min(consumer_indexes)
     ):
         violations.append("venv creation and install must precede Python-owned tools")
     return violations
@@ -582,6 +650,14 @@ py -m venv .venv
 .\.venv\Scripts\python.exe -m ruff check app migrations
 ```
 """,
+        r"""
+```powershell
+.\scripts\verify_local.ps1 -TaskSlug before_setup -BackendOnly
+py -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m ruff check app migrations
+```
+""",
     ],
 )
 def test_contributor_venv_guard_rejects_missing_executable_setup_roles(
@@ -664,6 +740,24 @@ Run `pytest.exe prose trailing` now.
         "pytest.exe numbered prose",
         "pytest.exe indented",
     }
+
+
+def test_powershell_parser_preserves_quoted_markers_and_post_comment_suffix() -> None:
+    commands = [
+        command
+        for _, command, _ in _iter_documented_commands_from_content(
+            """
+```powershell
+Write-Host '<#'
+pytest.exe after_quoted_marker
+Write-Host 'before'; <# ignored #>; pytest.exe after_comment
+```
+"""
+        )
+    ]
+
+    assert "pytest.exe after_quoted_marker" in commands
+    assert "pytest.exe after_comment" in commands
 
 
 @pytest.mark.parametrize(
