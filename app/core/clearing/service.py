@@ -1547,9 +1547,18 @@ class ClearingService:
                     and isinstance(commit_error, asyncio.CancelledError)
                 ):
                     commit_cancellation = commit_error
-                reconciled_amount = await self._reconcile_committed_execution(
-                    tx_id_str
+                reconciliation_task = asyncio.create_task(
+                    self._reconcile_committed_execution(tx_id_str)
                 )
+                reconciliation_cancellation = await self._drain_task(
+                    reconciliation_task
+                )
+                reconciled_amount = reconciliation_task.result()
+                if (
+                    commit_cancellation is None
+                    and reconciliation_cancellation is not None
+                ):
+                    commit_cancellation = reconciliation_cancellation
                 if reconciled_amount is None:
                     if commit_cancellation is not None:
                         raise commit_cancellation

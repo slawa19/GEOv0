@@ -571,7 +571,12 @@ async def test_serializable_conflict_without_committed_occurrence_stays_failure_
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "boundary_kind",
-    ["cancellation", "ack_loss", "connection_loss"],
+    [
+        "cancellation",
+        "ack_loss",
+        "connection_loss",
+        "connection_loss_reconcile_cancellation",
+    ],
 )
 async def test_post_commit_boundary_reconciles_and_new_cycle_still_executes_postgres(
     db_session,
@@ -615,6 +620,8 @@ async def test_post_commit_boundary_reconciles_and_new_cycle_still_executes_post
     service_task = None
     release_commit_ack = asyncio.Event()
     commit_completed = asyncio.Event()
+    reconciliation_observed = asyncio.Event()
+    release_reconciliation = asyncio.Event()
 
     try:
         async with TestingSessionLocal() as setup:
@@ -683,6 +690,20 @@ async def test_post_commit_boundary_reconciles_and_new_cycle_still_executes_post
             execution_options={"isolation_level": "SERIALIZABLE"}
         )
         service = ClearingService(service_session)
+        real_reconcile = service._reconcile_committed_execution
+
+        async def _reconcile_then_delay_result(tx_id):
+            amount = await real_reconcile(tx_id)
+            reconciliation_observed.set()
+            await release_reconciliation.wait()
+            return amount
+
+        if boundary_kind == "connection_loss_reconcile_cancellation":
+            monkeypatch.setattr(
+                service,
+                "_reconcile_committed_execution",
+                _reconcile_then_delay_result,
+            )
         real_commit = AsyncSession.commit
         boundary_commit_seen = False
 
@@ -695,7 +716,10 @@ async def test_post_commit_boundary_reconciles_and_new_cycle_still_executes_post
             commit_completed.set()
             if boundary_kind == "ack_loss":
                 raise RuntimeError("commit acknowledgement lost")
-            if boundary_kind == "connection_loss":
+            if boundary_kind in {
+                "connection_loss",
+                "connection_loss_reconcile_cancellation",
+            }:
                 bind = session.bind
                 assert isinstance(bind, AsyncConnection)
                 await bind.invalidate()
@@ -713,6 +737,14 @@ async def test_post_commit_boundary_reconciles_and_new_cycle_still_executes_post
             service_task.cancel()
             await asyncio.sleep(0)
             release_commit_ack.set()
+            with pytest.raises(ClearingCommittedAfterCancellation) as cancellation:
+                await asyncio.wait_for(service_task, timeout=5.0)
+            boundary_amount = cancellation.value.cleared_amount
+        elif boundary_kind == "connection_loss_reconcile_cancellation":
+            await asyncio.wait_for(reconciliation_observed.wait(), timeout=5.0)
+            service_task.cancel()
+            await asyncio.sleep(0)
+            release_reconciliation.set()
             with pytest.raises(ClearingCommittedAfterCancellation) as cancellation:
                 await asyncio.wait_for(service_task, timeout=5.0)
             boundary_amount = cancellation.value.cleared_amount
@@ -787,6 +819,7 @@ async def test_post_commit_boundary_reconciles_and_new_cycle_still_executes_post
     finally:
         primary_error = sys.exc_info()[1]
         release_commit_ack.set()
+        release_reconciliation.set()
         try:
             if service_task is not None and not service_task.done():
                 service_task.cancel()
