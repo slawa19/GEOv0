@@ -22,7 +22,12 @@ from app.db.models.participant import Participant
 from app.db.models.equivalent import Equivalent
 from app.db.models.audit_log import IntegrityAuditLog
 from app.utils.error_codes import ERROR_MESSAGES, ErrorCode
-from app.utils.exceptions import GeoException, ConflictException, RoutingException
+from app.utils.exceptions import (
+    GeoException,
+    ConflictException,
+    RetryablePaymentConflictException,
+    RoutingException,
+)
 from app.utils.metrics import PAYMENT_EVENTS_TOTAL
 
 from app.core.integrity import compute_integrity_checkpoint_for_equivalent
@@ -32,9 +37,14 @@ logger = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
 
+
+class _EquivalentOwnerPreflightChanged(Exception):
+    """Persisted payment flows changed before the tx lock was acquired."""
+
 # PostgreSQL's two-int advisory-lock key space is disjoint from the one-BIGINT
 # key space used by segment locks. The first int is a stable domain tag.
 _TX_ADVISORY_LOCK_NAMESPACE = 0x475458
+_EQUIVALENT_OWNER_LOCK_NAMESPACE = 0x474551
 
 
 @dataclass(frozen=True)
@@ -101,6 +111,43 @@ class PaymentEngine:
         """Compute a stable signed INT key inside the transaction-lock domain."""
         digest = hashlib.sha256(str(tx_id).encode("utf-8")).digest()
         return int.from_bytes(digest[:4], byteorder="big", signed=True)
+
+    @staticmethod
+    def _equivalent_owner_lock_key(equivalent_id: UUID) -> int:
+        """Compute a stable signed INT key inside the equivalent-owner domain."""
+        digest = hashlib.sha256(equivalent_id.bytes).digest()
+        return int.from_bytes(digest[:4], byteorder="big", signed=True)
+
+    async def _acquire_equivalent_owner_locks(
+        self,
+        equivalent_ids: set[UUID] | list[UUID] | tuple[UUID, ...],
+    ) -> None:
+        """Acquire the complete equivalent owner set in one global order."""
+        if not self._is_postgres():
+            return
+
+        keys = sorted(
+            {
+                self._equivalent_owner_lock_key(equivalent_id)
+                for equivalent_id in equivalent_ids
+            }
+        )
+        for key in keys:
+            await self._set_local_advisory_lock_timeout()
+            await self.session.execute(
+                text("SELECT pg_advisory_xact_lock(:namespace, :key)"),
+                {
+                    "namespace": _EQUIVALENT_OWNER_LOCK_NAMESPACE,
+                    "key": key,
+                },
+            )
+
+    async def acquire_staged_equivalent_owner_locks(
+        self,
+        equivalent_ids: set[UUID] | list[UUID] | tuple[UUID, ...],
+    ) -> None:
+        """Acquire a caller-owned staged batch's complete equivalent set."""
+        await self._acquire_equivalent_owner_locks(equivalent_ids)
 
     async def _acquire_tx_advisory_lock(self, tx_id: str) -> None:
         """Serialize all state transitions for one tx before authoritative reads."""
@@ -232,6 +279,57 @@ class PaymentEngine:
             for flow in lock.flows
         }
 
+    @staticmethod
+    def _equivalent_ids_from_validated_locks(
+        validated_locks: tuple[_ValidatedPrepareLock, ...],
+    ) -> set[UUID]:
+        return {
+            flow.equivalent_id
+            for lock in validated_locks
+            for flow in lock.flows
+        }
+
+    async def _load_prepare_locks(self, tx_id: str) -> list[PrepareLock]:
+        return (
+            (
+                await self.session.execute(
+                    select(PrepareLock)
+                    .where(PrepareLock.tx_id == tx_id)
+                    .execution_options(populate_existing=True)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    async def _preacquire_equivalent_owner_locks_for_tx(
+        self,
+        tx_id: str,
+        *,
+        allow_malformed: bool,
+    ) -> tuple[tuple[_ValidatedPrepareLock, ...], bool] | None:
+        """Read lock metadata before tx lock, then acquire its full owner set.
+
+        PostgreSQL callers re-read under the tx lock and reject any changed
+        metadata rather than acquiring a newly appeared owner key out of order.
+        """
+        if not self._is_postgres():
+            return None
+
+        locks = await self._load_prepare_locks(tx_id)
+        if not locks:
+            return (), False
+        try:
+            validated_locks = self._parse_persisted_prepare_locks(locks)
+        except GeoException:
+            if allow_malformed:
+                return (), True
+            raise
+        await self._acquire_equivalent_owner_locks(
+            self._equivalent_ids_from_validated_locks(validated_locks)
+        )
+        return validated_locks, False
+
     def _is_retryable_db_error(self, exc: BaseException, *, op: str) -> bool:
         if not isinstance(exc, DBAPIError):
             return False
@@ -306,13 +404,37 @@ class PaymentEngine:
                         async with self.session.begin_nested():
                             return await fn()
                     return await fn()
+                except _EquivalentOwnerPreflightChanged as exc:
+                    # The safe global order forbids acquiring a newly appeared
+                    # equivalent owner after the tx key. A caller-owned outer UoW
+                    # must restart from a fresh snapshot; an engine-owned UoW can
+                    # rollback and repeat the complete owner -> tx -> pair sequence.
+                    attempt += 1
+                    if use_savepoint or attempt >= self._retry_attempts:
+                        raise RetryablePaymentConflictException(
+                            "Payment owner set changed concurrently; retry the transaction"
+                        ) from exc
+                    await self.session.rollback()
+                    logger.warning(
+                        "event=payment.owner_preflight_retry op=%s attempt=%s/%s",
+                        op,
+                        attempt,
+                        self._retry_attempts,
+                    )
+                    continue
                 except DBAPIError as exc:
+                    pgcode = self._get_pgcode(exc)
+                    if use_savepoint and pgcode in {"40P01", "40001"}:
+                        # A transaction-level owner lock or SERIALIZABLE snapshot
+                        # survives savepoint rollback. Retrying here recreates the
+                        # same conflict; the outer owner must restart its whole UoW.
+                        raise
                     attempt += 1
 
                     # A bounded advisory-lock wait is an operational timeout,
                     # not a generic database failure. Callers already own the
                     # rollback/abort policy for asyncio timeouts.
-                    if self._get_pgcode(exc) == "55P03":
+                    if pgcode == "55P03":
                         raise asyncio.TimeoutError(
                             "Payment advisory lock timed out"
                         ) from exc
@@ -344,7 +466,7 @@ class PaymentEngine:
                         attempt,
                         self._retry_attempts,
                         delay,
-                        self._get_pgcode(exc),
+                        pgcode,
                     )
                     await asyncio.sleep(delay)
         finally:
@@ -385,6 +507,7 @@ class PaymentEngine:
             except Exception:
                 pass
 
+            await self._acquire_equivalent_owner_locks([equivalent_id])
             await self._acquire_tx_advisory_lock(tx_id)
             tx = await self._get_tx(tx_id)
             if not tx:
@@ -606,6 +729,7 @@ class PaymentEngine:
             except Exception:
                 pass
 
+            await self._acquire_equivalent_owner_locks([equivalent_id])
             await self._acquire_tx_advisory_lock(tx_id)
             tx = await self._get_tx(tx_id)
             if not tx:
@@ -839,6 +963,10 @@ class PaymentEngine:
             except Exception:
                 pass
 
+            owner_preflight = await self._preacquire_equivalent_owner_locks_for_tx(
+                tx_id,
+                allow_malformed=False,
+            )
             await self._acquire_tx_advisory_lock(tx_id)
             tx = await self._get_tx(tx_id)
             if not tx:
@@ -862,13 +990,7 @@ class PaymentEngine:
                 )
 
             # 1. Load Locks
-            stmt = (
-                select(PrepareLock)
-                .where(PrepareLock.tx_id == tx_id)
-                .execution_options(populate_existing=True)
-            )
-            result = await self.session.execute(stmt)
-            locks = result.scalars().all()
+            locks = await self._load_prepare_locks(tx_id)
 
             if not locks:
                 # A concurrent commit may have removed the locks after our initial
@@ -904,6 +1026,13 @@ class PaymentEngine:
             # keys. Otherwise commit can update Debt and delete PrepareLocks between a
             # concurrent prepare's debt reads and reservation read under READ COMMITTED.
             validated_locks = self._parse_persisted_prepare_locks(locks)
+            if owner_preflight is not None:
+                preliminary_validated_locks, preliminary_malformed = owner_preflight
+                if preliminary_malformed or (
+                    validated_locks != preliminary_validated_locks
+                ):
+                    # Never acquire a newly appeared equivalent owner after the tx key.
+                    raise _EquivalentOwnerPreflightChanged()
             commit_segment_keys = self._segment_lock_keys_from_validated_flows(
                 validated_locks
             )
@@ -938,17 +1067,7 @@ class PaymentEngine:
                     f"Transaction {tx_id} is not prepared (state={tx.state})"
                 )
 
-            locks = (
-                (
-                    await self.session.execute(
-                        select(PrepareLock)
-                        .where(PrepareLock.tx_id == tx_id)
-                        .execution_options(populate_existing=True)
-                    )
-                )
-                .scalars()
-                .all()
-            )
+            locks = await self._load_prepare_locks(tx_id)
             if not locks:
                 raise GeoException(f"No locks found for transaction {tx_id}")
             refreshed_validated_locks = self._parse_persisted_prepare_locks(locks)
@@ -1029,6 +1148,7 @@ class PaymentEngine:
                     reason="Prepare locks expired before commit",
                     commit=commit,
                     _tx_lock_already_held=True,
+                    _equivalent_owner_locks_already_held=True,
                 )
                 raise ConflictException(f"Transaction {tx_id} expired before commit")
 
@@ -1106,6 +1226,7 @@ class PaymentEngine:
                     details=getattr(exc, "details", None),
                     commit=commit,
                     _tx_lock_already_held=not commit,
+                    _equivalent_owner_locks_already_held=not commit,
                 )
                 raise
 
@@ -1454,6 +1575,7 @@ class PaymentEngine:
         error_code: ErrorCode | str | None = None,
         details: dict[str, Any] | None = None,
         _tx_lock_already_held: bool = False,
+        _equivalent_owner_locks_already_held: bool = False,
     ):
         """
         Abort transaction: Delete locks, set state to ABORTED.
@@ -1483,10 +1605,21 @@ class PaymentEngine:
             except Exception:
                 pass
 
+            reuse_outer_owner_locks = _equivalent_owner_locks_already_held and (
+                not commit or attempt_index == 0
+            )
             reuse_outer_tx_lock = _tx_lock_already_held and (
                 not commit or attempt_index == 0
             )
             attempt_index += 1
+            owner_preflight = None
+            if not reuse_outer_owner_locks:
+                owner_preflight = (
+                    await self._preacquire_equivalent_owner_locks_for_tx(
+                        tx_id,
+                        allow_malformed=True,
+                    )
+                )
             if not reuse_outer_tx_lock:
                 await self._acquire_tx_advisory_lock(tx_id)
             tx = await self._get_tx(tx_id)
@@ -1505,20 +1638,11 @@ class PaymentEngine:
                     pass
                 return "already_committed" if return_outcome else True
 
-            initial_locks = (
-                (
-                    await self.session.execute(
-                        select(PrepareLock)
-                        .where(PrepareLock.tx_id == tx_id)
-                        .execution_options(populate_existing=True)
-                    )
-                )
-                .scalars()
-                .all()
-            )
+            initial_locks = await self._load_prepare_locks(tx_id)
             initial_validated_locks: tuple[_ValidatedPrepareLock, ...] = ()
             initial_segment_keys: set[int] = set()
             initial_locks_malformed = False
+            terminal_aborted = bool(tx and tx.state == "ABORTED")
             if initial_locks:
                 try:
                     initial_validated_locks = self._parse_persisted_prepare_locks(
@@ -1532,7 +1656,29 @@ class PaymentEngine:
                     initial_segment_keys = self._segment_lock_keys_from_validated_flows(
                         initial_validated_locks
                     )
+                    if owner_preflight is not None and not terminal_aborted:
+                        preliminary_validated_locks, preliminary_malformed = (
+                            owner_preflight
+                        )
+                        if preliminary_malformed or (
+                            initial_validated_locks != preliminary_validated_locks
+                        ):
+                            raise _EquivalentOwnerPreflightChanged()
                     await self._acquire_segment_advisory_lock_keys(initial_segment_keys)
+            elif (
+                owner_preflight is not None
+                and not terminal_aborted
+                and owner_preflight != ((), False)
+            ):
+                raise _EquivalentOwnerPreflightChanged()
+
+            if (
+                initial_locks_malformed
+                and owner_preflight is not None
+                and not terminal_aborted
+                and owner_preflight != ((), True)
+            ):
+                raise _EquivalentOwnerPreflightChanged()
 
             # A competing commit/abort may have completed while we waited. Terminal
             # state wins; active state requires the exact same authoritative lock flows.
@@ -1543,17 +1689,7 @@ class PaymentEngine:
                     .execution_options(populate_existing=True)
                 )
             ).scalar_one_or_none()
-            refreshed_locks = (
-                (
-                    await self.session.execute(
-                        select(PrepareLock)
-                        .where(PrepareLock.tx_id == tx_id)
-                        .execution_options(populate_existing=True)
-                    )
-                )
-                .scalars()
-                .all()
-            )
+            refreshed_locks = await self._load_prepare_locks(tx_id)
 
             if tx and tx.state == "COMMITTED":
                 await self.session.execute(

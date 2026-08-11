@@ -38,7 +38,7 @@ class _FakeAsyncSession:
 
 
 @pytest.mark.asyncio
-async def test_uow_retry_uses_savepoint_and_does_not_rollback_session(monkeypatch):
+async def test_staged_serialization_failure_is_owned_by_outer_transaction(monkeypatch):
     from app.core.payments.engine import PaymentEngine
 
     session = _FakeAsyncSession()
@@ -68,12 +68,13 @@ async def test_uow_retry_uses_savepoint_and_does_not_rollback_session(monkeypatc
             )
         return "ok"
 
-    res = await eng._run_uow_with_retry(op="t", fn=_fn, use_savepoint=True)
-    assert res == "ok"
+    with pytest.raises(DBAPIError) as raised:
+        await eng._run_uow_with_retry(op="t", fn=_fn, use_savepoint=True)
 
-    assert calls["n"] == 2
-    assert session.begin_nested_enters == 2
-    assert session.begin_nested_exits == 2
+    assert getattr(raised.value.orig, "sqlstate", None) == "40P01"
+    assert calls["n"] == 1
+    assert session.begin_nested_enters == 1
+    assert session.begin_nested_exits == 1
 
     # When using savepoints, we must NOT rollback the whole session.
     assert session.rollback_calls == 0

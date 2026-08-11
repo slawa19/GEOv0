@@ -126,7 +126,11 @@ async def test_payment_commit_aborts_on_trust_limit_violation(
 
     engine = PaymentEngine(db_session)
 
-    abort_called = {"called": False, "tx_lock_already_held": False}
+    abort_called = {
+        "called": False,
+        "tx_lock_already_held": False,
+        "equivalent_owner_locks_already_held": False,
+    }
 
     async def _abort_noop(
         _tx_id: str,
@@ -136,9 +140,13 @@ async def test_payment_commit_aborts_on_trust_limit_violation(
         error_code: str | None = None,
         details: dict | None = None,
         _tx_lock_already_held: bool = False,
+        _equivalent_owner_locks_already_held: bool = False,
     ):
         abort_called["called"] = True
         abort_called["tx_lock_already_held"] = _tx_lock_already_held
+        abort_called["equivalent_owner_locks_already_held"] = (
+            _equivalent_owner_locks_already_held
+        )
         return True
 
     async def _rollback_noop():
@@ -164,6 +172,10 @@ async def test_payment_commit_aborts_on_trust_limit_violation(
     assert abort_called["called"] is True
     assert (
         abort_called["tx_lock_already_held"] is expected_tx_lock_already_held
+    )
+    assert (
+        abort_called["equivalent_owner_locks_already_held"]
+        is expected_tx_lock_already_held
     )
 
 

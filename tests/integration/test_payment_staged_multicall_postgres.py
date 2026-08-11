@@ -94,6 +94,18 @@ async def _seed_staged_batches() -> dict:
                     limit=Decimal("50.00"),
                     status="active",
                 ),
+                Debt(
+                    debtor_id=participant_a.id,
+                    creditor_id=participant_b.id,
+                    equivalent_id=equivalent.id,
+                    amount=Decimal("1.00"),
+                ),
+                Debt(
+                    debtor_id=participant_b.id,
+                    creditor_id=participant_c.id,
+                    equivalent_id=equivalent.id,
+                    amount=Decimal("1.00"),
+                ),
             ]
         )
 
@@ -192,10 +204,6 @@ async def _cleanup_seed(seed: dict) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-    reason="P105: staged owner still accumulates pair locks across savepoints",
-    strict=True,
-)
 async def test_staged_multicall_batches_do_not_exhaust_retry_on_retained_locks_postgres(
     db_session,
 ) -> None:
@@ -207,26 +215,24 @@ async def test_staged_multicall_batches_do_not_exhaust_retry_on_retained_locks_p
     first_calls_ready = asyncio.Event()
     first_calls_count = 0
     first_calls_guard = asyncio.Lock()
-    backend_pids: set[int] = set()
+    owner_attempts = 0
 
     async def _release_barrier_for_current_or_coarse_owner(observer) -> None:
         for _ in range(2000):
             async with first_calls_guard:
                 ready_count = first_calls_count
-                pids = list(backend_pids)
+                attempts = owner_attempts
             if ready_count == 2:
                 first_calls_ready.set()
                 return
-            if ready_count == 1 and len(pids) == 2:
+            if ready_count == 1 and attempts == 2:
                 owner_waiting = await observer.scalar(
                     text(
                         "SELECT EXISTS ("
                         "SELECT 1 FROM pg_locks "
-                        "WHERE pid = ANY(:pids) "
-                        "AND locktype = 'advisory' AND NOT granted"
+                        "WHERE locktype = 'advisory' AND NOT granted"
                         ")"
-                    ),
-                    {"pids": pids},
+                    )
                 )
                 if owner_waiting:
                     first_calls_ready.set()
@@ -235,17 +241,17 @@ async def test_staged_multicall_batches_do_not_exhaust_retry_on_retained_locks_p
         raise AssertionError("staged barrier did not observe a safe release condition")
 
     async def _run_batch(first_tx_id: str, second_tx_id: str) -> bool:
-        nonlocal first_calls_count
+        nonlocal first_calls_count, owner_attempts
         async with TestingSessionLocal() as session:
             await session.connection(
                 execution_options={"isolation_level": "SERIALIZABLE"}
             )
-            backend_pid = int(
-                (await session.execute(text("SELECT pg_backend_pid()"))).scalar_one()
-            )
-            async with first_calls_guard:
-                backend_pids.add(backend_pid)
             engine = PaymentEngine(session)
+            async with first_calls_guard:
+                owner_attempts += 1
+            await engine.acquire_staged_equivalent_owner_locks(
+                [seed["equivalent_id"]]
+            )
             assert engine._retry_attempts == 3
             engine._retry_base_delay_s = 0.0
             engine._retry_max_delay_s = 0.0
@@ -264,28 +270,34 @@ async def test_staged_multicall_batches_do_not_exhaust_retry_on_retained_locks_p
                 raise
 
     try:
+        batches = [
+            (seed["tx_ids"]["left_ab"], seed["tx_ids"]["left_bc"]),
+            (seed["tx_ids"]["right_bc"], seed["tx_ids"]["right_ab"]),
+        ]
         async with TestingSessionLocal() as observer:
             barrier_task = asyncio.create_task(
                 _release_barrier_for_current_or_coarse_owner(observer)
             )
             results = await asyncio.wait_for(
                 asyncio.gather(
-                    _run_batch(
-                        seed["tx_ids"]["left_ab"], seed["tx_ids"]["left_bc"]
-                    ),
-                    _run_batch(
-                        seed["tx_ids"]["right_bc"], seed["tx_ids"]["right_ab"]
-                    ),
+                    *(_run_batch(*batch) for batch in batches),
                     return_exceptions=True,
                 ),
                 timeout=20.0,
             )
             await barrier_task
-        failures = [result for result in results if isinstance(result, BaseException)]
-        assert failures == [], (
-            "staged owner exhausted retry while retaining its first pair lock: "
-            f"sqlstates={[_sqlstate(failure) for failure in failures]}"
-        )
+        failure_indexes = [
+            index
+            for index, result in enumerate(results)
+            if isinstance(result, BaseException)
+        ]
+        assert len(failure_indexes) == 1
+        failed_index = failure_indexes[0]
+        assert _sqlstate(results[failed_index]) == "40001"
+
+        # The serialization snapshot belongs to the whole staged owner, not the
+        # savepoint. Retry the failed batch in a fresh outer transaction.
+        results[failed_index] = await _run_batch(*batches[failed_index])
         assert results == [True, True]
 
         async with TestingSessionLocal() as verify:
@@ -310,12 +322,12 @@ async def test_staged_multicall_batches_do_not_exhaust_retry_on_retained_locks_p
                 (
                     seed["participant_a_id"],
                     seed["participant_b_id"],
-                    Decimal("3.00000000"),
+                    Decimal("4.00000000"),
                 ),
                 (
                     seed["participant_b_id"],
                     seed["participant_c_id"],
-                    Decimal("3.00000000"),
+                    Decimal("4.00000000"),
                 ),
             }
             assert (
@@ -345,3 +357,81 @@ async def test_staged_multicall_batches_do_not_exhaust_retry_on_retained_locks_p
             assert limits == [Decimal("50.00000000")] * 2
     finally:
         await _cleanup_seed(seed)
+
+
+@pytest.mark.asyncio
+async def test_staged_owner_sorts_multi_equivalent_sets_without_global_serialization_postgres(
+    db_session,
+) -> None:
+    _require_postgres(db_session)
+
+    from tests.conftest import TestingSessionLocal
+
+    equivalent_a = uuid.uuid4()
+    equivalent_b = uuid.uuid4()
+    independent_equivalent = uuid.uuid4()
+    holder_acquired = asyncio.Event()
+    waiter_attempted = asyncio.Event()
+    waiter_acquired = asyncio.Event()
+    release_holder = asyncio.Event()
+    holder_task = None
+    waiter_task = None
+
+    async with (
+        TestingSessionLocal() as holder_session,
+        TestingSessionLocal() as waiter_session,
+        TestingSessionLocal() as independent_session,
+    ):
+        holder_engine = PaymentEngine(holder_session)
+        waiter_engine = PaymentEngine(waiter_session)
+        independent_engine = PaymentEngine(independent_session)
+        waiter_acquire = waiter_engine._acquire_equivalent_owner_locks
+
+        async def _hold_owner_set() -> None:
+            await holder_engine.acquire_staged_equivalent_owner_locks(
+                [equivalent_b, equivalent_a]
+            )
+            holder_acquired.set()
+            await release_holder.wait()
+            await holder_session.rollback()
+
+        async def _observe_waiter(equivalent_ids) -> None:
+            waiter_attempted.set()
+            await waiter_acquire(equivalent_ids)
+            waiter_acquired.set()
+
+        waiter_engine._acquire_equivalent_owner_locks = _observe_waiter
+
+        try:
+            holder_task = asyncio.create_task(_hold_owner_set())
+            await asyncio.wait_for(holder_acquired.wait(), timeout=5.0)
+            waiter_task = asyncio.create_task(
+                waiter_engine.acquire_staged_equivalent_owner_locks(
+                    [equivalent_a, equivalent_b]
+                )
+            )
+            await asyncio.wait_for(waiter_attempted.wait(), timeout=5.0)
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(waiter_acquired.wait(), timeout=0.25)
+
+            # A disjoint equivalent is not serialized by the coarse owner set.
+            await asyncio.wait_for(
+                independent_engine.acquire_staged_equivalent_owner_locks(
+                    [independent_equivalent]
+                ),
+                timeout=5.0,
+            )
+            await independent_session.rollback()
+
+            release_holder.set()
+            await asyncio.wait_for(holder_task, timeout=5.0)
+            await asyncio.wait_for(waiter_task, timeout=5.0)
+            assert waiter_acquired.is_set()
+        finally:
+            release_holder.set()
+            tasks = [task for task in (holder_task, waiter_task) if task is not None]
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            await holder_session.rollback()
+            await waiter_session.rollback()
+            await independent_session.rollback()

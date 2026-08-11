@@ -338,6 +338,48 @@ class PaymentService:
             post_commit_effects=(deferred_effects[0] if deferred_effects else None),
         )
 
+    async def acquire_staged_equivalent_owner_locks(
+        self,
+        equivalent_codes: list[str] | tuple[str, ...] | set[str],
+    ) -> None:
+        """Pre-acquire one sorted owner set for a caller-owned staged batch."""
+        codes = sorted(
+            {
+                str(code).strip().upper()
+                for code in equivalent_codes
+                if str(code).strip()
+            }
+        )
+        if not codes or not self.engine._is_postgres():
+            return
+
+        rows = (
+            await self.session.execute(
+                select(Equivalent.id, Equivalent.code).where(Equivalent.code.in_(codes))
+            )
+        ).all()
+        equivalent_ids_by_code = {str(code): equivalent_id for equivalent_id, code in rows}
+        # Preserve per-action validation for unknown codes; only persisted
+        # equivalents can own monetary resources or an advisory lock.
+        resolved_ids = [
+            equivalent_ids_by_code[code]
+            for code in codes
+            if code in equivalent_ids_by_code
+        ]
+        if not resolved_ids:
+            return
+
+        try:
+            await self.engine.acquire_staged_equivalent_owner_locks(
+                resolved_ids
+            )
+        except DBAPIError as exc:
+            if self.engine._get_pgcode(exc) == "55P03":
+                raise asyncio.TimeoutError(
+                    "Payment equivalent owner lock timed out"
+                ) from exc
+            raise _classify_payment_db_error(exc) from exc
+
     async def _create_payment_impl(
         self,
         sender_id: uuid.UUID,

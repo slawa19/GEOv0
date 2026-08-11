@@ -287,6 +287,18 @@ class RealPaymentsExecutor:
             run=run,
         )
 
+        planned_equivalents = sorted(
+            {
+                str(action.equivalent).strip().upper()
+                for action in (planned or [])
+                if str(action.equivalent).strip()
+            }
+        )
+        if planned_equivalents:
+            await PaymentService(session).acquire_staged_equivalent_owner_locks(
+                planned_equivalents
+            )
+
         sem = asyncio.Semaphore(max(1, int(max_in_flight)))
         action_db_lock = asyncio.Lock()
 

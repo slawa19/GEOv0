@@ -29,6 +29,7 @@ async def test_concurrent_payments_shared_bottleneck_commit_once_postgres(
 
     from app.core.payments.engine import PaymentEngine
     from app.core.payments.service import PaymentService
+    from app.config import settings
     from app.db.models.audit_log import IntegrityAuditLog
     from app.db.models.debt import Debt
     from app.db.models.equivalent import Equivalent
@@ -39,6 +40,12 @@ async def test_concurrent_payments_shared_bottleneck_commit_once_postgres(
     from app.utils.event_bus import event_bus
     from app.utils.exceptions import RoutingException
     from tests.conftest import TestingSessionLocal
+
+    # This test deliberately pauses inside the lock protocol. Keep the product
+    # timeout taxonomy out of the schedule while retaining bounded test waits.
+    monkeypatch.setattr(settings, "PREPARE_TIMEOUT_SECONDS", 15)
+    monkeypatch.setattr(settings, "COMMIT_TIMEOUT_SECONDS", 15)
+    monkeypatch.setattr(settings, "PAYMENT_TOTAL_TIMEOUT_SECONDS", 30)
 
     nonce = uuid.uuid4().hex[:10]
     equivalent_id = uuid.uuid4()
@@ -64,29 +71,37 @@ async def test_concurrent_payments_shared_bottleneck_commit_once_postgres(
     id_by_pid = {participant.pid: participant.id for participant in participants}
     a_pid, b_pid, c_pid, d_pid = pids
     tx_ids = [str(uuid.uuid4()), str(uuid.uuid4())]
-    original_acquire = PaymentEngine._acquire_segment_advisory_locks
+    original_acquire = PaymentEngine._acquire_equivalent_owner_locks
     acquire_calls = 0
+    holder_entered = asyncio.Event()
     holder_acquired = asyncio.Event()
     release_holder = asyncio.Event()
     waiter_entered = asyncio.Event()
     waiter_acquired = asyncio.Event()
 
-    async def _synchronized_acquire(self, **kwargs):
+    async def _synchronized_acquire(self, equivalent_ids):
         nonlocal acquire_calls
         acquire_calls += 1
         if acquire_calls == 1:
-            await original_acquire(self, **kwargs)
+            holder_entered.set()
+            await waiter_entered.wait()
+            await original_acquire(self, equivalent_ids)
             holder_acquired.set()
             await release_holder.wait()
             return
 
-        waiter_entered.set()
-        await original_acquire(self, **kwargs)
-        waiter_acquired.set()
+        if acquire_calls == 2:
+            waiter_entered.set()
+            await holder_acquired.wait()
+            await original_acquire(self, equivalent_ids)
+            waiter_acquired.set()
+            return
+
+        await original_acquire(self, equivalent_ids)
 
     monkeypatch.setattr(
         PaymentEngine,
-        "_acquire_segment_advisory_locks",
+        "_acquire_equivalent_owner_locks",
         _synchronized_acquire,
     )
 
@@ -151,9 +166,10 @@ async def test_concurrent_payments_shared_bottleneck_commit_once_postgres(
             await setup.commit()
 
         task1 = asyncio.create_task(_pay(id_by_pid[a_pid], tx_ids[0]))
-        await asyncio.wait_for(holder_acquired.wait(), timeout=5.0)
         task2 = asyncio.create_task(_pay(id_by_pid[b_pid], tx_ids[1]))
+        await asyncio.wait_for(holder_entered.wait(), timeout=5.0)
         await asyncio.wait_for(waiter_entered.wait(), timeout=5.0)
+        await asyncio.wait_for(holder_acquired.wait(), timeout=5.0)
         with pytest.raises(asyncio.TimeoutError):
             await asyncio.wait_for(waiter_acquired.wait(), timeout=0.25)
 
@@ -164,7 +180,7 @@ async def test_concurrent_payments_shared_bottleneck_commit_once_postgres(
         release_holder.set()
         result1, result2 = await asyncio.wait_for(
             asyncio.gather(task1, task2),
-            timeout=10.0,
+            timeout=30.0,
         )
 
         results = [result1, result2]

@@ -264,6 +264,7 @@ async def test_inverse_multisegment_commits_serialize_and_preserve_invariants_po
             waiter_engine._retry_attempts = 1
             holder_acquire = holder_engine._acquire_segment_advisory_lock_keys
             waiter_acquire = waiter_engine._acquire_segment_advisory_lock_keys
+            waiter_owner_acquire = waiter_engine._acquire_equivalent_owner_locks
 
             async def _hold_after_acquisition(keys) -> None:
                 await holder_acquire(keys)
@@ -271,9 +272,12 @@ async def test_inverse_multisegment_commits_serialize_and_preserve_invariants_po
                 await release_holder.wait()
 
             async def _observe_waiter_acquisition(keys) -> None:
-                waiter_attempted.set()
                 await waiter_acquire(keys)
                 waiter_acquired.set()
+
+            async def _observe_waiter_owner_acquisition(equivalent_ids) -> None:
+                waiter_attempted.set()
+                await waiter_owner_acquire(equivalent_ids)
 
             monkeypatch.setattr(
                 holder_engine,
@@ -284,6 +288,11 @@ async def test_inverse_multisegment_commits_serialize_and_preserve_invariants_po
                 waiter_engine,
                 "_acquire_segment_advisory_lock_keys",
                 _observe_waiter_acquisition,
+            )
+            monkeypatch.setattr(
+                waiter_engine,
+                "_acquire_equivalent_owner_locks",
+                _observe_waiter_owner_acquisition,
             )
 
             try:
