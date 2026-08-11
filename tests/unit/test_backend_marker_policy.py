@@ -135,7 +135,11 @@ def _iter_documented_commands_from_content(content: str):
                     fence_language,
                 )
             if pending_powershell_command is not None:
-                yield (*pending_powershell_command, fence_language)
+                yield (
+                    pending_powershell_command[0],
+                    f"{_POWERSHELL_SYNTAX_ERROR}: dangling continuation",
+                    fence_language,
+                )
                 pending_powershell_command = None
             fence_language = (
                 None if fence_language is not None else fence.group(1).lower()
@@ -176,9 +180,15 @@ def _iter_documented_commands_from_content(content: str):
             elif not in_powershell_block_comment:
                 powershell_block_comment_line = None
             here_string_start = re.search(r"@(['\"])\s*$", visible)
-            if here_string_start is not None:
+            if (
+                here_string_start is not None
+                and _tokenize_powershell_arguments(visible[: here_string_start.start()])
+                is not None
+            ):
                 powershell_here_string_end = f"{here_string_start.group(1)}@"
                 powershell_here_string_line = line_number
+            else:
+                here_string_start = None
             powershell_line_continues = visible.endswith("`")
             powershell_statements = _split_powershell_statements(visible)
             if not powershell_statements:
@@ -232,7 +242,11 @@ def _iter_documented_commands_from_content(content: str):
                 else:
                     yield command_line, command, fence_language
     if pending_powershell_command is not None:
-        yield (*pending_powershell_command, fence_language)
+        yield (
+            pending_powershell_command[0],
+            f"{_POWERSHELL_SYNTAX_ERROR}: dangling continuation",
+            fence_language,
+        )
     if powershell_here_string_end is not None:
         yield (
             powershell_here_string_line or 1,
@@ -1270,6 +1284,25 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 $ignored = @'
 not executable
 '@Write-Output "invalid suffix"
+```
+""",
+        """
+```powershell
+createdb -U geo geov0_test_fake_here_header
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_fake_here_header"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+./scripts/verify_local.ps1 -BackendMarker postgres
+$ignored = "unterminated @'
+'@
+```
+""",
+        """
+```powershell
+createdb -U geo geov0_test_dangling_non_verifier
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_dangling_non_verifier"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+./scripts/verify_local.ps1 -BackendMarker postgres
+Write-Host "incomplete" `
 ```
 """,
         """
