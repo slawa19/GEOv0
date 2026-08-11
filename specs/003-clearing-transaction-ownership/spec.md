@@ -105,7 +105,7 @@ severity, а не за откладывание.
 | T301 | Инвентаризация всех веток выхода `clearing/service.py`, явное решение по владению транзакцией | `[x]` |
 | T302 | Реализация выбранной границы владения; все ветви выхода завершают транзакцию | `[x]` |
 | T303 | Идемпотентный протокол подтверждения коммита клиринга | `[x]` |
-| T304 | Публикация реально заблокированной суммы вместо кандидата: перевести `real_clearing_engine.py:290` с bool-обёртки `execute_clearing` на `execute_clearing_with_amount` и провести возвращённую сумму в `:318-319` и `:334-336` (F-003-3) | `[!]` |
+| T304 | Публикация реально заблокированной суммы вместо кандидата: перевести `real_clearing_engine.py:290` с bool-обёртки `execute_clearing` на `execute_clearing_with_amount` и провести возвращённую сумму в `:318-319` и `:334-336` (F-003-3) | `[x]` |
 | T305 | Устранение повторной очистки lock в recovery (`recovery.py:131-136`) и исправление ложного комментария `recovery.py:126-128`; тест-дабл `tests/unit/test_recovery_cleanup.py:355-381` привести в соответствие с реальным поведением `abort` (F-003-4) | `[!]` |
 | T306 | Синхронизация `docs/ru/simulator/backend/payment-integration.md` и решений в `docs/ru/09-decisions-and-defaults.md` | `[!]` |
 | T307 | Независимое ревью и публикация evidence на точном HEAD | `[!]` |
@@ -207,3 +207,29 @@ severity, а не за откладывание.
 - Финальный PostgreSQL milestone `wave4_003_t303_pg_exact` по commit-replay, всем skip branches и
   clearing/payment contention — exit `0`, `9 passed`; unit/caller matrix
   `wave4_003_t303_units` — exit `0`, `64 passed`. Pinned Ruff и `git diff --check` — exit `0`.
+
+### 2026-08-11 — T304
+
+- Implementation commit: `c759558`. Перед изменением находка снова подтверждена: candidate
+  вычислялся из входных edge на `app/core/simulator/real_clearing_engine.py:258-278`, lossy
+  `execute_clearing` вызывался на прежней `:290`, candidate попадал в aggregate/per-edge на
+  прежних `:318-319,334-336` и затем в `clearing.done`.
+- После: входное число честно называется только `candidate_amount` и используется для diagnostic
+  log (`real_clearing_engine.py:269-290`). Durable `actual_amount` приходит из
+  `execute_clearing_with_amount` (`:294-301`) и только оно попадает в aggregate и per-edge
+  (`:327-349`), следовательно также во все последующие return/trust-growth/SSE surfaces.
+- Post-commit cancellation carrier из T303 теперь потребляется обоими publishers до повторного
+  raise: real engine записывает amount/edges и выпускает fallback `clearing.done`
+  (`real_clearing_engine.py:294-364,590-636`), interactive action —
+  `app/api/v1/simulator.py:1665-1698`. Cancellation остаётся cancellation, durable progress не
+  теряется.
+- RED `wave4_003_t304_red` — exit `1`, `5 failed`: при candidate `11` и фактическом service-result
+  `5` actual был `{'USD': 11.0}` и SSE `cleared_amount='11.00'`; initial committed-cancellation
+  вообще не доходила до accounting. Это прямые actual/expected, не fixture под старую строку.
+- Behavioral tests `tests/unit/test_real_clearing_engine_partial_failure.py:77-212` проверяют
+  aggregate `5`, per-edge `{('bob','alice'): 5.0}`, SSE `5.00`, partial failure и cancellation;
+  interactive carrier покрыт на `tests/unit/test_interact_actions_backend_p1.py:1174-1329`.
+  Оба service doubles переведены на amount API.
+- Targeted GREEN `wave4_003_t304_green2` — exit `0`, `34 passed`; отдельный amount-surface selector
+  `wave4_003_t304_amount_surfaces` — exit `0`, `5 passed`; финальная восьмифайловая caller matrix
+  `wave4_003_t304_units_exact` — exit `0`, `66 passed`. Pinned Ruff и `git diff --check` — exit `0`.
