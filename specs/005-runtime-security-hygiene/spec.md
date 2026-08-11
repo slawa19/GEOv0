@@ -1,7 +1,7 @@
 # 005 — Runtime security and delivery hygiene
 
 - **Date:** 2026-08-11
-- **Status:** IN PROGRESS — T500-T507 authorized 2026-08-11; T508 not separately authorized
+- **Status:** COMPLETE — T500-T508 закрыты 2026-08-11
 - **Status authority:** метка описательная; завершённость устанавливают success criteria и evidence.
 - **Owner surface:** `app/api/deps.py`, `app/main.py`, `app/api/v1/health.py`, `app/api/v1/websocket.py`, `.dockerignore`, `docker/`, `docker-compose*.yml`
 - **Почему одна программа:** все находки живут на периметре (auth, health, доставка образа), не пересекаются по файлам ни с 002/003/004, дёшевы и проверяемы поодиночке. Это лучший кандидат на первую волну.
@@ -98,7 +98,7 @@ liveness без деталей и аутентифицированный diagnos
 | T505 | Решение и реализация по `/health` degraded + HEALTHCHECK-потребителю | `[x]` |
 | T506 | `/api/v1/health` читает окружение через Settings | `[x]` |
 | T507 | Синхронизация `docs/ru/05-deployment.md`, `config-reference.md`, `09-decisions-and-defaults.md` | `[x]` |
-| T508 | Независимое внешнее ревью и evidence на точном HEAD (триггер AGENTS.md §15: периметр безопасности) | `[!]` |
+| T508 | Независимое внешнее ревью и evidence на точном HEAD (триггер AGENTS.md §15: периметр безопасности) | `[x]` |
 
 ## Changelog
 
@@ -254,3 +254,25 @@ liveness без деталей и аутентифицированный diagnos
   `docs/ru/09-decisions-and-defaults.md`: exit `0`, все четыре контракта найдены.
 - `git diff --check -- docs/ru/05-deployment.md docs/ru/config-reference.md docs/ru/09-decisions-and-defaults.md`:
   exit `0`; локальный scan Markdown targets для трёх файлов: `DOC_LINKS_OK`, exit `0`.
+
+### 2026-08-11 — T508 и закрытие программы
+
+- Независимый внешний reviewer `Codex gpt-5.6-sol` проверил implementation range
+  `ea9cde9161c3f7444495ede13871c901abbba811..200a09b` в отдельном чистом clone. По 005 не найдено
+  P1/P2; два найденных P2 относились к 006. После remediation второй независимый review тем же
+  классом модели проверил delta `200a09b..c19cb5f1b108325c88f4420cd62ce20a313e61ac` и вынес
+  `VERDICT-CLEAN`. Артефакты review оставлены вне репозитория; точный reviewed implementation HEAD —
+  `c19cb5f1b108325c88f4420cd62ce20a313e61ac`.
+- Полный verification plan повторён. Canonical selector
+  `$env:DEBUG='false'; .\scripts\verify_local.ps1 -TaskSlug wave1_final_005 -BackendOnly -BackendSelector tests/unit/test_websocket_payment_received_event.py,tests/integration/test_health_and_equivalents.py,tests/unit/test_deployment_config.py,tests/unit/test_admin_token_comparison.py,tests/unit/test_rate_limit_memory_bound.py,tests/unit/test_background_task_supervision.py,tests/contract/test_openapi_contract.py`
+  завершился exit `0`: `56 passed, 1 skipped`; cache nodeids подтверждают сбор всех 57 ожидаемых
+  cases. Это покрывает auth/log boundary, public/admin DB health, constant-time token comparison,
+  bounded limiter, readiness/HEALTHCHECK и OpenAPI aliases.
+- Реальная WSL Docker-проверка dev-образа на текущем дереве завершилась exit `0`: образ
+  `sha256:4bd9b59bb3cba8b8c4fd40c58ac47ef3c5ece54864302d37f965883004ce812f`, результат
+  `DEV_IMAGE_CONTENT_OK`; внутри `/app` отсутствуют `.local-run`, `.venv`, `node_modules` и `*.db`.
+  Временный tag и sentinels удалены cleanup trap.
+- Milestone всей волны
+  `$env:DEBUG='false'; .\scripts\verify_local.ps1 -TaskSlug wave1_final_full` завершился exit `0`:
+  backend `945 passed, 3 skipped, 15 deselected`, единственный Alembic head `017`, Admin и Simulator
+  lint/test/build прошли; финальная строка — `Required local validation passed.`
