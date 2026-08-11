@@ -123,7 +123,9 @@ Runner действует как «виртуальный клиент»:
 - `PAYMENT_TOTAL_TIMEOUT_SECONDS` (по умолчанию 10s)
 
 Поведение:
-- при `asyncio.TimeoutError` выполняется `engine.abort(..., reason="Payment timeout")` (shielded), затем кидается `TimeoutException`.
+- при `asyncio.TimeoutError` rollback/abort доводятся до terminal result до закрытия session, затем кидается `TimeoutException`;
+- `CancelledError` сохраняется, но после возможной записи tx выполняется тот же terminal cleanup;
+- уже закоммиченный платёж определяется read-before-abort и не переводится в `ABORTED`.
 
 ### 3.2 Идемпотентность
 `Idempotency-Key`:
@@ -174,8 +176,16 @@ UI не читает внутренние состояния платежей; �
 Политика:
 - порог: если за окно времени доля таймаутов выше X%, переводить run в `error`.
 
-### 4.3 Внутренние/неожиданные ошибки (INTERNAL_ERROR)
-- `GeoException`, `DBAPIError` и прочие непредвиденные → `last_error.code=INTERNAL_ERROR`.
+### 4.3 Временный конфликт БД (CONFLICT)
+
+- `40001`/`40P01` маппятся в существующий `ConflictException`-контракт `409/E008` с
+  `details.retryable=true`; driver text и SQLSTATE не публикуются.
+- Interact action отвечает `CONFLICT`, не `PAYMENT_REJECTED`.
+- В real tick конфликт пробрасывается до владельца внешней транзакции: весь tick откатывается;
+  продолжать clearing/trust drift на отравленной session запрещено.
+
+### 4.4 Внутренние/неожиданные ошибки (INTERNAL_ERROR)
+- Неретраимые `DBAPIError` и прочие непредвиденные ошибки → `last_error.code=INTERNAL_ERROR`.
 
 ---
 

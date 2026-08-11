@@ -264,6 +264,24 @@ dialect, пользователь, host и имя базы в публичный
 отдельный admin operation в `api/openapi.yaml`; отсутствие обязательного header не считается
 успешной диагностикой.
 
+### 1.17. Конкурентные ошибки и прерывание платежа
+
+**Решение 2026-08-11:** PostgreSQL `40001` (serialization failure) и `40P01` (deadlock) на границе
+`PaymentService` — временный конфликт, а не внутренняя ошибка. REST переиспользует существующий
+контракт HTTP 409 / `E008`; `details` содержит только `retryable: true` и
+`conflict_kind: database_concurrency`. Текст драйвера и SQLSTATE в публичный ответ не попадают.
+Новый HTTP 503 или новый business code не вводятся.
+
+Interactive-действие симулятора отвечает code `CONFLICT`, а не `PAYMENT_REJECTED`. В real tick тот
+же конфликт не засчитывается как терминальный отказ отдельного платежа: он прерывает tick, чтобы
+владелец внешней транзакции сделал rollback и мог переиграть работу на чистой сессии.
+
+При timeout или `CancelledError` после возможной записи `Transaction` cleanup доводится до
+terminal result до закрытия session: для commit-path выполняются rollback, read-before-abort и
+идемпотентный abort; staged-path оставляет окончательный rollback владельцу внешней транзакции.
+Исходный `CancelledError` сохраняется. Уже наблюдённый `COMMITTED` никогда не переводится в
+`ABORTED`.
+
 ---
 
 ## 2. Дефолты и лимиты
