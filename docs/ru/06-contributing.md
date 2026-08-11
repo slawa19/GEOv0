@@ -427,8 +427,8 @@ tests/
 .\scripts\verify_local.ps1 -TaskSlug contributor_super_smoke -BackendOnly `
   -BackendSelector tests/integration/test_simulator_super_smoke.py -IncludeExpensive
 
-# Debug-only coverage (не заменяет canonical gate)
-.\.venv\Scripts\python.exe -m pytest -m "not slow and not postgres" --cov=app --cov-report=html
+# Coverage запускается отдельным debug-срезом только после canonical gate;
+# прямой pytest не является документированным required path.
 ```
 
 ### 5.3. Fixtures

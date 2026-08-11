@@ -207,11 +207,11 @@ Health endpoints (есть также алиасы `/api/v1/*`):
 - `requirements.txt`
 - `requirements-dev.txt`
 
-Запуск:
-- `python -m pytest -q`
+Запуск из PowerShell:
+- `.\scripts\verify_local.ps1 -TaskSlug runbook_backend -BackendOnly`
 
 ### 7.2 OpenAPI contract test
-- `python -m pytest -q tests/contract/test_openapi_contract.py`
+- `.\scripts\verify_local.ps1 -TaskSlug runbook_openapi -BackendOnly -BackendSelector tests/contract/test_openapi_contract.py`
 
 ### 7.3 Postgres-backed тест конкурентности (важно)
 Для проверки семантики блокировок/изоляции нужен Postgres (SQLite не подходит).
@@ -220,17 +220,18 @@ Health endpoints (есть также алиасы `/api/v1/*`):
 1) Поднять контейнер БД:
 - `docker compose up -d db`
 
-2) Создать отдельную тестовую БД (one-time) внутри контейнера:
-- `docker exec geov0-db createdb -U geo geov0_test`
+2) Выбрать уникальное имя, проверить отсутствие БД и только затем создать её внутри контейнера:
+- `docker exec geov0-db createdb -U geo geov0_test_runbook`
 
 3) Указать переменные окружения тестов:
-- `TEST_DATABASE_URL=postgresql+asyncpg://geo:geo@localhost:5432/geov0_test`
+- `TEST_DATABASE_URL=postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_runbook`
 - `GEO_TEST_ALLOW_DB_RESET=1`
 
 4) Запустить конкретный тест:
-- `python -m pytest -q tests/integration/test_concurrent_prepare_routes_bottleneck_postgres.py`
+- `.\scripts\verify_local.ps1 -TaskSlug runbook_postgres -BackendOnly -BackendMarker postgres -BackendSelector tests/integration/test_concurrent_prepare_routes_bottleneck_postgres.py`
 
-Внимание: при non-SQLite `TEST_DATABASE_URL` тестовый harness сбрасывает схему (DROP/CREATE). Используйте только выделенную тестовую БД.
+Внимание: reset opt-in допустим только после проверки точного URL и отсутствия уникальной
+`geov0_test_*` БД. После прогона удаляйте только эту БД при нуле активных соединений.
 
 ---
 
