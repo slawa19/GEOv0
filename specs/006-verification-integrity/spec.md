@@ -171,7 +171,7 @@ sequence (что требует протокольного поля), либо �
 | T607 | Устранить rAF/тост-флак в admin vitest setup | `[x]` |
 | T608a | Ruff на пиннутых версиях: `--fix` (19 находок), затем 5 ручных случаев (3× `F841` и 1× `E712` под `--unsafe-fixes`, 1× `E741` вручную); перевод ruff-джоба в блокирующий. Ограниченный объём: одна команда + 5 правок | `[x]` |
 | T608b | Black **остаётся неблокирующей диагностикой**: переформатирование 98 файлов / 4931 `+`/`-`-строк уничтожит `git blame`. Перевод в блокирующий — только после отдельного датированного решения | `[x]` |
-| T609 | Диалектный guard вокруг `CREATE EXTENSION pgcrypto` в миграции 001 по образцу миграций 004-017. **Не однострочник:** отдельно оценить `postgresql.JSONB`, `gen_random_uuid()` и 7× `ALTER TABLE … ADD CONSTRAINT`, которые SQLite тоже не примет. Приоритет низкий: alembic не используется для создания dev-SQLite | `[!]` |
+| T609 | Диалектный guard вокруг `CREATE EXTENSION pgcrypto` в миграции 001 по образцу миграций 004-017. **Не однострочник:** отдельно оценить `postgresql.JSONB`, `gen_random_uuid()` и 7× `ALTER TABLE … ADD CONSTRAINT`, которые SQLite тоже не примет. Приоритет низкий: alembic не используется для создания dev-SQLite | `[x]` |
 | T610 | Решение по OpenAPI-ratchet: план сокращения дрейфа либо честное переименование гейта | `[!]` |
 | T611 | Независимое внешнее ревью и evidence на точном HEAD (триггер AGENTS.md §15: программа меняет сам механизм проверки, поэтому самопроверка гейта не является доказательством) | `[!]` |
 
@@ -418,3 +418,39 @@ sequence (что требует протокольного поля), либо �
 - Canonical policy gate `.\scripts\verify_local.ps1 -TaskSlug wave5_t608b_black_policy
   -BackendOnly -BackendSelector tests/unit/test_static_diagnostics_policy.py -Python
   .\.venv\Scripts\python.exe` — exit `0`, `1 passed`; `git diff --check` на decision/spec — exit `0`.
+
+### 2026-08-11 — T609
+
+- Finding воспроизведена: с `DATABASE_URL=sqlite+aiosqlite:///:memory:` прямой
+  `.\.venv\Scripts\python.exe -m alembic -c migrations/alembic.ini upgrade head` завершался exit
+  `1`, exact error `sqlite3.OperationalError: near "EXTENSION": syntax error`, SQL
+  `CREATE EXTENSION IF NOT EXISTS pgcrypto` (`migrations/versions/001_initial_schema.py:25`).
+- Первоначальная literal-попытка поставить dialect guard в уже применённую 001 прошла локальный
+  unit guard (`wave5_t609_pgcrypto_guard`, exit `0`, `4 passed`), но была **не закоммичена и
+  отозвана** после независимого review. Причины: applied revisions защищены AGENTS.md, а следующий
+  реальный SQLite blocker — не записанный в спеке `postgresql.UUID` (`001:29`), поэтому guard был
+  бы vacuous. Рабочее изменение 001 и его тест удалены; migration history остаётся неизменной.
+- Исправленный inventory: в 001 есть 19 ссылок `postgresql.UUID`, 11 `postgresql.JSONB`, 9 defaults
+  `gen_random_uuid()`, defaults `NOW()`, семь literal `ALTER TABLE ... ADD CONSTRAINT` и три
+  `op.create_unique_constraint`; 002/003/004/010 также содержат незащищённые PostgreSQL-only
+  операции. Изолированная SQLite-проверка: UUID/JSONB не компилируются; DDL с
+  `DEFAULT (gen_random_uuid())` принимается, но INSERT даёт `unknown function`; raw ADD CONSTRAINT
+  даёт syntax error. Таким образом, исходное «001 — единственная» и перечисление следующих
+  blockers были неполными.
+- **Current:** Alembic chain фактически PostgreSQL-only; SQLite создаётся поддержанным
+  `scripts/init_sqlite_db.py`/`Base.metadata.create_all`. **Intended:** applied revisions неизменны,
+  production migrations работают на PostgreSQL. **Optimal:** fail-closed до исполнения любого
+  revision вместо имитации частичной SQLite-совместимости. `migrations/env.py:26-32,34-47,66-74`
+  теперь проверяет URL и для online, и для offline/`--sql`; другой backend получает credential-safe
+  `Alembic migrations support PostgreSQL only` с указанием SQLite initializer.
+- Black-box anti-vacuum `tests/unit/test_alembic_postgres_only.py:29-75` доказывает: SQLite online и
+  offline завершаются до `Running upgrade`/revision SQL, а `scripts/init_sqlite_db.py` создаёт
+  representative SQLite tables. Canonical `wave5_t609_postgres_only` — exit `0`, `5 passed`;
+  single Alembic head check — exit `0`, head `017_add_owner_to_simulator_runs`.
+- PostgreSQL milestone на заранее отсутствующей disposable DB с каноническим entrypoint-preflight
+  (`alembic_version VARCHAR(128)`) завершился exit `0`: revision
+  `017_add_owner_to_simulator_runs`, `PGCRYPTO=True`, три representative constraints найдены;
+  active connections перед удалением `0`, DB после drop отсутствует. Более ранняя прямая попытка
+  без обязательного preflight честно сохранена: exit `1`,
+  `StringDataRightTruncationError ... character varying(32)` на длинном revision 011; её DB также
+  удалена при `0` connections. Pinned Ruff `0.1.14` и `git diff --check` на env/test/spec — exit `0`.
