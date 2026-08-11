@@ -158,8 +158,9 @@ Runner действует как «виртуальный клиент»:
 ### 3.4 Владение транзакцией и retry
 
 - Savepoint не является границей retry для конфликта внешнего `SERIALIZABLE` snapshot. В real mode
-  такой конфликт пробрасывается владельцу tick: вся внешняя транзакция откатывается и batch
-  повторяется на новой сессии.
+  такой конфликт пробрасывается владельцу tick: вся внешняя транзакция откатывается, tick получает
+  `REAL_MODE_TICK_FAILED`, а тот же batch автоматически не переигрывается. Следующий heartbeat
+  планирует новый tick.
 - Mixed-version payment workers не поддерживаются. При upgrade и rollback оператор останавливает API
   payment writers, real ticks, Admin abort и recovery, дожидается завершения/отката DB-транзакций и
   освобождения advisory locks, разворачивает одну версию на всех owner surfaces и только затем
@@ -202,7 +203,8 @@ UI не читает внутренние состояния платежей; �
   `uq_debts_debtor_creditor_equivalent`. Любой другой `23505` остаётся неретраимым.
 - Interact action отвечает `CONFLICT`, не `PAYMENT_REJECTED`.
 - В real tick конфликт пробрасывается до владельца внешней транзакции: весь tick откатывается;
-  продолжать clearing/trust drift на отравленной session запрещено.
+  продолжать clearing/trust drift на отравленной session запрещено. Тот же batch не переигрывается;
+  следующий heartbeat планирует новый tick.
 
 ### 4.4 Внутренние/неожиданные ошибки (INTERNAL_ERROR)
 - Неретраимые `DBAPIError` и прочие непредвиденные ошибки → `last_error.code=INTERNAL_ERROR`.

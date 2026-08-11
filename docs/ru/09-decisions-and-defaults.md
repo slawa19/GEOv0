@@ -225,8 +225,10 @@ Real mode: артефакты (dev perf)
 equivalent-owner locks → transaction lock → канонические pair locks. Service, Admin abort и recovery
 входят в этот протокол через `PaymentEngine`. Real tick до денежной работы захватывает полный набор
 configured equivalents, а executor перед staged actions фиксирует полный отсортированный planned set.
-Конфликт внешнего `SERIALIZABLE` snapshot не ретраится внутри savepoint: владелец внешней транзакции
-откатывает и повторяет всю единицу работы на новой сессии.
+Конфликт внешнего `SERIALIZABLE` snapshot не ретраится внутри savepoint. Engine-owned UoW может
+целиком повториться после rollback, но staged real tick использует fail-fast: откатывает tick,
+записывает `REAL_MODE_TICK_FAILED` и не переигрывает тот же batch. Следующий heartbeat планирует
+новый tick.
 
 Протокол не имеет mixed-version bridge. Upgrade и rollback требуют coordinated quiescence:
 остановить API payment writers, real ticks, Admin abort и recovery; дождаться завершения или отката
