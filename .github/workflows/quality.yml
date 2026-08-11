@@ -226,8 +226,8 @@ jobs:
           -BackendSelector tests/integration
 
   container-smoke:
-    name: Production-like container and schema smoke (manual)
-    if: github.event_name == 'workflow_dispatch'
+    name: Production-like container and schema smoke (scheduled/manual)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 30
 

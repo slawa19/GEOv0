@@ -339,8 +339,8 @@ The runner's reset action is restricted to the new `.local-run` default and fail
 closed for this legacy override or any custom URL.
 
 GitHub Actions runs the same verifier with Python 3.11 and Node 22.12. PostgreSQL
-integration, simulator super-smoke, Admin E2E, and Windows Simulator visual E2E
-jobs run only on the weekly schedule or manual dispatch; see
+integration, production container/schema smoke, simulator super-smoke, Admin E2E,
+and Windows Simulator visual E2E jobs run only on the weekly schedule or manual dispatch; see
 `.github/workflows/quality.yml`. The presence of the workflow is not evidence of a
 green CI run until the published job finishes successfully.
 

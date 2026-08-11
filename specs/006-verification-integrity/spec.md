@@ -167,7 +167,7 @@ sequence (что требует протокольного поля), либо �
 | T603 | Включить rate limiter в тестах; покрыть 429/окно/fallback | `[x]` |
 | T604 | Привести маркеры `pytest.ini` в соответствие с носителями | `[x]` |
 | T605 | Сделать `pytest -m postgres` fail-closed вне канонического раннера | `[x]` |
-| T606 | Добавить `container-smoke` в регулярное расписание | `[!]` |
+| T606 | Добавить `container-smoke` в регулярное расписание | `[x]` |
 | T607 | Устранить rAF/тост-флак в admin vitest setup | `[x]` |
 | T608a | Ruff на пиннутых версиях: `--fix` (19 находок), затем 5 ручных случаев (3× `F841` и 1× `E712` под `--unsafe-fixes`, 1× `E741` вручную); перевод ruff-джоба в блокирующий. Ограниченный объём: одна команда + 5 правок | `[x]` |
 | T608b | Black **остаётся неблокирующей диагностикой**: переформатирование 98 файлов / 4931 `+`/`-`-строк уничтожит `git blame`. Перевод в блокирующий — только после отдельного датированного решения | `[!]` |
@@ -372,3 +372,27 @@ sequence (что требует протокольного поля), либо �
   получает уже окончательный `session.items`. Повторный canonical
   `wave5_t605_collection_finish` — exit `0`, `24 passed, 1 skipped`; прямой SQLite postgres selector
   сохранил exit `4`, а safe PostgreSQL collect — exit `0`.
+
+### 2026-08-11 — T606
+
+- Перед правкой finding и anchors подтверждены. **Current:** workflow уже имел weekly trigger
+  `cron: "17 3 * * 1"` (`.github/workflows/quality.yml:9-10`), но `container-smoke` назывался
+  manual и имел единственное условие `github.event_name == 'workflow_dispatch'` (`:228-230` до
+  изменения). **Intended:** тот же production-like image/schema smoke выполняется на существующем
+  weekly cadence и остаётся доступен вручную. **Optimal:** переиспользовать один cron, не добавлять
+  PR-cost и второй scheduler.
+- После: job называется `Production-like container and schema smoke (scheduled/manual)` и допускает
+  ровно `schedule || workflow_dispatch` (`.github/workflows/quality.yml:228-230`). Permissions
+  остаются `contents: read`; job генерирует/маскирует ephemeral secrets, использует локальный image и
+  task-local containers/network, cleanup остаётся под `always()`. README weekly-job inventory
+  синхронизирован (`README.md:341-344`), текущая AGENTS CI table больше не называет job manual-only.
+- Policy guard `tests/unit/test_quality_workflow_schedule.py:9-30` проверяет не только job-level
+  условие, но и anti-vacuum: top-level `on.schedule` существует как непустой список с непустым cron.
+  Первая версия guard без проверки top-level trigger прошла (`wave5_t606_schedule`, exit `0`,
+  `5 passed`), но могла false-green при удалённом cron; история сохранена. После remediation
+  canonical `wave5_t606_schedule_final` на schedule/static/Postgres workflow policies — exit `0`,
+  `5 passed`; независимый повтор policy-selector — exit `0`, `1 passed`. Pinned Ruff `0.1.14` и
+  `git diff --check` — exit `0`.
+- Ограничение evidence: конфигурация и route policy доказаны локально; фактическое плановое
+  выполнение может подтвердить только будущий GitHub `schedule` run на default branch. Это не
+  подменяется manual dispatch и не заявляется как уже состоявшийся scheduled run.
