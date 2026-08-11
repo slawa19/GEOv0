@@ -62,9 +62,13 @@ def _iter_documented_commands_from_content(content: str):
                 if "#>" in stripped:
                     in_powershell_block_comment = False
                 continue
-            if stripped.startswith("<#"):
-                in_powershell_block_comment = "#>" not in stripped[2:]
-                continue
+            block_comment_start = stripped.find("<#")
+            if block_comment_start >= 0:
+                comment = stripped[block_comment_start + 2 :]
+                in_powershell_block_comment = "#>" not in comment
+                stripped = stripped[:block_comment_start].rstrip(" ;")
+                if not stripped:
+                    continue
         inline_commands = re.findall(r"`([^`]+)`", stripped)
         has_command_role = bool(
             re.match(r"^(?:[-*+]|\d+[.)])\s*`", stripped)
@@ -126,7 +130,9 @@ def _python_tool_module(command: str) -> str | None:
         "alembic",
         "alembic.exe",
         "ruff",
+        "ruff.exe",
         "black",
+        "black.exe",
     }:
         return executable.removesuffix(".exe")
     if executable in {"py", "py.exe"} or re.fullmatch(
@@ -304,14 +310,16 @@ def _is_canonical_verifier_command(command: str) -> bool:
     executable = executable_path.rsplit("/", 1)[-1]
     if executable not in {"powershell", "powershell.exe", "pwsh", "pwsh.exe"}:
         return False
-    file_argument = re.search(
-        r"""(?:^|\s)-File\s+("[^"]+"|'[^']+'|\S+)""",
+    file_invocation = re.fullmatch(
+        r"(?:(?:-NoProfile|-NonInteractive)\s+|"
+        r"-ExecutionPolicy\s+\S+\s+)*"
+        r"-File\s+(\"[^\"]+\"|'[^']+'|\S+)(?:\s+.*)?",
         arguments,
         re.IGNORECASE,
     )
-    if file_argument is None:
+    if file_invocation is None:
         return False
-    verifier_path = file_argument.group(1).strip("\"'").replace("\\", "/").lower()
+    verifier_path = file_invocation.group(1).strip("\"'").replace("\\", "/").lower()
     return verifier_path in {"./scripts/verify_local.ps1", "scripts/verify_local.ps1"}
 
 
@@ -536,6 +544,8 @@ def test_direct_pytest_guard_recognizes_supported_launcher_shapes(command: str) 
         ("py -m uvicorn app.main:app", "uvicorn"),
         ("python3.11 -m alembic upgrade head", "alembic"),
         ("black --check app", "black"),
+        ("ruff.exe check app", "ruff"),
+        ("black.exe --check app", "black"),
         (r".\.venv\Scripts\python.exe -m ruff check app", "ruff"),
     ],
 )
@@ -563,6 +573,15 @@ Write-Host ".\.venv\Scripts\python.exe -m pip install -r requirements.txt -r req
 .\.venv\Scripts\python.exe -m ruff check app migrations
 ```
 """,
+        r"""
+```powershell
+Write-Host "comment starts"; <#
+py -m venv .venv
+#>
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m ruff check app migrations
+```
+""",
     ],
 )
 def test_contributor_venv_guard_rejects_missing_executable_setup_roles(
@@ -583,6 +602,11 @@ def test_contributor_venv_guard_rejects_missing_executable_setup_roles(
         (r".\other\verify_local.ps1 -BackendMarker postgres", False),
         (r"C:\temp\verify_local.ps1 -BackendMarker postgres", False),
         ("verify_local.ps1 -BackendMarker postgres", False),
+        (
+            "powershell -Command Write-Host -File ./scripts/verify_local.ps1 "
+            "-BackendMarker postgres",
+            False,
+        ),
     ],
 )
 def test_canonical_verifier_guard_requires_repository_script_path(
@@ -707,6 +731,24 @@ createdb -U geo geov0_test_block_comment
 #>
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_block_comment"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
+```
+""",
+        """
+```powershell
+Write-Host "comment starts"; <#
+createdb -U geo geov0_test_inline_block_comment
+./scripts/verify_local.ps1 -BackendMarker postgres
+#>
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_inline_block_comment"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+```
+""",
+        """
+```powershell
+createdb -U geo geov0_test_command_mode
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_command_mode"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+powershell -Command Write-Host -File ./scripts/verify_local.ps1 -BackendMarker postgres
 ```
 """,
         """
