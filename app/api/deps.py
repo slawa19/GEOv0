@@ -35,6 +35,8 @@ def _admin_token_matches(candidate: str) -> bool:
 
 _rate_limit_lock = asyncio.Lock()
 _rate_limit_counters: dict[tuple[int, str], int] = {}
+_RATE_LIMIT_MAX_ENTRIES = 10_000
+_rate_limit_last_cleanup_bucket: int | None = None
 
 
 # Paths that are explicitly exempt from rate-limiting.
@@ -48,6 +50,8 @@ _RATE_LIMIT_EXEMPT_PATHS: frozenset[str] = frozenset(
 
 
 async def rate_limit(request: Request) -> None:
+    global _rate_limit_last_cleanup_bucket
+
     if not settings.RATE_LIMIT_ENABLED:
         return
 
@@ -86,12 +90,23 @@ async def rate_limit(request: Request) -> None:
     key = (bucket, client_host)
 
     async with _rate_limit_lock:
-        current = _rate_limit_counters.get(key, 0) + 1
+        if _rate_limit_last_cleanup_bucket != bucket:
+            stale_keys = [
+                stored_key
+                for stored_key in _rate_limit_counters
+                if stored_key[0] < bucket - 1
+            ]
+            for stale_key in stale_keys:
+                _rate_limit_counters.pop(stale_key, None)
+            _rate_limit_last_cleanup_bucket = bucket
+
+        current = _rate_limit_counters.pop(key, 0) + 1
         _rate_limit_counters[key] = current
 
-        # Best-effort cleanup of previous window for the same host
-        prev_key = (bucket - 1, client_host)
-        _rate_limit_counters.pop(prev_key, None)
+        max_entries = max(1, int(_RATE_LIMIT_MAX_ENTRIES))
+        while len(_rate_limit_counters) > max_entries:
+            oldest_key = next(iter(_rate_limit_counters))
+            _rate_limit_counters.pop(oldest_key, None)
 
     if current > limit:
         raise TooManyRequestsException(
