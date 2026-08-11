@@ -110,6 +110,7 @@ def _split_powershell_statements(line: str) -> list[str]:
 def _iter_documented_commands_from_content(content: str):
     fence_language: str | None = None
     in_powershell_block_comment = False
+    powershell_here_string_end: str | None = None
     for line_number, line in enumerate(
         content.splitlines(),
         start=1,
@@ -121,13 +122,21 @@ def _iter_documented_commands_from_content(content: str):
                 None if fence_language is not None else fence.group(1).lower()
             )
             in_powershell_block_comment = False
+            powershell_here_string_end = None
             continue
         powershell_statements: list[str] | None = None
         if fence_language in {"powershell", "pwsh"}:
+            if powershell_here_string_end is not None:
+                if stripped == powershell_here_string_end:
+                    powershell_here_string_end = None
+                continue
             visible, in_powershell_block_comment = _strip_powershell_block_comments(
                 line,
                 in_powershell_block_comment,
             )
+            here_string_start = re.search(r"@(['\"])\s*$", visible)
+            if here_string_start is not None:
+                powershell_here_string_end = f"{here_string_start.group(1)}@"
             powershell_statements = _split_powershell_statements(visible)
             if not powershell_statements:
                 continue
@@ -369,6 +378,37 @@ def _created_database_name(command: str) -> str | None:
     return database_names[-1] if database_names else None
 
 
+def _valid_verifier_arguments(arguments: str) -> bool:
+    candidate = arguments.strip()
+    if candidate.endswith("`"):
+        candidate = candidate[:-1].rstrip()
+    tokens = [
+        token.strip("\"'")
+        for token in re.findall(r""""[^"]*"|'[^']*'|\S+""", candidate)
+    ]
+    parameter_arity = {
+        "-taskslug": 1,
+        "-staticdiagnostics": 0,
+        "-backendselector": 1,
+        "-backendmarker": 1,
+        "-includeexpensive": 0,
+        "-backendonly": 0,
+        "-python": 1,
+    }
+    index = 0
+    while index < len(tokens):
+        parameter = tokens[index].lower()
+        arity = parameter_arity.get(parameter)
+        if arity is None:
+            return False
+        if arity == 1:
+            if index + 1 >= len(tokens) or tokens[index + 1].startswith("-"):
+                return False
+            index += 1
+        index += 1
+    return True
+
+
 def _is_canonical_verifier_command(command: str) -> bool:
     candidate = command.strip()
     if candidate.startswith("&"):
@@ -379,21 +419,24 @@ def _is_canonical_verifier_command(command: str) -> bool:
     executable_path = token.group(1).strip("\"'").replace("\\", "/").lower()
     arguments = token.group(2).lstrip()
     if executable_path in {"./scripts/verify_local.ps1", "scripts/verify_local.ps1"}:
-        return True
+        return _valid_verifier_arguments(arguments)
     executable = executable_path.rsplit("/", 1)[-1]
     if executable not in {"powershell", "powershell.exe", "pwsh", "pwsh.exe"}:
         return False
     file_invocation = re.fullmatch(
         r"(?:(?:-NoProfile|-NonInteractive)\s+|"
         r"-ExecutionPolicy\s+Bypass\s+)*"
-        r"-File\s+(\"[^\"]+\"|'[^']+'|\S+)(?:\s+.*)?",
+        r"-File\s+(\"[^\"]+\"|'[^']+'|\S+)(.*)",
         arguments,
         re.IGNORECASE,
     )
     if file_invocation is None:
         return False
     verifier_path = file_invocation.group(1).strip("\"'").replace("\\", "/").lower()
-    return verifier_path in {"./scripts/verify_local.ps1", "scripts/verify_local.ps1"}
+    return bool(
+        verifier_path in {"./scripts/verify_local.ps1", "scripts/verify_local.ps1"}
+        and _valid_verifier_arguments(file_invocation.group(2))
+    )
 
 
 def _postgres_example_violations(
@@ -648,6 +691,15 @@ Write-Host ".\.venv\Scripts\python.exe -m pip install -r requirements.txt -r req
 """,
         r"""
 ```powershell
+$help = @'
+py -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
+'@
+.\.venv\Scripts\python.exe -m ruff check app migrations
+```
+""",
+        r"""
+```powershell
 Write-Host "comment starts"; <#
 py -m venv .venv
 #>
@@ -704,6 +756,11 @@ def test_contributor_venv_guard_rejects_missing_executable_setup_roles(
         (
             "powershell.exe -ExecutionPolicy DefinitelyNotAPolicy "
             "-File ./scripts/verify_local.ps1 -BackendMarker postgres",
+            False,
+        ),
+        (
+            "./scripts/verify_local.ps1 -DefinitelyNotAParameter x "
+            "-BackendMarker postgres",
             False,
         ),
     ],
