@@ -94,7 +94,7 @@ liveness без деталей и аутентифицированный diagnos
 | T501 | Убрать `str(exc)` из публичного health; разделить liveness и diagnostic | `[x]` |
 | T502 | Переписать `.dockerignore` (гигиена сборки dev-образа, не security); добавить в CI проверку содержимого образа | `[x]` |
 | T503 | `compare_digest` для admin-токена | `[x]` |
-| T504 | Ограничить рост структуры rate-limiter | `[!]` |
+| T504 | Ограничить рост структуры rate-limiter | `[x]` |
 | T505 | Решение и реализация по `/health` degraded + HEALTHCHECK-потребителю | `[!]` |
 | T506 | `/api/v1/health` читает окружение через Settings | `[!]` |
 | T507 | Синхронизация `docs/ru/05-deployment.md`, `config-reference.md`, `09-decisions-and-defaults.md` | `[!]` |
@@ -185,3 +185,18 @@ liveness без деталей и аутентифицированный diagnos
   `-BackendMarker`, selector guard отклонил аргумент. Повтор с явным `$selectors = @(...)` и
   `-TaskSlug wave1_t503` прошёл: exit `0`, `40 passed`; охвачены новый policy test и существующие
   admin/simulator/integrity consumers.
+
+### 2026-08-11 — T504
+
+- Implementation commit: `3fd2d8ba216e14ae547a795745bb1f44148f90a6`.
+- До: `app/api/deps.py:80-86` удалял только previous-bucket ключ того же host; уникальные host в
+  одном окне безгранично росли в `_rate_limit_counters` (`:29`).
+- После: cap `10_000` и состояние window cleanup объявлены в `app/api/deps.py:38-39`; один раз при
+  смене bucket удаляются глобально устаревшие ключи, повторный host перемещается в конец insertion
+  order, а overflow вытесняет самый давно неиспользованный ключ (`:93-109`).
+- Red canonical selector
+  `$env:DEBUG='false'; .\scripts\verify_local.ps1 -TaskSlug wave1_t504_red -BackendOnly -BackendSelector tests/unit/test_rate_limit_memory_bound.py`:
+  exit `1`, `3 errors`; политика/cap ещё отсутствовали.
+- Тот же selector после исправления с `-TaskSlug wave1_t504`: exit `0`, `3 passed`. Проверены bound
+  на потоке уникальных host, сохранение активно используемого host при eviction и контрпроверка,
+  что реальный host по-прежнему получает `TooManyRequestsException` после лимита.
