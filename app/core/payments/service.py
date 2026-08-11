@@ -109,8 +109,8 @@ async def _drain_payment_cleanup(
                 continue
             if caller_cancellation is None:
                 caller_cancellation = exc
-            else:
-                task.cancel("repeated caller cancellation")
+            # Repeated caller cancellation must not interrupt the session-owned
+            # terminalization sequence and leave a durable NEW/PREPARED row.
         except Exception:
             # The task is terminal; classify its exact result below.
             pass
@@ -916,34 +916,32 @@ class PaymentService:
         except asyncio.CancelledError:
             if tx_may_be_persisted:
                 committed_after_cancellation = False
-                cleanup_error: BaseException | None = None
-                if commit:
-                    cleanup_error = await _drain_payment_cleanup(self.session.rollback)
-                    if cleanup_error is None:
-                        try:
-                            tx_latest = (
-                                await self.session.execute(
-                                    select(Transaction).where(
-                                        Transaction.tx_id == tx_id_str
-                                    ).execution_options(populate_existing=True)
-                                )
-                            ).scalar_one_or_none()
-                            committed_after_cancellation = (
-                                tx_latest is not None
-                                and tx_latest.state == "COMMITTED"
-                            )
-                        except BaseException as read_error:
-                            cleanup_error = read_error
 
-                if not committed_after_cancellation and cleanup_error is None:
-                    cleanup_error = await _drain_payment_cleanup(
-                        lambda: self.engine.abort(
+                async def terminalize_after_cancellation() -> None:
+                    nonlocal committed_after_cancellation
+                    if commit:
+                        await self.session.rollback()
+                        tx_latest = (
+                            await self.session.execute(
+                                select(Transaction).where(
+                                    Transaction.tx_id == tx_id_str
+                                ).execution_options(populate_existing=True)
+                            )
+                        ).scalar_one_or_none()
+                        committed_after_cancellation = (
+                            tx_latest is not None and tx_latest.state == "COMMITTED"
+                        )
+                    if not committed_after_cancellation:
+                        await self.engine.abort(
                             tx_id_str,
                             reason="Payment cancelled",
                             commit=commit,
                             error_code=ErrorCode.E007,
                         )
-                    )
+
+                cleanup_error = await _drain_payment_cleanup(
+                    terminalize_after_cancellation
+                )
 
                 if cleanup_error is not None:
                     logger.error(
@@ -957,19 +955,15 @@ class PaymentService:
             if tx_may_be_persisted:
                 # Timeout is ambiguous: commit may have succeeded. Read-after-timeout to avoid
                 # COMMITTED -> ABORTED.
-                if commit:
-                    rollback_error = await _drain_payment_cleanup(self.session.rollback)
-                    if rollback_error is not None:
-                        logger.error(
-                            "event=payment.timeout_rollback_failed tx_id=%s error_type=%s",
-                            tx_id_str,
-                            type(rollback_error).__name__,
-                        )
-                        if isinstance(rollback_error, asyncio.CancelledError):
-                            raise rollback_error
-                        raise GeoException() from rollback_error
+                committed_after_timeout: PaymentResult | None = None
+                cleanup_stage = "abort"
 
-                    try:
+                async def terminalize_after_timeout() -> None:
+                    nonlocal committed_after_timeout, cleanup_stage
+                    if commit:
+                        cleanup_stage = "rollback"
+                        await self.session.rollback()
+                        cleanup_stage = "recovery_read"
                         tx_latest = (
                             await self.session.execute(
                                 select(Transaction).where(
@@ -977,52 +971,37 @@ class PaymentService:
                                 ).execution_options(populate_existing=True)
                             )
                         ).scalar_one_or_none()
-                    except Exception as read_error:
-                        logger.error(
-                            "event=payment.timeout_recovery_read_failed tx_id=%s error_type=%s",
-                            tx_id_str,
-                            type(read_error).__name__,
-                        )
-                        raise GeoException() from read_error
-                    if tx_latest is not None and tx_latest.state == "COMMITTED":
-                        return self._tx_to_payment_result(tx_latest)
+                        if tx_latest is not None and tx_latest.state == "COMMITTED":
+                            committed_after_timeout = self._tx_to_payment_result(tx_latest)
+                            return
 
-                # Ensure abort isn't cancelled due to the timeout cancellation context.
-                if commit:
-                    abort_error = await _drain_payment_cleanup(
-                        lambda: self.engine.abort(
-                            tx_id_str,
-                            reason="Payment timeout",
-                            commit=True,
-                            error_code=ErrorCode.E007,
-                        )
+                    cleanup_stage = "abort"
+                    await self.engine.abort(
+                        tx_id_str,
+                        reason="Payment timeout",
+                        commit=commit,
+                        error_code=ErrorCode.E007,
                     )
-                    if abort_error is not None:
-                        logger.error(
-                            "event=payment.timeout_abort_failed tx_id=%s error_type=%s",
-                            tx_id_str,
-                            type(abort_error).__name__,
-                        )
-                        if isinstance(abort_error, asyncio.CancelledError):
-                            raise abort_error
-                        raise GeoException() from abort_error
-                else:
-                    abort_error = await _drain_payment_cleanup(
-                        lambda: self.engine.abort(
-                            tx_id_str,
-                            reason="Payment timeout",
-                            commit=False,
-                            error_code=ErrorCode.E007,
-                        )
+
+                cleanup_error = await _drain_payment_cleanup(terminalize_after_timeout)
+                if cleanup_error is not None:
+                    event_name = (
+                        "payment.timeout_recovery_read_failed"
+                        if cleanup_stage == "recovery_read"
+                        else f"payment.timeout_{cleanup_stage}_failed"
                     )
-                    if abort_error is not None:
-                        logger.error(
-                            "event=payment.timeout_abort_failed tx_id=%s error_type=%s",
-                            tx_id_str,
-                            type(abort_error).__name__,
-                        )
-                        if isinstance(abort_error, asyncio.CancelledError):
-                            raise abort_error
+                    logger.error(
+                        "event=%s tx_id=%s error_type=%s",
+                        event_name,
+                        tx_id_str,
+                        type(cleanup_error).__name__,
+                    )
+                    if isinstance(cleanup_error, asyncio.CancelledError):
+                        raise cleanup_error
+                    if commit:
+                        raise GeoException() from cleanup_error
+                if committed_after_timeout is not None:
+                    return committed_after_timeout
             raise TimeoutException("Payment timed out")
 
         # Fetch server timestamps (created_at/updated_at) explicitly.

@@ -34,14 +34,15 @@ async def test_payment_cleanup_is_drained_after_caller_cancellation():
 
 
 @pytest.mark.asyncio
-async def test_repeated_cancellation_cancels_but_still_drains_cleanup():
+async def test_repeated_cancellation_does_not_preempt_terminal_cleanup():
     started = asyncio.Event()
+    release = asyncio.Event()
     terminal = asyncio.Event()
 
     async def cleanup() -> None:
         started.set()
         try:
-            await asyncio.Event().wait()
+            await release.wait()
         finally:
             terminal.set()
 
@@ -50,6 +51,10 @@ async def test_repeated_cancellation_cancels_but_still_drains_cleanup():
     owner.cancel("first cancellation")
     await asyncio.sleep(0)
     owner.cancel("repeated cancellation")
+    await asyncio.sleep(0)
+
+    assert terminal.is_set() is False
+    release.set()
 
     result = await owner
 

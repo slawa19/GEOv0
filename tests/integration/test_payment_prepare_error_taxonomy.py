@@ -1168,6 +1168,88 @@ async def test_staged_prepare_cancellation_aborts_before_outer_rollback(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("interruption", ["cancellation", "timeout"])
+async def test_repeated_cancellation_during_recovery_read_still_aborts(
+    db_session,
+    monkeypatch,
+    interruption: str,
+) -> None:
+    service, sender, request, tx_id = await _build_direct_payment(
+        db_session,
+        suffix=f"recovery_read_{interruption}",
+    )
+
+    async def build_graph(equivalent_code: str, **kwargs) -> None:
+        return None
+
+    def find_flow_routes(from_pid: str, to_pid: str, amount: Decimal, **kwargs):
+        return [([from_pid, to_pid], amount)]
+
+    prepare_started = asyncio.Event()
+
+    async def interrupted_prepare(*args, **kwargs) -> None:
+        prepare_started.set()
+        await asyncio.Event().wait()
+
+    original_rollback = db_session.rollback
+    original_execute = db_session.execute
+    recovery_read_started = asyncio.Event()
+    release_recovery_read = asyncio.Event()
+    cleanup_started = False
+    recovery_read_intercepted = False
+    abort_calls = 0
+
+    async def tracked_rollback() -> None:
+        nonlocal cleanup_started
+        await original_rollback()
+        cleanup_started = True
+
+    async def blocking_recovery_read(*args, **kwargs):
+        nonlocal recovery_read_intercepted
+        if cleanup_started and not recovery_read_intercepted:
+            recovery_read_intercepted = True
+            recovery_read_started.set()
+            await release_recovery_read.wait()
+        return await original_execute(*args, **kwargs)
+
+    original_abort = service.engine.abort
+
+    async def tracked_abort(*args, **kwargs):
+        nonlocal abort_calls
+        abort_calls += 1
+        return await original_abort(*args, **kwargs)
+
+    monkeypatch.setattr(service.router, "build_graph", build_graph)
+    monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
+    monkeypatch.setattr(service.engine, "prepare", interrupted_prepare)
+    monkeypatch.setattr(service.engine, "abort", tracked_abort)
+    monkeypatch.setattr(db_session, "rollback", tracked_rollback)
+    monkeypatch.setattr(db_session, "execute", blocking_recovery_read)
+
+    if interruption == "timeout":
+        monkeypatch.setattr(settings, "PREPARE_TIMEOUT_SECONDS", 0.01, raising=False)
+
+    owner = asyncio.create_task(service.create_payment(sender.id, request))
+    await asyncio.wait_for(prepare_started.wait(), timeout=1)
+    if interruption == "cancellation":
+        owner.cancel("initial payment cancellation")
+
+    await asyncio.wait_for(recovery_read_started.wait(), timeout=1)
+    owner.cancel("cancellation during recovery read")
+    await asyncio.sleep(0)
+    release_recovery_read.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await owner
+
+    transaction = (
+        await original_execute(select(Transaction).where(Transaction.tx_id == tx_id))
+    ).scalar_one()
+    assert transaction.state == "ABORTED"
+    assert abort_calls == 1
+
+
+@pytest.mark.asyncio
 async def test_timeout_rollback_failure_is_safe_without_read_or_abort(
     db_session,
     monkeypatch,
