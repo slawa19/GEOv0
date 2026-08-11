@@ -43,6 +43,23 @@ async def _use_serializable(session) -> None:
     assert str(isolation).lower() == "serializable"
 
 
+async def _wait_for_advisory_wait(observer, *, backend_pid: int) -> bool:
+    for _ in range(200):
+        waiting = await observer.scalar(
+            text(
+                "SELECT EXISTS ("
+                "SELECT 1 FROM pg_locks "
+                "WHERE pid = :pid AND locktype = 'advisory' AND NOT granted"
+                ")"
+            ),
+            {"pid": backend_pid},
+        )
+        if waiting:
+            return True
+        await asyncio.sleep(0.01)
+    return False
+
+
 async def _seed_prepared_payment(
     *,
     include_waiter: bool,
@@ -333,8 +350,11 @@ async def test_concurrent_same_transaction_commit_applies_effects_once_postgres(
     seed = await _seed_prepared_payment(include_waiter=False)
     holder_at_segment = asyncio.Event()
     release_holder = asyncio.Event()
-    waiter_tx_lock_attempted = asyncio.Event()
-    waiter_tx_lock_acquired = asyncio.Event()
+    waiter_owner_attempted = asyncio.Event()
+    waiter_owner_acquired = asyncio.Event()
+    observed_retry_errors: list[tuple[str, str | None, str]] = []
+    waiter_preflight_calls = 0
+    waiter_rollback_calls = 0
     holder_task = None
     waiter_task = None
     exercise_completed = False
@@ -349,29 +369,61 @@ async def test_concurrent_same_transaction_commit_applies_effects_once_postgres(
         waiter_engine._retry_base_delay_s = 0.0
         waiter_engine._retry_max_delay_s = 0.0
         holder_segment_acquire = holder_engine._acquire_segment_advisory_lock_keys
-        waiter_execute = waiter_session.execute
+        waiter_owner_acquire = waiter_engine._acquire_equivalent_owner_locks
+        waiter_preflight = waiter_engine._preacquire_equivalent_owner_locks_for_tx
+        waiter_retryable = waiter_engine._is_retryable_db_error
+        waiter_rollback = waiter_session.rollback
+        waiter_pid = int(
+            (await waiter_session.execute(text("SELECT pg_backend_pid()"))).scalar_one()
+        )
 
         async def _hold_before_segment(keys):
             holder_at_segment.set()
             await release_holder.wait()
             await holder_segment_acquire(keys)
 
-        async def _observe_waiter_tx_lock(statement, *args, **kwargs):
-            sql = str(statement).lower()
-            is_tx_lock = "pg_advisory_xact_lock" in sql and "namespace" in sql
-            if is_tx_lock:
-                waiter_tx_lock_attempted.set()
-            result = await waiter_execute(statement, *args, **kwargs)
-            if is_tx_lock:
-                waiter_tx_lock_acquired.set()
-            return result
+        async def _observe_waiter_owner(equivalent_ids):
+            waiter_owner_attempted.set()
+            await waiter_owner_acquire(equivalent_ids)
+            waiter_owner_acquired.set()
+
+        async def _count_waiter_preflight(*args, **kwargs):
+            nonlocal waiter_preflight_calls
+            waiter_preflight_calls += 1
+            return await waiter_preflight(*args, **kwargs)
+
+        async def _count_waiter_rollback():
+            nonlocal waiter_rollback_calls
+            waiter_rollback_calls += 1
+            return await waiter_rollback()
+
+        def _record_retryable(exc, *, op):
+            observed_retry_errors.append(
+                (op, waiter_engine._get_pgcode(exc), str(exc.statement or ""))
+            )
+            return waiter_retryable(exc, op=op)
 
         monkeypatch.setattr(
             holder_engine,
             "_acquire_segment_advisory_lock_keys",
             _hold_before_segment,
         )
-        monkeypatch.setattr(waiter_session, "execute", _observe_waiter_tx_lock)
+        monkeypatch.setattr(
+            waiter_engine,
+            "_acquire_equivalent_owner_locks",
+            _observe_waiter_owner,
+        )
+        monkeypatch.setattr(
+            waiter_engine,
+            "_preacquire_equivalent_owner_locks_for_tx",
+            _count_waiter_preflight,
+        )
+        monkeypatch.setattr(
+            waiter_engine,
+            "_is_retryable_db_error",
+            _record_retryable,
+        )
+        monkeypatch.setattr(waiter_session, "rollback", _count_waiter_rollback)
 
         try:
             holder_task = asyncio.create_task(
@@ -382,9 +434,12 @@ async def test_concurrent_same_transaction_commit_applies_effects_once_postgres(
             waiter_task = asyncio.create_task(
                 waiter_engine.commit(seed["holder_tx_id"])
             )
-            await asyncio.wait_for(waiter_tx_lock_attempted.wait(), timeout=5.0)
-            with pytest.raises(asyncio.TimeoutError):
-                await asyncio.wait_for(waiter_tx_lock_acquired.wait(), timeout=0.25)
+            await asyncio.wait_for(waiter_owner_attempted.wait(), timeout=5.0)
+            async with TestingSessionLocal() as observer:
+                assert await _wait_for_advisory_wait(
+                    observer,
+                    backend_pid=waiter_pid,
+                )
             assert not waiter_task.done()
 
             release_holder.set()
@@ -394,7 +449,14 @@ async def test_concurrent_same_transaction_commit_applies_effects_once_postgres(
             )
             assert holder_result is True
             assert waiter_result is True
-            assert waiter_tx_lock_acquired.is_set()
+            assert waiter_owner_acquired.is_set()
+            assert waiter_rollback_calls == 1
+            assert waiter_preflight_calls == 2
+            assert len(observed_retry_errors) == 1
+            retry_op, retry_code, retry_statement = observed_retry_errors[0]
+            assert retry_op == "commit"
+            assert retry_code in {"40001", "23505"}
+            assert "INSERT INTO debts" in retry_statement
             exercise_completed = True
         finally:
             release_holder.set()
@@ -408,8 +470,8 @@ async def test_concurrent_same_transaction_commit_applies_effects_once_postgres(
 
     try:
         async with TestingSessionLocal() as verify:
-            state = await verify.scalar(
-                select(Transaction.state).where(
+            transaction = await verify.scalar(
+                select(Transaction).where(
                     Transaction.tx_id == seed["holder_tx_id"]
                 )
             )
@@ -427,9 +489,32 @@ async def test_concurrent_same_transaction_commit_applies_effects_once_postgres(
                     )
                 )
             ).scalars().all()
-            assert state == "COMMITTED"
+            reverse_debt = await verify.scalar(
+                select(Debt.amount).where(
+                    Debt.debtor_id == seed["receiver_id"],
+                    Debt.creditor_id == seed["sender_id"],
+                    Debt.equivalent_id == seed["equivalent_id"],
+                )
+            )
+            audit_count = await verify.scalar(
+                select(func.count()).select_from(IntegrityAuditLog).where(
+                    IntegrityAuditLog.tx_id == seed["holder_tx_id"],
+                    IntegrityAuditLog.operation_type == "PAYMENT",
+                )
+            )
+            persisted_limit = await verify.scalar(
+                select(TrustLine.limit).where(
+                    TrustLine.equivalent_id == seed["equivalent_id"]
+                )
+            )
+            assert transaction is not None
+            assert transaction.state == "COMMITTED"
+            assert transaction.error is None
             assert debt_amount == Decimal("8.00000000")
+            assert reverse_debt is None
             assert remaining_locks == []
+            assert audit_count == 1
+            assert persisted_limit == Decimal("10.00000000")
     finally:
         await _cleanup_seed(seed)
 

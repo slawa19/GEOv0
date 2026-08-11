@@ -344,13 +344,40 @@ class PaymentEngine:
             or getattr(orig, "pgcode", None)
             or getattr(orig, "code", None)
         )
-        # 40P01: deadlock_detected, 40001: serialization_failure. Under the
-        # default SERIALIZABLE isolation, a same-tx commit that waited on the
-        # advisory lock can observe an invisible concurrent insert as 23505;
-        # retrying the whole commit then resolves through the terminal tx state.
-        return sqlstate in {"40P01", "40001"} or (
-            sqlstate == "23505" and op == "commit"
+        # 40P01: deadlock_detected, 40001: serialization_failure. PostgreSQL may
+        # alternatively surface the known invisible concurrent Debt insert as
+        # 23505. Retry only that exact business-key constraint; every other
+        # unique violation must fail closed.
+        statement = str(getattr(exc, "statement", None) or "").lstrip().upper()
+        is_debt_insert = statement == "INSERT INTO DEBTS" or statement.startswith(
+            ("INSERT INTO DEBTS ", "INSERT INTO DEBTS(")
         )
+        constraint_name = self._get_db_constraint_name(exc)
+        return sqlstate in {"40P01", "40001"} or (
+            sqlstate == "23505"
+            and op == "commit"
+            and is_debt_insert
+            and constraint_name == "uq_debts_debtor_creditor_equivalent"
+        )
+
+    @staticmethod
+    def _get_db_constraint_name(exc: BaseException) -> str | None:
+        """Read a constraint name across asyncpg and psycopg DBAPI wrappers."""
+        current = getattr(exc, "orig", None)
+        seen: set[int] = set()
+        while current is not None and id(current) not in seen:
+            seen.add(id(current))
+            direct = getattr(current, "constraint_name", None)
+            if direct:
+                return str(direct)
+            diag = getattr(current, "diag", None)
+            diagnostic = getattr(diag, "constraint_name", None)
+            if diagnostic:
+                return str(diagnostic)
+            current = getattr(current, "__cause__", None) or getattr(
+                current, "__context__", None
+            )
+        return None
 
     def _get_pgcode(self, exc: BaseException) -> str | None:
         if not isinstance(exc, DBAPIError):
@@ -372,8 +399,8 @@ class PaymentEngine:
         """Retry wrapper for SERIALIZABLE/deadlock errors.
 
         Policy:
-        - Catch Postgres 40001/40P01, plus commit-only 23505 caused by an
-          invisible concurrent insert after a SERIALIZABLE advisory-lock wait.
+        - Catch Postgres 40001/40P01 and the exact known Debt business-key
+          23505 race after an invisible concurrent insert.
         - Rollback.
         - Exponential backoff with jitter, bounded.
         - Re-run the whole unit-of-work `fn()`.

@@ -80,7 +80,7 @@ async def test_staged_serialization_failure_is_owned_by_outer_transaction(monkey
     assert session.rollback_calls == 0
 
 
-def test_unique_violation_retry_is_limited_to_commit_operations(monkeypatch):
+def test_unique_violation_retry_is_narrowed_to_commit_debt_business_key(monkeypatch):
     from app.core.payments.engine import PaymentEngine
 
     session = _FakeAsyncSession()
@@ -89,6 +89,7 @@ def test_unique_violation_retry_is_limited_to_commit_operations(monkeypatch):
 
     class _FakePgError(Exception):
         sqlstate = "23505"
+        constraint_name = "uq_debts_debtor_creditor_equivalent"
 
     error = DBAPIError(
         statement="INSERT INTO debts",
@@ -101,6 +102,25 @@ def test_unique_violation_retry_is_limited_to_commit_operations(monkeypatch):
     assert eng._is_retryable_db_error(error, op="commit_nocommit") is False
     assert eng._is_retryable_db_error(error, op="prepare") is False
     assert eng._is_retryable_db_error(error, op="abort") is False
+
+    wrong_constraint = DBAPIError(
+        statement="INSERT INTO debts",
+        params=None,
+        orig=type(
+            "OtherUniqueViolation",
+            (Exception,),
+            {"sqlstate": "23505", "constraint_name": "debts_pkey"},
+        )(),
+        connection_invalidated=False,
+    )
+    wrong_table = DBAPIError(
+        statement="INSERT INTO transactions",
+        params=None,
+        orig=_FakePgError("unique_violation"),
+        connection_invalidated=False,
+    )
+    assert eng._is_retryable_db_error(wrong_constraint, op="commit") is False
+    assert eng._is_retryable_db_error(wrong_table, op="commit") is False
 
 
 @pytest.mark.asyncio
