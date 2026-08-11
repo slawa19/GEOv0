@@ -224,11 +224,18 @@ Health endpoints (есть также алиасы `/api/v1/*`):
 - `docker exec geov0-db createdb -U geo geov0_test_runbook`
 
 3) Указать переменные окружения тестов:
-- `TEST_DATABASE_URL=postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_runbook`
-- `GEO_TEST_ALLOW_DB_RESET=1`
+
+```powershell
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_runbook"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+```
 
 4) Запустить конкретный тест:
-- `.\scripts\verify_local.ps1 -TaskSlug runbook_postgres -BackendOnly -BackendMarker postgres -BackendSelector tests/integration/test_concurrent_prepare_routes_bottleneck_postgres.py`
+
+```powershell
+.\scripts\verify_local.ps1 -TaskSlug runbook_postgres -BackendOnly -BackendMarker postgres `
+  -BackendSelector tests/integration/test_concurrent_prepare_routes_bottleneck_postgres.py
+```
 
 Внимание: reset opt-in допустим только после проверки точного URL и отсутствия уникальной
 `geov0_test_*` БД. После прогона удаляйте только эту БД при нуле активных соединений.

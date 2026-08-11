@@ -70,15 +70,17 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 
 ### 1.5. Weryfikacja instalacji
 
-```bash
-# Uruchom kanoniczną bramkę backendu (PowerShell)
+Uruchom polecenia weryfikacyjne z PowerShell:
+
+```powershell
+# Uruchom kanoniczną bramkę backendu
 .\scripts\verify_local.ps1 -TaskSlug contributor_pl_install -BackendOnly
 
 # Sprawdź blocking scope Ruff
 python -m ruff check app migrations --no-cache
 
 # Otwórz dokumentację (Swagger UI)
-open http://localhost:8000/docs
+Start-Process http://localhost:8000/docs
 # (lub http://127.0.0.1:18000/docs przy uruchomieniu lokalnym przez scripts/run_local.ps1)
 ```
 
@@ -493,11 +495,17 @@ class TestRoutingService:
 
 ### 6.1. Przygotowanie PR
 
-```bash
+Uruchom wymagane bramki z PowerShell:
+
+```powershell
 # Upewnij się, że wszystkie checki przechodzą
 python -m ruff check app migrations --no-cache
 .\scripts\verify_local.ps1 -TaskSlug contributor_pl_pr_full
+```
 
+Następnie utwórz commit w używanej powłoce:
+
+```bash
 # Commit z czytelną wiadomością
 git commit -m "feat(payments): add multi-path routing support
 

@@ -89,8 +89,10 @@ npm --prefix admin-ui run dev
 
 ### 1.5. Проверка установки
 
-```bash
-# Запустить canonical backend gate (PowerShell)
+Запустите проверочные команды из PowerShell:
+
+```powershell
+# Запустить canonical backend gate
 .\scripts\verify_local.ps1 -TaskSlug contributor_install -BackendOnly
 
 # Проверить blocking Ruff scope (версия закреплена в requirements-dev.txt)
@@ -100,7 +102,7 @@ python -m ruff check app migrations --no-cache
 # mypy app/
 
 # Открыть документацию (Swagger UI)
-open http://localhost:8000/docs
+Start-Process http://localhost:8000/docs
 # (или http://127.0.0.1:18000/docs при запуске через scripts/run_local.ps1)
 ```
 
@@ -523,7 +525,9 @@ class TestRoutingService:
 
 ### 6.1. Подготовка PR
 
-```bash
+Запустите обязательные проверки из PowerShell:
+
+```powershell
 # Убедиться, что все проверки проходят
 python -m ruff check app migrations --no-cache
 
@@ -533,7 +537,11 @@ python -m ruff check app migrations --no-cache
 
 # 2. Запустить canonical full gate
 .\scripts\verify_local.ps1 -TaskSlug contributor_pr_full
+```
 
+Затем создайте commit в используемой оболочке:
+
+```bash
 # Commit с понятным сообщением
 git commit -m "feat(payments): add multi-path routing support
 
