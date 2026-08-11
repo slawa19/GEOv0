@@ -96,7 +96,7 @@ liveness без деталей и аутентифицированный diagnos
 | T503 | `compare_digest` для admin-токена | `[x]` |
 | T504 | Ограничить рост структуры rate-limiter | `[x]` |
 | T505 | Решение и реализация по `/health` degraded + HEALTHCHECK-потребителю | `[x]` |
-| T506 | `/api/v1/health` читает окружение через Settings | `[!]` |
+| T506 | `/api/v1/health` читает окружение через Settings | `[x]` |
 | T507 | Синхронизация `docs/ru/05-deployment.md`, `config-reference.md`, `09-decisions-and-defaults.md` | `[!]` |
 | T508 | Независимое внешнее ревью и evidence на точном HEAD (триггер AGENTS.md §15: периметр безопасности) | `[!]` |
 
@@ -223,3 +223,17 @@ liveness без деталей и аутентифицированный diagnos
   `docker image inspect --format '{{json .Config.Healthcheck}}'` подтвердил command `/health`,
   interval `30s`, timeout `10s`, start period `5s`, retries `3`; task-local image удалён
   (`IMAGE_CLEANED`).
+
+### 2026-08-11 — T506
+
+- Implementation commit: `1c00092e63f211b75cdac49c44d2ba57bc9f061d`.
+- До: `app/api/v1/health.py:35-38` повторно читал `GEO_ENV`/`ENV` через `os.getenv`, минуя уже
+  выполненную в `Settings` канонизацию `ENV`/legacy `ENVIRONMENT`.
+- После: `_best_effort_environment()` возвращает resolved singleton `settings.ENV`
+  (`app/api/v1/health.py:36-38`). Контрпроверка
+  `tests/integration/test_health_and_equivalents.py:88-99` намеренно задаёт process env
+  `GEO_ENV=prod`, `ENV=dev`, но `settings.ENV=staging`.
+- Red canonical selector
+  `$env:DEBUG='false'; .\scripts\verify_local.ps1 -TaskSlug wave1_t506_red -BackendOnly -BackendSelector tests/integration/test_health_and_equivalents.py`:
+  exit `1`, `1 failed, 4 passed`; actual environment был `prod`, expected `staging`.
+- Тот же selector после исправления с `-TaskSlug wave1_t506`: exit `0`, `5 passed`.
