@@ -152,7 +152,7 @@ npm --prefix simulator-ui/v2 run build
 .\scripts\verify_local.ps1 -TaskSlug premerge_payment_slice
 ```
 
-Default full gate исключает `slow` и `e2e`; эти tiers запускаются отдельными milestone selectors. Команда не является утверждением, что текущий baseline уже зелёный. Каждый известный baseline failure фиксируйте дословно и отделяйте от регрессий текущего slice.
+Default full gate исключает backend tiers `slow` и `postgres`; Playwright E2E запускается отдельными package jobs. Команда не является утверждением, что текущий baseline уже зелёный. Каждый известный baseline failure фиксируйте дословно и отделяйте от регрессий текущего slice.
 
 ### Postgres gate
 

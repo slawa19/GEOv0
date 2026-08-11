@@ -311,7 +311,7 @@ Health endpoints (also available as `/api/v1/*` aliases):
 ### Testing (single entry point)
 
 The canonical required local gate is the root PowerShell verifier. It runs the
-default backend pytest tier (excluding `slow`/`e2e`), asserts a single Alembic
+default backend pytest tier (excluding `slow`/`postgres`), asserts a single Alembic
 head, and runs Admin UI lint/unit/build plus Simulator UI v2
 lint/typecheck/unit/build:
 

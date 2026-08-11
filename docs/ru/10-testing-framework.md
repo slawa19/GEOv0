@@ -11,7 +11,7 @@
 .\scripts\verify_local.ps1 -TaskSlug phase6_example
 ```
 
-Команда запускает backend tier без `slow`, `e2e` и `postgres`, проверку одного
+Команда запускает backend tier без `slow` и `postgres`, проверку одного
 Alembic head, а затем lint/unit/build для Admin UI и lint/typecheck/unit/build для
 Simulator UI v2. Успешный локальный запуск не доказывает статус опубликованного CI.
 

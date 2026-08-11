@@ -124,7 +124,7 @@ try {
                 $pytestArgs += @('-m', 'not postgres')
             }
             else {
-                $pytestArgs += @('-m', 'not slow and not e2e and not postgres')
+                $pytestArgs += @('-m', 'not slow and not postgres')
             }
             if ($BackendSelector.Count -gt 0) {
                 $pytestArgs += '--'

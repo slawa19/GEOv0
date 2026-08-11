@@ -165,7 +165,7 @@ sequence (что требует протокольного поля), либо �
 | T601 | Убрать ветвление по `PYTEST_CURRENT_TEST` из production SSE (F-006-2, P2) | `[x]` |
 | T602 | Решить судьбу `stop_after_types`: сделать работающим вне pytest или убрать из контракта и сигнатур (F-006-2b, P3) | `[x]` |
 | T603 | Включить rate limiter в тестах; покрыть 429/окно/fallback | `[x]` |
-| T604 | Привести маркеры `pytest.ini` в соответствие с носителями | `[!]` |
+| T604 | Привести маркеры `pytest.ini` в соответствие с носителями | `[x]` |
 | T605 | Сделать `pytest -m postgres` fail-closed вне канонического раннера | `[!]` |
 | T606 | Добавить `container-smoke` в регулярное расписание | `[!]` |
 | T607 | Устранить rAF/тост-флак в admin vitest setup | `[x]` |
@@ -304,3 +304,29 @@ sequence (что требует протокольного поля), либо �
   wave5_t603_rate_limit -BackendOnly -BackendSelector $selectors -Python
   .\.venv\Scripts\python.exe` — exit `0`, `5 passed`. Pinned Ruff `0.1.14` на новом файле — exit
   `0`; `git diff --check` — exit `0`.
+
+### 2026-08-11 — T604
+
+- Перед правкой finding подтверждена на текущем дереве. **Current:** `pytest.ini:17` регистрировал
+  backend-marker `e2e`, `rg`/AST scan не нашли ни одного носителя, а debug-only
+  `pytest --collect-only -q -m e2e` собирал `0/1030` и завершался exit `5`; canonical default
+  всё равно исключал фиктивный tier через `scripts/verify_local.ps1:127`. **Intended:** backend
+  expensive tier принадлежит реальному marker `slow`, PostgreSQL — `postgres`, Playwright E2E
+  запускается отдельными package jobs. **Optimal:** удалить пустую регистрацию и `not e2e`, не
+  маркировать in-process super-smoke выдуманным external-service контрактом.
+- После: `pytest.ini:14-17` регистрирует `scenario`, `slow`, `postgres`; canonical default стал
+  `not slow and not postgres` (`scripts/verify_local.ps1:127`). Operational descriptions приведены
+  к той же семантике в `README.md:314`, `docs/ru/10-testing-framework.md:14` и AGENTS.md marker/full
+  gate sections. Policy guard `tests/unit/test_backend_marker_policy.py:7-29` AST-проверкой не даёт
+  вернуть пустой `pytest.mark.e2e` tier или фиктивный default exclusion.
+- Canonical targeted gate:
+  `$env:DEBUG='false'; $env:ENV='test'; $selectors=@('tests/unit/test_backend_marker_policy.py',
+  'tests/unit/test_postgres_test_taxonomy.py'); .\scripts\verify_local.ps1 -TaskSlug
+  wave5_t604_marker_policy_fix -BackendOnly -BackendSelector $selectors -Python
+  .\.venv\Scripts\python.exe` — exit `0`, `4 passed`. Debug-only full collect с новым выражением —
+  exit `0`, `987/1031 collected`, `44 deselected`; `pytest --markers` — exit `0`, e2e registrations
+  `0`. Pinned Ruff `0.1.14` и `git diff --check` на срезе — exit `0`.
+- Неудачная попытка policy guard сохранена: первый canonical `wave5_t604_marker_policy` завершился
+  exit `1` (`1 failed, 3 passed`), потому что строковый scan счёл собственный literal
+  `"pytest.mark.e2e"` носителем. Guard исправлен на AST-role check; production/tooling target не
+  менялся между попытками.
