@@ -12,11 +12,20 @@ from app.utils.event_bus import event_bus
 
 
 router = APIRouter()
+_BEARER_SUBPROTOCOL = "bearer"
+
+
+def _access_token_from_subprotocols(websocket: WebSocket) -> str | None:
+    protocols = websocket.scope.get("subprotocols", [])
+    if len(protocols) != 2 or protocols[0] != _BEARER_SUBPROTOCOL:
+        return None
+    token = protocols[1]
+    return token if token else None
 
 
 @router.websocket("/ws")
 async def ws_events(websocket: WebSocket):
-    token = websocket.query_params.get("token")
+    token = _access_token_from_subprotocols(websocket)
     if not token:
         await websocket.close(code=1008)
         return
@@ -28,7 +37,7 @@ async def ws_events(websocket: WebSocket):
 
     pid = str(payload["sub"])
 
-    await websocket.accept()
+    await websocket.accept(subprotocol=_BEARER_SUBPROTOCOL)
     await websocket.send_json({"type": "hello", "pid": pid, "ts": datetime.now(timezone.utc).isoformat()})
 
     sub = None

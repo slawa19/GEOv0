@@ -228,6 +228,18 @@ Real mode: артефакты (dev perf)
 
 Историческая спецификация решения: [simulator/backend/archive/anonymous-visitors-cookie-runs-spec.md](simulator/backend/archive/anonymous-visitors-cookie-runs-spec.md)
 
+### 1.14. Аутентификация WebSocket без токена в URL
+
+**Решение 2026-08-11:** access token для `/api/v1/ws` передаётся через WebSocket-подпротоколы:
+клиент открывает `new WebSocket(url, ["bearer", access_token])`, сервер выбирает только фиксированный
+подпротокол `bearer`. Сам токен не возвращается как выбранный подпротокол и не попадает в path,
+который uvicorn пишет в журнал рукопожатия.
+
+Документированный ранее URL `?token={access_token}` несовместим с требованием не оставлять секрет
+в request log, поэтому переход намеренно **не обратно совместим**: query-токен не принимается, а
+соединение без корректной пары подпротоколов закрывается с кодом `1008`. WebSocket остаётся
+опциональным для MVP; клиент сохраняет нормативный REST/polling fallback.
+
 ---
 
 ## 2. Дефолты и лимиты

@@ -270,7 +270,9 @@ UI (минимум):
 Статус: **опционально для MVP**.
 
 Подключение:
-- `wss://{hub_base_url}/api/v1/ws?token={access_token}`
+- `new WebSocket("wss://{hub_base_url}/api/v1/ws", ["bearer", access_token])`
+- URL с `?token={access_token}` больше не поддерживается: сервер закрывает такое соединение с
+  кодом `1008`, если токен не передан через `Sec-WebSocket-Protocol`.
 
 Ограничения (важно для UI/ожиданий):
 - Уведомления **best-effort**: возможны пропуски/дубликаты (at-most-once).
