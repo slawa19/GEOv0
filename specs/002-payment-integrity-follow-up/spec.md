@@ -284,3 +284,28 @@ program.
 - До P104 тест помечен `xfail(strict=True)` (`:22-25`): target improvement обязан дать XPASS.
   Та же canonical команда с `-TaskSlug wave3_p100` — exit `0`, `1 xfailed`; pinned Ruff и
   `git diff --check` — exit `0`. Test commit: `678d300`.
+
+### 2026-08-11 — P101
+
+- Перед правкой подтверждён владеющий путь: `app/core/payments/engine.py:899-906` вычисляет ключи
+  `commit()` из направленных persisted flows, а `:1031-1068` затем применяет оба сегмента.
+  `engine.py:82-93` всё ещё различает `(A,B)` и `(B,A)`, поэтому finding подтверждён без anchor
+  drift.
+- Добавлен параметризованный реальный PostgreSQL 16 test
+  `tests/integration/test_payment_inverse_multisegment_postgres.py:231-388`: оба порядка holder
+  (`A→B→C` и `C→B→A`), наблюдаемый через `pg_locks` advisory-wait barrier (`:205-224`), retries
+  отключены как источник false-green (`:267-268`). Target после P104 проверит два `COMMITTED`,
+  направленный net debt `1.00000000` на обоих сегментах, неизменные четыре trust limits, ноль
+  `PrepareLock` и ровно две payment audit rows (`:322-388`).
+- Первый canonical RED attempt `wave3_p101_red` — exit `1`, `2 failed` на test-fixture
+  `ForeignKeyViolationError`: ORM не имел relationship для упорядочивания `Transaction` и
+  `PrepareLock` в одном flush. Harness исправлен явным flush parent rows
+  (`test_payment_inverse_multisegment_postgres.py:115-118`); это не product failure.
+- Исправленный canonical RED:
+  `DEBUG=false; TEST_DATABASE_URL=postgresql+asyncpg://geo:geo@localhost:55433/geov0_test_wave3; GEO_TEST_ALLOW_DB_RESET=1; .\scripts\verify_local.ps1 -TaskSlug wave3_p101_red2 -BackendOnly -BackendMarker postgres -BackendSelector tests/integration/test_payment_inverse_multisegment_postgres.py`
+  — exit `1`, `2 failed`; оба start order дали exact
+  `AssertionError: inverse route bypassed the holder's pair locks` на `:304`.
+- До P104 оба параметра помечены `xfail(strict=True)` (`:231-234`). Canonical повтор после
+  последнего test change с `-TaskSlug wave3_p101_final` — exit `0`, `2 xfailed`; pinned
+  `ruff==0.1.14` и `git diff --check` — exit `0`. Test commit:
+  `6a12c47980b05d3aa9b3c95b2feae13829479219`.
