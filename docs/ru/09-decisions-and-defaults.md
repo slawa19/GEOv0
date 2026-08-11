@@ -303,8 +303,9 @@ violation остаётся неретраимым. Это узкое исклю�
 драйвера клиенту и не расширяет общий retry-предикат для `prepare`, `abort` или staged savepoint.
 
 Interactive-действие симулятора отвечает code `CONFLICT`, а не `PAYMENT_REJECTED`. В real tick тот
-же конфликт не засчитывается как терминальный отказ отдельного платежа: он прерывает tick, чтобы
-владелец внешней транзакции сделал rollback и мог переиграть работу на чистой сессии.
+же конфликт не засчитывается как терминальный отказ отдельного платежа: владелец внешней транзакции
+делает rollback, tick получает `REAL_MODE_TICK_FAILED`, а тот же batch не переигрывается. Следующий
+heartbeat планирует новый tick.
 
 При timeout или `CancelledError` после возможной записи `Transaction` cleanup доводится до
 terminal result до закрытия session: для commit-path выполняются rollback, read-before-abort и
