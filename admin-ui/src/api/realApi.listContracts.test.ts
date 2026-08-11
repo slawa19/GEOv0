@@ -40,6 +40,7 @@ const trustline = {
   available: '95.00000000',
   status: 'active',
   created_at: '2026-08-12T00:00:00Z',
+  policy: null,
 }
 
 const auditEntry = {
@@ -59,7 +60,7 @@ const auditEntry = {
 const equivalent = {
   code: 'UAH',
   precision: 2,
-  description: 'Hryvnia',
+  description: null,
   is_active: true,
 }
 
@@ -70,7 +71,7 @@ const incident = {
   equivalent: 'UAH',
   age_seconds: 61,
   sla_seconds: 60,
-  created_at: '2026-08-12T00:00:00Z',
+  created_at: null,
 }
 
 describe('realApi list response contracts', () => {
@@ -117,6 +118,11 @@ describe('realApi list response contracts', () => {
       call: () => realApi.listTrustlines({ page: 1, per_page: 20 }),
     },
     {
+      label: 'trustline nullable policy type',
+      payload: { items: [{ ...trustline, policy: 42 }], page: 1, per_page: 20, total: 1 },
+      call: () => realApi.listTrustlines({ page: 1, per_page: 20 }),
+    },
+    {
       label: 'audit item identity',
       payload: { items: [{ ...auditEntry, id: 1 }], page: 1, per_page: 50, total: 1 },
       call: () => realApi.listAuditLog({ page: 1, per_page: 50 }),
@@ -132,8 +138,18 @@ describe('realApi list response contracts', () => {
       call: () => realApi.listEquivalents({ include_inactive: true }),
     },
     {
+      label: 'equivalent nullable description type',
+      payload: { items: [{ ...equivalent, description: 42 }] },
+      call: () => realApi.listEquivalents({ include_inactive: true }),
+    },
+    {
       label: 'incidents pagination',
       payload: { items: [incident], page: '1', per_page: 20, total: 1 },
+      call: () => realApi.listIncidents({ page: 1, per_page: 20 }),
+    },
+    {
+      label: 'incident nullable created_at type',
+      payload: { items: [{ ...incident, created_at: 42 }], page: 1, per_page: 20, total: 1 },
       call: () => realApi.listIncidents({ page: 1, per_page: 20 }),
     },
   ])('rejects malformed 2xx $label payload', async ({ payload, call }) => {

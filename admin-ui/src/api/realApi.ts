@@ -119,7 +119,7 @@ const TrustlineSchema = z
     available: DecimalString,
     status: z.string(),
     created_at: z.string(),
-    policy: z.record(z.string(), z.unknown()).optional(),
+    policy: z.record(z.string(), z.unknown()).nullable().optional(),
   })
   .passthrough()
 
@@ -131,7 +131,7 @@ const IncidentSchema = z
     equivalent: z.string(),
     age_seconds: z.number(),
     sla_seconds: z.number(),
-    created_at: z.string().optional(),
+    created_at: z.string().nullable().optional(),
   })
   .passthrough()
 
@@ -139,7 +139,7 @@ const EquivalentSchema = z
   .object({
     code: z.string(),
     precision: z.number(),
-    description: z.string(),
+    description: z.string().nullable().optional(),
     is_active: z.boolean(),
   })
   .passthrough()
