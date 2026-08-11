@@ -55,8 +55,9 @@ Vertical slice:
    inverse multi-segment commit and staged outer transactions;
 2. replace the directed concurrency identity with a canonical unordered pair
    identity while retaining directed business/audit data;
-3. inventory every `commit=False` owner and implement a transaction-wide lock-set
-   or stable coarse-owner protocol before the first staged monetary mutation;
+3. use the inventoried `commit=False` owners to implement the selected
+   equivalent-scoped coarse-owner protocol before the first staged monetary
+   mutation; the real tick pre-acquires its complete sorted equivalent set;
 4. define mixed-version deployment compatibility: either coordinated quiescence,
    or canonical plus both legacy directional keys in one global order;
 5. add real PostgreSQL characterization for commit-only `23505` after a

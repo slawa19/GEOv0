@@ -46,7 +46,7 @@ Owner-authorized for Wave 3 on 2026-08-11; execute sequentially.
   state, PrepareLock and audit invariants.
 - [x] P102 Add a real staged multi-call deadlock regression test; do not inject a
   synthetic DBAPI error.
-- [!] P103 Inventory all staged owners and choose complete-lock-set or coarser-owner
+- [x] P103 Inventory all staged owners and choose complete-lock-set or coarser-owner
   acquisition with explicit transaction ownership.
 - [!] P104 Implement canonical unordered pair identity without changing directed
   business/audit semantics.

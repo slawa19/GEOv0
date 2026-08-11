@@ -344,3 +344,53 @@ program.
   RED `wave3_p102_red_reviewfix` — exit `1`, тот же единственный настоящий `40P01`; строгий final
   selector `wave3_p102_final` — exit `0`, `1 xfailed`; Ruff/diff — exit `0`. Review-remediation
   commit: `52273f0f86abe3a01c43bff39841bdbd70d040ed`.
+
+### 2026-08-11 — P103
+
+#### Current / Intended / Optimal
+
+- **Current.** Повторный inventory командой
+  `rg -n "PaymentEngine\(|commit=False|create_payment_internal_staged|execute_planned_payments" app`
+  — exit `0`. Все production-конструкторы `PaymentEngine` исчерпываются сервисом
+  (`app/core/payments/service.py:193-197`), Admin abort (`app/api/v1/admin.py:1014`), expired-lock
+  recovery (`app/core/recovery.py:102`) и stale-payment recovery (`recovery.py:208`). Старый
+  service anchor в спеке сдвинулся до `service.py:304-339`, но staged finding подтверждается:
+  `commit=False` остаётся на `:328-334`. Единственный multi-call staged payment owner — real tick:
+  один `action_db_lock`/session на `real_payments_executor.py:290-291,365-379`, задачи создаются на
+  `:465`, outer session живёт в `real_tick_orchestrator.py:233-383`, durable commit принадлежит
+  `real_tick_persistence.py:138-144`. Admin владеет одним staged abort плюс audit и commit/rollback
+  (`admin.py:1015-1050`); оба recovery loops вызывают item-owned `abort(commit=True)`
+  (`recovery.py:107-136,212-230`). Stop-level anchor drift нет.
+- **Intended.** Каждый payment transition сохраняет явного владельца транзакции; `commit=False`
+  не завершает outer transaction. Один outer owner не накапливает coarse locks в неизвестном
+  порядке, а public service, Admin и recovery используют тот же lock domain до tx/pair locks.
+- **Optimal bounded target.** Выбран equivalent-scoped coarse owner lock, а не глобальный payment
+  mutex и не предварительное вычисление всех route pairs. Стабильный ключ имеет отдельный advisory
+  namespace и identity одного `Equivalent`; все equivalent keys сортируются до acquisition. Это
+  сериализует денежные transitions внутри эквивалента, где staged route set заранее неизвестен,
+  но сохраняет параллелизм независимых эквивалентов. Global mutex был бы меньше по коду, однако
+  без необходимости сериализовал бы весь протокол; complete pair set потребовал бы маршрутизировать
+  весь batch до первой mutation и расширил бы owner refactor.
+
+#### Выбранный ownership protocol для P105
+
+1. `prepare`, `prepare_routes`, `commit` и `abort` получают полный набор equivalent-owner keys до
+   tx и segment keys; для persisted flows `commit`/`abort` делают read → owner-lock → tx-lock →
+   authoritative re-read/revalidation.
+2. Real tick до создания action tasks извлекает полный набор эквивалентов из planned batch и
+   pre-acquire-ит его в одном sorted call на общей outer session. Поэтому несколько savepoints не
+   могут накопить equivalent locks в противоположном порядке.
+3. Admin abort и recovery используют тот же engine boundary. Admin сохраняет один внешний commit
+   audit+abort; recovery сохраняет item-owned commits. Пустой/non-monetary terminal path не обязан
+   брать фиктивный equivalent lock и никогда не добирает его после tx lock.
+4. Pair locks остаются нужны для узкой same-equivalent serialization/revalidation и получают
+   канонический unordered identity в P104. Направление persisted flows, trustlines, audits и wire
+   data не меняется.
+5. P105 добавляет owner-surface regression через `RealPaymentsExecutor`; P102 остаётся focused
+   engine/savepoint test. P106 отдельно фиксирует coordinated-quiescence или bridge rollout.
+
+Независимый read-only inventory/review подтвердил owner map и equivalent-scoped coarse protocol как
+наименьший механизм без глобальной потери межэквивалентного параллелизма. `git diff --check` по
+`spec.md`, `plan.md`, `tasks.md` — exit `0`; product code в P103 не менялся. После задачи decision
+record находится в `spec.md:348-394`, executable selection — в `plan.md:58-60`, P103 status — в
+`tasks.md:49-50`.
