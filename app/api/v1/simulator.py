@@ -52,7 +52,6 @@ from app.schemas.simulator import (
     SetIntensityRequest,
     SimulatorGraphSnapshot,
     SimulatorRunStatusEvent,
-    SimulatorTxUpdatedEvent,
 
     # SSE payloads
     TopologyChangedEdgeRef,
