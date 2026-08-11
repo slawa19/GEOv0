@@ -88,3 +88,58 @@ def test_stable_contributor_guide_uses_canonical_backend_tiers() -> None:
     assert "geov0_test_docs_en" in english_guide
     assert 'localhost:5432/geov0"' not in english_guide
     assert "-BackendMarker postgres" in english_guide
+
+
+def test_active_operational_docs_do_not_bypass_the_canonical_pytest_runner() -> None:
+    operational_docs = [
+        _ROOT / "docs" / "ru" / "06-contributing.md",
+        _ROOT / "docs" / "ru" / "runbook-dev-wsl2-docker-no-desktop.md",
+        _ROOT / "docs" / "en" / "06-contributing.md",
+        _ROOT / "docs" / "en" / "10-testing-framework.md",
+        _ROOT / "docs" / "pl" / "06-contributing.md",
+        _ROOT / "docs" / "pl" / "10-testing-framework.md",
+    ]
+    direct_pytest = re.compile(
+        r"^(?:pytest|(?:py|python(?:\.exe)?|.*[\\/]python(?:\.exe)?)\s+-m\s+pytest)(?:\s|$)",
+        flags=re.IGNORECASE,
+    )
+
+    violations: list[str] = []
+    for path in operational_docs:
+        in_code_fence = False
+        for line_number, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(),
+            start=1,
+        ):
+            stripped = line.strip()
+            if stripped.startswith("```"):
+                in_code_fence = not in_code_fence
+                continue
+            inline_command = re.fullmatch(r"-\s*`([^`]+)`", stripped)
+            if not in_code_fence and inline_command is None:
+                continue
+            command = (
+                inline_command.group(1).strip()
+                if inline_command is not None
+                else stripped
+            )
+            if command.startswith("#"):
+                continue
+            if direct_pytest.match(command):
+                violations.append(f"{path.relative_to(_ROOT)}:{line_number}: {command}")
+
+    assert violations == []
+
+    postgres_docs = [
+        _ROOT / "docs" / "ru" / "runbook-dev-wsl2-docker-no-desktop.md",
+        _ROOT / "docs" / "en" / "10-testing-framework.md",
+    ]
+    for path in postgres_docs:
+        content = path.read_text(encoding="utf-8")
+        database_names = re.findall(
+            r"postgresql\+asyncpg://[^\s`\"']+/([A-Za-z0-9_]+)",
+            content,
+        )
+        assert database_names
+        assert all(name.startswith("geov0_test_") for name in database_names)
+        assert "-BackendMarker postgres" in content

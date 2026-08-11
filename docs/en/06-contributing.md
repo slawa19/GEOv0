@@ -71,12 +71,11 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 ### 1.5. Installation check
 
 ```bash
-# Run tests
-pytest
+# Run canonical backend gate (PowerShell)
+.\scripts\verify_local.ps1 -TaskSlug contributor_en_install -BackendOnly
 
-# Check linters
-ruff check .
-mypy app/
+# Check blocking Ruff scope
+python -m ruff check app migrations --no-cache
 
 # Open documentation (Swagger UI)
 open http://localhost:8000/docs
@@ -214,18 +213,17 @@ alembic -c migrations/alembic.ini history
 ### 4.1. Python
 
 We use:
-- **Ruff** — linter (replaces flake8, isort, pyupgrade)
-- **Black** — formatting (via ruff format)
-- **mypy** — static typing
+- **Ruff** — blocking CI linter for `app migrations`
+- **Black** — non-blocking formatting diagnostic
+- **mypy** — not configured as a repository gate
 
 ```bash
 # Check
-ruff check .
-mypy app/
+python -m ruff check app migrations --no-cache
 
 # Auto-fix
-ruff check --fix .
-ruff format .
+python -m ruff check --fix app migrations
+python -m black --check app migrations
 ```
 
 ### 4.2. Configuration (pyproject.toml)
@@ -389,21 +387,17 @@ tests/
 
 ### 5.2. Running tests
 
-```bash
-# All tests
-pytest
+```powershell
+# Default backend tier (excludes slow and postgres)
+.\scripts\verify_local.ps1 -TaskSlug contributor_en_backend -BackendOnly
 
-# With coverage
-pytest --cov=app --cov-report=html
+# Specific module through the canonical selector
+.\scripts\verify_local.ps1 -TaskSlug contributor_en_payments -BackendOnly `
+  -BackendSelector tests/unit/test_payments_2pc.py
 
-# Specific module
-pytest tests/unit/core/test_routing.py
-
-# By markers
-pytest -m "not slow"
-
-# In parallel
-pytest -n auto
+# Explicit slow milestone; postgres remains a dedicated tier
+.\scripts\verify_local.ps1 -TaskSlug contributor_en_super_smoke -BackendOnly `
+  -BackendSelector tests/integration/test_simulator_super_smoke.py -IncludeExpensive
 ```
 
 ### 5.3. Fixtures
@@ -500,9 +494,8 @@ class TestRoutingService:
 
 ```bash
 # Ensure all checks pass
-ruff check .
-mypy app/
-pytest
+python -m ruff check app migrations --no-cache
+.\scripts\verify_local.ps1 -TaskSlug contributor_en_pr_full
 
 # Commit with clear message
 git commit -m "feat(payments): add multi-path routing support
