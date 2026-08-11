@@ -170,7 +170,7 @@ sequence (что требует протокольного поля), либо �
 | T606 | Добавить `container-smoke` в регулярное расписание | `[x]` |
 | T607 | Устранить rAF/тост-флак в admin vitest setup | `[x]` |
 | T608a | Ruff на пиннутых версиях: `--fix` (19 находок), затем 5 ручных случаев (3× `F841` и 1× `E712` под `--unsafe-fixes`, 1× `E741` вручную); перевод ruff-джоба в блокирующий. Ограниченный объём: одна команда + 5 правок | `[x]` |
-| T608b | Black **остаётся неблокирующей диагностикой**: переформатирование 98 файлов / 4931 `+`/`-`-строк уничтожит `git blame`. Перевод в блокирующий — только после отдельного датированного решения | `[!]` |
+| T608b | Black **остаётся неблокирующей диагностикой**: переформатирование 98 файлов / 4931 `+`/`-`-строк уничтожит `git blame`. Перевод в блокирующий — только после отдельного датированного решения | `[x]` |
 | T609 | Диалектный guard вокруг `CREATE EXTENSION pgcrypto` в миграции 001 по образцу миграций 004-017. **Не однострочник:** отдельно оценить `postgresql.JSONB`, `gen_random_uuid()` и 7× `ALTER TABLE … ADD CONSTRAINT`, которые SQLite тоже не примет. Приоритет низкий: alembic не используется для создания dev-SQLite | `[!]` |
 | T610 | Решение по OpenAPI-ratchet: план сокращения дрейфа либо честное переименование гейта | `[!]` |
 | T611 | Независимое внешнее ревью и evidence на точном HEAD (триггер AGENTS.md §15: программа меняет сам механизм проверки, поэтому самопроверка гейта не является доказательством) | `[!]` |
@@ -396,3 +396,25 @@ sequence (что требует протокольного поля), либо �
 - Ограничение evidence: конфигурация и route policy доказаны локально; фактическое плановое
   выполнение может подтвердить только будущий GitHub `schedule` run на default branch. Это не
   подменяется manual dispatch и не заявляется как уже состоявшийся scheduled run.
+
+### 2026-08-11 — T608b
+
+- Перед решением проверены pinned owner surfaces: `requirements-dev.txt:6` фиксирует
+  `black==24.1.1`, CI `Black diagnostics` остаётся `continue-on-error: true`
+  (`.github/workflows/quality.yml:90-92`), а policy guard отдельно требует blocking Ruff и
+  non-blocking Black (`tests/unit/test_static_diagnostics_policy.py:9-27`). `git status --short --
+  app migrations` — exit `0`, пустой вывод: замер сделан на чистой product-области, несмотря на
+  несвязанные пользовательские docs changes в общем worktree.
+- Свежий pinned `.\.venv\Scripts\python.exe -m black --check app migrations` — exit `1`, точный
+  итог `99 files would be reformatted, 42 files would be left unchanged`. Дополнительный
+  `.\.venv\Scripts\python.exe -m black --diff app migrations` — exit `0`; 11529 raw output lines,
+  4991 строк с `+`/`-`, включая 198 file headers, то есть 4793 содержательные diff-строки. Это
+  актуализирует исторический baseline `98/4931`, не переписывая его.
+- **Current:** Black красный, но честно диагностический; Ruff остаётся blocking. **Intended:** не
+  смешивать массовое форматирование с функциональными волнами. **Optimal:** сохранить
+  non-blocking policy и потребовать отдельное датированное решение/атомарный formatting slice для
+  будущего перехода. Решение записано в `docs/ru/09-decisions-and-defaults.md:365-382`; product code,
+  formatter version и CI step не менялись.
+- Canonical policy gate `.\scripts\verify_local.ps1 -TaskSlug wave5_t608b_black_policy
+  -BackendOnly -BackendSelector tests/unit/test_static_diagnostics_policy.py -Python
+  .\.venv\Scripts\python.exe` — exit `0`, `1 passed`; `git diff --check` на decision/spec — exit `0`.
