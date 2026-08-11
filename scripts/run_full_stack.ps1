@@ -375,32 +375,6 @@ function Test-HttpEndpoint {
     return $false
 }
 
-function Show-RecentLog {
-    param(
-        [string]$Path,
-        [int]$Tail = 60,
-        [string]$Title = $null
-    )
-
-    if (-not $Path) { return }
-    if (-not (Test-Path $Path)) { return }
-
-    $label = if ($Title) { $Title } else { $Path }
-    Write-Host ("     --- Last {0} lines: {1} ---" -f $Tail, $label) -ForegroundColor DarkGray
-    try {
-        $lines = Get-Content -Path $Path -Tail $Tail -ErrorAction Stop
-        if ($null -eq $lines -or $lines.Count -eq 0) {
-            Write-Host "     (log is empty)" -ForegroundColor DarkGray
-        } else {
-            foreach ($line in $lines) {
-                Write-Host ("     {0}" -f $line)
-            }
-        }
-    } catch {
-        Write-Host "     (failed to read log)" -ForegroundColor DarkGray
-    }
- }
-
 function Update-EnvLocal {
     param([string]$Path, [string]$BaseUrl, [bool]$IsSimulator = $false)
     
