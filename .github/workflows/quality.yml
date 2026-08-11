@@ -92,6 +92,68 @@ jobs:
         continue-on-error: true
         run: python -m black --check app migrations
 
+  dev-image-content:
+    name: Development image content policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DEV_CONTEXT_IMAGE: geov0-dev-context:${{ github.run_id }}-${{ github.run_attempt }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Seed forbidden build-context sentinels
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .local-run .venv node_modules admin-ui/node_modules
+          : > .local-run/t502-sentinel.db
+          : > .venv/t502-sentinel
+          : > node_modules/t502-sentinel
+          : > admin-ui/node_modules/t502-sentinel
+          : > t502-root-sentinel.db
+
+      - name: Build development image
+        shell: bash
+        run: docker build --file Dockerfile --target runtime --tag "$DEV_CONTEXT_IMAGE" .
+
+      - name: Verify development image contents
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint sh "$DEV_CONTEXT_IMAGE" -ec '
+            for forbidden in \
+              /app/.local-run \
+              /app/.venv \
+              /app/node_modules \
+              /app/admin-ui/node_modules \
+              /app/t502-root-sentinel.db
+            do
+              if [ -e "$forbidden" ]; then
+                echo "Forbidden build-context path found in image: $forbidden" >&2
+                exit 1
+              fi
+            done
+
+            found_node_modules="$(find /app -type d -name node_modules -print -quit)"
+            if [ -n "$found_node_modules" ]; then
+              echo "Forbidden node_modules directory found in image: $found_node_modules" >&2
+              exit 1
+            fi
+
+            found_db="$(find /app -type f -name "*.db" -print -quit)"
+            if [ -n "$found_db" ]; then
+              echo "Forbidden database file found in image: $found_db" >&2
+              exit 1
+            fi
+          '
+
+      - name: Remove development image
+        if: always()
+        shell: bash
+        run: docker image rm --force "$DEV_CONTEXT_IMAGE" || true
+
   postgres:
     name: PostgreSQL integration (scheduled/manual)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'

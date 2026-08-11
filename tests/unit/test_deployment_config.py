@@ -66,6 +66,41 @@ def test_dockerfiles_have_distinct_documented_roles() -> None:
     assert 'CMD ["uvicorn", "app.main:app"' in dev_dockerfile
 
 
+def test_dev_image_content_gate_excludes_runtime_and_dependency_trees() -> None:
+    dockerignore = {
+        line.strip()
+        for line in _read_text(".dockerignore").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+    assert {
+        ".local-run",
+        ".venv",
+        "node_modules",
+        "**/node_modules",
+        "*.db",
+        "**/*.db",
+    } <= dockerignore
+
+    workflow = yaml.safe_load(_read_text(".github/workflows/quality.yml"))
+    job = workflow["jobs"]["dev-image-content"]
+    assert "if" not in job, "Dev image content must be checked on every workflow trigger"
+
+    commands = "\n".join(
+        str(step.get("run", "")) for step in job["steps"] if isinstance(step, dict)
+    )
+    assert "docker build --file Dockerfile --target runtime" in commands
+    for sentinel in (
+        ".local-run/t502-sentinel.db",
+        ".venv/t502-sentinel",
+        "node_modules/t502-sentinel",
+        "admin-ui/node_modules/t502-sentinel",
+        "t502-root-sentinel.db",
+    ):
+        assert sentinel in commands
+    assert "find /app -type d -name node_modules" in commands
+    assert 'find /app -type f -name "*.db"' in commands
+
+
 def test_dev_image_runs_shared_migrations_before_its_reload_command() -> None:
     dev_service = _read_compose("docker-compose.dev.yml")["services"]["app"]
     entrypoint = (_ROOT / "docker" / "docker-entrypoint.sh").read_text(
