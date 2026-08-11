@@ -302,3 +302,23 @@ severity, а не за откладывание.
   `{'40001'}`. `green3` — exit `0`, `3 passed`. Полная remediation unit matrix
   `wave4_003_review_fix_units` — exit `0`, `81 passed`; PG matrix
   `wave4_003_review_fix_pg` — exit `0`, `11 passed`; pinned Ruff и `git diff --check` — exit `0`.
+
+### 2026-08-11 — tracked anti-vacuum после remediation T307
+
+- Первое remediation-review на `88989eb` подтвердило исправление обоих P2 и не нашло новых P1/P2,
+  но отдельно воспроизвело отрицательный SERIALIZABLE schedule только внешним probe. Чтобы обещание
+  «reconciliation не синтезирует успех без matching `COMMITTED` transaction» не осталось
+  неповторяемым evidence, schedule добавлен в tracked test commit `b08de20`.
+- До/после: внешний probe на `88989eb` наблюдал настоящий `40001`, итоговый `GeoException(E010)`,
+  ноль `CLEARING` transaction/audit и сохранённый независимый update `100 -> 101`; после
+  `tests/integration/test_clearing_commit_replay_postgres.py:271-449` воспроизводит тот же порядок на
+  реальном PostgreSQL без DBAPI injection и проверяет одновременно failure, SQLSTATE, отсутствие
+  ложного durable clearing и точные Debt amounts.
+- Canonical single-selector:
+  `$env:DEBUG='false'; $env:ENV='test'; $env:TEST_DATABASE_URL='postgresql+asyncpg://geo:geo@127.0.0.1:55433/geov0_test_wave4_t303_negative_88989eb'; $env:GEO_TEST_ALLOW_DB_RESET='1'; .\scripts\verify_local.ps1 -TaskSlug wave4_003_t303_negative -BackendOnly -BackendMarker postgres -BackendSelector tests/integration/test_clearing_commit_replay_postgres.py::test_serializable_conflict_without_committed_occurrence_stays_failure_postgres`
+  — exit `0`, `1 passed`, cache содержит ровно этот nodeid.
+- Полный tracked replay-файл той же canonical формой с `-TaskSlug
+  wave4_003_t303_reconcile_file -BackendSelector
+  tests/integration/test_clearing_commit_replay_postgres.py` — exit `0`, `4 passed`; cache перечисляет
+  оба post-commit boundary (`ack_loss`, `cancellation`), same-cycle `40001 -> COMMITTED` и новый
+  отрицательный `40001 -> E010`. Pinned `ruff==0.1.14` для файла и `git diff --check` — exit `0`.
