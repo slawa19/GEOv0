@@ -420,3 +420,56 @@ record находится в `spec.md:348-394`, executable selection — в `pla
   Это доказывает, что pair canonicalization не подменяет transaction-wide owner fix. Pinned
   `ruff==0.1.14` и `git diff --check` — exit `0`. Implementation commit:
   `2b00246b8106e15ec8f2e73857847d77fdd2e739`.
+
+### 2026-08-11 — P105
+
+- Перед product-правкой unit characterization
+  `DEBUG=false; .\scripts\verify_local.ps1 -TaskSlug wave3_p105_unit_red -BackendOnly -BackendSelector tests/unit/test_payment_engine_advisory_locks_execute.py,tests/unit/test_payment_engine_retry_savepoint_nocommit.py,tests/unit/test_real_payments_ordered_journal.py`
+  завершился exit `1`, `2 failed, 29 passed`: отсутствовал equivalent-owner key, а executor дошёл
+  до трёх staged calls без batch pre-acquire. Это был RED именно нового owner boundary, не
+  синтетический DBAPI schedule.
+- Реализация вводит отдельный equivalent-owner namespace и стабильный signed key, сортирует и
+  дедуплицирует полный набор до tx/pair locks (`app/core/payments/engine.py:47,116-150`).
+  `prepare`/`prepare_routes` берут owner до tx (`:510-511,732-733`); `commit`/`abort` делают
+  persisted-flow preflight → owner → tx → authoritative comparison (`:305-330,966-1037,
+  1615-1681`). Изменившийся между preflight и tx набор не приводит к позднему lock acquisition:
+  engine-owned UoW целиком откатывается и повторяется, staged UoW получает существующий публичный
+  retryable `409/E008` (`:401-424`). Локальный savepoint retry для staged `40P01/40001` запрещён
+  (`:427-431`), configured retry count не увеличен.
+- Service boundary резолвит коды в UUID и сохраняет `55P03` как bounded timeout
+  (`app/core/payments/service.py:341-381`). Real tick после initialization boundary открывает
+  monetary UoW полным configured owner set (`app/core/simulator/real_tick_orchestrator.py:275-283`),
+  а executor перед action tasks повторно фиксирует точный sorted planned set
+  (`app/core/simulator/real_payments_executor.py:290-300`). Unit owner-surface regression доказывает,
+  что этот вызов первый и единственный перед staged calls
+  (`tests/unit/test_real_payments_ordered_journal.py:184-234`). Это уточняет P103: executor planned
+  set сохранён, а tick-level configured set добавлен до более ранних monetary phases; история P103
+  выше не переписывалась.
+- Реальный P102 после coarse owner подтвердил ожидаемую границу snapshot: промежуточный unmarked
+  `wave3_p105_p102_unmarked` завершился exit `1` с повторным `40001` внутри прежнего outer
+  `SERIALIZABLE` snapshot. Тест исправлен на один fail-fast outer rollback и повтор всего batch в
+  свежей транзакции; `wave3_p105_p102_restart` — exit `0`, `1 passed`. Следующий combined прогон
+  `wave3_p105_core_pg` честно завершился exit `1`, `1 failed, 3 passed`, потому что невидимый
+  конкурентный insert Debt дал независимый `23505` (предмет P107); fixture заменён существующими
+  Debt rows без изменения production retry policy.
+- Старые конкурентные tests сначала честно дали `wave3_p105_existing_pg` — exit `1`, `4 failed,
+  3 passed`: три barrier ожидали уже недостижимые segment/tx hooks, один abort обнаружил изменение
+  owner preflight. Barriers перенесены на equivalent-owner boundary с прежними monetary/state/lock
+  counterchecks; engine-owned abort теперь повторяет полный порядок после rollback. Повтор
+  `wave3_p105_existing_pg3` — exit `0`, `7 passed`. Дополнительный real-PG anti-vacuum test
+  (`tests/integration/test_payment_staged_multicall_postgres.py:363-438`) доказывает, что обратные
+  multi-equivalent input orders ждут один sorted set, а независимый equivalent проходит параллельно.
+- Прямой SQL lookup в раннем WIP оркестратора дал canonical
+  `wave3_p105_tick_units` — exit `1`, `3 failed, 1 passed`, exact error
+  `AttributeError: '_SuccessfulRollbackSession' object has no attribute 'execute'`. Lookup перенесён
+  в общий `PaymentService`; `wave3_p105_tick_units2` — exit `0`, `4 passed`. Финальный unit command
+  с engine/service-executor/tick selectors, `-TaskSlug wave3_p105_unit_final`, — exit `0`,
+  `52 passed`.
+- Проверенный disposable PostgreSQL 16 endpoint: database `geov0_test_wave3`, user `geo`, port
+  `55433`; guard подтвердил отдельную DB. Финальный post-commit milestone:
+  `DEBUG=false; TEST_DATABASE_URL=postgresql+asyncpg://geo:geo@localhost:55433/geov0_test_wave3; GEO_TEST_ALLOW_DB_RESET=1; $selectors=@('tests/integration/test_payment_pair_advisory_locks_postgres.py','tests/integration/test_payment_inverse_multisegment_postgres.py','tests/integration/test_payment_staged_multicall_postgres.py','tests/integration/test_payment_commit_advisory_locks_postgres.py','tests/integration/test_concurrent_prepare_routes_bottleneck_postgres.py'); .\scripts\verify_local.ps1 -TaskSlug wave3_p105_pg_final -BackendOnly -BackendMarker postgres -BackendSelector $selectors`
+  — exit `0`, `12 passed`.
+- `python -m ruff --version` подтвердил pinned `ruff 0.1.14`; pinned Ruff по 12 изменённым source/test
+  paths и `git diff --check` — exit `0`. Implementation commit:
+  `4ca910c77f29509e6d0e89a798563d92aba29bb6`; task/evidence находятся в
+  `tasks.md:53-54` и этой append-only записи.

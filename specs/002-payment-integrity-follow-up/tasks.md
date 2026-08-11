@@ -50,7 +50,7 @@ Owner-authorized for Wave 3 on 2026-08-11; execute sequentially.
   acquisition with explicit transaction ownership.
 - [x] P104 Implement canonical unordered pair identity without changing directed
   business/audit semantics.
-- [!] P105 Implement transaction-wide acquisition for staged owners; a retry-count
+- [x] P105 Implement transaction-wide acquisition for staged owners; a retry-count
   increase is forbidden.
 - [!] P106 Define and test mixed-version deployment compatibility across service,
   staged, Admin-abort and recovery owners. A bridge must acquire canonical plus
