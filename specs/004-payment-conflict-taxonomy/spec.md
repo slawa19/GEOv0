@@ -166,7 +166,7 @@ retryable-конфликта вместо `E010`; (3) `finally`-гарантия
 | T404 | `finally`-гарантия терминального состояния для отмены и таймаута (staged и non-staged) | `[x]` |
 | T405 | Симметричное логирование timeout-abort в обеих ветках | `[x]` |
 | T406 | Решение по ретраю/маппингу для trustlines и integrity сервисов | `[x]` |
-| T407 | Синхронизация `docs/ru/09-decisions-and-defaults.md` и платёжной RU-документации | `[!]` |
+| T407 | Синхронизация `docs/ru/09-decisions-and-defaults.md` и платёжной RU-документации | `[x]` |
 | T408 | Независимое ревью и evidence на точном HEAD | `[!]` |
 
 ### T403 — подход и критерии приёмки
@@ -348,3 +348,19 @@ retryable-конфликта вместо `E010`; (3) `finally`-гарантия
   «Проглатывание исключений: экземпляры без владельца», с пятью подтверждёнными инстансами и явным
   разделением классов (а)/(б). Поэтому BACKLOG повторно не переписывался, код trustlines,
   integrity и clearing не менялся. T406 закрыта как решение/маршрутизация, не как фиктивный fix.
+
+### 2026-08-11 — T407
+
+- Documentation commit: `ae234aa`. До правки платёжная RU-документация описывала timeout как
+  одиночный shielded abort и не имела публичной семантики PostgreSQL `40001`/`40P01`.
+- Решение и wire-семантика записаны в `docs/ru/09-decisions-and-defaults.md:273-290`:
+  существующие HTTP `409/E008`, безопасные `details.retryable=true` и
+  `conflict_kind=database_concurrency`, без driver text/SQLSTATE и без нового 503/business code;
+  simulator использует `CONFLICT`, real tick откатывается целиком.
+- Активная платёжная документация синхронизирована в `docs/ru/02-protocol-spec.md:974-981` и
+  `docs/ru/simulator/backend/payment-integration.md:126-128,179-188`: cancellation/timeout cleanup
+  дренируется до terminal result, а наблюдённый `COMMITTED` не регрессирует в `ABORTED`.
+- Проверка
+  `rg -n "1\\.17|40001|40P01|retryable|CONFLICT|terminal result|read-before-abort|прерыв" docs/ru/09-decisions-and-defaults.md docs/ru/02-protocol-spec.md docs/ru/simulator/backend/payment-integration.md`
+  и `git diff --check -- <эти три файла>` — exit `0`. Пользовательский metadata-hunk в начале
+  `09-decisions-and-defaults.md` намеренно не вошёл в коммит и остаётся в рабочем дереве.
