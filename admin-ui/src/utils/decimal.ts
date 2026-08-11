@@ -74,6 +74,12 @@ export function compareDecimalStrings(a: string, b: string): number {
   return ai < bi ? -1 : 1
 }
 
+export function isUnitIntervalDecimalString(value: unknown): boolean {
+  const dec = parseDecimal(String(value ?? ''))
+  if (!dec || dec.i < 0n) return false
+  return dec.i <= pow10(dec.scale)
+}
+
 // Formats a decimal string to exactly `digits` fraction digits (default 2).
 // Uses integer math and rounds half-up.
 export function formatDecimalFixed(input: string, digits = 2): string {

@@ -28,6 +28,7 @@ import {
   type IntegrityVerifyResponse,
 } from './adminContracts'
 import { z, type ZodTypeAny } from 'zod'
+import { isUnitIntervalDecimalString } from '../utils/decimal'
 import type {
   AuditLogEntry,
   ClearingCycles,
@@ -573,6 +574,20 @@ export function buildQuery(pathname: string, params: Record<string, unknown>): s
   return u.pathname + u.search
 }
 
+function validatedOptionalThreshold(value: string | number | null | undefined): string | undefined {
+  if (value === null || value === undefined) return undefined
+  const threshold = String(value).trim()
+  if (!threshold) return undefined
+  if (!isUnitIntervalDecimalString(threshold)) {
+    throw new ApiException({
+      status: 422,
+      code: 'VALIDATION_ERROR',
+      message: 'Threshold must be a decimal between 0 and 1',
+    })
+  }
+  return threshold
+}
+
 export const realApi = {
   health(): Promise<ApiEnvelope<Record<string, unknown>>> {
     return requestJson('/api/v1/health')
@@ -687,7 +702,7 @@ export const realApi = {
   },
 
   trustlineBottlenecks(params: { threshold?: string; limit?: number; equivalent?: string }): Promise<ApiEnvelope<{ threshold: number; items: Trustline[] }>> {
-    const threshold = String(params.threshold ?? '').trim() || undefined
+    const threshold = validatedOptionalThreshold(params.threshold)
     const limit = params.limit ?? 10
     const equivalent = String(params.equivalent ?? '').trim() || undefined
     return requestJson<{ threshold: number; items: Trustline[] }>(
@@ -697,7 +712,7 @@ export const realApi = {
   },
 
   liquiditySummary(params: { equivalent?: string; threshold?: string; limit?: number }): Promise<ApiEnvelope<LiquiditySummary>> {
-    const threshold = String(params.threshold ?? '').trim() || undefined
+    const threshold = validatedOptionalThreshold(params.threshold)
     const limit = params.limit ?? 10
     const equivalentRaw = String(params.equivalent ?? '').trim().toUpperCase()
     const equivalent = equivalentRaw && equivalentRaw !== 'ALL' ? equivalentRaw : undefined
@@ -925,11 +940,10 @@ export const realApi = {
     params?: { equivalent?: string | null; threshold?: string | number | null },
   ): Promise<ApiEnvelope<ParticipantMetrics>> {
     const eq = params?.equivalent ? String(params.equivalent) : undefined
-    const thrRaw = params?.threshold
-    const threshold = thrRaw === null || thrRaw === undefined || thrRaw === '' ? undefined : Number(thrRaw)
+    const threshold = validatedOptionalThreshold(params?.threshold)
 
     const pathname = `/api/v1/admin/participants/${encodeURIComponent(pid)}/metrics`
-    const url = buildQuery(pathname, { equivalent: eq, threshold: Number.isFinite(threshold) ? threshold : undefined })
+    const url = buildQuery(pathname, { equivalent: eq, threshold })
     return await requestJson<ParticipantMetrics>(url, { admin: true, schema: ParticipantMetricsSchema })
   },
 }

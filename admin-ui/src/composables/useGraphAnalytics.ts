@@ -4,7 +4,7 @@ import { api } from '../api'
 import { assertSuccess } from '../api/envelope'
 import { t } from '../i18n'
 import { makeMetricsKey } from '../pages/graph/graphPageHelpers'
-import { isRatioBelowThreshold } from '../utils/decimal'
+import { isRatioBelowThreshold, isUnitIntervalDecimalString } from '../utils/decimal'
 import type { ParticipantMetrics } from '../types/domain'
 import type {
   AuditLogEntry,
@@ -136,7 +136,12 @@ export function useGraphAnalytics(opts: {
     }
 
     const eqCode = selectedEqCode.value
-    const thr = String(opts.threshold.value || '')
+    const thr = String(opts.threshold.value || '').trim()
+    if (!isUnitIntervalDecimalString(thr)) {
+      metricsLoading.value = false
+      metricsError.value = t('validation.thresholdUnitInterval')
+      return
+    }
     const key = makeMetricsKey(pid, eqCode, thr)
     if (metricsCache.value.has(key)) {
       metricsLoading.value = false

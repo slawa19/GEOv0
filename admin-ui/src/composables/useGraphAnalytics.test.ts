@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { computed, effectScope, ref } from 'vue'
+import { computed, effectScope, nextTick, ref } from 'vue'
 
 const apiMock = vi.hoisted(() => ({
   participantMetrics: vi.fn(),
@@ -285,6 +285,41 @@ describe('useGraphAnalytics (fixtures-first)', () => {
     expect(graph.selectedBalanceRows.value[0]?.net).toBe('2.00')
     expect(graph.metricsError.value).toBeNull()
     expect(graph.metricsLoading.value).toBe(false)
+  })
+
+  it('blocks invalid thresholds and preserves a valid high-precision threshold', async () => {
+    const threshold = ref('1.00000000000000001')
+    const participants = ref<Participant[]>([{ pid: 'PID_A', display_name: 'Alice' }])
+    const graph = useGraphAnalytics({
+      isRealMode: computed(() => true),
+      threshold,
+      analyticsEq: computed(() => 'EUR'),
+      precisionByEq: computed(() => new Map([['EUR', 2]])),
+      availableEquivalents: computed(() => ['EUR']),
+      participantByPid: computed(() => new Map(participants.value.map((participant) => [participant.pid, participant]))),
+      participants,
+      trustlines: ref<Trustline[]>([]),
+      debts: ref<Debt[]>([]),
+      incidents: ref<Incident[]>([]),
+      auditLog: ref<AuditLogEntry[]>([]),
+      transactions: ref<Transaction[]>([]),
+      clearingCycles: ref<ClearingCycles | null>(null),
+      selected: ref<SelectedInfo | null>({ kind: 'node', pid: 'PID_A', degree: 0, inDegree: 0, outDegree: 0 }),
+    })
+
+    await graph.loadSelectedMetrics()
+    expect(apiMock.participantMetrics).not.toHaveBeenCalled()
+    expect(graph.metricsError.value).toBeTruthy()
+
+    apiMock.participantMetrics.mockResolvedValueOnce(metricsEnvelope('1.00'))
+    threshold.value = '0.10000000000000001'
+    await nextTick()
+    await Promise.resolve()
+    expect(apiMock.participantMetrics).toHaveBeenLastCalledWith('PID_A', {
+      equivalent: 'EUR',
+      threshold: '0.10000000000000001',
+    })
+    expect(graph.metricsError.value).toBeNull()
   })
 
   it('does not publish pending metrics after scope disposal', async () => {

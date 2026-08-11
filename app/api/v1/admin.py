@@ -5,11 +5,11 @@ from collections.abc import Callable
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Request
-from pydantic import TypeAdapter, ValidationError
-from sqlalchemy import String, cast, desc, func, select, and_, case, union_all
+from pydantic import TypeAdapter, ValidationError, WithJsonSchema
+from sqlalchemy import String, cast, desc, func, select, and_, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -63,7 +63,7 @@ from app.schemas.graph import (
 )
 from app.schemas.trustline import TrustLine as TrustLineSchema
 from app.core.clearing.service import ClearingService
-from app.core.admin.metrics import compute_participant_metrics
+from app.core.admin.metrics import compute_participant_metrics, is_ratio_below_threshold
 from app.core.trustlines.service import TrustLineService
 from app.core.payments.engine import PaymentEngine
 from app.utils.exceptions import (
@@ -92,6 +92,17 @@ _ACTIVE_PAYMENT_TX_STATES: set[str] = {
     "PROPOSED",
     "WAITING",
 }
+
+_DecimalThreshold = Annotated[
+    Decimal,
+    Query(ge=0.0, le=1.0),
+    WithJsonSchema({"type": "number", "minimum": 0, "maximum": 1}),
+]
+_OptionalDecimalThreshold = Annotated[
+    Decimal | None,
+    Query(ge=0.0, le=1.0),
+    WithJsonSchema({"type": "number", "minimum": 0, "maximum": 1}),
+]
 
 
 def _participant_status_db_values_for_filter(status: str | None) -> list[str] | None:
@@ -553,15 +564,13 @@ async def admin_participants_stats(
     )
 
 
-@router.get("/trustlines/bottlenecks", response_model=AdminTrustLinesBottlenecksResponse)
-async def admin_trustlines_bottlenecks(
-    threshold: float = Query(0.10, ge=0.0, le=1.0),
-    limit: int = Query(10, ge=1, le=50),
-    equivalent: str | None = Query(None, description="Equivalent code (optional)"),
-    db: AsyncSession = Depends(deps.get_db),
-) -> AdminTrustLinesBottlenecksResponse:
-    eq_code = str(equivalent or "").strip().upper() or None
-
+async def _load_admin_trustline_bottlenecks(
+    *,
+    threshold: Decimal,
+    limit: int,
+    equivalent: str | None,
+    db: AsyncSession,
+) -> tuple[int, list[TrustLineSchema]]:
     p_from = aliased(Participant)
     p_to = aliased(Participant)
     used_expr = func.coalesce(Debt.amount, 0)
@@ -598,16 +607,15 @@ async def admin_trustlines_bottlenecks(
         .where(
             TrustLine.status == "active",
             TrustLine.limit > 0,
-            (available_expr / TrustLine.limit) < float(threshold),
         )
         .order_by(available_expr.asc(), TrustLine.created_at.asc())
-        .limit(limit)
     )
 
-    if eq_code:
-        stmt = stmt.where(EquivalentModel.code == eq_code)
+    if equivalent:
+        stmt = stmt.where(EquivalentModel.code == equivalent)
 
     rows = (await db.execute(stmt)).all()
+    total = 0
     items: list[TrustLineSchema] = []
     for (
         tl_id,
@@ -624,6 +632,15 @@ async def admin_trustlines_bottlenecks(
         used,
         available,
     ) in rows:
+        if not is_ratio_below_threshold(
+            numerator=available,
+            denominator=limit_value,
+            threshold=threshold,
+        ):
+            continue
+        total += 1
+        if len(items) >= limit:
+            continue
         items.append(
             TrustLineSchema.model_validate(
                 {
@@ -644,17 +661,37 @@ async def admin_trustlines_bottlenecks(
             )
         )
 
-    return AdminTrustLinesBottlenecksResponse(threshold=float(threshold), items=items)
+    return total, items
+
+
+@router.get("/trustlines/bottlenecks", response_model=AdminTrustLinesBottlenecksResponse)
+async def admin_trustlines_bottlenecks(
+    threshold: _DecimalThreshold = 0.10,
+    limit: int = Query(10, ge=1, le=50),
+    equivalent: str | None = Query(None, description="Equivalent code (optional)"),
+    db: AsyncSession = Depends(deps.get_db),
+) -> AdminTrustLinesBottlenecksResponse:
+    eq_code = str(equivalent or "").strip().upper() or None
+    threshold_dec = Decimal(str(threshold))
+    _, items = await _load_admin_trustline_bottlenecks(
+        threshold=threshold_dec,
+        limit=limit,
+        equivalent=eq_code,
+        db=db,
+    )
+
+    return AdminTrustLinesBottlenecksResponse(threshold=float(threshold_dec), items=items)
 
 
 @router.get("/liquidity/summary", response_model=AdminLiquiditySummaryResponse)
 async def admin_liquidity_summary(
     equivalent: str | None = Query(None, description="Equivalent code (optional; omit for ALL)"),
-    threshold: float = Query(0.10, ge=0.0, le=1.0),
+    threshold: _DecimalThreshold = 0.10,
     limit: int = Query(10, ge=1, le=50, description="Top-N size for ranked lists"),
     db: AsyncSession = Depends(deps.get_db),
 ) -> AdminLiquiditySummaryResponse:
     eq_code = str(equivalent or "").strip().upper() or None
+    threshold_dec = Decimal(str(threshold))
     now = _utc_now()
 
     used_expr = func.coalesce(Debt.amount, 0)
@@ -666,18 +703,6 @@ async def admin_liquidity_summary(
             func.coalesce(func.sum(TrustLine.limit), 0).label("total_limit"),
             func.coalesce(func.sum(used_expr), 0).label("total_used"),
             func.coalesce(func.sum(available_expr), 0).label("total_available"),
-            func.coalesce(
-                func.sum(
-                    case(
-                        (
-                            and_(TrustLine.limit > 0, (available_expr / TrustLine.limit) < float(threshold)),
-                            1,
-                        ),
-                        else_=0,
-                    )
-                ),
-                0,
-            ).label("bottlenecks"),
         )
         .select_from(TrustLine)
         .join(EquivalentModel, TrustLine.equivalent_id == EquivalentModel.id)
@@ -699,7 +724,6 @@ async def admin_liquidity_summary(
     total_limit = totals.total_limit
     total_used = totals.total_used
     total_available = totals.total_available
-    bottlenecks = int(totals.bottlenecks or 0)
 
     # Incidents over SLA ("stuck" payments). Filter by equivalent in Python to keep it portable.
     sla_seconds = int(getattr(settings, "PAYMENT_TX_STUCK_TIMEOUT_SECONDS", 120) or 120)
@@ -766,8 +790,8 @@ async def admin_liquidity_summary(
     top_by_abs_net = [AdminLiquidityNetRow(pid=pid, display_name=dn, net=netv) for pid, dn, netv in top_abs_rows]
 
     # Top bottleneck edges with computed used/available.
-    bottlenecks_env = await admin_trustlines_bottlenecks(
-        threshold=threshold,
+    bottlenecks, bottleneck_items = await _load_admin_trustline_bottlenecks(
+        threshold=threshold_dec,
         limit=limit,
         equivalent=eq_code,
         db=db,
@@ -775,7 +799,7 @@ async def admin_liquidity_summary(
 
     return AdminLiquiditySummaryResponse(
         equivalent=eq_code,
-        threshold=float(threshold),
+        threshold=float(threshold_dec),
         updated_at=now,
         active_trustlines=active_trustlines,
         bottlenecks=bottlenecks,
@@ -786,7 +810,7 @@ async def admin_liquidity_summary(
         top_creditors=top_creditors,
         top_debtors=top_debtors,
         top_by_abs_net=top_by_abs_net,
-        top_bottleneck_edges=bottlenecks_env.items,
+        top_bottleneck_edges=bottleneck_items,
     )
 
 
@@ -2151,7 +2175,7 @@ async def admin_clearing_cycles(
 async def admin_participant_metrics(
     pid: str,
     equivalent: str | None = Query(default=None),
-    threshold: float | None = Query(default=None, ge=0.0, le=1.0),
+    threshold: _OptionalDecimalThreshold = None,
     db: AsyncSession = Depends(deps.get_db),
 ) -> AdminParticipantMetricsResponse:
     return await compute_participant_metrics(db, pid=pid, equivalent=equivalent, threshold=threshold)

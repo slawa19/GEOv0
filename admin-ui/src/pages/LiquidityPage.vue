@@ -12,7 +12,7 @@ import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
 import OperatorAdvicePanel from '../ui/OperatorAdvicePanel.vue'
 
 import { t } from '../i18n'
-import { compareDecimalStrings, formatDecimalFixed } from '../utils/decimal'
+import { compareDecimalStrings, formatDecimalFixed, isUnitIntervalDecimalString } from '../utils/decimal'
 import { formatIsoInTimeZone } from '../utils/datetime'
 import { buildLiquidityAdvice } from '../advice/operatorAdvice'
 import { carryScenarioQuery, readQueryString, toLocationQueryRaw } from '../router/query'
@@ -41,6 +41,7 @@ const timeZone = computed(() => String(configStore.config['ui.timezone'] || 'UTC
 
 const eq = ref<string>('ALL')
 const threshold = ref<string>('0.10')
+const thresholdValid = computed(() => isUnitIntervalDecimalString(threshold.value))
 
 let routeSyncInitialized = false
 const debouncedLoad = debounce(() => void load(), DEBOUNCE_SEARCH_MS)
@@ -96,7 +97,13 @@ watch(threshold, (v) => {
 async function load() {
   const request = loadRequests.begin()
   const requestEq = eq.value
-  const requestThreshold = threshold.value
+  const requestThreshold = threshold.value.trim()
+  if (!thresholdValid.value) {
+    summary.value = null
+    loading.value = false
+    error.value = t('validation.thresholdUnitInterval')
+    return
+  }
   loading.value = true
   error.value = null
   try {
@@ -247,6 +254,7 @@ function money(v: string): string {
                 v-model="threshold"
                 size="small"
                 style="width: 110px"
+                :aria-invalid="!thresholdValid"
                 :placeholder="t('liquidity.controls.thresholdPlaceholder')"
               />
             </div>
@@ -254,6 +262,7 @@ function money(v: string): string {
             <el-button
               size="small"
               :loading="loading"
+              :disabled="!thresholdValid"
               @click="load"
             >
               {{ t('common.refresh') }}

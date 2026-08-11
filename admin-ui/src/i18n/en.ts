@@ -27,6 +27,7 @@ export const EN: Record<string, string> = {
   'common.readOnlyUpdatesDisabled': 'Read-only role: updates are disabled',
   'common.refresh': 'Refresh',
   'common.refreshHint': 'If the error is temporary, try refreshing.',
+  'validation.thresholdUnitInterval': 'Threshold must be a decimal between 0 and 1.',
   'common.run': 'Run',
   'common.repair': 'Repair',
   'common.abort': 'Abort',

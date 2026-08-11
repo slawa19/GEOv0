@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import TooltipLabel from '../../ui/TooltipLabel.vue'
 import GraphSearchBar from './GraphSearchBar.vue'
 import { t } from '../../i18n'
+import { isUnitIntervalDecimalString } from '../../utils/decimal'
 
 type ToolbarTab = 'filters' | 'display'
 type LayoutName = 'fcose' | 'grid' | 'circle'
@@ -107,6 +108,7 @@ const thresholdModel = computed({
   get: () => props.threshold,
   set: (v) => emit('update:threshold', v),
 })
+const thresholdValid = computed(() => isUnitIntervalDecimalString(props.threshold))
 
 const typeFilterModel = computed({
   get: () => props.typeFilter,
@@ -342,6 +344,7 @@ const focusDepthFieldWidth = computed(() =>
               size="small"
               class="ctl__field ctl__field--compact"
               :style="{ '--geo-ctl-width': thresholdFieldWidth }"
+              :aria-invalid="!thresholdValid"
               :placeholder="t('graph.filters.bottleneckPlaceholder')"
             />
               </div>

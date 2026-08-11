@@ -27,6 +27,7 @@ export const RU: Record<string, string> = {
   'common.readOnlyUpdatesDisabled': 'Роль только чтение: изменения отключены',
   'common.refresh': 'Обновить',
   'common.refreshHint': 'Если ошибка временная, попробуйте обновить.',
+  'validation.thresholdUnitInterval': 'Порог должен быть десятичным числом от 0 до 1.',
   'common.run': 'Запустить',
   'common.repair': 'Исправить',
   'common.abort': 'Прервать',

@@ -8,6 +8,7 @@ import AuditLogPage from './AuditLogPage.vue'
 import EquivalentsPage from './EquivalentsPage.vue'
 import IncidentsPage from './IncidentsPage.vue'
 import LiquidityPage from './LiquidityPage.vue'
+import DashboardPage from './DashboardPage.vue'
 import ParticipantsPage from './ParticipantsPage.vue'
 import TrustlinesPage from './TrustlinesPage.vue'
 
@@ -26,6 +27,7 @@ const apiMock = vi.hoisted(() => ({
   setEquivalentActive: vi.fn(),
   deleteEquivalent: vi.fn(),
   liquiditySummary: vi.fn(),
+  trustlineBottlenecks: vi.fn(),
 }))
 
 const routing = vi.hoisted(() => ({
@@ -367,6 +369,50 @@ describe('mounted non-Graph list request ownership', () => {
     expect(state.summary).not.toBeNull()
     expect(state.activeTrustlinesCount).toBe(0)
     expect(state.totalLimit).toBe('0')
+    wrapper.unmount()
+  })
+
+  it('blocks invalid Liquidity thresholds and preserves a valid high-precision threshold', async () => {
+    const wrapper = mountPage(LiquidityPage, '/liquidity', { threshold: '1.00000000000000001' })
+    await settle()
+    const state = setupState(wrapper)
+
+    expect(state.thresholdValid).toBe(false)
+    expect(state.error).toBeTruthy()
+    expect(apiMock.listEquivalents).not.toHaveBeenCalled()
+    expect(apiMock.liquiditySummary).not.toHaveBeenCalled()
+
+    apiMock.listEquivalents.mockResolvedValue(ok({ items: [equivalentNew] }))
+    apiMock.liquiditySummary.mockResolvedValue(ok({ updated_at: '2026-08-11T12:00:00Z' }))
+    state.threshold = '0.10000000000000001'
+    await state.load()
+    expect(apiMock.liquiditySummary).toHaveBeenLastCalledWith({
+      equivalent: 'ALL',
+      threshold: '0.10000000000000001',
+      limit: 10,
+    })
+    wrapper.unmount()
+  })
+
+  it('blocks invalid Dashboard thresholds and preserves a valid high-precision threshold', async () => {
+    apiMock.trustlineBottlenecks.mockResolvedValue(ok({ threshold: 0.1, items: [] }))
+    const wrapper = mountPage(DashboardPage, '/dashboard')
+    await settle()
+    const state = setupState(wrapper)
+    const initialCalls = apiMock.trustlineBottlenecks.mock.calls.length
+
+    state.threshold = '1.00000000000000001'
+    await state.loadBottlenecks()
+    expect(state.thresholdValid).toBe(false)
+    expect(state.bottlenecksError).toBeTruthy()
+    expect(apiMock.trustlineBottlenecks).toHaveBeenCalledTimes(initialCalls)
+
+    state.threshold = '0.10000000000000001'
+    await state.loadBottlenecks()
+    expect(apiMock.trustlineBottlenecks).toHaveBeenLastCalledWith({
+      threshold: '0.10000000000000001',
+      limit: 10,
+    })
     wrapper.unmount()
   })
 
