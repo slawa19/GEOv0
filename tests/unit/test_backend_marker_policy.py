@@ -362,7 +362,12 @@ def _powershell_executable_segments(command: str) -> list[str]:
             segment = "".join(current).strip()
             if segment:
                 segments.append(segment)
-            current = []
+            is_call_operator = bool(
+                character == "&"
+                and (index == 0 or command[index - 1] != "&")
+                and (index + 1 >= len(command) or command[index + 1] != "&")
+            )
+            current = ["&", " "] if is_call_operator else []
         else:
             current.append(character)
         index += 1
@@ -960,14 +965,25 @@ def _unsupported_owned_powershell_blocks(
     ):
         if re.search(owner_pattern, block, re.IGNORECASE) is None:
             continue
-        if re.search(
-            r"(?:^|[;}])\s*"
-            r"(?:if|elseif|else|while|do|for|foreach|switch|try|catch|finally)"
-            r"\b(?!\s*=)",
-            block,
-            re.IGNORECASE | re.MULTILINE,
-        ):
-            violations.append("unsupported control flow in owned PowerShell block")
+        quote: str | None = None
+        index = 0
+        while index < len(block):
+            character = block[index]
+            if character == "`" and index + 1 < len(block):
+                index += 2
+                continue
+            if character in {'"', "'"}:
+                quote = (
+                    None
+                    if quote == character
+                    else character if quote is None else quote
+                )
+            elif quote is None and character == "{":
+                violations.append(
+                    "unsupported structural block in owned PowerShell block"
+                )
+                break
+            index += 1
     return violations
 
 
@@ -1263,10 +1279,14 @@ def _powershell_inline_syntax_is_valid(
             index += 2
             continue
         if character in {'"', "'"}:
-            quote = (
-                None if quote == character else character if quote is None else quote
-            )
-            unquoted.append(" ")
+            if quote is None:
+                quote = character
+                unquoted.append("Q")
+            elif quote == character:
+                quote = None
+                unquoted.append(" ")
+            else:
+                unquoted.append(" ")
         else:
             unquoted.append(character if quote is None else " ")
         index += 1
@@ -1274,7 +1294,7 @@ def _powershell_inline_syntax_is_valid(
     word_operator = (
         r"-(?:[ic]?(?:eq|ne|gt|ge|lt|le|like|notlike|match|notmatch|"
         r"contains|notcontains|in|notin|replace)|"
-        r"split|join|is|isnot|as|and|or|xor|band|bor|bxor|shl|shr|f)"
+        r"[ic]?(?:split|join)|is|isnot|as|and|or|xor|band|bor|bxor|shl|shr|f)"
     )
     if not inside_hashtable and re.search(
         r"(?:^|[=;|&{(]\s*|:[A-Za-z_][A-Za-z0-9_]*\s+)" r"if\s+(?!\s*\()",
@@ -1287,6 +1307,8 @@ def _powershell_inline_syntax_is_valid(
         visible_syntax,
         re.IGNORECASE,
     ):
+        return False
+    if re.search(r",\s*\)", visible_syntax):
         return False
     if re.search(
         rf"(?:^|[\s(\[])(?:[+\-*/%]|{word_operator})\s+[*/%]",
@@ -1654,6 +1676,7 @@ def test_contributor_guides_keep_python_tools_on_the_prepared_venv() -> None:
         "pytest.exe -q",
         r".\.venv\Scripts\pytest.exe -q",
         r'& ".\.venv\Scripts\python.exe" -m pytest -q',
+        r'& "C:\Python312\python.exe" -m pytest -q',
         r"& 'C:\Python311\python.exe' -m pytest tests/unit",
         "py -m pytest -q",
         "py -3.12 -m pytest -q",
@@ -1875,7 +1898,7 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
     )
 
 
-def test_postgres_doc_guard_preserves_multiline_hashtable_data() -> None:
+def test_postgres_doc_guard_rejects_multiline_hashtable_in_owned_block() -> None:
     content = r"""
 ```powershell
 $metadata = @{
@@ -1888,13 +1911,12 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 ./scripts/verify_local.ps1 -BackendMarker postgres
 ```
 """
-    assert (
-        _postgres_example_violations(Path("synthetic.md"), content, require_create=True)
-        == []
+    assert _postgres_example_violations(
+        Path("synthetic.md"), content, require_create=True
     )
 
 
-def test_postgres_doc_guard_preserves_one_line_hashtable_data() -> None:
+def test_postgres_doc_guard_rejects_one_line_hashtable_in_owned_block() -> None:
     content = r"""
 ```powershell
 $metadata = @{ if = 1; while = 2; exit = "value" }
@@ -1904,9 +1926,8 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 ./scripts/verify_local.ps1 -BackendMarker postgres
 ```
 """
-    assert (
-        _postgres_example_violations(Path("synthetic.md"), content, require_create=True)
-        == []
+    assert _postgres_example_violations(
+        Path("synthetic.md"), content, require_create=True
     )
 
 
@@ -2798,6 +2819,8 @@ def test_postgres_doc_guard_fails_closed_after_control_flow(
         "! )",
         "(Get-Date),)",
         ",)",
+        "$arr[0],)",
+        "1 -isplit )",
     ],
 )
 def test_postgres_doc_guard_rejects_invalid_expression(
