@@ -138,9 +138,10 @@ def _split_powershell_statements(line: str) -> list[str]:
 def _powershell_brace_context(
     line: str,
     current_depth: int,
-) -> tuple[int, int, bool]:
+) -> tuple[int, int, bool, bool]:
     quote: str | None = None
     delta = 0
+    has_opening_brace = False
     stripped_line = line.lstrip()
     leading_closes = len(stripped_line) - len(stripped_line.lstrip("}"))
     index = 0
@@ -156,13 +157,14 @@ def _powershell_brace_context(
         elif quote is None:
             if character == "{":
                 delta += 1
+                has_opening_brace = True
             elif character == "}":
                 delta -= 1
         index += 1
     execution_depth = max(0, current_depth - leading_closes)
     new_depth = current_depth + delta
     is_valid = leading_closes <= current_depth and new_depth >= 0
-    return execution_depth, max(0, new_depth), is_valid
+    return execution_depth, max(0, new_depth), is_valid, has_opening_brace
 
 
 def _powershell_group_context(
@@ -219,6 +221,23 @@ def _powershell_executable_segments(command: str) -> list[str]:
     if segment:
         segments.append(segment)
     return segments
+
+
+def _contains_powershell_control_flow(command: str) -> bool:
+    for segment in _powershell_executable_segments(command):
+        candidate = re.sub(
+            r"^:[A-Za-z_][A-Za-z0-9_]*\s+",
+            "",
+            segment.strip(),
+        )
+        if re.match(
+            r"^(?:if|else|while|do|for|foreach|switch|try|catch|finally|"
+            r"function|filter|trap)(?:\s|\(|\{|$)",
+            candidate,
+            re.IGNORECASE,
+        ):
+            return True
+    return False
 
 
 def _iter_documented_commands_from_content(content: str):
@@ -387,6 +406,7 @@ def _iter_documented_commands_from_content(content: str):
                 command_execution_depth,
                 powershell_brace_depth,
                 brace_syntax_is_valid,
+                has_opening_brace,
             ) = _powershell_brace_context(command, powershell_brace_depth)
             powershell_group_stack, group_syntax_is_valid = _powershell_group_context(
                 command,
@@ -407,7 +427,7 @@ def _iter_documented_commands_from_content(content: str):
                 )
                 continue
             if powershell_pending_control_block and not powershell_group_stack:
-                if "{" in command:
+                if has_opening_brace:
                     powershell_pending_control_block = False
                 else:
                     yield (
@@ -416,15 +436,9 @@ def _iter_documented_commands_from_content(content: str):
                         fence_language,
                     )
                     powershell_pending_control_block = False
-            control_flow = re.match(
-                r"^(?:if|else|while|do|for|foreach|switch|try|catch|finally|"
-                r"function|filter|trap)(?:\s|\(|\{)",
-                command.lstrip("} "),
-                re.IGNORECASE,
-            )
-            if control_flow is not None:
+            if _contains_powershell_control_flow(command):
                 powershell_control_flow_seen = True
-                if "{" not in command:
+                if not has_opening_brace:
                     powershell_pending_control_block = True
             if pending_powershell_command is not None:
                 command_line, pending = pending_powershell_command
@@ -526,7 +540,13 @@ def _is_direct_pytest_command(command: str) -> bool:
         r"python(?:\d+(?:\.\d+)*)?(?:\.exe)?",
         executable,
     ):
-        return re.match(r"^-m\s+pytest(?:\s|$)", arguments, re.IGNORECASE) is not None
+        tokens = _tokenize_powershell_arguments(arguments)
+        return tokens is not None and any(
+            token.lower() == "-m"
+            and index + 1 < len(tokens)
+            and tokens[index + 1].lower() == "pytest"
+            for index, token in enumerate(tokens)
+        )
     return False
 
 
@@ -841,8 +861,7 @@ def _powershell_inline_syntax_is_valid(command: str) -> bool:
         index += 1
     visible_syntax = "".join(unquoted)
     if re.search(
-        r"(?:[+\-*/%]|-(?:i?eq|ceq|ne|lt|le|gt|ge|like|match|contains|in))"
-        r"\s*[\)\]]",
+        r"(?:[+\-*/%]|-[A-Za-z][A-Za-z0-9]*)\s*[\)\]]",
         visible_syntax,
         re.IGNORECASE,
     ):
@@ -1164,6 +1183,10 @@ def test_contributor_guides_keep_python_tools_on_the_prepared_venv() -> None:
         r'& ".\.venv\Scripts\python.exe" -m pytest -q',
         r"'C:\Python311\python.exe' -m pytest tests/unit",
         "py -m pytest -q",
+        "py -3.12 -m pytest -q",
+        "py -3 -m pytest -q",
+        "python -B -m pytest -q",
+        "python -I -X dev -m pytest -q",
         "python3.11 -m pytest -q",
     ],
 )
@@ -2009,6 +2032,9 @@ def test_postgres_doc_guard_rejects_invalid_or_mismatched_database_names(
         "while ($true) { return }",
         "do { return } while ($false)",
         "if ($false) { return } else { return }",
+        "$result = if ($true) { return }",
+        "$result = $(if ($true) { return })",
+        ":outer while ($true) { return }",
     ],
 )
 def test_postgres_doc_guard_fails_closed_after_control_flow(
@@ -2032,14 +2058,15 @@ def test_postgres_doc_guard_fails_closed_after_control_flow(
     )
 
 
-def test_postgres_doc_guard_rejects_missing_binary_operand() -> None:
-    content = """
+@pytest.mark.parametrize("operator", ["+", "-and", "-band", "-notlike"])
+def test_postgres_doc_guard_rejects_missing_binary_operand(operator: str) -> None:
+    content = f"""
 ```powershell
 createdb -U geo geov0_test_binary_operand
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_binary_operand"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
 ./scripts/verify_local.ps1 -BackendMarker postgres
-Write-Host (1 -eq )
+Write-Host (1 {operator} )
 ```
 """
 
@@ -2050,15 +2077,23 @@ Write-Host (1 -eq )
     )
 
 
-def test_postgres_doc_guard_rejects_control_statement_without_block() -> None:
-    content = """
+@pytest.mark.parametrize(
+    "invalid_control_statement",
+    [
+        'if ($true)\nWrite-Output "no block"',
+        'if ($true) Write-Output "{"',
+    ],
+)
+def test_postgres_doc_guard_rejects_control_statement_without_block(
+    invalid_control_statement: str,
+) -> None:
+    content = f"""
 ```powershell
 createdb -U geo geov0_test_missing_control_block
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_missing_control_block"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
 ./scripts/verify_local.ps1 -BackendMarker postgres
-if ($true)
-Write-Output "no block"
+{invalid_control_statement}
 ```
 """
 
