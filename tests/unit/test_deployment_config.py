@@ -208,11 +208,11 @@ def test_active_local_callers_select_dev_configuration_explicitly() -> None:
     assert readme.count(f"{overlay} up -d --build") >= 2
     assert "$env:ENV = 'dev'" in readme
     assert overlay in contributing
-    assert "export ENV=dev" in contributing
+    assert '$env:ENV = "dev"' in contributing
     assert overlay in contributing_en
-    assert "export ENV=dev" in contributing_en
+    assert '$env:ENV = "dev"' in contributing_en
     assert overlay in contributing_pl
-    assert "export ENV=dev" in contributing_pl
+    assert '$env:ENV = "dev"' in contributing_pl
     for local_guide in (
         readme,
         contributing,
