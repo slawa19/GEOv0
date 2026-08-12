@@ -2,7 +2,14 @@ import { expect, test, type Page, type Route } from '@playwright/test'
 
 type SnapshotPayload = ReturnType<typeof makeSnapshot>
 interface ActionResult { status: number; body: unknown }
-interface PaymentRealReq { from_pid: string; to_pid: string; amount: string | number; [key: string]: unknown }
+interface PaymentRealReq {
+  from_pid: string
+  to_pid: string
+  equivalent: string
+  amount: string | number
+  client_action_id?: string | null
+  [key: string]: unknown
+}
 interface TrustlineCloseReq { from_pid: string; to_pid: string; [key: string]: unknown }
 interface GeoSimCameraSnapshot { panX: number; panY: number; zoom: number }
 interface GeoSimTooltipInput {
@@ -159,6 +166,22 @@ async function getSelectValue(page: Page, css: string): Promise<string> {
   const loc = page.locator(css)
   await expect(loc).toBeAttached()
   return await loc.evaluate((el: Element) => String((el as HTMLSelectElement).value ?? ''))
+}
+
+function paymentRealSuccess(req: PaymentRealReq): ActionResult {
+  return {
+    status: 200,
+    body: {
+      ok: true,
+      payment_id: 'payment-e2e-1',
+      from_pid: req.from_pid,
+      to_pid: req.to_pid,
+      equivalent: req.equivalent,
+      amount: String(req.amount),
+      status: 'committed',
+      client_action_id: req.client_action_id ?? null,
+    },
+  }
 }
 
 async function chooseOverlayOption(
@@ -347,7 +370,7 @@ async function mockRealInteractApp(page: Page, o: {
 
   await page.route(`**/simulator/runs/${encodeURIComponent(runId)}/actions/payment-real`, async (route: Route) => {
     const req: PaymentRealReq = JSON.parse((await route.request().postData()) ?? '{}')
-    const resp = o.onPaymentReal?.(req) ?? { status: 200, body: { ok: true } }
+    const resp = o.onPaymentReal?.(req) ?? paymentRealSuccess(req)
     await route.fulfill({ status: resp.status, contentType: 'application/json', body: JSON.stringify(resp.body) })
   })
 
@@ -535,7 +558,7 @@ test.describe('Manual operations UI — Playwright E2E (Interact, mocked backend
         expect(req.from_pid).toBe('alice')
         expect(req.to_pid).toBe('bob')
         expect(String(req.amount)).toBe('1.00')
-        return { status: 200, body: { ok: true } }
+        return paymentRealSuccess(req)
       },
     })
 
