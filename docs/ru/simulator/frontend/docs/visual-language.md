@@ -82,7 +82,7 @@
 ## 4) Типографика (HUD/карточки)
 
 Для любого текста (панель/карточки/подсказки) используем принципы админки:
-- [docs/ru/admin-ui/typography.md](../../../../admin-ui/typography.md)
+- [docs/ru/admin-ui/typography.md](../../../admin-ui/typography.md)
 
 ## 5) Где править, если меняется визуальный язык
 

@@ -13,7 +13,7 @@ FX — это отдельный overlay canvas поверх базового г
 - Базовый граф: постоянно рисует узлы/рёбра и их LOD.
 - FX overlay: рисует краткоживущие эффекты (частицы/пульсы/вспышки).
 
-См. общий контекст: [specs/GEO-visual-demo-fast-mock.md](specs/GEO-visual-demo-fast-mock.md).
+См. общий контекст: [archive/GEO-visual-demo-fast-mock.md](archive/GEO-visual-demo-fast-mock.md).
 
 ## 1) Примитивы FX (что у нас есть)
 
@@ -113,7 +113,7 @@ FX — это отдельный overlay canvas поверх базового г
 
 - **Параметр:** `dimmedNodeIds?: Set<string>` в [`drawBaseGraph()`](../../../../../simulator-ui/v2/src/render/baseGraph.ts)
 - **Эффект:** узлы, входящие в `dimmedNodeIds`, рендерятся с `globalAlpha = 0.25`
-- **Pipeline:** прокинуто через [`useRenderLoop.ts`](../../../../../simulator-ui/v2/src/composables/useRenderLoop.ts) → [`useAppRenderLoop.ts`](../../../../../simulator-ui/v2/src/composables/useAppRenderLoop.ts) → [`useAppFxAndRender.ts`](../../../../../simulator-ui/v2/src/composables/useAppFxAndRender.ts) → [`useSimulatorApp.ts`](../../../../../simulator-ui/v2/src/composables/useSimulatorApp.ts)
+- **Pipeline:** прокинуто через [`useRenderLoop.ts`](../../../../../simulator-ui/v2/src/composables/useRenderLoop.ts) → [`useAppRenderLoop.ts`](../../../../../simulator-ui/v2/src/composables/useAppRenderLoop.ts) → [`useAppFxOverlays.ts`](../../../../../simulator-ui/v2/src/composables/useAppFxOverlays.ts) → [`useSimulatorApp.ts`](../../../../../simulator-ui/v2/src/composables/useSimulatorApp.ts)
 - **Источник данных:** `availableTargetIds` computed в `useInteractMode` — набор доступных узлов; все остальные попадают в `dimmedNodeIds`
 
 > **Важно:** Это не FX-эффект, а параметр base graph рендера. При выходе из picking-фазы `dimmedNodeIds` сбрасывается (пустой Set), и все узлы возвращаются к нормальной отрисовке.

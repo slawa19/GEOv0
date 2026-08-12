@@ -1,5 +1,11 @@
 # Runbook: GEO Hub dev-стенд в Windows 11 + WSL2 без Docker Desktop
 
+```text
+Статус: Stable
+Область: core
+Последнее обновление: 2026-08-11
+```
+
 Этот документ описывает самый простой способ поднять dev-стенд GEO Hub в окружении Windows 11 + WSL2, используя Docker Engine внутри WSL2 (без Docker Desktop).
 
 Опирается на:

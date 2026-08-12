@@ -1,6 +1,6 @@
 # REVIEW — Manual Operations UI improvements (2026-02-27)
 
-Ревью реализации требований из [`manual-operations-ui-improvements-spec-2026-02-26.md`](../specs/manual-operations-ui-improvements-spec-2026-02-26.md).
+Ревью реализации требований из [`manual-operations-ui-improvements-spec-2026-02-26.md`](../specs/archive/manual-operations-ui-improvements-spec-2026-02-26.md).
 
 Цель ревью: выявить расхождения со спекой и незакрытые риски относительно принципа **UI не предлагает невозможных действий**.
 
@@ -12,7 +12,7 @@
 
 ## 2) Реализовано (по факту кода)
 
-Сводный статус отмечен в спеке в разделе “Implementation status (as of 2026-02-27)”: [`manual-operations-ui-improvements-spec-2026-02-26.md`](../specs/manual-operations-ui-improvements-spec-2026-02-26.md).
+Сводный статус отмечен в спеке в разделе “Implementation status (as of 2026-02-27)”: [`manual-operations-ui-improvements-spec-2026-02-26.md`](../specs/archive/manual-operations-ui-improvements-spec-2026-02-26.md).
 
 Основные места реализации:
 
@@ -28,7 +28,7 @@
 
 #### P0.1 Multi-hop targets vs direct-hop gating (Manual Payment)
 
-- Спека: tri-state targets и Phase 2.5 backend-first routing: [`MP-1a`](docs/ru/simulator/frontend/docs/specs/manual-operations-ui-improvements-spec-2026-02-26.md:292), [`§7.2`](docs/ru/simulator/frontend/docs/specs/manual-operations-ui-improvements-spec-2026-02-26.md:1208)
+- Спека: tri-state targets и Phase 2.5 backend-first routing: [`MP-1a`](docs/ru/simulator/frontend/docs/specs/archive/manual-operations-ui-improvements-spec-2026-02-26.md:292), [`§7.2`](docs/ru/simulator/frontend/docs/specs/archive/manual-operations-ui-improvements-spec-2026-02-26.md:1208)
 - Что не так:
   - Набор To-целей берётся из backend payment-targets, но **сейчас** endpoint вызывается в режиме **direct-only** (`PAYMENT_TARGETS_MAX_HOPS = 1`). Это сделано намеренно, чтобы targets не расходились с текущим gating, который опирается на direct trustline capacity (`availableCapacity`/`canSendPayment`).
 - Почему важно: при включении multi-hop в payment-targets без пересмотра gating возможен UX-конфликт: To покажется доступным, но Confirm будет заблокирован как “no direct route”.
@@ -37,7 +37,7 @@
 
 #### P0.2 Close TL / Close line: тексты предупреждений при reverse debt
 
-- Спека: Phase 2 строгий guard `used || reverse_used`: [`TL-2`](docs/ru/simulator/frontend/docs/specs/manual-operations-ui-improvements-spec-2026-02-26.md:560), [`ED-1`](docs/ru/simulator/frontend/docs/specs/manual-operations-ui-improvements-spec-2026-02-26.md:693)
+- Спека: Phase 2 строгий guard `used || reverse_used`: [`TL-2`](docs/ru/simulator/frontend/docs/specs/archive/manual-operations-ui-improvements-spec-2026-02-26.md:560), [`ED-1`](docs/ru/simulator/frontend/docs/specs/archive/manual-operations-ui-improvements-spec-2026-02-26.md:693)
 - Что не так:
   - Ранее warning мог вводить в заблуждение в кейсе `used=0, reverse_used>0`.
   - Сейчас исправлено:
@@ -49,24 +49,24 @@
 
 #### P1.1 `capacity === '0'` отображается как unknown `…`
 
-- Спека: capacity label и исключение `0` за счёт фильтрации: [`MP-2`](docs/ru/simulator/frontend/docs/specs/manual-operations-ui-improvements-spec-2026-02-26.md:356)
+- Спека: capacity label и исключение `0` за счёт фильтрации: [`MP-2`](docs/ru/simulator/frontend/docs/specs/archive/manual-operations-ui-improvements-spec-2026-02-26.md:356)
 - Статус: исправлено (используется `cap == null`, строка `'0'` отображается как `0`).
 
 #### P1.2 NodeCardOverlay: формат available column (NC-2)
 
-- Спека: `avail: 150` в явной колонке: [`NC-2`](docs/ru/simulator/frontend/docs/specs/manual-operations-ui-improvements-spec-2026-02-26.md:832)
+- Спека: `avail: 150` в явной колонке: [`NC-2`](docs/ru/simulator/frontend/docs/specs/archive/manual-operations-ui-improvements-spec-2026-02-26.md:832)
 - Статус: исправлено — `avail:` отображается видимым текстом в колонке (tooltip можно считать дублирующим).
 
 #### P1.3 EdgeDetailPopup utilization bar: unknown vs 0% (A11y)
 
-- Спека: ED-2 utilization bar: [`ED-2`](docs/ru/simulator/frontend/docs/specs/manual-operations-ui-improvements-spec-2026-02-26.md:737)
+- Спека: ED-2 utilization bar: [`ED-2`](docs/ru/simulator/frontend/docs/specs/archive/manual-operations-ui-improvements-spec-2026-02-26.md:737)
 - Статус: исправлено — при unknown `aria-valuenow` не выставляется, используется `aria-valuetext="unknown"`.
 
 ### P2 — надёжность/edge-cases/тесты
 
 #### P2.1 Toast timers: повтор одинакового текста может не перезапустить таймер
 
-- Спека: FB-1/FB-2: [`FB-1`](docs/ru/simulator/frontend/docs/specs/manual-operations-ui-improvements-spec-2026-02-26.md:926), [`FB-2`](docs/ru/simulator/frontend/docs/specs/manual-operations-ui-improvements-spec-2026-02-26.md:980)
+- Спека: FB-1/FB-2: [`FB-1`](docs/ru/simulator/frontend/docs/specs/archive/manual-operations-ui-improvements-spec-2026-02-26.md:926), [`FB-2`](docs/ru/simulator/frontend/docs/specs/archive/manual-operations-ui-improvements-spec-2026-02-26.md:980)
 - Статус: закрыто.
   - Success: `useInteractMode.setSuccessToastMessage()` сбрасывает значение в `null` и восстанавливает в microtask, чтобы повтор одинакового текста всё равно перезапускал toast.
   - Error: при повторе той же ошибки `runBusy()` аналогично сбрасывает `state.error` в `null` и восстанавливает в microtask.
@@ -79,7 +79,7 @@
 
 #### P2.3 Недостающие тесты по спекам
 
-- Phase 2.5 AC для payment-targets: [`AC-MP-15..18`](docs/ru/simulator/frontend/docs/specs/manual-operations-ui-improvements-spec-2026-02-26.md:1280)
+- Phase 2.5 AC для payment-targets: [`AC-MP-15..18`](docs/ru/simulator/frontend/docs/specs/archive/manual-operations-ui-improvements-spec-2026-02-26.md:1280)
 - Clearing preview-loading: тест добавлен (ветка preview без данных).
 - Root tri-state wiring: тест добавлен (`targets === undefined` при loading и `Set` после).
 

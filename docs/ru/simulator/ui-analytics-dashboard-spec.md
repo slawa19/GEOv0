@@ -2,7 +2,28 @@
 
 **Версия:** 1.0  
 **Дата:** 2026-01-30  
-**Статус:** Draft
+**Статус:** Draft — живая продуктовая спецификация экрана
+
+> **Исполняемый контракт — [`specs/007-simulator-analytics-surface/spec.md`](../../../specs/007-simulator-analytics-surface/spec.md).**
+> Там же две поправки к этому документу, обнаруженные сверкой с кодом 2026-08-11:
+>
+> 1. **§5 задаёт сырой CSS с хардкодом `#1e293b` / `#ef4444`** — это нарушает
+>    `simulator-ui/v2/src/ui-kit/AI-AGENT-GUIDE.md`. Реализовывать через токены `--ds-*`.
+> 2. **§7.1 показывает `from_ms`/`to_ms`/`step_ms` необязательными** — сервер требует все три
+>    (`app/api/v1/simulator.py:2695-2697`).
+>
+> Плюс не описанная здесь предпосылка: типы фронтенда (`simulatorTypes.ts:328-346`) противоречат
+> схеме бэкенда (`app/schemas/simulator.py:465-525`) — у `MetricsResponse` нет поля `series`,
+> у `BottleneckItem` нет `target`/`reason_code`. Панель по текущим типам прочитает `undefined`
+> (сегодня это латентно: у `getMetrics`/`getBottlenecks` нет call-site'ов).
+>
+> **Про `MetricSeriesKey` — этот документ прав.** §2.1 перечисляет 5 значений, и это ровно то,
+> что API отдаёт сегодня: эмиттер зашивает пятёрку жёстко
+> (`app/core/simulator/metrics_bottlenecks.py:80-86`). Схема объявляет 7
+> (`app/schemas/simulator.py:443-451`); `active_participants`/`active_trustlines` считаются и
+> персистятся, но наружу не отдаются — это пробел бэкенда (задача T707), а не ошибка §2.1.
+>
+> Мелкий дрейф имён: `RealHudTop`/`RealHudBottom` в дереве называются `TopBar.vue` / `BottomBar.vue`.
 
 ---
 

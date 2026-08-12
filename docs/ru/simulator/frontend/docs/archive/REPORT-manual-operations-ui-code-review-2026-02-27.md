@@ -1,6 +1,6 @@
 # Проверка реализации замечаний: Manual Operations UI Code Review (2026‑02‑27)
 
-Источник замечаний: [`manual-operations-ui-improvements-spec-2026-02-26.md`](../specs/manual-operations-ui-improvements-spec-2026-02-26.md).
+Источник замечаний: [`manual-operations-ui-improvements-spec-2026-02-26.md`](../specs/archive/manual-operations-ui-improvements-spec-2026-02-26.md).
 
 ---
 
