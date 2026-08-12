@@ -430,7 +430,6 @@ def _iter_documented_commands_from_content(content: str):
     powershell_brace_depth = 0
     powershell_brace_kind_stack: list[str] = []
     powershell_group_stack: list[str] = []
-    powershell_control_flow_seen = False
     powershell_pending_control_block = False
     powershell_pending_control_line: int | None = None
     powershell_flow_terminated = False
@@ -492,7 +491,6 @@ def _iter_documented_commands_from_content(content: str):
             powershell_brace_depth = 0
             powershell_brace_kind_stack = []
             powershell_group_stack = []
-            powershell_control_flow_seen = False
             powershell_pending_control_block = False
             powershell_pending_control_line = None
             powershell_flow_terminated = False
@@ -687,7 +685,6 @@ def _iter_documented_commands_from_content(content: str):
                     inside_hashtable=inside_hashtable,
                 )
             ):
-                powershell_control_flow_seen = True
                 if (
                     _contains_powershell_control_flow(
                         command,
