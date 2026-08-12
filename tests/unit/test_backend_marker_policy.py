@@ -197,7 +197,7 @@ def _powershell_brace_context(
     )
 
 
-def _powershell_if_body_is_attached(command: str) -> bool | None:
+def _powershell_control_body_is_attached(command: str) -> bool | None:
     visible: list[str] = []
     quote: str | None = None
     index = 0
@@ -216,8 +216,26 @@ def _powershell_if_body_is_attached(command: str) -> bool | None:
             visible.append(character if quote is None else " ")
         index += 1
     candidate = "".join(visible)
-    match = re.search(r"(?<![$A-Za-z0-9_-])if\s*\(", candidate, re.IGNORECASE)
+    match = re.search(
+        r"(?<![$A-Za-z0-9_-])" r"(if|elseif|while|for|foreach|switch)\s*\(",
+        candidate,
+        re.IGNORECASE,
+    )
     if match is None:
+        simple = re.search(
+            r"(?<![$A-Za-z0-9_-])(else|do|try|finally)\b(.*)$",
+            candidate,
+            re.IGNORECASE,
+        )
+        if simple is not None:
+            return simple.group(2).lstrip().startswith("{")
+        catch = re.search(
+            r"(?<![$A-Za-z0-9_-])catch\b(?:\s+\[[^\]]+\])?(.*)$",
+            candidate,
+            re.IGNORECASE,
+        )
+        if catch is not None:
+            return catch.group(1).lstrip().startswith("{")
         return None
     opening = candidate.find("(", match.start())
     depth = 0
@@ -364,6 +382,45 @@ def _contains_powershell_control_flow(
     return False
 
 
+def _contains_powershell_termination(
+    command: str,
+    *,
+    inside_hashtable: bool = False,
+) -> bool:
+    if inside_hashtable and re.match(
+        r"^\s*(?:return|exit|throw|break|continue)\s*=",
+        command,
+        re.IGNORECASE,
+    ):
+        return False
+    command_without_uninvoked_scriptblocks = re.sub(
+        r"=\s*\{[^{}]*\}",
+        "= __documentation_scriptblock__",
+        command,
+    )
+    for segment in _powershell_executable_segments(
+        command_without_uninvoked_scriptblocks
+    ):
+        candidate = re.sub(
+            r"^:[A-Za-z_][A-Za-z0-9_]*\s+",
+            "",
+            segment.strip(),
+        ).lstrip("} ")
+        if inside_hashtable and re.match(
+            r"^(?:return|exit|throw|break|continue)\s*=",
+            candidate,
+            re.IGNORECASE,
+        ):
+            continue
+        if re.match(
+            r"^(?:return|exit|throw|break|continue)(?:\s|$)",
+            candidate,
+            re.IGNORECASE,
+        ):
+            return True
+    return False
+
+
 def _iter_documented_commands_from_content(content: str):
     fence_language: str | None = None
     in_powershell_block_comment = False
@@ -377,6 +434,7 @@ def _iter_documented_commands_from_content(content: str):
     powershell_pending_control_block = False
     powershell_pending_control_line: int | None = None
     powershell_flow_terminated = False
+    powershell_scriptblock_variables: set[str] = set()
     pending_powershell_command: tuple[int, str] | None = None
     pending_powershell_depth = 0
     for line_number, line in enumerate(
@@ -438,6 +496,7 @@ def _iter_documented_commands_from_content(content: str):
             powershell_pending_control_block = False
             powershell_pending_control_line = None
             powershell_flow_terminated = False
+            powershell_scriptblock_variables = set()
             continue
         powershell_statements: list[str] | None = None
         powershell_line_continues = False
@@ -542,7 +601,7 @@ def _iter_documented_commands_from_content(content: str):
                     powershell_brace_depth,
                     sum(token in "([" for token in powershell_group_stack),
                 )
-                if _powershell_if_body_is_attached(command) is False:
+                if _powershell_control_body_is_attached(command) is False:
                     has_opening_brace = False
                 powershell_group_stack, group_syntax_is_valid = (
                     _powershell_group_context(
@@ -572,7 +631,7 @@ def _iter_documented_commands_from_content(content: str):
             if (
                 is_powershell
                 and powershell_pending_control_block
-                and not powershell_group_stack
+                and not any(token in "([" for token in powershell_group_stack)
             ):
                 if powershell_pending_control_line == command_line:
                     yield (
@@ -597,6 +656,29 @@ def _iter_documented_commands_from_content(content: str):
                     powershell_pending_control_line = None
             inside_hashtable = "hashtable" in powershell_brace_kind_stack
             inside_uninvoked = "uninvoked" in powershell_brace_kind_stack
+            scriptblock_assignment = re.match(
+                r"^\$([A-Za-z_][A-Za-z0-9_]*)\s*=\s*\{",
+                command.strip(),
+            )
+            if scriptblock_assignment is not None:
+                powershell_scriptblock_variables.add(
+                    scriptblock_assignment.group(1).lower()
+                )
+            invoked_variable = re.match(
+                r"^&\s+\$([A-Za-z_][A-Za-z0-9_]*)\b",
+                command.strip(),
+            )
+            if (
+                invoked_variable is not None
+                and invoked_variable.group(1).lower()
+                in powershell_scriptblock_variables
+            ):
+                yield (
+                    command_line,
+                    f"{_POWERSHELL_SYNTAX_ERROR}: unsupported scriptblock invocation",
+                    fence_language,
+                )
+                continue
             if (
                 is_powershell
                 and not inside_uninvoked
@@ -616,6 +698,14 @@ def _iter_documented_commands_from_content(content: str):
                 ):
                     powershell_pending_control_block = True
                     powershell_pending_control_line = command_line
+            command_terminates_flow = (
+                is_powershell
+                and not inside_uninvoked
+                and _contains_powershell_termination(
+                    command,
+                    inside_hashtable=inside_hashtable,
+                )
+            )
             if pending_powershell_command is not None:
                 command_line, pending = pending_powershell_command
                 command = f"{pending[:-1].rstrip()} {command.lstrip()}"
@@ -644,19 +734,11 @@ def _iter_documented_commands_from_content(content: str):
                         fence_language,
                     )
                 else:
-                    if (
-                        command_execution_depth > 0
-                        or powershell_control_flow_seen
-                        or powershell_flow_terminated
-                    ):
+                    if command_execution_depth > 0 or powershell_flow_terminated:
                         command = f"{_POWERSHELL_NON_TOP_LEVEL}: {command}"
                     yield command_line, command, fence_language
                     unwrapped_command, _ = _unwrap_execution_context(command)
-                    if command_execution_depth == 0 and re.match(
-                        r"^(?:return|exit|throw)(?:\s|$)",
-                        unwrapped_command,
-                        re.IGNORECASE,
-                    ):
+                    if command_terminates_flow:
                         powershell_flow_terminated = True
             if is_powershell:
                 powershell_brace_kind_stack = _powershell_brace_kind_context(
@@ -707,10 +789,13 @@ def _iter_documented_commands(path: Path):
 
 def _command_executable(command: str) -> tuple[str, str]:
     candidate = command.strip()
-    if re.match(r"^[&.]\s+", candidate):
+    uses_call_operator = bool(re.match(r"^[&.]\s+", candidate))
+    if uses_call_operator:
         candidate = candidate[1:].lstrip()
     token_match = re.match(r"""^("[^"]+"|'[^']+'|\S+)(.*)$""", candidate)
     if token_match is None:
+        return "", ""
+    if token_match.group(1).startswith(('"', "'")) and not uses_call_operator:
         return "", ""
     executable = token_match.group(1).strip("\"'").replace("\\", "/")
     return executable.rsplit("/", 1)[-1].lower(), token_match.group(2).lstrip()
@@ -763,8 +848,13 @@ def _is_venv_creation_command(command: str) -> bool:
 
 def _is_venv_dependency_install_command(command: str) -> bool:
     candidate = command.strip()
+    uses_call_operator = candidate.startswith("&")
+    if uses_call_operator:
+        candidate = candidate[1:].lstrip()
     token = re.match(r"""^("[^"]+"|'[^']+'|\S+)(.*)$""", candidate)
     if token is None:
+        return False
+    if token.group(1).startswith(('"', "'")) and not uses_call_operator:
         return False
     executable_path = token.group(1).strip("\"'").replace("\\", "/").lower()
     arguments = token.group(2).lstrip()
@@ -781,10 +871,13 @@ def _is_venv_dependency_install_command(command: str) -> bool:
 
 def _is_prepared_venv_tool_command(command: str, module: str) -> bool:
     candidate = command.strip()
-    if candidate.startswith("&"):
+    uses_call_operator = candidate.startswith("&")
+    if uses_call_operator:
         candidate = candidate[1:].lstrip()
     token = re.match(r"""^("[^"]+"|'[^']+'|\S+)(.*)$""", candidate)
     if token is None:
+        return False
+    if token.group(1).startswith(('"', "'")) and not uses_call_operator:
         return False
     executable_path = token.group(1).strip("\"'").replace("\\", "/").lower()
     return bool(
@@ -1035,9 +1128,20 @@ def _python_module_execution_target(arguments: str) -> str | None:
             return normalized[2:]
         if (
             re.fullmatch(r"-V+", token)
+            or re.fullmatch(r"-0p?", normalized)
             or normalized.startswith("-c")
             or normalized.startswith("--help")
-            or normalized in {"-c", "--", "-", "--version", "--list", "--list-paths"}
+            or normalized
+            in {
+                "-c",
+                "--",
+                "-",
+                "-h",
+                "-?",
+                "--version",
+                "--list",
+                "--list-paths",
+            }
         ):
             return None
         if token in {"-X", "-W"} or normalized == "--check-hash-based-pycs":
@@ -1098,7 +1202,13 @@ def _powershell_inline_syntax_is_valid(
         re.IGNORECASE,
     ):
         return False
-    if re.search(r",\s*\)", command_without_comment):
+    if re.search(
+        r"\(\s*(?:@\{[^{}]*\}|"
+        r"\$[A-Za-z_][A-Za-z0-9_.]*|"
+        r"\d+(?:\.\d+)?|"
+        r"\"[^\"]*\"|'[^']*')\s*,\s*\)",
+        command_without_comment,
+    ):
         return False
     if re.search(
         rf"{word_operator}\s+" rf"(?!-(?:not|bnot|split|join)\b){word_operator}",
@@ -1108,7 +1218,11 @@ def _powershell_inline_syntax_is_valid(
         return False
     if re.search(r"\|\s*[\)\]\}]", visible_syntax):
         return False
-    if re.search(r"(?:=|&&|\|\|)\s*[\)\]\}]", visible_syntax):
+    if re.search(r"(?:&&|\|\|)\s*[\)\]\}]", visible_syntax):
+        return False
+    if re.search(r"=\s*\}", command_without_comment):
+        return False
+    if re.search(r"-(?:not|bnot)\s*[\)\]\}]", visible_syntax, re.IGNORECASE):
         return False
     return not command_without_comment.rstrip().endswith(("|", "&&", "||"))
 
@@ -1425,7 +1539,7 @@ def test_contributor_guides_keep_python_tools_on_the_prepared_venv() -> None:
         "pytest.exe -q",
         r".\.venv\Scripts\pytest.exe -q",
         r'& ".\.venv\Scripts\python.exe" -m pytest -q',
-        r"'C:\Python311\python.exe' -m pytest tests/unit",
+        r"& 'C:\Python311\python.exe' -m pytest tests/unit",
         "py -m pytest -q",
         "py -3.12 -m pytest -q",
         "py -3 -m pytest -q",
@@ -1450,6 +1564,8 @@ def test_direct_pytest_guard_recognizes_supported_launcher_shapes(command: str) 
         "python -c 'print(1)' -m pytest",
         "python --version -m pytest",
         "python - -m pytest",
+        "py -0 -m pytest",
+        "py -0p -m pytest",
     ],
 )
 def test_direct_pytest_guard_stops_at_python_execution_target(command: str) -> None:
@@ -1562,6 +1678,19 @@ def test_prepared_venv_tool_accepts_equivalent_module_launchers() -> None:
         assert _is_prepared_venv_tool_command(command, "ruff")
 
 
+def test_quoted_venv_executable_requires_call_operator() -> None:
+    invalid_install = (
+        r'".\.venv\Scripts\python.exe" -m pip install '
+        r"-r requirements.txt -r requirements-dev.txt"
+    )
+    assert not _is_venv_dependency_install_command(invalid_install)
+    assert _is_venv_dependency_install_command(f"& {invalid_install}")
+    assert not _is_prepared_venv_tool_command(
+        r'".\.venv\Scripts\python.exe" -m ruff check app',
+        "ruff",
+    )
+
+
 def test_control_flow_guard_does_not_treat_hashtable_keys_as_execution() -> None:
     assert not _contains_powershell_control_flow(
         '@{ if = 1; while = 2; exit = "value" }'
@@ -1602,8 +1731,55 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
     )
 
 
+def test_postgres_doc_guard_rejects_invoked_scriptblock() -> None:
+    content = r"""
+```powershell
+$callback = { exit 0 }; & $callback
+createdb -U geo geov0_test_callback
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_callback"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+./scripts/verify_local.ps1 -BackendMarker postgres
+```
+"""
+    assert _postgres_example_violations(
+        Path("synthetic.md"),
+        content,
+        require_create=True,
+    )
+
+
 def test_expression_guard_preserves_cmdlet_switches() -> None:
     assert _powershell_inline_syntax_is_valid("Write-Host (Get-ChildItem -Force)")
+
+
+@pytest.mark.parametrize(
+    "control_block",
+    [
+        "if (\n    $true\n) {\n    Write-Output ok\n}",
+        'if ((@{ Name = "value" }).Count -eq 1) { Write-Output ok }',
+    ],
+)
+def test_postgres_doc_guard_preserves_valid_control_bodies(
+    control_block: str,
+) -> None:
+    content = (
+        "```powershell\n"
+        f"{control_block}\n"
+        "createdb -U geo geov0_test_valid_control\n"
+        '$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/'
+        'geov0_test_valid_control"\n'
+        '$env:GEO_TEST_ALLOW_DB_RESET = "1"\n'
+        "./scripts/verify_local.ps1 -BackendMarker postgres\n"
+        "```\n"
+    )
+    assert (
+        _postgres_example_violations(
+            Path("synthetic.md"),
+            content,
+            require_create=True,
+        )
+        == []
+    )
 
 
 @pytest.mark.parametrize(
@@ -2431,6 +2607,8 @@ def test_postgres_doc_guard_fails_closed_after_control_flow(
         '"x" -ireplace )',
         "1 && )",
         "$x = }",
+        "-not )",
+        "-bnot )",
     ],
 )
 def test_postgres_doc_guard_rejects_invalid_expression(
