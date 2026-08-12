@@ -172,7 +172,9 @@ def _iter_documented_commands_from_content(content: str):
                 line = stripped
             was_in_block_comment = in_powershell_block_comment
             line_for_block_comments = (
-                line if in_powershell_block_comment else _strip_shell_comment(line)
+                line
+                if in_powershell_block_comment
+                else _strip_shell_comment(line, preserve_trailing=True)
             )
             visible, in_powershell_block_comment = _strip_powershell_block_comments(
                 line_for_block_comments,
@@ -182,7 +184,7 @@ def _iter_documented_commands_from_content(content: str):
                 powershell_block_comment_line = line_number
             elif not in_powershell_block_comment:
                 powershell_block_comment_line = None
-            visible = _strip_shell_comment(visible)
+            visible = _strip_shell_comment(visible, preserve_trailing=True)
             here_string_start = re.search(r"@(['\"])\s*$", visible)
             if (
                 here_string_start is not None
@@ -448,7 +450,7 @@ def _shell_contract_violation(command: str, fence_language: str | None) -> bool:
     )
 
 
-def _strip_shell_comment(command: str) -> str:
+def _strip_shell_comment(command: str, *, preserve_trailing: bool = False) -> str:
     quote: str | None = None
     for index, character in enumerate(command):
         if character in {'"', "'"}:
@@ -461,8 +463,16 @@ def _strip_shell_comment(command: str) -> str:
             and not (index > 0 and command[index - 1] == "<")
             and not (index + 1 < len(command) and command[index + 1] == ">")
         ):
-            return command[:index].rstrip()
-    return command.rstrip()
+            preceding_backticks = 0
+            previous = index - 1
+            while previous >= 0 and command[previous] == "`":
+                preceding_backticks += 1
+                previous -= 1
+            if preceding_backticks % 2 == 1:
+                continue
+            prefix = command[:index]
+            return prefix if preserve_trailing else prefix.rstrip()
+    return command if preserve_trailing else command.rstrip()
 
 
 def _assignment_value(command: str, name: str) -> str | None:
@@ -1269,11 +1279,28 @@ $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
 ./scripts/verify_local.ps1 -BackendMarker postgres `"""
             + "   \n"
-            + """
-  -BackendOnly
+            + """  -BackendOnly
 ```
 """
         ),
+        """
+```powershell
+createdb -U geo geov0_test_backtick_before_comment
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_backtick_before_comment"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+./scripts/verify_local.ps1 -BackendMarker postgres ` # real comment
+  -BackendOnly
+```
+""",
+        """
+```powershell
+createdb -U geo geov0_test_escaped_comment_marker
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_escaped_comment_marker"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+./scripts/verify_local.ps1 -BackendMarker postgres `#not_a_comment
+  -BackendOnly
+```
+""",
         """
 ```powershell
 createdb -U geo geov0_test_indented_here_end
