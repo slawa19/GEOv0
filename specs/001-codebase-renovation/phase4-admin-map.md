@@ -149,5 +149,11 @@ sustained P1/P2.
 - Naive `AdminParticipantListItem.created_at` and
   `AdminIncidentItem.created_at` are sibling residuals outside the one confirmed
   Phase 4 audit timestamp path; no speculative schema sweep was made.
+  - **Status correction 2026-08-11 (ledger staleness, finding B-4).** This line is
+    stale for `AdminIncidentItem.created_at`: the UTC validator landed in `08ba40e`
+    and is present at `app/schemas/admin.py:139-147`. The archived body is left
+    otherwise unchanged per `docs/ru/documentation-rules.md` §2.4; this is a status
+    mark, not a rewrite. The sibling residual that is still real is
+    `app/schemas/trustline.py:22-23`, registered in `specs/BACKLOG.md`.
 - No visual redesign, complex ARIA canvas model, all-browser matrix or broad
   Cytoscape decomposition is claimed.
