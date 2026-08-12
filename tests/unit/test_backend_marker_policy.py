@@ -228,7 +228,8 @@ def _powershell_if_body_is_attached(command: str) -> bool | None:
             depth -= 1
             if depth == 0:
                 remainder = candidate[index + 1 :].lstrip()
-                return remainder.startswith("{")
+                condition = candidate[opening + 1 : index].strip()
+                return bool(condition) and remainder.startswith("{")
     return False
 
 
@@ -280,7 +281,8 @@ def _powershell_brace_kind_context(line: str, stack: list[str]) -> list[str]:
                 index += 2
                 continue
         if quote is None and character == "{":
-            updated.append("block")
+            prefix = line[:index].rstrip()
+            updated.append("uninvoked" if prefix.endswith("=") else "block")
         elif quote is None and character == "}" and updated:
             updated.pop()
         index += 1
@@ -352,6 +354,7 @@ def _contains_powershell_control_flow(
             "",
             segment.strip(),
         )
+        candidate = candidate.lstrip("} ")
         if re.match(
             rf"^(?:{keywords})(?:\s|\(|\{{|$)",
             candidate,
@@ -372,6 +375,7 @@ def _iter_documented_commands_from_content(content: str):
     powershell_group_stack: list[str] = []
     powershell_control_flow_seen = False
     powershell_pending_control_block = False
+    powershell_pending_control_line: int | None = None
     powershell_flow_terminated = False
     pending_powershell_command: tuple[int, str] | None = None
     pending_powershell_depth = 0
@@ -432,6 +436,7 @@ def _iter_documented_commands_from_content(content: str):
             powershell_group_stack = []
             powershell_control_flow_seen = False
             powershell_pending_control_block = False
+            powershell_pending_control_line = None
             powershell_flow_terminated = False
             continue
         powershell_statements: list[str] | None = None
@@ -569,8 +574,19 @@ def _iter_documented_commands_from_content(content: str):
                 and powershell_pending_control_block
                 and not powershell_group_stack
             ):
-                if command.lstrip().startswith("{"):
+                if powershell_pending_control_line == command_line:
+                    yield (
+                        command_line,
+                        f"{_POWERSHELL_SYNTAX_ERROR}: missing control statement block",
+                        fence_language,
+                    )
                     powershell_pending_control_block = False
+                    powershell_pending_control_line = None
+                elif command.lstrip().startswith("{") or has_opening_brace:
+                    powershell_pending_control_block = False
+                    powershell_pending_control_line = None
+                elif re.fullmatch(r"\)+", command.strip()):
+                    pass
                 else:
                     yield (
                         command_line,
@@ -578,10 +594,16 @@ def _iter_documented_commands_from_content(content: str):
                         fence_language,
                     )
                     powershell_pending_control_block = False
+                    powershell_pending_control_line = None
             inside_hashtable = "hashtable" in powershell_brace_kind_stack
-            if is_powershell and _contains_powershell_control_flow(
-                command,
-                inside_hashtable=inside_hashtable,
+            inside_uninvoked = "uninvoked" in powershell_brace_kind_stack
+            if (
+                is_powershell
+                and not inside_uninvoked
+                and _contains_powershell_control_flow(
+                    command,
+                    inside_hashtable=inside_hashtable,
+                )
             ):
                 powershell_control_flow_seen = True
                 if (
@@ -593,6 +615,7 @@ def _iter_documented_commands_from_content(content: str):
                     and not has_opening_brace
                 ):
                     powershell_pending_control_block = True
+                    powershell_pending_control_line = command_line
             if pending_powershell_command is not None:
                 command_line, pending = pending_powershell_command
                 command = f"{pending[:-1].rstrip()} {command.lstrip()}"
@@ -758,6 +781,8 @@ def _is_venv_dependency_install_command(command: str) -> bool:
 
 def _is_prepared_venv_tool_command(command: str, module: str) -> bool:
     candidate = command.strip()
+    if candidate.startswith("&"):
+        candidate = candidate[1:].lstrip()
     token = re.match(r"""^("[^"]+"|'[^']+'|\S+)(.*)$""", candidate)
     if token is None:
         return False
@@ -1008,15 +1033,12 @@ def _python_module_execution_target(arguments: str) -> str | None:
             return tokens[index + 1].lower() if index + 1 < len(tokens) else None
         if normalized.startswith("-m") and normalized != "-m":
             return normalized[2:]
-        if token in {"-V"} or normalized in {
-            "-c",
-            "--",
-            "-",
-            "--version",
-            "-h",
-            "-?",
-            "--help",
-        }:
+        if (
+            re.fullmatch(r"-V+", token)
+            or normalized.startswith("-c")
+            or normalized.startswith("--help")
+            or normalized in {"-c", "--", "-", "--version", "--list", "--list-paths"}
+        ):
             return None
         if token in {"-X", "-W"} or normalized == "--check-hash-based-pycs":
             index += 2
@@ -1055,8 +1077,8 @@ def _powershell_inline_syntax_is_valid(
     visible_syntax = "".join(unquoted)
     word_operator = (
         r"-(?:[ic]?(?:eq|ne|gt|ge|lt|le|like|notlike|match|notmatch)|"
-        r"contains|notcontains|in|notin|replace|split|join|is|isnot|as|"
-        r"and|or|xor|band|bor|bxor|f)"
+        r"contains|notcontains|in|notin|replace|ireplace|creplace|"
+        r"split|join|is|isnot|as|and|or|xor|band|bor|bxor|shl|shr|f)"
     )
     if not inside_hashtable and re.search(
         r"(?:^|[=;|&{(]\s*|:[A-Za-z_][A-Za-z0-9_]*\s+)" r"if\s+(?!\s*\()",
@@ -1085,6 +1107,8 @@ def _powershell_inline_syntax_is_valid(
     ):
         return False
     if re.search(r"\|\s*[\)\]\}]", visible_syntax):
+        return False
+    if re.search(r"(?:=|&&|\|\|)\s*[\)\]\}]", visible_syntax):
         return False
     return not command_without_comment.rstrip().endswith(("|", "&&", "||"))
 
@@ -1509,6 +1533,10 @@ def test_python_tool_guard_recognizes_all_supported_launcher_shapes(
         "python -c 'print(1)' -m uvicorn",
         "python --version -m ruff",
         "python - -m black",
+        "python -cprint(1) -m ruff",
+        "python -VV -m black",
+        "python --help-env -m uvicorn",
+        "py --list -m ruff",
     ],
 )
 def test_python_tool_guard_stops_at_python_execution_target(command: str) -> None:
@@ -1529,6 +1557,7 @@ def test_prepared_venv_tool_accepts_equivalent_module_launchers() -> None:
         r".\.venv\Scripts\python.exe -I -m ruff check app",
         r".\.venv\Scripts\python.exe -mruff check app",
         r'.\.venv\Scripts\python.exe "-m" "ruff" check app',
+        r'& ".\.venv\Scripts\python.exe" "-m" "ruff" check app',
     ]:
         assert _is_prepared_venv_tool_command(command, "ruff")
 
@@ -1553,7 +1582,9 @@ $metadata = @{
     if = "value"
     return = "value"
 }
-$callback = { return 1 }
+$callback = {
+    return 1
+}
 createdb -U geo geov0_test_data_roles
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_data_roles"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
@@ -2396,6 +2427,10 @@ def test_postgres_doc_guard_fails_closed_after_control_flow(
         "$obj.Value,)",
         "1 -and -or 2)",
         "Get-Item |)",
+        "1 -shl )",
+        '"x" -ireplace )',
+        "1 && )",
+        "$x = }",
     ],
 )
 def test_postgres_doc_guard_rejects_invalid_expression(
@@ -2430,6 +2465,10 @@ Write-Host ({invalid_expression}
         'if ($true) & { Write-Output "not a body" }',
         'if $true { Write-Output "invalid condition" }',
         'if ($true) Write-Output (Get-Date) { Write-Output "not a body" }',
+        'if ($true); { Write-Output "not a body" }',
+        'if () { Write-Output "empty condition" }',
+        'else Write-Output "missing body"',
+        'catch Write-Output "missing body"',
     ],
 )
 def test_postgres_doc_guard_rejects_control_statement_without_block(
