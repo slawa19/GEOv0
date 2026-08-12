@@ -21,6 +21,39 @@ When primary authorities conflict, do not silently force one to match another. C
 2. **Intended behavior** — accepted decision or owner clarification.
 3. **Optimal target** — the safest maintainable behavior and migration implications.
 
+## Translation freeze (RU is the working tree) — 2026-08-10
+
+RU is the primary and only maintained documentation tree. **EN and PL are frozen and are not
+being updated.** Do not spend effort synchronizing them; do not treat them as evidence of
+current behavior. Measured drift as of 2026-08-10:
+
+| Document | RU | EN | PL | Gap |
+|---|---|---|---|---|
+| `09-decisions-and-defaults` | 22 104 B / 2026-08-09 | 5 600 B / 2026-01-06 | 5 823 B / 2026-01-06 | EN/PL hold ~25% of the RU text — **215 days behind** |
+| `03-architecture` | 82 560 B / 2026-08-09 | 69 022 B / 2026-01-10 | 53 115 B / 2026-01-10 | 211 days behind |
+| `00-overview` | 12 240 B / 2026-08-07 | 7 614 B / 2026-01-06 | 7 549 B / 2026-01-06 | 213 days behind |
+| `02-protocol-spec` | 116 170 B / 2026-02-10 | 87 153 B (−25%) | 61 019 B (−47%) | translations frozen at 2026-01-06 |
+| `05-deployment`, `10-testing-framework`, `config-reference` | rewritten shorter in Aug 2026 | **larger than RU** | **larger than RU** | inverted: translations still assert claims RU has withdrawn |
+
+Two structural facts behind the freeze:
+
+- **0 of 28 EN/PL files carry a dated synchronization header.** By the rule in the table below,
+  that makes the entire EN/PL tree informative, never normative.
+- **~114 of 144 RU documents (79%) were never translated**, including every "current front door"
+  listed below (`ru/backend/README.md`, `ru/admin-ui/README.md`, `ru/simulator/README.md`,
+  `ru/documentation-rules.md`) and all of `ru/simulator/` (81 files).
+
+Known orphan translations — EN/PL files whose RU counterpart was archived or moved, so the
+same-filename correspondence no longer holds. Cleanup candidates, not sources of truth:
+
+- `en/admin-console-minimal-spec.md`, `pl/admin-console-minimal-spec.md` — RU original is archived at `ru/admin-ui/specs/archive/admin-console-minimal-spec.md`
+- `en/admin-ui-spec.md`, `pl/admin-ui-spec.md` — RU moved to `ru/admin-ui/specs/admin-ui-spec.md`
+- `en/pwa-client-ui-spec.md`, `pl/pwa-client-ui-spec.md` — RU moved to `ru/pwa/specs/pwa-client-ui-spec.md`
+- `en/concept/09-behavior-simulator-application.md`, `pl/concept/09-aplikacja-symulator-zachowan.md` — RU content moved to `ru/simulator/backend/GEO-community-simulator-application.md`
+
+Lifting the freeze is a deliberate decision: it means re-translating from RU and stamping each
+file with a synchronization source and date.
+
 ## Current front doors
 
 - Runtime and local start: [`README.md`](../README.md#getting-started)
@@ -32,5 +65,7 @@ When primary authorities conflict, do not silently force one to match another. C
 - Admin UI domain: [`ru/admin-ui/README.md`](ru/admin-ui/README.md)
 - Simulator domain: [`ru/simulator/README.md`](ru/simulator/README.md)
 - Documentation rules: [`ru/documentation-rules.md`](ru/documentation-rules.md)
+- Agent rules and gates: [`AGENTS.md`](../AGENTS.md); orchestrator role: [`codex-orchestrator-rule.md`](codex-orchestrator-rule.md); external review (who reviews whom, and how): [`external-review-runbook.md`](external-review-runbook.md)
+- Program registry and what to work on next: [`specs/README.md`](../specs/README.md)
 
 The root README and this index are navigation surfaces, not substitute specifications.
