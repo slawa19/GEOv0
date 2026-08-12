@@ -110,6 +110,7 @@ def _split_powershell_statements(line: str) -> list[str]:
     statements: list[str] = []
     current: list[str] = []
     quote: str | None = None
+    group_depth = 0
     index = 0
     while index < len(line):
         character = line[index]
@@ -121,7 +122,11 @@ def _split_powershell_statements(line: str) -> list[str]:
             quote = (
                 None if quote == character else character if quote is None else quote
             )
-        if character == ";" and quote is None:
+        elif quote is None and character in "([{":
+            group_depth += 1
+        elif quote is None and character in ")]}" and group_depth:
+            group_depth -= 1
+        if character == ";" and quote is None and group_depth == 0:
             statement = "".join(current).strip()
             if statement:
                 statements.append(statement)
@@ -256,6 +261,21 @@ def _powershell_control_body_is_attached(command: str) -> bool | None:
                 if closing is None:
                     return False
                 cursor = closing + 1
+                while True:
+                    separator = cursor
+                    while separator < len(candidate) and candidate[separator].isspace():
+                        separator += 1
+                    if separator >= len(candidate) or candidate[separator] != ",":
+                        break
+                    cursor = separator + 1
+                    while cursor < len(candidate) and candidate[cursor].isspace():
+                        cursor += 1
+                    if cursor >= len(candidate) or candidate[cursor] != "[":
+                        return False
+                    closing = closing_delimiter(cursor, "[", "]")
+                    if closing is None:
+                        return False
+                    cursor = closing + 1
         while cursor < len(candidate) and candidate[cursor].isspace():
             cursor += 1
         if cursor >= len(candidate) or candidate[cursor] != "{":
@@ -669,6 +689,13 @@ def _iter_documented_commands_from_content(content: str):
                     powershell_pending_control_block = False
                     powershell_pending_control_line = None
             inside_hashtable = "hashtable" in powershell_brace_kind_stack
+            defines_hashtable = (
+                re.match(
+                    r"^\$[A-Za-z_][A-Za-z0-9_]*\s*=\s*@\{",
+                    command.strip(),
+                )
+                is not None
+            )
             inside_uninvoked = "uninvoked" in powershell_brace_kind_stack
             scriptblock_assignment = re.match(
                 r"^\$([A-Za-z_][A-Za-z0-9_]*)\s*=\s*\{",
@@ -738,7 +765,7 @@ def _iter_documented_commands_from_content(content: str):
                     and here_string_start is None
                     and not _powershell_inline_syntax_is_valid(
                         command,
-                        inside_hashtable=inside_hashtable,
+                        inside_hashtable=inside_hashtable or defines_hashtable,
                     )
                 ):
                     yield (
@@ -910,11 +937,38 @@ def _is_scriptblock_definition(command: str) -> bool:
     nested_command, _ = _unwrap_execution_context(command)
     return (
         re.match(
-            r"^\$[A-Za-z_][A-Za-z0-9_]*\s*=\s*\{",
+            r"^(?:\[[^\]]+\]\s*)?\$"
+            r"(?:\{[^}]+\}|(?:[A-Za-z_][A-Za-z0-9_]*:)?"
+            r"[A-Za-z_][A-Za-z0-9_]*)\s*=\s*"
+            r"(?:\{|\[scriptblock\]::Create\s*\()",
             nested_command.strip(),
         )
         is not None
     )
+
+
+def _unsupported_owned_powershell_blocks(
+    content: str,
+    *,
+    owner_pattern: str,
+) -> list[str]:
+    violations: list[str] = []
+    for block in re.findall(
+        r"```(?:powershell|pwsh)\s*\n(.*?)```",
+        content,
+        re.IGNORECASE | re.DOTALL,
+    ):
+        if re.search(owner_pattern, block, re.IGNORECASE) is None:
+            continue
+        if re.search(
+            r"(?:^|[;}])\s*"
+            r"(?:if|elseif|else|while|do|for|foreach|switch|try|catch|finally)"
+            r"\b(?!\s*=)",
+            block,
+            re.IGNORECASE | re.MULTILINE,
+        ):
+            violations.append("unsupported control flow in owned PowerShell block")
+    return violations
 
 
 def _contributor_venv_violations(content: str) -> list[str]:
@@ -937,6 +991,12 @@ def _contributor_venv_violations(content: str) -> list[str]:
     tool_indexes: list[int] = []
     verifier_indexes: list[int] = []
     violations: list[str] = list(syntax_errors)
+    violations.extend(
+        _unsupported_owned_powershell_blocks(
+            content,
+            owner_pattern=r"(?:py\s+-m\s+venv\s+\.venv|\.venv[\\/]Scripts[\\/]python)",
+        )
+    )
     for index, command in enumerate(commands):
         if _is_scriptblock_definition(command):
             violations.append("unsupported scriptblock definition")
@@ -1188,6 +1248,11 @@ def _powershell_inline_syntax_is_valid(
     command_without_comment = command
     if _tokenize_powershell_arguments(command_without_comment) is None:
         return False
+    if re.match(
+        r"""^\s*(?:"[^"]+"|'[^']+')\s+\S+""",
+        command_without_comment,
+    ):
+        return False
     unquoted: list[str] = []
     quote: str | None = None
     index = 0
@@ -1237,8 +1302,16 @@ def _powershell_inline_syntax_is_valid(
         command_without_comment,
     ):
         return False
+    if re.search(r"\(\s*,", visible_syntax):
+        return False
     if re.search(
         rf"{word_operator}\s+" rf"(?!-(?:not|bnot|split|join)\b){word_operator}",
+        visible_syntax,
+        re.IGNORECASE,
+    ):
+        return False
+    if re.search(
+        rf"(?:[+*/%]|{word_operator})\s+(?:[+*/%]|{word_operator})",
         visible_syntax,
         re.IGNORECASE,
     ):
@@ -1250,6 +1323,10 @@ def _powershell_inline_syntax_is_valid(
     if re.search(r"=\s*\}", command_without_comment):
         return False
     if re.search(r"-(?:not|bnot)\s*[\)\]\}]", visible_syntax, re.IGNORECASE):
+        return False
+    if re.search(r"!\s*[\)\]\}]", visible_syntax):
+        return False
+    if re.search(r"\(\s*\([^(),]+\)\s*,\s*\)", visible_syntax):
         return False
     return not command_without_comment.rstrip().endswith(("|", "&&", "||"))
 
@@ -1346,6 +1423,13 @@ def _postgres_example_violations(
     require_create: bool | None = None,
 ) -> list[str]:
     violations: list[str] = []
+    violations.extend(
+        f"{path}: {violation}"
+        for violation in _unsupported_owned_powershell_blocks(
+            content,
+            owner_pattern=r"(?:TEST_DATABASE_URL|-BackendMarker\s+postgres)",
+        )
+    )
     if require_create is None:
         require_create = path in _POSTGRES_CREATE_EXAMPLE_DOCS
     variables: dict[str, str] = {}
@@ -1358,6 +1442,7 @@ def _postgres_example_violations(
         if _is_scriptblock_definition(command):
             violations.append(f"{path}: unsupported scriptblock definition")
             continue
+        nested_command, is_nested = _unwrap_execution_context(command)
         variable_assignment = re.fullmatch(
             r"\$([A-Za-z_][A-Za-z0-9_]*)\s*=\s*" r"(?:(['\"])([^'\"]+)\2|([^\s'\"]+))",
             command,
@@ -1719,6 +1804,15 @@ def test_quoted_venv_executable_requires_call_operator() -> None:
         r'".\.venv\Scripts\python.exe" -m ruff check app',
         "ruff",
     )
+    contributor = rf"""
+```powershell
+py -m venv .venv
+& {invalid_install}
+".\.venv\Scripts\python.exe" -m black --check app
+.\.venv\Scripts\python.exe -m ruff check app migrations
+```
+"""
+    assert _contributor_venv_violations(contributor)
 
 
 def test_control_flow_guard_does_not_treat_hashtable_keys_as_execution() -> None:
@@ -1756,6 +1850,31 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
     )
 
 
+@pytest.mark.parametrize(
+    "definition",
+    [
+        "${callback} = { exit 23 }",
+        "$local:callback = { exit 23 }",
+        "[scriptblock]$callback = { exit 23 }",
+        '$callback = [scriptblock]::Create("exit 23")',
+    ],
+)
+def test_postgres_doc_guard_rejects_all_local_scriptblock_definitions(
+    definition: str,
+) -> None:
+    content = f"""```powershell
+{definition}
+createdb -U geo geov0_test_callback_shape
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_callback_shape"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+./scripts/verify_local.ps1 -BackendMarker postgres
+```
+"""
+    assert _postgres_example_violations(
+        Path("synthetic.md"), content, require_create=True
+    )
+
+
 def test_postgres_doc_guard_preserves_multiline_hashtable_data() -> None:
     content = r"""
 ```powershell
@@ -1765,6 +1884,22 @@ $metadata = @{
 }
 createdb -U geo geov0_test_data_roles
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_data_roles"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+./scripts/verify_local.ps1 -BackendMarker postgres
+```
+"""
+    assert (
+        _postgres_example_violations(Path("synthetic.md"), content, require_create=True)
+        == []
+    )
+
+
+def test_postgres_doc_guard_preserves_one_line_hashtable_data() -> None:
+    content = r"""
+```powershell
+$metadata = @{ if = 1; while = 2; exit = "value" }
+createdb -U geo geov0_test_inline_data
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_inline_data"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
 ./scripts/verify_local.ps1 -BackendMarker postgres
 ```
@@ -1796,6 +1931,12 @@ def test_expression_guard_preserves_cmdlet_switches() -> None:
     assert _powershell_inline_syntax_is_valid("Write-Host (Get-ChildItem -Force)")
 
 
+def test_control_guard_preserves_multi_type_catch_shape() -> None:
+    assert _powershell_control_body_is_attached(
+        "catch [System.IO.IOException], [System.TimeoutException] { Write-Output ok }"
+    )
+
+
 @pytest.mark.parametrize(
     "control_block",
     [
@@ -1803,7 +1944,7 @@ def test_expression_guard_preserves_cmdlet_switches() -> None:
         'if ((@{ Name = "value" }).Count -eq 1) { Write-Output ok }',
     ],
 )
-def test_postgres_doc_guard_preserves_valid_control_bodies(
+def test_postgres_doc_guard_rejects_unsupported_control_bodies(
     control_block: str,
 ) -> None:
     content = (
@@ -1816,13 +1957,10 @@ def test_postgres_doc_guard_preserves_valid_control_bodies(
         "./scripts/verify_local.ps1 -BackendMarker postgres\n"
         "```\n"
     )
-    assert (
-        _postgres_example_violations(
-            Path("synthetic.md"),
-            content,
-            require_create=True,
-        )
-        == []
+    assert _postgres_example_violations(
+        Path("synthetic.md"),
+        content,
+        require_create=True,
     )
 
 
@@ -2655,6 +2793,11 @@ def test_postgres_doc_guard_fails_closed_after_control_flow(
         "-bnot )",
         "1 -icontains )",
         "1 -cin )",
+        "1 + -eq 2)",
+        "1 * -eq 2)",
+        "! )",
+        "(Get-Date),)",
+        ",)",
     ],
 )
 def test_postgres_doc_guard_rejects_invalid_expression(
