@@ -358,7 +358,7 @@ def _powershell_executable_segments(command: str) -> list[str]:
             quote = (
                 None if quote == character else character if quote is None else quote
             )
-        if quote is None and character in "{}|=&()":
+        if quote is None and character in "{}|=&();":
             segment = "".join(current).strip()
             if segment:
                 segments.append(segment)
@@ -945,8 +945,10 @@ def _is_scriptblock_definition(command: str) -> bool:
             r"^(?:\[[^\]]+\]\s*)?\$"
             r"(?:\{[^}]+\}|(?:[A-Za-z_][A-Za-z0-9_]*:)?"
             r"[A-Za-z_][A-Za-z0-9_]*)\s*=\s*"
-            r"(?:\{|\[scriptblock\]::Create\s*\()",
+            r"(?:\{|\[(?:System\.Management\.Automation\.)?"
+            r"ScriptBlock\]::Create\s*\()",
             nested_command.strip(),
+            re.IGNORECASE,
         )
         is not None
     )
@@ -965,11 +967,29 @@ def _unsupported_owned_powershell_blocks(
     ):
         if re.search(owner_pattern, block, re.IGNORECASE) is None:
             continue
+        if re.search(
+            r"\[(?:System\.Management\.Automation\.)?ScriptBlock\]::Create\s*\(",
+            block,
+            re.IGNORECASE,
+        ):
+            violations.append("unsupported structural block in owned PowerShell block")
+            continue
+        visible_lines: list[str] = []
+        in_block_comment = False
+        for line in block.splitlines():
+            visible_line, in_block_comment = _strip_powershell_block_comments(
+                line,
+                in_block_comment,
+            )
+            visible_lines.append(
+                _strip_shell_comment(visible_line, preserve_trailing=True)
+            )
+        visible_block = "\n".join(visible_lines)
         quote: str | None = None
         index = 0
-        while index < len(block):
-            character = block[index]
-            if character == "`" and index + 1 < len(block):
+        while index < len(visible_block):
+            character = visible_block[index]
+            if character == "`" and index + 1 < len(visible_block):
                 index += 2
                 continue
             if character in {'"', "'"}:
@@ -1338,11 +1358,17 @@ def _powershell_inline_syntax_is_valid(
         re.IGNORECASE,
     ):
         return False
+    if re.search(
+        rf"(?:[A-Za-z0-9_$\)\]])\s+-\s+{word_operator}",
+        visible_syntax,
+        re.IGNORECASE,
+    ):
+        return False
     if re.search(r"\|\s*[\)\]\}]", visible_syntax):
         return False
     if re.search(r"(?:&&|\|\|)\s*[\)\]\}]", visible_syntax):
         return False
-    if re.search(r"=\s*\}", command_without_comment):
+    if re.search(r"=\s*\}", visible_syntax):
         return False
     if re.search(r"-(?:not|bnot)\s*[\)\]\}]", visible_syntax, re.IGNORECASE):
         return False
@@ -1880,6 +1906,8 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
         "$local:callback = { exit 23 }",
         "[scriptblock]$callback = { exit 23 }",
         '$callback = [scriptblock]::Create("exit 23")',
+        '$callback = [ScriptBlock]::Create("exit 23")',
+        '$callback = [System.Management.Automation.ScriptBlock]::Create("exit 23")',
     ],
 )
 def test_postgres_doc_guard_rejects_all_local_scriptblock_definitions(
@@ -1950,6 +1978,7 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 
 def test_expression_guard_preserves_cmdlet_switches() -> None:
     assert _powershell_inline_syntax_is_valid("Write-Host (Get-ChildItem -Force)")
+    assert _powershell_inline_syntax_is_valid('Write-Host "=}"')
 
 
 def test_control_guard_preserves_multi_type_catch_shape() -> None:
@@ -2816,6 +2845,7 @@ def test_postgres_doc_guard_fails_closed_after_control_flow(
         "1 -cin )",
         "1 + -eq 2)",
         "1 * -eq 2)",
+        "1 - -eq 2)",
         "! )",
         "(Get-Date),)",
         ",)",
