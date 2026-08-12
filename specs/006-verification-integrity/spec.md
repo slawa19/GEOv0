@@ -1,7 +1,7 @@
 # 006 — Verification integrity
 
 - **Date:** 2026-08-11
-- **Status:** IN PROGRESS — срез Волны 1 (T601, T607, T608a) закрыт 2026-08-11; остаток авторизован для Волны 5
+- **Status:** COMPLETED 2026-08-12 — T600–T611 закрыты; финальное независимое ревью CLEAN на exact HEAD `b020296bfb97ba4b28a6eba850a20de390f04136`
 - **Status authority:** метка описательная; завершённость устанавливают success criteria и evidence.
 - **Owner surface:** `tests/`, `pytest.ini`, `tests/conftest.py`, `.github/workflows/quality.yml`, `scripts/verify_local.ps1`, `admin-ui/src/test/`, SSE-ветвление в `app/api/v1/simulator.py`, а также применение patch в `simulator-ui/v2/src/demo/patches.ts` (F-006-1)
 - **Почему это отдельная и ранняя программа:** пока гейты сообщают неправду, любое «зелено» из программ 002–005, 007 недоказуемо. AGENTS.md §5 уже запрещает заявлять «CI green»; эта программа делает так, чтобы запрет перестал быть нужен.
@@ -173,7 +173,7 @@ sequence (что требует протокольного поля), либо �
 | T608b | Black **остаётся неблокирующей диагностикой**: переформатирование 98 файлов / 4931 `+`/`-`-строк уничтожит `git blame`. Перевод в блокирующий — только после отдельного датированного решения | `[x]` |
 | T609 | Диалектный guard вокруг `CREATE EXTENSION pgcrypto` в миграции 001 по образцу миграций 004-017. **Не однострочник:** отдельно оценить `postgresql.JSONB`, `gen_random_uuid()` и 7× `ALTER TABLE … ADD CONSTRAINT`, которые SQLite тоже не примет. Приоритет низкий: alembic не используется для создания dev-SQLite | `[x]` |
 | T610 | Решение по OpenAPI-ratchet: план сокращения дрейфа либо честное переименование гейта | `[x]` |
-| T611 | Независимое внешнее ревью и evidence на точном HEAD (триггер AGENTS.md §15: программа меняет сам механизм проверки, поэтому самопроверка гейта не является доказательством) | `[!]` |
+| T611 | Независимое внешнее ревью и evidence на точном HEAD (триггер AGENTS.md §15: программа меняет сам механизм проверки, поэтому самопроверка гейта не является доказательством) | `[x]` |
 
 ## Changelog
 
@@ -492,3 +492,28 @@ auth transport header identity/requiredness входят в count+digest ratchet
 `business_parameter_identities`, а датированное решение синхронизировано без изменения baselines.
 Canonical contract selector в `wave5_extrem_verification_policy` — exit `0`; полный contract file
 собрал `23 passed` в предшествующем финальном verification.
+
+### 2026-08-12 — T611 final external review
+
+- Обязательное независимое read-only ревью выполнено агентом Codex с явно запрошенной моделью
+  `gpt-5.6-sol` на exact HEAD `b020296bfb97ba4b28a6eba850a20de390f04136`. Изоляция:
+  standalone detached clone вне репозитория, собственный `.git`, пустой список remotes, чистые
+  index/worktree. Финальный вердикт: **CLEAN — воспроизводимых current/substantial P1/P2 нет**.
+- Ревью честно сохранило lifecycle remediation: ранние exact-head раунды находили false-green
+  operational-policy проверки; они исправлялись общими правилами и перепроверялись на новых SHA.
+  Финальный delta `a5ecd270..b020296` затронул один файл
+  `tests/unit/test_backend_marker_policy.py` (`+36/-6`). Остаточные сконструированные редкие формы
+  PowerShell отсутствуют в active docs и классифицированы как неблокирующий P3/unsupported grammar,
+  а не как основание строить собственный полный PowerShell parser.
+- В isolated clone: canonical policy selector — exit `0`, `212 passed`; seven-selector combined
+  gate — exit `0`, `267 passed`; debug collection подтвердила ровно 267 nodeids; 10 active
+  operational docs, 5 PostgreSQL-owner docs и 3 contributor guides дали 0 policy violations.
+  Pinned Ruff `0.1.14` на product scope и изменённом файле — exit `0`; Black `24.1.1` на
+  изменённом файле — exit `0`; repository-wide Black остаётся известной неблокирующей диагностикой
+  (`99 would reformat, 42 unchanged`); `git diff --check` — exit `0`.
+- После последнего изменения оркестратор повторил canonical combined gate:
+  `.\scripts\verify_local.ps1 -TaskSlug wave5_t611_final_b020296 -BackendOnly -BackendSelector
+  <seven exact selectors> -Python .\.venv\Scripts\python.exe` — exit `0`, `267 passed`.
+  PostgreSQL в среде внешнего ревью был недоступен и не заявляется проверенным; финальный policy-only
+  delta не затрагивает product/DB/money/concurrency paths, а применимые PostgreSQL milestones
+  записаны у соответствующих задач выше.

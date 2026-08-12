@@ -1,6 +1,6 @@
 # Specs — реестр программ и порядок работ
 
-**Обновлено:** 2026-08-11
+**Обновлено:** 2026-08-12
 
 **Это точка входа для агента.** Если вопрос звучит «что делать дальше» — ответ здесь, в разделе
 «Порядок работ». Ничего не начинайте по документу из `plans/`: по AGENTS.md §13 он не source of truth.
@@ -26,7 +26,7 @@
 | 003 | [clearing-transaction-ownership](003-clearing-transaction-ownership/spec.md) | ✅ **ЗАКРЫТА** 2026-08-11 (T300–T307) | 2 × P2, 2 × P3 | `app/core/clearing/`, `app/core/recovery.py`, `real_clearing_engine.py` |
 | 004 | [payment-conflict-taxonomy](004-payment-conflict-taxonomy/spec.md) | ✅ **ЗАКРЫТА** 2026-08-11 (T400-T408) | 1 × P2, 6 × P3 | `payments/service.py`, `main.py` handlers |
 | 005 | [runtime-security-hygiene](005-runtime-security-hygiene/spec.md) | ✅ **ЗАКРЫТА** 2026-08-11 | 2 × P2, 5 × P3 | `api/deps.py`, `main.py`, `health.py`, `docker/` |
-| 006 | [verification-integrity](006-verification-integrity/spec.md) | 🟡 срез Волны 1 закрыт; остаток авторизован для Волны 5 | 1 × P2, 9 × P3 | `tests/`, CI, SSE-ветвление |
+| 006 | [verification-integrity](006-verification-integrity/spec.md) | ✅ **ЗАКРЫТА** 2026-08-12 (T600–T611) | 1 × P2, 9 × P3 | `tests/`, CI, SSE-ветвление |
 | 007 | [simulator-analytics-surface](007-simulator-analytics-surface/spec.md) | 🔴 **ЗАБЛОКИРОВАНА** предусловием F-007-1 | 1 × P2 (предусловие) + фича | `simulator-ui/v2/`, `app/core/simulator/metrics_bottlenecks.py` |
 
 Счётчики severity сверены с телами спек 2026-08-11 после внешнего ревью (вердикт `MAJOR-OBJECTIONS`)
@@ -51,8 +51,8 @@
 007  ─── НЕ АВТОРИЗОВАНА: отдельная разблокировка F-007-1 ───────────────────┘
 ```
 
-**Статус волн на 2026-08-11:** Волны 1–4 закрыты; следующая — Волна 5: остаток программы 006 и
-только раздел BACKLOG «Узкие правки — не требуют спеки».
+**Статус волн на 2026-08-12:** Волны 1–5 закрыты. Программа 007 остаётся неавторизованной и
+заблокированной собственным предусловием F-007-1.
 
 **Почему такой порядок**
 
