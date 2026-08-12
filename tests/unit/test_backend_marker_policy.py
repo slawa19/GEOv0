@@ -74,6 +74,8 @@ def _strip_powershell_block_comments(
             in_block_comment = True
             index += 2
             continue
+        if quote is None and character == "#":
+            return "".join(visible), False
         visible.append(character)
         index += 1
     return "".join(visible), in_block_comment
@@ -157,6 +159,10 @@ def _iter_documented_commands_from_content(content: str):
                 if not line.startswith(powershell_here_string_end):
                     continue
                 here_string_suffix = line[len(powershell_here_string_end) :]
+                here_string_suffix = _strip_shell_comment(
+                    here_string_suffix,
+                    preserve_trailing=True,
+                )
                 if here_string_suffix.strip() and not re.match(
                     r"^\s*;",
                     here_string_suffix,
@@ -171,20 +177,14 @@ def _iter_documented_commands_from_content(content: str):
                     continue
                 line = stripped
             was_in_block_comment = in_powershell_block_comment
-            line_for_block_comments = (
-                line
-                if in_powershell_block_comment
-                else _strip_shell_comment(line, preserve_trailing=True)
-            )
             visible, in_powershell_block_comment = _strip_powershell_block_comments(
-                line_for_block_comments,
+                line,
                 in_powershell_block_comment,
             )
             if in_powershell_block_comment and not was_in_block_comment:
                 powershell_block_comment_line = line_number
             elif not in_powershell_block_comment:
                 powershell_block_comment_line = None
-            visible = _strip_shell_comment(visible, preserve_trailing=True)
             here_string_start = re.search(r"@(['\"])\s*$", visible)
             if (
                 here_string_start is not None
@@ -1093,6 +1093,9 @@ def test_powershell_parser_preserves_quoted_markers_and_post_comment_suffix() ->
 Write-Host '<#'
 pytest.exe after_quoted_marker
 Write-Host 'before'; <# ignored #>; pytest.exe after_comment
+Write-Host 'before'; <# # valid content #>; pytest.exe after_inline_block
+Write-Host 'visible' #> ordinary line comment
+pytest.exe after_orphan_block_end
 ```
 """
         )
@@ -1100,6 +1103,8 @@ Write-Host 'before'; <# ignored #>; pytest.exe after_comment
 
     assert "pytest.exe after_quoted_marker" in commands
     assert "pytest.exe after_comment" in commands
+    assert "pytest.exe after_inline_block" in commands
+    assert "pytest.exe after_orphan_block_end" in commands
 
 
 def test_powershell_line_comments_cannot_hide_following_pytest_commands() -> None:
@@ -1136,12 +1141,17 @@ def test_powershell_parser_preserves_here_string_terminator_suffix() -> None:
 $help = @'
 not executable
 '@; pytest.exe after_here_string
+$commented = @'
+not executable
+'@ # valid terminator comment
+pytest.exe after_commented_terminator
 ```
 """
         )
     ]
 
     assert "pytest.exe after_here_string" in commands
+    assert "pytest.exe after_commented_terminator" in commands
 
 
 @pytest.mark.parametrize(
