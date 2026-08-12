@@ -1,6 +1,5 @@
 import ast
 import re
-from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 import pytest
@@ -222,77 +221,6 @@ def _powershell_executable_segments(command: str) -> list[str]:
     return segments
 
 
-def _strip_balanced_outer_parentheses(expression: str) -> str:
-    candidate = expression.strip()
-    while candidate.startswith("(") and candidate.endswith(")"):
-        depth = 0
-        closes_at_end = False
-        for index, character in enumerate(candidate):
-            if character == "(":
-                depth += 1
-            elif character == ")":
-                depth -= 1
-                if depth == 0:
-                    closes_at_end = index == len(candidate) - 1
-                    break
-        if not closes_at_end:
-            break
-        candidate = candidate[1:-1].strip()
-    return candidate
-
-
-def _powershell_constant_condition_is_true(expression: str) -> bool:
-    candidate = _strip_balanced_outer_parentheses(expression)
-    if candidate.lower() == "$true":
-        return True
-    equality = re.fullmatch(
-        r"(?P<left>\d+(?:\.\d+)?|'[^']*'|\"[^\"]*\")\s+"
-        r"-(?P<operator>i?eq|ceq)\s+"
-        r"(?P<right>\d+(?:\.\d+)?|'[^']*'|\"[^\"]*\")",
-        candidate,
-        re.IGNORECASE,
-    )
-    if equality is None:
-        return False
-    left = equality.group("left")
-    right = equality.group("right")
-    try:
-        return Decimal(left) == Decimal(right)
-    except InvalidOperation:
-        left = left.strip("'\"")
-        right = right.strip("'\"")
-        if equality.group("operator").lower() == "ceq":
-            return left == right
-        return left.casefold() == right.casefold()
-
-
-def _powershell_guaranteed_if_opens(command: str) -> bool:
-    candidate = command.strip()
-    if re.match(r"^if\s*\(", candidate, re.IGNORECASE) is None:
-        return False
-    opening = candidate.find("(")
-    depth = 0
-    quote: str | None = None
-    closing: int | None = None
-    for index in range(opening, len(candidate)):
-        character = candidate[index]
-        if character in {'"', "'"}:
-            quote = (
-                None if quote == character else character if quote is None else quote
-            )
-        elif quote is None:
-            if character == "(":
-                depth += 1
-            elif character == ")":
-                depth -= 1
-                if depth == 0:
-                    closing = index
-                    break
-    if closing is None or not candidate[closing + 1 :].lstrip().startswith("{"):
-        return False
-    return _powershell_constant_condition_is_true(candidate[opening + 1 : closing])
-
-
 def _iter_documented_commands_from_content(content: str):
     fence_language: str | None = None
     in_powershell_block_comment = False
@@ -301,8 +229,8 @@ def _iter_documented_commands_from_content(content: str):
     powershell_here_string_line: int | None = None
     powershell_brace_depth = 0
     powershell_group_stack: list[str] = []
-    powershell_guaranteed_control_depths: set[int] = set()
-    powershell_pending_if_condition: str | None = None
+    powershell_control_flow_seen = False
+    powershell_pending_control_block = False
     powershell_flow_terminated = False
     pending_powershell_command: tuple[int, str] | None = None
     pending_powershell_depth = 0
@@ -313,6 +241,12 @@ def _iter_documented_commands_from_content(content: str):
         stripped = line.strip()
         fence = re.match(r"^```\s*([A-Za-z0-9_-]*)", stripped)
         if fence is not None:
+            if powershell_pending_control_block:
+                yield (
+                    line_number,
+                    f"{_POWERSHELL_SYNTAX_ERROR}: missing control statement block",
+                    fence_language,
+                )
             if powershell_brace_depth:
                 yield (
                     line_number,
@@ -354,8 +288,8 @@ def _iter_documented_commands_from_content(content: str):
             powershell_here_string_line = None
             powershell_brace_depth = 0
             powershell_group_stack = []
-            powershell_guaranteed_control_depths = set()
-            powershell_pending_if_condition = None
+            powershell_control_flow_seen = False
+            powershell_pending_control_block = False
             powershell_flow_terminated = False
             continue
         powershell_statements: list[str] | None = None
@@ -458,18 +392,6 @@ def _iter_documented_commands_from_content(content: str):
                 command,
                 powershell_group_stack,
             )
-            flow_command = command
-            if powershell_pending_if_condition is not None:
-                flow_command = f"{powershell_pending_if_condition} {command}"
-            if re.match(r"^if\s*\(", flow_command, re.IGNORECASE) is not None:
-                powershell_pending_if_condition = (
-                    flow_command if "{" not in flow_command else None
-                )
-            if (
-                _powershell_guaranteed_if_opens(flow_command)
-                and powershell_brace_depth > command_execution_depth
-            ):
-                powershell_guaranteed_control_depths.add(powershell_brace_depth)
             if not brace_syntax_is_valid:
                 yield (
                     command_line,
@@ -484,6 +406,26 @@ def _iter_documented_commands_from_content(content: str):
                     fence_language,
                 )
                 continue
+            if powershell_pending_control_block and not powershell_group_stack:
+                if "{" in command:
+                    powershell_pending_control_block = False
+                else:
+                    yield (
+                        command_line,
+                        f"{_POWERSHELL_SYNTAX_ERROR}: missing control statement block",
+                        fence_language,
+                    )
+                    powershell_pending_control_block = False
+            control_flow = re.match(
+                r"^(?:if|else|while|do|for|foreach|switch|try|catch|finally|"
+                r"function|filter|trap)(?:\s|\(|\{)",
+                command.lstrip("} "),
+                re.IGNORECASE,
+            )
+            if control_flow is not None:
+                powershell_control_flow_seen = True
+                if "{" not in command:
+                    powershell_pending_control_block = True
             if pending_powershell_command is not None:
                 command_line, pending = pending_powershell_command
                 command = f"{pending[:-1].rstrip()} {command.lstrip()}"
@@ -509,36 +451,20 @@ def _iter_documented_commands_from_content(content: str):
                         fence_language,
                     )
                 else:
-                    if command_execution_depth > 0 or powershell_flow_terminated:
+                    if (
+                        command_execution_depth > 0
+                        or powershell_control_flow_seen
+                        or powershell_flow_terminated
+                    ):
                         command = f"{_POWERSHELL_NON_TOP_LEVEL}: {command}"
                     yield command_line, command, fence_language
                     unwrapped_command, _ = _unwrap_execution_context(command)
-                    guaranteed_inline_termination = _powershell_guaranteed_if_opens(
-                        flow_command
-                    ) and re.search(
-                        r"\{[^}]*\b(?:return|exit|throw)\b",
-                        flow_command,
+                    if command_execution_depth == 0 and re.match(
+                        r"^(?:return|exit|throw)(?:\s|$)",
+                        unwrapped_command,
                         re.IGNORECASE,
-                    )
-                    if (
-                        (
-                            command_execution_depth == 0
-                            or command_execution_depth
-                            in powershell_guaranteed_control_depths
-                        )
-                        and re.match(
-                            r"^(?:return|exit|throw)(?:\s|$)",
-                            unwrapped_command,
-                            re.IGNORECASE,
-                        )
-                        or guaranteed_inline_termination
                     ):
                         powershell_flow_terminated = True
-            powershell_guaranteed_control_depths = {
-                depth
-                for depth in powershell_guaranteed_control_depths
-                if depth <= powershell_brace_depth
-            }
     if pending_powershell_command is not None:
         yield (
             pending_powershell_command[0],
@@ -567,6 +493,12 @@ def _iter_documented_commands_from_content(content: str):
         yield (
             1,
             f"{_POWERSHELL_SYNTAX_ERROR}: unclosed grouping delimiter",
+            fence_language,
+        )
+    if powershell_pending_control_block:
+        yield (
+            1,
+            f"{_POWERSHELL_SYNTAX_ERROR}: missing control statement block",
             fence_language,
         )
 
@@ -908,7 +840,12 @@ def _powershell_inline_syntax_is_valid(command: str) -> bool:
             unquoted.append(character if quote is None else " ")
         index += 1
     visible_syntax = "".join(unquoted)
-    if re.search(r"[+\-*/%]\s*[\)\]]", visible_syntax):
+    if re.search(
+        r"(?:[+\-*/%]|-(?:i?eq|ceq|ne|lt|le|gt|ge|like|match|contains|in))"
+        r"\s*[\)\]]",
+        visible_syntax,
+        re.IGNORECASE,
+    ):
         return False
     return not command_without_comment.rstrip().endswith(("|", "&&", "||"))
 
@@ -2056,6 +1993,75 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 def test_postgres_doc_guard_rejects_invalid_or_mismatched_database_names(
     content: str,
 ) -> None:
+    assert _postgres_example_violations(
+        Path("synthetic.md"),
+        content,
+        require_create=True,
+    )
+
+
+@pytest.mark.parametrize(
+    "control_flow",
+    [
+        "if (-1 -eq -1) { return }",
+        "if (1-eq1) { return }",
+        "if ($false -eq $false) { return }",
+        "while ($true) { return }",
+        "do { return } while ($false)",
+        "if ($false) { return } else { return }",
+    ],
+)
+def test_postgres_doc_guard_fails_closed_after_control_flow(
+    control_flow: str,
+) -> None:
+    content = (
+        "```powershell\n"
+        f"{control_flow}\n"
+        "createdb -U geo geov0_test_control_flow\n"
+        '$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/'
+        'geov0_test_control_flow"\n'
+        '$env:GEO_TEST_ALLOW_DB_RESET = "1"\n'
+        "./scripts/verify_local.ps1 -BackendMarker postgres\n"
+        "```\n"
+    )
+
+    assert _postgres_example_violations(
+        Path("synthetic.md"),
+        content,
+        require_create=True,
+    )
+
+
+def test_postgres_doc_guard_rejects_missing_binary_operand() -> None:
+    content = """
+```powershell
+createdb -U geo geov0_test_binary_operand
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_binary_operand"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+./scripts/verify_local.ps1 -BackendMarker postgres
+Write-Host (1 -eq )
+```
+"""
+
+    assert _postgres_example_violations(
+        Path("synthetic.md"),
+        content,
+        require_create=True,
+    )
+
+
+def test_postgres_doc_guard_rejects_control_statement_without_block() -> None:
+    content = """
+```powershell
+createdb -U geo geov0_test_missing_control_block
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_missing_control_block"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+./scripts/verify_local.ps1 -BackendMarker postgres
+if ($true)
+Write-Output "no block"
+```
+"""
+
     assert _postgres_example_violations(
         Path("synthetic.md"),
         content,
