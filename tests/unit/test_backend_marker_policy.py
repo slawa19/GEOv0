@@ -143,7 +143,7 @@ def _powershell_brace_context(
     quote: str | None = None
     delta = 0
     group_depth = current_group_depth
-    has_top_level_opening_brace = False
+    has_control_body_opening_brace = False
     stripped_line = line.lstrip()
     leading_closes = len(stripped_line) - len(stripped_line.lstrip("}"))
     index = 0
@@ -164,14 +164,37 @@ def _powershell_brace_context(
             elif character == "{":
                 delta += 1
                 if group_depth == 0:
-                    has_top_level_opening_brace = True
+                    prefix = line[:index].rstrip()
+                    has_control_body_opening_brace = bool(
+                        prefix.endswith(")")
+                        or re.search(
+                            r"(?:^|\s)(?:else|do|try|finally)\s*$",
+                            prefix,
+                            re.IGNORECASE,
+                        )
+                        or re.search(
+                            r"(?:^|\s)(?:function|filter)\s+\S+\s*$",
+                            prefix,
+                            re.IGNORECASE,
+                        )
+                        or re.search(
+                            r"(?:^|\s)(?:catch|trap)(?:\s+\[[^\]]+\])?\s*$",
+                            prefix,
+                            re.IGNORECASE,
+                        )
+                    )
             elif character == "}":
                 delta -= 1
         index += 1
     execution_depth = max(0, current_depth - leading_closes)
     new_depth = current_depth + delta
     is_valid = leading_closes <= current_depth and new_depth >= 0
-    return execution_depth, max(0, new_depth), is_valid, has_top_level_opening_brace
+    return (
+        execution_depth,
+        max(0, new_depth),
+        is_valid,
+        has_control_body_opening_brace,
+    )
 
 
 def _powershell_group_context(
@@ -241,7 +264,13 @@ def _contains_powershell_control_flow(
     )
     if not requires_block:
         keywords += r"|return|exit|throw|break|continue"
-    for segment in _powershell_executable_segments(command):
+    command_without_hashtable_keys = re.sub(
+        rf"((?:@\{{|[;,])\s*)(?:{keywords})(\s*=)",
+        r"\1__documentation_key__\2",
+        command,
+        flags=re.IGNORECASE,
+    )
+    for segment in _powershell_executable_segments(command_without_hashtable_keys):
         candidate = re.sub(
             r"^:[A-Za-z_][A-Za-z0-9_]*\s+",
             "",
@@ -579,16 +608,8 @@ def _is_direct_pytest_command(command: str) -> bool:
         r"python(?:\d+(?:\.\d+)*)?(?:\.exe)?",
         executable,
     ):
-        tokens = _tokenize_powershell_arguments(arguments)
-        return tokens is not None and any(
-            token.lower() == "-mpytest"
-            or (
-                token.lower() == "-m"
-                and index + 1 < len(tokens)
-                and tokens[index + 1].lower() == "pytest"
-            )
-            for index, token in enumerate(tokens)
-        )
+        module = _python_module_execution_target(arguments)
+        return module is not None and module.removesuffix(".__main__") == "pytest"
     return False
 
 
@@ -609,22 +630,10 @@ def _python_tool_module(command: str) -> str | None:
         r"python(?:\d+(?:\.\d+)*)?(?:\.exe)?",
         executable,
     ):
-        tokens = _tokenize_powershell_arguments(arguments)
-        if tokens is None:
-            return None
-        for index, token in enumerate(tokens):
-            normalized = token.lower()
-            if normalized.startswith("-m") and normalized != "-m":
-                module = normalized[2:]
-                return (
-                    module
-                    if module in {"uvicorn", "alembic", "ruff", "black"}
-                    else None
-                )
-            if normalized != "-m" or index + 1 >= len(tokens):
-                continue
-            module = tokens[index + 1].lower()
-            return module if module in {"uvicorn", "alembic", "ruff", "black"} else None
+        module = _python_module_execution_target(arguments)
+        if module is not None:
+            module = module.removesuffix(".__main__")
+        return module if module in {"uvicorn", "alembic", "ruff", "black"} else None
     return None
 
 
@@ -892,6 +901,29 @@ def _tokenize_powershell_arguments(candidate: str) -> list[str] | None:
     return tokens
 
 
+def _python_module_execution_target(arguments: str) -> str | None:
+    tokens = _tokenize_powershell_arguments(arguments)
+    if tokens is None:
+        return None
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        normalized = token.lower()
+        if normalized == "-m":
+            return tokens[index + 1].lower() if index + 1 < len(tokens) else None
+        if normalized.startswith("-m") and normalized != "-m":
+            return normalized[2:]
+        if normalized in {"-c", "--"}:
+            return None
+        if normalized in {"-x", "-w"}:
+            index += 2
+            continue
+        if not normalized.startswith("-"):
+            return None
+        index += 1
+    return None
+
+
 def _powershell_inline_syntax_is_valid(command: str) -> bool:
     command_without_comment = command
     if _tokenize_powershell_arguments(command_without_comment) is None:
@@ -915,8 +947,14 @@ def _powershell_inline_syntax_is_valid(command: str) -> bool:
         index += 1
     visible_syntax = "".join(unquoted)
     if re.search(
+        r"(?:^|[=;|&{(]\s*|:[A-Za-z_][A-Za-z0-9_]*\s+)" r"if\s+(?!\s*\()",
+        visible_syntax,
+        re.IGNORECASE,
+    ):
+        return False
+    if re.search(
         r"(?:^|[\s(\[])(?:[+\-*/%]|-[A-Za-z][A-Za-z0-9]*"
-        r"(?![A-Za-z0-9_-]))\s*[\)\]]",
+        r"(?![A-Za-z0-9_-]))\s*[\)\]\}]",
         visible_syntax,
         re.IGNORECASE,
     ):
@@ -931,6 +969,8 @@ def _powershell_inline_syntax_is_valid(command: str) -> bool:
         r"\(\s*(?:\$?[A-Za-z_][A-Za-z0-9_]*|\d+(?:\.\d+)?)\s*,\s*\)",
         visible_syntax,
     ):
+        return False
+    if re.search(r"\(\s+,\s*\)", visible_syntax):
         return False
     return not command_without_comment.rstrip().endswith(("|", "&&", "||"))
 
@@ -1255,11 +1295,25 @@ def test_contributor_guides_keep_python_tools_on_the_prepared_venv() -> None:
         "python -I -X dev -m pytest -q",
         "python -mpytest -q",
         "py -3.12 -mpytest -q",
+        "python -m pytest.__main__ -q",
+        "py -3.12 -mpytest.__main__ -q",
         "python3.11 -m pytest -q",
     ],
 )
 def test_direct_pytest_guard_recognizes_supported_launcher_shapes(command: str) -> None:
     assert _is_direct_pytest_command(command)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "python script.py -m pytest",
+        "python -m pip -- -m pytest",
+        "python -c 'print(1)' -m pytest",
+    ],
+)
+def test_direct_pytest_guard_stops_at_python_execution_target(command: str) -> None:
+    assert not _is_direct_pytest_command(command)
 
 
 def test_direct_pytest_guard_unwraps_nested_execution_context() -> None:
@@ -1313,6 +1367,8 @@ Write-Output "chain" && pytest.exe chain
         ("py -m uvicorn app.main:app", "uvicorn"),
         ("py -3.12 -m ruff check app", "ruff"),
         ("py -3.12 -mruff check app", "ruff"),
+        ("python -m black.__main__ --check app", "black"),
+        ("python -m ruff.__main__ check app", "ruff"),
         ("python -I -X dev -m black --check app", "black"),
         ("python3.11 -m alembic upgrade head", "alembic"),
         ("black --check app", "black"),
@@ -1326,6 +1382,24 @@ def test_python_tool_guard_recognizes_all_supported_launcher_shapes(
     module: str,
 ) -> None:
     assert _python_tool_module(command) == module
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "python script.py -m ruff",
+        "python -m pip -- -m black",
+        "python -c 'print(1)' -m uvicorn",
+    ],
+)
+def test_python_tool_guard_stops_at_python_execution_target(command: str) -> None:
+    assert _python_tool_module(command) is None
+
+
+def test_control_flow_guard_does_not_treat_hashtable_keys_as_execution() -> None:
+    assert not _contains_powershell_control_flow(
+        '@{ if = 1; while = 2; exit = "value" }'
+    )
 
 
 @pytest.mark.parametrize(
@@ -2143,6 +2217,8 @@ def test_postgres_doc_guard_fails_closed_after_control_flow(
         "1 -notlike )",
         "1 + * 2)",
         "1,)",
+        '"x",)',
+        "1 + }",
     ],
 )
 def test_postgres_doc_guard_rejects_invalid_expression(
@@ -2173,6 +2249,9 @@ Write-Host ({invalid_expression}
         'if ($true)\n$x = @{ Name = "value" }',
         'if ((@{}).Count -eq 0)\nWrite-Output "no block"',
         'if (& { $true })\nWrite-Output "no block"',
+        'if ($true) Write-Output @{ Name = "value" }',
+        'if ($true) & { Write-Output "not a body" }',
+        'if $true { Write-Output "invalid condition" }',
     ],
 )
 def test_postgres_doc_guard_rejects_control_statement_without_block(
