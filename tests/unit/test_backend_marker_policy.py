@@ -1,5 +1,6 @@
 import ast
 import re
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 import pytest
@@ -171,7 +172,7 @@ def _powershell_group_context(
 ) -> tuple[list[str], bool]:
     stack = list(current_stack)
     quote: str | None = None
-    matching = {")": "(", "]": "["}
+    matching = {")": "(", "]": "[", "}": "{"}
     index = 0
     while index < len(line):
         character = line[index]
@@ -246,14 +247,23 @@ def _powershell_constant_condition_is_true(expression: str) -> bool:
         return True
     equality = re.fullmatch(
         r"(?P<left>\d+(?:\.\d+)?|'[^']*'|\"[^\"]*\")\s+"
-        r"-(?:i?eq|ceq)\s+"
+        r"-(?P<operator>i?eq|ceq)\s+"
         r"(?P<right>\d+(?:\.\d+)?|'[^']*'|\"[^\"]*\")",
         candidate,
         re.IGNORECASE,
     )
     if equality is None:
         return False
-    return equality.group("left").strip("'\"") == equality.group("right").strip("'\"")
+    left = equality.group("left")
+    right = equality.group("right")
+    try:
+        return Decimal(left) == Decimal(right)
+    except InvalidOperation:
+        left = left.strip("'\"")
+        right = right.strip("'\"")
+        if equality.group("operator").lower() == "ceq":
+            return left == right
+        return left.casefold() == right.casefold()
 
 
 def _powershell_guaranteed_if_opens(command: str) -> bool:
@@ -292,6 +302,7 @@ def _iter_documented_commands_from_content(content: str):
     powershell_brace_depth = 0
     powershell_group_stack: list[str] = []
     powershell_guaranteed_control_depths: set[int] = set()
+    powershell_pending_if_condition: str | None = None
     powershell_flow_terminated = False
     pending_powershell_command: tuple[int, str] | None = None
     pending_powershell_depth = 0
@@ -344,6 +355,7 @@ def _iter_documented_commands_from_content(content: str):
             powershell_brace_depth = 0
             powershell_group_stack = []
             powershell_guaranteed_control_depths = set()
+            powershell_pending_if_condition = None
             powershell_flow_terminated = False
             continue
         powershell_statements: list[str] | None = None
@@ -446,8 +458,15 @@ def _iter_documented_commands_from_content(content: str):
                 command,
                 powershell_group_stack,
             )
+            flow_command = command
+            if powershell_pending_if_condition is not None:
+                flow_command = f"{powershell_pending_if_condition} {command}"
+            if re.match(r"^if\s*\(", flow_command, re.IGNORECASE) is not None:
+                powershell_pending_if_condition = (
+                    flow_command if "{" not in flow_command else None
+                )
             if (
-                _powershell_guaranteed_if_opens(command)
+                _powershell_guaranteed_if_opens(flow_command)
                 and powershell_brace_depth > command_execution_depth
             ):
                 powershell_guaranteed_control_depths.add(powershell_brace_depth)
@@ -495,10 +514,10 @@ def _iter_documented_commands_from_content(content: str):
                     yield command_line, command, fence_language
                     unwrapped_command, _ = _unwrap_execution_context(command)
                     guaranteed_inline_termination = _powershell_guaranteed_if_opens(
-                        unwrapped_command
+                        flow_command
                     ) and re.search(
                         r"\{[^}]*\b(?:return|exit|throw)\b",
-                        unwrapped_command,
+                        flow_command,
                         re.IGNORECASE,
                     )
                     if (
@@ -558,7 +577,7 @@ def _iter_documented_commands(path: Path):
 
 def _command_executable(command: str) -> tuple[str, str]:
     candidate = command.strip()
-    if candidate.startswith("&"):
+    if re.match(r"^[&.]\s+", candidate):
         candidate = candidate[1:].lstrip()
     token_match = re.match(r"""^("[^"]+"|'[^']+'|\S+)(.*)$""", candidate)
     if token_match is None:
@@ -870,6 +889,26 @@ def _tokenize_powershell_arguments(candidate: str) -> list[str] | None:
 def _powershell_inline_syntax_is_valid(command: str) -> bool:
     command_without_comment = command
     if _tokenize_powershell_arguments(command_without_comment) is None:
+        return False
+    unquoted: list[str] = []
+    quote: str | None = None
+    index = 0
+    while index < len(command_without_comment):
+        character = command_without_comment[index]
+        if character == "`" and index + 1 < len(command_without_comment):
+            unquoted.extend((" ", " "))
+            index += 2
+            continue
+        if character in {'"', "'"}:
+            quote = (
+                None if quote == character else character if quote is None else quote
+            )
+            unquoted.append(" ")
+        else:
+            unquoted.append(character if quote is None else " ")
+        index += 1
+    visible_syntax = "".join(unquoted)
+    if re.search(r"[+\-*/%]\s*[\)\]]", visible_syntax):
         return False
     return not command_without_comment.rstrip().endswith(("|", "&&", "||"))
 
@@ -1199,7 +1238,7 @@ def test_direct_pytest_guard_unwraps_nested_execution_context() -> None:
     commands = [
         command
         for _, command, _ in _iter_documented_commands_from_content(
-            """
+            r"""
 ```powershell
 if ($true) {
     pytest.exe -q
@@ -1211,6 +1250,8 @@ $result = pytest.exe assignment
 $result = $(pytest.exe subexpression)
 (pytest.exe grouped)
 Write-Output "chain" && pytest.exe chain
+. pytest.exe dot_invocation
+. .\.venv\Scripts\python.exe -m pytest dot_python
 ```
 """
         )
@@ -1233,6 +1274,8 @@ Write-Output "chain" && pytest.exe chain
         "pytest.exe subexpression",
         "pytest.exe grouped",
         "pytest.exe chain",
+        ". pytest.exe dot_invocation",
+        r". .\.venv\Scripts\python.exe -m pytest dot_python",
     }
 
 
@@ -1890,6 +1933,24 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 """,
         """
 ```powershell
+createdb -U geo geov0_test_crossed_grouping
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_crossed_grouping"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+./scripts/verify_local.ps1 -BackendMarker postgres
+Write-Host ({)}
+```
+""",
+        """
+```powershell
+createdb -U geo geov0_test_missing_operand
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_missing_operand"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+./scripts/verify_local.ps1 -BackendMarker postgres
+Write-Host (1 + )
+```
+""",
+        """
+```powershell
 return
 createdb -U geo geov0_test_after_return
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_after_return"
@@ -1920,6 +1981,47 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 if (($true)) { return }
 createdb -U geo geov0_test_after_parenthesized_true
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_after_parenthesized_true"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+./scripts/verify_local.ps1 -BackendMarker postgres
+```
+""",
+        """
+```powershell
+if (1.0 -eq 1) { return }
+createdb -U geo geov0_test_after_numeric_equality
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_after_numeric_equality"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+./scripts/verify_local.ps1 -BackendMarker postgres
+```
+""",
+        """
+```powershell
+if ('A' -eq 'a') { return }
+createdb -U geo geov0_test_after_casefold_equality
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_after_casefold_equality"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+./scripts/verify_local.ps1 -BackendMarker postgres
+```
+""",
+        """
+```powershell
+if ($true)
+{
+    return
+}
+createdb -U geo geov0_test_after_multiline_true
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_after_multiline_true"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+./scripts/verify_local.ps1 -BackendMarker postgres
+```
+""",
+        """
+```powershell
+if (
+    $true
+) { return }
+createdb -U geo geov0_test_after_split_condition
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_after_split_condition"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
 ./scripts/verify_local.ps1 -BackendMarker postgres
 ```
