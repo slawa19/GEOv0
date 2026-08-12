@@ -165,6 +165,62 @@ def _powershell_brace_context(
     return execution_depth, max(0, new_depth), is_valid
 
 
+def _powershell_group_context(
+    line: str,
+    current_stack: list[str],
+) -> tuple[list[str], bool]:
+    stack = list(current_stack)
+    quote: str | None = None
+    matching = {")": "(", "]": "["}
+    index = 0
+    while index < len(line):
+        character = line[index]
+        if character == "`" and index + 1 < len(line):
+            index += 2
+            continue
+        if character in {'"', "'"}:
+            quote = (
+                None if quote == character else character if quote is None else quote
+            )
+        elif quote is None:
+            if character in matching.values():
+                stack.append(character)
+            elif character in matching:
+                if not stack or stack.pop() != matching[character]:
+                    return stack, False
+        index += 1
+    return stack, True
+
+
+def _powershell_executable_segments(command: str) -> list[str]:
+    segments: list[str] = []
+    current: list[str] = []
+    quote: str | None = None
+    index = 0
+    while index < len(command):
+        character = command[index]
+        if character == "`" and index + 1 < len(command):
+            current.extend((character, command[index + 1]))
+            index += 2
+            continue
+        if character in {'"', "'"}:
+            quote = (
+                None if quote == character else character if quote is None else quote
+            )
+        if quote is None and character in "{}|":
+            segment = "".join(current).strip()
+            if segment:
+                segments.append(segment)
+            current = []
+        else:
+            current.append(character)
+        index += 1
+    segment = "".join(current).strip()
+    if segment:
+        segments.append(segment)
+    return segments
+
+
 def _iter_documented_commands_from_content(content: str):
     fence_language: str | None = None
     in_powershell_block_comment = False
@@ -172,6 +228,8 @@ def _iter_documented_commands_from_content(content: str):
     powershell_here_string_end: str | None = None
     powershell_here_string_line: int | None = None
     powershell_brace_depth = 0
+    powershell_group_stack: list[str] = []
+    powershell_guaranteed_control_depths: set[int] = set()
     powershell_flow_terminated = False
     pending_powershell_command: tuple[int, str] | None = None
     pending_powershell_depth = 0
@@ -186,6 +244,12 @@ def _iter_documented_commands_from_content(content: str):
                 yield (
                     line_number,
                     f"{_POWERSHELL_SYNTAX_ERROR}: unclosed control block",
+                    fence_language,
+                )
+            if powershell_group_stack:
+                yield (
+                    line_number,
+                    f"{_POWERSHELL_SYNTAX_ERROR}: unclosed grouping delimiter",
                     fence_language,
                 )
             if in_powershell_block_comment:
@@ -216,6 +280,8 @@ def _iter_documented_commands_from_content(content: str):
             powershell_here_string_end = None
             powershell_here_string_line = None
             powershell_brace_depth = 0
+            powershell_group_stack = []
+            powershell_guaranteed_control_depths = set()
             powershell_flow_terminated = False
             continue
         powershell_statements: list[str] | None = None
@@ -314,10 +380,26 @@ def _iter_documented_commands_from_content(content: str):
                 powershell_brace_depth,
                 brace_syntax_is_valid,
             ) = _powershell_brace_context(command, powershell_brace_depth)
+            powershell_group_stack, group_syntax_is_valid = _powershell_group_context(
+                command,
+                powershell_group_stack,
+            )
+            if (
+                re.match(r"^if\s*\(\s*\$true\s*\)\s*\{", command, re.IGNORECASE)
+                and powershell_brace_depth > command_execution_depth
+            ):
+                powershell_guaranteed_control_depths.add(powershell_brace_depth)
             if not brace_syntax_is_valid:
                 yield (
                     command_line,
                     f"{_POWERSHELL_SYNTAX_ERROR}: unmatched closing brace",
+                    fence_language,
+                )
+                continue
+            if not group_syntax_is_valid:
+                yield (
+                    command_line,
+                    f"{_POWERSHELL_SYNTAX_ERROR}: unmatched grouping delimiter",
                     fence_language,
                 )
                 continue
@@ -350,12 +432,31 @@ def _iter_documented_commands_from_content(content: str):
                         command = f"{_POWERSHELL_NON_TOP_LEVEL}: {command}"
                     yield command_line, command, fence_language
                     unwrapped_command, _ = _unwrap_execution_context(command)
-                    if command_execution_depth == 0 and re.match(
-                        r"^(?:return|exit|throw)(?:\s|$)",
+                    guaranteed_inline_termination = re.match(
+                        r"^if\s*\(\s*\$true\s*\)\s*\{[^}]*\b"
+                        r"(?:return|exit|throw)\b",
                         unwrapped_command,
                         re.IGNORECASE,
+                    )
+                    if (
+                        (
+                            command_execution_depth == 0
+                            or command_execution_depth
+                            in powershell_guaranteed_control_depths
+                        )
+                        and re.match(
+                            r"^(?:return|exit|throw)(?:\s|$)",
+                            unwrapped_command,
+                            re.IGNORECASE,
+                        )
+                        or guaranteed_inline_termination
                     ):
                         powershell_flow_terminated = True
+            powershell_guaranteed_control_depths = {
+                depth
+                for depth in powershell_guaranteed_control_depths
+                if depth <= powershell_brace_depth
+            }
     if pending_powershell_command is not None:
         yield (
             pending_powershell_command[0],
@@ -378,6 +479,12 @@ def _iter_documented_commands_from_content(content: str):
         yield (
             1,
             f"{_POWERSHELL_SYNTAX_ERROR}: unclosed control block",
+            fence_language,
+        )
+    if powershell_group_stack:
+        yield (
+            1,
+            f"{_POWERSHELL_SYNTAX_ERROR}: unclosed grouping delimiter",
             fence_language,
         )
 
@@ -981,7 +1088,10 @@ def test_active_operational_docs_do_not_bypass_the_canonical_pytest_runner() -> 
             executable_command, _ = _unwrap_execution_context(command)
             if command.startswith(_POWERSHELL_SYNTAX_ERROR):
                 violations.append(f"{path.relative_to(_ROOT)}:{line_number}: {command}")
-            if _is_direct_pytest_command(executable_command):
+            if any(
+                _is_direct_pytest_command(segment)
+                for segment in _powershell_executable_segments(executable_command)
+            ):
                 violations.append(
                     f"{path.relative_to(_ROOT)}:{line_number}: {executable_command}"
                 )
@@ -1031,15 +1141,28 @@ def test_direct_pytest_guard_unwraps_nested_execution_context() -> None:
 if ($true) {
     pytest.exe -q
 }
+if ($true) { pytest.exe same_line }
+Write-Output "pipeline" | pytest.exe pipeline
+$runner = { pytest.exe scriptblock }
 ```
 """
         )
     ]
 
-    assert any(
-        _is_direct_pytest_command(_unwrap_execution_context(command)[0])
+    detected_segments = {
+        segment
         for command in commands
-    )
+        for segment in _powershell_executable_segments(
+            _unwrap_execution_context(command)[0]
+        )
+        if _is_direct_pytest_command(segment)
+    }
+    assert detected_segments == {
+        "pytest.exe -q",
+        "pytest.exe same_line",
+        "pytest.exe pipeline",
+        "pytest.exe scriptblock",
+    }
 
 
 @pytest.mark.parametrize(
@@ -1699,6 +1822,23 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 return
 createdb -U geo geov0_test_after_return
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_after_return"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+./scripts/verify_local.ps1 -BackendMarker postgres
+```
+""",
+        """
+```powershell
+if ($true) { return }
+createdb -U geo geov0_test_after_guaranteed_return
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_after_guaranteed_return"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+./scripts/verify_local.ps1 -BackendMarker postgres
+```
+""",
+        """
+```powershell
+createdb -U geo geov0_test_unclosed_createdb_group (
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_unclosed_createdb_group"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
 ./scripts/verify_local.ps1 -BackendMarker postgres
 ```
