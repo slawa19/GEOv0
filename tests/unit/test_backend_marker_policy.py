@@ -41,6 +41,19 @@ _CONTRIBUTOR_GUIDES = (
     _ROOT / "docs" / "pl" / "06-contributing.md",
 )
 _POWERSHELL_SYNTAX_ERROR = "__documentation_powershell_syntax_error__"
+_POWERSHELL_NON_TOP_LEVEL = "__documentation_powershell_non_top_level__"
+
+
+def _trailing_backtick_count(value: str) -> int:
+    return len(value) - len(value.rstrip("`"))
+
+
+def _powershell_hash_starts_comment(visible: list[str]) -> bool:
+    prefix = "".join(visible)
+    trailing_backticks = _trailing_backtick_count(prefix)
+    if trailing_backticks:
+        prefix = prefix[:-trailing_backticks]
+    return not prefix or prefix[-1].isspace() or prefix[-1] in ";|{}()"
 
 
 def _strip_powershell_block_comments(
@@ -60,6 +73,17 @@ def _strip_powershell_block_comments(
             continue
         character = line[index]
         if character == "`" and index + 1 < len(line):
+            run_end = index
+            while run_end < len(line) and line[run_end] == "`":
+                run_end += 1
+            if run_end < len(line) and line[run_end] == "#":
+                visible.extend(line[index:run_end])
+                if (run_end - index) % 2 == 1:
+                    visible.append("#")
+                    index = run_end + 1
+                else:
+                    index = run_end
+                continue
             visible.extend((character, line[index + 1]))
             index += 2
             continue
@@ -74,7 +98,11 @@ def _strip_powershell_block_comments(
             in_block_comment = True
             index += 2
             continue
-        if quote is None and character == "#":
+        if (
+            quote is None
+            and character == "#"
+            and _powershell_hash_starts_comment(visible)
+        ):
             return "".join(visible), False
         visible.append(character)
         index += 1
@@ -110,12 +138,38 @@ def _split_powershell_statements(line: str) -> list[str]:
     return statements
 
 
+def _powershell_brace_context(line: str, current_depth: int) -> tuple[int, int]:
+    quote: str | None = None
+    delta = 0
+    stripped_line = line.lstrip()
+    leading_closes = len(stripped_line) - len(stripped_line.lstrip("}"))
+    index = 0
+    while index < len(line):
+        character = line[index]
+        if character == "`" and index + 1 < len(line):
+            index += 2
+            continue
+        if character in {'"', "'"}:
+            quote = (
+                None if quote == character else character if quote is None else quote
+            )
+        elif quote is None:
+            if character == "{":
+                delta += 1
+            elif character == "}":
+                delta -= 1
+        index += 1
+    execution_depth = max(0, current_depth - leading_closes)
+    return execution_depth, max(0, current_depth + delta)
+
+
 def _iter_documented_commands_from_content(content: str):
     fence_language: str | None = None
     in_powershell_block_comment = False
     powershell_block_comment_line: int | None = None
     powershell_here_string_end: str | None = None
     powershell_here_string_line: int | None = None
+    powershell_brace_depth = 0
     pending_powershell_command: tuple[int, str] | None = None
     for line_number, line in enumerate(
         content.splitlines(),
@@ -150,9 +204,11 @@ def _iter_documented_commands_from_content(content: str):
             powershell_block_comment_line = None
             powershell_here_string_end = None
             powershell_here_string_line = None
+            powershell_brace_depth = 0
             continue
         powershell_statements: list[str] | None = None
         powershell_line_continues = False
+        powershell_execution_depth = 0
         here_string_start: re.Match[str] | None = None
         if fence_language in {"powershell", "pwsh"}:
             if powershell_here_string_end is not None:
@@ -185,6 +241,9 @@ def _iter_documented_commands_from_content(content: str):
                 powershell_block_comment_line = line_number
             elif not in_powershell_block_comment:
                 powershell_block_comment_line = None
+            powershell_execution_depth, powershell_brace_depth = (
+                _powershell_brace_context(visible, powershell_brace_depth)
+            )
             here_string_start = re.search(r"@(['\"])\s*$", visible)
             if (
                 here_string_start is not None
@@ -205,7 +264,7 @@ def _iter_documented_commands_from_content(content: str):
                 )
                 pending_powershell_command = None
                 continue
-            powershell_line_continues = visible.endswith("`")
+            powershell_line_continues = _trailing_backtick_count(visible) % 2 == 1
             powershell_statements = _split_powershell_statements(visible)
             if not powershell_statements:
                 if pending_powershell_command is not None:
@@ -263,6 +322,8 @@ def _iter_documented_commands_from_content(content: str):
                         fence_language,
                     )
                 else:
+                    if powershell_execution_depth > 0:
+                        command = f"{_POWERSHELL_NON_TOP_LEVEL}: {command}"
                     yield command_line, command, fence_language
     if pending_powershell_command is not None:
         yield (
@@ -371,6 +432,13 @@ def _is_prepared_venv_tool_command(command: str, module: str) -> bool:
     )
 
 
+def _unwrap_execution_context(command: str) -> tuple[str, bool]:
+    prefix = f"{_POWERSHELL_NON_TOP_LEVEL}: "
+    if command.startswith(prefix):
+        return command[len(prefix) :], True
+    return command, False
+
+
 def _contributor_venv_violations(content: str) -> list[str]:
     commands = [
         command for _, command, _ in _iter_documented_commands_from_content(content)
@@ -392,6 +460,15 @@ def _contributor_venv_violations(content: str) -> list[str]:
     verifier_indexes: list[int] = []
     violations: list[str] = list(syntax_errors)
     for index, command in enumerate(commands):
+        nested_command, is_nested = _unwrap_execution_context(command)
+        if is_nested and (
+            _is_venv_creation_command(nested_command)
+            or _is_venv_dependency_install_command(nested_command)
+            or _python_tool_module(nested_command) is not None
+            or _looks_like_verifier_command(nested_command)
+        ):
+            violations.append(f"owned command is not top-level: {nested_command}")
+            continue
         if _looks_like_verifier_command(command):
             if _is_canonical_verifier_command(command):
                 verifier_indexes.append(index)
@@ -710,6 +787,22 @@ def _postgres_example_violations(
     reset_indexes: list[int] = []
     verifier_indexes: list[int] = []
     for command_index, command in enumerate(commands):
+        nested_command, is_nested = _unwrap_execution_context(command)
+        if is_nested and (
+            _created_database_name(nested_command) is not None
+            or re.match(
+                r"^(?:\$env:|export\s+)?(?:TEST_DATABASE_URL|"
+                r"GEO_TEST_ALLOW_DB_RESET)\s*=",
+                nested_command,
+                re.IGNORECASE,
+            )
+            is not None
+            or _looks_like_verifier_command(nested_command)
+        ):
+            violations.append(
+                f"{path}: owned command is not top-level: {nested_command}"
+            )
+            continue
         created_name = _created_database_name(command)
         if created_name is not None:
             created_names.add(created_name)
@@ -970,6 +1063,15 @@ py -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
 ```
 """,
+        r"""
+```powershell
+if ($false) {
+    py -m venv .venv
+    .\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
+    .\.venv\Scripts\python.exe -m ruff check app migrations
+}
+```
+""",
     ],
 )
 def test_contributor_venv_guard_rejects_missing_executable_setup_roles(
@@ -1121,6 +1223,14 @@ pytest.exe after_commented_here_marker
 # <#
 pytest.exe after_commented_block_marker
 #>
+Write-Host foo#bar
+pytest.exe after_mid_token_hash
+Write-Host https://example.test/#fragment
+pytest.exe after_url_fragment
+Write-Host "two literal backticks" ``
+pytest.exe after_even_backticks
+Write-Host "two backticks before comment" ``# ordinary comment
+pytest.exe after_even_backticks_comment
 ```
 """
         )
@@ -1129,6 +1239,10 @@ pytest.exe after_commented_block_marker
     assert "pytest.exe after_commented_backtick" in commands
     assert "pytest.exe after_commented_here_marker" in commands
     assert "pytest.exe after_commented_block_marker" in commands
+    assert "pytest.exe after_mid_token_hash" in commands
+    assert "pytest.exe after_url_fragment" in commands
+    assert "pytest.exe after_even_backticks" in commands
+    assert "pytest.exe after_even_backticks_comment" in commands
     assert any(command.startswith(_POWERSHELL_SYNTAX_ERROR) for command in commands)
 
 
@@ -1472,6 +1586,18 @@ createdb -U geo geov0_test_reset_suffix
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_reset_suffix"
 $env:GEO_TEST_ALLOW_DB_RESET = "1" definitely_invalid
 ./scripts/verify_local.ps1 -BackendMarker postgres
+```
+""",
+        """
+```powershell
+if ($false) {
+    createdb -U geo geov0_test_dead_control_flow
+}
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_dead_control_flow"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+if ($false) {
+    ./scripts/verify_local.ps1 -BackendMarker postgres
+}
 ```
 """,
         """
