@@ -755,6 +755,10 @@ jobs:
           cache: npm
           cache-dependency-path: simulator-ui/v2/package-lock.json
 
+      - name: Install backend dependencies
+        shell: pwsh
+        run: python -m pip install -r requirements.txt -r requirements-dev.txt
+
       - name: Install Simulator UI v2 dependencies
         shell: pwsh
         run: npm --prefix simulator-ui/v2 ci
