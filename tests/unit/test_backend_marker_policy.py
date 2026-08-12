@@ -216,39 +216,55 @@ def _powershell_control_body_is_attached(command: str) -> bool | None:
             visible.append(character if quote is None else " ")
         index += 1
     candidate = "".join(visible)
-    match = re.search(
-        r"(?<![$A-Za-z0-9_-])" r"(if|elseif|while|for|foreach|switch)\s*\(",
-        candidate,
+    control = re.compile(
+        r"(?<![$A-Za-z0-9_-])"
+        r"(elseif|foreach|finally|while|switch|catch|else|if|for|do|try)\b",
         re.IGNORECASE,
     )
-    if match is None:
-        simple = re.search(
-            r"(?<![$A-Za-z0-9_-])(else|do|try|finally)\b(.*)$",
-            candidate,
-            re.IGNORECASE,
-        )
-        if simple is not None:
-            return simple.group(2).lstrip().startswith("{")
-        catch = re.search(
-            r"(?<![$A-Za-z0-9_-])catch\b(?:\s+\[[^\]]+\])?(.*)$",
-            candidate,
-            re.IGNORECASE,
-        )
-        if catch is not None:
-            return catch.group(1).lstrip().startswith("{")
+
+    def closing_delimiter(opening: int, left: str, right: str) -> int | None:
+        depth = 0
+        for offset in range(opening, len(candidate)):
+            if candidate[offset] == left:
+                depth += 1
+            elif candidate[offset] == right:
+                depth -= 1
+                if depth == 0:
+                    return offset
         return None
-    opening = candidate.find("(", match.start())
-    depth = 0
-    for index in range(opening, len(candidate)):
-        if candidate[index] == "(":
-            depth += 1
-        elif candidate[index] == ")":
-            depth -= 1
-            if depth == 0:
-                remainder = candidate[index + 1 :].lstrip()
-                condition = candidate[opening + 1 : index].strip()
-                return bool(condition) and remainder.startswith("{")
-    return False
+
+    found = False
+    position = 0
+    while (match := control.search(candidate, position)) is not None:
+        found = True
+        keyword = match.group(1).lower()
+        cursor = match.end()
+        if keyword in {"if", "elseif", "while", "for", "foreach", "switch"}:
+            while cursor < len(candidate) and candidate[cursor].isspace():
+                cursor += 1
+            if cursor >= len(candidate) or candidate[cursor] != "(":
+                return False
+            closing = closing_delimiter(cursor, "(", ")")
+            if closing is None or not candidate[cursor + 1 : closing].strip():
+                return False
+            cursor = closing + 1
+        elif keyword == "catch":
+            while cursor < len(candidate) and candidate[cursor].isspace():
+                cursor += 1
+            if cursor < len(candidate) and candidate[cursor] == "[":
+                closing = closing_delimiter(cursor, "[", "]")
+                if closing is None:
+                    return False
+                cursor = closing + 1
+        while cursor < len(candidate) and candidate[cursor].isspace():
+            cursor += 1
+        if cursor >= len(candidate) or candidate[cursor] != "{":
+            return False
+        closing_body = closing_delimiter(cursor, "{", "}")
+        if closing_body is None:
+            return True
+        position = closing_body + 1
+    return True if found else None
 
 
 def _powershell_group_context(
@@ -890,6 +906,17 @@ def _unwrap_execution_context(command: str) -> tuple[str, bool]:
     return command, False
 
 
+def _is_scriptblock_definition(command: str) -> bool:
+    nested_command, _ = _unwrap_execution_context(command)
+    return (
+        re.match(
+            r"^\$[A-Za-z_][A-Za-z0-9_]*\s*=\s*\{",
+            nested_command.strip(),
+        )
+        is not None
+    )
+
+
 def _contributor_venv_violations(content: str) -> list[str]:
     commands = [
         command for _, command, _ in _iter_documented_commands_from_content(content)
@@ -911,6 +938,9 @@ def _contributor_venv_violations(content: str) -> list[str]:
     verifier_indexes: list[int] = []
     violations: list[str] = list(syntax_errors)
     for index, command in enumerate(commands):
+        if _is_scriptblock_definition(command):
+            violations.append("unsupported scriptblock definition")
+            continue
         nested_command, is_nested = _unwrap_execution_context(command)
         if is_nested and (
             _is_venv_creation_command(nested_command)
@@ -1177,8 +1207,8 @@ def _powershell_inline_syntax_is_valid(
         index += 1
     visible_syntax = "".join(unquoted)
     word_operator = (
-        r"-(?:[ic]?(?:eq|ne|gt|ge|lt|le|like|notlike|match|notmatch)|"
-        r"contains|notcontains|in|notin|replace|ireplace|creplace|"
+        r"-(?:[ic]?(?:eq|ne|gt|ge|lt|le|like|notlike|match|notmatch|"
+        r"contains|notcontains|in|notin|replace)|"
         r"split|join|is|isnot|as|and|or|xor|band|bor|bxor|shl|shr|f)"
     )
     if not inside_hashtable and re.search(
@@ -1324,6 +1354,9 @@ def _postgres_example_violations(
         command = raw_command
         if command.startswith(_POWERSHELL_SYNTAX_ERROR):
             violations.append(f"{path}: {command}")
+            continue
+        if _is_scriptblock_definition(command):
+            violations.append(f"{path}: unsupported scriptblock definition")
             continue
         variable_assignment = re.fullmatch(
             r"\$([A-Za-z_][A-Za-z0-9_]*)\s*=\s*" r"(?:(['\"])([^'\"]+)\2|([^\s'\"]+))",
@@ -1699,9 +1732,7 @@ def test_control_flow_guard_does_not_treat_hashtable_keys_as_execution() -> None
     assert not _contains_powershell_control_flow("$callback = { return 1 }")
 
 
-def test_postgres_doc_guard_preserves_multiline_data_and_uninvoked_scriptblock() -> (
-    None
-):
+def test_postgres_doc_guard_rejects_unsupported_scriptblock_definition() -> None:
     content = r"""
 ```powershell
 $metadata = @{
@@ -1718,12 +1749,28 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 ```
 """
 
+    assert _postgres_example_violations(
+        Path("synthetic.md"),
+        content,
+        require_create=True,
+    )
+
+
+def test_postgres_doc_guard_preserves_multiline_hashtable_data() -> None:
+    content = r"""
+```powershell
+$metadata = @{
+    if = "value"
+    return = "value"
+}
+createdb -U geo geov0_test_data_roles
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_data_roles"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+./scripts/verify_local.ps1 -BackendMarker postgres
+```
+"""
     assert (
-        _postgres_example_violations(
-            Path("synthetic.md"),
-            content,
-            require_create=True,
-        )
+        _postgres_example_violations(Path("synthetic.md"), content, require_create=True)
         == []
     )
 
@@ -2606,6 +2653,8 @@ def test_postgres_doc_guard_fails_closed_after_control_flow(
         "$x = }",
         "-not )",
         "-bnot )",
+        "1 -icontains )",
+        "1 -cin )",
     ],
 )
 def test_postgres_doc_guard_rejects_invalid_expression(
@@ -2644,6 +2693,9 @@ Write-Host ({invalid_expression}
         'if () { Write-Output "empty condition" }',
         'else Write-Output "missing body"',
         'catch Write-Output "missing body"',
+        'if ($true) { Write-Output ok } else Write-Output "missing body"',
+        "if ($true) { Write-Output ok } elseif ($false) Write-Output bad",
+        'try { Write-Output ok } catch Write-Output "missing body"',
     ],
 )
 def test_postgres_doc_guard_rejects_control_statement_without_block(
