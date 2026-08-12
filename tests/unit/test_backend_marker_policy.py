@@ -78,11 +78,8 @@ def _strip_powershell_block_comments(
                 run_end += 1
             if run_end < len(line) and line[run_end] == "#":
                 visible.extend(line[index:run_end])
-                if (run_end - index) % 2 == 1:
-                    visible.append("#")
-                    index = run_end + 1
-                else:
-                    index = run_end
+                visible.append("#")
+                index = run_end + 1
                 continue
             visible.extend((character, line[index + 1]))
             index += 2
@@ -138,7 +135,10 @@ def _split_powershell_statements(line: str) -> list[str]:
     return statements
 
 
-def _powershell_brace_context(line: str, current_depth: int) -> tuple[int, int]:
+def _powershell_brace_context(
+    line: str,
+    current_depth: int,
+) -> tuple[int, int, bool]:
     quote: str | None = None
     delta = 0
     stripped_line = line.lstrip()
@@ -160,7 +160,9 @@ def _powershell_brace_context(line: str, current_depth: int) -> tuple[int, int]:
                 delta -= 1
         index += 1
     execution_depth = max(0, current_depth - leading_closes)
-    return execution_depth, max(0, current_depth + delta)
+    new_depth = current_depth + delta
+    is_valid = leading_closes <= current_depth and new_depth >= 0
+    return execution_depth, max(0, new_depth), is_valid
 
 
 def _iter_documented_commands_from_content(content: str):
@@ -170,7 +172,9 @@ def _iter_documented_commands_from_content(content: str):
     powershell_here_string_end: str | None = None
     powershell_here_string_line: int | None = None
     powershell_brace_depth = 0
+    powershell_flow_terminated = False
     pending_powershell_command: tuple[int, str] | None = None
+    pending_powershell_depth = 0
     for line_number, line in enumerate(
         content.splitlines(),
         start=1,
@@ -178,6 +182,12 @@ def _iter_documented_commands_from_content(content: str):
         stripped = line.strip()
         fence = re.match(r"^```\s*([A-Za-z0-9_-]*)", stripped)
         if fence is not None:
+            if powershell_brace_depth:
+                yield (
+                    line_number,
+                    f"{_POWERSHELL_SYNTAX_ERROR}: unclosed control block",
+                    fence_language,
+                )
             if in_powershell_block_comment:
                 yield (
                     powershell_block_comment_line or line_number,
@@ -197,6 +207,7 @@ def _iter_documented_commands_from_content(content: str):
                     fence_language,
                 )
                 pending_powershell_command = None
+                pending_powershell_depth = 0
             fence_language = (
                 None if fence_language is not None else fence.group(1).lower()
             )
@@ -205,10 +216,10 @@ def _iter_documented_commands_from_content(content: str):
             powershell_here_string_end = None
             powershell_here_string_line = None
             powershell_brace_depth = 0
+            powershell_flow_terminated = False
             continue
         powershell_statements: list[str] | None = None
         powershell_line_continues = False
-        powershell_execution_depth = 0
         here_string_start: re.Match[str] | None = None
         if fence_language in {"powershell", "pwsh"}:
             if powershell_here_string_end is not None:
@@ -241,9 +252,6 @@ def _iter_documented_commands_from_content(content: str):
                 powershell_block_comment_line = line_number
             elif not in_powershell_block_comment:
                 powershell_block_comment_line = None
-            powershell_execution_depth, powershell_brace_depth = (
-                _powershell_brace_context(visible, powershell_brace_depth)
-            )
             here_string_start = re.search(r"@(['\"])\s*$", visible)
             if (
                 here_string_start is not None
@@ -274,6 +282,7 @@ def _iter_documented_commands_from_content(content: str):
                         fence_language,
                     )
                     pending_powershell_command = None
+                    pending_powershell_depth = 0
                 continue
             stripped = powershell_statements[0]
         inline_commands = re.findall(r"`([^`]+)`", stripped)
@@ -300,16 +309,31 @@ def _iter_documented_commands_from_content(content: str):
         commands = powershell_statements or [stripped]
         for command_index, command in enumerate(commands):
             command_line = line_number
+            (
+                command_execution_depth,
+                powershell_brace_depth,
+                brace_syntax_is_valid,
+            ) = _powershell_brace_context(command, powershell_brace_depth)
+            if not brace_syntax_is_valid:
+                yield (
+                    command_line,
+                    f"{_POWERSHELL_SYNTAX_ERROR}: unmatched closing brace",
+                    fence_language,
+                )
+                continue
             if pending_powershell_command is not None:
                 command_line, pending = pending_powershell_command
                 command = f"{pending[:-1].rstrip()} {command.lstrip()}"
+                command_execution_depth = pending_powershell_depth
                 pending_powershell_command = None
+                pending_powershell_depth = 0
             if (
                 powershell_line_continues
                 and command_index == len(commands) - 1
                 and fence_language in {"powershell", "pwsh"}
             ):
                 pending_powershell_command = (command_line, command)
+                pending_powershell_depth = command_execution_depth
             elif command and not command.startswith("#"):
                 if (
                     fence_language in {"powershell", "pwsh"}
@@ -322,9 +346,16 @@ def _iter_documented_commands_from_content(content: str):
                         fence_language,
                     )
                 else:
-                    if powershell_execution_depth > 0:
+                    if command_execution_depth > 0 or powershell_flow_terminated:
                         command = f"{_POWERSHELL_NON_TOP_LEVEL}: {command}"
                     yield command_line, command, fence_language
+                    unwrapped_command, _ = _unwrap_execution_context(command)
+                    if command_execution_depth == 0 and re.match(
+                        r"^(?:return|exit|throw)(?:\s|$)",
+                        unwrapped_command,
+                        re.IGNORECASE,
+                    ):
+                        powershell_flow_terminated = True
     if pending_powershell_command is not None:
         yield (
             pending_powershell_command[0],
@@ -341,6 +372,12 @@ def _iter_documented_commands_from_content(content: str):
         yield (
             powershell_block_comment_line or 1,
             f"{_POWERSHELL_SYNTAX_ERROR}: unclosed block comment",
+            fence_language,
+        )
+    if powershell_brace_depth:
+        yield (
+            1,
+            f"{_POWERSHELL_SYNTAX_ERROR}: unclosed control block",
             fence_language,
         )
 
@@ -661,7 +698,7 @@ def _tokenize_powershell_arguments(candidate: str) -> list[str] | None:
 
 
 def _powershell_inline_syntax_is_valid(command: str) -> bool:
-    command_without_comment = _strip_shell_comment(command)
+    command_without_comment = command
     if _tokenize_powershell_arguments(command_without_comment) is None:
         return False
     return not command_without_comment.rstrip().endswith(("|", "&&", "||"))
@@ -764,7 +801,7 @@ def _postgres_example_violations(
     variables: dict[str, str] = {}
     commands: list[str] = []
     for _, raw_command, _ in _iter_documented_commands_from_content(content):
-        command = _strip_shell_comment(raw_command)
+        command = raw_command
         if command.startswith(_POWERSHELL_SYNTAX_ERROR):
             violations.append(f"{path}: {command}")
             continue
@@ -941,13 +978,17 @@ def test_active_operational_docs_do_not_bypass_the_canonical_pytest_runner() -> 
     violations: list[str] = []
     for path in _ACTIVE_OPERATIONAL_DOCS:
         for line_number, command, fence_language in _iter_documented_commands(path):
+            executable_command, _ = _unwrap_execution_context(command)
             if command.startswith(_POWERSHELL_SYNTAX_ERROR):
                 violations.append(f"{path.relative_to(_ROOT)}:{line_number}: {command}")
-            if _is_direct_pytest_command(command):
-                violations.append(f"{path.relative_to(_ROOT)}:{line_number}: {command}")
-            if _shell_contract_violation(command, fence_language):
+            if _is_direct_pytest_command(executable_command):
                 violations.append(
-                    f"{path.relative_to(_ROOT)}:{line_number}: shell mismatch: {command}"
+                    f"{path.relative_to(_ROOT)}:{line_number}: {executable_command}"
+                )
+            if _shell_contract_violation(executable_command, fence_language):
+                violations.append(
+                    f"{path.relative_to(_ROOT)}:{line_number}: shell mismatch: "
+                    f"{executable_command}"
                 )
 
     assert violations == []
@@ -979,6 +1020,26 @@ def test_contributor_guides_keep_python_tools_on_the_prepared_venv() -> None:
 )
 def test_direct_pytest_guard_recognizes_supported_launcher_shapes(command: str) -> None:
     assert _is_direct_pytest_command(command)
+
+
+def test_direct_pytest_guard_unwraps_nested_execution_context() -> None:
+    commands = [
+        command
+        for _, command, _ in _iter_documented_commands_from_content(
+            """
+```powershell
+if ($true) {
+    pytest.exe -q
+}
+```
+"""
+        )
+    ]
+
+    assert any(
+        _is_direct_pytest_command(_unwrap_execution_context(command)[0])
+        for command in commands
+    )
 
 
 @pytest.mark.parametrize(
@@ -1229,8 +1290,7 @@ Write-Host https://example.test/#fragment
 pytest.exe after_url_fragment
 Write-Host "two literal backticks" ``
 pytest.exe after_even_backticks
-Write-Host "two backticks before comment" ``# ordinary comment
-pytest.exe after_even_backticks_comment
+Write-Host ``#bar; pytest.exe after_even_backticks_hash
 ```
 """
         )
@@ -1242,7 +1302,7 @@ pytest.exe after_even_backticks_comment
     assert "pytest.exe after_mid_token_hash" in commands
     assert "pytest.exe after_url_fragment" in commands
     assert "pytest.exe after_even_backticks" in commands
-    assert "pytest.exe after_even_backticks_comment" in commands
+    assert "pytest.exe after_even_backticks_hash" in commands
     assert any(command.startswith(_POWERSHELL_SYNTAX_ERROR) for command in commands)
 
 
@@ -1598,6 +1658,49 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 if ($false) {
     ./scripts/verify_local.ps1 -BackendMarker postgres
 }
+```
+""",
+        """
+```powershell
+if ($false) { Write-Output "noop"; createdb -U geo geov0_test_dead_same_line; }
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_dead_same_line"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+if ($false) { Write-Output "noop"; ./scripts/verify_local.ps1 -BackendMarker postgres; }
+```
+""",
+        """
+```powershell
+createdb -U geo geov0_test_mid_token_hash
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_mid_token_hash"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+./scripts/verify_local.ps1 -BackendMarker postgres -TaskSlug safe#invalid
+```
+""",
+        """
+```powershell
+createdb -U geo geov0_test_unclosed_control
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_unclosed_control"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+./scripts/verify_local.ps1 -BackendMarker postgres
+if ($true) {
+```
+""",
+        """
+```powershell
+}
+createdb -U geo geov0_test_orphan_close
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_orphan_close"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+./scripts/verify_local.ps1 -BackendMarker postgres
+```
+""",
+        """
+```powershell
+return
+createdb -U geo geov0_test_after_return
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_after_return"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+./scripts/verify_local.ps1 -BackendMarker postgres
 ```
 """,
         """
