@@ -207,7 +207,7 @@ def _powershell_executable_segments(command: str) -> list[str]:
             quote = (
                 None if quote == character else character if quote is None else quote
             )
-        if quote is None and character in "{}|":
+        if quote is None and character in "{}|=&()":
             segment = "".join(current).strip()
             if segment:
                 segments.append(segment)
@@ -219,6 +219,68 @@ def _powershell_executable_segments(command: str) -> list[str]:
     if segment:
         segments.append(segment)
     return segments
+
+
+def _strip_balanced_outer_parentheses(expression: str) -> str:
+    candidate = expression.strip()
+    while candidate.startswith("(") and candidate.endswith(")"):
+        depth = 0
+        closes_at_end = False
+        for index, character in enumerate(candidate):
+            if character == "(":
+                depth += 1
+            elif character == ")":
+                depth -= 1
+                if depth == 0:
+                    closes_at_end = index == len(candidate) - 1
+                    break
+        if not closes_at_end:
+            break
+        candidate = candidate[1:-1].strip()
+    return candidate
+
+
+def _powershell_constant_condition_is_true(expression: str) -> bool:
+    candidate = _strip_balanced_outer_parentheses(expression)
+    if candidate.lower() == "$true":
+        return True
+    equality = re.fullmatch(
+        r"(?P<left>\d+(?:\.\d+)?|'[^']*'|\"[^\"]*\")\s+"
+        r"-(?:i?eq|ceq)\s+"
+        r"(?P<right>\d+(?:\.\d+)?|'[^']*'|\"[^\"]*\")",
+        candidate,
+        re.IGNORECASE,
+    )
+    if equality is None:
+        return False
+    return equality.group("left").strip("'\"") == equality.group("right").strip("'\"")
+
+
+def _powershell_guaranteed_if_opens(command: str) -> bool:
+    candidate = command.strip()
+    if re.match(r"^if\s*\(", candidate, re.IGNORECASE) is None:
+        return False
+    opening = candidate.find("(")
+    depth = 0
+    quote: str | None = None
+    closing: int | None = None
+    for index in range(opening, len(candidate)):
+        character = candidate[index]
+        if character in {'"', "'"}:
+            quote = (
+                None if quote == character else character if quote is None else quote
+            )
+        elif quote is None:
+            if character == "(":
+                depth += 1
+            elif character == ")":
+                depth -= 1
+                if depth == 0:
+                    closing = index
+                    break
+    if closing is None or not candidate[closing + 1 :].lstrip().startswith("{"):
+        return False
+    return _powershell_constant_condition_is_true(candidate[opening + 1 : closing])
 
 
 def _iter_documented_commands_from_content(content: str):
@@ -385,7 +447,7 @@ def _iter_documented_commands_from_content(content: str):
                 powershell_group_stack,
             )
             if (
-                re.match(r"^if\s*\(\s*\$true\s*\)\s*\{", command, re.IGNORECASE)
+                _powershell_guaranteed_if_opens(command)
                 and powershell_brace_depth > command_execution_depth
             ):
                 powershell_guaranteed_control_depths.add(powershell_brace_depth)
@@ -432,9 +494,10 @@ def _iter_documented_commands_from_content(content: str):
                         command = f"{_POWERSHELL_NON_TOP_LEVEL}: {command}"
                     yield command_line, command, fence_language
                     unwrapped_command, _ = _unwrap_execution_context(command)
-                    guaranteed_inline_termination = re.match(
-                        r"^if\s*\(\s*\$true\s*\)\s*\{[^}]*\b"
-                        r"(?:return|exit|throw)\b",
+                    guaranteed_inline_termination = _powershell_guaranteed_if_opens(
+                        unwrapped_command
+                    ) and re.search(
+                        r"\{[^}]*\b(?:return|exit|throw)\b",
                         unwrapped_command,
                         re.IGNORECASE,
                     )
@@ -1144,6 +1207,10 @@ if ($true) {
 if ($true) { pytest.exe same_line }
 Write-Output "pipeline" | pytest.exe pipeline
 $runner = { pytest.exe scriptblock }
+$result = pytest.exe assignment
+$result = $(pytest.exe subexpression)
+(pytest.exe grouped)
+Write-Output "chain" && pytest.exe chain
 ```
 """
         )
@@ -1162,6 +1229,10 @@ $runner = { pytest.exe scriptblock }
         "pytest.exe same_line",
         "pytest.exe pipeline",
         "pytest.exe scriptblock",
+        "pytest.exe assignment",
+        "pytest.exe subexpression",
+        "pytest.exe grouped",
+        "pytest.exe chain",
     }
 
 
@@ -1831,6 +1902,24 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 if ($true) { return }
 createdb -U geo geov0_test_after_guaranteed_return
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_after_guaranteed_return"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+./scripts/verify_local.ps1 -BackendMarker postgres
+```
+""",
+        """
+```powershell
+if (1 -eq 1) { return }
+createdb -U geo geov0_test_after_constant_equality
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_after_constant_equality"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+./scripts/verify_local.ps1 -BackendMarker postgres
+```
+""",
+        """
+```powershell
+if (($true)) { return }
+createdb -U geo geov0_test_after_parenthesized_true
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_after_parenthesized_true"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
 ./scripts/verify_local.ps1 -BackendMarker postgres
 ```
