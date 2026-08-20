@@ -4725,10 +4725,19 @@ components:
           type: integer
           minimum: 0
         v:
+          # 2026-08-20 / p007_t715: decimal string, not a number. Two of the
+          # seven series (total_debt, clearing_volume) are amounts in the
+          # selected equivalent, and money stays exact decimal. One type for all
+          # seven series: the values come from one column, so a union would only
+          # force consumers to branch.
+          # The form is fixed and identical for the DB-backed and the synthetic
+          # producer: the eight fractional digits of the Numeric(20, 8) column,
+          # plain decimal notation, never exponential.
           # null means "no measurement at/before this timestamp"; it is
-          # intentionally distinguishable from a measured zero.
-          type: number
+          # intentionally distinguishable from a measured zero ("0.00000000").
+          type: string
           nullable: true
+          description: Metric value as decimal string
       additionalProperties: false
 
     MetricSeriesKey:

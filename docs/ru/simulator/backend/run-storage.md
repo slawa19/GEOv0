@@ -105,7 +105,10 @@ CREATE TABLE IF NOT EXISTS simulator_run_metrics (
   equivalent_code TEXT NOT NULL,
   key TEXT NOT NULL,
   t_ms BIGINT NOT NULL CHECK (t_ms >= 0),
-  value DOUBLE PRECISION NULL,
+  -- 007 / T715 (2026-08-20): деньги остаются точным decimal.
+  -- Старые float-строки архивированы в simulator_run_metrics_float_archive
+  -- (значение сохранено как текст), а не сконвертированы.
+  value NUMERIC(20, 8) NULL,
   PRIMARY KEY (run_id, equivalent_code, key, t_ms)
 );
 
@@ -147,6 +150,31 @@ CREATE TABLE IF NOT EXISTS simulator_run_artifacts (
 CREATE INDEX IF NOT EXISTS idx_simulator_run_artifacts_created_at
   ON simulator_run_artifacts (created_at);
 ```
+
+### Точность `simulator_run_metrics.value` (007 / T715, 2026-08-20)
+
+Колонка — `NUMERIC(20, 8)`, а `MetricPoint.v` на проводе — decimal string. Серии
+`total_debt` и `clearing_volume` — деньги, и они **точны только на PostgreSQL**.
+
+**Известное ограничение SQLite.** SQLite не имеет нативного decimal: SQLAlchemy
+проводит `Numeric` через binary float, поэтому `Decimal("12345678901.12345678")`
+читается обратно как `Decimal("12345678901.12345695")`. Провод при этом отдаёт
+decimal string, то есть форму, зарезервированную за точными деньгами. SQLite остаётся
+поддерживаемым бэкендом сознательно — это дефолт `DATABASE_URL` (`app/config.py`) и
+документированный путь локальной разработки без Docker (`README.md`), — но ограничение
+объявлено, а не спрятано: `app/core/simulator/storage.py` пишет **один WARNING за
+прогон** (`simulator.storage.sqlite_money_metrics_are_not_exact`), когда денежная серия
+фактически персистится на SQLite. Ровно так же, как §4 AGENTS.md разводит SQLite и
+Postgres по семантике блокировок: денежные метрики симулятора точны только на Postgres.
+
+**Потолок `NUMERIC(20, 8)`** — 12 целых цифр. Значение `total_debt >= 10^12` даёт
+`numeric field overflow`; писатель best-effort, он логирует отказ и откатывает
+**только свой SAVEPOINT**, не транзакцию вызывающего тика.
+
+**Архив старых float-значений.** Миграция `018_simulator_run_metrics_numeric_value`
+не конвертирует старые строки, а переносит их в `simulator_run_metrics_float_archive`
+текстом (`value_text`), с `extra_float_digits = 3`, зафиксированным на транзакцию
+миграции, и проверкой, что каждая строка кастуется обратно в тот же `float8`.
 
 Примечания:
 - `last_error` хранится как JSONB и повторяет структуру `RunStatus.last_error`.

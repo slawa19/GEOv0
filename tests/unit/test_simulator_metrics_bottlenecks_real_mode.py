@@ -22,6 +22,7 @@ from __future__ import annotations
 import logging
 import threading
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Optional, get_args
@@ -37,7 +38,7 @@ from app.core.simulator import storage as simulator_storage
 from app.core.simulator.metrics_bottlenecks import MetricsBottlenecks
 from app.core.simulator.real_tick_metrics import RealTickMetrics
 from app.db.models.simulator_storage import SimulatorRunBottleneck, SimulatorRunMetric
-from app.schemas.simulator import MetricSeriesKey
+from app.schemas.simulator import MetricSeriesKey, metric_point_value
 from app.utils.exceptions import GeoException
 
 
@@ -132,8 +133,22 @@ _SCENARIO_RAW: dict[str, Any] = {
 }
 
 
-def _metric_row(key: str, t_ms: int, value: Optional[float]) -> SimpleNamespace:
-    return SimpleNamespace(key=key, t_ms=t_ms, value=value)
+# 2026-08-20 / p007_t715: the column is Numeric(20, 8), so a row handed back by
+# SQLAlchemy carries a Decimal quantized to eight fractional digits. The fake
+# rows below mirror that exactly, otherwise the expectations here would describe
+# a shape the database never produces.
+_COLUMN_QUANT = Decimal("0.00000001")
+
+
+def _metric_row(
+    key: str, t_ms: int, value: Optional[Decimal | float | str]
+) -> SimpleNamespace:
+    stored = (
+        None
+        if value is None
+        else Decimal(str(value)).quantize(_COLUMN_QUANT)
+    )
+    return SimpleNamespace(key=key, t_ms=t_ms, value=stored)
 
 
 def _bottleneck_row(
@@ -187,7 +202,9 @@ def _series(response: Any, key: str) -> Any:
     raise AssertionError(f"series {key} missing from response")
 
 
-def _values(response: Any, key: str) -> list[Optional[float]]:
+def _values(response: Any, key: str) -> list[Optional[str]]:
+    """`MetricPoint.v` is a decimal string since p007_t715, or None."""
+
     return [p.v for p in _series(response, key).points]
 
 
@@ -229,7 +246,13 @@ async def test_real_mode_metrics_serves_persisted_points_with_carry_forward(
 
     # Before the first measurement there is no value to report; afterwards the
     # last measurement is carried forward until the next tick.
-    assert _values(resp, "success_rate") == [None, None, 50.0, 50.0, 75.0]
+    assert _values(resp, "success_rate") == [
+        None,
+        None,
+        "50.00000000",
+        "50.00000000",
+        "75.00000000",
+    ]
     assert resp.run_id == "run-1"
     assert resp.equivalent == "UAH"
 
@@ -261,7 +284,9 @@ async def test_real_mode_metrics_distinguish_missing_measurement_from_measured_z
 
     total_debt = _values(resp, "total_debt")
     assert total_debt[0] is None and total_debt[1] is None
-    assert total_debt[2] == 0.0 and total_debt[3] == 0.0
+    # A measured zero is the string "0.00000000"; it is not None and it is not
+    # dropped. `None` and a zero measurement stay two different things.
+    assert total_debt[2] == "0.00000000" and total_debt[3] == "0.00000000"
 
     # A series with no usable measurement at all is null everywhere, not zeros.
     assert _values(resp, "clearing_volume") == [None, None, None, None]
@@ -270,7 +295,7 @@ async def test_real_mode_metrics_distinguish_missing_measurement_from_measured_z
     # The distinction must survive to the wire, not only in Python objects.
     wire = resp.model_dump(mode="json")
     wire_debt = next(s for s in wire["series"] if s["key"] == "total_debt")["points"]
-    assert [p["v"] for p in wire_debt] == [None, None, 0.0, 0.0]
+    assert [p["v"] for p in wire_debt] == [None, None, "0.00000000", "0.00000000"]
 
 
 # --- metrics: failure paths --------------------------------------------------
@@ -585,9 +610,13 @@ class _RaisingSession:
 
 
 class _DebtSession:
-    """First execute() resolves equivalents, the next ones return debt sums."""
+    """First execute() resolves equivalents, the next ones return debt sums.
 
-    def __init__(self, total: float) -> None:
+    `SUM(debts.amount)` over a Numeric(20, 8) column yields a Decimal, which is
+    what the fake returns since p007_t715.
+    """
+
+    def __init__(self, total: Decimal) -> None:
         self.execute_calls = 0
         self._total = total
 
@@ -610,7 +639,7 @@ def _tick_run(tick_index: int = 1) -> SimpleNamespace:
     return SimpleNamespace(
         run_id="run-1",
         tick_index=tick_index,
-        _real_total_debt_by_eq={"UAH": 42.0},
+        _real_total_debt_by_eq={"UAH": Decimal("42")},
         _real_total_debt_tick=0,
         _edges_by_equivalent={"UAH": [("alice", "bob")]},
     )
@@ -618,8 +647,8 @@ def _tick_run(tick_index: int = 1) -> SimpleNamespace:
 
 async def _populate(
     tick_metrics: RealTickMetrics, run: SimpleNamespace, session: Any
-) -> dict[str, dict[str, Optional[float]]]:
-    values: dict[str, dict[str, Optional[float]]] = {"UAH": {}}
+) -> dict[str, dict[str, Optional[Decimal | float]]]:
+    values: dict[str, dict[str, Optional[Decimal | float]]] = {"UAH": {}}
     await tick_metrics.populate_per_eq_metric_values(
         session=session,
         run=run,
@@ -637,9 +666,13 @@ async def test_measured_total_debt_is_recorded(
 ) -> None:
     caplog.set_level(logging.WARNING, logger=LOGGER_NAME)
 
-    values = await _populate(_tick_metrics(), _tick_run(), _DebtSession(12.5))
+    values = await _populate(
+        _tick_metrics(), _tick_run(), _DebtSession(Decimal("12.5"))
+    )
 
-    assert values["UAH"]["total_debt"] == 12.5
+    assert values["UAH"]["total_debt"] == Decimal("12.5")
+    # p007_t715: money leaves the producer as Decimal, not as float.
+    assert isinstance(values["UAH"]["total_debt"], Decimal)
     assert _warnings(caplog) == []
 
 
@@ -658,7 +691,7 @@ async def test_failed_total_debt_snapshot_is_not_reported_as_measurement(
     # No successful route this tick: the average is undefined, not zero.
     assert "avg_route_length" not in values["UAH"]
     # Genuine measurements of this tick stay numeric.
-    assert values["UAH"]["clearing_volume"] == 0.0
+    assert values["UAH"]["clearing_volume"] == Decimal("0")
     assert values["UAH"]["active_trustlines"] == 1.0
     assert values["UAH"]["active_participants"] == 2.0
 
@@ -682,19 +715,19 @@ async def test_measured_route_length_is_recorded() -> None:
     """Counter-check: avg_route_length is omitted only when there is no route."""
 
     tick_metrics = _tick_metrics()
-    values: dict[str, dict[str, Optional[float]]] = {"UAH": {}}
+    values: dict[str, dict[str, Optional[Decimal | float]]] = {"UAH": {}}
     await tick_metrics.populate_per_eq_metric_values(
-        session=_DebtSession(0.0),
+        session=_DebtSession(Decimal("0")),
         run=_tick_run(),
         scenario={},
         equivalents=["UAH"],
         per_eq_route={"UAH": {"route_len_n": 2.0, "route_len_sum": 7.0}},
-        clearing_volume_by_eq={"UAH": 4.0},
+        clearing_volume_by_eq={"UAH": Decimal("4")},
         per_eq_metric_values=values,
     )
 
     assert values["UAH"]["avg_route_length"] == 3.5
-    assert values["UAH"]["clearing_volume"] == 4.0
+    assert values["UAH"]["clearing_volume"] == Decimal("4")
 
 
 # --- end to end: producer -> writer -> DB row -> reader -> API payload -------
@@ -720,7 +753,9 @@ async def test_missing_measurement_stays_null_end_to_end(
         },
         # The producer measured total_debt (exactly zero) but had no route to
         # average, so avg_route_length is absent.
-        metric_values_by_eq={"UAH": {"total_debt": 0.0, "clearing_volume": 0.0}},
+        metric_values_by_eq={
+            "UAH": {"total_debt": Decimal("0"), "clearing_volume": Decimal("0")}
+        },
         session=db_session,
     )
     await simulator_storage.write_tick_metrics(
@@ -729,7 +764,9 @@ async def test_missing_measurement_stays_null_end_to_end(
         per_equivalent={
             "UAH": {"committed": 0, "rejected": 2, "errors": 0, "timeouts": 0}
         },
-        metric_values_by_eq={"UAH": {"total_debt": 0.0, "clearing_volume": 0.0}},
+        metric_values_by_eq={
+            "UAH": {"total_debt": Decimal("0"), "clearing_volume": Decimal("0")}
+        },
         session=db_session,
     )
 
@@ -746,9 +783,9 @@ async def test_missing_measurement_stays_null_end_to_end(
         ).all()
     }
     assert stored[("success_rate", 1_000)] is None  # no attempts: not measured
-    assert stored[("success_rate", 2_000)] == 0.0  # measured zero percent
+    assert stored[("success_rate", 2_000)] == Decimal("0")  # measured zero percent
     assert stored[("avg_route_length", 1_000)] is None
-    assert stored[("total_debt", 1_000)] == 0.0
+    assert stored[("total_debt", 1_000)] == Decimal("0")
     assert stored[("active_trustlines", 1_000)] is None
 
     _install_session(monkeypatch, lambda: _SharedSession(db_session))
@@ -757,15 +794,163 @@ async def test_missing_measurement_stays_null_end_to_end(
         run_id="run-1", equivalent="UAH", from_ms=0, to_ms=3_000, step_ms=1_000
     )
 
-    assert _values(resp, "success_rate") == [None, None, 0.0, 0.0]
+    zero = "0.00000000"
+    assert _values(resp, "success_rate") == [None, None, zero, zero]
     assert _values(resp, "avg_route_length") == [None, None, None, None]
-    assert _values(resp, "total_debt") == [None, 0.0, 0.0, 0.0]
+    assert _values(resp, "total_debt") == [None, zero, zero, zero]
 
     wire = resp.model_dump(mode="json")
     wire_success = next(
         item for item in wire["series"] if item["key"] == "success_rate"
     )["points"]
-    assert [point["v"] for point in wire_success] == [None, None, 0.0, 0.0]
+    assert [point["v"] for point in wire_success] == [None, None, zero, zero]
+
+
+# --- T715: money stays exact decimal from the source to the wire -------------
+
+
+# A value float cannot hold: 19 significant digits against ~17 for binary64.
+# Every assertion below would fail if any stage narrowed through float.
+_TOO_PRECISE_FOR_FLOAT = Decimal("12345678901.12345678")
+
+
+def test_the_probe_value_really_is_beyond_float() -> None:
+    """Anti-vacuum: prove the discriminator discriminates.
+
+    Without this, the exactness assertions could pass simply because the chosen
+    value happens to be representable as a float.
+    """
+
+    assert Decimal(str(float(_TOO_PRECISE_FOR_FLOAT))) != _TOO_PRECISE_FOR_FLOAT
+
+
+def test_metric_point_value_renders_one_canonical_decimal_string() -> None:
+    """The single serialization point: fixed scale, plain notation, null kept."""
+
+    assert metric_point_value(None) is None
+    # A measured zero is a value, not a missing measurement.
+    assert metric_point_value(Decimal("0")) == "0.00000000"
+    # Exponential money strings break consumer parsers; never emit them.
+    assert metric_point_value(Decimal("1E-8")) == "0.00000001"
+    assert metric_point_value(Decimal("1E+11")) == "100000000000.00000000"
+    assert metric_point_value(_TOO_PRECISE_FOR_FLOAT) == "12345678901.12345678"
+    for probe in (Decimal("1E-8"), Decimal("1E+11"), Decimal("0")):
+        rendered = metric_point_value(probe)
+        assert rendered is not None and "E" not in rendered.upper()
+
+    # One form, whatever the producer handed in: the same number written as a
+    # float, as an int, as a str and as a Decimal renders identically.
+    assert (
+        metric_point_value(45.3)
+        == metric_point_value("45.3")
+        == metric_point_value(Decimal("45.3"))
+        == "45.30000000"
+    )
+    assert metric_point_value(2) == metric_point_value(2.0) == "2.00000000"
+    # Every rendering carries the column's scale, so string comparison and
+    # de-duplication on `v` stay stable.
+    for probe in (0, 2.0, 45.3, Decimal("50.00000000"), _TOO_PRECISE_FOR_FLOAT):
+        rendered = metric_point_value(probe)
+        assert rendered is not None
+        assert len(rendered.split(".")[1]) == 8, rendered
+
+
+async def test_real_and_synthetic_producers_emit_the_same_form(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One endpoint, one field, one shape - whichever branch produced it.
+
+    Before this was pinned, the DB-backed reader emitted `"0.00000000"` while
+    the synthetic generator emitted `"0.0"` and `"45.3"` for the same field.
+    """
+
+    _install_session(
+        monkeypatch,
+        lambda: _FakeSession(
+            [_FakeResult(rows=[_metric_row("active_trustlines", 0, 2.0)])]
+        ),
+    )
+    persisted = await _build().build_metrics(
+        run_id="run-1", equivalent="UAH", from_ms=0, to_ms=0, step_ms=1_000
+    )
+
+    _install_session(monkeypatch, lambda: _FakeSession([]))
+    synthetic = await _build(mode="fixtures", db_enabled=False).build_metrics(
+        run_id="run-1", equivalent="UAH", from_ms=0, to_ms=0, step_ms=1_000
+    )
+
+    # The same measured cardinality, produced by the two different branches.
+    assert _values(persisted, "active_trustlines") == ["2.00000000"]
+    assert _values(synthetic, "active_trustlines") == ["2.00000000"]
+
+    # And no synthetic series slips out in another shape.
+    for series in synthetic.series:
+        for point in series.points:
+            assert point.v is not None
+            assert len(point.v.split(".")[1]) == 8, (series.key, point.v)
+
+
+async def test_money_series_reach_the_wire_without_losing_precision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reader stage: a Decimal from the column reaches the response intact."""
+
+    _install_session(
+        monkeypatch,
+        lambda: _FakeSession(
+            [
+                _FakeResult(
+                    rows=[
+                        _metric_row("total_debt", 1_000, _TOO_PRECISE_FOR_FLOAT),
+                        _metric_row("clearing_volume", 1_000, Decimal("0.00000001")),
+                    ]
+                )
+            ]
+        ),
+    )
+
+    resp = await _build().build_metrics(
+        run_id="run-1", equivalent="UAH", from_ms=1_000, to_ms=1_000, step_ms=1_000
+    )
+
+    assert _values(resp, "total_debt") == ["12345678901.12345678"]
+    assert _values(resp, "clearing_volume") == ["0.00000001"]
+
+    # And on the wire, not only in Python objects.
+    wire = resp.model_dump(mode="json")
+    wire_debt = next(s for s in wire["series"] if s["key"] == "total_debt")["points"]
+    assert [point["v"] for point in wire_debt] == ["12345678901.12345678"]
+
+
+async def test_total_debt_snapshot_leaves_the_producer_as_exact_decimal() -> None:
+    """Source stage: `float(total)` over SUM(debts.amount) is gone."""
+
+    values = await _populate(
+        _tick_metrics(), _tick_run(), _DebtSession(_TOO_PRECISE_FOR_FLOAT)
+    )
+
+    assert values["UAH"]["total_debt"] == _TOO_PRECISE_FOR_FLOAT
+
+
+async def test_clearing_volume_leaves_the_producer_as_exact_decimal() -> None:
+    """Source stage: `float(cleared_amount_dec)` is gone from the clearing path.
+
+    The engine hands the tick a Decimal per equivalent; the metrics producer
+    must forward it untouched.
+    """
+
+    values: dict[str, dict[str, Optional[Decimal | float]]] = {"UAH": {}}
+    await _tick_metrics().populate_per_eq_metric_values(
+        session=_DebtSession(Decimal("0")),
+        run=_tick_run(),
+        scenario={},
+        equivalents=["UAH"],
+        per_eq_route={},
+        clearing_volume_by_eq={"UAH": _TOO_PRECISE_FOR_FLOAT},
+        per_eq_metric_values=values,
+    )
+
+    assert values["UAH"]["clearing_volume"] == _TOO_PRECISE_FOR_FLOAT
 
 
 # --- T713: one metric key set on all four sides ------------------------------
@@ -828,8 +1013,18 @@ async def test_real_mode_serves_persisted_network_cardinalities(
 
     # T711 rule holds for the new series too: before the first measurement the
     # value is null, never an invented 0.0.
-    assert _values(resp, "active_participants") == [None, 4.0, 4.0, 4.0]
-    assert _values(resp, "active_trustlines") == [None, 6.0, 6.0, 5.0]
+    assert _values(resp, "active_participants") == [
+        None,
+        "4.00000000",
+        "4.00000000",
+        "4.00000000",
+    ]
+    assert _values(resp, "active_trustlines") == [
+        None,
+        "6.00000000",
+        "6.00000000",
+        "5.00000000",
+    ]
 
 
 async def test_synthetic_mode_counts_cardinalities_instead_of_inventing_them(
@@ -861,9 +1056,9 @@ async def test_synthetic_mode_counts_cardinalities_instead_of_inventing_them(
     )
 
     # alice (status omitted, defaults to active) + bob; carol is blocked.
-    assert _values(resp, "active_participants") == [2.0, 2.0]
+    assert _values(resp, "active_participants") == ["2.00000000", "2.00000000"]
     # Two edges in the run's UAH edge cache.
-    assert _values(resp, "active_trustlines") == [2.0, 2.0]
+    assert _values(resp, "active_trustlines") == ["2.00000000", "2.00000000"]
 
 
 async def test_writer_and_reader_agree_on_the_key_set_end_to_end(
@@ -882,8 +1077,8 @@ async def test_writer_and_reader_agree_on_the_key_set_end_to_end(
         metric_values_by_eq={
             "UAH": {
                 "avg_route_length": 2.0,
-                "total_debt": 7.0,
-                "clearing_volume": 0.0,
+                "total_debt": Decimal("7"),
+                "clearing_volume": Decimal("0"),
                 "active_participants": 4.0,
                 "active_trustlines": 6.0,
             }
@@ -909,8 +1104,8 @@ async def test_writer_and_reader_agree_on_the_key_set_end_to_end(
     )
 
     assert persisted_keys == {item.key for item in resp.series}
-    assert _values(resp, "active_participants") == [None, 4.0]
-    assert _values(resp, "active_trustlines") == [None, 6.0]
+    assert _values(resp, "active_participants") == [None, "4.00000000"]
+    assert _values(resp, "active_trustlines") == [None, "6.00000000"]
 
 
 # --- T714: answering a GET must not write to the database --------------------

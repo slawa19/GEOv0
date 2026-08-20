@@ -211,3 +211,93 @@ async def test_partial_clearing_is_finalized_before_failure_propagates(
     assert done_events[0]["cleared_cycles"] == 1
     assert done_events[0]["cleared_amount"] == "5.00"
     assert done_events[0]["cycle_edges"] == [{"from": "bob", "to": "alice"}]
+
+
+# --- p007_t715: the cleared volume leaves this engine as exact Decimal -------
+
+
+# 19 significant digits: binary64 cannot hold it, so a single `float(...)` on the
+# way out would change the value.
+_TOO_PRECISE_FOR_FLOAT = Decimal("12345678901.12345678")
+
+
+class _ExactAmountService:
+    """Clears one cycle for an amount no float can represent, then stops."""
+
+    def __init__(self, _session) -> None:
+        self.calls = 0
+
+    async def find_cycles(self, equivalent: str, *, max_depth: int) -> list:
+        # Only USD has a cycle; EUR clears nothing this tick.
+        if self.calls or str(equivalent) != "USD":
+            return []
+        return [[{"debtor": "alice", "creditor": "bob", "amount": "1.00"}]]
+
+    async def execute_clearing_with_amount(self, _cycle) -> Decimal | None:
+        self.calls += 1
+        return _TOO_PRECISE_FOR_FLOAT
+
+
+def test_exact_amount_probe_is_beyond_float() -> None:
+    """Anti-vacuum: the probe must actually be unrepresentable as a float."""
+
+    assert Decimal(str(float(_TOO_PRECISE_FOR_FLOAT))) != _TOO_PRECISE_FOR_FLOAT
+
+
+@pytest.mark.asyncio
+async def test_cleared_volume_is_returned_as_exact_decimal() -> None:
+    """`float(cleared_amount_dec)` used to narrow the clearing volume here.
+
+    The volume feeds the `clearing_volume` metric series, which the domain model
+    declares as an amount, so it must stay Decimal all the way out (spec 007,
+    T715 / finding B-D1-002).
+    """
+
+    run = RunRecord(
+        run_id="exact-clearing-run",
+        scenario_id="scenario",
+        mode="real",
+        state="running",
+    )
+    run.tick_index = 3
+    run._real_viz_by_eq["USD"] = _VizHelper()
+    run._edges_by_equivalent = {"USD": [("bob", "alice")]}
+
+    engine = RealClearingEngine(
+        lock=threading.RLock(),
+        sse=_SseCapture(),
+        utc_now=lambda: datetime(2026, 8, 20, tzinfo=timezone.utc),
+        logger=logging.getLogger(__name__),
+        edge_patch_builder=_EdgePatchBuilder(),
+        clearing_max_depth_limit=6,
+        clearing_max_fx_edges_limit=8,
+        real_clearing_time_budget_ms=10_000,
+    )
+
+    async def _apply_trust_growth(**_kwargs):
+        return SimpleNamespace(updated_count=0)
+
+    async def _edge_patch(**_kwargs) -> list:
+        return []
+
+    def _broadcast(**_kwargs) -> None:
+        return None
+
+    cleared = await engine.tick_real_mode_clearing(
+        None,
+        run_id=run.run_id,
+        run=run,
+        equivalents=["USD", "EUR"],
+        apply_trust_growth=_apply_trust_growth,
+        build_edge_patch_for_equivalent=_edge_patch,
+        broadcast_topology_edge_patch=_broadcast,
+        async_session_local=lambda: _SessionContext(),
+        clearing_service_cls=_ExactAmountService,
+    )
+
+    assert cleared["USD"] == _TOO_PRECISE_FOR_FLOAT
+    assert isinstance(cleared["USD"], Decimal)
+    # An equivalent that cleared nothing is a measured zero, still Decimal:
+    # a float seed would re-narrow it before the metric writer ever sees it.
+    assert isinstance(cleared["EUR"], Decimal)
+    assert cleared["EUR"] == Decimal("0")

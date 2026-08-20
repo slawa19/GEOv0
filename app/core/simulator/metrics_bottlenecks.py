@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import time
+from decimal import Decimal
 from typing import Optional
 
 from sqlalchemy import func, select
@@ -20,6 +21,7 @@ from app.schemas.simulator import (
     MetricSeries,
     MetricSeriesKey,
     MetricsResponse,
+    metric_point_value,
 )
 from app.utils.error_codes import ErrorCode
 from app.utils.exceptions import BadRequestException, GeoException, NotFoundException
@@ -206,11 +208,13 @@ class MetricsBottlenecks:
                         )
                     ).scalars().all()
 
-                by_key: dict[str, list[tuple[int, float]]] = {str(k): [] for (k, _u) in keys}
+                # 2026-08-20 / p007_t715: values stay Decimal from the column to
+                # the wire. No float ever touches them here.
+                by_key: dict[str, list[tuple[int, Decimal]]] = {str(k): [] for (k, _u) in keys}
                 for r in rows:
                     if r.value is None:
                         continue
-                    by_key.setdefault(str(r.key), []).append((int(r.t_ms), float(r.value)))
+                    by_key.setdefault(str(r.key), []).append((int(r.t_ms), r.value))
 
                 # Resample persisted tick metrics to (from_ms..to_ms, step_ms) using carry-forward.
                 # Carry-forward starts at the first real measurement: points before it
@@ -220,18 +224,15 @@ class MetricsBottlenecks:
                 for key, unit in keys:
                     timeline = by_key.get(str(key), [])
                     idx = 0
-                    last_val: Optional[float] = None
+                    last_val: Optional[Decimal] = None
                     pts: list[MetricPoint] = []
                     for i in range(points_count):
                         t = int(from_ms + i * step_ms)
                         while idx < len(timeline) and int(timeline[idx][0]) <= t:
-                            last_val = float(timeline[idx][1])
+                            last_val = timeline[idx][1]
                             idx += 1
                         pts.append(
-                            MetricPoint(
-                                t_ms=t,
-                                v=None if last_val is None else float(last_val),
-                            )
+                            MetricPoint(t_ms=t, v=metric_point_value(last_val))
                         )
                     series.append(MetricSeries(key=key, unit=unit, points=pts))
 
@@ -317,7 +318,7 @@ class MetricsBottlenecks:
                     wobble = (seed_f(run_id, "bns", equivalent, str(t)) - 0.5) * 0.12
                     v = v01(0.20 + 0.55 * sparsity + 0.20 * intensity + wobble) * 100.0
 
-                points.append(MetricPoint(t_ms=t, v=float(v)))
+                points.append(MetricPoint(t_ms=t, v=metric_point_value(v)))
             series.append(MetricSeries(key=key, unit=unit, points=points))
 
         return MetricsResponse(

@@ -76,7 +76,7 @@ class RealClearingEngine:
         clearing_service_cls: Any | None = None,
         time_budget_ms_override: int | None = None,
         max_depth_override: int | None = None,
-    ) -> dict[str, float]:
+    ) -> dict[str, Decimal]:
         """Execute clearing for all equivalents using an isolated session.
 
         IMPORTANT: This method uses its own session to avoid poisoning the parent
@@ -109,7 +109,12 @@ class RealClearingEngine:
         max_depth = max(1, int(max_depth))
         effective_time_budget_ms = max(1, int(effective_time_budget_ms))
         max_fx_edges = int(self._clearing_max_fx_edges_limit)
-        cleared_amount_by_eq: dict[str, float] = {str(eq): 0.0 for eq in equivalents}
+        # 2026-08-20 / p007_t715: cleared volume is money and stays Decimal all
+        # the way out of this engine. `float(cleared_amount_dec)` used to narrow
+        # it here, at the source, so no downstream column type could restore it.
+        cleared_amount_by_eq: dict[str, Decimal] = {
+            str(eq): Decimal("0") for eq in equivalents
+        }
 
         emitter = SseEventEmitter(sse=self._sse, utc_now=self._utc_now, logger=self._logger)
 
@@ -369,7 +374,7 @@ class RealClearingEngine:
                         if cleared_cycles > 100:
                             break
 
-                    cleared_amount_by_eq[str(eq)] = float(cleared_amount_dec)
+                    cleared_amount_by_eq[str(eq)] = cleared_amount_dec
 
                     if touched_edges:
                         try:
@@ -593,7 +598,7 @@ class RealClearingEngine:
                         raise execution_error
             except asyncio.CancelledError:
                 if cleared_cycles > 0 and not partial_done_emitted:
-                    cleared_amount_by_eq[str(eq)] = float(cleared_amount_dec)
+                    cleared_amount_by_eq[str(eq)] = cleared_amount_dec
                     with self._lock:
                         run.last_event_type = "clearing.done"
                         run.current_phase = None

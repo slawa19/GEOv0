@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from decimal import Decimal
 from typing import Any, Callable, Optional
 
 from sqlalchemy import func, select
@@ -30,8 +31,8 @@ class RealTickMetrics:
         scenario: dict[str, Any],
         equivalents: list[str],
         per_eq_route: dict[str, Any],
-        clearing_volume_by_eq: dict[str, float],
-        per_eq_metric_values: dict[str, dict[str, Optional[float]]],
+        clearing_volume_by_eq: dict[str, Decimal | float],
+        per_eq_metric_values: dict[str, dict[str, Optional[Decimal | float]]],
         should_warn: Callable[[str], bool] | None = None,
     ) -> None:
         # Real total debt snapshot (sum of all debts for the equivalent).
@@ -41,7 +42,7 @@ class RealTickMetrics:
         # key means "not measured now" and is persisted as NULL: neither a stale
         # cached value nor 0.0 may be stamped with the current t_ms as if it were
         # a fresh measurement (spec 007, F-007-1).
-        total_debt_by_eq: dict[str, float] = {}
+        total_debt_by_eq: dict[str, Decimal] = {}
 
         metrics_every_n = int(self._real_db_metrics_every_n_ticks)
         should_refresh_total_debt = metrics_every_n <= 1 or (
@@ -66,7 +67,14 @@ class RealTickMetrics:
                             )
                         )
                     ).scalar_one()
-                    total_debt_by_eq[str(eq_code)] = float(total)
+                    # 2026-08-20 / p007_t715: `total_debt` is money (the domain
+                    # model calls it "amount in the selected equivalent"), so the
+                    # SUM over Numeric(20, 8) debt amounts stays Decimal. The old
+                    # `float(total)` narrowed it here, at the source, before any
+                    # column type could matter.
+                    total_debt_by_eq[str(eq_code)] = (
+                        total if isinstance(total, Decimal) else Decimal(str(total))
+                    )
 
                 with self._lock:
                     run._real_total_debt_by_eq = dict(total_debt_by_eq)
@@ -96,11 +104,12 @@ class RealTickMetrics:
             if n > 0:
                 per_eq_metric_values[str(eq)]["avg_route_length"] = float(s / n)
             if str(eq) in total_debt_by_eq:
-                per_eq_metric_values[str(eq)]["total_debt"] = float(
-                    total_debt_by_eq[str(eq)]
-                )
-            per_eq_metric_values[str(eq)]["clearing_volume"] = float(
-                clearing_volume_by_eq.get(str(eq), 0.0) or 0.0
+                per_eq_metric_values[str(eq)]["total_debt"] = total_debt_by_eq[str(eq)]
+            # Clearing volume is money too and arrives as Decimal from
+            # `real_clearing_engine`; keep it exact instead of re-narrowing.
+            raw_volume = clearing_volume_by_eq.get(str(eq)) or 0
+            per_eq_metric_values[str(eq)]["clearing_volume"] = (
+                raw_volume if isinstance(raw_volume, Decimal) else Decimal(str(raw_volume))
             )
 
         # --- Network topology metrics (Phase 3) ---

@@ -50,8 +50,18 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # of the GET /simulator/runs/{run_id}/metrics entry moved, and it moved towards
 # the generated side: both now list the same seven keys. That entry still drifts
 # for unrelated pre-existing reasons, so the entry count stays 71.
+# 2026-08-20 / p007_t715: `MetricPoint.v` became a decimal string on both sides.
+# Two of the seven series (`total_debt`, `clearing_volume`) are amounts in the
+# selected equivalent, so they are money and stay exact decimal (AGENTS.md §8);
+# the field is one type for all seven series because they come from one column.
+# The normalized delta inside the GET /simulator/runs/{run_id}/metrics entry is
+# exactly, on the canonical and the generated side alike:
+#     "v": {"nullable": true, "type": "number"}
+#  -> "v": {"nullable": true, "type": "string"}
+# Both sides moved together, so this entry still drifts only for the unrelated
+# pre-existing reasons, and the entry count stays 71.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "98a2b68359363b3f1a7cdac073393bd9e6379d327e6fc9e14147fa006f63e76e"
+    "ccb4001a18a198528e7915b308c7cd98983ff42b8c223da10dba9aab520370ee"
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 71
 # 2026-08-11 / T501: public DB health no longer declares exception details;

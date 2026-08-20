@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from sqlalchemy import CheckConstraint, DateTime, Float, Index, Integer, JSON, String, func
+from decimal import Decimal
+
+from sqlalchemy import CheckConstraint, DateTime, Float, Index, Integer, JSON, Numeric, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -70,7 +72,13 @@ class SimulatorRunMetric(Base):
     key: Mapped[str] = mapped_column(String(50), primary_key=True)
     t_ms: Mapped[int] = mapped_column(Integer, primary_key=True)
 
-    value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # 2026-08-20 / p007_t715: the money-carrying series (`total_debt`,
+    # `clearing_volume`) are declared as amounts by the domain model, so this
+    # column stores exact decimals - the same Numeric(20, 8) the debt and
+    # trustline tables use. The non-money series share the column and become
+    # exact too. NULL still means "not measured" and stays distinguishable from
+    # a measured zero (spec 007, F-007-1).
+    value: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
 
     __table_args__ = (
         CheckConstraint("t_ms >= 0", name="chk_simulator_run_metrics_t_ms"),
