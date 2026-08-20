@@ -80,7 +80,7 @@
 
 Реестры находок ведутся по волнам в
 `plans/review-2026-08-11-three-surfaces/` (untracked evidence, см. `plan.md` §5).
-**Подтверждённые** находки сводятся сюда таблицей по мере закрытия волн.
+**Подтверждённые** находки ведутся в tracked [`evidence-index.md`](evidence-index.md) — он и есть полный реестр закрытых волн (введён аудитом плана, F-PA-7). Таблицы ниже несут P2 волны 1 и отдельные позиции, требующие решения владельца; **полнотой по всем волнам они не являются** — уточнено 2026-08-20 по T808.
 
 **Волна 1 закрыта 2026-08-11.** Прочитано **48** файлов / 11 149 строк (A1a 3/3449, A1b **28**/4322,
 C1 17/3378). Полнота проверена пофайловым сопоставлением с `git ls-files`: файлов без строки
@@ -90,7 +90,7 @@ C1 17/3378). Полнота проверена пофайловым сопост
 Находок 40: **P2 — 7**, P3 — 33. Плюс 10 пунктов помечены `known` (BACKLOG, 005, 006) и
 31 гипотеза убита агентами на самопроверке.
 
-Волны 2–6 не запускались. Для них состояние — «не измерено», а не «дефектов нет» (AGENTS.md §1).
+Гейты, сервер и браузер в волнах 1–6 не запускались: для находок состояние — «не измерено», а не «дефектов нет». Формулировка уточнена 2026-08-20 — прежняя редакция «волны 2–6 не запускались» протухла и противоречила таблице статусов ниже.
 
 **P2 волны 1** — каждый перепроверен оркестратором по коду вручную. Таблица — исторический реестр
 на `ea9cde9`; **текущие статусы после re-baseline 2026-08-12** (аудит A1, 212 коммитов спустя):
@@ -102,11 +102,11 @@ exit 0, с `SIMULATOR_ACTIONS_ENABLE=1` — `1 failed` exit 1). Сводно —
 | ID | path:line | Класс | Sev | Суть | Вердикт перепроверки | Триаж |
 |---|---|---|---|---|---|---|
 | `C-A1b-001` | `app/schemas/simulator.py:95,110` | C | P2 | `serialize_by_alias=True` — no-op на закреплённом `pydantic==2.5.3` (ключ введён в 2.11). Защита алиасов `from`/`to` (§8) инертна; wire цел только потому, что все 6 продюсеров в `sse_broadcast.py` передают `by_alias=True` руками | **CONFIRMED интроспекцией:** `model_dump()` и `model_dump(mode="json")` дают `{'from_': …}`; `'serialize_by_alias' in ConfigDict.__annotations__` → `False`. Других сериализаторов этих моделей в `app/` нет | fix now |
-| `C-A1a-001` | `app/api/v1/simulator.py:891,1088,1257,1415,1587,1732,1784,1940` | C | P2 | 8 живых interact-маршрутов отсутствуют в `openapi.yaml`, а гард паритета путей проходит вхолостую: `include_in_schema=_actions_enabled()` читает env на импорте | **CONFIRMED:** путей в каноне нет; `tx-once`/`clearing-once` того же семейства — есть (`openapi.yaml:1480,1524`), исключение непоследовательно; гард — `assert generated_versioned_paths == canonical_paths` (`tests/contract/test_openapi_contract.py:1003`), зелёный зависит от переменной окружения | fix now |
+| `C-A1a-001` | `app/api/v1/simulator.py:891,1088,1257,1415,1587,1732,1784,1940` | C | P2 | 8 живых interact-маршрутов отсутствуют в `openapi.yaml`, а гард паритета путей проходит вхолостую: `include_in_schema=_actions_enabled()` читает env на импорте | **CONFIRMED:** путей в каноне нет; `tx-once`/`clearing-once` того же семейства — есть (`openapi.yaml:1480,1524`), исключение непоследовательно; гард — `assert generated_versioned_paths == canonical_paths` (`tests/contract/test_openapi_contract.py:1007`), зелёный зависит от переменной окружения | fix now |
 | `C-C1-001` | `admin-ui/src/api/realApi.ts:884-886` | C | P2 | `graphSnapshot` не шлёт `include`, поэтому `incidents`/`audit_log`/`transactions` в real-режиме пусты всегда (гейт `app/api/v1/admin.py:1643-1662`), а в моке полны | **CONFIRMED** чтением обеих сторон | **чинить в паре с `C-C1-012`** (сцепка с `C-C1-002` устранена внешним фиксом) |
 | `C-C1-002` | `admin-ui/src/api/realApi.ts:155-170` | B | P2 | `AuditLogEntrySchema` требует `actor_id: z.string()`, бэкенд всегда пишет `actor_id=None` (`admin.py:277`) | **CONFIRMED, сцеплено:** `GraphSnapshotSchema` содержит `audit_log: z.array(AuditLogEntrySchema)` (`realApi.ts:195`). Починка `C-C1-001` в одиночку уронит Zod-разбор **всего** снапшота → страница Graph умрёт целиком | **FIXED_EXTERNALLY 2026-08-12:** коммит `84ca396` сделал `actor_id` и sibling-поля `.nullable().optional()` с контрпроверками malformed-значений. Закрыта |
 | `C-C1-012` | `app/api/v1/admin.py:219-231` против `admin-ui/src/api/realApi.ts:181` | B | P2 | **Найдена аудитом 2026-08-12** — брат `C-C1-002`: `_graph_fetch_transactions` собирает транзакцию **без** ключа `payload` (использует его только для извлечения `equivalent`), а `TransactionSchema` требует `payload: z.record(...)` без `.optional()`; `useGraphAnalytics.ts:626-636` читает из него `from`/`to`/`edges` | Включение `include=transactions` (починка `C-C1-001`) уронит Zod-разбор всего снапшота — та же механика, что уже сработала у `C-C1-002`. Падающего runtime-репродьюсера пока нет — статически подтверждено | **CONFIRMED** оркестратором чтением обеих сторон 2026-08-12 | fix now, **в паре с `C-C1-001`** |
-| `B-A1b-003` | `app/api/v1/admin.py:2085-2088` | B | P2 | `except Exception → raw_cycles = []` без разбора класса отказа и без лога; ветка не покрыта тестами | **CONFIRMED:** соседний `app/api/v1/clearing.py:26` зовёт тот же `find_cycles` без глушителя. Оператор видит «циклов нет» там, где «поиск упал» | fix now |
+| `B-A1b-003` | `app/api/v1/admin.py:2129-2130` | B | P2 | `except Exception → raw_cycles = []` без разбора класса отказа и без лога; ветка не покрыта тестами | **CONFIRMED:** соседний `app/api/v1/clearing.py:26` зовёт тот же `find_cycles` без глушителя. Оператор видит «циклов нет» там, где «поиск упал» | fix now |
 | `B-A1b-002` | `app/api/v1/auth.py:81` | B | P2 | Сырой `X-Request-ID` в аудит логина мимо `validate_request_id`/`request_id_var`; блок в `except Exception: rollback` без лога | **CONFIRMED структурно:** соседний писатель `admin.py:271-274` валидирует и подставляет `new_request_id()`. Гипотеза о `DataError` на PG (`String(64)`) **не воспроизводилась** | fix now (валидация), PG-гипотеза — отдельно |
 | `C-A1a-003` | `app/api/v1/simulator.py:608-629` | C | P2 | Мутирующие interact-действия резолвят участников по глобальной таблице `Participant`, тогда как read-эндпоинты того же семейства scoped по снапшоту рана | **CONFIRMED как код** (`select(Participant).where(pid==…)` без скоупа), **эффект не воспроизведён**: нужен прогон двух ранов на разных сценариях | **решение владельца о границе**, не автоматическая правка |
 
