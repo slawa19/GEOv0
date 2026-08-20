@@ -1,0 +1,753 @@
+"""Real-mode honesty contract for simulator analytics (spec 007, F-007-1).
+
+Most tests here are pure unit tests: the DB boundary is replaced by an
+in-process fake session, so no database is required. The tests named
+``*_end_to_end`` are DB-backed (shared sqlite ``db_session`` fixture) and walk
+the whole chain writer -> simulator_run_metrics -> reader -> API payload.
+
+Covered:
+
+* real mode never returns synthetic data, whatever the storage does;
+* an empty bottlenecks table is a normal state and yields an empty result;
+* "not measured" (``null``) is distinguishable from "measured zero" at every
+  stage: the tick producer, the writer, the DB row and the API response;
+* explicitly synthetic mode (``run.mode != "real"``) keeps synthesising.
+"""
+
+from __future__ import annotations
+
+import logging
+import threading
+from types import SimpleNamespace
+from typing import Any, Optional
+
+import pytest
+from sqlalchemy import select
+
+import app.core.simulator.metrics_bottlenecks as metrics_bottlenecks_module
+import app.db.session as db_session
+from app.config import settings
+from app.core.simulator import storage as simulator_storage
+from app.core.simulator.metrics_bottlenecks import MetricsBottlenecks
+from app.core.simulator.real_tick_metrics import RealTickMetrics
+from app.db.models.simulator_storage import SimulatorRunMetric
+from app.utils.exceptions import GeoException
+
+
+LOGGER_NAME = "tests.simulator.metrics_bottlenecks"
+
+
+# --- DB boundary fakes -------------------------------------------------------
+
+
+class _FakeScalars:
+    def __init__(self, rows: list[Any]) -> None:
+        self._rows = rows
+
+    def all(self) -> list[Any]:
+        return list(self._rows)
+
+
+class _FakeResult:
+    def __init__(self, *, rows: Optional[list[Any]] = None, scalar: Any = None) -> None:
+        self._rows = rows or []
+        self._scalar = scalar
+
+    def scalars(self) -> _FakeScalars:
+        return _FakeScalars(self._rows)
+
+    def all(self) -> list[Any]:
+        return list(self._rows)
+
+    def scalar_one(self) -> Any:
+        return self._scalar
+
+    def scalar_one_or_none(self) -> Any:
+        return self._scalar
+
+
+class _SharedSession:
+    """Async context manager handing out an already-open session (DB tests)."""
+
+    def __init__(self, session: Any) -> None:
+        self._session = session
+
+    async def __aenter__(self) -> Any:
+        return self._session
+
+    async def __aexit__(self, *_exc: Any) -> bool:
+        return False
+
+
+class _FakeSession:
+    """Returns queued results in order; a queued Exception is raised instead."""
+
+    def __init__(self, results: list[Any]) -> None:
+        self._results = list(results)
+        self.execute_calls = 0
+
+    async def __aenter__(self) -> "_FakeSession":
+        return self
+
+    async def __aexit__(self, *_exc: Any) -> bool:
+        return False
+
+    async def execute(self, _query: Any) -> Any:
+        if self.execute_calls >= len(self._results):
+            raise AssertionError("unexpected extra session.execute() call")
+        result = self._results[self.execute_calls]
+        self.execute_calls += 1
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+
+class _ExplodingSessionFactory:
+    """Fails when the session itself cannot be opened (connection refused)."""
+
+    def __call__(self) -> Any:
+        raise RuntimeError("connection refused")
+
+
+def _install_session(monkeypatch: pytest.MonkeyPatch, factory: Any) -> None:
+    monkeypatch.setattr(db_session, "AsyncSessionLocal", factory, raising=False)
+
+
+# --- Fixtures under test -----------------------------------------------------
+
+
+_SCENARIO_RAW: dict[str, Any] = {
+    "equivalent": "UAH",
+    "trustlines": [
+        {"from": "alice", "to": "bob", "limit": "100"},
+        {"from": "bob", "to": "carol", "limit": "100"},
+    ],
+}
+
+
+def _metric_row(key: str, t_ms: int, value: Optional[float]) -> SimpleNamespace:
+    return SimpleNamespace(key=key, t_ms=t_ms, value=value)
+
+
+def _bottleneck_row(
+    *,
+    target_id: str,
+    score: float,
+    reason_code: str = "LOW_AVAILABLE",
+    details: Optional[dict[str, Any]] = None,
+    target_type: str = "edge",
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        target_type=target_type,
+        target_id=target_id,
+        score=score,
+        reason_code=reason_code,
+        details=details if details is not None else {},
+    )
+
+
+def _build(
+    *,
+    mode: str = "real",
+    db_enabled: bool = True,
+    logger: Optional[logging.Logger] = None,
+) -> MetricsBottlenecks:
+    run = SimpleNamespace(
+        run_id="run-1",
+        scenario_id="scn-1",
+        mode=mode,
+        state="running",
+        sim_time_ms=5_000,
+        intensity_percent=50,
+        _edges_by_equivalent={"UAH": [("alice", "bob"), ("bob", "carol")]},
+        _scenario_raw=_SCENARIO_RAW,
+    )
+    scenario = SimpleNamespace(scenario_id="scn-1", raw=_SCENARIO_RAW)
+    return MetricsBottlenecks(
+        lock=threading.RLock(),
+        runs={"run-1": run},
+        scenarios={"scn-1": scenario},
+        utc_now=lambda: None,
+        db_enabled=lambda: db_enabled,
+        logger=logger or logging.getLogger(LOGGER_NAME),
+    )
+
+
+def _series(response: Any, key: str) -> Any:
+    for item in response.series:
+        if item.key == key:
+            return item
+    raise AssertionError(f"series {key} missing from response")
+
+
+def _values(response: Any, key: str) -> list[Optional[float]]:
+    return [p.v for p in _series(response, key).points]
+
+
+def _warnings(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    return [r for r in caplog.records if r.levelno == logging.WARNING]
+
+
+# --- metrics: DB-backed success path ----------------------------------------
+
+
+async def test_real_mode_metrics_serves_persisted_points_with_carry_forward(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_session(
+        monkeypatch,
+        lambda: _FakeSession(
+            [
+                _FakeResult(
+                    rows=[
+                        _metric_row("success_rate", 2_000, 50.0),
+                        _metric_row("success_rate", 4_000, 75.0),
+                    ]
+                )
+            ]
+        ),
+    )
+
+    resp = await _build().build_metrics(
+        run_id="run-1", equivalent="UAH", from_ms=0, to_ms=4_000, step_ms=1_000
+    )
+
+    # Before the first measurement there is no value to report; afterwards the
+    # last measurement is carried forward until the next tick.
+    assert _values(resp, "success_rate") == [None, None, 50.0, 50.0, 75.0]
+    assert resp.run_id == "run-1"
+    assert resp.equivalent == "UAH"
+
+
+async def test_real_mode_metrics_distinguish_missing_measurement_from_measured_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Central criterion: null (no measurement) != 0 (measured zero)."""
+
+    _install_session(
+        monkeypatch,
+        lambda: _FakeSession(
+            [
+                _FakeResult(
+                    rows=[
+                        # A genuine zero measurement at t=2000.
+                        _metric_row("total_debt", 2_000, 0.0),
+                        # A persisted NULL must not count as a measurement.
+                        _metric_row("clearing_volume", 1_000, None),
+                    ]
+                )
+            ]
+        ),
+    )
+
+    resp = await _build().build_metrics(
+        run_id="run-1", equivalent="UAH", from_ms=0, to_ms=3_000, step_ms=1_000
+    )
+
+    total_debt = _values(resp, "total_debt")
+    assert total_debt[0] is None and total_debt[1] is None
+    assert total_debt[2] == 0.0 and total_debt[3] == 0.0
+
+    # A series with no usable measurement at all is null everywhere, not zeros.
+    assert _values(resp, "clearing_volume") == [None, None, None, None]
+    assert _values(resp, "bottlenecks_score") == [None, None, None, None]
+
+    # The distinction must survive to the wire, not only in Python objects.
+    wire = resp.model_dump(mode="json")
+    wire_debt = next(s for s in wire["series"] if s["key"] == "total_debt")["points"]
+    assert [p["v"] for p in wire_debt] == [None, None, 0.0, 0.0]
+
+
+# --- metrics: failure paths --------------------------------------------------
+
+
+async def test_real_mode_metrics_db_failure_raises_instead_of_synthesising(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    _install_session(
+        monkeypatch,
+        lambda: _FakeSession([RuntimeError("db exploded")]),
+    )
+    caplog.set_level(logging.WARNING, logger=LOGGER_NAME)
+
+    with pytest.raises(GeoException) as excinfo:
+        await _build().build_metrics(
+            run_id="run-1", equivalent="UAH", from_ms=0, to_ms=4_000, step_ms=1_000
+        )
+
+    assert excinfo.value.status_code == 503
+    assert excinfo.value.details["run_id"] == "run-1"
+    assert excinfo.value.details["equivalent"] == "UAH"
+    assert excinfo.value.code == "E010"
+    assert isinstance(excinfo.value.__cause__, RuntimeError)
+
+    # The exception class is diagnostic: log only, never the public body.
+    assert "error_class" not in excinfo.value.details
+    assert "RuntimeError" not in str(excinfo.value.to_dict())
+
+    records = _warnings(caplog)
+    assert len(records) == 1
+    assert "simulator.metrics.real_mode_db_read_failed" in records[0].getMessage()
+    assert "run_id=run-1" in records[0].getMessage()
+    assert "error_class=RuntimeError" in records[0].getMessage()
+
+
+async def test_real_mode_metrics_session_open_failure_raises(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    _install_session(monkeypatch, _ExplodingSessionFactory())
+    caplog.set_level(logging.WARNING, logger=LOGGER_NAME)
+
+    with pytest.raises(GeoException):
+        await _build().build_metrics(
+            run_id="run-1", equivalent="UAH", from_ms=0, to_ms=1_000, step_ms=1_000
+        )
+
+    assert len(_warnings(caplog)) == 1
+
+
+async def test_real_mode_metrics_without_storage_raises(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Storage disabled in real mode is a failure, not a licence to synthesise."""
+
+    _install_session(monkeypatch, lambda: _FakeSession([]))
+    caplog.set_level(logging.WARNING, logger=LOGGER_NAME)
+
+    with pytest.raises(GeoException) as excinfo:
+        await _build(db_enabled=False).build_metrics(
+            run_id="run-1", equivalent="UAH", from_ms=0, to_ms=1_000, step_ms=1_000
+        )
+
+    assert excinfo.value.details["reason"] == "storage_disabled"
+    # No read was attempted, so the message must not claim a failed read.
+    assert "could not be read" not in excinfo.value.message
+    assert "persistence is disabled" in excinfo.value.message
+    assert len(_warnings(caplog)) == 1
+
+
+async def test_real_mode_failure_traceback_is_rate_limited(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Every failure warns; only the traceback is throttled (polling clients)."""
+
+    _install_session(
+        monkeypatch, lambda: _FakeSession([RuntimeError("db exploded")])
+    )
+    caplog.set_level(logging.WARNING, logger=LOGGER_NAME)
+    runtime = _build()
+
+    for _ in range(3):
+        with pytest.raises(GeoException):
+            await runtime.build_metrics(
+                run_id="run-1", equivalent="UAH", from_ms=0, to_ms=1_000, step_ms=1_000
+            )
+
+    records = _warnings(caplog)
+    assert len(records) == 3
+    assert [r.exc_info is not None for r in records] == [True, False, False]
+
+    # Re-arms once the interval elapses.
+    caplog.clear()
+    monkeypatch.setattr(
+        metrics_bottlenecks_module, "TRACEBACK_MIN_INTERVAL_S", 0.0, raising=False
+    )
+    with pytest.raises(GeoException):
+        await runtime.build_metrics(
+            run_id="run-1", equivalent="UAH", from_ms=0, to_ms=1_000, step_ms=1_000
+        )
+    assert [r.exc_info is not None for r in _warnings(caplog)] == [True]
+
+
+async def test_fixtures_mode_metrics_still_synthesise_numeric_series(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Counter-check: the synthetic generator is alive for explicitly synthetic runs.
+
+    Without this, the real-mode assertions above could pass simply because
+    nothing is ever produced anywhere.
+    """
+
+    _install_session(monkeypatch, lambda: _FakeSession([]))
+
+    resp = await _build(mode="fixtures", db_enabled=False).build_metrics(
+        run_id="run-1", equivalent="UAH", from_ms=0, to_ms=3_000, step_ms=1_000
+    )
+
+    values = _values(resp, "success_rate")
+    assert len(values) == 4
+    assert all(v is not None for v in values)
+
+
+# --- bottlenecks: DB-backed paths -------------------------------------------
+
+
+async def test_real_mode_bottlenecks_serve_persisted_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_session(
+        monkeypatch,
+        lambda: _FakeSession(
+            [
+                _FakeResult(scalar="2026-08-20T10:00:00"),
+                _FakeResult(
+                    rows=[
+                        _bottleneck_row(
+                            target_id="alice->bob",
+                            score=0.9,
+                            details={
+                                "label": "Low available capacity",
+                                "suggested_action": "Increase trust limit",
+                            },
+                        ),
+                        _bottleneck_row(
+                            target_id="bob->carol",
+                            score=0.2,
+                            reason_code="HIGH_USED",
+                        ),
+                        # Non-edge and malformed targets are skipped.
+                        _bottleneck_row(
+                            target_id="alice", score=0.99, target_type="node"
+                        ),
+                        _bottleneck_row(target_id="broken", score=0.98),
+                    ]
+                ),
+            ]
+        ),
+    )
+
+    resp = await _build().build_bottlenecks(
+        run_id="run-1", equivalent="UAH", limit=20, min_score=None
+    )
+
+    assert [(i.target.from_, i.target.to, i.score) for i in resp.items] == [
+        ("alice", "bob", 0.9),
+        ("bob", "carol", 0.2),
+    ]
+    assert resp.items[0].label == "Low available capacity"
+    assert resp.items[0].reason_code == "LOW_AVAILABLE"
+    assert resp.items[1].label is None
+
+
+async def test_real_mode_bottlenecks_apply_min_score_and_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_session(
+        monkeypatch,
+        lambda: _FakeSession(
+            [
+                _FakeResult(scalar="2026-08-20T10:00:00"),
+                _FakeResult(
+                    rows=[
+                        _bottleneck_row(target_id="alice->bob", score=0.9),
+                        _bottleneck_row(target_id="bob->carol", score=0.5),
+                        _bottleneck_row(target_id="carol->dave", score=0.1),
+                    ]
+                ),
+            ]
+        ),
+    )
+
+    resp = await _build().build_bottlenecks(
+        run_id="run-1", equivalent="UAH", limit=1, min_score=0.4
+    )
+
+    assert [(i.target.from_, i.score) for i in resp.items] == [("alice", 0.9)]
+
+
+async def test_real_mode_bottlenecks_empty_table_returns_empty_not_synthetic(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Regression: `latest is None` used to raise UnboundLocalError and fall
+    through to synthetic items derived from scenario trustlines."""
+
+    _install_session(
+        monkeypatch,
+        lambda: _FakeSession([_FakeResult(scalar=None)]),
+    )
+    caplog.set_level(logging.WARNING, logger=LOGGER_NAME)
+
+    resp = await _build().build_bottlenecks(
+        run_id="run-1", equivalent="UAH", limit=20, min_score=None
+    )
+
+    assert resp.items == []
+    assert _warnings(caplog) == []
+
+
+async def test_fixtures_mode_bottlenecks_still_synthesise_from_trustlines(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Counter-check for the empty-table test: the same scenario does produce
+    synthetic items when the mode is explicitly synthetic."""
+
+    _install_session(monkeypatch, lambda: _FakeSession([]))
+
+    resp = await _build(mode="fixtures", db_enabled=False).build_bottlenecks(
+        run_id="run-1", equivalent="UAH", limit=20, min_score=None
+    )
+
+    assert {(i.target.from_, i.target.to) for i in resp.items} == {
+        ("alice", "bob"),
+        ("bob", "carol"),
+    }
+
+
+# --- bottlenecks: failure paths ---------------------------------------------
+
+
+async def test_real_mode_bottlenecks_db_failure_raises_instead_of_synthesising(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    _install_session(
+        monkeypatch,
+        lambda: _FakeSession([RuntimeError("db exploded")]),
+    )
+    caplog.set_level(logging.WARNING, logger=LOGGER_NAME)
+
+    with pytest.raises(GeoException) as excinfo:
+        await _build().build_bottlenecks(
+            run_id="run-1", equivalent="UAH", limit=20, min_score=None
+        )
+
+    assert excinfo.value.status_code == 503
+    assert excinfo.value.details["run_id"] == "run-1"
+    assert excinfo.value.code == "E010"
+    assert "error_class" not in excinfo.value.details
+    assert isinstance(excinfo.value.__cause__, RuntimeError)
+
+    records = _warnings(caplog)
+    assert len(records) == 1
+    assert "simulator.bottlenecks.real_mode_db_read_failed" in records[0].getMessage()
+    assert "run_id=run-1" in records[0].getMessage()
+    assert "error_class=RuntimeError" in records[0].getMessage()
+
+
+async def test_real_mode_bottlenecks_second_query_failure_raises(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    _install_session(
+        monkeypatch,
+        lambda: _FakeSession(
+            [_FakeResult(scalar="2026-08-20T10:00:00"), RuntimeError("row read failed")]
+        ),
+    )
+    caplog.set_level(logging.WARNING, logger=LOGGER_NAME)
+
+    with pytest.raises(GeoException):
+        await _build().build_bottlenecks(
+            run_id="run-1", equivalent="UAH", limit=20, min_score=None
+        )
+
+    assert len(_warnings(caplog)) == 1
+
+
+async def test_real_mode_bottlenecks_without_storage_raises(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    _install_session(monkeypatch, lambda: _FakeSession([]))
+    caplog.set_level(logging.WARNING, logger=LOGGER_NAME)
+
+    with pytest.raises(GeoException) as excinfo:
+        await _build(db_enabled=False).build_bottlenecks(
+            run_id="run-1", equivalent="UAH", limit=20, min_score=None
+        )
+
+    assert excinfo.value.details["reason"] == "storage_disabled"
+    assert len(_warnings(caplog)) == 1
+
+
+# --- writer stage: the tick producer must not invent measurements -----------
+
+
+class _RaisingSession:
+    def __init__(self) -> None:
+        self.execute_calls = 0
+
+    async def execute(self, *_args: Any, **_kwargs: Any) -> Any:
+        self.execute_calls += 1
+        raise RuntimeError("snapshot failed")
+
+
+class _DebtSession:
+    """First execute() resolves equivalents, the next ones return debt sums."""
+
+    def __init__(self, total: float) -> None:
+        self.execute_calls = 0
+        self._total = total
+
+    async def execute(self, *_args: Any, **_kwargs: Any) -> Any:
+        self.execute_calls += 1
+        if self.execute_calls == 1:
+            return _FakeResult(rows=[(1, "UAH")])
+        return _FakeResult(scalar=self._total)
+
+
+def _tick_metrics(every_n: int = 1) -> RealTickMetrics:
+    return RealTickMetrics(
+        lock=threading.RLock(),
+        logger=logging.getLogger(LOGGER_NAME),
+        real_db_metrics_every_n_ticks=every_n,
+    )
+
+
+def _tick_run(tick_index: int = 1) -> SimpleNamespace:
+    return SimpleNamespace(
+        run_id="run-1",
+        tick_index=tick_index,
+        _real_total_debt_by_eq={"UAH": 42.0},
+        _real_total_debt_tick=0,
+        _edges_by_equivalent={"UAH": [("alice", "bob")]},
+    )
+
+
+async def _populate(
+    tick_metrics: RealTickMetrics, run: SimpleNamespace, session: Any
+) -> dict[str, dict[str, Optional[float]]]:
+    values: dict[str, dict[str, Optional[float]]] = {"UAH": {}}
+    await tick_metrics.populate_per_eq_metric_values(
+        session=session,
+        run=run,
+        scenario={"participants": [{"status": "active"}, {"status": "active"}]},
+        equivalents=["UAH"],
+        per_eq_route={},
+        clearing_volume_by_eq={},
+        per_eq_metric_values=values,
+    )
+    return values
+
+
+async def test_measured_total_debt_is_recorded(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.WARNING, logger=LOGGER_NAME)
+
+    values = await _populate(_tick_metrics(), _tick_run(), _DebtSession(12.5))
+
+    assert values["UAH"]["total_debt"] == 12.5
+    assert _warnings(caplog) == []
+
+
+async def test_failed_total_debt_snapshot_is_not_reported_as_measurement(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A broken DB during a run must not persist 0.0 (or a stale value) as data."""
+
+    caplog.set_level(logging.WARNING, logger=LOGGER_NAME)
+    session = _RaisingSession()
+
+    values = await _populate(_tick_metrics(), _tick_run(), session)
+
+    assert session.execute_calls == 1
+    assert "total_debt" not in values["UAH"]
+    # No successful route this tick: the average is undefined, not zero.
+    assert "avg_route_length" not in values["UAH"]
+    # Genuine measurements of this tick stay numeric.
+    assert values["UAH"]["clearing_volume"] == 0.0
+    assert values["UAH"]["active_trustlines"] == 1.0
+    assert values["UAH"]["active_participants"] == 2.0
+
+    records = _warnings(caplog)
+    assert len(records) == 1
+    assert "simulator.real.total_debt_snapshot_failed" in records[0].getMessage()
+    assert "run_id=run-1" in records[0].getMessage()
+    assert "error_class=RuntimeError" in records[0].getMessage()
+
+
+async def test_throttled_tick_does_not_stamp_stale_total_debt() -> None:
+    session = _RaisingSession()  # must never be touched on a throttled tick
+
+    values = await _populate(_tick_metrics(every_n=5), _tick_run(tick_index=3), session)
+
+    assert session.execute_calls == 0
+    assert "total_debt" not in values["UAH"]
+
+
+async def test_measured_route_length_is_recorded() -> None:
+    """Counter-check: avg_route_length is omitted only when there is no route."""
+
+    tick_metrics = _tick_metrics()
+    values: dict[str, dict[str, Optional[float]]] = {"UAH": {}}
+    await tick_metrics.populate_per_eq_metric_values(
+        session=_DebtSession(0.0),
+        run=_tick_run(),
+        scenario={},
+        equivalents=["UAH"],
+        per_eq_route={"UAH": {"route_len_n": 2.0, "route_len_sum": 7.0}},
+        clearing_volume_by_eq={"UAH": 4.0},
+        per_eq_metric_values=values,
+    )
+
+    assert values["UAH"]["avg_route_length"] == 3.5
+    assert values["UAH"]["clearing_volume"] == 4.0
+
+
+# --- end to end: producer -> writer -> DB row -> reader -> API payload -------
+
+
+async def test_missing_measurement_stays_null_end_to_end(
+    db_session: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DB-backed (sqlite): proves the whole chain preserves "not measured".
+
+    Both flavours appear in the same series: at t=1000 there were no payment
+    attempts at all (success_rate is undefined), at t=2000 two payments were
+    rejected (success_rate is a measured 0%).
+    """
+
+    monkeypatch.setattr(settings, "SIMULATOR_DB_ENABLED", True, raising=False)
+
+    await simulator_storage.write_tick_metrics(
+        run_id="run-1",
+        t_ms=1_000,
+        per_equivalent={
+            "UAH": {"committed": 0, "rejected": 0, "errors": 0, "timeouts": 0}
+        },
+        # The producer measured total_debt (exactly zero) but had no route to
+        # average, so avg_route_length is absent.
+        metric_values_by_eq={"UAH": {"total_debt": 0.0, "clearing_volume": 0.0}},
+        session=db_session,
+    )
+    await simulator_storage.write_tick_metrics(
+        run_id="run-1",
+        t_ms=2_000,
+        per_equivalent={
+            "UAH": {"committed": 0, "rejected": 2, "errors": 0, "timeouts": 0}
+        },
+        metric_values_by_eq={"UAH": {"total_debt": 0.0, "clearing_volume": 0.0}},
+        session=db_session,
+    )
+
+    stored = {
+        (key, t_ms): value
+        for (key, t_ms, value) in (
+            await db_session.execute(
+                select(
+                    SimulatorRunMetric.key,
+                    SimulatorRunMetric.t_ms,
+                    SimulatorRunMetric.value,
+                ).where(SimulatorRunMetric.run_id == "run-1")
+            )
+        ).all()
+    }
+    assert stored[("success_rate", 1_000)] is None  # no attempts: not measured
+    assert stored[("success_rate", 2_000)] == 0.0  # measured zero percent
+    assert stored[("avg_route_length", 1_000)] is None
+    assert stored[("total_debt", 1_000)] == 0.0
+    assert stored[("active_trustlines", 1_000)] is None
+
+    _install_session(monkeypatch, lambda: _SharedSession(db_session))
+
+    resp = await _build().build_metrics(
+        run_id="run-1", equivalent="UAH", from_ms=0, to_ms=3_000, step_ms=1_000
+    )
+
+    assert _values(resp, "success_rate") == [None, None, 0.0, 0.0]
+    assert _values(resp, "avg_route_length") == [None, None, None, None]
+    assert _values(resp, "total_debt") == [None, 0.0, 0.0, 0.0]
+
+    wire = resp.model_dump(mode="json")
+    wire_success = next(
+        item for item in wire["series"] if item["key"] == "success_rate"
+    )["points"]
+    assert [point["v"] for point in wire_success] == [None, None, 0.0, 0.0]

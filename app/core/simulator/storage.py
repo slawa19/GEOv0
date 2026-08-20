@@ -252,12 +252,23 @@ async def sync_artifacts(run: RunRecord) -> None:
         return
 
 
+def _measured_value(values: dict[str, Optional[float]], key: str) -> Optional[float]:
+    """Return the measured value for `key`, or None when it was not measured.
+
+    A metric the producer did not measure must reach the DB as NULL; defaulting
+    it to 0.0 would be indistinguishable from a measured zero (spec 007, F-007-1).
+    """
+
+    raw = values.get(key)
+    return None if raw is None else float(raw)
+
+
 async def write_tick_metrics(
     *,
     run_id: str,
     t_ms: int,
     per_equivalent: dict[str, dict[str, int]],
-    metric_values_by_eq: Optional[dict[str, dict[str, float]]] = None,
+    metric_values_by_eq: Optional[dict[str, dict[str, Optional[float]]]] = None,
     session=None,
     commit: bool = True,
 ) -> None:
@@ -295,19 +306,24 @@ async def write_tick_metrics(
                 errors = int(counters.get("errors", 0))
                 timeouts = int(counters.get("timeouts", 0))
 
+                # "Not measured" is persisted as NULL, never as 0.0: the reader
+                # must be able to tell a missing measurement from a measured
+                # zero (spec 007, F-007-1). The column is nullable.
                 denom = committed + rejected
-                success_rate = (committed / denom) * 100.0 if denom > 0 else 0.0
+                success_rate = (
+                    (committed / denom) * 100.0 if denom > 0 else None
+                )
                 attempts = committed + rejected + errors
                 bottlenecks_score = (
-                    ((errors + timeouts) / attempts) * 100.0 if attempts > 0 else 0.0
+                    ((errors + timeouts) / attempts) * 100.0 if attempts > 0 else None
                 )
 
-                mv = (metric_values_by_eq or {}).get(str(eq), {})
-                avg_route_length = float(mv.get("avg_route_length", 0.0) or 0.0)
-                total_debt = float(mv.get("total_debt", 0.0) or 0.0)
-                clearing_volume = float(mv.get("clearing_volume", 0.0) or 0.0)
-                active_participants = float(mv.get("active_participants", 0.0) or 0.0)
-                active_trustlines = float(mv.get("active_trustlines", 0.0) or 0.0)
+                mv = (metric_values_by_eq or {}).get(str(eq), {}) or {}
+                avg_route_length = _measured_value(mv, "avg_route_length")
+                total_debt = _measured_value(mv, "total_debt")
+                clearing_volume = _measured_value(mv, "clearing_volume")
+                active_participants = _measured_value(mv, "active_participants")
+                active_trustlines = _measured_value(mv, "active_trustlines")
 
                 eq_code = str(eq)
                 rows.extend(
@@ -317,49 +333,49 @@ async def write_tick_metrics(
                             "equivalent_code": eq_code,
                             "key": "success_rate",
                             "t_ms": int(t_ms),
-                            "value": float(success_rate),
+                            "value": None if success_rate is None else float(success_rate),
                         },
                         {
                             "run_id": str(run_id),
                             "equivalent_code": eq_code,
                             "key": "bottlenecks_score",
                             "t_ms": int(t_ms),
-                            "value": float(bottlenecks_score),
+                            "value": None if bottlenecks_score is None else float(bottlenecks_score),
                         },
                         {
                             "run_id": str(run_id),
                             "equivalent_code": eq_code,
                             "key": "avg_route_length",
                             "t_ms": int(t_ms),
-                            "value": float(avg_route_length),
+                            "value": None if avg_route_length is None else float(avg_route_length),
                         },
                         {
                             "run_id": str(run_id),
                             "equivalent_code": eq_code,
                             "key": "total_debt",
                             "t_ms": int(t_ms),
-                            "value": float(total_debt),
+                            "value": None if total_debt is None else float(total_debt),
                         },
                         {
                             "run_id": str(run_id),
                             "equivalent_code": eq_code,
                             "key": "clearing_volume",
                             "t_ms": int(t_ms),
-                            "value": float(clearing_volume),
+                            "value": None if clearing_volume is None else float(clearing_volume),
                         },
                         {
                             "run_id": str(run_id),
                             "equivalent_code": eq_code,
                             "key": "active_participants",
                             "t_ms": int(t_ms),
-                            "value": float(active_participants),
+                            "value": None if active_participants is None else float(active_participants),
                         },
                         {
                             "run_id": str(run_id),
                             "equivalent_code": eq_code,
                             "key": "active_trustlines",
                             "t_ms": int(t_ms),
-                            "value": float(active_trustlines),
+                            "value": None if active_trustlines is None else float(active_trustlines),
                         },
                     ]
                 )

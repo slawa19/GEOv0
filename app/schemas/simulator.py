@@ -435,7 +435,10 @@ class SetIntensityRequest(BaseModel):
 
 class MetricPoint(BaseModel):
     t_ms: int = Field(ge=0)
-    v: float
+    # `null` means "no measurement at/before this timestamp"; it is intentionally
+    # distinguishable from a measured zero. Producers must not synthesize 0.0 to
+    # keep the field numeric.
+    v: Optional[float]
 
     model_config = ConfigDict(extra="forbid")
 

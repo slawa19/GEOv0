@@ -39,14 +39,23 @@ REQUEST_SCHEMA_DRIFT_SHA256 = (
     "7eee1624c958db4900f2d24bf529bf7e6bab92aff055fd15403eb847dd7e5c25"
 )
 REQUEST_SCHEMA_DRIFT_COUNT = 13
+# 2026-08-20 / p007_unblock_f0071: MetricPoint.v became nullable on both sides
+# (canonical YAML and generated schema) so "not measured" is distinguishable from
+# a measured zero. The GET /simulator/runs/{run_id}/metrics entry already carried
+# unrelated drift, so only its content changed; the entry count stays 71 and the
+# normalized diff for `v` is identical on both sides.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "a3645ea4ab2e8502738119175566c4b591b516b33e4a2b0e7dac155466af6e44"
+    "af0f682866ede6d7ef844d49a4a453c8e7ec513e3ee0ab7ea3dae9e78c91fc0c"
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 71
 # 2026-08-11 / T501: public DB health no longer declares exception details;
 # the new admin diagnostic operation matches generated responses, so count stays 84.
+# 2026-08-20 / p007_unblock_f0071: simulator metrics/bottlenecks declare 503 in the
+# canonical contract (real mode refuses to substitute synthetic data). FastAPI does
+# not know about it because the routes carry no `responses=`, so both operations —
+# which already drifted for other reasons — gained a canonical-only 503; count stays 84.
 ERROR_RESPONSE_DRIFT_SHA256 = (
-    "06a5e6bab85152ba1ca004666a311842217feafcf053deb4ebba3da2043dfb8c"
+    "b0af8a86310cdf916a93a5fcae795b95effa067204d89108c15a4c3e6ef214ec"
 )
 ERROR_RESPONSE_DRIFT_COUNT = 84
 SECURITY_DRIFT_SHA256 = (

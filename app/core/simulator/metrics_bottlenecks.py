@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import time
 from typing import Optional
 
 from sqlalchemy import func, select
@@ -20,8 +21,26 @@ from app.schemas.simulator import (
     MetricSeriesKey,
     MetricsResponse,
 )
-from app.utils.exceptions import BadRequestException, NotFoundException
+from app.utils.error_codes import ErrorCode
+from app.utils.exceptions import BadRequestException, GeoException, NotFoundException
 from app.core.simulator.scenario_equivalent import effective_equivalent
+
+
+# Minimum interval between full tracebacks for the same failure kind. The
+# WARNING line is never throttled; only the traceback is.
+TRACEBACK_MIN_INTERVAL_S = 60.0
+
+REASON_MESSAGES = {
+    "db_read_failed": (
+        "Simulator analytics unavailable for this real-mode run: persisted data "
+        "could not be read. Synthetic data is never served in real mode."
+    ),
+    "storage_disabled": (
+        "Simulator analytics unavailable for this real-mode run: persistence is "
+        "disabled, so there is no measured data. Synthetic data is never served "
+        "in real mode."
+    ),
+}
 
 
 class MetricsBottlenecks:
@@ -41,6 +60,7 @@ class MetricsBottlenecks:
         self._utc_now = utc_now
         self._db_enabled = db_enabled
         self._logger = logger
+        self._traceback_last_at: dict[str, float] = {}
 
     def _get_run(self, run_id: str) -> RunRecord:
         with self._lock:
@@ -48,6 +68,70 @@ class MetricsBottlenecks:
         if run is None:
             raise NotFoundException(f"Run {run_id} not found")
         return run
+
+    def _should_attach_traceback(self, key: str) -> bool:
+        """Rate-limit tracebacks so polling clients cannot flood the log.
+
+        The WARNING itself is emitted on every failure; only the (expensive and
+        repetitive) traceback is throttled per failure kind.
+        """
+
+        now = time.monotonic()
+        last = self._traceback_last_at.get(key)
+        if last is not None and (now - last) < TRACEBACK_MIN_INTERVAL_S:
+            return False
+        self._traceback_last_at[key] = now
+        return True
+
+    def _real_mode_unavailable(
+        self,
+        *,
+        event: str,
+        run_id: str,
+        equivalent: str,
+        reason: str,
+        cause: Optional[BaseException] = None,
+        counters: Optional[dict[str, int]] = None,
+    ) -> GeoException:
+        """Log a real-mode analytics failure and build the explicit error to raise.
+
+        Real mode never degrades into synthetic data: a failure here is a gate,
+        not a log line. Only counters and correlation identifiers are logged;
+        the exception class stays in the log and never reaches the public body
+        (this endpoint is not admin-only).
+        """
+
+        error_class = type(cause).__name__ if cause is not None else "none"
+        counters_repr = " ".join(
+            f"{name}={value}" for name, value in sorted((counters or {}).items())
+        )
+        attach_traceback = cause is not None and self._should_attach_traceback(
+            f"{event}:{reason}"
+        )
+        self._logger.warning(
+            "%s run_id=%s equivalent=%s reason=%s error_class=%s%s",
+            event,
+            run_id,
+            str(equivalent),
+            reason,
+            error_class,
+            f" {counters_repr}" if counters_repr else "",
+            exc_info=cause if attach_traceback else None,
+        )
+        return GeoException(
+            REASON_MESSAGES.get(reason, REASON_MESSAGES["db_read_failed"]),
+            # E010 (internal error) is the closest existing public code: this is a
+            # server-side dependency failure the caller cannot fix by changing the
+            # request. A dedicated availability code would mean editing the error
+            # taxonomy in app/utils/error_codes.py, which belongs to program 004.
+            code=ErrorCode.E010,
+            details={
+                "run_id": run_id,
+                "equivalent": str(equivalent),
+                "reason": reason,
+            },
+            status_code=503,
+        )
 
     def _get_scenario(self, scenario_id: str) -> ScenarioRecord:
         with self._lock:
@@ -85,8 +169,17 @@ class MetricsBottlenecks:
             ("bottlenecks_score", "%"),
         ]
 
-        # DB-first for real-mode: return persisted points if available.
-        if self._db_enabled() and run.mode == "real":
+        # Real mode is DB-only: persisted points or an explicit failure.
+        # Synthetic series below are unreachable for run.mode == "real".
+        if run.mode == "real":
+            if not self._db_enabled():
+                raise self._real_mode_unavailable(
+                    event="simulator.metrics.real_mode_storage_disabled",
+                    run_id=run_id,
+                    equivalent=equivalent,
+                    reason="storage_disabled",
+                    counters={"points_count": points_count},
+                )
             try:
                 async with db_session.AsyncSessionLocal() as session:
                     rows = (
@@ -110,19 +203,26 @@ class MetricsBottlenecks:
                     by_key.setdefault(str(r.key), []).append((int(r.t_ms), float(r.value)))
 
                 # Resample persisted tick metrics to (from_ms..to_ms, step_ms) using carry-forward.
-                # This guarantees MetricPoint.v is always numeric.
+                # Carry-forward starts at the first real measurement: points before it
+                # carry v=None ("not measured"), never an invented 0.0. After the first
+                # measurement the last value is held until the next tick.
                 series: list[MetricSeries] = []
                 for key, unit in keys:
                     timeline = by_key.get(str(key), [])
                     idx = 0
-                    last_val = 0.0
+                    last_val: Optional[float] = None
                     pts: list[MetricPoint] = []
                     for i in range(points_count):
                         t = int(from_ms + i * step_ms)
                         while idx < len(timeline) and int(timeline[idx][0]) <= t:
                             last_val = float(timeline[idx][1])
                             idx += 1
-                        pts.append(MetricPoint(t_ms=t, v=float(last_val)))
+                        pts.append(
+                            MetricPoint(
+                                t_ms=t,
+                                v=None if last_val is None else float(last_val),
+                            )
+                        )
                     series.append(MetricSeries(key=key, unit=unit, points=pts))
 
                 return MetricsResponse(
@@ -134,14 +234,16 @@ class MetricsBottlenecks:
                     step_ms=step_ms,
                     series=series,
                 )
-            except Exception:
-                # Fall back to synthetic below.
-                self._logger.debug(
-                    "simulator.metrics.db_query_failed_falling_back run_id=%s equivalent=%s",
-                    run_id,
-                    equivalent,
-                    exc_info=True,
-                )
+            except Exception as exc:
+                # Real mode never falls back to synthetic data (see spec F-007-1).
+                raise self._real_mode_unavailable(
+                    event="simulator.metrics.real_mode_db_read_failed",
+                    run_id=run_id,
+                    equivalent=equivalent,
+                    reason="db_read_failed",
+                    cause=exc,
+                    counters={"points_count": points_count},
+                ) from exc
 
         def v01(x: float) -> float:
             return max(0.0, min(1.0, x))
@@ -213,8 +315,16 @@ class MetricsBottlenecks:
         run = self._get_run(run_id)
         scenario = getattr(run, "_scenario_raw", None) or self._get_scenario(run.scenario_id).raw
 
-        # DB-first for real-mode: return persisted bottlenecks if available.
-        if self._db_enabled() and run.mode == "real":
+        # Real mode is DB-only: persisted bottlenecks or an explicit failure.
+        # Synthetic items below are unreachable for run.mode == "real".
+        if run.mode == "real":
+            if not self._db_enabled():
+                raise self._real_mode_unavailable(
+                    event="simulator.bottlenecks.real_mode_storage_disabled",
+                    run_id=run_id,
+                    equivalent=equivalent,
+                    reason="storage_disabled",
+                )
             try:
                 async with db_session.AsyncSessionLocal() as session:
                     latest = (
@@ -225,13 +335,16 @@ class MetricsBottlenecks:
                             )
                         )
                     ).scalar_one_or_none()
+                    # An empty table is a normal state at the start of a run:
+                    # it must yield an empty result, not UnboundLocalError.
+                    rows: list[SimulatorRunBottleneck] = []
                     if latest is not None:
                         q = select(SimulatorRunBottleneck).where(
                             (SimulatorRunBottleneck.run_id == run_id)
                             & (SimulatorRunBottleneck.equivalent_code == str(equivalent))
                             & (SimulatorRunBottleneck.computed_at == latest)
                         )
-                        rows = (await session.execute(q)).scalars().all()
+                        rows = list((await session.execute(q)).scalars().all())
 
                 items: list[BottleneckItem] = []
                 for r in rows:
@@ -277,9 +390,16 @@ class MetricsBottlenecks:
                     equivalent=equivalent,
                     items=items,
                 )
-            except Exception:
-                # Fall back to synthetic below.
-                pass
+            except Exception as exc:
+                # Real mode never falls back to synthetic data (see spec F-007-1).
+                raise self._real_mode_unavailable(
+                    event="simulator.bottlenecks.real_mode_db_read_failed",
+                    run_id=run_id,
+                    equivalent=equivalent,
+                    reason="db_read_failed",
+                    cause=exc,
+                    counters={"limit": int(limit)},
+                ) from exc
 
         # Read trustlines so we have access to limits.
         eq_norm = str(equivalent or "").strip().upper()

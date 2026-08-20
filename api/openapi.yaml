@@ -1689,6 +1689,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
 
   /simulator/runs/{run_id}/bottlenecks:
     get:
@@ -1723,6 +1725,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
 
   /simulator/runs/{run_id}/artifacts:
     get:
@@ -2717,6 +2721,14 @@ components:
             $ref: '#/components/schemas/ErrorEnvelope'
     NotFound:
       description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    ServiceUnavailable:
+      description: >-
+        Measured data is unavailable and the endpoint refuses to substitute
+        synthetic data (real-mode simulator analytics).
       content:
         application/json:
           schema:
@@ -4713,7 +4725,10 @@ components:
           type: integer
           minimum: 0
         v:
+          # null means "no measurement at/before this timestamp"; it is
+          # intentionally distinguishable from a measured zero.
           type: number
+          nullable: true
       additionalProperties: false
 
     MetricSeriesKey:
