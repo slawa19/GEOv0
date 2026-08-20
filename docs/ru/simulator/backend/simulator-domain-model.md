@@ -167,6 +167,18 @@ MVP-контракт событий **точно равен** union `SimulatorEv
   - Диапазон: $[0,1]$.
   - Определение (MVP): нормализованная функция от top-N bottlenecks (например max(score) или average(score)).
 
+- `active_participants` — число участников сценария со статусом `active` на момент бакета.
+  - Единицы: `count`.
+  - Считается по in-memory сценарию (`real_tick_metrics.populate_per_eq_metric_values`);
+    значение одинаково для всех эквивалентов одного прогона.
+
+- `active_trustlines` — число рёбер (trustlines) в выбранном эквиваленте на момент бакета.
+  - Единицы: `count`.
+  - Считается по runtime-кешу рёбер прогона, поэтому учитывает заморозку/удаление после inject-операций.
+
+Обе метрики измерялись и персистились с самого simulator storage MVP, но не отдавались в
+`GET /metrics` до спеки 007 (T707/T713, 2026-08-20).
+
 ### 3.3 Bottlenecks
 - Канал: `GET /api/v1/simulator/runs/{run_id}/bottlenecks`
 - Возврат: top-N + (опционально) фильтр `min_score`

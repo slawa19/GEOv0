@@ -44,8 +44,14 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # a measured zero. The GET /simulator/runs/{run_id}/metrics entry already carried
 # unrelated drift, so only its content changed; the entry count stays 71 and the
 # normalized diff for `v` is identical on both sides.
+# 2026-08-20 / p007_t713_t714: the canonical MetricSeriesKey enum gained
+# `active_participants` and `active_trustlines`, the two series that were already
+# measured, persisted and declared by the pydantic model. Only the canonical side
+# of the GET /simulator/runs/{run_id}/metrics entry moved, and it moved towards
+# the generated side: both now list the same seven keys. That entry still drifts
+# for unrelated pre-existing reasons, so the entry count stays 71.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "af0f682866ede6d7ef844d49a4a453c8e7ec513e3ee0ab7ea3dae9e78c91fc0c"
+    "98a2b68359363b3f1a7cdac073393bd9e6379d327e6fc9e14147fa006f63e76e"
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 71
 # 2026-08-11 / T501: public DB health no longer declares exception details;

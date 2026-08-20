@@ -11,18 +11,24 @@ Covered:
 * an empty bottlenecks table is a normal state and yields an empty result;
 * "not measured" (``null``) is distinguishable from "measured zero" at every
   stage: the tick producer, the writer, the DB row and the API response;
-* explicitly synthetic mode (``run.mode != "real"``) keeps synthesising.
+* explicitly synthetic mode (``run.mode != "real"``) keeps synthesising;
+* the metric key set is one set on all four sides — canonical OpenAPI, pydantic
+  model, reader and writer (spec 007, T713);
+* answering ``GET bottlenecks`` writes nothing to the database (spec 007, T714).
 """
 
 from __future__ import annotations
 
 import logging
 import threading
+from datetime import datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Optional
+from typing import Any, Optional, get_args
 
 import pytest
-from sqlalchemy import select
+import yaml
+from sqlalchemy import func, select
 
 import app.core.simulator.metrics_bottlenecks as metrics_bottlenecks_module
 import app.db.session as db_session
@@ -30,7 +36,8 @@ from app.config import settings
 from app.core.simulator import storage as simulator_storage
 from app.core.simulator.metrics_bottlenecks import MetricsBottlenecks
 from app.core.simulator.real_tick_metrics import RealTickMetrics
-from app.db.models.simulator_storage import SimulatorRunMetric
+from app.db.models.simulator_storage import SimulatorRunBottleneck, SimulatorRunMetric
+from app.schemas.simulator import MetricSeriesKey
 from app.utils.exceptions import GeoException
 
 
@@ -182,6 +189,14 @@ def _series(response: Any, key: str) -> Any:
 
 def _values(response: Any, key: str) -> list[Optional[float]]:
     return [p.v for p in _series(response, key).points]
+
+
+def _canonical_metric_series_keys() -> list[str]:
+    """The `MetricSeriesKey` enum as declared in the canonical OpenAPI file."""
+
+    canon = Path(__file__).resolve().parents[2] / "api" / "openapi.yaml"
+    doc = yaml.safe_load(canon.read_text(encoding="utf-8"))
+    return list(doc["components"]["schemas"]["MetricSeriesKey"]["enum"])
 
 
 def _warnings(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
@@ -751,3 +766,217 @@ async def test_missing_measurement_stays_null_end_to_end(
         item for item in wire["series"] if item["key"] == "success_rate"
     )["points"]
     assert [point["v"] for point in wire_success] == [None, None, 0.0, 0.0]
+
+
+# --- T713: one metric key set on all four sides ------------------------------
+
+
+async def test_metric_series_keys_agree_across_canon_pydantic_and_reader(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Canon, pydantic model and reader must describe the same set.
+
+    Before T713 they did not: the canonical enum had five values, the pydantic
+    Literal seven, and the reader emitted the same five as the canon, so
+    ``active_participants``/``active_trustlines`` were measured and persisted but
+    never reached a client.
+    """
+
+    _install_session(monkeypatch, lambda: _FakeSession([_FakeResult(rows=[])]))
+
+    resp = await _build().build_metrics(
+        run_id="run-1", equivalent="UAH", from_ms=0, to_ms=0, step_ms=1_000
+    )
+    served = [item.key for item in resp.series]
+
+    assert len(served) == len(set(served))
+    assert sorted(served) == sorted(_canonical_metric_series_keys())
+    assert sorted(served) == sorted(get_args(MetricSeriesKey))
+    # Named explicitly so the assertions above cannot be satisfied by all three
+    # sides shrinking back to the old five.
+    assert {"active_participants", "active_trustlines"}.issubset(served)
+
+
+async def test_real_mode_serves_persisted_network_cardinalities(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The two formerly persist-only series reach the response as counts."""
+
+    _install_session(
+        monkeypatch,
+        lambda: _FakeSession(
+            [
+                _FakeResult(
+                    rows=[
+                        _metric_row("active_participants", 1_000, 4.0),
+                        _metric_row("active_trustlines", 1_000, 6.0),
+                        # An edge was frozen between the two ticks.
+                        _metric_row("active_trustlines", 3_000, 5.0),
+                    ]
+                )
+            ]
+        ),
+    )
+
+    resp = await _build().build_metrics(
+        run_id="run-1", equivalent="UAH", from_ms=0, to_ms=3_000, step_ms=1_000
+    )
+
+    # Cardinalities, not amounts and not percentages.
+    assert _series(resp, "active_participants").unit == "count"
+    assert _series(resp, "active_trustlines").unit == "count"
+
+    # T711 rule holds for the new series too: before the first measurement the
+    # value is null, never an invented 0.0.
+    assert _values(resp, "active_participants") == [None, 4.0, 4.0, 4.0]
+    assert _values(resp, "active_trustlines") == [None, 6.0, 6.0, 5.0]
+
+
+async def test_synthetic_mode_counts_cardinalities_instead_of_inventing_them(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Counter-check: the synthetic path also produces the two new series.
+
+    Without this the synthetic branch would fall through to the
+    ``bottlenecks_score`` formula and label a percentage as a count.
+    """
+
+    _install_session(monkeypatch, lambda: _FakeSession([]))
+    runtime = _build(mode="fixtures", db_enabled=False)
+    runtime._scenarios["scn-1"] = SimpleNamespace(
+        scenario_id="scn-1",
+        raw={
+            **_SCENARIO_RAW,
+            "participants": [
+                {"id": "alice"},
+                {"id": "bob", "status": "active"},
+                {"id": "carol", "status": "blocked"},
+            ],
+        },
+    )
+    runtime._runs["run-1"]._scenario_raw = runtime._scenarios["scn-1"].raw
+
+    resp = await runtime.build_metrics(
+        run_id="run-1", equivalent="UAH", from_ms=0, to_ms=1_000, step_ms=1_000
+    )
+
+    # alice (status omitted, defaults to active) + bob; carol is blocked.
+    assert _values(resp, "active_participants") == [2.0, 2.0]
+    # Two edges in the run's UAH edge cache.
+    assert _values(resp, "active_trustlines") == [2.0, 2.0]
+
+
+async def test_writer_and_reader_agree_on_the_key_set_end_to_end(
+    db_session: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DB-backed (sqlite): what the writer persists is what the reader serves."""
+
+    monkeypatch.setattr(settings, "SIMULATOR_DB_ENABLED", True, raising=False)
+
+    await simulator_storage.write_tick_metrics(
+        run_id="run-1",
+        t_ms=1_000,
+        per_equivalent={
+            "UAH": {"committed": 3, "rejected": 1, "errors": 0, "timeouts": 0}
+        },
+        metric_values_by_eq={
+            "UAH": {
+                "avg_route_length": 2.0,
+                "total_debt": 7.0,
+                "clearing_volume": 0.0,
+                "active_participants": 4.0,
+                "active_trustlines": 6.0,
+            }
+        },
+        session=db_session,
+    )
+
+    persisted_keys = {
+        str(key)
+        for (key,) in (
+            await db_session.execute(
+                select(SimulatorRunMetric.key)
+                .where(SimulatorRunMetric.run_id == "run-1")
+                .distinct()
+            )
+        ).all()
+    }
+
+    _install_session(monkeypatch, lambda: _SharedSession(db_session))
+
+    resp = await _build().build_metrics(
+        run_id="run-1", equivalent="UAH", from_ms=0, to_ms=1_000, step_ms=1_000
+    )
+
+    assert persisted_keys == {item.key for item in resp.series}
+    assert _values(resp, "active_participants") == [None, 4.0]
+    assert _values(resp, "active_trustlines") == [None, 6.0]
+
+
+# --- T714: answering a GET must not write to the database --------------------
+
+
+async def test_synthetic_bottlenecks_get_writes_nothing_end_to_end(
+    db_session: Any, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """DB-backed (sqlite): polling the endpoint no longer grows the table.
+
+    The synthetic branch used to append one row per item on every request, with
+    no deduplication, no row limit and a silent ``except Exception: pass``. The
+    rows were unreachable: only the real-mode branch reads that table.
+    """
+
+    monkeypatch.setattr(settings, "SIMULATOR_DB_ENABLED", True, raising=False)
+    _install_session(monkeypatch, lambda: _SharedSession(db_session))
+    caplog.set_level(logging.WARNING, logger=LOGGER_NAME)
+
+    async def _row_count() -> int:
+        return int(
+            (
+                await db_session.execute(
+                    select(func.count()).select_from(SimulatorRunBottleneck)
+                )
+            ).scalar_one()
+        )
+
+    synthetic = _build(mode="fixtures", db_enabled=True)
+    for _ in range(3):
+        resp = await synthetic.build_bottlenecks(
+            run_id="run-1", equivalent="UAH", limit=20, min_score=None
+        )
+
+    # The endpoint still answers with synthetic items; only the write is gone.
+    assert {(i.target.from_, i.target.to) for i in resp.items} == {
+        ("alice", "bob"),
+        ("bob", "carol"),
+    }
+    assert await _row_count() == 0
+    assert _warnings(caplog) == []
+
+    # Counter-check: the table is writable through this very session, so the
+    # zero above means "the GET wrote nothing", not "nothing can be written".
+    await simulator_storage.write_tick_bottlenecks(
+        run_id="run-1",
+        equivalent="UAH",
+        computed_at=datetime(2026, 8, 20, 10, 0, tzinfo=timezone.utc),
+        edge_stats={
+            ("alice", "bob"): {
+                "attempts": 4,
+                "committed": 2,
+                "rejected": 0,
+                "errors": 2,
+                "timeouts": 0,
+            }
+        },
+        session=db_session,
+        commit=False,
+    )
+    assert await _row_count() == 1
+
+    # And the real-mode reader serves exactly what the runner wrote.
+    real = await _build().build_bottlenecks(
+        run_id="run-1", equivalent="UAH", limit=20, min_score=None
+    )
+    assert [(i.target.from_, i.target.to, i.score) for i in real.items] == [
+        ("alice", "bob", 0.5)
+    ]

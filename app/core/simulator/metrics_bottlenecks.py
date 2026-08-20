@@ -57,6 +57,9 @@ class MetricsBottlenecks:
         self._lock = lock
         self._runs = runs
         self._scenarios = scenarios
+        # Unused since T714 removed the write-on-GET (2026-08-20). The parameter
+        # stays because the only construction site is runtime_impl.py, which is
+        # outside this slice's owner surface; dropping it is a separate change.
         self._utc_now = utc_now
         self._db_enabled = db_enabled
         self._logger = logger
@@ -150,7 +153,7 @@ class MetricsBottlenecks:
         step_ms: int,
     ) -> MetricsResponse:
         run = self._get_run(run_id)
-        _ = self._get_scenario(run.scenario_id)
+        scenario = self._get_scenario(run.scenario_id)
 
         if to_ms < from_ms:
             raise BadRequestException("to_ms must be >= from_ms")
@@ -167,6 +170,13 @@ class MetricsBottlenecks:
             ("total_debt", "amount"),
             ("clearing_volume", "amount"),
             ("bottlenecks_score", "%"),
+            # Network cardinalities. The writer persists them as plain counts
+            # (`storage.write_tick_metrics`, fed by
+            # `real_tick_metrics.populate_per_eq_metric_values`: number of active
+            # scenario participants and number of edges in the equivalent), so
+            # the unit is "count", not "amount".
+            ("active_participants", "count"),
+            ("active_trustlines", "count"),
         ]
 
         # Real mode is DB-only: persisted points or an explicit failure.
@@ -257,6 +267,18 @@ class MetricsBottlenecks:
         intensity = max(0.0, min(1.0, float(run.intensity_percent) / 100.0))
         edges_n = len(((run._edges_by_equivalent or {}).get(equivalent) or []))
 
+        # Cardinalities are counted from the same sources the real-mode producer
+        # uses (`real_tick_metrics.populate_per_eq_metric_values`): the scenario
+        # participant list and the runtime edge cache. They are counted, not
+        # invented, even on this synthetic path.
+        scenario_raw = getattr(run, "_scenario_raw", None) or scenario.raw or {}
+        active_participants_n = sum(
+            1
+            for p in (scenario_raw.get("participants") or [])
+            if isinstance(p, dict)
+            and str(p.get("status") or "active").strip().lower() == "active"
+        )
+
         series: list[MetricSeries] = []
 
         for key, unit in keys:
@@ -285,6 +307,10 @@ class MetricsBottlenecks:
                         phase = (t - 25_000) % 45_000
                         spike = 1.0 if 0 <= phase < 3_000 else 0.15
                         v = spike * (50.0 + 150.0 * intensity) * (0.8 + 0.4 * base)
+                elif key == "active_participants":
+                    v = float(active_participants_n)
+                elif key == "active_trustlines":
+                    v = float(edges_n)
                 else:  # bottlenecks_score
                     # Higher score when sparse or at high intensity.
                     sparsity = 1.0 if edges_n == 0 else max(0.0, 1.0 - min(1.0, edges_n / 200.0))
@@ -459,35 +485,14 @@ class MetricsBottlenecks:
         items.sort(key=lambda x: x.score, reverse=True)
         items = items[: int(limit)]
 
-        # Keep writing synthetic bottlenecks only for non-real mode (UI scaffolding);
-        # real-mode is DB-first and writes from the runner.
-        if self._db_enabled() and run.mode != "real":
-            try:
-                computed_at = self._utc_now()
-                async with db_session.AsyncSessionLocal() as session:
-                    rows: list[SimulatorRunBottleneck] = []
-                    for it in items:
-                        target_id = f"{it.target.from_}->{it.target.to}"  # type: ignore[attr-defined]
-                        rows.append(
-                            SimulatorRunBottleneck(
-                                run_id=run_id,
-                                equivalent_code=str(equivalent),
-                                computed_at=computed_at,
-                                target_type="edge",
-                                target_id=target_id,
-                                score=float(it.score),
-                                reason_code=str(it.reason_code),
-                                details={
-                                    "label": it.label,
-                                    "suggested_action": it.suggested_action,
-                                },
-                            )
-                        )
-                    session.add_all(rows)
-                    await session.commit()
-            except Exception:
-                pass
-
+        # This synthetic branch deliberately does not write to
+        # `simulator_run_bottlenecks` (spec 007, T714). It used to append one row
+        # per item on every GET, unbounded and under a silent `except Exception:
+        # pass`. The rows were unreachable: the only reader of that table is the
+        # real-mode branch above, `run.mode` is fixed when the run is created and
+        # never reassigned, so nothing that reaches this code path can ever read
+        # what it wrote. Real-mode bottlenecks are still persisted by the runner
+        # (`storage.write_tick_bottlenecks`).
         return BottlenecksResponse(
             api_version=SIMULATOR_API_VERSION,
             run_id=run_id,

@@ -17,11 +17,11 @@
 > у `BottleneckItem` нет `target`/`reason_code`. Панель по текущим типам прочитает `undefined`
 > (сегодня это латентно: у `getMetrics`/`getBottlenecks` нет call-site'ов).
 >
-> **Про `MetricSeriesKey` — этот документ прав.** §2.1 перечисляет 5 значений, и это ровно то,
-> что API отдаёт сегодня: эмиттер зашивает пятёрку жёстко
-> (`app/core/simulator/metrics_bottlenecks.py:80-86`). Схема объявляет 7
-> (`app/schemas/simulator.py:443-451`); `active_participants`/`active_trustlines` считаются и
-> персистятся, но наружу не отдаются — это пробел бэкенда (задача T707), а не ошибка §2.1.
+> **Про `MetricSeriesKey` — устарело с 2026-08-20 (T713 программы 007).** §2.1 перечисляет
+> 5 значений; на этот момент их **7**. `active_participants` и `active_trustlines` больше не
+> persist-only: канон, pydantic, читатель и писатель согласованы на семёрке, единица обеих —
+> `count`, потому что это кардинальности сети, а не деньги. Пробел бэкенда, значившийся как
+> T707, закрыт; сам §2.1 подлежит правке в T706.
 >
 > Мелкий дрейф имён: `RealHudTop`/`RealHudBottom` в дереве называются `TopBar.vue` / `BottomBar.vue`.
 

@@ -4739,6 +4739,11 @@ components:
         - total_debt
         - clearing_volume
         - bottlenecks_score
+        # Network cardinalities. Measured per tick and persisted since the
+        # simulator storage MVP; exposed here by spec 007 / T713 so the canon,
+        # the pydantic model, the reader and the writer describe one set.
+        - active_participants
+        - active_trustlines
 
     MetricSeries:
       type: object
