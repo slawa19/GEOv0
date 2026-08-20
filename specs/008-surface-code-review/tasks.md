@@ -748,14 +748,14 @@ scope байт-в-байт равен frozen HEAD, регенерация ман
 каждой задаче; он взят из закрытых волн и внешних ревью и весь лежит в
 [`evidence-index.md`](evidence-index.md).
 
-- [N] T807-D1 Триангуляция контрактов: `openapi.yaml` ↔ backend ↔ simulator-ui ↔ admin-ui.
+- [ ] T807-D1 Триангуляция контрактов: `openapi.yaml` ↔ backend ↔ simulator-ui ↔ admin-ui.
   **Вход:** `C-C2-010` (четыре графовых ответа объявлены `type: object` + `additionalProperties: true`);
   `C-C3-1-008` (ещё семь неграфовых эндпоинтов там же); уточнение A4-1 — «канон молчит» на
   **13 операциях из 88**; коды ошибок `E0xx` в каноне отсутствуют **вовсе** при 69 assert-узлах по
   всему A4 (знаменатель исправлен внешним ревью); три латентных расхождения типов `C-B1-010…012`
   (`MetricsResponse`, `BottleneckItem`, `uploadScenario`); измеренный **ноль** расхождений по
   алиасам `from`/`to` на проводе — его надо не потерять, а зафиксировать как результат.
-- [N] T807-D2 Сводный список удаления: reference scan, `git log -- <path>`, safe delete / verify first / keep. Rollback — revertable-коммиты и полный SHA; обязательный tag не требуется (A6).
+- [ ] T807-D2 Сводный список удаления: reference scan, `git log -- <path>`, safe delete / verify first / keep. Rollback — revertable-коммиты и полный SHA; обязательный tag не требуется (A6).
   **Вход:** одобренные триажем `D-C2-001` + `D-C2-013` (шесть вкладок графа и `graphUiOptions`);
   единственный `delete`-кандидат волны 5 — `simulator-ui/v2/playwright.hud-qa.config.ts` (ноль
   вызовов); `FeatureFlagsPage.vue`, не смонтированная ниоткуда (reference scan по §14 **не завершён**);
