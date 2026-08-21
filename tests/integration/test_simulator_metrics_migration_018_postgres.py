@@ -21,6 +21,9 @@ Covered:
   would otherwise truncate;
 * without the pin the round-trip check aborts the migration instead of
   deleting the live rows;
+* the migration serialises with concurrent writers: it holds ACCESS EXCLUSIVE
+  across the copy/delete/alter window, and fails fast on a busy table instead
+  of blocking forever;
 * ``downgrade()`` restores the column type and keeps the archive.
 """
 
@@ -28,11 +31,13 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import time
 from pathlib import Path
 from typing import Any
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from alembic.migration import MigrationContext
@@ -114,6 +119,46 @@ def _upgrade_without_the_pin(sync_connection: Any) -> None:
             if "extra_float_digits" in str(sql):
                 return None
             return real_execute(sql, *args, **kwargs)
+
+        operations.execute = _execute  # type: ignore[method-assign]
+        module.upgrade()
+
+
+_OWN_LOCKS_SQL = (
+    "SELECT l.mode FROM pg_locks l "
+    "JOIN pg_class c ON c.oid = l.relation "
+    "JOIN pg_namespace n ON n.oid = c.relnamespace "
+    "WHERE n.nspname = :schema AND c.relname = 'simulator_run_metrics' "
+    "AND l.pid = pg_backend_pid()"
+)
+
+
+def _upgrade_recording_locks(sync_connection: Any, observed: list[set[str]]) -> None:
+    """Run the revision, capturing our own lock modes right after the copy.
+
+    The window the finding is about opens *between* the archive INSERT and the
+    DELETE, so that is exactly where the locks are sampled. A backend can see
+    its own entries in `pg_locks`, so no second connection is needed and there
+    is nothing to interleave.
+    """
+
+    module = _load_revision()
+    context = MigrationContext.configure(sync_connection)
+    with Operations.context(context) as operations:
+        real_execute = operations.execute
+
+        def _execute(sql: Any, *args: Any, **kwargs: Any) -> Any:
+            result = real_execute(sql, *args, **kwargs)
+            if "INSERT INTO" in str(sql):
+                observed.append(
+                    {
+                        str(row[0])
+                        for row in sync_connection.execute(
+                            text(_OWN_LOCKS_SQL), {"schema": PROBE_SCHEMA}
+                        ).all()
+                    }
+                )
+            return result
 
         operations.execute = _execute  # type: ignore[method-assign]
         module.upgrade()
@@ -320,3 +365,78 @@ async def test_migration_018_aborts_instead_of_losing_digits(probe_engine) -> No
         ).scalar_one()
         assert surviving == 1
         assert (await _column_type(conn))[0] == "double precision"
+
+
+async def test_migration_018_holds_access_exclusive_across_the_copy_window(
+    probe_engine,
+) -> None:
+    """The lock is taken before the copy, not just implicitly by the ALTER.
+
+    Between the archive INSERT and the DELETE the migration must already own
+    ACCESS EXCLUSIVE. Without it a row committed in that window is deleted
+    without ever being archived, and a row committed after the round-trip gate
+    is converted from float to numeric - given an exactness it never had.
+    """
+
+    observed: list[set[str]] = []
+
+    async with probe_engine.connect() as conn:
+        await _seed_pre_018(conn, _ROWS)
+        await conn.commit()
+
+        await conn.run_sync(_upgrade_recording_locks, observed)
+        await conn.commit()
+
+    assert observed, "the archive INSERT must have been observed"
+    for modes in observed:
+        assert "AccessExclusiveLock" in modes, modes
+
+
+async def test_migration_018_fails_fast_on_a_busy_table(probe_engine) -> None:
+    """A busy table must produce a lock timeout, not an unbounded wait."""
+
+    async with probe_engine.connect() as setup:
+        await _seed_pre_018(setup, _ROWS)
+        await setup.commit()
+
+    async with probe_engine.connect() as writer:
+        # A plain writer: INSERT takes ROW EXCLUSIVE, which is compatible with
+        # other writers but conflicts with ACCESS EXCLUSIVE. Left uncommitted.
+        await writer.execute(
+            text(_INSERT_ROW),
+            {
+                "run_id": "run-concurrent",
+                "eq": "UAH",
+                "key": "total_debt",
+                "t_ms": 9_000,
+                "value": 1.5,
+            },
+        )
+
+        async with probe_engine.connect() as migrator:
+            started = time.monotonic()
+            with pytest.raises(DBAPIError) as excinfo:
+                await migrator.run_sync(_run_revision, "upgrade")
+            elapsed = time.monotonic() - started
+            await migrator.rollback()
+
+        message = str(excinfo.value).lower()
+        assert "lock timeout" in message or "lock_timeout" in message, message
+
+        # It failed *at the lock*, before touching any data - that is what the
+        # early LOCK TABLE buys. Without it the copy and the delete would run
+        # first and only the ALTER would time out.
+        assert "LOCK TABLE" in str(excinfo.value.statement or "")
+
+        # Bounded: the migration gave up rather than waiting on the writer.
+        assert elapsed < 30.0
+
+        await writer.rollback()
+
+    # Nothing moved: the live table is untouched and still double precision.
+    async with probe_engine.connect() as check:
+        assert (await _column_type(check))[0] == "double precision"
+        live = (
+            await check.execute(text("SELECT count(*) FROM simulator_run_metrics"))
+        ).scalar_one()
+        assert live == len(_ROWS)

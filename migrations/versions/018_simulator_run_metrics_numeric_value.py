@@ -34,6 +34,16 @@ present a lossy number as a restored exact amount. So the migration:
 3. empties the live table;
 4. changes the column type.
 
+Steps 2-4 are correct only as a unit, so `upgrade()` takes
+`LOCK TABLE simulator_run_metrics IN ACCESS EXCLUSIVE MODE` before step 1 and
+holds it to the end: **this migration deliberately serialises with writers**. A
+row committed between the copy and the DELETE would be deleted without ever
+reaching the archive, and a row committed between the gate and the ALTER would
+be converted from float to numeric, i.e. handed the exact appearance it never
+had. `lock_timeout` is pinned to `LOCK_TIMEOUT_MS`, so a busy table makes the
+migration fail with a clear lock-timeout error instead of blocking a deployment
+indefinitely; rerun it in a quiet window.
+
 What the archive guarantees is therefore precise: `value_text` is a decimal
 string that casts back to **exactly** the `double precision` value that was
 stored. It is not a claim that the number is an exact amount — it never was.
@@ -69,6 +79,11 @@ depends_on = None
 
 ARCHIVE_TABLE = "simulator_run_metrics_float_archive"
 
+# How long the migration is willing to wait for the exclusive lock before giving
+# up. Failing fast with a clear error beats blocking a deployment behind an
+# arbitrarily long-running writer; rerun the migration in a quiet window.
+LOCK_TIMEOUT_MS = 5000
+
 
 def _archive_table_exists(bind) -> bool:
     return sa.inspect(bind).has_table(ARCHIVE_TABLE)
@@ -76,6 +91,19 @@ def _archive_table_exists(bind) -> bool:
 
 def upgrade() -> None:
     bind = op.get_bind()
+
+    # Step 0: serialise with concurrent writers, deliberately, for the whole
+    # critical section. The archive copy, the round-trip gate, the DELETE and
+    # the ALTER are only correct together: a row committed between the copy and
+    # the DELETE would be deleted without ever being archived, and a row
+    # committed between the gate and the ALTER would be converted from float to
+    # numeric - handed the exact appearance it never had, which is the very
+    # laundering this revision exists to prevent.
+    #
+    # This costs nothing extra: the ALTER COLUMN below takes ACCESS EXCLUSIVE
+    # anyway. The lock is simply taken earlier and held across the whole window.
+    op.execute(sa.text(f"SET LOCAL lock_timeout = {LOCK_TIMEOUT_MS}"))
+    op.execute(sa.text("LOCK TABLE simulator_run_metrics IN ACCESS EXCLUSIVE MODE"))
 
     # Step 1: archive table. Append-only with a surrogate key, so a re-run after
     # a downgrade (which keeps the archive) cannot collide on the natural key.
@@ -162,6 +190,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # The ALTER below takes ACCESS EXCLUSIVE by itself; the timeout only keeps a
+    # rollback from blocking indefinitely behind a writer.
+    op.execute(sa.text(f"SET LOCAL lock_timeout = {LOCK_TIMEOUT_MS}"))
+
     # Type only. Archived rows are NOT restored (see the module docstring), and
     # the archive table is intentionally left in place.
     op.alter_column(

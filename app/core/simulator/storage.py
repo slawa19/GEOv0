@@ -527,8 +527,28 @@ async def write_tick_metrics(
                 except Exception:
                     pass
                 raise
+
             if commit:
-                await session.commit()
+                # 2026-08-20 / p007_t715: this is NOT a relapse of the defect
+                # fixed just above, it is its mirror image. There the caller
+                # passed `commit=False`, kept ownership of the transaction and
+                # never asked us to end it - so rolling it back was deciding for
+                # them. Here `commit=True` means the caller delegated the commit
+                # to us (`real_tick_persistence.py` opens a session, hands it
+                # over without `commit=`, and then reuses it for
+                # `write_tick_bottlenecks`). Failing the delegated commit and
+                # leaving the session in pending-rollback would make the caller's
+                # *next* statement die of `PendingRollbackError`, an error with
+                # no connection to the real cause. Returning the session to a
+                # usable state is part of the job we accepted.
+                try:
+                    await session.commit()
+                except Exception:
+                    try:
+                        await session.rollback()
+                    except Exception:
+                        pass
+                    raise
     except Exception:
         logger.exception(
             "simulator.storage.write_tick_metrics_failed run_id=%s t_ms=%s",

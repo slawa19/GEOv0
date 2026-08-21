@@ -286,3 +286,63 @@ async def test_failed_metrics_write_does_not_roll_back_the_caller(
         )
     ).all()
     assert leaked == []
+
+
+@pytest.mark.asyncio
+async def test_failed_delegated_commit_leaves_the_session_usable(
+    db_session, monkeypatch, caplog
+):
+    """`commit=True` delegates the commit to us, so we must not abandon it broken.
+
+    The reachable caller is `real_tick_persistence.py`: it opens a session,
+    hands it to `write_tick_metrics` without `commit=` (so the default
+    `commit=True` applies) and then reuses that same session for
+    `write_tick_bottlenecks`. If the delegated commit fails and the session is
+    left in pending-rollback, the next write dies of `PendingRollbackError` -
+    an error with no relationship to the real cause.
+
+    This is the mirror image of the SAVEPOINT case, not a relapse of it: there
+    the caller kept ownership (`commit=False`) and never asked us to end the
+    transaction.
+    """
+
+    monkeypatch.setattr(settings, "SIMULATOR_DB_ENABLED", True, raising=False)
+    caplog.set_level(logging.ERROR, logger=simulator_storage.logger.name)
+
+    async def _failing_commit(*_args, **_kwargs):
+        # Fail the way a real commit fails, not merely by raising: `commit()`
+        # flushes first, and a failed flush is exactly what puts a SQLAlchemy
+        # session into pending-rollback. Without reproducing that state the
+        # test could not tell the fix from its absence.
+        db_session.add(
+            SimulatorRunMetric(
+                run_id="r-delegated",
+                equivalent_code="UAH",
+                key="total_debt",
+                t_ms=-1,  # violates chk_simulator_run_metrics_t_ms
+                value=Decimal("1"),
+            )
+        )
+        await db_session.flush()
+
+    monkeypatch.setattr(db_session, "commit", _failing_commit, raising=True)
+
+    await simulator_storage.write_tick_metrics(
+        run_id="r-delegated",
+        t_ms=1_000,
+        per_equivalent={
+            "UAH": {"committed": 1, "rejected": 0, "errors": 0, "timeouts": 0}
+        },
+        metric_values_by_eq={"UAH": {"total_debt": Decimal("7")}},
+        session=db_session,
+        # commit defaults to True: the delegation the caller actually performs.
+    )
+
+    # Best-effort, so the failure is reported rather than raised...
+    assert [r for r in caplog.records if r.levelno >= logging.ERROR]
+
+    # ...and the subject of this test: the caller's very next statement - the
+    # bottlenecks write, in production - still works. Nothing is rolled back
+    # here on purpose; if the test had to repair the session itself, it would
+    # prove nothing about the writer.
+    await db_session.execute(select(SimulatorRunMetric.key).limit(1))
