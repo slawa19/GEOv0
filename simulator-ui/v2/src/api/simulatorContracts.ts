@@ -1,7 +1,16 @@
 import type { GraphLink, GraphNode } from '../types'
 import { ApiError } from './http'
 import type {
+  BottleneckItem,
+  BottleneckReasonCode,
+  BottleneckTarget,
+  BottlenecksResponse,
   ClearingOnceResponse,
+  MetricPoint,
+  MetricSeries,
+  MetricSeriesKey,
+  MetricUnit,
+  MetricsResponse,
   RunError,
   RunStatus,
   ScenarioSummary,
@@ -566,6 +575,145 @@ function decodePaymentTargets(value: unknown, path: string): SimulatorPaymentTar
   }
 }
 
+const METRIC_SERIES_KEYS = new Set<string>([
+  'success_rate',
+  'avg_route_length',
+  'total_debt',
+  'clearing_volume',
+  'bottlenecks_score',
+  'active_participants',
+  'active_trustlines',
+])
+
+const METRIC_UNITS = new Set<string>(['%', 'count', 'amount'])
+
+function decodeMetricPoint(value: unknown, path: string): MetricPoint {
+  const raw = objectAt(value, path)
+  onlyKeys(raw, path, ['t_ms', 'v'])
+  // `v` is a REQUIRED key: an absent one is not the same statement as an explicit `null`, and
+  // filling it in here would be exactly the silent repair §9 forbids. (Contrast `unit` in
+  // `decodeMetricSeries` below, where absence and `null` do mean the same thing and absence is
+  // therefore accepted — the two sites differ on purpose.)
+  if (!('v' in raw)) fail(`${path}.v`, 'expected decimal string or null')
+  // `null` stays `null` — "not measured" must never become a measured zero — and a present value
+  // stays the backend's own decimal string: parsing it into a JS number is where money loses
+  // exactness (AGENTS.md §8).
+  const v = raw.v === null ? null : decimalStringAt(raw.v, `${path}.v`)
+  return {
+    t_ms: numberAt(raw.t_ms, `${path}.t_ms`, { integer: true, min: 0 }),
+    v,
+  }
+}
+
+function decodeMetricSeries(value: unknown, path: string): MetricSeries {
+  const raw = objectAt(value, path)
+  onlyKeys(raw, path, ['key', 'unit', 'points'])
+
+  const key = stringAt(raw.key, `${path}.key`)
+  if (!METRIC_SERIES_KEYS.has(key)) fail(`${path}.key`, 'expected canonical metric series key')
+
+  // `unit` is OPTIONAL by both sides of the contract — the canon lists
+  // `MetricSeries.required: [key, points]`, pydantic declares `unit: MetricUnit = None` — and an
+  // absent key carries exactly the meaning of an explicit `null`: no unit declared. So absence is
+  // accepted and read as `null`.
+  //
+  // Note the deliberate asymmetry with `decodeMetricPoint` above, where an absent `v` is REJECTED:
+  // there `null` says "not measured" and a string says "measured", so a missing key is a third,
+  // unstated thing and inventing one of the two would be the silent repair §9 forbids. Here the
+  // two states are one state. Neither site is a mistake for the other.
+  let unit: MetricUnit = null
+  if (raw.unit !== undefined && raw.unit !== null) {
+    // Optional key, but not an arbitrary value: an unknown unit is still a contract violation.
+    const unitText = stringAt(raw.unit, `${path}.unit`)
+    if (!METRIC_UNITS.has(unitText)) fail(`${path}.unit`, 'expected %, count or amount')
+    unit = unitText as MetricUnit
+  }
+
+  return {
+    key: key as MetricSeriesKey,
+    unit,
+    points: arrayAt(raw.points, `${path}.points`).map((point, index) =>
+      decodeMetricPoint(point, `${path}.points[${index}]`),
+    ),
+  }
+}
+
+function decodeMetrics(value: unknown, path: string): MetricsResponse {
+  const raw = objectAt(value, path)
+  onlyKeys(raw, path, ['api_version', 'run_id', 'equivalent', 'from_ms', 'to_ms', 'step_ms', 'series'])
+  return {
+    api_version: apiVersionAt(raw.api_version, `${path}.api_version`),
+    run_id: stringAt(raw.run_id, `${path}.run_id`),
+    equivalent: stringAt(raw.equivalent, `${path}.equivalent`),
+    from_ms: numberAt(raw.from_ms, `${path}.from_ms`, { integer: true, min: 0 }),
+    to_ms: numberAt(raw.to_ms, `${path}.to_ms`, { integer: true, min: 0 }),
+    step_ms: numberAt(raw.step_ms, `${path}.step_ms`, { integer: true, min: 1 }),
+    series: arrayAt(raw.series, `${path}.series`).map((series, index) =>
+      decodeMetricSeries(series, `${path}.series[${index}]`),
+    ),
+  }
+}
+
+const BOTTLENECK_REASON_CODES = new Set<string>([
+  'LOW_AVAILABLE',
+  'HIGH_USED',
+  'FREQUENT_ABORTS',
+  'TOO_MANY_TIMEOUTS',
+  'ROUTING_TOO_DEEP',
+  'CLEARING_PRESSURE',
+])
+
+function decodeBottleneckTarget(value: unknown, path: string): BottleneckTarget {
+  const raw = objectAt(value, path)
+  const kind = stringAt(raw.kind, `${path}.kind`)
+  if (kind === 'edge') {
+    // Wire key is `from` (pydantic `Field(alias="from")`), never `from_`.
+    onlyKeys(raw, path, ['kind', 'from', 'to'])
+    return {
+      kind: 'edge',
+      from: stringAt(raw.from, `${path}.from`),
+      to: stringAt(raw.to, `${path}.to`),
+    }
+  }
+  if (kind === 'node') {
+    onlyKeys(raw, path, ['kind', 'id'])
+    return { kind: 'node', id: stringAt(raw.id, `${path}.id`) }
+  }
+  return fail(`${path}.kind`, 'expected edge or node')
+}
+
+function decodeBottleneckItem(value: unknown, path: string): BottleneckItem {
+  const raw = objectAt(value, path)
+  onlyKeys(raw, path, ['target', 'score', 'reason_code', 'label', 'suggested_action'])
+
+  const reasonCode = stringAt(raw.reason_code, `${path}.reason_code`)
+  if (!BOTTLENECK_REASON_CODES.has(reasonCode)) {
+    fail(`${path}.reason_code`, 'expected canonical bottleneck reason code')
+  }
+
+  return {
+    target: decodeBottleneckTarget(raw.target, `${path}.target`),
+    // `score` is a ranking weight, not money: the canon types it `number`.
+    score: numberAt(raw.score, `${path}.score`),
+    reason_code: reasonCode as BottleneckReasonCode,
+    label: optionalString(raw, 'label', path),
+    suggested_action: optionalString(raw, 'suggested_action', path),
+  }
+}
+
+function decodeBottlenecks(value: unknown, path: string): BottlenecksResponse {
+  const raw = objectAt(value, path)
+  onlyKeys(raw, path, ['api_version', 'run_id', 'equivalent', 'items'])
+  return {
+    api_version: apiVersionAt(raw.api_version, `${path}.api_version`),
+    run_id: stringAt(raw.run_id, `${path}.run_id`),
+    equivalent: stringAt(raw.equivalent, `${path}.equivalent`),
+    items: arrayAt(raw.items, `${path}.items`).map((item, index) =>
+      decodeBottleneckItem(item, `${path}.items[${index}]`),
+    ),
+  }
+}
+
 function decodeClearingCycle(
   value: unknown,
   path: string,
@@ -678,4 +826,12 @@ export function decodeSimulatorActionTrustlinesListResponse(
 
 export function decodeSimulatorPaymentTargetsResponse(value: unknown): SimulatorPaymentTargetsResponse {
   return decodeSimulatorResponse('payment-targets', value, decodePaymentTargets)
+}
+
+export function decodeMetricsResponse(value: unknown): MetricsResponse {
+  return decodeSimulatorResponse('metrics', value, decodeMetrics)
+}
+
+export function decodeBottlenecksResponse(value: unknown): BottlenecksResponse {
+  return decodeSimulatorResponse('bottlenecks', value, decodeBottlenecks)
 }

@@ -187,8 +187,8 @@ OpenAPI.
 
 | ID | Задача | Статус |
 |---|---|---|
-| T700 | Переписать `MetricsResponse`, `BottleneckItem`, `BottlenecksResponse` в `simulatorTypes.ts:328-346` под `app/schemas/simulator.py:443-525`; `MetricSeriesKey` на 7 значений, добавить `run_id` в `BottlenecksResponse`, сделать `api_version` обязательным. Готовый текст — в приложении ниже. **История git подтверждает, что это не «фронт против старого бэкенда»:** `git log -S 'MetricsResponse' -- simulator-ui/v2/src/api/simulatorTypes.ts` даёт ровно один коммит — `c2220cf` (2026-01-29), он же коммит создания файла; форма на бэкенде — тоже ровно один коммит, `5f26ea0` (2026-01-28). Схема бэкенда приземлилась **на день раньше** фронтовых типов: типы были спекулятивными с самого начала и ни разу не сверялись | `[ ]` |
-| T701 | Декодеры + перевод `getMetrics`/`getBottlenecks` на `simulatorContractJson`. Опорный факт: коммит `8494992 fix(simulator): validate critical REST responses` ввёл `simulatorContractJson` (`simulatorApi.ts:39-47`) и провёл через него сценарные и lifecycle-вызовы — `listScenarios` `:50`, `getScenario` `:54`, `getSnapshot` `:147`, `setIntensity` `:134` и др. `getMetrics` `:166` и `getBottlenecks` `:180` в эту волну валидации не попали | `[ ]` |
+| T700 | Переписать `MetricsResponse`, `BottleneckItem`, `BottlenecksResponse` в `simulatorTypes.ts:328-346` под `app/schemas/simulator.py:443-525`; `MetricSeriesKey` на 7 значений, добавить `run_id` в `BottlenecksResponse`, сделать `api_version` обязательным. Готовый текст — в приложении ниже. **История git подтверждает, что это не «фронт против старого бэкенда»:** `git log -S 'MetricsResponse' -- simulator-ui/v2/src/api/simulatorTypes.ts` даёт ровно один коммит — `c2220cf` (2026-01-29), он же коммит создания файла; форма на бэкенде — тоже ровно один коммит, `5f26ea0` (2026-01-28). Схема бэкенда приземлилась **на день раньше** фронтовых типов: типы были спекулятивными с самого начала и ни разу не сверялись | `[x]` — закрыт 2026-08-21 |
+| T701 | Декодеры + перевод `getMetrics`/`getBottlenecks` на `simulatorContractJson`. Опорный факт: коммит `8494992 fix(simulator): validate critical REST responses` ввёл `simulatorContractJson` (`simulatorApi.ts:39-47`) и провёл через него сценарные и lifecycle-вызовы — `listScenarios` `:50`, `getScenario` `:54`, `getSnapshot` `:147`, `setIntensity` `:134` и др. `getMetrics` `:166` и `getBottlenecks` `:180` в эту волну валидации не попали | `[x]` — закрыт 2026-08-21 |
 | T702 | `useMetricsPolling.ts` (5 c, гейт по `runStatus`, вычисление `from_ms`/`to_ms`/`step_ms`) | `[ ]` |
 | T703 | `MetricsKpiCard.vue`, `BottlenecksList.vue`, `RealMetricsPanel.vue` на `ds-*`; регистрация в `overlaySurfaceCatalog.ts` | `[ ]` |
 | T704 | `focusOnEdge` в `useCamera.ts` + проводка через `useAppViewWiring.ts` | `[ ]` |
@@ -245,7 +245,11 @@ export type MetricSeriesKey =
 
 export type MetricUnit = '%' | 'count' | 'amount' | null
 
-export type MetricPoint = { t_ms: number; v: number }
+// 2026-08-20 / T715: `v` — decimal string и nullable. `null` = измерения не было,
+// строка = было; `"0.00000000"` — измеренный ноль. Числом `v` не был с момента
+// перевода денежных серий на Numeric: вставка прежней редакции вернула бы
+// и float над деньгами, и неотличимость "нет данных" от нуля.
+export type MetricPoint = { t_ms: number; v: string | null }
 
 export type MetricSeries = { key: MetricSeriesKey; unit: MetricUnit; points: MetricPoint[] }
 

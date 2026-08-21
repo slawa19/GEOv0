@@ -9,6 +9,8 @@ import {
   actionTrustlineCreate,
   actionTrustlineUpdate,
   actionTxOnce,
+  getBottlenecks,
+  getMetrics,
   getParticipantsList,
   getPaymentTargets,
   getRun,
@@ -106,6 +108,69 @@ const clearingRealResponse = {
   total_cleared_amount: '0',
   cycles: [],
   client_action_id: null,
+}
+
+const metricsQuery = { from_ms: 0, to_ms: 10_000, step_ms: 5_000 }
+
+// Shaped after the canonical `MetricsResponse` (`api/openapi.yaml`, `app/schemas/simulator.py`):
+// seven declared series keys, `v` a decimal string or `null`, never a number.
+const metricsResponse = {
+  api_version: 'simulator-api/1',
+  run_id: 'run-1',
+  equivalent: 'UAH',
+  from_ms: 0,
+  to_ms: 10_000,
+  step_ms: 5_000,
+  series: [
+    {
+      key: 'success_rate',
+      unit: '%',
+      // `null` = no measurement yet; `"0.00000000"` = a measured zero. Different states.
+      points: [
+        { t_ms: 0, v: null },
+        { t_ms: 5_000, v: '0.00000000' },
+        { t_ms: 10_000, v: '99.50000000' },
+      ],
+    },
+    {
+      key: 'total_debt',
+      unit: 'amount',
+      // Beyond Number.MAX_SAFE_INTEGER on purpose: a float round-trip would corrupt this string.
+      points: [{ t_ms: 10_000, v: '9007199254740993.00000001' }],
+    },
+    {
+      key: 'active_trustlines',
+      unit: 'count',
+      points: [{ t_ms: 10_000, v: '12.00000000' }],
+    },
+    {
+      key: 'avg_route_length',
+      unit: null,
+      points: [],
+    },
+  ],
+}
+
+const bottlenecksResponse = {
+  api_version: 'simulator-api/1',
+  run_id: 'run-1',
+  equivalent: 'UAH',
+  items: [
+    {
+      target: { kind: 'edge', from: 'alice', to: 'bob' },
+      score: 0.75,
+      reason_code: 'LOW_AVAILABLE',
+      label: 'Alice → Bob',
+      suggested_action: 'raise the limit',
+    },
+    {
+      target: { kind: 'node', id: 'carol' },
+      score: 0.5,
+      reason_code: 'CLEARING_PRESSURE',
+      label: null,
+      suggested_action: null,
+    },
+  ],
 }
 
 const uncheckedActionCases = [
@@ -266,6 +331,197 @@ describe('Simulator critical REST response contracts', () => {
     await expect(getScenarioPreview(cfg, 'scenario-1', 'UAH', { mode: 'real' })).resolves.toMatchObject({
       links: [{ source: 'A', target: 'B' }],
     })
+  })
+
+  it('accepts the canonical metrics response and keeps every value in its wire form', async () => {
+    respondWith(metricsResponse)
+    const result = await getMetrics(cfg, 'run-1', 'UAH', metricsQuery)
+
+    expect(result).toEqual(metricsResponse)
+
+    const successRate = result.series[0]
+    // "not measured" survives as null and is not compensated into a zero...
+    expect(successRate.points[0].v).toBeNull()
+    // ...while a measured zero survives as the decimal string it arrived as.
+    expect(successRate.points[1].v).toBe('0.00000000')
+    expect(typeof successRate.points[1].v).toBe('string')
+
+    // Money keeps every digit: this string is not representable as a JS number.
+    const totalDebt = result.series[1]
+    expect(totalDebt.points[0].v).toBe('9007199254740993.00000001')
+    expect(String(Number(totalDebt.points[0].v))).not.toBe(totalDebt.points[0].v)
+
+    expect(result.series.map((s) => s.key)).toEqual([
+      'success_rate',
+      'total_debt',
+      'active_trustlines',
+      'avg_route_length',
+    ])
+    expect(result.series[3].unit).toBeNull()
+  })
+
+  it('accepts a series with no unit key, because the contract makes unit optional', async () => {
+    // The canon lists `MetricSeries.required: [key, points]` and pydantic declares
+    // `unit: MetricUnit = None`. A response without the key is therefore valid and must not be
+    // rejected: rejecting it would put the decoder *stricter* than its own source of truth.
+    respondWith({
+      ...metricsResponse,
+      series: [{ key: 'success_rate', points: [{ t_ms: 0, v: '1.00000000' }] }],
+    })
+    const result = await getMetrics(cfg, 'run-1', 'UAH', metricsQuery)
+
+    // Absent and explicit `null` are one state for `unit`, so the absent key reads as `null`...
+    expect(result.series[0].unit).toBeNull()
+    expect(result.series[0].points[0].v).toBe('1.00000000')
+
+    // ...and that is the exact opposite of `v`, where a missing key stays a rejection.
+    respondWith({
+      ...metricsResponse,
+      series: [{ key: 'success_rate', unit: null, points: [{ t_ms: 0 }] }],
+    })
+    await expect(getMetrics(cfg, 'run-1', 'UAH', metricsQuery)).rejects.toBeInstanceOf(
+      SimulatorContractError,
+    )
+  })
+
+  it('accepts the canonical bottlenecks response with both target kinds', async () => {
+    respondWith(bottlenecksResponse)
+    const result = await getBottlenecks(cfg, 'run-1', 'UAH', { limit: 20 })
+
+    expect(result).toEqual(bottlenecksResponse)
+    expect(result.items[0].target).toEqual({ kind: 'edge', from: 'alice', to: 'bob' })
+    expect(result.items[1].target).toEqual({ kind: 'node', id: 'carol' })
+  })
+
+  it.each([
+    {
+      label: 'legacy flat points shape',
+      payload: {
+        api_version: 'simulator-api/1',
+        equivalent: 'UAH',
+        points: [{ t_ms: 0, success_rate: 99.5 }],
+      },
+      call: () => getMetrics(cfg, 'run-1', 'UAH', metricsQuery),
+      contract: 'metrics',
+      diagnostic: '$.points',
+    },
+    {
+      label: 'numeric metric value',
+      payload: {
+        ...metricsResponse,
+        series: [{ key: 'success_rate', unit: '%', points: [{ t_ms: 0, v: 99.5 }] }],
+      },
+      call: () => getMetrics(cfg, 'run-1', 'UAH', metricsQuery),
+      contract: 'metrics',
+      diagnostic: '$.series[0].points[0].v',
+    },
+    {
+      label: 'exponential metric value',
+      payload: {
+        ...metricsResponse,
+        series: [{ key: 'success_rate', unit: '%', points: [{ t_ms: 0, v: '1e3' }] }],
+      },
+      call: () => getMetrics(cfg, 'run-1', 'UAH', metricsQuery),
+      contract: 'metrics',
+      diagnostic: '$.series[0].points[0].v',
+    },
+    {
+      label: 'metric point with no value key at all',
+      payload: {
+        ...metricsResponse,
+        series: [{ key: 'success_rate', unit: '%', points: [{ t_ms: 0 }] }],
+      },
+      call: () => getMetrics(cfg, 'run-1', 'UAH', metricsQuery),
+      contract: 'metrics',
+      diagnostic: '$.series[0].points[0].v',
+    },
+    {
+      label: 'unknown metric series key',
+      payload: {
+        ...metricsResponse,
+        series: [{ key: 'route_depth', unit: 'count', points: [] }],
+      },
+      call: () => getMetrics(cfg, 'run-1', 'UAH', metricsQuery),
+      contract: 'metrics',
+      diagnostic: '$.series[0].key',
+    },
+    {
+      label: 'unknown metric unit',
+      payload: {
+        ...metricsResponse,
+        series: [{ key: 'success_rate', unit: 'percent', points: [] }],
+      },
+      call: () => getMetrics(cfg, 'run-1', 'UAH', metricsQuery),
+      contract: 'metrics',
+      diagnostic: '$.series[0].unit',
+    },
+    {
+      label: 'metrics window missing step',
+      payload: { ...metricsResponse, step_ms: undefined },
+      call: () => getMetrics(cfg, 'run-1', 'UAH', metricsQuery),
+      contract: 'metrics',
+      diagnostic: '$.step_ms',
+    },
+    {
+      label: 'legacy bottleneck item shape',
+      payload: {
+        api_version: 'simulator-api/1',
+        run_id: 'run-1',
+        equivalent: 'UAH',
+        items: [{ kind: 'edge', score: 0.75, from: 'alice', to: 'bob' }],
+      },
+      call: () => getBottlenecks(cfg, 'run-1', 'UAH', {}),
+      contract: 'bottlenecks',
+      diagnostic: '$.items[0].kind',
+    },
+    {
+      label: 'unknown bottleneck reason code',
+      payload: {
+        ...bottlenecksResponse,
+        items: [{ ...bottlenecksResponse.items[0], reason_code: 'SOMETHING_ELSE' }],
+      },
+      call: () => getBottlenecks(cfg, 'run-1', 'UAH', {}),
+      contract: 'bottlenecks',
+      diagnostic: '$.items[0].reason_code',
+    },
+    {
+      label: 'bottleneck edge target with the python-side from_ alias',
+      payload: {
+        ...bottlenecksResponse,
+        items: [{ ...bottlenecksResponse.items[0], target: { kind: 'edge', from_: 'alice', to: 'bob' } }],
+      },
+      call: () => getBottlenecks(cfg, 'run-1', 'UAH', {}),
+      contract: 'bottlenecks',
+      diagnostic: '$.items[0].target.from_',
+    },
+    {
+      label: 'bottleneck target of an unknown kind',
+      payload: {
+        ...bottlenecksResponse,
+        items: [{ ...bottlenecksResponse.items[0], target: { kind: 'cluster', id: 'c1' } }],
+      },
+      call: () => getBottlenecks(cfg, 'run-1', 'UAH', {}),
+      contract: 'bottlenecks',
+      diagnostic: '$.items[0].target.kind',
+    },
+    {
+      label: 'bottlenecks response without run_id',
+      payload: { ...bottlenecksResponse, run_id: undefined },
+      call: () => getBottlenecks(cfg, 'run-1', 'UAH', {}),
+      contract: 'bottlenecks',
+      diagnostic: '$.run_id',
+    },
+  ])('rejects malformed 2xx $label response', async ({ payload, call, contract, diagnostic }) => {
+    respondWith(payload)
+
+    try {
+      await call()
+      throw new Error('expected contract rejection')
+    } catch (error) {
+      expect(error).toBeInstanceOf(SimulatorContractError)
+      expect(error).toMatchObject({ status: 200, contract })
+      expect((error as SimulatorContractError).diagnostic).toContain(diagnostic)
+    }
   })
 
   it('accepts an honest zero-cycle clearing action response', async () => {

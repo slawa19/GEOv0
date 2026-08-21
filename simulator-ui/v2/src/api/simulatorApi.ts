@@ -1,7 +1,9 @@
 import { httpJson, httpUrl, type HttpConfig } from './http'
 import {
+  decodeBottlenecksResponse,
   decodeClearingOnceResponse,
   decodeGraphSnapshotResponse,
+  decodeMetricsResponse,
   decodeRunStatusResponse,
   decodeScenariosListResponse,
   decodeScenarioSummaryResponse,
@@ -167,7 +169,11 @@ export function getMetrics(
     to_ms: String(params.to_ms),
     step_ms: String(params.step_ms),
   }).toString()
-  return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/metrics?${q}`)
+  return simulatorContractJson(
+    cfg,
+    `/simulator/runs/${encodeURIComponent(runId)}/metrics?${q}`,
+    decodeMetricsResponse,
+  )
 }
 
 export function getBottlenecks(
@@ -181,7 +187,11 @@ export function getBottlenecks(
     ...(params.limit != null ? { limit: String(params.limit) } : {}),
     ...(params.min_score != null ? { min_score: String(params.min_score) } : {}),
   }).toString()
-  return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/bottlenecks?${q}`)
+  return simulatorContractJson(
+    cfg,
+    `/simulator/runs/${encodeURIComponent(runId)}/bottlenecks?${q}`,
+    decodeBottlenecksResponse,
+  )
 }
 
 export function listArtifacts(cfg: HttpConfig, runId: string): Promise<ArtifactIndexResponse> {

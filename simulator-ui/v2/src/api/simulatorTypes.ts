@@ -325,22 +325,71 @@ export type SimulatorEvent =
 
 export type SimulatorGraphSnapshot = GraphSnapshot
 
+export type MetricSeriesKey =
+  | 'success_rate'
+  | 'avg_route_length'
+  | 'total_debt'
+  | 'clearing_volume'
+  | 'bottlenecks_score'
+  | 'active_participants'
+  | 'active_trustlines'
+
+/**
+ * The value when the backend declares a unit for the series. The key itself is OPTIONAL:
+ * the canon lists `MetricSeries.required: [key, points]` and pydantic gives it a default
+ * (`unit: MetricUnit = None`), so a response without the key is contract-valid.
+ */
+export type MetricUnit = '%' | 'count' | 'amount' | null
+
+/**
+ * 2026-08-20 / T715: `v` is a decimal string and nullable.
+ *
+ * `null` means "no measurement at/before this timestamp"; a string means there was one, so a
+ * measured zero arrives as `"0.00000000"` and stays distinguishable from `null`. Two of the seven
+ * series (`total_debt`, `clearing_volume`) are money, so the value must never be parsed into a JS
+ * number — that is the step where exactness is lost (AGENTS.md §8).
+ */
+export type MetricPoint = { t_ms: number; v: string | null }
+
+// `unit?`, not `unit`: an absent key and an explicit `null` mean the same thing here — no unit
+// declared — which is exactly the opposite of `MetricPoint.v`, where the two are different
+// statements. The asymmetry is deliberate; see the decoder for both halves.
+export type MetricSeries = { key: MetricSeriesKey; unit?: MetricUnit; points: MetricPoint[] }
+
 export type MetricsResponse = {
-  api_version?: string
+  api_version: string
+  run_id: string
   equivalent: string
-  points: Array<{ t_ms: number } & Record<string, number | null>>
+  from_ms: number
+  to_ms: number
+  step_ms: number
+  /** Seven keys are declared, but a run may legitimately carry fewer series: never index blindly. */
+  series: MetricSeries[]
 }
 
+export type BottleneckReasonCode =
+  | 'LOW_AVAILABLE'
+  | 'HIGH_USED'
+  | 'FREQUENT_ABORTS'
+  | 'TOO_MANY_TIMEOUTS'
+  | 'ROUTING_TOO_DEEP'
+  | 'CLEARING_PRESSURE'
+
+export type BottleneckTargetEdge = { kind: 'edge'; from: string; to: string }
+export type BottleneckTargetNode = { kind: 'node'; id: string }
+export type BottleneckTarget = BottleneckTargetEdge | BottleneckTargetNode
+
 export type BottleneckItem = {
-  kind: string
+  target: BottleneckTarget
   score: number
-  from?: string
-  to?: string
-  details?: Record<string, unknown>
+  reason_code: BottleneckReasonCode
+  label?: string | null
+  suggested_action?: string | null
 }
 
 export type BottlenecksResponse = {
-  api_version?: string
+  api_version: string
+  run_id: string
   equivalent: string
   items: BottleneckItem[]
 }
