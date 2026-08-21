@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { effectScope, nextTick, ref, type Ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -103,9 +106,13 @@ type Harness = {
   runId: Ref<string | null>
   equivalent: Ref<string>
   runStatus: Ref<RunStatus | null>
+  /** The surface gate (spec 007, T705): is anything actually showing this data? */
+  enabled: Ref<boolean>
 }
 
-function setup(over: { runId?: string | null; runStatus?: RunStatus | null } = {}): Harness {
+function setup(
+  over: { runId?: string | null; runStatus?: RunStatus | null; enabled?: boolean } = {},
+): Harness {
   const apiBase = ref('/api/v1')
   const accessToken = ref<string | null>(null)
   const runId = ref<string | null>(over.runId === undefined ? 'run-1' : over.runId)
@@ -113,15 +120,16 @@ function setup(over: { runId?: string | null; runStatus?: RunStatus | null } = {
   const runStatus = ref<RunStatus | null>(
     over.runStatus === undefined ? makeRunStatus() : over.runStatus,
   )
+  const enabled = ref(over.enabled ?? true)
 
   const scope = effectScope()
   let api: ReturnType<typeof useMetricsPolling> | null = null
   scope.run(() => {
-    api = useMetricsPolling({ apiBase, accessToken, runId, equivalent, runStatus })
+    api = useMetricsPolling({ apiBase, accessToken, runId, equivalent, runStatus, enabled })
   })
   if (api === null) throw new Error('composable did not initialise')
 
-  return { scope, api, runId, equivalent, runStatus }
+  return { scope, api, runId, equivalent, runStatus, enabled }
 }
 
 /** A promise whose settlement the test controls, so "still in flight" is an observable state. */
@@ -525,6 +533,75 @@ describe('useMetricsPolling', () => {
     h.scope.stop()
   })
 
+  // --- The surface gate (spec 007, T705) -------------------------
+  //
+  // A run can be `running` and still have nobody looking at it. Every poll costs two requests, and
+  // both of them make the backend read the run's metric tables, so an invisible panel that keeps
+  // polling is spending someone else's database.
+
+  it('does not poll at all while the surface is hidden, however healthy the run is', async () => {
+    const h = setup({ enabled: false })
+    await flush()
+
+    expect(getMetricsMock).not.toHaveBeenCalled()
+    expect(getBottlenecksMock).not.toHaveBeenCalled()
+    expect(h.api.isPolling.value).toBe(false)
+    expect(vi.getTimerCount()).toBe(0)
+
+    // Not merely "late": twenty intervals of a running run produce nothing.
+    await vi.advanceTimersByTimeAsync(METRICS_POLL_INTERVAL_MS * 20)
+    await flush()
+    expect(getMetricsMock).not.toHaveBeenCalled()
+    expect(getBottlenecksMock).not.toHaveBeenCalled()
+    expect(h.api.phase.value).toBe('idle')
+
+    h.scope.stop()
+  })
+
+  it('stops polling when the surface is hidden and resumes when it comes back', async () => {
+    const h = setup()
+    await flush()
+    expect(getMetricsMock).toHaveBeenCalledTimes(1)
+
+    h.enabled.value = false
+    await flush()
+    expect(h.api.isPolling.value).toBe(false)
+    expect(vi.getTimerCount()).toBe(0)
+
+    await vi.advanceTimersByTimeAsync(METRICS_POLL_INTERVAL_MS * 5)
+    await flush()
+    // Not one request while hidden.
+    expect(getMetricsMock).toHaveBeenCalledTimes(1)
+
+    h.enabled.value = true
+    await flush()
+    // Reopening refreshes immediately rather than making the user wait out an interval.
+    expect(getMetricsMock).toHaveBeenCalledTimes(2)
+    expect(h.api.isPolling.value).toBe(true)
+
+    await vi.advanceTimersByTimeAsync(METRICS_POLL_INTERVAL_MS)
+    await flush()
+    expect(getMetricsMock).toHaveBeenCalledTimes(3)
+
+    h.scope.stop()
+  })
+
+  it('keeps the last answer while hidden instead of blanking the panel', async () => {
+    const h = setup()
+    await flush()
+    expect(h.api.phase.value).toBe('ready')
+
+    h.enabled.value = false
+    await flush()
+
+    // Hiding is not a run change: nothing was invalidated, so nothing is thrown away. Re-opening
+    // shows the last measurements immediately, with a fresh poll already on its way.
+    expect(h.api.metrics.value?.series[0]?.key).toBe('total_debt')
+    expect(h.api.phase.value).toBe('ready')
+
+    h.scope.stop()
+  })
+
   it('does not write into a disposed surface when a late answer arrives', async () => {
     const late = deferred<MetricsResponse>()
     getMetricsMock.mockImplementationOnce(() => late.promise)
@@ -538,5 +615,86 @@ describe('useMetricsPolling', () => {
 
     expect(h.api.metrics.value).toBeNull()
     expect(h.api.metricsPhase.value).not.toBe('ready')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Wiring guard: does the app actually feed this composable?
+// ---------------------------------------------------------------------------
+
+/**
+ * The second position of a blind spot found while wiring T705, worth naming precisely.
+ *
+ * `useSimulatorApp` is instantiated exactly once, inside `SimulatorAppRoot`, and the only test
+ * that mounts that component mocks the composable away. Nothing in this suite ever runs its body.
+ * Measured, not assumed: deleting `getLayoutLinks` from its `useAppViewWiring` call left all 844
+ * tests green and `vue-tsc` silent.
+ *
+ * The dependencies below sit in the same position and fail the same way. Every one of them is
+ * tolerant by design — a ref that may read empty, a getter that may be absent — so dropping one
+ * does not fail to compile. It makes `shouldPoll` false forever: the panel sits on `idle`, no
+ * request is ever made, nothing is logged, and every test above still passes. A user sees an
+ * analytics panel that shows nothing and reports nothing wrong.
+ *
+ * This reads source text, which is the weakest kind of test, and that is deliberate. Until
+ * something can instantiate the real composable — separate and much larger work — a source
+ * assertion is the only thing standing between that regression and a green build.
+ */
+function useSimulatorAppSource(): string {
+  // `new URL(rel, import.meta.url)` is unusable here: under happy-dom the global `URL` resolves
+  // against the document origin and hands back an http: URL.
+  const here = dirname(fileURLToPath(import.meta.url))
+  return readFileSync(resolve(here, './useSimulatorApp.ts'), 'utf8')
+}
+
+/**
+ * The options literal of `callee(` … `)`, with comments removed.
+ *
+ * Stripping comments is not tidiness. The first version of the companion guard passed on the very
+ * deletion it existed to catch, because it matched the dependency's name inside a comment that
+ * described it. Prose about a dependency is not the dependency.
+ */
+function optionsBlockOf(source: string, callee: string): string {
+  const start = source.indexOf(`${callee}({`)
+  expect(start).toBeGreaterThan(-1)
+
+  const end = source.indexOf('\n  })', start)
+  expect(end).toBeGreaterThan(start)
+
+  return source
+    .slice(start, end)
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .filter((line) => !line.trim().startsWith('//'))
+    .join('\n')
+}
+
+describe('useMetricsPolling — the app really feeds it (spec 007, T705)', () => {
+  it('passes every gate dependency, each from its live source', () => {
+    const block = optionsBlockOf(useSimulatorAppSource(), 'useMetricsPolling')
+
+    // Counter-probes: the slice is the right call, and it is not empty or over-long.
+    expect(block.startsWith('useMetricsPolling({')).toBe(true)
+    expect(block).not.toContain('useAppViewWiring')
+    // And the comment stripper works, so no assertion below can be satisfied by prose.
+    expect(block).not.toContain('GET /metrics')
+
+    // Credentials and target. Read from `real` live: captured values would pin the stream to
+    // whatever the app happened to hold at setup, across run restarts and token refreshes.
+    expect(block).toMatch(/\bapiBase\s*:[^\n]*\breal\.apiBase\b/)
+    expect(block).toMatch(/\baccessToken\s*:[^\n]*\breal\.accessToken\b/)
+    expect(block).toMatch(/\brunId\s*:[^\n]*\breal\.runId\b/)
+
+    // The two gates. `runStatus` decides whether new points are being produced; without it the
+    // run never reads as `running` and nothing is ever fetched.
+    expect(block).toMatch(/\brunStatus\s*:[^\n]*\breal\.runStatus\b/)
+
+    // The equivalent must be the effective one, not the raw picker value: an empty string here
+    // closes `shouldPoll` silently.
+    expect(block).toMatch(/\bequivalent\s*:\s*effectiveEq\b/)
+
+    // The surface gate. Dropping it does not make the panel poll more — `enabled` defaults to
+    // "always" only when omitted at the seam, and the app's own default is "no surface, no poll".
+    expect(block).toMatch(/\benabled\s*:\s*isAnalyticsPanelVisible\b/)
   })
 })

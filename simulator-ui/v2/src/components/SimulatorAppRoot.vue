@@ -16,6 +16,7 @@ import ErrorToast from './ErrorToast.vue'
 import SuccessToast from './SuccessToast.vue'
 import InteractHistoryLog from './InteractHistoryLog.vue'
 import GraphNavigator from './GraphNavigator.vue'
+import RealMetricsPanel from './RealMetricsPanel.vue'
 
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 
@@ -137,6 +138,7 @@ onUnmounted(() => {
 })
 
 import type { GraphLink } from '../types'
+import type { BottleneckTarget } from '../api/simulatorTypes'
 
 import { useSimulatorApp } from '../composables/useSimulatorApp'
 import { computeNodeEdgeStats } from '../composables/useSelectedNodeEdgeStats'
@@ -149,7 +151,7 @@ import { computeNodeEdgeStats } from '../composables/useSelectedNodeEdgeStats'
  import { interactWindowOfPhase } from '../composables/windowManager/interactWindowOfPhase'
  import { useWmEdgeDetail } from '../composables/useWmEdgeDetail'
  import { useWindowController } from '../composables/useWindowController'
-import { resolveWindowSurfaceDescriptor } from '../ui-kit/overlaySurfaceCatalog'
+import { resolveOverlayDockStyle, resolveWindowSurfaceDescriptor } from '../ui-kit/overlaySurfaceCatalog'
 import {
   createMeasuredPublishedGeometryValue,
   DEFAULT_VIEWPORT_FALLBACK_HEIGHT_PX,
@@ -197,12 +199,35 @@ function uiOpenOrUpdateNodeCard(o: { nodeId: string; anchor: Point | null }) {
   queueMicrotask(() => windowController?.uiOpenOrUpdateNodeCard(o))
 }
 
+/**
+ * Analytics overlay surface visibility (spec 007, T705).
+ *
+ * Kept here, next to the theme and the DevTools snapshot, and persisted through the very same
+ * `useSimulatorStorage` `read01`/`write01` pair the DevTools dropdown in `BottomBar` uses — no new
+ * store and no new preference layer. `flush: 'sync'` for the same reason as that neighbour: the
+ * flag must reach storage before a reload can race it.
+ */
+const analyticsPanelOpen = ref(simulatorStorage.readAnalyticsPanelOpen() ?? false)
+
+watch(
+  analyticsPanelOpen,
+  (open) => {
+    simulatorStorage.writeAnalyticsPanelOpen(open)
+  },
+  { flush: 'sync' },
+)
+
+function toggleAnalyticsPanel(): void {
+  analyticsPanelOpen.value = !analyticsPanelOpen.value
+}
+
 const app = useSimulatorApp({
   uiCloseTopmostInspectorWindow,
   uiOpenOrUpdateEdgeDetail,
   uiOpenOrUpdateNodeCard,
   uiIsNodeCardOpen: () => wm.windows.value.some((w) => w.type === 'node-card'),
   optionalFxEnabled: () => !reducedMotion.value,
+  isAnalyticsPanelOpen: () => analyticsPanelOpen.value,
 })
 
 // MVP safety: ensure viewport isn't 0×0 even before `.root` ref is available.
@@ -400,8 +425,12 @@ const {
   floatingLabelsViewFx,
   worldToCssTranslateNoScale,
 
+  // analytics overlay surface (spec 007)
+  analytics,
+
   // helpers for template
   getNodeById,
+  focusOnEdge,
   resetView,
 } = app
 
@@ -812,6 +841,28 @@ function captureInteractFlowOpener(
 
 function inspectNodeFromNavigator(nodeId: string): void {
   uiOpenOrUpdateNodeCard({ nodeId, anchor: getNodeScreenCenter(nodeId) })
+}
+
+/**
+ * Analytics panel placement (spec 007, T705). Every value is derived from the catalog descriptor —
+ * which edge, which HUD clearances, which width contract, which z layer — so the scoped rule below
+ * declares the properties and the catalog decides what goes in them.
+ */
+const analyticsDockStyle = resolveOverlayDockStyle('real-metrics-panel')
+
+/**
+ * A bottleneck row asks to be shown on the graph.
+ *
+ * Edge targets frame the edge; node targets open the node's inspector card, which is the same
+ * thing the graph navigator does with a node. Both are visible responses — a row that reported
+ * "focus" and then did nothing would be worse than no button at all.
+ */
+function focusBottleneckTarget(target: BottleneckTarget): void {
+  if (target.kind === 'edge') {
+    focusOnEdge(target.from, target.to)
+    return
+  }
+  inspectNodeFromNavigator(target.id)
 }
 
 function inspectEdgeFromNavigator(link: GraphLink): void {
@@ -1352,11 +1403,32 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
       :is-demo-ui="isDemoUi"
       :is-exiting="isExiting"
       :toggle-demo-ui="toggleDemoUi"
+      :analytics-panel-open="analyticsPanelOpen"
+      :toggle-analytics-panel="toggleAnalyticsPanel"
       :fx-debug-enabled="apiMode === 'real' && fxDebug.enabled.value"
       :fx-busy="fxDebug.busy.value"
       :run-tx-once="isDemoUi ? demoRunTxOnce : fxDebug.runTxOnce"
       :run-clearing-once="isDemoUi ? demoRunClearingOnce : fxDebug.runClearingOnce"
     />
+
+    <!-- Analytics overlay surface (spec 007, T705). Registered in `overlaySurfaceCatalog`; the
+         geometry below is the descriptor's, not this component's. -->
+    <div
+      v-if="analytics.isVisible.value"
+      class="sar-analytics-dock"
+      data-surface="real-metrics-panel"
+      :style="analyticsDockStyle"
+    >
+      <RealMetricsPanel
+        :phase="analytics.phase.value"
+        :metrics="analytics.metrics.value"
+        :bottlenecks="analytics.bottlenecks.value"
+        :last-error="analytics.lastError.value"
+        :unavailable-reason="analytics.unavailableReason.value"
+        :get-node-name="(id) => getNodeById(id)?.name ?? null"
+        @focus-bottleneck="focusBottleneckTarget"
+      />
+    </div>
 
     <!-- Loading / error overlay (fail-fast, but non-intrusive).
          Hide the overlay during incremental updates (when we already have a snapshot)
@@ -1419,6 +1491,26 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
 }
 
 .wm-layer :deep(.ws-shell) {
+  pointer-events: auto;
+}
+
+/*
+  Analytics dock (spec 007, T705). Declarations only — every value comes from
+  `resolveOverlayDockStyle('real-metrics-panel')`, so moving the surface means editing the catalog
+  descriptor, not this rule.
+*/
+.sar-analytics-dock {
+  position: absolute;
+  top: var(--ds-ov-dock-top);
+  bottom: var(--ds-ov-dock-bottom);
+  left: var(--ds-ov-dock-left);
+  right: var(--ds-ov-dock-right);
+  width: var(--ds-ov-dock-width);
+  z-index: var(--ds-ov-dock-z);
+
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   pointer-events: auto;
 }
 

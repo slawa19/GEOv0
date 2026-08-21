@@ -192,7 +192,7 @@ OpenAPI.
 | T702 | `useMetricsPolling.ts` (5 c, гейт по `runStatus`, вычисление `from_ms`/`to_ms`/`step_ms`) | `[x]` — закрыт 2026-08-21 |
 | T703 | `MetricsKpiCard.vue`, `BottlenecksList.vue`, `RealMetricsPanel.vue` на `ds-*`; регистрация в `overlaySurfaceCatalog.ts` | `[x]` — закрыт 2026-08-21 |
 | T704 | `focusOnEdge` в `useCamera.ts` + проводка через `useAppViewWiring.ts` | `[x]` — закрыт 2026-08-21 |
-| T705 | **Панель как зарегистрированная overlay-поверхность** (не grid): новое семейство в `overlaySurfaceCatalog.ts`, переключатель в `BottomBar.vue`, сохранение в `usePersistedSimulatorPrefs.ts`. Подробности и история задачи — раздел «T705: сохранена и перепрописана» ниже | `[ ]` |
+| T705 | **Панель как зарегистрированная overlay-поверхность** (не grid): новое семейство в `overlaySurfaceCatalog.ts`, переключатель в `BottomBar.vue`, сохранение в `usePersistedSimulatorPrefs.ts`. Подробности и история задачи — раздел «T705: сохранена и перепрописана» ниже | `[x]` — закрыт 2026-08-21 |
 | T706 | Обновить `docs/ru/simulator/ui-analytics-dashboard-spec.md`: убрать хардкод-CSS из §5, поправить §7.1 и имена компонентов | `[ ]` |
 | T707 | Экспонировать `active_participants` / `active_trustlines` в `GET /metrics` (`metrics_bottlenecks.py:80-86`) либо явно задокументировать их как persist-only | `[x]` — закрыт срезом T713 2026-08-20 |
 | T708 | **Unblock F-007-1.** Починить unbound-local: `rows` связывается только внутри `if latest is not None:` (`metrics_bottlenecks.py:228`, присваивание `:234`), а читается снаружи (`:237`). Инициализировать `rows` пустым списком до ветки — тогда «bottlenecks ещё не персистились» становится честным пустым ответом, а не `UnboundLocalError` | `[x]` |

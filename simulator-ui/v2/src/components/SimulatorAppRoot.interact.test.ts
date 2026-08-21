@@ -1,8 +1,15 @@
 import { computed, createApp, h, nextTick, reactive, ref, type Component, type Ref } from 'vue'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { ParticipantInfo, TrustlineInfo } from '../api/simulatorTypes'
+import type {
+  BottlenecksResponse,
+  MetricsResponse,
+  ParticipantInfo,
+  TrustlineInfo,
+} from '../api/simulatorTypes'
+import type { MetricsStreamPhase } from '../composables/useMetricsPolling'
 import type { GraphSnapshot } from '../types'
+import { resolveOverlayDockStyle } from '../ui-kit/overlaySurfaceCatalog'
 
 type TestAnchor = { x: number; y: number }
 type TestSelectedNode = {
@@ -26,6 +33,7 @@ type MockUseSimulatorAppOpts = {
   uiOpenOrUpdateEdgeDetail?: (o: { fromPid: string; toPid: string; anchor: TestAnchor }) => void
   uiOpenOrUpdateNodeCard?: (o: { nodeId: string; anchor: TestAnchor | null }) => void
   uiCloseTopmostInspectorWindow?: () => void
+  isAnalyticsPanelOpen?: () => boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -38,6 +46,9 @@ const __GEO_TEST_SIM_STORAGE = {
 
   readUiTheme: vi.fn<() => string | null>(() => null),
   writeUiTheme: vi.fn(),
+
+  readAnalyticsPanelOpen: vi.fn<() => boolean | null>(() => null),
+  writeAnalyticsPanelOpen: vi.fn<(isOpen: boolean) => void>(),
 
   readDevtoolsOpenReal: vi.fn<() => boolean | null>(() => null),
   writeDevtoolsOpenReal: vi.fn<(isOpen: boolean) => void>(),
@@ -85,6 +96,15 @@ type GeoTestGlobals = {
   __GEO_TEST_SNAPSHOT?: GraphSnapshot | null
   __GEO_TEST_STATE_LOADING?: boolean
   __GEO_TEST_STATE_ERROR?: string
+
+  // Analytics overlay surface (spec 007, T705).
+  __GEO_TEST_ANALYTICS_PHASE_REF?: Ref<MetricsStreamPhase>
+  __GEO_TEST_ANALYTICS_METRICS_REF?: Ref<MetricsResponse | null>
+  __GEO_TEST_ANALYTICS_BOTTLENECKS_REF?: Ref<BottlenecksResponse | null>
+  __GEO_TEST_ANALYTICS_LAST_ERROR_REF?: Ref<string>
+  __GEO_TEST_ANALYTICS_UNAVAILABLE_REASON_REF?: Ref<string>
+  __GEO_TEST_ANALYTICS_IS_VISIBLE?: () => boolean
+  __GEO_TEST_FOCUS_ON_EDGE?: ReturnType<typeof vi.fn>
 }
 
 function setGeoTestGlobal<K extends keyof GeoTestGlobals>(key: K, value: GeoTestGlobals[K]): void {
@@ -595,12 +615,51 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
         floatingLabelsViewFx: computed(() => []),
         worldToCssTranslateNoScale: () => 'translate(0px, 0px)',
 
+        // analytics overlay surface (spec 007, T705)
+        //
+        // `isVisible` mirrors the production rule: the mount point owns and persists the toggle,
+        // this layer adds the real-mode half. Stream state is exposed through refs so a test can
+        // drive `ready` / `unavailable` / `error` and watch what reaches the surface.
+        analytics: (() => {
+          const analyticsPhase = ref<MetricsStreamPhase>('idle')
+          const analyticsMetrics = ref<MetricsResponse | null>(null)
+          const analyticsBottlenecks = ref<BottlenecksResponse | null>(null)
+          const analyticsLastError = ref('')
+          const analyticsUnavailableReason = ref('')
+
+          setGeoTestGlobal('__GEO_TEST_ANALYTICS_PHASE_REF', analyticsPhase)
+          setGeoTestGlobal('__GEO_TEST_ANALYTICS_METRICS_REF', analyticsMetrics)
+          setGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_REF', analyticsBottlenecks)
+          setGeoTestGlobal('__GEO_TEST_ANALYTICS_LAST_ERROR_REF', analyticsLastError)
+          setGeoTestGlobal('__GEO_TEST_ANALYTICS_UNAVAILABLE_REASON_REF', analyticsUnavailableReason)
+
+          const isVisible = computed(
+            () => apiMode.value === 'real' && Boolean(opts?.isAnalyticsPanelOpen?.()),
+          )
+          setGeoTestGlobal('__GEO_TEST_ANALYTICS_IS_VISIBLE', () => isVisible.value)
+
+          return {
+            isVisible,
+            phase: computed(() => analyticsPhase.value),
+            metrics: analyticsMetrics,
+            bottlenecks: analyticsBottlenecks,
+            lastError: analyticsLastError,
+            unavailableReason: analyticsUnavailableReason,
+            isPolling: computed(() => false),
+          }
+        })(),
+
         // helpers for template
         getNodeById: (id: string | null) => {
           const n = getGeoTestGlobal('__GEO_TEST_SELECTED_NODE') ?? null
           if (!id || !n) return null
           return String(n.id) === String(id) ? n : null
         },
+        focusOnEdge: (() => {
+          const fn = vi.fn(() => true)
+          setGeoTestGlobal('__GEO_TEST_FOCUS_ON_EDGE', fn)
+          return fn
+        })(),
         resetView: vi.fn(),
       }
     },
@@ -4196,6 +4255,303 @@ describe('SimulatorAppRoot - Demo UI DevTools snapshot/restore wiring', () => {
       host.remove()
 
       nav.restore()
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Analytics overlay surface (spec 007, T705)
+// ---------------------------------------------------------------------------
+
+function analyticsDock(host: HTMLElement): HTMLElement | null {
+  return host.querySelector('[data-surface="real-metrics-panel"]')
+}
+
+function analyticsToggle(host: HTMLElement): HTMLButtonElement {
+  const btn = host.querySelector('[data-testid="bottombar-analytics-toggle"]')
+  expect(btn).toBeTruthy()
+  return btn as HTMLButtonElement
+}
+
+function makeAnalyticsMetrics(): MetricsResponse {
+  return {
+    api_version: 'v1',
+    run_id: 'run-1',
+    equivalent: 'UAH',
+    from_ms: 0,
+    to_ms: 5_000,
+    step_ms: 5_000,
+    series: [{ key: 'success_rate', unit: '%', points: [{ t_ms: 0, v: '0.75' }] }],
+  }
+}
+
+type AnalyticsTestTarget = { kind: 'edge'; from: string; to: string } | { kind: 'node'; id: string }
+
+function makeAnalyticsBottlenecks(target: AnalyticsTestTarget): BottlenecksResponse {
+  return {
+    api_version: 'v1',
+    run_id: 'run-1',
+    equivalent: 'UAH',
+    items: [
+      {
+        target,
+        score: 0.85,
+        reason_code: 'FREQUENT_ABORTS',
+        label: 'Hot line',
+        suggested_action: 'Raise trust limit',
+      },
+    ],
+  }
+}
+
+describe('SimulatorAppRoot - analytics overlay surface (spec 007, T705)', () => {
+  beforeEach(() => {
+    const simStorage = getSimStorage()
+    simStorage.readAnalyticsPanelOpen.mockReturnValue(null)
+    simStorage.writeAnalyticsPanelOpen.mockClear()
+  })
+
+  afterEach(() => {
+    clearGeoTestGlobals(
+      '__GEO_TEST_ANALYTICS_PHASE_REF',
+      '__GEO_TEST_ANALYTICS_METRICS_REF',
+      '__GEO_TEST_ANALYTICS_BOTTLENECKS_REF',
+      '__GEO_TEST_ANALYTICS_LAST_ERROR_REF',
+      '__GEO_TEST_ANALYTICS_UNAVAILABLE_REASON_REF',
+      '__GEO_TEST_ANALYTICS_IS_VISIBLE',
+      '__GEO_TEST_FOCUS_ON_EDGE',
+    )
+  })
+
+  it('the bottom-bar toggle shows and hides the surface, and persists the choice', async () => {
+    setUrl('/?mode=real')
+    const simStorage = getSimStorage()
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = mountSimulatorAppRoot(host)
+
+    try {
+      await nextTick()
+
+      // Default is off: nothing is mounted and nothing was written yet.
+      expect(analyticsDock(host)).toBeNull()
+      expect(analyticsToggle(host).getAttribute('aria-pressed')).toBe('false')
+      expect(simStorage.writeAnalyticsPanelOpen).not.toHaveBeenCalled()
+
+      analyticsToggle(host).click()
+      await nextTick()
+
+      expect(analyticsDock(host)).toBeTruthy()
+      expect(analyticsToggle(host).getAttribute('aria-pressed')).toBe('true')
+      // Same mechanism as the DevTools dropdown next to it: written through useSimulatorStorage.
+      expect(simStorage.writeAnalyticsPanelOpen).toHaveBeenLastCalledWith(true)
+
+      analyticsToggle(host).click()
+      await nextTick()
+
+      expect(analyticsDock(host)).toBeNull()
+      expect(analyticsToggle(host).getAttribute('aria-pressed')).toBe('false')
+      expect(simStorage.writeAnalyticsPanelOpen).toHaveBeenLastCalledWith(false)
+    } finally {
+      app.unmount()
+      host.remove()
+    }
+  })
+
+  it('a stored "open" survives the reload: the surface is there on first paint', async () => {
+    setUrl('/?mode=real')
+    getSimStorage().readAnalyticsPanelOpen.mockReturnValue(true)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = mountSimulatorAppRoot(host)
+
+    try {
+      await nextTick()
+
+      expect(analyticsDock(host)).toBeTruthy()
+      expect(analyticsToggle(host).getAttribute('aria-pressed')).toBe('true')
+    } finally {
+      app.unmount()
+      host.remove()
+    }
+  })
+
+  it('never shows over fixtures, even when the stored flag says open', async () => {
+    // Fixtures have no metric store behind them; a panel here could only ever say "no data".
+    setUrl('/?mode=fixtures')
+    getSimStorage().readAnalyticsPanelOpen.mockReturnValue(true)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = mountSimulatorAppRoot(host)
+
+    try {
+      await nextTick()
+      expect(analyticsDock(host)).toBeNull()
+    } finally {
+      app.unmount()
+      host.remove()
+    }
+  })
+
+  it('takes its placement and z-order from the catalog descriptor, not from the component', async () => {
+    setUrl('/?mode=real')
+    getSimStorage().readAnalyticsPanelOpen.mockReturnValue(true)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = mountSimulatorAppRoot(host)
+
+    try {
+      await nextTick()
+
+      const dock = analyticsDock(host)
+      expect(dock).toBeTruthy()
+
+      const expected = resolveOverlayDockStyle('real-metrics-panel')
+      for (const [prop, value] of Object.entries(expected)) {
+        expect(dock!.style.getPropertyValue(prop)).toBe(value)
+      }
+
+      // Spot-check the two decisions visible on screen: it docks right, on the panel z layer.
+      expect(dock!.style.getPropertyValue('--ds-ov-dock-left')).toBe('auto')
+      expect(dock!.style.getPropertyValue('--ds-ov-dock-z')).toBe('var(--ds-z-panel)')
+    } finally {
+      app.unmount()
+      host.remove()
+    }
+  })
+
+  it('carries all three stream states through to the mounted surface', async () => {
+    setUrl('/?mode=real')
+    getSimStorage().readAnalyticsPanelOpen.mockReturnValue(true)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = mountSimulatorAppRoot(host)
+
+    try {
+      await nextTick()
+
+      const phase = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_PHASE_REF')
+      const metrics = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_METRICS_REF')
+      const bottlenecks = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_REF')
+      const lastError = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_LAST_ERROR_REF')
+      const unavailableReason = getRequiredGeoTestGlobal(
+        '__GEO_TEST_ANALYTICS_UNAVAILABLE_REASON_REF',
+      )
+
+      // ready — measurements are shown.
+      metrics.value = makeAnalyticsMetrics()
+      bottlenecks.value = makeAnalyticsBottlenecks({ kind: 'edge', from: 'alice', to: 'bob' })
+      phase.value = 'ready'
+      await nextTick()
+
+      expect(analyticsDock(host)!.querySelector('[data-state="ready"]')).toBeTruthy()
+      expect(analyticsDock(host)!.querySelector('.bnl__item')).toBeTruthy()
+
+      // unavailable — the backend has no measurements and said so. Not an error surface.
+      phase.value = 'unavailable'
+      unavailableReason.value = 'storage_disabled'
+      await nextTick()
+
+      const unavailable = analyticsDock(host)!.querySelector('[data-state="unavailable"]')
+      expect(unavailable).toBeTruthy()
+      expect(analyticsDock(host)!.querySelector('[data-state="error"]')).toBeNull()
+      // The correlation token the backend logged reaches the screen.
+      expect(unavailable!.textContent).toContain('storage_disabled')
+
+      // error — a failure, announced as one, with its message.
+      phase.value = 'error'
+      unavailableReason.value = ''
+      lastError.value = 'HTTP 500 metrics'
+      await nextTick()
+
+      const errored = analyticsDock(host)!.querySelector('[data-state="error"]')
+      expect(errored).toBeTruthy()
+      expect(analyticsDock(host)!.querySelector('[data-state="unavailable"]')).toBeNull()
+      expect(errored!.textContent).toContain('HTTP 500 metrics')
+    } finally {
+      app.unmount()
+      host.remove()
+    }
+  })
+
+  it('a bottleneck row asks the camera for that exact edge', async () => {
+    setUrl('/?mode=real')
+    getSimStorage().readAnalyticsPanelOpen.mockReturnValue(true)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = mountSimulatorAppRoot(host)
+
+    try {
+      await nextTick()
+
+      const phase = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_PHASE_REF')
+      const bottlenecks = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_REF')
+      bottlenecks.value = makeAnalyticsBottlenecks({ kind: 'edge', from: 'alice', to: 'bob' })
+      phase.value = 'ready'
+      await nextTick()
+
+      const focusBtn = analyticsDock(host)!.querySelector(
+        '.bnl__actions button',
+      ) as HTMLButtonElement
+      expect(focusBtn).toBeTruthy()
+
+      const focusOnEdge = getRequiredGeoTestGlobal('__GEO_TEST_FOCUS_ON_EDGE')
+      focusBtn.click()
+      await nextTick()
+
+      // Direction included: A to B and B to A are different edges everywhere in this app.
+      expect(focusOnEdge).toHaveBeenCalledWith('alice', 'bob')
+    } finally {
+      app.unmount()
+      host.remove()
+    }
+  })
+
+  it('a node bottleneck opens that node instead of pretending an edge was framed', async () => {
+    setUrl('/?mode=real')
+    getSimStorage().readAnalyticsPanelOpen.mockReturnValue(true)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = mountSimulatorAppRoot(host)
+
+    try {
+      await nextTick()
+
+      const phase = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_PHASE_REF')
+      const bottlenecks = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_REF')
+      bottlenecks.value = makeAnalyticsBottlenecks({ kind: 'node', id: 'carol' })
+      phase.value = 'ready'
+      await nextTick()
+
+      const wmOpen = getRequiredGeoTestGlobal('__GEO_TEST_WM_OPEN')
+      wmOpen.mockClear()
+      const focusOnEdge = getRequiredGeoTestGlobal('__GEO_TEST_FOCUS_ON_EDGE')
+
+      const focusBtn = analyticsDock(host)!.querySelector(
+        '.bnl__actions button',
+      ) as HTMLButtonElement
+      focusBtn.click()
+      await nextTick()
+      await nextTick()
+
+      expect(focusOnEdge).not.toHaveBeenCalled()
+
+      const opened = wmOpen.mock.calls
+        .map((c) => c[0] as { type?: string; data?: { nodeId?: unknown } } | undefined)
+        .filter(Boolean)
+      expect(
+        opened.some((o) => o?.type === 'node-card' && String(o?.data?.nodeId) === 'carol'),
+      ).toBe(true)
+    } finally {
+      app.unmount()
+      host.remove()
     }
   })
 })

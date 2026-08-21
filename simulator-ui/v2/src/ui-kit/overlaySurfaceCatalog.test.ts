@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
-import { getOverlaySurfaceDescriptor, resolveWindowSurfaceDescriptor } from './overlaySurfaceCatalog'
+import {
+  getOverlaySurfaceDescriptor,
+  resolveOverlayDockStyle,
+  resolveWindowSurfaceDescriptor,
+} from './overlaySurfaceCatalog'
 import type { WindowInstance } from '../composables/windowManager/types'
 
 function makeWindow(overrides?: Partial<WindowInstance>): WindowInstance {
@@ -158,5 +162,56 @@ describe('overlaySurfaceCatalog', () => {
     expect(resolved.descriptor.key).toBe('wm-inspector-window')
     expect(resolved.role).toBe('region')
     expect(resolved.ariaLabel).toBe('Node details: Bob')
+  })
+})
+describe('analytics panel surface (spec 007, T705)', () => {
+  it('is a docked overlay surface of its own family, not a cover over the canvas', () => {
+    expect(getOverlaySurfaceDescriptor('real-metrics-panel')).toMatchObject({
+      family: 'analytics-panel',
+      // `root-inset` would sit on top of the graph; the panel is read alongside it.
+      positioningOwner: 'root-side-dock',
+      zLayerToken: '--ds-z-panel',
+      a11y: { role: 'region', ariaLabel: 'Run analytics' },
+    })
+
+    expect(getOverlaySurfaceDescriptor('real-metrics-panel').dock).toEqual({
+      edge: 'right',
+      topClearanceToken: '--ds-hud-stack-height',
+      bottomClearanceToken: '--ds-hud-bottom-stack-height',
+      insetToken: '--ds-ov-inset',
+      widthToken: '--ds-ov-panel-maxw',
+    })
+  })
+
+  it('resolves placement into custom properties that name tokens, never pixels', () => {
+    const style = resolveOverlayDockStyle('real-metrics-panel')
+
+    // Docked right: the opposite edge is released, not given a competing value.
+    expect(style['--ds-ov-dock-left']).toBe('auto')
+    expect(style['--ds-ov-dock-right']).toBe('calc(var(--ds-ov-inset) + var(--ds-ov-safe-right))')
+
+    // Clears both HUD stacks by the tokens those stacks publish their measured heights into.
+    expect(style['--ds-ov-dock-top']).toContain('var(--ds-hud-stack-height)')
+    expect(style['--ds-ov-dock-bottom']).toContain('var(--ds-hud-bottom-stack-height)')
+
+    // Width follows the same overlay contract as `.ds-ov-panel`.
+    expect(style['--ds-ov-dock-width']).toBe(
+      'min(var(--ds-ov-panel-maxw), calc(100% - var(--ds-ov-panel-maxw-inset)))',
+    )
+
+    // The z layer is the descriptor's, so stacking cannot be re-decided in a stylesheet.
+    expect(style['--ds-ov-dock-z']).toBe('var(--ds-z-panel)')
+
+    // The whole point of the indirection: no number appears here. Every value is a token
+    // reference, so the design system stays the only place the geometry is written down.
+    for (const value of Object.values(style)) {
+      if (value === 'auto') continue
+      expect(value).not.toMatch(/\d+px/)
+    }
+  })
+
+  it('refuses to resolve dock geometry for a surface that has none', () => {
+    // Silently returning `{}` would pin the surface to the canvas corner with no explanation.
+    expect(() => resolveOverlayDockStyle('edge-tooltip')).toThrow(/not a docked surface/)
   })
 })

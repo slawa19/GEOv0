@@ -96,6 +96,15 @@ export function useMetricsPolling(deps: {
   runId: Readonly<Ref<string | null | undefined>>
   equivalent: Readonly<Ref<string>>
   runStatus: Readonly<Ref<RunStatus | null | undefined>>
+  /**
+   * Optional second gate: is anything actually showing this data?
+   *
+   * The run-status gate answers "are new points being produced"; this one answers "is anyone
+   * looking". A closed analytics panel (spec 007, T705) makes both requests pure waste — and not
+   * only on the client: `GET /metrics` and `GET /bottlenecks` read the run's metric tables on
+   * every poll. Omitted means "always enabled", which keeps every existing caller unchanged.
+   */
+  enabled?: Readonly<Ref<boolean>>
 }): {
   /**
    * Decoded responses, stored verbatim. Nothing here rewrites `MetricPoint.v`: a `null` value
@@ -148,8 +157,14 @@ export function useMetricsPolling(deps: {
    */
   const isRunning = computed(() => toLower(deps.runStatus.value?.state) === 'running')
 
+  const isEnabled = computed(() => deps.enabled?.value ?? true)
+
   const shouldPoll = computed(
-    () => activeRunId.value !== null && equivalentKey.value !== '' && isRunning.value,
+    () =>
+      isEnabled.value &&
+      activeRunId.value !== null &&
+      equivalentKey.value !== '' &&
+      isRunning.value,
   )
 
   const pollWindow = computed<MetricsWindow | null>(() =>

@@ -40,6 +40,7 @@ import { useAppUiDerivedState } from './useAppUiDerivedState'
 import { useLabelNodes } from './useLabelNodes'
 import { useLayoutIndex } from './useLayoutIndex'
 import { usePersistedSimulatorPrefs } from './usePersistedSimulatorPrefs'
+import { useMetricsPolling } from './useMetricsPolling'
 import { useSelectedNodeEdgeStats } from './useSelectedNodeEdgeStats'
 import { useSnapshotIndex } from './useSnapshotIndex'
 import { useAppPickingAndHover } from './useAppPickingAndHover'
@@ -114,6 +115,7 @@ type LabelNodesApi = ReturnType<typeof useLabelNodes>
 type PickingAndHoverApi = ReturnType<typeof useAppPickingAndHover>
 type FxOverlaysApi = ReturnType<typeof useAppFxOverlays>
 type ViewWiringApi = ReturnType<typeof useAppViewWiring>
+type MetricsPollingApi = ReturnType<typeof useMetricsPolling>
 type DragToPinApi = ReturnType<typeof useAppDragToPinAndPreview>
 type PhysicsAndPinningApi = ReturnType<typeof useAppPhysicsAndPinningWiring>
 type CanvasInteractionsApi = ReturnType<typeof useAppCanvasInteractionsWiring>
@@ -240,7 +242,19 @@ export type SimulatorAppApi = {
   worldToCssTranslateNoScale: ViewWiringApi['worldToCssTranslateNoScale']
 
   getNodeById: ReturnType<typeof useSnapshotIndex>['getNodeById']
+  focusOnEdge: ViewWiringApi['focusOnEdge']
   resetView: ViewWiringApi['resetView']
+
+  /** Analytics overlay surface (spec 007): visibility plus the single stream feeding the panel. */
+  analytics: {
+    isVisible: ComputedRef<boolean>
+    phase: MetricsPollingApi['phase']
+    metrics: MetricsPollingApi['metrics']
+    bottlenecks: MetricsPollingApi['bottlenecks']
+    lastError: MetricsPollingApi['lastError']
+    unavailableReason: MetricsPollingApi['unavailableReason']
+    isPolling: MetricsPollingApi['isPolling']
+  }
 }
 
 /**
@@ -356,6 +370,18 @@ export function useSimulatorApp(opts?: {
 
   /** Policy seam for non-essential animation and canvas effects. */
   optionalFxEnabled?: () => boolean
+
+  /**
+   * T705: has the user asked for the analytics overlay surface?
+   *
+   * The mount point owns and persists this flag (it is a UI preference, stored the same way as
+   * its bottom-bar neighbours); the real-mode half of the decision is added here, and the result
+   * is published back as `analytics.isVisible` so the flag and the poll gate cannot disagree.
+   *
+   * Read reactively — the getter is evaluated inside a `computed`. Omitted means "no such
+   * surface": nothing is polled at all.
+   */
+  isAnalyticsPanelOpen?: () => boolean
 }): SimulatorAppApi {
   const eq = ref('UAH')
   const scene = ref<SceneId>('A')
@@ -924,6 +950,11 @@ export function useSimulatorApp(opts?: {
     },
     getNodeById,
     getLayoutNodeById: (id) => getLayoutNodeByIdLive(id),
+    // Required for `focusOnEdge` to be anything but a no-op: without the links of the current
+    // snapshot it cannot tell "this edge exists" from "these two nodes exist", so it refuses to
+    // move the camera at all. Read live (not captured) for the same reason as the other five
+    // `getLayoutLinks` call sites in this file: `layout.links` is replaced wholesale per snapshot.
+    getLayoutLinks: () => layout.links,
   })
 
   const cameraSystem = viewWiring.cameraSystem
@@ -1688,6 +1719,32 @@ export function useSimulatorApp(opts?: {
     getLayoutSize: () => ({ w: layout.w, h: layout.h }),
   })
 
+  // ── Analytics overlay surface (spec 007, T705) ───────────────────────────────────────────────
+  //
+  // The toggle is owned and persisted by the mount point (`SimulatorAppRoot`), through the same
+  // `useSimulatorStorage` mechanism as its bottom-bar neighbours. What is added here is the second
+  // half of the condition — real mode — because fixtures have no metric store behind them: a panel
+  // opened over a demo scene would show permanent "no measurements" and poll endpoints that cannot
+  // answer. Mount point and poll gate then read the same computed and cannot disagree.
+  const isAnalyticsPanelVisible = computed(
+    () => isRealMode.value && (opts?.isAnalyticsPanelOpen?.() ?? false),
+  )
+
+  const analyticsStream = useMetricsPolling({
+    apiBase: computed(() => real.apiBase),
+    accessToken: computed(() => real.accessToken),
+    runId: computed(() => real.runId),
+    equivalent: effectiveEq,
+    runStatus: computed(() => real.runStatus),
+    /**
+     * Exactly the panel's visibility, not merely "real mode": a hidden surface must not spend a
+     * request pair every five seconds — `GET /metrics` and `GET /bottlenecks` both read the run's
+     * metric tables. Absent (no surface declared itself) means no polling at all, which is the
+     * only default that cannot bill a user for a screen nobody is looking at.
+     */
+    enabled: isAnalyticsPanelVisible,
+  })
+
   const api = {
     apiMode,
 
@@ -1843,8 +1900,20 @@ export function useSimulatorApp(opts?: {
     floatingLabelsViewFx,
     worldToCssTranslateNoScale: viewWiring.worldToCssTranslateNoScale,
 
+    // analytics overlay surface (spec 007)
+    analytics: {
+      isVisible: isAnalyticsPanelVisible,
+      phase: analyticsStream.phase,
+      metrics: analyticsStream.metrics,
+      bottlenecks: analyticsStream.bottlenecks,
+      lastError: analyticsStream.lastError,
+      unavailableReason: analyticsStream.unavailableReason,
+      isPolling: analyticsStream.isPolling,
+    },
+
     // helpers for template
     getNodeById,
+    focusOnEdge: viewWiring.focusOnEdge,
     resetView: viewWiring.resetView,
   } satisfies SimulatorAppApi
 
