@@ -14,6 +14,7 @@
 - Справочник API: см. [`docs/ru/04-api-reference.md`](../04-api-reference.md)
 - Конфигурация: см. [`docs/ru/config-reference.md`](../config-reference.md)
 - Деплоймент: см. [`docs/ru/05-deployment.md`](../05-deployment.md)
+- Локальный PostgreSQL без Docker и без прав администратора: [`postgres-local-portable.md`](postgres-local-portable.md)
 
 ## Критические заметки
 

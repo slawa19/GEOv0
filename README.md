@@ -391,6 +391,9 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 .\scripts\verify_local.ps1 -TaskSlug $taskSlug -BackendOnly -BackendMarker postgres -BackendSelector tests/integration/test_concurrent_prepare_routes_bottleneck_postgres.py
 ```
 
+No Docker on the machine? See [`docs/ru/backend/postgres-local-portable.md`](docs/ru/backend/postgres-local-portable.md)
+for a portable PostgreSQL that needs neither Docker nor administrator rights, matched to the version CI pins.
+
 The harness rejects non-SQLite databases unless both the database name matches
 `geov0_test_*` and `GEO_TEST_ALLOW_DB_RESET=1`. The opt-in flag cannot override
 an unsafe name. Direct pytest also fails during collection whenever a selected
