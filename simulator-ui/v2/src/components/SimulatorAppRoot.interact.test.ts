@@ -117,11 +117,14 @@ type GeoTestGlobals = {
   __GEO_TEST_STATE_ERROR?: string
 
   // Analytics overlay surface (spec 007, T705).
-  __GEO_TEST_ANALYTICS_PHASE_REF?: Ref<MetricsStreamPhase>
+  __GEO_TEST_ANALYTICS_METRICS_PHASE_REF?: Ref<MetricsStreamPhase>
+  __GEO_TEST_ANALYTICS_BOTTLENECKS_PHASE_REF?: Ref<MetricsStreamPhase>
   __GEO_TEST_ANALYTICS_METRICS_REF?: Ref<MetricsResponse | null>
   __GEO_TEST_ANALYTICS_BOTTLENECKS_REF?: Ref<BottlenecksResponse | null>
-  __GEO_TEST_ANALYTICS_LAST_ERROR_REF?: Ref<string>
-  __GEO_TEST_ANALYTICS_UNAVAILABLE_REASON_REF?: Ref<string>
+  __GEO_TEST_ANALYTICS_METRICS_ERROR_REF?: Ref<string>
+  __GEO_TEST_ANALYTICS_BOTTLENECKS_ERROR_REF?: Ref<string>
+  __GEO_TEST_ANALYTICS_METRICS_REASON_REF?: Ref<string>
+  __GEO_TEST_ANALYTICS_BOTTLENECKS_REASON_REF?: Ref<string>
   __GEO_TEST_ANALYTICS_IS_VISIBLE?: () => boolean
   __GEO_TEST_FOCUS_ON_EDGE?: ReturnType<typeof vi.fn>
 
@@ -223,7 +226,16 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
 // IMPORTANT: This test verifies conditional rendering in SimulatorAppRoot when the URL contains `ui=interact`.
 // We mock `useSimulatorApp()` to keep the test fast + deterministic while still deriving flags from the query string.
 
-  vi.mock('../composables/useSimulatorApp', () => {
+  vi.mock('../composables/useSimulatorApp', async () => {
+    // The one thing this mock does NOT re-invent: the rule that decides whether the analytics
+    // surface exists. A mock that re-states a rule turns every test over it into a test of the
+    // mock — which is how "never shows over fixtures" stayed green while the real-mode half of
+    // the app's condition was deleted. The rule is imported, not repeated.
+    const actual =
+      await vi.importActual<typeof import('../composables/useSimulatorApp')>(
+        '../composables/useSimulatorApp',
+      )
+
         return {
     useSimulatorApp: (opts?: MockUseSimulatorAppOpts) => {
       const qs = () => {
@@ -689,34 +701,54 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
 
         // analytics overlay surface (spec 007, T705)
         //
-        // `isVisible` mirrors the production rule: the mount point owns and persists the toggle,
-        // this layer adds the real-mode half. Stream state is exposed through refs so a test can
-        // drive `ready` / `unavailable` / `error` and watch what reaches the surface.
+        // `isVisible` IS the production rule — `__analyticsPanelVisibilityPolicy`, imported above
+        // — applied to the two facts this mock does synthesise: the mode taken from the query
+        // string, and the toggle owned by the mount point. Stream state is exposed per stream,
+        // through refs, so a test can drive `/metrics` and `/bottlenecks` independently and watch
+        // what reaches the surface.
         analytics: (() => {
-          const analyticsPhase = ref<MetricsStreamPhase>('idle')
+          const analyticsMetricsPhase = ref<MetricsStreamPhase>('idle')
+          const analyticsBottlenecksPhase = ref<MetricsStreamPhase>('idle')
           const analyticsMetrics = ref<MetricsResponse | null>(null)
           const analyticsBottlenecks = ref<BottlenecksResponse | null>(null)
-          const analyticsLastError = ref('')
-          const analyticsUnavailableReason = ref('')
+          const analyticsMetricsError = ref('')
+          const analyticsBottlenecksError = ref('')
+          const analyticsMetricsUnavailableReason = ref('')
+          const analyticsBottlenecksUnavailableReason = ref('')
 
-          setGeoTestGlobal('__GEO_TEST_ANALYTICS_PHASE_REF', analyticsPhase)
+          setGeoTestGlobal('__GEO_TEST_ANALYTICS_METRICS_PHASE_REF', analyticsMetricsPhase)
+          setGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_PHASE_REF', analyticsBottlenecksPhase)
           setGeoTestGlobal('__GEO_TEST_ANALYTICS_METRICS_REF', analyticsMetrics)
           setGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_REF', analyticsBottlenecks)
-          setGeoTestGlobal('__GEO_TEST_ANALYTICS_LAST_ERROR_REF', analyticsLastError)
-          setGeoTestGlobal('__GEO_TEST_ANALYTICS_UNAVAILABLE_REASON_REF', analyticsUnavailableReason)
+          setGeoTestGlobal('__GEO_TEST_ANALYTICS_METRICS_ERROR_REF', analyticsMetricsError)
+          setGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_ERROR_REF', analyticsBottlenecksError)
+          setGeoTestGlobal(
+            '__GEO_TEST_ANALYTICS_METRICS_REASON_REF',
+            analyticsMetricsUnavailableReason,
+          )
+          setGeoTestGlobal(
+            '__GEO_TEST_ANALYTICS_BOTTLENECKS_REASON_REF',
+            analyticsBottlenecksUnavailableReason,
+          )
 
-          const isVisible = computed(
-            () => apiMode.value === 'real' && Boolean(opts?.isAnalyticsPanelOpen?.()),
+          const isVisible = computed(() =>
+            actual.__analyticsPanelVisibilityPolicy(
+              apiMode.value === 'real',
+              Boolean(opts?.isAnalyticsPanelOpen?.()),
+            ),
           )
           setGeoTestGlobal('__GEO_TEST_ANALYTICS_IS_VISIBLE', () => isVisible.value)
 
           return {
             isVisible,
-            phase: computed(() => analyticsPhase.value),
+            metricsPhase: computed(() => analyticsMetricsPhase.value),
+            bottlenecksPhase: computed(() => analyticsBottlenecksPhase.value),
             metrics: analyticsMetrics,
             bottlenecks: analyticsBottlenecks,
-            lastError: analyticsLastError,
-            unavailableReason: analyticsUnavailableReason,
+            metricsError: analyticsMetricsError,
+            bottlenecksError: analyticsBottlenecksError,
+            metricsUnavailableReason: analyticsMetricsUnavailableReason,
+            bottlenecksUnavailableReason: analyticsBottlenecksUnavailableReason,
             isPolling: computed(() => false),
           }
         })(),
@@ -4385,11 +4417,14 @@ describe('SimulatorAppRoot - analytics overlay surface (spec 007, T705)', () => 
 
   afterEach(() => {
     clearGeoTestGlobals(
-      '__GEO_TEST_ANALYTICS_PHASE_REF',
+      '__GEO_TEST_ANALYTICS_METRICS_PHASE_REF',
+      '__GEO_TEST_ANALYTICS_BOTTLENECKS_PHASE_REF',
       '__GEO_TEST_ANALYTICS_METRICS_REF',
       '__GEO_TEST_ANALYTICS_BOTTLENECKS_REF',
-      '__GEO_TEST_ANALYTICS_LAST_ERROR_REF',
-      '__GEO_TEST_ANALYTICS_UNAVAILABLE_REASON_REF',
+      '__GEO_TEST_ANALYTICS_METRICS_ERROR_REF',
+      '__GEO_TEST_ANALYTICS_BOTTLENECKS_ERROR_REF',
+      '__GEO_TEST_ANALYTICS_METRICS_REASON_REF',
+      '__GEO_TEST_ANALYTICS_BOTTLENECKS_REASON_REF',
       '__GEO_TEST_ANALYTICS_IS_VISIBLE',
       '__GEO_TEST_FOCUS_ON_EDGE',
       '__GEO_TEST_LAYOUT_LINKS',
@@ -4501,7 +4536,7 @@ describe('SimulatorAppRoot - analytics overlay surface (spec 007, T705)', () => 
     }
   })
 
-  it('carries all three stream states through to the mounted surface', async () => {
+  it('carries both streams, separately, all the way through to the mounted surface', async () => {
     setUrl('/?mode=real')
     getSimStorage().readAnalyticsPanelOpen.mockReturnValue(true)
 
@@ -4512,43 +4547,69 @@ describe('SimulatorAppRoot - analytics overlay surface (spec 007, T705)', () => 
     try {
       await nextTick()
 
-      const phase = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_PHASE_REF')
+      const metricsPhase = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_METRICS_PHASE_REF')
+      const bottlenecksPhase = getRequiredGeoTestGlobal(
+        '__GEO_TEST_ANALYTICS_BOTTLENECKS_PHASE_REF',
+      )
       const metrics = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_METRICS_REF')
       const bottlenecks = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_REF')
-      const lastError = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_LAST_ERROR_REF')
-      const unavailableReason = getRequiredGeoTestGlobal(
-        '__GEO_TEST_ANALYTICS_UNAVAILABLE_REASON_REF',
+      const metricsError = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_METRICS_ERROR_REF')
+      const metricsReason = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_METRICS_REASON_REF')
+      const bottlenecksReason = getRequiredGeoTestGlobal(
+        '__GEO_TEST_ANALYTICS_BOTTLENECKS_REASON_REF',
       )
+
+      const section = (name: 'metrics' | 'bottlenecks'): Element =>
+        analyticsDock(host)!.querySelector(`[data-section="${name}"]`) as Element
 
       // ready — measurements are shown.
       metrics.value = makeAnalyticsMetrics()
       bottlenecks.value = makeAnalyticsBottlenecks({ kind: 'edge', from: 'alice', to: 'bob' })
-      phase.value = 'ready'
+      metricsPhase.value = 'ready'
+      bottlenecksPhase.value = 'ready'
       await nextTick()
 
-      expect(analyticsDock(host)!.querySelector('[data-state="ready"]')).toBeTruthy()
+      expect(section('metrics').querySelector('[data-state="ready"]')).toBeTruthy()
       expect(analyticsDock(host)!.querySelector('.bnl__item')).toBeTruthy()
 
-      // unavailable — the backend has no measurements and said so. Not an error surface.
-      phase.value = 'unavailable'
-      unavailableReason.value = 'storage_disabled'
+      /**
+       * The mixed pair, end to end through the real mount point.
+       *
+       * `/bottlenecks` raises `db_read_failed` in its own database session while `/metrics`
+       * answers normally. Before the panel was split this pair rendered as one "No measurements
+       * recorded", over a response that was decoded and in hand.
+       */
+      bottlenecksPhase.value = 'unavailable'
+      bottlenecksReason.value = 'db_read_failed'
       await nextTick()
 
-      const unavailable = analyticsDock(host)!.querySelector('[data-state="unavailable"]')
+      expect(section('metrics').querySelector('[data-state="ready"]')).toBeTruthy()
+      expect(section('metrics').querySelector('.mkc')).toBeTruthy()
+      expect(section('metrics').textContent).not.toContain('No measurements recorded')
+      const noBottlenecks = section('bottlenecks').querySelector('[data-state="unavailable"]')
+      expect(noBottlenecks).toBeTruthy()
+      expect(noBottlenecks!.textContent).toContain('db_read_failed')
+
+      // unavailable — the backend has no measurements and said so. Not an error surface.
+      metricsPhase.value = 'unavailable'
+      metricsReason.value = 'storage_disabled'
+      await nextTick()
+
+      const unavailable = section('metrics').querySelector('[data-state="unavailable"]')
       expect(unavailable).toBeTruthy()
-      expect(analyticsDock(host)!.querySelector('[data-state="error"]')).toBeNull()
+      expect(section('metrics').querySelector('[data-state="error"]')).toBeNull()
       // The correlation token the backend logged reaches the screen.
       expect(unavailable!.textContent).toContain('storage_disabled')
 
       // error — a failure, announced as one, with its message.
-      phase.value = 'error'
-      unavailableReason.value = ''
-      lastError.value = 'HTTP 500 metrics'
+      metricsPhase.value = 'error'
+      metricsReason.value = ''
+      metricsError.value = 'HTTP 500 metrics'
       await nextTick()
 
-      const errored = analyticsDock(host)!.querySelector('[data-state="error"]')
+      const errored = section('metrics').querySelector('[data-state="error"]')
       expect(errored).toBeTruthy()
-      expect(analyticsDock(host)!.querySelector('[data-state="unavailable"]')).toBeNull()
+      expect(section('metrics').querySelector('[data-state="unavailable"]')).toBeNull()
       expect(errored!.textContent).toContain('HTTP 500 metrics')
     } finally {
       app.unmount()
@@ -4567,7 +4628,7 @@ describe('SimulatorAppRoot - analytics overlay surface (spec 007, T705)', () => 
     try {
       await nextTick()
 
-      const phase = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_PHASE_REF')
+      const phase = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_PHASE_REF')
       const bottlenecks = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_REF')
       bottlenecks.value = makeAnalyticsBottlenecks({ kind: 'edge', from: 'alice', to: 'bob' })
       phase.value = 'ready'
@@ -4610,7 +4671,7 @@ describe('SimulatorAppRoot - analytics overlay surface (spec 007, T705)', () => 
     try {
       await nextTick()
 
-      const phase = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_PHASE_REF')
+      const phase = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_PHASE_REF')
       const bottlenecks = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_REF')
       bottlenecks.value = makeAnalyticsBottlenecks({ kind: 'edge', from: 'alice', to: 'bob' })
       phase.value = 'ready'
@@ -4666,7 +4727,7 @@ describe('SimulatorAppRoot - analytics overlay surface (spec 007, T705)', () => 
     try {
       await nextTick()
 
-      const phase = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_PHASE_REF')
+      const phase = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_PHASE_REF')
       const bottlenecks = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_REF')
       bottlenecks.value = makeAnalyticsBottlenecks({ kind: 'edge', from: 'alice', to: 'bob' })
       phase.value = 'ready'
@@ -4710,7 +4771,7 @@ describe('SimulatorAppRoot - analytics overlay surface (spec 007, T705)', () => 
     try {
       await nextTick()
 
-      const phase = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_PHASE_REF')
+      const phase = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_PHASE_REF')
       const bottlenecks = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_REF')
       bottlenecks.value = makeAnalyticsBottlenecks({ kind: 'edge', from: 'alice', to: 'bob' })
       phase.value = 'ready'
@@ -4750,7 +4811,7 @@ describe('SimulatorAppRoot - analytics overlay surface (spec 007, T705)', () => 
     try {
       await nextTick()
 
-      const phase = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_PHASE_REF')
+      const phase = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_PHASE_REF')
       const bottlenecks = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_REF')
       bottlenecks.value = makeAnalyticsBottlenecks({ kind: 'node', id: 'carol' })
       phase.value = 'ready'

@@ -128,6 +128,11 @@ const chart = computed<Chart>(() => {
     const value = scaled[measuredIndex] as bigint
     measuredIndex += 1
 
+    // The scale is min..max of THIS window, not zero..max: `total_debt` sits far from zero and
+    // moves by fractions of a percent, and a zero baseline would draw every such window as the
+    // same flat line at the top. The cost — the floor of the card is the window minimum, not a
+    // zero — is accepted knowingly and pinned in `MetricsKpiCard.test.ts`.
+    //
     // `ratio` is an integer in 0..1000 computed entirely in BigInt; converting THAT to a Number is
     // lossless. The decimal value itself never becomes a Number.
     const ratio = span === 0n ? 500 : Number(((value - min) * 1000n) / span)

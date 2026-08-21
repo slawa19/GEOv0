@@ -70,8 +70,9 @@ describe('MetricsKpiCard', () => {
       expect(zeroDot).not.toBeNull()
       expect(zeroDot?.getAttribute('data-v')).toBe('0.00000000')
 
-      // ...and it sits at the bottom of the chart, i.e. the zero baseline: strictly lower on
-      // screen (larger y) than the two 10s, which sit at the top.
+      // ...and it sits at the bottom of the chart, strictly lower on screen (larger y) than the
+      // two 10s. "Bottom" here is the minimum of the measured window, not a zero baseline —
+      // see the dedicated test below, which is where that scale is pinned.
       const ys = dots(zero.host).map((d) => Number(d.getAttribute('cy')))
       expect(ys).toHaveLength(3)
       expect(ys[1]).toBeGreaterThan(ys[0] as number)
@@ -178,6 +179,43 @@ describe('MetricsKpiCard', () => {
       expect(svg.getAttribute('data-gap-count')).toBe('0')
       expect(card.host.querySelectorAll('.mkc__spark-line')).toHaveLength(0)
       expect(card.host.textContent).toContain('outside the wire contract')
+    } finally {
+      card.destroy()
+    }
+  })
+
+  /**
+   * The vertical scale runs from the MINIMUM to the MAXIMUM of the measured window. There is no
+   * zero baseline, and this is the deliberate choice rather than an accident of the code:
+   *
+   * two of the seven series are money, and `total_debt` typically sits far from zero while moving
+   * by fractions of a percent. On a zero-based axis every such window renders as the same flat
+   * line at the top — a chart that cannot show the only thing it exists to show. The price is the
+   * opposite misreading: the bottom of the card is the window minimum, not zero, so a dot at the
+   * floor can mean a 0.0001% dip. That price is paid knowingly, which is why it is asserted here
+   * instead of being described in a comment next to an assertion that cannot see it.
+   */
+  it('scales the sparkline from the window minimum to its maximum, with no zero baseline', () => {
+    const card = mount({
+      key: 'total_debt',
+      unit: 'amount',
+      points: [
+        { t_ms: 0, v: '1000000.00000000' },
+        { t_ms: 5_000, v: '999999.00000000' },
+        { t_ms: 10_000, v: '1000001.00000000' },
+      ],
+    })
+    try {
+      const ys = dots(card.host).map((d) => Number(d.getAttribute('cy')))
+
+      // CHART_H (32) - CHART_PAD (2) = 30 is the floor of the padded box; CHART_PAD = 2 its
+      // ceiling. The smallest measurement is on the floor and the largest on the ceiling even
+      // though the three values differ by two parts in a million and none is near zero.
+      expect(ys).toEqual([16, 30, 2])
+
+      // Stated as the cost it is: a 0.0002% spread occupies the full height of the card. Under a
+      // zero baseline all three would land within 0.06 units of the ceiling, i.e. one flat line.
+      expect(Math.max(...ys) - Math.min(...ys)).toBe(28)
     } finally {
       card.destroy()
     }

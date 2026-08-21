@@ -251,16 +251,40 @@ export type SimulatorAppApi = {
   focusOnEdge: ViewWiringApi['focusOnEdge']
   resetView: ViewWiringApi['resetView']
 
-  /** Analytics overlay surface (spec 007): visibility plus the single stream feeding the panel. */
+  /**
+   * Analytics overlay surface (spec 007): visibility plus the two streams feeding the panel.
+   *
+   * Two of everything, on purpose. `/metrics` and `/bottlenecks` fail independently, so a single
+   * merged phase (or a single shared error string) would make the panel state the absence of data
+   * it is holding. The merge does not exist anywhere on this path.
+   */
   analytics: {
     isVisible: ComputedRef<boolean>
-    phase: MetricsPollingApi['phase']
+    metricsPhase: MetricsPollingApi['metricsPhase']
+    bottlenecksPhase: MetricsPollingApi['bottlenecksPhase']
     metrics: MetricsPollingApi['metrics']
     bottlenecks: MetricsPollingApi['bottlenecks']
-    lastError: MetricsPollingApi['lastError']
-    unavailableReason: MetricsPollingApi['unavailableReason']
+    metricsError: MetricsPollingApi['metricsError']
+    bottlenecksError: MetricsPollingApi['bottlenecksError']
+    metricsUnavailableReason: MetricsPollingApi['metricsUnavailableReason']
+    bottlenecksUnavailableReason: MetricsPollingApi['bottlenecksUnavailableReason']
     isPolling: MetricsPollingApi['isPolling']
   }
+}
+
+/**
+ * The rule that decides whether the analytics surface exists at all (spec 007, T705).
+ *
+ * Exported as a named policy for one reason: the only test that mounts `SimulatorAppRoot` mocks
+ * this whole composable away, so the mock used to re-state the rule in its own words — and a test
+ * that re-states the rule verifies the restatement, not the application. The mock now calls this,
+ * which makes "never over fixtures" a fact about the shipped rule.
+ *
+ * Fixtures have no metric store behind them: a panel opened over a demo scene could only ever say
+ * "no measurements", while polling two endpoints that cannot answer for it.
+ */
+export function __analyticsPanelVisibilityPolicy(realMode: boolean, panelOpen: boolean): boolean {
+  return realMode && panelOpen
 }
 
 /**
@@ -1728,12 +1752,12 @@ export function useSimulatorApp(opts?: {
   // ── Analytics overlay surface (spec 007, T705) ───────────────────────────────────────────────
   //
   // The toggle is owned and persisted by the mount point (`SimulatorAppRoot`), through the same
-  // `useSimulatorStorage` mechanism as its bottom-bar neighbours. What is added here is the second
-  // half of the condition — real mode — because fixtures have no metric store behind them: a panel
-  // opened over a demo scene would show permanent "no measurements" and poll endpoints that cannot
-  // answer. Mount point and poll gate then read the same computed and cannot disagree.
-  const isAnalyticsPanelVisible = computed(
-    () => isRealMode.value && (opts?.isAnalyticsPanelOpen?.() ?? false),
+  // `useSimulatorStorage` mechanism as its bottom-bar neighbours. The second half of the condition
+  // — real mode — is `__analyticsPanelVisibilityPolicy`, which is where the rule lives so that the
+  // test that mounts the root can call it instead of re-inventing it. Mount point and poll gate
+  // read the same computed and cannot disagree.
+  const isAnalyticsPanelVisible = computed(() =>
+    __analyticsPanelVisibilityPolicy(isRealMode.value, opts?.isAnalyticsPanelOpen?.() ?? false),
   )
 
   const analyticsStream = useMetricsPolling({
@@ -1910,11 +1934,14 @@ export function useSimulatorApp(opts?: {
     // analytics overlay surface (spec 007)
     analytics: {
       isVisible: isAnalyticsPanelVisible,
-      phase: analyticsStream.phase,
+      metricsPhase: analyticsStream.metricsPhase,
+      bottlenecksPhase: analyticsStream.bottlenecksPhase,
       metrics: analyticsStream.metrics,
       bottlenecks: analyticsStream.bottlenecks,
-      lastError: analyticsStream.lastError,
-      unavailableReason: analyticsStream.unavailableReason,
+      metricsError: analyticsStream.metricsError,
+      bottlenecksError: analyticsStream.bottlenecksError,
+      metricsUnavailableReason: analyticsStream.metricsUnavailableReason,
+      bottlenecksUnavailableReason: analyticsStream.bottlenecksUnavailableReason,
       isPolling: analyticsStream.isPolling,
     },
 

@@ -99,7 +99,8 @@ function mountPanelWiredToCamera(opts: {
 
       return () =>
         h(RealMetricsPanel, {
-          phase: 'ready',
+          metricsPhase: 'ready',
+          bottlenecksPhase: 'ready',
           metrics: METRICS,
           bottlenecks: makeBottlenecks(opts.target),
           onFocusBottleneck,

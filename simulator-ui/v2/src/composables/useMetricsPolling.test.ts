@@ -171,13 +171,14 @@ describe('useMetricsPolling', () => {
     const h = setup()
     await flush()
 
-    expect(h.api.phase.value).toBe('ready')
     expect(h.api.metricsPhase.value).toBe('ready')
     expect(h.api.bottlenecksPhase.value).toBe('ready')
     expect(h.api.metrics.value?.series[0]?.key).toBe('total_debt')
     expect(h.api.bottlenecks.value?.items).toHaveLength(1)
-    expect(h.api.lastError.value).toBe('')
-    expect(h.api.unavailableReason.value).toBe('')
+    expect(h.api.metricsError.value).toBe('')
+    expect(h.api.bottlenecksError.value).toBe('')
+    expect(h.api.metricsUnavailableReason.value).toBe('')
+    expect(h.api.bottlenecksUnavailableReason.value).toBe('')
 
     h.scope.stop()
   })
@@ -191,12 +192,14 @@ describe('useMetricsPolling', () => {
 
     // The point of the whole backend honesty block: 503 means the backend refused to invent
     // measurements. If this collapsed into 'error', that refusal would read as a malfunction.
-    expect(h.api.phase.value).toBe('unavailable')
-    expect(h.api.phase.value).not.toBe('error')
     expect(h.api.metricsPhase.value).toBe('unavailable')
     expect(h.api.bottlenecksPhase.value).toBe('unavailable')
-    expect(h.api.lastError.value).toBe('')
-    expect(h.api.unavailableReason.value).toBe('storage_disabled')
+    expect(h.api.metricsPhase.value).not.toBe('error')
+    expect(h.api.bottlenecksPhase.value).not.toBe('error')
+    expect(h.api.metricsError.value).toBe('')
+    expect(h.api.bottlenecksError.value).toBe('')
+    expect(h.api.metricsUnavailableReason.value).toBe('storage_disabled')
+    expect(h.api.bottlenecksUnavailableReason.value).toBe('storage_disabled')
     expect(h.api.metrics.value).toBeNull()
 
     h.scope.stop()
@@ -209,10 +212,11 @@ describe('useMetricsPolling', () => {
     const h = setup()
     await flush()
 
-    expect(h.api.phase.value).toBe('error')
     expect(h.api.metricsPhase.value).toBe('error')
-    expect(h.api.lastError.value).toContain('HTTP 500')
-    expect(h.api.unavailableReason.value).toBe('')
+    expect(h.api.bottlenecksPhase.value).toBe('error')
+    expect(h.api.metricsError.value).toContain('HTTP 500')
+    expect(h.api.bottlenecksError.value).toContain('HTTP 500')
+    expect(h.api.metricsUnavailableReason.value).toBe('')
 
     h.scope.stop()
   })
@@ -224,8 +228,10 @@ describe('useMetricsPolling', () => {
     await flush()
 
     expect(h.api.metricsPhase.value).toBe('error')
-    expect(h.api.phase.value).toBe('error')
-    expect(h.api.lastError.value).toContain('expected string')
+    expect(h.api.metricsError.value).toContain('expected string')
+    // The decoder blew up on `/metrics`; `/bottlenecks` answered and is untouched by it.
+    expect(h.api.bottlenecksPhase.value).toBe('ready')
+    expect(h.api.bottlenecksError.value).toBe('')
 
     h.scope.stop()
   })
@@ -239,7 +245,83 @@ describe('useMetricsPolling', () => {
     expect(h.api.metricsPhase.value).toBe('unavailable')
     expect(h.api.bottlenecksPhase.value).toBe('ready')
     expect(h.api.bottlenecks.value?.items).toHaveLength(1)
-    expect(h.api.lastError.value).toBe('')
+    expect(h.api.metricsError.value).toBe('')
+    expect(h.api.bottlenecksError.value).toBe('')
+
+    h.scope.stop()
+  })
+
+  /**
+   * The pair that used to be collapsed into one word, from the other side.
+   *
+   * `/metrics` and `/bottlenecks` read the run's tables in two separate database sessions
+   * (`metrics_bottlenecks.py:250`, `:422`), so `db_read_failed` on one and a 500 on the other is a
+   * single ordinary poll. Neither the phases nor the two detail strings may leak across: a reason
+   * token shown under the other stream's failure is the same lie in smaller print.
+   */
+  it('keeps phase, error message and reason token separate per stream', async () => {
+    getMetricsMock.mockRejectedValue(
+      apiError(
+        503,
+        JSON.stringify({ error: { details: { reason: 'db_read_failed' } } }),
+      ),
+    )
+    getBottlenecksMock.mockRejectedValue(apiError(500, '{"error":{"code":"E010"}}'))
+
+    const h = setup()
+    await flush()
+
+    expect(h.api.metricsPhase.value).toBe('unavailable')
+    expect(h.api.metricsUnavailableReason.value).toBe('db_read_failed')
+    expect(h.api.metricsError.value).toBe('')
+
+    expect(h.api.bottlenecksPhase.value).toBe('error')
+    expect(h.api.bottlenecksError.value).toContain('HTTP 500')
+    expect(h.api.bottlenecksUnavailableReason.value).toBe('')
+
+    h.scope.stop()
+  })
+
+  it('keeps the ready stream ready while the other one is unavailable', async () => {
+    getBottlenecksMock.mockRejectedValue(apiError(503, UNAVAILABLE_BODY))
+
+    const h = setup()
+    await flush()
+
+    // The composable holds a decoded measurement AND an unavailable bottlenecks stream at once.
+    // There is no single word for this state, which is why there is no single word.
+    expect(h.api.metricsPhase.value).toBe('ready')
+    expect(h.api.metrics.value?.series[0]?.points[0]?.v).toBe('12500.00000000')
+    expect(h.api.bottlenecksPhase.value).toBe('unavailable')
+    expect(h.api.bottlenecksUnavailableReason.value).toBe('storage_disabled')
+    expect(h.api.metricsUnavailableReason.value).toBe('')
+
+    h.scope.stop()
+  })
+
+  // --- loading is a state the caller can see -----------------------
+
+  it('says loading from the moment the first request leaves until it is answered', async () => {
+    const pendingMetrics = deferred<MetricsResponse>()
+    const pendingBottlenecks = deferred<BottlenecksResponse>()
+    getMetricsMock.mockImplementationOnce(() => pendingMetrics.promise)
+    getBottlenecksMock.mockImplementationOnce(() => pendingBottlenecks.promise)
+
+    const h = setup()
+    await flush()
+
+    // Not `idle`: `idle` means the gate is closed and nothing was asked, which would be a false
+    // statement while two requests are on the wire.
+    expect(getMetricsMock).toHaveBeenCalledTimes(1)
+    expect(h.api.metricsPhase.value).toBe('loading')
+    expect(h.api.bottlenecksPhase.value).toBe('loading')
+
+    pendingMetrics.resolve(makeMetrics())
+    pendingBottlenecks.resolve(makeBottlenecks())
+    await flush()
+
+    expect(h.api.metricsPhase.value).toBe('ready')
+    expect(h.api.bottlenecksPhase.value).toBe('ready')
 
     h.scope.stop()
   })
@@ -373,16 +455,97 @@ describe('useMetricsPolling', () => {
     h.scope.stop()
   })
 
+  /**
+   * "One pair at a time" is per subject, not global.
+   *
+   * The in-flight guard used to sit before the run id and equivalent were read, so a run change
+   * during a slow request was swallowed: the identity watcher had already reset both streams to
+   * `idle`, the immediate refetch returned at the guard, and the panel sat on "Analytics updates
+   * while a run is running" — during a running run — until the next tick of the 5s interval.
+   */
+  it.each([
+    [
+      'the run changes',
+      (h: Harness): void => {
+        h.runId.value = 'run-2'
+      },
+    ],
+    [
+      'the equivalent changes',
+      (h: Harness): void => {
+        h.equivalent.value = 'USD'
+      },
+    ],
+  ] as Array<[string, (h: Harness) => void]>)(
+    'refetches at once when %s mid-request, instead of waiting out the interval',
+    async (_label, change) => {
+      const slow = deferred<MetricsResponse>()
+      getMetricsMock.mockImplementationOnce(() => slow.promise)
+
+      const h = setup()
+      await flush()
+      expect(getMetricsMock).toHaveBeenCalledTimes(1)
+
+      change(h)
+      await flush()
+
+      // No clock was advanced: this is the immediate refetch, not the next interval.
+      expect(getMetricsMock).toHaveBeenCalledTimes(2)
+      expect(h.api.metricsPhase.value).not.toBe('idle')
+
+      // ...and the superseded pair still cannot write into the new subject.
+      slow.resolve(makeMetrics({ run_id: 'run-1', equivalent: 'STALE' }))
+      await flush()
+      expect(h.api.metrics.value).not.toBeNull()
+      expect(h.api.metrics.value?.equivalent).not.toBe('STALE')
+
+      h.scope.stop()
+    },
+  )
+
+  it('does not let a superseded pair release the slot the current pair is holding', async () => {
+    const first = deferred<MetricsResponse>()
+    const second = deferred<MetricsResponse>()
+    getMetricsMock
+      .mockImplementationOnce(() => first.promise)
+      .mockImplementationOnce(() => second.promise)
+
+    const h = setup()
+    await flush()
+    h.runId.value = 'run-2'
+    await flush()
+    expect(getMetricsMock).toHaveBeenCalledTimes(2)
+
+    // The superseded run-1 pair settles while the run-2 pair is still on the wire.
+    first.resolve(makeMetrics({ run_id: 'run-1' }))
+    await flush()
+
+    await h.api.poll()
+    // Still one pair in flight for run-2, so no third request was allowed.
+    expect(getMetricsMock).toHaveBeenCalledTimes(2)
+
+    second.resolve(makeMetrics({ run_id: 'run-2' }))
+    await flush()
+    expect(h.api.metrics.value?.run_id).toBe('run-2')
+
+    h.scope.stop()
+  })
+
   // --- the gate: when to start and when to stop -------------------
 
   it('never polls while the gate is closed', async () => {
-    const h = setup({ runStatus: makeRunStatus({ state: 'created' }) })
+    // `idle`, not `created`. `RunState` still lists `created`, but the decoder's canonical set
+    // (`simulatorContracts.ts` `RUN_STATES`) does not accept it, so no response can carry it: a
+    // fixture built on it tests a state the gate will never actually be asked about. `idle` is
+    // the one canonical non-running state the `it.each` below does not already cover.
+    const h = setup({ runStatus: makeRunStatus({ state: 'idle' }) })
     await flush()
     await vi.advanceTimersByTimeAsync(METRICS_POLL_INTERVAL_MS * 5)
     await flush()
 
     expect(getMetricsMock).not.toHaveBeenCalled()
-    expect(h.api.phase.value).toBe('idle')
+    expect(h.api.metricsPhase.value).toBe('idle')
+    expect(h.api.bottlenecksPhase.value).toBe('idle')
     expect(h.api.isPolling.value).toBe(false)
 
     h.scope.stop()
@@ -450,7 +613,7 @@ describe('useMetricsPolling', () => {
     await nextTick()
     // Before the new answer lands there is nothing to show, and nothing stale is shown.
     expect(h.api.metrics.value).toBeNull()
-    expect(h.api.phase.value).not.toBe('ready')
+    expect(h.api.metricsPhase.value).not.toBe('ready')
 
     await flush()
     expect(getMetricsMock).toHaveBeenLastCalledWith(
@@ -472,10 +635,12 @@ describe('useMetricsPolling', () => {
 
     h.runId.value = 'run-2'
     await nextTick()
-    stale.resolve(makeMetrics({ run_id: 'run-1' }))
+    // Marked, not merely "the previous run id": the fixture's `run_id` is the same string the
+    // fresh answer carries, so an assertion on `run_id` alone cannot tell the two apart.
+    stale.resolve(makeMetrics({ run_id: 'run-1', equivalent: 'STALE' }))
     await flush()
 
-    expect(h.api.metrics.value?.run_id).not.toBe('run-1')
+    expect(h.api.metrics.value?.equivalent).not.toBe('STALE')
 
     h.scope.stop()
   })
@@ -553,7 +718,8 @@ describe('useMetricsPolling', () => {
     await flush()
     expect(getMetricsMock).not.toHaveBeenCalled()
     expect(getBottlenecksMock).not.toHaveBeenCalled()
-    expect(h.api.phase.value).toBe('idle')
+    expect(h.api.metricsPhase.value).toBe('idle')
+    expect(h.api.bottlenecksPhase.value).toBe('idle')
 
     h.scope.stop()
   })
@@ -589,7 +755,7 @@ describe('useMetricsPolling', () => {
   it('keeps the last answer while hidden instead of blanking the panel', async () => {
     const h = setup()
     await flush()
-    expect(h.api.phase.value).toBe('ready')
+    expect(h.api.metricsPhase.value).toBe('ready')
 
     h.enabled.value = false
     await flush()
@@ -597,7 +763,7 @@ describe('useMetricsPolling', () => {
     // Hiding is not a run change: nothing was invalidated, so nothing is thrown away. Re-opening
     // shows the last measurements immediately, with a fresh poll already on its way.
     expect(h.api.metrics.value?.series[0]?.key).toBe('total_debt')
-    expect(h.api.phase.value).toBe('ready')
+    expect(h.api.metricsPhase.value).toBe('ready')
 
     h.scope.stop()
   })

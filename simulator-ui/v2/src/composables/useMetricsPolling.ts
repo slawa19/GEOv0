@@ -49,6 +49,12 @@ export type MetricsWindow = { from_ms: number; to_ms: number; step_ms: number }
  * - `error` — everything else: a real failure the user should see as a failure.
  * - `loading` — a request is in flight and nothing has been answered yet.
  * - `idle` — the gate is closed (no run, or the run is not `running`) and nothing was fetched.
+ *
+ * A phase describes ONE stream, and there is deliberately no aggregate of the two.
+ * `GET /metrics` and `GET /bottlenecks` are answered from two different database sessions
+ * (`app/core/simulator/metrics_bottlenecks.py:250`, `:422`), each of which raises `db_read_failed`
+ * on its own, so the pair `(ready, unavailable)` is an ordinary outcome — and any single word
+ * covering it would have to state the absence of measurements this composable is holding.
  */
 export type MetricsStreamPhase = 'idle' | 'loading' | 'ready' | 'unavailable' | 'error'
 
@@ -90,6 +96,29 @@ function unavailableReasonOf(e: ApiError): string {
   }
 }
 
+/**
+ * Everything one endpoint says about itself: what it answered, which state it is in, and — when it
+ * failed — why. Held together so the four can never drift apart, and so one stream's reason can
+ * never be shown under the other stream's phase.
+ */
+type StreamState<T> = {
+  data: ShallowRef<T | null>
+  phase: ShallowRef<MetricsStreamPhase>
+  /** Non-empty only while `phase === 'error'`. A 503 never lands here. */
+  error: ShallowRef<string>
+  /** Non-empty only while `phase === 'unavailable'` and the 503 carried a reason token. */
+  unavailableReason: ShallowRef<string>
+}
+
+function makeStreamState<T>(): StreamState<T> {
+  return {
+    data: shallowRef<T | null>(null),
+    phase: shallowRef<MetricsStreamPhase>('idle'),
+    error: shallowRef(''),
+    unavailableReason: shallowRef(''),
+  }
+}
+
 export function useMetricsPolling(deps: {
   apiBase: Readonly<Ref<string>>
   accessToken: Readonly<Ref<string | null | undefined>>
@@ -117,31 +146,35 @@ export function useMetricsPolling(deps: {
    */
   metrics: ShallowRef<MetricsResponse | null>
   bottlenecks: ShallowRef<BottlenecksResponse | null>
+  /**
+   * Two phases, and no aggregate. See `MetricsStreamPhase`: `(ready, unavailable)` is reachable
+   * on any poll, so a merged phase is a statement no consumer could make truthfully.
+   */
   metricsPhase: Ref<MetricsStreamPhase>
   bottlenecksPhase: Ref<MetricsStreamPhase>
-  phase: ComputedRef<MetricsStreamPhase>
-  /** Non-empty only when `phase === 'error'`. A 503 never lands here. */
-  lastError: Ref<string>
-  /** Non-empty only when a 503 carried a reason token. */
-  unavailableReason: Ref<string>
+  metricsError: Ref<string>
+  bottlenecksError: Ref<string>
+  metricsUnavailableReason: Ref<string>
+  bottlenecksUnavailableReason: Ref<string>
   window: ComputedRef<MetricsWindow | null>
   isPolling: ComputedRef<boolean>
   poll: () => Promise<void>
   dispose: () => void
 } {
-  const metrics = shallowRef<MetricsResponse | null>(null)
-  const bottlenecks = shallowRef<BottlenecksResponse | null>(null)
-  const metricsPhase = shallowRef<MetricsStreamPhase>('idle')
-  const bottlenecksPhase = shallowRef<MetricsStreamPhase>('idle')
-  const lastError = shallowRef('')
-  const unavailableReason = shallowRef('')
+  const metricsStream = makeStreamState<MetricsResponse>()
+  const bottlenecksStream = makeStreamState<BottlenecksResponse>()
 
   // A ref, not a plain flag: `isPolling` is a computed, and a non-reactive flag would leave it
   // reporting a torn-down poller as live until some unrelated dependency happened to change.
   const disposed = shallowRef(false)
   let timer: number | null = null
-  let inFlight = false
   let seq = 0
+  /**
+   * Which subject the in-flight request pair belongs to (`null` when nothing is in flight), and
+   * the sequence number that owns the slot.
+   */
+  let inFlightIdentity: string | null = null
+  let inFlightSeq = 0
 
   const activeRunId = computed<string | null>(() => {
     const id = String(deps.runId.value ?? '').trim()
@@ -173,51 +206,43 @@ export function useMetricsPolling(deps: {
 
   const isPolling = computed(() => shouldPoll.value && !disposed.value)
 
-  const phase = computed<MetricsStreamPhase>(() => {
-    const m = metricsPhase.value
-    const b = bottlenecksPhase.value
-    if (m === 'error' || b === 'error') return 'error'
-    if (m === 'unavailable' || b === 'unavailable') return 'unavailable'
-    if (m === 'ready' && b === 'ready') return 'ready'
-    if (m === 'loading' || b === 'loading') return 'loading'
-    return 'idle'
-  })
+  function resetStream(stream: StreamState<unknown>): void {
+    stream.data.value = null
+    stream.phase.value = 'idle'
+    stream.error.value = ''
+    stream.unavailableReason.value = ''
+  }
 
   function reset(): void {
     // Bumping the sequence orphans any in-flight response so data from the previous run or
     // equivalent can never land on the new one.
     seq += 1
-    metrics.value = null
-    bottlenecks.value = null
-    metricsPhase.value = 'idle'
-    bottlenecksPhase.value = 'idle'
-    lastError.value = ''
-    unavailableReason.value = ''
+    resetStream(metricsStream)
+    resetStream(bottlenecksStream)
   }
 
-  function applyResult<T>(
-    result: PromiseSettledResult<T>,
-    data: ShallowRef<T | null>,
-    streamPhase: Ref<MetricsStreamPhase>,
-  ): void {
+  function applyResult<T>(result: PromiseSettledResult<T>, stream: StreamState<T>): void {
+    stream.error.value = ''
+    stream.unavailableReason.value = ''
+
     if (result.status === 'fulfilled') {
-      data.value = result.value
-      streamPhase.value = 'ready'
+      stream.data.value = result.value
+      stream.phase.value = 'ready'
       return
     }
 
     const reason: unknown = result.reason
     // Stale numbers rendered next to a failure banner read as current numbers; drop them.
-    data.value = null
+    stream.data.value = null
 
     if (reason instanceof ApiError && reason.status === 503) {
-      streamPhase.value = 'unavailable'
-      unavailableReason.value = unavailableReasonOf(reason)
+      stream.phase.value = 'unavailable'
+      stream.unavailableReason.value = unavailableReasonOf(reason)
       return
     }
 
-    streamPhase.value = 'error'
-    lastError.value = extractErrorMessage(reason)
+    stream.phase.value = 'error'
+    stream.error.value = extractErrorMessage(reason)
   }
 
   async function poll(): Promise<void> {
@@ -225,8 +250,14 @@ export function useMetricsPolling(deps: {
     const runId = activeRunId.value
     const equivalent = equivalentKey.value
     if (runId === null || equivalent === '') return
-    // One request pair at a time: a slow backend must not queue up polls.
-    if (inFlight) return
+    const identity = `${runId}|${equivalent}`
+
+    // One request pair at a time PER SUBJECT: a slow backend must not queue up polls. The identity
+    // is captured before this check on purpose — a poll caused by the run or the equivalent
+    // changing is not a queued poll, and swallowing it leaves the panel on `idle` for up to a full
+    // interval while the run is running, i.e. saying "analytics updates while a run is running"
+    // during a running run.
+    if (inFlightIdentity === identity) return
 
     const mySeq = ++seq
     const isCurrent = (): boolean =>
@@ -241,10 +272,11 @@ export function useMetricsPolling(deps: {
     }
     const win = computeMetricsWindow(deps.runStatus.value?.sim_time_ms)
 
-    if (metricsPhase.value === 'idle') metricsPhase.value = 'loading'
-    if (bottlenecksPhase.value === 'idle') bottlenecksPhase.value = 'loading'
+    if (metricsStream.phase.value === 'idle') metricsStream.phase.value = 'loading'
+    if (bottlenecksStream.phase.value === 'idle') bottlenecksStream.phase.value = 'loading'
 
-    inFlight = true
+    inFlightIdentity = identity
+    inFlightSeq = mySeq
     try {
       // `allSettled`, not `all`: the two endpoints fail independently, and one of them being
       // unavailable must not be reported as the other one failing.
@@ -253,12 +285,12 @@ export function useMetricsPolling(deps: {
         getBottlenecks(cfg, runId, equivalent, { limit: BOTTLENECKS_LIMIT }),
       ])
       if (!isCurrent()) return
-      lastError.value = ''
-      unavailableReason.value = ''
-      applyResult(metricsResult, metrics, metricsPhase)
-      applyResult(bottlenecksResult, bottlenecks, bottlenecksPhase)
+      applyResult(metricsResult, metricsStream)
+      applyResult(bottlenecksResult, bottlenecksStream)
     } finally {
-      inFlight = false
+      // Only the pair that still owns the slot releases it: a superseded pair settling later must
+      // not re-open the gate for the pair that is still running.
+      if (inFlightSeq === mySeq) inFlightIdentity = null
     }
   }
 
@@ -311,13 +343,14 @@ export function useMetricsPolling(deps: {
   if (getCurrentScope()) onScopeDispose(dispose)
 
   return {
-    metrics,
-    bottlenecks,
-    metricsPhase,
-    bottlenecksPhase,
-    phase,
-    lastError,
-    unavailableReason,
+    metrics: metricsStream.data,
+    bottlenecks: bottlenecksStream.data,
+    metricsPhase: metricsStream.phase,
+    bottlenecksPhase: bottlenecksStream.phase,
+    metricsError: metricsStream.error,
+    bottlenecksError: bottlenecksStream.error,
+    metricsUnavailableReason: metricsStream.unavailableReason,
+    bottlenecksUnavailableReason: bottlenecksStream.unavailableReason,
     window: pollWindow,
     isPolling,
     poll,

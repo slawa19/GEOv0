@@ -414,6 +414,48 @@ describe('useCamera', () => {
       expect(cameraSystem.camera.zoom).toBe(1)
     })
 
+    /**
+     * `focusOnEdge` ends with the same `clampCameraPan()` the wheel path uses, and until now
+     * nothing could tell whether that call was there: every fixture in this file lays out exactly
+     * the two endpoints of the edge being framed, so the world bounds ARE the framed segment and
+     * the clamp is a no-op by construction. Deleting the call left the suite green.
+     *
+     * Here the graph is wider than the edge — a third node far to the right, which is the ordinary
+     * case in a real snapshot. The centred pan then falls outside the legal range and the clamp
+     * has to bite, so its absence is visible.
+     */
+    it('keeps the camera inside its legal pan range after framing an edge', () => {
+      const left = { __x: 0, __y: 0 }
+      const right = { __x: 100, __y: 0 }
+      const faraway = { __x: 5000, __y: 0 }
+
+      const cameraSystem = useCamera({
+        canvasEl: { value: null },
+        hostEl: { value: null },
+        getLayoutNodes: () => [left, right, faraway],
+        getLayoutW: () => 600,
+        getLayoutH: () => 600,
+        isTestMode: () => false,
+      })
+
+      expect(cameraSystem.focusOnEdge(left, right)).toBe(true)
+
+      // Fit of a 100-wide segment into 440 usable px wants 4.4x; the interactive ceiling is 3.
+      expect(cameraSystem.camera.zoom).toBe(3)
+
+      // Centring the segment alone would put panX at 600/2 - 50*3 = 150. The clamp caps it at
+      // `padPx - minX * z` = 80, because the content extends far to the right of this edge.
+      expect(cameraSystem.camera.panX).toBeCloseTo(80)
+      expect(cameraSystem.camera.panX).not.toBeCloseTo(150)
+
+      // The Y axis fits entirely, so it is centred rather than clamped: 300 becomes 298.5.
+      expect(cameraSystem.camera.panY).toBeCloseTo(298.5)
+      expect(cameraSystem.camera.panY).not.toBeCloseTo(300)
+
+      // What the clamp is for: the left edge of the content is not dragged off screen.
+      expect(cameraSystem.worldToScreen(left.__x, left.__y).x).toBeCloseTo(80)
+    })
+
     it('keeps the zoom inside the interactive range for a very short edge', () => {
       const near = { __x: 400, __y: 400 }
       const alsoNear = { __x: 401, __y: 400 }

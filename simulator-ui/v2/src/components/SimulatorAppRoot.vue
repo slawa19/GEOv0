@@ -1437,11 +1437,14 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
       :style="analyticsDockStyle"
     >
       <RealMetricsPanel
-        :phase="analytics.phase.value"
+        :metrics-phase="analytics.metricsPhase.value"
+        :bottlenecks-phase="analytics.bottlenecksPhase.value"
         :metrics="analytics.metrics.value"
         :bottlenecks="analytics.bottlenecks.value"
-        :last-error="analytics.lastError.value"
-        :unavailable-reason="analytics.unavailableReason.value"
+        :metrics-error="analytics.metricsError.value"
+        :bottlenecks-error="analytics.bottlenecksError.value"
+        :metrics-unavailable-reason="analytics.metricsUnavailableReason.value"
+        :bottlenecks-unavailable-reason="analytics.bottlenecksUnavailableReason.value"
         :get-node-name="(id) => getNodeById(id)?.name ?? null"
         @focus-bottleneck="focusBottleneckTarget"
       />
