@@ -27,7 +27,7 @@
 | 004 | [payment-conflict-taxonomy](004-payment-conflict-taxonomy/spec.md) | ✅ **ЗАКРЫТА** 2026-08-11 (T400-T408) | 1 × P2, 6 × P3 | `payments/service.py`, `main.py` handlers |
 | 005 | [runtime-security-hygiene](005-runtime-security-hygiene/spec.md) | ✅ **ЗАКРЫТА** 2026-08-11 | 2 × P2, 5 × P3 | `api/deps.py`, `main.py`, `health.py`, `docker/` |
 | 006 | [verification-integrity](006-verification-integrity/spec.md) | ✅ **ЗАКРЫТА** 2026-08-12 (T600–T611) | 1 × P2, 9 × P3 | `tests/`, CI, SSE-ветвление |
-| 007 | [simulator-analytics-surface](007-simulator-analytics-surface/spec.md) | 🟢 **АВТОРИЗОВАНА** 2026-08-20 расширенным набором; F-007-1 — первый исполняемый блок | 1 × P2 (предусловие) + фича | `simulator-ui/v2/`, `app/core/simulator/metrics_bottlenecks.py` |
+| 007 | [simulator-analytics-surface](007-simulator-analytics-surface/spec.md) | ✅ **РЕАЛИЗАЦИЯ ЗАКРЫТА** 2026-08-21; F-007-1 снят, приёмка пройдена, открыты только долги T716/T717 | 1 × P2 (предусловие) + фича | `simulator-ui/v2/`, `app/core/simulator/metrics_bottlenecks.py` |
 | 008 | [surface-code-review](008-surface-code-review/spec.md) | 🟡 волна 1 из 6 закрыта; план скорректирован по аудиту 2026-08-12; фаза I read-only | 7 × P2 (1 закрыт externally) + 33 × P3 | весь продуктовый код: `app/`, `admin-ui/src/`, `simulator-ui/v2/src/`, `tests/` (read-only; денежное ядро — только чтение) |
 
 Счётчики severity сверены с телами спек 2026-08-11 после внешнего ревью (вердикт `MAJOR-OBJECTIONS`)
