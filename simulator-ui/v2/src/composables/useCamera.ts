@@ -24,6 +24,19 @@ type UseCameraDeps<N extends LayoutNodeLike> = {
 
 type RectLike = { left: number; top: number }
 
+/**
+ * Interactive zoom range. `onWheel` and `focusOnEdge` share it so that framing an edge
+ * can never leave the camera at a zoom the user could not have reached by scrolling.
+ */
+const ZOOM_MIN = 0.4
+const ZOOM_MAX = 3.0
+
+/**
+ * Viewport padding kept free around content. Shared by pan clamping and by edge framing,
+ * so a framed edge lands inside exactly the region the clamp is willing to keep.
+ */
+const CAMERA_PAD_PX = 80
+
 function getHostRect(host: HTMLElement): RectLike {
   const r = host.getBoundingClientRect()
   return { left: r.left, top: r.top }
@@ -92,7 +105,7 @@ export function useCamera<N extends LayoutNodeLike>(deps: UseCameraDeps<N>) {
 
     // NOTE: `padPx` is used only for clamping when content is larger than the viewport.
     // When content fits the viewport, we lock panning and keep it centered.
-    const padPx = 80
+    const padPx = CAMERA_PAD_PX
     const z = clamp(camera.zoom, 0.2, 10)
 
     const worldW = Math.max(1, bounds.maxX - bounds.minX)
@@ -167,6 +180,60 @@ export function useCamera<N extends LayoutNodeLike>(deps: UseCameraDeps<N>) {
 
     if (info.fitY) camera.panY = info.centeredPanY
     else camera.panY = clamp(camera.panY, info.minPanY, info.maxPanY)
+  }
+
+  /**
+   * Point the camera at one edge, given both of its endpoints in layout space.
+   *
+   * An edge is a segment, not a point, so this fits the segment's bounds instead of
+   * centering on one end: the camera ends up centered on the segment's midpoint at the
+   * largest interactive zoom that still leaves both endpoints inside the padded viewport.
+   * The result depends only on the two endpoints and the viewport size — no animation,
+   * no easing, no dependence on the camera's previous position.
+   *
+   * Returns `true` when the camera was moved, `false` when it was not. `false` happens when
+   * an endpoint is missing (or has non-finite coordinates): the caller asked for an edge the
+   * current snapshot cannot place. That is a normal outcome — a snapshot can change between
+   * the panel's poll and the click — so it is neither an exception nor a silent no-op: the
+   * camera stays exactly where it was and the caller can see that focusing did not happen.
+   *
+   * Identity lives outside the camera: this composable only ever knows `__x`/`__y`, so
+   * resolving "edge from → to" into two endpoints is the wiring's job (`useAppViewWiring`),
+   * which is also the layer that knows whether the edge is in the snapshot at all.
+   */
+  function focusOnEdge(a: LayoutNodeLike | null | undefined, b: LayoutNodeLike | null | undefined): boolean {
+    if (!a || !b) return false
+    if (!Number.isFinite(a.__x) || !Number.isFinite(a.__y)) return false
+    if (!Number.isFinite(b.__x) || !Number.isFinite(b.__y)) return false
+
+    const minX = Math.min(a.__x, b.__x)
+    const maxX = Math.max(a.__x, b.__x)
+    const minY = Math.min(a.__y, b.__y)
+    const maxY = Math.max(a.__y, b.__y)
+
+    const layoutW = deps.getLayoutW()
+    const layoutH = deps.getLayoutH()
+
+    const availW = Math.max(1, layoutW - 2 * CAMERA_PAD_PX)
+    const availH = Math.max(1, layoutH - 2 * CAMERA_PAD_PX)
+
+    const spanX = maxX - minX
+    const spanY = maxY - minY
+
+    // A degenerate segment (both ends at the same point) has no span to fit on that axis,
+    // so that axis asks for the maximum zoom instead of producing Infinity.
+    const fitZoom = Math.min(spanX > 0 ? availW / spanX : ZOOM_MAX, spanY > 0 ? availH / spanY : ZOOM_MAX)
+
+    camera.zoom = clamp(fitZoom, ZOOM_MIN, ZOOM_MAX)
+    camera.panX = layoutW / 2 - ((minX + maxX) / 2) * camera.zoom
+    camera.panY = layoutH / 2 - ((minY + maxY) / 2) * camera.zoom
+
+    // Same post-step the wheel path uses: keep the camera inside its legal pan range,
+    // then let the render loop wake up from deep-idle.
+    clampCameraPan()
+    deps.onCameraChanged?.()
+
+    return true
   }
 
   function worldToScreen(x: number, y: number) {
@@ -327,7 +394,7 @@ export function useCamera<N extends LayoutNodeLike>(deps: UseCameraDeps<N>) {
       const before = screenToWorld(sx, sy)
 
       const k = Math.exp(-dy * 0.001)
-      const nextZoom = clamp(camera.zoom * k, 0.4, 3.0)
+      const nextZoom = clamp(camera.zoom * k, ZOOM_MIN, ZOOM_MAX)
       if (nextZoom === camera.zoom) {
         // Still notify: user interaction happened, and wiring may need to wake up
         // from deep-idle even if zoom is clamped.
@@ -351,6 +418,7 @@ export function useCamera<N extends LayoutNodeLike>(deps: UseCameraDeps<N>) {
     resetCamera,
     getWorldBounds,
     clampCameraPan,
+    focusOnEdge,
     worldToScreen,
     screenToWorld,
     worldToCssTranslate,

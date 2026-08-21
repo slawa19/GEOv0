@@ -17,6 +17,13 @@ export type OverlaySurfaceFamily =
   | 'tooltip'
   | 'canvas-overlay'
   | 'message-overlay'
+  /**
+   * Analytics surface (spec 007, T703/T705). A family of its own rather than a docked column:
+   * the canvas is `position: absolute; inset: 0` (`App.css:38-42`), so turning `.root` into a
+   * grid would move the canvas and break the overlay model. Registered here so the panel is a
+   * catalogued overlay like every other floating surface.
+   */
+  | 'analytics-panel'
 
 export type OverlaySizingMode =
   | 'fixed-width-auto-height'
@@ -83,6 +90,7 @@ export type OverlaySurfaceKey =
   | 'canvas-floating-labels-overlay'
   | 'loading-message-overlay'
   | 'error-message-overlay'
+  | 'real-metrics-panel'
 
 export type OverlaySurfaceA11y = {
   role: OverlayAriaRole
@@ -263,6 +271,21 @@ export const overlaySurfaceCatalog = {
     widthOwner: 'content',
     heightOwner: 'content',
     zLayerToken: '--ds-z-inset',
+  },
+  'real-metrics-panel': {
+    key: 'real-metrics-panel',
+    family: 'analytics-panel',
+    sizingMode: 'bounded-intrinsic',
+    // Placement and the visibility toggle belong to T705; T703 only registers the surface, so the
+    // existing owners are reused rather than new ones invented ahead of that decision.
+    positioningOwner: 'root-inset',
+    widthOwner: 'overlay-max-width-contract',
+    heightOwner: 'content-max-height-token',
+    zLayerToken: '--ds-z-panel',
+    a11y: {
+      role: 'region',
+      ariaLabel: 'Run analytics',
+    },
   },
 } as const satisfies Record<OverlaySurfaceKey, OverlaySurfaceDescriptor>
 

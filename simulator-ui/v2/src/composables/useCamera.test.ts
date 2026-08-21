@@ -313,4 +313,123 @@ describe('useCamera', () => {
 
     vi.useRealTimers()
   })
+
+  describe('focusOnEdge', () => {
+    // 1000x600 viewport, edge from (100,100) to (300,300).
+    // Padding is 80px per side => the segment must fit into 840x440 and end up centered.
+    // The tight axis is Y: 440 / 200 = 2.2, which is inside the interactive zoom range.
+    const from = { __x: 100, __y: 100 }
+    const to = { __x: 300, __y: 300 }
+
+    function makeCamera(overrides?: { onCameraChanged?: () => void }) {
+      return useCamera({
+        canvasEl: { value: null },
+        hostEl: { value: null },
+        getLayoutNodes: () => [from, to],
+        getLayoutW: () => 1000,
+        getLayoutH: () => 600,
+        isTestMode: () => false,
+        onCameraChanged: overrides?.onCameraChanged,
+      })
+    }
+
+    it('frames the whole segment, not one of its ends', () => {
+      const cameraSystem = makeCamera()
+
+      expect(cameraSystem.focusOnEdge(from, to)).toBe(true)
+
+      expect(cameraSystem.camera.zoom).toBeCloseTo(2.2)
+      expect(cameraSystem.camera.panX).toBeCloseTo(60)
+      expect(cameraSystem.camera.panY).toBeCloseTo(-140)
+
+      // Both ends are on screen, inside the 80px padding, and the segment is centered:
+      // the midpoint lands on the viewport center.
+      const a = cameraSystem.worldToScreen(from.__x, from.__y)
+      const b = cameraSystem.worldToScreen(to.__x, to.__y)
+
+      expect(a.x).toBeCloseTo(280)
+      expect(a.y).toBeCloseTo(80)
+      expect(b.x).toBeCloseTo(720)
+      expect(b.y).toBeCloseTo(520)
+
+      const mid = cameraSystem.worldToScreen((from.__x + to.__x) / 2, (from.__y + to.__y) / 2)
+      expect(mid.x).toBeCloseTo(500)
+      expect(mid.y).toBeCloseTo(300)
+    })
+
+    it('lands on the same camera state regardless of where the camera was', () => {
+      const first = makeCamera()
+      first.focusOnEdge(from, to)
+
+      const second = makeCamera()
+      second.camera.panX = -4321
+      second.camera.panY = 987
+      second.camera.zoom = 0.42
+      second.focusOnEdge(from, to)
+
+      expect(second.camera.panX).toBeCloseTo(first.camera.panX)
+      expect(second.camera.panY).toBeCloseTo(first.camera.panY)
+      expect(second.camera.zoom).toBeCloseTo(first.camera.zoom)
+    })
+
+    it('notifies that the camera changed', () => {
+      const onCameraChanged = vi.fn()
+      const cameraSystem = makeCamera({ onCameraChanged })
+
+      cameraSystem.focusOnEdge(from, to)
+
+      expect(onCameraChanged).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not move the camera when an endpoint is missing, and does not throw', () => {
+      const onCameraChanged = vi.fn()
+      const cameraSystem = makeCamera({ onCameraChanged })
+
+      cameraSystem.camera.panX = 11
+      cameraSystem.camera.panY = 22
+      cameraSystem.camera.zoom = 1.5
+
+      expect(cameraSystem.focusOnEdge(null, to)).toBe(false)
+      expect(cameraSystem.focusOnEdge(from, null)).toBe(false)
+      expect(cameraSystem.focusOnEdge(undefined, undefined)).toBe(false)
+
+      expect(cameraSystem.camera.panX).toBe(11)
+      expect(cameraSystem.camera.panY).toBe(22)
+      expect(cameraSystem.camera.zoom).toBe(1.5)
+      expect(onCameraChanged).not.toHaveBeenCalled()
+    })
+
+    it('does not move the camera when an endpoint has non-finite coordinates', () => {
+      const cameraSystem = makeCamera()
+
+      cameraSystem.camera.panX = 5
+      cameraSystem.camera.panY = 6
+      cameraSystem.camera.zoom = 1
+
+      expect(cameraSystem.focusOnEdge({ __x: Number.NaN, __y: 0 }, to)).toBe(false)
+      expect(cameraSystem.focusOnEdge(from, { __x: 0, __y: Number.POSITIVE_INFINITY })).toBe(false)
+
+      expect(cameraSystem.camera.panX).toBe(5)
+      expect(cameraSystem.camera.panY).toBe(6)
+      expect(cameraSystem.camera.zoom).toBe(1)
+    })
+
+    it('keeps the zoom inside the interactive range for a very short edge', () => {
+      const near = { __x: 400, __y: 400 }
+      const alsoNear = { __x: 401, __y: 400 }
+
+      const cameraSystem = useCamera({
+        canvasEl: { value: null },
+        hostEl: { value: null },
+        getLayoutNodes: () => [near, alsoNear],
+        getLayoutW: () => 1000,
+        getLayoutH: () => 600,
+        isTestMode: () => true,
+      })
+
+      expect(cameraSystem.focusOnEdge(near, alsoNear)).toBe(true)
+      // 840 / 1 would be 840x; the wheel path can never exceed 3.0, and neither can this.
+      expect(cameraSystem.camera.zoom).toBe(3)
+    })
+  })
 })
