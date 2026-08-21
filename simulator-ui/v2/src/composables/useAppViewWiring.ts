@@ -3,6 +3,7 @@ import type { Ref } from 'vue'
 import type { GraphNode } from '../types'
 import type { LayoutLinkLike, LayoutNode } from '../types/layout'
 
+import type { FocusOnEdgeOptions } from './useCamera'
 import { useAppViewAndNodeCard } from './useAppViewAndNodeCard'
 
 export function useAppViewWiring(opts: {
@@ -82,10 +83,18 @@ export function useAppViewWiring(opts: {
    * Returns `true` when the camera moved. Returns `false`, leaving the camera untouched and
    * throwing nothing, when the edge is not in the current snapshot (removed, or the snapshot
    * was replaced between a panel poll and the click) or when its endpoints cannot be placed.
+   *
+   * `options` is forwarded verbatim and this layer never invents it: which part of the viewport
+   * is covered is known only to the layer that mounts the covering surface, which is above this
+   * one. Omitted means the historical framing, centred on the whole canvas.
    */
-  function focusOnEdge(fromId: string, toId: string): boolean {
+  function focusOnEdge(fromId: string, toId: string, options?: FocusOnEdgeOptions): boolean {
     if (!findLayoutLink(fromId, toId)) return false
-    return cameraSystem.focusOnEdge(opts.getLayoutNodeById(fromId), opts.getLayoutNodeById(toId))
+    return cameraSystem.focusOnEdge(
+      opts.getLayoutNodeById(fromId),
+      opts.getLayoutNodeById(toId),
+      options,
+    )
   }
 
   return {

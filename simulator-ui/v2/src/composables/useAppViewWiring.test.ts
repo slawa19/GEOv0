@@ -124,6 +124,24 @@ describe('useAppViewWiring focusOnEdge', () => {
     expect(wiring.camera.zoom).toBe(1.25)
   })
 
+  /**
+   * The inset travels down untouched. This layer knows about edges and snapshots; it does not
+   * know that an analytics dock exists, how wide it is, or whether it is open — that is the
+   * component above, which is the layer that mounts it.
+   */
+  it('forwards a visible-region inset to the camera and invents none of its own', () => {
+    const dockWidth = 560
+    const wiring = makeWiring()
+
+    expect(wiring.focusOnEdge('A', 'B', { viewportInsetRight: dockWidth })).toBe(true)
+    expect(wiring.worldToScreen(200, 200).x).toBeCloseTo((1000 - dockWidth) / 2)
+
+    // Called without one, the framing is exactly what it always was: the canvas' own centre.
+    const uninformed = makeWiring()
+    expect(uninformed.focusOnEdge('A', 'B')).toBe(true)
+    expect(uninformed.worldToScreen(200, 200).x).toBeCloseTo(500)
+  })
+
   it('is repeatable: focusing the same edge twice lands on the same camera state', () => {
     const wiring = makeWiring()
 

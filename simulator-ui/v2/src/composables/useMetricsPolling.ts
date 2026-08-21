@@ -42,11 +42,15 @@ export type MetricsWindow = { from_ms: number; to_ms: number; step_ms: number }
  * the first answer.
  *
  * - `ready` — the backend answered with measurements.
- * - `unavailable` — HTTP 503: real mode refused to substitute synthetic data for measurements it
- *   does not have (`metrics_bottlenecks.py` `_real_mode_unavailable`: storage disabled or DB read
- *   failed). This is the backend being honest, not the application breaking, and the UI must say
- *   "no data", not "something went wrong".
- * - `error` — everything else: a real failure the user should see as a failure.
+ * - `unavailable` — HTTP 503 carrying one of `UNAVAILABLE_REASONS` in `error.details.reason`: real
+ *   mode refused to substitute synthetic data for measurements it does not have
+ *   (`metrics_bottlenecks.py` `_real_mode_unavailable`: storage disabled or DB read failed). This
+ *   is the backend being honest, not the application breaking, and the UI must say "no data", not
+ *   "something went wrong". The reason token is what makes it that statement; a bare 503 is not.
+ * - `error` — everything else, INCLUDING a 503 without a recognised reason: a real failure the
+ *   user should see as a failure. A 503 from a proxy, an ingress or a balancer in front of a
+ *   restarting application never reached this application at all, so it is not evidence about
+ *   whether the run has measurements.
  * - `loading` — a request is in flight and nothing has been answered yet.
  * - `idle` — the gate is closed (no run, or the run is not `running`) and nothing was fetched.
  *
@@ -79,20 +83,46 @@ export function computeMetricsWindow(simTimeMs: number | null | undefined): Metr
 }
 
 /**
- * Best-effort correlation handle for a 503: the body carries
- * `{"error": {"code", "message", "details": {"run_id", "equivalent", "reason"}}}`
- * (`app/utils/exceptions.py:43-44`), and `reason` is the same token the backend logged
- * (`storage_disabled` / `db_read_failed`), so a message on screen can be found in the log.
+ * The complete set of reasons this application answers 503 with, mirrored from the backend:
+ * `REASON_MESSAGES` in `app/core/simulator/metrics_bottlenecks.py:35-45`, raised by
+ * `_real_mode_unavailable` on all four of its call sites (`:188`, `:250`, `:349`, `:422`).
+ *
+ * It is a closed set on purpose. A 503 is only "the backend has no measurements" when the backend
+ * itself said so; every other 503 on the wire — a proxy, a load balancer, an ingress, a restart
+ * window — is a request that never reached this application, and it says nothing whatsoever about
+ * whether the run has measurements.
  */
-function unavailableReasonOf(e: ApiError): string {
+export const UNAVAILABLE_REASONS = ['storage_disabled', 'db_read_failed'] as const
+
+export type UnavailableReason = (typeof UNAVAILABLE_REASONS)[number]
+
+function isUnavailableReason(value: unknown): value is UnavailableReason {
+  return typeof value === 'string' && (UNAVAILABLE_REASONS as readonly string[]).includes(value)
+}
+
+/**
+ * The structural reason a 503 carries, or `null` when it carries none this application recognises.
+ *
+ * The body of an application 503 is
+ * `{"error": {"code", "message", "details": {"run_id", "equivalent", "reason"}}}`
+ * (`app/utils/exceptions.py:43-44`), and `reason` is the same token the backend logged, so a
+ * message on screen can be found in the log.
+ *
+ * `null` for a missing body, an unparseable body, a body without the token, and — deliberately —
+ * a token this build does not know. An unknown token means the two sides disagree about what the
+ * backend can say; guessing "no measurements" from a word we cannot read would be the same claim
+ * about the user's data made on even weaker evidence. Each stage is correct on its own and does
+ * not lean on a later one to correct it (§9).
+ */
+function unavailableReasonOf(e: ApiError): UnavailableReason | null {
   const raw = e.bodyText
-  if (!raw) return ''
+  if (!raw) return null
   try {
     const parsed = JSON.parse(raw) as { error?: { details?: { reason?: unknown } } } | null
     const reason = parsed?.error?.details?.reason
-    return typeof reason === 'string' ? reason : ''
+    return isUnavailableReason(reason) ? reason : null
   } catch {
-    return ''
+    return null
   }
 }
 
@@ -106,7 +136,10 @@ type StreamState<T> = {
   phase: ShallowRef<MetricsStreamPhase>
   /** Non-empty only while `phase === 'error'`. A 503 never lands here. */
   error: ShallowRef<string>
-  /** Non-empty only while `phase === 'unavailable'` and the 503 carried a reason token. */
+  /**
+   * Non-empty exactly while `phase === 'unavailable'`, and always one of `UNAVAILABLE_REASONS`:
+   * that phase is not reachable without a recognised token.
+   */
   unavailableReason: ShallowRef<string>
 }
 
@@ -235,10 +268,17 @@ export function useMetricsPolling(deps: {
     // Stale numbers rendered next to a failure banner read as current numbers; drop them.
     stream.data.value = null
 
+    // "No measurements" is a statement about the user's data, so only the application may make it:
+    // the status code alone is not evidence. A 503 counts as `unavailable` exactly when it carries
+    // a structural reason from `_real_mode_unavailable`; anything else that answers 503 — a proxy,
+    // an ingress, a balancer in front of a restarting app — is a failure and is shown as one.
     if (reason instanceof ApiError && reason.status === 503) {
-      stream.phase.value = 'unavailable'
-      stream.unavailableReason.value = unavailableReasonOf(reason)
-      return
+      const structuralReason = unavailableReasonOf(reason)
+      if (structuralReason !== null) {
+        stream.phase.value = 'unavailable'
+        stream.unavailableReason.value = structuralReason
+        return
+      }
     }
 
     stream.phase.value = 'error'

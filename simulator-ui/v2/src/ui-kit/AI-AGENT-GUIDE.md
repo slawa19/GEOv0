@@ -200,7 +200,7 @@ HUD — это **не отдельный CSS зоопарк**, а:
 | DevPerfOverlay | `dev-overlay` | `intrinsic` | fixed corner | DS overlay max-width contract | content/max-height token | `--ds-z-dev` |
 | EdgeTooltip | `tooltip` | `intrinsic` | cursor-following shell | content | content | `--ds-z-tooltip` |
 | Canvas labels/floating labels | `canvas-overlay` | `stretch` | viewport | viewport | viewport | `--ds-z-world-labels` |
-| RealMetricsPanel | `analytics-panel` | `bounded-intrinsic` | `root-side-dock` (right, clears both HUD stacks) | DS overlay max-width contract | content/max-height token | `--ds-z-panel` |
+| RealMetricsPanel | `analytics-panel` | `bounded-intrinsic` | `root-side-dock` (right, clears both HUD stacks) | DS overlay max-width contract | content/max-height token | `--ds-z-analytics-dock` (its own layer, below the WindowManager one) |
 
 Validation outcome for current shipped scope:
 

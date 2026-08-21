@@ -17,6 +17,7 @@ import {
   METRICS_POLL_INTERVAL_MS,
   METRICS_STEP_MS,
   METRICS_WINDOW_MS,
+  UNAVAILABLE_REASONS,
   useMetricsPolling,
 } from './useMetricsPolling'
 
@@ -201,6 +202,82 @@ describe('useMetricsPolling', () => {
     expect(h.api.metricsUnavailableReason.value).toBe('storage_disabled')
     expect(h.api.bottlenecksUnavailableReason.value).toBe('storage_disabled')
     expect(h.api.metrics.value).toBeNull()
+
+    h.scope.stop()
+  })
+
+  /**
+   * The third defect of the same family as the two already closed: the panel stating something
+   * about the user's data that it has no evidence for.
+   *
+   * "No measurements recorded / Nothing is being substituted for them" is an assertion ABOUT THE
+   * RUN, and only this application can make it — it is the one party that looked at the run's
+   * tables. A 503 with no body is what a reverse proxy, an ingress or a load balancer answers when
+   * the request never reached the application at all; the run may hold thousands of measurements
+   * at that moment. Reading that as "there are none" is a confident falsehood, so it is a failure.
+   */
+  it('reports a 503 with no body as a failure, never as "no measurements"', async () => {
+    getMetricsMock.mockRejectedValue(apiError(503))
+    getBottlenecksMock.mockRejectedValue(apiError(503))
+
+    const h = setup()
+    await flush()
+
+    expect(h.api.metricsPhase.value).toBe('error')
+    expect(h.api.bottlenecksPhase.value).toBe('error')
+    expect(h.api.metricsPhase.value).not.toBe('unavailable')
+    expect(h.api.bottlenecksPhase.value).not.toBe('unavailable')
+    expect(h.api.metricsError.value).toContain('HTTP 503')
+    expect(h.api.bottlenecksError.value).toContain('HTTP 503')
+    expect(h.api.metricsUnavailableReason.value).toBe('')
+    expect(h.api.bottlenecksUnavailableReason.value).toBe('')
+
+    h.scope.stop()
+  })
+
+  /**
+   * Same rule, from the side where a body exists but says something this build cannot read: a
+   * reason token from a newer backend, or a 503 body minted by something that is not this
+   * application. An unknown word is not evidence either, and §9 forbids leaning on a later stage
+   * to correct a claim made here — the phase itself has to be right.
+   */
+  it('reports a 503 whose reason is not one the backend can raise as a failure', async () => {
+    getMetricsMock.mockRejectedValue(
+      apiError(503, JSON.stringify({ error: { details: { reason: 'upstream_connect_error' } } })),
+    )
+    getBottlenecksMock.mockRejectedValue(
+      apiError(503, JSON.stringify({ error: { details: { reason: '' } } })),
+    )
+
+    const h = setup()
+    await flush()
+
+    expect(h.api.metricsPhase.value).toBe('error')
+    expect(h.api.bottlenecksPhase.value).toBe('error')
+    expect(h.api.metricsUnavailableReason.value).toBe('')
+    expect(h.api.bottlenecksUnavailableReason.value).toBe('')
+    // The unreadable token is not shown as a reason for anything, under any phase.
+    expect(h.api.metricsError.value).not.toContain('upstream_connect_error')
+
+    h.scope.stop()
+  })
+
+  /**
+   * The set is the backend's, not a list invented here: `REASON_MESSAGES` in
+   * `app/core/simulator/metrics_bottlenecks.py:35-45` is exactly what `_real_mode_unavailable`
+   * can carry, and each of its members has to reach `unavailable` on its own.
+   */
+  it.each([...UNAVAILABLE_REASONS])('accepts %s — the reasons the backend actually raises', async (token) => {
+    getMetricsMock.mockRejectedValue(
+      apiError(503, JSON.stringify({ error: { details: { reason: token } } })),
+    )
+
+    const h = setup()
+    await flush()
+
+    expect(h.api.metricsPhase.value).toBe('unavailable')
+    expect(h.api.metricsUnavailableReason.value).toBe(token)
+    expect(h.api.metricsError.value).toBe('')
 
     h.scope.stop()
   })
@@ -862,5 +939,39 @@ describe('useMetricsPolling — the app really feeds it (spec 007, T705)', () =>
     // The surface gate. Dropping it does not make the panel poll more — `enabled` defaults to
     // "always" only when omitted at the seam, and the app's own default is "no surface, no poll".
     expect(block).toMatch(/\benabled\s*:\s*isAnalyticsPanelVisible\b/)
+  })
+})
+
+/**
+ * The reason set is the backend's property, not a list this module is free to hold an opinion
+ * about: an application 503 means "no measurements" only because `_real_mode_unavailable` said so
+ * in `error.details.reason`, and the panel's phrasing on screen is that sentence repeated.
+ *
+ * A token added on the backend and not here would be shown to the user as a malfunction; a token
+ * removed there and left here would keep a word alive that nothing can send any more. Both are
+ * silent, so the two lists are compared against the source rather than trusted to stay in step.
+ */
+describe('the unavailable reasons are the backend’s, not a local invention', () => {
+  it('matches REASON_MESSAGES in app/core/simulator/metrics_bottlenecks.py exactly', () => {
+    const here = dirname(fileURLToPath(import.meta.url))
+    const source = readFileSync(
+      resolve(here, '../../../../app/core/simulator/metrics_bottlenecks.py'),
+      'utf8',
+    )
+
+    const start = source.indexOf('REASON_MESSAGES = {')
+    expect(start).toBeGreaterThan(-1)
+    const end = source.indexOf('\n}', start)
+    expect(end).toBeGreaterThan(start)
+
+    const backendReasons = [...source.slice(start, end).matchAll(/^\s{4}"([a-z_]+)":/gm)].map(
+      (m) => m[1],
+    )
+
+    // Guards the parse itself: an expression that stopped matching would otherwise "prove"
+    // agreement with an empty set.
+    expect(backendReasons.length).toBeGreaterThan(1)
+
+    expect([...UNAVAILABLE_REASONS].sort()).toEqual([...backendReasons].sort())
   })
 })

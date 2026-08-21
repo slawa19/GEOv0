@@ -851,6 +851,34 @@ function inspectNodeFromNavigator(nodeId: string): void {
  */
 const analyticsDockStyle = resolveOverlayDockStyle('real-metrics-panel')
 
+/** The dock's own element, so its width can be measured rather than guessed from a token. */
+const analyticsDockEl = ref<HTMLElement | null>(null)
+
+/**
+ * How much of the canvas's right-hand side the analytics dock is currently covering, in CSS px.
+ *
+ * This is the one place that knows both things at once — that a dock exists, and how wide it
+ * actually is right now. The dock's width is a `min()` of a token and a percentage of the host
+ * (`resolveOverlayDockStyle`), so it is measured, not read off a constant that would be wrong on
+ * exactly the narrow windows where the overlap matters.
+ *
+ * Measured from the host's right edge to the dock's left edge, so the gap between them counts as
+ * covered too — the camera must not aim into a 12px sliver. `0` whenever there is nothing to
+ * measure (dock closed, or a layout-less environment such as jsdom), which is the value that
+ * leaves framing exactly as it was.
+ */
+function analyticsDockInsetRightPx(): number {
+  const host = hostEl.value
+  const dock = analyticsDockEl.value
+  if (!host || !dock) return 0
+
+  const hostRect = host.getBoundingClientRect()
+  const dockRect = dock.getBoundingClientRect()
+  const covered = hostRect.right - dockRect.left
+  if (!Number.isFinite(covered) || covered <= 0) return 0
+  return Math.min(covered, hostRect.width)
+}
+
 /**
  * A bottleneck row asks to be shown on the graph.
  *
@@ -875,7 +903,15 @@ const analyticsDockStyle = resolveOverlayDockStyle('real-metrics-panel')
  */
 function focusBottleneckTarget(target: BottleneckTarget): void {
   if (target.kind === 'edge') {
-    if (!focusOnEdge(target.from, target.to)) return
+    // The click came from the dock, so the dock is open and covering the right-hand side of the
+    // canvas. Framing into the middle of the full canvas would put the edge under the very panel
+    // the row was clicked in — on a narrow window, sometimes entirely under it.
+    const insetRight = analyticsDockInsetRightPx()
+    const focused =
+      insetRight > 0
+        ? focusOnEdge(target.from, target.to, { viewportInsetRight: insetRight })
+        : focusOnEdge(target.from, target.to)
+    if (!focused) return
     addActiveEdge(keyEdge(target.from, target.to), 3000)
     return
   }
@@ -1432,6 +1468,7 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
          geometry below is the descriptor's, not this component's. -->
     <div
       v-if="analytics.isVisible.value"
+      ref="analyticsDockEl"
       class="sar-analytics-dock"
       data-surface="real-metrics-panel"
       :style="analyticsDockStyle"
@@ -1503,6 +1540,13 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
 </template>
 
 <style scoped>
+/*
+  The WindowManager layer. Its z-index is the whole stacking context every window lives in:
+  `effectiveZ` orders windows WITHIN it and can never lift one above it, so any surface that shares
+  this value and comes later in the markup sits above every window at once. Surfaces meant to stay
+  behind windows therefore take a lower layer of their own (`--ds-z-analytics-dock`), instead of
+  the relation being decided by sibling order down in the template.
+*/
 .wm-layer {
   position: absolute;
   inset: 0;

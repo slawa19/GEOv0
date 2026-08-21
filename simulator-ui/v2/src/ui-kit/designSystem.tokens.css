@@ -306,6 +306,22 @@
   --ds-ov-dev-warn-pad-x: 10px;
   --ds-ov-dev-warn-radius: 8px;
 
+  /*
+    Analytics dock layer (spec 007, T705).
+
+    The rest of the z scale lives on `.root` in App.css; this one value is here because it exists
+    to state a RELATION rather than to place another HUD surface, and the relation is what the
+    catalog reads (`overlaySurfaceCatalog`, `real-metrics-panel`).
+
+    41 = above the HUD stacks (`--ds-z-top: 40`), strictly below the WindowManager layer
+    (`--ds-z-panel: 42`). WindowManager windows are summoned and dragged by the user, and their
+    in-layer ordering (`effectiveZ`) can only decide which window is on top — it can never lift one
+    out of `.wm-layer`. So if the dock shared that layer, being a later sibling in the markup would
+    put it above every window there is, permanently, and it would swallow their input as well. A
+    fixed surface must not be able to outrank a window the user just raised.
+  */
+  --ds-z-analytics-dock: 41;
+
   /* SimulatorAppRoot (Interact Mode history overlay) */
   --ds-sar-interact-history-right: 12px;
   --ds-sar-interact-history-bottom: 120px;

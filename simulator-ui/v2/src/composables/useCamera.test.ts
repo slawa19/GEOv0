@@ -448,12 +448,111 @@ describe('useCamera', () => {
       expect(cameraSystem.camera.panX).toBeCloseTo(80)
       expect(cameraSystem.camera.panX).not.toBeCloseTo(150)
 
-      // The Y axis fits entirely, so it is centred rather than clamped: 300 becomes 298.5.
-      expect(cameraSystem.camera.panY).toBeCloseTo(298.5)
-      expect(cameraSystem.camera.panY).not.toBeCloseTo(300)
+      // The Y axis fits entirely, and on this path the clamp only holds bounds: the framed
+      // midpoint stays on the viewport's centre line instead of being re-centred to 298.5,
+      // which is the whole graph's centre and not the thing that was asked for.
+      expect(cameraSystem.camera.panY).toBeCloseTo(300)
+      expect(cameraSystem.camera.panY).not.toBeCloseTo(298.5)
 
       // What the clamp is for: the left edge of the content is not dragged off screen.
       expect(cameraSystem.worldToScreen(left.__x, left.__y).x).toBeCloseTo(80)
+    })
+
+    /**
+     * The other half of the clamp's job, and the half that used to be missing.
+     *
+     * The test above pins the case where the clamp MUST act: the graph is far wider than the
+     * framed edge, and without the clamp the camera would show emptiness beyond the world. This
+     * one is the case where the same clamp used to undo the whole operation: the graph fits the
+     * viewport, so `fitX`/`fitY` held, and the fitting branch assigned `centeredPan*` — the centre
+     * of the WHOLE GRAPH — over the pan that had just been computed to centre one edge. The edge
+     * then sat wherever the graph's centre happened to leave it, while the panel that offered
+     * "Focus" claimed otherwise.
+     *
+     * Both cases run through one clamp and one set of bounds; only the fitting branch differs.
+     */
+    it('does not re-centre the graph over the framing when the content fits', () => {
+      const edgeFrom = { __x: 100, __y: 300 }
+      const edgeTo = { __x: 200, __y: 300 }
+      // Off to the side, and inside the viewport at the framing zoom: this is what makes the
+      // graph's centre differ from the edge's centre while `fitX` still holds.
+      const bystander = { __x: 400, __y: 300 }
+
+      const cameraSystem = useCamera({
+        canvasEl: { value: null },
+        hostEl: { value: null },
+        getLayoutNodes: () => [edgeFrom, edgeTo, bystander],
+        getLayoutW: () => 1000,
+        getLayoutH: () => 600,
+        isTestMode: () => false,
+      })
+
+      expect(cameraSystem.focusOnEdge(edgeFrom, edgeTo)).toBe(true)
+
+      const mid = cameraSystem.worldToScreen(
+        (edgeFrom.__x + edgeTo.__x) / 2,
+        (edgeFrom.__y + edgeTo.__y) / 2,
+      )
+
+      // The edge's midpoint is on the viewport's centre — the thing "Focus" promises.
+      expect(mid.x).toBeCloseTo(500)
+      expect(mid.y).toBeCloseTo(300)
+
+      // Re-centring the graph instead would have put it here: 200px from the left, and 1.5px
+      // off the vertical centre. Both are what the fitting branch produced before.
+      expect(mid.x).not.toBeCloseTo(200)
+      expect(mid.y).not.toBeCloseTo(298.5)
+
+      // Both endpoints are on screen inside the padding, which is what framing means.
+      const a = cameraSystem.worldToScreen(edgeFrom.__x, edgeFrom.__y)
+      const b = cameraSystem.worldToScreen(edgeTo.__x, edgeTo.__y)
+      expect(a.x).toBeGreaterThanOrEqual(80)
+      expect(b.x).toBeLessThanOrEqual(1000 - 80)
+    })
+
+    /**
+     * Spec 007 T705 mounts a dock on the right-hand side of the canvas, and "Focus" is pressed
+     * inside it. The camera is told how much is covered; it is never told what covers it.
+     */
+    it('frames the edge into the middle of the visible region when part of it is covered', () => {
+      const cameraSystem = makeCamera()
+      const dockWidth = 560
+      const visibleRight = 1000 - dockWidth
+
+      expect(cameraSystem.focusOnEdge(from, to, { viewportInsetRight: dockWidth })).toBe(true)
+
+      const mid = cameraSystem.worldToScreen((from.__x + to.__x) / 2, (from.__y + to.__y) / 2)
+      const a = cameraSystem.worldToScreen(from.__x, from.__y)
+      const b = cameraSystem.worldToScreen(to.__x, to.__y)
+
+      // Centred in the strip the user can see (440px wide), not in the canvas (1000px wide).
+      expect(mid.x).toBeCloseTo(visibleRight / 2)
+      expect(mid.y).toBeCloseTo(300)
+
+      // And the whole segment clears the covered strip, with the same padding as everywhere else.
+      expect(a.x).toBeGreaterThanOrEqual(80)
+      expect(b.x).toBeLessThanOrEqual(visibleRight - 80)
+
+      // Without the inset this same edge is centred on x=500 — 60px INSIDE a 560px dock, i.e.
+      // underneath the panel the "Focus" button was pressed in.
+      const uninformed = makeCamera()
+      uninformed.focusOnEdge(from, to)
+      const hidden = uninformed.worldToScreen((from.__x + to.__x) / 2, (from.__y + to.__y) / 2)
+      expect(hidden.x).toBeGreaterThan(visibleRight)
+    })
+
+    it('treats an absent, zero or nonsensical inset as "nothing is covered"', () => {
+      const baseline = makeCamera()
+      baseline.focusOnEdge(from, to)
+      const expected = { ...baseline.camera }
+
+      for (const inset of [undefined, 0, -400, Number.NaN, Number.POSITIVE_INFINITY]) {
+        const cameraSystem = makeCamera()
+        expect(cameraSystem.focusOnEdge(from, to, { viewportInsetRight: inset })).toBe(true)
+        expect(cameraSystem.camera.panX).toBeCloseTo(expected.panX)
+        expect(cameraSystem.camera.panY).toBeCloseTo(expected.panY)
+        expect(cameraSystem.camera.zoom).toBeCloseTo(expected.zoom)
+      }
     })
 
     it('keeps the zoom inside the interactive range for a very short edge', () => {

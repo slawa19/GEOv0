@@ -70,6 +70,13 @@ export type OverlayHeightOwner =
 
 export type OverlayZLayerToken =
   | '--ds-z-panel'
+  /**
+   * Strictly below `--ds-z-panel`, which the WindowManager layer owns. A docked surface is fixed
+   * furniture; a window is summoned and moved by the user and must be able to come out on top of
+   * it. See the token's definition in `designSystem.tokens.css` for why sharing the panel layer
+   * cannot express that.
+   */
+  | '--ds-z-analytics-dock'
   | '--ds-z-top'
   | '--ds-z-bottom'
   | '--ds-z-inset'
@@ -320,7 +327,14 @@ export const overlaySurfaceCatalog = {
     positioningOwner: 'root-side-dock',
     widthOwner: 'overlay-max-width-contract',
     heightOwner: 'content-max-height-token',
-    zLayerToken: '--ds-z-panel',
+    /**
+     * Its own layer, one step below the WindowManager layer (`--ds-z-panel`), so that a window the
+     * user opened or dragged over the dock is in front of it and keeps its own input. Sharing
+     * `--ds-z-panel` left the outcome to sibling order in `SimulatorAppRoot`'s template, where the
+     * dock comes last and therefore covered the whole `.wm-layer` — an ordering no `effectiveZ`
+     * inside that layer could overturn.
+     */
+    zLayerToken: '--ds-z-analytics-dock',
     dock: {
       edge: 'right',
       topClearanceToken: '--ds-hud-stack-height',

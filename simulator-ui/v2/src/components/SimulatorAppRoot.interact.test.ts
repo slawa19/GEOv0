@@ -4527,9 +4527,10 @@ describe('SimulatorAppRoot - analytics overlay surface (spec 007, T705)', () => 
         expect(dock!.style.getPropertyValue(prop)).toBe(value)
       }
 
-      // Spot-check the two decisions visible on screen: it docks right, on the panel z layer.
+      // Spot-check the two decisions visible on screen: it docks right, on its own z layer —
+      // and specifically NOT on `--ds-z-panel`, which is the WindowManager's layer.
       expect(dock!.style.getPropertyValue('--ds-ov-dock-left')).toBe('auto')
-      expect(dock!.style.getPropertyValue('--ds-ov-dock-z')).toBe('var(--ds-z-panel)')
+      expect(dock!.style.getPropertyValue('--ds-ov-dock-z')).toBe('var(--ds-z-analytics-dock)')
     } finally {
       app.unmount()
       host.remove()
@@ -4645,6 +4646,114 @@ describe('SimulatorAppRoot - analytics overlay surface (spec 007, T705)', () => 
 
       // Direction included: A to B and B to A are different edges everywhere in this app.
       expect(focusOnEdge).toHaveBeenCalledWith('alice', 'bob')
+    } finally {
+      app.unmount()
+      host.remove()
+    }
+  })
+
+  /**
+   * The dock covers the right-hand side of the canvas, and "Focus" is pressed inside the dock.
+   *
+   * The camera centres on the middle of what it is told is visible, and it is told nothing unless
+   * this component measures the dock: it has no notion of panels. Left uninformed it centres on
+   * the canvas' geometric middle, which on a window narrower than roughly 1144px is inside the
+   * dock — the framed edge ends up behind the panel the user clicked in, a short one entirely.
+   *
+   * The number is measured, not assumed: the dock's width is `min(token, 100% - inset)`, so on a
+   * narrow window it is the percentage that wins and a hard-coded 560 would be wrong exactly
+   * where the overlap happens.
+   */
+  it('tells the camera how much of the canvas the dock is covering', async () => {
+    setUrl('/?mode=real')
+    getSimStorage().readAnalyticsPanelOpen.mockReturnValue(true)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = mountSimulatorAppRoot(host)
+
+    const nativeRect = Element.prototype.getBoundingClientRect
+    let rectSpy: { mockRestore: () => void } | null = null
+    const rect = (left: number, right: number): DOMRect =>
+      ({
+        x: left,
+        y: 0,
+        left,
+        right,
+        top: 0,
+        bottom: 600,
+        width: right - left,
+        height: 600,
+        toJSON: () => ({}),
+      }) as DOMRect
+
+    try {
+      await nextTick()
+
+      const phase = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_PHASE_REF')
+      const bottlenecks = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_REF')
+      bottlenecks.value = makeAnalyticsBottlenecks({ kind: 'edge', from: 'alice', to: 'bob' })
+      phase.value = 'ready'
+      await nextTick()
+
+      // jsdom lays nothing out, so the two elements this reads are given a geometry: a 1000px
+      // host with a 560px dock hugging its right edge, plus a 12px gap.
+      rectSpy = vi
+        .spyOn(Element.prototype, 'getBoundingClientRect')
+        .mockImplementation(function (this: Element) {
+          if (this.classList.contains('root')) return rect(0, 1000)
+          if (this.getAttribute('data-surface') === 'real-metrics-panel') return rect(428, 988)
+          return nativeRect.call(this)
+        })
+
+      const focusBtn = analyticsDock(host)!.querySelector(
+        '.bnl__actions button',
+      ) as HTMLButtonElement
+      const focusOnEdge = getRequiredGeoTestGlobal('__GEO_TEST_FOCUS_ON_EDGE')
+      focusBtn.click()
+      await nextTick()
+
+      // Host right edge to dock left edge: the panel plus the gap beside it, since the camera
+      // must not aim into that sliver either.
+      expect(focusOnEdge).toHaveBeenCalledWith('alice', 'bob', { viewportInsetRight: 572 })
+    } finally {
+      rectSpy?.mockRestore()
+      app.unmount()
+      host.remove()
+    }
+  })
+
+  /**
+   * The companion of the test above: with nothing to measure — the environment has no layout, or
+   * the dock is not mounted — the call is the one it has always been, not the same call carrying
+   * a zero. "No inset" and "an inset of zero" must stay the same request.
+   */
+  it('asks for plain framing when there is no dock geometry to report', async () => {
+    setUrl('/?mode=real')
+    getSimStorage().readAnalyticsPanelOpen.mockReturnValue(true)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = mountSimulatorAppRoot(host)
+
+    try {
+      await nextTick()
+
+      const phase = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_PHASE_REF')
+      const bottlenecks = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_REF')
+      bottlenecks.value = makeAnalyticsBottlenecks({ kind: 'edge', from: 'alice', to: 'bob' })
+      phase.value = 'ready'
+      await nextTick()
+
+      const focusBtn = analyticsDock(host)!.querySelector(
+        '.bnl__actions button',
+      ) as HTMLButtonElement
+      const focusOnEdge = getRequiredGeoTestGlobal('__GEO_TEST_FOCUS_ON_EDGE')
+      focusBtn.click()
+      await nextTick()
+
+      expect(focusOnEdge).toHaveBeenCalledWith('alice', 'bob')
+      expect(focusOnEdge.mock.calls[0]).toHaveLength(2)
     } finally {
       app.unmount()
       host.remove()

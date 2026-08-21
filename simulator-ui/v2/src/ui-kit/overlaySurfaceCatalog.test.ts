@@ -170,7 +170,9 @@ describe('analytics panel surface (spec 007, T705)', () => {
       family: 'analytics-panel',
       // `root-inset` would sit on top of the graph; the panel is read alongside it.
       positioningOwner: 'root-side-dock',
-      zLayerToken: '--ds-z-panel',
+      // NOT `--ds-z-panel`: that layer belongs to the WindowManager, and a fixed dock sharing it
+      // would win on markup order alone and cover every window the user opens.
+      zLayerToken: '--ds-z-analytics-dock',
       a11y: { role: 'region', ariaLabel: 'Run analytics' },
     })
 
@@ -200,7 +202,7 @@ describe('analytics panel surface (spec 007, T705)', () => {
     )
 
     // The z layer is the descriptor's, so stacking cannot be re-decided in a stylesheet.
-    expect(style['--ds-ov-dock-z']).toBe('var(--ds-z-panel)')
+    expect(style['--ds-ov-dock-z']).toBe('var(--ds-z-analytics-dock)')
 
     // The whole point of the indirection: no number appears here. Every value is a token
     // reference, so the design system stays the only place the geometry is written down.
