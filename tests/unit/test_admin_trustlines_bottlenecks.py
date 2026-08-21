@@ -47,6 +47,16 @@ async def test_admin_trustlines_bottlenecks_filters_and_sorts(client, db_session
         policy={"auto_clearing": True, "can_be_intermediate": True},
         status="active",
     )
+    # Exact boundary row: available/limit == 0.10. It must not match 0.10,
+    # but must match a threshold that differs beyond binary-float precision.
+    tl_boundary = TrustLine(
+        from_participant_id=bob.id,
+        to_participant_id=alice.id,
+        equivalent_id=uah.id,
+        limit=Decimal("100.00"),
+        policy=None,
+        status="active",
+    )
     # Non-matching rows (status != active / different equivalent)
     tl3 = TrustLine(
         from_participant_id=alice.id,
@@ -56,13 +66,14 @@ async def test_admin_trustlines_bottlenecks_filters_and_sorts(client, db_session
         policy=None,
         status="frozen",
     )
-    db_session.add_all([tl1, tl2, tl3])
+    db_session.add_all([tl1, tl2, tl_boundary, tl3])
     await db_session.flush()
 
     db_session.add_all(
         [
             Debt(debtor_id=bob.id, creditor_id=alice.id, equivalent_id=uah.id, amount=Decimal("95.00")),
             Debt(debtor_id=bob.id, creditor_id=charlie.id, equivalent_id=uah.id, amount=Decimal("98.00")),
+            Debt(debtor_id=alice.id, creditor_id=bob.id, equivalent_id=uah.id, amount=Decimal("90.00")),
         ]
     )
     await db_session.commit()
@@ -93,6 +104,17 @@ async def test_admin_trustlines_bottlenecks_filters_and_sorts(client, db_session
     assert items[1]["equivalent"] == "UAH"
     assert Decimal(items[1]["used"]) == Decimal("95.00")
     assert Decimal(items[1]["available"]) == Decimal("5.00")
+
+    # Anti-vacuum: exact decimal input must not collapse to float(0.10).
+    r_boundary = await client.get(
+        "/api/v1/admin/trustlines/bottlenecks?threshold=0.10000000000000001&limit=10",
+        headers=headers,
+    )
+    assert r_boundary.status_code == 200
+    boundary_items = r_boundary.json()["items"]
+    assert len(boundary_items) == 3
+    assert boundary_items[2]["from"] == "bob"
+    assert Decimal(boundary_items[2]["available"]) == Decimal("10.00")
 
     # Equivalent filter
     r2 = await client.get(

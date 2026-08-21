@@ -274,11 +274,64 @@ function getIncidentItems(incidents, label) {
   )
 }
 
+const adminConfigTypes = new Map([
+  ['LOG_LEVEL', 'string'],
+  ['RATE_LIMIT_ENABLED', 'boolean'],
+  ['ROUTING_MAX_HOPS', 'number'],
+  ['ROUTING_MAX_PATHS', 'number'],
+  ['INTEGRITY_CHECKPOINT_ENABLED', 'boolean'],
+  ['INTEGRITY_CHECKPOINT_INTERVAL_SECONDS', 'number'],
+  ['RECOVERY_ENABLED', 'boolean'],
+  ['RECOVERY_INTERVAL_SECONDS', 'number'],
+  ['PAYMENT_TX_STUCK_TIMEOUT_SECONDS', 'number'],
+  ['FEATURE_FLAGS_MULTIPATH_ENABLED', 'boolean'],
+  ['FEATURE_FLAGS_FULL_MULTIPATH_ENABLED', 'boolean'],
+  ['CLEARING_ENABLED', 'boolean'],
+])
+
+function validateAdminConfig(config, label) {
+  assert(config && typeof config === 'object' && !Array.isArray(config), `${label} config must be an object`)
+  const actual = Object.keys(config).sort()
+  const expected = Array.from(adminConfigTypes.keys()).sort()
+  assert(deepEqual(actual, expected), `${label} config keys differ from the mutable backend config contract`)
+  for (const [key, expectedType] of adminConfigTypes) {
+    assert(typeof config[key] === expectedType, `${label} config.${key} must be ${expectedType}`)
+    if (expectedType === 'number') assert(Number.isInteger(config[key]), `${label} config.${key} must be an integer`)
+  }
+}
+
+function validateAuditLog(auditLog, label) {
+  assert(Array.isArray(auditLog), `${label} audit-log must be an array`)
+  const allowedActions = new Set([
+    'admin.config.patch',
+    'admin.feature_flags.patch',
+    'admin.participants.freeze',
+    'admin.participants.unfreeze',
+    'admin.equivalents.create',
+    'admin.equivalents.patch',
+    'admin.equivalents.delete',
+    'admin.transactions.abort',
+  ])
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+  for (let i = 0; i < auditLog.length; i += 1) {
+    const entry = auditLog[i]
+    assert(entry && typeof entry === 'object' && !Array.isArray(entry), `${label} audit-log[${i}] must be an object`)
+    assert(uuid.test(String(entry.id || '')), `${label} audit-log[${i}].id must be a UUID`)
+    assert(isIsoDateString(entry.timestamp), `${label} audit-log[${i}].timestamp must be ISO-8601`)
+    assert(allowedActions.has(entry.action), `${label} audit-log[${i}].action is not canonical: ${entry.action}`)
+    assert(entry.actor_id == null || uuid.test(String(entry.actor_id)), `${label} audit-log[${i}].actor_id must be null or UUID`)
+    assert(typeof entry.object_type === 'string', `${label} audit-log[${i}].object_type must be a string`)
+    assert(!('created_at' in entry) && !('object' in entry) && !('details' in entry), `${label} audit-log[${i}] contains legacy fields`)
+  }
+}
+
 async function validateSide(label, dir) {
   const equivalents = await readJson(path.join(dir, 'equivalents.json'))
   const participants = await readJson(path.join(dir, 'participants.json'))
   const trustlines = await readJson(path.join(dir, 'trustlines.json'))
   const incidents = await readJson(path.join(dir, 'incidents.json'))
+  const config = await readJson(path.join(dir, 'config.json'))
+  const auditLog = await readJson(path.join(dir, 'audit-log.json'))
 
   const debtsPath = path.join(dir, 'debts.json')
   const cyclesPath = path.join(dir, 'clearing-cycles.json')
@@ -331,8 +384,10 @@ async function validateSide(label, dir) {
   validateDebts(debts, label)
   validateClearingCycles(clearingCycles, label)
   validateTransactions(transactions, label, participants, equivalents)
+  validateAdminConfig(config, label)
+  validateAuditLog(auditLog, label)
 
-  return { equivalents, participants, trustlines, incidents, incidentItems, debts, clearingCycles, transactions }
+  return { equivalents, participants, trustlines, incidents, incidentItems, debts, clearingCycles, transactions, config, auditLog }
 }
 
 async function main() {
@@ -383,7 +438,9 @@ async function main() {
       deepEqual(canonical.incidents, publicSide.incidents) &&
       deepEqual(canonical.debts, publicSide.debts) &&
       deepEqual(canonical.clearingCycles, publicSide.clearingCycles) &&
-      deepEqual(canonical.transactions, publicSide.transactions),
+      deepEqual(canonical.transactions, publicSide.transactions) &&
+      deepEqual(canonical.config, publicSide.config) &&
+      deepEqual(canonical.auditLog, publicSide.auditLog),
     'PUBLIC fixtures differ from CANONICAL. Run `npm run sync:fixtures` in admin-ui.',
   )
 

@@ -199,6 +199,37 @@ async def test_staged_payment_effects_apply_once_after_outer_commit(
 
 
 @pytest.mark.asyncio
+async def test_committed_payment_result_does_not_read_expired_participants(
+    db_session,
+    monkeypatch,
+):
+    suffix = uuid.uuid4().hex[:8]
+    sender, receiver, equivalent = await _seed_direct_route(db_session, suffix)
+    service = PaymentService(db_session)
+    original_commit = service.engine.commit
+
+    async def _commit_and_expire(*args, **kwargs):
+        result = await original_commit(*args, **kwargs)
+        db_session.expire_all()
+        return result
+
+    monkeypatch.setattr(service.engine, "commit", _commit_and_expire)
+
+    result = await service.create_payment_internal(
+        sender.id,
+        to_pid=receiver.pid,
+        equivalent=equivalent.code,
+        amount="5.00",
+        idempotency_key=f"expired-result-{suffix}",
+    )
+
+    assert result.status == "COMMITTED"
+    assert result.from_ == f"STAGED_SENDER_{suffix}"
+    assert result.to == f"STAGED_RECEIVER_{suffix}"
+    assert result.equivalent == f"S{suffix[:5].upper()}"
+
+
+@pytest.mark.asyncio
 async def test_staged_payment_cancellation_rolls_back_without_effects(db_session):
     suffix = uuid.uuid4().hex[:8]
     sender, receiver, equivalent = await _seed_direct_route(db_session, suffix)

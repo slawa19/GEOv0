@@ -1,10 +1,16 @@
+import asyncio
 import logging
 import uuid
 from decimal import Decimal
 from typing import Dict, List, Set
 
 from sqlalchemy import select, and_, func, text
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import (
+    AsyncConnection,
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+)
 
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
@@ -13,18 +19,256 @@ from app.db.models.transaction import Transaction
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.db.models.audit_log import IntegrityAuditLog
-from app.utils.exceptions import GeoException
+from app.utils.error_codes import ErrorCode
+from app.utils.exceptions import GeoException, TimeoutException
 from app.utils.metrics import CLEARING_EVENTS_TOTAL
+from app.core.payments.engine import PaymentEngine
 from app.core.payments.router import PaymentRouter
 from app.core.invariants import InvariantChecker
 from app.core.integrity import compute_integrity_checkpoint_for_equivalent
 
 logger = logging.getLogger(__name__)
 
+_CLEARING_REPLAY_NAMESPACE = uuid.UUID("7438b16f-c629-4aeb-8b97-4bf113704c93")
+
+
+class ClearingCommittedAfterCancellation(asyncio.CancelledError):
+    """Cancellation raised only after the clearing commit became durable."""
+
+    def __init__(self, *, tx_id: str, cleared_amount: Decimal):
+        super().__init__("Clearing committed while cancellation was pending")
+        self.tx_id = tx_id
+        self.cleared_amount = cleared_amount
+
 
 class ClearingService:
     def __init__(self, session: AsyncSession):
         self.session = session
+
+    async def _raise_unexpected_execution(self, exc: Exception) -> None:
+        """Rollback and surface one sanitized unexpected clearing failure."""
+        logger.exception("event=clearing.failed")
+        try:
+            CLEARING_EVENTS_TOTAL.labels(event="execute", result="error").inc()
+        except Exception:
+            pass
+        try:
+            await self.session.rollback()
+        except Exception:
+            logger.exception("event=clearing.rollback_failed")
+        raise GeoException() from exc
+
+    async def _rollback_skipped_execution(self) -> None:
+        """End a service-owned clearing attempt before returning a skip result."""
+        try:
+            await self.session.rollback()
+        except Exception as exc:
+            logger.exception("event=clearing.skip_rollback_failed")
+            raise GeoException() from exc
+
+    @staticmethod
+    async def _drain_task(task: asyncio.Task) -> asyncio.CancelledError | None:
+        """Wait through repeated caller cancellation and return its first pulse."""
+
+        caller_cancellation: asyncio.CancelledError | None = None
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError as exc:
+                if caller_cancellation is None:
+                    caller_cancellation = exc
+            except Exception:
+                # The task is terminal; surface its exact result below.
+                pass
+        task.result()
+        return caller_cancellation
+
+    @classmethod
+    async def _rollback_before_interlock(cls, session: AsyncSession) -> None:
+        rollback_task = asyncio.create_task(session.rollback())
+        caller_cancellation = await cls._drain_task(rollback_task)
+        if caller_cancellation is not None:
+            raise caller_cancellation
+
+    @classmethod
+    async def _close_checked_out_connection(
+        cls,
+        connection: AsyncConnection,
+    ) -> asyncio.CancelledError | None:
+        """Return a pre-lock connection to its pool despite caller cancellation."""
+
+        async def _cleanup() -> None:
+            try:
+                await connection.close()
+            except BaseException:
+                # No advisory lock exists at this stage, but a connection whose
+                # close status is unknown must still not return to the pool.
+                await connection.invalidate()
+                await connection.close()
+
+        return await cls._drain_task(asyncio.create_task(_cleanup()))
+
+    @classmethod
+    async def _release_interlock_session(
+        cls,
+        work_session: AsyncSession,
+        connection: AsyncConnection,
+        equivalent_id: uuid.UUID,
+        *,
+        lock_was_acquired: bool,
+    ) -> asyncio.CancelledError | None:
+        """Rollback work, release the session lock, then return the connection."""
+
+        async def _cleanup() -> None:
+            try:
+                await work_session.rollback()
+                unlocked = await PaymentEngine(
+                    work_session
+                ).release_session_equivalent_owner_lock(equivalent_id)
+                if lock_was_acquired and not unlocked:
+                    logger.warning(
+                        "event=clearing.interlock_unlock_unconfirmed"
+                    )
+                    await connection.invalidate()
+                    return
+                remaining = await work_session.scalar(
+                    text(
+                        "SELECT count(*) FROM pg_locks "
+                        "WHERE pid = pg_backend_pid() "
+                        "AND locktype = 'advisory'"
+                    )
+                )
+                if int(remaining or 0) != 0:
+                    raise RuntimeError("Clearing connection retained advisory locks")
+            except BaseException:
+                # Never return a connection with uncertain session-lock state.
+                logger.exception("event=clearing.interlock_cleanup_invalidated")
+                await connection.invalidate()
+            finally:
+                try:
+                    await work_session.close()
+                finally:
+                    await connection.close()
+
+        return await cls._drain_task(asyncio.create_task(_cleanup()))
+
+    @staticmethod
+    def _execution_tx_id(debt_ids: List[uuid.UUID]) -> str:
+        canonical_debt_set = ":".join(sorted({str(debt_id) for debt_id in debt_ids}))
+        return str(uuid.uuid5(_CLEARING_REPLAY_NAMESPACE, canonical_debt_set))
+
+    @staticmethod
+    async def _read_committed_execution_amount(
+        session: AsyncSession,
+        tx_id: str,
+    ) -> Decimal | None:
+        transaction = (
+            await session.execute(
+                select(Transaction).where(
+                    Transaction.tx_id == tx_id,
+                    Transaction.type == "CLEARING",
+                )
+            )
+        ).scalar_one_or_none()
+        if transaction is None or transaction.state != "COMMITTED":
+            return None
+        try:
+            amount = Decimal(str((transaction.payload or {})["amount"]))
+        except Exception as exc:
+            logger.error("event=clearing.replay_payload_invalid tx_id=%s", tx_id)
+            raise GeoException() from exc
+        if amount <= 0:
+            logger.error("event=clearing.replay_amount_invalid tx_id=%s", tx_id)
+            raise GeoException()
+        return amount
+
+    async def _committed_execution_amount(self, tx_id: str) -> Decimal | None:
+        return await self._read_committed_execution_amount(self.session, tx_id)
+
+    @staticmethod
+    def _postgres_error_codes(exc: BaseException) -> set[str]:
+        pending: list[BaseException] = [exc]
+        seen: set[int] = set()
+        codes: set[str] = set()
+        while pending:
+            current = pending.pop()
+            if id(current) in seen:
+                continue
+            seen.add(id(current))
+            for attr in ("sqlstate", "pgcode", "code"):
+                value = getattr(current, attr, None)
+                if value is not None:
+                    codes.add(str(value).strip())
+            for linked in (
+                getattr(current, "orig", None),
+                current.__cause__,
+                current.__context__,
+            ):
+                if isinstance(linked, BaseException):
+                    pending.append(linked)
+        return codes
+
+    @classmethod
+    def _is_retryable_concurrency_error(cls, exc: BaseException) -> bool:
+        return bool(cls._postgres_error_codes(exc) & {"40001", "40P01"})
+
+    async def _reconcile_committed_execution(self, tx_id: str) -> Decimal | None:
+        """Resolve one ambiguous occurrence from a fresh transaction snapshot."""
+        try:
+            await self.session.rollback()
+        except Exception:
+            logger.exception("event=clearing.reconcile_rollback_failed tx_id=%s", tx_id)
+
+        bind = getattr(self.session, "bind", None)
+        if bind is None:
+            raise GeoException()
+        session_factory = async_sessionmaker(
+            bind=bind,
+            class_=AsyncSession,
+            expire_on_commit=False,
+            autoflush=False,
+        )
+        last_error: Exception | None = None
+        for attempt in range(3):
+            try:
+                async with session_factory() as recovery_session:
+                    amount = await self._read_committed_execution_amount(
+                        recovery_session,
+                        tx_id,
+                    )
+            except Exception as exc:
+                last_error = exc
+            else:
+                last_error = None
+                if amount is not None:
+                    return amount
+            if attempt < 2:
+                await asyncio.sleep(0.01 * (attempt + 1))
+        if last_error is not None:
+            raise last_error
+        return None
+
+    async def _commit_to_terminal(
+        self,
+    ) -> tuple[asyncio.CancelledError | None, BaseException | None]:
+        """Drain the session commit and report caller cancellation separately."""
+        commit_task = asyncio.create_task(self.session.commit())
+        caller_cancellation: asyncio.CancelledError | None = None
+        while not commit_task.done():
+            try:
+                await asyncio.shield(commit_task)
+            except asyncio.CancelledError as exc:
+                if caller_cancellation is None:
+                    caller_cancellation = exc
+            except Exception:
+                # The task is terminal; surface its exact result below.
+                pass
+        commit_error: BaseException | None = None
+        try:
+            commit_task.result()
+        except (Exception, asyncio.CancelledError) as exc:
+            commit_error = exc
+        return caller_cancellation, commit_error
 
     def _dialect_name(self) -> str | None:
         try:
@@ -774,13 +1018,205 @@ class ClearingService:
         return (await self.execute_clearing_with_amount(cycle)) is not None
 
     async def execute_clearing_with_amount(self, cycle: List[Dict]) -> Decimal | None:
+        """Execute one clearing attempt inside the shared payment owner domain."""
+        if self._dialect_name() not in {"postgresql", "postgres"} or not cycle:
+            return await self._execute_clearing_with_amount(cycle)
+
+        bind = getattr(self.session, "bind", None)
+        if isinstance(bind, AsyncConnection):
+            # PostgreSQL clearing owns a one-connection interlock boundary. An
+            # externally owned connection cannot be returned before the pinned
+            # work connection is acquired, so accepting it could exhaust even
+            # a valid single-connection pool.
+            await self._rollback_before_interlock(self.session)
+            logger.error("event=clearing.external_connection_bind_unsupported")
+            raise GeoException() from RuntimeError(
+                "PostgreSQL clearing requires an engine-bound AsyncSession"
+            )
+        if not isinstance(bind, AsyncEngine):
+            await self._raise_unexpected_execution(GeoException())
+        lock_bind = bind
+
+        try:
+            debt_ids = [uuid.UUID(str(edge["debt_id"])) for edge in cycle]
+        except Exception:
+            return await self._execute_clearing_with_amount(cycle)
+
+        execution_tx_id = self._execution_tx_id(debt_ids)
+        try:
+            preflight_debts = (
+                (
+                    await self.session.execute(
+                        select(Debt).where(Debt.id.in_(debt_ids))
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        except asyncio.CancelledError:
+            await self._rollback_before_interlock(self.session)
+            raise
+        except Exception as exc:
+            await self._raise_unexpected_execution(exc)
+
+        if len(preflight_debts) != len(debt_ids):
+            try:
+                replay_amount = await self._reconcile_committed_execution(
+                    execution_tx_id
+                )
+            except Exception as exc:
+                await self._raise_unexpected_execution(exc)
+            if replay_amount is not None:
+                return replay_amount
+            return await self._execute_clearing_with_amount(cycle)
+
+        equivalent_ids = {debt.equivalent_id for debt in preflight_debts}
+        if len(equivalent_ids) != 1:
+            await self._raise_unexpected_execution(
+                GeoException("Clearing cycle spans multiple equivalents")
+            )
+        equivalent_id = next(iter(equivalent_ids))
+
+        try:
+            caller_connection = await self.session.connection()
+            isolation_level = await caller_connection.get_isolation_level()
+        except asyncio.CancelledError:
+            await self._rollback_before_interlock(self.session)
+            raise
+        except Exception as exc:
+            await self._raise_unexpected_execution(exc)
+
+        try:
+            await self._rollback_before_interlock(self.session)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            await self._raise_unexpected_execution(exc)
+
+        from app.config import settings
+
+        connection_budget_s = max(
+            0.001,
+            min(
+                float(settings.PAYMENT_TOTAL_TIMEOUT_SECONDS or 10),
+                float(settings.COMMIT_TIMEOUT_SECONDS or 5),
+            ),
+        )
+        connection: AsyncConnection | None = None
+        try:
+            connection = await asyncio.wait_for(
+                lock_bind.connect(),
+                timeout=connection_budget_s,
+            )
+            connection = await connection.execution_options(
+                isolation_level=isolation_level,
+            )
+        except asyncio.TimeoutError as exc:
+            raise TimeoutException("Clearing interlock timed out") from exc
+        except asyncio.CancelledError as exc:
+            if connection is not None:
+                try:
+                    await self._close_checked_out_connection(connection)
+                except BaseException as cleanup_error:
+                    exc.add_note(
+                        "Clearing pre-lock connection cleanup failed: "
+                        f"{type(cleanup_error).__name__}: {cleanup_error}"
+                    )
+            raise
+        except Exception as exc:
+            if connection is not None:
+                await self._close_checked_out_connection(connection)
+            await self._raise_unexpected_execution(exc)
+
+        if connection is None:
+            await self._raise_unexpected_execution(GeoException())
+
+        work_session = AsyncSession(
+            bind=connection,
+            expire_on_commit=False,
+            autoflush=False,
+        )
+        lock_was_acquired = False
+        result: Decimal | None = None
+        result_available = False
+        primary_error: BaseException | None = None
+        original_session = self.session
+        try:
+            try:
+                await PaymentEngine(
+                    work_session
+                ).acquire_session_equivalent_owner_lock(equivalent_id)
+                lock_was_acquired = True
+            except Exception as exc:
+                if "55P03" in self._postgres_error_codes(exc):
+                    raise TimeoutException("Clearing interlock timed out") from exc
+                logger.exception("event=clearing.interlock_acquire_failed")
+                raise GeoException() from exc
+
+            # The session lock survives this rollback, while the next statement
+            # gets a snapshot newer than the payment holder we may have awaited.
+            await self._rollback_before_interlock(work_session)
+            self.session = work_session
+            try:
+                result = await self._execute_clearing_with_amount(
+                    cycle,
+                    interlocked_equivalent_id=equivalent_id,
+                )
+                result_available = True
+            finally:
+                self.session = original_session
+        except BaseException as exc:
+            primary_error = exc
+
+        try:
+            cleanup_cancellation = await self._release_interlock_session(
+                work_session,
+                connection,
+                equivalent_id,
+                lock_was_acquired=lock_was_acquired,
+            )
+        except asyncio.CancelledError as exc:
+            # The production helper drains cleanup and returns cancellation.
+            # Keep the outer boundary correct if cancellation is delivered in
+            # the final await after cleanup has already become terminal.
+            cleanup_cancellation = exc
+        except BaseException as cleanup_error:
+            if primary_error is not None:
+                primary_error.add_note(
+                    "Clearing interlock cleanup also failed: "
+                    f"{type(cleanup_error).__name__}: {cleanup_error}"
+                )
+                raise primary_error
+            raise
+
+        if primary_error is not None:
+            raise primary_error
+        if cleanup_cancellation is not None:
+            if result_available and result is not None:
+                raise ClearingCommittedAfterCancellation(
+                    tx_id=execution_tx_id,
+                    cleared_amount=result,
+                ) from cleanup_cancellation
+            raise cleanup_cancellation
+        return result
+
+    async def _execute_clearing_with_amount(
+        self,
+        cycle: List[Dict],
+        *,
+        interlocked_equivalent_id: uuid.UUID | None = None,
+    ) -> Decimal | None:
         """Execute clearing for a specific cycle and return the *actual* cleared amount.
 
         Returns:
         - Decimal amount on success (the min debt amount among the locked cycle edges at execution time)
-        - None on failure / skipped.
+        - None when the candidate is invalid or skipped by lock/policy checks.
+
+        Unexpected execution failures are rolled back and surfaced through the
+        application's sanitized internal-error path.
         """
         if not cycle:
+            await self._rollback_skipped_execution()
             return None
 
         logger.info("event=clearing.execute cycle_len=%s", len(cycle))
@@ -805,25 +1241,76 @@ class ClearingService:
                     "event=clearing.metrics_inc_failed metric=CLEARING_EVENTS_TOTAL label=execute.bad_request",
                     exc_info=True,
                 )
+            await self._rollback_skipped_execution()
             return None
 
-        debts = (
-            (
-                await self.session.execute(
-                    select(Debt).where(Debt.id.in_(debt_ids)).with_for_update()
+        execution_tx_id = self._execution_tx_id(debt_ids)
+        try:
+            replay_amount = await self._committed_execution_amount(execution_tx_id)
+        except Exception as exc:
+            if self._is_retryable_concurrency_error(exc):
+                try:
+                    replay_amount = await self._reconcile_committed_execution(
+                        execution_tx_id
+                    )
+                except Exception as reconciliation_error:
+                    await self._raise_unexpected_execution(reconciliation_error)
+                if replay_amount is not None:
+                    return replay_amount
+            await self._raise_unexpected_execution(exc)
+        if replay_amount is not None:
+            await self._rollback_skipped_execution()
+            return replay_amount
+
+        try:
+            debts = (
+                (
+                    await self.session.execute(
+                        select(Debt).where(Debt.id.in_(debt_ids)).with_for_update()
+                    )
                 )
+                .scalars()
+                .all()
             )
-            .scalars()
-            .all()
-        )
+        except Exception as exc:
+            if self._is_retryable_concurrency_error(exc):
+                try:
+                    replay_amount = await self._reconcile_committed_execution(
+                        execution_tx_id
+                    )
+                except Exception as reconciliation_error:
+                    await self._raise_unexpected_execution(reconciliation_error)
+                if replay_amount is not None:
+                    return replay_amount
+            await self._raise_unexpected_execution(exc)
 
         if len(debts) != len(debt_ids):
+            # A concurrent owner may have committed this exact occurrence while
+            # we waited for its Debt rows. Resolve that durable result before skip.
+            try:
+                replay_amount = await self._committed_execution_amount(
+                    execution_tx_id
+                )
+            except Exception as exc:
+                await self._raise_unexpected_execution(exc)
+            if replay_amount is not None:
+                await self._rollback_skipped_execution()
+                return replay_amount
+            await self._rollback_skipped_execution()
             return None
+
+        if interlocked_equivalent_id is not None and any(
+            debt.equivalent_id != interlocked_equivalent_id for debt in debts
+        ):
+            await self._raise_unexpected_execution(
+                GeoException("Clearing cycle identity changed after interlock")
+            )
 
         # 1. Determine clearing amount (min amount in cycle)
         clear_amount = min([d.amount for d in debts])
 
         if clear_amount <= 0:
+            await self._rollback_skipped_execution()
             return None
 
         logger.info(
@@ -833,7 +1320,12 @@ class ClearingService:
         )
 
         # Reject cycles that touch any edge reserved by active PrepareLocks.
-        locked_pairs = await self._locked_pairs_for_equivalent(debts[0].equivalent_id)
+        try:
+            locked_pairs = await self._locked_pairs_for_equivalent(
+                debts[0].equivalent_id
+            )
+        except Exception as exc:
+            await self._raise_unexpected_execution(exc)
         if locked_pairs:
             for d in debts:
                 pair = frozenset({d.debtor_id, d.creditor_id})
@@ -848,10 +1340,15 @@ class ClearingService:
                             "event=clearing.metrics_inc_failed metric=CLEARING_EVENTS_TOTAL label=execute.skip_locked",
                             exc_info=True,
                         )
+                    await self._rollback_skipped_execution()
                     return None
 
         # FIX-017: enforce auto_clearing policy on every edge in the cycle.
-        if not await self._cycle_respects_auto_clearing(debts):
+        try:
+            respects_auto_clearing = await self._cycle_respects_auto_clearing(debts)
+        except Exception as exc:
+            await self._raise_unexpected_execution(exc)
+        if not respects_auto_clearing:
             logger.info("event=clearing.skip_policy cycle_len=%s", len(cycle))
             try:
                 CLEARING_EVENTS_TOTAL.labels(
@@ -862,6 +1359,7 @@ class ClearingService:
                     "event=clearing.metrics_inc_failed metric=CLEARING_EVENTS_TOTAL label=execute.skip_policy",
                     exc_info=True,
                 )
+            await self._rollback_skipped_execution()
             return None
 
         # FIX-011: capture net positions BEFORE clearing (clearing neutrality invariant).
@@ -872,26 +1370,29 @@ class ClearingService:
             participant_ids.add(d.creditor_id)
 
         # FIX-025: enrich CLEARING transaction payload for traceability.
-        equivalent = (
-            await self.session.execute(
-                select(Equivalent).where(Equivalent.id == debts[0].equivalent_id)
-            )
-        ).scalar_one_or_none()
+        try:
+            equivalent = (
+                await self.session.execute(
+                    select(Equivalent).where(Equivalent.id == debts[0].equivalent_id)
+                )
+            ).scalar_one_or_none()
 
-        pid_by_id: Dict[uuid.UUID, str] = {}
-        if participant_ids:
-            participants = (
-                (
-                    await self.session.execute(
-                        select(Participant).where(
-                            Participant.id.in_(list(participant_ids))
+            pid_by_id: Dict[uuid.UUID, str] = {}
+            if participant_ids:
+                participants = (
+                    (
+                        await self.session.execute(
+                            select(Participant).where(
+                                Participant.id.in_(list(participant_ids))
+                            )
                         )
                     )
+                    .scalars()
+                    .all()
                 )
-                .scalars()
-                .all()
-            )
-            pid_by_id = {p.id: p.pid for p in participants}
+                pid_by_id = {p.id: p.pid for p in participants}
+        except Exception as exc:
+            await self._raise_unexpected_execution(exc)
 
         debts_by_id: Dict[uuid.UUID, Debt] = {d.id: d for d in debts}
         edges_payload: List[Dict[str, str]] = []
@@ -914,11 +1415,14 @@ class ClearingService:
                 }
             )
 
-        positions_before: Dict[uuid.UUID, Decimal] = {}
-        for pid in participant_ids:
-            positions_before[pid] = await checker._calculate_net_position(
-                pid, debts[0].equivalent_id
-            )
+        try:
+            positions_before: Dict[uuid.UUID, Decimal] = {}
+            for pid in participant_ids:
+                positions_before[pid] = await checker._calculate_net_position(
+                    pid, debts[0].equivalent_id
+                )
+        except Exception as exc:
+            await self._raise_unexpected_execution(exc)
 
         checkpoint_before = None
         try:
@@ -927,6 +1431,10 @@ class ClearingService:
                 equivalent_id=debts[0].equivalent_id,
             )
         except Exception:
+            logger.warning(
+                "event=clearing.checkpoint_before_failed",
+                exc_info=True,
+            )
             checkpoint_before = None
 
         # 2. Create Transaction (CLEARING)
@@ -934,12 +1442,13 @@ class ClearingService:
         # Let's pick the first debtor.
         initiator_id = debts[0].debtor_id
 
-        tx_uuid = uuid.uuid4()
-        tx_id_str = str(tx_uuid)
+        tx_uuid = uuid.UUID(execution_tx_id)
+        tx_id_str = execution_tx_id
 
         new_tx = Transaction(
             id=tx_uuid,
             tx_id=tx_id_str,
+            idempotency_key=f"clearing:{tx_id_str}",
             type="CLEARING",
             initiator_id=initiator_id,
             payload={
@@ -981,6 +1490,10 @@ class ClearingService:
                     equivalent_id=debts[0].equivalent_id,
                 )
             except Exception:
+                logger.warning(
+                    "event=clearing.checkpoint_after_failed",
+                    exc_info=True,
+                )
                 checkpoint_after = None
 
             try:
@@ -993,7 +1506,7 @@ class ClearingService:
                     if checkpoint_after
                     else {}
                 )
-                passed = bool(invariants_status.get("passed", True))
+                passed = bool(invariants_status.get("passed", False))
 
                 self.session.add(
                     IntegrityAuditLog(
@@ -1018,7 +1531,10 @@ class ClearingService:
                 )
             except Exception:
                 # Best-effort; clearing must not fail due to audit logging.
-                pass
+                logger.warning(
+                    "event=clearing.audit_build_failed",
+                    exc_info=True,
+                )
 
             # Verify neutrality AFTER applying changes (must be within the same DB transaction).
             await checker.verify_clearing_neutrality(
@@ -1030,7 +1546,30 @@ class ClearingService:
             # 4. Commit
             new_tx.state = "COMMITTED"
             self.session.add(new_tx)
-            await self.session.commit()
+            commit_cancellation, commit_error = await self._commit_to_terminal()
+            if commit_error is not None:
+                if (
+                    commit_cancellation is None
+                    and isinstance(commit_error, asyncio.CancelledError)
+                ):
+                    commit_cancellation = commit_error
+                reconciliation_task = asyncio.create_task(
+                    self._reconcile_committed_execution(tx_id_str)
+                )
+                reconciliation_cancellation = await self._drain_task(
+                    reconciliation_task
+                )
+                reconciled_amount = reconciliation_task.result()
+                if (
+                    commit_cancellation is None
+                    and reconciliation_cancellation is not None
+                ):
+                    commit_cancellation = reconciliation_cancellation
+                if reconciled_amount is None:
+                    if commit_cancellation is not None:
+                        raise commit_cancellation
+                    raise commit_error
+                clear_amount = reconciled_amount
 
             # Debts changed: invalidate any TTL routing graph cache.
             try:
@@ -1045,17 +1584,24 @@ class ClearingService:
                 CLEARING_EVENTS_TOTAL.labels(event="execute", result="success").inc()
             except Exception:
                 pass
+            if commit_cancellation is not None:
+                raise ClearingCommittedAfterCancellation(
+                    tx_id=tx_id_str,
+                    cleared_amount=clear_amount,
+                ) from commit_cancellation
             return clear_amount
 
-        except Exception as e:
-            logger.error("event=clearing.failed error=%s", str(e))
-            try:
-                CLEARING_EVENTS_TOTAL.labels(event="execute", result="error").inc()
-            except Exception:
-                pass
-            await self.session.rollback()
-            # Log failed tx?
-            return None
+        except Exception as exc:
+            if self._is_retryable_concurrency_error(exc):
+                try:
+                    replay_amount = await self._reconcile_committed_execution(
+                        execution_tx_id
+                    )
+                except Exception as reconciliation_error:
+                    await self._raise_unexpected_execution(reconciliation_error)
+                if replay_amount is not None:
+                    return replay_amount
+            await self._raise_unexpected_execution(exc)
 
     async def auto_clear(self, equivalent_code: str, *, max_depth: int = 6) -> int:
         """
@@ -1064,14 +1610,75 @@ class ClearingService:
         """
         count = 0
         while True:
-            cycles = await self.find_cycles(equivalent_code, max_depth=max_depth)
+            try:
+                cycles = await self.find_cycles(
+                    equivalent_code,
+                    max_depth=max_depth,
+                )
+            except GeoException as exc:
+                if exc.code != ErrorCode.E010.value:
+                    raise
+                logger.exception(
+                    "event=clearing.auto_clear_find_failed equivalent=%s "
+                    "cleared_cycles=%s",
+                    equivalent_code,
+                    count,
+                )
+                raise GeoException(
+                    details={
+                        "cleared_cycles": count,
+                        "partial": count > 0,
+                    }
+                ) from exc
+            except Exception as exc:
+                logger.exception(
+                    "event=clearing.auto_clear_find_failed equivalent=%s "
+                    "cleared_cycles=%s",
+                    equivalent_code,
+                    count,
+                )
+                raise GeoException(
+                    details={
+                        "cleared_cycles": count,
+                        "partial": count > 0,
+                    }
+                ) from exc
             if not cycles:
                 break
 
             # Try cycles until one succeeds. If all candidates fail (e.g. due to locks/concurrency), stop.
             executed = False
             for cycle in cycles:
-                success = await self.execute_clearing(cycle)
+                try:
+                    success = await self.execute_clearing(cycle)
+                except GeoException as exc:
+                    if exc.code != ErrorCode.E010.value:
+                        raise
+                    logger.exception(
+                        "event=clearing.auto_clear_execute_failed equivalent=%s "
+                        "cleared_cycles=%s",
+                        equivalent_code,
+                        count,
+                    )
+                    raise GeoException(
+                        details={
+                            "cleared_cycles": count,
+                            "partial": count > 0,
+                        }
+                    ) from exc
+                except Exception as exc:
+                    logger.exception(
+                        "event=clearing.auto_clear_execute_failed equivalent=%s "
+                        "cleared_cycles=%s",
+                        equivalent_code,
+                        count,
+                    )
+                    raise GeoException(
+                        details={
+                            "cleared_cycles": count,
+                            "partial": count > 0,
+                        }
+                    ) from exc
                 if success:
                     count += 1
                     executed = True

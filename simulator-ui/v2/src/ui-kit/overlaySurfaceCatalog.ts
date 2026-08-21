@@ -17,6 +17,13 @@ export type OverlaySurfaceFamily =
   | 'tooltip'
   | 'canvas-overlay'
   | 'message-overlay'
+  /**
+   * Analytics surface (spec 007, T703/T705). A family of its own rather than a docked column:
+   * the canvas is `position: absolute; inset: 0` (`App.css:38-42`), so turning `.root` into a
+   * grid would move the canvas and break the overlay model. Registered here so the panel is a
+   * catalogued overlay like every other floating surface.
+   */
+  | 'analytics-panel'
 
 export type OverlaySizingMode =
   | 'fixed-width-auto-height'
@@ -35,6 +42,13 @@ export type OverlayPositioningOwner =
   | 'cursor-following-shell'
   | 'viewport'
   | 'root-inset'
+  /**
+   * A column pinned to one vertical edge of `.root`, clearing the HUD stacks above and below it.
+   * Unlike `fixed-corner` it is height-filling, and unlike `root-inset` it does not cover the
+   * canvas — the geometry is fully described by `OverlaySurfaceDock` below, so the mount point
+   * reads it instead of inventing offsets of its own.
+   */
+  | 'root-side-dock'
 
 export type OverlayWidthOwner =
   | 'wm-policy'
@@ -56,6 +70,13 @@ export type OverlayHeightOwner =
 
 export type OverlayZLayerToken =
   | '--ds-z-panel'
+  /**
+   * Strictly below `--ds-z-panel`, which the WindowManager layer owns. A docked surface is fixed
+   * furniture; a window is summoned and moved by the user and must be able to come out on top of
+   * it. See the token's definition in `designSystem.tokens.css` for why sharing the panel layer
+   * cannot express that.
+   */
+  | '--ds-z-analytics-dock'
   | '--ds-z-top'
   | '--ds-z-bottom'
   | '--ds-z-inset'
@@ -66,6 +87,31 @@ export type OverlayZLayerToken =
 
 export type OverlayAriaRole = 'dialog' | 'region' | 'status' | 'alert'
 export type OverlayAriaLive = 'polite' | 'assertive'
+
+/**
+ * Geometry tokens a docked surface is allowed to name. Deliberately a closed union: a descriptor
+ * may pick which token applies, never invent a pixel value — the numbers stay in the design system
+ * (`designSystem.tokens.css`, `designSystem.overlays.css`), which this module must not duplicate.
+ */
+export type OverlayClearanceToken =
+  | '--ds-hud-stack-height'
+  | '--ds-hud-bottom-stack-height'
+
+export type OverlayInsetToken = '--ds-ov-inset'
+
+export type OverlayDockWidthToken = '--ds-ov-panel-maxw'
+
+/**
+ * The complete placement contract of a `root-side-dock` surface: which edge it hugs, what it has
+ * to clear vertically, and which width contract bounds it.
+ */
+export type OverlaySurfaceDock = {
+  edge: 'left' | 'right'
+  topClearanceToken: OverlayClearanceToken
+  bottomClearanceToken: OverlayClearanceToken
+  insetToken: OverlayInsetToken
+  widthToken: OverlayDockWidthToken
+}
 
 export type OverlaySurfaceKey =
   | 'wm-interact-window'
@@ -83,6 +129,7 @@ export type OverlaySurfaceKey =
   | 'canvas-floating-labels-overlay'
   | 'loading-message-overlay'
   | 'error-message-overlay'
+  | 'real-metrics-panel'
 
 export type OverlaySurfaceA11y = {
   role: OverlayAriaRole
@@ -99,6 +146,8 @@ export type OverlaySurfaceDescriptor = {
   heightOwner: OverlayHeightOwner
   zLayerToken: OverlayZLayerToken
   a11y?: OverlaySurfaceA11y
+  /** Present exactly when `positioningOwner === 'root-side-dock'`. */
+  dock?: OverlaySurfaceDock
 }
 
 export type ResolvedWindowSurfaceDescriptor = {
@@ -264,6 +313,40 @@ export const overlaySurfaceCatalog = {
     heightOwner: 'content',
     zLayerToken: '--ds-z-inset',
   },
+  'real-metrics-panel': {
+    key: 'real-metrics-panel',
+    family: 'analytics-panel',
+    sizingMode: 'bounded-intrinsic',
+    /**
+     * T705 placement. A right-hand column, not a `root-inset` cover: the panel is read alongside
+     * the graph, so it must not sit on top of it. It clears the top and bottom HUD stacks by the
+     * same published tokens those stacks measure themselves into
+     * (`SimulatorAppRoot` writes `--ds-hud-stack-height` / `--ds-hud-bottom-stack-height`), which
+     * is why the panel follows a growing TopBar instead of being clipped by it.
+     */
+    positioningOwner: 'root-side-dock',
+    widthOwner: 'overlay-max-width-contract',
+    heightOwner: 'content-max-height-token',
+    /**
+     * Its own layer, one step below the WindowManager layer (`--ds-z-panel`), so that a window the
+     * user opened or dragged over the dock is in front of it and keeps its own input. Sharing
+     * `--ds-z-panel` left the outcome to sibling order in `SimulatorAppRoot`'s template, where the
+     * dock comes last and therefore covered the whole `.wm-layer` — an ordering no `effectiveZ`
+     * inside that layer could overturn.
+     */
+    zLayerToken: '--ds-z-analytics-dock',
+    dock: {
+      edge: 'right',
+      topClearanceToken: '--ds-hud-stack-height',
+      bottomClearanceToken: '--ds-hud-bottom-stack-height',
+      insetToken: '--ds-ov-inset',
+      widthToken: '--ds-ov-panel-maxw',
+    },
+    a11y: {
+      role: 'region',
+      ariaLabel: 'Run analytics',
+    },
+  },
 } as const satisfies Record<OverlaySurfaceKey, OverlaySurfaceDescriptor>
 
 type InteractPanelKind = InteractPanelData['panel']
@@ -294,6 +377,52 @@ export function getOverlaySurfaceDescriptor<Key extends OverlaySurfaceKey>(
   key: Key,
 ): (typeof overlaySurfaceCatalog)[Key] {
   return overlaySurfaceCatalog[key]
+}
+
+/**
+ * The custom properties a `root-side-dock` mount point consumes. Named here, not in the mount
+ * point, so that a stylesheet reading them cannot drift from the descriptor that produces them.
+ */
+export type OverlayDockStyle = {
+  '--ds-ov-dock-top': string
+  '--ds-ov-dock-bottom': string
+  '--ds-ov-dock-left': string
+  '--ds-ov-dock-right': string
+  '--ds-ov-dock-width': string
+  '--ds-ov-dock-z': string
+}
+
+/**
+ * Translate a docked descriptor into inline custom properties for its mount point.
+ *
+ * Custom properties rather than `top`/`right`/`z-index` directly: the mount point still owns the
+ * declarations (one scoped rule), but every value in them — which edge, which clearances, which
+ * width contract, which z layer — comes from the catalog. Nothing numeric appears here; the
+ * numbers stay in the design-system stylesheets that define these tokens on `.ds-ov-vars`, and a
+ * docked surface is only ever mounted inside that scope.
+ *
+ * Throws when the descriptor is not a docked surface: a caller asking for dock geometry that the
+ * catalog does not define has a wiring bug, and silently returning an empty style would place the
+ * surface at the top-left corner of the canvas without saying why.
+ */
+export function resolveOverlayDockStyle(key: OverlaySurfaceKey): OverlayDockStyle {
+  const descriptor: OverlaySurfaceDescriptor = getOverlaySurfaceDescriptor(key)
+  const dock = descriptor.dock
+  if (!dock) {
+    throw new Error(`Overlay surface "${key}" is not a docked surface: no dock geometry to resolve`)
+  }
+
+  const inset = `var(${dock.insetToken})`
+  const edgeGap = `calc(${inset} + var(--ds-ov-safe-${dock.edge}))`
+
+  return {
+    '--ds-ov-dock-top': `calc(var(${dock.topClearanceToken}) + ${inset} + var(--ds-ov-safe-top))`,
+    '--ds-ov-dock-bottom': `calc(var(${dock.bottomClearanceToken}) + ${inset} + var(--ds-ov-safe-bottom))`,
+    '--ds-ov-dock-left': dock.edge === 'left' ? edgeGap : 'auto',
+    '--ds-ov-dock-right': dock.edge === 'right' ? edgeGap : 'auto',
+    '--ds-ov-dock-width': `min(var(${dock.widthToken}), calc(100% - var(--ds-ov-panel-maxw-inset)))`,
+    '--ds-ov-dock-z': `var(${descriptor.zLayerToken})`,
+  }
 }
 
 export function resolveWindowSurfaceDescriptor(

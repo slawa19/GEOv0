@@ -43,7 +43,8 @@
 
 - `./scripts/run_local.ps1 status`
 - `./scripts/run_local.ps1 stop`
-- `./scripts/run_local.ps1 restart-backend -ReloadBackend` (hot reload)
+- `./scripts/run_local.ps1 restart-backend` (exact single-process ownership;
+  `-ReloadBackend` намеренно отклоняется до остановки сервисов)
 
 Проверка, что backend жив:
 
@@ -59,7 +60,9 @@
 
 ## 2) Данные для локальной разработки (SQLite) — «fixtures mode»
 
-`scripts/run_local.ps1` по умолчанию использует локальную SQLite базу `geov0.db`.
+`scripts/run_local.ps1` по умолчанию использует локальную SQLite базу
+`.local-run/geov0.db`. Корневой `geov0.db` — legacy/user data и требует явного
+`DATABASE_URL`; runner не переносит и не удаляет его автоматически.
 
 Если базы нет — она создаётся и засеивается.
 
@@ -200,7 +203,12 @@ Production-like запуск использует только base Compose, н�
 SSE replay buffer (best-effort):
 - `SIMULATOR_EVENT_BUFFER_SIZE` (по умолчанию 2000)
 - `SIMULATOR_EVENT_BUFFER_TTL_SEC` (по умолчанию 600)
-- `SIMULATOR_SSE_STRICT_REPLAY=1` — возвращать `HTTP 410`, если `Last-Event-ID` слишком старый
+- `SIMULATOR_SSE_SUB_QUEUE_MAX` (по умолчанию 500)
+
+`HTTP 410` для invalid/future/pruned/oversized `Last-Event-ID` включён всегда и
+не имеет отдельного env-переключателя. После `410` или закрытия stream из-за
+queue overflow клиент обязан переподключиться; snapshot refresh используется
+для восстановления materialized UI state.
 
 Real Mode guardrails:
 - `SIMULATOR_REAL_MAX_IN_FLIGHT` (по умолчанию 1)

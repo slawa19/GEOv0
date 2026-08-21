@@ -1,5 +1,11 @@
 # GEO Hub: Как вносить вклад
 
+```text
+Статус: Stable
+Область: core
+Последнее обновление: 2026-08-11
+```
+
 **Версия:** 0.1  
 **Дата:** Ноябрь 2025
 
@@ -24,7 +30,7 @@
 
 ### 1.1. Требования
 
-- Python 3.11+
+- Python 3.11+ с Windows Python Launcher (`py`)
 - PostgreSQL 16+ (для прод и для dev через Docker Compose)
 - Redis 7+ (опционально; используется в текущем dev-стеке через Docker Compose)
 - Git
@@ -46,16 +52,14 @@ git remote add upstream https://github.com/geo-protocol/geo-hub.git
 
 ### 1.3. Настройка окружения
 
-```bash
+Создайте окружение для canonical verifier из PowerShell:
+
+```powershell
 # Создать виртуальное окружение
-python3.11 -m venv venv
-source venv/bin/activate
+py -m venv .venv
 
 # Установить зависимости (runtime + dev)
-python -m pip install -r requirements.txt -r requirements-dev.txt
-
-# pre-commit (опционально)
-# Репозиторий использует линтеры/форматтеры, но pre-commit не обязателен для начала.
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
 ```
 
 ### 1.4. Запуск через Docker
@@ -89,18 +93,20 @@ npm --prefix admin-ui run dev
 
 ### 1.5. Проверка установки
 
-```bash
-# Запустить тесты
-pytest
+Запустите проверочные команды из PowerShell:
 
-# Проверить линтеры
-ruff check .
+```powershell
+# Запустить canonical backend gate
+.\scripts\verify_local.ps1 -TaskSlug contributor_install -BackendOnly
+
+# Проверить blocking Ruff scope (версия закреплена в requirements-dev.txt)
+.\.venv\Scripts\python.exe -m ruff check app migrations --no-cache
 
 # (опционально)
 # mypy app/
 
 # Открыть документацию (Swagger UI)
-open http://localhost:8000/docs
+Start-Process http://localhost:8000/docs
 # (или http://127.0.0.1:18000/docs при запуске через scripts/run_local.ps1)
 ```
 
@@ -203,30 +209,32 @@ git checkout -b feature/my-feature
 
 ### 3.3. Запуск в режиме разработки
 
-```bash
-export ENV=dev
+```powershell
+$env:ENV = "dev"
 
 # Запустить с hot reload
-uvicorn app.main:app --reload --host 0.0.0.0 --port 18000
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 0.0.0.0 --port 18000
 
 # Логирование в debug режиме
-DEBUG=true LOG_LEVEL=DEBUG uvicorn app.main:app --reload --host 0.0.0.0 --port 18000
+$env:DEBUG = "true"
+$env:LOG_LEVEL = "DEBUG"
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 0.0.0.0 --port 18000
 ```
 
 ### 3.4. Работа с базой данных
 
-```bash
+```powershell
 # Создать новую миграцию
-alembic -c migrations/alembic.ini revision --autogenerate -m "Add column X to table Y"
+.\.venv\Scripts\python.exe -m alembic -c migrations/alembic.ini revision --autogenerate -m "Add column X to table Y"
 
 # Применить миграции
-alembic -c migrations/alembic.ini upgrade head
+.\.venv\Scripts\python.exe -m alembic -c migrations/alembic.ini upgrade head
 
 # Откатить последнюю миграцию
-alembic -c migrations/alembic.ini downgrade -1
+.\.venv\Scripts\python.exe -m alembic -c migrations/alembic.ini downgrade -1
 
 # Просмотреть историю
-alembic -c migrations/alembic.ini history
+.\.venv\Scripts\python.exe -m alembic -c migrations/alembic.ini history
 ```
 
 ---
@@ -236,20 +244,22 @@ alembic -c migrations/alembic.ini history
 ### 4.1. Python
 
 Используем:
-- **Ruff** — линтер (замена flake8, isort, pyupgrade)
-- **Black** — форматирование (через ruff format)
+- **Ruff** — blocking CI-линтер для `app migrations` (замена flake8, isort, pyupgrade)
+- **Black** — пока non-blocking formatting diagnostic
 - **mypy** — опционально (не закреплён в зависимостях репозитория)
 
-```bash
+```powershell
 # Проверка
-ruff check .
+.\.venv\Scripts\python.exe -m ruff check app migrations --no-cache
 
 # (опционально)
 # mypy app/
 
-# Автоисправление
-ruff check --fix .
-ruff format .
+# Автоисправление Ruff в blocking scope
+.\.venv\Scripts\python.exe -m ruff check --fix app migrations
+
+# Black пока только non-blocking diagnostic; массовое форматирование требует отдельного среза
+.\.venv\Scripts\python.exe -m black --check app migrations
 ```
 
 ### 4.2. Конфигурация (pyproject.toml)
@@ -413,21 +423,20 @@ tests/
 
 ### 5.2. Запуск тестов
 
-```bash
-# Все тесты
-pytest
+```powershell
+# Backend tier по умолчанию: исключает slow и postgres
+.\scripts\verify_local.ps1 -TaskSlug contributor_backend -BackendOnly
 
-# С покрытием
-pytest --cov=app --cov-report=html
+# Конкретный модуль через canonical selector
+.\scripts\verify_local.ps1 -TaskSlug contributor_payments -BackendOnly `
+  -BackendSelector tests/unit/test_payments_2pc.py
 
-# Конкретный модуль
-pytest tests/unit/core/test_routing.py
+# Явный slow milestone; postgres по-прежнему исключён
+.\scripts\verify_local.ps1 -TaskSlug contributor_super_smoke -BackendOnly `
+  -BackendSelector tests/integration/test_simulator_super_smoke.py -IncludeExpensive
 
-# По маркерам
-pytest -m "not slow"
-
-# Параллельно
-pytest -n auto
+# Coverage запускается отдельным debug-срезом только после canonical gate;
+# прямой pytest не является документированным required path.
 ```
 
 ### 5.3. Fixtures
@@ -522,16 +531,23 @@ class TestRoutingService:
 
 ### 6.1. Подготовка PR
 
-```bash
+Запустите обязательные проверки из PowerShell:
+
+```powershell
 # Убедиться, что все проверки проходят
-ruff check .
+.\.venv\Scripts\python.exe -m ruff check app migrations --no-cache
 
 # 1. Запустить Super Smoke (обязательно!)
-pytest tests/integration/test_simulator_super_smoke.py -vv
+.\scripts\verify_local.ps1 -TaskSlug contributor_pr_super_smoke -BackendOnly `
+  -BackendSelector tests/integration/test_simulator_super_smoke.py -IncludeExpensive
 
-# 2. Запустить все тесты
-pytest
+# 2. Запустить canonical full gate
+.\scripts\verify_local.ps1 -TaskSlug contributor_pr_full
+```
 
+Затем создайте commit в используемой оболочке:
+
+```bash
 # Commit с понятным сообщением
 git commit -m "feat(payments): add multi-path routing support
 

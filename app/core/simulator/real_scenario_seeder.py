@@ -14,6 +14,7 @@ from app.core.simulator.scenario_equivalent import (
     effective_equivalent,
     scenario_default_equivalent,
 )
+from app.utils.validation import validate_equivalent_code
 
 
 class RealScenarioSeeder:
@@ -67,6 +68,11 @@ class RealScenarioSeeder:
                 eq_set.add(str(eq).strip().upper())
 
         eq_codes = sorted(eq_set)
+
+        # Scenario JSON is intentionally broader than the persisted Equivalent
+        # catalog. Reject noncanonical codes before any ORM objects are staged.
+        for code in eq_codes:
+            validate_equivalent_code(code)
 
         if eq_codes:
             existing_eq = (

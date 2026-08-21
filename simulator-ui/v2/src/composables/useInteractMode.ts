@@ -1,6 +1,7 @@
 import { computed, ref, watch, type ComputedRef, type Reactive, type Ref } from 'vue'
 
 import type { GraphSnapshot } from '../types'
+import { extractErrorMessage } from '../utils/errorMessage'
 import { parseAmountNumber, parseAmountStringOrNull } from '../utils/numberFormat'
 import type { ParticipantInfo, SimulatorActionClearingRealResponse, TrustlineInfo } from '../api/simulatorTypes'
 import { useInteractActions } from './useInteractActions'
@@ -35,7 +36,7 @@ export function useInteractMode(opts: {
   startTrustlineFlowWithFrom: (fromPid: string) => void
   startClearingFlow: () => void
   selectNode: (nodeId: string) => void
-  selectEdge: (edgeKey: string, anchor?: { x: number; y: number } | null) => void
+  selectEdge: (edgeKey: string, anchor?: { x: number; y: number } | null) => boolean
   cancel: () => void
 
   // Actions
@@ -94,11 +95,6 @@ export function useInteractMode(opts: {
   // UX: keep the clearing preview visible long enough to be noticed/read.
   const CLEARING_PREVIEW_DWELL_MS = 800
   const CLEARING_RUNNING_DWELL_MS = 200
-
-  function getErrorMessage(error: unknown): string {
-    if (error instanceof Error) return error.message
-    return String(error)
-  }
 
   // NOTE: payment targets are backend-first (Phase 2.5) and include multi-hop reachability.
   // IMPORTANT: capacity shown in the UI is best-effort only (direct-hop hint).
@@ -200,8 +196,6 @@ export function useInteractMode(opts: {
   const invalidateTrustlinesCache = dataCache.invalidateTrustlinesCache
   const findActiveTrustline = dataCache.findActiveTrustline
 
-  const paymentTargetsLastError = dataCache.paymentTargetsLastError
-
   function normalizeEq(v: unknown): string {
     return String(v ?? '').trim().toUpperCase()
   }
@@ -230,6 +224,11 @@ export function useInteractMode(opts: {
     const fromPid = normalizePid(state.fromPid)
     if (!runId || !eq || !fromPid) return null
     return dataCache.paymentTargetsKey({ runId, eq, fromPid, maxHops: PAYMENT_TARGETS_MAX_HOPS })
+  })
+
+  const paymentTargetsLastError = computed(() => {
+    const key = paymentTargetsActiveKey.value
+    return key ? (dataCache.paymentTargetsLastErrorByKey.value.get(key) ?? null) : null
   })
 
   const paymentTargetsLoading = computed(() => {
@@ -449,12 +448,13 @@ export function useInteractMode(opts: {
   }
 
   function selectEdge(edgeKey: string, anchor?: { x: number; y: number } | null) {
-    if (busyRef.value) return
+    if (busyRef.value) return false
     fsm.selectEdge(edgeKey, anchor)
 
     // Opening edit UI: try to have trustlines list ready for dropdown + accurate details.
     void refreshParticipants()
     void refreshTrustlines()
+    return true
   }
 
   async function runBusy<T>(
@@ -483,7 +483,7 @@ export function useInteractMode(opts: {
     } catch (error) {
       // Don't leak errors into already-cancelled state.
       if (isCurrent()) {
-        const msg = getErrorMessage(error)
+        const msg = extractErrorMessage(error)
         // Ensure repeated identical errors still retrigger the ErrorToast timer.
         if (state.error === msg) {
           state.error = null
@@ -635,7 +635,7 @@ export function useInteractMode(opts: {
       fsm.setLastClearing(res)
 
       // BUG-5: log to history
-      const clearedCycles = res.cleared_cycles ?? 0
+      const clearedCycles = res.cleared_cycles
       const clearedAmt = res.total_cleared_amount ?? '0'
       if (clearedCycles > 0) {
         pushHistory('🌀', `Clearing: ${clearedCycles} cycle(s), −${clearedAmt} ${opts.equivalent.value}`)
@@ -667,8 +667,8 @@ export function useInteractMode(opts: {
       await new Promise((r) => setTimeout(r, CLEARING_RUNNING_DWELL_MS))
       if (!isCurrent()) return
 
-      const settled = res?.cleared_cycles ?? 0
-      const total = Array.isArray(res?.cycles) ? res.cycles.length : settled
+      const settled = res.cleared_cycles
+      const total = res.cycles.length
       successMessage.value = `Clearing done: ${settled}/${total} cycles`
 
       resetToIdle()

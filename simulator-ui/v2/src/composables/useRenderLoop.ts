@@ -136,6 +136,7 @@ type UseRenderLoopDeps = {
   setFlash: (v: number) => void
 
   pruneFloatingLabels: (nowMs: number) => void
+  hasFloatingLabels?: () => boolean
 
   // Optional: keep overlay sets bounded over long sessions.
   pruneActiveEdges?: (nowMs: number) => void
@@ -367,6 +368,10 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
   }
 
   function renderFrame(nowMs: number) {
+    // DOM overlays own their own TTL and must expire even when canvas/snapshot
+    // prerequisites are temporarily unavailable (for example during refresh).
+    deps.pruneFloatingLabels(nowMs)
+
     const canvas = deps.canvasEl.value
     const fxCanvas = deps.fxCanvasEl.value
     const layout = deps.getLayout()
@@ -489,8 +494,6 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
 
     if (deps.pruneActiveEdges) deps.pruneActiveEdges(nowMs)
     if (deps.pruneActiveNodes) deps.pruneActiveNodes(nowMs)
-    deps.pruneFloatingLabels(nowMs)
-
     // FX hard cap:
     // - Prefer declared snapshot limits.
     // - Otherwise apply a quality-based default to keep demo playback bounded.
@@ -557,6 +560,7 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
     if (deps.getFlash() > 0) return true
     if (deps.activeEdges && deps.activeEdges.size > 0) return true
     if (deps.activeNodes && deps.activeNodes.size > 0) return true
+    if (deps.hasFloatingLabels?.()) return true
 
     const fxState = deps.fxState
     const sparks = Array.isArray(fxState?.sparks) ? fxState.sparks.length : 0

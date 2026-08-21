@@ -6,6 +6,15 @@ import type { GraphSnapshot } from '../types'
 type SceneId = 'A' | 'B' | 'C'
 
 type LoadSnapshotFn = (eq: string) => Promise<{ snapshot: GraphSnapshot; sourcePath: string }>
+type RecoverySceneContext = {
+  runId: string
+  equivalent: string
+  isCurrent: () => boolean
+}
+type LoadRecoverySnapshotFn = (context: Pick<RecoverySceneContext, 'runId' | 'equivalent'>) => Promise<{
+  snapshot: GraphSnapshot
+  sourcePath: string
+}>
 
 type SceneState = {
   loading: boolean
@@ -28,6 +37,7 @@ type UseSceneStateDeps = {
   state: SceneState
 
   loadSnapshot: LoadSnapshotFn
+  loadRecoverySnapshot?: LoadRecoverySnapshotFn
 
   clearScheduledTimeouts: (opts?: { keepCritical?: boolean }) => void
   resetCamera: () => void
@@ -49,16 +59,21 @@ type UseSceneStateDeps = {
   // When true, setup() skips the initial loadScene() call.
   // Useful when another subsystem (e.g. real-mode boot) is responsible for the first load.
   skipInitialLoad?: () => boolean
+  // A scene/equivalent watcher supersedes any replay-recovery snapshot that
+  // might currently own the SSE lifecycle.
+  onSceneContextChange?: () => Promise<void>
 }
 
 type UseSceneStateReturn = {
   loadScene: () => Promise<void>
+  loadRecoveryScene: (context: RecoverySceneContext) => Promise<boolean>
   setup: () => void
   teardown: () => void
 }
 
 export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
   let deepLinkFocusNodeId: string | null = null
+  let loadSceneSeq = 0
 
   // Track loaded snapshot identity to detect "incremental" updates vs. full scene changes.
   // When node IDs are the same, we can skip costly resets (camera, overlays, layout animation).
@@ -121,7 +136,16 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
     return true
   }
 
-  async function loadScene() {
+  async function applySceneLoad(input: {
+    loadSnapshot: () => Promise<{ snapshot: GraphSnapshot; sourcePath: string }>
+    isContextCurrent?: () => boolean
+    recoveryContext?: Pick<RecoverySceneContext, 'runId' | 'equivalent'>
+    rethrow?: boolean
+  }): Promise<boolean> {
+    if (input.isContextCurrent && !input.isContextCurrent()) return false
+    const mySeq = ++loadSceneSeq
+    const isCurrent = () => loadSceneSeq === mySeq && (!input.isContextCurrent || input.isContextCurrent())
+
     // IMPORTANT:
     // - `loadScene()` can be triggered by snapshot refreshes within the same run.
     // - We must NOT silently drop pending critical timers (e.g. delayed receiver amount labels).
@@ -132,7 +156,17 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
     deps.state.error = ''
 
     try {
-      const { snapshot, sourcePath } = await deps.loadSnapshot(deps.effectiveEq.value)
+      const { snapshot, sourcePath } = await input.loadSnapshot()
+      if (!isCurrent()) return false
+
+      if (input.recoveryContext) {
+        const source = parseSceneContext(sourcePath)
+        const expectedEq = String(input.recoveryContext.equivalent || '').trim().toUpperCase()
+        const snapshotEq = String(snapshot.equivalent || '').trim().toUpperCase()
+        if (source.kind !== 'run' || source.id !== input.recoveryContext.runId || snapshotEq !== expectedEq) {
+          throw new Error('Replay recovery snapshot does not match the active run/equivalent context')
+        }
+      }
 
       // Detect if this is an "incremental" update (same node IDs) vs. a full scene change.
       // Incremental: skip camera reset, overlay clear, and layout cache invalidation.
@@ -181,15 +215,43 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
         deps.resizeAndLayout()
       }
       deps.ensureRenderLoop()
+      return true
     } catch (error) {
+      if (!isCurrent()) return false
       deps.state.error = getErrorMessage(error)
+      if (input.rethrow) throw error
+      return false
     } finally {
-      deps.state.loading = false
+      if (isCurrent()) deps.state.loading = false
     }
   }
 
+  async function loadScene() {
+    await applySceneLoad({
+      loadSnapshot: () => deps.loadSnapshot(deps.effectiveEq.value),
+    })
+  }
+
+  async function loadRecoveryScene(context: RecoverySceneContext): Promise<boolean> {
+    if (!deps.loadRecoverySnapshot) throw new Error('Strict replay recovery snapshot loader is not configured')
+    const runId = String(context.runId || '').trim()
+    const equivalent = String(context.equivalent || '').trim().toUpperCase()
+    if (!runId || !equivalent) throw new Error('Replay recovery requires a run id and equivalent')
+
+    return await applySceneLoad({
+      loadSnapshot: () => deps.loadRecoverySnapshot!({ runId, equivalent }),
+      isContextCurrent: context.isCurrent,
+      recoveryContext: { runId, equivalent },
+      rethrow: true,
+    })
+  }
+
   watch([deps.eq, deps.scene], () => {
-    loadScene()
+    if (deps.onSceneContextChange) {
+      void deps.onSceneContextChange()
+      return
+    }
+    void loadScene()
   })
 
   function setup() {
@@ -236,10 +298,12 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
   }
 
   function teardown() {
+    loadSceneSeq += 1
+    deps.state.loading = false
     deps.teardownResizeListener()
     deps.clearScheduledTimeouts()
     deps.stopRenderLoop()
   }
 
-  return { loadScene, setup, teardown }
+  return { loadScene, loadRecoveryScene, setup, teardown }
 }

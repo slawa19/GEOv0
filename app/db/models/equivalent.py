@@ -1,7 +1,8 @@
 import uuid
 from sqlalchemy import Boolean, CheckConstraint, DateTime, JSON, SmallInteger, String, Text, Uuid, func
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, validates
 from app.db.base import Base
+from app.utils.validation import validate_equivalent_code, validate_equivalent_precision
 
 class Equivalent(Base):
     __tablename__ = "equivalents"
@@ -19,3 +20,12 @@ class Equivalent(Base):
     __table_args__ = (
         CheckConstraint("code = upper(code)", name="chk_equivalents_code_upper"),
     )
+
+    @validates("code")
+    def validate_code(self, _key: str, value: str) -> str:
+        validate_equivalent_code(value)
+        return value
+
+    @validates("precision")
+    def validate_precision(self, _key: str, value: int) -> int:
+        return validate_equivalent_precision(value)

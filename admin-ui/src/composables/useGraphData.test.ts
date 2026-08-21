@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ref } from 'vue'
+import { effectScope, ref } from 'vue'
 
 const apiMock = vi.hoisted(() => ({
   graphSnapshot: vi.fn(),
@@ -159,6 +159,31 @@ describe('useGraphData', () => {
     expect(g.availableEquivalents.value).toEqual(['EUR', 'USD'])
   })
 
+  it('does not claim mock focus data is ready while the full snapshot is loading', async () => {
+    const snapshot = deferred<ReturnType<typeof snapshotEnvelope>>()
+    const cycles = deferred<ReturnType<typeof cyclesEnvelope>>()
+    apiMock.graphSnapshot.mockReturnValueOnce(snapshot.promise)
+    apiMock.clearingCycles.mockReturnValueOnce(cycles.promise)
+    const graph = useGraphData({
+      eq: ref('EUR'),
+      isRealMode: ref(false),
+      focusMode: ref(true),
+      focusRootPid: ref('PID_A'),
+      focusDepth: ref(1),
+      statusFilter: ref<string[]>([]),
+    })
+
+    const pending = graph.loadData()
+    expect(graph.loading.value).toBe(true)
+    await expect(graph.refreshForFocusMode()).resolves.toBe(false)
+
+    snapshot.resolve(snapshotEnvelope('READY'))
+    cycles.resolve(cyclesEnvelope('READY'))
+    await pending
+
+    await expect(graph.refreshForFocusMode()).resolves.toBe(true)
+  })
+
   it('keeps the newest graph load when an older load rejects last', async () => {
     const olderSnapshot = deferred<ReturnType<typeof snapshotEnvelope>>()
     const latestSnapshot = deferred<ReturnType<typeof snapshotEnvelope>>()
@@ -193,6 +218,29 @@ describe('useGraphData', () => {
     expect(g.participants.value.map((participant) => participant.pid)).toEqual(['LATEST'])
     expect(g.clearingCycles.value).toEqual(cyclesEnvelope('LATEST').data)
     expect(g.error.value).toBeNull()
+    expect(g.loading.value).toBe(false)
+  })
+
+  it('keeps a successful graph snapshot visible when clearing cycles fail', async () => {
+    apiMock.graphSnapshot.mockResolvedValueOnce(snapshotEnvelope('SNAPSHOT'))
+    apiMock.clearingCycles.mockResolvedValueOnce({
+      success: false,
+      error: { code: 'cycles_unavailable', message: 'clearing cycles unavailable' },
+    })
+    const g = useGraphData({
+      eq: ref('EUR'),
+      isRealMode: ref(true),
+      focusMode: ref(false),
+      focusRootPid: ref(''),
+      focusDepth: ref(1),
+      statusFilter: ref<string[]>([]),
+    })
+
+    await expect(g.loadData()).resolves.toBe(true)
+
+    expect(g.participants.value.map((participant) => participant.pid)).toEqual(['SNAPSHOT'])
+    expect(g.clearingCycles.value).toBeNull()
+    expect(g.error.value).toBe('clearing cycles unavailable')
     expect(g.loading.value).toBe(false)
   })
 
@@ -272,6 +320,388 @@ describe('useGraphData', () => {
       expect(g.clearingCycles.value).toEqual(cyclesEnvelope('LOAD').data)
     },
   )
+
+  it('does not let a no-op participant deselection supersede pending load cycles', async () => {
+    const snapshot = deferred<ReturnType<typeof snapshotEnvelope>>()
+    const cycles = deferred<ReturnType<typeof cyclesEnvelope>>()
+    apiMock.graphSnapshot.mockReturnValueOnce(snapshot.promise)
+    apiMock.clearingCycles.mockReturnValueOnce(cycles.promise)
+    const g = useGraphData({
+      eq: ref('EUR'),
+      isRealMode: ref(true),
+      focusMode: ref(false),
+      focusRootPid: ref(''),
+      focusDepth: ref(1),
+      statusFilter: ref<string[]>([]),
+    })
+
+    const fullLoad = g.loadData()
+    await expect(g.refreshClearingCyclesForParticipant('')).resolves.toBe(true)
+    expect(apiMock.clearingCycles.mock.calls).toEqual([[]])
+
+    snapshot.resolve(snapshotEnvelope('LOAD'))
+    cycles.resolve(cyclesEnvelope('LOAD'))
+    await expect(fullLoad).resolves.toBe(true)
+
+    expect(g.participants.value.map((participant) => participant.pid)).toEqual(['LOAD'])
+    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('LOAD').data)
+    expect(g.error.value).toBeNull()
+  })
+
+  it('invalidates pending participant cycles when the participant is deselected', async () => {
+    const participantCycles = deferred<ReturnType<typeof cyclesEnvelope>>()
+    apiMock.graphSnapshot.mockResolvedValueOnce(snapshotEnvelope('BASE'))
+    apiMock.clearingCycles
+      .mockResolvedValueOnce(cyclesEnvelope('FULL'))
+      .mockReturnValueOnce(participantCycles.promise)
+    const g = useGraphData({
+      eq: ref('EUR'),
+      isRealMode: ref(true),
+      focusMode: ref(false),
+      focusRootPid: ref(''),
+      focusDepth: ref(1),
+      statusFilter: ref<string[]>([]),
+    })
+    await g.loadData()
+
+    const pendingParticipant = g.refreshClearingCyclesForParticipant('PID_A')
+    await expect(g.refreshClearingCyclesForParticipant('')).resolves.toBe(true)
+    participantCycles.resolve(cyclesEnvelope('PARTICIPANT'))
+
+    await expect(pendingParticipant).resolves.toBe(false)
+    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('FULL').data)
+    expect(apiMock.clearingCycles.mock.calls).toEqual([[], [{ participant_pid: 'PID_A' }]])
+  })
+
+  it('applies pending full cycles after a participant is selected and deselected before the full load resolves', async () => {
+    const fullSnapshot = deferred<ReturnType<typeof snapshotEnvelope>>()
+    const fullCycles = deferred<ReturnType<typeof cyclesEnvelope>>()
+    const participantCycles = deferred<ReturnType<typeof cyclesEnvelope>>()
+    apiMock.graphSnapshot.mockReturnValueOnce(fullSnapshot.promise)
+    apiMock.clearingCycles
+      .mockReturnValueOnce(fullCycles.promise)
+      .mockReturnValueOnce(participantCycles.promise)
+    const g = useGraphData({
+      eq: ref('EUR'),
+      isRealMode: ref(true),
+      focusMode: ref(false),
+      focusRootPid: ref(''),
+      focusDepth: ref(1),
+      statusFilter: ref<string[]>([]),
+    })
+
+    const fullLoad = g.loadData()
+    const pendingParticipant = g.refreshClearingCyclesForParticipant('PID_A')
+    await expect(g.refreshClearingCyclesForParticipant('')).resolves.toBe(true)
+
+    participantCycles.resolve(cyclesEnvelope('STALE_PARTICIPANT'))
+    await expect(pendingParticipant).resolves.toBe(false)
+    fullSnapshot.resolve(snapshotEnvelope('FULL'))
+    fullCycles.resolve(cyclesEnvelope('FULL'))
+    await expect(fullLoad).resolves.toBe(true)
+
+    expect(g.participants.value.map((participant) => participant.pid)).toEqual(['FULL'])
+    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('FULL').data)
+    expect(g.error.value).toBeNull()
+    expect(g.loading.value).toBe(false)
+  })
+
+  it.each(['resolve', 'reject'] as const)(
+    'ignores a deselected participant request that %s after the pending full load',
+    async (participantOutcome) => {
+      const fullSnapshot = deferred<ReturnType<typeof snapshotEnvelope>>()
+      const fullCycles = deferred<ReturnType<typeof cyclesEnvelope>>()
+      const participantCycles = deferred<ReturnType<typeof cyclesEnvelope>>()
+      apiMock.graphSnapshot.mockReturnValueOnce(fullSnapshot.promise)
+      apiMock.clearingCycles
+        .mockReturnValueOnce(fullCycles.promise)
+        .mockReturnValueOnce(participantCycles.promise)
+      const g = useGraphData({
+        eq: ref('EUR'),
+        isRealMode: ref(true),
+        focusMode: ref(false),
+        focusRootPid: ref(''),
+        focusDepth: ref(1),
+        statusFilter: ref<string[]>([]),
+      })
+
+      const fullLoad = g.loadData()
+      const pendingParticipant = g.refreshClearingCyclesForParticipant('PID_A')
+      await expect(g.refreshClearingCyclesForParticipant('')).resolves.toBe(true)
+
+      fullSnapshot.resolve(snapshotEnvelope('FULL'))
+      fullCycles.resolve(cyclesEnvelope('FULL'))
+      await expect(fullLoad).resolves.toBe(true)
+      if (participantOutcome === 'resolve') {
+        participantCycles.resolve(cyclesEnvelope('STALE_PARTICIPANT'))
+      } else {
+        participantCycles.reject(new Error('stale participant failure'))
+      }
+      await expect(pendingParticipant).resolves.toBe(false)
+
+      expect(g.participants.value.map((participant) => participant.pid)).toEqual(['FULL'])
+      expect(g.clearingCycles.value).toEqual(cyclesEnvelope('FULL').data)
+      expect(g.error.value).toBeNull()
+      expect(g.loading.value).toBe(false)
+    },
+  )
+
+  it.each(['participant-first', 'full-first'] as const)(
+    'keeps a successful active-participant view clear of a full-cycle failure that settles %s',
+    async (resolutionOrder) => {
+      const fullSnapshot = deferred<ReturnType<typeof snapshotEnvelope>>()
+      const fullCycles = deferred<ReturnType<typeof cyclesEnvelope>>()
+      const participantCycles = deferred<ReturnType<typeof cyclesEnvelope>>()
+      apiMock.graphSnapshot
+        .mockResolvedValueOnce(snapshotEnvelope('BASE'))
+        .mockReturnValueOnce(fullSnapshot.promise)
+      apiMock.clearingCycles
+        .mockResolvedValueOnce(cyclesEnvelope('BASE'))
+        .mockReturnValueOnce(fullCycles.promise)
+        .mockReturnValueOnce(participantCycles.promise)
+      const g = useGraphData({
+        eq: ref('EUR'),
+        isRealMode: ref(true),
+        focusMode: ref(false),
+        focusRootPid: ref(''),
+        focusDepth: ref(1),
+        statusFilter: ref<string[]>([]),
+      })
+      await g.loadData()
+
+      const pendingFull = g.loadData()
+      const pendingParticipant = g.refreshClearingCyclesForParticipant('PID_A')
+
+      if (resolutionOrder === 'participant-first') {
+        participantCycles.resolve(cyclesEnvelope('PARTICIPANT'))
+        await expect(pendingParticipant).resolves.toBe(true)
+        fullSnapshot.resolve(snapshotEnvelope('FULL'))
+        fullCycles.reject(new Error('full cycles failed'))
+        await expect(pendingFull).resolves.toBe(true)
+      } else {
+        fullSnapshot.resolve(snapshotEnvelope('FULL'))
+        fullCycles.reject(new Error('full cycles failed'))
+        await expect(pendingFull).resolves.toBe(true)
+        participantCycles.resolve(cyclesEnvelope('PARTICIPANT'))
+        await expect(pendingParticipant).resolves.toBe(true)
+      }
+
+      expect(g.clearingCycles.value).toEqual(cyclesEnvelope('PARTICIPANT').data)
+      expect(g.error.value).toBeNull()
+
+      await expect(g.refreshClearingCyclesForParticipant('')).resolves.toBe(true)
+      expect(g.clearingCycles.value).toEqual(cyclesEnvelope('BASE').data)
+      expect(g.error.value).toBe('full cycles failed')
+    },
+  )
+
+  it.each(['participant-first', 'full-first'] as const)(
+    'restores the latest full cycles when the active participant request fails %s',
+    async (resolutionOrder) => {
+      const fullSnapshot = deferred<ReturnType<typeof snapshotEnvelope>>()
+      const fullCycles = deferred<ReturnType<typeof cyclesEnvelope>>()
+      const participantCycles = deferred<ReturnType<typeof cyclesEnvelope>>()
+      apiMock.graphSnapshot
+        .mockResolvedValueOnce(snapshotEnvelope('BASE'))
+        .mockReturnValueOnce(fullSnapshot.promise)
+      apiMock.clearingCycles
+        .mockResolvedValueOnce(cyclesEnvelope('BASE'))
+        .mockReturnValueOnce(fullCycles.promise)
+        .mockReturnValueOnce(participantCycles.promise)
+      const g = useGraphData({
+        eq: ref('EUR'),
+        isRealMode: ref(true),
+        focusMode: ref(false),
+        focusRootPid: ref(''),
+        focusDepth: ref(1),
+        statusFilter: ref<string[]>([]),
+      })
+      await g.loadData()
+
+      const pendingFull = g.loadData()
+      const pendingParticipant = g.refreshClearingCyclesForParticipant('PID_A')
+
+      if (resolutionOrder === 'participant-first') {
+        participantCycles.reject(new Error('participant cycles failed'))
+        await expect(pendingParticipant).resolves.toBe(false)
+        expect(g.clearingCycles.value).toEqual(cyclesEnvelope('BASE').data)
+        fullSnapshot.resolve(snapshotEnvelope('FULL'))
+        fullCycles.resolve(cyclesEnvelope('FULL'))
+        await expect(pendingFull).resolves.toBe(true)
+      } else {
+        fullSnapshot.resolve(snapshotEnvelope('FULL'))
+        fullCycles.resolve(cyclesEnvelope('FULL'))
+        await expect(pendingFull).resolves.toBe(true)
+        participantCycles.reject(new Error('participant cycles failed'))
+        await expect(pendingParticipant).resolves.toBe(false)
+      }
+
+      expect(g.clearingCycles.value).toEqual(cyclesEnvelope('FULL').data)
+      expect(g.error.value).toBe('participant cycles failed')
+      expect(g.loading.value).toBe(false)
+    },
+  )
+
+  it('restores full cycles immediately while a newly selected participant is pending', async () => {
+    const participantB = deferred<ReturnType<typeof cyclesEnvelope>>()
+    apiMock.graphSnapshot.mockResolvedValueOnce(snapshotEnvelope('FULL'))
+    apiMock.clearingCycles
+      .mockResolvedValueOnce(cyclesEnvelope('FULL'))
+      .mockResolvedValueOnce(cyclesEnvelope('PARTICIPANT_A'))
+      .mockReturnValueOnce(participantB.promise)
+    const g = useGraphData({
+      eq: ref('EUR'),
+      isRealMode: ref(true),
+      focusMode: ref(false),
+      focusRootPid: ref(''),
+      focusDepth: ref(1),
+      statusFilter: ref<string[]>([]),
+    })
+    await g.loadData()
+    await g.refreshClearingCyclesForParticipant('PID_A')
+
+    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('PARTICIPANT_A').data)
+
+    const pendingParticipantB = g.refreshClearingCyclesForParticipant('PID_B')
+
+    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('FULL').data)
+    expect(g.error.value).toBeNull()
+
+    participantB.resolve(cyclesEnvelope('PARTICIPANT_B'))
+    await expect(pendingParticipantB).resolves.toBe(true)
+    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('PARTICIPANT_B').data)
+  })
+
+  it('clears a prior participant error when another participant request starts', async () => {
+    const participantB = deferred<ReturnType<typeof cyclesEnvelope>>()
+    apiMock.graphSnapshot.mockResolvedValueOnce(snapshotEnvelope('FULL'))
+    apiMock.clearingCycles
+      .mockResolvedValueOnce(cyclesEnvelope('FULL'))
+      .mockRejectedValueOnce(new Error('participant A failed'))
+      .mockReturnValueOnce(participantB.promise)
+    const g = useGraphData({
+      eq: ref('EUR'),
+      isRealMode: ref(true),
+      focusMode: ref(false),
+      focusRootPid: ref(''),
+      focusDepth: ref(1),
+      statusFilter: ref<string[]>([]),
+    })
+    await g.loadData()
+    await expect(g.refreshClearingCyclesForParticipant('PID_A')).resolves.toBe(false)
+    expect(g.error.value).toBe('participant A failed')
+
+    const pendingParticipantB = g.refreshClearingCyclesForParticipant('PID_B')
+
+    expect(g.error.value).toBeNull()
+    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('FULL').data)
+
+    participantB.resolve(cyclesEnvelope('PARTICIPANT_B'))
+    await expect(pendingParticipantB).resolves.toBe(true)
+  })
+
+  it('keeps the full cycle lane current while a changed participant request is pending', async () => {
+    const latestFullSnapshot = deferred<ReturnType<typeof snapshotEnvelope>>()
+    const latestFullCycles = deferred<ReturnType<typeof cyclesEnvelope>>()
+    const participantB = deferred<ReturnType<typeof cyclesEnvelope>>()
+    apiMock.graphSnapshot
+      .mockResolvedValueOnce(snapshotEnvelope('BASE'))
+      .mockResolvedValueOnce(snapshotEnvelope('FAILED_FULL'))
+      .mockReturnValueOnce(latestFullSnapshot.promise)
+    apiMock.clearingCycles
+      .mockResolvedValueOnce(cyclesEnvelope('FULL_1'))
+      .mockRejectedValueOnce(new Error('cached full failure'))
+      .mockReturnValueOnce(latestFullCycles.promise)
+      .mockResolvedValueOnce(cyclesEnvelope('PARTICIPANT_A'))
+      .mockReturnValueOnce(participantB.promise)
+    const g = useGraphData({
+      eq: ref('EUR'),
+      isRealMode: ref(true),
+      focusMode: ref(false),
+      focusRootPid: ref(''),
+      focusDepth: ref(1),
+      statusFilter: ref<string[]>([]),
+    })
+    await g.loadData()
+    await g.loadData()
+
+    const pendingFull = g.loadData()
+    await g.refreshClearingCyclesForParticipant('PID_A')
+    const pendingParticipantB = g.refreshClearingCyclesForParticipant('PID_B')
+
+    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('FULL_1').data)
+    expect(g.error.value).toBe('cached full failure')
+
+    latestFullSnapshot.resolve(snapshotEnvelope('LATEST_FULL'))
+    latestFullCycles.resolve(cyclesEnvelope('FULL_2'))
+    await expect(pendingFull).resolves.toBe(true)
+
+    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('FULL_2').data)
+    expect(g.error.value).toBeNull()
+
+    participantB.resolve(cyclesEnvelope('PARTICIPANT_B'))
+    await expect(pendingParticipantB).resolves.toBe(true)
+    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('PARTICIPANT_B').data)
+  })
+
+  it('retains displayed cycles while the same participant is refreshed', async () => {
+    const participantRetry = deferred<ReturnType<typeof cyclesEnvelope>>()
+    apiMock.graphSnapshot.mockResolvedValueOnce(snapshotEnvelope('FULL'))
+    apiMock.clearingCycles
+      .mockResolvedValueOnce(cyclesEnvelope('FULL'))
+      .mockResolvedValueOnce(cyclesEnvelope('PARTICIPANT_A'))
+      .mockReturnValueOnce(participantRetry.promise)
+    const g = useGraphData({
+      eq: ref('EUR'),
+      isRealMode: ref(true),
+      focusMode: ref(false),
+      focusRootPid: ref(''),
+      focusDepth: ref(1),
+      statusFilter: ref<string[]>([]),
+    })
+    await g.loadData()
+    await g.refreshClearingCyclesForParticipant('PID_A')
+
+    const pendingRetry = g.refreshClearingCyclesForParticipant('PID_A')
+    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('PARTICIPANT_A').data)
+    expect(g.error.value).toBeNull()
+
+    participantRetry.reject(new Error('participant retry failed'))
+    await expect(pendingRetry).resolves.toBe(false)
+    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('PARTICIPANT_A').data)
+    expect(g.error.value).toBe('participant retry failed')
+  })
+
+  it('keeps a cycle-owned error across an initial primary-equivalent snapshot refresh', async () => {
+    const eq = ref('')
+    apiMock.graphSnapshot
+      .mockResolvedValueOnce(snapshotEnvelope('INITIAL'))
+      .mockResolvedValueOnce(snapshotEnvelope('PRIMARY_EQ'))
+    apiMock.clearingCycles.mockResolvedValueOnce({
+      success: false,
+      error: { code: 'cycles_unavailable', message: 'clearing cycles unavailable' },
+    })
+    const g = useGraphData({
+      eq,
+      isRealMode: ref(true),
+      focusMode: ref(false),
+      focusRootPid: ref(''),
+      focusDepth: ref(1),
+      statusFilter: ref<string[]>([]),
+    })
+
+    await expect(g.loadData()).resolves.toBe(true)
+    expect(eq.value).toBe('EUR')
+    expect(g.error.value).toBe('clearing cycles unavailable')
+
+    await expect(g.refreshSnapshotForEq()).resolves.toBe(true)
+
+    expect(apiMock.graphSnapshot.mock.calls).toEqual([[{ equivalent: undefined }], [{ equivalent: 'EUR' }]])
+    expect(g.participants.value.map((participant) => participant.pid)).toEqual(['PRIMARY_EQ'])
+    expect(g.clearingCycles.value).toBeNull()
+    expect(g.error.value).toBe('clearing cycles unavailable')
+    expect(g.loading.value).toBe(false)
+  })
 
   it('keeps a failed equivalent refresh visible when an older full load resolves last', async () => {
     const olderSnapshot = deferred<ReturnType<typeof snapshotEnvelope>>()
@@ -360,6 +790,223 @@ describe('useGraphData', () => {
     expect(g.loading.value).toBe(false)
   })
 
+  it('keeps a successful focus snapshot visible when clearing cycles fail', async () => {
+    apiMock.graphEgo.mockResolvedValueOnce(snapshotEnvelope('FOCUS'))
+    apiMock.clearingCycles.mockResolvedValueOnce({
+      success: false,
+      error: { code: 'cycles_unavailable', message: 'focus cycles unavailable' },
+    })
+    const g = useGraphData({
+      eq: ref('EUR'),
+      isRealMode: ref(true),
+      focusMode: ref(true),
+      focusRootPid: ref('PID_A'),
+      focusDepth: ref(1),
+      statusFilter: ref<string[]>(['active']),
+    })
+
+    await expect(g.refreshForFocusMode()).resolves.toBe(true)
+
+    expect(g.participants.value.map((participant) => participant.pid)).toEqual(['FOCUS'])
+    expect(g.clearingCycles.value).toBeNull()
+    expect(g.error.value).toBe('focus cycles unavailable')
+    expect(g.loading.value).toBe(false)
+  })
+
+  it('restores a cached global cycle failure after a successful focus view exits', async () => {
+    const focusMode = ref(false)
+    const focusRootPid = ref('')
+    apiMock.graphSnapshot
+      .mockResolvedValueOnce(snapshotEnvelope('BASE'))
+      .mockResolvedValueOnce(snapshotEnvelope('LATEST_FULL'))
+    apiMock.graphEgo.mockResolvedValueOnce(snapshotEnvelope('FOCUS'))
+    apiMock.clearingCycles
+      .mockResolvedValueOnce(cyclesEnvelope('FULL'))
+      .mockRejectedValueOnce(new Error('global cycles failed'))
+      .mockResolvedValueOnce(cyclesEnvelope('FOCUS'))
+    const g = useGraphData({
+      eq: ref('EUR'),
+      isRealMode: ref(true),
+      focusMode,
+      focusRootPid,
+      focusDepth: ref(1),
+      statusFilter: ref<string[]>([]),
+    })
+
+    await expect(g.loadData()).resolves.toBe(true)
+    await expect(g.loadData()).resolves.toBe(true)
+    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('FULL').data)
+    expect(g.error.value).toBe('global cycles failed')
+
+    focusMode.value = true
+    focusRootPid.value = 'PID_FOCUS'
+    await expect(g.refreshForFocusMode()).resolves.toBe(true)
+    expect(g.participants.value.map((participant) => participant.pid)).toEqual(['FOCUS'])
+    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('FOCUS').data)
+    expect(g.error.value).toBeNull()
+
+    focusMode.value = false
+    focusRootPid.value = ''
+    await expect(g.refreshForFocusMode()).resolves.toBe(true)
+    expect(g.participants.value.map((participant) => participant.pid)).toEqual(['LATEST_FULL'])
+    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('FULL').data)
+    expect(g.error.value).toBe('global cycles failed')
+  })
+
+  it('does not let a superseded global load erase the cached full failure across focus', async () => {
+    const staleSnapshot = deferred<ReturnType<typeof snapshotEnvelope>>()
+    const staleCycles = deferred<ReturnType<typeof cyclesEnvelope>>()
+    const focusMode = ref(false)
+    const focusRootPid = ref('')
+    apiMock.graphSnapshot
+      .mockResolvedValueOnce(snapshotEnvelope('BASE'))
+      .mockResolvedValueOnce(snapshotEnvelope('FAILED_FULL'))
+      .mockReturnValueOnce(staleSnapshot.promise)
+    apiMock.graphEgo.mockResolvedValueOnce(snapshotEnvelope('FOCUS'))
+    apiMock.clearingCycles
+      .mockResolvedValueOnce(cyclesEnvelope('FULL'))
+      .mockRejectedValueOnce(new Error('cached full failure'))
+      .mockReturnValueOnce(staleCycles.promise)
+      .mockResolvedValueOnce(cyclesEnvelope('FOCUS'))
+    const g = useGraphData({
+      eq: ref('EUR'),
+      isRealMode: ref(true),
+      focusMode,
+      focusRootPid,
+      focusDepth: ref(1),
+      statusFilter: ref<string[]>([]),
+    })
+    await g.loadData()
+    await g.loadData()
+
+    const staleFullLoad = g.loadData()
+    expect(g.error.value).toBe('cached full failure')
+
+    focusMode.value = true
+    focusRootPid.value = 'PID_FOCUS'
+    await expect(g.refreshForFocusMode()).resolves.toBe(true)
+    expect(g.error.value).toBeNull()
+
+    staleSnapshot.resolve(snapshotEnvelope('STALE_FULL'))
+    staleCycles.resolve(cyclesEnvelope('STALE_FULL'))
+    await expect(staleFullLoad).resolves.toBe(false)
+
+    focusMode.value = false
+    focusRootPid.value = ''
+    await expect(g.refreshForFocusMode()).resolves.toBe(true)
+    expect(g.participants.value.map((participant) => participant.pid)).toEqual(['FAILED_FULL'])
+    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('FULL').data)
+    expect(g.error.value).toBe('cached full failure')
+  })
+
+  it.each(['success', 'failure'] as const)(
+    'loads a global view on focus exit without a cached full snapshot (%s)',
+    async (outcome) => {
+      const globalSnapshot = deferred<ReturnType<typeof snapshotEnvelope>>()
+      const focusMode = ref(true)
+      apiMock.graphEgo.mockResolvedValueOnce(snapshotEnvelope('FOCUS'))
+      apiMock.graphSnapshot.mockReturnValueOnce(globalSnapshot.promise)
+      apiMock.clearingCycles
+        .mockResolvedValueOnce(cyclesEnvelope('FOCUS'))
+        .mockResolvedValueOnce(cyclesEnvelope('GLOBAL'))
+      const g = useGraphData({
+        eq: ref('EUR'),
+        isRealMode: ref(true),
+        focusMode,
+        focusRootPid: ref('PID_FOCUS'),
+        focusDepth: ref(1),
+        statusFilter: ref<string[]>([]),
+      })
+      await expect(g.refreshForFocusMode()).resolves.toBe(true)
+      expect(g.participants.value.map((participant) => participant.pid)).toEqual(['FOCUS'])
+
+      focusMode.value = false
+      const exitFocus = g.refreshForFocusMode()
+
+      expect(apiMock.graphSnapshot).toHaveBeenCalledWith({ equivalent: 'EUR' })
+      expect(apiMock.graphSnapshot).toHaveBeenCalledTimes(1)
+      expect(apiMock.clearingCycles).toHaveBeenCalledTimes(2)
+      expect(g.participants.value).toEqual([])
+
+      if (outcome === 'success') {
+        globalSnapshot.resolve(snapshotEnvelope('GLOBAL'))
+        await expect(exitFocus).resolves.toBe(true)
+        expect(g.participants.value.map((participant) => participant.pid)).toEqual(['GLOBAL'])
+        expect(g.error.value).toBeNull()
+      } else {
+        globalSnapshot.reject(new Error('global view unavailable'))
+        await expect(exitFocus).resolves.toBe(false)
+        expect(g.participants.value).toEqual([])
+        expect(g.error.value).toBe('global view unavailable')
+      }
+    },
+  )
+
+  it('invalidates a pending focus load before it can commit', async () => {
+    const focusSnapshot = deferred<ReturnType<typeof snapshotEnvelope>>()
+    const focusCycles = deferred<ReturnType<typeof cyclesEnvelope>>()
+    const focusMode = ref(false)
+    apiMock.graphSnapshot.mockResolvedValueOnce(snapshotEnvelope('FULL'))
+    apiMock.graphEgo.mockReturnValueOnce(focusSnapshot.promise)
+    apiMock.clearingCycles
+      .mockResolvedValueOnce(cyclesEnvelope('FULL'))
+      .mockReturnValueOnce(focusCycles.promise)
+    const g = useGraphData({
+      eq: ref('EUR'),
+      isRealMode: ref(true),
+      focusMode,
+      focusRootPid: ref('PID_FOCUS'),
+      focusDepth: ref(1),
+      statusFilter: ref<string[]>([]),
+    })
+    await g.loadData()
+
+    focusMode.value = true
+    const pendingFocus = g.refreshForFocusMode()
+    g.invalidateDataOwnership()
+    focusSnapshot.resolve(snapshotEnvelope('STALE_FOCUS'))
+    focusCycles.resolve(cyclesEnvelope('STALE_FOCUS'))
+
+    await expect(pendingFocus).resolves.toBe(false)
+    expect(g.participants.value.map((participant) => participant.pid)).toEqual(['FULL'])
+    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('FULL').data)
+    expect(g.loading.value).toBe(false)
+  })
+
+  it('reloads the active focus view and only uses the global loader after focus is cleared', async () => {
+    const focusMode = ref(true)
+    apiMock.graphEgo.mockResolvedValueOnce(snapshotEnvelope('FOCUS'))
+    apiMock.clearingCycles
+      .mockResolvedValueOnce(cyclesEnvelope('FOCUS'))
+      .mockResolvedValueOnce(cyclesEnvelope('GLOBAL'))
+    apiMock.graphSnapshot.mockResolvedValueOnce(snapshotEnvelope('GLOBAL'))
+    const g = useGraphData({
+      eq: ref('EUR'),
+      isRealMode: ref(true),
+      focusMode,
+      focusRootPid: ref('PID_A'),
+      focusDepth: ref(1),
+      statusFilter: ref<string[]>(['active']),
+    })
+
+    await expect(g.reloadCurrentView()).resolves.toBe(true)
+
+    expect(apiMock.graphEgo).toHaveBeenCalledWith({
+      pid: 'PID_A',
+      depth: 1,
+      equivalent: 'EUR',
+      status: ['active'],
+    })
+    expect(apiMock.graphSnapshot).not.toHaveBeenCalled()
+    expect(g.participants.value.map((participant) => participant.pid)).toEqual(['FOCUS'])
+
+    focusMode.value = false
+    await expect(g.reloadCurrentView()).resolves.toBe(true)
+
+    expect(apiMock.graphSnapshot).toHaveBeenCalledWith({ equivalent: 'EUR' })
+    expect(g.participants.value.map((participant) => participant.pid)).toEqual(['GLOBAL'])
+  })
+
   it('keeps the latest focus equivalent and status when an older focus load resolves last', async () => {
     const olderEgo = deferred<ReturnType<typeof snapshotEnvelope>>()
     const latestEgo = deferred<ReturnType<typeof snapshotEnvelope>>()
@@ -407,5 +1054,64 @@ describe('useGraphData', () => {
     expect(g.clearingCycles.value).toEqual(cyclesEnvelope('LATEST').data)
     expect(g.error.value).toBeNull()
     expect(g.loading.value).toBe(false)
+  })
+
+  it('does not apply a pending full snapshot or cycles after scope disposal', async () => {
+    const snapshot = deferred<ReturnType<typeof snapshotEnvelope>>()
+    const cycles = deferred<ReturnType<typeof cyclesEnvelope>>()
+    apiMock.graphSnapshot.mockReturnValueOnce(snapshot.promise)
+    apiMock.clearingCycles.mockReturnValueOnce(cycles.promise)
+    const scope = effectScope()
+    const graph = scope.run(() => useGraphData({
+      eq: ref('EUR'),
+      isRealMode: ref(true),
+      focusMode: ref(false),
+      focusRootPid: ref(''),
+      focusDepth: ref(1),
+      statusFilter: ref<string[]>([]),
+    }))
+    if (!graph) throw new Error('Expected graph data owner')
+
+    const pending = graph.loadData()
+    scope.stop()
+    snapshot.resolve(snapshotEnvelope('LATE'))
+    cycles.resolve(cyclesEnvelope('LATE'))
+    await pending
+
+    expect(graph.participants.value).toEqual([])
+    expect(graph.clearingCycles.value).toBeNull()
+    expect(graph.error.value).toBeNull()
+  })
+
+  it('does not apply pending focus or participant-cycle results after scope disposal', async () => {
+    const ego = deferred<ReturnType<typeof snapshotEnvelope>>()
+    const focusCycles = deferred<ReturnType<typeof cyclesEnvelope>>()
+    const participantCycles = deferred<ReturnType<typeof cyclesEnvelope>>()
+    apiMock.graphEgo.mockReturnValueOnce(ego.promise)
+    apiMock.clearingCycles
+      .mockReturnValueOnce(focusCycles.promise)
+      .mockReturnValueOnce(participantCycles.promise)
+    const scope = effectScope()
+    const graph = scope.run(() => useGraphData({
+      eq: ref('EUR'),
+      isRealMode: ref(true),
+      focusMode: ref(true),
+      focusRootPid: ref('PID_A'),
+      focusDepth: ref(1),
+      statusFilter: ref<string[]>(['active']),
+    }))
+    if (!graph) throw new Error('Expected graph data owner')
+
+    const pendingFocus = graph.refreshForFocusMode()
+    const pendingCycles = graph.refreshClearingCyclesForParticipant('PID_A')
+    scope.stop()
+    ego.resolve(snapshotEnvelope('LATE_FOCUS'))
+    focusCycles.resolve(cyclesEnvelope('LATE_FOCUS'))
+    participantCycles.resolve(cyclesEnvelope('LATE_PARTICIPANT'))
+    await Promise.all([pendingFocus, pendingCycles])
+
+    expect(graph.participants.value).toEqual([])
+    expect(graph.clearingCycles.value).toBeNull()
+    expect(graph.error.value).toBeNull()
   })
 })

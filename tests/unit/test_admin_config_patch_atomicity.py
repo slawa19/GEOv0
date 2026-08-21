@@ -287,14 +287,16 @@ async def test_config_patch_persists_exact_audit_before_and_after(
 
 
 @pytest.mark.asyncio
-async def test_config_patch_audit_cancellation_never_publishes_values(monkeypatch) -> None:
+async def test_config_patch_cancellation_waits_for_durable_audit_and_publish(
+    monkeypatch,
+) -> None:
     monkeypatch.setattr(settings, "ROUTING_MAX_PATHS", 3)
     monkeypatch.setattr(admin_api, "_runtime_config_lock", asyncio.Lock())
     commit_started = asyncio.Event()
-    never_release_commit = asyncio.Event()
+    release_commit = asyncio.Event()
     controlled_db = ControlledAuditDB(
         commit_started=commit_started,
-        release_commit=never_release_commit,
+        release_commit=release_commit,
     )
 
     patch = asyncio.create_task(
@@ -308,13 +310,65 @@ async def test_config_patch_audit_cancellation_never_publishes_values(monkeypatc
     assert settings.ROUTING_MAX_PATHS == 3
 
     patch.cancel()
+    await asyncio.sleep(0)
+    assert not patch.done()
+    release_commit.set()
     with pytest.raises(asyncio.CancelledError):
         await patch
 
-    assert settings.ROUTING_MAX_PATHS == 3
-    assert controlled_db.rollback_calls == 1
+    assert settings.ROUTING_MAX_PATHS == 4
+    assert controlled_db.rollback_calls == 0
     assert controlled_db.pending == []
-    assert controlled_db.durable == []
+    assert len(controlled_db.durable) == 1
+
+
+@pytest.mark.asyncio
+async def test_repeated_config_patch_cancellation_cancels_audit_before_unlock(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(settings, "ROUTING_MAX_PATHS", 3)
+    monkeypatch.setattr(admin_api, "_runtime_config_lock", asyncio.Lock())
+    commit_started = asyncio.Event()
+    release_commit = asyncio.Event()
+    first_db = ControlledAuditDB(
+        commit_started=commit_started,
+        release_commit=release_commit,
+    )
+    second_db = ControlledAuditDB()
+
+    first_patch = asyncio.create_task(
+        admin_api.patch_admin_config(
+            AdminConfigPatchRequest(updates={"ROUTING_MAX_PATHS": 4}),
+            _config_request(),
+            first_db,
+        )
+    )
+    await asyncio.wait_for(commit_started.wait(), timeout=1.0)
+
+    second_patch = asyncio.create_task(
+        admin_api.patch_admin_config(
+            AdminConfigPatchRequest(updates={"ROUTING_MAX_PATHS": 5}),
+            _config_request(),
+            second_db,
+        )
+    )
+    await asyncio.sleep(0)
+    assert not second_patch.done()
+
+    first_patch.cancel("first cancellation")
+    await asyncio.sleep(0)
+    first_patch.cancel("second cancellation")
+    with pytest.raises(asyncio.CancelledError) as cancelled:
+        await asyncio.wait_for(first_patch, timeout=1.0)
+    assert cancelled.value.args == ("first cancellation",)
+
+    response = await asyncio.wait_for(second_patch, timeout=1.0)
+    assert response.updated == ["ROUTING_MAX_PATHS"]
+    assert settings.ROUTING_MAX_PATHS == 5
+    assert first_db.rollback_calls == 1
+    assert first_db.pending == []
+    assert first_db.durable == []
+    assert len(second_db.durable) == 1
 
 
 @pytest.mark.asyncio
@@ -429,16 +483,16 @@ async def test_feature_flags_patch_audit_failure_never_publishes_values(
 
 
 @pytest.mark.asyncio
-async def test_feature_flags_patch_audit_cancellation_never_publishes_values(
+async def test_feature_flags_patch_cancellation_waits_for_audit_and_publish(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(settings, "FEATURE_FLAGS_MULTIPATH_ENABLED", False)
     monkeypatch.setattr(admin_api, "_runtime_config_lock", asyncio.Lock())
     commit_started = asyncio.Event()
-    never_release_commit = asyncio.Event()
+    release_commit = asyncio.Event()
     controlled_db = ControlledAuditDB(
         commit_started=commit_started,
-        release_commit=never_release_commit,
+        release_commit=release_commit,
     )
 
     patch = asyncio.create_task(
@@ -452,18 +506,21 @@ async def test_feature_flags_patch_audit_cancellation_never_publishes_values(
     assert (await admin_api.get_feature_flags()).multipath_enabled is False
 
     patch.cancel()
+    await asyncio.sleep(0)
+    assert not patch.done()
+    release_commit.set()
     with pytest.raises(asyncio.CancelledError):
         await patch
 
-    assert settings.FEATURE_FLAGS_MULTIPATH_ENABLED is False
-    assert (await admin_api.get_feature_flags()).multipath_enabled is False
+    assert settings.FEATURE_FLAGS_MULTIPATH_ENABLED is True
+    assert (await admin_api.get_feature_flags()).multipath_enabled is True
     config_reader = {
         item.key: item.value for item in (await admin_api.get_admin_config()).items
     }
-    assert config_reader["FEATURE_FLAGS_MULTIPATH_ENABLED"] is False
-    assert controlled_db.rollback_calls == 1
+    assert config_reader["FEATURE_FLAGS_MULTIPATH_ENABLED"] is True
+    assert controlled_db.rollback_calls == 0
     assert controlled_db.pending == []
-    assert controlled_db.durable == []
+    assert len(controlled_db.durable) == 1
 
 
 @pytest.mark.asyncio
@@ -483,10 +540,10 @@ async def test_cancelled_config_audit_releases_feature_flags_required_writer(
     monkeypatch.setattr(settings, setting_key, False)
     monkeypatch.setattr(admin_api, "_runtime_config_lock", asyncio.Lock())
     config_commit_started = asyncio.Event()
-    never_release_config = asyncio.Event()
+    release_config = asyncio.Event()
     config_db = ControlledAuditDB(
         commit_started=config_commit_started,
-        release_commit=never_release_config,
+        release_commit=release_config,
     )
     feature_db = ControlledAuditDB()
 
@@ -511,13 +568,16 @@ async def test_cancelled_config_audit_releases_feature_flags_required_writer(
     assert not feature_flags_patch.done()
 
     config_patch.cancel()
+    await asyncio.sleep(0)
+    assert not config_patch.done()
+    release_config.set()
     with pytest.raises(asyncio.CancelledError):
         await config_patch
 
     response = await asyncio.wait_for(feature_flags_patch, timeout=1.0)
     assert getattr(response, request_key) is True
     assert getattr(settings, setting_key) is True
-    assert config_db.rollback_calls == 1
-    assert config_db.durable == []
+    assert config_db.rollback_calls == 0
+    assert len(config_db.durable) == 1
     assert len(feature_db.durable) == 1
     assert feature_db.durable[0].action == "admin.feature_flags.patch"

@@ -1,11 +1,16 @@
-# GEO Hub — Rejestr konfiguracji (parametry)
+# GEO Hub — Rejestr konfiguracji (tłumaczenie historyczne)
 
-Ten dokument jest **jedynym źródłem prawdy** dla parametrów konfiguracyjnych GEO Hub MVP: cel, dozwolone wartości, wartości domyślne i ryzyka.
+> **Status tłumaczenia:** materiał informacyjny; synchronizacja z aktualną wersją
+> rosyjską i runtime nie została potwierdzona. Implementacja `app/config.py` oraz
+> `docs/ru/config-reference.md` mają pierwszeństwo.
+
+Ten dokument zachowuje starszy opis parametrów i nie jest źródłem prawdy dla
+aktualnych wartości domyślnych.
 
 Powiązane dokumenty:
-- Specyfikacja protokołu (włącznie z multipath/full multipath): [`docs/pl/02-protocol-spec.md`](docs/pl/02-protocol-spec.md)
-- Wdrożenie i schemat konfiguracji (env + YAML): [`docs/pl/05-deployment.md`](docs/pl/05-deployment.md)
-- Minimalna konsola administracyjna do zarządzania parametrami: [`docs/pl/admin-console-minimal-spec.md`](docs/pl/admin-console-minimal-spec.md)
+- Specyfikacja protokołu: [`02-protocol-spec.md`](02-protocol-spec.md)
+- Historyczne notatki wdrożeniowe: [`05-deployment.md`](05-deployment.md)
+- Historyczna specyfikacja konsoli: [`admin-console-minimal-spec.md`](admin-console-minimal-spec.md)
 
 ---
 

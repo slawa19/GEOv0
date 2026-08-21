@@ -117,9 +117,18 @@ tmp/
 # Local working directory (project-specific)
 .local/
 
+# External audit evidence dumps — owner decision 2026-08-12: keep local-only.
+# Historical evidence, not current spec (AGENTS.md §12); review files are not
+# committed (docs/external-review-runbook.md §3). Anchored to repo root.
+/_audit/
+/_audit_xfer/
+
 # Project-private working docs
-plans/
-docs/plans/
+# NOTE: anchored with a leading slash on purpose. An unanchored `plans/` matched at ANY
+# depth and silently excluded docs/ru/simulator/frontend/docs/plans/ (137 KB of simulator
+# frontend documentation that existed only on the local machine). Fixed 2026-08-10.
+/plans/
+/docs/plans/
 
 # =========================
 # Frontend apps (Node.js / npm)

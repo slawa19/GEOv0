@@ -1,14 +1,15 @@
 import { ElMessage } from 'element-plus'
 import cytoscape, { type Core, type EdgeSingular, type ElementDefinition, type LayoutOptions, type NodeSingular } from 'cytoscape'
 import fcose from 'cytoscape-fcose'
-import { computed, onBeforeUnmount, onMounted, watch, type ComputedRef, type Ref } from 'vue'
+import { computed, onBeforeUnmount, watch, type ComputedRef, type Ref } from 'vue'
 
 import { NODE_DOUBLE_TAP_MS } from '../constants/graph'
-import { GRAPH_SEARCH_HIT_FLASH_MS } from '../constants/timing'
+import { DEV_GRAPH_DOUBLE_TAP_DELAY_MS, GRAPH_SEARCH_HIT_FLASH_MS } from '../constants/timing'
 import { cycleDebtEdgeToTrustlineDirection } from '../utils/cycleMapping'
 import { isRatioBelowThreshold } from '../utils/decimal'
 import type { Participant, Trustline } from '../pages/graph/graphTypes'
 import { t } from '../i18n'
+import { installGraphDevHooks } from '../pages/graph/graphDevHooks'
 
 cytoscape.use(fcose as unknown as cytoscape.Ext)
 
@@ -42,14 +43,41 @@ export type LabelMode = 'off' | 'name' | 'pid' | 'both'
 
 export type ParticipantSuggestion = { value: string; pid: string }
 
+export type GraphElementOption = {
+  key: string
+  label: string
+  kind: 'node' | 'edge'
+}
+
+export type GraphRebuildOptions = {
+  fit?: boolean
+  preserveViewport?: boolean
+}
+
+export function graphSelectionAnnouncement(selected: SelectedInfo | null, drawerOpen: boolean): string | null {
+  if (selected?.kind === 'node') {
+    return t(drawerOpen ? 'graph.a11y.nodeDetailsOpened' : 'graph.a11y.nodeSelected', {
+      name: selected.display_name || selected.pid,
+      pid: selected.pid,
+    })
+  }
+  if (selected?.kind === 'edge') {
+    return t(drawerOpen ? 'graph.a11y.edgeDetailsOpened' : 'graph.a11y.edgeSelected', {
+      from: selected.from,
+      to: selected.to,
+      equivalent: selected.equivalent,
+    })
+  }
+  return null
+}
+
 function normEq(v: string): string {
   return String(v || '').trim().toUpperCase()
 }
 
 export function useGraphVisualization(options: {
   cyRoot: Ref<HTMLElement | null>
-  getCy: () => Core | null
-  setCy: (cy: Core | null) => void
+  createCy?: (container: HTMLElement) => Core
 
   threshold: Ref<string>
 
@@ -91,10 +119,14 @@ export function useGraphVisualization(options: {
 
   extractPidFromText: (text: string) => string | null
 }): {
+  getCy: () => Core | null
   canFind: ComputedRef<boolean>
   buildElements: () => { nodes: ElementDefinition[]; edges: ElementDefinition[] }
-  initCy: () => void
+  initCy: () => boolean
   destroyCy: () => void
+
+  graphElementOptions: () => GraphElementOption[]
+  openElementDetails: (key: string) => boolean
 
   applySelectedHighlight: (pid: string) => void
 
@@ -112,7 +144,7 @@ export function useGraphVisualization(options: {
   applyStyle: () => void
   updateZoomStyles: () => void
   runLayout: () => void
-  rebuildGraph: (opts?: { fit?: boolean }) => void
+  rebuildGraph: (opts?: GraphRebuildOptions) => void
   updateLabelsForZoom: () => void
   updateSearchHighlights: () => void
 
@@ -121,12 +153,28 @@ export function useGraphVisualization(options: {
   applyZoom: (level: number) => void
   syncZoomFromControl: (level: number) => void
 } {
+  let cy: Core | null = null
+  const getCy = () => cy
   let zoomUpdatingFromCy = false
 
   let lastNodeTapAt = 0
   let lastNodeTapPid = ''
 
   let pendingNodeTapTimer: number | null = null
+  const ownedTimeouts = new Set<number>()
+
+  function scheduleOwnedTimeout(callback: () => void, delayMs: number) {
+    const timer = window.setTimeout(() => {
+      ownedTimeouts.delete(timer)
+      callback()
+    }, delayMs)
+    ownedTimeouts.add(timer)
+  }
+
+  function stopOwnedTimeouts() {
+    for (const timer of ownedTimeouts) window.clearTimeout(timer)
+    ownedTimeouts.clear()
+  }
 
   function stopPendingNodeTap() {
     if (pendingNodeTapTimer !== null) {
@@ -147,7 +195,7 @@ export function useGraphVisualization(options: {
   }
 
   function applySelectedHighlight(pid: string) {
-    const cy = options.getCy()
+    const cy = getCy()
     if (!cy) return
     const p = String(pid || '').trim()
 
@@ -168,7 +216,7 @@ export function useGraphVisualization(options: {
 
     // Blink by toggling a secondary class (Cytoscape has no CSS animations).
     selectedPulseTimer = window.setInterval(() => {
-      const cy2 = options.getCy()
+      const cy2 = getCy()
       if (!cy2) return
       const nn = cy2.getElementById(p)
       if (!nn || nn.empty()) return
@@ -180,7 +228,7 @@ export function useGraphVisualization(options: {
 
   function clearCycleHighlight() {
     options.activeCycleKey.value = ''
-    const cy = options.getCy()
+    const cy = getCy()
     if (!cy) return
     cy.edges('.cycle-highlight').removeClass('cycle-highlight')
     cy.nodes('.cycle-node').removeClass('cycle-node')
@@ -188,7 +236,7 @@ export function useGraphVisualization(options: {
 
   function clearConnectionHighlight() {
     options.activeConnectionKey.value = ''
-    const cy = options.getCy()
+    const cy = getCy()
     if (!cy) return
     cy.edges('.connection-highlight').removeClass('connection-highlight')
     cy.nodes('.connection-node').removeClass('connection-node')
@@ -219,7 +267,7 @@ export function useGraphVisualization(options: {
   }
 
   function nodeClientRect(n: NodeSingular): { x1: number; y1: number; x2: number; y2: number } | null {
-    const cy2 = options.getCy()
+    const cy2 = getCy()
     const container = cy2?.container()
     if (!cy2 || !container) return null
     const c = container.getBoundingClientRect()
@@ -233,7 +281,7 @@ export function useGraphVisualization(options: {
   }
 
   function panIfCoveredByDrawer(pid: string) {
-    const cy2 = options.getCy()
+    const cy2 = getCy()
     if (!cy2) return
     if (!options.drawerOpen.value) return
 
@@ -268,8 +316,8 @@ export function useGraphVisualization(options: {
     const p = String(pid || '').trim()
     if (!p) return
     // Drawer is mounted/animated; check coverage after it appears.
-    window.setTimeout(() => panIfCoveredByDrawer(p), 0)
-    window.setTimeout(() => panIfCoveredByDrawer(p), 250)
+    scheduleOwnedTimeout(() => panIfCoveredByDrawer(p), 0)
+    scheduleOwnedTimeout(() => panIfCoveredByDrawer(p), 250)
   }
 
   // When the drawer opens (or selection changes while open), pan just enough to keep
@@ -523,8 +571,83 @@ export function useGraphVisualization(options: {
     return { nodes, edges }
   }
 
+  function graphElementOptions(): GraphElementOption[] {
+    const { nodes, edges } = buildElements()
+    const nodeOptions = nodes.map((node) => {
+      const pid = String(node.data?.pid || node.data?.id || '')
+      const displayName = String(node.data?.display_name || '').trim()
+      return {
+        key: `node:${pid}`,
+        kind: 'node' as const,
+        label: t('graph.keyboard.nodeOption', { name: displayName || pid, pid }),
+      }
+    })
+    const edgeOptions = edges.map((edge) => {
+      const id = String(edge.data?.id || '')
+      const from = String(edge.data?.source || '')
+      const to = String(edge.data?.target || '')
+      const equivalent = String(edge.data?.equivalent || '')
+      return {
+        key: `edge:${id}`,
+        kind: 'edge' as const,
+        label: t('graph.keyboard.edgeOption', { from, to, equivalent }),
+      }
+    })
+    return [...nodeOptions, ...edgeOptions]
+  }
+
+  function openElementDetails(key: string): boolean {
+    const [kind, ...idParts] = String(key || '').split(':')
+    const id = idParts.join(':')
+    if (!id || (kind !== 'node' && kind !== 'edge')) return false
+
+    const { nodes, edges } = buildElements()
+    if (kind === 'node') {
+      const node = nodes.find((candidate) => String(candidate.data?.id || '') === id)
+      if (!node) return false
+      const pid = String(node.data?.pid || node.data?.id || '')
+      const inDegree = edges.filter((edge) => String(edge.data?.target || '') === pid).length
+      const outDegree = edges.filter((edge) => String(edge.data?.source || '') === pid).length
+      const displayName = String(node.data?.display_name || '').trim()
+      options.selected.value = {
+        kind: 'node',
+        pid,
+        display_name: displayName || undefined,
+        status: String(node.data?.status || '') || undefined,
+        type: String(node.data?.type || '') || undefined,
+        degree: inDegree + outDegree,
+        inDegree,
+        outDegree,
+      }
+      options.searchQuery.value = displayName ? `${displayName} — ${pid}` : pid
+      options.focusPid.value = pid
+      options.drawerTab.value = 'summary'
+      options.drawerOpen.value = true
+      applySelectedHighlight(pid)
+      schedulePanIfCoveredByDrawer(pid)
+      return true
+    }
+
+    const edge = edges.find((candidate) => String(candidate.data?.id || '') === id)
+    if (!edge) return false
+    options.selected.value = {
+      kind: 'edge',
+      id,
+      equivalent: String(edge.data?.equivalent || ''),
+      from: String(edge.data?.source || ''),
+      to: String(edge.data?.target || ''),
+      status: String(edge.data?.status || ''),
+      limit: String(edge.data?.limit || ''),
+      used: String(edge.data?.used || ''),
+      available: String(edge.data?.available || ''),
+      created_at: String(edge.data?.created_at || ''),
+    }
+    options.drawerOpen.value = true
+    return true
+  }
+
   function highlightConnection(fromPid: string, toPid: string, eqCode: string) {
-    const cy = options.getCy()
+    const cy = getCy()
     if (!cy) return
     const from = String(fromPid || '').trim()
     const to = String(toPid || '').trim()
@@ -551,7 +674,7 @@ export function useGraphVisualization(options: {
   }
 
   function highlightCycle(cycle: Array<{ debtor: string; creditor: string; equivalent: string; amount: string }>) {
-    const cy = options.getCy()
+    const cy = getCy()
     if (!cy) return
 
     const touchedPids = new Set<string>()
@@ -582,7 +705,7 @@ export function useGraphVisualization(options: {
   }
 
   function toggleCycleHighlight(cycle: Array<{ debtor: string; creditor: string; equivalent: string; amount: string }>) {
-    const cy = options.getCy()
+    const cy = getCy()
     if (!cy) return
     const key = cycleKey(cycle)
     if (!key) return
@@ -603,7 +726,7 @@ export function useGraphVisualization(options: {
   }
 
   function updateZoomStyles() {
-    const cy = options.getCy()
+    const cy = getCy()
     if (!cy) return
     const z = cy.zoom()
 
@@ -668,7 +791,7 @@ export function useGraphVisualization(options: {
   }
 
   function applyStyle() {
-    const cy = options.getCy()
+    const cy = getCy()
     if (!cy) return
 
     const SUSPENDED_PATTERN =
@@ -876,20 +999,21 @@ export function useGraphVisualization(options: {
     updateZoomStyles()
   }
 
-  function runLayout() {
-    const cy = options.getCy()
+  function runLayoutWithFit(fit: boolean) {
+    const cy = getCy()
     if (!cy) return
 
     const name = options.layoutName.value
     const spacing = Math.max(1, Math.min(3, Number(options.layoutSpacing.value) || 1))
     const layout =
       name === 'grid'
-        ? cy.layout({ name: 'grid', padding: 30 })
+        ? cy.layout({ name: 'grid', padding: 30, fit })
         : name === 'circle'
-          ? cy.layout({ name: 'circle', padding: 30 })
+          ? cy.layout({ name: 'circle', padding: 30, fit })
           : cy.layout(
               {
               name: 'fcose',
+              fit,
               animate: false,
               randomize: true,
               randomSeed: 42,
@@ -910,10 +1034,14 @@ export function useGraphVisualization(options: {
     layout.run()
   }
 
+  function runLayout() {
+    runLayoutWithFit(true)
+  }
+
   let layoutRunId = 0
 
-  function runLayoutAndMaybeFit({ fitOnStop }: { fitOnStop: boolean }) {
-    const cy = options.getCy()
+  function runLayoutAndMaybeFit({ fitOnStop, layoutFit }: { fitOnStop: boolean; layoutFit: boolean }) {
+    const cy = getCy()
     if (!cy) return
 
     layoutRunId += 1
@@ -921,7 +1049,7 @@ export function useGraphVisualization(options: {
 
     if (fitOnStop) {
       cy.one('layoutstop', () => {
-        const cy2 = options.getCy()
+        const cy2 = getCy()
         if (!cy2) return
         if (runId !== layoutRunId) return
         cy2.fit(cy2.elements(), 10)
@@ -933,14 +1061,15 @@ export function useGraphVisualization(options: {
       })
     }
 
-    runLayout()
+    runLayoutWithFit(layoutFit)
   }
 
-  function rebuildGraph(opts?: { fit?: boolean }) {
-    const cy = options.getCy()
+  function rebuildGraph(opts?: GraphRebuildOptions) {
+    const cy = getCy()
     if (!cy) return
 
     const fit = opts?.fit ?? false
+    const layoutFit = !opts?.preserveViewport
 
     const { nodes, edges } = buildElements()
     clearCycleHighlight()
@@ -955,7 +1084,7 @@ export function useGraphVisualization(options: {
     applySelectedHighlight(
       options.selected.value && options.selected.value.kind === 'node' ? options.selected.value.pid : '',
     )
-    runLayoutAndMaybeFit({ fitOnStop: fit })
+    runLayoutAndMaybeFit({ fitOnStop: fit, layoutFit })
   }
 
   function labelFor(mode: LabelMode, displayName: string, pid: string): string {
@@ -966,7 +1095,7 @@ export function useGraphVisualization(options: {
   }
 
   function updateLabelsForZoom() {
-    const cy = options.getCy()
+    const cy = getCy()
     if (!cy) return
 
     if (!options.showLabels.value) {
@@ -1019,7 +1148,7 @@ export function useGraphVisualization(options: {
 
   function visibleParticipantSuggestions(): ParticipantSuggestion[] {
     const out: ParticipantSuggestion[] = []
-    const cy = options.getCy()
+    const cy = getCy()
     if (!cy) {
       for (const p of options.participants.value || []) {
         if (!p?.pid) continue
@@ -1073,7 +1202,7 @@ export function useGraphVisualization(options: {
 
     const matches: string[] = []
 
-    const cy = options.getCy()
+    const cy = getCy()
     if (cy) {
       cy.nodes().forEach((n) => {
         const pid = String(n.data('pid') || n.id())
@@ -1096,7 +1225,7 @@ export function useGraphVisualization(options: {
   }
 
   function updateSearchHighlights() {
-    const cy = options.getCy()
+    const cy = getCy()
     if (!cy) return
     cy.nodes('.search-hit').removeClass('search-hit')
 
@@ -1124,7 +1253,7 @@ export function useGraphVisualization(options: {
   })
 
   function applyZoom(level: number) {
-    const cy = options.getCy()
+    const cy = getCy()
     if (!cy) return
     const z = Math.min(cy.maxZoom(), Math.max(cy.minZoom(), level))
     const center = { x: cy.width() / 2, y: cy.height() / 2 }
@@ -1132,7 +1261,7 @@ export function useGraphVisualization(options: {
   }
 
   function syncZoomFromControl(level: number) {
-    const cy = options.getCy()
+    const cy = getCy()
     if (!cy) return
     if (zoomUpdatingFromCy) return
     applyZoom(level)
@@ -1141,7 +1270,7 @@ export function useGraphVisualization(options: {
   }
 
   function fit() {
-    const cy = options.getCy()
+    const cy = getCy()
     if (!cy) return
     cy.fit(cy.elements(), 10)
     zoomUpdatingFromCy = true
@@ -1152,7 +1281,7 @@ export function useGraphVisualization(options: {
   }
 
   function focusSearch() {
-    const cy = options.getCy()
+    const cy = getCy()
     if (!cy) return
 
     const cy0 = cy
@@ -1176,7 +1305,7 @@ export function useGraphVisualization(options: {
     function centerAndFlash(n: NodeSingular) {
       cy0.animate({ center: { eles: n }, zoom: Math.max(1.2, cy0.zoom()) }, { duration: 300 })
       n.addClass('search-hit')
-      setTimeout(() => n.removeClass('search-hit'), GRAPH_SEARCH_HIT_FLASH_MS)
+      scheduleOwnedTimeout(() => n.removeClass('search-hit'), GRAPH_SEARCH_HIT_FLASH_MS)
     }
 
     const q = String(options.searchQuery.value || '').trim()
@@ -1268,7 +1397,7 @@ export function useGraphVisualization(options: {
   }
 
   function attachHandlers() {
-    const cy = options.getCy()
+    const cy = getCy()
     if (!cy) return
 
     cy.on('tap', 'node', (ev) => {
@@ -1347,25 +1476,27 @@ export function useGraphVisualization(options: {
     })
   }
 
-  function initCy() {
-    if (!options.cyRoot.value) return
+  function initCy(): boolean {
+    if (!options.cyRoot.value) return false
 
     // Avoid double init.
-    if (options.getCy()) return
+    if (getCy()) return true
 
-    const cy = cytoscape({
-      container: options.cyRoot.value,
-      elements: [],
-      minZoom: 0.1,
-      maxZoom: 3,
-      // We implement our own selection highlight via classes; disable Cytoscape selection state.
-      autounselectify: true,
-    })
+    cy = options.createCy
+      ? options.createCy(options.cyRoot.value)
+      : cytoscape({
+          container: options.cyRoot.value,
+          elements: [],
+          minZoom: 0.1,
+          maxZoom: 3,
+          // We implement our own selection highlight via classes; disable Cytoscape selection state.
+          autounselectify: true,
+        })
 
-    options.setCy(cy)
+    if (import.meta.env.DEV) installGraphDevHooks(cy, DEV_GRAPH_DOUBLE_TAP_DELAY_MS)
 
     cy.on('viewport', () => {
-      const cy2 = options.getCy()
+      const cy2 = getCy()
       if (!cy2) return
       zoomUpdatingFromCy = true
       options.zoom.value = cy2.zoom()
@@ -1382,34 +1513,36 @@ export function useGraphVisualization(options: {
     zoomUpdatingFromCy = true
     options.zoom.value = cy.zoom()
     zoomUpdatingFromCy = false
+    return true
   }
 
   function destroyCy() {
     stopPendingNodeTap()
     stopSelectedPulse()
-    const cy = options.getCy()
-    if (cy) {
-      cy.destroy()
+    stopOwnedTimeouts()
+    layoutRunId += 1
+    const current = getCy()
+    if (current) {
+      current.destroy()
     }
-    options.setCy(null)
+    cy = null
+    if (import.meta.env.DEV) installGraphDevHooks(null, DEV_GRAPH_DOUBLE_TAP_DELAY_MS)
   }
 
-  // Keep lifecycle helpers convenient: GraphPage can still call initCy manually,
-  // but composable guarantees cleanup when used inside a component.
   onBeforeUnmount(() => {
     destroyCy()
     stopDrawerPanWatch()
   })
 
-  onMounted(() => {
-    // Intentionally no auto-init: GraphPage needs to `await loadData()` first.
-  })
-
   return {
+    getCy,
     canFind,
     buildElements,
     initCy,
     destroyCy,
+
+    graphElementOptions,
+    openElementDetails,
 
     applySelectedHighlight,
 

@@ -12,7 +12,7 @@ import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
 import OperatorAdvicePanel from '../ui/OperatorAdvicePanel.vue'
 
 import { t } from '../i18n'
-import { compareDecimalStrings, formatDecimalFixed } from '../utils/decimal'
+import { compareDecimalStrings, formatDecimalFixed, isUnitIntervalDecimalString } from '../utils/decimal'
 import { formatIsoInTimeZone } from '../utils/datetime'
 import { buildLiquidityAdvice } from '../advice/operatorAdvice'
 import { carryScenarioQuery, readQueryString, toLocationQueryRaw } from '../router/query'
@@ -41,6 +41,7 @@ const timeZone = computed(() => String(configStore.config['ui.timezone'] || 'UTC
 
 const eq = ref<string>('ALL')
 const threshold = ref<string>('0.10')
+const thresholdValid = computed(() => isUnitIntervalDecimalString(threshold.value))
 
 let routeSyncInitialized = false
 const debouncedLoad = debounce(() => void load(), DEBOUNCE_SEARCH_MS)
@@ -79,7 +80,6 @@ watch(
       void load()
       return
     }
-    if (applyingRouteQuery.value) return
     debouncedLoad()
   },
   { immediate: true },
@@ -97,7 +97,13 @@ watch(threshold, (v) => {
 async function load() {
   const request = loadRequests.begin()
   const requestEq = eq.value
-  const requestThreshold = threshold.value
+  const requestThreshold = threshold.value.trim()
+  if (!thresholdValid.value) {
+    summary.value = null
+    loading.value = false
+    error.value = t('validation.thresholdUnitInterval')
+    return
+  }
   loading.value = true
   error.value = null
   try {
@@ -127,7 +133,9 @@ const equivalents = computed(() => (equivalentsList.value || []).filter((e) => e
 const precisionByEq = computed(() => {
   const m = new Map<string, number>()
   for (const e of equivalentsList.value || []) {
-    m.set(String(e.code || '').toUpperCase(), Number(e.precision ?? 2) || 2)
+    const code = String(e.code || '').trim().toUpperCase()
+    const precision = Number(e.precision)
+    if (code && Number.isInteger(precision) && precision >= 0) m.set(code, precision)
   }
   return m
 })
@@ -137,19 +145,21 @@ const selectedEq = computed(() => {
   return k === 'ALL' ? null : k
 })
 
-const activeTrustlinesCount = computed(() => summary.value?.active_trustlines ?? 0)
-const bottlenecksCount = computed(() => summary.value?.bottlenecks ?? 0)
-const incidentsOverSlaCount = computed(() => summary.value?.incidents_over_sla ?? 0)
+const activeTrustlinesCount = computed(() => summary.value?.active_trustlines)
+const bottlenecksCount = computed(() => summary.value?.bottlenecks)
+const incidentsOverSlaCount = computed(() => summary.value?.incidents_over_sla)
 
 const selectedPrecision = computed(() => {
   const k = selectedEq.value
-  if (!k) return 2
-  return precisionByEq.value.get(k) ?? 2
+  if (!k) return null
+  return precisionByEq.value.get(k) ?? null
 })
 
-const totalLimit = computed(() => String(summary.value?.total_limit ?? '0'))
-const totalUsed = computed(() => String(summary.value?.total_used ?? '0'))
-const totalAvailable = computed(() => String(summary.value?.total_available ?? '0'))
+const totalLimit = computed(() => (summary.value ? String(summary.value.total_limit) : null))
+const totalUsed = computed(() => (summary.value ? String(summary.value.total_used) : null))
+const totalAvailable = computed(() => (summary.value ? String(summary.value.total_available) : null))
+const showCountKpis = computed(() => summary.value !== null)
+const showMoneyKpis = computed(() => summary.value !== null && selectedPrecision.value !== null)
 
 const topCreditors = computed(() => summary.value?.top_creditors ?? [])
 const topDebtors = computed(() => summary.value?.top_debtors ?? [])
@@ -158,13 +168,14 @@ const topBottleneckEdges = computed(() => (summary.value?.top_bottleneck_edges ?
 
 const adviceItems = computed(() => {
   if (!summary.value) return []
+  const current = summary.value
   return buildLiquidityAdvice({
     ctx: {
       eq: selectedEq.value,
       threshold: threshold.value,
-      trustlinesTotal: activeTrustlinesCount.value,
-      bottlenecks: bottlenecksCount.value,
-      incidentsOverSla: incidentsOverSlaCount.value,
+      trustlinesTotal: current.active_trustlines,
+      bottlenecks: current.bottlenecks,
+      incidentsOverSla: current.incidents_over_sla,
     },
     baseQuery: route.query,
   })
@@ -187,13 +198,26 @@ function goParticipant(pid: string) {
   void router.push({ path: '/participants', query: toLocationQueryRaw({ ...carryScenarioQuery(route.query), q: pid }) })
 }
 
+function goGraph() {
+  void router.push({
+    path: '/graph',
+    query: toLocationQueryRaw({
+      ...carryScenarioQuery(route.query),
+      ...(selectedEq.value ? { equivalent: selectedEq.value } : {}),
+      threshold: threshold.value,
+    }),
+  })
+}
+
 const lastUpdatedLabel = computed(() => {
   if (!lastLoadedAt.value) return ''
   return formatIsoInTimeZone(lastLoadedAt.value.toISOString(), timeZone.value)
 })
 
-function money(v: string): string {
-  return formatDecimalFixed(v, selectedPrecision.value)
+function money(v: string, equivalent: unknown = selectedEq.value): string {
+  const code = String(equivalent || '').trim().toUpperCase()
+  const precision = code ? precisionByEq.value.get(code) : undefined
+  return precision === undefined ? '—' : formatDecimalFixed(v, precision)
 }
 </script>
 
@@ -236,6 +260,7 @@ function money(v: string): string {
                 v-model="threshold"
                 size="small"
                 style="width: 110px"
+                :aria-invalid="!thresholdValid"
                 :placeholder="t('liquidity.controls.thresholdPlaceholder')"
               />
             </div>
@@ -243,6 +268,7 @@ function money(v: string): string {
             <el-button
               size="small"
               :loading="loading"
+              :disabled="!thresholdValid"
               @click="load"
             >
               {{ t('common.refresh') }}
@@ -285,7 +311,20 @@ function money(v: string): string {
 
     <el-divider />
 
-    <el-row :gutter="12">
+    <el-alert
+      v-if="summary && selectedPrecision === null"
+      type="warning"
+      show-icon
+      :closable="false"
+      class="mb"
+      :title="t('liquidity.precisionUnavailable')"
+    />
+
+    <el-row
+      v-if="showCountKpis"
+      data-testid="liquidity-count-kpis"
+      :gutter="12"
+    >
       <el-col :span="8">
         <el-statistic
           :title="t('liquidity.kpi.activeTrustlines')"
@@ -308,7 +347,11 @@ function money(v: string): string {
 
     <el-divider />
 
-    <el-row :gutter="12">
+    <el-row
+      v-if="showMoneyKpis"
+      data-testid="liquidity-money-kpis"
+      :gutter="12"
+    >
       <el-col :span="8">
         <el-statistic
           :title="t('liquidity.kpi.totalLimit')"
@@ -399,7 +442,7 @@ function money(v: string): string {
               width="120"
             >
               <template #default="scope">
-                <el-text type="danger">{{ money(scope.row.available) }}</el-text>
+                <el-text type="danger">{{ money(scope.row.available, scope.row.equivalent) }}</el-text>
               </template>
             </el-table-column>
 
@@ -408,7 +451,7 @@ function money(v: string): string {
               :label="t('trustlines.limit')"
               width="120"
             >
-              <template #default="scope">{{ money(scope.row.limit) }}</template>
+              <template #default="scope">{{ money(scope.row.limit, scope.row.equivalent) }}</template>
             </el-table-column>
 
             <el-table-column
@@ -446,7 +489,7 @@ function money(v: string): string {
               <div class="hdr__right">
                 <el-button
                   size="small"
-                  @click="router.push({ path: '/graph', query: toLocationQueryRaw({ ...carryScenarioQuery(route.query), ...(selectedEq ? { equivalent: selectedEq } : {}) }) })"
+                  @click="goGraph"
                 >
                   {{ t('liquidity.actions.openGraph') }}
                 </el-button>

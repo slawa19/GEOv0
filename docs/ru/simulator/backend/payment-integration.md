@@ -29,6 +29,11 @@ Source of truth:
 Ключевые свойства:
 - Поддержан `Idempotency-Key` (заголовок).
 - На уровне API есть distributed lock по ключу: `dlock:payment:{sender_id}:{equivalent}`.
+- В PostgreSQL денежный segment lock использует каноническую identity
+  `(equivalent, unordered participant UUID pair)`; направление flow, trustline и audit не меняется.
+- Все payment owners соблюдают порядок: полный sorted equivalent-owner set → transaction lock →
+  canonical pair locks. Real tick захватывает configured set до денежной работы, executor — точный
+  planned set до запуска staged actions.
 - В `PaymentService.create_payment()` есть:
   - поиск маршрута (routing)
   - 2PC-like prepare/commit (через `PaymentEngine`)
@@ -68,6 +73,20 @@ Source of truth:
 - Guardrail: `CLEARING_ENABLED` может выключать clearing.
 - Есть distributed lock: `dlock:clearing:{equivalent}`.
 - `ClearingService` избегает пар участников, затронутых активными prepared payment flows (см. `_locked_pairs_for_equivalent`).
+- `execute_clearing_with_amount()` владеет одной попыткой целиком: успешный amount уже durable,
+  любой `None` завершает попытку rollback и не оставляет row locks вызывающему.
+- Идентичность occurrence — UUIDv5 от канонического неупорядоченного набора Debt UUID. Повтор того
+  же набора после потери подтверждения возвращает сохранённый `Transaction.payload.amount`, не
+  применяя эффект повторно; новый набор с новым Debt UUID считается новой occurrence.
+- Clearing входит в общий с payment equivalent-owner domain на одной pinned physical connection.
+  После preflight берётся session-level lock той же identity, acquisition-транзакция откатывается
+  для свежего snapshot, и authoritative Debt/PrepareLock reads выполняются на этой же connection.
+  Денежный UoW завершается до exact unlock; при неподтверждённом unlock connection инвалидируется и
+  физически закрывается. Поэтому committed `PrepareLock` после ожидания виден, новый prepare не
+  пересекает уже принятое clearing conflict decision, а попытка не занимает две pool connections.
+  `55P03` остаётся bounded timeout, направление долгов и payload не меняется. На PostgreSQL входная
+  `AsyncSession` должна быть привязана к `AsyncEngine`; externally bound `AsyncConnection` сервис
+  отклоняет до preflight, чтобы не требовать второе соединение из pool.
 
 ---
 
@@ -123,7 +142,9 @@ Runner действует как «виртуальный клиент»:
 - `PAYMENT_TOTAL_TIMEOUT_SECONDS` (по умолчанию 10s)
 
 Поведение:
-- при `asyncio.TimeoutError` выполняется `engine.abort(..., reason="Payment timeout")` (shielded), затем кидается `TimeoutException`.
+- при `asyncio.TimeoutError` rollback/abort доводятся до terminal result до закрытия session, затем кидается `TimeoutException`;
+- `CancelledError` сохраняется, но после возможной записи tx выполняется тот же terminal cleanup;
+- уже закоммиченный платёж определяется read-before-abort и не переводится в `ABORTED`.
 
 ### 3.2 Идемпотентность
 `Idempotency-Key`:
@@ -145,6 +166,17 @@ Runner действует как «виртуальный клиент»:
 Чтобы не перегружать ядро:
 - на run держать `max_in_flight` (см. `runner-algorithm.md` guardrails)
 - дополнительно учитывать lock в API: платежи для одного sender+equivalent сериализуются через redis lock.
+
+### 3.4 Владение транзакцией и retry
+
+- Savepoint не является границей retry для конфликта внешнего `SERIALIZABLE` snapshot. В real mode
+  такой конфликт пробрасывается владельцу tick: вся внешняя транзакция откатывается, tick получает
+  `REAL_MODE_TICK_FAILED`, а тот же batch автоматически не переигрывается. Следующий heartbeat
+  планирует новый tick.
+- Mixed-version payment/clearing workers не поддерживаются. При upgrade и rollback оператор
+  останавливает API payment writers, clearing workers, real ticks, Admin abort и recovery,
+  дожидается завершения/отката DB-транзакций и освобождения advisory locks, разворачивает одну версию
+  на всех owner surfaces и только затем возобновляет работу.
 
 ---
 
@@ -174,8 +206,20 @@ UI не читает внутренние состояния платежей; �
 Политика:
 - порог: если за окно времени доля таймаутов выше X%, переводить run в `error`.
 
-### 4.3 Внутренние/неожиданные ошибки (INTERNAL_ERROR)
-- `GeoException`, `DBAPIError` и прочие непредвиденные → `last_error.code=INTERNAL_ERROR`.
+### 4.3 Временный конфликт БД (CONFLICT)
+
+- `40001`/`40P01` маппятся в существующий `ConflictException`-контракт `409/E008` с
+  `details.retryable=true`; driver text и SQLSTATE не публикуются.
+- После `SERIALIZABLE` advisory wait PostgreSQL может вернуть `23505` вместо `40001`. Ретраится только
+  точный Debt business-key conflict: операция `commit`, `INSERT INTO debts`, constraint
+  `uq_debts_debtor_creditor_equivalent`. Любой другой `23505` остаётся неретраимым.
+- Interact action отвечает `CONFLICT`, не `PAYMENT_REJECTED`.
+- В real tick конфликт пробрасывается до владельца внешней транзакции: весь tick откатывается;
+  продолжать clearing/trust drift на отравленной session запрещено. Тот же batch не переигрывается;
+  следующий heartbeat планирует новый tick.
+
+### 4.4 Внутренние/неожиданные ошибки (INTERNAL_ERROR)
+- Неретраимые `DBAPIError` и прочие непредвиденные ошибки → `last_error.code=INTERNAL_ERROR`.
 
 ---
 
@@ -209,8 +253,21 @@ MVP правило:
 - по результату:
   - эмитить `clearing.done` с `cycle_edges` (список затронутых рёбер `{from,to}` для FX) и `cleared_amount`.
 
+`cleared_amount` берётся только из результата `execute_clearing_with_amount()`, полученного после
+блокировки строк; предварительный minimum из candidate edges используется лишь для диагностики.
+Тот же actual amount используется в aggregate, per-edge trust-growth и SSE.
+
+Если caller отменён после того, как commit уже стал durable, сервис поднимает
+`ClearingCommittedAfterCancellation` (подкласс `CancelledError`) с `tx_id` и actual amount. Real и
+Interact publishers сначала учитывают этот durable result и выпускают partial `clearing.done`, затем
+повторно распространяют cancellation. Обычная отмена до подтверждённого commit не выдаётся за успех.
+
 Guardrails:
-- учитывать, что `ClearingService` пропускает циклы, затрагивающие пары участников из активных payment prepare locks.
+- учитывать, что `ClearingService` пропускает циклы, затрагивающие пары участников из активных
+  payment prepare locks;
+- не обходить общий equivalent-owner interlock прямой денежной мутацией или чтением старого
+  snapshot: только service-owned попытка на pinned connection завершает денежный UoW перед exact
+  unlock либо инвалидирует connection при неопределённом состоянии lock.
 
 ---
 

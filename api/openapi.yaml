@@ -48,6 +48,27 @@ paths:
                     minimum: 0
                   timestamp:
                     type: string
+        '503':
+          description: Service degraded
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, version, uptime_seconds, timestamp]
+                properties:
+                  status:
+                    type: string
+                    enum: [ok, degraded]
+                  version:
+                    type: string
+                  environment:
+                    type: string
+                    nullable: true
+                  uptime_seconds:
+                    type: integer
+                    minimum: 0
+                  timestamp:
+                    type: string
 
   /healthz:
     get:
@@ -95,8 +116,64 @@ paths:
                   status:
                     type: string
                     enum: [error]
-                  details:
-                    type: string
+
+  /admin/health/db:
+    get:
+      tags: [Health, Admin]
+      summary: Authenticated database diagnostic
+      security: []
+      parameters:
+        - in: header
+          name: X-Admin-Token
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: DB OK
+          content:
+            application/json:
+              schema: {}
+        '403':
+          description: Admin token required
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: object
+                    required: [code, message]
+                    properties:
+                      code:
+                        type: string
+                      message:
+                        type: string
+                      details:
+                        type: object
+                        nullable: true
+        '503':
+          description: Database unavailable
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: object
+                    required: [code, message]
+                    properties:
+                      code:
+                        type: string
+                      message:
+                        type: string
+                      details:
+                        type: object
+                        nullable: true
 
   /admin/config:
     get:
@@ -303,8 +380,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: '#/components/schemas/AdminParticipantStatusResponse'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -332,8 +408,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: '#/components/schemas/AdminParticipantStatusResponse'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -521,6 +596,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Equivalent'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -555,8 +632,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: '#/components/schemas/AdminDeleteResponse'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -582,8 +658,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: '#/components/schemas/AdminEquivalentUsageResponse'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -814,8 +889,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: '#/components/schemas/AdminAbortTxResponse'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -968,9 +1042,13 @@ paths:
           required: true
           schema:
             $ref: '#/components/schemas/EquivalentCode'
-        - in: query
-          name: stop_after_types
+        - in: header
+          name: Last-Event-ID
           required: false
+          description: |
+            Resume after this previously observed SSE event ID. The server returns
+            `410` when the cursor is malformed, belongs to another run, is ahead of
+            the run, has been pruned, or cannot fit in the subscriber bootstrap queue.
           schema:
             type: string
       responses:
@@ -982,6 +1060,12 @@ paths:
                 type: string
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '410':
+          description: Replay cursor is invalid or cannot be delivered completely
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
 
   /simulator/events/poll:
     get:
@@ -1433,9 +1517,13 @@ paths:
       parameters:
         - $ref: '#/components/parameters/RunIdPath'
         - $ref: '#/components/parameters/EquivalentQuery'
-        - in: query
-          name: stop_after_types
+        - in: header
+          name: Last-Event-ID
           required: false
+          description: |
+            Resume after this previously observed SSE event ID. If the cursor is
+            malformed, belongs to another run, is ahead of the run, has been pruned,
+            or cannot fit in the subscriber bootstrap queue, the server returns `410`.
           schema:
             type: string
       responses:
@@ -1449,6 +1537,12 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '410':
+          description: Replay cursor is invalid or cannot be delivered completely
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
 
   /simulator/runs/{run_id}/actions/tx-once:
     post:
@@ -1595,6 +1689,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
 
   /simulator/runs/{run_id}/bottlenecks:
     get:
@@ -1629,6 +1725,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
 
   /simulator/runs/{run_id}/artifacts:
     get:
@@ -2505,7 +2603,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
+                $ref: '#/components/schemas/IntegrityNetMutualDebtsRepairResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
 
@@ -2519,7 +2617,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
+                $ref: '#/components/schemas/IntegrityCapDebtsRepairResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
 
@@ -2623,6 +2721,14 @@ components:
             $ref: '#/components/schemas/ErrorEnvelope'
     NotFound:
       description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    ServiceUnavailable:
+      description: >-
+        Measured data is unavailable and the endpoint refuses to substitute
+        synthetic data (real-mode simulator analytics).
       content:
         application/json:
           schema:
@@ -2749,6 +2855,34 @@ components:
           type: string
           format: date-time
 
+    StoredEquivalent:
+      description: Read projection that keeps pre-contract rows visible to operators.
+      type: object
+      required: [code, precision, is_active, created_at, updated_at]
+      properties:
+        code:
+          type: string
+        symbol:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        precision:
+          type: integer
+        metadata:
+          type: object
+          nullable: true
+          additionalProperties: true
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
     EquivalentsList:
       type: object
       required: [items]
@@ -2756,7 +2890,7 @@ components:
         items:
           type: array
           items:
-            $ref: '#/components/schemas/Equivalent'
+            $ref: '#/components/schemas/StoredEquivalent'
 
     EquivalentCode:
       type: string
@@ -2828,6 +2962,7 @@ components:
           type: boolean
         clearing_enabled:
           type: boolean
+      additionalProperties: false
 
     AdminFeatureFlagsPatchRequest:
       type: object
@@ -2860,6 +2995,28 @@ components:
       properties:
         reason:
           type: string
+
+    AdminParticipantStatusResponse:
+      type: object
+      required: [pid, status]
+      properties:
+        pid:
+          type: string
+        status:
+          type: string
+          enum: [active, suspended]
+      additionalProperties: false
+
+    AdminAbortTxResponse:
+      type: object
+      required: [tx_id, status]
+      properties:
+        tx_id:
+          type: string
+        status:
+          type: string
+          pattern: '^aborted$'
+      additionalProperties: false
 
     AdminAuditLogItem:
       type: object
@@ -2942,6 +3099,8 @@ components:
         precision:
           type: integer
           default: 2
+          minimum: 0
+          maximum: 18
         metadata:
           type: object
           nullable: true
@@ -2965,6 +3124,8 @@ components:
         precision:
           type: integer
           nullable: true
+          minimum: 0
+          maximum: 18
         metadata:
           type: object
           nullable: true
@@ -2975,6 +3136,28 @@ components:
         reason:
           type: string
           nullable: true
+
+    AdminEquivalentUsageResponse:
+      type: object
+      required: [code, trustlines, debts, integrity_checkpoints]
+      properties:
+        code:
+          type: string
+        trustlines:
+          type: integer
+        debts:
+          type: integer
+        integrity_checkpoints:
+          type: integer
+      additionalProperties: false
+
+    AdminDeleteResponse:
+      type: object
+      required: [deleted]
+      properties:
+        deleted:
+          type: string
+      additionalProperties: false
 
     SignedRequest:
       type: object
@@ -3584,6 +3767,7 @@ components:
           type: object
           nullable: true
           additionalProperties: true
+      additionalProperties: false
 
     EquivalentIntegrityStatus:
       type: object
@@ -3602,6 +3786,7 @@ components:
           type: object
           additionalProperties:
             $ref: '#/components/schemas/InvariantResult'
+      additionalProperties: false
 
     IntegrityStatusResponse:
       type: object
@@ -3621,6 +3806,7 @@ components:
           type: array
           items:
             type: string
+      additionalProperties: false
 
     IntegrityChecksumResponse:
       type: object
@@ -3662,6 +3848,49 @@ components:
           type: array
           items:
             type: string
+      additionalProperties: false
+
+    IntegrityNetMutualDebtsRepairResponse:
+      type: object
+      required: [ok, action, netted_pairs, updated, deleted]
+      properties:
+        ok:
+          type: boolean
+          enum: [true]
+        action:
+          type: string
+          enum: [net-mutual-debts]
+        netted_pairs:
+          type: integer
+          minimum: 0
+        updated:
+          type: integer
+          minimum: 0
+        deleted:
+          type: integer
+          minimum: 0
+      additionalProperties: false
+
+    IntegrityCapDebtsRepairResponse:
+      type: object
+      required: [ok, action, scanned, updated, deleted]
+      properties:
+        ok:
+          type: boolean
+          enum: [true]
+        action:
+          type: string
+          enum: [cap-debts-to-trust-limits]
+        scanned:
+          type: integer
+          minimum: 0
+        updated:
+          type: integer
+          minimum: 0
+        deleted:
+          type: integer
+          minimum: 0
+      additionalProperties: false
 
     IntegrityAuditLogItem:
       type: object
@@ -3947,6 +4176,9 @@ components:
         amount:
           type: string
           nullable: true
+        amount_flyout:
+          type: boolean
+          nullable: true
         ttl_ms:
           type: integer
           nullable: true
@@ -4023,6 +4255,10 @@ components:
             at:
               type: string
               format: date-time
+            details:
+              type: object
+              nullable: true
+              additionalProperties: true
           additionalProperties: true
       additionalProperties: true
 
@@ -4065,11 +4301,135 @@ components:
             $ref: '#/components/schemas/SimulatorGraphLinkPatch'
       additionalProperties: true
 
+    SimulatorAuditDriftEvent:
+      type: object
+      required: [event_id, ts, type, equivalent, tick_index, severity, total_drift, drifts, source]
+      properties:
+        event_id:
+          type: string
+        ts:
+          type: string
+          format: date-time
+        type:
+          type: string
+          enum: [audit.drift]
+        equivalent:
+          $ref: '#/components/schemas/EquivalentCode'
+        tick_index:
+          type: integer
+        severity:
+          type: string
+          enum: [warning, critical]
+        total_drift:
+          type: string
+        drifts:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        source:
+          type: string
+          enum: [post_tick_audit, delta_check]
+      additionalProperties: true
+
+    TopologyChangedNodeRef:
+      type: object
+      required: [pid]
+      properties:
+        pid:
+          type: string
+        name:
+          type: string
+          nullable: true
+        type:
+          type: string
+          nullable: true
+      additionalProperties: false
+
+    TopologyChangedEdgeRef:
+      type: object
+      required: [from_pid, to_pid, equivalent_code]
+      properties:
+        from_pid:
+          type: string
+        to_pid:
+          type: string
+        equivalent_code:
+          $ref: '#/components/schemas/EquivalentCode'
+        limit:
+          type: string
+          nullable: true
+      additionalProperties: false
+
+    TopologyChangedPayload:
+      type: object
+      properties:
+        added_nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/TopologyChangedNodeRef'
+        removed_nodes:
+          type: array
+          items:
+            type: string
+        frozen_nodes:
+          type: array
+          items:
+            type: string
+        added_edges:
+          type: array
+          items:
+            $ref: '#/components/schemas/TopologyChangedEdgeRef'
+        removed_edges:
+          type: array
+          items:
+            $ref: '#/components/schemas/TopologyChangedEdgeRef'
+        frozen_edges:
+          type: array
+          items:
+            $ref: '#/components/schemas/TopologyChangedEdgeRef'
+        node_patch:
+          type: array
+          nullable: true
+          items:
+            type: object
+            additionalProperties: true
+        edge_patch:
+          type: array
+          nullable: true
+          items:
+            type: object
+            additionalProperties: true
+      additionalProperties: false
+
+    SimulatorTopologyChangedEvent:
+      type: object
+      required: [event_id, ts, type, equivalent, payload]
+      properties:
+        event_id:
+          type: string
+        ts:
+          type: string
+          format: date-time
+        type:
+          type: string
+          enum: [topology.changed]
+        equivalent:
+          $ref: '#/components/schemas/EquivalentCode'
+        payload:
+          $ref: '#/components/schemas/TopologyChangedPayload'
+        reason:
+          type: string
+          nullable: true
+      additionalProperties: true
+
     SimulatorEvent:
       oneOf:
         - $ref: '#/components/schemas/SimulatorTxUpdatedEvent'
         - $ref: '#/components/schemas/SimulatorTxFailedEvent'
         - $ref: '#/components/schemas/SimulatorClearingDoneEvent'
+        - $ref: '#/components/schemas/SimulatorAuditDriftEvent'
+        - $ref: '#/components/schemas/SimulatorTopologyChangedEvent'
         - $ref: '#/components/schemas/SimulatorRunStatusEvent'
 
     SimulatorRunStatusEvent:
@@ -4104,6 +4464,30 @@ components:
           nullable: true
           minimum: 0
         queue_depth:
+          type: integer
+          nullable: true
+          minimum: 0
+        attempts_total:
+          type: integer
+          nullable: true
+          minimum: 0
+        committed_total:
+          type: integer
+          nullable: true
+          minimum: 0
+        rejected_total:
+          type: integer
+          nullable: true
+          minimum: 0
+        errors_total:
+          type: integer
+          nullable: true
+          minimum: 0
+        timeouts_total:
+          type: integer
+          nullable: true
+          minimum: 0
+        consec_all_rejected_ticks:
           type: integer
           nullable: true
           minimum: 0
@@ -4244,6 +4628,19 @@ components:
           type: string
           format: date-time
           nullable: true
+        stop_requested_at:
+          type: string
+          format: date-time
+          nullable: true
+        stop_source:
+          type: string
+          nullable: true
+        stop_reason:
+          type: string
+          nullable: true
+        stop_client:
+          type: string
+          nullable: true
         sim_time_ms:
           type: integer
           nullable: true
@@ -4265,7 +4662,27 @@ components:
           type: integer
           nullable: true
           minimum: 0
+        committed_total:
+          type: integer
+          nullable: true
+          minimum: 0
+        rejected_total:
+          type: integer
+          nullable: true
+          minimum: 0
+        attempts_total:
+          type: integer
+          nullable: true
+          minimum: 0
+        timeouts_total:
+          type: integer
+          nullable: true
+          minimum: 0
         errors_last_1m:
+          type: integer
+          nullable: true
+          minimum: 0
+        consec_all_rejected_ticks:
           type: integer
           nullable: true
           minimum: 0
@@ -4308,7 +4725,19 @@ components:
           type: integer
           minimum: 0
         v:
-          type: number
+          # 2026-08-20 / p007_t715: decimal string, not a number. Two of the
+          # seven series (total_debt, clearing_volume) are amounts in the
+          # selected equivalent, and money stays exact decimal. One type for all
+          # seven series: the values come from one column, so a union would only
+          # force consumers to branch.
+          # The form is fixed and identical for the DB-backed and the synthetic
+          # producer: the eight fractional digits of the Numeric(20, 8) column,
+          # plain decimal notation, never exponential.
+          # null means "no measurement at/before this timestamp"; it is
+          # intentionally distinguishable from a measured zero ("0.00000000").
+          type: string
+          nullable: true
+          description: Metric value as decimal string
       additionalProperties: false
 
     MetricSeriesKey:
@@ -4319,6 +4748,11 @@ components:
         - total_debt
         - clearing_volume
         - bottlenecks_score
+        # Network cardinalities. Measured per tick and persisted since the
+        # simulator storage MVP; exposed here by spec 007 / T713 so the canon,
+        # the pydantic model, the reader and the writer describe one set.
+        - active_participants
+        - active_trustlines
 
     MetricSeries:
       type: object

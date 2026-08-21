@@ -18,7 +18,18 @@ plan at exact commit `8f271693e7b763856d86fb3c2f579a56938d6fcb`, then separately
 authorized publication and `workflow_dispatch`. Exit was accepted at main commit
 `31e887fc904ef8060b0c1c9f233957b235ee1aeb` using
 [workflow run 31246985920](https://github.com/slawa19/GEOv0/actions/runs/31246985920).
-Phase 2 has not started; Phases 2–7 remain paused.
+Phase 2 completed on 2026-08-08 at product commit
+`7d0a8a9ca48cec34cc62e0965cdd6d28825370de`. Phase 3 completed on
+2026-08-08 at product commit
+`f8517bc90b119a3b156de0a2945019d1b9381118`. Phase 4 completed locally on
+2026-08-08 at product commit `f0428f9996e511e723ce1980a24c2073b3adadb8`;
+Phase 5 completed locally on 2026-08-09 at product-behavior commit
+`ff53dbc1c070220ad7ddfdaf8a0aa5c8c1ccd157`, with final test evidence at
+`345991b47f15e2ed4080c7617f4f3430883f8b7b`. Phase 6 completed on
+2026-08-09 at `579ad5769470b0d3bcdb4c59830362a7b9bd73bc`; Phase 7 and REN-015
+completed on 2026-08-09 at accepted product/test HEAD
+`f5a86ae369c563ae32d2b306ada3e6b8f48f21e2` with published Quality run
+`31329706963`.
 
 ### Phase 1 evidence ledger
 
@@ -47,6 +58,125 @@ Local evidence recorded on 2026-08-07, before publication:
   Its overall conclusion remains `failure` because the broader scheduled/manual
   Admin and Simulator E2E suites retain known failures assigned to Phases 4–6;
   no CI-green claim is made.
+
+### Phase 2 evidence ledger
+
+- Accepted product range:
+  `0635a651f0ae6f970d82d7d71b7a18071069262d..7d0a8a9ca48cec34cc62e0965cdd6d28825370de`.
+  `phase2-owner-map.md` records every frozen public payment, clearing,
+  trustline, destructive Admin/Integrity and Simulator-nested write path with a
+  `FIX` or `KEEP` decision, plus the actor/owner matrix. Conditional REN-012A was
+  not triggered.
+- Confirmed remediations stayed on existing service/route seams: clearing failure
+  taxonomy and partial progress, trustline cache invalidation, atomic Admin and
+  Integrity audit boundaries, payment insert-race/idempotency and retry-safe audit
+  reads, and Simulator clearing failure/cancellation publication. No generalized
+  repository/UoW framework or broad router rewrite was introduced.
+- Local final backend validation exited `0` with `734 passed`, `3 skipped`, `15
+  deselected`; the combined final adversarial-remediation selector passed `53`
+  tests. Targeted OpenAPI, actor/owner, payment, clearing, trustline, Admin,
+  Integrity and Simulator selectors passed during their owning slices.
+- Published [workflow run
+  31256289008](https://github.com/slawa19/GEOv0/actions/runs/31256289008)
+  executed on the exact product HEAD. Its guarded disposable PostgreSQL Phase 2
+  matrix passed `3` tests; the complete marker tier passed `11` tests with `105`
+  deselected. The conditional Admin lost-update case remained `NOT TRIGGERED`.
+  Required local-equivalent gates also passed: backend `735 passed`, `2 skipped`,
+  `15 deselected`; Admin `76 passed` plus build; Simulator `637 passed` plus
+  build. The overall workflow remains `failure`, not “CI green”, because broader
+  Admin and Simulator visual E2E failures are assigned to later frozen phases.
+- Final internal adversarial findings were fixed in `8936031`, `8a1601f`,
+  `c9a34cc`, and `7d0a8a9`, then independently re-reviewed with no remaining
+  P1/P2. Claude Code `2.1.226` reviewed the full accepted product range read-only
+  at high effort; exit `0`, complete JSON, `is_error=false`, resolved
+  `claude-opus-5`. Its five findings were manually triaged and none survived as a
+  P1/P2. Phase 3 subsequently completed as recorded below.
+
+### Phase 3 evidence ledger
+
+- Accepted product range:
+  `cf76e096ddaf9b896de161a5a44e208f982484fd..f8517bc90b119a3b156de0a2945019d1b9381118`.
+  `phase3-contract-map.md` records the frozen selected Admin/OpenAPI and Simulator
+  REST/SSE boundaries, Current/Intended/Optimal decisions and explicit residuals.
+- Admin real/mock config, feature-flag and selected mutation paths share strict
+  decoders; feature-flag PATCH is partial. Simulator scenario list/detail, run
+  status, snapshot and selected SSE families reject malformed/unknown input before
+  cursor, dedup, state or effects. Replay ordering remains Phase 5.
+- Local backend validation on the last backend-changing commit `032ed86` passed
+  `774` tests (`3` skipped, `15` deselected); Admin passed `113` tests/build and
+  Simulator passed typecheck, `668` tests/build. The final E2E-only delta passed
+  contract unit (`10`) and typecheck/discovery gates and independent review.
+- Published [workflow run
+  31265705618](https://github.com/slawa19/GEOv0/actions/runs/31265705618) on exact
+  accepted HEAD passed required local-equivalent gates (backend `775`, Admin
+  `113`, Simulator `668`), PostgreSQL matrix/full tier (`3`/`11`), container,
+  active Chromium and super-smoke. Overall status remains `failure`, not “CI
+  green”, because the exact prior Admin `2 failed / 2 passed` and Simulator `6
+  failed / 13 passed` later-phase E2E baselines remain.
+- Two accepted Claude Code reviews resolved `claude-opus-5` at high effort with
+  complete exit-`0` JSON. Reproduced findings were fixed; final internal
+  adversarial reviews, including the E2E mock delta, were CLEAN. Phase 4
+  subsequently completed as recorded below.
+
+### Phase 4 evidence ledger
+
+- Accepted execution range:
+  `1953845eef960352764c77778e1670456c58f5bf..f0428f9996e511e723ce1980a24c2073b3adadb8`.
+  `phase4-admin-map.md` records the frozen loader/effect classification,
+  Current / Intended / Optimal decisions, selected workflows, Graph lifecycle
+  boundary and explicit residuals.
+- Confirmed overlapping Participants, Trustlines, Audit, Incidents, Equivalents,
+  Liquidity and Graph owners have deterministic reverse-resolution and pending-
+  unmount evidence. The existing generation-token approach is retained; no new
+  query/state framework was introduced.
+- Representative freeze/unfreeze, config/flags, incident abort, Integrity,
+  Equivalent and query-preserving investigation paths cover success and meaningful
+  failure without a combinatorial CRUD matrix. A disposable real-contract smoke
+  passed config/flag audit and participant freeze/unfreeze with cleanup (`2/2`).
+- Graph Core ownership is consolidated in the existing visualization composable.
+  The DOM keyboard route selects nodes and edges, opens existing details, announces
+  state and restores focus; bounded guarded search avoids a broad Cytoscape or ARIA
+  canvas rewrite.
+- Final local Admin gates passed: lint exit `0` (`0` errors, `116` warnings), unit
+  `154/154`, build, and scoped Chromium `5/5`. The confirmed
+  `AdminAuditLogItem.timestamp` selector passed `2/2`. No published workflow ran,
+  so this is not a “CI green” claim.
+- Independent Graph and non-Graph adversarial re-reviews were CLEAN. Claude Code
+  `2.1.226` reviewed the frozen product and remediation deltas from clean
+  credential-free standalone clones with exit `0`, complete JSON and resolved
+  `claude-opus-5`. Reproduced findings were remediated. The final suggestion to
+  auto-search after dependency invalidation was manually rejected because the
+  accepted large-graph policy requires new explicit remote input.
+- Replay ordering and REN-012B2/C remain Phase 5; invalid legacy Equivalent codes
+  remain manual cleanup. Participant/incident naive timestamps are sibling
+  residuals outside the one confirmed audit path. Simulator E2E/bootstrap failures
+  were not touched.
+
+### Phase 5 evidence ledger
+
+- Accepted product range:
+  `5ea8bd854e25075634edb4436359f73dcb22c704..ff53dbc1c070220ad7ddfdaf8a0aa5c8c1ccd157`;
+  final test evidence is `345991b47f15e2ed4080c7617f4f3430883f8b7b`.
+  `phase5-simulator-map.md` records the frozen event/UI decisions, implementation
+  boundary, exact gates, reviews and deliberately unverified paths.
+- Replay admission/cursor ownership and lifecycle, topology, payment and clearing
+  application are independently testable; accepted state precedes effect intents,
+  and stale/duplicate/malformed/rejected frames have no trusted state or FX effect.
+  Existing frontend facades and all backend/OpenAPI/wire shapes were preserved.
+- The bounded DOM graph navigator, focus ownership, busy/status semantics,
+  decorative canvases and reduced-motion policy cover the selected fixture/real/
+  interact flows without an ARIA-canvas rewrite or visual redesign.
+- Final local Simulator gates passed lint, typecheck, unit `701/701` across `99`
+  files, build and scoped non-visual Chromium `5/5`. The final test-only correction
+  passed `SimulatorAppRoot.interact.test.ts` `68/68` plus lint/typecheck. Strict
+  fixture sync produced no diff; the known Vite `fxRenderer` warning remains.
+- Internal adversarial review ended without a remaining product finding. Claude
+  Code `2.1.226` reviewed the frozen product/remediation deltas read-only from clean
+  credential-free standalone clones with exit `0`, complete JSON and resolved
+  `claude-opus-5`; all reproduced findings were fixed.
+- No published workflow ran, so this is not a “CI green” claim. Live-backend SSE
+  browser, visual/browser-matrix, screen-reader and direct private busy-canvas
+  callback probes remain unverified. Phase 6 was not started.
 
 GEOv0 is an MVP community hub/simulator for roughly 10–500 participants, not a
 banking or HA platform. The authoritative remaining sequence is:
@@ -119,11 +249,11 @@ findings:
 
 - `BACKEND-TARGETED`: `.\scripts\verify_local.ps1 -TaskSlug <unique-task> -BackendOnly -BackendSelector <selectors>`
 - `BACKEND-DEFAULT`: `.\scripts\verify_local.ps1 -TaskSlug <unique-task> -BackendOnly`;
-  runs all backend tests except the explicitly marked `slow`/`e2e` tiers.
-- `BACKEND-EXPENSIVE`: add `-IncludeExpensive` with an explicit slow/e2e selector;
-  it is not part of the default tier.
-- `BACKEND-LINT-DIAGNOSTIC`: `.\.venv\Scripts\python.exe -m ruff check app migrations --no-cache`;
-  this is known-red and non-blocking until a baseline/ratchet is accepted.
+  runs all backend tests except the explicitly marked `slow`/`postgres` tiers.
+- `BACKEND-EXPENSIVE`: add `-IncludeExpensive` with an explicit `slow` selector;
+  slow joins the run, while `postgres` remains excluded and owned by its dedicated tier.
+- `BACKEND-RUFF`: `.\.venv\Scripts\python.exe -m ruff check app migrations --no-cache`;
+  pinned Ruff is blocking in CI and must exit `0`.
 - `OPENAPI`: `.\scripts\verify_local.ps1 -TaskSlug <unique-task> -BackendOnly -BackendSelector tests/contract/test_openapi_contract.py`
 - `ALEMBIC-HEADS`: `.\.venv\Scripts\python.exe scripts/check_alembic_heads.py`
 - `ADMIN-UNIT`: `npm --prefix admin-ui run test`
@@ -134,8 +264,8 @@ findings:
 - `SIM-UNIT`: `npm --prefix simulator-ui/v2 run test:unit`
 - `SIM-BUILD`: `npm --prefix simulator-ui/v2 run build`
 - `SIM-E2E`: `npm --prefix simulator-ui/v2 run test:e2e`
-- `REPO-FULL`: `.\scripts\verify_local.ps1 -TaskSlug <unique-task>`; Ruff/Black
-  remain separately reported diagnostics and are not described as enforced.
+- `REPO-FULL`: `.\scripts\verify_local.ps1 -TaskSlug <unique-task>`; CI separately enforces
+  pinned Ruff, while Black remains a non-blocking diagnostic.
 - `POSTGRES-CONCURRENCY`: the named selector against a dedicated disposable
   PostgreSQL database only; never point `TEST_DATABASE_URL` at developer data.
 
@@ -143,6 +273,12 @@ A completed published `workflow_dispatch` job with retained run URL/logs is equa
 evidence to a local disposable run when it executes the same frozen selector.
 Configured, skipped or cancelled jobs are not evidence. Phase 1 owns adding the
 missing container-smoke job and the 016→head PostgreSQL step.
+
+**2026-08-12 / T611 correction:** сохранённый выше `BACKEND-LINT-DIAGNOSTIC` описывает
+историческое состояние до T608. Сейчас pinned Ruff из `requirements-dev.txt` на области
+`app migrations` является blocking CI gate и проходит с exit `0`; только Black остаётся
+non-blocking diagnostic. Локальный `-StaticDiagnostics` по-прежнему не меняет exit code,
+поэтому его нельзя путать с политикой CI.
 
 Commands above describe repository intent. REN-003 owns making them unambiguous
 and CI-reproducible; until it lands, record the exact executable and environment
@@ -218,6 +354,11 @@ used.
   reported `10 passed`, `86 deselected`. Ruff/Black remain visible non-blocking
   diagnostics; the completed workflow is not called green because the broader
   scheduled/manual E2E jobs retain known failures assigned to later phases.
+- **2026-08-12 / T611 supersession:** эта completion evidence описывает policy на дату
+  REN-003 и не является текущей инструкцией. T608 очистил pinned Ruff scope `app migrations`
+  и убрал для него `continue-on-error`; теперь Ruff blocking, Black по-прежнему diagnostic.
+  Сохранённые ниже формулировки scope/acceptance также читаются только в историческом контексте
+  REN-003; актуальный owner — Program006 T608 и `tests/unit/test_static_diagnostics_policy.py`.
 - **Rationale / value:** A workflow and aggregate runner now exist in the working
   tree, but they are not accepted until clean-checkout jobs and every required
   surface complete. Ruff/Black debt is visible diagnostic evidence, not an
@@ -446,7 +587,19 @@ used.
 - **Priority:** P1
 - **Owner surface:** `api/openapi.yaml`, FastAPI route/schema declarations,
   `tests/contract/test_openapi_contract.py`
-- **Status:** IN PROGRESS (2026-08-07)
+- **Status:** DONE (2026-08-08)
+- **Completion evidence (2026-08-08):** Phase 3 selected response schemas and
+  mutation-sensitive exact guards close the remaining semantic parity scope at
+  `f8517bc90b119a3b156de0a2945019d1b9381118`. The final OpenAPI selector passed
+  `23` tests; published required backend validation passed `775` tests and the
+  affected Admin/Simulator gates passed. `phase3-contract-map.md` records the
+  selected operations and explicit non-scope.
+- **2026-08-11 / T610 clarification:** the dated phrase “semantic parity” above
+  means mutation-sensitive ratchets over all maintained operations plus exact
+  parity only for the selected Phase 3 contracts. It does **not** claim
+  repository-wide parity between generated FastAPI schemas and
+  `api/openapi.yaml`; the remaining category drift is deliberately count+digest
+  ratcheted.
 - **Working-tree evidence (2026-08-07):** the contract compares semantic
   parameters (including full auth transport shape), request/response media and
   schemas, statuses, error envelopes and security OR/AND/scopes under exact
@@ -454,7 +607,8 @@ used.
   `400` from identity-transport `422 ErrorEnvelope`; both health aliases share a
   typed `ok|degraded` response. The canonical contract selector passed `16`
   tests and two independent adversarial passes found no remaining P1/P2. A
-  published CI contract job has not run, so the task remains `IN PROGRESS`.
+  published CI contract job had not yet run, so the task remained `IN PROGRESS`
+  at that dated checkpoint.
 - **Rationale / value:** The current contract test passes while checking only path
   and method sets; it does not protect parameters, request/response schemas,
   statuses, or security.
@@ -467,7 +621,8 @@ used.
 - **Non-scope:** Rewriting every schema for stylistic parity, changing public API
   semantics to match stale prose, requiring byte-identical generated YAML, or
   testing descriptions/examples as behavior.
-- **Dependencies:** REN-002; REN-003 for CI. Semantic parity has already landed;
+- **Dependencies:** REN-002; REN-003 for CI. The REN-009 selected exact contracts
+  and all-operation drift ratchets have landed;
   REN-010A may proceed, but any change to a maintained REST payload must extend the
   REN-009 contract test in the same commit. REN-012B1 remains the selected
   frontend-ingress continuation.
@@ -487,8 +642,25 @@ used.
 - **Priority:** P1
 - **Owner surface:** `app/api/v1/payments.py`, `app/api/v1/clearing.py`, write paths
   in `app/api/v1/admin.py`, `app/core/payments/`,
-  `app/core/clearing/service.py`, `app/core/trustlines/service.py`
-- **Status:** IN PROGRESS (2026-08-07)
+  `app/core/clearing/service.py`, `app/core/trustlines/service.py`, and the selected
+  Admin integration paths under `admin-ui/src/`
+- **Status:** DONE (2026-08-08) — REN-010A and REN-010B complete.
+- **REN-010A completion evidence (2026-08-08):** the compact owner/effect map and
+  actor matrix are complete at `phase2-owner-map.md`. Only reproduced ownership,
+  cache, audit, idempotency and error-boundary defects were fixed. The final
+  product SHA `7d0a8a9ca48cec34cc62e0965cdd6d28825370de` passed the local backend
+  milestone (`734 passed`, `3 skipped`, `15 deselected`) and published run
+  `31256289008`: the three-case live PostgreSQL matrix passed, as did all `11`
+  registered PostgreSQL tests. The conditional Admin lost-update matrix case and
+  REN-012A adapter were not triggered. Internal and Claude full-range reviews
+  have no sustained P1/P2.
+- **REN-010B completion evidence (2026-08-08):** the selected Admin operator
+  integrations expose the accepted durable result without duplicating Phase 2
+  transaction tests. Component/contract paths cover freeze/unfreeze, config/flags,
+  incident abort, bounded Integrity repair semantics and one Equivalent mutation
+  class. The disposable real-contract smoke passed config/flag audit and participant
+  freeze/unfreeze with cleanup (`2/2`). Exact product HEAD and residuals are recorded
+  in `phase4-admin-map.md`.
 - **Committed slice evidence (2026-08-07):** the first vertical slice replaces the
   simulator's implicit `commit=False` convention with an explicit staged payment
   result and ordered post-commit/rollback journal. Outer tick owners now resolve
@@ -577,9 +749,9 @@ used.
 - **Non-scope:** Replacing SQLAlchemy, changing routing/clearing algorithms,
   relaxing invariants, combining independent failures, or optimizing before
   correctness is locked.
-- **Dependencies:** REN-006 and REN-003. Existing REN-009 semantic parity is
-  sufficient to begin REN-010A; any maintained REST payload change extends the
-  REN-009 contract test in the same commit.
+- **Dependencies:** REN-006 and REN-003. Existing REN-009 selected-contract guards
+  and all-operation drift ratchets are sufficient to begin REN-010A; any maintained
+  REST payload change extends the REN-009 contract test in the same commit.
 - **Acceptance criteria:**
   - Each listed supported write path has a compact owner/effect map and a `FIX` or
     `KEEP` decision; unrelated writes are not pulled into the slice.
@@ -600,7 +772,8 @@ used.
   `POSTGRES-CONCURRENCY` for
   `tests/integration/test_concurrent_clearing_payment_lost_update_postgres.py`,
   `test_concurrent_prepare_routes_bottleneck_postgres.py`, and
-  `test_payment_engine_uow_retry_postgres.py`.
+  `test_payment_idempotency_postgres.py`. The broader registered PostgreSQL
+  marker tier separately retains `test_payment_engine_uow_retry_postgres.py`.
 - **Full gates:** `BACKEND-DEFAULT`; `BACKEND-LINT-DIAGNOSTIC`; `OPENAPI`; scheduled PostgreSQL
   suite; independent adversarial review before merge.
 
@@ -609,7 +782,16 @@ used.
 - **Priority:** P1
 - **Owner surface:** `admin-ui/src/api/realApi.ts`, page/composable loaders under
   `admin-ui/src/`, their Vitest suites
-- **Status:** IN PROGRESS (2026-08-07)
+- **Status:** DONE (2026-08-08)
+- **Completion evidence (2026-08-08):** `phase4-admin-map.md` classifies every
+  frozen loader as overlapping, one-shot or write. Mounted deterministic tests
+  prove B-before-A, stale rejection and pending-unmount behavior for Participants,
+  Trustlines, Audit, Incidents, Equivalents, Liquidity and Graph owners. Graph
+  lifecycle/search effects use the existing generation owners, including bounded
+  debounced keyboard search and deterministic cache invalidation. Final Admin
+  unit passed `154/154`; lint exited `0` with no errors; build and scoped Chromium
+  `5/5` passed. Independent adversarial re-reviews were CLEAN and final accepted
+  product HEAD is `f0428f9996e511e723ce1980a24c2073b3adadb8`.
 - **Working-tree evidence (2026-08-07):** a narrow generation-token primitive is
   applied to confirmed overlapping page/graph loaders; debounce/throttle disposal
   and a single graph view-request owner prevent stale data/error/loading/rebuild
@@ -652,7 +834,8 @@ used.
 - **Owner surface:** Simulator HTTP/SSE normalization, real-mode replay/state/effect
   path, existing frontend facades, selected UI/window primitives; backend router
   only when a confirmed transaction/contract fix needs an extraction seam.
-- **Status:** PLANNED — split into REN-012A/B/C below.
+- **Status:** DONE (2026-08-09) — REN-012A was explicitly not triggered;
+  REN-012B1/B2 and REN-012C are complete.
 - **Rationale / value:** The material risk is not file length. It is that unchecked
   input, replay logic, state mutation and visual effects are difficult to verify
   independently, while canvas-only selection blocks keyboard use. The target is a
@@ -662,7 +845,7 @@ used.
 
 ### REN-012A — Conditional backend adapter
 
-- **Status:** PLANNED / execute only if triggered.
+- **Status:** ACCEPTED-NOT-DOING / NO TRIGGER (2026-08-08).
 - **Exact scope:** when REN-009/010 work repeatedly crosses the same router-owned
   lifecycle/action boundary, extract one route-independent adapter behind the
   existing public runtime facade. Preserve owner/CSRF, paths, payloads and SSE.
@@ -673,8 +856,21 @@ used.
 
 ### REN-012B — Frontend ingress, replay, state and effect seam
 
-- **Status:** PLANNED. REN-012B1 contract/ingress is owned by Phase 3;
-  REN-012B2 replay/state/effect migration is owned by Phase 5.
+- **Status:** DONE. REN-012B1 contract/ingress completed on 2026-08-08 at
+  `f8517bc90b119a3b156de0a2945019d1b9381118`; REN-012B2 replay/state/effect
+  migration completed on 2026-08-09 at product-behavior commit
+  `ff53dbc1c070220ad7ddfdaf8a0aa5c8c1ccd157`.
+- **REN-012B1 completion evidence:** `phase3-contract-map.md` records critical
+  scenario/run/snapshot ingress, accepted-versus-ignored SSE semantics, replay
+  cursor/duplicate/stale/`410` characterization and producer→decoder coverage.
+  Published required Simulator gates passed `668` tests plus typecheck/build;
+  the visual E2E set returned to the exact Phase 2 `6 failed / 13 passed`
+  later-phase baseline after stale selected-contract mocks were corrected.
+- **REN-012B2 completion evidence:** `realEventPipeline.ts` owns explicit replay
+  admission/cursor and deterministic lifecycle/topology/payment/clearing state
+  application with post-state intents. Stale reset and `410` recovery remain behind
+  the existing facade. Unit, build, lint/typecheck, scoped Chromium and independent
+  review evidence is recorded in `phase5-simulator-map.md`.
 - **Exact sequence:**
   1. Characterize scenario/run-status/snapshot HTTP responses and lifecycle,
      topology, payment and clearing SSE families.
@@ -695,7 +891,9 @@ used.
 
 ### REN-012C — Critical Simulator functionality and accessibility
 
-- **Status:** PLANNED.
+- **Status:** DONE (2026-08-09) at product-behavior commit
+  `ff53dbc1c070220ad7ddfdaf8a0aa5c8c1ccd157`; final test evidence
+  `345991b47f15e2ed4080c7617f4f3430883f8b7b`.
 - **Functional paths:** fixture bootstrap/switch; real preview/stale recovery;
   start/stop/restart/error; payment success plus one rejection/cancel; trustline
   create/edit/blocked close; clearing preview/confirm/result; node/edge inspect.
@@ -705,6 +903,11 @@ used.
   hidden from assistive technology; reduced motion disables optional FX.
 - **Acceptance:** unit/component behavior plus a short non-visual Chromium keyboard
   smoke proves the named paths. Claims are limited to those paths.
+- **Completion evidence:** the DOM graph navigator, existing forms/windows, focus
+  ownership, busy/status announcements, decorative canvases and reduced-motion
+  optional-FX policy passed the bounded component/unit suite and scoped Chromium
+  `5/5`. Residual certification and direct-integration limits are recorded in
+  `phase5-simulator-map.md`.
 - **Stop:** no full WCAG/screen-reader/browser certification, no complex ARIA canvas
   model, no visual redesign and no manual audit of every overlay.
 
@@ -719,7 +922,7 @@ used.
 - **Priority:** P1
 - **Owner surface:** `tests/`, `pytest.ini`, test fixtures, simulator/admin test
   configs, README testing section
-- **Status:** IN PROGRESS — REN-013A DONE (2026-08-08); REN-013B remains Phase 6.
+- **Status:** DONE (2026-08-09) — REN-013A and bounded REN-013B complete.
 - **Owning sub-slices:** REN-013A (Phase 1) owns truthful marker/gate selection and
   two-task-slug resource isolation. REN-013B (Phase 6) owns cleanup of false-signal
   or leaked-state tests touched by the accepted product slices.
@@ -737,7 +940,9 @@ used.
   passed all `10` tests with `86` deselected. Two canonical local task slugs each
   passed the same `11`-test selector with distinct DB, basetemp and artifact roots.
   Sequential Simulator unit tests passed `637` tests and its build exited `0`.
-  Broader false-signal/E2E cleanup remains explicitly owned by REN-013B.
+  REN-013B later removed only one unobserved GraphNavigator keyboard dispatch;
+  the stronger browser proof remains. Its focused test passed `3` tests and the
+  final Simulator unit tier passed `701`; no broad test cleanup was attempted.
 - **Rationale / value:** Tests named unit/integration/e2e currently mix TestClient,
   DB setup, placeholders, and dialect-specific semantics. A truthful taxonomy
   makes gates fast and prevents SQLite success from being reported as concurrency
@@ -746,7 +951,7 @@ used.
   historical `tests/test_e2e_example.py`; `tests/unit/`; `tests/integration/`;
   PostgreSQL selectors in `tests/integration/*postgres*.py`;
   `README.md:298-410`.
-- **Remaining exact scope:** keep the existing marker/DB guardrails; prove two
+- **Completed Phase 6 scope:** kept the existing marker/DB guardrails; proved two
   canonical runs with different task slugs do not share DB/temp/artifact state;
   repair leaked singleton/event-loop/timer/file state only in suites touched by the
   remaining plan; retire a duplicate/source-text test only when the changed
@@ -776,7 +981,7 @@ used.
 - **Priority:** P1
 - **Owner surface:** `README.md`, `docs/en/`, `docs/ru/`, `docs/pl/`, archive
   indexes, config/deployment/API/simulator architecture docs
-- **Status:** IN PROGRESS (2026-08-07)
+- **Status:** DONE (2026-08-09)
 - **Partial evidence (2026-08-07):** Root and documentation indexes now expose a
   single classified path to runtime, architecture intent, OpenAPI,
   configuration, canonical testing and Simulator domains. Current RU decision
@@ -788,6 +993,13 @@ used.
   adversarial review closed two stale README navigation/authority links. Broader
   architecture/config body reconciliation, archive successor mapping and
   per-document translation status remain; this entry does not complete REN-014.
+- **Completion evidence (2026-08-09):** current config/deployment/testing guides
+  now cite executable owners and the canonical verifier; architecture and dated
+  plans are classified; OpenAPI owns Simulator wire shapes; Admin/Simulator
+  current behavior is reconciled; EN/PL config copies declare unsynchronized
+  status. Independent review checked `98` local links in `23` changed Markdown
+  files with zero broken and closed all P1/P2. Archive bodies and translations
+  were not mechanically rewritten.
 - **Rationale / value:** Current architecture prose describes planned modules that
   do not exist, current and archived simulator specs coexist, and translations can
   drift independently. Operators and agents need navigation and status, not a
@@ -799,7 +1011,7 @@ used.
   `docs/ru/03-architecture.md`; `docs/ru/config-reference.md:331-340`;
   `docs/ru/simulator/backend/`; `docs/**/archive/`;
   `docs/ru/documentation-rules.md`; `README.md:571-640`.
-- **Remaining exact scope:** update only current front-door, testing, deployment,
+- **Completed remaining scope:** updated only current front-door, testing, deployment,
   affected contract and affected Admin/Simulator architecture documents after the
   owning behavior is accepted. Correct the known Vitest/canonical-verifier drift;
   label translation lag and archives. Do not reconcile every historical body or
@@ -831,7 +1043,16 @@ used.
 - **Owner surface:** `app/config.py`, local run scripts, `scripts/verify_local.ps1`,
   `pytest.ini`, `tests/conftest.py`, `.gitignore`, current runtime/testing docs,
   `simulator-ui/v1/`, generated fixture entrypoints and proven Admin starter files.
-- **Status:** PLANNED (Phase 6).
+- **Status:** DONE (2026-08-09).
+- **Completion evidence:** backend SQLite, direct/canonical pytest and Playwright
+  defaults now write below `.local-run/`; explicit process/`.env` overrides are
+  preserved, Python helpers use repo-root cwd, and reset deletes only the new
+  default DB. The existing root `geov0.db` remained untouched. Two concurrent
+  selectors passed `60` tests with `1` skip each using distinct task roots;
+  scoped Admin/Simulator Chromium smoke each passed; generated fixture sync was
+  no-diff; v1/archive/generated classifications are explicit. The full local
+  milestone passed backend `777`/Admin `154`/Simulator `701` tests plus builds.
+  Exact review evidence and residuals are in `phase6-cleanup-map.md`.
 - **Rationale / value:** Canonical commands and defaults still create or reference
   mutable DB/log/PID/test output in the repository root, contradicting the current
   repository policy and making parallel/repeated work less predictable. The same
@@ -871,7 +1092,10 @@ used.
 
 - **Priority:** P1
 - **Owner surface:** all changed surfaces, spec changelog, accepted-debt register
-- **Status:** PLANNED
+- **Status:** DONE (2026-08-09; execution base
+  `579ad5769470b0d3bcdb4c59830362a7b9bd73bc`; accepted product/test HEAD
+  `f5a86ae369c563ae32d2b306ada3e6b8f48f21e2`; passing published Quality run
+  `31329706963`; evidence ledger `phase7-closure-map.md`)
 - **Rationale / value:** Verify effects across sibling paths and catch regressions
   introduced by the renovation itself before declaring the old-code cleanup done.
 - **Evidence paths:** diffs and acceptance evidence for REN-001 through REN-014 and

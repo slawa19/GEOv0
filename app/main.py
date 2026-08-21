@@ -335,7 +335,8 @@ async def _sqlite_ensure_debts_version_column() -> None:
         # Fail fast with a clearer message than the later SQLAlchemy error.
         raise RuntimeError(
             "SQLite DB schema appears outdated and auto-fix failed. "
-            "Delete ./geov0.db (or point DATABASE_URL to a fresh file) and restart."
+            "For the default local database, replace ./.local-run/geov0.db; "
+            "for an explicit DATABASE_URL, repair it or point to a fresh file."
         ) from exc
 
 
@@ -547,10 +548,18 @@ if getattr(settings, "METRICS_ENABLED", True):
         return Response(content=payload, media_type=content_type)
 
 
-@app.get("/health", response_model=HealthResponse, response_model_exclude_none=True)
-async def health_check():
+@app.get(
+    "/health",
+    response_model=HealthResponse,
+    response_model_exclude_none=True,
+    responses={503: {"model": HealthResponse, "description": "Service degraded"}},
+)
+async def health_check(response: Response):
+    status = background_health_status(app)
+    if status == "degraded":
+        response.status_code = 503
     return {
-        "status": background_health_status(app),
+        "status": status,
         "version": _best_effort_version(),
         "uptime_seconds": int(max(0.0, time.time() - _START_TIME)),
         "timestamp": _utc_now_iso(),
@@ -574,13 +583,12 @@ async def health_db_check():
             "db": {"reachable": True, "latency_ms": latency_ms},
             "timestamp": _utc_now_iso(),
         }
-    except Exception as exc:
+    except Exception:
         return JSONResponse(
             status_code=503,
             content={
                 "status": "error",
                 "db": {"reachable": False, "latency_ms": None},
-                "details": str(exc),
                 "timestamp": _utc_now_iso(),
             },
         )

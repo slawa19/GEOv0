@@ -4,7 +4,7 @@ import { THROTTLE_GRAPH_REBUILD_MS, THROTTLE_LAYOUT_SPACING_MS } from '../../con
 import { throttle } from '../../utils/throttle'
 import { useLatestRequest } from '../../composables/useLatestRequest'
 
-import type { LabelMode, SelectedInfo } from '../../composables/useGraphVisualization'
+import type { GraphRebuildOptions, LabelMode, SelectedInfo } from '../../composables/useGraphVisualization'
 
 export function useGraphPageWatchers(opts: {
   isRealMode: ComputedRef<boolean>
@@ -25,6 +25,8 @@ export function useGraphPageWatchers(opts: {
   refreshForFocusMode: () => Promise<boolean>
   refreshSnapshotForEq: () => Promise<boolean>
   refreshClearingCyclesForParticipant: (pid: string) => Promise<boolean>
+  invalidateDataOwnership: () => void
+  waitForPendingGraphLoad?: () => Promise<void>
 
   selected: Ref<SelectedInfo | null>
 
@@ -42,8 +44,11 @@ export function useGraphPageWatchers(opts: {
   layoutName: Ref<'fcose' | 'grid' | 'circle'>
   layoutSpacing: Ref<number>
 
+  graphEffectRequests?: ReturnType<typeof useLatestRequest>
+  applyGraphView?: (opts: GraphRebuildOptions) => boolean
+
   graphViz: {
-    rebuildGraph: (opts?: { fit?: boolean }) => void
+    rebuildGraph: (opts?: GraphRebuildOptions) => void
     runLayout: () => void
 
     clearCycleHighlight: () => void
@@ -57,8 +62,15 @@ export function useGraphPageWatchers(opts: {
     syncZoomFromControl: (z: number) => void
   }
 }) {
+  const graphEffectRequests = opts.graphEffectRequests ?? useLatestRequest()
+  const watcherRefreshRequests = useLatestRequest()
+  const applyGraphView = opts.applyGraphView ?? ((rebuildOptions: GraphRebuildOptions) => {
+    opts.graphViz.rebuildGraph(rebuildOptions)
+    return true
+  })
+
   const throttledRebuild = throttle(() => {
-    opts.graphViz.rebuildGraph({ fit: false })
+    applyGraphView({ fit: false })
   }, THROTTLE_GRAPH_REBUILD_MS)
 
   const throttledLayoutSpacing = throttle(() => {
@@ -78,16 +90,23 @@ export function useGraphPageWatchers(opts: {
     if (!opts.focusMode.value) throttledRebuild()
   })
 
-  const graphRefreshRequests = useLatestRequest()
-
   async function refreshGraph(
     refresh: () => Promise<boolean>,
     rebuildOptions: { fit: boolean },
+    refreshOptions?: { waitForPendingGraphLoad?: boolean },
   ) {
-    const request = graphRefreshRequests.begin()
+    const refreshRequest = watcherRefreshRequests.begin()
+    if (refreshOptions?.waitForPendingGraphLoad !== false) {
+      await opts.waitForPendingGraphLoad?.()
+    }
+    if (!refreshRequest.isCurrent()) return
     const applied = await refresh()
-    if (!applied || !request.isCurrent()) return
-    opts.graphViz.rebuildGraph(rebuildOptions)
+    if (!applied || !refreshRequest.isCurrent()) return
+    // A watcher only supersedes an in-flight mount/manual render after its own
+    // data refresh has actually won and applied. Failed/stale watcher fetches
+    // must leave the successful load's render ownership intact.
+    graphEffectRequests.begin()
+    applyGraphView(rebuildOptions)
   }
 
   watch(opts.eq, () => {
@@ -101,7 +120,8 @@ export function useGraphPageWatchers(opts: {
 
   watch([opts.focusMode, opts.focusDepth, opts.focusRootPid], () => {
     if (opts.focusMode.value) opts.ensureFocusRootPid()
-    void refreshGraph(opts.refreshForFocusMode, { fit: true })
+    opts.invalidateDataOwnership()
+    void refreshGraph(opts.refreshForFocusMode, { fit: true }, { waitForPendingGraphLoad: false })
   })
 
   watch(

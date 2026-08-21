@@ -83,6 +83,7 @@ async def test_admin_incidents_lists_only_stuck_payments(client, db_session, mon
     assert item['equivalent'] == 'UAH'
     assert item['sla_seconds'] == 60
     assert item['age_seconds'] >= 60
+    assert datetime.fromisoformat(item['created_at']).utcoffset() == timedelta(0)
 
 
 @pytest.mark.asyncio

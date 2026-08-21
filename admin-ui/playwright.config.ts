@@ -1,3 +1,5 @@
+import { fileURLToPath } from 'node:url'
+
 import { defineConfig, devices } from '@playwright/test'
 
 const e2ePort = Number.parseInt(process.env.PW_E2E_PORT ?? '', 10) || 5173
@@ -9,6 +11,10 @@ const e2eBaseUrl = `http://127.0.0.1:${e2ePort}`
 // Only auto-start the dev server for normal `playwright test` runs.
 const isTestServer = process.argv.some((a) => a === 'test-server' || a.endsWith('test-server'))
 const shouldStartWebServer = !isTestServer
+const outputDir = process.env.GEO_ADMIN_PLAYWRIGHT_OUTPUT_DIR
+  ?? fileURLToPath(new URL('../.local-run/playwright/admin/results/', import.meta.url))
+const reportDir = process.env.GEO_ADMIN_PLAYWRIGHT_REPORT_DIR
+  ?? fileURLToPath(new URL('../.local-run/playwright/admin/report/', import.meta.url))
 
 export default defineConfig({
   testDir: './e2e',
@@ -16,7 +22,10 @@ export default defineConfig({
   expect: { timeout: 10_000 },
   fullyParallel: true,
   retries: process.env.CI ? 2 : 0,
-  reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : [['list'], ['html', { open: 'never' }]],
+  reporter: process.env.CI
+    ? [['github'], ['html', { open: 'never', outputFolder: reportDir }]]
+    : [['list'], ['html', { open: 'never', outputFolder: reportDir }]],
+  outputDir,
   use: {
     baseURL: e2eBaseUrl,
     trace: 'on-first-retry',

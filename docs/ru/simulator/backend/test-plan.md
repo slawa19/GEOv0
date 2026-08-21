@@ -2,9 +2,16 @@
 
 Дата: **2026-01-28**
 
+> **Классификация:** исторический target/test-design документ. Он не является
+> текущим реестром тестов или команд. Текущие файлы определяет tree, markers —
+> [`../../../../pytest.ini`](../../../../pytest.ini), canonical backend entrypoint —
+> [`../../../../scripts/verify_local.ps1`](../../../../scripts/verify_local.ps1),
+> UI scripts — `simulator-ui/v2/package.json`. Предложения ниже могут быть уже
+> реализованы, заменены или отклонены.
+
 Цель: описать **структуру тестов** (unit/integration/contract/e2e/perf), минимальные smoke-сценарии и правила запуска, чтобы выполнение критериев из `acceptance-criteria.md` было проверяемым и воспроизводимым.
 
-Source of truth:
+Контекст исходного плана:
 - `docs/ru/simulator/backend/acceptance-criteria.md`
 - `api/openapi.yaml`
 - `docs/ru/simulator/backend/ws-protocol.md`
@@ -33,7 +40,9 @@ Source of truth:
 - Базовые фикстуры клиента/БД: `tests/conftest.py`.
 
 Важно про БД в тестах:
-- По умолчанию `TEST_DATABASE_URL` указывает на SQLite (`.pytest_geov0.db`).
+- Канонический verifier назначает task-local SQLite URL под
+  `.local-run/test-runs/<TaskSlug>/test.db`; прямой pytest использует отдельный
+  fallback `direct-pytest/test.db` в том же runtime root.
 - Для **не-SQLite** тестовых БД потребуется `GEO_TEST_ALLOW_DB_RESET=1` (guardrail в `tests/conftest.py`).
 
 ### 2.2 UI e2e (Playwright)
@@ -87,7 +96,7 @@ Source of truth:
 Расположение (фактически в репозитории сейчас):
 - `tests/integration/test_simulator_sse_smoke.py`
 - `tests/integration/test_simulator_sse_real_smoke.py`
-- `tests/integration/test_simulator_sse_strict_replay_410.py`
+- `tests/integration/test_simulator_sse_replay_410.py`
 - `tests/integration/test_simulator_sse_tx_failed_timeout.py`
 - `tests/integration/test_simulator_sse_fixtures_clearing_animation_pair.py`
 - `tests/integration/test_simulator_artifacts_events_ndjson.py`
@@ -148,7 +157,7 @@ tests/performance/simulator/
 Цель: быстро проверить «живость» системы без UI.
 
 Псевдосценарий (REST+SSE):
-1) `POST /api/v1/simulator/scenarios` с телом `fixtures/simulator/greenfield-village-100/scenario.json` → получить `scenario_id`.
+1) `POST /api/v1/simulator/scenarios` с телом `fixtures/simulator/greenfield-village-100-realistic-v2/scenario.json` → получить `scenario_id`.
 2) `POST /api/v1/simulator/runs` → получить `run_id`.
 3) Подключиться к `GET /api/v1/simulator/runs/{run_id}/events?equivalent=UAH`.
 4) В течение 2 секунд получить минимум 1 событие `type=run_status` со `state=running`.
@@ -179,7 +188,8 @@ tests/performance/simulator/
 Что делает smoke-run:
 - создаёт run через control plane (`/simulator/runs`), ждёт `run_seconds`, затем `stop`;
 - скачивает артефакты через API в `.local-run/analysis/<run_id>/`;
-- читает `geov0.db` и печатает распределение `PAYMENT.amount` за окно run (started_at..stopped_at).
+- читает `.local-run/geov0.db` (или явный `--db`) и печатает распределение
+  `PAYMENT.amount` за окно run (started_at..stopped_at).
 
 Критерии успеха (минимум):
 - в выводе есть `payments.over_3 > 0` при `SIMULATOR_REAL_AMOUNT_CAP>=500` (не «залипло» на legacy 1–3);
@@ -222,18 +232,17 @@ Feature: Simulator UI Real Mode
     Then UI показывает stopped и прекращает сессию
 ```
 
-Реализация (предложение):
-- добавить файл `simulator-ui/v2/e2e/real-mode.spec.ts`.
-- по умолчанию **skip**, пока не будет реализован real mode:
-  - `test.skip(process.env.GEO_E2E_REAL_MODE !== '1', '...')`.
-- запускать при поднятом backend (`scripts/run_local.ps1 start`) и доступном порту UI.
+Текущее browser evidence находится в существующих specs, включая
+`scenario-switch-real-mode.spec.ts`, `manual-operations-interact.spec.ts` и
+Phase-5 smoke. Наличие этих тестов не превращает весь первоначальный план ниже в
+реализованный контракт.
 
 ---
 
 ## 7) Правила запуска и флаги
 
 ### 7.1 Pytest
-- Базовый запуск: `pytest`.
+- Базовый canonical запуск: `.\scripts\verify_local.ps1 -TaskSlug <unique-slug>`.
 - Для тестов, требующих внешние сервисы, использовать маркер `@pytest.mark.e2e` (см. `pytest.ini`).
 
 Окружение (важно):
@@ -243,7 +252,9 @@ Feature: Simulator UI Real Mode
 ### 7.2 Playwright (simulator-ui)
 - Unit: `npm --prefix simulator-ui/v2 run test:unit`
 - E2E fixtures scenes: `npm --prefix simulator-ui/v2 run test:e2e`
-- E2E real mode (когда появится): `GEO_E2E_REAL_MODE=1 npm --prefix simulator-ui/v2 run test:e2e`
+- Scoped real-mode E2E выбирается существующим spec/config и запускается с
+  уникальными портом и output root; несуществующий `GEO_E2E_REAL_MODE` не является
+  поддерживаемым флагом.
 
 Рекомендация по быстрым прогонам:
 - Для «быстрых проверок» UI (smoke/e2e без зависимости от БД и данных) используйте **sandbox/topology-only**:

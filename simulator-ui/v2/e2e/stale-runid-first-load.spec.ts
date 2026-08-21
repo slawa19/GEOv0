@@ -4,14 +4,7 @@ function makeSnapshot() {
   return {
     equivalent: 'UAH',
     generated_at: new Date('2026-02-01T00:00:00Z').toISOString(),
-    palette: {
-      node_colors: {},
-      edge_colors: {},
-      node_badges: {},
-      node_shapes: {},
-      edge_widths: {},
-      edge_alphas: {},
-    },
+    palette: { default: { color: '#64748b', label: 'Default' } },
     limits: { max_particles: 120 },
     nodes: [
       {
@@ -19,7 +12,21 @@ function makeSnapshot() {
         name: 'Alice',
         type: 'person',
         status: 'active',
-        links_count: 0,
+        links_count: 1,
+        net_balance_atoms: '0',
+        net_sign: 0,
+        net_balance: '0',
+        viz_color_key: 'default',
+        viz_shape_key: 'default',
+        viz_size: { w: 24, h: 24 },
+        viz_badge_key: '',
+      },
+      {
+        id: 'B',
+        name: 'Bob',
+        type: 'person',
+        status: 'active',
+        links_count: 1,
         net_balance_atoms: '0',
         net_sign: 0,
         net_balance: '0',
@@ -29,7 +36,19 @@ function makeSnapshot() {
         viz_badge_key: '',
       },
     ],
-    links: [],
+    links: [
+      {
+        source: 'A',
+        target: 'B',
+        trust_limit: '10',
+        used: '7',
+        available: '3',
+        status: 'active',
+        viz_color_key: 'default',
+        viz_width_key: 'default',
+        viz_alpha_key: 'default',
+      },
+    ],
   }
 }
 
@@ -80,7 +99,19 @@ test('real mode: stale persisted runId does not block first preview load', async
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ items: [{ scenario_id: 'S1', label: 'Scenario 1' }] }),
+      body: JSON.stringify({
+        api_version: 'simulator-api/1',
+        items: [
+          {
+            api_version: 'simulator-api/1',
+            scenario_id: 'S1',
+            name: 'Scenario 1',
+            participants_count: 2,
+            trustlines_count: 1,
+            equivalents: ['UAH'],
+          },
+        ],
+      }),
     })
   })
 
@@ -101,5 +132,5 @@ test('real mode: stale persisted runId does not block first preview load', async
   await expect(page.getByText('Loading…', { exact: true })).toBeHidden()
   // The empty product fallback is also "ready"; this proves our sentinel snapshot
   // was applied rather than merely observing the fallback state.
-  expect(await readMetricValue(page, 'Participants')).toBe('1')
+  expect(await readMetricValue(page, 'Total Debt')).toBe('7 UAH')
 })

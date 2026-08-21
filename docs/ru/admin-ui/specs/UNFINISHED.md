@@ -1,15 +1,63 @@
 # Незавершённые спеки (RU)
 
+```text
+Статус: Stable
+Область: admin-ui
+Последнее обновление: 2026-08-11 (сверка с кодом)
+```
+
 Этот список фиксирует **незавершённые** элементы из активных спецификаций в `docs/ru/admin-ui/specs/`.
+
+## Сверка с кодом 2026-08-11
+
+Документ не трогали с 2026-01-18. Проверено по текущему коду:
+
+| Элемент | Реальный статус | Доказательство |
+|---|---|---|
+| `Liquidity analytics` (MVP, чеклист ниже) | ✅ **Реализован (9/9 функционально), с двумя отклонениями от критериев приёмки** — см. врезку ниже | роут `admin-ui/src/router/index.ts:12-14` → `LiquidityPage.vue`; меню `AppShell.vue:22`; бэкенд `app/api/v1/admin.py:645 GET /admin/liquidity/summary`; советы `advice/operatorAdvice.ts`; i18n `i18n/en.ts:77-106` (блок заканчивается `liquidity.empty.noDebts`; подпись пункта меню отдельно — `:723`) |
+| `Events` (timeline) | 🔴 **Открыт — и это не фронтовая работа** | Эндпоинта `GET /admin/events` не существует в `app/api/v1/admin.py` (перечислены все 27 маршрутов). Нет страницы, нет роута (`router/index.ts` — 12 записей, среди них нет `/events`), нет пункта меню (`AppShell.vue:21-30`). `/events` у симулятора (`simulator.py:2345,2407,2579`) — другой домен: SSE/poll в рамках прогона, не аудиторская лента. Объём работы, впрочем, меньше, чем следует из §1 «Зависимости» — см. примечание там |
+| `Transactions / Clearing` (глобальные списки) | 🔴 **Открыт — и это не фронтовая работа** | Есть только `POST /admin/transactions/{tx_id}/abort` (`admin.py:996`) и `GET /admin/clearing/cycles` (`:2056`). Списочных `GET /admin/transactions` и `GET /admin/transactions/{tx_id}` нет. Но `GET /payments` (`app/api/v1/payments.py:107`) и `GET /payments/{tx_id}` (`:91`) уже есть с фильтрами `direction/status/equivalent/from_date/to_date/page/per_page` — они лишь заскоуплены на запрашивающего (`app/core/payments/service.py:1054-1070`, ветки `is_admin` нет). Задача = снять requester-scoping за админским маршрутом |
+
+### Liquidity: два отклонения от критериев приёмки
+
+Функционально закрыты все 9 пунктов чеклиста, но два места расходятся с критериями, записанными
+в этом же документе:
+
+1. **KPI-суммы идут через float.** Итоги рисуются как `:value="Number(totalLimit)"`
+   (`LiquidityPage.vue:325,332,339`) — round-trip через число, хотя хелпер
+   `money()`/`formatDecimalFixed` существует (`:205-207`) и используется в таблицах (`:412,421,504,545,577`).
+   Против требования «все суммы/лимиты/доли считаются из decimal string и отображаются без float-ошибок».
+2. **Счётчик bottlenecks считается по-разному в mock и real — это дефект.** Бэкенд:
+   `(available_expr / TrustLine.limit) < float(threshold)` прямо в SQL (`app/api/v1/admin.py:668`,
+   параметр `threshold: float = Query(0.10, ge=0.0, le=1.0)` на `:648`; тот же паттерн в
+   `/admin/trustlines/bottlenecks` — `:553,596`). Mock: точное сравнение decimal-строк через
+   `isRatioBelowThreshold` (`admin-ui/src/api/mockApi.ts:1060-1062` → `utils/decimal.ts:104-129`).
+   На рёбрах, стоящих ровно на пороге, KPI может разойтись между режимами — это нарушает
+   MVP-критерий «расчёты: детерминированные, decimal-safe (без float)».
+   Зарегистрировано в [`specs/BACKLOG.md`](../../../../specs/BACKLOG.md) как узкая правка.
+
+Второстепенное: поле порога — свободный `el-input` без клиентской проверки
+(`LiquidityPage.vue:245-250`), поэтому значение вне `[0,1]` в реальном режиме даёт HTTP 422.
+
+**Вывод, которого не было в документе семь месяцев:** Events и Transactions открыты не потому,
+что до них не дошли руки на фронте, а потому что **отсутствуют бэкенд-эндпоинты**. Планировать их
+как чисто фронтовую работу нельзя. Оба пункта зарегистрированы в
+[`specs/BACKLOG.md`](../../../../specs/BACKLOG.md) как требующие продуктового решения.
+
+Phase 2 экраны Liquidity (Bottlenecks edges, Participants net position, Concentration/HHI,
+Clearing impact) осознанно вне MVP. HHI/top-shares реализованы, но на странице Graph
+(`admin-ui/src/composables/useGraphAnalytics.ts`), а не как экран Liquidity; churn/Gini нет нигде.
+
+---
 
 ## Admin UI
 
 Источник: [docs/ru/admin-ui/specs/admin-ui-spec.md](admin-ui-spec.md)
 
 Незавершённые элементы (Phase 2 / optional):
-- `Events` (timeline)
-- `Transactions / Clearing` (глобальные списки)
-- `Liquidity analytics`
+- `Events` (timeline) — 🔴 открыт, блокирован бэкендом
+- `Transactions / Clearing` (глобальные списки) — 🔴 открыт, блокирован бэкендом
+- `Liquidity analytics` — ✅ MVP реализован 2026-01 (9/9 функционально, два отклонения от критериев приёмки), см. сверку выше
 
 Ниже — пояснение: **что это**, **зачем**, **какие зависимости** (данные/API), и какой **минимальный срез** имеет смысл делать первым.
 
@@ -42,6 +90,29 @@
 	- либо расширенный audit-log, который включает не только «изменения сущностей», но и «шаги процесса».
 - Нужны стабильные correlation-id: `tx_id`, `request_id`, `run_id`, `scenario_id`.
 - Нужен endpoint уровня `GET /admin/events` (или аналог) с пагинацией и фильтрами.
+
+> **Примечание 2026-08-11 (сверка с кодом; исходный текст выше не менялся).**
+> Отдельную таблицу `domain_events` заводить, скорее всего, не придётся: `integrity_audit_log`
+> **уже является процессным источником событий** для PAYMENT / CLEARING / TRUSTLINE_*.
+> Модель — `app/db/models/audit_log.py:28-44`: индексированный `tx_id`, `operation_type`,
+> `equivalent_code`, checksum состояния до/после, `affected_participants`, `invariants_checked`,
+> `verification_passed`, `error_details`, индексированный `timestamp`. Пишут его
+> `app/core/payments/engine.py:1134`, `app/core/clearing/service.py:1042`,
+> `app/core/trustlines/service.py:122,226,319`, `app/core/simulator/real_tick_orchestrator.py:447`,
+> `app/api/v1/integrity.py:266`. Читающий эндпоинт тоже есть — `GET /integrity/audit-log`
+> (`app/api/v1/integrity.py:470`), он доступен админу через `deps.require_participant_or_admin`,
+> но принимает **только** `page`/`per_page` — ни одного фильтра, и `admin-ui` его не вызывает
+> (0 вхождений `integrity/audit-log` в `admin-ui/src`).
+> Для сравнения, `GET /admin/audit-log` (`app/api/v1/admin.py:899`) на эту роль не годится: он
+> покрывает 10 операторских мутаций (`admin.config.patch`, `admin.feature_flags.patch`,
+> `admin.participants.{freeze,unfreeze,ban,unban}`, `admin.transactions.abort`,
+> `admin.equivalents.{create,patch,delete}`; писатель — `admin.py:276`) плюс запись о логине
+> (`app/api/v1/auth.py:68`), и критерий «фильтр по `tx_id` даёт полный упорядоченный список шагов»
+> удовлетворить не может.
+> **Итог:** для первых двух acceptance criteria работа сводится к «добавить query-параметры
+> (`tx_id`, `operation_type`, диапазон дат) + страницу», а не к постройке пайплайна событий.
+> Третий критерий — связь с прогоном через `run_id`/`scenario_id` — по-прежнему не обеспечен
+> ничем: этих полей нет ни в одной таблице аудита.
 
 ### Минимальный срез (предложение)
 - Начать с **read-only таблицы** событий, без красивого таймлайна.

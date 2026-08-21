@@ -1,6 +1,9 @@
-# GEO Simulator API (MVP, черновик)
+# GEO Simulator API — consumer guide
 
-Этот документ — **источник правды** для контракта `/api/v1/simulator/*`.
+Это пояснение для frontend-потребителя, а не параллельная wire-schema. Источник
+правды для `/api/v1/simulator/*`, union `SimulatorEvent`, aliases и required fields —
+[`api/openapi.yaml`](../../../../../api/openapi.yaml). При расхождении этот текст
+исправляется по OpenAPI и наблюдаемому runtime, а не наоборот.
 
 Принципы (как в доработках графа Admin UI):
 - Фронтенд **не вычисляет** семантику визуализации (цвет/размер/биннинг/приоритеты). Всё это приходит как `viz_*`.
@@ -90,7 +93,7 @@ Dev-диагностика (localhost only):
 - `POST /api/v1/simulator/runs/{run_id}/actions/tx-once`
 - `POST /api/v1/simulator/runs/{run_id}/actions/clearing-once`
 
-Спецификация: [../backend/backend-driven-demo-mode-spec.md](../backend/backend-driven-demo-mode-spec.md)
+Спецификация: [../../backend/backend-driven-demo-mode-spec.md](../../backend/backend-driven-demo-mode-spec.md)
 
 ### Snapshot (namespace by run)
 - `GET /api/v1/simulator/runs/{run_id}/graph/snapshot?equivalent=UAH`
@@ -215,6 +218,11 @@ export type GraphLink = {
 ## 4) Events (готовые к анимации)
 
 ### 4.1 Общие требования
+- Полный текущий union: `run_status`, `tx.updated`, `tx.failed`,
+  `clearing.done`, `audit.drift`, `topology.changed`. Required fields и payload
+  каждого варианта определяет `SimulatorEvent` в
+  [`api/openapi.yaml`](../../../../../api/openapi.yaml); примеры ниже не являются
+  исчерпывающей схемой.
 - Любое событие должно иметь `event_id` и `ts` (идемпотентность/упорядочивание).
 - Клиент применяет событие без перерасчёта графа:
   - меняет overlays (подсветка/частицы/бейдж),
@@ -437,8 +445,33 @@ export type RunStatus = {
 
 Принцип: UI рисует графики, но **не вычисляет** метрики из событий.
 
+`v` **nullable**: `null` означает «измерения в этой точке не было», строка — измерение
+было. `null` и `0` различимы намеренно: `0` — это измеренный ноль. Точки до первого
+измерения приходят как `null`; после первого измерения значение держится (carry-forward)
+до следующего тика. Клиент обязан рисовать `null` как разрыв ряда, а не как ноль.
+
+`MetricPoint.v` — **decimal string**, а не число (007 / T715, 2026-08-20). Две из семи
+серий (`total_debt`, `clearing_volume`) — суммы в выбранном эквиваленте, то есть деньги,
+и остаются точным decimal. Тип один на все семь серий: значения приходят из одной
+колонки, и union заставил бы потребителя ветвиться.
+
+Форма записи **фиксирована и одинакова** для персистированной и синтетической ветки:
+восемь знаков после точки — масштаб колонки `Numeric(20, 8)` — и всегда обычная
+десятичная запись, экспоненциальной не бывает. То есть `"45.30000000"`, а измеренный
+ноль — `"0.00000000"`. `null` по-прежнему означает «не измерено» и отличается от
+измеренного нуля.
+
+**Точность гарантирует только PostgreSQL.** На SQLite (дефолт `DATABASE_URL`, путь
+локальной разработки без Docker) `Numeric` проходит через binary float, поэтому
+денежные серии там приближённые; писатель предупреждает об этом в лог один раз за
+прогон. Подробности — `docs/ru/simulator/backend/run-storage.md`.
+
+В реальном режиме (`mode: "real"`) метрики и bottlenecks отдаются только из
+персистированных данных. Если измеренных данных нет из-за отказа хранилища,
+эндпоинт отвечает `503` с `ErrorEnvelope`, а не синтетикой.
+
 ```ts
-export type MetricPoint = { t_ms: number; v: number }
+export type MetricPoint = { t_ms: number; v: string | null }
 
 export type MetricSeries = {
   key:
@@ -447,6 +480,9 @@ export type MetricSeries = {
     | 'total_debt'
     | 'clearing_volume'
     | 'bottlenecks_score'
+    // Кардинальности сети, unit: 'count' (007 / T713, 2026-08-20).
+    | 'active_participants'
+    | 'active_trustlines'
 
   unit?: '%' | 'count' | 'amount'
   points: MetricPoint[]

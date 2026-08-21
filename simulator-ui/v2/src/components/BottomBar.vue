@@ -34,6 +34,13 @@ type Props = {
   isExiting: boolean
   toggleDemoUi: () => void
 
+  /**
+   * Analytics overlay surface (spec 007, T705). The state is owned by `useSimulatorApp` because
+   * the panel's mount point and its poll gate both read it; the bar only shows and flips it.
+   */
+  analyticsPanelOpen: boolean
+  toggleAnalyticsPanel: () => void
+
   fxDebugEnabled: boolean
   fxBusy: boolean
   runTxOnce: () => void | Promise<void>
@@ -196,6 +203,16 @@ async function onRunClearingOnce() {
           @click="resetView"
         >
           Reset view
+        </button>
+
+        <button
+          class="ds-btn ds-btn--ghost ds-btn--sm"
+          type="button"
+          data-testid="bottombar-analytics-toggle"
+          :aria-pressed="analyticsPanelOpen ? 'true' : 'false'"
+          @click="toggleAnalyticsPanel"
+        >
+          Analytics
         </button>
 
         <details

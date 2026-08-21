@@ -214,6 +214,16 @@ export function useSimulatorStorage(storage?: StorageLike) {
     },
   }
 
+  /**
+   * Analytics panel visibility (spec 007, T705). Stored through the same `read01`/`write01`
+   * mechanism as the DevTools dropdown next to it in the bottom bar, so the toggle survives a
+   * reload the same way — no second preference layer was introduced for it.
+   *
+   * A single key, not one per UI mode: the panel only exists in real mode, so a demo/real split
+   * would have one half that can never be written.
+   */
+  const ANALYTICS_PANEL_OPEN_KEY = 'geo.sim.v2.analytics.open'
+
   const DEVTOOLS_OPEN_REAL_KEY = 'geo.sim.v2.devtools.open.real'
   const DEVTOOLS_OPEN_DEMO_KEY = 'geo.sim.v2.devtools.open.demo'
   const DEVTOOLS_OPEN_REAL_SNAPSHOT_KEY = 'geo.sim.v2.devtools.open.realSnapshot'
@@ -253,6 +263,13 @@ export function useSimulatorStorage(storage?: StorageLike) {
     _storage.removeItem('geo.sim.v2.runId')
   }
 
+  function readAnalyticsPanelOpen(): boolean | null {
+    return storage01.read01(ANALYTICS_PANEL_OPEN_KEY)
+  }
+  function writeAnalyticsPanelOpen(v: boolean) {
+    storage01.write01(ANALYTICS_PANEL_OPEN_KEY, v)
+  }
+
   function readDevtoolsOpenReal(): boolean | null {
     return storage01.read01(DEVTOOLS_OPEN_REAL_KEY)
   }
@@ -283,6 +300,10 @@ export function useSimulatorStorage(storage?: StorageLike) {
     forceDesiredModeReal,
     isFxDebugRun,
     clearFxDebugRunState,
+
+    // Analytics panel visibility (spec 007, T705).
+    readAnalyticsPanelOpen,
+    writeAnalyticsPanelOpen,
 
     // DevTools panel prefs (Demo vs Real) + snapshot for reload-based demo enter/exit.
     readDevtoolsOpenReal,

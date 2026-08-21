@@ -60,17 +60,38 @@ async def test_simulator_run_events_sse_real_mode_emits_tx_failed_on_timeout(
     assert resp.status_code == 200, resp.text
     run_id = resp.json()["run_id"]
 
+    # The in-process ASGI transport cannot expose an open stream incrementally.
+    # Wait on the real runtime broadcast until the post-commit tx.failed exists;
+    # the HTTP assertion below then exercises the normal replay + terminal-close
+    # path without any pytest-only branch in production code.
+    observer = await runtime.subscribe(
+        run_id,
+        equivalent="UAH",
+        after_event_id=f"evt_{run_id}_000000",
+    )
+    try:
+        async def _wait_for_failed() -> None:
+            while True:
+                event = await observer.queue.get()
+                if event.get("type") == "tx.failed":
+                    return
+
+        await asyncio.wait_for(_wait_for_failed(), timeout=10.0)
+    finally:
+        await runtime.unsubscribe(run_id, observer)
+
     url = f"/api/v1/simulator/runs/{run_id}/events"
 
     seen_run_status = False
     seen_failed = False
+    seen_types: list[str] = []
 
     try:
         async with client.stream(
             "GET",
             url,
-            headers=auth_headers,
-            params={"equivalent": "UAH", "stop_after_types": "tx.failed"},
+            headers={**auth_headers, "Last-Event-ID": f"evt_{run_id}_000000"},
+            params={"equivalent": "UAH"},
         ) as r:
             assert r.status_code == 200
 
@@ -80,6 +101,7 @@ async def test_simulator_run_events_sse_real_mode_emits_tx_failed_on_timeout(
                     if not line.startswith("data: "):
                         continue
                     payload = json.loads(line.removeprefix("data: "))
+                    seen_types.append(str(payload.get("type") or ""))
                     if payload.get("type") == "run_status":
                         seen_run_status = True
                     if payload.get("type") == "tx.failed":
@@ -103,7 +125,7 @@ async def test_simulator_run_events_sse_real_mode_emits_tx_failed_on_timeout(
         )
 
     assert seen_run_status
-    assert seen_failed
+    assert seen_failed, f"No tx.failed seen; types={seen_types}"
     assert injected > 0
     assert [code for code, _message in fail_run_calls] == [
         "REAL_MODE_TOO_MANY_TIMEOUTS"

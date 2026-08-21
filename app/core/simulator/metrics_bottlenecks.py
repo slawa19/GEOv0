@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import time
+from decimal import Decimal
 from typing import Optional
 
 from sqlalchemy import func, select
@@ -19,9 +21,28 @@ from app.schemas.simulator import (
     MetricSeries,
     MetricSeriesKey,
     MetricsResponse,
+    metric_point_value,
 )
-from app.utils.exceptions import BadRequestException, NotFoundException
+from app.utils.error_codes import ErrorCode
+from app.utils.exceptions import BadRequestException, GeoException, NotFoundException
 from app.core.simulator.scenario_equivalent import effective_equivalent
+
+
+# Minimum interval between full tracebacks for the same failure kind. The
+# WARNING line is never throttled; only the traceback is.
+TRACEBACK_MIN_INTERVAL_S = 60.0
+
+REASON_MESSAGES = {
+    "db_read_failed": (
+        "Simulator analytics unavailable for this real-mode run: persisted data "
+        "could not be read. Synthetic data is never served in real mode."
+    ),
+    "storage_disabled": (
+        "Simulator analytics unavailable for this real-mode run: persistence is "
+        "disabled, so there is no measured data. Synthetic data is never served "
+        "in real mode."
+    ),
+}
 
 
 class MetricsBottlenecks:
@@ -38,9 +59,13 @@ class MetricsBottlenecks:
         self._lock = lock
         self._runs = runs
         self._scenarios = scenarios
+        # Unused since T714 removed the write-on-GET (2026-08-20). The parameter
+        # stays because the only construction site is runtime_impl.py, which is
+        # outside this slice's owner surface; dropping it is a separate change.
         self._utc_now = utc_now
         self._db_enabled = db_enabled
         self._logger = logger
+        self._traceback_last_at: dict[str, float] = {}
 
     def _get_run(self, run_id: str) -> RunRecord:
         with self._lock:
@@ -48,6 +73,70 @@ class MetricsBottlenecks:
         if run is None:
             raise NotFoundException(f"Run {run_id} not found")
         return run
+
+    def _should_attach_traceback(self, key: str) -> bool:
+        """Rate-limit tracebacks so polling clients cannot flood the log.
+
+        The WARNING itself is emitted on every failure; only the (expensive and
+        repetitive) traceback is throttled per failure kind.
+        """
+
+        now = time.monotonic()
+        last = self._traceback_last_at.get(key)
+        if last is not None and (now - last) < TRACEBACK_MIN_INTERVAL_S:
+            return False
+        self._traceback_last_at[key] = now
+        return True
+
+    def _real_mode_unavailable(
+        self,
+        *,
+        event: str,
+        run_id: str,
+        equivalent: str,
+        reason: str,
+        cause: Optional[BaseException] = None,
+        counters: Optional[dict[str, int]] = None,
+    ) -> GeoException:
+        """Log a real-mode analytics failure and build the explicit error to raise.
+
+        Real mode never degrades into synthetic data: a failure here is a gate,
+        not a log line. Only counters and correlation identifiers are logged;
+        the exception class stays in the log and never reaches the public body
+        (this endpoint is not admin-only).
+        """
+
+        error_class = type(cause).__name__ if cause is not None else "none"
+        counters_repr = " ".join(
+            f"{name}={value}" for name, value in sorted((counters or {}).items())
+        )
+        attach_traceback = cause is not None and self._should_attach_traceback(
+            f"{event}:{reason}"
+        )
+        self._logger.warning(
+            "%s run_id=%s equivalent=%s reason=%s error_class=%s%s",
+            event,
+            run_id,
+            str(equivalent),
+            reason,
+            error_class,
+            f" {counters_repr}" if counters_repr else "",
+            exc_info=cause if attach_traceback else None,
+        )
+        return GeoException(
+            REASON_MESSAGES.get(reason, REASON_MESSAGES["db_read_failed"]),
+            # E010 (internal error) is the closest existing public code: this is a
+            # server-side dependency failure the caller cannot fix by changing the
+            # request. A dedicated availability code would mean editing the error
+            # taxonomy in app/utils/error_codes.py, which belongs to program 004.
+            code=ErrorCode.E010,
+            details={
+                "run_id": run_id,
+                "equivalent": str(equivalent),
+                "reason": reason,
+            },
+            status_code=503,
+        )
 
     def _get_scenario(self, scenario_id: str) -> ScenarioRecord:
         with self._lock:
@@ -66,7 +155,7 @@ class MetricsBottlenecks:
         step_ms: int,
     ) -> MetricsResponse:
         run = self._get_run(run_id)
-        _ = self._get_scenario(run.scenario_id)
+        scenario = self._get_scenario(run.scenario_id)
 
         if to_ms < from_ms:
             raise BadRequestException("to_ms must be >= from_ms")
@@ -83,10 +172,26 @@ class MetricsBottlenecks:
             ("total_debt", "amount"),
             ("clearing_volume", "amount"),
             ("bottlenecks_score", "%"),
+            # Network cardinalities. The writer persists them as plain counts
+            # (`storage.write_tick_metrics`, fed by
+            # `real_tick_metrics.populate_per_eq_metric_values`: number of active
+            # scenario participants and number of edges in the equivalent), so
+            # the unit is "count", not "amount".
+            ("active_participants", "count"),
+            ("active_trustlines", "count"),
         ]
 
-        # DB-first for real-mode: return persisted points if available.
-        if self._db_enabled() and run.mode == "real":
+        # Real mode is DB-only: persisted points or an explicit failure.
+        # Synthetic series below are unreachable for run.mode == "real".
+        if run.mode == "real":
+            if not self._db_enabled():
+                raise self._real_mode_unavailable(
+                    event="simulator.metrics.real_mode_storage_disabled",
+                    run_id=run_id,
+                    equivalent=equivalent,
+                    reason="storage_disabled",
+                    counters={"points_count": points_count},
+                )
             try:
                 async with db_session.AsyncSessionLocal() as session:
                     rows = (
@@ -103,26 +208,32 @@ class MetricsBottlenecks:
                         )
                     ).scalars().all()
 
-                by_key: dict[str, list[tuple[int, float]]] = {str(k): [] for (k, _u) in keys}
+                # 2026-08-20 / p007_t715: values stay Decimal from the column to
+                # the wire. No float ever touches them here.
+                by_key: dict[str, list[tuple[int, Decimal]]] = {str(k): [] for (k, _u) in keys}
                 for r in rows:
                     if r.value is None:
                         continue
-                    by_key.setdefault(str(r.key), []).append((int(r.t_ms), float(r.value)))
+                    by_key.setdefault(str(r.key), []).append((int(r.t_ms), r.value))
 
                 # Resample persisted tick metrics to (from_ms..to_ms, step_ms) using carry-forward.
-                # This guarantees MetricPoint.v is always numeric.
+                # Carry-forward starts at the first real measurement: points before it
+                # carry v=None ("not measured"), never an invented 0.0. After the first
+                # measurement the last value is held until the next tick.
                 series: list[MetricSeries] = []
                 for key, unit in keys:
                     timeline = by_key.get(str(key), [])
                     idx = 0
-                    last_val = 0.0
+                    last_val: Optional[Decimal] = None
                     pts: list[MetricPoint] = []
                     for i in range(points_count):
                         t = int(from_ms + i * step_ms)
                         while idx < len(timeline) and int(timeline[idx][0]) <= t:
-                            last_val = float(timeline[idx][1])
+                            last_val = timeline[idx][1]
                             idx += 1
-                        pts.append(MetricPoint(t_ms=t, v=float(last_val)))
+                        pts.append(
+                            MetricPoint(t_ms=t, v=metric_point_value(last_val))
+                        )
                     series.append(MetricSeries(key=key, unit=unit, points=pts))
 
                 return MetricsResponse(
@@ -134,14 +245,16 @@ class MetricsBottlenecks:
                     step_ms=step_ms,
                     series=series,
                 )
-            except Exception:
-                # Fall back to synthetic below.
-                self._logger.debug(
-                    "simulator.metrics.db_query_failed_falling_back run_id=%s equivalent=%s",
-                    run_id,
-                    equivalent,
-                    exc_info=True,
-                )
+            except Exception as exc:
+                # Real mode never falls back to synthetic data (see spec F-007-1).
+                raise self._real_mode_unavailable(
+                    event="simulator.metrics.real_mode_db_read_failed",
+                    run_id=run_id,
+                    equivalent=equivalent,
+                    reason="db_read_failed",
+                    cause=exc,
+                    counters={"points_count": points_count},
+                ) from exc
 
         def v01(x: float) -> float:
             return max(0.0, min(1.0, x))
@@ -154,6 +267,18 @@ class MetricsBottlenecks:
         base = seed_f(run_id, equivalent)
         intensity = max(0.0, min(1.0, float(run.intensity_percent) / 100.0))
         edges_n = len(((run._edges_by_equivalent or {}).get(equivalent) or []))
+
+        # Cardinalities are counted from the same sources the real-mode producer
+        # uses (`real_tick_metrics.populate_per_eq_metric_values`): the scenario
+        # participant list and the runtime edge cache. They are counted, not
+        # invented, even on this synthetic path.
+        scenario_raw = getattr(run, "_scenario_raw", None) or scenario.raw or {}
+        active_participants_n = sum(
+            1
+            for p in (scenario_raw.get("participants") or [])
+            if isinstance(p, dict)
+            and str(p.get("status") or "active").strip().lower() == "active"
+        )
 
         series: list[MetricSeries] = []
 
@@ -183,13 +308,17 @@ class MetricsBottlenecks:
                         phase = (t - 25_000) % 45_000
                         spike = 1.0 if 0 <= phase < 3_000 else 0.15
                         v = spike * (50.0 + 150.0 * intensity) * (0.8 + 0.4 * base)
+                elif key == "active_participants":
+                    v = float(active_participants_n)
+                elif key == "active_trustlines":
+                    v = float(edges_n)
                 else:  # bottlenecks_score
                     # Higher score when sparse or at high intensity.
                     sparsity = 1.0 if edges_n == 0 else max(0.0, 1.0 - min(1.0, edges_n / 200.0))
                     wobble = (seed_f(run_id, "bns", equivalent, str(t)) - 0.5) * 0.12
                     v = v01(0.20 + 0.55 * sparsity + 0.20 * intensity + wobble) * 100.0
 
-                points.append(MetricPoint(t_ms=t, v=float(v)))
+                points.append(MetricPoint(t_ms=t, v=metric_point_value(v)))
             series.append(MetricSeries(key=key, unit=unit, points=points))
 
         return MetricsResponse(
@@ -213,8 +342,16 @@ class MetricsBottlenecks:
         run = self._get_run(run_id)
         scenario = getattr(run, "_scenario_raw", None) or self._get_scenario(run.scenario_id).raw
 
-        # DB-first for real-mode: return persisted bottlenecks if available.
-        if self._db_enabled() and run.mode == "real":
+        # Real mode is DB-only: persisted bottlenecks or an explicit failure.
+        # Synthetic items below are unreachable for run.mode == "real".
+        if run.mode == "real":
+            if not self._db_enabled():
+                raise self._real_mode_unavailable(
+                    event="simulator.bottlenecks.real_mode_storage_disabled",
+                    run_id=run_id,
+                    equivalent=equivalent,
+                    reason="storage_disabled",
+                )
             try:
                 async with db_session.AsyncSessionLocal() as session:
                     latest = (
@@ -225,13 +362,16 @@ class MetricsBottlenecks:
                             )
                         )
                     ).scalar_one_or_none()
+                    # An empty table is a normal state at the start of a run:
+                    # it must yield an empty result, not UnboundLocalError.
+                    rows: list[SimulatorRunBottleneck] = []
                     if latest is not None:
                         q = select(SimulatorRunBottleneck).where(
                             (SimulatorRunBottleneck.run_id == run_id)
                             & (SimulatorRunBottleneck.equivalent_code == str(equivalent))
                             & (SimulatorRunBottleneck.computed_at == latest)
                         )
-                        rows = (await session.execute(q)).scalars().all()
+                        rows = list((await session.execute(q)).scalars().all())
 
                 items: list[BottleneckItem] = []
                 for r in rows:
@@ -277,9 +417,16 @@ class MetricsBottlenecks:
                     equivalent=equivalent,
                     items=items,
                 )
-            except Exception:
-                # Fall back to synthetic below.
-                pass
+            except Exception as exc:
+                # Real mode never falls back to synthetic data (see spec F-007-1).
+                raise self._real_mode_unavailable(
+                    event="simulator.bottlenecks.real_mode_db_read_failed",
+                    run_id=run_id,
+                    equivalent=equivalent,
+                    reason="db_read_failed",
+                    cause=exc,
+                    counters={"limit": int(limit)},
+                ) from exc
 
         # Read trustlines so we have access to limits.
         eq_norm = str(equivalent or "").strip().upper()
@@ -304,11 +451,6 @@ class MetricsBottlenecks:
             dst = str(tl.get("to") or "").strip()
             if not src or not dst:
                 continue
-            limit_raw = tl.get("limit")
-            try:
-                limit_value = float(limit_raw)
-            except Exception:
-                limit_value = 0.0
 
             # Synthetic used fraction: increases with intensity and time.
             wobble = abs(seed_f(run_id, equivalent, src, dst, str(t)) - 0.5) * 2.0
@@ -344,35 +486,14 @@ class MetricsBottlenecks:
         items.sort(key=lambda x: x.score, reverse=True)
         items = items[: int(limit)]
 
-        # Keep writing synthetic bottlenecks only for non-real mode (UI scaffolding);
-        # real-mode is DB-first and writes from the runner.
-        if self._db_enabled() and run.mode != "real":
-            try:
-                computed_at = self._utc_now()
-                async with db_session.AsyncSessionLocal() as session:
-                    rows: list[SimulatorRunBottleneck] = []
-                    for it in items:
-                        target_id = f"{it.target.from_}->{it.target.to}"  # type: ignore[attr-defined]
-                        rows.append(
-                            SimulatorRunBottleneck(
-                                run_id=run_id,
-                                equivalent_code=str(equivalent),
-                                computed_at=computed_at,
-                                target_type="edge",
-                                target_id=target_id,
-                                score=float(it.score),
-                                reason_code=str(it.reason_code),
-                                details={
-                                    "label": it.label,
-                                    "suggested_action": it.suggested_action,
-                                },
-                            )
-                        )
-                    session.add_all(rows)
-                    await session.commit()
-            except Exception:
-                pass
-
+        # This synthetic branch deliberately does not write to
+        # `simulator_run_bottlenecks` (spec 007, T714). It used to append one row
+        # per item on every GET, unbounded and under a silent `except Exception:
+        # pass`. The rows were unreachable: the only reader of that table is the
+        # real-mode branch above, `run.mode` is fixed when the run is created and
+        # never reassigned, so nothing that reaches this code path can ever read
+        # what it wrote. Real-mode bottlenecks are still persisted by the runner
+        # (`storage.write_tick_bottlenecks`).
         return BottlenecksResponse(
             api_version=SIMULATOR_API_VERSION,
             run_id=run_id,

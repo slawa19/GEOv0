@@ -7,3 +7,9 @@ docs
 .pytest_cache
 *.pyc
 *.pyo
+.local-run
+.venv
+node_modules
+**/node_modules
+*.db
+**/*.db

@@ -18,6 +18,7 @@
     "lint": "eslint \"src/**/*.{ts,vue}\"",
     "test:e2e": "playwright test",
     "test:e2e:smoke": "playwright test console-guard --reporter=list",
+    "test:e2e:phase5": "playwright test --config=e2e/playwright.phase5.config.ts --browser=chromium",
     "test:e2e:update": "playwright test --update-snapshots"
   },
   "dependencies": {

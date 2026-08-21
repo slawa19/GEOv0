@@ -971,6 +971,14 @@ def apply_commit(participant, tx_id):
 | COMMIT | 5 сек | Retry, затем ABORT |
 | Общий | 10 сек | ABORT |
 
+Конкурентные ошибки PostgreSQL `40001`/`40P01` сначала обрабатываются whole-UoW retry. Если
+конфликт достигает границы сервиса, публичный ответ — существующий `409/E008` с безопасным
+признаком `details.retryable=true`, а не `500/E010`; диагностический текст драйвера не раскрывается.
+
+Timeout и отмена запроса не оставляют устойчивые `NEW`/`PREPARED`: cleanup дренируется до
+завершения до закрытия владеющей session. При неоднозначности после COMMIT сначала перечитывается
+состояние; `COMMITTED` имеет приоритет и не регрессирует в `ABORTED`.
+
 ---
 
 ## 7. Клиринг
@@ -1127,6 +1135,25 @@ def apply_clearing(cycle, amount, equivalent):
         else:
             update_debt(debtor, creditor, equivalent, new_debt)
 ```
+
+#### 7.6.1. Конкурентная граница с payment prepare
+
+Payment и clearing одного эквивалента сериализуются на общем advisory owner lock. Clearing завершает
+preflight-транзакцию, закрепляет одну физическую DB connection, берёт на ней session-level вариант
+той же lock identity и откатывает acquisition-транзакцию для свежего `SERIALIZABLE` snapshot. На этой
+же connection заново читаются фактические `Debt` и активные `PrepareLock`; денежный UoW завершается
+до exact unlock. Если unlock нельзя подтвердить, connection инвалидируется и физически закрывается,
+а не возвращается в pool. Следствия:
+
+- уже подготовленный payment заставляет clearing вернуть skip без денежного эффекта;
+- после пустого conflict snapshot новый prepare ждёт завершения clearing;
+- ожидание ограничено timeout budget, а отмена/ошибка сначала откатывает денежный UoW, затем делает
+  exact unlock или инвалидирует connection;
+- одна clearing-попытка использует не более одной pool connection одновременно;
+- advisory identity не меняет направление Debt, TrustLine, flow или audit payload.
+
+Поскольку старые процессы не участвовали в этой общей границе, rolling mixed-version deployment не
+поддерживается: upgrade и rollback выполняются с coordinated quiescence payment и clearing writers.
 
 ### 7.7. Стейт-машина CLEARING
 

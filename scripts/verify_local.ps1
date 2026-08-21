@@ -110,7 +110,13 @@ try {
             & $pythonExe scripts/validate_test_database_url.py @databaseGuardArgs
         }
         Invoke-RequiredStep -Name 'Backend tests (pytest)' -Command {
-            $pytestArgs = @('-m', 'pytest', '--basetemp', $baseTemp, '-q')
+            $pytestCache = Join-Path $taskRoot 'cache'
+            $pytestArgs = @(
+                '-m', 'pytest',
+                '--basetemp', $baseTemp,
+                '-o', "cache_dir=$pytestCache",
+                '-q'
+            )
             if ($BackendMarker) {
                 $pytestArgs += @('-m', $BackendMarker)
             }
@@ -118,7 +124,7 @@ try {
                 $pytestArgs += @('-m', 'not postgres')
             }
             else {
-                $pytestArgs += @('-m', 'not slow and not e2e and not postgres')
+                $pytestArgs += @('-m', 'not slow and not postgres')
             }
             if ($BackendSelector.Count -gt 0) {
                 $pytestArgs += '--'
@@ -154,7 +160,7 @@ try {
         }
 
         if ($StaticDiagnostics) {
-            Write-Host "`nRuff and Black have known repository-wide debt and are reported without gating." -ForegroundColor Yellow
+            Write-Host "`nLocal diagnostics do not gate this command; CI separately requires pinned Ruff while Black remains non-blocking." -ForegroundColor Yellow
             Write-Host 'Mypy is not configured in this repository and is not run.' -ForegroundColor Yellow
             Invoke-DiagnosticStep -Name 'Ruff' -Command {
                 & $pythonExe -m ruff check app migrations --no-cache

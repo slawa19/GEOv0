@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -14,6 +15,7 @@ from app.core.simulator.scenario_equivalent import (
     scenario_default_equivalent,
 )
 from app.utils.exceptions import BadRequestException
+from app.utils.validation import validate_equivalent_code
 
 
 _VALIDATORS_BY_SCHEMA_PATH: dict[str, Draft202012Validator] = {}
@@ -64,12 +66,80 @@ def validate_scenario_or_400(*, raw: dict[str, Any], schema_path: Path) -> None:
     )
 
 
+def _scenario_equivalent_sources(raw: dict[str, Any]) -> Iterator[tuple[str, str]]:
+    for index, value in enumerate(raw.get("equivalents") or []):
+        code = str(value).strip().upper()
+        if code:
+            yield f"equivalents/{index}", code
+
+    default_code = scenario_default_equivalent(raw)
+    if default_code:
+        default_path = "baseEquivalent" if raw.get("baseEquivalent") else "equivalent"
+        yield default_path, default_code
+
+    for index, trustline in enumerate(raw.get("trustlines") or []):
+        if not isinstance(trustline, dict):
+            continue
+        code = str(trustline.get("equivalent") or "").strip().upper()
+        if code:
+            yield f"trustlines/{index}/equivalent", code
+
+    for event_index, event in enumerate(raw.get("events") or []):
+        if not isinstance(event, dict):
+            continue
+        for effect_index, effect in enumerate(event.get("effects") or []):
+            if not isinstance(effect, dict):
+                continue
+            code = str(effect.get("equivalent") or "").strip().upper()
+            if code:
+                yield f"events/{event_index}/effects/{effect_index}/equivalent", code
+            for trustline_index, trustline in enumerate(
+                effect.get("initial_trustlines") or []
+            ):
+                if not isinstance(trustline, dict):
+                    continue
+                code = str(trustline.get("equivalent") or "").strip().upper()
+                if code:
+                    yield (
+                        f"events/{event_index}/effects/{effect_index}/"
+                        f"initial_trustlines/{trustline_index}/equivalent",
+                        code,
+                    )
+
+
+def _validate_scenario_equivalent_codes(raw: dict[str, Any]) -> None:
+    errors = []
+    for path, code in _scenario_equivalent_sources(raw):
+        try:
+            validate_equivalent_code(code)
+        except BadRequestException:
+            errors.append(
+                {
+                    "path": path,
+                    "message": f"Noncanonical equivalent code: {code}",
+                }
+            )
+            if len(errors) == 50:
+                break
+
+    if errors:
+        raise BadRequestException(
+            "Scenario invalid",
+            details={
+                "simulator_error": "SCENARIO_INVALID",
+                "errors": errors,
+            },
+        )
+
+
 def scenario_to_record(
     raw: dict[str, Any],
     *,
     source_path: Optional[Path],
     created_at: Optional[datetime],
 ) -> ScenarioRecord:
+    _validate_scenario_equivalent_codes(raw)
+
     scenario_id = str(raw.get("scenario_id") or raw.get("id") or "").strip()
     if not scenario_id:
         scenario_id = source_path.parent.name if source_path is not None else "unknown"
@@ -138,7 +208,6 @@ class ScenarioRegistry:
             raise BadRequestException("Scenario must contain scenario_id")
 
         base = self._local_state_dir / "scenarios" / scenario_id
-        base.mkdir(parents=True, exist_ok=True)
         path = base / "scenario.json"
 
         if path.exists():
@@ -147,8 +216,13 @@ class ScenarioRegistry:
                 details={"scenario_id": scenario_id},
             )
 
+        rec = scenario_to_record(
+            scenario,
+            source_path=path,
+            created_at=self._utc_now(),
+        )
+        base.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(scenario, ensure_ascii=False, indent=2), encoding="utf-8")
-        rec = scenario_to_record(scenario, source_path=path, created_at=self._utc_now())
         with self._lock:
             self._scenarios[scenario_id] = rec
         return rec

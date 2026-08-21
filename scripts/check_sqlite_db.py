@@ -10,7 +10,11 @@ def _one(cur: sqlite3.Cursor, q: str, *p):
 
 def main() -> None:
     p = argparse.ArgumentParser(description="Sanity-check a GEOv0 SQLite database")
-    p.add_argument("--db", default="geov0.db", help="Path to SQLite DB file (default: geov0.db)")
+    p.add_argument(
+        "--db",
+        default=".local-run/geov0.db",
+        help="Path to SQLite DB file (default: .local-run/geov0.db)",
+    )
     args = p.parse_args()
 
     con = sqlite3.connect(args.db)

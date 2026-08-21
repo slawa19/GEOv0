@@ -94,7 +94,22 @@ export function useGraphData(opts: {
   statusFilter: Ref<string[]>
 }) {
   const loading = ref(false)
-  const error = ref<string | null>(null)
+  const viewError = ref<string | null>(null)
+  const fullCycleError = ref<string | null>(null)
+  const focusCycleError = ref<string | null>(null)
+  const participantCycleError = ref<string | null>(null)
+  const activeParticipantPid = ref('')
+  const participantCycleState = ref<'idle' | 'pending' | 'visible' | 'fallback'>('idle')
+  const cycleDisplayOwner = ref<{ kind: 'full' } | { kind: 'participant'; pid: string }>({ kind: 'full' })
+  const cycleError = computed(() => {
+    if (opts.focusMode.value) return focusCycleError.value
+    if (cycleDisplayOwner.value.kind === 'participant') return participantCycleError.value
+    if (participantCycleState.value === 'fallback' && activeParticipantPid.value) {
+      return participantCycleError.value ?? fullCycleError.value
+    }
+    return fullCycleError.value
+  })
+  const error = computed(() => viewError.value ?? cycleError.value)
 
   const participants = ref<Participant[]>([])
   const trustlines = ref<Trustline[]>([])
@@ -147,6 +162,23 @@ export function useGraphData(opts: {
   let fullClearingCycles: ClearingCycles | null = null
   const viewRequests = useLatestRequest()
   const cycleRequests = useLatestRequest()
+  const participantCycleRequests = useLatestRequest()
+
+  function resetParticipantCycleVisibility() {
+    activeParticipantPid.value = ''
+    participantCycleState.value = 'idle'
+    participantCycleError.value = null
+    cycleDisplayOwner.value = { kind: 'full' }
+    participantCycleRequests.invalidate()
+    clearingCycles.value = fullClearingCycles
+  }
+
+  function invalidateDataOwnership() {
+    viewRequests.invalidate()
+    cycleRequests.invalidate()
+    participantCycleRequests.invalidate()
+    loading.value = false
+  }
 
   function applySnapshotPayload(p: GraphSnapshotPayload) {
     participants.value = p.participants || []
@@ -158,17 +190,21 @@ export function useGraphData(opts: {
     transactions.value = p.transactions || []
   }
 
-  async function loadData() {
+  async function loadData(): Promise<boolean> {
     const viewRequest = viewRequests.begin()
     const cycleRequest = cycleRequests.begin()
+    resetParticipantCycleVisibility()
     loading.value = true
-    error.value = null
+    viewError.value = null
     try {
       // First load without equivalent to get full trustlines list for primary equivalent computation
       const snapEq = normalizeEqCode(opts.eq.value)
-      const [snap, cc] = await Promise.all([
+      const [snap, cycleResult] = await Promise.all([
         api.graphSnapshot({ equivalent: snapEq || undefined }),
-        api.clearingCycles(),
+        api.clearingCycles().then(
+          (value) => ({ status: 'fulfilled' as const, value }),
+          (reason: unknown) => ({ status: 'rejected' as const, reason }),
+        ),
       ])
       const s = assertSuccess(snap)
       const payload: GraphSnapshotPayload = {
@@ -180,8 +216,6 @@ export function useGraphData(opts: {
         audit_log: (s.audit_log || []) as AuditLogEntry[],
         transactions: (s.transactions || []) as Transaction[],
       }
-
-      const nextClearingCycles = (assertSuccess(cc) as ClearingCycles | null) ?? null
 
       if (viewRequest.isCurrent()) {
         applySnapshotPayload(payload)
@@ -195,13 +229,25 @@ export function useGraphData(opts: {
       }
 
       if (cycleRequest.isCurrent()) {
-        clearingCycles.value = nextClearingCycles
-        fullClearingCycles = nextClearingCycles
+        try {
+          if (cycleResult.status === 'rejected') throw cycleResult.reason
+          const nextClearingCycles = (assertSuccess(cycleResult.value) as ClearingCycles | null) ?? null
+          fullClearingCycles = nextClearingCycles
+          if (cycleDisplayOwner.value.kind === 'full') {
+            clearingCycles.value = nextClearingCycles
+          }
+          fullCycleError.value = null
+        } catch (e: unknown) {
+          const msg = e instanceof Error ? e.message : String(e)
+          fullCycleError.value = msg || t('graph.data.loadFailed')
+        }
       }
+      return viewRequest.isCurrent()
     } catch (e: unknown) {
-      if (!viewRequest.isCurrent()) return
+      if (!viewRequest.isCurrent()) return false
       const msg = e instanceof Error ? e.message : String(e)
-      error.value = msg || t('graph.data.loadFailed')
+      viewError.value = msg || t('graph.data.loadFailed')
+      return false
     } finally {
       if (viewRequest.isCurrent()) loading.value = false
     }
@@ -211,7 +257,7 @@ export function useGraphData(opts: {
     if (opts.focusMode.value) return false
     const request = viewRequests.begin()
     loading.value = true
-    error.value = null
+    viewError.value = null
     try {
       const snapEq = normalizeEqCode(opts.eq.value)
       const snap = await api.graphSnapshot({ equivalent: snapEq || undefined })
@@ -232,7 +278,7 @@ export function useGraphData(opts: {
     } catch (e: unknown) {
       if (!request.isCurrent()) return false
       const msg = e instanceof Error ? e.message : String(e)
-      error.value = msg || t('graph.data.loadFailed')
+      viewError.value = msg || t('graph.data.loadFailed')
       return false
     } finally {
       if (request.isCurrent()) loading.value = false
@@ -240,12 +286,16 @@ export function useGraphData(opts: {
   }
 
   async function refreshForFocusMode(): Promise<boolean> {
-    if (!opts.isRealMode.value) return true
+    // Mock focus mode only rebuilds the already-loaded snapshot. While the
+    // initial/full load is pending there is no stable data for a watcher render.
+    if (!opts.isRealMode.value) return !loading.value
 
     const viewRequest = viewRequests.begin()
     const cycleRequest = cycleRequests.begin()
+    resetParticipantCycleVisibility()
     loading.value = true
-    error.value = null
+    viewError.value = null
+    focusCycleError.value = null
 
     const query = buildFocusModeQuery({
       enabled: Boolean(opts.focusMode.value),
@@ -256,16 +306,31 @@ export function useGraphData(opts: {
     })
 
     if (!query) {
-      if (viewRequest.isCurrent() && fullSnapshot) applySnapshotPayload(fullSnapshot)
+      if (viewRequest.isCurrent() && !fullSnapshot) {
+        applySnapshotPayload({
+          participants: [],
+          trustlines: [],
+          incidents: [],
+          equivalents: [],
+          debts: [],
+          audit_log: [],
+          transactions: [],
+        })
+        return await loadData()
+      }
+      if (viewRequest.isCurrent()) applySnapshotPayload(fullSnapshot!)
       if (cycleRequest.isCurrent()) clearingCycles.value = fullClearingCycles
       if (viewRequest.isCurrent()) loading.value = false
       return viewRequest.isCurrent()
     }
 
     try {
-      const [ego, cc] = await Promise.all([
+      const [ego, cycleResult] = await Promise.all([
         api.graphEgo({ pid: query.pid, depth: query.depth, equivalent: query.equivalent, status: query.status }),
-        api.clearingCycles({ participant_pid: query.participant_pid }),
+        api.clearingCycles({ participant_pid: query.participant_pid }).then(
+          (value) => ({ status: 'fulfilled' as const, value }),
+          (reason: unknown) => ({ status: 'rejected' as const, reason }),
+        ),
       ])
 
       const e = assertSuccess(ego) as Partial<GraphSnapshotPayload>
@@ -278,17 +343,30 @@ export function useGraphData(opts: {
         audit_log: (e.audit_log || []) as AuditLogEntry[],
         transactions: (e.transactions || []) as Transaction[],
       }
-      const nextClearingCycles = (assertSuccess(cc) as ClearingCycles | null) ?? null
-
       if (!viewRequest.isCurrent()) return false
       applySnapshotPayload(payload)
-      if (cycleRequest.isCurrent()) clearingCycles.value = nextClearingCycles
+      if (cycleRequest.isCurrent()) {
+        try {
+          if (cycleResult.status === 'rejected') throw cycleResult.reason
+          if (!activeParticipantPid.value) {
+            clearingCycles.value = (assertSuccess(cycleResult.value) as ClearingCycles | null) ?? null
+          }
+          focusCycleError.value = null
+        } catch (e: unknown) {
+          if (viewRequest.isCurrent()) {
+            const msg = e instanceof Error ? e.message : String(e)
+            const failure = msg || t('graph.focusMode.loadFailed')
+            focusCycleError.value = failure
+            ElMessage.warning(failure)
+          }
+        }
+      }
       return true
     } catch (e: unknown) {
       if (!viewRequest.isCurrent()) return false
       const msg = e instanceof Error ? e.message : String(e)
       const failure = msg || t('graph.focusMode.loadFailed')
-      error.value = failure
+      viewError.value = failure
       ElMessage.warning(failure)
       return false
     } finally {
@@ -297,16 +375,45 @@ export function useGraphData(opts: {
   }
 
   async function refreshClearingCyclesForParticipant(pid: string): Promise<boolean> {
-    const request = cycleRequests.begin()
-    if (!pid) return true
+    if (!pid) {
+      resetParticipantCycleVisibility()
+      return true
+    }
+    const retainsParticipantCycles =
+      cycleDisplayOwner.value.kind === 'participant' && cycleDisplayOwner.value.pid === pid
+    activeParticipantPid.value = pid
+    participantCycleState.value = 'pending'
+    participantCycleError.value = null
+    if (!retainsParticipantCycles) {
+      cycleDisplayOwner.value = { kind: 'full' }
+      clearingCycles.value = fullClearingCycles
+    }
+    const participantRequest = participantCycleRequests.begin()
     try {
       const cc = await api.clearingCycles({ participant_pid: pid })
-      if (!request.isCurrent()) return false
+      if (!participantRequest.isCurrent() || activeParticipantPid.value !== pid) return false
       clearingCycles.value = (assertSuccess(cc) as ClearingCycles | null) ?? null
+      cycleDisplayOwner.value = { kind: 'participant', pid }
+      participantCycleState.value = 'visible'
+      participantCycleError.value = null
       return true
-    } catch {
-      return request.isCurrent()
+    } catch (e: unknown) {
+      if (!participantRequest.isCurrent() || activeParticipantPid.value !== pid) return false
+      if (retainsParticipantCycles) {
+        participantCycleState.value = 'visible'
+      } else {
+        participantCycleState.value = 'fallback'
+        cycleDisplayOwner.value = { kind: 'full' }
+        clearingCycles.value = fullClearingCycles
+      }
+      const msg = e instanceof Error ? e.message : String(e)
+      participantCycleError.value = msg || t('graph.data.loadFailed')
+      return false
     }
+  }
+
+  function reloadCurrentView(): Promise<boolean> {
+    return opts.focusMode.value ? refreshForFocusMode() : loadData()
   }
 
   return {
@@ -332,5 +439,7 @@ export function useGraphData(opts: {
     refreshSnapshotForEq,
     refreshForFocusMode,
     refreshClearingCyclesForParticipant,
+    invalidateDataOwnership,
+    reloadCurrentView,
   }
 }

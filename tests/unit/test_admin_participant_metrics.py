@@ -135,6 +135,14 @@ async def test_admin_participant_metrics_balance_and_counterparties_and_capacity
     # With threshold=0.10, Alice->Bob available is 10/100 = 0.10, not < threshold => not bottleneck
     assert cap["bottlenecks"] == []
 
+    # Decimal-string precision beyond float must remain observable.
+    resp_decimal = await client.get(
+        "/api/v1/admin/participants/alice/metrics?equivalent=USD&threshold=0.10000000000000001",
+        headers=headers,
+    )
+    assert resp_decimal.status_code == 200
+    assert len(resp_decimal.json()["capacity"]["bottlenecks"]) == 1
+
     resp3 = await client.get(
         "/api/v1/admin/participants/alice/metrics?equivalent=USD&threshold=0.11",
         headers=headers,

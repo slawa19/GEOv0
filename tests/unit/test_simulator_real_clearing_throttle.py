@@ -56,6 +56,9 @@ class _DummyClearingService:
     async def execute_clearing(self, cycle) -> bool:
         return True
 
+    async def execute_clearing_with_amount(self, cycle) -> Decimal | None:
+        return Decimal("1")
+
 
 @pytest.mark.asyncio
 async def test_tick_real_mode_clearing_yields_to_event_loop(monkeypatch) -> None:

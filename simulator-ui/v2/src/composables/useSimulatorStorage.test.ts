@@ -198,3 +198,39 @@ describe('useSimulatorStorage — DevTools panel prefs', () => {
     })
   })
 })
+
+// ---------------------------------------------------------------------------
+// Analytics overlay surface visibility (spec 007, T705)
+// ---------------------------------------------------------------------------
+describe('useSimulatorStorage — analytics panel visibility', () => {
+  let store: ReturnType<typeof makeStorage>
+  let prefs: ReturnType<typeof useSimulatorStorage>
+
+  beforeEach(() => {
+    store = makeStorage()
+    prefs = useSimulatorStorage(store)
+  })
+
+  it('returns null when the user has never touched the toggle', () => {
+    // Null, not false: "never chosen" is what lets the caller apply its own default.
+    expect(prefs.readAnalyticsPanelOpen()).toBeNull()
+  })
+
+  it('round-trips through the same 0/1 encoding as its bottom-bar neighbours', () => {
+    prefs.writeAnalyticsPanelOpen(true)
+    expect(store._map.get('geo.sim.v2.analytics.open')).toBe('1')
+    expect(prefs.readAnalyticsPanelOpen()).toBe(true)
+
+    prefs.writeAnalyticsPanelOpen(false)
+    expect(store._map.get('geo.sim.v2.analytics.open')).toBe('0')
+    expect(prefs.readAnalyticsPanelOpen()).toBe(false)
+  })
+
+  it('keeps its own key: writing it does not disturb the DevTools prefs', () => {
+    prefs.writeDevtoolsOpenReal(true)
+    prefs.writeAnalyticsPanelOpen(false)
+
+    expect(prefs.readDevtoolsOpenReal()).toBe(true)
+    expect(prefs.readAnalyticsPanelOpen()).toBe(false)
+  })
+})

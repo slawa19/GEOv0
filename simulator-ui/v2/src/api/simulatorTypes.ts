@@ -3,16 +3,24 @@ import type { EdgePatch, GraphSnapshot, NodePatch, TxUpdatedEvent, ClearingDoneE
 export type SimulatorMode = 'fixtures' | 'real'
 
 export type ScenarioSummary = {
+  api_version?: string
   scenario_id: string
-  /** Human-friendly name (preferred over legacy `label`). */
-  name?: string
+  name?: string | null
+  /** UI-only compatibility field; REST decoder accepts only canonical backend fields. */
   label?: string
   mode?: string
-  created_at?: string
+  created_at?: string | null
   updated_at?: string
+  participants_count?: number
+  trustlines_count?: number
+  equivalents?: string[]
+  clusters_count?: number | null
+  hubs_count?: number | null
+  tags?: string[] | null
 }
 
 export type ScenariosListResponse = {
+  api_version?: string
   items: ScenarioSummary[]
 }
 
@@ -213,48 +221,50 @@ export type SimulatorPaymentTargetsResponse = {
   items: SimulatorPaymentTargetsItem[]
 }
 
-export type RunState = 'created' | 'running' | 'paused' | 'stopped' | 'error'
+export type RunState = 'created' | 'idle' | 'running' | 'paused' | 'stopping' | 'stopped' | 'error'
 
 export type RunError = {
   code: string
   message: string
-  at?: string
+  at: string
 }
 
 export type RunStatus = {
+  api_version?: string
   run_id: string
   scenario_id: string
   mode?: SimulatorMode
   state: RunState | string
-  started_at?: string
-  stopped_at?: string
+  started_at?: string | null
+  stopped_at?: string | null
 
   // Why/where stop was requested (best-effort).
-  stop_requested_at?: string
+  stop_requested_at?: string | null
   stop_source?: string | null
   stop_reason?: string | null
   stop_client?: string | null
-  sim_time_ms: number
-  intensity_percent: number
-  ops_sec: number
-  queue_depth: number
+  sim_time_ms?: number | null
+  intensity_percent?: number | null
+  ops_sec?: number | null
+  queue_depth?: number | null
   last_event_type?: string | null
   current_phase?: string | null
   last_error?: RunError | null
 
   // Backend-first cumulative stats (authoritative; sent in every run_status event).
-  attempts_total?: number
-  committed_total?: number
-  rejected_total?: number
-  errors_total?: number
-  timeouts_total?: number
+  attempts_total?: number | null
+  committed_total?: number | null
+  rejected_total?: number | null
+  errors_total?: number | null
+  timeouts_total?: number | null
+  errors_last_1m?: number | null
 
   // Diagnostic: consecutive ticks where all planned payments were rejected (capacity stall).
   // Only present in SSE run_status events when > 0.
-  consec_all_rejected_ticks?: number
+  consec_all_rejected_ticks?: number | null
 }
 
-export type RunStatusEvent = RunStatus & {
+export type RunStatusEvent = Omit<RunStatus, 'api_version' | 'mode' | 'started_at' | 'stopped_at'> & {
   event_id: string
   ts: string
   type: 'run_status'
@@ -315,22 +325,71 @@ export type SimulatorEvent =
 
 export type SimulatorGraphSnapshot = GraphSnapshot
 
+export type MetricSeriesKey =
+  | 'success_rate'
+  | 'avg_route_length'
+  | 'total_debt'
+  | 'clearing_volume'
+  | 'bottlenecks_score'
+  | 'active_participants'
+  | 'active_trustlines'
+
+/**
+ * The value when the backend declares a unit for the series. The key itself is OPTIONAL:
+ * the canon lists `MetricSeries.required: [key, points]` and pydantic gives it a default
+ * (`unit: MetricUnit = None`), so a response without the key is contract-valid.
+ */
+export type MetricUnit = '%' | 'count' | 'amount' | null
+
+/**
+ * 2026-08-20 / T715: `v` is a decimal string and nullable.
+ *
+ * `null` means "no measurement at/before this timestamp"; a string means there was one, so a
+ * measured zero arrives as `"0.00000000"` and stays distinguishable from `null`. Two of the seven
+ * series (`total_debt`, `clearing_volume`) are money, so the value must never be parsed into a JS
+ * number — that is the step where exactness is lost (AGENTS.md §8).
+ */
+export type MetricPoint = { t_ms: number; v: string | null }
+
+// `unit?`, not `unit`: an absent key and an explicit `null` mean the same thing here — no unit
+// declared — which is exactly the opposite of `MetricPoint.v`, where the two are different
+// statements. The asymmetry is deliberate; see the decoder for both halves.
+export type MetricSeries = { key: MetricSeriesKey; unit?: MetricUnit; points: MetricPoint[] }
+
 export type MetricsResponse = {
-  api_version?: string
+  api_version: string
+  run_id: string
   equivalent: string
-  points: Array<{ t_ms: number } & Record<string, number | null>>
+  from_ms: number
+  to_ms: number
+  step_ms: number
+  /** Seven keys are declared, but a run may legitimately carry fewer series: never index blindly. */
+  series: MetricSeries[]
 }
 
+export type BottleneckReasonCode =
+  | 'LOW_AVAILABLE'
+  | 'HIGH_USED'
+  | 'FREQUENT_ABORTS'
+  | 'TOO_MANY_TIMEOUTS'
+  | 'ROUTING_TOO_DEEP'
+  | 'CLEARING_PRESSURE'
+
+export type BottleneckTargetEdge = { kind: 'edge'; from: string; to: string }
+export type BottleneckTargetNode = { kind: 'node'; id: string }
+export type BottleneckTarget = BottleneckTargetEdge | BottleneckTargetNode
+
 export type BottleneckItem = {
-  kind: string
+  target: BottleneckTarget
   score: number
-  from?: string
-  to?: string
-  details?: Record<string, unknown>
+  reason_code: BottleneckReasonCode
+  label?: string | null
+  suggested_action?: string | null
 }
 
 export type BottlenecksResponse = {
-  api_version?: string
+  api_version: string
+  run_id: string
   equivalent: string
   items: BottleneckItem[]
 }

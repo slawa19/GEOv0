@@ -90,6 +90,27 @@ describe('useAppFxOverlays.scheduleTimeout()', () => {
     expect(calls).toEqual(['fn'])
   })
 
+  it('wakes the render loop when a floating label is actually added', () => {
+    const wakeUp = vi.fn()
+    const fx = useAppFxOverlays({
+      getLayoutNodeById: () => makeLayoutNode(),
+      sizeForNode: () => ({ w: 10, h: 10 }),
+      getCameraZoom: () => 1,
+      setFlash: () => undefined,
+      isWebDriver: () => false,
+      getLayoutNodes: () => [],
+      worldToScreen: (x, y) => ({ x, y }),
+      layoutVersion: ref(0),
+      wakeUp,
+    })
+
+    expect(fx.hasFloatingLabels()).toBe(false)
+    fx.pushFloatingLabel({ nodeId: 'n', text: '1 UAH', color: '#000' })
+
+    expect(fx.hasFloatingLabels()).toBe(true)
+    expect(wakeUp).toHaveBeenCalledOnce()
+  })
+
   it('cleans up scheduled timers on component unmount', () => {
     vi.useFakeTimers()
 

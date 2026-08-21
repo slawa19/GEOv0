@@ -125,7 +125,7 @@ const props = defineProps<{
   precisionByEq: Map<string, number>
   atomsToDecimal: (atoms: bigint, precision: number) => string
 
-  loadData: () => void
+  reloadCurrentView: () => void
   money: (v: string) => string
   pct: (x: number, digits?: number) => string
 
@@ -269,7 +269,8 @@ const adviceItems = computed(() => {
             <div class="drawerControls__actions">
               <el-button
                 size="small"
-                @click="loadData"
+                data-testid="refresh-current-graph-view"
+                @click="reloadCurrentView"
               >
                 {{ t('common.refresh') }}
               </el-button>

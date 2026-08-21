@@ -74,6 +74,9 @@ async function mountBottomBar(opts: { isDemoUi: boolean; propOverrides?: Record<
     isExiting: false,
     toggleDemoUi: vi.fn(),
 
+    analyticsPanelOpen: false,
+    toggleAnalyticsPanel: vi.fn(),
+
     fxDebugEnabled: false,
     fxBusy: false,
     runTxOnce: vi.fn(),
@@ -274,3 +277,63 @@ describe('BottomBar — DevTools panel (<details>)', () => {
   })
 })
 
+
+describe('BottomBar — analytics surface toggle (spec 007, T705)', () => {
+  beforeEach(() => {
+    storageMock = makeSimulatorStorageMock()
+  })
+
+  it('reports the surface state to assistive tech and flips it on click', async () => {
+    const toggleAnalyticsPanel = vi.fn()
+    const { app, host } = await mountBottomBar({
+      isDemoUi: false,
+      propOverrides: { analyticsPanelOpen: false, toggleAnalyticsPanel },
+    })
+    await nextTick()
+
+    const btn = host.querySelector('[data-testid="bottombar-analytics-toggle"]') as HTMLButtonElement
+    expect(btn).toBeTruthy()
+    // A toggle, not a link: its state has to be readable, not merely inferable from the screen.
+    expect(btn.getAttribute('aria-pressed')).toBe('false')
+
+    btn.click()
+    await nextTick()
+
+    // The bar does not own the flag — it asks the owner to flip it.
+    expect(toggleAnalyticsPanel).toHaveBeenCalledTimes(1)
+
+    app.unmount()
+    host.remove()
+  })
+
+  it('reflects an already-open surface', async () => {
+    const { app, host } = await mountBottomBar({
+      isDemoUi: false,
+      propOverrides: { analyticsPanelOpen: true, toggleAnalyticsPanel: vi.fn() },
+    })
+    await nextTick()
+
+    const btn = host.querySelector('[data-testid="bottombar-analytics-toggle"]') as HTMLButtonElement
+    expect(btn.getAttribute('aria-pressed')).toBe('true')
+
+    app.unmount()
+    host.remove()
+  })
+
+  it('is absent outside real mode, where there is no metric store to show', async () => {
+    const { app, host } = await mountBottomBar({
+      isDemoUi: false,
+      propOverrides: {
+        apiMode: 'fixtures' as const,
+        analyticsPanelOpen: false,
+        toggleAnalyticsPanel: vi.fn(),
+      },
+    })
+    await nextTick()
+
+    expect(host.querySelector('[data-testid="bottombar-analytics-toggle"]')).toBeNull()
+
+    app.unmount()
+    host.remove()
+  })
+})

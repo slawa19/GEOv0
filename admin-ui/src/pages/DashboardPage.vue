@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ApiException, assertSuccess } from '../api/envelope'
 import { api } from '../api'
-import { formatDecimalFixed } from '../utils/decimal'
+import { formatDecimalFixed, isUnitIntervalDecimalString } from '../utils/decimal'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
 import type { AuditLogEntry, Incident, Trustline } from '../types/domain'
@@ -27,6 +27,7 @@ const auditError = ref<string | null>(null)
 const auditItems = ref<AuditLogEntry[]>([])
 
 const threshold = ref('0.10')
+const thresholdValid = computed(() => isUnitIntervalDecimalString(threshold.value))
 
 const bottlenecksLoading = ref(false)
 const bottlenecksError = ref<string | null>(null)
@@ -107,6 +108,12 @@ function money(v: string): string {
 }
 
 async function loadBottlenecks() {
+  if (!thresholdValid.value) {
+    bottlenecksLoading.value = false
+    bottlenecksError.value = t('validation.thresholdUnitInterval')
+    bottleneckItems.value = []
+    return
+  }
   bottlenecksLoading.value = true
   bottlenecksError.value = null
   try {
@@ -159,10 +166,17 @@ function goParticipantsWithFilter(filter: { status?: string; type?: string }) {
 }
 
 function goTrustlinesWithThreshold() {
-  const t = String(threshold.value || '').trim()
+  if (!thresholdValid.value) {
+    bottlenecksError.value = t('validation.thresholdUnitInterval')
+    return
+  }
+  const thresholdValue = String(threshold.value || '').trim()
   void router.push({
     path: '/trustlines',
-    query: toLocationQueryRaw({ ...carryScenarioQuery(route.query), ...(t ? { threshold: t } : {}) }),
+    query: toLocationQueryRaw({
+      ...carryScenarioQuery(route.query),
+      ...(thresholdValue ? { threshold: thresholdValue } : {}),
+    }),
   })
 }
 
@@ -476,11 +490,13 @@ const typeRows = computed(() => {
                     v-model="threshold"
                     size="small"
                     style="width: 120px"
+                    :aria-invalid="!thresholdValid"
                     :placeholder="t('dashboard.controls.threshold.placeholder')"
                   />
                 </div>
                 <el-button
                   size="small"
+                  :disabled="!thresholdValid"
                   @click="goTrustlinesWithThreshold()"
                 >
                   {{ t('common.viewAll') }}

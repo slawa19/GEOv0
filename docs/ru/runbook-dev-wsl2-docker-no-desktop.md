@@ -1,5 +1,11 @@
 # Runbook: GEO Hub dev-стенд в Windows 11 + WSL2 без Docker Desktop
 
+```text
+Статус: Stable
+Область: core
+Последнее обновление: 2026-08-11
+```
+
 Этот документ описывает самый простой способ поднять dev-стенд GEO Hub в окружении Windows 11 + WSL2, используя Docker Engine внутри WSL2 (без Docker Desktop).
 
 Опирается на:
@@ -25,8 +31,11 @@
 
 - Проверить, что у вас WSL2:
   - `wsl -l -v` (в колонке VERSION должно быть 2)
+- Для canonical test path из раздела 7 нужен также Windows CPython 3.11+ и Python Launcher:
+  - `py --version` должен завершиться успешно и показать поддерживаемую версию.
 
-Дальше все команды из runbook выполняйте в терминале WSL (Ubuntu/Debian и т.д.).
+Дальше команды выполняются в терминале WSL (Ubuntu/Debian и т.д.), кроме явно
+отмеченных Windows PowerShell-команд в разделе 7.
 
 ---
 
@@ -207,11 +216,20 @@ Health endpoints (есть также алиасы `/api/v1/*`):
 - `requirements.txt`
 - `requirements-dev.txt`
 
-Запуск:
-- `python -m pytest -q`
+Canonical verifier — PowerShell-скрипт. Для раздела 7 откройте Windows PowerShell в том же
+checkout (для каталога внутри WSL используйте путь `\\wsl.localhost\<distro>\...`) и один раз
+создайте отдельное Windows-окружение:
+
+```powershell
+py -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
+```
+
+Запуск из Windows PowerShell:
+- `.\scripts\verify_local.ps1 -TaskSlug runbook_backend -BackendOnly`
 
 ### 7.2 OpenAPI contract test
-- `python -m pytest -q tests/contract/test_openapi_contract.py`
+- `.\scripts\verify_local.ps1 -TaskSlug runbook_openapi -BackendOnly -BackendSelector tests/contract/test_openapi_contract.py`
 
 ### 7.3 Postgres-backed тест конкурентности (важно)
 Для проверки семантики блокировок/изоляции нужен Postgres (SQLite не подходит).
@@ -220,17 +238,27 @@ Health endpoints (есть также алиасы `/api/v1/*`):
 1) Поднять контейнер БД:
 - `docker compose up -d db`
 
-2) Создать отдельную тестовую БД (one-time) внутри контейнера:
-- `docker exec geov0-db createdb -U geo geov0_test`
+2) Выбрать уникальное имя, проверить отсутствие БД и только затем создать её внутри контейнера:
+- `docker exec geov0-db createdb -U geo geov0_test_runbook`
+
+Шаги 1–2 выполняются в WSL. Шаги 3–4 — в Windows PowerShell из того же checkout.
 
 3) Указать переменные окружения тестов:
-- `TEST_DATABASE_URL=postgresql+asyncpg://geo:geo@localhost:5432/geov0_test`
-- `GEO_TEST_ALLOW_DB_RESET=1`
+
+```powershell
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_runbook"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+```
 
 4) Запустить конкретный тест:
-- `python -m pytest -q tests/integration/test_concurrent_prepare_routes_bottleneck_postgres.py`
 
-Внимание: при non-SQLite `TEST_DATABASE_URL` тестовый harness сбрасывает схему (DROP/CREATE). Используйте только выделенную тестовую БД.
+```powershell
+.\scripts\verify_local.ps1 -TaskSlug runbook_postgres -BackendOnly -BackendMarker postgres `
+  -BackendSelector tests/integration/test_concurrent_prepare_routes_bottleneck_postgres.py
+```
+
+Внимание: reset opt-in допустим только после проверки точного URL и отсутствия уникальной
+`geov0_test_*` БД. После прогона удаляйте только эту БД при нуле активных соединений.
 
 ---
 

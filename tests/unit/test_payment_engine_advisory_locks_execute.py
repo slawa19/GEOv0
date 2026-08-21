@@ -82,10 +82,13 @@ async def test_acquire_segment_advisory_locks_executes_pg_advisory_xact_lock_for
         participant_map=participant_map,
     )
 
-    # Unique segments across the two routes: A->B, B->D, A->C, C->D.
-    assert len(session.executed) == 4
-    assert all("pg_advisory_xact_lock" in sql for sql, _params in session.executed)
-    assert all("key" in params for _sql, params in session.executed)
+    # The remaining transaction budget is applied before every unique lock.
+    assert len(session.executed) == 8
+    timeout_calls = session.executed[0::2]
+    lock_calls = session.executed[1::2]
+    assert all("SET LOCAL lock_timeout" in sql for sql, _params in timeout_calls)
+    assert all("pg_advisory_xact_lock" in sql for sql, _params in lock_calls)
+    assert all("key" in params for _sql, params in lock_calls)
 
 
 @pytest.mark.asyncio
@@ -95,7 +98,11 @@ async def test_acquire_segment_advisory_lock_keys_deduplicates_and_sorts_globall
 
     await engine._acquire_segment_advisory_lock_keys([9, -4, 9, 2, -4])
 
-    assert [params["key"] for _sql, params in session.executed] == [-4, 2, 9]
+    assert all(
+        "SET LOCAL lock_timeout" in sql
+        for sql, _params in session.executed[0::2]
+    )
+    assert [params["key"] for _sql, params in session.executed[1::2]] == [-4, 2, 9]
 
 
 @pytest.mark.asyncio
@@ -110,8 +117,10 @@ async def test_tx_lock_key_is_stable_and_uses_domain_separate_from_segment_keys(
     await engine._acquire_tx_advisory_lock(tx_id)
     await engine._acquire_segment_advisory_lock_keys([17])
 
-    tx_sql, tx_params = session.executed[0]
-    segment_sql, segment_params = session.executed[1]
+    tx_sql, tx_params = session.executed[1]
+    segment_sql, segment_params = session.executed[3]
+    assert "SET LOCAL lock_timeout" in session.executed[0][0]
+    assert "SET LOCAL lock_timeout" in session.executed[2][0]
     assert "pg_advisory_xact_lock" in tx_sql
     assert set(tx_params) == {"namespace", "key"}
     assert "pg_advisory_xact_lock" in segment_sql
@@ -119,8 +128,148 @@ async def test_tx_lock_key_is_stable_and_uses_domain_separate_from_segment_keys(
 
 
 @pytest.mark.asyncio
+async def test_equivalent_owner_locks_are_deduplicated_sorted_and_domain_separated():
+    session = _Session()
+    engine = PaymentEngine(session)
+    equivalent_a = uuid.uuid4()
+    equivalent_b = uuid.uuid4()
+
+    key_a = engine._equivalent_owner_lock_key(equivalent_a)
+    key_b = engine._equivalent_owner_lock_key(equivalent_b)
+    assert key_a == engine._equivalent_owner_lock_key(equivalent_a)
+    assert key_a != key_b
+    assert -(2**31) <= key_a < 2**31
+
+    await engine._acquire_equivalent_owner_locks(
+        [equivalent_b, equivalent_a, equivalent_b]
+    )
+    await engine._acquire_tx_advisory_lock("tx-owner-domain")
+
+    owner_calls = session.executed[1:4:2]
+    tx_call = session.executed[5]
+    assert [params["key"] for _sql, params in owner_calls] == sorted({key_a, key_b})
+    assert len({params["namespace"] for _sql, params in owner_calls}) == 1
+    assert owner_calls[0][1]["namespace"] != tx_call[1]["namespace"]
+
+
+@pytest.mark.asyncio
+async def test_tx_preflight_acquires_every_persisted_equivalent_before_tx_lock(
+    monkeypatch,
+):
+    equivalent_a = uuid.uuid4()
+    equivalent_b = uuid.uuid4()
+    lock = SimpleNamespace(
+        id=uuid.uuid4(),
+        effects={
+            "flows": [
+                {
+                    "equivalent": str(equivalent_b),
+                    "from": str(uuid.uuid4()),
+                    "to": str(uuid.uuid4()),
+                    "amount": "1.00",
+                },
+                {
+                    "equivalent": str(equivalent_a),
+                    "from": str(uuid.uuid4()),
+                    "to": str(uuid.uuid4()),
+                    "amount": "2.00",
+                },
+            ]
+        },
+    )
+    engine = PaymentEngine(SimpleNamespace(bind=_Bind()))
+    acquired: list[set[uuid.UUID]] = []
+
+    async def _load(_tx_id):
+        return [lock]
+
+    async def _acquire(equivalent_ids):
+        acquired.append(set(equivalent_ids))
+
+    monkeypatch.setattr(engine, "_load_prepare_locks", _load)
+    monkeypatch.setattr(engine, "_acquire_equivalent_owner_locks", _acquire)
+
+    validated, malformed = await engine._preacquire_equivalent_owner_locks_for_tx(
+        "tx-multi-equivalent",
+        allow_malformed=False,
+    )
+
+    assert malformed is False
+    assert len(validated) == 1
+    assert acquired == [{equivalent_a, equivalent_b}]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("locks", "expected"),
+    [([], ((), False)), ([SimpleNamespace(id=uuid.uuid4(), effects={})], ((), True))],
+)
+async def test_abort_preflight_does_not_invent_owner_for_empty_or_malformed_locks(
+    monkeypatch,
+    locks,
+    expected,
+):
+    engine = PaymentEngine(SimpleNamespace(bind=_Bind()))
+    acquisitions = 0
+
+    async def _load(_tx_id):
+        return locks
+
+    async def _acquire(_equivalent_ids):
+        nonlocal acquisitions
+        acquisitions += 1
+
+    monkeypatch.setattr(engine, "_load_prepare_locks", _load)
+    monkeypatch.setattr(engine, "_acquire_equivalent_owner_locks", _acquire)
+
+    assert (
+        await engine._preacquire_equivalent_owner_locks_for_tx(
+            "tx-non-monetary",
+            allow_malformed=True,
+        )
+        == expected
+    )
+    assert acquisitions == 0
+
+
+@pytest.mark.asyncio
+async def test_segment_lock_timeout_uses_one_decreasing_commit_budget(
+    monkeypatch,
+):
+    from app.config import settings
+    from app.core.payments import engine as engine_module
+
+    monkeypatch.setattr(settings, "PAYMENT_TOTAL_TIMEOUT_SECONDS", 10)
+    monkeypatch.setattr(settings, "COMMIT_TIMEOUT_SECONDS", 5)
+    monotonic_values = iter([100.0, 101.0])
+    monkeypatch.setattr(
+        engine_module,
+        "time",
+        SimpleNamespace(monotonic=lambda: next(monotonic_values)),
+    )
+    session = _Session()
+    engine = PaymentEngine(session)
+
+    await engine._acquire_segment_advisory_lock_keys([1, 2])
+
+    assert "5000ms" in session.executed[0][0]
+    assert "4000ms" in session.executed[2][0]
+
+
+def test_advisory_lock_budget_matches_service_zero_default(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "PAYMENT_TOTAL_TIMEOUT_SECONDS", 0)
+    monkeypatch.setattr(settings, "COMMIT_TIMEOUT_SECONDS", 0)
+
+    engine = PaymentEngine(_Session())
+
+    assert engine._advisory_lock_budget_s == 5.0
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("operation", ["prepare", "prepare_routes", "commit", "abort"])
-async def test_all_payment_transitions_acquire_tx_key_before_first_tx_read(
+async def test_all_payment_transitions_acquire_owner_before_tx_and_first_tx_read(
     monkeypatch,
     operation,
 ):
@@ -133,11 +282,29 @@ async def test_all_payment_transitions_acquire_tx_key_before_first_tx_read(
     async def _acquire_tx(_tx_id):
         events.append("tx-key")
 
+    async def _acquire_owner(_equivalent_ids):
+        events.append("owner-key")
+
+    async def _preacquire_owner(_tx_id, *, allow_malformed):
+        assert allow_malformed is (operation == "abort")
+        events.append("owner-key")
+        return None
+
     async def _get_tx(_tx_id):
         events.append("tx-read")
         raise _StopAtRead
 
     monkeypatch.setattr(engine, "_acquire_tx_advisory_lock", _acquire_tx)
+    monkeypatch.setattr(
+        engine,
+        "_acquire_equivalent_owner_locks",
+        _acquire_owner,
+    )
+    monkeypatch.setattr(
+        engine,
+        "_preacquire_equivalent_owner_locks_for_tx",
+        _preacquire_owner,
+    )
     monkeypatch.setattr(engine, "_get_tx", _get_tx)
 
     with pytest.raises(_StopAtRead):
@@ -154,7 +321,71 @@ async def test_all_payment_transitions_acquire_tx_key_before_first_tx_read(
         else:
             await engine.abort("tx")
 
-    assert events == ["tx-key", "tx-read"]
+    assert events == ["owner-key", "tx-key", "tx-read"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("commit", "expected_reacquires"),
+    [(True, 1), (False, 0)],
+)
+async def test_abort_reacquires_preheld_tx_lock_only_after_outer_rollback_retry(
+    monkeypatch,
+    commit,
+    expected_reacquires,
+):
+    engine = PaymentEngine(SimpleNamespace(bind=None))
+    reacquires: list[str] = []
+    owner_reacquires: list[str] = []
+    attempts = 0
+
+    class _Retry(RuntimeError):
+        pass
+
+    class _Stop(RuntimeError):
+        pass
+
+    async def _acquire_tx(tx_id):
+        reacquires.append(tx_id)
+
+    async def _preacquire_owner(tx_id, *, allow_malformed):
+        assert allow_malformed is True
+        owner_reacquires.append(tx_id)
+        return None
+
+    async def _get_tx(_tx_id):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise _Retry
+        raise _Stop
+
+    async def _run_twice(*, op, fn, use_savepoint=False):
+        assert op == ("abort" if commit else "abort_nocommit")
+        assert use_savepoint is (not commit)
+        with pytest.raises(_Retry):
+            await fn()
+        return await fn()
+
+    monkeypatch.setattr(engine, "_acquire_tx_advisory_lock", _acquire_tx)
+    monkeypatch.setattr(
+        engine,
+        "_preacquire_equivalent_owner_locks_for_tx",
+        _preacquire_owner,
+    )
+    monkeypatch.setattr(engine, "_get_tx", _get_tx)
+    monkeypatch.setattr(engine, "_run_uow_with_retry", _run_twice)
+
+    with pytest.raises(_Stop):
+        await engine.abort(
+            "tx-retry",
+            commit=commit,
+            _tx_lock_already_held=True,
+            _equivalent_owner_locks_already_held=True,
+        )
+
+    assert reacquires == ["tx-retry"] * expected_reacquires
+    assert owner_reacquires == ["tx-retry"] * expected_reacquires
 
 
 def test_persisted_prepare_lock_parser_and_keys_share_validated_flows(monkeypatch):

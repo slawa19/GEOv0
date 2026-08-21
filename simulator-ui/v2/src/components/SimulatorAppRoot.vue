@@ -15,6 +15,8 @@ import DevPerfOverlay from './DevPerfOverlay.vue'
 import ErrorToast from './ErrorToast.vue'
 import SuccessToast from './SuccessToast.vue'
 import InteractHistoryLog from './InteractHistoryLog.vue'
+import GraphNavigator from './GraphNavigator.vue'
+import RealMetricsPanel from './RealMetricsPanel.vue'
 
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 
@@ -27,9 +29,11 @@ import { provideActivePanelState } from '../composables/useActivePanelState'
  import { normalizeUiThemeId, type UiThemeId } from '../types/uiPrefs'
  import { toLower } from '../utils/stringHelpers'
  import { extractErrorMessage } from '../utils/errorMessage'
+ import { useReducedMotionPreference } from '../composables/useReducedMotionPreference'
 
 // TD-1: all localStorage access is delegated to this composable.
 const simulatorStorage = useSimulatorStorage()
+const reducedMotion = useReducedMotionPreference()
 
 function readThemeFromUrl(): UiThemeId {
   try {
@@ -134,6 +138,7 @@ onUnmounted(() => {
 })
 
 import type { GraphLink } from '../types'
+import type { BottleneckTarget } from '../api/simulatorTypes'
 
 import { useSimulatorApp } from '../composables/useSimulatorApp'
 import { computeNodeEdgeStats } from '../composables/useSelectedNodeEdgeStats'
@@ -146,7 +151,7 @@ import { computeNodeEdgeStats } from '../composables/useSelectedNodeEdgeStats'
  import { interactWindowOfPhase } from '../composables/windowManager/interactWindowOfPhase'
  import { useWmEdgeDetail } from '../composables/useWmEdgeDetail'
  import { useWindowController } from '../composables/useWindowController'
-import { resolveWindowSurfaceDescriptor } from '../ui-kit/overlaySurfaceCatalog'
+import { resolveOverlayDockStyle, resolveWindowSurfaceDescriptor } from '../ui-kit/overlaySurfaceCatalog'
 import {
   createMeasuredPublishedGeometryValue,
   DEFAULT_VIEWPORT_FALLBACK_HEIGHT_PX,
@@ -194,11 +199,35 @@ function uiOpenOrUpdateNodeCard(o: { nodeId: string; anchor: Point | null }) {
   queueMicrotask(() => windowController?.uiOpenOrUpdateNodeCard(o))
 }
 
+/**
+ * Analytics overlay surface visibility (spec 007, T705).
+ *
+ * Kept here, next to the theme and the DevTools snapshot, and persisted through the very same
+ * `useSimulatorStorage` `read01`/`write01` pair the DevTools dropdown in `BottomBar` uses — no new
+ * store and no new preference layer. `flush: 'sync'` for the same reason as that neighbour: the
+ * flag must reach storage before a reload can race it.
+ */
+const analyticsPanelOpen = ref(simulatorStorage.readAnalyticsPanelOpen() ?? false)
+
+watch(
+  analyticsPanelOpen,
+  (open) => {
+    simulatorStorage.writeAnalyticsPanelOpen(open)
+  },
+  { flush: 'sync' },
+)
+
+function toggleAnalyticsPanel(): void {
+  analyticsPanelOpen.value = !analyticsPanelOpen.value
+}
+
 const app = useSimulatorApp({
   uiCloseTopmostInspectorWindow,
   uiOpenOrUpdateEdgeDetail,
   uiOpenOrUpdateNodeCard,
   uiIsNodeCardOpen: () => wm.windows.value.some((w) => w.type === 'node-card'),
+  optionalFxEnabled: () => !reducedMotion.value,
+  isAnalyticsPanelOpen: () => analyticsPanelOpen.value,
 })
 
 // MVP safety: ensure viewport isn't 0×0 even before `.root` ref is available.
@@ -373,6 +402,7 @@ const {
   // selection + overlays
   hoveredEdge,
   clearHoveredEdge,
+  addActiveEdge,
   edgeTooltipStyle: calcEdgeTooltipStyle,
   selectedNode,
   getNodeScreenCenter,
@@ -396,8 +426,12 @@ const {
   floatingLabelsViewFx,
   worldToCssTranslateNoScale,
 
+  // analytics overlay surface (spec 007)
+  analytics,
+
   // helpers for template
   getNodeById,
+  focusOnEdge,
   resetView,
 } = app
 
@@ -771,6 +805,154 @@ function getActionBarAnchor(): Point | null {
   return { x, y }
 }
 
+function navigatorEdgeAnchor(link: GraphLink): Point {
+  const source = getNodeScreenCenter(link.source)
+  const target = getNodeScreenCenter(link.target)
+  if (source && target) {
+    return {
+      x: (source.x + target.x) / 2,
+      y: (source.y + target.y) / 2,
+    }
+  }
+  return source ?? target ?? getActionBarAnchor() ?? { x: 24, y: 120 }
+}
+
+let interactFlowOpener: HTMLElement | null = null
+let interactFlowFallback: HTMLElement | null = null
+let interactFlowFocusOwnerType = 'interact-panel'
+let interactFlowStrictFocusOwner: Element | null = null
+let interactFlowUsesStrictFocusOwner = false
+
+function captureInteractFlowOpener(
+  fallbackSelector?: string,
+  opts: { focusOwnerType?: 'interact-panel' | 'edge-detail'; preferFallback?: boolean; strictFocusOwner?: boolean } = {},
+): void {
+  const active = document.activeElement
+  const fallback = fallbackSelector ? getHostEl()?.querySelector(fallbackSelector) : null
+  interactFlowFallback = fallback instanceof HTMLElement ? fallback : null
+  interactFlowOpener = opts.preferFallback ? null : active instanceof HTMLElement ? active : null
+  interactFlowFocusOwnerType = opts.focusOwnerType ?? 'interact-panel'
+  interactFlowUsesStrictFocusOwner = opts.strictFocusOwner === true
+  const activeWindow = active instanceof Element ? active.closest('[data-win-type]') : null
+  interactFlowStrictFocusOwner =
+    interactFlowUsesStrictFocusOwner && activeWindow?.getAttribute('data-win-type') === interactFlowFocusOwnerType
+      ? active
+      : null
+}
+
+function inspectNodeFromNavigator(nodeId: string): void {
+  uiOpenOrUpdateNodeCard({ nodeId, anchor: getNodeScreenCenter(nodeId) })
+}
+
+/**
+ * Analytics panel placement (spec 007, T705). Every value is derived from the catalog descriptor —
+ * which edge, which HUD clearances, which width contract, which z layer — so the scoped rule below
+ * declares the properties and the catalog decides what goes in them.
+ */
+const analyticsDockStyle = resolveOverlayDockStyle('real-metrics-panel')
+
+/** The dock's own element, so its width can be measured rather than guessed from a token. */
+const analyticsDockEl = ref<HTMLElement | null>(null)
+
+/**
+ * How much of the canvas's right-hand side the analytics dock is currently covering, in CSS px.
+ *
+ * This is the one place that knows both things at once — that a dock exists, and how wide it
+ * actually is right now. The dock's width is a `min()` of a token and a percentage of the host
+ * (`resolveOverlayDockStyle`), so it is measured, not read off a constant that would be wrong on
+ * exactly the narrow windows where the overlap matters.
+ *
+ * Measured from the host's right edge to the dock's left edge, so the gap between them counts as
+ * covered too — the camera must not aim into a 12px sliver. `0` whenever there is nothing to
+ * measure (dock closed, or a layout-less environment such as jsdom), which is the value that
+ * leaves framing exactly as it was.
+ */
+function analyticsDockInsetRightPx(): number {
+  const host = hostEl.value
+  const dock = analyticsDockEl.value
+  if (!host || !dock) return 0
+
+  const hostRect = host.getBoundingClientRect()
+  const dockRect = dock.getBoundingClientRect()
+  const covered = hostRect.right - dockRect.left
+  if (!Number.isFinite(covered) || covered <= 0) return 0
+  return Math.min(covered, hostRect.width)
+}
+
+/**
+ * A bottleneck row asks to be shown on the graph.
+ *
+ * Edge targets frame the edge and then mark it; node targets open the node's inspector card, which
+ * is the same thing the graph navigator does with a node. Both are visible responses — a row that
+ * reported "focus" and then did nothing would be worse than no button at all.
+ *
+ * Framing alone is not an answer to "which edge": the camera fits a segment, and where trustlines
+ * run in parallel the fitted region holds several of them. The active-edge highlight is the app's
+ * existing way of naming one edge, so the row borrows it rather than inventing a second marker.
+ *
+ * The highlight goes on strictly *after* `focusOnEdge` confirms the edge is still in the snapshot.
+ * A `false` there means the graph moved on between the panel's poll and this click; painting a
+ * highlight anyway would point at whatever edge now owns that key — a second wrong answer layered
+ * on a camera that correctly refused to move.
+ *
+ * TTL: 3000ms. The overlay fades over its last 1200ms, so this is ~1.8s at full strength and then
+ * a visible decay — long enough for a gaze to travel from the panel row to the canvas after the
+ * camera jumps, short enough that it is unambiguously gone before the next row is clicked. The
+ * automatic effects sit either side of it on purpose: 1500ms for a single scripted transfer pulse,
+ * 5200ms for a clearing cascade that lights many edges at once and has to outlast its own animation.
+ */
+function focusBottleneckTarget(target: BottleneckTarget): void {
+  if (target.kind === 'edge') {
+    // The click came from the dock, so the dock is open and covering the right-hand side of the
+    // canvas. Framing into the middle of the full canvas would put the edge under the very panel
+    // the row was clicked in — on a narrow window, sometimes entirely under it.
+    const insetRight = analyticsDockInsetRightPx()
+    const focused =
+      insetRight > 0
+        ? focusOnEdge(target.from, target.to, { viewportInsetRight: insetRight })
+        : focusOnEdge(target.from, target.to)
+    if (!focused) return
+    addActiveEdge(keyEdge(target.from, target.to), 3000)
+    return
+  }
+  inspectNodeFromNavigator(target.id)
+}
+
+function inspectEdgeFromNavigator(link: GraphLink): void {
+  if (apiMode.value !== 'real' || !isInteractUi.value || interact.mode.busy.value) return
+
+  const anchor = navigatorEdgeAnchor(link)
+  if (!interact.mode.selectEdge(keyEdge(link.source, link.target), anchor)) return
+  uiOpenOrUpdateEdgeDetail({ fromPid: link.source, toPid: link.target, anchor })
+}
+
+function cancelInteractWindowFromUi(): void {
+  const interactWindow = wm.windows.value.find((win) => win.type === 'interact-panel' && win.state !== 'closing')
+  if (interactWindow) {
+    // The WM interact-panel policy delegates action-close to the current FSM onClose owner.
+    wm.close(interactWindow.id, 'action')
+    const opener = interactFlowOpener
+    const fallback = interactFlowFallback
+    interactFlowOpener = null
+    interactFlowFallback = null
+    interactFlowFocusOwnerType = 'interact-panel'
+    interactFlowStrictFocusOwner = null
+    interactFlowUsesStrictFocusOwner = false
+    void nextTick(() => {
+      const target = opener?.isConnected && !opener.matches(':disabled') ? opener : fallback
+      if (document.activeElement !== document.body || !target?.isConnected || target.matches(':disabled')) return
+      target.focus({ preventScroll: true })
+    })
+    return
+  }
+  interactFlowOpener = null
+  interactFlowFallback = null
+  interactFlowFocusOwnerType = 'interact-panel'
+  interactFlowStrictFocusOwner = null
+  interactFlowUsesStrictFocusOwner = false
+  interact.mode.cancel()
+}
+
 /** Computed: should TrustlineManagementPanel be shown? */
 const showTrustlinePanel = computed(() => {
   if (activePanelType.value !== 'trustline') return false
@@ -853,6 +1035,7 @@ function goInteract() {
 // Interact Mode state is provided by useSimulatorApp() (core-only; panels/picking wiring is a later task).
 
  function onEdgeDetailChangeLimit() {
+  captureInteractFlowOpener('[data-testid="actionbar-trustline"]')
   // MUST: anchor propagation from edge popup to interact-panel.
   wmEdgePopupAnchor.value = interact.mode.state.edgeAnchor ?? null
 
@@ -873,6 +1056,11 @@ function goInteract() {
 function onEdgeDetailCloseLine() {
   // Delegate to mode action (will transition to idle on success).
   if (interactPhase.value !== 'editing-trustline') return
+  captureInteractFlowOpener('[data-testid="actionbar-trustline"]', {
+    focusOwnerType: 'edge-detail',
+    preferFallback: true,
+    strictFocusOwner: true,
+  })
   void interact.mode.confirmTrustlineClose()
 }
 
@@ -881,6 +1069,7 @@ function onEdgeDetailCloseLine() {
   const fromPid = interact.mode.state.fromPid
   const toPid = interact.mode.state.toPid
   if (!fromPid || !toPid) return
+  captureInteractFlowOpener('[data-testid="actionbar-payment"]')
 
   // MUST: if initiated from edge popup, propagate edge anchor to interact-panel.
   wmEdgePopupAnchor.value = interact.mode.state.edgeAnchor ?? null
@@ -903,6 +1092,7 @@ function startFlowFromNodeCard(opts: {
   openEditor?: boolean
   start: () => void
 }) {
+  captureInteractFlowOpener()
   // Not an edge-popup initiated action.
   wmEdgePopupAnchor.value = null
   // Snapshot NodeCard node screen center BEFORE phase changes.
@@ -916,6 +1106,7 @@ function startFlowFromNodeCard(opts: {
 }
 
 function startFlowFromActionBar(opts: { openEditor?: boolean; start: () => void }) {
+  captureInteractFlowOpener()
   // Not an edge-popup initiated action.
   wmEdgePopupAnchor.value = null
   // Snapshot ActionBar anchor BEFORE opts.start() changes the phase.
@@ -986,10 +1177,37 @@ function onActionStartClearingFlow() {
 // so the NEXT edge click shows EdgeDetailPopup (not full editor).
 // NOTE: do NOT reset when transitioning between trustline sub-phases
 // (e.g. picking-trustline-to → editing-trustline) to preserve the ActionBar intent.
-watch(interactPhase, (phase) => {
+watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
   const p = toLower(phase)
   if (!p.includes('trustline')) {
     useFullTrustlineEditor.value = false
+  }
+
+  if (p === 'idle' && !busy && (interactFlowOpener || interactFlowFallback)) {
+    const opener = interactFlowOpener
+    const fallback = interactFlowFallback
+    const focusOwnerType = interactFlowFocusOwnerType
+    const strictFocusOwner = interactFlowStrictFocusOwner
+    const usesStrictFocusOwner = interactFlowUsesStrictFocusOwner
+    interactFlowOpener = null
+    interactFlowFallback = null
+    interactFlowFocusOwnerType = 'interact-panel'
+    interactFlowStrictFocusOwner = null
+    interactFlowUsesStrictFocusOwner = false
+    void nextTick(() => {
+      const target = opener?.isConnected && !opener.matches(':disabled') ? opener : fallback
+      const active = document.activeElement
+      const activeWindow = active instanceof Element ? active.closest('[data-win-type]') : null
+      const focusStillOwnedByFlow = usesStrictFocusOwner
+        ? Boolean(strictFocusOwner && (active === strictFocusOwner || (active instanceof Node && strictFocusOwner.contains(active))))
+        : activeWindow?.getAttribute('data-win-type') === focusOwnerType
+      if (
+        (active !== document.body && !focusStillOwnedByFlow) ||
+        !target?.isConnected ||
+        target.matches(':disabled')
+      ) return
+      target.focus({ preventScroll: true })
+    })
   }
 })
 </script>
@@ -1000,7 +1218,8 @@ watch(interactPhase, (phase) => {
     class="root ds-ov-vars"
     :data-theme="uiTheme"
     data-density="comfortable"
-    data-motion="full"
+    :data-motion="reducedMotion ? 'reduced' : 'full'"
+    :aria-busy="state.loading || real.loadingScenarios || interact.mode.busy.value ? 'true' : 'false'"
     :data-ready="!state.loading && !state.error && state.snapshot ? '1' : '0'"
     :data-scene="scene"
     :data-layout="layoutMode"
@@ -1012,6 +1231,7 @@ watch(interactPhase, (phase) => {
     <canvas
       ref="canvasEl"
       class="canvas"
+      aria-hidden="true"
       :style="{ cursor: isInteractPickingPhase ? 'crosshair' : 'default' }"
       @click="onCanvasClick"
       @dblclick.prevent="onCanvasDblClick"
@@ -1022,7 +1242,7 @@ watch(interactPhase, (phase) => {
       @pointerleave="clearHoveredEdge"
       @wheel.prevent="onCanvasWheel"
     />
-    <canvas ref="fxCanvasEl" class="canvas canvas-fx" />
+    <canvas ref="fxCanvasEl" class="canvas canvas-fx" aria-hidden="true" />
 
     <div ref="dragPreviewEl" class="drag-preview" aria-hidden="true" />
 
@@ -1071,7 +1291,17 @@ watch(interactPhase, (phase) => {
           :start-trustline-flow="onActionStartTrustlineFlow"
           :start-clearing-flow="onActionStartClearingFlow"
         />
+
       </template>
+
+      <GraphNavigator
+        v-if="dataReady && !isE2eScreenshots"
+        :nodes="state.snapshot?.nodes ?? []"
+        :links="state.snapshot?.links ?? []"
+        :edge-inspect-disabled="apiMode !== 'real' || !isInteractUi || interact.mode.busy.value"
+        @inspect-node="inspectNodeFromNavigator"
+        @inspect-edge="inspectEdgeFromNavigator"
+      />
     </TopBar>
 
     <!-- Step 2: WindowLayer (renders migrated windows from WM state). -->
@@ -1161,7 +1391,7 @@ watch(interactPhase, (phase) => {
           :confirm-payment="interact.mode.confirmPayment"
           :set-from-pid="interact.mode.setPaymentFromPid"
           :set-to-pid="interact.mode.setPaymentToPid"
-          :cancel="interact.mode.cancel"
+          :cancel="cancelInteractWindowFromUi"
         />
 
         <TrustlineManagementPanel
@@ -1182,7 +1412,7 @@ watch(interactPhase, (phase) => {
           :set-from-pid="interact.mode.setTrustlineFromPid"
           :set-to-pid="interact.mode.setTrustlineToPid"
           :select-trustline="interact.mode.selectTrustline"
-          :cancel="interact.mode.cancel"
+          :cancel="cancelInteractWindowFromUi"
         />
 
         <ClearingPanel
@@ -1192,7 +1422,7 @@ watch(interactPhase, (phase) => {
           :busy="interact.mode.busy.value"
           :equivalent="effectiveEq"
           :confirm-clearing="interact.mode.confirmClearing"
-          :cancel="interact.mode.cancel"
+          :cancel="cancelInteractWindowFromUi"
         />
       </WindowShell>
     </TransitionGroup>
@@ -1226,21 +1456,52 @@ watch(interactPhase, (phase) => {
       :is-demo-ui="isDemoUi"
       :is-exiting="isExiting"
       :toggle-demo-ui="toggleDemoUi"
+      :analytics-panel-open="analyticsPanelOpen"
+      :toggle-analytics-panel="toggleAnalyticsPanel"
       :fx-debug-enabled="apiMode === 'real' && fxDebug.enabled.value"
       :fx-busy="fxDebug.busy.value"
       :run-tx-once="isDemoUi ? demoRunTxOnce : fxDebug.runTxOnce"
       :run-clearing-once="isDemoUi ? demoRunClearingOnce : fxDebug.runClearingOnce"
     />
 
+    <!-- Analytics overlay surface (spec 007, T705). Registered in `overlaySurfaceCatalog`; the
+         geometry below is the descriptor's, not this component's. -->
+    <div
+      v-if="analytics.isVisible.value"
+      ref="analyticsDockEl"
+      class="sar-analytics-dock"
+      data-surface="real-metrics-panel"
+      :style="analyticsDockStyle"
+    >
+      <RealMetricsPanel
+        :metrics-phase="analytics.metricsPhase.value"
+        :bottlenecks-phase="analytics.bottlenecksPhase.value"
+        :metrics="analytics.metrics.value"
+        :bottlenecks="analytics.bottlenecks.value"
+        :metrics-error="analytics.metricsError.value"
+        :bottlenecks-error="analytics.bottlenecksError.value"
+        :metrics-unavailable-reason="analytics.metricsUnavailableReason.value"
+        :bottlenecks-unavailable-reason="analytics.bottlenecksUnavailableReason.value"
+        :get-node-name="(id) => getNodeById(id)?.name ?? null"
+        @focus-bottleneck="focusBottleneckTarget"
+      />
+    </div>
+
     <!-- Loading / error overlay (fail-fast, but non-intrusive).
          Hide the overlay during incremental updates (when we already have a snapshot)
          to avoid a visible "Loading…" flash on preview → run transitions. -->
-    <div v-if="state.loading && !state.snapshot" class="ds-ov-inset">
+    <div
+      v-if="state.loading && !state.snapshot"
+      class="ds-ov-inset"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+    >
       <div class="ds-ov-message">
         <div class="ds-ov-message__title">Loading…</div>
       </div>
     </div>
-    <div v-else-if="state.error" class="ds-ov-inset">
+    <div v-else-if="state.error" class="ds-ov-inset" role="alert" aria-atomic="true">
       <div class="ds-ov-message">
         <div class="ds-ov-message__title">Error</div>
         <div class="ds-ov-message__text">{{ state.error }}</div>
@@ -1279,6 +1540,13 @@ watch(interactPhase, (phase) => {
 </template>
 
 <style scoped>
+/*
+  The WindowManager layer. Its z-index is the whole stacking context every window lives in:
+  `effectiveZ` orders windows WITHIN it and can never lift one above it, so any surface that shares
+  this value and comes later in the markup sits above every window at once. Surfaces meant to stay
+  behind windows therefore take a lower layer of their own (`--ds-z-analytics-dock`), instead of
+  the relation being decided by sibling order down in the template.
+*/
 .wm-layer {
   position: absolute;
   inset: 0;
@@ -1287,6 +1555,26 @@ watch(interactPhase, (phase) => {
 }
 
 .wm-layer :deep(.ws-shell) {
+  pointer-events: auto;
+}
+
+/*
+  Analytics dock (spec 007, T705). Declarations only — every value comes from
+  `resolveOverlayDockStyle('real-metrics-panel')`, so moving the surface means editing the catalog
+  descriptor, not this rule.
+*/
+.sar-analytics-dock {
+  position: absolute;
+  top: var(--ds-ov-dock-top);
+  bottom: var(--ds-ov-dock-bottom);
+  left: var(--ds-ov-dock-left);
+  right: var(--ds-ov-dock-right);
+  width: var(--ds-ov-dock-width);
+  z-index: var(--ds-ov-dock-z);
+
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   pointer-events: auto;
 }
 

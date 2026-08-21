@@ -13,12 +13,16 @@ from sqlalchemy import select
 
 import app.db.session as db_session
 from app.config import settings
-from app.core.clearing.service import ClearingService
+from app.core.clearing.service import (
+    ClearingCommittedAfterCancellation,
+    ClearingService,
+)
 from app.core.simulator.edge_patch_builder import EdgePatchBuilder
 from app.core.simulator.models import RunRecord
 from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter
 from app.core.simulator.viz_patch_helper import VizPatchHelper
 from app.db.models.participant import Participant
+from app.utils.exceptions import GeoException
 
 
 class RealClearingEngine:
@@ -72,7 +76,7 @@ class RealClearingEngine:
         clearing_service_cls: Any | None = None,
         time_budget_ms_override: int | None = None,
         max_depth_override: int | None = None,
-    ) -> dict[str, float]:
+    ) -> dict[str, Decimal]:
         """Execute clearing for all equivalents using an isolated session.
 
         IMPORTANT: This method uses its own session to avoid poisoning the parent
@@ -105,7 +109,12 @@ class RealClearingEngine:
         max_depth = max(1, int(max_depth))
         effective_time_budget_ms = max(1, int(effective_time_budget_ms))
         max_fx_edges = int(self._clearing_max_fx_edges_limit)
-        cleared_amount_by_eq: dict[str, float] = {str(eq): 0.0 for eq in equivalents}
+        # 2026-08-20 / p007_t715: cleared volume is money and stays Decimal all
+        # the way out of this engine. `float(cleared_amount_dec)` used to narrow
+        # it here, at the source, so no downstream column type could restore it.
+        cleared_amount_by_eq: dict[str, Decimal] = {
+            str(eq): Decimal("0") for eq in equivalents
+        }
 
         emitter = SseEventEmitter(sse=self._sse, utc_now=self._utc_now, logger=self._logger)
 
@@ -113,6 +122,13 @@ class RealClearingEngine:
         service_cls = clearing_service_cls or ClearingService
 
         for eq in equivalents:
+            plan_id = ""
+            cleared_cycles = 0
+            cleared_amount_dec = Decimal("0")
+            touched_nodes: set[str] = set()
+            touched_edges: set[tuple[str, str]] = set()
+            cleared_amount_per_edge: dict[tuple[str, str], float] = {}
+            partial_done_emitted = False
             try:
                 async with session_local() as clearing_session:
                     service = service_cls(clearing_session)
@@ -176,13 +192,9 @@ class RealClearingEngine:
                     with self._lock:
                         run.current_phase = "clearing"
 
-                    cleared_cycles = 0
-                    cleared_amount_dec = Decimal("0")
-                    touched_nodes: set[str] = set()
-                    touched_edges: set[tuple[str, str]] = set()
-                    cleared_amount_per_edge: dict[tuple[str, str], float] = {}
                     clearing_started = time.monotonic()
                     progress_last_log = 0.0
+                    execution_error: Exception | None = None
 
                     while True:
                         now = time.monotonic()
@@ -226,7 +238,15 @@ class RealClearingEngine:
                             int(cleared_cycles),
                         )
                         _loop_fc_t0 = time.monotonic()
-                        cycles = await service.find_cycles(eq, max_depth=max_depth)
+                        try:
+                            cycles = await service.find_cycles(eq, max_depth=max_depth)
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception as exc:
+                            if cleared_cycles <= 0:
+                                raise
+                            execution_error = exc
+                            break
                         _loop_fc_ms = int((time.monotonic() - _loop_fc_t0) * 1000.0)
                         if _loop_fc_ms > 500:
                             self._logger.warning(
@@ -251,7 +271,9 @@ class RealClearingEngine:
                                         amts.append(Decimal(str(edge.get("amount"))))
                                     else:
                                         amts.append(Decimal(str(getattr(edge, "amount"))))
-                                clear_amount = min(amts) if amts else Decimal("0")
+                                candidate_amount = (
+                                    min(amts) if amts else Decimal("0")
+                                )
                             except Exception:
                                 if self._should_warn_this_tick(
                                     run, f"clearing_clear_amount_parse_failed:{eq}"
@@ -263,25 +285,39 @@ class RealClearingEngine:
                                         str(eq),
                                         exc_info=True,
                                     )
-                                clear_amount = Decimal("0")
+                                candidate_amount = Decimal("0")
 
                             self._logger.warning(
-                                "simulator.real.clearing_execute_start run_id=%s tick=%s eq=%s clear_amount=%s cycle_len=%s",
+                                "simulator.real.clearing_execute_start run_id=%s tick=%s eq=%s candidate_amount=%s cycle_len=%s",
                                 str(run.run_id),
                                 int(run.tick_index),
                                 str(eq),
-                                str(clear_amount),
+                                str(candidate_amount),
                                 int(len(cycle or [])),
                             )
                             _exec_t0 = time.monotonic()
-                            success = await service.execute_clearing(cycle)
+                            commit_cancellation = None
+                            try:
+                                actual_amount = (
+                                    await service.execute_clearing_with_amount(cycle)
+                                )
+                            except ClearingCommittedAfterCancellation as exc:
+                                actual_amount = exc.cleared_amount
+                                commit_cancellation = exc
+                            except asyncio.CancelledError:
+                                raise
+                            except Exception as exc:
+                                if cleared_cycles <= 0:
+                                    raise
+                                execution_error = exc
+                                break
                             _exec_ms = int((time.monotonic() - _exec_t0) * 1000.0)
                             self._logger.warning(
                                 "simulator.real.clearing_execute_done run_id=%s tick=%s eq=%s success=%s elapsed_ms=%s",
                                 str(run.run_id),
                                 int(run.tick_index),
                                 str(eq),
-                                bool(success),
+                                actual_amount is not None,
                                 int(_exec_ms),
                             )
                             if _exec_ms > 500:
@@ -293,10 +329,12 @@ class RealClearingEngine:
                                     int(_exec_ms),
                                 )
 
-                            if success:
+                            if actual_amount is not None:
+                                actual_amount = Decimal(str(actual_amount))
+                                if actual_amount <= 0:
+                                    raise GeoException()
                                 cleared_cycles += 1
-                                if clear_amount > 0:
-                                    cleared_amount_dec += clear_amount
+                                cleared_amount_dec += actual_amount
 
                                 try:
                                     for edge in cycle:
@@ -313,7 +351,7 @@ class RealClearingEngine:
                                             edge_key = (creditor_pid, debtor_pid)
                                             cleared_amount_per_edge[edge_key] = (
                                                 cleared_amount_per_edge.get(edge_key, 0.0)
-                                                + float(clear_amount)
+                                                + float(actual_amount)
                                             )
                                 except Exception:
                                     if self._should_warn_this_tick(
@@ -327,6 +365,8 @@ class RealClearingEngine:
                                             exc_info=True,
                                         )
                                 executed = True
+                                if commit_cancellation is not None:
+                                    raise commit_cancellation
                                 break
 
                         if not executed:
@@ -334,7 +374,7 @@ class RealClearingEngine:
                         if cleared_cycles > 100:
                             break
 
-                    cleared_amount_by_eq[str(eq)] = float(cleared_amount_dec)
+                    cleared_amount_by_eq[str(eq)] = cleared_amount_dec
 
                     if touched_edges:
                         try:
@@ -544,6 +584,7 @@ class RealClearingEngine:
                         node_patch=node_patch_list,
                         edge_patch=edge_patch_list,
                     )
+                    partial_done_emitted = True
 
                     self._logger.warning(
                         "simulator.real.clearing_eq_done run_id=%s tick=%s eq=%s elapsed_ms=%s cleared_cycles=%s",
@@ -553,7 +594,57 @@ class RealClearingEngine:
                         int((time.monotonic() - eq_t0) * 1000.0),
                         int(cleared_cycles),
                     )
-            except Exception as e:
+                    if execution_error is not None:
+                        raise execution_error
+            except asyncio.CancelledError:
+                if cleared_cycles > 0 and not partial_done_emitted:
+                    cleared_amount_by_eq[str(eq)] = cleared_amount_dec
+                    with self._lock:
+                        run.last_event_type = "clearing.done"
+                        run.current_phase = None
+                        topology_edges = set(
+                            ((run._edges_by_equivalent or {}).get(str(eq)) or [])
+                        )
+
+                    fallback_edges: list[dict[str, str]] = []
+                    for from_pid, to_pid in sorted(touched_edges):
+                        if topology_edges and (from_pid, to_pid) not in topology_edges:
+                            if (to_pid, from_pid) in topology_edges:
+                                from_pid, to_pid = to_pid, from_pid
+                            else:
+                                continue
+                        fallback_edges.append({"from": from_pid, "to": to_pid})
+                        if len(fallback_edges) >= max(1, max_fx_edges):
+                            break
+
+                    try:
+                        emitter.emit_clearing_done(
+                            run_id=run_id,
+                            run=run,
+                            equivalent=eq,
+                            plan_id=plan_id or f"plan_{secrets.token_hex(6)}",
+                            cleared_cycles=cleared_cycles,
+                            cleared_amount=format(
+                                cleared_amount_dec.quantize(
+                                    Decimal("0.01"), rounding=ROUND_DOWN
+                                ),
+                                "f",
+                            ),
+                            cycle_edges=fallback_edges or None,
+                            node_patch=None,
+                            edge_patch=None,
+                        )
+                    except Exception:
+                        self._logger.warning(
+                            "simulator.real.clearing_cancel_partial_emit_failed "
+                            "run_id=%s tick=%s eq=%s",
+                            str(run.run_id),
+                            int(run.tick_index),
+                            str(eq),
+                            exc_info=True,
+                        )
+                raise
+            except Exception:
                 if self._should_warn_this_tick(run, f"clearing_failed:{eq}"):
                     self._logger.warning(
                         "simulator.real.clearing_failed run_id=%s tick=%s eq=%s",
@@ -570,7 +661,7 @@ class RealClearingEngine:
                         run._error_timestamps.popleft()
                     run.last_error = {
                         "code": "CLEARING_ERROR",
-                        "message": str(e),
+                        "message": GeoException().message,
                         "at": self._utc_now().isoformat(),
                     }
                 continue

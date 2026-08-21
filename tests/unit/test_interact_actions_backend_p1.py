@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 from decimal import Decimal
 from types import SimpleNamespace
@@ -9,18 +10,24 @@ import pytest
 from sqlalchemy import select
 
 from app.config import settings
+from app.core.clearing.service import ClearingCommittedAfterCancellation
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.schemas.simulator import (
     SimulatorActionClearingCycle,
+    SimulatorActionClearingRealRequest,
     SimulatorActionEdgeRef,
     SimulatorGraphLink,
     SimulatorGraphNode,
     SimulatorGraphSnapshot,
 )
-from app.utils.exceptions import RoutingException
+from app.utils.exceptions import (
+    GeoException,
+    RetryablePaymentConflictException,
+    RoutingException,
+)
 
 
 @pytest.fixture
@@ -775,6 +782,48 @@ async def test_action_payment_real_no_route_mocked(client, db_session, interact_
 
 
 @pytest.mark.asyncio
+async def test_action_payment_real_retryable_conflict_is_not_rejected(
+    client,
+    db_session,
+    interact_actions_enabled,
+    monkeypatch,
+):
+    await _seed_alice_bob_uah(db_session)
+    headers = {"X-Admin-Token": settings.ADMIN_TOKEN}
+
+    async def _retryable_conflict(self, *_args, **_kwargs):
+        raise RetryablePaymentConflictException()
+
+    monkeypatch.setattr(
+        interact_actions_enabled.PaymentService,
+        "create_payment_internal",
+        _retryable_conflict,
+    )
+
+    response = await client.post(
+        "/api/v1/simulator/runs/test-run/actions/payment-real",
+        headers=headers,
+        json={
+            "from_pid": "alice",
+            "to_pid": "bob",
+            "equivalent": "UAH",
+            "amount": "1",
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "code": "CONFLICT",
+        "message": "State conflict",
+        "details": {
+            "retryable": True,
+            "conflict_kind": "database_concurrency",
+        },
+    }
+    assert response.json()["code"] != "PAYMENT_REJECTED"
+
+
+@pytest.mark.asyncio
 async def test_action_payment_real_insufficient_capacity_when_topology_path_exists(
     client, db_session, interact_actions_enabled, monkeypatch
 ):
@@ -1121,6 +1170,225 @@ async def test_action_clearing_real_total_cleared_amount_is_actual_not_precalc(
     assert Decimal(str(payload["total_cleared_amount"])) == Decimal("5")
     assert isinstance(payload.get("cycles"), list)
     assert Decimal(str(payload["cycles"][0]["cleared_amount"])) == Decimal("5")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure_kind",
+    [
+        "geo",
+        "unexpected",
+        "cancelled_execute",
+        "cancelled_finalize",
+        "committed_cancel",
+    ],
+)
+async def test_action_clearing_real_emits_durable_partial_done_before_sanitized_failure(
+    client,
+    db_session,
+    interact_actions_enabled,
+    monkeypatch,
+    failure_kind,
+):
+    await _seed_alice_bob_uah(db_session)
+
+    cycles = [
+        [
+            {
+                "debt_id": str(uuid.uuid4()),
+                "debtor": "alice",
+                "creditor": "bob",
+                "amount": "2.5",
+            }
+        ],
+        [
+            {
+                "debt_id": str(uuid.uuid4()),
+                "debtor": "bob",
+                "creditor": "alice",
+                "amount": "1",
+            }
+        ],
+    ]
+    find_calls = 0
+    execute_calls = 0
+
+    async def _find_cycles(self, equivalent_code: str, max_depth: int = 6):
+        nonlocal find_calls
+        assert equivalent_code == "UAH"
+        assert max_depth == 6
+        cycle = cycles[min(find_calls, len(cycles) - 1)]
+        find_calls += 1
+        return [cycle]
+
+    async def _execute_clearing(self, cycle):
+        nonlocal execute_calls
+        execute_calls += 1
+        if failure_kind == "committed_cancel" and execute_calls == 1:
+            raise ClearingCommittedAfterCancellation(
+                tx_id="clearing-committed",
+                cleared_amount=Decimal("2.5"),
+            )
+        if execute_calls == 1:
+            assert cycle is cycles[0]
+            return Decimal("2.5")
+        assert cycle is cycles[1]
+        if failure_kind == "geo":
+            raise GeoException(details={"safe_context": "retry_exhausted"}) from RuntimeError(
+                "raw clearing failure secret"
+            )
+        if failure_kind == "cancelled_execute":
+            raise asyncio.CancelledError
+        if failure_kind == "cancelled_finalize":
+            return None
+        raise RuntimeError("raw clearing failure secret")
+
+    monkeypatch.setattr(
+        interact_actions_enabled.ClearingService,
+        "find_cycles",
+        _find_cycles,
+    )
+    monkeypatch.setattr(
+        interact_actions_enabled.ClearingService,
+        "execute_clearing_with_amount",
+        _execute_clearing,
+    )
+
+    patch_calls = 0
+
+    async def _no_patches(**_kwargs):
+        nonlocal patch_calls
+        patch_calls += 1
+        if failure_kind == "cancelled_finalize" and patch_calls == 1:
+            raise asyncio.CancelledError
+        return None, None
+
+    monkeypatch.setattr(
+        interact_actions_enabled,
+        "_compute_viz_patches_best_effort",
+        _no_patches,
+    )
+
+    emitted: list[dict] = []
+
+    class _FakeEmitter:
+        def __init__(self, *, sse, utc_now, logger):
+            return None
+
+        def emit_clearing_done(self, **kwargs) -> None:
+            emitted.append({"type": "clearing.done", **kwargs})
+
+    monkeypatch.setattr(interact_actions_enabled, "SseEventEmitter", _FakeEmitter)
+
+    if failure_kind.startswith("cancelled") or failure_kind == "committed_cancel":
+        with pytest.raises(asyncio.CancelledError):
+            await interact_actions_enabled.action_clearing_real(
+                "test-run",
+                SimulatorActionClearingRealRequest(
+                    equivalent="UAH",
+                    max_depth=6,
+                ),
+                SimpleNamespace(is_admin=True, owner_id="admin"),
+                db_session,
+            )
+        response = None
+    else:
+        response = await client.post(
+            "/api/v1/simulator/runs/test-run/actions/clearing-real",
+            headers={"X-Admin-Token": settings.ADMIN_TOKEN},
+            json={"equivalent": "UAH", "max_depth": 6},
+        )
+
+    expected_details = {
+        "partial_cleared_cycles": 1,
+        "partial_cleared_amount": "2.5",
+    }
+    if failure_kind == "geo":
+        expected_details = {
+            "safe_context": "retry_exhausted",
+            **expected_details,
+        }
+    if response is not None:
+        assert response.status_code == 500
+        assert response.json() == {
+            "code": "CLEARING_FAILED",
+            "message": "Clearing failed",
+            "details": expected_details,
+        }
+        assert "raw clearing failure secret" not in response.text
+    assert execute_calls == (1 if failure_kind == "committed_cancel" else 2)
+    assert len(emitted) == 1
+    assert emitted[0]["type"] == "clearing.done"
+    assert emitted[0]["equivalent"] == "UAH"
+    assert emitted[0]["cleared_cycles"] == 1
+    assert emitted[0]["cleared_amount"] == "2.5"
+    assert "raw clearing failure secret" not in str(emitted[0])
+    if failure_kind.startswith("cancelled") or failure_kind == "committed_cancel":
+        assert emitted[0]["node_patch"] is None
+        assert emitted[0]["edge_patch"] is None
+    if failure_kind in {"cancelled_execute", "committed_cancel"}:
+        assert patch_calls == 0
+    else:
+        assert patch_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_action_clearing_real_initial_failure_uses_flat_sanitized_error(
+    client,
+    db_session,
+    interact_actions_enabled,
+    monkeypatch,
+    caplog,
+):
+    await _seed_alice_bob_uah(db_session)
+    cycle = [
+        {
+            "debt_id": str(uuid.uuid4()),
+            "debtor": "alice",
+            "creditor": "bob",
+            "amount": "2.5",
+        }
+    ]
+
+    async def _find_cycles(*_args, **_kwargs):
+        return [cycle]
+
+    async def _execute_clearing(*_args, **_kwargs):
+        raise RuntimeError("raw initial clearing secret")
+
+    async def _unexpected_done(*_args, **_kwargs):
+        raise AssertionError("zero-progress failure must not emit clearing.done")
+
+    monkeypatch.setattr(
+        interact_actions_enabled.ClearingService,
+        "find_cycles",
+        _find_cycles,
+    )
+    monkeypatch.setattr(
+        interact_actions_enabled.ClearingService,
+        "execute_clearing_with_amount",
+        _execute_clearing,
+    )
+    monkeypatch.setattr(
+        interact_actions_enabled,
+        "_emit_interact_clearing_done_best_effort",
+        _unexpected_done,
+    )
+
+    response = await client.post(
+        "/api/v1/simulator/runs/test-run/actions/clearing-real",
+        headers={"X-Admin-Token": settings.ADMIN_TOKEN},
+        json={"equivalent": "UAH", "max_depth": 6},
+    )
+
+    assert response.status_code == 500
+    assert response.json() == {
+        "code": "CLEARING_FAILED",
+        "message": "Clearing failed",
+        "details": None,
+    }
+    assert "raw initial clearing secret" not in response.text
+    assert "event=simulator.interact.clearing_failed" in caplog.text
 
 
 @pytest.mark.asyncio

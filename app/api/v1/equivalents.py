@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import deps
 from app.db.models.equivalent import Equivalent as EquivalentModel
-from app.schemas.equivalents import EquivalentsList, Equivalent
+from app.schemas.equivalents import EquivalentsList, StoredEquivalent
 
 router = APIRouter()
 
@@ -24,4 +24,4 @@ async def list_equivalents(
         )
     ).scalars().all()
 
-    return EquivalentsList(items=[Equivalent.model_validate(x) for x in items])
+    return EquivalentsList(items=[StoredEquivalent.model_validate(x) for x in items])

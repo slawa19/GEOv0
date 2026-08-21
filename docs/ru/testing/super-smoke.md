@@ -1,53 +1,32 @@
-# Super Smoke Test (v2)
+# Simulator super-smoke
 
-«Cупер смок» (`tests/integration/test_simulator_super_smoke.py`) — это главная линия обороны против регрессий в симуляторе. Он проверяет всё: от старта HTTP-сервера до визуализации графа и корректности клиринга.
+Super-smoke — дорогой backend milestone для сценария Simulator через fixtures,
+deterministic real logic и real-mode HTTP startup. Он не предназначен для
+внутреннего debug-цикла.
 
-## Что он проверяет?
-
-Тест разбит на 3 независимые части:
-
-1.  **Part 1: Fixtures & Visual Contract**
-    *   Запускает сценарий `fixtures` через HTTP.
-    *   Проверяет `tx-once` и `clearing-once` (атомарные действия дебага).
-    *   **Главное**: проверяет, что ребра в событиях `tx.updated` и `clearing.done` реально существуют в `graph/snapshot`.
-    *   Это гарантирует, что Simulator UI не упадет с ошибкой "Node/Edge not found".
-
-2.  **Part 2: Real Logic (Deterministic)**
-    *   Работает **без HTTP**, напрямую с движками (`RealClearingEngine`).
-    *   Создает детерминированную топологию (A->B->C->A) в изолированной SQLite.
-    *   Проводит вложенный платеж (`begin_nested` + `commit=False`) — ловит баги транзакций.
-    *   Запускает цикл клиринга и проверяет формат патчей (`node_patch`, `edge_patch`).
-
-3.  **Part 3: Real Mode HTTP Startup**
-    *   Создает `real` режим через API.
-    *   Проверяет, что `run_status` приходит по SSE (heartbeat).
-    *   Гарантирует, что real-mode seeding не сломан.
-
-## Когда запускать?
-
-Запускайте этот тест (он быстрый, ~2-3 сек) перед любым коммитом, который касается:
-*   Симулятора (Real Mode, Fixtures Mode).
-*   SSE-событий (формат полей, сериализация).
-*   Базовых механизмов БД (сессии, транзакции).
+## Канонический запуск
 
 ```powershell
-# Запуск
-.\.venv\Scripts\python.exe -m pytest tests/integration/test_simulator_super_smoke.py -vv
+.\scripts\verify_local.ps1 -TaskSlug simulator_super_smoke -BackendOnly `
+  -BackendSelector tests/integration/test_simulator_super_smoke.py -IncludeExpensive
 ```
 
-## Как обновлять?
+Команда изолирует SQLite, pytest basetemp/cache и postmortem output под
+`.local-run/test-runs/simulator_super_smoke/`. Для параллельного запуска назначьте
+другой `TaskSlug`; shared DB/output запрещены.
 
-Если вы меняете логику симулятора или состав полей SSE:
-1.  Запустите тест — он упадет и покажет diff.
-2.  Если изменение намеренное (например, переименовали поле в API) — обновите валидаторы в `test_simulator_super_smoke.py` (`_validate_run_status`, `_validate_clearing_done` и т.д.).
-3.  **Не удаляйте проверки**, если они кажутся "лишними" — они там, чтобы frontend не падал молча.
+## Когда запускать
 
-## Артефакты (Postmortem)
+- после изменения simulator runtime или SSE lifecycle;
+- после изменения payments/clearing, потребляемого simulator;
+- после изменения schema/serialization UI-facing events;
+- перед merge связного simulator milestone.
 
-При падении тест сохраняет полный дамп (события, логи, эксепшны) в JSON:
-`test-results/super-simulator/test_super_smoke_partX_YYYYMMDD-HHMMSS-uuuuuu.json`
+Успех super-smoke не доказывает браузерный UX, Postgres concurrency или полный
+required local gate. Их результаты сообщаются отдельно.
 
-Можно включить сохранение дампа даже при успехе (для отладки CI):
-```powershell
-$env:GEO_TEST_DUMP_SUPER_SIM="1"; .\.venv\Scripts\python.exe -m pytest ...
-```
+## Failure artifacts
+
+При падении тест пишет диагностические файлы в task-local `artifacts/`. Эти файлы
+ignored, не являются fixtures и не коммитятся. Канонические demo fixtures меняются
+через generator/sync scripts с проверкой детерминированного diff.

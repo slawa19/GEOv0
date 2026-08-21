@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Request
-from pydantic import TypeAdapter, ValidationError
-from sqlalchemy import String, cast, desc, func, select, and_, case, union_all
+from pydantic import TypeAdapter, ValidationError, WithJsonSchema
+from sqlalchemy import String, cast, desc, func, select, and_, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -38,6 +39,7 @@ from app.schemas.admin import (
     AdminFeatureFlagsPatchRequest,
     AdminMigrationsStatus,
     AdminParticipantActionRequest,
+    AdminParticipantStatusResponse,
     AdminParticipantsListResponse,
     AdminIncidentsListResponse,
     AdminLiquiditySummaryResponse,
@@ -48,7 +50,8 @@ from app.schemas.admin import (
     AdminWhoAmIResponse,
 )
 from app.schemas.equivalents import Equivalent as EquivalentSchema
-from app.schemas.equivalents import EquivalentsList
+from app.schemas.equivalents import EquivalentsList, StoredEquivalent
+from app.schemas.common import ErrorEnvelope
 from app.schemas.graph import (
     AdminClearingCycleEdge,
     AdminClearingCyclesForEquivalent,
@@ -60,11 +63,18 @@ from app.schemas.graph import (
 )
 from app.schemas.trustline import TrustLine as TrustLineSchema
 from app.core.clearing.service import ClearingService
-from app.core.admin.metrics import compute_participant_metrics
+from app.core.admin.metrics import compute_participant_metrics, is_ratio_below_threshold
 from app.core.trustlines.service import TrustLineService
 from app.core.payments.engine import PaymentEngine
-from app.utils.exceptions import BadRequestException, ConflictException, NotFoundException
-from app.utils.validation import validate_equivalent_code
+from app.utils.exceptions import (
+    BadRequestException,
+    ConflictException,
+    NotFoundException,
+    TimeoutException,
+)
+from app.utils.metrics import PAYMENT_EVENTS_TOTAL
+from app.utils.request_id import new_request_id, request_id_var, validate_request_id
+from app.utils.validation import validate_equivalent_code, validate_equivalent_precision
 
 from app.schemas.metrics import AdminParticipantMetricsResponse
 
@@ -82,6 +92,17 @@ _ACTIVE_PAYMENT_TX_STATES: set[str] = {
     "PROPOSED",
     "WAITING",
 }
+
+_DecimalThreshold = Annotated[
+    Decimal,
+    Query(ge=0.0, le=1.0),
+    WithJsonSchema({"type": "number", "minimum": 0, "maximum": 1}),
+]
+_OptionalDecimalThreshold = Annotated[
+    Decimal | None,
+    Query(ge=0.0, le=1.0),
+    WithJsonSchema({"type": "number", "minimum": 0, "maximum": 1}),
+]
 
 
 def _participant_status_db_values_for_filter(status: str | None) -> list[str] | None:
@@ -252,7 +273,7 @@ def _validate_runtime_config_updates(updates: dict[str, Any]) -> dict[str, Any]:
     return validated
 
 
-async def _audit(
+def _add_audit_entry(
     db: AsyncSession,
     *,
     request: Request,
@@ -262,35 +283,89 @@ async def _audit(
     reason: str | None = None,
     before_state: dict[str, Any] | None = None,
     after_state: dict[str, Any] | None = None,
-    required: bool = False,
+) -> AuditLog:
+    rid = validate_request_id(request_id_var.get())
+    if rid is None:
+        rid = validate_request_id(request.headers.get("X-Request-ID")) or new_request_id()
+    ip = (request.client.host if request.client else None) or None
+    ua = request.headers.get("user-agent")
+    entry = AuditLog(
+        actor_id=None,
+        actor_role="admin",
+        action=action,
+        object_type=object_type,
+        object_id=object_id,
+        reason=reason,
+        before_state=before_state,
+        after_state=after_state,
+        request_id=rid,
+        ip_address=ip,
+        user_agent=ua,
+    )
+    db.add(entry)
+    return entry
+
+
+async def _required_audit_and_publish(
+    db: AsyncSession,
+    *,
+    publish: Callable[[], None],
+    request: Request,
+    action: str,
+    object_type: str | None = None,
+    object_id: str | None = None,
+    reason: str | None = None,
+    before_state: dict[str, Any] | None = None,
+    after_state: dict[str, Any] | None = None,
 ) -> None:
-    try:
-        rid = request.headers.get("X-Request-ID")
-        ip = (request.client.host if request.client else None) or None
-        ua = request.headers.get("user-agent")
-        db.add(
-            AuditLog(
-                actor_id=None,
-                actor_role="admin",
-                action=action,
-                object_type=object_type,
-                object_id=object_id,
-                reason=reason,
-                before_state=before_state,
-                after_state=after_state,
-                request_id=rid,
-                ip_address=ip,
-                user_agent=ua,
-            )
+    async def _operation() -> None:
+        _add_audit_entry(
+            db,
+            request=request,
+            action=action,
+            object_type=object_type,
+            object_id=object_id,
+            reason=reason,
+            before_state=before_state,
+            after_state=after_state,
         )
         await db.commit()
-    except asyncio.CancelledError:
+        publish()
+
+    task = asyncio.create_task(_operation())
+    cancellation: asyncio.CancelledError | None = None
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError as exc:
+            if task.done():
+                continue
+            current = asyncio.current_task()
+            if current is None or not current.cancelling():
+                continue
+            if cancellation is not None:
+                # Keep the request session and runtime-config lock alive until
+                # the cancelled database operation has reached a terminal
+                # state. Detaching here would race dependency cleanup and let
+                # an older publish overwrite a newer patch.
+                task.cancel("repeated caller cancellation")
+                continue
+            cancellation = exc
+        except Exception:
+            pass
+
+    operation_error: BaseException | None = None
+    try:
+        task.result()
+    except BaseException as exc:
+        operation_error = exc
+
+    if operation_error is not None:
         await db.rollback()
-        raise
-    except Exception:
-        await db.rollback()
-        if required:
-            raise
+    if cancellation is not None:
+        raise cancellation
+    if operation_error is not None:
+        raise operation_error
 
 
 @router.get("/config", response_model=AdminConfigResponse, dependencies=[])
@@ -312,8 +387,18 @@ async def patch_admin_config(
         before = {key: getattr(settings, key) for key in validated}
         after = dict(validated)
 
-        await _audit(
+        def _publish() -> None:
+            try:
+                for key, value in validated.items():
+                    setattr(settings, key, value)
+            except BaseException:
+                for key, value in before.items():
+                    setattr(settings, key, value)
+                raise
+
+        await _required_audit_and_publish(
             db,
+            publish=_publish,
             request=request,
             action="admin.config.patch",
             object_type="config",
@@ -321,16 +406,7 @@ async def patch_admin_config(
             reason=body.reason,
             before_state=before or None,
             after_state=after or None,
-            required=True,
         )
-
-        try:
-            for key, value in validated.items():
-                setattr(settings, key, value)
-        except BaseException:
-            for key, value in before.items():
-                setattr(settings, key, value)
-            raise
 
         return AdminConfigPatchResponse(updated=list(validated))
 
@@ -370,8 +446,26 @@ async def patch_feature_flags(
         if body.clearing_enabled is not None:
             after["clearing_enabled"] = body.clearing_enabled
 
-        await _audit(
+        def _publish() -> None:
+            try:
+                settings.FEATURE_FLAGS_MULTIPATH_ENABLED = after["multipath_enabled"]
+                settings.FEATURE_FLAGS_FULL_MULTIPATH_ENABLED = after[
+                    "full_multipath_enabled"
+                ]
+                settings.CLEARING_ENABLED = after["clearing_enabled"]
+            except BaseException:
+                settings.FEATURE_FLAGS_MULTIPATH_ENABLED = before[
+                    "multipath_enabled"
+                ]
+                settings.FEATURE_FLAGS_FULL_MULTIPATH_ENABLED = before[
+                    "full_multipath_enabled"
+                ]
+                settings.CLEARING_ENABLED = before["clearing_enabled"]
+                raise
+
+        await _required_audit_and_publish(
             db,
+            publish=_publish,
             request=request,
             action="admin.feature_flags.patch",
             object_type="feature_flags",
@@ -379,23 +473,7 @@ async def patch_feature_flags(
             reason=body.reason,
             before_state=before,
             after_state=after,
-            required=True,
         )
-
-        try:
-            if body.multipath_enabled is not None:
-                settings.FEATURE_FLAGS_MULTIPATH_ENABLED = body.multipath_enabled
-            if body.full_multipath_enabled is not None:
-                settings.FEATURE_FLAGS_FULL_MULTIPATH_ENABLED = body.full_multipath_enabled
-            if body.clearing_enabled is not None:
-                settings.CLEARING_ENABLED = body.clearing_enabled
-        except BaseException:
-            settings.FEATURE_FLAGS_MULTIPATH_ENABLED = before["multipath_enabled"]
-            settings.FEATURE_FLAGS_FULL_MULTIPATH_ENABLED = before[
-                "full_multipath_enabled"
-            ]
-            settings.CLEARING_ENABLED = before["clearing_enabled"]
-            raise
 
         return AdminFeatureFlags(**after)
 
@@ -486,15 +564,13 @@ async def admin_participants_stats(
     )
 
 
-@router.get("/trustlines/bottlenecks", response_model=AdminTrustLinesBottlenecksResponse)
-async def admin_trustlines_bottlenecks(
-    threshold: float = Query(0.10, ge=0.0, le=1.0),
-    limit: int = Query(10, ge=1, le=50),
-    equivalent: str | None = Query(None, description="Equivalent code (optional)"),
-    db: AsyncSession = Depends(deps.get_db),
-) -> AdminTrustLinesBottlenecksResponse:
-    eq_code = str(equivalent or "").strip().upper() or None
-
+async def _load_admin_trustline_bottlenecks(
+    *,
+    threshold: Decimal,
+    limit: int,
+    equivalent: str | None,
+    db: AsyncSession,
+) -> tuple[int, list[TrustLineSchema]]:
     p_from = aliased(Participant)
     p_to = aliased(Participant)
     used_expr = func.coalesce(Debt.amount, 0)
@@ -531,16 +607,15 @@ async def admin_trustlines_bottlenecks(
         .where(
             TrustLine.status == "active",
             TrustLine.limit > 0,
-            (available_expr / TrustLine.limit) < float(threshold),
         )
         .order_by(available_expr.asc(), TrustLine.created_at.asc())
-        .limit(limit)
     )
 
-    if eq_code:
-        stmt = stmt.where(EquivalentModel.code == eq_code)
+    if equivalent:
+        stmt = stmt.where(EquivalentModel.code == equivalent)
 
     rows = (await db.execute(stmt)).all()
+    total = 0
     items: list[TrustLineSchema] = []
     for (
         tl_id,
@@ -557,6 +632,15 @@ async def admin_trustlines_bottlenecks(
         used,
         available,
     ) in rows:
+        if not is_ratio_below_threshold(
+            numerator=available,
+            denominator=limit_value,
+            threshold=threshold,
+        ):
+            continue
+        total += 1
+        if len(items) >= limit:
+            continue
         items.append(
             TrustLineSchema.model_validate(
                 {
@@ -577,17 +661,37 @@ async def admin_trustlines_bottlenecks(
             )
         )
 
-    return AdminTrustLinesBottlenecksResponse(threshold=float(threshold), items=items)
+    return total, items
+
+
+@router.get("/trustlines/bottlenecks", response_model=AdminTrustLinesBottlenecksResponse)
+async def admin_trustlines_bottlenecks(
+    threshold: _DecimalThreshold = 0.10,
+    limit: int = Query(10, ge=1, le=50),
+    equivalent: str | None = Query(None, description="Equivalent code (optional)"),
+    db: AsyncSession = Depends(deps.get_db),
+) -> AdminTrustLinesBottlenecksResponse:
+    eq_code = str(equivalent or "").strip().upper() or None
+    threshold_dec = Decimal(str(threshold))
+    _, items = await _load_admin_trustline_bottlenecks(
+        threshold=threshold_dec,
+        limit=limit,
+        equivalent=eq_code,
+        db=db,
+    )
+
+    return AdminTrustLinesBottlenecksResponse(threshold=float(threshold_dec), items=items)
 
 
 @router.get("/liquidity/summary", response_model=AdminLiquiditySummaryResponse)
 async def admin_liquidity_summary(
     equivalent: str | None = Query(None, description="Equivalent code (optional; omit for ALL)"),
-    threshold: float = Query(0.10, ge=0.0, le=1.0),
+    threshold: _DecimalThreshold = 0.10,
     limit: int = Query(10, ge=1, le=50, description="Top-N size for ranked lists"),
     db: AsyncSession = Depends(deps.get_db),
 ) -> AdminLiquiditySummaryResponse:
     eq_code = str(equivalent or "").strip().upper() or None
+    threshold_dec = Decimal(str(threshold))
     now = _utc_now()
 
     used_expr = func.coalesce(Debt.amount, 0)
@@ -599,18 +703,6 @@ async def admin_liquidity_summary(
             func.coalesce(func.sum(TrustLine.limit), 0).label("total_limit"),
             func.coalesce(func.sum(used_expr), 0).label("total_used"),
             func.coalesce(func.sum(available_expr), 0).label("total_available"),
-            func.coalesce(
-                func.sum(
-                    case(
-                        (
-                            and_(TrustLine.limit > 0, (available_expr / TrustLine.limit) < float(threshold)),
-                            1,
-                        ),
-                        else_=0,
-                    )
-                ),
-                0,
-            ).label("bottlenecks"),
         )
         .select_from(TrustLine)
         .join(EquivalentModel, TrustLine.equivalent_id == EquivalentModel.id)
@@ -632,7 +724,6 @@ async def admin_liquidity_summary(
     total_limit = totals.total_limit
     total_used = totals.total_used
     total_available = totals.total_available
-    bottlenecks = int(totals.bottlenecks or 0)
 
     # Incidents over SLA ("stuck" payments). Filter by equivalent in Python to keep it portable.
     sla_seconds = int(getattr(settings, "PAYMENT_TX_STUCK_TIMEOUT_SECONDS", 120) or 120)
@@ -699,8 +790,8 @@ async def admin_liquidity_summary(
     top_by_abs_net = [AdminLiquidityNetRow(pid=pid, display_name=dn, net=netv) for pid, dn, netv in top_abs_rows]
 
     # Top bottleneck edges with computed used/available.
-    bottlenecks_env = await admin_trustlines_bottlenecks(
-        threshold=threshold,
+    bottlenecks, bottleneck_items = await _load_admin_trustline_bottlenecks(
+        threshold=threshold_dec,
         limit=limit,
         equivalent=eq_code,
         db=db,
@@ -708,7 +799,7 @@ async def admin_liquidity_summary(
 
     return AdminLiquiditySummaryResponse(
         equivalent=eq_code,
-        threshold=float(threshold),
+        threshold=float(threshold_dec),
         updated_at=now,
         active_trustlines=active_trustlines,
         bottlenecks=bottlenecks,
@@ -719,7 +810,7 @@ async def admin_liquidity_summary(
         top_creditors=top_creditors,
         top_debtors=top_debtors,
         top_by_abs_net=top_by_abs_net,
-        top_bottleneck_edges=bottlenecks_env.items,
+        top_bottleneck_edges=bottleneck_items,
     )
 
 
@@ -740,24 +831,30 @@ async def _set_participant_status(
 
     before = {"status": participant.status}
     participant.status = status_value
-    await db.commit()
-    await db.refresh(participant)
+    result = {"pid": participant.pid, "status": participant.status}
+    try:
+        _add_audit_entry(
+            db,
+            request=request,
+            action=audit_action,
+            object_type="participant",
+            object_id=pid,
+            reason=body.reason,
+            before_state=before,
+            after_state={"status": participant.status},
+        )
+        await db.commit()
+    except BaseException:
+        await db.rollback()
+        raise
 
-    await _audit(
-        db,
-        request=request,
-        action=audit_action,
-        object_type="participant",
-        object_id=pid,
-        reason=body.reason,
-        before_state=before,
-        after_state={"status": participant.status},
-    )
-
-    return {"pid": participant.pid, "status": participant.status}
+    return result
 
 
-@router.post("/participants/{pid}/freeze")
+@router.post(
+    "/participants/{pid}/freeze",
+    response_model=AdminParticipantStatusResponse,
+)
 async def freeze_participant(
     pid: str,
     body: AdminParticipantActionRequest,
@@ -774,7 +871,10 @@ async def freeze_participant(
     )
 
 
-@router.post("/participants/{pid}/unfreeze")
+@router.post(
+    "/participants/{pid}/unfreeze",
+    response_model=AdminParticipantStatusResponse,
+)
 async def unfreeze_participant(
     pid: str,
     body: AdminParticipantActionRequest,
@@ -934,26 +1034,67 @@ async def abort_transaction(
     ).scalar_one_or_none()
     if tx is None:
         raise NotFoundException(f"Transaction {tx_id} not found")
+    if tx.state == "COMMITTED":
+        await db.rollback()
+        raise ConflictException("Transaction is already committed")
 
     before = {"state": tx.state, "error": tx.error}
 
     engine = PaymentEngine(db)
-    await engine.abort(tx_id, reason=body.reason)
+    try:
+        audit_entry = _add_audit_entry(
+            db,
+            request=request,
+            action="admin.transactions.abort",
+            object_type="transaction",
+            object_id=tx_id,
+            reason=body.reason,
+            before_state=before,
+            after_state=None,
+        )
+        # Establish the outer transaction before PaymentEngine opens its retry
+        # savepoint; neither the staged abort nor this audit is durable yet.
+        await db.flush()
+        abort_timeout_s = max(
+            0.001,
+            min(
+                float(settings.PAYMENT_TOTAL_TIMEOUT_SECONDS or 10),
+                float(settings.COMMIT_TIMEOUT_SECONDS or 5),
+            ),
+        )
+        try:
+            abort_outcome = await asyncio.wait_for(
+                engine.abort(
+                    tx_id,
+                    reason=body.reason,
+                    commit=False,
+                    return_outcome=True,
+                ),
+                timeout=abort_timeout_s,
+            )
+        except asyncio.TimeoutError as exc:
+            raise TimeoutException("Admin transaction abort timed out") from exc
 
-    tx2 = (
-        await db.execute(select(Transaction).where(Transaction.tx_id == tx_id))
-    ).scalar_one()
+        tx2 = (
+            await db.execute(
+                select(Transaction)
+                .where(Transaction.tx_id == tx_id)
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one()
+        if tx2.state == "COMMITTED":
+            raise ConflictException("Transaction is already committed")
 
-    await _audit(
-        db,
-        request=request,
-        action="admin.transactions.abort",
-        object_type="transaction",
-        object_id=tx_id,
-        reason=body.reason,
-        before_state=before,
-        after_state={"state": tx2.state, "error": tx2.error},
-    )
+        audit_entry.after_state = {"state": tx2.state, "error": tx2.error}
+        await db.commit()
+    except BaseException:
+        await db.rollback()
+        raise
+
+    try:
+        PAYMENT_EVENTS_TOTAL.labels(event="abort", result=abort_outcome).inc()
+    except Exception:
+        pass
 
     return AdminAbortTxResponse(tx_id=tx_id, status="aborted")
 
@@ -967,7 +1108,7 @@ async def admin_list_equivalents(
     if not include_inactive:
         stmt = stmt.where(EquivalentModel.is_active.is_(True))
     items = (await db.execute(stmt.order_by(EquivalentModel.code.asc()))).scalars().all()
-    return EquivalentsList(items=[EquivalentSchema.model_validate(x) for x in items])
+    return EquivalentsList(items=[StoredEquivalent.model_validate(x) for x in items])
 
 
 @router.post("/equivalents", response_model=EquivalentSchema)
@@ -985,22 +1126,37 @@ async def admin_create_equivalent(
         is_active=body.is_active,
     )
     db.add(eq)
-    await db.commit()
-    await db.refresh(eq)
-    await _audit(
-        db,
-        request=request,
-        action="admin.equivalents.create",
-        object_type="equivalent",
-        object_id=eq.code,
-        reason=body.reason,
-        before_state=None,
-        after_state={"code": eq.code, "is_active": eq.is_active},
-    )
-    return EquivalentSchema.model_validate(eq)
+    try:
+        await db.flush()
+        await db.refresh(eq)
+        result = EquivalentSchema.model_validate(eq)
+        _add_audit_entry(
+            db,
+            request=request,
+            action="admin.equivalents.create",
+            object_type="equivalent",
+            object_id=eq.code,
+            reason=body.reason,
+            before_state=None,
+            after_state={"code": eq.code, "is_active": eq.is_active},
+        )
+        await db.commit()
+    except BaseException:
+        await db.rollback()
+        raise
+    return result
 
 
-@router.patch("/equivalents/{code}", response_model=EquivalentSchema)
+@router.patch(
+    "/equivalents/{code}",
+    response_model=EquivalentSchema,
+    responses={
+        409: {
+            "model": ErrorEnvelope,
+            "description": "Stored equivalent requires an explicit legacy-data repair",
+        }
+    },
+)
 async def admin_update_equivalent(
     code: str,
     body: AdminEquivalentUpdateRequest,
@@ -1012,6 +1168,31 @@ async def admin_update_equivalent(
     ).scalar_one_or_none()
     if eq is None:
         raise NotFoundException(f"Equivalent {code} not found")
+
+    try:
+        validate_equivalent_code(eq.code)
+    except BadRequestException:
+        raise ConflictException(
+            "Legacy equivalent code requires manual cleanup",
+            details={
+                "code": eq.code,
+                "reason": "noncanonical_code",
+                "repair": "manual_cleanup",
+            },
+        )
+
+    try:
+        validate_equivalent_precision(eq.precision)
+    except BadRequestException:
+        if body.precision is None:
+            raise ConflictException(
+                "Legacy equivalent precision must be repaired by this PATCH",
+                details={
+                    "code": eq.code,
+                    "reason": "noncanonical_precision",
+                    "repair": "patch_precision",
+                },
+            )
 
     before = {
         "symbol": eq.symbol,
@@ -1031,28 +1212,33 @@ async def admin_update_equivalent(
     if body.is_active is not None:
         eq.is_active = body.is_active
 
-    await db.commit()
-    await db.refresh(eq)
+    try:
+        await db.flush()
+        await db.refresh(eq)
+        after = {
+            "symbol": eq.symbol,
+            "description": eq.description,
+            "precision": eq.precision,
+            "metadata": eq.metadata_,
+            "is_active": eq.is_active,
+        }
+        result = EquivalentSchema.model_validate(eq)
+        _add_audit_entry(
+            db,
+            request=request,
+            action="admin.equivalents.patch",
+            object_type="equivalent",
+            object_id=eq.code,
+            reason=body.reason,
+            before_state=before,
+            after_state=after,
+        )
+        await db.commit()
+    except BaseException:
+        await db.rollback()
+        raise
 
-    after = {
-        "symbol": eq.symbol,
-        "description": eq.description,
-        "precision": eq.precision,
-        "metadata": eq.metadata_,
-        "is_active": eq.is_active,
-    }
-    await _audit(
-        db,
-        request=request,
-        action="admin.equivalents.patch",
-        object_type="equivalent",
-        object_id=eq.code,
-        reason=body.reason,
-        before_state=before,
-        after_state=after,
-    )
-
-    return EquivalentSchema.model_validate(eq)
+    return result
 
 
 async def _equivalent_usage_counts(db: AsyncSession, *, equivalent_id) -> dict[str, int]:
@@ -1125,19 +1311,22 @@ async def admin_delete_equivalent(
         "is_active": eq.is_active,
     }
 
-    await db.delete(eq)
-    await db.commit()
-
-    await _audit(
-        db,
-        request=request,
-        action="admin.equivalents.delete",
-        object_type="equivalent",
-        object_id=normalized,
-        reason=body.reason,
-        before_state=before,
-        after_state=None,
-    )
+    try:
+        await db.delete(eq)
+        _add_audit_entry(
+            db,
+            request=request,
+            action="admin.equivalents.delete",
+            object_type="equivalent",
+            object_id=normalized,
+            reason=body.reason,
+            before_state=before,
+            after_state=None,
+        )
+        await db.commit()
+    except BaseException:
+        await db.rollback()
+        raise
 
     return AdminDeleteResponse(deleted=normalized)
 
@@ -1246,7 +1435,7 @@ async def admin_graph_snapshot(
     eq_models = (
         await db.execute(select(EquivalentModel).order_by(EquivalentModel.code.asc()))
     ).scalars().all()
-    equivalents = [EquivalentSchema.model_validate(e) for e in eq_models]
+    equivalents = [StoredEquivalent.model_validate(e) for e in eq_models]
 
     def _eq_precision(code: str) -> int:
         c = str(code or "").strip().upper()
@@ -1621,7 +1810,7 @@ async def admin_graph_ego(
     eq_models = (
         await db.execute(select(EquivalentModel).order_by(EquivalentModel.code.asc()))
     ).scalars().all()
-    equivalents = [EquivalentSchema.model_validate(e) for e in eq_models]
+    equivalents = [StoredEquivalent.model_validate(e) for e in eq_models]
 
     def _eq_precision_ego(code: str) -> int:
         c = str(code or "").strip().upper()
@@ -1986,7 +2175,7 @@ async def admin_clearing_cycles(
 async def admin_participant_metrics(
     pid: str,
     equivalent: str | None = Query(default=None),
-    threshold: float | None = Query(default=None, ge=0.0, le=1.0),
+    threshold: _OptionalDecimalThreshold = None,
     db: AsyncSession = Depends(deps.get_db),
 ) -> AdminParticipantMetricsResponse:
     return await compute_participant_metrics(db, pid=pid, equivalent=equivalent, threshold=threshold)

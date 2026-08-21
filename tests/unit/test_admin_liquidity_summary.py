@@ -120,3 +120,67 @@ async def test_admin_liquidity_summary_smoke(client, db_session, monkeypatch):
     assert edge["from"] == "alice"
     assert edge["to"] == "bob"
     assert edge["equivalent"] == "UAH"
+
+
+@pytest.mark.asyncio
+async def test_admin_liquidity_summary_keeps_high_precision_threshold(client, db_session):
+    alice = Participant(
+        pid="alice_boundary",
+        display_name="Alice Boundary",
+        public_key="D" * 64,
+        type="person",
+        status="active",
+    )
+    bob = Participant(
+        pid="bob_boundary",
+        display_name="Bob Boundary",
+        public_key="E" * 64,
+        type="person",
+        status="active",
+    )
+    uah = Equivalent(
+        code="UAH_BOUNDARY",
+        symbol="UB",
+        description="Boundary equivalent",
+        precision=2,
+        metadata_={},
+        is_active=True,
+    )
+    db_session.add_all([alice, bob, uah])
+    await db_session.flush()
+    db_session.add(
+        TrustLine(
+            from_participant_id=alice.id,
+            to_participant_id=bob.id,
+            equivalent_id=uah.id,
+            limit=Decimal("100.00"),
+            policy=None,
+            status="active",
+        )
+    )
+    db_session.add(
+        Debt(
+            debtor_id=bob.id,
+            creditor_id=alice.id,
+            equivalent_id=uah.id,
+            amount=Decimal("90.00"),
+        )
+    )
+    await db_session.commit()
+
+    headers = {"X-Admin-Token": settings.ADMIN_TOKEN}
+    exact = await client.get(
+        "/api/v1/admin/liquidity/summary?equivalent=UAH_BOUNDARY&threshold=0.10",
+        headers=headers,
+    )
+    above = await client.get(
+        "/api/v1/admin/liquidity/summary?equivalent=UAH_BOUNDARY&threshold=0.10000000000000001",
+        headers=headers,
+    )
+
+    assert exact.status_code == 200
+    assert exact.json()["bottlenecks"] == 0
+    assert exact.json()["top_bottleneck_edges"] == []
+    assert above.status_code == 200
+    assert above.json()["bottlenecks"] == 1
+    assert len(above.json()["top_bottleneck_edges"]) == 1

@@ -69,14 +69,24 @@ Backend пытается реплеить события из in-memory ring-buf
 Настройки replay buffer (env):
 - `SIMULATOR_EVENT_BUFFER_SIZE` (по умолчанию 2000 событий)
 - `SIMULATOR_EVENT_BUFFER_TTL_SEC` (по умолчанию 600 секунд)
+- `SIMULATOR_SSE_SUB_QUEUE_MAX` (по умолчанию 500 событий)
 
-Hardening (после MVP):
-- Backend может завершать SSE stream после получения терминального `run_status.state` = `stopped` или `error`.
-- Backend может включать строгий режим replay: если `Last-Event-ID` старее окна ring-buffer, вернуть 410 и UI делает full refresh (GET run_status + snapshots).
+**Current behavior.** ID выделяется в той же критической секции, где событие
+попадает в replay buffer и очереди подписчиков. Невалидный, чужой, будущий,
+удалённый из buffer или не помещающийся целиком replay cursor безусловно даёт
+`HTTP 410` на обоих active SSE endpoints. Отдельного strict-replay knob нет.
+Если bootstrap tail или обычная live queue переполняется, backend закрывает
+эту подписку и не отправляет события с более высоким ID после образовавшегося
+gap; UI переподключается с последним фактически принятым ID.
 
-Строгий replay (реализовано):
-- env: `SIMULATOR_SSE_STRICT_REPLAY=1`
-- поведение: при слишком старом `Last-Event-ID` endpoint возвращает `HTTP 410`.
+**Intended behavior.** Replay prefix, bootstrap status и live suffix образуют
+одну producer-ordered последовательность. Терминальный `run_status.state` =
+`stopped|error` завершает stream; transport overflow также завершает stream,
+чтобы reconnect/replay восстановил состояние без скрытой потери.
+
+**Optimal target.** Сохранить этот fail-closed контракт при переходе с
+in-memory buffer на durable event log и добавить метрики reconnect/overflow,
+не вводя режим, разрешающий тихий пропуск событий.
 
 ### 2.1.1 Ограничение concurrent SSE connections (реализовано)
 Для базовой защиты от DoS backend ограничивает количество одновременных подписок SSE:
@@ -128,8 +138,12 @@ MVP правило: `run_status` — единственный обязатель
 - `tx.updated`
 - `tx.failed`
 - `clearing.done`
+- `audit.drift`
+- `topology.changed`
 
-См. `docs/ru/simulator/frontend/docs/api.md` — там source of truth для полей `viz_*`.
+Пояснения для UI находятся в
+[`../frontend/docs/api.md`](../frontend/docs/api.md); wire source of truth для
+событий и `viz_*` полей — [`api/openapi.yaml`](../../../../api/openapi.yaml).
 
 ## 5) Ошибки
 - При ошибке выполнения backend:
@@ -166,5 +180,7 @@ MVP правило: `run_status` — единственный обязатель
 | `tx.updated` | SSE | визуальные подсветки транзакций |
 | `tx.failed` | SSE | отказ/ошибка платежа (нормализованный код в `error.code`) |
 | `clearing.done` | SSE | завершение клиринга + `cycle_edges` для FX |
+| `audit.drift` | SSE | обнаруженный integrity drift |
+| `topology.changed` | SSE | изменение topology/graph state |
 
 Команды (REST): `pause`, `resume`, `stop`, `restart` (опц.), `intensity`.

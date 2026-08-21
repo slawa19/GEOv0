@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { computed, ref } from 'vue'
+import { computed, effectScope, nextTick, ref } from 'vue'
 
 const apiMock = vi.hoisted(() => ({
   participantMetrics: vi.fn(),
@@ -219,6 +219,35 @@ describe('useGraphAnalytics (fixtures-first)', () => {
     expect(first.other).toBe('PID_B')
   })
 
+  it('counts canonical participant audit actions in fixture-mode activity', () => {
+    const selected = ref<SelectedInfo | null>({ kind: 'node', pid: 'PID_A', degree: 0, inDegree: 0, outDegree: 0 })
+    const participants = ref<Participant[]>([{ pid: 'PID_A', display_name: 'Alice' }])
+    const graph = useGraphAnalytics({
+      isRealMode: computed(() => false),
+      threshold: ref('0.10'),
+      analyticsEq: computed(() => 'EUR'),
+      precisionByEq: computed(() => new Map([['EUR', 2]])),
+      availableEquivalents: computed(() => ['EUR']),
+      participantByPid: computed(() => new Map(participants.value.map((participant) => [participant.pid, participant]))),
+      participants,
+      trustlines: ref<Trustline[]>([]),
+      debts: ref<Debt[]>([]),
+      incidents: ref<Incident[]>([]),
+      auditLog: ref<AuditLogEntry[]>([{
+        id: '00000000-0000-4000-8000-000000000001',
+        timestamp: new Date().toISOString(),
+        action: 'admin.participants.freeze',
+        object_type: 'participant',
+        object_id: 'PID_A',
+      }]),
+      transactions: ref<Transaction[]>([]),
+      clearingCycles: ref<ClearingCycles | null>(null),
+      selected,
+    })
+
+    expect(graph.selectedActivity.value?.participantOps[7]).toBe(1)
+  })
+
   it('does not let an older metrics rejection replace the latest metrics state', async () => {
     const older = deferred<ReturnType<typeof metricsEnvelope>>()
     const latest = deferred<ReturnType<typeof metricsEnvelope>>()
@@ -256,5 +285,130 @@ describe('useGraphAnalytics (fixtures-first)', () => {
     expect(graph.selectedBalanceRows.value[0]?.net).toBe('2.00')
     expect(graph.metricsError.value).toBeNull()
     expect(graph.metricsLoading.value).toBe(false)
+  })
+
+  it('blocks invalid thresholds and preserves a valid high-precision threshold', async () => {
+    const threshold = ref('1.00000000000000001')
+    const participants = ref<Participant[]>([{ pid: 'PID_A', display_name: 'Alice' }])
+    const graph = useGraphAnalytics({
+      isRealMode: computed(() => true),
+      threshold,
+      analyticsEq: computed(() => 'EUR'),
+      precisionByEq: computed(() => new Map([['EUR', 2]])),
+      availableEquivalents: computed(() => ['EUR']),
+      participantByPid: computed(() => new Map(participants.value.map((participant) => [participant.pid, participant]))),
+      participants,
+      trustlines: ref<Trustline[]>([]),
+      debts: ref<Debt[]>([]),
+      incidents: ref<Incident[]>([]),
+      auditLog: ref<AuditLogEntry[]>([]),
+      transactions: ref<Transaction[]>([]),
+      clearingCycles: ref<ClearingCycles | null>(null),
+      selected: ref<SelectedInfo | null>({ kind: 'node', pid: 'PID_A', degree: 0, inDegree: 0, outDegree: 0 }),
+    })
+
+    await graph.loadSelectedMetrics()
+    expect(apiMock.participantMetrics).not.toHaveBeenCalled()
+    expect(graph.metricsError.value).toBeTruthy()
+
+    apiMock.participantMetrics.mockResolvedValueOnce(metricsEnvelope('1.00'))
+    threshold.value = '0.10000000000000001'
+    await nextTick()
+    await Promise.resolve()
+    expect(apiMock.participantMetrics).toHaveBeenLastCalledWith('PID_A', {
+      equivalent: 'EUR',
+      threshold: '0.10000000000000001',
+    })
+    expect(graph.metricsError.value).toBeNull()
+  })
+
+  it('does not publish pending metrics after scope disposal', async () => {
+    const pendingMetrics = deferred<ReturnType<typeof metricsEnvelope>>()
+    apiMock.participantMetrics.mockReturnValueOnce(pendingMetrics.promise)
+    const participants = ref<Participant[]>([{ pid: 'PID_A', display_name: 'Alice' }])
+    const scope = effectScope()
+    const graph = scope.run(() => useGraphAnalytics({
+      isRealMode: computed(() => true),
+      threshold: ref('0.10'),
+      analyticsEq: computed(() => 'EUR'),
+      precisionByEq: computed(() => new Map([['EUR', 2]])),
+      availableEquivalents: computed(() => ['EUR']),
+      participantByPid: computed(() => new Map(participants.value.map((participant) => [participant.pid, participant]))),
+      participants,
+      trustlines: ref<Trustline[]>([]),
+      debts: ref<Debt[]>([]),
+      incidents: ref<Incident[]>([]),
+      auditLog: ref<AuditLogEntry[]>([]),
+      transactions: ref<Transaction[]>([]),
+      clearingCycles: ref<ClearingCycles | null>(null),
+      selected: ref<SelectedInfo | null>({ kind: 'node', pid: 'PID_A', degree: 0, inDegree: 0, outDegree: 0 }),
+    }))
+    if (!graph) throw new Error('Expected graph analytics owner')
+
+    const pending = graph.loadSelectedMetrics()
+    scope.stop()
+    pendingMetrics.resolve(metricsEnvelope('9.00'))
+    await pending
+
+    expect(graph.selectedBalanceRows.value[0]?.net).not.toBe('9.00')
+    expect(graph.metricsError.value).toBeNull()
+  })
+
+  it('normalizes equivalent keys and preserves non-default precision in fixture analytics', () => {
+    const participants = ref<Participant[]>([
+      { pid: 'PID_A', display_name: 'Alice' },
+      { pid: 'PID_B', display_name: 'Bob' },
+    ])
+    const graph = useGraphAnalytics({
+      isRealMode: computed(() => false),
+      threshold: ref('0.10'),
+      analyticsEq: computed(() => ' eur '),
+      precisionByEq: computed(() => new Map([['EUR', 4]])),
+      availableEquivalents: computed(() => ['eur']),
+      participantByPid: computed(() => new Map(participants.value.map((participant) => [participant.pid, participant]))),
+      participants,
+      trustlines: ref<Trustline[]>([]),
+      debts: ref<Debt[]>([{ debtor: 'PID_A', creditor: 'PID_B', equivalent: 'eur', amount: '0.0001' }]),
+      incidents: ref<Incident[]>([]),
+      auditLog: ref<AuditLogEntry[]>([]),
+      transactions: ref<Transaction[]>([]),
+      clearingCycles: ref<ClearingCycles | null>(null),
+      selected: ref<SelectedInfo | null>({ kind: 'node', pid: 'PID_A', degree: 0, inDegree: 0, outDegree: 0 }),
+    })
+
+    expect(graph.selectedBalanceRows.value).toEqual([
+      expect.objectContaining({ equivalent: 'EUR', total_debt: '0.0001', net: '-0.0001' }),
+    ])
+    expect(graph.netDistribution.value?.min).toBe(-1n)
+  })
+
+  it('fails closed when equivalent precision is unavailable', () => {
+    const participants = ref<Participant[]>([
+      { pid: 'PID_A', display_name: 'Alice' },
+      { pid: 'PID_B', display_name: 'Bob' },
+    ])
+    const graph = useGraphAnalytics({
+      isRealMode: computed(() => false),
+      threshold: ref('0.10'),
+      analyticsEq: computed(() => 'EUR'),
+      precisionByEq: computed(() => new Map()),
+      availableEquivalents: computed(() => ['EUR']),
+      participantByPid: computed(() => new Map(participants.value.map((participant) => [participant.pid, participant]))),
+      participants,
+      trustlines: ref<Trustline[]>([
+        { from: 'PID_A', to: 'PID_B', equivalent: 'EUR', limit: '1.0000', used: '0.0001', available: '0.9999', status: 'active', created_at: 't' },
+      ]),
+      debts: ref<Debt[]>([{ debtor: 'PID_A', creditor: 'PID_B', equivalent: 'EUR', amount: '0.0001' }]),
+      incidents: ref<Incident[]>([]),
+      auditLog: ref<AuditLogEntry[]>([]),
+      transactions: ref<Transaction[]>([]),
+      clearingCycles: ref<ClearingCycles | null>(null),
+      selected: ref<SelectedInfo | null>({ kind: 'node', pid: 'PID_A', degree: 0, inDegree: 0, outDegree: 0 }),
+    })
+
+    expect(graph.selectedBalanceRows.value).toEqual([])
+    expect(graph.selectedCounterpartySplit.value.eq).toBeNull()
+    expect(graph.netDistribution.value).toBeNull()
+    expect(graph.selectedCapacity.value).toBeNull()
   })
 })

@@ -88,6 +88,16 @@ export function useAppFxOverlays<N extends LayoutNodeLike>(deps: {
     timers.clearAll(opts)
   }
 
+  function pushFloatingLabel(...args: Parameters<typeof overlayState.pushFloatingLabel>) {
+    overlayState.pushFloatingLabel(...args)
+    deps.wakeUp?.()
+  }
+
+  function pushClearingAmountOverlay(...args: Parameters<typeof overlayState.pushClearingAmountOverlay>) {
+    overlayState.pushClearingAmountOverlay(...args)
+    deps.wakeUp?.()
+  }
+
   return {
     fxState,
 
@@ -102,9 +112,10 @@ export function useAppFxOverlays<N extends LayoutNodeLike>(deps: {
     addActiveNode: overlayState.addActiveNode,
     pruneActiveNodes: overlayState.pruneActiveNodes,
 
-    pushFloatingLabel: overlayState.pushFloatingLabel,
-    pushClearingAmountOverlay: overlayState.pushClearingAmountOverlay,
+    pushFloatingLabel,
+    pushClearingAmountOverlay,
     pruneFloatingLabels: overlayState.pruneFloatingLabels,
+    hasFloatingLabels: () => overlayState.floatingLabels.length > 0,
 
     resetOverlays: overlayState.resetOverlays,
 

@@ -1,11 +1,10 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import type { Core } from 'cytoscape'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useGraphData } from '../composables/useGraphData'
 import { useGraphAnalytics } from '../composables/useGraphAnalytics'
-import { useGraphVisualization } from '../composables/useGraphVisualization'
-import type { DrawerTab, LabelMode, SelectedInfo } from '../composables/useGraphVisualization'
+import { graphSelectionAnnouncement, useGraphVisualization } from '../composables/useGraphVisualization'
+import type { DrawerTab, GraphElementOption, GraphRebuildOptions, LabelMode, SelectedInfo } from '../composables/useGraphVisualization'
 import {
   DEFAULT_FOCUS_DEPTH,
   DEFAULT_LAYOUT_SPACING,
@@ -15,7 +14,7 @@ import {
 } from '../constants/graph'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import LoadErrorAlert from '../ui/LoadErrorAlert.vue'
-import { t } from '../i18n'
+import { locale, t } from '../i18n'
 import GraphAnalyticsDrawer from './graph/GraphAnalyticsDrawer.vue'
 import GraphLegend from './graph/GraphLegend.vue'
 import GraphFiltersToolbar from './graph/GraphFiltersToolbar.vue'
@@ -29,22 +28,28 @@ import {
 import {
   atomsToDecimal,
   computeSeedLabel,
+  createDebouncedGraphElementSearch,
   extractPidFromText,
+  graphElementOptionsForSearch,
+  guardedGraphSearchCacheAction,
   labelPartsToMode,
   money,
   modeToLabelParts,
   pct,
+  reloadGraphView,
+  syncGraphCoreForView,
+  waitForLatestPendingGraphLoad,
   type LabelPart,
 } from './graph/graphPageHelpers'
 import { useGraphConnections } from './graph/useGraphConnections'
 import { useGraphFocusMode } from './graph/useGraphFocusMode'
 import { useGraphPageStorage } from './graph/useGraphPageStorage'
-import { DEV_GRAPH_DOUBLE_TAP_DELAY_MS } from '../constants/timing'
-import { installGraphDevHooks } from './graph/graphDevHooks'
 import { useGraphPageOptions } from './graph/useGraphPageOptions'
 import { useGraphPageWatchers } from './graph/useGraphPageWatchers'
+import GraphKeyboardNavigator from './graph/GraphKeyboardNavigator.vue'
 import { readQueryString, toLocationQueryRaw } from '../router/query'
 import { useRouteHydrationGuard } from '../composables/useRouteHydrationGuard'
+import { useLatestRequest } from '../composables/useLatestRequest'
 import { effectiveApiMode } from '../api/apiMode'
 
 const route = useRoute()
@@ -66,19 +71,8 @@ function updateRouteQuery(patch: Record<string, unknown>) {
 }
 
 const cyRoot = ref<HTMLElement | null>(null)
-let cy: Core | null = null
-const getCy = () => cy
 
 const { statuses, layoutOptions } = useGraphPageOptions()
-
-const setCy = (next: Core | null) => {
-  cy = next
-
-  // Dev-only E2E hook: lets Playwright tap a node deterministically.
-  if (import.meta.env.DEV) {
-    installGraphDevHooks(next, DEV_GRAPH_DOUBLE_TAP_DELAY_MS)
-  }
-}
 
 const drawerTab = ref<DrawerTab>('summary')
 const drawerEq = ref<string>('ALL')
@@ -150,8 +144,6 @@ const MAX_AUTO_RENDER_NODES = 1500
 const MAX_AUTO_RENDER_EDGES = 8000
 
 const renderOverride = ref(false)
-const cyInitialized = ref(false)
-
 const zoom = ref<number>(1)
 
 const businessLabelParts = computed<LabelPart[]>({
@@ -190,10 +182,11 @@ const {
   precisionByEq,
   incidentRatioByPid: incidentRatioByPidAll,
   participantByPid,
-  loadData,
   refreshSnapshotForEq,
   refreshForFocusMode,
   refreshClearingCyclesForParticipant,
+  invalidateDataOwnership,
+  reloadCurrentView,
 } = useGraphData({
   eq,
   isRealMode,
@@ -268,8 +261,6 @@ const { restore: restoreStorage } = useGraphPageStorage({
 
 const graphViz = useGraphVisualization({
   cyRoot,
-  getCy,
-  setCy,
 
   threshold,
 
@@ -324,7 +315,7 @@ const {
 
   onConnectionRowClick,
 } = useGraphConnections({
-  getCy,
+  getCy: graphViz.getCy,
   participantByPid,
   selected,
   threshold,
@@ -341,14 +332,13 @@ const {
  * The in-file implementation has been removed to keep `GraphPage.vue` focused.
  */
 
+const graphEffectRequests = useLatestRequest()
+let pendingGraphLoad: Promise<unknown> | null = null
+
 onMounted(async () => {
   restoreStorage()
 
   await reloadAll()
-})
-
-onBeforeUnmount(() => {
-  graphViz.destroyCy()
 })
 
 const rawNodesCount = computed(() => (participants.value || []).length)
@@ -357,25 +347,51 @@ const rawEdgesCount = computed(() => (filteredTrustlines.value || []).length)
 const isTooLargeToAutoRender = computed(() => {
   return rawNodesCount.value > MAX_AUTO_RENDER_NODES || rawEdgesCount.value > MAX_AUTO_RENDER_EDGES
 })
+const graphRenderGuardActive = computed(() => isTooLargeToAutoRender.value && !renderOverride.value)
 
-function ensureCyInitialized() {
-  if (cyInitialized.value) return
-  if (isTooLargeToAutoRender.value && !renderOverride.value) return
-  graphViz.initCy()
-  cyInitialized.value = true
+function applyGraphView(rebuildOptions: GraphRebuildOptions) {
+  return syncGraphCoreForView({
+    guarded: graphRenderGuardActive.value,
+    hasCore: () => Boolean(graphViz.getCy()),
+    initialize: graphViz.initCy,
+    destroy: graphViz.destroyCy,
+    rebuild: graphViz.rebuildGraph,
+    rebuildOptions,
+  })
 }
 
 function renderAnyway() {
   renderOverride.value = true
-  ensureCyInitialized()
+  applyGraphView({ fit: true })
 }
 
-async function reloadAll() {
-  await loadData()
-  // If data got smaller after filters/focus changes, auto-init.
-  ensureCyInitialized()
-  // If graph is already initialized, just rebuild it.
-  graphViz.rebuildGraph({ fit: true })
+function reloadGraph(rebuildOptions: { fit: boolean; preserveViewport?: boolean }) {
+  const request = graphEffectRequests.begin()
+  const operation = reloadGraphView({
+    loadData: reloadCurrentView,
+    isCurrent: request.isCurrent,
+    afterLoad: async () => { await nextTick() },
+    applyView: applyGraphView,
+    rebuildOptions,
+  })
+  let tracked!: Promise<boolean>
+  tracked = operation.finally(() => {
+    if (pendingGraphLoad === tracked) pendingGraphLoad = null
+  })
+  pendingGraphLoad = tracked
+  return tracked
+}
+
+async function waitForPendingGraphLoad() {
+  await waitForLatestPendingGraphLoad(() => pendingGraphLoad)
+}
+
+function reloadAll() {
+  return reloadGraph({ fit: true })
+}
+
+function reloadDrawer() {
+  return reloadGraph({ fit: false, preserveViewport: true })
 }
 
 useGraphPageWatchers({
@@ -394,6 +410,8 @@ useGraphPageWatchers({
   refreshForFocusMode,
   refreshSnapshotForEq,
   refreshClearingCyclesForParticipant,
+  invalidateDataOwnership,
+  waitForPendingGraphLoad,
   selected,
   showLabels,
   labelModeBusiness,
@@ -406,16 +424,101 @@ useGraphPageWatchers({
   zoom,
   layoutName,
   layoutSpacing,
+  graphEffectRequests,
+  applyGraphView,
   graphViz,
 })
 
 const stats = computed(() => {
-  if (isTooLargeToAutoRender.value && !renderOverride.value) {
+  if (graphRenderGuardActive.value) {
     return { nodes: rawNodesCount.value, edges: rawEdgesCount.value, bottlenecks: 0 }
   }
   const { nodes, edges } = graphViz.buildElements()
   const bottlenecks = edges.filter((e) => e.data?.bottleneck === 1).length
   return { nodes: nodes.length, edges: edges.length, bottlenecks }
+})
+
+const keyboardElementKey = ref('')
+const keyboardElementQuery = ref('')
+const GUARDED_KEYBOARD_QUERY_MIN = 2
+const GUARDED_KEYBOARD_OPTION_LIMIT = 100
+const GUARDED_KEYBOARD_DEBOUNCE_MS = 200
+const guardedKeyboardElementOptions = ref<GraphElementOption[]>([])
+const guardedKeyboardSearch = createDebouncedGraphElementSearch({
+  delayMs: GUARDED_KEYBOARD_DEBOUNCE_MS,
+  guardedQueryMin: GUARDED_KEYBOARD_QUERY_MIN,
+  guardedLimit: GUARDED_KEYBOARD_OPTION_LIMIT,
+  buildOptions: graphViz.graphElementOptions,
+  publish: (options) => { guardedKeyboardElementOptions.value = options },
+})
+const keyboardElementOptions = computed(() => graphElementOptionsForSearch({
+  guarded: false,
+  query: keyboardElementQuery.value,
+  guardedQueryMin: GUARDED_KEYBOARD_QUERY_MIN,
+  guardedLimit: GUARDED_KEYBOARD_OPTION_LIMIT,
+  buildOptions: graphViz.graphElementOptions,
+}))
+const visibleKeyboardElementOptions = computed(() => (
+  graphRenderGuardActive.value ? guardedKeyboardElementOptions.value : keyboardElementOptions.value
+))
+let drawerReturnFocus: HTMLElement | null = null
+
+function searchKeyboardElements(query: string) {
+  keyboardElementQuery.value = query
+  if (graphRenderGuardActive.value) {
+    guardedKeyboardSearch.search(query)
+    return
+  }
+  guardedKeyboardSearch.cancel()
+  guardedKeyboardElementOptions.value = []
+}
+
+watch(
+  [
+    graphRenderGuardActive,
+    participants,
+    filteredTrustlines,
+    incidentRatioByPid,
+    threshold,
+    typeFilter,
+    minDegree,
+    hideIsolates,
+    showIncidents,
+    focusMode,
+    focusRootPid,
+    focusDepth,
+    focusPid,
+    locale,
+  ],
+  ([guarded], [wasGuarded]) => {
+    const action = guardedGraphSearchCacheAction(guarded, wasGuarded)
+    if (action === 'search') guardedKeyboardSearch.search(keyboardElementQuery.value)
+    if (action === 'invalidate') guardedKeyboardSearch.invalidate()
+  },
+)
+
+onBeforeUnmount(guardedKeyboardSearch.cancel)
+
+function openKeyboardElement() {
+  const active = document.activeElement
+  drawerReturnFocus = active instanceof HTMLElement ? active : null
+  if (!graphViz.openElementDetails(keyboardElementKey.value)) drawerReturnFocus = null
+}
+
+watch(drawerOpen, async (open, wasOpen) => {
+  if (open || !wasOpen || !drawerReturnFocus) return
+  const target = drawerReturnFocus
+  drawerReturnFocus = null
+  await nextTick()
+  if (target.isConnected) target.focus()
+})
+
+const graphLiveAnnouncement = computed(() => {
+  if (loading.value) return t('graph.a11y.loading')
+  if (error.value) return t('graph.a11y.error', { error: error.value })
+  const selection = graphSelectionAnnouncement(selected.value, drawerOpen.value)
+  if (selection) return selection
+  return t('graph.a11y.ready', { nodes: stats.value.nodes, edges: stats.value.edges })
 })
 </script>
 
@@ -459,21 +562,21 @@ const stats = computed(() => {
           </div>
 
           <div class="hdr__stats">
-          <el-tag type="info">
-            {{ seedLabel }}
-          </el-tag>
-          <el-tag type="info">
-            {{ t('graph.stats.nodes') }}: {{ stats.nodes }}
-          </el-tag>
-          <el-tag type="info">
-            {{ t('graph.stats.edges') }}: {{ stats.edges }}
-          </el-tag>
-          <el-tag
-            v-if="stats.bottlenecks"
-            type="danger"
-          >
-            {{ t('graph.stats.bottlenecks') }}: {{ stats.bottlenecks }}
-          </el-tag>
+            <el-tag type="info">
+              {{ seedLabel }}
+            </el-tag>
+            <el-tag type="info">
+              {{ t('graph.stats.nodes') }}: {{ stats.nodes }}
+            </el-tag>
+            <el-tag type="info">
+              {{ t('graph.stats.edges') }}: {{ stats.edges }}
+            </el-tag>
+            <el-tag
+              v-if="stats.bottlenecks"
+              type="danger"
+            >
+              {{ t('graph.stats.bottlenecks') }}: {{ stats.bottlenecks }}
+            </el-tag>
           </div>
         </div>
       </div>
@@ -487,7 +590,7 @@ const stats = computed(() => {
     />
 
     <el-alert
-      v-else-if="isTooLargeToAutoRender && !renderOverride"
+      v-else-if="graphRenderGuardActive"
       type="warning"
       show-icon
       :closable="false"
@@ -496,7 +599,9 @@ const stats = computed(() => {
     >
       <template #default>
         <div class="guardRow">
-          <div class="guardHint">{{ t('graph.guard.hint', { maxNodes: MAX_AUTO_RENDER_NODES, maxEdges: MAX_AUTO_RENDER_EDGES }) }}</div>
+          <div class="guardHint">
+            {{ t('graph.guard.hint', { maxNodes: MAX_AUTO_RENDER_NODES, maxEdges: MAX_AUTO_RENDER_EDGES }) }}
+          </div>
           <el-button
             size="small"
             type="primary"
@@ -540,20 +645,62 @@ const stats = computed(() => {
       :on-clear-focus-mode="clearFocusMode"
     />
 
-    <el-skeleton
-      v-if="loading"
-      animated
-      :rows="6"
+    <GraphKeyboardNavigator
+      v-model="keyboardElementKey"
+      :options="visibleKeyboardElementOptions"
+      :busy="loading"
+      :hint-id="graphRenderGuardActive ? 'graph-keyboard-guard-hint' : undefined"
+      @open="openKeyboardElement"
+      @search="searchKeyboardElements"
     />
+    <p
+      v-if="graphRenderGuardActive"
+      id="graph-keyboard-guard-hint"
+      class="keyboardGuardHint"
+    >
+      {{ t('graph.keyboard.largeGraphHint', {
+        min: GUARDED_KEYBOARD_QUERY_MIN,
+        limit: GUARDED_KEYBOARD_OPTION_LIMIT,
+      }) }}
+    </p>
 
     <div
-      v-else
+      id="graph-keyboard-alternative"
+      class="visuallyHidden"
+    >
+      {{ t('graph.a11y.alternativeHint') }}
+    </div>
+    <div
+      class="visuallyHidden"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      data-testid="graph-live-status"
+    >
+      {{ graphLiveAnnouncement }}
+    </div>
+
+    <div
       class="cy-wrap"
     >
+      <div
+        v-if="loading"
+        class="cy-loading"
+        aria-hidden="true"
+      >
+        <el-skeleton
+          animated
+          :rows="6"
+        />
+      </div>
       <GraphLegend :open="showLegend" />
       <div
         ref="cyRoot"
         class="cy"
+        role="img"
+        :aria-label="t('graph.a11y.canvasLabel')"
+        :aria-busy="loading"
+        aria-describedby="graph-keyboard-alternative"
         data-testid="graph-cy"
       />
     </div>
@@ -574,7 +721,7 @@ const stats = computed(() => {
     :threshold="threshold"
     :precision-by-eq="precisionByEq"
     :atoms-to-decimal="atomsToDecimal"
-    :load-data="loadData"
+    :reload-current-view="reloadDrawer"
     :money="money"
     :pct="pct"
     :selected-rank="selectedRank"
@@ -671,11 +818,37 @@ const stats = computed(() => {
   min-height: 520px;
 }
 
+.cy-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  padding: 16px;
+  background: var(--el-bg-color-overlay);
+}
+
+.keyboardGuardHint {
+  margin: -4px 0 12px;
+  color: var(--el-text-color-secondary);
+  font-size: var(--geo-font-size-label);
+}
+
 .cy {
   height: 100%;
   width: 100%;
   border: 1px solid var(--el-border-color);
   border-radius: 8px;
   background: var(--el-bg-color-overlay);
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 </style>

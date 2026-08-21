@@ -108,7 +108,6 @@ class FixturesRunner:
             intensity_key=str(evt.get("intensity_key") or "") or None,
             edges=list(evt.get("edges") or []),
             node_badges=(list(evt.get("node_badges") or []) or None),
-            event_id=str(evt.get("event_id") or "") or None,
         )
 
     def maybe_make_tx_updated(self, *, run_id: str, equivalent: str) -> Optional[dict[str, Any]]:
@@ -121,7 +120,6 @@ class FixturesRunner:
 
         (src, dst) = run._rng.choice(edges)
         return {
-            "event_id": self._sse.next_event_id(run),
             "ts": self._utc_now().isoformat(),
             "type": "tx.updated",
             "equivalent": equivalent,

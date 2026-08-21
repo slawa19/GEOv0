@@ -101,6 +101,9 @@ function guardedStart(fn: () => void) {
         class="action-bar__hint"
         data-testid="actionbar-busy-hint"
         aria-label="Action Bar busy hint"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
       >
         {{ cancelling ? 'Cancelling… please wait.' : 'Operation in progress… please wait.' }}
       </span>

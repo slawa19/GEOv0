@@ -43,8 +43,8 @@ def main() -> None:
     p.add_argument("--run-id", default=None, help="Existing run id (optional)")
     p.add_argument(
         "--db",
-        default="geov0.db",
-        help="Path to SQLite DB file (default: geov0.db)",
+        default=".local-run/geov0.db",
+        help="Path to SQLite DB file (default: .local-run/geov0.db)",
     )
     p.add_argument(
         "--eps",

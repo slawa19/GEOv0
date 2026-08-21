@@ -171,10 +171,6 @@ class _SimulatorRuntimeBase:
         )
         self._sse_sub_queue_max = _safe_int_env("SIMULATOR_SSE_SUB_QUEUE_MAX", 500)
 
-        # If enabled, SSE endpoints may return 410 when Last-Event-ID is too old
-        # to be replayed from the in-memory ring buffer.
-        self._sse_strict_replay = bool(_safe_int_env("SIMULATOR_SSE_STRICT_REPLAY", 0))
-
         self._sse = SseBroadcast(
             lock=self._lock,
             runs=self._runs,
@@ -276,17 +272,6 @@ class _SimulatorRuntimeBase:
             # Allow re-use after graceful shutdown completes.
             with self._lock:
                 self._is_shutting_down = False
-
-    def is_sse_strict_replay_enabled(self) -> bool:
-        return self._sse_strict_replay
-
-    def is_replay_too_old(self, *, run_id: str, after_event_id: str) -> bool:
-        """Returns True if after_event_id is older than the oldest event in buffer.
-
-        This is best-effort and only applies to standard runtime event ids.
-        """
-
-        return self._sse.is_replay_too_old(run_id=run_id, after_event_id=after_event_id)
 
     # ------------------------------------------
     # Per-owner active run management
@@ -481,11 +466,11 @@ class _SimulatorRuntimeBase:
     def get_artifact_path(self, *, run_id: str, name: str) -> Path:
         return self._artifacts.get_artifact_path(run_id=run_id, name=name)
 
-    def publish_run_status(self, run_id: str) -> None:
+    def _build_run_status_event(self, run_id: str, event_id: str) -> dict[str, Any]:
         run = self.get_run(run_id)
         stall_ticks = int(run._real_consec_all_rejected_ticks or 0)
-        payload = SimulatorRunStatusEvent(
-            event_id=self._sse.next_event_id(run),
+        return SimulatorRunStatusEvent(
+            event_id=event_id,
             ts=_utc_now(),
             type="run_status",
             run_id=run.run_id,
@@ -506,7 +491,16 @@ class _SimulatorRuntimeBase:
             consec_all_rejected_ticks=(stall_ticks if stall_ticks > 0 else None),
         ).model_dump(mode="json", by_alias=True)
 
-        self._sse.broadcast(run_id, payload)
+    def publish_run_status(self, run_id: str) -> str:
+        payload = self._sse.publish_event(
+            run_id=run_id,
+            payload_factory=lambda event_id: self._build_run_status_event(
+                run_id, event_id
+            ),
+        )
+        if payload is None:  # pragma: no cover - get_run callers own this invariant
+            raise RuntimeError("Cannot publish status for missing simulator run")
+        return str(payload["event_id"])
 
     def _ensure_run_accepts_actions(self, run_id: str) -> RunRecord:
         run = self.get_run(run_id)
@@ -572,8 +566,7 @@ class _SimulatorRuntimeBase:
         ik = str(intensity_key or "").strip() or "mid"
 
         emitter = SseEventEmitter(sse=self._sse, utc_now=_utc_now, logger=logger)
-        event_id = self._sse.next_event_id(run)
-        emitter.emit_tx_updated(
+        event_id = emitter.emit_tx_updated(
             run_id=run_id,
             run=run,
             equivalent=eq,
@@ -585,8 +578,9 @@ class _SimulatorRuntimeBase:
             intensity_key=ik,
             edges=[{"from": src, "to": dst}],
             node_badges=None,
-            event_id=event_id,
         )
+        if event_id is None:
+            raise RuntimeError("Failed to emit debug tx.updated event")
 
         with self._lock:
             run.last_event_type = "tx.updated"
@@ -695,49 +689,26 @@ class _SimulatorRuntimeBase:
         plan_id = f"plan_dbg_{secrets.token_hex(6)}"
         emitter = SseEventEmitter(sse=self._sse, utc_now=_utc_now, logger=logger)
 
-        done_event_id = self._sse.next_event_id(run)
         done_amt = str(cleared_amount or "").strip() or "10.00"
 
-        async def _emit_done_later() -> None:
-            try:
-                await asyncio.sleep(1.1)
-                with self._lock:
-                    run.last_event_type = "clearing.done"
-                emitter.emit_clearing_done(
-                    run_id=run_id,
-                    run=run,
-                    equivalent=eq,
-                    plan_id=plan_id,
-                    cleared_cycles=1,
-                    cleared_amount=done_amt,
-                    cycle_edges=[{"from": a, "to": b} for a, b in picked] if picked else None,
-                    node_patch=None,
-                    edge_patch=None,
-                    event_id=done_event_id,
-                )
-            except Exception:
-                logger.exception(
-                    "simulator.debug_clearing_done_emit_failed run_id=%s", run_id
-                )
-
-        try:
-            asyncio.get_running_loop().create_task(_emit_done_later())
-        except RuntimeError:
-            # No running loop (should not happen under FastAPI); fall back to immediate emit.
-            with self._lock:
-                run.last_event_type = "clearing.done"
-            emitter.emit_clearing_done(
-                run_id=run_id,
-                run=run,
-                equivalent=eq,
-                plan_id=plan_id,
-                cleared_cycles=1,
-                cleared_amount=done_amt,
-                cycle_edges=[{"from": a, "to": b} for a, b in picked] if picked else None,
-                node_patch=None,
-                edge_patch=None,
-                event_id=done_event_id,
-            )
+        # The response promises the exact emitted ID. Emit synchronously so the
+        # ID is allocated at publication time instead of reserving a lower ID
+        # that can be overtaken by unrelated producers.
+        with self._lock:
+            run.last_event_type = "clearing.done"
+        done_event_id = emitter.emit_clearing_done(
+            run_id=run_id,
+            run=run,
+            equivalent=eq,
+            plan_id=plan_id,
+            cleared_cycles=1,
+            cleared_amount=done_amt,
+            cycle_edges=[{"from": a, "to": b} for a, b in picked] if picked else None,
+            node_patch=None,
+            edge_patch=None,
+        )
+        if done_event_id is None:
+            raise RuntimeError("Failed to emit debug clearing.done event")
 
         return plan_id, str(done_event_id), eq
 
@@ -798,11 +769,72 @@ class _SimulatorRuntimeBase:
                 run_id=run_id, equivalent=equivalent
             )
             if evt is not None:
-                try:
-                    sub.queue.put_nowait(evt)
-                except asyncio.QueueFull:
-                    pass
+                SseEventEmitter(
+                    sse=self._sse, utc_now=_utc_now, logger=logger
+                ).emit_tx_updated(
+                    run_id=run_id,
+                    run=run,
+                    equivalent=equivalent,
+                    from_pid=str(evt.get("from") or "") or None,
+                    to_pid=str(evt.get("to") or "") or None,
+                    amount=str(evt.get("amount") or "") or None,
+                    amount_flyout=bool(evt.get("amount_flyout")),
+                    ttl_ms=int(evt.get("ttl_ms") or 1200),
+                    intensity_key=str(evt.get("intensity_key") or "") or None,
+                    edges=list(evt.get("edges") or []),
+                    node_badges=(list(evt.get("node_badges") or []) or None),
+                )
         return sub
+
+    async def subscribe_with_status(
+        self, run_id: str, *, equivalent: str, after_event_id: Optional[str] = None
+    ) -> tuple[_Subscription, str]:
+        """Atomically enqueue replay + authoritative status before exposure."""
+        payload: dict[str, Any] | None = None
+
+        def build_status(event_id: str) -> dict[str, Any]:
+            nonlocal payload
+            payload = self._build_run_status_event(run_id, event_id)
+            return payload
+
+        sub = await self._sse.subscribe(
+            run_id,
+            equivalent=equivalent,
+            after_event_id=after_event_id,
+            bootstrap_event_factory=build_status,
+        )
+        if payload is None:  # pragma: no cover - defensive invariant
+            raise RuntimeError("SSE status bootstrap was not created")
+
+        # Preserve the fixtures-mode first-frame hint through the same ordered
+        # publish path as every other runtime event.
+        run = self.get_run(run_id)
+        if after_event_id is None and run.state == "running" and run.mode == "fixtures":
+            evt = self._fixtures_runner.maybe_make_tx_updated(
+                run_id=run_id, equivalent=equivalent
+            )
+            if evt is not None:
+                SseEventEmitter(
+                    sse=self._sse, utc_now=_utc_now, logger=logger
+                ).emit_tx_updated(
+                    run_id=run_id,
+                    run=run,
+                    equivalent=equivalent,
+                    from_pid=str(evt.get("from") or "") or None,
+                    to_pid=str(evt.get("to") or "") or None,
+                    amount=str(evt.get("amount") or "") or None,
+                    amount_flyout=bool(evt.get("amount_flyout")),
+                    ttl_ms=int(evt.get("ttl_ms") or 1200),
+                    intensity_key=str(evt.get("intensity_key") or "") or None,
+                    edges=list(evt.get("edges") or []),
+                    node_badges=(list(evt.get("node_badges") or []) or None),
+                )
+        return sub, str(payload["event_id"])
+
+    def finish_replay_bootstrap(
+        self, run_id: str, sub: _Subscription
+    ) -> Optional[list[dict[str, Any]]]:
+        return self._sse.finish_replay_bootstrap(run_id=run_id, sub=sub)
 
     async def unsubscribe(self, run_id: str, sub: _Subscription) -> None:
         await self._sse.unsubscribe(run_id, sub)

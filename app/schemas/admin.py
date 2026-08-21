@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic.types import StrictInt
 
 from app.schemas.trustline import TrustLine as TrustLineSchema
@@ -35,6 +35,8 @@ class AdminFeatureFlags(BaseModel):
     full_multipath_enabled: bool
     clearing_enabled: bool
 
+    model_config = ConfigDict(extra="forbid")
+
 
 class AdminFeatureFlagsPatchRequest(BaseModel):
     # Partial PATCH: all fields optional; only provided ones are updated.
@@ -52,6 +54,13 @@ class AdminParticipantActionRequest(BaseModel):
     reason: str
 
 
+class AdminParticipantStatusResponse(BaseModel):
+    pid: str
+    status: Literal["active", "suspended"]
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class AdminAbortTxRequest(BaseModel):
     reason: str = Field(..., min_length=1)
 
@@ -59,6 +68,8 @@ class AdminAbortTxRequest(BaseModel):
 class AdminAbortTxResponse(BaseModel):
     tx_id: str
     status: str = Field(..., pattern="^aborted$")
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class AdminAuditLogItem(BaseModel):
@@ -75,6 +86,13 @@ class AdminAuditLogItem(BaseModel):
     request_id: Optional[str] = None
     ip_address: Optional[str] = None
     user_agent: Optional[str] = None
+
+    @field_validator("timestamp")
+    @classmethod
+    def attach_utc_to_naive_database_timestamp(cls, value: datetime) -> datetime:
+        if value.utcoffset() is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -118,6 +136,15 @@ class AdminIncidentItem(BaseModel):
     age_seconds: StrictInt = Field(..., ge=0)
     sla_seconds: StrictInt = Field(..., ge=0)
     created_at: Optional[datetime] = None
+
+    @field_validator("created_at")
+    @classmethod
+    def attach_utc_to_naive_database_timestamp(
+        cls, value: Optional[datetime]
+    ) -> Optional[datetime]:
+        if value is not None and value.utcoffset() is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
 
 
 class AdminIncidentsListResponse(AdminPaginatedMeta):
@@ -167,10 +194,10 @@ class AdminMigrationsStatus(BaseModel):
 
 
 class AdminEquivalentCreateRequest(BaseModel):
-    code: str
+    code: str = Field(..., pattern=r"^[A-Z0-9_]{1,16}$")
     symbol: Optional[str] = None
     description: Optional[str] = None
-    precision: int = 2
+    precision: int = Field(default=2, ge=0, le=18)
     metadata: Optional[dict[str, Any]] = None
     is_active: bool = True
     reason: Optional[str] = None
@@ -179,7 +206,7 @@ class AdminEquivalentCreateRequest(BaseModel):
 class AdminEquivalentUpdateRequest(BaseModel):
     symbol: Optional[str] = None
     description: Optional[str] = None
-    precision: Optional[int] = None
+    precision: Optional[int] = Field(default=None, ge=0, le=18)
     metadata: Optional[dict[str, Any]] = None
     is_active: Optional[bool] = None
     reason: Optional[str] = None
@@ -195,6 +222,10 @@ class AdminEquivalentUsageResponse(BaseModel):
     debts: int
     integrity_checkpoints: int
 
+    model_config = ConfigDict(extra="forbid")
+
 
 class AdminDeleteResponse(BaseModel):
     deleted: str
+
+    model_config = ConfigDict(extra="forbid")

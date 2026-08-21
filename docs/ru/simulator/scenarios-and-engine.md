@@ -47,7 +47,7 @@
 
 ### Как добавить/запустить новый сценарий (практика)
 Самый простой путь:
-1) Скопировать один из примеров, например [../../../fixtures/simulator/greenfield-village-100/scenario.json](../../../fixtures/simulator/greenfield-village-100/scenario.json)
+1) Скопировать один из примеров, например [../../../fixtures/simulator/greenfield-village-100-realistic-v2/scenario.json](../../../fixtures/simulator/greenfield-village-100-realistic-v2/scenario.json)
 2) Поменять `scenario_id` на новый уникальный
 3) Отредактировать участников и trustlines
 4) Запустить backend + UI, затем выбрать сценарий в UI
@@ -56,7 +56,7 @@
 - По умолчанию UI показывает демо-набор (включая realistic v2).
 - Если вы добавили новый сценарий и не видите его в списке, выставьте env:
   - `SIMULATOR_SCENARIO_ALLOWLIST=all`
-  - или `SIMULATOR_SCENARIO_ALLOWLIST=greenfield-village-100,my-new-scenario`
+  - или `SIMULATOR_SCENARIO_ALLOWLIST=greenfield-village-100-realistic-v2,my-new-scenario`
 
 Технически это фильтр в runtime (см. [../../../app/core/simulator/runtime_impl.py](../../../app/core/simulator/runtime_impl.py)).
 
@@ -65,7 +65,7 @@
 **A) Создать сценарий**
 1) Выберите основу:
   - минимальный: [../../../fixtures/simulator/minimal/scenario.json](../../../fixtures/simulator/minimal/scenario.json)
-  - “похож на реальный”: [../../../fixtures/simulator/greenfield-village-100/scenario.json](../../../fixtures/simulator/greenfield-village-100/scenario.json)
+  - “похож на реальный”: [../../../fixtures/simulator/greenfield-village-100-realistic-v2/scenario.json](../../../fixtures/simulator/greenfield-village-100-realistic-v2/scenario.json)
   - realistic v2 (UAH-only): [../../../fixtures/simulator/greenfield-village-100-realistic-v2/scenario.json](../../../fixtures/simulator/greenfield-village-100-realistic-v2/scenario.json)
 
 Примечание для realistic v2:
@@ -382,8 +382,8 @@ npm run validate:fixtures
 
 Результат:
 - перезаписываются (детерминированно) сценарии:
-  - `fixtures/simulator/greenfield-village-100/scenario.json`
-  - `fixtures/simulator/riverside-town-50/scenario.json`
+  - `fixtures/simulator/greenfield-village-100-realistic-v2/scenario.json`
+  - `fixtures/simulator/riverside-town-50-realistic-v2/scenario.json`
 
 В генераторе дополнительно есть встроенная проверка формы сценария по JSON schema.
 
@@ -446,7 +446,11 @@ flowchart TD
 SSE replay buffer:
 - `SIMULATOR_EVENT_BUFFER_SIZE`
 - `SIMULATOR_EVENT_BUFFER_TTL_SEC`
-- `SIMULATOR_SSE_STRICT_REPLAY`
+- `SIMULATOR_SSE_SUB_QUEUE_MAX`
+
+Replay correctness не переключается env-флагом: любой переданный
+`Last-Event-ID`, который нельзя полностью и упорядоченно восстановить, всегда
+получает `HTTP 410`.
 
 Real mode guardrails:
 - `SIMULATOR_REAL_MAX_IN_FLIGHT`

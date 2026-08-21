@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Callable, Optional
 
 from sqlalchemy.exc import OperationalError
@@ -252,15 +253,98 @@ async def sync_artifacts(run: RunRecord) -> None:
         return
 
 
+# 2026-08-20 / p007_t715. The two series the domain model declares as amounts
+# in the selected equivalent, i.e. the ones that carry money.
+MONEY_METRIC_KEYS = frozenset({"total_debt", "clearing_volume"})
+
+# Run ids already warned about lossy SQLite money persistence. Bounded so a long
+# lived process cannot grow this set without limit; when the cap is reached the
+# set is cleared, which at worst re-emits the warning once more for a run.
+_SQLITE_MONEY_WARNED_RUN_IDS: set[str] = set()
+_SQLITE_MONEY_WARNED_MAX_RUN_IDS = 512
+
+
+def _warn_once_sqlite_money_precision(run_id: str, keys: list[str]) -> None:
+    """Warn once per run that money metrics on SQLite are NOT exact.
+
+    `simulator_run_metrics.value` is `Numeric(20, 8)` and `MetricPoint.v` is a
+    decimal string, but SQLite has no native decimal: SQLAlchemy round-trips the
+    value through binary floating point, so `Decimal("12345678901.12345678")`
+    comes back as `Decimal("12345678901.12345695")`. The wire format would then
+    present an inexact number in the shape reserved for exact money.
+
+    SQLite stays a supported backend on purpose - it is the documented
+    no-Docker development path (`README.md`, `app/config.py` default) - so this
+    is an announced limitation, not a silent one. PostgreSQL is the only backend
+    where these series are exact, the same split AGENTS.md 4 already makes for
+    locking semantics.
+    """
+
+    key = str(run_id)
+    if key in _SQLITE_MONEY_WARNED_RUN_IDS:
+        return
+    if len(_SQLITE_MONEY_WARNED_RUN_IDS) >= _SQLITE_MONEY_WARNED_MAX_RUN_IDS:
+        _SQLITE_MONEY_WARNED_RUN_IDS.clear()
+    _SQLITE_MONEY_WARNED_RUN_IDS.add(key)
+    logger.warning(
+        "simulator.storage.sqlite_money_metrics_are_not_exact run_id=%s keys=%s "
+        "detail=%s",
+        key,
+        ",".join(sorted(keys)),
+        "SQLite stores Numeric through binary floating point, so the money "
+        "metric series persisted for this run are approximations and the "
+        "decimal strings served for them are NOT exact amounts. Use PostgreSQL "
+        "for exact simulator money metrics.",
+    )
+
+
+def _measured_value(
+    values: dict[str, Optional[Decimal | float]], key: str
+) -> Optional[Decimal]:
+    """Return the measured value for `key` as Decimal, or None when unmeasured.
+
+    A metric the producer did not measure must reach the DB as NULL; defaulting
+    it to 0 would be indistinguishable from a measured zero (spec 007, F-007-1).
+
+    2026-08-20 / p007_t715: the column is Numeric(20, 8). A Decimal produced
+    upstream (the money series) is passed through untouched — converting it to
+    float here would reintroduce exactly the narrowing this slice removes.
+    """
+
+    raw = values.get(key)
+    if raw is None:
+        return None
+    return raw if isinstance(raw, Decimal) else Decimal(str(raw))
+
+
 async def write_tick_metrics(
     *,
     run_id: str,
     t_ms: int,
     per_equivalent: dict[str, dict[str, int]],
-    metric_values_by_eq: Optional[dict[str, dict[str, float]]] = None,
+    metric_values_by_eq: Optional[dict[str, dict[str, Optional[Decimal | float]]]] = None,
     session=None,
     commit: bool = True,
 ) -> None:
+    """Upsert one tick worth of metric points. Best-effort: never raises.
+
+    Transaction contract (2026-08-20 / p007_t715): when `session` is supplied it
+    belongs to the caller. This function wraps its statements in a SAVEPOINT and
+    rolls back only that savepoint on failure, so a failed metrics write cannot
+    discard work the caller staged in the same transaction. It commits the
+    caller's session only when `commit=True`.
+
+    Backend limitation (2026-08-20 / p007_t715): `SimulatorRunMetric.value` is
+    `Numeric(20, 8)` and the money series (`MONEY_METRIC_KEYS`) are served as
+    decimal strings, but **only PostgreSQL stores them exactly**. On SQLite -
+    the documented no-Docker development backend and the `app/config.py`
+    default - SQLAlchemy round-trips Numeric through binary floating point, so
+    those values are approximations wearing an exact-money shape. The condition
+    is announced once per run at WARNING level rather than hidden; see
+    `_warn_once_sqlite_money_precision` and
+    `docs/ru/simulator/backend/run-storage.md`.
+    """
+
     if not db_enabled():
         return
 
@@ -295,19 +379,30 @@ async def write_tick_metrics(
                 errors = int(counters.get("errors", 0))
                 timeouts = int(counters.get("timeouts", 0))
 
+                # "Not measured" is persisted as NULL, never as 0.0: the reader
+                # must be able to tell a missing measurement from a measured
+                # zero (spec 007, F-007-1). The column is nullable.
+                # 2026-08-20 / p007_t715: the column is Numeric(20, 8), so the
+                # ratios are computed in Decimal as well; no float reaches the DB.
                 denom = committed + rejected
-                success_rate = (committed / denom) * 100.0 if denom > 0 else 0.0
+                success_rate = (
+                    (Decimal(committed) / Decimal(denom)) * Decimal(100)
+                    if denom > 0
+                    else None
+                )
                 attempts = committed + rejected + errors
                 bottlenecks_score = (
-                    ((errors + timeouts) / attempts) * 100.0 if attempts > 0 else 0.0
+                    (Decimal(errors + timeouts) / Decimal(attempts)) * Decimal(100)
+                    if attempts > 0
+                    else None
                 )
 
-                mv = (metric_values_by_eq or {}).get(str(eq), {})
-                avg_route_length = float(mv.get("avg_route_length", 0.0) or 0.0)
-                total_debt = float(mv.get("total_debt", 0.0) or 0.0)
-                clearing_volume = float(mv.get("clearing_volume", 0.0) or 0.0)
-                active_participants = float(mv.get("active_participants", 0.0) or 0.0)
-                active_trustlines = float(mv.get("active_trustlines", 0.0) or 0.0)
+                mv = (metric_values_by_eq or {}).get(str(eq), {}) or {}
+                avg_route_length = _measured_value(mv, "avg_route_length")
+                total_debt = _measured_value(mv, "total_debt")
+                clearing_volume = _measured_value(mv, "clearing_volume")
+                active_participants = _measured_value(mv, "active_participants")
+                active_trustlines = _measured_value(mv, "active_trustlines")
 
                 eq_code = str(eq)
                 rows.extend(
@@ -317,55 +412,70 @@ async def write_tick_metrics(
                             "equivalent_code": eq_code,
                             "key": "success_rate",
                             "t_ms": int(t_ms),
-                            "value": float(success_rate),
+                            "value": success_rate,
                         },
                         {
                             "run_id": str(run_id),
                             "equivalent_code": eq_code,
                             "key": "bottlenecks_score",
                             "t_ms": int(t_ms),
-                            "value": float(bottlenecks_score),
+                            "value": bottlenecks_score,
                         },
                         {
                             "run_id": str(run_id),
                             "equivalent_code": eq_code,
                             "key": "avg_route_length",
                             "t_ms": int(t_ms),
-                            "value": float(avg_route_length),
+                            "value": avg_route_length,
                         },
                         {
                             "run_id": str(run_id),
                             "equivalent_code": eq_code,
                             "key": "total_debt",
                             "t_ms": int(t_ms),
-                            "value": float(total_debt),
+                            "value": total_debt,
                         },
                         {
                             "run_id": str(run_id),
                             "equivalent_code": eq_code,
                             "key": "clearing_volume",
                             "t_ms": int(t_ms),
-                            "value": float(clearing_volume),
+                            "value": clearing_volume,
                         },
                         {
                             "run_id": str(run_id),
                             "equivalent_code": eq_code,
                             "key": "active_participants",
                             "t_ms": int(t_ms),
-                            "value": float(active_participants),
+                            "value": active_participants,
                         },
                         {
                             "run_id": str(run_id),
                             "equivalent_code": eq_code,
                             "key": "active_trustlines",
                             "t_ms": int(t_ms),
-                            "value": float(active_trustlines),
+                            "value": active_trustlines,
                         },
                     ]
                 )
 
             if not rows:
                 return
+
+            # p007_t715: announce the SQLite money-precision limitation once per
+            # run, and only when a money series actually carries a measurement -
+            # a warning that fires with nothing at stake teaches nothing.
+            if dialect_name == "sqlite":
+                lossy_keys = sorted(
+                    {
+                        str(row["key"])
+                        for row in rows
+                        if str(row["key"]) in MONEY_METRIC_KEYS
+                        and row.get("value") is not None
+                    }
+                )
+                if lossy_keys:
+                    _warn_once_sqlite_money_precision(str(run_id), lossy_keys)
 
             table = SimulatorRunMetric.__table__
             stmt = insert_fn(table)
@@ -379,17 +489,17 @@ async def write_tick_metrics(
                 set_={table.c.value: stmt.excluded.value},
             )
             await s.execute(stmt, rows)
-
-            if commit:
-                await s.commit()
-            else:
-                await s.flush()
+            await s.flush()
 
         if session is None:
             async def _do_write():
                 async with db.AsyncSessionLocal() as s:
+                    # This session is ours: rolling it back on failure is
+                    # within our mandate.
                     try:
                         await _write(s)
+                        if commit:
+                            await s.commit()
                     except Exception:
                         try:
                             await s.rollback()
@@ -398,14 +508,47 @@ async def write_tick_metrics(
                         raise
             await _retry_on_locked(_do_write)
         else:
+            # 2026-08-20 / p007_t715: the session belongs to the caller - the
+            # real-mode tick passes its own session with commit=False. A failed
+            # metrics write must undo ONLY this write. The previous
+            # `await session.rollback()` discarded the caller's whole
+            # transaction, and the outer `except` below swallowed the failure,
+            # so everything the tick had staged vanished with no signal. That is
+            # the same defect family as finding B-A2b-001 (registry 008); the
+            # Numeric(20, 8) column made it reachable through a new failure
+            # class (numeric field overflow above 10^12).
+            savepoint = await session.begin_nested()
             try:
                 await _write(session)
+                await savepoint.commit()
             except Exception:
                 try:
-                    await session.rollback()
+                    await savepoint.rollback()
                 except Exception:
                     pass
                 raise
+
+            if commit:
+                # 2026-08-20 / p007_t715: this is NOT a relapse of the defect
+                # fixed just above, it is its mirror image. There the caller
+                # passed `commit=False`, kept ownership of the transaction and
+                # never asked us to end it - so rolling it back was deciding for
+                # them. Here `commit=True` means the caller delegated the commit
+                # to us (`real_tick_persistence.py` opens a session, hands it
+                # over without `commit=`, and then reuses it for
+                # `write_tick_bottlenecks`). Failing the delegated commit and
+                # leaving the session in pending-rollback would make the caller's
+                # *next* statement die of `PendingRollbackError`, an error with
+                # no connection to the real cause. Returning the session to a
+                # usable state is part of the job we accepted.
+                try:
+                    await session.commit()
+                except Exception:
+                    try:
+                        await session.rollback()
+                    except Exception:
+                        pass
+                    raise
     except Exception:
         logger.exception(
             "simulator.storage.write_tick_metrics_failed run_id=%s t_ms=%s",

@@ -1,6 +1,10 @@
-# Тестирование сценариев (CLI)
+# Тестирование сценариев (исторические CLI-заметки)
 
-Документ живой: пополняется по мере исправления падений.
+> **Классификация:** документ сохраняет опыт ранних scenario-прогонов, но не
+> задаёт текущий entrypoint и содержит environment-specific примеры. Используйте
+> [`../10-testing-framework.md`](../10-testing-framework.md) и
+> `scripts/verify_local.ps1` с уникальным `TaskSlug`. Прямые pytest-команды ниже —
+> debug-only; shared DB и hardcoded абсолютные пути применять нельзя.
 
 > **См. также:** [Быстрый старт и отладка](quick-start-and-debugging.md) — общее руководство по запуску проекта, unit-тестам и отладке типичных проблем.
 
@@ -74,7 +78,7 @@ D:/www/Projects/2025/GEOv0-PROJECT/.venv/Scripts/python.exe -m pytest -q tests/i
 - Причина:
   - Пул соединений asyncpg может переиспользовать соединение, привязанное к уже закрытому event loop (pytest-asyncio по умолчанию создаёт loop на тест).
 - Решение (уже применено в фикстурах тестов):
-  - Использовать `NullPool` для async engine в [tests/conftest.py](tests/conftest.py)
+  - Использовать `NullPool` для async engine в [`../../../tests/conftest.py`](../../../tests/conftest.py)
 
 ## Артефакты прогона
 

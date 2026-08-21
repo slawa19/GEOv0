@@ -58,7 +58,7 @@ Dev convenience (intentional):
 ## 4) Endpoint mapping
 The `realApi` skeleton is expected to implement the same surface as `mockApi`, but using real endpoints.
 
-Use [api/openapi.yaml](../api/openapi.yaml) as the contract source of truth.
+Use [api/openapi.yaml](../../api/openapi.yaml) as the contract source of truth.
 
 Common endpoints used by pages:
 - `GET /api/v1/health`
@@ -142,18 +142,24 @@ Pick a full community dataset (recommended for graph testing):
 ### 7.1 Start backend + DB (Docker Compose)
 From repo root:
 
-- `docker compose up -d --build`
+- Local development, with the repository's explicit dev defaults:
+  `docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build`
+- Production-like startup uses only `docker-compose.yml`, but first requires
+  non-placeholder `JWT_SECRET`, `ADMIN_TOKEN`, `SIMULATOR_SESSION_SECRET`, and a
+  valid `SIMULATOR_CSRF_ORIGIN_ALLOWLIST`. Running the base file without those
+  values is expected to fail fast.
 
 Migrations run automatically on container start (see `docker/docker-entrypoint.sh`).
 
 Optional seed:
-- `docker compose exec app python scripts/seed_db.py`
+- Local dev stack:
+  `docker compose -f docker-compose.yml -f docker-compose.dev.yml exec app python scripts/seed_db.py`
 
 ### 7.1b Start backend locally (no Docker)
 
 If Docker is unavailable, you can run the backend locally on SQLite:
 
-- Initialize DB schema (creates `geov0.db` in repo root):
+- Initialize DB schema (creates `.local-run/geov0.db`):
   - `python scripts/init_sqlite_db.py`
 - Seed demo data:
   - Recommended for Admin UI testing (fixtures-like rich dataset): `python scripts/seed_db.py --source fixtures`
@@ -171,6 +177,9 @@ Note on Windows terminals:
 Quick DB sanity check:
 - From repo root: `.\.venv\Scripts\python.exe scripts\check_sqlite_db.py`
 - Or via the repo runner: `.\scripts\run_local.ps1 check-db`
+- An existing root `geov0.db` is legacy/user data and is used only with an
+  explicit `DATABASE_URL=sqlite+aiosqlite:///./geov0.db`; it is not moved or
+  deleted automatically.
 - Run API:
   - `python -m uvicorn app.main:app --reload --port 18000`
   - If `18000` is unavailable on Windows, use another port and set `VITE_API_BASE_URL` accordingly.

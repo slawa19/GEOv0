@@ -42,7 +42,7 @@ function makeInstance(overrides?: Partial<WindowInstance>): WindowInstance {
   }
 }
 
-describe('useDestructiveConfirmation (TODO-ESC)', () => {
+describe('useDestructiveConfirmation window-scoped Escape', () => {
   it('disarms on Escape keydown dispatched on the window container element (not on global window)', async () => {
     const host = document.createElement('div')
     document.body.appendChild(host)

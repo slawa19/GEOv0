@@ -1,7 +1,7 @@
 # GEOv0 Codebase Renovation Specification
 
 - **Date:** 2026-08-07
-- **Status:** PHASE 1 IN PROGRESS — OWNER-APPROVED FROZEN PLAN; EXIT CRITERIA OPEN
+- **Status:** COMPLETE (2026-08-09)
 - **Plan:** `specs/001-codebase-renovation/plan.md`
 - **Backlog:** `specs/001-codebase-renovation/tasks.md`
 - **Status authority:** this label is descriptive only and is not authoritative. Completion is established only by the success criteria, recorded evidence, and accepted review artifacts defined below. A future edit that changes `Status` without that evidence does not make the renovation complete.
@@ -218,6 +218,108 @@ scope. Optional diagnostics may be reported as `UNVERIFIED`, never as passing.
 
 ## Changelog
 
+- **2026-08-09:** Phase 7 and REN-015 completed from exact Phase 6 closeout
+  `579ad5769470b0d3bcdb4c59830362a7b9bd73bc` to accepted product/test HEAD
+  `f5a86ae369c563ae32d2b306ada3e6b8f48f21e2`. The bounded review reproduced
+  and fixed runtime ownership/credential, Admin UTC/selection, scenario error
+  bounding, payment SERIALIZABLE/advisory-lock/recovery and cancellation/session
+  ownership defects without modifying protected v1, archives or migrations.
+  Local canonical backend validation passed `932` tests with `3` skipped and
+  `15` deselected. Published
+  [Quality run 31329706963](https://github.com/slawa19/GEOv0/actions/runs/31329706963)
+  completed all eight jobs successfully on that exact HEAD: required backend
+  `933` passed, Admin `200` unit plus `7` E2E, Simulator `729` unit plus `24`
+  E2E, disposable PostgreSQL concurrency `3` and marker tier `11`, container/
+  migration smoke, active Chromium smoke and super-smoke all passed. Required
+  Claude Code 2.1.226 reviews used exact read-only ranges, OS exit `0`, complete
+  JSON and resolved `claude-opus-5`; all confirmed in-scope P1/P2 were fixed and
+  manually verified. The bounded residuals and complete twelve-criterion mapping
+  are recorded in `phase7-closure-map.md`. The renovation stops here; further
+  work requires a new owner-approved specification.
+
+- **2026-08-09:** Phase 5 completed locally at exact product-behavior commit
+  `ff53dbc1c070220ad7ddfdaf8a0aa5c8c1ccd157`; final test evidence is
+  `345991b47f15e2ed4080c7617f4f3430883f8b7b`. `phase5-simulator-map.md` records
+  the accepted replay/state/effect seam, critical Simulator v2 keyboard paths,
+  reviews, gates and residuals. Local Simulator gates passed lint, typecheck,
+  `701/701` unit tests across `99` files, build and scoped non-visual Chromium
+  `5/5`; the final test-only correction passed its `68/68` component selector and
+  lint/typecheck. Internal adversarial review ended without a remaining product
+  finding. Claude Code `2.1.226` reviewed the frozen product/remediation deltas
+  read-only from clean credential-free standalone clones with exit `0`, complete
+  JSON and resolved `claude-opus-5`; reproduced findings were fixed, and its sole
+  final test-quality suggestion was resolved by the evidence-only commit. No
+  published workflow ran, so this is not a “CI green” claim. Live-backend browser
+  SSE, visual/browser-matrix, screen-reader and direct private-canvas callback
+  probes remain unverified. No backend/OpenAPI/wire change or Phase 6 work occurred.
+- **2026-08-08:** Phase 4 completed locally at exact product commit
+  `f0428f9996e511e723ce1980a24c2073b3adadb8`; Phase 5 was not started. The
+  loader classification, Current / Intended / Optimal decisions, selected
+  operator paths, Graph ownership boundary, gates, reviews and residuals are
+  recorded in `phase4-admin-map.md`. Deterministic mounted evidence now covers
+  the frozen overlapping Admin loaders and pending unmounts; the selected
+  operator contracts pass component/unit tests; Admin lint (`0` errors, `116`
+  warnings), all `154` unit tests, build and scoped Chromium (`5/5`) passed. The
+  disposable real-contract smoke passed `2/2` for config/flag audit and
+  participant freeze/unfreeze with cleanup, and the confirmed audit timestamp
+  selector passed `2/2`. Independent adversarial re-reviews were CLEAN. Claude
+  Code `2.1.226` reviewed the frozen product/remediation deltas from standalone
+  credential-free clones with exit `0`, complete JSON and resolved
+  `claude-opus-5`; reproduced findings were fixed, and the final automatic
+  re-search suggestion was rejected as contrary to the accepted guarded-graph
+  invalidation policy. There is no new published workflow and no “CI green”
+  claim. Replay ordering and REN-012B2/C remain Phase 5, invalid legacy
+  Equivalent codes remain manual cleanup, and sibling participant/incident naive
+  timestamps remain outside the one confirmed Phase 4 audit path.
+- **2026-08-08:** Phase 3 completed at exact product commit
+  `f8517bc90b119a3b156de0a2945019d1b9381118`; Phase 4 was not started. The
+  selected Admin mutation/config and Simulator REST/SSE ingress contracts,
+  decisions, residuals and review evidence are recorded in
+  `phase3-contract-map.md`. Local backend validation on the last backend-changing
+  commit `032ed86` passed `774` tests (`3` skipped, `15` deselected); final
+  published [workflow run
+  31265705618](https://github.com/slawa19/GEOv0/actions/runs/31265705618) on exact
+  accepted HEAD passed required local-equivalent, PostgreSQL, production-like
+  container/schema, active Chromium and Simulator super-smoke jobs. Required
+  counts were backend `775 passed`, Admin `113 passed`, Simulator `668 passed`;
+  the PostgreSQL matrix/full tier passed `3`/`11` tests. The overall workflow is
+  not “CI green”: Admin retained its prior `2 failed / 2 passed` graph E2E set,
+  and Simulator returned to its exact Phase 2 `6 failed / 13 passed` visual E2E
+  baseline after three stale selected-contract mocks were corrected. Claude Code
+  `2.1.226` produced two accepted read-only reviews with complete exit-`0` JSON
+  and resolved `claude-opus-5`; reproduced findings were remediated and the final
+  internal adversarial reviews were CLEAN. Invalid legacy Equivalent codes remain
+  manual cleanup, `AdminAuditLogItem.timestamp` remains Phase 4, and replay
+  ordering remains Phase 5.
+- **2026-08-08:** Phase 2 completed at exact product commit
+  `7d0a8a9ca48cec34cc62e0965cdd6d28825370de`; Phase 3 was not started. The
+  bounded range from base `0635a651f0ae6f970d82d7d71b7a18071069262d`
+  produced the compact owner/effect and actor maps in
+  `phase2-owner-map.md`, assigned every frozen path `FIX` or `KEEP`, and left the
+  conditional REN-012A adapter `NO TRIGGER`. Confirmed changes stayed on existing
+  payment, clearing, trustline, Admin, Integrity and Simulator seams; no new
+  repository/UoW framework or broad module rewrite was introduced. Published
+  [workflow run 31256289008](https://github.com/slawa19/GEOv0/actions/runs/31256289008)
+  executed on that exact product SHA. Its guarded disposable PostgreSQL Phase 2
+  matrix passed all three mandatory cases (`3 passed`), while the conditional
+  Admin lost-update row remained `NOT TRIGGERED`; the complete registered
+  PostgreSQL tier passed `11` tests with `105` deselected. Required
+  local-equivalent gates passed with backend `735 passed`, `2 skipped`, `15
+  deselected`, Admin `76 passed` plus build, and Simulator `637 passed` plus
+  build. The overall workflow conclusion remains `failure`, not “CI green”:
+  scheduled Admin and Simulator visual E2E retain known failures assigned to
+  later frozen phases. Local final backend validation separately passed `734`
+  tests with `3` skipped and `15` deselected. Final internal adversarial findings
+  were fixed in `8936031`, `8a1601f`, `c9a34cc`, and `7d0a8a9`, then
+  independently re-reviewed with no remaining P1/P2. Claude Code `2.1.226`
+  reviewed the full `0635a651..7d0a8a9` range from a clean credential-free
+  standalone clone using `/code-review high`, `--model opus --effort high` and
+  read-only tools. Exit was `0`, JSON complete, `is_error=false`, and
+  `modelUsage` resolved `claude-opus-5`. Its five findings were manually checked;
+  none remained a P1/P2 after verifying staged rollback ownership, the approved
+  clearing taxonomy and sanitization, nested viz fallback, and multi-layer error
+  logging.
+
 - **2026-08-08:** Phase 1 completed at merged main commit
   `31e887fc904ef8060b0c1c9f233957b235ee1aeb`; Phase 2 was not started. The
   owner authorized publication, and PRs
@@ -389,3 +491,14 @@ scope. Optional diagnostics may be reported as `UNVERIFIED`, never as passing.
   closed the `IncludeExpensive` bypass. No third external loop was opened. The
   final backend default tier passed (`687 passed`, `3 skipped`, `14`
   PostgreSQL/expensive deselected); live PostgreSQL remains unverified.
+- **2026-08-09:** Phase 6 completed only REN-013B, REN-014 and REN-016 from exact
+  execution base `d6e3e094d14422e20075a70839b0b288efe51bce` to accepted product
+  HEAD `90ac5ef6197c184b5818fe52826a8e97dbb5f6d5`. Mutable defaults moved below
+  `.local-run/`, legacy/custom DB reset is fail-closed, one no-op test step and
+  proven Admin starter remnants were removed, current docs and classifications
+  were reconciled, and generated sync was no-diff. The canonical milestone passed
+  backend `777`, Admin `154` and Simulator `701` tests plus required builds.
+  Independent adversarial review and Claude Code `2.1.226`/resolved
+  `claude-opus-5` high-effort reviews have no remaining P1/P2. Exact ranges,
+  commands and residuals are recorded in `phase6-cleanup-map.md`. Phase 7 was not
+  started and no branch was published.

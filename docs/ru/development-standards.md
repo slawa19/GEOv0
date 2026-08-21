@@ -1,14 +1,20 @@
 # Стандарты разработки GEO v0
 
+> **Статус:** накопленный engineering guide, не единый исполнимый policy-файл.
+> Обязательный контракт агента — [`AGENTS.md`](../../AGENTS.md); test discovery —
+> [`pytest.ini`](../../pytest.ini); required local entrypoint —
+> [`scripts/verify_local.ps1`](../../scripts/verify_local.ps1). Раздел 3 ниже
+> сохраняет общие принципы, но его прямые `pytest`/package-команды не заменяют
+> verifier. Пиннутый Ruff для `app migrations` блокирует CI; Black остаётся
+> non-blocking diagnostic, mypy не настроен как gate.
+
 ## Введение
 
-Этот документ описывает стандарты разработки проекта GEO v0. Он является единым источником правды для всех правил, конвенций и best practices.
+Этот документ описывает накопленные стандарты и best practices проекта GEO v0.
 
 Документ создан на основе анализа архитектурных ошибок, выявленных в ходе рефакторинга (март 2026), и обобщает существующие стандарты из [`docs/ru/06-contributing.md`](06-contributing.md), [`simulator-ui/v2/src/ui-kit/AI-AGENT-GUIDE.md`](../../simulator-ui/v2/src/ui-kit/AI-AGENT-GUIDE.md) и [`docs/ru/documentation-rules.md`](documentation-rules.md).
 
-Компактная версия для AI-агента: [`.clinerules`](../../.clinerules) (читается автоматически при каждой задаче).
-
-> **Связь с `.clinerules`**: Этот документ — полная версия стандартов. Сжатая версия для AI-агента находится в `.clinerules` (корень проекта). Нумерация разделов намеренно различается: `.clinerules` начинается с описания стека (§1), а этот документ — с антипаттернов (§1). При обновлении правил — обновляй ОБА файла.
+Компактный обязательный контракт для ИИ-агента: [`AGENTS.md`](../../AGENTS.md).
 
 ---
 
@@ -594,9 +600,9 @@ function fitToViewport(nodes: Node[], width: number, height: number) {
 Подробные правила: [`docs/ru/06-contributing.md`](06-contributing.md)
 
 **Краткая выжимка:**
-- Formatter: **Black**, `line-length = 100`
-- Linter: **Ruff** (заменяет flake8 + isort)
-- Типы: **mypy** в strict режиме
+- Formatter: **Black**, `line-length = 100` (пока non-blocking diagnostic)
+- Linter: **Ruff** (пиннутая версия и `app migrations` — blocking CI gate)
+- Типы: mypy не настроен как repository gate
 - Именование: snake_case для функций/переменных, PascalCase для классов
 - Async: SQLAlchemy async sessions, `async def` для всех endpoint handlers
 - Commits: Conventional Commits — `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`
@@ -634,7 +640,7 @@ function fitToViewport(nodes: Node[], width: number, height: number) {
 
 - Директория тестов: `tests/`
 - Integration тесты: `tests/integration/test_*.py`
-- Запуск: `pytest tests/` из корня проекта
+- Канонический запуск: `.\scripts\verify_local.ps1 -TaskSlug <unique-slug>` из корня проекта
 - Фикстуры: в `conftest.py` на уровне директории
 - Correlation ID: каждый тест должен логировать correlation ID для диагностики
 - Артефакты: тесты симулятора сохраняют артефакты для post-run анализа
@@ -643,7 +649,7 @@ function fitToViewport(nodes: Node[], width: number, height: number) {
 
 - Unit-тесты: `simulator-ui/v2/src/**/*.test.ts`
 - Конфиг: `simulator-ui/v2/vite.config.ts` (секция `test`)
-- Запуск: `npm run test:unit` из `simulator-ui/v2/`
+- Узкий запуск: `npm --prefix simulator-ui/v2 run test:unit`; repository milestone — через verifier
 - Изолированность: НЕ импортировать canvas/WebGL модули в unit-тестах
 - Mock: использовать `vi.mock()` для тяжёлых зависимостей
 - Type safety: тесты и mocks ДОЛЖНЫ соблюдать те же правила типизации, что и runtime-код
@@ -654,7 +660,7 @@ function fitToViewport(nodes: Node[], width: number, height: number) {
 ### 3.3 Frontend: Playwright (e2e)
 
 - E2E тесты: `simulator-ui/v2/e2e/**/*.spec.ts`
-- Запуск: `npm run test:e2e` из `simulator-ui/v2/`
+- Запуск: `npm --prefix simulator-ui/v2 run test:e2e` с уникальными портом/output root
 - Именование: ТОЛЬКО `*.spec.ts` для e2e, НИКОГДА `*.spec.ts` в `src/`
 
 ### 3.4 Naming conventions
@@ -667,17 +673,16 @@ function fitToViewport(nodes: Node[], width: number, height: number) {
 
 ### 3.5 Gate команды
 
-```bash
-# Frontend (из simulator-ui/v2/)
-npm run typecheck    # TypeScript — MUST pass
-npm run test:unit    # Vitest unit — MUST pass
-npm run test:e2e     # Playwright — SHOULD pass (если затронуты e2e файлы)
+```powershell
+# Required local repository milestone
+.\scripts\verify_local.ps1 -TaskSlug premerge_slice
 
-# Backend (из корня проекта)
-pytest tests/        # MUST pass
-mypy app/            # MUST pass
-ruff check app/      # MUST pass
+# Non-blocking repository-wide diagnostics with known debt
+.\scripts\verify_local.ps1 -TaskSlug diagnostics -StaticDiagnostics
 ```
+
+Playwright, Postgres, `slow` и super-smoke запускаются отдельными milestone
+selectors по затронутому контракту. Mypy не является gate.
 
 ---
 
@@ -712,9 +717,8 @@ test/add-overlay-geometry-tests
 ### 4.3 PR checklist (backend + frontend)
 
 **Обязательно перед открытием PR:**
-- [ ] `npm run typecheck` — pass
-- [ ] `npm run test:unit` — pass
-- [ ] `pytest tests/` — pass (если затронут backend)
+- [ ] `.\scripts\verify_local.ps1 -TaskSlug <unique-slug>` — exit 0
+- [ ] Отдельные Postgres/Playwright/slow selectors пройдены, если затронут их контракт
 - [ ] Нет `as any` без комментария-обоснования
 - [ ] Тесты и mocks не обходят типизацию через `any`; узкие `unknown` bridges документированы
 - [ ] Нет magic numbers — только `--ds-*` токены
@@ -773,7 +777,7 @@ simulator-ui/v2/src/ui-kit/
 | Удаляешь / переименовываешь | Нет orphan тест-файлов. Нет мёртвого кода. Импорты обновлены |
 | Добавляешь новый design token | Добавил в `designSystem.tokens.css`. Обновил `AI-AGENT-GUIDE.md` |
 | Меняешь overlay/window компоненты | Выбрал family и sizing mode до кодинга. Не смешал WM/shell/content responsibilities. Сверился с `overlay-window-development-rules.md` |
-| Архитектурное решение | Записал ADR в `plans/` или `docs/`. Обновил `plans/INDEX.md` |
+| Архитектурное решение | Зафиксировал Problem/Current/Intended/Optimal и verification plan в актуальной spec/domain-документации |
 
 ---
 
@@ -783,5 +787,4 @@ simulator-ui/v2/src/ui-kit/
 - [`docs/ru/documentation-rules.md`](documentation-rules.md) — правила документирования
 - [`simulator-ui/v2/src/ui-kit/AI-AGENT-GUIDE.md`](../../simulator-ui/v2/src/ui-kit/AI-AGENT-GUIDE.md) — Design System, токены, компоненты UI-kit
 - [`docs/ru/simulator/frontend/docs/overlay-window-development-rules.md`](simulator/frontend/docs/overlay-window-development-rules.md) — guardrails для overlay windows, WindowShell и window-manager
-- [`plans/INDEX.md`](../../plans/INDEX.md) — индекс планов и архитектурных решений
-- [`.clinerules`](../../.clinerules) — компактная версия этих правил для AI-агента
+- [`AGENTS.md`](../../AGENTS.md) — обязательный front-door и verification policy для агентов

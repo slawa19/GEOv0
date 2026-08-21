@@ -17,6 +17,8 @@ export type ClearingFxParams = {
   planId?: string // optional; used for throttle key
 }
 
+type ClearingFxOptions = { animate?: boolean }
+
 type SpawnEdgePulsesFn = typeof spawnEdgePulsesDefault
 type SpawnNodeBurstsFn = typeof spawnNodeBurstsDefault
 type FxStateLike = Partial<Pick<FxState, 'sparks' | 'edgePulses' | 'nodeBursts'>>
@@ -69,8 +71,8 @@ export function useRealClearingFx(deps: {
   spawnEdgePulses?: SpawnEdgePulsesFn
   spawnNodeBursts?: SpawnNodeBurstsFn
 }): {
-  runClearingFx: (params: ClearingFxParams) => void
-  runRealClearingDoneFx: (done: ClearingDoneEvent) => void
+  runClearingFx: (params: ClearingFxParams, opts?: ClearingFxOptions) => void
+  runRealClearingDoneFx: (done: ClearingDoneEvent, opts?: ClearingFxOptions) => void
   resetDedup: () => void
 } {
   const nowMs =
@@ -150,7 +152,7 @@ export function useRealClearingFx(deps: {
     return fxState
   }
 
-  function runClearingFx(params: ClearingFxParams) {
+  function runClearingFx(params: ClearingFxParams, opts: ClearingFxOptions = {}) {
     const { edges: edgesAll, totalAmount, equivalent, planId } = params
 
     const edgeSig = edgesAll.map((e) => `${e.from}>${e.to}`).sort().join('|')
@@ -172,44 +174,46 @@ export function useRealClearingFx(deps: {
       gcClearingFxDedup(_clearingFxDedupByEdgeSig, now)
     }
 
-    const tNowMs = nowMs()
-    const fxState = getFxState()
-    const nodeIds = nodesFromEdges(edgesAll)
+    if (opts.animate !== false) {
+      const tNowMs = nowMs()
+      const fxState = getFxState()
+      const nodeIds = nodesFromEdges(edgesAll)
 
-    deps.setFlash(0.55)
+      deps.setFlash(0.55)
 
-    for (const id of nodeIds) deps.addActiveNode(id, 5200)
+      for (const id of nodeIds) deps.addActiveNode(id, 5200)
 
-    const edgesFx = edgesAll.length > 30 ? edgesAll.slice(0, 30) : edgesAll
-    if (edgesFx.length > 0) {
-      spawnEdgePulses(fxState, {
-        edges: edgesFx,
-        nowMs: tNowMs,
-        durationMs: 4200,
-        color: deps.clearingColor,
-        thickness: 3.2,
-        seedPrefix: `clearing:${planId ?? tNowMs.toFixed(0)}`,
-        countPerEdge: 1,
-        keyEdge: deps.keyEdge,
-        seedFn: deps.seedFn,
-        isTestMode: deps.isTestMode.value && deps.isWebDriver,
-      })
-    }
+      const edgesFx = edgesAll.length > 30 ? edgesAll.slice(0, 30) : edgesAll
+      if (edgesFx.length > 0) {
+        spawnEdgePulses(fxState, {
+          edges: edgesFx,
+          nowMs: tNowMs,
+          durationMs: 4200,
+          color: deps.clearingColor,
+          thickness: 3.2,
+          seedPrefix: `clearing:${planId ?? tNowMs.toFixed(0)}`,
+          countPerEdge: 1,
+          keyEdge: deps.keyEdge,
+          seedFn: deps.seedFn,
+          isTestMode: deps.isTestMode.value && deps.isWebDriver,
+        })
+      }
 
-    for (const e of edgesAll) deps.addActiveEdge(deps.keyEdge(e.from, e.to), 5200)
+      for (const e of edgesAll) deps.addActiveEdge(deps.keyEdge(e.from, e.to), 5200)
 
-    const burstNodeIds = nodeIds.slice(0, 40)
-    if (burstNodeIds.length > 0) {
-      spawnNodeBursts(fxState, {
-        nodeIds: burstNodeIds,
-        nowMs: tNowMs,
-        durationMs: 2800,
-        color: deps.clearingColor,
-        kind: 'clearing',
-        seedPrefix: `clearing-burst:${planId ?? tNowMs.toFixed(0)}`,
-        seedFn: deps.seedFn,
-        isTestMode: deps.isTestMode.value && deps.isWebDriver,
-      })
+      const burstNodeIds = nodeIds.slice(0, 40)
+      if (burstNodeIds.length > 0) {
+        spawnNodeBursts(fxState, {
+          nodeIds: burstNodeIds,
+          nowMs: tNowMs,
+          durationMs: 2800,
+          color: deps.clearingColor,
+          kind: 'clearing',
+          seedPrefix: `clearing-burst:${planId ?? tNowMs.toFixed(0)}`,
+          seedFn: deps.seedFn,
+          isTestMode: deps.isTestMode.value && deps.isWebDriver,
+        })
+      }
     }
 
     const clearedAmount = totalAmount.trim()
@@ -222,19 +226,22 @@ export function useRealClearingFx(deps: {
     }
   }
 
-  function runRealClearingDoneFx(done: ClearingDoneEvent) {
+  function runRealClearingDoneFx(done: ClearingDoneEvent, opts: ClearingFxOptions = {}) {
     const edges: Array<{ from: string; to: string }> = []
     if (Array.isArray(done.cycle_edges) && done.cycle_edges.length > 0) {
       for (const e of done.cycle_edges) edges.push({ from: e.from, to: e.to })
     }
     if (edges.length === 0) return
 
-    runClearingFx({
-      edges,
-      totalAmount: String(done.cleared_amount ?? '0'),
-      equivalent: String(done.equivalent ?? ''),
-      planId: String(done.plan_id ?? '') || undefined,
-    })
+    runClearingFx(
+      {
+        edges,
+        totalAmount: String(done.cleared_amount ?? '0'),
+        equivalent: String(done.equivalent ?? ''),
+        planId: String(done.plan_id ?? '') || undefined,
+      },
+      opts,
+    )
   }
 
   function resetDedup(): void {

@@ -1,5 +1,11 @@
 # Simulator Frontend (RU)
 
+```text
+Статус: Stable
+Область: simulator
+Последнее обновление: 2026-08-11
+```
+
 Входная точка документации текущего UI в [`simulator-ui/v2`](../../../../simulator-ui/v2/README.md). `simulator-ui/v1` и документы в `archive/` — исторические материалы.
 
 ## Implementation-oriented guides

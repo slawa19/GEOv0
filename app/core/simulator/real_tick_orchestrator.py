@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Protocol
 import app.db.session as db_session
 import app.core.simulator.storage as simulator_storage
 from app.config import settings
+from app.core.payments.service import PaymentService
 from app.core.simulator.commit_resolution import resolve_rollback_under_cancellation
 from app.core.simulator.post_tick_audit import audit_tick_balance
 from app.core.simulator.models import RunRecord
@@ -270,6 +271,16 @@ class RealTickOrchestrator:
                     equivalents = run._real_equivalents or []
                     if len(participants) < 2 or not equivalents:
                         return
+
+                    owner_service = PaymentService(session)
+                    if owner_service.engine._is_postgres():
+                        # Close initialization reads before the monetary outer UoW.
+                        # The owner set is its first statement; a SERIALIZABLE waiter
+                        # can still receive 40001 and must restart at this outer owner.
+                        await session.commit()
+                        await owner_service.acquire_staged_equivalent_owner_locks(
+                            equivalents
+                        )
 
                     # Initialize trust drift (once per run)
                     if run._trust_drift_config is None:

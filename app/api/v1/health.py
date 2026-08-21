@@ -4,14 +4,15 @@ import os
 import time
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Header, Request
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy import text
 from sqlalchemy.engine.url import make_url
 
+from app.api import deps
 from app.db.session import engine
 from app.config import settings
-from app.schemas.common import HealthResponse
+from app.schemas.common import ErrorEnvelope, HealthResponse
 from app.utils.background_jobs import background_health_status
 
 
@@ -34,13 +35,21 @@ def _best_effort_version() -> str:
 
 def _best_effort_environment() -> str:
     # Optional, but useful for the Admin UI cards.
-    return (os.getenv("GEO_ENV") or os.getenv("ENV") or "dev").strip() or "dev"
+    return settings.ENV or "dev"
 
 
-@router.get("/health", response_model=HealthResponse, response_model_exclude_none=True)
-async def health_check(request: Request):
+@router.get(
+    "/health",
+    response_model=HealthResponse,
+    response_model_exclude_none=True,
+    responses={503: {"model": HealthResponse, "description": "Service degraded"}},
+)
+async def health_check(request: Request, response: Response):
+    status = background_health_status(request.app)
+    if status == "degraded":
+        response.status_code = 503
     return {
-        "status": background_health_status(request.app),
+        "status": status,
         "version": _best_effort_version(),
         "environment": _best_effort_environment(),
         "uptime_seconds": int(max(0.0, time.time() - _START_TIME)),
@@ -55,6 +64,44 @@ async def healthz_check():
 
 @router.get("/health/db")
 async def health_db_check():
+    try:
+        t0 = time.perf_counter()
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        latency_ms = int(round((time.perf_counter() - t0) * 1000.0))
+
+        return {
+            "status": "ok",
+            "db": {
+                "reachable": True,
+                "latency_ms": latency_ms,
+            },
+            "timestamp": _utc_now_iso(),
+        }
+    except Exception:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "error",
+                "db": {"reachable": False, "latency_ms": None},
+                "timestamp": _utc_now_iso(),
+            },
+        )
+
+
+@router.get(
+    "/admin/health/db",
+    tags=["Admin"],
+    responses={
+        403: {"model": ErrorEnvelope, "description": "Admin token required"},
+        503: {"description": "Database unavailable"},
+    },
+)
+async def health_db_diagnostic(
+    request: Request,
+    x_admin_token: str = Header(alias="X-Admin-Token"),
+):
+    await deps.require_admin(request, x_admin_token)
     try:
         t0 = time.perf_counter()
         async with engine.connect() as conn:

@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-test('graph: loads, supports equivalent filter, and opens drawer on node click', async ({ page, request }) => {
+test('graph: loads, supports equivalent filter, and opens node details by keyboard', async ({ page, request }) => {
   // Pick a PID that is guaranteed to exist when eq=EUR (from trustlines dataset).
   const trustlinesRes = await request.get('/admin-fixtures/v1/datasets/trustlines.json')
   expect(trustlinesRes.ok()).toBe(true)
@@ -8,10 +8,15 @@ test('graph: loads, supports equivalent filter, and opens drawer on node click',
   const eur = trustlines.find((t) => String(t.equivalent).trim().toUpperCase() === 'EUR')
   const pid = String(eur?.from || eur?.to || '').trim()
   expect(pid.length).toBeGreaterThan(0)
+  const participantsRes = await request.get('/admin-fixtures/v1/datasets/participants.json')
+  expect(participantsRes.ok()).toBe(true)
+  const participants = (await participantsRes.json()) as Array<{ pid: string; display_name?: string }>
+  const participant = participants.find((candidate) => candidate.pid === pid)
+  const nodeOptionName = `Node: ${String(participant?.display_name || pid).trim()} — ${pid}`
 
   await page.goto('/graph')
 
-  await expect(page.getByText('Network Graph', { exact: true })).toBeVisible()
+  await expect(page.getByRole('img', { name: 'Network graph visualization' })).toBeVisible()
 
   // UI layout sanity (regression insurance): ensure the toolbar uses the intended grid structure.
   await page.getByRole('tab', { name: 'Filters', exact: true }).click()
@@ -19,8 +24,7 @@ test('graph: loads, supports equivalent filter, and opens drawer on node click',
   await page.getByRole('tab', { name: 'Display', exact: true }).click()
   await expect(page.locator('.displayGrid')).toBeVisible()
 
-  const cy = page.getByTestId('graph-cy')
-  await expect(cy).toBeVisible()
+  await expect(page.getByTestId('graph-cy')).toBeVisible()
 
   // Switch equivalent filter (smoke).
   await page.getByRole('tab', { name: 'Filters', exact: true }).click()
@@ -28,24 +32,28 @@ test('graph: loads, supports equivalent filter, and opens drawer on node click',
   await eqSelect.click()
   await page.getByRole('option', { name: 'EUR', exact: true }).click()
 
-  // Deterministically tap the node via the dev-only hook exposed by GraphPage.
-  await expect
-    .poll(async () => {
-      return await page.evaluate((p) => {
-        const fn = (globalThis as any).__GEO_TAP_NODE__ as undefined | ((pid: string) => boolean)
-        if (typeof fn !== 'function') return false
-        return fn(p)
-      }, pid)
-    })
-    .toBe(true)
+  const elementSelect = page.getByRole('combobox', { name: 'Open graph element' })
+  await expect(elementSelect).toBeEnabled()
+  await elementSelect.fill(pid)
+  await expect(page.getByRole('option', { name: nodeOptionName, exact: true })).toBeVisible()
+  await elementSelect.press('ArrowDown')
+  await elementSelect.press('Enter')
+  await expect(page.getByTestId('graph-element-select')).toContainText(nodeOptionName)
+  const openButton = page.getByTestId('graph-element-open')
+  await openButton.focus()
+  await page.keyboard.press('Enter')
 
   // Drawer should open with node details including PID.
   const drawerContent = page.getByTestId('graph-drawer-content')
   await expect(drawerContent).toBeVisible()
   await expect(drawerContent).toContainText(pid)
+
+  await page.keyboard.press('Escape')
+  await expect(drawerContent).toBeHidden()
+  await expect(openButton).toBeFocused()
 })
 
-test('graph: opens drawer on edge click', async ({ page, request }) => {
+test('graph: opens edge details by keyboard', async ({ page, request }) => {
   // Pick an edge that exists under EUR.
   const trustlinesRes = await request.get('/admin-fixtures/v1/datasets/trustlines.json')
   expect(trustlinesRes.ok()).toBe(true)
@@ -57,7 +65,7 @@ test('graph: opens drawer on edge click', async ({ page, request }) => {
   expect(to.length).toBeGreaterThan(0)
 
   await page.goto('/graph')
-  await expect(page.getByText('Network Graph', { exact: true })).toBeVisible()
+  await expect(page.getByRole('img', { name: 'Network graph visualization' })).toBeVisible()
 
   // Ensure equivalent filter is EUR to guarantee the edge is present.
   await page.getByRole('tab', { name: 'Filters', exact: true }).click()
@@ -65,19 +73,17 @@ test('graph: opens drawer on edge click', async ({ page, request }) => {
   await eqSelect.click()
   await page.getByRole('option', { name: 'EUR', exact: true }).click()
 
-  // Tap the edge via dev-only hook.
-  await expect
-    .poll(async () => {
-      return await page.evaluate(
-        (args) => {
-          const fn = (globalThis as any).__GEO_TAP_EDGE__ as undefined | ((from: string, to: string, eq: string) => boolean)
-          if (typeof fn !== 'function') return false
-          return fn(args.from, args.to, args.eq)
-        },
-        { from, to, eq: 'EUR' },
-      )
-    })
-    .toBe(true)
+  const edgeOptionName = `Edge: ${from} → ${to} (EUR)`
+  const elementSelect = page.getByRole('combobox', { name: 'Open graph element' })
+  await expect(elementSelect).toBeEnabled()
+  await elementSelect.fill(edgeOptionName)
+  await expect(page.getByRole('option', { name: edgeOptionName, exact: true })).toBeVisible()
+  await elementSelect.press('ArrowDown')
+  await elementSelect.press('Enter')
+  await expect(page.getByTestId('graph-element-select')).toContainText(edgeOptionName)
+  const openButton = page.getByTestId('graph-element-open')
+  await openButton.focus()
+  await page.keyboard.press('Enter')
 
   const edgeDrawer = page.getByTestId('graph-drawer-edge')
   await expect(edgeDrawer).toBeVisible()

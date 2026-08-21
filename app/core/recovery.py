@@ -3,9 +3,10 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -29,66 +30,136 @@ _ACTIVE_TX_STATES: set[str] = {
 }
 
 
-async def cleanup_expired_prepare_locks(session: AsyncSession) -> int:
+@dataclass(frozen=True)
+class ExpiredLockCleanupResult:
+    expired_lock_ids_resolved: int = 0
+    transactions_aborted: int = 0
+    terminal_transactions_seen: int = 0
+    item_failures: int = 0
+
+    @property
+    def succeeded(self) -> bool:
+        return self.item_failures == 0
+
+
+@dataclass(frozen=True)
+class StalePaymentAbortResult:
+    transactions_aborted: int = 0
+    terminal_transactions_seen: int = 0
+    abort_failures: int = 0
+
+    @property
+    def succeeded(self) -> bool:
+        return self.abort_failures == 0
+
+
+async def _rollback_failed_recovery_item(
+    session: AsyncSession, *, operation: str, tx_id: str
+) -> None:
+    try:
+        await session.rollback()
+    except Exception:
+        logger.exception("recovery.%s_rollback_failed tx_id=%s", operation, tx_id)
+        raise
+
+
+def _classify_abort_outcome(outcome: object) -> tuple[int, int]:
+    if outcome == "success":
+        return 1, 0
+    if outcome in {"already_aborted", "already_committed"}:
+        return 0, 1
+    raise RuntimeError(f"unexpected payment abort outcome: {outcome!r}")
+
+
+async def cleanup_expired_prepare_locks(
+    session: AsyncSession,
+) -> ExpiredLockCleanupResult:
     try:
         # Best-effort metrics (avoid new metric names if registry isn't available).
         RECOVERY_EVENTS_TOTAL.labels(event="cleanup_expired_prepare_locks", result="start").inc()
     except Exception:
         pass
 
-    # Count first to avoid relying on DBAPI rowcount semantics.
-    expired_count = (
+    expired_lock_rows = (
         await session.execute(
-            select(func.count()).select_from(PrepareLock).where(PrepareLock.expires_at <= func.now())
+            select(PrepareLock.id, PrepareLock.tx_id)
+            .where(PrepareLock.expires_at <= func.now())
+            .order_by(PrepareLock.tx_id.asc(), PrepareLock.id.asc())
         )
-    ).scalar_one()
+    ).all()
 
-    if not expired_count:
+    if not expired_lock_rows:
         try:
             RECOVERY_EVENTS_TOTAL.labels(event="cleanup_expired_prepare_locks", result="noop").inc()
         except Exception:
             pass
-        return 0
+        return ExpiredLockCleanupResult()
 
-    # Abort related transactions first to ensure we don't leave "active" tx without locks.
-    tx_ids = (
-        await session.execute(
-            select(PrepareLock.tx_id)
-            .where(PrepareLock.expires_at <= func.now())
-            .distinct()
-        )
-    ).scalars().all()
+    expired_lock_ids_by_tx: dict[str, list[object]] = {}
+    for lock_id, tx_id in expired_lock_rows:
+        expired_lock_ids_by_tx.setdefault(str(tx_id), []).append(lock_id)
 
     engine = PaymentEngine(session)
-    abort_failures = 0
-    for tx_id in tx_ids:
+    expired_lock_ids_resolved = 0
+    transactions_aborted = 0
+    terminal_transactions_seen = 0
+    item_failures = 0
+    for tx_id, expired_lock_ids in expired_lock_ids_by_tx.items():
         try:
-            await engine.abort(tx_id, reason="Prepare lock expired", error_code=ErrorCode.E007)
+            outcome = await engine.abort(
+                tx_id,
+                reason="Prepare lock expired",
+                error_code=ErrorCode.E007,
+                return_outcome=True,
+            )
+            newly_aborted, terminal_seen = _classify_abort_outcome(outcome)
         except Exception:
-            abort_failures += 1
+            item_failures += 1
             logger.exception("recovery.abort_expired_prepare_lock_tx_failed tx_id=%s", tx_id)
+            await _rollback_failed_recovery_item(
+                session,
+                operation="abort_expired_prepare_lock_tx",
+                tx_id=tx_id,
+            )
+            continue
 
-    # Best-effort cleanup for any remaining expired rows (e.g., if abort failed part-way).
-    await session.execute(delete(PrepareLock).where(PrepareLock.expires_at <= func.now()))
-    await session.commit()
+        # PaymentEngine durably removes every lock for all successful terminal
+        # outcomes, including already_committed. Recovery only accounts for the
+        # expired IDs it observed before delegating ownership to the engine.
+        transactions_aborted += newly_aborted
+        terminal_transactions_seen += terminal_seen
+        expired_lock_ids_resolved += len(expired_lock_ids)
 
     try:
         RECOVERY_EVENTS_TOTAL.labels(
             event="cleanup_expired_prepare_locks",
-            result="partial_error" if abort_failures else "success",
+            result="partial_error" if item_failures else "success",
         ).inc()
     except Exception:
         pass
 
-    if abort_failures:
-        raise RuntimeError(
-            f"failed to abort {abort_failures} transaction(s) with expired prepare locks"
+    if item_failures:
+        logger.warning(
+            "recovery.cleanup_expired_prepare_locks_partial "
+            "expired_lock_ids_resolved=%s transactions_aborted=%s "
+            "terminal_transactions_seen=%s item_failures=%s",
+            expired_lock_ids_resolved,
+            transactions_aborted,
+            terminal_transactions_seen,
+            item_failures,
         )
 
-    return int(expired_count)
+    return ExpiredLockCleanupResult(
+        expired_lock_ids_resolved=expired_lock_ids_resolved,
+        transactions_aborted=transactions_aborted,
+        terminal_transactions_seen=terminal_transactions_seen,
+        item_failures=item_failures,
+    )
 
 
-async def abort_stale_payment_transactions(session: AsyncSession) -> int:
+async def abort_stale_payment_transactions(
+    session: AsyncSession,
+) -> StalePaymentAbortResult:
     timeout_seconds = int(getattr(settings, "PAYMENT_TX_STUCK_TIMEOUT_SECONDS", 120) or 120)
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=timeout_seconds)
 
@@ -114,22 +185,31 @@ async def abort_stale_payment_transactions(session: AsyncSession) -> int:
             RECOVERY_EVENTS_TOTAL.labels(event="abort_stale_payment_transactions", result="noop").inc()
         except Exception:
             pass
-        return 0
+        return StalePaymentAbortResult()
 
     engine = PaymentEngine(session)
     aborted = 0
+    terminal_transactions_seen = 0
     abort_failures = 0
     for tx_id in tx_ids:
         try:
-            await engine.abort(
+            outcome = await engine.abort(
                 tx_id,
                 reason="Recovered stale payment transaction",
                 error_code=ErrorCode.E007,
+                return_outcome=True,
             )
-            aborted += 1
+            newly_aborted, terminal_seen = _classify_abort_outcome(outcome)
+            aborted += newly_aborted
+            terminal_transactions_seen += terminal_seen
         except Exception:
             abort_failures += 1
             logger.exception("recovery.abort_failed tx_id=%s", tx_id)
+            await _rollback_failed_recovery_item(
+                session,
+                operation="abort_stale_payment_transaction",
+                tx_id=tx_id,
+            )
 
     try:
         RECOVERY_EVENTS_TOTAL.labels(
@@ -140,29 +220,50 @@ async def abort_stale_payment_transactions(session: AsyncSession) -> int:
         pass
 
     if abort_failures:
-        raise RuntimeError(f"failed to abort {abort_failures} stale payment transaction(s)")
+        logger.warning(
+            "recovery.abort_stale_payment_transactions_partial "
+            "transactions_aborted=%s terminal_transactions_seen=%s abort_failures=%s",
+            aborted,
+            terminal_transactions_seen,
+            abort_failures,
+        )
 
-    return aborted
+    return StalePaymentAbortResult(
+        transactions_aborted=aborted,
+        terminal_transactions_seen=terminal_transactions_seen,
+        abort_failures=abort_failures,
+    )
 
 
 async def run_recovery_once(session: AsyncSession) -> bool:
-    deleted = 0
-    aborted = 0
+    expired_result = ExpiredLockCleanupResult()
+    stale_result = StalePaymentAbortResult()
     succeeded = True
     try:
-        deleted = await cleanup_expired_prepare_locks(session)
+        expired_result = await cleanup_expired_prepare_locks(session)
+        succeeded = succeeded and expired_result.succeeded
     except Exception:
         succeeded = False
         logger.exception("recovery.cleanup_expired_prepare_locks_failed")
+        try:
+            await session.rollback()
+        except Exception:
+            logger.exception("recovery.cleanup_expired_prepare_locks_session_unusable")
+            return False
 
     try:
-        aborted = await abort_stale_payment_transactions(session)
+        stale_result = await abort_stale_payment_transactions(session)
+        succeeded = succeeded and stale_result.succeeded
     except Exception:
         succeeded = False
         logger.exception("recovery.abort_stale_payment_transactions_failed")
 
-    if deleted or aborted:
-        logger.info("recovery.done expired_locks_deleted=%s stale_payments_aborted=%s", deleted, aborted)
+    if expired_result.expired_lock_ids_resolved or stale_result.transactions_aborted:
+        logger.info(
+            "recovery.done expired_lock_ids_resolved=%s stale_payments_aborted=%s",
+            expired_result.expired_lock_ids_resolved,
+            stale_result.transactions_aborted,
+        )
     return succeeded
 
 

@@ -229,6 +229,12 @@
   will-change: transform, opacity;
 }
 
+.root[data-motion='reduced'] .floating-label-inner {
+  animation: none !important;
+  transition: none !important;
+  will-change: auto;
+}
+
 /*
  * Compositor-only animation: a single translate3d handles centering + vertical drift,
  * scale is a separate property — no nested calc() chains, no layout thrashing.

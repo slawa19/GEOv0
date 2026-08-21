@@ -1,3 +1,5 @@
+import { fileURLToPath } from 'node:url'
+
 import { defineConfig } from '@playwright/test'
 
 const e2ePort = Number.parseInt(process.env.PW_E2E_PORT ?? '', 10) || 5177
@@ -9,6 +11,8 @@ const e2eBaseUrl = `http://127.0.0.1:${e2ePort}`
 // Only auto-start the dev server for normal `playwright test` runs.
 const isTestServer = process.argv.some((a) => a === 'test-server' || a.endsWith('test-server'))
 const shouldStartWebServer = !isTestServer
+const outputDir = process.env.GEO_SIMULATOR_PLAYWRIGHT_OUTPUT_DIR
+  ?? fileURLToPath(new URL('../../.local-run/playwright/simulator/results/', import.meta.url))
 
 export default defineConfig({
   testDir: './e2e',
@@ -16,6 +20,7 @@ export default defineConfig({
   expect: {
     timeout: 10_000,
   },
+  outputDir,
   use: {
     baseURL: e2eBaseUrl,
     viewport: { width: 1280, height: 720 },

@@ -40,6 +40,7 @@ import { useAppUiDerivedState } from './useAppUiDerivedState'
 import { useLabelNodes } from './useLabelNodes'
 import { useLayoutIndex } from './useLayoutIndex'
 import { usePersistedSimulatorPrefs } from './usePersistedSimulatorPrefs'
+import { useMetricsPolling } from './useMetricsPolling'
 import { useSelectedNodeEdgeStats } from './useSelectedNodeEdgeStats'
 import { useSnapshotIndex } from './useSnapshotIndex'
 import { useAppPickingAndHover } from './useAppPickingAndHover'
@@ -78,6 +79,32 @@ function getErrorMessage(err: unknown): string {
   return String(err)
 }
 
+export async function loadStrictRunRecoverySnapshot(input: {
+  apiBase: string
+  accessToken: string
+  runId: string
+  equivalent: string
+}): Promise<{ snapshot: GraphSnapshot; sourcePath: string }> {
+  const runId = String(input.runId || '').trim()
+  const equivalent = String(input.equivalent || '').trim().toUpperCase()
+  if (!runId || !equivalent) throw new Error('Replay recovery requires a run id and equivalent')
+
+  // Recovery after an unreplayable cursor must never fall back to a scenario
+  // preview or an empty graph: only this run-scoped snapshot can cover the gap.
+  const snapshot = await getSnapshot(
+    { apiBase: input.apiBase, accessToken: input.accessToken },
+    runId,
+    equivalent,
+  )
+  if (String(snapshot.equivalent || '').trim().toUpperCase() !== equivalent) {
+    throw new Error('Replay recovery snapshot equivalent does not match the requested context')
+  }
+  return {
+    snapshot,
+    sourcePath: `GET ${input.apiBase}/simulator/runs/${encodeURIComponent(runId)}/graph/snapshot?equivalent=${encodeURIComponent(equivalent)}`,
+  }
+}
+
 type RealModeApi = ReturnType<typeof useSimulatorRealMode>
 type AdminRunsPanelApi = ReturnType<typeof useAdminRunsPanel>
 type CookieSessionApi = ReturnType<typeof useCookieSessionBootstrap>
@@ -88,6 +115,7 @@ type LabelNodesApi = ReturnType<typeof useLabelNodes>
 type PickingAndHoverApi = ReturnType<typeof useAppPickingAndHover>
 type FxOverlaysApi = ReturnType<typeof useAppFxOverlays>
 type ViewWiringApi = ReturnType<typeof useAppViewWiring>
+type MetricsPollingApi = ReturnType<typeof useMetricsPolling>
 type DragToPinApi = ReturnType<typeof useAppDragToPinAndPreview>
 type PhysicsAndPinningApi = ReturnType<typeof useAppPhysicsAndPinningWiring>
 type CanvasInteractionsApi = ReturnType<typeof useAppCanvasInteractionsWiring>
@@ -186,6 +214,12 @@ export type SimulatorAppApi = {
   hasNodeCardInspectorOpen: ComputedRef<boolean>
   hoveredEdge: FxOverlaysApi['hoveredEdge']
   clearHoveredEdge: FxOverlaysApi['clearHoveredEdge']
+  /**
+   * The active-edge highlight sink. Exposed because a caller outside the FX composables needs to
+   * name one edge on the graph — a bottleneck row saying "this one, not its neighbour" — and this
+   * overlay is already the app's single way of saying that.
+   */
+  addActiveEdge: FxOverlaysApi['addActiveEdge']
   edgeTooltipStyle: PickingAndHoverApi['edgeTooltipStyle']
   selectedNode: ViewWiringApi['selectedNode']
   selectedNodeScreenCenter: ViewWiringApi['selectedNodeScreenCenter']
@@ -214,7 +248,43 @@ export type SimulatorAppApi = {
   worldToCssTranslateNoScale: ViewWiringApi['worldToCssTranslateNoScale']
 
   getNodeById: ReturnType<typeof useSnapshotIndex>['getNodeById']
+  focusOnEdge: ViewWiringApi['focusOnEdge']
   resetView: ViewWiringApi['resetView']
+
+  /**
+   * Analytics overlay surface (spec 007): visibility plus the two streams feeding the panel.
+   *
+   * Two of everything, on purpose. `/metrics` and `/bottlenecks` fail independently, so a single
+   * merged phase (or a single shared error string) would make the panel state the absence of data
+   * it is holding. The merge does not exist anywhere on this path.
+   */
+  analytics: {
+    isVisible: ComputedRef<boolean>
+    metricsPhase: MetricsPollingApi['metricsPhase']
+    bottlenecksPhase: MetricsPollingApi['bottlenecksPhase']
+    metrics: MetricsPollingApi['metrics']
+    bottlenecks: MetricsPollingApi['bottlenecks']
+    metricsError: MetricsPollingApi['metricsError']
+    bottlenecksError: MetricsPollingApi['bottlenecksError']
+    metricsUnavailableReason: MetricsPollingApi['metricsUnavailableReason']
+    bottlenecksUnavailableReason: MetricsPollingApi['bottlenecksUnavailableReason']
+    isPolling: MetricsPollingApi['isPolling']
+  }
+}
+
+/**
+ * The rule that decides whether the analytics surface exists at all (spec 007, T705).
+ *
+ * Exported as a named policy for one reason: the only test that mounts `SimulatorAppRoot` mocks
+ * this whole composable away, so the mock used to re-state the rule in its own words — and a test
+ * that re-states the rule verifies the restatement, not the application. The mock now calls this,
+ * which makes "never over fixtures" a fact about the shipped rule.
+ *
+ * Fixtures have no metric store behind them: a panel opened over a demo scene could only ever say
+ * "no measurements", while polling two endpoints that cannot answer for it.
+ */
+export function __analyticsPanelVisibilityPolicy(realMode: boolean, panelOpen: boolean): boolean {
+  return realMode && panelOpen
 }
 
 /**
@@ -327,6 +397,21 @@ export function useSimulatorApp(opts?: {
 
   /** Step 5 (WM): whether node-card inspector window is currently open (WM source of truth). */
   uiIsNodeCardOpen?: () => boolean
+
+  /** Policy seam for non-essential animation and canvas effects. */
+  optionalFxEnabled?: () => boolean
+
+  /**
+   * T705: has the user asked for the analytics overlay surface?
+   *
+   * The mount point owns and persists this flag (it is a UI preference, stored the same way as
+   * its bottom-bar neighbours); the real-mode half of the decision is added here, and the result
+   * is published back as `analytics.isVisible` so the flag and the poll gate cannot disagree.
+   *
+   * Read reactively — the getter is evaluated inside a `computed`. Omitted means "no such
+   * surface": nothing is polled at all.
+   */
+  isAnalyticsPanelOpen?: () => boolean
 }): SimulatorAppApi {
   const eq = ref('UAH')
   const scene = ref<SceneId>('A')
@@ -691,29 +776,34 @@ export function useSimulatorApp(opts?: {
       real.runId = next ? next : null
     },
   })
+  let resetStaleRunOwner: ((opts?: { clearError?: boolean }) => void) | null = null
+  function resetStaleRunThroughOwner(opts?: { clearError?: boolean }) {
+    if (resetStaleRunOwner) {
+      resetStaleRunOwner(opts)
+      return
+    }
+    // Real-mode boot is asynchronous, while the owner is wired later in setup.
+    // Defer the extremely early completion case instead of duplicating reset policy here.
+    queueMicrotask(() => resetStaleRunOwner?.(opts))
+  }
   const interactActions = useInteractActions({
     httpConfig: interactHttpConfig,
     runId: interactRunId,
     onStaleRunId: () => {
-      real.runId = null
-      real.runStatus = null
-      real.lastEventId = null
-      real.artifacts = []
-      real.lastError = ''
-      state.error = ''
+      resetStaleRunThroughOwner({ clearError: true })
     },
   })
 
   // Clearing FX is wired later (depends on fxState + overlays), but must be callable
   // from early wiring (e.g. Interact callbacks) without TDZ hazards.
-  let runClearingFxImpl: (params: ClearingFxParams) => void = () => undefined
+  let runClearingFxImpl: (params: ClearingFxParams, opts?: { animate?: boolean }) => void = () => undefined
   function runClearingFx(params: ClearingFxParams) {
-    runClearingFxImpl(params)
+    runClearingFxImpl(params, { animate: opts?.optionalFxEnabled?.() !== false })
   }
 
-  let runRealClearingDoneFxImpl: (done: ClearingDoneEvent) => void = () => undefined
+  let runRealClearingDoneFxImpl: (done: ClearingDoneEvent, opts?: { animate?: boolean }) => void = () => undefined
   function runRealClearingDoneFx(done: ClearingDoneEvent) {
-    runRealClearingDoneFxImpl(done)
+    runRealClearingDoneFxImpl(done, { animate: opts?.optionalFxEnabled?.() !== false })
   }
 
   let resetClearingFxDedupImpl: () => void = () => undefined
@@ -890,6 +980,11 @@ export function useSimulatorApp(opts?: {
     },
     getNodeById,
     getLayoutNodeById: (id) => getLayoutNodeByIdLive(id),
+    // Required for `focusOnEdge` to be anything but a no-op: without the links of the current
+    // snapshot it cannot tell "this edge exists" from "these two nodes exist", so it refuses to
+    // move the camera at all. Read live (not captured) for the same reason as the other five
+    // `getLayoutLinks` call sites in this file: `layout.links` is replaced wholesale per snapshot.
+    getLayoutLinks: () => layout.links,
   })
 
   const cameraSystem = viewWiring.cameraSystem
@@ -962,6 +1057,7 @@ export function useSimulatorApp(opts?: {
     pruneActiveEdges: fxOverlays.pruneActiveEdges,
     pruneActiveNodes: fxOverlays.pruneActiveNodes,
     pruneFloatingLabels: fxOverlays.pruneFloatingLabels,
+    hasFloatingLabels: fxOverlays.hasFloatingLabels,
     mapping: VIZ_MAPPING,
     fxState: fxOverlays.fxState,
     getSelectedNodeId: () => state.selectedNodeId,
@@ -1332,7 +1428,9 @@ export function useSimulatorApp(opts?: {
       // IMPORTANT: anchor must be in the same coordinate system as popup clamping/placement.
       // Use host-relative screen coordinates (clientToScreen).
       const anchor = hostEl.value ? clientToScreen(ptr.clientX, ptr.clientY) : { x: ptr.clientX, y: ptr.clientY }
-      interactMode.selectEdge(edge.key, anchor)
+      // Busy rejection is still a handled canvas click: do not fall through to
+      // the outside-click path, which can prompt and cancel the in-flight flow.
+      if (!interactMode.selectEdge(edge.key, anchor)) return true
 
       // Step 5 (WM): open/update edge-detail window.
       // `edge.*Id` values are participant ids in this UI; treat them as pids.
@@ -1379,9 +1477,7 @@ export function useSimulatorApp(opts?: {
         if (e instanceof ApiError && e.status === 404) {
           // Stale runId (e.g. deleted/expired). Clear it so we don't keep calling
           // run-scoped endpoints like /runs/:id/actions/* and /runs/:id.
-          real.runId = null
-          real.runStatus = null
-          real.lastEventId = null
+          resetStaleRunThroughOwner({ clearError: true })
         }
         // Non-fatal: if run snapshot is unreachable (401/404/stale), fall back to scenario preview.
         console.warn('Failed to load run snapshot; falling back to scenario preview:', e)
@@ -1418,6 +1514,7 @@ export function useSimulatorApp(opts?: {
     }
   }
 
+  let handleRealSceneContextChange: () => Promise<void> = async () => undefined
   const sceneState = useAppSceneState({
     eq,
     scene,
@@ -1427,6 +1524,12 @@ export function useSimulatorApp(opts?: {
     isTestMode: () => isTestMode.value,
     isEqAllowed: (v) => ALLOWED_EQS.has(String(v ?? '').toUpperCase()),
     loadSnapshot: loadSnapshotForUi,
+    loadRecoverySnapshot: ({ runId, equivalent }) => loadStrictRunRecoverySnapshot({
+      apiBase: real.apiBase,
+      accessToken: real.accessToken,
+      runId,
+      equivalent,
+    }),
     onIncrementalSnapshotLoaded: (snapshot) => syncLayoutFromSnapshot(snapshot),
     clearScheduledTimeouts,
     resetCamera,
@@ -1441,6 +1544,7 @@ export function useSimulatorApp(opts?: {
     // immediate watcher (refreshScenarios → refreshSnapshot). Skipping the duplicate
     // loadScene() in setup() eliminates a redundant "Loading…" flash on page open.
     skipInitialLoad: () => isRealMode.value,
+    onSceneContextChange: () => handleRealSceneContextChange(),
   })
 
   function cleanupRealRunFxAndTimers() {
@@ -1471,6 +1575,7 @@ export function useSimulatorApp(opts?: {
     isUserFacingRunError,
     inc,
     loadScene: () => sceneState.loadScene(),
+    loadRecoveryScene: (context) => sceneState.loadRecoveryScene(context),
     realPatchApplier,
     pushTxAmountLabel,
     runRealTxFx,
@@ -1479,7 +1584,10 @@ export function useSimulatorApp(opts?: {
     scheduleTimeout,
     wakeUp,
     onAnySseEvent: markDemoActivity,
+    optionalFxEnabled: opts?.optionalFxEnabled,
   })
+  handleRealSceneContextChange = realMode.handleSceneContextChange
+  resetStaleRunOwner = realMode.resetStaleRun
 
   // Real mode: if intensity ends up 0 (common after legacy Interact UI persistence),
   // reset to a sensible default so a newly started run actually produces events.
@@ -1641,6 +1749,32 @@ export function useSimulatorApp(opts?: {
     getLayoutSize: () => ({ w: layout.w, h: layout.h }),
   })
 
+  // ── Analytics overlay surface (spec 007, T705) ───────────────────────────────────────────────
+  //
+  // The toggle is owned and persisted by the mount point (`SimulatorAppRoot`), through the same
+  // `useSimulatorStorage` mechanism as its bottom-bar neighbours. The second half of the condition
+  // — real mode — is `__analyticsPanelVisibilityPolicy`, which is where the rule lives so that the
+  // test that mounts the root can call it instead of re-inventing it. Mount point and poll gate
+  // read the same computed and cannot disagree.
+  const isAnalyticsPanelVisible = computed(() =>
+    __analyticsPanelVisibilityPolicy(isRealMode.value, opts?.isAnalyticsPanelOpen?.() ?? false),
+  )
+
+  const analyticsStream = useMetricsPolling({
+    apiBase: computed(() => real.apiBase),
+    accessToken: computed(() => real.accessToken),
+    runId: computed(() => real.runId),
+    equivalent: effectiveEq,
+    runStatus: computed(() => real.runStatus),
+    /**
+     * Exactly the panel's visibility, not merely "real mode": a hidden surface must not spend a
+     * request pair every five seconds — `GET /metrics` and `GET /bottlenecks` both read the run's
+     * metric tables. Absent (no surface declared itself) means no polling at all, which is the
+     * only default that cannot bill a user for a screen nobody is looking at.
+     */
+    enabled: isAnalyticsPanelVisible,
+  })
+
   const api = {
     apiMode,
 
@@ -1765,6 +1899,7 @@ export function useSimulatorApp(opts?: {
     hasNodeCardInspectorOpen,
     hoveredEdge,
     clearHoveredEdge,
+    addActiveEdge,
     edgeTooltipStyle: pickingAndHover.edgeTooltipStyle,
     selectedNode: viewWiring.selectedNode,
     selectedNodeScreenCenter,
@@ -1796,8 +1931,23 @@ export function useSimulatorApp(opts?: {
     floatingLabelsViewFx,
     worldToCssTranslateNoScale: viewWiring.worldToCssTranslateNoScale,
 
+    // analytics overlay surface (spec 007)
+    analytics: {
+      isVisible: isAnalyticsPanelVisible,
+      metricsPhase: analyticsStream.metricsPhase,
+      bottlenecksPhase: analyticsStream.bottlenecksPhase,
+      metrics: analyticsStream.metrics,
+      bottlenecks: analyticsStream.bottlenecks,
+      metricsError: analyticsStream.metricsError,
+      bottlenecksError: analyticsStream.bottlenecksError,
+      metricsUnavailableReason: analyticsStream.metricsUnavailableReason,
+      bottlenecksUnavailableReason: analyticsStream.bottlenecksUnavailableReason,
+      isPolling: analyticsStream.isPolling,
+    },
+
     // helpers for template
     getNodeById,
+    focusOnEdge: viewWiring.focusOnEdge,
     resetView: viewWiring.resetView,
   } satisfies SimulatorAppApi
 

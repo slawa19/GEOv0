@@ -19,7 +19,8 @@ Powiązane dokumenty:
 ## 0. Jak uruchomić testy lokalnie (venv + komendy)
 
 Projekt używa wirtualnego środowiska Python (`.venv`) i zależności z [`requirements.txt`](../../requirements.txt) oraz [`requirements-dev.txt`](../../requirements-dev.txt).
-Na Windows **nie polegaj na `pytest` w PATH**: użyj `python -m pytest`, aby uruchomić testy na właściwym interpreterze.
+Na Windows używaj kanonicznego skryptu PowerShell repozytorium; wybiera on interpreter
+i izoluje artefakty za pomocą `TaskSlug`.
 
 ### 0.1. Windows PowerShell
 
@@ -30,11 +31,12 @@ py -m venv .venv
 python -m pip install -r requirements.txt
 python -m pip install -r requirements-dev.txt
 
-# Wszystkie testy (w tym OpenAPI contract test)
-python -m pytest -q
+# Pełna kanoniczna bramka lokalna
+.\scripts\verify_local.ps1 -TaskSlug docs_pl_full
 
 # Tylko OpenAPI contract test
-python -m pytest -q tests/contract/test_openapi_contract.py
+.\scripts\verify_local.ps1 -TaskSlug docs_pl_openapi -BackendOnly `
+  -BackendSelector tests/contract/test_openapi_contract.py
 ```
 
 ### 0.2. Windows CMD
@@ -45,7 +47,7 @@ call .\.venv\Scripts\activate.bat
 
 python -m pip install -r requirements.txt
 python -m pip install -r requirements-dev.txt
-python -m pytest -q
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify_local.ps1 -TaskSlug docs_pl_cmd
 ```
 
 ### 0.3. Rozwiązywanie problemów
@@ -310,7 +312,7 @@ tests/artifacts/
 
 ### 8.1. run_id / scenario_id
 - `run_id` — fixture na poziomie sesji (UUID)
-- `scenario_id` — marker `@pytest.mark.scenario("TS-12")` lub derywacja z nazwy testu
+- `scenario_id` — fixture/wartość lub derywacja z nazwy testu; marker pytest `scenario` nie jest zarejestrowany
 
 ### 8.2. Klient HTTP
 Klient (httpx) musi:
@@ -320,8 +322,9 @@ Klient (httpx) musi:
 
 ### 8.3. Selektywne uruchamianie
 Przykład:
-```bash
-pytest -k TS_12
+```powershell
+.\scripts\verify_local.ps1 -TaskSlug scenario_ts12 -BackendOnly `
+  -BackendSelector <ścieżka-testu-TS-12>
 ```
 
 ---

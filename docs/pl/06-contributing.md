@@ -24,7 +24,7 @@
 
 ### 1.1. Wymagania
 
-- Python 3.11+  
+- Python 3.11+ z Windows Python Launcher (`py`)
 - PostgreSQL 15+  
 - Redis 7+  
 - Git  
@@ -45,16 +45,14 @@ git remote add upstream https://github.com/geo-protocol/geo-hub.git
 
 ### 1.3. Konfiguracja środowiska
 
-```bash
+Utwórz środowisko używane przez kanoniczny verifier z PowerShell:
+
+```powershell
 # Utwórz wirtualne środowisko
-python3.11 -m venv venv
-source venv/bin/activate
+py -m venv .venv
 
-# Zainstaluj zależności (w tym dev)
-pip install -e ".[dev]"
-
-# Skonfiguruj pre-commit hooks
-pre-commit install
+# Zainstaluj zależności runtime i dev
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
 ```
 
 ### 1.4. Uruchomienie przez Docker
@@ -70,16 +68,17 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 
 ### 1.5. Weryfikacja instalacji
 
-```bash
-# Uruchom testy
-pytest
+Uruchom polecenia weryfikacyjne z PowerShell:
 
-# Sprawdź lintery
-ruff check .
-mypy app/
+```powershell
+# Uruchom kanoniczną bramkę backendu
+.\scripts\verify_local.ps1 -TaskSlug contributor_pl_install -BackendOnly
+
+# Sprawdź blocking scope Ruff
+.\.venv\Scripts\python.exe -m ruff check app migrations --no-cache
 
 # Otwórz dokumentację (Swagger UI)
-open http://localhost:8000/docs
+Start-Process http://localhost:8000/docs
 # (lub http://127.0.0.1:18000/docs przy uruchomieniu lokalnym przez scripts/run_local.ps1)
 ```
 
@@ -181,30 +180,32 @@ git checkout -b feature/my-feature
 
 ### 3.3. Uruchomienie w trybie deweloperskim
 
-```bash
-export ENV=dev
+```powershell
+$env:ENV = "dev"
 
 # Uruchom z hot reload
-uvicorn app.main:app --reload --host 0.0.0.0 --port 18000
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 0.0.0.0 --port 18000
 
 # Logowanie w trybie debug
-DEBUG=true LOG_LEVEL=DEBUG uvicorn app.main:app --reload --host 0.0.0.0 --port 18000
+$env:DEBUG = "true"
+$env:LOG_LEVEL = "DEBUG"
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 0.0.0.0 --port 18000
 ```
 
 ### 3.4. Praca z bazą danych
 
-```bash
+```powershell
 # Utwórz nową migrację
-alembic -c migrations/alembic.ini revision --autogenerate -m "Add column X to table Y"
+.\.venv\Scripts\python.exe -m alembic -c migrations/alembic.ini revision --autogenerate -m "Add column X to table Y"
 
 # Zastosuj migracje
-alembic -c migrations/alembic.ini upgrade head
+.\.venv\Scripts\python.exe -m alembic -c migrations/alembic.ini upgrade head
 
 # Cofnij ostatnią migrację
-alembic -c migrations/alembic.ini downgrade -1
+.\.venv\Scripts\python.exe -m alembic -c migrations/alembic.ini downgrade -1
 
 # Pokaż historię
-alembic -c migrations/alembic.ini history
+.\.venv\Scripts\python.exe -m alembic -c migrations/alembic.ini history
 ```
 
 ---
@@ -215,18 +216,17 @@ alembic -c migrations/alembic.ini history
 
 Używamy:
 
-- **Ruff** — linter (zastępuje flake8, isort, pyupgrade)  
-- **Black** — formatowanie (przez `ruff format`)  
-- **mypy** — statyczne typowanie  
+- **Ruff** — blocking linter CI dla `app migrations`
+- **Black** — non-blocking diagnostyka formatowania
+- **mypy** — nie jest skonfigurowany jako bramka repozytorium
 
-```bash
+```powershell
 # Sprawdzenie
-ruff check .
-mypy app/
+.\.venv\Scripts\python.exe -m ruff check app migrations --no-cache
 
 # Automatyczne poprawki
-ruff check --fix .
-ruff format .
+.\.venv\Scripts\python.exe -m ruff check --fix app migrations
+.\.venv\Scripts\python.exe -m black --check app migrations
 ```
 
 ### 4.2. Konfiguracja (pyproject.toml)
@@ -390,21 +390,17 @@ tests/
 
 ### 5.2. Uruchamianie testów
 
-```bash
-# Wszystkie testy
-pytest
+```powershell
+# Domyślna warstwa backendu (bez slow i postgres)
+.\scripts\verify_local.ps1 -TaskSlug contributor_pl_backend -BackendOnly
 
-# Z pokryciem
-pytest --cov=app --cov-report=html
+# Konkretny moduł przez canonical selector
+.\scripts\verify_local.ps1 -TaskSlug contributor_pl_payments -BackendOnly `
+  -BackendSelector tests/unit/test_payments_2pc.py
 
-# Konkretny moduł
-pytest tests/unit/core/test_routing.py
-
-# Po markerach
-pytest -m "not slow"
-
-# Równolegle
-pytest -n auto
+# Jawny milestone slow; postgres pozostaje osobną warstwą
+.\scripts\verify_local.ps1 -TaskSlug contributor_pl_super_smoke -BackendOnly `
+  -BackendSelector tests/integration/test_simulator_super_smoke.py -IncludeExpensive
 ```
 
 ### 5.3. Fixtures
@@ -499,12 +495,17 @@ class TestRoutingService:
 
 ### 6.1. Przygotowanie PR
 
-```bash
-# Upewnij się, że wszystkie checki przechodzą
-ruff check .
-mypy app/
-pytest
+Uruchom wymagane bramki z PowerShell:
 
+```powershell
+# Upewnij się, że wszystkie checki przechodzą
+.\.venv\Scripts\python.exe -m ruff check app migrations --no-cache
+.\scripts\verify_local.ps1 -TaskSlug contributor_pl_pr_full
+```
+
+Następnie utwórz commit w używanej powłoce:
+
+```bash
 # Commit z czytelną wiadomością
 git commit -m "feat(payments): add multi-path routing support
 

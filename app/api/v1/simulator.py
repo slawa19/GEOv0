@@ -12,7 +12,7 @@ from typing import Any, AsyncIterator, Optional
 from pydantic import BaseModel, Field
 from pydantic.config import ConfigDict
 
-from fastapi import APIRouter, Body, Depends, Query, Request
+from fastapi import APIRouter, Body, Depends, Header, Query, Request
 from starlette.responses import FileResponse, Response, StreamingResponse, JSONResponse
 
 from sqlalchemy import and_, func, select
@@ -20,13 +20,21 @@ from sqlalchemy import and_, func, select
 from app.api import deps
 from app.config import settings
 from app.core.simulator.runtime import runtime
-from app.core.clearing.service import ClearingService
+from app.core.clearing.service import (
+    ClearingCommittedAfterCancellation,
+    ClearingService,
+)
 from app.core.payments.router import PaymentRouter
 from app.core.payments.service import PaymentService
 from app.core.simulator.edge_patch_builder import EdgePatchBuilder
 from app.core.simulator.real_scenario_seeder import RealScenarioSeeder
 from app.core.simulator.scenario_equivalent import effective_equivalent
-from app.core.simulator.sse_broadcast import SseEventEmitter
+from app.core.simulator.models import _Subscription
+from app.core.simulator.sse_broadcast import (
+    SSE_SUBSCRIPTION_CLOSED_TYPE,
+    SseEventEmitter,
+    SseReplayUnavailable,
+)
 from app.core.simulator.viz_patch_helper import VizPatchHelper
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
@@ -47,7 +55,6 @@ from app.schemas.simulator import (
     SetIntensityRequest,
     SimulatorGraphSnapshot,
     SimulatorRunStatusEvent,
-    SimulatorTxUpdatedEvent,
 
     # SSE payloads
     TopologyChangedEdgeRef,
@@ -84,6 +91,7 @@ from app.utils.exceptions import (
     GeoException,
     GoneException,
     NotFoundException,
+    RetryablePaymentConflictException,
     RoutingException,
     TimeoutException,
 )
@@ -162,6 +170,99 @@ def _build_clearing_done_cycle_edges_payload(
     # Stable ordering for UI (regardless of cycle discovery/execution order).
     out.sort(key=lambda d: (d.get("from") or "", d.get("to") or ""))
     return out
+
+
+async def _emit_interact_clearing_done_best_effort(
+    *,
+    run_id: str,
+    run,
+    db,
+    equivalent_code: str,
+    executed: list[SimulatorActionClearingCycle],
+    cleared_count: int,
+    total: Decimal,
+) -> None:
+    if cleared_count <= 0:
+        return
+
+    try:
+        emitter = SseEventEmitter(
+            sse=runtime._sse,  # type: ignore[attr-defined]
+            utc_now=_utc_now,
+            logger=logger,
+        )
+        cycle_edges_payload = _build_clearing_done_cycle_edges_payload(executed)
+
+        edges_pairs: list[tuple[str, str]] = []
+        for edge in cycle_edges_payload or []:
+            from_pid = str(edge.get("from") or "").strip()
+            to_pid = str(edge.get("to") or "").strip()
+            if from_pid and to_pid:
+                edges_pairs.append((from_pid, to_pid))
+
+        edge_patch, node_patch = await _compute_viz_patches_best_effort(
+            session=db,
+            run=run,
+            equivalent_code=equivalent_code,
+            edges_pairs=edges_pairs,
+        )
+
+        emitter.emit_clearing_done(
+            run_id=run_id,
+            run=run,
+            equivalent=equivalent_code,
+            plan_id=f"plan_interact_{secrets.token_hex(6)}",
+            cleared_cycles=int(cleared_count),
+            cleared_amount=_fmt_decimal_for_api(total),
+            cycle_edges=cycle_edges_payload,
+            node_patch=node_patch,
+            edge_patch=edge_patch,
+        )
+    except Exception:
+        logger.warning(
+            "Best-effort SSE emission failed: interact.clearing_real run_id=%s",
+            run_id,
+            exc_info=True,
+        )
+
+
+def _emit_interact_clearing_done_without_patches_best_effort(
+    *,
+    run_id: str,
+    run,
+    equivalent_code: str,
+    executed: list[SimulatorActionClearingCycle],
+    cleared_count: int,
+    total: Decimal,
+) -> None:
+    """Publish durable clearing progress without entering another await."""
+    if cleared_count <= 0:
+        return
+
+    try:
+        emitter = SseEventEmitter(
+            sse=runtime._sse,  # type: ignore[attr-defined]
+            utc_now=_utc_now,
+            logger=logger,
+        )
+        emitter.emit_clearing_done(
+            run_id=run_id,
+            run=run,
+            equivalent=equivalent_code,
+            plan_id=f"plan_interact_{secrets.token_hex(6)}",
+            cleared_cycles=int(cleared_count),
+            cleared_amount=_fmt_decimal_for_api(total),
+            cycle_edges=_build_clearing_done_cycle_edges_payload(executed),
+            node_patch=None,
+            edge_patch=None,
+        )
+    except Exception:
+        logger.warning(
+            "Best-effort cancellation SSE emission failed: "
+            "interact.clearing_real run_id=%s",
+            run_id,
+            exc_info=True,
+        )
 
 
 async def _compute_viz_patches_best_effort(
@@ -1381,6 +1482,13 @@ async def action_payment_real(
             idempotency_key=None,
             commit=True,
         )
+    except RetryablePaymentConflictException as exc:
+        return _action_error(
+            status_code=exc.status_code,
+            code="CONFLICT",
+            message=exc.message,
+            details=exc.details,
+        )
     except RoutingException as exc:
         if any_path_exists is False:
             return _action_error(
@@ -1510,6 +1618,9 @@ async def action_clearing_real(
     if err is not None:
         return err
     assert eq is not None
+    # A skipped clearing rolls back its service-owned attempt, which expires ORM
+    # instances. Keep the wire identifier independent of that session state.
+    eq_code = str(eq.code)
 
     service = ClearingService(db)
 
@@ -1517,82 +1628,117 @@ async def action_clearing_real(
     total = Decimal("0")
     cleared_count = 0
 
-    # Auto-clear loop: best-effort match ClearingService.auto_clear(), but keep per-cycle details.
-    for _ in range(0, 100):
-        cycles = await service.find_cycles(eq.code, max_depth=int(req.max_depth))
-        if not cycles:
-            break
-
-        executed_this_round = False
-        for cycle in cycles:
-            clear_amt = await service.execute_clearing_with_amount(cycle)
-            if clear_amt is None:
-                continue
-
-            edges: list[SimulatorActionEdgeRef] = []
-            for e in (cycle or []):
-                debtor = str(e.get("debtor") or "").strip()
-                creditor = str(e.get("creditor") or "").strip()
-                if debtor and creditor and debtor != creditor:
-                    # Trustline direction is creditor -> debtor (see project guardrails).
-                    edges.append(SimulatorActionEdgeRef(from_=creditor, to=debtor))
-
-            executed.append(
-                SimulatorActionClearingCycle(
-                    cleared_amount=_fmt_decimal_for_api(clear_amt),
-                    edges=edges,
-                )
-            )
-            total += clear_amt
-            cleared_count += 1
-            executed_this_round = True
-            break
-
-        if not executed_this_round:
-            break
-
-    # Best-effort SSE emission (clearing.done). `run` already fetched by _get_run_checked above.
-    try:
-        if cleared_count > 0:
-            emitter = SseEventEmitter(sse=runtime._sse, utc_now=_utc_now, logger=logger)  # type: ignore[attr-defined]
-
-            cycle_edges_payload = _build_clearing_done_cycle_edges_payload(executed)
-
-            edges_pairs: list[tuple[str, str]] = []
-            for e in (cycle_edges_payload or []):
-                a = str(e.get("from") or "").strip()
-                b = str(e.get("to") or "").strip()
-                if a and b:
-                    edges_pairs.append((a, b))
-
-            edge_patch, node_patch = await _compute_viz_patches_best_effort(
-                session=db,
-                run=run,
-                equivalent_code=eq.code,
-                edges_pairs=edges_pairs,
-            )
-
-            emitter.emit_clearing_done(
+    async def _emit_known_progress() -> None:
+        try:
+            await _emit_interact_clearing_done_best_effort(
                 run_id=run_id,
                 run=run,
-                equivalent=eq.code,
-                plan_id=f"plan_interact_{secrets.token_hex(6)}",
-                cleared_cycles=int(cleared_count),
-                cleared_amount=_fmt_decimal_for_api(total),
-                cycle_edges=cycle_edges_payload,
-                node_patch=node_patch,
-                edge_patch=edge_patch,
+                db=db,
+                equivalent_code=eq_code,
+                executed=executed,
+                cleared_count=cleared_count,
+                total=total,
             )
-    except Exception:
-        # TODO(interact): compute node_patch/edge_patch via VizPatchHelper for clearing.done.
-        logger.warning(
-            "Best-effort SSE emission failed: interact.clearing_real run_id=%s",
+        except asyncio.CancelledError:
+            # Cancellation may arrive while patches are being computed, before
+            # the synchronous broadcast. Publish already-durable progress
+            # without entering another await, then preserve cancellation.
+            _emit_interact_clearing_done_without_patches_best_effort(
+                run_id=run_id,
+                run=run,
+                equivalent_code=eq_code,
+                executed=executed,
+                cleared_count=cleared_count,
+                total=total,
+            )
+            raise
+
+    try:
+        # Auto-clear loop: best-effort match ClearingService.auto_clear(), but keep per-cycle details.
+        for _ in range(0, 100):
+            cycles = await service.find_cycles(eq_code, max_depth=int(req.max_depth))
+            if not cycles:
+                break
+
+            executed_this_round = False
+            for cycle in cycles:
+                commit_cancellation = None
+                try:
+                    clear_amt = await service.execute_clearing_with_amount(cycle)
+                except ClearingCommittedAfterCancellation as exc:
+                    clear_amt = exc.cleared_amount
+                    commit_cancellation = exc
+                if clear_amt is None:
+                    continue
+
+                # The clearing transaction is already durable when the service
+                # returns an amount. Record it before response/SSE shaping so a
+                # later formatting failure cannot hide committed progress.
+                total += clear_amt
+                cleared_count += 1
+                executed_this_round = True
+
+                edges: list[SimulatorActionEdgeRef] = []
+                for edge in cycle or []:
+                    debtor = str(edge.get("debtor") or "").strip()
+                    creditor = str(edge.get("creditor") or "").strip()
+                    if debtor and creditor and debtor != creditor:
+                        # Trustline direction is creditor -> debtor (see project guardrails).
+                        edges.append(
+                            SimulatorActionEdgeRef(from_=creditor, to=debtor)
+                        )
+
+                executed.append(
+                    SimulatorActionClearingCycle(
+                        cleared_amount=_fmt_decimal_for_api(clear_amt),
+                        edges=edges,
+                    )
+                )
+                if commit_cancellation is not None:
+                    raise commit_cancellation
+                break
+
+            if not executed_this_round:
+                break
+    except asyncio.CancelledError:
+        if cleared_count > 0:
+            _emit_interact_clearing_done_without_patches_best_effort(
+                run_id=run_id,
+                run=run,
+                equivalent_code=eq_code,
+                executed=executed,
+                cleared_count=cleared_count,
+                total=total,
+            )
+        raise
+    except Exception as exc:
+        logger.exception(
+            "event=simulator.interact.clearing_failed run_id=%s "
+            "equivalent=%s cleared_cycles=%s",
             run_id,
-            exc_info=True,
+            eq_code,
+            cleared_count,
+        )
+        details = dict(exc.details or {}) if isinstance(exc, GeoException) else {}
+        if cleared_count > 0:
+            details.update(
+                {
+                    "partial_cleared_cycles": int(cleared_count),
+                    "partial_cleared_amount": _fmt_decimal_for_api(total),
+                }
+            )
+            await _emit_known_progress()
+        return _action_error(
+            status_code=500,
+            code="CLEARING_FAILED",
+            message="Clearing failed",
+            details=details or None,
         )
 
+    await _emit_known_progress()
+
     return SimulatorActionClearingRealResponse(
-        equivalent=eq.code,
+        equivalent=eq_code,
         cleared_cycles=int(cleared_count),
         total_cleared_amount=_fmt_decimal_for_api(total),
         cycles=executed,
@@ -1913,39 +2059,37 @@ def _sse_format(*, payload: dict[str, Any], event_id: str) -> str:
     return f"id: {event_id}\nevent: simulator.event\ndata: {data}\n\n"
 
 
-def _parse_stop_after_types(raw: Optional[str]) -> Optional[set[str]]:
-    if raw is None:
-        return None
-    parts = [p.strip() for p in str(raw).split(",")]
-    parts = [p for p in parts if p]
-    return set(parts) if parts else None
-
-
 async def _run_events_stream(
     *,
     run_id: str,
     equivalent: str,
     last_event_id: Optional[str] = None,
-    stop_after_types: Optional[set[str]] = None,
+    subscription: Optional[_Subscription] = None,
+    initial_status_event_id: Optional[str] = None,
 ) -> AsyncIterator[str]:
-    # Subscribe first so we don't miss immediate events.
-    sub = await runtime.subscribe(run_id, equivalent=equivalent, after_event_id=last_event_id)
-    is_pytest = bool(os.environ.get("PYTEST_CURRENT_TEST"))
+    # Replay and the initial status are atomically queued before subscription exposure.
+    if subscription is None:
+        sub, status_event_id = await runtime.subscribe_with_status(
+            run_id, equivalent=equivalent, after_event_id=last_event_id
+        )
+    else:
+        sub = subscription
+        status_event_id = initial_status_event_id or runtime.publish_run_status(run_id)
     try:
         # Always start with a status snapshot.
         # We emit it through the runtime so it has a normal sequential event_id
         # and lands in the replay buffer.
-        runtime.publish_run_status(run_id)
-
         prefetched: list[dict[str, Any]] = []
-        seen_types: set[str] = set()
         status_evt: Optional[dict[str, Any]] = None
         try:
-            # Drain until we see the first run_status; preserve other events.
+            # Drain until we see the status emitted above. Older replay statuses are
+            # part of the replay prefix and must not be mistaken for this snapshot.
             deadline_sec = 1.0
             while True:
                 evt = await asyncio.wait_for(sub.queue.get(), timeout=deadline_sec)
-                if str(evt.get("type") or "") == "run_status":
+                if str(evt.get("type") or "") == SSE_SUBSCRIPTION_CLOSED_TYPE:
+                    return
+                if str(evt.get("event_id") or "") == status_event_id:
                     status_evt = evt
                     break
                 prefetched.append(evt)
@@ -1972,125 +2116,57 @@ async def _run_events_stream(
                 current_phase=run.current_phase,
                 last_error=run.last_error,
             ).model_dump(mode="json", by_alias=True)
-            seen_types.add(str(init_event.get("type") or ""))
             yield _sse_format(payload=init_event, event_id=str(init_event["event_id"]))
+            bootstrap_tail = (
+                runtime.finish_replay_bootstrap(run_id, sub)
+                if sub.replay_bootstrap_pending
+                else []
+            )
+            if bootstrap_tail is None:
+                return
+            if str(init_event.get("state") or "") in ("stopped", "error"):
+                return
         else:
-            event_id = str(status_evt.get("event_id") or "")
-            if not event_id:
-                event_id = f"evt_{secrets.token_hex(6)}"
+            status_id = str(status_evt.get("event_id") or "")
+            if not status_id:
+                status_id = f"evt_{secrets.token_hex(6)}"
                 status_evt = dict(status_evt)
-                status_evt["event_id"] = event_id
-            seen_types.add(str(status_evt.get("type") or ""))
-            yield _sse_format(payload=status_evt, event_id=event_id)
-
-            # Flush prefetched events after the initial status.
+                status_evt["event_id"] = status_id
+            # Replay and any already queued live tail must precede the new
+            # authoritative status snapshot.
             for evt in prefetched:
                 event_id = str(evt.get("event_id") or evt.get("event") or "")
                 if not event_id:
                     event_id = f"evt_{secrets.token_hex(6)}"
                     evt = dict(evt)
                     evt["event_id"] = event_id
-                seen_types.add(str(evt.get("type") or ""))
                 yield _sse_format(payload=evt, event_id=event_id)
 
-        # NOTE: httpx's in-process ASGI test transport can buffer streaming responses.
-        # Under pytest we intentionally terminate the stream after emitting a minimal
-        # "first frame" (run_status + at least one tx.updated) so integration tests
-        # don't hang waiting for an infinite response to complete.
-        if is_pytest:
-            # NOTE: httpx's in-process ASGI test transport can buffer streaming responses.
-            # Under pytest we intentionally terminate the stream after emitting a bounded
-            # "first frame" so integration tests don't hang on infinite SSE.
-            #
-            # Some tests need specific event types (e.g. clearing.done);
-            # in that case we keep streaming until we observe all requested types or
-            # hit a short deadline.
-            if stop_after_types and stop_after_types.issubset(seen_types):
+            yield _sse_format(payload=status_evt, event_id=status_id)
+            bootstrap_tail = (
+                runtime.finish_replay_bootstrap(run_id, sub)
+                if sub.replay_bootstrap_pending
+                else []
+            )
+            if bootstrap_tail is None:
                 return
 
-            # Give the simulator enough time to emit at least one tx.* event under
-            # in-process httpx streaming, while keeping the SSE response bounded.
-            deadline = asyncio.get_running_loop().time() + (6.0 if stop_after_types else 3.0)
-            seen_tx_updated = False
-            while asyncio.get_running_loop().time() < deadline:
-                try:
-                    nxt = await asyncio.wait_for(sub.queue.get(), timeout=0.25)
-                except asyncio.TimeoutError:
-                    continue
+            if str(status_evt.get("state") or "") in ("stopped", "error"):
+                return
 
-                nxt_type = str(nxt.get("type") or "")
-                if nxt_type == "run_status":
-                    continue
-
-                event_id = str(nxt.get("event_id") or nxt.get("event") or "")
-                if not event_id:
-                    event_id = f"evt_{secrets.token_hex(6)}"
-                    nxt = dict(nxt)
-                    nxt["event_id"] = event_id
-
-                seen_types.add(nxt_type)
-                yield _sse_format(payload=nxt, event_id=event_id)
-                if nxt_type == "tx.updated":
-                    seen_tx_updated = True
-
-                if stop_after_types and stop_after_types.issubset(seen_types):
-                    return
-
-                if stop_after_types is None and seen_tx_updated:
-                    return
-
-            # If we didn't observe a tx.updated, emit a synthetic one so SSE
-            # consumers/tests have a predictable "first frame". Best-effort
-            # include patches derived from a snapshot.
-            if not seen_tx_updated and stop_after_types is None:
-                edge_patch = None
-                node_patch = None
-                edges = None
-                try:
-                    from app.db.session import AsyncSessionLocal
-
-                    async with AsyncSessionLocal() as session:
-                        snap = await runtime.build_graph_snapshot(
-                            run_id=run_id, equivalent=equivalent, session=session
-                        )
-
-                    if getattr(snap, "links", None):
-                        l0 = snap.links[0]
-                        edge_patch = [l0.model_dump(mode="json", by_alias=True)]
-                        edges = [{"from": str(l0.source), "to": str(l0.target)}]
-
-                        node_by_id = {n.id: n for n in (snap.nodes or [])}
-                        n_src = node_by_id.get(str(l0.source))
-                        n_dst = node_by_id.get(str(l0.target))
-                        node_patch = [
-                            n.model_dump(mode="json", by_alias=True)
-                            for n in (n_src, n_dst)
-                            if n is not None
-                        ]
-                except Exception:
-                    edge_patch = None
-                    node_patch = None
-                    edges = None
-
-                evt = SimulatorTxUpdatedEvent(
-                    event_id=f"evt_init_tx_{secrets.token_hex(6)}",
-                    ts=_utc_now(),
-                    type="tx.updated",
-                    equivalent=equivalent,
-                    amount="0.00",
-                    amount_flyout=False,
-                    ttl_ms=1200,
-                    intensity_key="mid",
-                    edges=edges,
-                    node_badges=None,
-                ).model_dump(mode="json", by_alias=True)
-                if edge_patch:
-                    evt["edge_patch"] = edge_patch
-                if node_patch:
-                    evt["node_patch"] = node_patch
-                event_id = str(evt.get("event_id") or "") or f"evt_{secrets.token_hex(6)}"
-                yield _sse_format(payload=evt, event_id=event_id)
-            return
+        # This list is the exact pre-finalization live tail. Future broadcasts
+        # now enter the normal queue and cannot be consumed in this flush.
+        for evt in bootstrap_tail:
+            event_id = str(evt.get("event_id") or evt.get("event") or "")
+            if not event_id:
+                event_id = f"evt_{secrets.token_hex(6)}"
+                evt = dict(evt)
+                evt["event_id"] = event_id
+            yield _sse_format(payload=evt, event_id=event_id)
+            if str(evt.get("type") or "") == "run_status" and str(
+                evt.get("state") or ""
+            ) in ("stopped", "error"):
+                return
 
         keepalive_sec = 15
         while True:
@@ -2100,6 +2176,9 @@ async def _run_events_stream(
                 # Keep-alive comment
                 yield ": keep-alive\n\n"
                 continue
+
+            if str(evt.get("type") or "") == SSE_SUBSCRIPTION_CLOSED_TYPE:
+                return
 
             event_id = str(evt.get("event_id") or evt.get("event") or "")
             if not event_id:
@@ -2114,11 +2193,6 @@ async def _run_events_stream(
                 return
     finally:
         await runtime.unsubscribe(run_id, sub)
-        if is_pytest:
-            try:
-                await runtime.stop(run_id)
-            except Exception:
-                pass
 
 
 # -----------------------------
@@ -2165,11 +2239,18 @@ async def ego_snapshot_active_run(
     return await runtime.build_ego_snapshot(run_id=run_id, equivalent=equivalent, pid=pid, depth=depth, session=db)
 
 
-@router.get("/events")
+@router.get(
+    "/events",
+    responses={
+        410: {
+            "model": ErrorEnvelope,
+            "description": "Replay cursor is invalid, unavailable, or cannot fit the subscriber queue",
+        }
+    },
+)
 async def events_stream_active_run(
-    request: Request,
     equivalent: str = Query(...),
-    stop_after_types: Optional[str] = Query(None),
+    last_event_id: Optional[str] = Header(None, alias="Last-Event-ID"),
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
     run_id = runtime.get_active_run_id(owner_id=actor.owner_id)
@@ -2183,6 +2264,10 @@ async def events_stream_active_run(
             run_id = None
 
     if run_id is None:
+        if last_event_id is not None:
+            raise GoneException(
+                "Last-Event-ID replay is unavailable; please refresh state"
+            )
 
         async def idle_stream() -> AsyncIterator[str]:
             while True:
@@ -2195,18 +2280,20 @@ async def events_stream_active_run(
             headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
         )
 
-    last_event_id = request.headers.get("Last-Event-ID")
-    if last_event_id and runtime.is_sse_strict_replay_enabled() and runtime.is_replay_too_old(
-        run_id=run_id, after_event_id=last_event_id
-    ):
-        raise GoneException("Last-Event-ID is too old; please refresh state")
+    try:
+        sub, status_event_id = await runtime.subscribe_with_status(
+            run_id, equivalent=equivalent, after_event_id=last_event_id
+        )
+    except SseReplayUnavailable as exc:
+        raise GoneException("Last-Event-ID replay is unavailable; please refresh state") from exc
 
     return StreamingResponse(
         _run_events_stream(
             run_id=run_id,
             equivalent=equivalent,
             last_event_id=last_event_id,
-            stop_after_types=_parse_stop_after_types(stop_after_types),
+            subscription=sub,
+            initial_status_event_id=status_event_id,
         ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
@@ -2384,27 +2471,36 @@ async def set_run_intensity(
     return await runtime.set_intensity(run_id, intensity_percent=body.intensity_percent)
 
 
-@router.get("/runs/{run_id}/events")
+@router.get(
+    "/runs/{run_id}/events",
+    responses={
+        410: {
+            "model": ErrorEnvelope,
+            "description": "Replay cursor is invalid, unavailable, or cannot fit the subscriber queue",
+        }
+    },
+)
 async def run_events_stream(
     run_id: str,
-    request: Request,
     equivalent: str = Query(...),
-    stop_after_types: Optional[str] = Query(None),
+    last_event_id: Optional[str] = Header(None, alias="Last-Event-ID"),
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
     _check_run_access(runtime.get_run(run_id), actor, run_id)
-    last_event_id = request.headers.get("Last-Event-ID")
-    if last_event_id and runtime.is_sse_strict_replay_enabled() and runtime.is_replay_too_old(
-        run_id=run_id, after_event_id=last_event_id
-    ):
-        raise GoneException("Last-Event-ID is too old; please refresh state")
+    try:
+        sub, status_event_id = await runtime.subscribe_with_status(
+            run_id, equivalent=equivalent, after_event_id=last_event_id
+        )
+    except SseReplayUnavailable as exc:
+        raise GoneException("Last-Event-ID replay is unavailable; please refresh state") from exc
 
     return StreamingResponse(
         _run_events_stream(
             run_id=run_id,
             equivalent=equivalent,
             last_event_id=last_event_id,
-            stop_after_types=_parse_stop_after_types(stop_after_types),
+            subscription=sub,
+            initial_status_event_id=status_event_id,
         ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 
-import { requestJson } from './realApi'
+import { realApi, requestJson } from './realApi'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -148,5 +148,48 @@ describe('realApi.requestJson', () => {
 
     const env = await requestJson('/api/v1/health', { schema: z.object({ n: z.number() }), toast: false })
     expect(env.success).toBe(false)
+  })
+})
+
+describe('realApi bottleneck threshold transport', () => {
+  it('rejects invalid thresholds before any HTTP request', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
+
+    expect(() => realApi.trustlineBottlenecks({ threshold: '1.00000000000000001' })).toThrowError(
+      expect.objectContaining({ name: 'ApiException', code: 'VALIDATION_ERROR', status: 422 }),
+    )
+    expect(() => realApi.liquiditySummary({ threshold: '-0.01' })).toThrowError(
+      expect.objectContaining({ name: 'ApiException', code: 'VALIDATION_ERROR', status: 422 }),
+    )
+    await expect(realApi.participantMetrics('PID_A', { threshold: '1e-1' })).rejects.toMatchObject({
+      name: 'ApiException',
+      code: 'VALIDATION_ERROR',
+      status: 422,
+    })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('preserves a valid high-precision decimal string for every endpoint', async () => {
+    const meta = import.meta as unknown as { env: Record<string, unknown> }
+    meta.env.VITE_API_BASE_URL = ''
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify({ success: false, error: { code: 'EXPECTED', message: 'stop' } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
+    const threshold = '0.10000000000000001'
+
+    await realApi.trustlineBottlenecks({ threshold })
+    await realApi.liquiditySummary({ threshold })
+    await realApi.participantMetrics('PID_A', { threshold })
+
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      `/api/v1/admin/trustlines/bottlenecks?threshold=${threshold}&limit=10`,
+      `/api/v1/admin/liquidity/summary?threshold=${threshold}&limit=10`,
+      `/api/v1/admin/participants/PID_A/metrics?threshold=${threshold}`,
+    ])
   })
 })

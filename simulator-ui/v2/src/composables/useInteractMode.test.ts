@@ -190,6 +190,29 @@ describe('useInteractMode', () => {
     expect(im.state.fromPid).toBe(null)
   })
 
+  it('surfaces the message from a structured InteractActionError instead of [object Object]', async () => {
+    const snapshot = ref<GraphSnapshot | null>(null)
+    const actions = mkActions()
+    actions.sendPayment.mockRejectedValueOnce({
+      status: 422,
+      code: 'NO_ROUTE',
+      message: 'No route between selected participants',
+    })
+    const im = useInteractMode({
+      actions,
+      runId: computed(() => 'run_test'),
+      equivalent: computed(() => 'UAH'),
+      snapshot,
+    })
+
+    im.startPaymentFlow()
+    im.selectNode('alice')
+    im.selectNode('bob')
+    await im.confirmPayment('1.00')
+
+    expect(im.state.error).toBe('No route between selected participants')
+  })
+
   it('cancel keeps busy=true until in-flight action settles; cancelled error does not leak', async () => {
     const snapshot = ref<GraphSnapshot | null>(null)
     const actions = mkActions()
@@ -435,10 +458,34 @@ describe('useInteractMode', () => {
     const im = useInteractMode({ actions: mkActions(), runId, equivalent: computed(() => 'UAH'), snapshot })
 
     // selectEdge should set phase to 'editing-trustline'
-    im.selectEdge('alice→bob')
+    expect(im.selectEdge('alice→bob')).toBe(true)
     expect(im.phase.value).toBe('editing-trustline')
     expect(im.state.fromPid).toBe('alice')
     expect(im.state.toPid).toBe('bob')
+  })
+
+  it('rejects an edge switch while a trustline operation owns the busy state', async () => {
+    const snapshot = ref<GraphSnapshot | null>(null)
+    const actions = mkActions()
+    const close = deferred<TrustlineCloseResult>()
+    actions.closeTrustline.mockImplementationOnce(async () => close.promise)
+    const im = useInteractMode({
+      actions,
+      runId: computed(() => 'run_test'),
+      equivalent: computed(() => 'UAH'),
+      snapshot,
+    })
+
+    expect(im.selectEdge('alice→bob')).toBe(true)
+    const pendingClose = im.confirmTrustlineClose()
+    expect(im.busy.value).toBe(true)
+
+    expect(im.selectEdge('carol→dave')).toBe(false)
+    expect(im.state.fromPid).toBe('alice')
+    expect(im.state.toPid).toBe('bob')
+
+    close.resolve(trustlineCloseSuccess())
+    await pendingClose
   })
 
   it('successMessage is retriggered when the same toast text repeats (microtask reset)', async () => {
@@ -600,6 +647,50 @@ describe('useInteractMode', () => {
     if (!ids) throw new Error('expected paymentToTargetIds to resolve for the current From')
     expect(ids.has('alice')).toBe(true)
     expect(ids.has('carol')).toBe(false)
+  })
+
+  it('payment-targets: late failure for another sender does not degrade the active sender key', async () => {
+    const snapshot = ref<GraphSnapshot | null>({
+      equivalent: 'UAH',
+      generated_at: '2026-01-01T00:00:00Z',
+      nodes: [
+        { id: 'alice', status: 'active' },
+        { id: 'bob', status: 'active' },
+        { id: 'carol', status: 'active' },
+      ],
+      links: [],
+    })
+    const actions = mkActions()
+    const aliceTargets = deferred<PaymentTargetsResult>()
+    const bobTargets = deferred<PaymentTargetsResult>()
+    actions.fetchPaymentTargets
+      .mockImplementationOnce(() => aliceTargets.promise)
+      .mockImplementationOnce(() => bobTargets.promise)
+
+    const im = useInteractMode({
+      actions,
+      runId: computed(() => 'run_test'),
+      equivalent: computed(() => 'UAH'),
+      snapshot,
+    })
+    im.startPaymentFlow()
+    im.setPaymentFromPid('alice')
+    im.cancel()
+    im.startPaymentFlow()
+    im.setPaymentFromPid('bob')
+
+    bobTargets.resolve([{ to_pid: 'carol', hops: 1 }] as PaymentTargetsResult)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(im.paymentTargetsLastError.value).toBeNull()
+    expect(im.paymentToTargetIds.value).toEqual(new Set(['carol']))
+
+    aliceTargets.reject(new Error('alice request failed late'))
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(im.state.fromPid).toBe('bob')
+    expect(im.paymentTargetsLastError.value).toBeNull()
+    expect(im.paymentToTargetIds.value).toEqual(new Set(['carol']))
   })
 
   it('availableCapacity computed from snapshot link', () => {

@@ -1,5 +1,11 @@
 # GEO v0.1 — Admin UI (RU)
 
+```text
+Статус: Stable
+Область: admin-ui
+Последнее обновление: 2026-08-11
+```
+
 Этот раздел — **каноническая** документация по админке (операторской консоли) и правилам UI для текущей реализации в этом репозитории.
 
 ## Технологический стек (источник истины)
@@ -111,6 +117,21 @@ npm --prefix admin-ui run validate:fixtures
 ## Спецификации и архив
 
 Рабочие спеки для доработок UI находятся в [specs/README.md](specs/README.md).
+
+## Проверка текущей реализации
+
+Phase 4 operator path включает контекстную аналитику, детерминированные советы,
+синхронизацию latest-request и keyboard-доступную навигацию графа. Проверяйте его
+behavioral unit-тестами и Admin Playwright smoke, а не статусом старой spec.
+
+```powershell
+npm --prefix admin-ui run test
+npm --prefix admin-ui run build
+```
+
+Required repository milestone запускается через `scripts/verify_local.ps1`.
+Playwright output по умолчанию находится под `.local-run/playwright/admin/` и не
+является fixture.
 
 ---
 

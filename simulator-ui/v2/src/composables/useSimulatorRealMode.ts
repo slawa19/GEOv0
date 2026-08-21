@@ -1,4 +1,4 @@
-import { watch, type ComputedRef } from 'vue'
+import { getCurrentScope, onScopeDispose, watch, type ComputedRef } from 'vue'
 
 import {
   artifactDownloadUrl,
@@ -17,22 +17,23 @@ import type {
   ActiveRunResponse,
   ArtifactIndexItem,
   RunStatus,
-  RunStatusEvent,
   ScenarioSummary,
-  SimulatorEvent,
   SimulatorMode,
-  TopologyChangedEvent,
-  TxFailedEvent,
 } from '../api/simulatorTypes'
-import { connectSse } from '../api/sse'
+import { connectSse, type SseParsedMessage } from '../api/sse'
 import { normalizeSimulatorEvent } from '../api/normalizeSimulatorEvent'
 import { ApiError, authHeaders } from '../api/http'
 
-import type { ClearingDoneEvent, EdgePatch, GraphLink, GraphNode, NodePatch, TxUpdatedEvent } from '../types'
+import type { ClearingDoneEvent, EdgePatch, NodePatch, TxUpdatedEvent } from '../types'
 import type { SimulatorAppState } from '../types/simulatorApp'
-import { resolveTxDirection } from '../utils/txDirection'
 import { incCounter } from '../utils/counters'
-import { toLower, toLowerTrim } from '../utils/stringHelpers'
+import { toLower } from '../utils/stringHelpers'
+import {
+  applyAcceptedRealEvent,
+  createRealEventReplayOwner,
+  executeRealEventIntents,
+  type RealEventIntent,
+} from './realEventPipeline'
 
 export type RealModeState = {
   apiBase: string
@@ -70,6 +71,8 @@ type RealModeDiag = {
   rx_messages: number
   json_parse_errors: number
   normalize_dropped: number
+  rejected_by_reason: Record<string, number>
+  frame_id_mismatches: number
   events_by_type: Record<string, number>
   tx_sender_labels: number
   tx_receiver_labels: number
@@ -82,6 +85,22 @@ type RealModeDiag = {
 
 type GeoRealModeGlobal = typeof globalThis & { __geo_real_mode_diag?: RealModeDiag }
 
+const DIAGNOSTIC_EVENT_TYPE_BUCKETS = new Set([
+  'run_status',
+  'tx.updated',
+  'tx.failed',
+  'clearing.done',
+  'topology.changed',
+  'audit.drift',
+])
+
+const REPLAY_GAP_BUFFER_MAX_MESSAGES = 512
+
+function diagnosticEventTypeBucket(eventType: string | undefined): string {
+  if (!eventType) return 'untyped'
+  return DIAGNOSTIC_EVENT_TYPE_BUCKETS.has(eventType) ? eventType : 'other'
+}
+
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
@@ -92,41 +111,8 @@ function getErrorMessage(e: unknown): string {
   return String(e)
 }
 
-function readString(v: unknown): string | null {
-  return typeof v === 'string' ? v : null
-}
-
-function readNumber(v: unknown): number | null {
-  return typeof v === 'number' && Number.isFinite(v) ? v : null
-}
-
 function extractRunId(v: ActiveRunResponse | null | undefined): string {
   return String(v?.run_id ?? '').trim()
-}
-
-function isRunStatusEvent(evt: unknown): evt is RunStatusEvent {
-  if (!isRecord(evt)) return false
-  return (
-    evt.type === 'run_status' &&
-    readString(evt.run_id) !== null &&
-    readString(evt.scenario_id) !== null &&
-    readNumber(evt.sim_time_ms) !== null &&
-    readNumber(evt.intensity_percent) !== null &&
-    readNumber(evt.ops_sec) !== null &&
-    readNumber(evt.queue_depth) !== null
-  )
-}
-
-function isTxUpdatedEvent(evt: unknown): evt is TxUpdatedEvent {
-  return isRecord(evt) && evt.type === 'tx.updated' && typeof evt.equivalent === 'string'
-}
-
-function isTxFailedEvent(evt: unknown): evt is TxFailedEvent {
-  return isRecord(evt) && evt.type === 'tx.failed' && typeof evt.equivalent === 'string'
-}
-
-function isTopologyChangedEvent(evt: SimulatorEvent): evt is TopologyChangedEvent {
-  return evt.type === 'topology.changed' && isRecord(evt.payload)
 }
 
 export function useSimulatorRealMode(opts: {
@@ -145,6 +131,11 @@ export function useSimulatorRealMode(opts: {
 
   // Scene loader integration (real mode uses snapshots via SceneState)
   loadScene: () => Promise<void>
+  loadRecoveryScene?: (context: {
+    runId: string
+    equivalent: string
+    isCurrent: () => boolean
+  }) => Promise<boolean>
 
   // Live patch application + FX hooks
   realPatchApplier: PatchApplier
@@ -164,8 +155,11 @@ export function useSimulatorRealMode(opts: {
 
   // Optional: notify on any SSE event (used to keep Demo UI render loop awake).
   onAnySseEvent?: () => void
+  // Optional visual-effects policy seam (e.g. reduced-motion integration).
+  optionalFxEnabled?: () => boolean
 }): {
   stopSse: () => void
+  handleSceneContextChange: () => Promise<void>
   resetStaleRun: (opts?: { clearError?: boolean }) => void
   refreshRunStatus: () => Promise<void>
   refreshSnapshot: () => Promise<void>
@@ -194,6 +188,7 @@ export function useSimulatorRealMode(opts: {
     isUserFacingRunError,
     inc,
     loadScene,
+    loadRecoveryScene,
     realPatchApplier,
     pushTxAmountLabel,
     clampRealTxTtlMs,
@@ -202,6 +197,7 @@ export function useSimulatorRealMode(opts: {
     runRealClearingDoneFx,
     wakeUp,
     onAnySseEvent,
+    optionalFxEnabled,
   } = opts
 
   // -----------------
@@ -212,6 +208,8 @@ export function useSimulatorRealMode(opts: {
     rx_messages: 0,
     json_parse_errors: 0,
     normalize_dropped: 0,
+    rejected_by_reason: {},
+    frame_id_mismatches: 0,
     events_by_type: {},
     tx_sender_labels: 0,
     tx_receiver_labels: 0,
@@ -228,63 +226,29 @@ export function useSimulatorRealMode(opts: {
 
   const incDiag = incCounter
 
-  function getBurstLabelThrottleMs(): number {
-    const ops = Number(real.runStatus?.ops_sec ?? 0)
-    const qd = Number(real.runStatus?.queue_depth ?? 0)
-
-    // Degradation policy (P2.2): when backend indicates bursts/overload, enable
-    // overlay throttling to reduce cap evictions and perceived dropouts.
-    if (ops >= 40 || qd >= 200) return 240
-    if (ops >= 20 || qd >= 100) return 120
-    return 0
-  }
-
   // -----------------
   // Real Mode: SSE loop
   // -----------------
 
   let sseAbort: AbortController | null = null
   let sseSeq = 0
+  let refreshRunStatusSeq = 0
+  let replayGapRecoveryRunId: string | null = null
+  let sceneContextRefreshSeq = 0
+  let sceneContextRefresh: {
+    seq: number
+    runId: string | null
+    accessToken: string
+    equivalent: string
+    apiBase: string
+  } | null = null
 
-  // Best-effort event de-duplication: prevents duplicate UI effects (labels/FX)
-  // when backend replays events after SSE reconnect.
-  const processedEventIds = new Map<string, true>()
-  let processedEventIdsRunId: string | null = null
-
-  // Bound memory while keeping enough history to dedup large SSE replays.
-  // Too small -> duplicates slip through -> extra labels -> cap eviction -> perceived dropouts.
-  const PROCESSED_EVENT_IDS_MAX = 5000
-  const PROCESSED_EVENT_IDS_PRUNE_BATCH = 500
-
-  function markEventProcessed(runId: string, eventId: string): boolean {
-    const rid = runId
-    const eid = eventId
-    if (!rid || !eid) return true
-
-    if (processedEventIdsRunId !== rid) {
-      processedEventIdsRunId = rid
-      processedEventIds.clear()
-    }
-
-    if (processedEventIds.has(eid)) return false
-    processedEventIds.set(eid, true)
-
-    // Bound memory: keep only the most recent event IDs (Map preserves insertion order).
-    // Prune in batches to keep the loop cheap under bursts.
-    if (processedEventIds.size > PROCESSED_EVENT_IDS_MAX) {
-      const targetSize = Math.max(0, PROCESSED_EVENT_IDS_MAX - PROCESSED_EVENT_IDS_PRUNE_BATCH)
-      while (processedEventIds.size > targetSize) {
-        const firstKey = processedEventIds.keys().next().value as string | undefined
-        if (!firstKey) break
-        processedEventIds.delete(firstKey)
-      }
-    }
-    return true
-  }
+  const replayOwner = createRealEventReplayOwner()
 
   // Debounce multiple rapid calls to refreshSnapshot (e.g., during startRun + watcher cascade).
   let refreshSnapshotDebounceTimer: ReturnType<typeof setTimeout> | null = null
-  let refreshSnapshotInFlight = false
+  type SnapshotRefreshOutcome = 'current' | 'stale' | 'transient' | 'superseded'
+  let refreshSnapshotActivePromise: Promise<SnapshotRefreshOutcome> | null = null
   let refreshSnapshotPending = false
 
   // Sequence id used to invalidate pending debounced refreshes and to guard against stale context.
@@ -340,7 +304,11 @@ export function useSimulatorRealMode(opts: {
     cancelPendingRefreshSnapshotDebounce()
   }
 
-  function stopSse() {
+  function stopSse(stopOpts?: { preserveSceneRefresh?: boolean }) {
+    if (!stopOpts?.preserveSceneRefresh) {
+      sceneContextRefreshSeq += 1
+      sceneContextRefresh = null
+    }
     // Ensure no delayed refreshSnapshot() can fire after SSE stop/teardown.
     cancelPendingRefreshSnapshotDebounce()
     sseAbort?.abort()
@@ -348,7 +316,60 @@ export function useSimulatorRealMode(opts: {
     real.sseState = 'idle'
   }
 
+  function currentSceneContext() {
+    return {
+      runId: real.runId,
+      accessToken: real.accessToken,
+      equivalent: String(effectiveEq.value || '').trim().toUpperCase(),
+      apiBase: real.apiBase,
+    }
+  }
+
+  function isSceneContextCurrent(context: ReturnType<typeof currentSceneContext>): boolean {
+    const current = currentSceneContext()
+    return current.runId === context.runId &&
+      current.accessToken === context.accessToken &&
+      current.equivalent === context.equivalent &&
+      current.apiBase === context.apiBase
+  }
+
+  async function replaceSceneSnapshotBeforeSse(): Promise<void> {
+    const seq = ++sceneContextRefreshSeq
+    const context = currentSceneContext()
+    sceneContextRefresh = { seq, ...context }
+    replayGapRecoveryRunId = null
+    teardownRefreshSnapshot()
+    stopSse({ preserveSceneRefresh: true })
+    try {
+      await loadScene()
+    } catch (error: unknown) {
+      if (sceneContextRefreshSeq === seq && isSceneContextCurrent(context)) {
+        real.lastError = getErrorMessage(error)
+      }
+    }
+
+    if (sceneContextRefreshSeq !== seq || !isSceneContextCurrent(context)) return
+    sceneContextRefresh = null
+    if (isRealMode.value && real.runId) void runSseLoop()
+  }
+
+  async function handleSceneContextChange(): Promise<void> {
+    if (!isRealMode.value) {
+      await loadScene()
+      return
+    }
+    await replaceSceneSnapshotBeforeSse()
+  }
+
+  if (getCurrentScope()) {
+    onScopeDispose(() => {
+      teardownRefreshSnapshot()
+      stopSse()
+    })
+  }
+
   function resetStaleRun(resetOpts?: { clearError?: boolean }) {
+    refreshRunStatusSeq += 1
     teardownRefreshSnapshot()
     real.runId = null
     real.runStatus = null
@@ -358,8 +379,8 @@ export function useSimulatorRealMode(opts: {
     resetRunStats()
     stopSse()
 
-    processedEventIdsRunId = null
-    processedEventIds.clear()
+    replayOwner.reset()
+    replayGapRecoveryRunId = null
 
     if (resetOpts?.clearError ?? true) {
       real.lastError = ''
@@ -370,41 +391,41 @@ export function useSimulatorRealMode(opts: {
     ensureScenarioSelectionValid()
   }
 
-  async function refreshRunStatus() {
+  type RunStatusRefreshOutcome = 'current' | 'stale' | 'transient' | 'superseded'
+
+  async function refreshRunStatusForCurrentContext(): Promise<RunStatusRefreshOutcome> {
     // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
-    if (!real.runId) return
+    const runId = real.runId
+    if (!runId) return 'superseded'
+    const mySeq = ++refreshRunStatusSeq
+    const isCurrent = () => refreshRunStatusSeq === mySeq && real.runId === runId
     try {
-      const st = await getRun({ apiBase: real.apiBase, accessToken: real.accessToken }, real.runId)
+      const st = await getRun({ apiBase: real.apiBase, accessToken: real.accessToken }, runId)
+      if (!isCurrent()) return 'superseded'
       real.runStatus = st
       const le = st.last_error
       real.lastError = le && isUserFacingRunError(le.code) ? `${le.code}: ${le.message}` : ''
+      return 'current'
     } catch (e: unknown) {
+      if (!isCurrent()) return 'superseded'
       if (e instanceof ApiError && e.status === 404) {
         resetStaleRun({ clearError: true })
-        return
+        return 'stale'
       }
       real.lastError = getErrorMessage(e)
+      return 'transient'
     }
   }
 
-  async function refreshSnapshot() {
-    // Guard: never refresh snapshots when real mode is not active or context is missing.
-    // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
-    if (!isRealMode.value) return
-    if (!real.runId && !real.selectedScenarioId) return
+  async function refreshRunStatus(): Promise<void> {
+    await refreshRunStatusForCurrentContext()
+  }
 
-    // If a refresh is already in flight, mark as pending and return — the current call will re-invoke.
-    if (refreshSnapshotInFlight) {
-      refreshSnapshotPending = true
-      return
-    }
-
-    // Debounce: if called within a short window, delay to coalesce multiple triggers.
-    if (refreshSnapshotDebounceTimer !== null) {
-      refreshSnapshotPending = true
-      return
-    }
-
+  function startSnapshotRefresh(opts?: {
+    debounce?: boolean
+    load?: () => Promise<boolean | void>
+    isContextCurrent?: () => boolean
+  }): Promise<SnapshotRefreshOutcome> {
     const mySeq = ++refreshSnapshotSeq
     const runIdAtStart = real.runId
 
@@ -418,54 +439,125 @@ export function useSimulatorRealMode(opts: {
       // Prevent a delayed refresh from applying to a different run context.
       if (real.runId !== runIdAtStart) return false
 
+      if (opts?.isContextCurrent && !opts.isContextCurrent()) return false
+
       return true
     }
 
-    refreshSnapshotDebounceTimer = setTimeout(() => {
-      refreshSnapshotDebounceTimer = null
+    if (opts?.debounce ?? true) {
+      refreshSnapshotDebounceTimer = setTimeout(() => {
+        refreshSnapshotDebounceTimer = null
 
-      // If context changed while we were debouncing, drop pending refresh safely.
-      if (!isContextStillValid()) {
-        refreshSnapshotPending = false
-        return
-      }
-
-      if (refreshSnapshotPending) {
-        refreshSnapshotPending = false
-        refreshSnapshot()
-      }
-    }, 80)
-
-    refreshSnapshotInFlight = true
-    try {
-      // If we got here via a delayed debounce call, ensure we still target the same context.
-      if (!isContextStillValid()) return
-
-      await loadScene()
-
-      // Context might have changed while loadScene() was in-flight.
-      if (!isContextStillValid()) return
-
-      // Snapshot change should be visible immediately even if deep idle stopped scheduling.
-      wakeUp?.()
-
-      // Scene loader stores errors in state.error; in real mode surface them in the HUD.
-      if (isRealMode.value && state.error) {
-        if (state.error.includes('HTTP 404')) {
-          resetStaleRun({ clearError: true })
+        // If context changed while we were debouncing, drop pending refresh safely.
+        if (!isContextStillValid()) {
+          refreshSnapshotPending = false
           return
         }
-        real.lastError = state.error
-      }
-    } finally {
-      refreshSnapshotInFlight = false
 
-      // If another call came in while we were loading, re-invoke.
-      if (refreshSnapshotPending) {
-        refreshSnapshotPending = false
-        refreshSnapshot()
-      }
+        if (refreshSnapshotPending) {
+          refreshSnapshotPending = false
+          void refreshSnapshot()
+        }
+      }, 80)
     }
+
+    let promise: Promise<SnapshotRefreshOutcome>
+    promise = Promise.resolve().then(async (): Promise<SnapshotRefreshOutcome> => {
+      try {
+        if (!isContextStillValid()) return 'superseded'
+
+        try {
+          const applied = await (opts?.load ? opts.load() : loadScene())
+          if (applied === false) return 'superseded'
+        } catch (e: unknown) {
+          if (!isContextStillValid()) return 'superseded'
+          const message = getErrorMessage(e)
+          if (message.includes('HTTP 404')) {
+            resetStaleRun({ clearError: true })
+            return 'stale'
+          }
+          real.lastError = message
+          return 'transient'
+        }
+
+        // Context might have changed while loadScene() was in-flight.
+        if (!isContextStillValid()) return 'superseded'
+
+        // Snapshot change should be visible immediately even if deep idle stopped scheduling.
+        wakeUp?.()
+
+        // Scene loader stores errors in state.error; in real mode surface them in the HUD.
+        if (isRealMode.value && state.error) {
+          if (state.error.includes('HTTP 404')) {
+            resetStaleRun({ clearError: true })
+            return 'stale'
+          }
+          real.lastError = state.error
+          return 'transient'
+        }
+        return 'current'
+      } finally {
+        if (refreshSnapshotActivePromise === promise) {
+          refreshSnapshotActivePromise = null
+        }
+
+        // If another call came in while we were loading, re-invoke.
+        if (refreshSnapshotPending) {
+          refreshSnapshotPending = false
+          // Replay recovery already owns an authoritative refresh. Requests
+          // coalesced into it are redundant and must not start a competing
+          // snapshot between buffered-frame drain and live admission.
+          if (replayGapRecoveryRunId === null) void refreshSnapshot()
+        }
+      }
+    })
+    refreshSnapshotActivePromise = promise
+    return promise
+  }
+
+  async function refreshSnapshot(): Promise<void> {
+    // Guard: never refresh snapshots when real mode is not active or context is missing.
+    // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
+    if (!isRealMode.value) return
+    if (!real.runId && !real.selectedScenarioId) return
+
+    // If a refresh is already in flight, mark as pending and return — the current call will re-invoke.
+    if (refreshSnapshotActivePromise) {
+      refreshSnapshotPending = true
+      await refreshSnapshotActivePromise
+      return
+    }
+
+    // Debounce: if called within a short window, delay to coalesce multiple triggers.
+    if (refreshSnapshotDebounceTimer !== null) {
+      refreshSnapshotPending = true
+      return
+    }
+    await startSnapshotRefresh()
+  }
+
+  async function refreshSnapshotForReplayRecovery(input: {
+    runId: string
+    equivalent: string
+    isCurrent: () => boolean
+  }): Promise<SnapshotRefreshOutcome> {
+    // Start a new authoritative load immediately. SceneState owns latest-request
+    // application, so this invalidates both tracked and direct watcher loads.
+    cancelPendingRefreshSnapshotDebounce()
+    if (!isRealMode.value || real.runId !== input.runId || !input.isCurrent()) return 'superseded'
+    if (!loadRecoveryScene) {
+      real.lastError = 'Strict replay recovery snapshot loader is not configured'
+      return 'transient'
+    }
+    return await startSnapshotRefresh({
+      debounce: false,
+      isContextCurrent: input.isCurrent,
+      load: () => loadRecoveryScene({
+        runId: input.runId,
+        equivalent: input.equivalent,
+        isCurrent: input.isCurrent,
+      }),
+    })
   }
 
   // Also surface initial scene-load errors (e.g., "No run started") that happen on mount.
@@ -492,7 +584,315 @@ export function useSimulatorRealMode(opts: {
     return Math.max(250, Math.round(base + jitter))
   }
 
-  async function runSseLoop() {
+  function handleSseMessage(input: {
+    msg: SseParsedMessage
+    signal: AbortSignal
+    runId: string
+    equivalent: string
+  }): void {
+    const { msg, signal, runId, equivalent } = input
+    if (signal.aborted) return
+    if (String(effectiveEq.value || '').trim().toUpperCase() !== String(equivalent || '').trim().toUpperCase()) return
+    if (!msg.data) return
+
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(msg.data)
+    } catch {
+      diag.rx_messages += 1
+      diag.json_parse_errors += 1
+      return
+    }
+
+    diag.rx_messages += 1
+
+    const normalized = normalizeSimulatorEvent(parsed)
+    if (normalized.status === 'ignored') {
+      diag.normalize_dropped += 1
+      incDiag(
+        diag.rejected_by_reason,
+        `${normalized.kind}:${diagnosticEventTypeBucket(normalized.eventType)}:${normalized.diagnostic}`,
+      )
+      return
+    }
+
+    const evt = normalized.event
+    const admission = replayOwner.admit({
+      event: evt,
+      frameId: msg.id,
+      connectionRunId: runId,
+      activeRunId: real.runId,
+      connectionEquivalent: equivalent,
+      currentCursor: real.lastEventId,
+    })
+    if (admission.status === 'rejected') {
+      diag.normalize_dropped += 1
+      if (admission.diagnostic === 'frame_id_mismatch') diag.frame_id_mismatches += 1
+      incDiag(diag.rejected_by_reason, `${admission.kind}:${evt.type}:${admission.diagnostic}`)
+      return
+    }
+    if (admission.status === 'duplicate') return
+
+    const intents = applyAcceptedRealEvent(evt, runId, { real, state }, {
+      patchApplier: realPatchApplier,
+      isUserFacingRunError,
+      inc,
+    })
+    replayOwner.commit(evt.event_id, runId)
+    real.lastEventId = admission.cursor
+    incDiag(diag.events_by_type, evt.type)
+    executeRealEventIntents(intents, {
+      getActiveRunId: () => real.runId,
+      optionalFxEnabled,
+      onAnySseEvent,
+      refreshSnapshot: () => void refreshSnapshot(),
+      wakeUp,
+      runRealTxFx,
+      runRealClearingDoneFx,
+      pushTxAmountLabel,
+      clampRealTxTtlMs,
+      scheduleTimeout,
+      onIntentExecuted: (intent: RealEventIntent) => {
+        if (intent.type === 'amount-flyout-suppressed') diag.amount_flyout_suppressed += 1
+        else if (intent.type === 'burst-throttle') {
+          diag.burst_throttle_ms_last = intent.throttleMs
+          if (intent.throttleMs > 0) diag.burst_throttle_enabled_events += 1
+        } else if (intent.type === 'tx-label') diag.tx_sender_labels += 1
+        else if (intent.type === 'tx-label-delayed') diag.tx_receiver_scheduled += 1
+      },
+      onReceiverLabelPushed: () => {
+        diag.tx_receiver_labels += 1
+      },
+      onReceiverGuardDropped: () => {
+        diag.tx_receiver_guard_dropped += 1
+      },
+    })
+  }
+
+  function replayBootstrapFrame(
+    msg: SseParsedMessage,
+    runId: string,
+    equivalent: string,
+  ): { terminal: boolean } | null {
+    if (!msg.data) return null
+    try {
+      const payload: unknown = JSON.parse(msg.data)
+      const normalized = normalizeSimulatorEvent(payload)
+      if (normalized.status !== 'accepted' || normalized.event.type !== 'run_status') return null
+      const admission = replayOwner.admit({
+        event: normalized.event,
+        frameId: msg.id,
+        connectionRunId: runId,
+        activeRunId: real.runId,
+        connectionEquivalent: equivalent,
+        currentCursor: real.lastEventId,
+      })
+      if (admission.status !== 'accepted') return null
+      const state = String(normalized.event.state || '').trim().toLowerCase()
+      return { terminal: state === 'stopped' || state === 'error' }
+    } catch {
+      return null
+    }
+  }
+
+  type SseConnectionOutcome = { status: 'ended' } | { status: 'error'; error: unknown }
+  type ReplayRecoveryConnectionOutcome = 'ended' | 'terminal' | 'retry' | 'stop'
+
+  async function runReplayRecoveryConnection(input: {
+    runId: string
+    ctrl: AbortController
+    sseLoopSeq: number
+    equivalent: string
+    url: string
+  }): Promise<ReplayRecoveryConnectionOutcome> {
+    const { runId, ctrl, sseLoopSeq, equivalent, url } = input
+    const equivalentKey = String(equivalent || '').trim().toUpperCase()
+    const connectionCtrl = new AbortController()
+    const isCurrentContext = () =>
+      !ctrl.signal.aborted &&
+      !connectionCtrl.signal.aborted &&
+      sseLoopSeq === sseSeq &&
+      isRealMode.value &&
+      real.runId === runId &&
+      String(effectiveEq.value || '').trim().toUpperCase() === equivalentKey
+
+    if (!isCurrentContext()) return 'stop'
+
+    const abortConnection = () => connectionCtrl.abort()
+    ctrl.signal.addEventListener('abort', abortConnection, { once: true })
+
+    const bufferedMessages: SseParsedMessage[] = []
+    let buffering = true
+    let bufferOverflowed = false
+    let terminalBootstrap = false
+    let firstBootstrapResolved = false
+    let resolveFirstBootstrap!: () => void
+    let resolveBufferOverflow!: () => void
+    const firstBootstrap = new Promise<void>((resolve) => {
+      resolveFirstBootstrap = resolve
+    })
+    const bufferOverflow = new Promise<void>((resolve) => {
+      resolveBufferOverflow = resolve
+    })
+
+    const connectionOutcome: Promise<SseConnectionOutcome> = connectSse({
+      url,
+      headers: authHeaders(real.accessToken),
+      lastEventId: null,
+      signal: connectionCtrl.signal,
+      onMessage: (msg) => {
+        if (connectionCtrl.signal.aborted || !isCurrentContext()) return
+        if (!buffering) {
+          handleSseMessage({ msg, signal: connectionCtrl.signal, runId, equivalent })
+          return
+        }
+
+        if (bufferedMessages.length >= REPLAY_GAP_BUFFER_MAX_MESSAGES) {
+          if (!bufferOverflowed) {
+            bufferOverflowed = true
+            real.lastError = `SSE replay recovery buffer exceeded ${REPLAY_GAP_BUFFER_MAX_MESSAGES} messages`
+            resolveBufferOverflow()
+            connectionCtrl.abort()
+          }
+          return
+        }
+
+        bufferedMessages.push(msg)
+        const bootstrap = replayBootstrapFrame(msg, runId, equivalent)
+        if (!firstBootstrapResolved && bootstrap) {
+          firstBootstrapResolved = true
+          terminalBootstrap = bootstrap.terminal
+          resolveFirstBootstrap()
+        }
+      },
+    }).then(
+      () => ({ status: 'ended' as const }),
+      (error: unknown) => ({ status: 'error' as const, error }),
+    )
+
+    const settleAfterAbort = async () => {
+      connectionCtrl.abort()
+      await connectionOutcome
+    }
+
+    try {
+      const bootstrapOutcome = await Promise.race([
+        firstBootstrap.then(() => ({ kind: 'bootstrap' as const })),
+        bufferOverflow.then(() => ({ kind: 'overflow' as const })),
+        connectionOutcome.then((outcome) => ({ kind: 'connection' as const, outcome })),
+      ])
+
+      if (bootstrapOutcome.kind === 'overflow') {
+        await settleAfterAbort()
+        return 'retry'
+      }
+      if (bootstrapOutcome.kind === 'connection') {
+        if (!isCurrentContext()) return 'stop'
+        if (bootstrapOutcome.outcome.status === 'error') throw bootstrapOutcome.outcome.error
+        real.lastError = 'SSE replay recovery connection ended before its bootstrap frame'
+        return 'retry'
+      }
+      if (bufferOverflowed) {
+        await settleAfterAbort()
+        return 'retry'
+      }
+      if (!isCurrentContext()) {
+        await settleAfterAbort()
+        return 'stop'
+      }
+
+      const snapshotPromise = refreshSnapshotForReplayRecovery({
+        runId,
+        equivalent,
+        isCurrent: isCurrentContext,
+      })
+      const snapshotOrConnection = await Promise.race([
+        snapshotPromise.then((outcome) => ({ kind: 'snapshot' as const, outcome })),
+        bufferOverflow.then(() => ({ kind: 'overflow' as const })),
+        connectionOutcome.then((outcome) => ({ kind: 'connection' as const, outcome })),
+      ])
+
+      if (snapshotOrConnection.kind === 'overflow') {
+        await settleAfterAbort()
+        return 'retry'
+      }
+      let snapshotOutcome: SnapshotRefreshOutcome
+      if (snapshotOrConnection.kind === 'connection') {
+        if (!isCurrentContext()) return 'stop'
+        if (snapshotOrConnection.outcome.status === 'error') throw snapshotOrConnection.outcome.error
+        if (!terminalBootstrap) {
+          real.lastError = 'SSE replay recovery connection ended before the authoritative snapshot completed'
+          await settleAfterAbort()
+          return 'retry'
+        }
+        snapshotOutcome = await snapshotPromise
+      } else {
+        snapshotOutcome = snapshotOrConnection.outcome
+      }
+      if (snapshotOutcome === 'transient') {
+        await settleAfterAbort()
+        return 'retry'
+      }
+      if (snapshotOutcome !== 'current' || !isCurrentContext()) {
+        await settleAfterAbort()
+        return 'stop'
+      }
+      if (bufferOverflowed) {
+        await settleAfterAbort()
+        return 'retry'
+      }
+
+      for (const msg of bufferedMessages) {
+        handleSseMessage({ msg, signal: connectionCtrl.signal, runId, equivalent })
+      }
+      bufferedMessages.length = 0
+      buffering = false
+      replayGapRecoveryRunId = null
+      real.sseState = terminalBootstrap ? 'closed' : 'open'
+
+      if (terminalBootstrap) {
+        await settleAfterAbort()
+        return 'terminal'
+      }
+
+      const finalOutcome = await connectionOutcome
+      if (finalOutcome.status === 'error') throw finalOutcome.error
+      return 'ended'
+    } finally {
+      ctrl.signal.removeEventListener('abort', abortConnection)
+    }
+  }
+
+  async function refreshReplayGapStatusForCurrentContext(input: {
+    runId: string
+    ctrl: AbortController
+    sseLoopSeq: number
+  }): Promise<'current' | 'retry' | 'stop'> {
+    const { runId, ctrl, sseLoopSeq } = input
+    if (replayGapRecoveryRunId !== runId) return 'current'
+
+    real.sseState = 'reconnecting'
+    const statusOutcome = await refreshRunStatusForCurrentContext()
+    if (
+      statusOutcome === 'stale' ||
+      statusOutcome === 'superseded' ||
+      ctrl.signal.aborted ||
+      sseLoopSeq !== sseSeq ||
+      real.runId !== runId
+    ) {
+      return 'stop'
+    }
+    if (statusOutcome === 'transient') return 'retry'
+    const state = String(real.runStatus?.state || '').trim().toLowerCase()
+    if (state === 'stopped' || state === 'error') {
+      replayGapRecoveryRunId = null
+      real.sseState = 'closed'
+      return 'stop'
+    }
+    return 'current'
+  }
+
+  async function runSseLoop(loopOpts?: { preserveLastError?: boolean }) {
     const mySeq = ++sseSeq
     stopSse()
 
@@ -506,351 +906,61 @@ export function useSimulatorRealMode(opts: {
 
     let attempt = 0
     real.sseState = 'connecting'
-    real.lastError = ''
+    if (!loopOpts?.preserveLastError) real.lastError = ''
 
     while (!ctrl.signal.aborted && mySeq === sseSeq) {
-      const runId = real.runId
+      const activeRunId = real.runId
+      if (!activeRunId) return
+      const runId: string = activeRunId
+      if (replayGapRecoveryRunId !== null && replayGapRecoveryRunId !== runId) {
+        replayGapRecoveryRunId = null
+      }
+
       const eqNow = effectiveEq.value
       const url = `${real.apiBase.replace(/\/+$/, '')}/simulator/runs/${encodeURIComponent(runId)}/events?equivalent=${encodeURIComponent(
         eqNow,
       )}`
 
       try {
-        real.sseState = 'open'
-        await connectSse({
-          url,
-          headers: authHeaders(real.accessToken),
-          lastEventId: real.lastEventId,
-          signal: ctrl.signal,
-          onMessage: (msg) => {
-            if (ctrl.signal.aborted) return
-            if (msg.id) real.lastEventId = msg.id
-            if (!msg.data) return
+        if (replayGapRecoveryRunId === runId) {
+          const statusOutcome = await refreshReplayGapStatusForCurrentContext({ runId, ctrl, sseLoopSeq: mySeq })
+          if (statusOutcome === 'stop') return
+          if (statusOutcome === 'retry') {
+            const delay = nextBackoff(attempt++)
+            await new Promise((r) => setTimeout(r, delay))
+            continue
+          }
 
-            let parsed: unknown
-            try {
-              parsed = JSON.parse(msg.data)
-            } catch {
-              diag.rx_messages += 1
-              diag.json_parse_errors += 1
-              return
-            }
-
-            diag.rx_messages += 1
-
-            const evt = normalizeSimulatorEvent(parsed)
-            if (!evt) {
-              diag.normalize_dropped += 1
-              return
-            }
-
-            incDiag(diag.events_by_type, String(evt.type ?? 'unknown'))
-
-            // Prefer payload event_id when present.
-            real.lastEventId = evt.event_id
-
-            // Drop duplicates (SSE replay after reconnect).
-            if (!markEventProcessed(runId, evt.event_id)) return
-
-            onAnySseEvent?.()
-
-            if (isRunStatusEvent(evt)) {
-              const st = evt
-              real.runStatus = st
-              const le = st.last_error
-              real.lastError = le && isUserFacingRunError(le.code) ? `${le.code}: ${le.message}` : ''
-
-              // Backend-first: sync cumulative stats from authoritative run_status.
-              // This overwrites optimistic local increments, ensuring SSE reconnect
-              // does not lose history and classification stays consistent.
-              if (typeof st.attempts_total === 'number') real.runStats.attempts = st.attempts_total
-              if (typeof st.committed_total === 'number') real.runStats.committed = st.committed_total
-              if (typeof st.rejected_total === 'number') real.runStats.rejected = st.rejected_total
-              if (typeof st.errors_total === 'number') real.runStats.errors = st.errors_total
-              if (typeof st.timeouts_total === 'number') real.runStats.timeouts = st.timeouts_total
-              return
-            }
-
-            if (isTxUpdatedEvent(evt)) {
-              real.runStats.attempts += 1
-              real.runStats.committed += 1
-
-              const tx = evt
-              // Backward compatible:
-              // - amount_flyout === false -> do not emit amount labels (even if amount is present)
-              // - amount_flyout === true/undefined -> best-effort emit based on amount+endpoints
-              const allowAmountFlyout = tx.amount_flyout !== false
-              const edges = Array.isArray(tx.edges) ? tx.edges : []
-              const resolved = resolveTxDirection({ from: tx.from, to: tx.to, edges })
-              const senderId = resolved.from
-              const receiverId = resolved.to
-
-              // Backend-first: labels require explicit amount.
-              const amount = String(tx.amount ?? '').trim()
-
-              // Contract diagnostic: amount_flyout=true should always include enough data
-              // for both labels. This should never trigger in healthy backend runs.
-              if (tx.amount_flyout === true && (!amount || !senderId || !receiverId)) {
-                // eslint-disable-next-line no-console
-                console.warn('tx.updated amount_flyout contract violated (missing amount/endpoints)', {
-                  event_id: tx.event_id,
-                  amount,
-                  from: tx.from,
-                  to: tx.to,
-                  edges_len: edges.length,
-                })
-              }
-
-              // Apply patches to keep snapshot authoritative.
-              if (tx.node_patch) realPatchApplier.applyNodePatches(tx.node_patch)
-              if (tx.edge_patch) realPatchApplier.applyEdgePatches(tx.edge_patch)
-
-              // Run spark FX first so we can align timing with ttl_ms clamping logic.
-              runRealTxFx(tx)
-
-              // Ensure canvas updates even if render loop entered deep idle.
-              wakeUp?.()
-
-              const labelThrottleMs = getBurstLabelThrottleMs()
-              diag.burst_throttle_ms_last = labelThrottleMs
-              if (labelThrottleMs > 0) diag.burst_throttle_enabled_events += 1
-
-              if (!allowAmountFlyout) {
-                diag.amount_flyout_suppressed += 1
-              }
-
-              if (allowAmountFlyout && amount && senderId) {
-                pushTxAmountLabel(senderId, `-${amount}`, tx.equivalent, { throttleMs: labelThrottleMs })
-                diag.tx_sender_labels += 1
-              }
-
-              // Note: self-payment (senderId === receiverId) intentionally does not emit a receiver label.
-              if (allowAmountFlyout && amount && receiverId && receiverId !== senderId) {
-                const ttlMs = clampRealTxTtlMs(tx.ttl_ms)
-
-                const runIdAtEvent = runId
-
-                diag.tx_receiver_scheduled += 1
-                scheduleTimeout(
-                  () => {
-                    // IMPORTANT: do NOT guard on ctrl.signal.aborted.
-                    // AbortSignal is tied to the fetch/SSE-loop lifecycle; on reconnect we abort
-                    // the old connection, but UI timers for still-valid events should still fire.
-                    if (real.runId !== runIdAtEvent) {
-                      diag.tx_receiver_guard_dropped += 1
-                      return
-                    }
-                    pushTxAmountLabel(receiverId, `+${amount}`, tx.equivalent, { throttleMs: labelThrottleMs })
-                    diag.tx_receiver_labels += 1
-                  },
-                  ttlMs,
-                  { critical: true },
-                )
-              }
-              return
-            }
-
-            if (isTxFailedEvent(evt)) {
-              const failed = evt
-              const code = String(failed.error?.code ?? 'TX_FAILED')
-              real.runStats.attempts += 1
-              if (code.toUpperCase() === 'PAYMENT_TIMEOUT') {
-                real.runStats.timeouts += 1
-                real.runStats.errors += 1
-                inc(real.runStats.errorsByCode, code)
-              } else if (isUserFacingRunError(code)) {
-                real.runStats.errors += 1
-                inc(real.runStats.errorsByCode, code)
-              } else {
-                real.runStats.rejected += 1
-                inc(real.runStats.rejectedByCode, code)
-              }
-              return
-            }
-
-
-            if (evt.type === 'clearing.done') {
-              const done = evt as ClearingDoneEvent
-
-              if (done.node_patch) realPatchApplier.applyNodePatches(done.node_patch)
-              if (done.edge_patch) realPatchApplier.applyEdgePatches(done.edge_patch)
-
-              runRealClearingDoneFx(done)
-              wakeUp?.()
-              return
-            }
-
-            if (isTopologyChangedEvent(evt)) {
-              const t = evt
-              const payload = t.payload
-
-              const hasPatches = (payload.node_patch?.length ?? 0) > 0 || (payload.edge_patch?.length ?? 0) > 0
-
-              const isEmptyPayload =
-                payload.added_nodes.length === 0 &&
-                payload.removed_nodes.length === 0 &&
-                (payload.frozen_nodes?.length ?? 0) === 0 &&
-                payload.added_edges.length === 0 &&
-                payload.removed_edges.length === 0 &&
-                (payload.frozen_edges?.length ?? 0) === 0 &&
-                !hasPatches
-
-              if ((isEmptyPayload && !hasPatches) || !state.snapshot) {
-                void refreshSnapshot()
-                return
-              }
-
-              // Incremental topology patch: update snapshot in-place.
-              const snap = state.snapshot
-              if (String(snap.equivalent ?? '').toUpperCase() !== String(t.equivalent ?? '').toUpperCase()) {
-                // If the event is for a different equivalent than the current scene,
-                // keep behavior safe and let the next refresh/load handle it.
-                return
-              }
-
-              // Patch-only event (e.g. trust drift / inject_debt): apply patches and return.
-              if (
-                hasPatches &&
-                payload.added_nodes.length === 0 &&
-                payload.removed_nodes.length === 0 &&
-                (payload.frozen_nodes?.length ?? 0) === 0 &&
-                payload.added_edges.length === 0 &&
-                payload.removed_edges.length === 0 &&
-                (payload.frozen_edges?.length ?? 0) === 0
-              ) {
-                if (payload.node_patch) realPatchApplier.applyNodePatches(payload.node_patch)
-                if (payload.edge_patch) realPatchApplier.applyEdgePatches(payload.edge_patch)
-                snap.generated_at = String(t.ts ?? new Date().toISOString())
-                wakeUp?.()
-                return
-              }
-
-              const nodeColorKey = (type?: string | null, status?: string | null): string => {
-                const st = toLowerTrim(status ?? '')
-                if (st === 'suspended' || st === 'left' || st === 'deleted') return st
-                const tp = toLowerTrim(type ?? '')
-                if (tp === 'business' || tp === 'person') return tp
-                return 'unknown'
-              }
-
-              const ensureNodeDefaults = (n: GraphNode) => {
-                if (!n) return
-                const tp = toLowerTrim(String(n.type ?? ''))
-                const isBiz = tp === 'business'
-                if (!n.viz_shape_key) n.viz_shape_key = isBiz ? 'rounded-rect' : 'circle'
-                if (!n.viz_size) n.viz_size = isBiz ? { w: 26, h: 22 } : { w: 16, h: 16 }
-                if (!n.viz_color_key) n.viz_color_key = nodeColorKey(n.type, n.status)
-              }
-
-              const nodesById = new Map(snap.nodes.map((n) => [n.id, n] as const))
-
-              const removedNodes = new Set<string>(payload.removed_nodes ?? [])
-              const frozenNodes = new Set<string>(payload.frozen_nodes ?? [])
-
-              // Apply node additions.
-              for (const r of payload.added_nodes ?? []) {
-                const id = String(r?.pid ?? '').trim()
-                if (!id || nodesById.has(id)) continue
-                const node: GraphNode = {
-                  id,
-                  name: r?.name ?? undefined,
-                  type: r?.type ?? undefined,
-                  status: 'active',
-                }
-                ensureNodeDefaults(node)
-                snap.nodes.push(node)
-                nodesById.set(id, node)
-              }
-
-              // Apply node freeze (status change).
-              for (const id of frozenNodes) {
-                const node = nodesById.get(id)
-                if (!node) continue
-                node.status = 'suspended'
-                node.viz_color_key = nodeColorKey(node.type, node.status)
-              }
-
-              // Apply node removals.
-              if (removedNodes.size) {
-                snap.nodes = snap.nodes.filter((n) => !removedNodes.has(n.id))
-                // Remove incident links too.
-                snap.links = snap.links.filter((l) => !removedNodes.has(String(l.source)) && !removedNodes.has(String(l.target)))
-              }
-
-              // Links: use (source,target) as identity.
-              const keyEdge = (s: string, d: string) => `${s}→${d}`
-              const linksByKey = new Map(snap.links.map((l) => [keyEdge(String(l.source), String(l.target)), l] as const))
-
-              // Apply edge additions.
-              for (const r of payload.added_edges ?? []) {
-                const s = String(r?.from_pid ?? '').trim()
-                const d = String(r?.to_pid ?? '').trim()
-                if (!s || !d) continue
-                const k = keyEdge(s, d)
-                if (linksByKey.has(k)) continue
-                const limit = r?.limit ?? undefined
-                const link: GraphLink = {
-                  source: s,
-                  target: d,
-                  trust_limit: limit,
-                  used: 0,
-                  available: limit,
-                  status: 'active',
-                  viz_width_key: 'thin',
-                  viz_alpha_key: 'active',
-                }
-                snap.links.push(link)
-                linksByKey.set(k, link)
-              }
-
-              // Apply frozen edges.
-              for (const r of payload.frozen_edges ?? []) {
-                const s = String(r?.from_pid ?? '').trim()
-                const d = String(r?.to_pid ?? '').trim()
-                if (!s || !d) continue
-                const link = linksByKey.get(keyEdge(s, d))
-                if (!link) continue
-                link.status = 'frozen'
-                link.viz_alpha_key = 'muted'
-              }
-
-              // Apply removed edges.
-              const removedEdgeKeys = new Set<string>()
-              for (const r of payload.removed_edges ?? []) {
-                const s = String(r?.from_pid ?? '').trim()
-                const d = String(r?.to_pid ?? '').trim()
-                if (!s || !d) continue
-                removedEdgeKeys.add(keyEdge(s, d))
-              }
-              if (removedEdgeKeys.size) {
-                snap.links = snap.links.filter((l) => !removedEdgeKeys.has(keyEdge(String(l.source), String(l.target))))
-              }
-
-              // Recompute links_count.
-              const counts: Record<string, number> = {}
-              for (const l of snap.links) {
-                const s = String(l.source)
-                const d = String(l.target)
-                counts[s] = (counts[s] ?? 0) + 1
-                counts[d] = (counts[d] ?? 0) + 1
-              }
-              for (const n of snap.nodes) {
-                n.links_count = counts[n.id] ?? 0
-              }
-
-              // Bump generated_at so layout coordinator can detect updates.
-              snap.generated_at = String(t.ts ?? new Date().toISOString())
-
-              // Apply backend-authoritative patches (limits/used/available/viz keys) if provided.
-              if (payload.node_patch) realPatchApplier.applyNodePatches(payload.node_patch)
-              if (payload.edge_patch) realPatchApplier.applyEdgePatches(payload.edge_patch)
-
-              wakeUp?.()
-            }
-          },
-        })
+          const recoveryConnectionOutcome = await runReplayRecoveryConnection({
+            runId,
+            ctrl,
+            sseLoopSeq: mySeq,
+            equivalent: eqNow,
+            url,
+          })
+          if (recoveryConnectionOutcome === 'stop') return
+          if (recoveryConnectionOutcome === 'terminal') return
+          if (recoveryConnectionOutcome === 'retry') {
+            const delay = nextBackoff(attempt++)
+            await new Promise((r) => setTimeout(r, delay))
+            continue
+          }
+        } else {
+          real.sseState = 'open'
+          await connectSse({
+            url,
+            headers: authHeaders(real.accessToken),
+            lastEventId: real.lastEventId,
+            signal: ctrl.signal,
+            onMessage: (msg) => handleSseMessage({ msg, signal: ctrl.signal, runId, equivalent: eqNow }),
+          })
+        }
 
         await refreshRunStatus()
+        // refreshRunStatus() owns stale-404 reset and may abort this loop,
+        // advance its sequence, and clear runId. Do not overwrite the resulting
+        // idle state with a reconnecting state from the obsolete connection.
+        if (ctrl.signal.aborted || mySeq !== sseSeq || real.runId !== runId) return
 
         const st = String(real.runStatus?.state ?? '')
         if (st === 'stopped' || st === 'error') {
@@ -861,6 +971,7 @@ export function useSimulatorRealMode(opts: {
         real.sseState = 'reconnecting'
       } catch (e: unknown) {
         if (ctrl.signal.aborted) return
+        if (mySeq !== sseSeq || real.runId !== runId) return
 
         const msg = getErrorMessage(e)
         if (msg.includes('SSE HTTP 404') || msg.includes('HTTP 404')) {
@@ -870,13 +981,15 @@ export function useSimulatorRealMode(opts: {
 
         real.lastError = msg
 
-        // Strict replay mode: backend may return 410 → do a full refresh.
+        // Unrecoverable replay cursor: clear it and rebuild authoritative state.
         if (msg.includes(' 410 ') || msg.includes('HTTP 410') || msg.includes('status 410')) {
           real.lastEventId = null
-          await refreshRunStatus()
-          await refreshSnapshot()
+          replayGapRecoveryRunId = runId
+          real.sseState = 'reconnecting'
+          continue
         }
 
+        if (ctrl.signal.aborted || mySeq !== sseSeq || real.runId !== runId) return
         real.sseState = 'reconnecting'
       }
 
@@ -888,6 +1001,14 @@ export function useSimulatorRealMode(opts: {
   watch(
     () => [real.runId, real.accessToken, effectiveEq.value, real.apiBase] as const,
     () => {
+      if (sceneContextRefresh) {
+        if (!isSceneContextCurrent(sceneContextRefresh)) void replaceSceneSnapshotBeforeSse()
+        return
+      }
+      if (replayGapRecoveryRunId !== null) {
+        void replaceSceneSnapshotBeforeSse()
+        return
+      }
       if (!isRealMode.value) {
         stopSse()
         return
@@ -960,6 +1081,7 @@ export function useSimulatorRealMode(opts: {
 
       real.runStatus = null
       real.lastEventId = null
+      replayGapRecoveryRunId = null
       real.artifacts = []
 
       if (startOpts?.pauseImmediately) {
@@ -1038,6 +1160,9 @@ export function useSimulatorRealMode(opts: {
       }
 
       real.lastError = msg
+      // The stop request was not confirmed. The backend run may still be live,
+      // so restore observation instead of leaving the UI permanently detached.
+      if (isRealMode.value && real.runId) void runSseLoop({ preserveLastError: true })
     }
   }
 
@@ -1055,6 +1180,7 @@ export function useSimulatorRealMode(opts: {
       real.runId = rid
       real.runStatus = null
       real.lastEventId = null
+      replayGapRecoveryRunId = null
       real.artifacts = []
 
       await refreshRunStatus()
@@ -1230,6 +1356,7 @@ export function useSimulatorRealMode(opts: {
 
   return {
     stopSse,
+    handleSceneContextChange,
     resetStaleRun,
     refreshRunStatus,
     refreshSnapshot,

@@ -17,7 +17,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.db.session import get_db_session
 from app.db.models import AuditLog, Debt, Equivalent, Participant, Transaction, TrustLine
-from app.utils.validation import validate_equivalent_code, validate_equivalent_metadata
+from app.utils.validation import (
+    validate_equivalent_code,
+    validate_equivalent_metadata,
+    validate_equivalent_precision,
+)
 
 
 def _parse_dt(s: str | None) -> datetime | None:
@@ -89,6 +93,9 @@ async def _seed_from_seeds_dir(repo_root: str) -> None:
                 equivalents_data = _load_json(equivalents_path)
                 for eq_data in equivalents_data:
                     validate_equivalent_code(eq_data.get("code"))
+                    eq_data["precision"] = validate_equivalent_precision(
+                        eq_data.get("precision", 2)
+                    )
 
                     if "metadata" in eq_data and "metadata_" not in eq_data:
                         eq_data["metadata_"] = eq_data.pop("metadata")
@@ -271,7 +278,9 @@ async def _seed_from_admin_fixtures_datasets(
                         code=code,
                         symbol=item.get("symbol"),
                         description=item.get("description"),
-                        precision=int(item.get("precision") or 2),
+                        precision=validate_equivalent_precision(
+                            item.get("precision", 2)
+                        ),
                         metadata_=validate_equivalent_metadata(raw_meta),
                         is_active=bool(item.get("is_active", True)),
                     )

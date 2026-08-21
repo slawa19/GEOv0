@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from typing import Any
+from uuid import UUID
 
 from seedlib import Participant, iso as _iso, write_json as _write_json
 
@@ -47,15 +48,25 @@ def generate_migrations(*, base_ts: datetime) -> dict[str, Any]:
 def generate_feature_flags() -> dict[str, Any]:
     return {
         "multipath_enabled": True,
+        "full_multipath_enabled": False,
         "clearing_enabled": True,
-        "audit_log_enabled": True,
     }
 
 
 def generate_config() -> dict[str, Any]:
     return {
-        "routing": {"max_paths_per_payment": 6, "max_hops": 6},
-        "clearing": {"max_cycle_len": 6},
+        "LOG_LEVEL": "INFO",
+        "RATE_LIMIT_ENABLED": True,
+        "ROUTING_MAX_HOPS": 6,
+        "ROUTING_MAX_PATHS": 3,
+        "INTEGRITY_CHECKPOINT_ENABLED": True,
+        "INTEGRITY_CHECKPOINT_INTERVAL_SECONDS": 300,
+        "RECOVERY_ENABLED": True,
+        "RECOVERY_INTERVAL_SECONDS": 60,
+        "PAYMENT_TX_STUCK_TIMEOUT_SECONDS": 120,
+        "FEATURE_FLAGS_MULTIPATH_ENABLED": True,
+        "FEATURE_FLAGS_FULL_MULTIPATH_ENABLED": False,
+        "CLEARING_ENABLED": True,
     }
 
 
@@ -111,17 +122,18 @@ def generate_integrity_status(*, base_ts: datetime) -> dict[str, Any]:
 
 def generate_audit_log(*, participants: list[Participant], base_ts: datetime, total: int = 180) -> list[dict[str, Any]]:
     actions = [
-        ("CONFIG_PATCH", "config"),
-        ("FEATURE_FLAG_SET", "feature_flag"),
-        ("PARTICIPANT_FREEZE", "participant"),
-        ("PARTICIPANT_UNFREEZE", "participant"),
-        ("TX_ABORT", "transaction"),
+        ("admin.config.patch", "config"),
+        ("admin.feature_flags.patch", "feature_flags"),
+        ("admin.participants.freeze", "participant"),
+        ("admin.participants.unfreeze", "participant"),
+        ("admin.equivalents.patch", "equivalent"),
+        ("admin.transactions.abort", "transaction"),
     ]
 
     actors = [
-        {"actor_id": "admin:root", "actor_role": "admin"},
-        {"actor_id": "operator:ops-1", "actor_role": "operator"},
-        {"actor_id": "auditor:audit-1", "actor_role": "auditor"},
+        {"actor_id": str(UUID(int=10_001, version=4)), "actor_role": "admin"},
+        {"actor_id": str(UUID(int=10_002, version=4)), "actor_role": "operator"},
+        {"actor_id": str(UUID(int=10_003, version=4)), "actor_role": "auditor"},
     ]
 
     pids = [p.pid for p in participants] or ["PID_U0001_00000000"]
@@ -134,23 +146,55 @@ def generate_audit_log(*, participants: list[Participant], base_ts: datetime, to
 
         object_id = None
         if obj == "config":
-            object_id = "routing.max_paths_per_payment"
-        elif obj == "feature_flag":
-            object_id = "multipath_enabled"
+            object_id = "ROUTING_MAX_PATHS"
+        elif obj == "feature_flags":
+            object_id = None
         elif obj == "participant":
             object_id = pids[(i * 17) % len(pids)]
+        elif obj == "equivalent":
+            object_id = ["UAH", "EUR", "HOUR"][i % 3]
         elif obj == "transaction":
             object_id = f"TX_{(i * 104729) % 10**8:08d}"
 
+        before_state: dict[str, Any] | None = None
+        after_state: dict[str, Any] | None = None
+        reason = None
+        if action == "admin.config.patch":
+            before_state = {"ROUTING_MAX_PATHS": 2}
+            after_state = {"ROUTING_MAX_PATHS": 3}
+        elif action == "admin.feature_flags.patch":
+            before_state = {"multipath_enabled": False}
+            after_state = {"multipath_enabled": True}
+        elif action == "admin.participants.freeze":
+            reason = "operational maintenance"
+            before_state = {"status": "active"}
+            after_state = {"status": "suspended"}
+        elif action == "admin.participants.unfreeze":
+            reason = "maintenance complete"
+            before_state = {"status": "suspended"}
+            after_state = {"status": "active"}
+        elif action == "admin.equivalents.patch":
+            before_state = {"is_active": True}
+            after_state = {"is_active": True, "description": "updated"}
+        elif action == "admin.transactions.abort":
+            reason = "stuck tx unblock"
+            before_state = {"state": "PREPARE_IN_PROGRESS"}
+            after_state = {"state": "ABORTED"}
+
         out.append(
             {
-                "id": f"AUD_{i+1:05d}",
+                "id": str(UUID(int=i + 1, version=4)),
+                "timestamp": _iso(ts),
                 "action": action,
-                "object": obj,
+                "object_type": obj,
                 "object_id": object_id,
                 **actor,
-                "created_at": _iso(ts),
-                "details": {},
+                "reason": reason,
+                "before_state": before_state,
+                "after_state": after_state,
+                "request_id": f"req_{(i * 99991) % 10**8:08d}",
+                "ip_address": f"10.0.{(i % 50) + 1}.{(i % 200) + 10}",
+                "user_agent": "admin-fixtures/1",
             }
         )
 

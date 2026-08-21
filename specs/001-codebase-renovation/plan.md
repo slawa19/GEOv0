@@ -5,8 +5,18 @@
 - **Executable backlog:** `specs/001-codebase-renovation/tasks.md`
 - **State:** owner-approved at exact commit
   `8f271693e7b763856d86fb3c2f579a56938d6fcb`; Phase 1 completed on 2026-08-08
-  at main commit `31e887fc904ef8060b0c1c9f233957b235ee1aeb`. Phase 2 has not
-  started; Phases 2–7 remain paused.
+  at main commit `31e887fc904ef8060b0c1c9f233957b235ee1aeb`. Phase 2 completed on
+  2026-08-08 at product commit `7d0a8a9ca48cec34cc62e0965cdd6d28825370de`;
+  Phase 3 completed on 2026-08-08 at product commit
+  `f8517bc90b119a3b156de0a2945019d1b9381118`; Phase 4 completed locally on
+  2026-08-08 at product commit `f0428f9996e511e723ce1980a24c2073b3adadb8`;
+  Phase 5 completed locally on 2026-08-09 at product-behavior commit
+  `ff53dbc1c070220ad7ddfdaf8a0aa5c8c1ccd157`, with final test evidence at
+  `345991b47f15e2ed4080c7617f4f3430883f8b7b`; Phase 6 completed on
+  2026-08-09 at `579ad5769470b0d3bcdb4c59830362a7b9bd73bc`; Phase 7 and the
+  renovation program completed on 2026-08-09 at accepted product/test HEAD
+  `f5a86ae369c563ae32d2b306ada3e6b8f48f21e2` with published Quality run
+  `31329706963`.
 
 ## 1. Objective and project fit
 
@@ -117,12 +127,19 @@ as evidence but does not authorize more implementation.
   parity, background-job supervision, semantic OpenAPI, Admin async ownership,
   payment locking/state/error handling and Simulator transaction-outcome work are
   implemented in bounded slices.
-- Local backend, Admin and Simulator gates have substantial passing evidence.
-- Published CI, Docker runtime, live PostgreSQL, browser E2E and full frontend
-  architecture/functionality evidence are still absent.
-- Claude Code reviewed frozen product diffs, not the full repository or this final
-  plan. Its confirmed product findings were remediated; the plan itself receives a
-  separate review before owner presentation.
+- Local and published backend, Admin and Simulator required gates have passing
+  evidence. Phase 1 also established the production-like container, disposable
+  PostgreSQL, short Chromium and Simulator super-smoke paths.
+- Phase 2's bounded live PostgreSQL concurrency matrix and complete registered
+  marker tier passed on its exact accepted product SHA. Broader scheduled Admin
+  and Simulator visual E2E remain truthfully red and owned by later phases.
+- Phase 3 completed the frozen selected Admin REST/OpenAPI and Simulator REST/SSE
+  ingress contracts. Its exact accepted product SHA passed all required and
+  milestone jobs; broader scheduled Admin and Simulator visual E2E retained the
+  exact earlier baseline and remain owned by later phases.
+- Claude Code reviewed the complete Phase 2 product range as well as earlier
+  frozen product and planning diffs. Confirmed findings were remediated; rejected
+  findings retain manual call-site and contract triage evidence.
 
 ## 6. Frozen remaining sequence
 
@@ -268,6 +285,11 @@ described as green Phase 1 gates.
 
 ### Phase 2 — Close only confirmed backend ownership and integrity gaps
 
+**Status:** completed 2026-08-08 at product commit
+`7d0a8a9ca48cec34cc62e0965cdd6d28825370de`. The compact owner/effect and actor
+maps, bounded remediations, final reviews and published evidence are recorded in
+`phase2-owner-map.md`. Phase 3 was not started by this closeout.
+
 **Purpose:** finish the domain review that has broad correctness value without
 turning the MVP into a distributed transaction research project.
 
@@ -372,6 +394,19 @@ the changed behavior is independently testable.
   owner-approved spec revision.
 - No new framework or broad module rewrite was introduced.
 
+Exit was accepted for exact product SHA
+`7d0a8a9ca48cec34cc62e0965cdd6d28825370de` using published
+[workflow run 31256289008](https://github.com/slawa19/GEOv0/actions/runs/31256289008).
+The three mandatory live PostgreSQL selectors passed; the fourth Admin row was
+conditional and remained `NOT TRIGGERED` after the owner map found no qualifying
+lost-update risk. The complete PostgreSQL marker tier and required
+local-equivalent job also passed. Internal adversarial findings were fixed and
+independently re-reviewed; Claude Code `2.1.226` reviewed the full
+`0635a651..7d0a8a9` product range with resolved `claude-opus-5`, high effort,
+exit `0`, complete JSON and no manually sustained P1/P2. Process-crash delivery,
+network partitions, generalized retry/UoW frameworks and the later-phase UI/E2E
+owners remain outside this phase.
+
 #### Conditional operational follow-up — not a renovation blocker by default
 
 Before storing real community data, rehearse one `pg_dump` custom-format backup and
@@ -380,6 +415,11 @@ counts and the existing integrity check. For local/demo use this is
 `ACCEPTED-NOT-DOING`; no PITR/WAL/cloud backup or RPO/RTO program is required.
 
 ### Phase 3 — Complete the backend-to-frontend contract chain
+
+**Status:** completed 2026-08-08 at product commit
+`f8517bc90b119a3b156de0a2945019d1b9381118`. The frozen decisions, selected
+contracts, residuals, local gates and external/internal review evidence are
+recorded in `phase3-contract-map.md`. Phase 4 was not started by this closeout.
 
 **Purpose:** validate only the contracts used by the frozen functional matrix.
 
@@ -418,7 +458,25 @@ do not need exhaustive schemas unless they control a mutation or readiness decis
 - Unknown/malformed Simulator input cannot silently become a trusted event.
 - OpenAPI and affected frontend gates pass.
 
+Exit was accepted for exact product SHA
+`f8517bc90b119a3b156de0a2945019d1b9381118` using published
+[workflow run 31265705618](https://github.com/slawa19/GEOv0/actions/runs/31265705618).
+Required local-equivalent, disposable PostgreSQL, production-like container/schema,
+active Chromium and Simulator super-smoke jobs passed. Intentional selected drift
+is mutation-sensitive, Admin real/mock clients share the selected decoders, and
+malformed/unknown Simulator input cannot advance cursor/state/effects. The overall
+workflow remains truthfully red only for the prior later-phase Admin `2/2` and
+Simulator `6/13` E2E baselines; an initially exposed stale scenario-list mock was
+corrected without weakening the decoder. No Phase 4 loader/operator work or Phase
+5 replay ordering redesign entered this phase.
+
 ### Phase 4 — Finish the Admin UI on actual operator paths
+
+**Status:** completed locally 2026-08-08 at product commit
+`f0428f9996e511e723ce1980a24c2073b3adadb8`. The loader/effect inventory,
+Current / Intended / Optimal decisions, operator matrix, Graph boundary, exact
+local gates, review triage and residuals are recorded in `phase4-admin-map.md`.
+Phase 5 was not started by this closeout.
 
 **Purpose:** close the async and operator correctness already started, without UI
 redesign or a new data-fetching architecture.
@@ -491,7 +549,32 @@ fixture already exists. Firefox/WebKit and visual redesign are not required.
 - Admin lint/unit/build and scoped Chromium smoke pass.
 - Graph has a usable keyboard alternative without a broad Cytoscape rewrite.
 
+Exit was accepted for exact product SHA
+`f0428f9996e511e723ce1980a24c2073b3adadb8`. Final Admin lint exited `0` with
+zero errors and `116` known warnings; unit passed `154/154`; build passed; scoped
+Chromium passed `5/5`. The disposable real-contract smoke passed `2/2` and
+cleaned its owned processes, ports and SQLite artifacts. The selected backend
+audit timestamp selector passed `2/2`. Independent Graph and non-Graph reviews
+were CLEAN. Claude Code remediation reviews resolved `claude-opus-5` at high
+effort with complete exit-`0` JSON; reproduced findings were fixed, and the final
+automatic re-search note was rejected because data/filter/locale changes
+intentionally invalidate large-graph results until new explicit search input.
+No published workflow ran, so this local exit is not a “CI green” claim.
+
 ### Phase 5 — Make Simulator v2 behavior testable at its risky seam
+
+**Status:** completed locally on 2026-08-09. Accepted product behavior is
+`ff53dbc1c070220ad7ddfdaf8a0aa5c8c1ccd157`; final test evidence is
+`345991b47f15e2ed4080c7617f4f3430883f8b7b`. The event/state/effect seam and
+critical DOM/focus/status paths are recorded in `phase5-simulator-map.md`.
+Simulator lint, typecheck, all `701` unit tests, build and scoped Chromium `5/5`
+passed locally; the final test-only correction passed its `68/68` selector plus
+lint/typecheck. Internal adversarial review ended clean, and Claude Code `2.1.226`
+read-only reviews returned complete exit-`0` JSON with resolved `claude-opus-5`;
+all reproduced findings were fixed. No published workflow ran, so this is not a
+“CI green” claim. Live-backend SSE/browser, visual/browser-matrix, screen-reader
+and direct private-canvas callback probes remain outside the evidence. Backend,
+OpenAPI and wire contracts were unchanged, and Phase 6 was not started.
 
 **Purpose:** separate trusted event/state handling from visual effects only as far
 as needed for current real/fixture/interact workflows.
@@ -569,6 +652,16 @@ This is a critical-path improvement, not complete WCAG certification.
 **Maps to:** REN-013B, REN-014 and REN-016. REN-004 remains complete historical
 cleanup evidence and is not reopened.
 
+**Status:** COMPLETE (2026-08-09) at accepted product HEAD
+`90ac5ef6197c184b5818fe52826a8e97dbb5f6d5`. Canonical mutable outputs now live
+under `.local-run/`, legacy user DB reset is fail-closed, the one proved no-op test
+step and Admin starter remnants were removed, current docs/classifications were
+reconciled, generated sync was no-diff, and internal plus Claude reviews have no
+open P1/P2. Exact commands, counts and residuals are recorded in
+[`phase6-cleanup-map.md`](phase6-cleanup-map.md). At that Phase 6 closeout,
+Phase 7 had not started; its current status is authoritative in the section
+below.
+
 #### 6A. Test-value cleanup — MUST only where proven
 
 1. Delete a test only when it is pass-only, duplicated by stronger behavior proof
@@ -632,6 +725,12 @@ command scans for changed current documents, not all historical prose.
 ### Phase 7 — Final bounded adversarial review and closure
 
 **Maps to:** REN-015.
+
+**Status:** COMPLETE (2026-08-09) from exact Phase 6 closeout
+`579ad5769470b0d3bcdb4c59830362a7b9bd73bc` to accepted product/test HEAD
+`f5a86ae369c563ae32d2b306ada3e6b8f48f21e2`. The complete evidence and
+residual ledger is `phase7-closure-map.md`; published Quality run
+`31329706963` passed all eight jobs on that exact HEAD.
 
 #### MUST evidence matrix
 

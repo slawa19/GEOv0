@@ -4,6 +4,8 @@ import json
 import pytest
 from httpx import AsyncClient
 
+from app.core.simulator.runtime import runtime
+
 
 @pytest.mark.asyncio
 async def test_simulator_sse_trust_drift_decay_emits_edge_patch_not_empty_topology_changed(
@@ -24,6 +26,32 @@ async def test_simulator_sse_trust_drift_decay_emits_edge_patch_not_empty_topolo
     assert resp.status_code == 200, resp.text
     run_id = resp.json()["run_id"]
 
+    # The ASGI test transport buffers streaming responses. Observe the real
+    # runtime event, then stop the run so the HTTP stream closes via its normal
+    # terminal run_status rather than a pytest-only production branch.
+    observer = await runtime.subscribe(
+        run_id,
+        equivalent="UAH",
+        after_event_id=f"evt_{run_id}_000000",
+    )
+    try:
+        async def _wait_for_decay() -> None:
+            while True:
+                event = await observer.queue.get()
+                if event.get("type") == "topology.changed" and event.get(
+                    "reason"
+                ) == "trust_drift_decay":
+                    return
+
+        await asyncio.wait_for(_wait_for_decay(), timeout=15.0)
+    finally:
+        await runtime.unsubscribe(run_id, observer)
+
+    stop_resp = await client.post(
+        f"/api/v1/simulator/runs/{run_id}/stop", headers=auth_headers
+    )
+    assert stop_resp.status_code == 200, stop_resp.text
+
     url = f"/api/v1/simulator/runs/{run_id}/events"
 
     seen_decay_topology_changed = False
@@ -34,14 +62,8 @@ async def test_simulator_sse_trust_drift_decay_emits_edge_patch_not_empty_topolo
         async with client.stream(
             "GET",
             url,
-            headers=auth_headers,
-            params={
-                "equivalent": "UAH",
-                # Under pytest, the SSE endpoint intentionally terminates after a
-                # bounded "first frame". Ask it to keep streaming until we see
-                # topology.changed (or hit its short deadline).
-                "stop_after_types": "topology.changed",
-            },
+            headers={**auth_headers, "Last-Event-ID": f"evt_{run_id}_000000"},
+            params={"equivalent": "UAH"},
         ) as r:
             assert r.status_code == 200
 

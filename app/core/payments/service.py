@@ -4,11 +4,11 @@ import logging
 import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import List, Literal
+from typing import Any, Awaitable, Callable, List, Literal
 
 from sqlalchemy import select, and_, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from app.core.payments.engine import PaymentEngine
 from app.core.payments.router import PaymentRouter
@@ -30,6 +30,7 @@ from app.utils.exceptions import (
     BadRequestException,
     GeoException,
     ConflictException,
+    RetryablePaymentConflictException,
     InvalidSignatureException,
     RoutingException,
     TimeoutException,
@@ -38,6 +39,88 @@ from app.utils.error_codes import ErrorCode
 from app.utils.validation import validate_equivalent_code, validate_tx_id, parse_amount_decimal
 
 logger = logging.getLogger(__name__)
+
+
+_RETRYABLE_PAYMENT_SQLSTATES = frozenset({"40001", "40P01"})
+
+
+def _iter_exception_chain(exc: BaseException):
+    pending = [exc]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        marker = id(current)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        yield current
+
+        for related in (
+            getattr(current, "orig", None),
+            current.__cause__,
+            current.__context__,
+        ):
+            if isinstance(related, BaseException):
+                pending.append(related)
+
+
+def _payment_db_sqlstate(exc: BaseException) -> str | None:
+    chain = list(_iter_exception_chain(exc))
+    for attribute in ("sqlstate", "pgcode"):
+        for current in chain:
+            value = getattr(current, attribute, None)
+            if value:
+                return str(value)
+    for current in chain:
+        # SQLAlchemy's wrapper-level `.code` identifies its documentation page
+        # (for example "dbapi"), not PostgreSQL SQLSTATE. Driver exceptions may
+        # expose SQLSTATE as `.code`, so inspect only non-wrapper nodes here.
+        if isinstance(current, DBAPIError):
+            continue
+        value = getattr(current, "code", None)
+        if value:
+            return str(value)
+    return None
+
+
+def _classify_payment_db_error(exc: BaseException) -> GeoException:
+    """Map database concurrency failures without exposing driver details."""
+
+    for current in _iter_exception_chain(exc):
+        if not isinstance(current, DBAPIError):
+            continue
+        if _payment_db_sqlstate(current) in _RETRYABLE_PAYMENT_SQLSTATES:
+            return RetryablePaymentConflictException()
+    return GeoException()
+
+
+async def _drain_payment_cleanup(
+    operation: Callable[[], Awaitable[Any]],
+) -> BaseException | None:
+    """Run session-owned cleanup to a terminal result under caller cancellation."""
+
+    task = asyncio.create_task(operation())
+    caller_cancellation: asyncio.CancelledError | None = None
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError as exc:
+            if task.done():
+                continue
+            if caller_cancellation is None:
+                caller_cancellation = exc
+            # Repeated caller cancellation must not interrupt the session-owned
+            # terminalization sequence and leave a durable NEW/PREPARED row.
+        except Exception:
+            # The task is terminal; classify its exact result below.
+            pass
+
+    operation_error: BaseException | None = None
+    try:
+        task.result()
+    except BaseException as exc:
+        operation_error = exc
+    return caller_cancellation or operation_error
 
 
 @dataclass
@@ -50,13 +133,14 @@ class PaymentPostCommitEffects:
     invalidate_routing_cache: bool = True
     include_engine_success_metrics: bool = False
     _applied: bool = field(default=False, init=False, repr=False)
+    _cache_invalidated: bool = field(default=False, init=False, repr=False)
 
-    def apply_once(self) -> bool:
-        if self._applied:
+    def invalidate_routing_cache_once(self) -> bool:
+        """Discard possibly stale routes without publishing commit-only effects."""
+
+        if self._cache_invalidated:
             return False
-        # Mark first: these effects are process-local and cannot be made exactly-once
-        # across a crash without a transactional outbox.
-        self._applied = True
+        self._cache_invalidated = True
 
         if self.invalidate_routing_cache:
             try:
@@ -67,6 +151,15 @@ class PaymentPostCommitEffects:
                     self.equivalent,
                     exc_info=True,
                 )
+        return True
+
+    def apply_once(self) -> bool:
+        if self._applied:
+            return False
+        # Mark first: these effects are process-local and cannot be made exactly-once
+        # across a crash without a transactional outbox.
+        self._applied = True
+        self.invalidate_routing_cache_once()
 
         try:
             from app.utils.metrics import PAYMENT_EVENTS_TOTAL
@@ -102,6 +195,50 @@ class PaymentService:
         self.session = session
         self.engine = PaymentEngine(session)
         self.router = PaymentRouter(session)
+
+    def _resolve_existing_payment(
+        self,
+        existing_tx: Transaction,
+        *,
+        sender_id: uuid.UUID,
+        request_fingerprint: str,
+    ) -> PaymentResult:
+        """Apply one idempotency policy to both lookup and insert-race rows."""
+        if existing_tx.type != "PAYMENT":
+            raise ConflictException("tx_id already used")
+        if existing_tx.initiator_id != sender_id:
+            raise ConflictException("tx_id already used")
+
+        existing_payload = existing_tx.payload or {}
+        existing_fp = (existing_payload.get("idempotency") or {}).get("fingerprint")
+        if existing_fp is not None and existing_fp != request_fingerprint:
+            raise ConflictException("tx_id already used for a different request")
+
+        if existing_tx.state in {
+            "NEW",
+            "ROUTED",
+            "PREPARE_IN_PROGRESS",
+            "PREPARED",
+            "PROPOSED",
+            "WAITING",
+        }:
+            try:
+                from app.utils.metrics import PAYMENT_EVENTS_TOTAL
+
+                PAYMENT_EVENTS_TOTAL.labels(
+                    event="create", result="conflict_in_progress"
+                ).inc()
+            except Exception:
+                pass
+            raise ConflictException("Payment with same tx_id is in progress")
+
+        try:
+            from app.utils.metrics import PAYMENT_EVENTS_TOTAL
+
+            PAYMENT_EVENTS_TOTAL.labels(event="create", result="idempotent_hit").inc()
+        except Exception:
+            pass
+        return self._tx_to_payment_result(existing_tx)
 
     async def create_payment(
         self,
@@ -200,6 +337,48 @@ class PaymentService:
             result=result,
             post_commit_effects=(deferred_effects[0] if deferred_effects else None),
         )
+
+    async def acquire_staged_equivalent_owner_locks(
+        self,
+        equivalent_codes: list[str] | tuple[str, ...] | set[str],
+    ) -> None:
+        """Pre-acquire one sorted owner set for a caller-owned staged batch."""
+        codes = sorted(
+            {
+                str(code).strip().upper()
+                for code in equivalent_codes
+                if str(code).strip()
+            }
+        )
+        if not codes or not self.engine._is_postgres():
+            return
+
+        rows = (
+            await self.session.execute(
+                select(Equivalent.id, Equivalent.code).where(Equivalent.code.in_(codes))
+            )
+        ).all()
+        equivalent_ids_by_code = {str(code): equivalent_id for equivalent_id, code in rows}
+        # Preserve per-action validation for unknown codes; only persisted
+        # equivalents can own monetary resources or an advisory lock.
+        resolved_ids = [
+            equivalent_ids_by_code[code]
+            for code in codes
+            if code in equivalent_ids_by_code
+        ]
+        if not resolved_ids:
+            return
+
+        try:
+            await self.engine.acquire_staged_equivalent_owner_locks(
+                resolved_ids
+            )
+        except DBAPIError as exc:
+            if self.engine._get_pgcode(exc) == "55P03":
+                raise asyncio.TimeoutError(
+                    "Payment equivalent owner lock timed out"
+                ) from exc
+            raise _classify_payment_db_error(exc) from exc
 
     async def _create_payment_impl(
         self,
@@ -303,6 +482,14 @@ class PaymentService:
                 pass
             raise NotFoundException(f"Equivalent {request.equivalent} not found")
 
+        # Payment engine retries may expire the session identity map after an
+        # optimistic-lock conflict. Keep the validated wire identifiers as plain
+        # values so result construction never triggers implicit async ORM IO.
+        sender_pid = str(sender.pid)
+        receiver_pid = str(receiver.pid)
+        equivalent_id = equivalent.id
+        equivalent_code = str(equivalent.code)
+
         # Signature payload (canonical JSON) is part of the API contract for MVP.
         # IMPORTANT: it must include tx_id and must exclude the `signature` field itself.
         payload: dict = {
@@ -342,45 +529,15 @@ class PaymentService:
             )
         ).scalar_one_or_none()
         if existing_tx is not None:
-            if existing_tx.type != "PAYMENT":
-                raise ConflictException("tx_id already used")
-            if existing_tx.initiator_id != sender_id:
-                raise ConflictException("tx_id already used")
-
-            existing_payload = existing_tx.payload or {}
-            existing_fp = (existing_payload.get("idempotency") or {}).get("fingerprint")
-            if existing_fp is not None and existing_fp != request_fingerprint:
-                raise ConflictException("tx_id already used for a different request")
-
-            if existing_tx.state in {
-                "NEW",
-                "ROUTED",
-                "PREPARE_IN_PROGRESS",
-                "PREPARED",
-                "PROPOSED",
-                "WAITING",
-            }:
-                try:
-                    from app.utils.metrics import PAYMENT_EVENTS_TOTAL
-
-                    PAYMENT_EVENTS_TOTAL.labels(
-                        event="create", result="conflict_in_progress"
-                    ).inc()
-                except Exception:
-                    pass
-                raise ConflictException("Payment with same tx_id is in progress")
-
-            try:
-                from app.utils.metrics import PAYMENT_EVENTS_TOTAL
-
-                PAYMENT_EVENTS_TOTAL.labels(event="create", result="idempotent_hit").inc()
-            except Exception:
-                pass
-            return self._tx_to_payment_result(existing_tx)
+            return self._resolve_existing_payment(
+                existing_tx,
+                sender_id=sender_id,
+                request_fingerprint=request_fingerprint,
+            )
 
         # 2. Routing
         tx_uuid = uuid.uuid4()
-        tx_persisted = False
+        tx_may_be_persisted = False
 
         # Effective routing constraints (signed client request is the source of truth;
         # hub settings may cap it from above).
@@ -431,10 +588,10 @@ class PaymentService:
                 # Build routing graph + compute routes under spec-aligned timeout budget.
                 try:
                     if deferred_effects is None:
-                        build_graph = self.router.build_graph(equivalent.code)
+                        build_graph = self.router.build_graph(equivalent_code)
                     else:
                         build_graph = self.router.build_graph(
-                            equivalent.code,
+                            equivalent_code,
                             use_shared_cache=False,
                         )
                     await asyncio.wait_for(
@@ -448,8 +605,8 @@ class PaymentService:
                     routes_found = await asyncio.wait_for(
                         asyncio.to_thread(
                             self.router.find_flow_routes,
-                            sender.pid,
-                            receiver.pid,
+                            sender_pid,
+                            receiver_pid,
                             amount,
                             max_hops=effective_max_hops,
                             max_paths=effective_max_paths,
@@ -493,12 +650,12 @@ class PaymentService:
                     # Legacy header is ignored for new requests; tx_id is the single source of truth.
                     idempotency_key=None,
                     type="PAYMENT",
-                    initiator_id=sender.id,
+                    initiator_id=sender_id,
                     payload={
-                        "from": sender.pid,
-                        "to": receiver.pid,
+                        "from": sender_pid,
+                        "to": receiver_pid,
                         "amount": str(amount),
-                        "equivalent": equivalent.code,
+                        "equivalent": equivalent_code,
                         "routes": routes_payload,
                         "idempotency": {
                             "key": tx_id_str,
@@ -507,6 +664,7 @@ class PaymentService:
                     },
                     state="NEW",
                 )
+                tx_may_be_persisted = True
                 self.session.add(new_tx)
                 try:
                     if commit:
@@ -528,20 +686,33 @@ class PaymentService:
                         )
                     ).scalar_one_or_none()
                     if existing_tx is not None:
-                        if existing_tx.type != "PAYMENT":
-                            raise ConflictException("tx_id already used")
-                        existing_payload = existing_tx.payload or {}
-                        existing_fp = (existing_payload.get("idempotency") or {}).get(
-                            "fingerprint"
+                        return self._resolve_existing_payment(
+                            existing_tx,
+                            sender_id=sender_id,
+                            request_fingerprint=request_fingerprint,
                         )
-                        if existing_fp is not None and existing_fp != request_fingerprint:
-                            raise ConflictException(
-                                "tx_id already used for a different request"
-                            )
-                        return self._tx_to_payment_result(existing_tx)
                     raise
-                tx_persisted = True
-
+                except DBAPIError as exc:
+                    public_error = _classify_payment_db_error(exc)
+                    if not isinstance(
+                        public_error, RetryablePaymentConflictException
+                    ):
+                        raise
+                    if commit:
+                        try:
+                            await self.session.rollback()
+                        except Exception as rollback_error:
+                            logger.error(
+                                "event=payment.insert_rollback_failed "
+                                "tx_id=%s error_type=%s",
+                                tx_id_str,
+                                type(rollback_error).__name__,
+                            )
+                            raise GeoException() from rollback_error
+                    # In staged mode the caller owns the outer transaction. A
+                    # serialization failure invalidates that scope, so propagate
+                    # the typed conflict and let the tick rollback/replay it.
+                    raise public_error from exc
                 # 4. Engine Prepare
                 try:
                     if len(routes_found) == 1:
@@ -550,7 +721,7 @@ class PaymentService:
                                 tx_id_str,
                                 routes_found[0][0],
                                 amount,
-                                equivalent.id,
+                                equivalent_id,
                                 commit=commit,
                             ),
                             timeout=prepare_timeout_s,
@@ -560,7 +731,7 @@ class PaymentService:
                             self.engine.prepare_routes(
                                 tx_id_str,
                                 routes_found,
-                                equivalent.id,
+                                equivalent_id,
                                 commit=commit,
                             ),
                             timeout=prepare_timeout_s,
@@ -589,7 +760,9 @@ class PaymentService:
                     is_client_error = isinstance(e, GeoException) and 400 <= int(
                         getattr(e, "status_code", 500) or 500
                     ) < 500
-                    public_error = e if is_client_error else GeoException()
+                    public_error = (
+                        e if is_client_error else _classify_payment_db_error(e)
+                    )
                     abort_reason = str(public_error.message)
                     abort_code = getattr(public_error, "code", ErrorCode.E010)
                     abort_details = getattr(public_error, "details", None) or {}
@@ -719,7 +892,7 @@ class PaymentService:
 
                     # Under uncertainty (e.g. DB/network errors), commit may have succeeded even if
                     # the caller sees an exception. Read-before-abort to avoid COMMITTED -> ABORTED.
-                    public_error = GeoException()
+                    public_error = _classify_payment_db_error(e)
                     if commit:
                         try:
                             await self.session.rollback()
@@ -755,8 +928,8 @@ class PaymentService:
                             await self.engine.abort(
                                 tx_id_str,
                                 reason=public_error.message,
-                                error_code=ErrorCode.E010,
-                                details={},
+                                error_code=public_error.code,
+                                details=public_error.details,
                                 commit=True,
                             )
                         except Exception as abort_error:
@@ -771,8 +944,8 @@ class PaymentService:
                             await self.engine.abort(
                                 tx_id_str,
                                 reason=public_error.message,
-                                error_code=ErrorCode.E010,
-                                details={},
+                                error_code=public_error.code,
+                                details=public_error.details,
                                 commit=False,
                             )
                         except Exception as abort_error:
@@ -782,69 +955,95 @@ class PaymentService:
                                 type(abort_error).__name__,
                             )
                     raise public_error from e
-        except asyncio.TimeoutError:
-            if tx_persisted:
-                # Timeout is ambiguous: commit may have succeeded. Read-after-timeout to avoid
-                # COMMITTED -> ABORTED.
-                if commit:
-                    try:
-                        await self.session.rollback()
-                    except Exception as rollback_error:
-                        logger.error(
-                            "event=payment.timeout_rollback_failed tx_id=%s error_type=%s",
-                            tx_id_str,
-                            type(rollback_error).__name__,
-                        )
-                        raise GeoException() from rollback_error
+        except asyncio.CancelledError:
+            if tx_may_be_persisted:
+                committed_after_cancellation = False
 
-                    try:
+                async def terminalize_after_cancellation() -> None:
+                    nonlocal committed_after_cancellation
+                    if commit:
+                        await self.session.rollback()
                         tx_latest = (
                             await self.session.execute(
                                 select(Transaction).where(
                                     Transaction.tx_id == tx_id_str
-                                )
+                                ).execution_options(populate_existing=True)
                             )
                         ).scalar_one_or_none()
-                    except Exception as read_error:
-                        logger.error(
-                            "event=payment.timeout_recovery_read_failed tx_id=%s error_type=%s",
-                            tx_id_str,
-                            type(read_error).__name__,
+                        committed_after_cancellation = (
+                            tx_latest is not None and tx_latest.state == "COMMITTED"
                         )
-                        raise GeoException() from read_error
-                    if tx_latest is not None and tx_latest.state == "COMMITTED":
-                        return self._tx_to_payment_result(tx_latest)
+                    if not committed_after_cancellation:
+                        await self.engine.abort(
+                            tx_id_str,
+                            reason="Payment cancelled",
+                            commit=commit,
+                            error_code=ErrorCode.E007,
+                        )
 
-                # Ensure abort isn't cancelled due to the timeout cancellation context.
-                if commit:
-                    try:
-                        await asyncio.shield(
-                            self.engine.abort(
-                                tx_id_str,
-                                reason="Payment timeout",
-                                commit=True,
-                                error_code=ErrorCode.E007,
+                cleanup_error = await _drain_payment_cleanup(
+                    terminalize_after_cancellation
+                )
+
+                if cleanup_error is not None:
+                    logger.error(
+                        "event=payment.cancellation_cleanup_failed "
+                        "tx_id=%s error_type=%s",
+                        tx_id_str,
+                        type(cleanup_error).__name__,
+                    )
+            raise
+        except asyncio.TimeoutError:
+            if tx_may_be_persisted:
+                # Timeout is ambiguous: commit may have succeeded. Read-after-timeout to avoid
+                # COMMITTED -> ABORTED.
+                committed_after_timeout: PaymentResult | None = None
+                cleanup_stage = "abort"
+
+                async def terminalize_after_timeout() -> None:
+                    nonlocal committed_after_timeout, cleanup_stage
+                    if commit:
+                        cleanup_stage = "rollback"
+                        await self.session.rollback()
+                        cleanup_stage = "recovery_read"
+                        tx_latest = (
+                            await self.session.execute(
+                                select(Transaction).where(
+                                    Transaction.tx_id == tx_id_str
+                                ).execution_options(populate_existing=True)
                             )
-                        )
-                    except Exception as abort_error:
-                        logger.error(
-                            "event=payment.timeout_abort_failed tx_id=%s error_type=%s",
-                            tx_id_str,
-                            type(abort_error).__name__,
-                        )
-                        raise GeoException() from abort_error
-                else:
-                    try:
-                        await asyncio.shield(
-                            self.engine.abort(
-                                tx_id_str,
-                                reason="Payment timeout",
-                                commit=False,
-                                error_code=ErrorCode.E007,
-                            )
-                        )
-                    except Exception:
-                        pass
+                        ).scalar_one_or_none()
+                        if tx_latest is not None and tx_latest.state == "COMMITTED":
+                            committed_after_timeout = self._tx_to_payment_result(tx_latest)
+                            return
+
+                    cleanup_stage = "abort"
+                    await self.engine.abort(
+                        tx_id_str,
+                        reason="Payment timeout",
+                        commit=commit,
+                        error_code=ErrorCode.E007,
+                    )
+
+                cleanup_error = await _drain_payment_cleanup(terminalize_after_timeout)
+                if cleanup_error is not None:
+                    event_name = (
+                        "payment.timeout_recovery_read_failed"
+                        if cleanup_stage == "recovery_read"
+                        else f"payment.timeout_{cleanup_stage}_failed"
+                    )
+                    logger.error(
+                        "event=%s tx_id=%s error_type=%s",
+                        event_name,
+                        tx_id_str,
+                        type(cleanup_error).__name__,
+                    )
+                    if isinstance(cleanup_error, asyncio.CancelledError):
+                        raise cleanup_error
+                    if commit:
+                        raise GeoException() from cleanup_error
+                if committed_after_timeout is not None:
+                    return committed_after_timeout
             raise TimeoutException("Payment timed out")
 
         # Fetch server timestamps (created_at/updated_at) explicitly.
@@ -872,22 +1071,22 @@ class PaymentService:
         result = PaymentResult(
             tx_id=tx_id_str,
             status="COMMITTED",
-            **{"from": sender.pid},
-            to=receiver.pid,
-            equivalent=equivalent.code,
+            **{"from": sender_pid},
+            to=receiver_pid,
+            equivalent=equivalent_code,
             amount=str(amount),
             routes=routes,
             created_at=created_at,
             committed_at=committed_at,
         )
         effects = PaymentPostCommitEffects(
-            equivalent=str(equivalent.code),
-            recipient_pid=str(receiver.pid),
+            equivalent=equivalent_code,
+            recipient_pid=receiver_pid,
             event_payload={
                 "tx_id": tx_id_str,
-                "from": str(sender.pid),
-                "to": str(receiver.pid),
-                "equivalent": str(equivalent.code),
+                "from": sender_pid,
+                "to": receiver_pid,
+                "equivalent": equivalent_code,
                 "amount": str(amount),
             },
             invalidate_routing_cache=deferred_effects is not None,

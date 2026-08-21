@@ -293,7 +293,7 @@ If Docker is unavailable, you can run the backend locally using SQLite (developm
 ```powershell
 $env:ENV = 'dev'
 
-# 1) Initialize SQLite schema (creates ./geov0.db)
+# 1) Initialize SQLite schema (creates ./.local-run/geov0.db)
 python scripts/init_sqlite_db.py
 
 # 2) Seed demo data (from ./seeds/*.json)
@@ -311,9 +311,9 @@ Health endpoints (also available as `/api/v1/*` aliases):
 ### Testing (single entry point)
 
 The canonical required local gate is the root PowerShell verifier. It runs the
-default backend pytest tier (excluding `slow`/`e2e`), asserts a single Alembic
+default backend pytest tier (excluding `slow`/`postgres`), asserts a single Alembic
 head, and runs Admin UI lint/unit/build plus Simulator UI v2
-typecheck/unit/build:
+lint/typecheck/unit/build:
 
 ```powershell
 # One-time setup
@@ -331,23 +331,30 @@ The verifier gives pytest a task-specific SQLite DB and basetemp by default. Par
 agents must pass a unique slug, for example
 `.\scripts\verify_local.ps1 -TaskSlug agent_contract_review`.
 
+Local databases, pytest cache/basetemp, logs, PID/NDJSON and browser-test output
+belong under the ignored `.local-run/` runtime root. An existing legacy
+`./geov0.db` is never moved or deleted automatically; set
+`DATABASE_URL=sqlite+aiosqlite:///./geov0.db` only when you intentionally need it.
+The runner's reset action is restricted to the new `.local-run` default and fails
+closed for this legacy override or any custom URL.
+
 GitHub Actions runs the same verifier with Python 3.11 and Node 22.12. PostgreSQL
-integration, simulator super-smoke, Admin E2E, and Windows Simulator visual E2E
-jobs run only on the weekly schedule or manual dispatch; see
+integration, production container/schema smoke, simulator super-smoke, Admin E2E,
+and Windows Simulator visual E2E jobs run only on the weekly schedule or manual dispatch; see
 `.github/workflows/quality.yml`. The presence of the workflow is not evidence of a
 green CI run until the published job finishes successfully.
 
-Ruff and Black currently have known repository-wide debt and are not required green
-gates yet. To display that debt after the required checks, run:
+Pinned Ruff is a blocking CI gate for `app migrations`; Black still has known
+repository-wide formatting debt. To run both locally after the required checks, use:
 
 ```powershell
 .\scripts\verify_local.ps1 -StaticDiagnostics
 ```
 
-Those diagnostics are explicitly non-blocking. Mypy is not configured. Do not report
-them or CI as green unless the named command/job actually reached a final successful
-state. CI reports Ruff and Black in separate non-blocking diagnostic steps; they are
-not part of `required-quality`.
+The local `-StaticDiagnostics` wrapper reports both tools without changing its exit
+status. In CI, however, Ruff is blocking and Black alone has `continue-on-error`.
+Mypy is not configured. Do not report a named command/job as green unless it actually
+reached a final successful state.
 
 #### Focused backend tests
 
@@ -381,12 +388,18 @@ docker compose up -d db
 docker exec geov0-db createdb -U geo "geov0_test_$taskSlug" 2>$null
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_$taskSlug"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-.\scripts\verify_local.ps1 -TaskSlug $taskSlug -BackendOnly -BackendSelector tests/integration/test_concurrent_prepare_routes_bottleneck_postgres.py
+.\scripts\verify_local.ps1 -TaskSlug $taskSlug -BackendOnly -BackendMarker postgres -BackendSelector tests/integration/test_concurrent_prepare_routes_bottleneck_postgres.py
 ```
+
+No Docker on the machine? See [`docs/ru/backend/postgres-local-portable.md`](docs/ru/backend/postgres-local-portable.md)
+for a portable PostgreSQL that needs neither Docker nor administrator rights, matched to the version CI pins.
 
 The harness rejects non-SQLite databases unless both the database name matches
 `geov0_test_*` and `GEO_TEST_ALLOW_DB_RESET=1`. The opt-in flag cannot override
-an unsafe name. Never point it at developer, shared, staging, or production data.
+an unsafe name. Direct pytest also fails during collection whenever a selected
+`postgres` test uses a non-PostgreSQL `TEST_DATABASE_URL`; a skipped SQLite run is
+not accepted as evidence. Never point it at developer, shared, staging, or
+production data.
 
 #### UI commands and E2E
 

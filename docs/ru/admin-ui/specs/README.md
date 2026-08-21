@@ -9,7 +9,7 @@
   - Рекомендуемая практика: для реализованных частей переносить «нормативные» решения в [docs/ru/admin-ui/README.md](../README.md), а здесь оставлять требования к будущему.
 
 - [docs/ru/admin-ui/specs/operator-advice-spec.md](operator-advice-spec.md)
-  - Статус: к реализации сейчас; детерминированные советы оператору в Graph/Trustlines.
+  - Статус: реализовано; документ хранит исходные acceptance-требования, а текущее поведение подтверждают UI-код и behavioral tests.
 
 Отдельный список незавершённого: [docs/ru/admin-ui/specs/UNFINISHED.md](UNFINISHED.md)
 

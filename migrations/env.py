@@ -2,7 +2,7 @@ import asyncio
 from logging.config import fileConfig
 
 from sqlalchemy import pool
-from sqlalchemy.engine import Connection
+from sqlalchemy.engine import Connection, make_url
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
@@ -22,6 +22,15 @@ if config.config_file_name is not None:
 # target_metadata = None
 target_metadata = Base.metadata
 
+
+def _require_postgresql_migration_url(database_url: str) -> None:
+    backend = make_url(database_url).get_backend_name()
+    if backend != "postgresql":
+        raise RuntimeError(
+            "Alembic migrations support PostgreSQL only. "
+            "For a local SQLite database, run: python scripts/init_sqlite_db.py"
+        )
+
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode.
 
@@ -35,6 +44,7 @@ def run_migrations_offline() -> None:
 
     """
     url = settings.DATABASE_URL
+    _require_postgresql_migration_url(url)
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -60,8 +70,10 @@ async def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
+    database_url = settings.DATABASE_URL
+    _require_postgresql_migration_url(database_url)
     configuration = config.get_section(config.config_ini_section)
-    configuration["sqlalchemy.url"] = settings.DATABASE_URL
+    configuration["sqlalchemy.url"] = database_url
 
     connectable = async_engine_from_config(
         configuration,

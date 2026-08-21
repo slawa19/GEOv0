@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 import uuid
 from decimal import Decimal, InvalidOperation, ROUND_DOWN
 from typing import Any, Optional
@@ -282,7 +281,6 @@ class SnapshotBuilder:
 
         mags_sorted = sorted(mags)
         debt_mags_sorted = sorted(debt_mags)
-        mn = len(mags_sorted)
 
         for node in snap.nodes:
             pid = str(node.id or "").strip()
@@ -382,9 +380,9 @@ def scenario_to_snapshot(raw: dict[str, Any], *, equivalent: str, utc_now) -> Si
 
     # links_count
     counts: dict[str, int] = {}
-    for l in links:
-        counts[l.source] = counts.get(l.source, 0) + 1
-        counts[l.target] = counts.get(l.target, 0) + 1
+    for link in links:
+        counts[link.source] = counts.get(link.source, 0) + 1
+        counts[link.target] = counts.get(link.target, 0) + 1
     for n in nodes:
         n.links_count = counts.get(n.id)
 

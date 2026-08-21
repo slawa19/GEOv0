@@ -126,7 +126,11 @@ async def test_payment_commit_aborts_on_trust_limit_violation(
 
     engine = PaymentEngine(db_session)
 
-    abort_called = {"called": False, "tx_lock_already_held": False}
+    abort_called = {
+        "called": False,
+        "tx_lock_already_held": False,
+        "equivalent_owner_locks_already_held": False,
+    }
 
     async def _abort_noop(
         _tx_id: str,
@@ -136,9 +140,13 @@ async def test_payment_commit_aborts_on_trust_limit_violation(
         error_code: str | None = None,
         details: dict | None = None,
         _tx_lock_already_held: bool = False,
+        _equivalent_owner_locks_already_held: bool = False,
     ):
         abort_called["called"] = True
         abort_called["tx_lock_already_held"] = _tx_lock_already_held
+        abort_called["equivalent_owner_locks_already_held"] = (
+            _equivalent_owner_locks_already_held
+        )
         return True
 
     async def _rollback_noop():
@@ -164,6 +172,10 @@ async def test_payment_commit_aborts_on_trust_limit_violation(
     assert abort_called["called"] is True
     assert (
         abort_called["tx_lock_already_held"] is expected_tx_lock_already_held
+    )
+    assert (
+        abort_called["equivalent_owner_locks_already_held"]
+        is expected_tx_lock_already_held
     )
 
 
@@ -364,7 +376,10 @@ async def test_integrity_checkpoint_status_warning_for_debt_symmetry(db_session)
 
 
 @pytest.mark.asyncio
-async def test_payment_commit_writes_integrity_audit_log_on_success(db_session):
+async def test_payment_commit_writes_integrity_audit_log_on_success(
+    db_session,
+    monkeypatch,
+):
     nonce = uuid.uuid4().hex[:10]
     eq = Equivalent(
         code=("T" + nonce[:15]).upper(),
@@ -439,8 +454,16 @@ async def test_payment_commit_writes_integrity_audit_log_on_success(db_session):
         )
     )
     await db_session.commit()
+    expected_audit_participants = sorted([a.pid, b.pid])
 
     engine = PaymentEngine(db_session)
+    original_apply_flow = engine._apply_flow
+
+    async def _apply_flow_and_expire(*args, **kwargs):
+        await original_apply_flow(*args, **kwargs)
+        db_session.expire_all()
+
+    monkeypatch.setattr(engine, "_apply_flow", _apply_flow_and_expire)
     assert await engine.commit(tx_id) is True
 
     log = (
@@ -452,6 +475,9 @@ async def test_payment_commit_writes_integrity_audit_log_on_success(db_session):
         )
     ).scalar_one()
     assert log.verification_passed is True
+    assert log.affected_participants == {
+        "participants": expected_audit_participants,
+    }
 
     locks = (
         (await db_session.execute(select(PrepareLock).where(PrepareLock.tx_id == tx_id)))

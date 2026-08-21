@@ -1,8 +1,34 @@
 import { computed, createApp, h, nextTick, reactive, ref, type Component, type Ref } from 'vue'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { ParticipantInfo, TrustlineInfo } from '../api/simulatorTypes'
+import type {
+  BottlenecksResponse,
+  MetricsResponse,
+  ParticipantInfo,
+  TrustlineInfo,
+} from '../api/simulatorTypes'
+import type { MetricsStreamPhase } from '../composables/useMetricsPolling'
 import type { GraphSnapshot } from '../types'
+import type { LayoutLinkLike, LayoutNode } from '../types/layout'
+import { useAppViewWiring } from '../composables/useAppViewWiring'
+import { useOverlayState } from '../composables/useOverlayState'
+import { keyEdge } from '../utils/edgeKey'
+import { resolveOverlayDockStyle } from '../ui-kit/overlaySurfaceCatalog'
+
+/**
+ * Layout fixture behind the mocked app: a 1000x600 viewport, two placed participants, and by
+ * default the single edge between them. Same geometry as `useAppViewWiring.test.ts`, so the
+ * framing a test asserts is the camera's documented framing and not an artefact of pan clamping.
+ */
+const TEST_LAYOUT_NODES: LayoutNode[] = [
+  { id: 'alice', __x: 100, __y: 100 },
+  { id: 'bob', __x: 300, __y: 300 },
+]
+const TEST_LAYOUT_LINK_ALICE_BOB: LayoutLinkLike = {
+  __key: keyEdge('alice', 'bob'),
+  source: 'alice',
+  target: 'bob',
+}
 
 type TestAnchor = { x: number; y: number }
 type TestSelectedNode = {
@@ -26,6 +52,7 @@ type MockUseSimulatorAppOpts = {
   uiOpenOrUpdateEdgeDetail?: (o: { fromPid: string; toPid: string; anchor: TestAnchor }) => void
   uiOpenOrUpdateNodeCard?: (o: { nodeId: string; anchor: TestAnchor | null }) => void
   uiCloseTopmostInspectorWindow?: () => void
+  isAnalyticsPanelOpen?: () => boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -38,6 +65,9 @@ const __GEO_TEST_SIM_STORAGE = {
 
   readUiTheme: vi.fn<() => string | null>(() => null),
   writeUiTheme: vi.fn(),
+
+  readAnalyticsPanelOpen: vi.fn<() => boolean | null>(() => null),
+  writeAnalyticsPanelOpen: vi.fn<(isOpen: boolean) => void>(),
 
   readDevtoolsOpenReal: vi.fn<() => boolean | null>(() => null),
   writeDevtoolsOpenReal: vi.fn<(isOpen: boolean) => void>(),
@@ -82,6 +112,29 @@ type GeoTestGlobals = {
   __GEO_TEST_PAYMENT_TARGETS_LAST_ERROR_REF?: Ref<string | null>
   __GEO_TEST_PAYMENT_TO_TARGET_IDS_REF?: Ref<Set<string> | undefined>
   __GEO_TEST_INTERACT_STATE?: TestInteractState
+  __GEO_TEST_SNAPSHOT?: GraphSnapshot | null
+  __GEO_TEST_STATE_LOADING?: boolean
+  __GEO_TEST_STATE_ERROR?: string
+
+  // Analytics overlay surface (spec 007, T705).
+  __GEO_TEST_ANALYTICS_METRICS_PHASE_REF?: Ref<MetricsStreamPhase>
+  __GEO_TEST_ANALYTICS_BOTTLENECKS_PHASE_REF?: Ref<MetricsStreamPhase>
+  __GEO_TEST_ANALYTICS_METRICS_REF?: Ref<MetricsResponse | null>
+  __GEO_TEST_ANALYTICS_BOTTLENECKS_REF?: Ref<BottlenecksResponse | null>
+  __GEO_TEST_ANALYTICS_METRICS_ERROR_REF?: Ref<string>
+  __GEO_TEST_ANALYTICS_BOTTLENECKS_ERROR_REF?: Ref<string>
+  __GEO_TEST_ANALYTICS_METRICS_REASON_REF?: Ref<string>
+  __GEO_TEST_ANALYTICS_BOTTLENECKS_REASON_REF?: Ref<string>
+  __GEO_TEST_ANALYTICS_IS_VISIBLE?: () => boolean
+  __GEO_TEST_FOCUS_ON_EDGE?: ReturnType<typeof vi.fn>
+
+  // Camera + highlight, wired to the real composables rather than to spies, so a test can ask
+  // what the graph is showing instead of asking which functions ran (spec 007, §4.2 item 4).
+  __GEO_TEST_LAYOUT_LINKS?: LayoutLinkLike[]
+  __GEO_TEST_CAMERA?: { panX: number; panY: number; zoom: number }
+  __GEO_TEST_WORLD_TO_SCREEN?: (x: number, y: number) => { x: number; y: number }
+  __GEO_TEST_ACTIVE_EDGES?: Map<string, number>
+  __GEO_TEST_PRUNE_ACTIVE_EDGES?: (nowMs: number) => void
 }
 
 function setGeoTestGlobal<K extends keyof GeoTestGlobals>(key: K, value: GeoTestGlobals[K]): void {
@@ -173,7 +226,16 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
 // IMPORTANT: This test verifies conditional rendering in SimulatorAppRoot when the URL contains `ui=interact`.
 // We mock `useSimulatorApp()` to keep the test fast + deterministic while still deriving flags from the query string.
 
-  vi.mock('../composables/useSimulatorApp', () => {
+  vi.mock('../composables/useSimulatorApp', async () => {
+    // The one thing this mock does NOT re-invent: the rule that decides whether the analytics
+    // surface exists. A mock that re-states a rule turns every test over it into a test of the
+    // mock — which is how "never shows over fixtures" stayed green while the real-mode half of
+    // the app's condition was deleted. The rule is imported, not repeated.
+    const actual =
+      await vi.importActual<typeof import('../composables/useSimulatorApp')>(
+        '../composables/useSimulatorApp',
+      )
+
         return {
     useSimulatorApp: (opts?: MockUseSimulatorAppOpts) => {
       const qs = () => {
@@ -259,6 +321,20 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
        })
        setGeoTestGlobal('__GEO_TEST_INTERACT_START_CLEARING_FLOW', startClearingFlow)
 
+       const interactBusy = ref(false)
+       setGeoTestGlobal('__GEO_TEST_INTERACT_BUSY_REF', interactBusy)
+
+       const selectEdge = vi.fn((edgeKey: string, anchor?: TestAnchor | null) => {
+         if (interactBusy.value) return false
+         interactState.selectedEdgeKey = edgeKey
+         interactState.edgeAnchor = anchor ?? null
+         const [fromPid, toPid] = edgeKey.split('→')
+         interactState.fromPid = fromPid || null
+         interactState.toPid = toPid || null
+         phase.value = 'editing-trustline'
+         return true
+       })
+
        const setPaymentFromPid = vi.fn((pid: string | null) => {
          const st = getGeoTestGlobal('__GEO_TEST_INTERACT_STATE')
          if (st) st.fromPid = pid
@@ -301,9 +377,6 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
        const successMessage = ref<string | null>(null)
        setGeoTestGlobal('__GEO_TEST_INTERACT_SUCCESS_MESSAGE', successMessage)
 
-      const interactBusy = ref(false)
-      setGeoTestGlobal('__GEO_TEST_INTERACT_BUSY_REF', interactBusy)
-
       const trustlinesLoading = ref(false)
       setGeoTestGlobal('__GEO_TEST_TRUSTLINES_LOADING_REF', trustlinesLoading)
 
@@ -337,6 +410,50 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
           p === 'picking-trustline-to'
         )
       })
+
+      // --- camera + active-edge highlight: real composables, not spies ---------------------
+      //
+      // `focusOnEdge` and `addActiveEdge` are the two halves of "show me this bottleneck", and
+      // both are only meaningful as state. Stubbing them would make the tests below assert that
+      // the component called something; wiring the real ones makes them assert that the camera
+      // moved and that the graph is highlighting that edge — and, crucially, lets the real
+      // wiring decide on its own that an edge is absent, instead of a test declaring it absent.
+      const fxOverlayState = useOverlayState({
+        getLayoutNodeById: (id: string) => TEST_LAYOUT_NODES.find((n) => n.id === id),
+        sizeForNode: () => ({ w: 40, h: 40 }),
+        getCameraZoom: () => 1,
+        setFlash: () => undefined,
+        resetFxState: () => undefined,
+        nowMs: () => 0,
+      })
+      setGeoTestGlobal('__GEO_TEST_ACTIVE_EDGES', fxOverlayState.activeEdges)
+      setGeoTestGlobal('__GEO_TEST_PRUNE_ACTIVE_EDGES', fxOverlayState.pruneActiveEdges)
+
+      const viewWiringSelectedNodeId = ref<string | null>(null)
+      const viewWiring = useAppViewWiring({
+        canvasEl: ref(null),
+        hostEl: ref(null),
+
+        getLayoutNodes: () => TEST_LAYOUT_NODES,
+        getLayoutW: () => 1000,
+        getLayoutH: () => 600,
+        isTestMode: () => false,
+
+        setClampCameraPan: () => undefined,
+
+        selectedNodeId: viewWiringSelectedNodeId,
+        setSelectedNodeId: (id) => {
+          viewWiringSelectedNodeId.value = id
+        },
+
+        getNodeById: () => null,
+        getLayoutNodeById: (id) => TEST_LAYOUT_NODES.find((n) => n.id === id) ?? null,
+
+        getLayoutLinks: () =>
+          getGeoTestGlobal('__GEO_TEST_LAYOUT_LINKS') ?? [TEST_LAYOUT_LINK_ALICE_BOB],
+      })
+      setGeoTestGlobal('__GEO_TEST_CAMERA', viewWiring.camera)
+      setGeoTestGlobal('__GEO_TEST_WORLD_TO_SCREEN', viewWiring.worldToScreen)
 
       return {
         apiMode,
@@ -400,10 +517,10 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
 
         // state + prefs
         state: reactive({
-          loading: false,
-          error: '',
+          loading: Boolean(getGeoTestGlobal('__GEO_TEST_STATE_LOADING') ?? false),
+          error: String(getGeoTestGlobal('__GEO_TEST_STATE_ERROR') ?? ''),
           sourcePath: '',
-          snapshot: null as GraphSnapshot | null,
+          snapshot: getGeoTestGlobal('__GEO_TEST_SNAPSHOT') ?? null,
           selectedNodeId: null as string | null,
           flash: 0,
         }),
@@ -443,6 +560,7 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
               setTrustlineFromPid,
               setTrustlineToPid,
              selectTrustline: vi.fn(),
+             selectEdge,
 
              startPaymentFlow: startPaymentFlow,
              startPaymentFlowWithFrom,
@@ -510,6 +628,7 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
         // selection + overlays
         hoveredEdge: reactive({ key: null, fromId: '', toId: '', amountText: '' }),
         clearHoveredEdge: vi.fn(),
+        addActiveEdge: fxOverlayState.addActiveEdge,
         edgeTooltipStyle: () => ({}),
         selectedNode: computed(() => selectedNode.value),
         selectedNodeScreenCenter: computed(() => selectedNodeScreenCenter.value),
@@ -580,12 +699,71 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
         floatingLabelsViewFx: computed(() => []),
         worldToCssTranslateNoScale: () => 'translate(0px, 0px)',
 
+        // analytics overlay surface (spec 007, T705)
+        //
+        // `isVisible` IS the production rule — `__analyticsPanelVisibilityPolicy`, imported above
+        // — applied to the two facts this mock does synthesise: the mode taken from the query
+        // string, and the toggle owned by the mount point. Stream state is exposed per stream,
+        // through refs, so a test can drive `/metrics` and `/bottlenecks` independently and watch
+        // what reaches the surface.
+        analytics: (() => {
+          const analyticsMetricsPhase = ref<MetricsStreamPhase>('idle')
+          const analyticsBottlenecksPhase = ref<MetricsStreamPhase>('idle')
+          const analyticsMetrics = ref<MetricsResponse | null>(null)
+          const analyticsBottlenecks = ref<BottlenecksResponse | null>(null)
+          const analyticsMetricsError = ref('')
+          const analyticsBottlenecksError = ref('')
+          const analyticsMetricsUnavailableReason = ref('')
+          const analyticsBottlenecksUnavailableReason = ref('')
+
+          setGeoTestGlobal('__GEO_TEST_ANALYTICS_METRICS_PHASE_REF', analyticsMetricsPhase)
+          setGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_PHASE_REF', analyticsBottlenecksPhase)
+          setGeoTestGlobal('__GEO_TEST_ANALYTICS_METRICS_REF', analyticsMetrics)
+          setGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_REF', analyticsBottlenecks)
+          setGeoTestGlobal('__GEO_TEST_ANALYTICS_METRICS_ERROR_REF', analyticsMetricsError)
+          setGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_ERROR_REF', analyticsBottlenecksError)
+          setGeoTestGlobal(
+            '__GEO_TEST_ANALYTICS_METRICS_REASON_REF',
+            analyticsMetricsUnavailableReason,
+          )
+          setGeoTestGlobal(
+            '__GEO_TEST_ANALYTICS_BOTTLENECKS_REASON_REF',
+            analyticsBottlenecksUnavailableReason,
+          )
+
+          const isVisible = computed(() =>
+            actual.__analyticsPanelVisibilityPolicy(
+              apiMode.value === 'real',
+              Boolean(opts?.isAnalyticsPanelOpen?.()),
+            ),
+          )
+          setGeoTestGlobal('__GEO_TEST_ANALYTICS_IS_VISIBLE', () => isVisible.value)
+
+          return {
+            isVisible,
+            metricsPhase: computed(() => analyticsMetricsPhase.value),
+            bottlenecksPhase: computed(() => analyticsBottlenecksPhase.value),
+            metrics: analyticsMetrics,
+            bottlenecks: analyticsBottlenecks,
+            metricsError: analyticsMetricsError,
+            bottlenecksError: analyticsBottlenecksError,
+            metricsUnavailableReason: analyticsMetricsUnavailableReason,
+            bottlenecksUnavailableReason: analyticsBottlenecksUnavailableReason,
+            isPolling: computed(() => false),
+          }
+        })(),
+
         // helpers for template
         getNodeById: (id: string | null) => {
           const n = getGeoTestGlobal('__GEO_TEST_SELECTED_NODE') ?? null
           if (!id || !n) return null
           return String(n.id) === String(id) ? n : null
         },
+        focusOnEdge: (() => {
+          const fn = vi.fn((fromId: string, toId: string) => viewWiring.focusOnEdge(fromId, toId))
+          setGeoTestGlobal('__GEO_TEST_FOCUS_ON_EDGE', fn)
+          return fn
+        })(),
         resetView: vi.fn(),
       }
     },
@@ -829,6 +1007,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
 
       const canvas = host.querySelector('canvas.canvas') as HTMLCanvasElement | null
       expect(canvas).toBeTruthy()
+      expect(host.querySelectorAll('canvas[aria-hidden="true"]')).toHaveLength(2)
 
       canvas?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
       canvas?.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 16 }))
@@ -1540,12 +1719,212 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       confirmBtn?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }))
       await nextTick()
       expect(document.activeElement).toBe(cancelBtn)
+
+      cancelBtn?.click()
+      await nextTick()
+      await nextTick()
+      expect(getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_CANCEL')).toHaveBeenCalledTimes(1)
+      expect(document.activeElement).toBe(opener)
+    } finally {
+      app.unmount()
+      host.remove()
+      clearGeoTestGlobals('__GEO_TEST_INTERACT_PHASE', '__GEO_TEST_INTERACT_CANCEL')
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('restores keyboard focus to the ActionBar opener after a successful interact flow closes', async () => {
+    setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'idle')
+    setUrl('/?mode=real&ui=interact')
+    stubMissingResizeObserver()
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = mountSimulatorAppRoot(host)
+    try {
+      await nextTick()
+      await nextTick()
+
+      const opener = host.querySelector('[data-testid="actionbar-clearing"]') as HTMLButtonElement | null
+      expect(opener).toBeTruthy()
+      opener?.focus()
+      opener?.click()
+      await nextTick()
+      await nextTick()
+
+      const confirmBtn = host.querySelector('[data-testid="clearing-panel"] button.ds-btn--primary') as
+        | HTMLButtonElement
+        | null
+      expect(confirmBtn).toBeTruthy()
+      confirmBtn?.focus()
+      expect(document.activeElement).toBe(confirmBtn)
+
+      const busy = getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_BUSY_REF')
+      busy.value = true
+      getPhaseRef().value = 'idle'
+      await nextTick()
+      await nextTick()
+      expect(document.activeElement).not.toBe(opener)
+
+      busy.value = false
+      await nextTick()
+      await nextTick()
+
+      expect(host.querySelector('[data-testid="clearing-panel"]')).toBeNull()
+      expect(document.activeElement).toBe(opener)
     } finally {
       app.unmount()
       host.remove()
       clearGeoTestGlobals('__GEO_TEST_INTERACT_PHASE')
       vi.unstubAllGlobals()
     }
+  })
+
+  it('does not steal focus from an unrelated control when a successful interact flow closes', async () => {
+    setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'idle')
+    setUrl('/?mode=real&ui=interact')
+    stubMissingResizeObserver()
+
+    const host = document.createElement('div')
+    const unrelated = document.createElement('button')
+    unrelated.textContent = 'Unrelated control'
+    document.body.append(host, unrelated)
+    const app = mountSimulatorAppRoot(host)
+    try {
+      await nextTick()
+      await nextTick()
+
+      const opener = host.querySelector('[data-testid="actionbar-clearing"]') as HTMLButtonElement | null
+      opener?.click()
+      await nextTick()
+      await nextTick()
+
+      const busy = getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_BUSY_REF')
+      busy.value = true
+      getPhaseRef().value = 'idle'
+      await nextTick()
+      unrelated.focus()
+      expect(document.activeElement).toBe(unrelated)
+
+      busy.value = false
+      await nextTick()
+      await nextTick()
+
+      expect(host.querySelector('[data-testid="clearing-panel"]')).toBeNull()
+      expect(document.activeElement).toBe(unrelated)
+    } finally {
+      app.unmount()
+      host.remove()
+      unrelated.remove()
+      clearGeoTestGlobals('__GEO_TEST_INTERACT_PHASE')
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('opens node and edge inspectors from the labelled DOM graph navigator', async () => {
+    setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'idle')
+    setGeoTestGlobal('__GEO_TEST_SELECTED_NODE', makeSelectedNode())
+    setGeoTestGlobal('__GEO_TEST_NODE_SCREEN_CENTER', { x: 100, y: 160 })
+    setGeoTestGlobal('__GEO_TEST_SNAPSHOT', {
+      equivalent: 'UAH',
+      generated_at: '2026-08-09T00:00:00Z',
+      nodes: [makeSelectedNode('alice', 'Alice'), makeSelectedNode('bob', 'Bob')],
+      links: [{ source: 'alice', target: 'bob', trust_limit: '100', used: '25', available: '75' }],
+    })
+    setUrl('/?mode=real&ui=interact')
+    stubMissingResizeObserver()
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = mountSimulatorAppRoot(host)
+    try {
+      await nextTick()
+      await nextTick()
+
+      const navigator = host.querySelector('[role="region"][aria-label="Graph navigator"]') as HTMLElement | null
+      expect(navigator).toBeTruthy()
+      const disclosure = navigator?.querySelector('details') as HTMLDetailsElement | null
+      expect(disclosure).toBeTruthy()
+      disclosure!.open = true
+
+      const nodeSelect = host.querySelector('#graph-navigator-node') as HTMLSelectElement
+      nodeSelect.value = 'bob'
+      nodeSelect.dispatchEvent(new Event('change', { bubbles: true }))
+      await nextTick()
+      const nodeButton = Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Inspect node') as
+        | HTMLButtonElement
+        | undefined
+      nodeButton?.focus()
+      nodeButton?.click()
+      await nextTick()
+      await nextTick()
+      expect(host.querySelector('.ws-shell[data-win-type="node-card"]')).toBeTruthy()
+      expect(host.querySelector('[data-testid="graph-navigator-status"]')?.textContent).toContain('Node details opened: Bob')
+
+      const edgeButton = Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Inspect edge') as
+        | HTMLButtonElement
+        | undefined
+      expect(edgeButton?.disabled).toBe(false)
+      edgeButton?.focus()
+      edgeButton?.click()
+      await nextTick()
+      await nextTick()
+      expect(host.querySelector('.ws-shell[data-win-type="edge-detail"]')).toBeTruthy()
+      expect(host.querySelector('[data-testid="graph-navigator-status"]')?.textContent).toContain(
+        'Trustline details opened: alice → bob',
+      )
+
+      const busy = getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_BUSY_REF')
+      busy.value = true
+      await nextTick()
+      expect(edgeButton?.disabled).toBe(true)
+      const selectedEdgeBeforeRejectedClick = getInteractState().selectedEdgeKey
+      edgeButton?.click()
+      await nextTick()
+      expect(getInteractState().selectedEdgeKey).toBe(selectedEdgeBeforeRejectedClick)
+      expect(host.querySelectorAll('.ws-shell[data-win-type="edge-detail"]')).toHaveLength(1)
+    } finally {
+      app.unmount()
+      host.remove()
+      clearGeoTestGlobals(
+        '__GEO_TEST_INTERACT_PHASE',
+        '__GEO_TEST_SELECTED_NODE',
+        '__GEO_TEST_NODE_SCREEN_CENTER',
+        '__GEO_TEST_SNAPSHOT',
+      )
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('exposes root loading and error lifecycle semantics without duplicating toast roles', async () => {
+    setGeoTestGlobal('__GEO_TEST_STATE_LOADING', true)
+    setUrl('/?mode=real&ui=interact')
+    stubMissingResizeObserver()
+
+    const loadingHost = document.createElement('div')
+    document.body.appendChild(loadingHost)
+    const loadingApp = mountSimulatorAppRoot(loadingHost)
+    await nextTick()
+    expect(loadingHost.querySelector('.root')?.getAttribute('aria-busy')).toBe('true')
+    const loading = loadingHost.querySelector('.ds-ov-inset[role="status"]')
+    expect(loading?.getAttribute('aria-live')).toBe('polite')
+    expect(loading?.getAttribute('aria-atomic')).toBe('true')
+    loadingApp.unmount()
+    loadingHost.remove()
+    clearGeoTestGlobals('__GEO_TEST_STATE_LOADING')
+
+    setGeoTestGlobal('__GEO_TEST_STATE_ERROR', 'Snapshot unavailable')
+    const errorHost = document.createElement('div')
+    document.body.appendChild(errorHost)
+    const errorApp = mountSimulatorAppRoot(errorHost)
+    await nextTick()
+    const error = errorHost.querySelector('.ds-ov-inset[role="alert"]')
+    expect(error?.getAttribute('aria-atomic')).toBe('true')
+    expect(error?.textContent).toContain('Snapshot unavailable')
+    errorApp.unmount()
+    errorHost.remove()
+    clearGeoTestGlobals('__GEO_TEST_STATE_ERROR')
+    vi.unstubAllGlobals()
   })
 
   it('renders EdgeDetailPopup through WindowLayer (WindowShell)', async () => {
@@ -1789,6 +2168,8 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
         | undefined
       expect(btn).toBeTruthy()
 
+      btn?.focus()
+      expect(document.activeElement).toBe(btn)
       btn?.click()
       await nextTick()
       await nextTick()
@@ -1796,10 +2177,100 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       // Edge detail must be closed; trustline panel must be visible.
       expect(host.querySelectorAll('[data-testid="edge-detail-popup"]').length).toBe(0)
       expect(host.querySelectorAll('[data-testid="trustline-panel"]').length).toBe(1)
+
+      const busy = getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_BUSY_REF')
+      busy.value = true
+      getPhaseRef().value = 'idle'
+      await nextTick()
+      busy.value = false
+      await nextTick()
+      await nextTick()
+      expect(document.activeElement).toBe(host.querySelector('[data-testid="actionbar-trustline"]'))
     } finally {
       app.unmount()
       host.remove()
       clearGeoTestGlobals('__GEO_TEST_INTERACT_PHASE', '__GEO_TEST_INTERACT_CANCEL')
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('restores Close Line focus to the trustline action after the original edge detail closes', async () => {
+    setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'editing-trustline')
+    setUrl('/?mode=real&ui=interact')
+    stubMissingResizeObserver()
+
+    const host = document.createElement('div')
+    document.body.append(host)
+    const app = mountSimulatorAppRoot(host)
+    try {
+      await nextTick()
+      await nextTick()
+
+      const closeLine = host.querySelector('[data-testid="edge-close-line-btn"]') as HTMLButtonElement | null
+      expect(closeLine?.disabled).toBe(false)
+      closeLine?.focus()
+      closeLine?.click()
+      await nextTick()
+      closeLine?.click()
+      expect(getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_CONFIRM_TRUSTLINE_CLOSE')).toHaveBeenCalledOnce()
+
+      const busy = getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_BUSY_REF')
+      busy.value = true
+      getPhaseRef().value = 'idle'
+      await nextTick()
+      busy.value = false
+      await nextTick()
+      await nextTick()
+
+      expect(document.activeElement).toBe(host.querySelector('[data-testid="actionbar-trustline"]'))
+    } finally {
+      app.unmount()
+      host.remove()
+      clearGeoTestGlobals('__GEO_TEST_INTERACT_PHASE', '__GEO_TEST_INTERACT_CONFIRM_TRUSTLINE_CLOSE')
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('does not capture body as the strict Close Line owner or steal later focus', async () => {
+    setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'editing-trustline')
+    setUrl('/?mode=real&ui=interact')
+    stubMissingResizeObserver()
+
+    const host = document.createElement('div')
+    const otherOwner = document.createElement('div')
+    otherOwner.dataset.winType = 'edge-detail'
+    const otherButton = document.createElement('button')
+    otherOwner.appendChild(otherButton)
+    document.body.append(host, otherOwner)
+    const app = mountSimulatorAppRoot(host)
+    try {
+      await nextTick()
+      await nextTick()
+
+      const closeLine = host.querySelector('[data-testid="edge-close-line-btn"]') as HTMLButtonElement | null
+      expect(closeLine?.disabled).toBe(false)
+      expect(document.activeElement).toBe(document.body)
+      closeLine?.click()
+      await nextTick()
+      closeLine?.click()
+      expect(getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_CONFIRM_TRUSTLINE_CLOSE')).toHaveBeenCalledOnce()
+
+      const busy = getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_BUSY_REF')
+      busy.value = true
+      getPhaseRef().value = 'idle'
+      await nextTick()
+      otherButton.focus()
+
+      busy.value = false
+      await nextTick()
+      await nextTick()
+
+      expect(document.activeElement).toBe(otherButton)
+    } finally {
+      app.unmount()
+      host.remove()
+      otherOwner.remove()
+      clearGeoTestGlobals('__GEO_TEST_INTERACT_PHASE')
       vi.unstubAllGlobals()
     }
   })
@@ -1885,6 +2356,8 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       const sendBtn = host.querySelector('[data-testid="edge-send-payment"]') as HTMLButtonElement | null
       expect(sendBtn).toBeTruthy()
 
+      sendBtn?.focus()
+      expect(document.activeElement).toBe(sendBtn)
       sendBtn?.click()
       await nextTick()
       await nextTick()
@@ -1927,6 +2400,15 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       const zInteract = Number(interactShell!.style.zIndex || '0')
       const zInspector = Number(inspectorShell!.style.zIndex || '0')
       expect(zInteract).toBeGreaterThan(zInspector)
+
+      const busy = getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_BUSY_REF')
+      busy.value = true
+      getPhaseRef().value = 'idle'
+      await nextTick()
+      busy.value = false
+      await nextTick()
+      await nextTick()
+      expect(document.activeElement).toBe(host.querySelector('[data-testid="actionbar-payment"]'))
     } finally {
       app.unmount()
       host.remove()
@@ -3877,6 +4359,598 @@ describe('SimulatorAppRoot - Demo UI DevTools snapshot/restore wiring', () => {
       host.remove()
 
       nav.restore()
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Analytics overlay surface (spec 007, T705)
+// ---------------------------------------------------------------------------
+
+function analyticsDock(host: HTMLElement): HTMLElement | null {
+  return host.querySelector('[data-surface="real-metrics-panel"]')
+}
+
+function analyticsToggle(host: HTMLElement): HTMLButtonElement {
+  const btn = host.querySelector('[data-testid="bottombar-analytics-toggle"]')
+  expect(btn).toBeTruthy()
+  return btn as HTMLButtonElement
+}
+
+function makeAnalyticsMetrics(): MetricsResponse {
+  return {
+    api_version: 'v1',
+    run_id: 'run-1',
+    equivalent: 'UAH',
+    from_ms: 0,
+    to_ms: 5_000,
+    step_ms: 5_000,
+    series: [{ key: 'success_rate', unit: '%', points: [{ t_ms: 0, v: '0.75' }] }],
+  }
+}
+
+type AnalyticsTestTarget = { kind: 'edge'; from: string; to: string } | { kind: 'node'; id: string }
+
+function makeAnalyticsBottlenecks(target: AnalyticsTestTarget): BottlenecksResponse {
+  return {
+    api_version: 'v1',
+    run_id: 'run-1',
+    equivalent: 'UAH',
+    items: [
+      {
+        target,
+        score: 0.85,
+        reason_code: 'FREQUENT_ABORTS',
+        label: 'Hot line',
+        suggested_action: 'Raise trust limit',
+      },
+    ],
+  }
+}
+
+describe('SimulatorAppRoot - analytics overlay surface (spec 007, T705)', () => {
+  beforeEach(() => {
+    const simStorage = getSimStorage()
+    simStorage.readAnalyticsPanelOpen.mockReturnValue(null)
+    simStorage.writeAnalyticsPanelOpen.mockClear()
+  })
+
+  afterEach(() => {
+    clearGeoTestGlobals(
+      '__GEO_TEST_ANALYTICS_METRICS_PHASE_REF',
+      '__GEO_TEST_ANALYTICS_BOTTLENECKS_PHASE_REF',
+      '__GEO_TEST_ANALYTICS_METRICS_REF',
+      '__GEO_TEST_ANALYTICS_BOTTLENECKS_REF',
+      '__GEO_TEST_ANALYTICS_METRICS_ERROR_REF',
+      '__GEO_TEST_ANALYTICS_BOTTLENECKS_ERROR_REF',
+      '__GEO_TEST_ANALYTICS_METRICS_REASON_REF',
+      '__GEO_TEST_ANALYTICS_BOTTLENECKS_REASON_REF',
+      '__GEO_TEST_ANALYTICS_IS_VISIBLE',
+      '__GEO_TEST_FOCUS_ON_EDGE',
+      '__GEO_TEST_LAYOUT_LINKS',
+      '__GEO_TEST_CAMERA',
+      '__GEO_TEST_WORLD_TO_SCREEN',
+      '__GEO_TEST_ACTIVE_EDGES',
+      '__GEO_TEST_PRUNE_ACTIVE_EDGES',
+    )
+  })
+
+  it('the bottom-bar toggle shows and hides the surface, and persists the choice', async () => {
+    setUrl('/?mode=real')
+    const simStorage = getSimStorage()
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = mountSimulatorAppRoot(host)
+
+    try {
+      await nextTick()
+
+      // Default is off: nothing is mounted and nothing was written yet.
+      expect(analyticsDock(host)).toBeNull()
+      expect(analyticsToggle(host).getAttribute('aria-pressed')).toBe('false')
+      expect(simStorage.writeAnalyticsPanelOpen).not.toHaveBeenCalled()
+
+      analyticsToggle(host).click()
+      await nextTick()
+
+      expect(analyticsDock(host)).toBeTruthy()
+      expect(analyticsToggle(host).getAttribute('aria-pressed')).toBe('true')
+      // Same mechanism as the DevTools dropdown next to it: written through useSimulatorStorage.
+      expect(simStorage.writeAnalyticsPanelOpen).toHaveBeenLastCalledWith(true)
+
+      analyticsToggle(host).click()
+      await nextTick()
+
+      expect(analyticsDock(host)).toBeNull()
+      expect(analyticsToggle(host).getAttribute('aria-pressed')).toBe('false')
+      expect(simStorage.writeAnalyticsPanelOpen).toHaveBeenLastCalledWith(false)
+    } finally {
+      app.unmount()
+      host.remove()
+    }
+  })
+
+  it('a stored "open" survives the reload: the surface is there on first paint', async () => {
+    setUrl('/?mode=real')
+    getSimStorage().readAnalyticsPanelOpen.mockReturnValue(true)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = mountSimulatorAppRoot(host)
+
+    try {
+      await nextTick()
+
+      expect(analyticsDock(host)).toBeTruthy()
+      expect(analyticsToggle(host).getAttribute('aria-pressed')).toBe('true')
+    } finally {
+      app.unmount()
+      host.remove()
+    }
+  })
+
+  it('never shows over fixtures, even when the stored flag says open', async () => {
+    // Fixtures have no metric store behind them; a panel here could only ever say "no data".
+    setUrl('/?mode=fixtures')
+    getSimStorage().readAnalyticsPanelOpen.mockReturnValue(true)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = mountSimulatorAppRoot(host)
+
+    try {
+      await nextTick()
+      expect(analyticsDock(host)).toBeNull()
+    } finally {
+      app.unmount()
+      host.remove()
+    }
+  })
+
+  it('takes its placement and z-order from the catalog descriptor, not from the component', async () => {
+    setUrl('/?mode=real')
+    getSimStorage().readAnalyticsPanelOpen.mockReturnValue(true)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = mountSimulatorAppRoot(host)
+
+    try {
+      await nextTick()
+
+      const dock = analyticsDock(host)
+      expect(dock).toBeTruthy()
+
+      const expected = resolveOverlayDockStyle('real-metrics-panel')
+      for (const [prop, value] of Object.entries(expected)) {
+        expect(dock!.style.getPropertyValue(prop)).toBe(value)
+      }
+
+      // Spot-check the two decisions visible on screen: it docks right, on its own z layer —
+      // and specifically NOT on `--ds-z-panel`, which is the WindowManager's layer.
+      expect(dock!.style.getPropertyValue('--ds-ov-dock-left')).toBe('auto')
+      expect(dock!.style.getPropertyValue('--ds-ov-dock-z')).toBe('var(--ds-z-analytics-dock)')
+    } finally {
+      app.unmount()
+      host.remove()
+    }
+  })
+
+  it('carries both streams, separately, all the way through to the mounted surface', async () => {
+    setUrl('/?mode=real')
+    getSimStorage().readAnalyticsPanelOpen.mockReturnValue(true)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = mountSimulatorAppRoot(host)
+
+    try {
+      await nextTick()
+
+      const metricsPhase = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_METRICS_PHASE_REF')
+      const bottlenecksPhase = getRequiredGeoTestGlobal(
+        '__GEO_TEST_ANALYTICS_BOTTLENECKS_PHASE_REF',
+      )
+      const metrics = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_METRICS_REF')
+      const bottlenecks = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_REF')
+      const metricsError = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_METRICS_ERROR_REF')
+      const metricsReason = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_METRICS_REASON_REF')
+      const bottlenecksReason = getRequiredGeoTestGlobal(
+        '__GEO_TEST_ANALYTICS_BOTTLENECKS_REASON_REF',
+      )
+
+      const section = (name: 'metrics' | 'bottlenecks'): Element =>
+        analyticsDock(host)!.querySelector(`[data-section="${name}"]`) as Element
+
+      // ready — measurements are shown.
+      metrics.value = makeAnalyticsMetrics()
+      bottlenecks.value = makeAnalyticsBottlenecks({ kind: 'edge', from: 'alice', to: 'bob' })
+      metricsPhase.value = 'ready'
+      bottlenecksPhase.value = 'ready'
+      await nextTick()
+
+      expect(section('metrics').querySelector('[data-state="ready"]')).toBeTruthy()
+      expect(analyticsDock(host)!.querySelector('.bnl__item')).toBeTruthy()
+
+      /**
+       * The mixed pair, end to end through the real mount point.
+       *
+       * `/bottlenecks` raises `db_read_failed` in its own database session while `/metrics`
+       * answers normally. Before the panel was split this pair rendered as one "No measurements
+       * recorded", over a response that was decoded and in hand.
+       */
+      bottlenecksPhase.value = 'unavailable'
+      bottlenecksReason.value = 'db_read_failed'
+      await nextTick()
+
+      expect(section('metrics').querySelector('[data-state="ready"]')).toBeTruthy()
+      expect(section('metrics').querySelector('.mkc')).toBeTruthy()
+      expect(section('metrics').textContent).not.toContain('No measurements recorded')
+      const noBottlenecks = section('bottlenecks').querySelector('[data-state="unavailable"]')
+      expect(noBottlenecks).toBeTruthy()
+      expect(noBottlenecks!.textContent).toContain('db_read_failed')
+
+      // unavailable — the backend has no measurements and said so. Not an error surface.
+      metricsPhase.value = 'unavailable'
+      metricsReason.value = 'storage_disabled'
+      await nextTick()
+
+      const unavailable = section('metrics').querySelector('[data-state="unavailable"]')
+      expect(unavailable).toBeTruthy()
+      expect(section('metrics').querySelector('[data-state="error"]')).toBeNull()
+      // The correlation token the backend logged reaches the screen.
+      expect(unavailable!.textContent).toContain('storage_disabled')
+
+      // error — a failure, announced as one, with its message.
+      metricsPhase.value = 'error'
+      metricsReason.value = ''
+      metricsError.value = 'HTTP 500 metrics'
+      await nextTick()
+
+      const errored = section('metrics').querySelector('[data-state="error"]')
+      expect(errored).toBeTruthy()
+      expect(section('metrics').querySelector('[data-state="unavailable"]')).toBeNull()
+      expect(errored!.textContent).toContain('HTTP 500 metrics')
+    } finally {
+      app.unmount()
+      host.remove()
+    }
+  })
+
+  it('a bottleneck row asks the camera for that exact edge', async () => {
+    setUrl('/?mode=real')
+    getSimStorage().readAnalyticsPanelOpen.mockReturnValue(true)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = mountSimulatorAppRoot(host)
+
+    try {
+      await nextTick()
+
+      const phase = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_PHASE_REF')
+      const bottlenecks = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_REF')
+      bottlenecks.value = makeAnalyticsBottlenecks({ kind: 'edge', from: 'alice', to: 'bob' })
+      phase.value = 'ready'
+      await nextTick()
+
+      const focusBtn = analyticsDock(host)!.querySelector(
+        '.bnl__actions button',
+      ) as HTMLButtonElement
+      expect(focusBtn).toBeTruthy()
+
+      const focusOnEdge = getRequiredGeoTestGlobal('__GEO_TEST_FOCUS_ON_EDGE')
+      focusBtn.click()
+      await nextTick()
+
+      // Direction included: A to B and B to A are different edges everywhere in this app.
+      expect(focusOnEdge).toHaveBeenCalledWith('alice', 'bob')
+    } finally {
+      app.unmount()
+      host.remove()
+    }
+  })
+
+  /**
+   * The dock covers the right-hand side of the canvas, and "Focus" is pressed inside the dock.
+   *
+   * The camera centres on the middle of what it is told is visible, and it is told nothing unless
+   * this component measures the dock: it has no notion of panels. Left uninformed it centres on
+   * the canvas' geometric middle, which on a window narrower than roughly 1144px is inside the
+   * dock — the framed edge ends up behind the panel the user clicked in, a short one entirely.
+   *
+   * The number is measured, not assumed: the dock's width is `min(token, 100% - inset)`, so on a
+   * narrow window it is the percentage that wins and a hard-coded 560 would be wrong exactly
+   * where the overlap happens.
+   */
+  it('tells the camera how much of the canvas the dock is covering', async () => {
+    setUrl('/?mode=real')
+    getSimStorage().readAnalyticsPanelOpen.mockReturnValue(true)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = mountSimulatorAppRoot(host)
+
+    const nativeRect = Element.prototype.getBoundingClientRect
+    let rectSpy: { mockRestore: () => void } | null = null
+    const rect = (left: number, right: number): DOMRect =>
+      ({
+        x: left,
+        y: 0,
+        left,
+        right,
+        top: 0,
+        bottom: 600,
+        width: right - left,
+        height: 600,
+        toJSON: () => ({}),
+      }) as DOMRect
+
+    try {
+      await nextTick()
+
+      const phase = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_PHASE_REF')
+      const bottlenecks = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_REF')
+      bottlenecks.value = makeAnalyticsBottlenecks({ kind: 'edge', from: 'alice', to: 'bob' })
+      phase.value = 'ready'
+      await nextTick()
+
+      // jsdom lays nothing out, so the two elements this reads are given a geometry: a 1000px
+      // host with a 560px dock hugging its right edge, plus a 12px gap.
+      rectSpy = vi
+        .spyOn(Element.prototype, 'getBoundingClientRect')
+        .mockImplementation(function (this: Element) {
+          if (this.classList.contains('root')) return rect(0, 1000)
+          if (this.getAttribute('data-surface') === 'real-metrics-panel') return rect(428, 988)
+          return nativeRect.call(this)
+        })
+
+      const focusBtn = analyticsDock(host)!.querySelector(
+        '.bnl__actions button',
+      ) as HTMLButtonElement
+      const focusOnEdge = getRequiredGeoTestGlobal('__GEO_TEST_FOCUS_ON_EDGE')
+      focusBtn.click()
+      await nextTick()
+
+      // Host right edge to dock left edge: the panel plus the gap beside it, since the camera
+      // must not aim into that sliver either.
+      expect(focusOnEdge).toHaveBeenCalledWith('alice', 'bob', { viewportInsetRight: 572 })
+    } finally {
+      rectSpy?.mockRestore()
+      app.unmount()
+      host.remove()
+    }
+  })
+
+  /**
+   * The companion of the test above: with nothing to measure — the environment has no layout, or
+   * the dock is not mounted — the call is the one it has always been, not the same call carrying
+   * a zero. "No inset" and "an inset of zero" must stay the same request.
+   */
+  it('asks for plain framing when there is no dock geometry to report', async () => {
+    setUrl('/?mode=real')
+    getSimStorage().readAnalyticsPanelOpen.mockReturnValue(true)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = mountSimulatorAppRoot(host)
+
+    try {
+      await nextTick()
+
+      const phase = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_PHASE_REF')
+      const bottlenecks = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_REF')
+      bottlenecks.value = makeAnalyticsBottlenecks({ kind: 'edge', from: 'alice', to: 'bob' })
+      phase.value = 'ready'
+      await nextTick()
+
+      const focusBtn = analyticsDock(host)!.querySelector(
+        '.bnl__actions button',
+      ) as HTMLButtonElement
+      const focusOnEdge = getRequiredGeoTestGlobal('__GEO_TEST_FOCUS_ON_EDGE')
+      focusBtn.click()
+      await nextTick()
+
+      expect(focusOnEdge).toHaveBeenCalledWith('alice', 'bob')
+      expect(focusOnEdge.mock.calls[0]).toHaveLength(2)
+    } finally {
+      app.unmount()
+      host.remove()
+    }
+  })
+
+  /**
+   * Spec 007 §4.2, acceptance item 4: after acting on a bottleneck row the edge is *highlighted*,
+   * so the user can see which one was meant.
+   *
+   * Framing is not enough on its own. The camera fits a segment, and where several trustlines run
+   * between neighbouring participants the fitted region contains all of them — the user is left
+   * looking at a bundle and guessing. These tests read the highlight overlay itself, which is the
+   * same state the renderer paints from.
+   */
+  it('a bottleneck row both frames the edge and marks it, so the user can tell which one', async () => {
+    setUrl('/?mode=real')
+    getSimStorage().readAnalyticsPanelOpen.mockReturnValue(true)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = mountSimulatorAppRoot(host)
+
+    try {
+      await nextTick()
+
+      const phase = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_PHASE_REF')
+      const bottlenecks = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_REF')
+      bottlenecks.value = makeAnalyticsBottlenecks({ kind: 'edge', from: 'alice', to: 'bob' })
+      phase.value = 'ready'
+      await nextTick()
+
+      const camera = getRequiredGeoTestGlobal('__GEO_TEST_CAMERA')
+      const activeEdges = getRequiredGeoTestGlobal('__GEO_TEST_ACTIVE_EDGES')
+
+      // A known starting point, so "moved" cannot be confused with "was already there".
+      camera.panX = 7
+      camera.panY = 8
+      camera.zoom = 1.25
+      expect(activeEdges.size).toBe(0)
+
+      const focusBtn = analyticsDock(host)!.querySelector(
+        '.bnl__actions button',
+      ) as HTMLButtonElement
+      expect(focusBtn).toBeTruthy()
+      focusBtn.click()
+      await nextTick()
+
+      // The camera framed the segment: tight axis is Y, so zoom = 440 / 200.
+      expect(camera.zoom).toBeCloseTo(2.2)
+      expect(camera.panX).toBeCloseTo(60)
+      expect(camera.panY).toBeCloseTo(-140)
+
+      // Both ends of the edge really are on screen afterwards.
+      const worldToScreen = getRequiredGeoTestGlobal('__GEO_TEST_WORLD_TO_SCREEN')
+      const aliceOnScreen = worldToScreen(100, 100)
+      const bobOnScreen = worldToScreen(300, 300)
+      expect(aliceOnScreen.x).toBeCloseTo(280)
+      expect(aliceOnScreen.y).toBeCloseTo(80)
+      expect(bobOnScreen.x).toBeCloseTo(720)
+      expect(bobOnScreen.y).toBeCloseTo(520)
+
+      // ...and exactly that edge is lit, at full strength, and nothing else is.
+      expect([...activeEdges.keys()]).toEqual([keyEdge('alice', 'bob')])
+      expect(activeEdges.get(keyEdge('alice', 'bob'))).toBe(1)
+    } finally {
+      app.unmount()
+      host.remove()
+    }
+  })
+
+  it('the highlight outlives the camera jump and then expires on its own', async () => {
+    setUrl('/?mode=real')
+    getSimStorage().readAnalyticsPanelOpen.mockReturnValue(true)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = mountSimulatorAppRoot(host)
+
+    try {
+      await nextTick()
+
+      const phase = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_PHASE_REF')
+      const bottlenecks = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_REF')
+      bottlenecks.value = makeAnalyticsBottlenecks({ kind: 'edge', from: 'alice', to: 'bob' })
+      phase.value = 'ready'
+      await nextTick()
+
+      const activeEdges = getRequiredGeoTestGlobal('__GEO_TEST_ACTIVE_EDGES')
+      const prune = getRequiredGeoTestGlobal('__GEO_TEST_PRUNE_ACTIVE_EDGES')
+
+      // The overlay's clock is pinned at 0 in the mock, so these are elapsed milliseconds.
+      ;(analyticsDock(host)!.querySelector('.bnl__actions button') as HTMLButtonElement).click()
+      await nextTick()
+
+      // Still at full strength well past the moment the eye reaches the canvas: the highlight is
+      // a deliberate answer to a click, not a flicker that is gone before it is looked at.
+      prune(1_500)
+      expect(activeEdges.get(keyEdge('alice', 'bob'))).toBe(1)
+
+      // And it is temporary — no stale marker survives to confuse the next row that is clicked.
+      prune(5_000)
+      expect(activeEdges.size).toBe(0)
+    } finally {
+      app.unmount()
+      host.remove()
+    }
+  })
+
+  it('an edge the snapshot no longer has is neither framed nor highlighted', async () => {
+    setUrl('/?mode=real')
+    getSimStorage().readAnalyticsPanelOpen.mockReturnValue(true)
+
+    // The panel still lists `alice → bob` — it was polled before the graph changed — but the
+    // laid-out snapshot no longer has that edge. This is the case the highlight must not paper
+    // over: the camera honestly refuses to move, and a marker drawn anyway would point at
+    // whatever now sits under that key.
+    setGeoTestGlobal('__GEO_TEST_LAYOUT_LINKS', [])
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = mountSimulatorAppRoot(host)
+
+    try {
+      await nextTick()
+
+      const phase = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_PHASE_REF')
+      const bottlenecks = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_REF')
+      bottlenecks.value = makeAnalyticsBottlenecks({ kind: 'edge', from: 'alice', to: 'bob' })
+      phase.value = 'ready'
+      await nextTick()
+
+      const camera = getRequiredGeoTestGlobal('__GEO_TEST_CAMERA')
+      const activeEdges = getRequiredGeoTestGlobal('__GEO_TEST_ACTIVE_EDGES')
+
+      camera.panX = 7
+      camera.panY = 8
+      camera.zoom = 1.25
+
+      const focusBtn = analyticsDock(host)!.querySelector(
+        '.bnl__actions button',
+      ) as HTMLButtonElement
+      focusBtn.click()
+      await nextTick()
+
+      expect(camera.panX).toBe(7)
+      expect(camera.panY).toBe(8)
+      expect(camera.zoom).toBe(1.25)
+      expect(activeEdges.size).toBe(0)
+    } finally {
+      app.unmount()
+      host.remove()
+    }
+  })
+
+  it('a node bottleneck opens that node instead of pretending an edge was framed', async () => {
+    setUrl('/?mode=real')
+    getSimStorage().readAnalyticsPanelOpen.mockReturnValue(true)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = mountSimulatorAppRoot(host)
+
+    try {
+      await nextTick()
+
+      const phase = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_PHASE_REF')
+      const bottlenecks = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_REF')
+      bottlenecks.value = makeAnalyticsBottlenecks({ kind: 'node', id: 'carol' })
+      phase.value = 'ready'
+      await nextTick()
+
+      const wmOpen = getRequiredGeoTestGlobal('__GEO_TEST_WM_OPEN')
+      wmOpen.mockClear()
+      const focusOnEdge = getRequiredGeoTestGlobal('__GEO_TEST_FOCUS_ON_EDGE')
+      const activeEdges = getRequiredGeoTestGlobal('__GEO_TEST_ACTIVE_EDGES')
+
+      const focusBtn = analyticsDock(host)!.querySelector(
+        '.bnl__actions button',
+      ) as HTMLButtonElement
+      focusBtn.click()
+      await nextTick()
+      await nextTick()
+
+      expect(focusOnEdge).not.toHaveBeenCalled()
+      // A node has no edge to name, so the edge highlight stays out of it entirely.
+      expect(activeEdges.size).toBe(0)
+
+      const opened = wmOpen.mock.calls
+        .map((c) => c[0] as { type?: string; data?: { nodeId?: unknown } } | undefined)
+        .filter(Boolean)
+      expect(
+        opened.some((o) => o?.type === 'node-card' && String(o?.data?.nodeId) === 'carol'),
+      ).toBe(true)
+    } finally {
+      app.unmount()
+      host.remove()
     }
   })
 })

@@ -60,6 +60,36 @@ def test_settings_guardrail_test_allows_default_secrets() -> None:
     )
 
 
+def test_default_database_uses_ignored_runtime_root(monkeypatch) -> None:
+    from app.config import Settings
+
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    configured = Settings(_env_file=None, ENV="dev")
+
+    assert configured.DATABASE_URL == "sqlite+aiosqlite:///./.local-run/geov0.db"
+
+
+def test_explicit_legacy_root_database_override_is_preserved(monkeypatch) -> None:
+    from app.config import Settings
+
+    monkeypatch.setenv("DATABASE_URL", "sqlite+aiosqlite:///./geov0.db")
+    configured = Settings(_env_file=None, ENV="dev")
+
+    assert configured.DATABASE_URL == "sqlite+aiosqlite:///./geov0.db"
+
+
+def test_default_database_parent_is_created_on_clean_bootstrap(
+    tmp_path, monkeypatch
+) -> None:
+    from app.config import Settings
+    from app.db.session import _ensure_default_sqlite_parent
+
+    monkeypatch.chdir(tmp_path)
+    _ensure_default_sqlite_parent(Settings.DEFAULT_SQLITE_DATABASE_URL)
+
+    assert (tmp_path / ".local-run").is_dir()
+
+
 @pytest.mark.parametrize(
     ("alias", "canonical"),
     [
@@ -147,6 +177,61 @@ def test_conflicting_environment_keys_fail_startup() -> None:
 
     with pytest.raises(RuntimeError, match="ENV and legacy ENVIRONMENT"):
         Settings(_env_file=None, ENV="dev", ENVIRONMENT="prod")
+
+
+def test_unrelated_ambient_legacy_environment_does_not_override_canonical_env(
+    monkeypatch,
+) -> None:
+    from app.config import Settings
+
+    monkeypatch.setenv("ENVIRONMENT", "qa")
+
+    configured = Settings(_env_file=None, ENV="prod", **_SECURE_NON_DEV_SETTINGS)
+
+    assert configured.ENV == "prod"
+    assert configured.LEGACY_ENVIRONMENT == "qa"
+
+
+def test_unsupported_explicit_legacy_environment_does_not_override_canonical_env() -> None:
+    from app.config import Settings
+
+    configured = Settings(
+        _env_file=None,
+        ENV="prod",
+        ENVIRONMENT="qa",
+        **_SECURE_NON_DEV_SETTINGS,
+    )
+
+    assert configured.ENV == "prod"
+    assert configured.LEGACY_ENVIRONMENT == "qa"
+
+
+@pytest.mark.parametrize("legacy_value", ["qa", "", "   "])
+def test_unsupported_legacy_environment_without_canonical_env_is_precise(
+    monkeypatch,
+    legacy_value: str,
+) -> None:
+    from app.config import Settings
+
+    monkeypatch.delenv("ENV", raising=False)
+
+    with pytest.raises(RuntimeError, match="ENV.*legacy ENVIRONMENT.*unsupported"):
+        Settings(
+            _env_file=None,
+            ENVIRONMENT=legacy_value,
+            **_SECURE_NON_DEV_SETTINGS,
+        )
+
+
+def test_supported_ambient_legacy_environment_still_conflicts_with_canonical_env(
+    monkeypatch,
+) -> None:
+    from app.config import Settings
+
+    monkeypatch.setenv("ENVIRONMENT", "production")
+
+    with pytest.raises(RuntimeError, match="ENV and legacy ENVIRONMENT"):
+        Settings(_env_file=None, ENV="dev")
 
 
 @pytest.mark.parametrize(
@@ -241,6 +326,35 @@ def test_non_dev_rejects_non_origin_csrf_allowlist_entries(allowlist: str) -> No
 
     values = {**_SECURE_NON_DEV_SETTINGS, "SIMULATOR_CSRF_ORIGIN_ALLOWLIST": allowlist}
     with pytest.raises(RuntimeError, match="SIMULATOR_CSRF_ORIGIN_ALLOWLIST"):
+        Settings(_env_file=None, ENV="prod", **values)
+
+
+@pytest.mark.parametrize("environment", ["dev", "prod"])
+def test_settings_reports_the_precise_invalid_csrf_allowlist_entry_without_broadening(
+    environment: str,
+) -> None:
+    from app.config import Settings
+
+    values = {} if environment == "dev" else {**_SECURE_NON_DEV_SETTINGS}
+    values["SIMULATOR_CSRF_ORIGIN_ALLOWLIST"] = (
+        "https://simulator.example.com,http://localhost:5176/"
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"entry 2 is invalid.*trailing slash",
+    ) as exc_info:
+        Settings(_env_file=None, ENV=environment, **values)
+
+    assert "must be set" not in str(exc_info.value)
+
+
+def test_non_dev_empty_csrf_allowlist_remains_a_missing_configuration_error() -> None:
+    from app.config import Settings
+
+    values = {**_SECURE_NON_DEV_SETTINGS, "SIMULATOR_CSRF_ORIGIN_ALLOWLIST": "  "}
+
+    with pytest.raises(RuntimeError, match="must be set in non-dev environment"):
         Settings(_env_file=None, ENV="prod", **values)
 
 

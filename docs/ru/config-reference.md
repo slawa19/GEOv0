@@ -1,463 +1,122 @@
-# GEO Hub — Config reference (реестр параметров)
-
-Этот документ — **единый источник правды** по параметрам конфигурации GEO Hub для MVP: назначение, допустимые значения, дефолты и риски.
-
-Связанные документы:
-- Спецификация протокола (в т.ч. multipath/full multipath): [`docs/ru/02-protocol-spec.md`](docs/ru/02-protocol-spec.md:1)
-- Развёртывание и общая схема конфигурации (env + YAML): [`docs/ru/05-deployment.md`](docs/ru/05-deployment.md:1)
-- Минимальная админка для управления параметрами: [`docs/ru/admin-ui/specs/archive/admin-console-minimal-spec.md`](docs/ru/admin-ui/specs/archive/admin-console-minimal-spec.md:1)
-
----
-
-## 1. Общие принципы
-
-### 1.1. Два уровня конфигурации
-
-1) **Переменные окружения (.env)** — инфраструктура/секреты/интеграции (БД, Redis, ключи и т.п.).  
-2) **YAML конфиг хаба** — параметры протокола и поведения (routing/clearing/limits/flags/observability).
-
-В текущих документах некоторые параметры могут фигурировать как env-переменные (например, лимиты/таймауты). Для MVP **каноничным** считается YAML-конфиг, а env оставляем для инфраструктуры и секретов.
-
-### 1.2. Runtime vs restart/migration
-
-- **Runtime (через админку)**: можно менять в рантайме без рестарта (с обязательным аудитом). Типично: `feature_flags.*`, `routing.*`, `clearing.*`, `limits.*`, `observability.*`.
-- **Restart required**: изменение требует рестарта процесса/подов. Типично: `protocol.*` (таймауты протокола) и часть `security.*`.
-- **Migration required**: изменение требует миграций/проверки совместимости состояния. Типично: `database.*` и часть `integrity.*` (если влияет на формат/хранение).
-
-### 1.3. Окружение и fail-fast guardrails
-
-- Каноническая переменная — `ENV`; её нужно задать явно. Допустимые значения
-  после нормализации: `dev`, `test`, `staging`, `prod`.
-- Поддерживаются алиасы значений `development`, `testing`, `stage`,
-  `production`. Старое имя переменной `ENVIRONMENT` временно принимается для
-  совместимости. Если одновременно заданы конфликтующие `ENV` и `ENVIRONMENT`,
-  приложение отказывается стартовать.
-- Отсутствующее, неизвестное или пустое значение окружения — ошибка
-  конфигурации. Библиотека settings игнорирует неизвестные имена process env,
-  но опечатка вроде `env` не переводит процесс в permissive-режим: без точного
-  `ENV` или `ENVIRONMENT` startup завершается ошибкой.
-- Только `dev` и `test` разрешают встроенные локальные значения. В `staging` и
-  `prod` значения `JWT_SECRET`, `ADMIN_TOKEN` и `SIMULATOR_SESSION_SECRET`
-  должны иметь не менее 32 символов и не совпадать с exact/anchored placeholder.
-- `SIMULATOR_CSRF_ORIGIN_ALLOWLIST` — comma-separated exact `http`/`https`
-  origins с host и без path, query, fragment, credentials или wildcard.
-
----
-
-## 2. Таблица параметров (по секциям)
-
-Ниже: **назначение / значения / дефолт / режим применения / влияние и риски**.
-
----
-
-## 2.1. `feature_flags.*` (runtime)
-
-### `feature_flags.multipath_enabled`
-- Назначение: включить multi-path разбиение платежа (если `false`, маршрутизация старается найти 1 путь).
-- Значения: `true|false`
-- Дефолт: `true`
-- Применение: runtime
-- Риски: отключение ухудшает проходимость платежей в фрагментированной сети.
-
-### `feature_flags.full_multipath_enabled`
-- Назначение: включить экспериментальный **full multipath** (для бенчмарков).
-- Значения: `true|false`
-- Дефолт: `false`
-- Применение: runtime
-- Риски: может резко увеличить стоимость маршрутизации; включать только при настроенных budget/таймаутах и метриках.
-
----
-
-## 2.2. `routing.*` (runtime)
-
-### `routing.multipath_mode`
-- Назначение: выбранный режим multipath.
-- Значения: `limited|full`
-- Дефолт: `limited`
-- Применение: runtime
-- Риски: `full` — экспериментальный; должен быть ограничен budget/таймаутами. Рекомендуется включать `full` только совместно с [`feature_flags.full_multipath_enabled`](docs/ru/config-reference.md:1).
-
-### `routing.max_path_length`
-- Назначение: верхняя граница длины пути (hops) для маршрутизации.
-- Значения: `1..12` (практически: `3..8`)
-- Дефолт: `6`
-- Применение: runtime
-- Риски: рост значения увеличивает стоимость поиска и ухудшает объяснимость.
-
-### `routing.max_paths_per_payment`
-- Назначение: максимум путей, используемых для разбиения одного платежа.
-- Значения: `1..10`
-- Дефолт: `3`
-- Применение: runtime
-- Риски: рост значения увеличивает число участников 2PC и вероятность таймаутов/abort; нужно для перф‑проверок.
-
-### `routing.path_finding_timeout_ms`
-- Назначение: общий таймаут на поиск маршрутов для платежа.
-- Значения: `50..5000`
-- Дефолт: `500`
-- Применение: runtime
-- Риски: слишком низкий → много отказов; слишком высокий → рост p99 latency и нагрузка.
-
-### `routing.route_cache_ttl_seconds`
-- Назначение: TTL кэша результатов маршрутизации.
-- Значения: `0..600`
-- Дефолт: `30`
-- Применение: runtime
-- Риски: высокий TTL при быстро меняющемся графе может давать устаревшие маршруты и лишние abort.
-
-### `routing.full_multipath_budget_ms`
-- Назначение: дополнительный budget времени/стоимости для режима `full`.
-- Значения: `0..10000`
-- Дефолт: `1000`
-- Применение: runtime
-- Риски: увеличение budget может перегружать CPU и ухудшать хвостовые задержки.
-
-### `routing.full_multipath_max_iterations`
-- Назначение: лимит итераций для max-flow-like реализаций (если используются).
-- Значения: `0..100000`
-- Дефолт: `100`
-- Применение: runtime
-- Риски: высокий лимит → непредсказуемое время.
-
-### `routing.fallback_to_limited_on_full_failure`
-- Назначение: если `full` не уложился в budget/таймаут, разрешить fallback на `limited`.
-- Значения: `true|false`
-- Дефолт: `true`
-- Применение: runtime
-- Риски: может скрывать проблемы `full` режима; требует метрик `budget_exhausted`.
-
----
-
-## 2.3. `clearing.*` (runtime)
-
-### `clearing.enabled`
-- Назначение: включить клиринг.
-- Значения: `true|false`
-- Дефолт: `true`
-- Применение: runtime
-- Риски: отключение ломает ключевую ценность GEO (рост долгов, хуже ликвидность).
-- Примечание: для удобства также доступен через `/admin/feature-flags` как `clearing_enabled`.
-
-### `clearing.trigger_cycles_max_length`
-- Назначение: максимальная длина цикла для **триггерного** поиска после транзакции.
-- Значения: `3..6` (для MVP рекомендуется `3..4`)
-- Дефолт: `4`
-- Применение: runtime
-- Риски: увеличение до `5..6` может резко увеличить стоимость поиска; параметр нужен для перф‑проверок и должен быть защищён лимитами по времени/кол-ву кандидатов.
-
-### `clearing.min_clearing_amount`
-- Назначение: минимальная сумма клиринга (фильтр «шумовых» циклов).
-- Значения: `0..(зависит от эквивалента)`
-- Дефолт: `0.01`
-- Применение: runtime
-- Риски: слишком низкий → много мелких операций; слишком высокий → упускаем полезные клиринги.
-
-### `clearing.max_cycles_per_run`
-- Назначение: ограничение числа клиринговых транзакций за один прогон.
-- Значения: `0..100000`
-- Дефолт: `200`
-- Применение: runtime
-- Риски: высокий лимит → пик нагрузки/блокировки; низкий → медленная «разрядка» долгов.
-
-### `clearing.periodic_cycles_5_interval_seconds`
-- Назначение: период фонового поиска циклов длиной 5 (если включён).
-- Значения: `0..604800` (0 = выключено)
-- Дефолт: `3600`
-- Применение: runtime
-- Риски: частый запуск может конкурировать с платежами за ресурсы.
-
-### `clearing.periodic_cycles_6_interval_seconds`
-- Назначение: период фонового поиска циклов длиной 6 (если включён).
-- Значения: `0..604800` (0 = выключено)
-- Дефолт: `86400`
-- Применение: runtime
-- Риски: как выше, но сильнее по стоимости.
-
----
-
-## 2.4. `limits.*` (runtime)
-
-Здесь предполагаются продуктовые/операционные лимиты. Важно: лимиты должны учитывать `verification_level` (если используется) и эквиваленты.
-
-### `limits.max_trustlines_per_participant`
-- Назначение: верхняя граница числа trust lines на участника.
-- Значения: `0..10000`
-- Дефолт: `50`
-- Применение: runtime
-- Риски: высокий лимит увеличивает размер графа и нагрузку на routing/clearing; низкий лимит может ухудшить UX.
-
-### `limits.default_trustline_limit.*`
-- Назначение: стартовый лимит trust line (если система поддерживает авто‑дефолт).
-- Значения: число ≥ 0 (по типу эквивалента)
-- Дефолт: `fiat_like: 100`, `time_like_hours: 2`
-- Применение: runtime
-- Риски: слишком высокие дефолты увеличивают риск дефолтов и конфликтов в пилоте.
-
-### `limits.max_trustline_limit_without_admin_approval.*`
-- Назначение: предел лимита trust line без явного одобрения админом.
-- Значения: число ≥ 0
-- Дефолт: `fiat_like: 1000`, `time_like_hours: 10`
-- Применение: runtime
-- Риски: слишком высокий → злоупотребления/спам; слишком низкий → админ‑бутылочное горлышко.
-
-### `limits.max_payment_amount.*`
-- Назначение: верхняя граница суммы платежа.
-- Значения: число ≥ 0
-- Дефолт: `fiat_like: 200`, `time_like_hours: 4`
-- Применение: runtime
-- Риски: высокий → рост рисков и стоимости multipath; низкий → ухудшение UX.
-
----
-
-## 2.5. `protocol.*` (restart required)
-
-Секция `protocol.*` описывает параметры, влияющие на **правила протокола** (2PC/валидация/дедлайны) и обычно требует рестарта.
-
-### `protocol.prepare_timeout_ms`
-- Назначение: таймаут фазы PREPARE в 2PC.
-- Значения: `100..60000`
-- Дефолт: `3000`
-- Применение: restart required
-- Риски: низкий → много abort; высокий → долгие зависания/блокировки.
-
-### `protocol.commit_timeout_ms`
-- Назначение: таймаут фазы COMMIT (и/или ожидания подтверждений применения).
-- Значения: `100..60000`
-- Дефолт: `5000`
-- Применение: restart required
-- Риски: как выше.
-
-### `protocol.max_clock_skew_seconds`
-- Назначение: допустимая рассинхронизация часов для подписанных сообщений.
-- Значения: `0..3600`
-- Дефолт: `300`
-- Применение: restart required
-- Риски: слишком низкий → ложные отказы; слишком высокий → больше окно replay-рисков.
-
----
-
-## 2.6. `security.*` (mixed: часть restart required)
-
-### `security.jwt_access_token_expire_minutes`
-- Назначение: срок жизни access token.
-- Значения: `1..1440`
-- Дефолт: `60`
-- Применение: restart required (рекомендуется)
-- Риски: слишком длинный → повышает риск компрометации; слишком короткий → ухудшает UX.
-
-### `security.jwt_refresh_token_expire_days`
-- Назначение: срок жизни refresh token.
-- Значения: `1..365`
-- Дефолт: `30`
-- Применение: restart required (рекомендуется)
-- Риски: как выше.
-
-### `security.rate_limits.*`
-- Назначение: rate limiting (ключи зависят от реализации).
-- Значения: строка формата `N/minute` или структура (в зависимости от реализации).
-- Дефолт: `auth_login: 5/minute`, `payments: 30/minute`, `default: 100/minute`
-- Применение: runtime (если rate-limit хранится в конфиг‑хранилище), иначе restart required
-- Риски: слишком мягко → DoS/спам; слишком жёстко → ложные блокировки.
-
----
-
-## 2.7. `database.*` (restart/migration)
-
-### `database.pool_size`
-- Назначение: размер пула соединений.
-- Значения: `1..500`
-- Дефолт: `20`
-- Применение: restart required
-- Риски: слишком мало → очереди; слишком много → перегруз БД.
-
-### `database.max_overflow`
-- Назначение: дополнительный overflow пула.
-- Значения: `0..500`
-- Дефолт: `10`
-- Применение: restart required
-- Риски: как выше.
-
-### `database.pool_timeout_seconds`
-- Назначение: таймаут ожидания соединения из пула.
-- Значения: `1..300`
-- Дефолт: `30`
-- Применение: restart required
-- Риски: низкий → ошибки при пиках; высокий → долгие подвисания.
-
----
-
-## 2.8. `integrity.*` (restart required)
-
-В текущей реализации backend (см. `app/config.py`, `app/main.py`) используется набор настроек `INTEGRITY_CHECKPOINT_*`.
-
-### `INTEGRITY_CHECKPOINT_ENABLED`
-- Назначение: включает фоновую задачу, которая периодически создаёт checkpoints в таблице `integrity_checkpoints`.
-- Значения: `true|false`
-- Дефолт: `true`
-- Применение: restart required
-- Риски: выключение → пропадает регулярный "сигнал" о проблемах целостности.
-
-### `INTEGRITY_CHECKPOINT_INTERVAL_SECONDS`
-- Назначение: интервал периодического вычисления и записи integrity-checkpoints.
-- Значения: `1..86400`
-- Дефолт: `300`
-- Применение: restart required
-- Риски: слишком часто → нагрузка на БД; слишком редко → позднее выявление проблем.
-
-### `INTEGRITY_CHECKPOINT_LOCK_TTL_SECONDS`
-- Назначение: TTL для distributed lock в Redis, чтобы **не запускать расчёт checkpoints параллельно** на нескольких репликах.
-- Значения: `0..86400` (0 = auto: `max(30, INTEGRITY_CHECKPOINT_INTERVAL_SECONDS)`)
-- Дефолт: `0`
-- Применение: restart required
-- Риски: слишком маленький TTL → возможны перекрытия при долгом расчёте; слишком большой → долгий "залипший" lock при падении воркера.
-
----
-
-## 2.9. `observability.*` (runtime)
-
-### `observability.log_level`
-- Назначение: уровень логирования.
-- Значения: `DEBUG|INFO|WARNING|ERROR`
-- Дефолт: `INFO`
-- Применение: runtime
-- Риски: `DEBUG` может утекать чувствительная информация и увеличивать нагрузку.
-
-### `observability.metrics_enabled`
-- Назначение: включить экспорт метрик.
-- Значения: `true|false`
-- Дефолт: `true`
-- Применение: runtime
-- Риски: минимальны.
-
-### `observability.slow_query_threshold_ms`
-- Назначение: порог для логирования медленных запросов.
-- Значения: `0..600000`
-- Дефолт: `1000`
-- Применение: runtime
-- Риски: низкий порог увеличивает шум.
-
----
-
-## 2.10. `simulator.*` — Simulator Session (Anonymous Visitors) (restart required)
-
-Настройки анонимных сессий для Simulator Real Mode. Подробнее: [`docs/ru/simulator/backend/anonymous-visitors-cookie-runs-spec.md`](simulator/backend/anonymous-visitors-cookie-runs-spec.md).
-
-### Simulator Session (Anonymous Visitors)
-
-| Переменная | Тип | Default | Описание |
-|-----------|-----|---------|----------|
-| `SIMULATOR_SESSION_SECRET` | str | `change-me-in-production` | HMAC-SHA256 ключ для подписи cookie `geo_sim_sid`. **Обязательно сменить в production!** Guardrail: fail-fast `RuntimeError` при дефолтном значении в non-dev/non-test окружении. |
-| `SIMULATOR_SESSION_TTL_SEC` | int | `604800` (7 дней) | Время жизни анонимной сессии в секундах. Cookie `geo_sim_sid` выдаётся с этим TTL. |
-| `SIMULATOR_SESSION_CLOCK_SKEW_SEC` | int | `300` (5 мин) | Допустимое расхождение часов при валидации cookie. **Важно:** clock_skew применяется **только** для проверки `iat` в будущем (защита от Clock Skew при выдаче), но **не расширяет TTL** просроченной сессии. |
-| `SIMULATOR_MAX_ACTIVE_RUNS_PER_OWNER` | int | `1` | Максимум активных run'ов на одного владельца (per-owner лимит). Поддерживает значения `>1`: если лимит достигнут, новый `POST /runs` возвращает `409 Conflict` с `conflict_kind: owner_active_exists`. Глобальный лимит: `409` с `conflict_kind: global_active_limit`. |
-| `SIMULATOR_CSRF_ORIGIN_ALLOWLIST` | str | `""` (пусто) | Comma-separated список разрешённых Origin для cookie-auth POST. Пусто = разрешить всё (dev). При CSRF нарушении возвращается `ForbiddenException` с кодом `E006` и `details.reason=csrf_origin`. |
-
-> ⚠️ В `staging`/`prod` пустой или placeholder
-> `SIMULATOR_CSRF_ORIGIN_ALLOWLIST` останавливает запуск. Разрешение всех origins
-> сохраняется только для явно выбранных `dev`/`test`.
-
-> ⚠️ **Security guardrail:** в `staging`/`prod` три секрета должны иметь не
-> менее 32 символов и не быть placeholder. CSRF allowlist проверяется отдельно
-> как список exact HTTP(S) origins.
-
----
-
-## 3. Пример `geo-hub-config.yaml` (рекомендуемые дефолты для пилота)
-
-```yaml
-# geo-hub-config.yaml
-
-feature_flags:
-  multipath_enabled: true
-  full_multipath_enabled: false
-
-routing:
-  multipath_mode: limited            # limited | full
-  max_path_length: 6
-  max_paths_per_payment: 3
-  path_finding_timeout_ms: 500
-  route_cache_ttl_seconds: 30
-
-  # Full multipath (экспериментально; включать только для бенчмарков)
-  full_multipath_budget_ms: 1000
-  full_multipath_max_iterations: 100
-  fallback_to_limited_on_full_failure: true
-
-clearing:
-  enabled: true
-  trigger_cycles_max_length: 4
-  periodic_cycles_5_interval_seconds: 3600
-  periodic_cycles_6_interval_seconds: 86400
-  min_clearing_amount: 0.01
-  max_cycles_per_run: 200
-
-limits:
-  max_trustlines_per_participant: 50
-  default_trustline_limit:
-    fiat_like: 100
-    time_like_hours: 2
-  max_trustline_limit_without_admin_approval:
-    fiat_like: 1000
-    time_like_hours: 10
-  max_payment_amount:
-    fiat_like: 200
-    time_like_hours: 4
-
-protocol:
-  prepare_timeout_ms: 3000
-  commit_timeout_ms: 5000
-  max_clock_skew_seconds: 300
-
-security:
-  jwt_access_token_expire_minutes: 60
-  jwt_refresh_token_expire_days: 30
-  rate_limits:
-    auth_login: 5/minute
-    payments: 30/minute
-    default: 100/minute
-
-database:
-  pool_size: 20
-  max_overflow: 10
-  pool_timeout_seconds: 30
-
-integrity:
-  check_interval_seconds: 300
-  checkpoint_interval_seconds: 3600
-
-observability:
-  log_level: INFO
-  metrics_enabled: true
-  slow_query_threshold_ms: 1000
+# Конфигурация GEOv0
+
+**Статус:** справочник текущей реализации. Актуальность проверяется по
+[`app/config.py`](../../app/config.py); переменные Compose дополнительно задаются в
+[`docker-compose.yml`](../../docker-compose.yml) и
+[`docker-compose.dev.yml`](../../docker-compose.dev.yml). В проекте нет активного
+YAML-файла конфигурации приложения.
+
+## Правила загрузки
+
+- Backend читает переменные окружения и корневой `.env` через Pydantic Settings.
+- Имена чувствительны к регистру; неизвестные ключи игнорируются.
+- `ENV` обязателен и нормализуется в `dev`, `test`, `staging` или `prod`.
+  `ENVIRONMENT` — только совместимый legacy-alias. При явном `ENV` конфликт с
+  поддерживаемым значением legacy-alias останавливает запуск; неподдерживаемое
+  legacy-значение игнорируется. Без `ENV` неподдерживаемый alias вызывает точную
+  startup-ошибку конфигурации.
+- `GEO_ENV` не является входом `Settings`. Поле `environment` в
+  `/api/v1/health` возвращает уже разрешённый `settings.ENV`, поэтому не может
+  расходиться с startup guard из-за позднего чтения process environment.
+- Небезопасные значения `JWT_SECRET`, `ADMIN_TOKEN` и
+  `SIMULATOR_SESSION_SECRET` допустимы только в `dev`/`test`. В остальных средах
+  startup guard завершает процесс ошибкой.
+- Пустой `SIMULATOR_CSRF_ORIGIN_ALLOWLIST` допускается только в безопасных средах;
+  элементы списка должны быть точными HTTP(S) origins.
+
+## База данных и локальное состояние
+
+Без явного `DATABASE_URL` локальный backend использует
+`sqlite+aiosqlite:///./.local-run/geov0.db`. Каталог создаётся при инициализации
+engine; `.local-run/` — ignored runtime root, а не fixture и не часть репозитория.
+
+Существующий legacy-файл `./geov0.db` не переносится и не удаляется автоматически.
+Для осознанного временного запуска с ним задайте:
+
+```powershell
+$env:DATABASE_URL = 'sqlite+aiosqlite:///./geov0.db'
 ```
 
----
+Команды `reset-db`/`-ResetDb` при таком override завершаются ошибкой: runner
+разрешает удаление только нового default-файла под `.local-run/`.
 
-## 4. Какие параметры должны быть доступны в админке
+В Compose приложение использует Postgres URL из `docker-compose.yml`. Настройки
+пула `DB_POOL_PRE_PING`, `DB_POOL_SIZE`, `DB_MAX_OVERFLOW`,
+`DB_POOL_TIMEOUT_SECONDS`, `DB_POOL_RECYCLE_SECONDS` и
+`DB_POSTGRES_ISOLATION_LEVEL` применимы к client/server БД; SQLite работает с
+`NullPool`.
 
-См. минимальную спецификацию админки: [`docs/ru/admin-ui/specs/archive/admin-console-minimal-spec.md`](docs/ru/admin-ui/specs/archive/admin-console-minimal-spec.md:1).
+## Группы backend-параметров
 
-### 4.1. Runtime editable (через админку)
-- `feature_flags.*`
-- `routing.*`
-- `clearing.*`
-- `limits.*`
-- `observability.*`
+Точные типы и дефолты находятся рядом с использованием в `Settings`:
 
-### 4.2. Read-only в админке (только просмотр)
-- `protocol.*` (изменение требует рестарта и согласованного выката)
-- `security.*` (часть может быть runtime, но по умолчанию считаем read-only для MVP)
-- `database.*`
-- `integrity.*` (по умолчанию read-only)
+- инфраструктура: `DATABASE_URL`, `REDIS_URL`, `REDIS_ENABLED`, `LOG_LEVEL`,
+  `DEBUG`;
+- auth: `JWT_*`, `AUTH_CHALLENGE_EXPIRE_SECONDS`, `ADMIN_TOKEN`,
+  `ADMIN_DEV_MODE`, `ADMIN_DEV_ALLOWLIST`;
+- payments/recovery: `PREPARE_LOCK_TTL_SECONDS`, `RECOVERY_*`,
+  `PAYMENT_TX_STUCK_TIMEOUT_SECONDS`, `PREPARE_TIMEOUT_SECONDS`,
+  `COMMIT_TIMEOUT_SECONDS`, `PAYMENT_TOTAL_TIMEOUT_SECONDS`, `COMMIT_RETRY_*`;
+- routing/balance: `ROUTING_*`, `MAX_FLOW_MAX_HOPS`,
+  `BALANCE_SUMMARY_CACHE_TTL_SECONDS`;
+- service controls: `RATE_LIMIT_*`, `METRICS_ENABLED`, `CLEARING_ENABLED`,
+  `FEATURE_FLAGS_*`, `INTEGRITY_CHECKPOINT_*`;
+- simulator: `SIMULATOR_DB_ENABLED`, `SIMULATOR_VIZ_QUANTILE_REFRESH_TICKS`,
+  `SIMULATOR_SESSION_*`, `SIMULATOR_MAX_ACTIVE_RUNS_PER_OWNER`,
+  `SIMULATOR_CSRF_ORIGIN_ALLOWLIST`;
+- Admin graph include limits: `ADMIN_GRAPH_INCLUDE_MAX_*`.
 
----
+In-memory fallback rate limiter хранит не более `10_000` bucket/host-записей
+(`app/api/deps.py`, константа `_RATE_LIMIT_MAX_ENTRIES`). Это защитный внутренний
+потолок, а не дополнительная environment-настройка: `RATE_LIMIT_*` по-прежнему
+задают окно и число запросов. Для общего лимита нескольких replicas нужен Redis;
+локальный fallback не является распределённым rate limiter.
 
-## 5. Минимальные метрики для перф‑проверок routing/clearing
+Не переносите дефолты из этого документа в новый параллельный конфиг: изменение
+контракта выполняется согласованно в `app/config.py`, Compose/env-примере, тестах и
+этом справочнике.
 
-Рекомендуемые метрики (минимум для пилота и бенчмарков):
-- `routing_duration_ms` (p50/p95/p99) и разрез по `routing.multipath_mode`
-- `routes_count` и `unique_nodes_in_routes`
-- `routing_budget_exhausted_total`
-- `routing_insufficient_capacity_total`
-- `clearing_cycles_found_total` и `clearing_cycles_applied_total`
-- `clearing_duration_ms` и `clearing_cycles_per_run`
+## Runtime-настройки Admin
+
+**Current behavior.** `PATCH /admin/config` и `PATCH /admin/feature-flags`
+валидируют значения и изменяют объект настроек только в текущем backend-процессе.
+В БД сохраняется audit-запись о действии, но не само новое значение. Поэтому
+изменение не переживает restart и не синхронизируется между несколькими backend
+replicas. Канонический перечень изменяемых ключей и валидация находятся в backend
+schemas/routes, а REST wire shape — в
+[`api/openapi.yaml`](../../api/openapi.yaml).
+
+**Intended operational behavior.** После restart процесс снова читает значения из
+deployment environment/`.env`; именно там следует задавать устойчивую конфигурацию.
+Admin PATCH сейчас подходит только для временной настройки одного процесса, а
+audit log подтверждает факт и причину изменения, не восстанавливает его значение.
+
+**Optimal target.** Если продукту потребуется устойчивое runtime-управление для
+нескольких replicas, ему нужен отдельный DB-backed контракт с загрузкой при старте,
+атомарным обновлением, распространением/инвалидацией и behavioral tests. Такого
+контракта в текущей реализации нет; этот справочник не выдаёт audit persistence за
+configuration persistence.
+
+## Тестовые overrides и артефакты
+
+[`scripts/verify_local.ps1`](../../scripts/verify_local.ps1) по умолчанию назначает
+уникальные для `TaskSlug`:
+
+- `TEST_DATABASE_URL=.local-run/test-runs/<TaskSlug>/test.db`;
+- pytest basetemp и cache;
+- `GEO_TEST_ARTIFACT_ROOT=.local-run/test-runs/<TaskSlug>/artifacts`.
+
+Для Postgres-тестов задавайте отдельную disposable DB и только после проверки URL
+включайте `GEO_TEST_ALLOW_DB_RESET=1`. Прямой pytest — debug path; его fallback
+также находится под `.local-run/test-runs/direct-pytest/`.
+
+## UI build-time параметры
+
+Admin UI использует `VITE_API_MODE` и `VITE_API_BASE_URL`; локальный runner пишет
+`admin-ui/.env.local`. Playwright output можно изолировать через
+`GEO_ADMIN_PLAYWRIGHT_OUTPUT_DIR`, `GEO_ADMIN_PLAYWRIGHT_REPORT_DIR`,
+`GEO_SIMULATOR_PLAYWRIGHT_OUTPUT_DIR` и отдельный
+`GEO_SIMULATOR_HUD_QA_OUTPUT_DIR`; дефолты находятся под `.local-run/`.
+
+Секреты, `.env`, локальные БД, логи, PID, NDJSON и test output не являются
+каноническими данными и не коммитятся.

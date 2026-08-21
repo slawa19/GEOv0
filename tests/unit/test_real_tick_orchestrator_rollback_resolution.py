@@ -17,6 +17,7 @@ from app.core.simulator.real_tick_orchestrator import RealTickOrchestrator
 from app.core.simulator.real_tick_payments_coordinator import (
     RealTickPaymentsPhaseResult,
 )
+from app.utils.exceptions import RetryablePaymentConflictException
 
 
 class TickFailure(RuntimeError):
@@ -45,6 +46,11 @@ class _BlockingRollbackSession(_Session):
     async def rollback(self) -> None:
         self.rollback_started.set()
         await self.release_rollback.wait()
+        self.rollback_calls += 1
+
+
+class _SuccessfulRollbackSession(_Session):
+    async def rollback(self) -> None:
         self.rollback_calls += 1
 
 
@@ -77,6 +83,11 @@ class _Emitter:
 class _PaymentEffect:
     def __init__(self) -> None:
         self.calls = 0
+        self.cache_invalidations = 0
+
+    def invalidate_routing_cache_once(self) -> bool:
+        self.cache_invalidations += 1
+        return True
 
     def apply_once(self) -> bool:
         self.calls += 1
@@ -89,6 +100,15 @@ class _PaymentsCoordinator:
 
     async def run_payments_phase(self, **_kwargs):
         return self.phase, False
+
+
+class _RetryableConflictPaymentsCoordinator:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def run_payments_phase(self, **_kwargs):
+        self.calls += 1
+        raise RetryablePaymentConflictException()
 
 
 class _ClearingCoordinator:
@@ -218,6 +238,36 @@ def _run_with_phase(
 
 
 @pytest.mark.asyncio
+async def test_retryable_payment_conflict_rolls_back_tick_transaction(
+    monkeypatch,
+) -> None:
+    logger = logging.getLogger("test.retryable_payment_conflict")
+    run, phase, emitter, committed_effect = _run_with_phase(
+        logger=logger,
+        run_id="retryable-payment-conflict",
+    )
+    runner = _Runner(run=run, phase=phase, logger=logger)
+    coordinator = _RetryableConflictPaymentsCoordinator()
+    runner._real_tick_payments_coordinator = coordinator
+    session = _SuccessfulRollbackSession()
+    monkeypatch.setattr(
+        orchestrator_module.db_session,
+        "AsyncSessionLocal",
+        lambda: _SessionContext(session),
+    )
+
+    await RealTickOrchestrator(runner).tick_real_mode(run.run_id)  # type: ignore[arg-type]
+
+    assert coordinator.calls == 1
+    assert session.rollback_calls == 1
+    assert committed_effect.calls == 0
+    assert emitter.updated == 0
+    assert run.last_error is not None
+    assert run.last_error["code"] == "REAL_MODE_TICK_FAILED"
+    assert run.last_error["message"] == "State conflict"
+
+
+@pytest.mark.asyncio
 async def test_rollback_failure_resolves_only_failure_observations_as_unknown(
     monkeypatch,
     caplog,
@@ -263,7 +313,7 @@ async def test_rollback_failure_resolves_only_failure_observations_as_unknown(
 
 
 @pytest.mark.asyncio
-async def test_double_cancellation_drains_final_rollback_before_resolution(
+async def test_double_cancellation_bounds_final_rollback_and_resolves_unknown(
     monkeypatch,
 ) -> None:
     logger = logging.getLogger("test.rollback_double_cancellation")
@@ -289,14 +339,12 @@ async def test_double_cancellation_drains_final_rollback_before_resolution(
     task.cancel("second cancellation")
     await asyncio.sleep(0)
     await asyncio.sleep(0)
-    assert not task.done()
-
-    session.release_rollback.set()
     with pytest.raises(asyncio.CancelledError):
         await task
 
-    assert session.rollback_calls == 1
+    assert session.rollback_calls == 0
     assert committed_effect.calls == 0
+    assert committed_effect.cache_invalidations == 1
     assert emitter.updated == 0
     assert emitter.failed == 2
     assert run.attempts_total == 2
@@ -305,3 +353,6 @@ async def test_double_cancellation_drains_final_rollback_before_resolution(
     assert run.errors_total == 1
     assert phase.apply_rollback_observations() is False
     assert phase.apply_unknown_transaction_observations() is False
+
+    session.release_rollback.set()
+    await asyncio.sleep(0)

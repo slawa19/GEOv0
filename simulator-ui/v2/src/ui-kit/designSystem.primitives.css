@@ -687,8 +687,12 @@
   clip-path: polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 6px 100%, 0 calc(100% - 6px));
 }
 
+[data-motion='reduced'][data-theme='hud'] .ds-panel--elevated,
+[data-motion='reduced'][data-theme='hud'] .ds-panel--elevated::before,
+[data-motion='reduced'][data-theme='hud'] .ds-panel__header::before,
 [data-motion='reduced'] [data-theme='hud'] .ds-panel--elevated,
-[data-motion='reduced'] [data-theme='hud'] .ds-panel--elevated::before {
+[data-motion='reduced'] [data-theme='hud'] .ds-panel--elevated::before,
+[data-motion='reduced'] [data-theme='hud'] .ds-panel__header::before {
   animation: none !important;
 }
 

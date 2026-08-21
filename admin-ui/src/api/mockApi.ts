@@ -1,4 +1,34 @@
 import { ApiException, type ApiEnvelope } from './envelope'
+import {
+  AdminAbortTxResponseSchema,
+  AdminAuditLogEntrySchema,
+  AdminAuditLogSchema,
+  AdminConfigPatchResponseSchema,
+  AdminConfigPatchSchema,
+  AdminConfigSchema,
+  AdminEquivalentDeleteResponseSchema,
+  AdminEquivalentCodeSchema,
+  AdminEquivalentMutationResponseSchema,
+  AdminEquivalentPrecisionSchema,
+  AdminEquivalentUsageResponseSchema,
+  AdminFeatureFlagsSchema,
+  AdminParticipantActionResponseSchema,
+  IntegrityRepairCapDebtsResponseSchema,
+  IntegrityRepairNetMutualDebtsResponseSchema,
+  IntegrityStatusResponseSchema,
+  IntegrityVerifyResponseSchema,
+  decodeAdminResponse,
+  type AdminAbortTxResponse,
+  type AdminConfigPatchResponse,
+  type AdminEquivalentDeleteResponse,
+  type AdminEquivalentUsageResponse,
+  type AdminFeatureFlags,
+  type AdminParticipantActionResponse,
+  type IntegrityRepairCapDebtsResponse,
+  type IntegrityRepairNetMutualDebtsResponse,
+  type IntegrityStatusResponse,
+  type IntegrityVerifyResponse,
+} from './adminContracts'
 import { TOAST_DEDUPE_MS } from '../constants/timing'
 import { absDecimalString, addDecimalStrings, compareDecimalStrings, isRatioBelowThreshold } from '../utils/decimal'
 import { t } from '../i18n'
@@ -32,6 +62,20 @@ type Scenario = {
 }
 
 const FIXTURES_BASE = '/admin-fixtures/v1'
+const MOCK_EQUIVALENT_TIMESTAMP = '2025-01-01T00:00:00.000Z'
+
+function toMockEquivalentWire(value: Equivalent) {
+  return {
+    code: value.code,
+    symbol: null,
+    description: value.description,
+    precision: value.precision,
+    metadata: null,
+    is_active: value.is_active,
+    created_at: MOCK_EQUIVALENT_TIMESTAMP,
+    updated_at: MOCK_EQUIVALENT_TIMESTAMP,
+  }
+}
 
 const cache = new Map<string, unknown>()
 
@@ -163,10 +207,14 @@ function paginate<T>(items: T[], page: number, perPage: number): Paginated<T> {
 }
 
 let mockConfig: Record<string, unknown> | null = null
-let mockFlags: Record<string, unknown> | null = null
+let mockFlags: AdminFeatureFlags | null = null
 let mockParticipants: Participant[] | null = null
 let mockEquivalents: Equivalent[] | null = null
 let mockAuditLog: AuditLogEntry[] | null = null
+let mockAuditLogLoad: Promise<unknown> | null = null
+let mockIncidents: Incident[] | null | undefined
+const mockAbortedTransactionIds = new Set<string>()
+let mockMutationTail: Promise<void> = Promise.resolve()
 
 function roleFromLocalStorage(): string {
   const v = (localStorage.getItem('admin-ui.role') || '').trim().toLowerCase()
@@ -178,8 +226,12 @@ function nowIso(): string {
   return new Date().toISOString()
 }
 
-function newId(prefix: string): string {
-  return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`
+function newUuid(): string {
+  if (typeof crypto?.randomUUID === 'function') return crypto.randomUUID()
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
+    const value = Math.floor(Math.random() * 16)
+    return (char === 'x' ? value : (value & 0x3) | 0x8).toString(16)
+  })
 }
 
 async function getParticipantsDataset(): Promise<Participant[]> {
@@ -193,8 +245,65 @@ async function getEquivalentsDataset(): Promise<Equivalent[]> {
 }
 
 async function getAuditLogDataset(): Promise<AuditLogEntry[]> {
-  if (!mockAuditLog) mockAuditLog = await loadJson<AuditLogEntry[]>('datasets/audit-log.json')
+  if (mockAuditLog) return mockAuditLog
+  let raw: unknown
+  try {
+    raw = await getSharedAuditLogRaw()
+  } catch {
+    // Dedicated audit/mutation paths retain the strict retry + toast contract.
+    raw = await loadJson<unknown>('datasets/audit-log.json')
+  }
+  const decoded = decodeAdminResponse(
+    AdminAuditLogSchema,
+    raw,
+    'mock GET /api/v1/admin/audit-log',
+  )
+  if (!mockAuditLog) mockAuditLog = decoded
   return mockAuditLog
+}
+
+async function getSharedAuditLogRaw(): Promise<unknown> {
+  if (!mockAuditLogLoad) {
+    // One silent attempt is the common concurrency boundary. Strict callers
+    // retry with user feedback after this shared attempt fails; optional Graph
+    // callers return an empty component without a misleading toast.
+    mockAuditLogLoad = loadJson<unknown>('datasets/audit-log.json', { silent: true })
+  }
+  const pending = mockAuditLogLoad
+  try {
+    return await pending
+  } finally {
+    if (mockAuditLogLoad === pending) mockAuditLogLoad = null
+  }
+}
+
+async function getIncidentsDataset(): Promise<Incident[] | null> {
+  if (mockIncidents === undefined) {
+    const dataset = await loadOptionalJson<{ items: Incident[] } | null>('datasets/incidents.json', null)
+    // A missing optional fixture is retried on the next request. Caching the
+    // fallback would turn one transient fetch failure into a session-long empty
+    // incident list.
+    if (dataset) mockIncidents = dataset.items
+    return dataset?.items ?? null
+  }
+  return mockIncidents
+}
+
+async function getGraphAuditLogDataset(): Promise<AuditLogEntry[]> {
+  try {
+    if (mockAuditLog) return mockAuditLog
+    const decoded = decodeAdminResponse(
+      AdminAuditLogSchema,
+      await getSharedAuditLogRaw(),
+      'mock GET /api/v1/admin/graph/snapshot audit-log',
+    )
+    if (!mockAuditLog) mockAuditLog = decoded
+    return mockAuditLog
+  } catch {
+    // audit_log is an optional Graph snapshot component in fixture mode. The
+    // dedicated audit endpoint remains strict and reports malformed fixtures.
+    return []
+  }
 }
 
 function normalizeEqCode(code: string): string {
@@ -263,30 +372,46 @@ function topShares(shares: number[]): { top1: number; top5: number; hhi: number 
   return { top1, top5, hhi }
 }
 
-async function getIncidentsDataset(): Promise<Incident[]> {
-  const ds = await loadJson<{ items: Incident[] }>('datasets/incidents.json')
-  return ds.items
-}
-
-async function getEquivalentUsageCounts(code: string): Promise<{ trustlines: number; incidents: number }> {
+async function getEquivalentUsageCounts(
+  code: string,
+): Promise<{ trustlines: number; debts: number; integrity_checkpoints: number }> {
   const key = normalizeEqCode(code)
-  if (!key) return { trustlines: 0, incidents: 0 }
+  if (!key) return { trustlines: 0, debts: 0, integrity_checkpoints: 0 }
 
-  const [trustlines, incidents] = await Promise.all([getTrustlinesDataset(), getIncidentsDataset()])
+  const [trustlines, debts] = await Promise.all([
+    getTrustlinesDataset(),
+    loadJson<Debt[]>('datasets/debts.json'),
+  ])
   return {
     trustlines: trustlines.filter((t) => normalizeEqCode(t.equivalent) === key).length,
-    incidents: incidents.filter((i) => normalizeEqCode(i.equivalent) === key).length,
+    debts: debts.filter((d) => normalizeEqCode(d.equivalent) === key).length,
+    integrity_checkpoints: 0,
   }
 }
 
-async function appendAuditLog(entry: Omit<AuditLogEntry, 'id' | 'timestamp' | 'actor_role'> & { actor_role?: string }) {
+async function getIntegrityStatusDataset(): Promise<IntegrityStatusResponse> {
+  return decodeAdminResponse(
+    IntegrityStatusResponseSchema,
+    await loadJson<unknown>('datasets/integrity-status.json'),
+    'mock GET /api/v1/integrity/status',
+  )
+}
+
+async function appendAuditLog(
+  entry: Omit<AuditLogEntry, 'id' | 'timestamp' | 'actor_id' | 'actor_role'> & { actor_role?: string },
+) {
   const all = await getAuditLogDataset()
-  const full: AuditLogEntry = {
-    id: newId('audit'),
-    timestamp: nowIso(),
-    actor_role: entry.actor_role || roleFromLocalStorage(),
-    ...entry,
-  }
+  const full = decodeAdminResponse(
+    AdminAuditLogEntrySchema,
+    {
+      id: newUuid(),
+      timestamp: nowIso(),
+      actor_id: null,
+      actor_role: entry.actor_role || roleFromLocalStorage(),
+      ...entry,
+    },
+    'mock audit mutation',
+  )
   all.unshift(full)
 }
 
@@ -327,6 +452,27 @@ async function withScenario<T>(pathname: string, handler: () => Promise<ApiEnvel
   return await handler()
 }
 
+async function serializeMockMutation<T>(handler: () => Promise<ApiEnvelope<T>>): Promise<ApiEnvelope<T>> {
+  const previous = mockMutationTail
+  let release!: () => void
+  mockMutationTail = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  await previous
+  try {
+    return await handler()
+  } finally {
+    release()
+  }
+}
+
+function withScenarioMutation<T>(
+  pathname: string,
+  handler: () => Promise<ApiEnvelope<T>>,
+): Promise<ApiEnvelope<T>> {
+  return withScenario(pathname, () => serializeMockMutation(handler))
+}
+
 export const mockApi = {
   async health(): Promise<ApiEnvelope<Record<string, unknown>>> {
     return withScenario('/api/v1/health', async () => ({ success: true, data: await loadJson('datasets/health.json') }))
@@ -342,7 +488,13 @@ export const mockApi = {
 
   async getConfig(): Promise<ApiEnvelope<Record<string, unknown>>> {
     return withScenario('/api/v1/admin/config', async () => {
-      const cfg = mockConfig ?? (mockConfig = await loadJson<Record<string, unknown>>('datasets/config.json'))
+      const cfg =
+        mockConfig ??
+        (mockConfig = decodeAdminResponse(
+          AdminConfigSchema,
+          await loadJson<unknown>('datasets/config.json'),
+          'mock GET /api/v1/admin/config',
+        ))
       return { success: true, data: cfg }
     })
   },
@@ -671,56 +823,148 @@ export const mockApi = {
     })
   },
 
-  async patchConfig(patch: Record<string, unknown>): Promise<ApiEnvelope<{ updated: string[] }>> {
-    return withScenario('/api/v1/admin/config', async () => {
-      if (!mockConfig) mockConfig = await loadJson('datasets/config.json')
-      const updated = Object.keys(patch)
-      mockConfig = { ...mockConfig, ...patch }
-      return { success: true, data: { updated } }
+  async patchConfig(patch: Record<string, unknown>): Promise<ApiEnvelope<AdminConfigPatchResponse>> {
+    return withScenarioMutation('/api/v1/admin/config', async () => {
+      const validatedPatch = AdminConfigPatchSchema.safeParse(patch)
+      if (!validatedPatch.success) {
+        return {
+          success: false,
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: 'config patch contains unknown keys or invalid values',
+            details: validatedPatch.error.issues,
+          },
+        }
+      }
+      if (!mockConfig) {
+        mockConfig = decodeAdminResponse(
+          AdminConfigSchema,
+          await loadJson<unknown>('datasets/config.json'),
+          'mock GET /api/v1/admin/config',
+        )
+      }
+      const updated = Object.keys(validatedPatch.data)
+      const beforeState = Object.fromEntries(updated.map((key) => [key, mockConfig![key]]))
+      const nextConfig = decodeAdminResponse(
+        AdminConfigSchema,
+        { ...mockConfig, ...validatedPatch.data },
+        'mock PATCH /api/v1/admin/config',
+      )
+      const afterState = Object.fromEntries(
+        updated.map((key) => [key, (nextConfig as Record<string, unknown>)[key]]),
+      )
+      const response = decodeAdminResponse(
+        AdminConfigPatchResponseSchema,
+        { updated },
+        'mock PATCH /api/v1/admin/config',
+      )
+      await appendAuditLog({
+        action: 'admin.config.patch',
+        object_type: 'config',
+        object_id: null,
+        reason: null,
+        before_state: beforeState,
+        after_state: afterState,
+      })
+      mockConfig = nextConfig
+      return {
+        success: true,
+        data: response,
+      }
     })
   },
 
-  async getFeatureFlags(): Promise<ApiEnvelope<Record<string, unknown>>> {
+  async getFeatureFlags(): Promise<ApiEnvelope<AdminFeatureFlags>> {
     return withScenario('/api/v1/admin/feature-flags', async () => {
-      const flags = mockFlags ?? (mockFlags = await loadJson<Record<string, unknown>>('datasets/feature-flags.json'))
+      const flags =
+        mockFlags ??
+        (mockFlags = decodeAdminResponse(
+          AdminFeatureFlagsSchema,
+          await loadJson<unknown>('datasets/feature-flags.json'),
+          'mock GET /api/v1/admin/feature-flags',
+        ))
       return { success: true, data: flags }
     })
   },
 
-  async patchFeatureFlags(patch: Record<string, unknown>): Promise<ApiEnvelope<{ updated: string[] }>> {
-    return withScenario('/api/v1/admin/feature-flags', async () => {
-      if (!mockFlags) mockFlags = await loadJson('datasets/feature-flags.json')
-      const updated = Object.keys(patch)
-      mockFlags = { ...mockFlags, ...patch }
-      return { success: true, data: { updated } }
+  async patchFeatureFlags(patch: Record<string, unknown>): Promise<ApiEnvelope<AdminFeatureFlags>> {
+    return withScenarioMutation('/api/v1/admin/feature-flags', async () => {
+      if (!mockFlags) {
+        mockFlags = decodeAdminResponse(
+          AdminFeatureFlagsSchema,
+          await loadJson<unknown>('datasets/feature-flags.json'),
+          'mock GET /api/v1/admin/feature-flags',
+        )
+      }
+
+      const next = { ...mockFlags }
+      const before = { ...mockFlags }
+      for (const key of ['multipath_enabled', 'full_multipath_enabled', 'clearing_enabled'] as const) {
+        if (typeof patch[key] === 'boolean') next[key] = patch[key]
+      }
+      const updated = decodeAdminResponse(
+        AdminFeatureFlagsSchema,
+        next,
+        'mock PATCH /api/v1/admin/feature-flags',
+      )
+      await appendAuditLog({
+        action: 'admin.feature_flags.patch',
+        object_type: 'feature_flags',
+        object_id: null,
+        reason: null,
+        before_state: before,
+        after_state: { ...updated },
+      })
+      mockFlags = updated
+      return { success: true, data: updated }
     })
   },
 
-  async integrityStatus(): Promise<ApiEnvelope<Record<string, unknown>>> {
-    return withScenario('/api/v1/integrity/status', async () => ({ success: true, data: await loadJson('datasets/integrity-status.json') }))
-  },
-
-  async integrityVerify(): Promise<ApiEnvelope<Record<string, unknown>>> {
-    return withScenario('/api/v1/integrity/verify', async () => ({
+  async integrityStatus(): Promise<ApiEnvelope<IntegrityStatusResponse>> {
+    return withScenario('/api/v1/integrity/status', async () => ({
       success: true,
-      data: {
-        status: 'finished',
-        checked_at: new Date().toISOString(),
-      },
+      data: await getIntegrityStatusDataset(),
     }))
   },
 
-  async integrityRepairNetMutualDebts(): Promise<ApiEnvelope<Record<string, unknown>>> {
+  async integrityVerify(): Promise<ApiEnvelope<IntegrityVerifyResponse>> {
+    return withScenario('/api/v1/integrity/verify', async () => {
+      const status = await getIntegrityStatusDataset()
+      return {
+        success: true,
+        data: decodeAdminResponse(
+          IntegrityVerifyResponseSchema,
+          {
+            status: status.status,
+            checked_at: new Date().toISOString(),
+            equivalents: status.equivalents,
+            alerts: status.alerts,
+          },
+          'mock POST /api/v1/integrity/verify',
+        ),
+      }
+    })
+  },
+
+  async integrityRepairNetMutualDebts(): Promise<ApiEnvelope<IntegrityRepairNetMutualDebtsResponse>> {
     return withScenario('/api/v1/integrity/repair/net-mutual-debts', async () => ({
       success: true,
-      data: { status: 'finished', repaired: true },
+      data: decodeAdminResponse(
+        IntegrityRepairNetMutualDebtsResponseSchema,
+        { ok: true, action: 'net-mutual-debts', netted_pairs: 0, updated: 0, deleted: 0 },
+        'mock POST /api/v1/integrity/repair/net-mutual-debts',
+      ),
     }))
   },
 
-  async integrityRepairCapDebtsToTrustLimits(): Promise<ApiEnvelope<Record<string, unknown>>> {
+  async integrityRepairCapDebtsToTrustLimits(): Promise<ApiEnvelope<IntegrityRepairCapDebtsResponse>> {
     return withScenario('/api/v1/integrity/repair/cap-debts-to-trust-limits', async () => ({
       success: true,
-      data: { status: 'finished', repaired: true },
+      data: decodeAdminResponse(
+        IntegrityRepairCapDebtsResponseSchema,
+        { ok: true, action: 'cap-debts-to-trust-limits', scanned: 0, updated: 0, deleted: 0 },
+        'mock POST /api/v1/integrity/repair/cap-debts-to-trust-limits',
+      ),
     }))
   },
 
@@ -884,45 +1128,55 @@ export const mockApi = {
     })
   },
 
-  async freezeParticipant(pid: string, reason: string): Promise<ApiEnvelope<{ pid: string; status: string }>> {
-    return withScenario('/api/v1/admin/participants/freeze', async () => {
+  async freezeParticipant(pid: string, reason: string): Promise<ApiEnvelope<AdminParticipantActionResponse>> {
+    return withScenarioMutation('/api/v1/admin/participants/freeze', async () => {
       if (!reason.trim()) return { success: false, error: { code: 'VALIDATION_ERROR', message: 'reason is required' } }
       const all = await getParticipantsDataset()
       const p = all.find((x) => x.pid === pid)
       if (!p) return { success: false, error: { code: 'NOT_FOUND', message: 'participant not found' } }
       const before = { ...p }
-      p.status = 'suspended'
+      const response = decodeAdminResponse(
+        AdminParticipantActionResponseSchema,
+        { pid, status: 'suspended' },
+        'mock POST /api/v1/admin/participants/{pid}/freeze',
+      )
+      const after = { ...p, status: response.status }
       await appendAuditLog({
-        actor_id: 'admin-ui',
-        action: 'participant.freeze',
+        action: 'admin.participants.freeze',
         object_type: 'participant',
         object_id: pid,
         reason,
         before_state: before,
-        after_state: { ...p },
+        after_state: after,
       })
-      return { success: true, data: { pid, status: p.status } }
+      Object.assign(p, after)
+      return { success: true, data: response }
     })
   },
 
-  async unfreezeParticipant(pid: string, reason: string): Promise<ApiEnvelope<{ pid: string; status: string }>> {
-    return withScenario('/api/v1/admin/participants/unfreeze', async () => {
+  async unfreezeParticipant(pid: string, reason: string): Promise<ApiEnvelope<AdminParticipantActionResponse>> {
+    return withScenarioMutation('/api/v1/admin/participants/unfreeze', async () => {
       if (!reason.trim()) return { success: false, error: { code: 'VALIDATION_ERROR', message: 'reason is required' } }
       const all = await getParticipantsDataset()
       const p = all.find((x) => x.pid === pid)
       if (!p) return { success: false, error: { code: 'NOT_FOUND', message: 'participant not found' } }
       const before = { ...p }
-      p.status = 'active'
+      const response = decodeAdminResponse(
+        AdminParticipantActionResponseSchema,
+        { pid, status: 'active' },
+        'mock POST /api/v1/admin/participants/{pid}/unfreeze',
+      )
+      const after = { ...p, status: response.status }
       await appendAuditLog({
-        actor_id: 'admin-ui',
-        action: 'participant.unfreeze',
+        action: 'admin.participants.unfreeze',
         object_type: 'participant',
         object_id: pid,
         reason,
         before_state: before,
-        after_state: { ...p },
+        after_state: after,
       })
-      return { success: true, data: { pid, status: p.status } }
+      Object.assign(p, after)
+      return { success: true, data: response }
     })
   },
 
@@ -993,8 +1247,8 @@ export const mockApi = {
 
   async listIncidents(params: { page?: number; per_page?: number }): Promise<ApiEnvelope<Paginated<Incident>>> {
     return withScenario('/api/v1/admin/incidents', async () => {
-      const ds = await loadJson<{ items: Incident[] }>('datasets/incidents.json')
-      return { success: true, data: paginate(ds.items, params.page ?? 1, params.per_page ?? 20) }
+      const incidents = (await getIncidentsDataset()) ?? []
+      return { success: true, data: paginate(incidents, params.page ?? 1, params.per_page ?? 20) }
     })
   },
 
@@ -1012,87 +1266,117 @@ export const mockApi = {
     description: string
     is_active?: boolean
   }): Promise<ApiEnvelope<{ created: Equivalent }>> {
-    return withScenario('/api/v1/admin/equivalents', async () => {
-      const code = (input.code || '').trim().toUpperCase()
-      if (!code) return { success: false, error: { code: 'VALIDATION_ERROR', message: 'code is required' } }
+    return withScenarioMutation('/api/v1/admin/equivalents', async () => {
+      const code = input.code
+      if (!AdminEquivalentCodeSchema.safeParse(code).success) {
+        return { success: false, error: { code: 'VALIDATION_ERROR', message: 'invalid equivalent code' } }
+      }
+      if (!AdminEquivalentPrecisionSchema.safeParse(input.precision).success) {
+        return { success: false, error: { code: 'VALIDATION_ERROR', message: 'precision must be an integer from 0 to 18' } }
+      }
       const all = await getEquivalentsDataset()
       if (all.some((e) => e.code === code)) return { success: false, error: { code: 'CONFLICT', message: 'code already exists' } }
 
-      const created: Equivalent = {
-        code,
-        precision: Math.max(0, Math.min(18, Math.floor(Number(input.precision ?? 2)))),
-        description: String(input.description || '').trim() || code,
-        is_active: Boolean(input.is_active ?? true),
-      }
-      all.unshift(created)
+      const created = decodeAdminResponse(
+        AdminEquivalentMutationResponseSchema,
+        toMockEquivalentWire({
+          code,
+          precision: input.precision,
+          description: String(input.description || '').trim() || code,
+          is_active: Boolean(input.is_active ?? true),
+        }),
+        'mock POST /api/v1/admin/equivalents',
+      )
       await appendAuditLog({
-        actor_id: 'admin-ui',
-        action: 'equivalent.create',
+        action: 'admin.equivalents.create',
         object_type: 'equivalent',
         object_id: code,
         reason: 'create',
         before_state: null,
         after_state: created,
       })
+      all.unshift(created)
       return { success: true, data: { created } }
     })
   },
 
   async updateEquivalent(code: string, patch: Partial<Pick<Equivalent, 'precision' | 'description'>>): Promise<ApiEnvelope<{ updated: Equivalent }>> {
-    return withScenario('/api/v1/admin/equivalents', async () => {
-      const key = (code || '').trim().toUpperCase()
+    return withScenarioMutation('/api/v1/admin/equivalents', async () => {
+      if (patch.precision !== undefined && !AdminEquivalentPrecisionSchema.safeParse(patch.precision).success) {
+        return { success: false, error: { code: 'VALIDATION_ERROR', message: 'precision must be an integer from 0 to 18' } }
+      }
+      const key = code
       const all = await getEquivalentsDataset()
       const eq = all.find((e) => e.code === key)
       if (!eq) return { success: false, error: { code: 'NOT_FOUND', message: 'equivalent not found' } }
       const before = { ...eq }
-      if (patch.precision !== undefined) eq.precision = Math.max(0, Math.min(18, Math.floor(Number(patch.precision))))
-      if (patch.description !== undefined) eq.description = String(patch.description || '').trim() || eq.description
+      const updated = decodeAdminResponse(
+        AdminEquivalentMutationResponseSchema,
+        toMockEquivalentWire({
+          ...eq,
+          precision: patch.precision === undefined ? eq.precision : patch.precision,
+          description:
+            patch.description === undefined ? eq.description : String(patch.description || '').trim() || eq.description,
+        }),
+        'mock PATCH /api/v1/admin/equivalents/{code}',
+      )
       await appendAuditLog({
-        actor_id: 'admin-ui',
-        action: 'equivalent.update',
+        action: 'admin.equivalents.patch',
         object_type: 'equivalent',
         object_id: key,
         reason: 'update',
         before_state: before,
-        after_state: { ...eq },
+        after_state: updated,
       })
-      return { success: true, data: { updated: eq } }
+      Object.assign(eq, updated)
+      return { success: true, data: { updated } }
     })
   },
 
   async setEquivalentActive(code: string, isActive: boolean, reason: string): Promise<ApiEnvelope<{ updated: Equivalent }>> {
-    return withScenario('/api/v1/admin/equivalents/active', async () => {
+    return withScenarioMutation('/api/v1/admin/equivalents/active', async () => {
       if (!String(reason || '').trim()) return { success: false, error: { code: 'VALIDATION_ERROR', message: 'reason is required' } }
-      const key = (code || '').trim().toUpperCase()
+      const key = code
       const all = await getEquivalentsDataset()
       const eq = all.find((e) => e.code === key)
       if (!eq) return { success: false, error: { code: 'NOT_FOUND', message: 'equivalent not found' } }
       const before = { ...eq }
-      eq.is_active = Boolean(isActive)
+      const updated = decodeAdminResponse(
+        AdminEquivalentMutationResponseSchema,
+        toMockEquivalentWire({ ...eq, is_active: Boolean(isActive) }),
+        'mock PATCH /api/v1/admin/equivalents/{code}',
+      )
       await appendAuditLog({
-        actor_id: 'admin-ui',
-        action: isActive ? 'equivalent.activate' : 'equivalent.deactivate',
+        action: 'admin.equivalents.patch',
         object_type: 'equivalent',
         object_id: key,
         reason,
         before_state: before,
-        after_state: { ...eq },
+        after_state: updated,
       })
-      return { success: true, data: { updated: eq } }
+      Object.assign(eq, updated)
+      return { success: true, data: { updated } }
     })
   },
 
-  async getEquivalentUsage(code: string): Promise<ApiEnvelope<{ code: string; trustlines: number; incidents: number }>> {
+  async getEquivalentUsage(code: string): Promise<ApiEnvelope<AdminEquivalentUsageResponse>> {
     return withScenario('/api/v1/admin/equivalents/usage', async () => {
       const key = normalizeEqCode(code)
       if (!key) return { success: false, error: { code: 'VALIDATION_ERROR', message: 'code is required' } }
       const counts = await getEquivalentUsageCounts(key)
-      return { success: true, data: { code: key, ...counts } }
+      return {
+        success: true,
+        data: decodeAdminResponse(
+          AdminEquivalentUsageResponseSchema,
+          { code: key, ...counts },
+          'mock GET /api/v1/admin/equivalents/{code}/usage',
+        ),
+      }
     })
   },
 
-  async deleteEquivalent(code: string, reason: string): Promise<ApiEnvelope<{ deleted: string }>> {
-    return withScenario('/api/v1/admin/equivalents/delete', async () => {
+  async deleteEquivalent(code: string, reason: string): Promise<ApiEnvelope<AdminEquivalentDeleteResponse>> {
+    return withScenarioMutation('/api/v1/admin/equivalents/delete', async () => {
       if (roleFromLocalStorage() === 'auditor') return { success: false, error: { code: 'FORBIDDEN', message: 'read-only' } }
       if (!String(reason || '').trim()) return { success: false, error: { code: 'VALIDATION_ERROR', message: 'reason is required' } }
 
@@ -1107,44 +1391,76 @@ export const mockApi = {
       if (before.is_active) return { success: false, error: { code: 'CONFLICT', message: 'Deactivate before delete' } }
 
       const usage = await getEquivalentUsageCounts(key)
-      if (usage.trustlines > 0 || usage.incidents > 0) {
+      if (usage.trustlines > 0 || usage.debts > 0 || usage.integrity_checkpoints > 0) {
         return { success: false, error: { code: 'CONFLICT', message: 'Equivalent is in use', details: usage } }
       }
 
-      all.splice(idx, 1)
-
+      const response = decodeAdminResponse(
+        AdminEquivalentDeleteResponseSchema,
+        { deleted: key },
+        'mock DELETE /api/v1/admin/equivalents/{code}',
+      )
       await appendAuditLog({
-        actor_id: 'admin-ui',
-        action: 'equivalent.delete',
+        action: 'admin.equivalents.delete',
         object_type: 'equivalent',
         object_id: key,
         reason,
         before_state: before,
         after_state: null,
       })
+      all.splice(idx, 1)
 
-      return { success: true, data: { deleted: key } }
+      return { success: true, data: response }
     })
   },
 
-  async abortTx(txId: string, reason: string): Promise<ApiEnvelope<{ tx_id: string; status: 'aborted' }>> {
-    return withScenario('/api/v1/admin/transactions/abort', async () => {
+  async abortTx(txId: string, reason: string): Promise<ApiEnvelope<AdminAbortTxResponse>> {
+    return withScenarioMutation('/api/v1/admin/transactions/abort', async () => {
       if (!reason.trim()) {
         return {
           success: false,
           error: { code: 'VALIDATION_ERROR', message: 'reason is required' },
         }
       }
+      const incidents = await getIncidentsDataset()
+      const incidentIndex = incidents?.findIndex((incident) => incident.tx_id === txId) ?? -1
+      const transactions = await loadOptionalJson<Transaction[]>('datasets/transactions.json', [])
+      const knownTransaction = transactions.find((transaction) => transaction.tx_id === txId)
+      const alreadyAborted = mockAbortedTransactionIds.has(txId)
+      if (incidentIndex < 0 && !knownTransaction && !alreadyAborted) {
+        return { success: false, error: { code: 'NOT_FOUND', message: 'transaction not found' } }
+      }
+      if (knownTransaction?.state === 'COMMITTED') {
+        return { success: false, error: { code: 'CONFLICT', message: 'Transaction is already committed' } }
+      }
+      const before = incidentIndex >= 0 && incidents
+        ? { ...incidents[incidentIndex] }
+          : knownTransaction
+          ? { state: knownTransaction.state, error: knownTransaction.error ?? null }
+          : { state: 'ABORTED', error: null }
+      const response = decodeAdminResponse(
+        AdminAbortTxResponseSchema,
+        { tx_id: txId, status: 'aborted' },
+        'mock POST /api/v1/admin/transactions/{tx_id}/abort',
+      )
       await appendAuditLog({
-        actor_id: 'admin-ui',
-        action: 'transaction.abort',
+        action: 'admin.transactions.abort',
         object_type: 'transaction',
         object_id: txId,
         reason,
-        before_state: { state: 'stuck' },
-        after_state: { state: 'aborted' },
+        before_state: before,
+        after_state: { state: 'ABORTED' },
       })
-      return { success: true, data: { tx_id: txId, status: 'aborted' } }
+      const currentIncidentIndex = incidents?.findIndex((incident) => incident.tx_id === txId) ?? -1
+      if (currentIncidentIndex >= 0) incidents?.splice(currentIncidentIndex, 1)
+      if (knownTransaction) {
+        knownTransaction.state = 'ABORTED'
+        knownTransaction.error = { code: 'E010', message: reason, details: {} }
+        knownTransaction.updated_at = nowIso()
+      } else {
+        mockAbortedTransactionIds.add(txId)
+      }
+      return { success: true, data: response }
     })
   },
 
@@ -1158,10 +1474,10 @@ export const mockApi = {
 
       const [trustlines, incidents, equivalents, debts, auditLog, transactions] = await Promise.all([
         loadJson<Trustline[]>('datasets/trustlines.json'),
-        loadJson<{ items: Incident[] }>('datasets/incidents.json').then((r) => r.items || []),
+        getIncidentsDataset().then((items) => items ?? []),
         loadJson<Equivalent[]>('datasets/equivalents.json'),
         loadOptionalJson<Debt[]>('datasets/debts.json', []),
-        loadOptionalJson<AuditLogEntry[]>('datasets/audit-log.json', []),
+        getGraphAuditLogDataset(),
         loadOptionalJson<Transaction[]>('datasets/transactions.json', []),
       ])
 
@@ -1265,6 +1581,10 @@ export function __resetMockApiForTests() {
   mockParticipants = null
   mockEquivalents = null
   mockAuditLog = null
+  mockAuditLogLoad = null
+  mockIncidents = undefined
+  mockAbortedTransactionIds.clear()
+  mockMutationTail = Promise.resolve()
   lastToastAt = 0
   lastToastMsg = ''
 }

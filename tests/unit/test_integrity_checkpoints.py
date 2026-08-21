@@ -3,11 +3,59 @@ from decimal import Decimal
 
 import pytest
 
-from app.core.integrity import compute_integrity_checkpoint_for_equivalent
+from app.core.integrity import (
+    compute_and_store_integrity_checkpoints,
+    compute_integrity_checkpoint_for_equivalent,
+)
+from app.core.invariants import InvariantChecker
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
+
+
+@pytest.mark.asyncio
+async def test_integrity_checkpoint_propagates_unavailable_invariant_checker(
+    db_session,
+    monkeypatch,
+):
+    async def _checker_unavailable(*_args, **_kwargs):
+        raise RuntimeError("invariant checker unavailable")
+
+    monkeypatch.setattr(InvariantChecker, "check_zero_sum", _checker_unavailable)
+
+    with pytest.raises(RuntimeError, match="invariant checker unavailable"):
+        await compute_integrity_checkpoint_for_equivalent(
+            db_session,
+            equivalent_id=uuid.uuid4(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_batch_fails_and_rolls_back_when_checker_is_unavailable(
+    db_session,
+    monkeypatch,
+):
+    equivalent = Equivalent(
+        code="BATCH",
+        symbol="B",
+        description=None,
+        precision=2,
+        metadata_={},
+        is_active=True,
+    )
+    db_session.add(equivalent)
+    await db_session.commit()
+
+    async def _checker_unavailable(*_args, **_kwargs):
+        raise RuntimeError("batch checker unavailable")
+
+    monkeypatch.setattr(InvariantChecker, "check_zero_sum", _checker_unavailable)
+
+    with pytest.raises(RuntimeError, match="batch checker unavailable"):
+        await compute_and_store_integrity_checkpoints(db_session)
+
+    assert db_session.in_transaction() is False
 
 
 @pytest.mark.asyncio

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 import pytest
 
 from app.config import settings
@@ -69,6 +71,7 @@ async def test_admin_audit_log_pagination_and_q_search(client, db_session):
     assert payload['per_page'] == 50
     assert payload['total'] == 3
     assert len(payload['items']) == 3
+    assert all(datetime.fromisoformat(item['timestamp']).utcoffset() is not None for item in payload['items'])
 
     # Pagination
     r = await client.get('/api/v1/admin/audit-log?per_page=1&page=2', headers=headers)

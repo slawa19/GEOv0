@@ -21,7 +21,11 @@ from app.core.simulator.real_tick_payments_coordinator import (
 )
 from app.core.simulator.sse_broadcast import SseEventEmitter
 from app.schemas.payment import PaymentResult
-from app.utils.exceptions import BadRequestException, TimeoutException
+from app.utils.exceptions import (
+    BadRequestException,
+    RetryablePaymentConflictException,
+    TimeoutException,
+)
 
 
 @dataclass(frozen=True)
@@ -102,6 +106,11 @@ class _Sse:
 class _ExplodingPaymentEffect:
     def __init__(self) -> None:
         self.calls = 0
+        self.cache_invalidations = 0
+
+    def invalidate_routing_cache_once(self) -> bool:
+        self.cache_invalidations += 1
+        return True
 
     def apply_once(self) -> bool:
         self.calls += 1
@@ -111,6 +120,11 @@ class _ExplodingPaymentEffect:
 class _CountingPaymentEffect:
     def __init__(self) -> None:
         self.calls = 0
+        self.cache_invalidations = 0
+
+    def invalidate_routing_cache_once(self) -> bool:
+        self.cache_invalidations += 1
+        return True
 
     def apply_once(self) -> bool:
         self.calls += 1
@@ -164,6 +178,97 @@ def _run() -> RunRecord:
     run.tick_index = 1
     run.sim_time_ms = 1000
     return run
+
+
+@pytest.mark.asyncio
+async def test_executor_preacquires_complete_sorted_equivalent_owner_set(
+    monkeypatch,
+):
+    session = _Session()
+    sse = _Sse()
+    run = _run()
+    events: list[tuple[str, object]] = []
+
+    async def _acquire_owner(self, equivalent_codes):
+        events.append(("owner", tuple(equivalent_codes)))
+
+    async def _staged(self, _sender_id, *, equivalent, to_pid, amount, **_kwargs):
+        assert events and events[0][0] == "owner"
+        events.append(("staged", equivalent))
+        return StagedPaymentResult(
+            result=_payment_result(to_pid=to_pid, amount=amount),
+            post_commit_effects=None,
+        )
+
+    monkeypatch.setattr(
+        PaymentService,
+        "acquire_staged_equivalent_owner_locks",
+        _acquire_owner,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        PaymentService,
+        "create_payment_internal_staged",
+        _staged,
+        raising=True,
+    )
+
+    result = await _executor(sse).execute_planned_payments(
+        session=session,
+        run_id=run.run_id,
+        run=run,
+        planned=[
+            _Action(0, "UAH", "A", "B", "1.00"),
+            _Action(1, "EUR", "A", "C", "2.00"),
+            _Action(2, "UAH", "A", "D", "3.00"),
+        ],
+        equivalents=["EUR", "UAH"],
+        sender_id_by_pid={"A": uuid.uuid4()},
+        max_in_flight=3,
+        max_timeouts_per_tick=0,
+        fail_run=lambda *_args: None,
+    )
+
+    assert result.committed == 3
+    assert events[0] == ("owner", ("EUR", "UAH"))
+    assert [kind for kind, _value in events[1:]] == ["staged"] * 3
+
+
+@pytest.mark.asyncio
+async def test_retryable_staged_conflict_propagates_without_rejection_observation(
+    monkeypatch,
+):
+    session = _Session()
+    sse = _Sse()
+    run = _run()
+
+    async def _staged(self, _sender_id, **_kwargs):
+        raise RetryablePaymentConflictException()
+
+    monkeypatch.setattr(
+        PaymentService,
+        "create_payment_internal_staged",
+        _staged,
+        raising=True,
+    )
+
+    with pytest.raises(RetryablePaymentConflictException):
+        await _executor(sse).execute_planned_payments(
+            session=session,
+            run_id=run.run_id,
+            run=run,
+            planned=[_Action(0, "UAH", "A", "B", "1.00")],
+            equivalents=["UAH"],
+            sender_id_by_pid={"A": uuid.uuid4()},
+            max_in_flight=1,
+            max_timeouts_per_tick=0,
+            fail_run=lambda *_args: None,
+        )
+
+    assert session.rollbacks == 0
+    assert run.rejected_total == 0
+    assert run.errors_total == 0
+    assert sse.events == []
 
 
 @pytest.mark.asyncio
@@ -334,6 +439,7 @@ async def test_stop_requested_rollback_failure_resolves_unknown_once_and_propaga
 
     assert session.rollbacks == 1
     assert committed_effect.calls == 0
+    assert committed_effect.cache_invalidations == 1
     assert [event.get("type") for event in sse.events] == ["tx.failed"]
     assert run.committed_total == 0
     assert run.rejected_total == 1
@@ -342,7 +448,7 @@ async def test_stop_requested_rollback_failure_resolves_unknown_once_and_propaga
 
 
 @pytest.mark.asyncio
-async def test_stop_requested_double_cancellation_drains_successful_rollback():
+async def test_stop_requested_double_cancellation_bounds_rollback_wait():
     session = _ControlledRollbackSession()
     sse = _Sse()
     run = _run()
@@ -358,19 +464,20 @@ async def test_stop_requested_double_cancellation_drains_successful_rollback():
     task.cancel("second cancellation")
     await asyncio.sleep(0)
     await asyncio.sleep(0)
-    assert not task.done()
-
-    session.release_rollback.set()
     with pytest.raises(asyncio.CancelledError):
         await task
 
-    assert session.rollbacks == 1
+    assert session.rollbacks == 0
     assert committed_effect.calls == 0
+    assert committed_effect.cache_invalidations == 1
     assert [event.get("type") for event in sse.events] == ["tx.failed"]
     assert run.committed_total == 0
     assert run.rejected_total == 1
     assert deferred.apply_after_rollback() is False
     assert deferred.apply_after_unknown_transaction_outcome() is False
+
+    session.release_rollback.set()
+    await asyncio.sleep(0)
 
 
 @pytest.mark.asyncio

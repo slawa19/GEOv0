@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, model_serializer, model_validator
@@ -433,9 +434,55 @@ class SetIntensityRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+# The wire scale of `MetricPoint.v`. It mirrors `simulator_run_metrics.value`,
+# which is `Numeric(20, 8)`: rendering at the store's own scale is what makes
+# one single form come out of every producer.
+METRIC_VALUE_QUANT = Decimal("0.00000001")
+
+
+def metric_point_value(value: Optional[Decimal | float | int | str]) -> Optional[str]:
+    """Render a measured metric value as the decimal string `MetricPoint.v` carries.
+
+    2026-08-20 / p007_t715. `null` in, `null` out: "not measured" must never
+    become a string, and never a zero.
+
+    **One canonical form for every producer.** The value is quantized to the
+    eight fractional digits of the `Numeric(20, 8)` column and printed with
+    `format(dec, "f")`. Both halves matter:
+
+    * fixed scale - otherwise the DB-backed reader emits `"0.00000000"` while
+      the synthetic generator emits `"0.0"` and `"45.3"` for the same field on
+      the same endpoint, and string comparison, de-duplication and caching keyed
+      on `v` stop being stable across modes;
+    * plain notation, never the exponential form - exponential money strings are
+      a confirmed defect class in this repository, consumer parsers break on
+      them.
+
+    A measured zero is therefore `"0.00000000"`: a value, still distinguishable
+    from `null` ("not measured").
+    """
+
+    if value is None:
+        return None
+    dec = value if isinstance(value, Decimal) else Decimal(str(value))
+    return format(dec.quantize(METRIC_VALUE_QUANT), "f")
+
+
 class MetricPoint(BaseModel):
     t_ms: int = Field(ge=0)
-    v: float
+    # 2026-08-20 / p007_t715: a decimal string, not a float. Two of the seven
+    # series (`total_debt`, `clearing_volume`) are money, and money stays exact
+    # (AGENTS.md §8). The field is one type for all seven series on purpose: the
+    # column is one column, so a union would only force consumers to branch.
+    #
+    # The form is fixed: the `Numeric(20, 8)` column's eight fractional digits,
+    # plain decimal notation, one shape for the DB-backed and the synthetic
+    # producer alike (see `metric_point_value`).
+    #
+    # `null` means "no measurement at/before this timestamp"; it is intentionally
+    # distinguishable from a measured zero (`"0.00000000"`). Producers must not
+    # synthesize a zero to keep the field populated.
+    v: Optional[str]
 
     model_config = ConfigDict(extra="forbid")
 

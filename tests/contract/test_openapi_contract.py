@@ -1,4 +1,4 @@
-"""Semantic contract between canonical ``api/openapi.yaml`` and FastAPI.
+"""Selected exact contracts and drift ratchets between canonical OpenAPI and FastAPI.
 
 The YAML file is the reviewed public contract. FastAPI's generated OpenAPI is a
 runtime projection with OpenAPI 3.1 nullable/title noise and incomplete custom
@@ -14,7 +14,7 @@ import copy
 import hashlib
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 import pytest
 import yaml
@@ -36,15 +36,42 @@ TRANSPORT_HEADER_DRIFT_SHA256 = (
 )
 TRANSPORT_HEADER_DRIFT_COUNT = 59
 REQUEST_SCHEMA_DRIFT_SHA256 = (
-    "82aaef73df69de4979b0a58ed9d0aba0a4d928ff83cdf2d713e3ec70a238a422"
+    "7eee1624c958db4900f2d24bf529bf7e6bab92aff055fd15403eb847dd7e5c25"
 )
 REQUEST_SCHEMA_DRIFT_COUNT = 13
+# 2026-08-20 / p007_unblock_f0071: MetricPoint.v became nullable on both sides
+# (canonical YAML and generated schema) so "not measured" is distinguishable from
+# a measured zero. The GET /simulator/runs/{run_id}/metrics entry already carried
+# unrelated drift, so only its content changed; the entry count stays 71 and the
+# normalized diff for `v` is identical on both sides.
+# 2026-08-20 / p007_t713_t714: the canonical MetricSeriesKey enum gained
+# `active_participants` and `active_trustlines`, the two series that were already
+# measured, persisted and declared by the pydantic model. Only the canonical side
+# of the GET /simulator/runs/{run_id}/metrics entry moved, and it moved towards
+# the generated side: both now list the same seven keys. That entry still drifts
+# for unrelated pre-existing reasons, so the entry count stays 71.
+# 2026-08-20 / p007_t715: `MetricPoint.v` became a decimal string on both sides.
+# Two of the seven series (`total_debt`, `clearing_volume`) are amounts in the
+# selected equivalent, so they are money and stay exact decimal (AGENTS.md §8);
+# the field is one type for all seven series because they come from one column.
+# The normalized delta inside the GET /simulator/runs/{run_id}/metrics entry is
+# exactly, on the canonical and the generated side alike:
+#     "v": {"nullable": true, "type": "number"}
+#  -> "v": {"nullable": true, "type": "string"}
+# Both sides moved together, so this entry still drifts only for the unrelated
+# pre-existing reasons, and the entry count stays 71.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "09e4088707989a7692418443ca17e298f8f683c7f04ccf07d980b04595be3598"
+    "ccb4001a18a198528e7915b308c7cd98983ff42b8c223da10dba9aab520370ee"
 )
-SUCCESS_SCHEMA_DRIFT_COUNT = 74
+SUCCESS_SCHEMA_DRIFT_COUNT = 71
+# 2026-08-11 / T501: public DB health no longer declares exception details;
+# the new admin diagnostic operation matches generated responses, so count stays 84.
+# 2026-08-20 / p007_unblock_f0071: simulator metrics/bottlenecks declare 503 in the
+# canonical contract (real mode refuses to substitute synthetic data). FastAPI does
+# not know about it because the routes carry no `responses=`, so both operations —
+# which already drifted for other reasons — gained a canonical-only 503; count stays 84.
 ERROR_RESPONSE_DRIFT_SHA256 = (
-    "0d173514d6e6d80197dad8f700ba5388c4e6909e7f40262641dc76bf8c6442bc"
+    "b0af8a86310cdf916a93a5fcae795b95effa067204d89108c15a4c3e6ef214ec"
 )
 ERROR_RESPONSE_DRIFT_COUNT = 84
 SECURITY_DRIFT_SHA256 = (
@@ -310,6 +337,475 @@ def test_openapi_yaml_is_well_formed() -> None:
     assert spec["paths"], "OpenAPI spec has no paths"
 
 
+def test_admin_equivalent_mutation_inputs_preserve_canonical_bounds() -> None:
+    canonical = _load_openapi_yaml()
+    generated = _load_fastapi_openapi()
+
+    canonical_schemas = canonical["components"]["schemas"]
+    equivalent_code = canonical_schemas["EquivalentCode"]
+    equivalent_precision = canonical_schemas["Equivalent"]["properties"]["precision"]
+    canonical_create = canonical_schemas["AdminEquivalentCreateRequest"]["properties"]
+    canonical_update = canonical_schemas["AdminEquivalentUpdateRequest"]["properties"]
+
+    assert equivalent_code["pattern"] == r"^[A-Z0-9_]{1,16}$"
+    assert equivalent_precision["minimum"] == 0
+    assert equivalent_precision["maximum"] == 18
+    assert canonical_create["code"] == {"$ref": "#/components/schemas/EquivalentCode"}
+    for properties in (canonical_create, canonical_update):
+        assert properties["precision"]["minimum"] == equivalent_precision["minimum"]
+        assert properties["precision"]["maximum"] == equivalent_precision["maximum"]
+
+    generated_schemas = generated["components"]["schemas"]
+    create_properties = generated_schemas["AdminEquivalentCreateRequest"]["properties"]
+    update_properties = generated_schemas["AdminEquivalentUpdateRequest"]["properties"]
+
+    assert create_properties["code"]["pattern"] == equivalent_code["pattern"]
+    for properties in (create_properties, update_properties):
+        precision = _normalize_schema(properties["precision"], generated)
+        assert precision["minimum"] == equivalent_precision["minimum"]
+        assert precision["maximum"] == equivalent_precision["maximum"]
+
+
+def test_equivalent_reads_preserve_legacy_visibility_without_weakening_mutations() -> None:
+    canonical = _load_openapi_yaml()
+    generated = _load_fastapi_openapi()
+    canonical_schemas = canonical["components"]["schemas"]
+    generated_schemas = generated["components"]["schemas"]
+
+    list_item_ref = {"$ref": "#/components/schemas/StoredEquivalent"}
+    assert canonical_schemas["EquivalentsList"]["properties"]["items"]["items"] == (
+        list_item_ref
+    )
+    assert generated_schemas["EquivalentsList"]["properties"]["items"]["items"] == (
+        list_item_ref
+    )
+
+    strict = canonical_schemas["Equivalent"]
+    stored = canonical_schemas["StoredEquivalent"]
+    assert set(stored["properties"]) == set(strict["properties"])
+    assert set(stored["required"]) == set(strict["required"])
+    assert stored["properties"]["code"] == {"type": "string"}
+    assert stored["properties"]["precision"] == {"type": "integer"}
+
+    generated_stored = generated_schemas["StoredEquivalent"]
+    assert set(generated_stored["properties"]) == set(strict["properties"])
+    assert set(generated_stored["required"]) == set(strict["required"])
+    assert generated_stored["properties"]["code"]["type"] == "string"
+    assert "pattern" not in generated_stored["properties"]["code"]
+    assert generated_stored["properties"]["precision"]["type"] == "integer"
+    assert "minimum" not in generated_stored["properties"]["precision"]
+    assert "maximum" not in generated_stored["properties"]["precision"]
+
+    canonical_patch = canonical["paths"]["/admin/equivalents/{code}"]["patch"]
+    canonical_errors = _normalized_responses(canonical_patch, canonical)
+    error_envelope = _normalize_schema(
+        {"$ref": "#/components/schemas/ErrorEnvelope"}, canonical
+    )
+    assert canonical_errors["409"]["content"]["application/json"] == error_envelope
+    generated_409 = generated["paths"]["/api/v1/admin/equivalents/{code}"][
+        "patch"
+    ]["responses"]["409"]
+    assert generated_409["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/ErrorEnvelope"
+    }
+
+
+def _assert_exact_object_schema(
+    schema: dict[str, Any],
+    *,
+    properties: set[str],
+    required: set[str],
+) -> None:
+    assert schema["type"] == "object"
+    assert set(schema["properties"]) == properties
+    assert set(schema["required"]) == required
+    assert schema.get("additionalProperties") is False
+
+
+def test_selected_admin_and_integrity_success_schemas_are_exact() -> None:
+    canonical = _load_openapi_yaml()
+    generated = _load_fastapi_openapi()
+    schemas = canonical["components"]["schemas"]
+    generated_schemas = generated["components"]["schemas"]
+
+    operation_refs = {
+        ("get", "/admin/feature-flags"): "AdminFeatureFlags",
+        ("patch", "/admin/feature-flags"): "AdminFeatureFlags",
+        ("post", "/admin/participants/{pid}/freeze"): "AdminParticipantStatusResponse",
+        ("post", "/admin/participants/{pid}/unfreeze"): "AdminParticipantStatusResponse",
+        ("post", "/admin/transactions/{tx_id}/abort"): "AdminAbortTxResponse",
+        ("post", "/admin/equivalents"): "Equivalent",
+        ("patch", "/admin/equivalents/{code}"): "Equivalent",
+        ("delete", "/admin/equivalents/{code}"): "AdminDeleteResponse",
+        ("get", "/admin/equivalents/{code}/usage"): "AdminEquivalentUsageResponse",
+        ("get", "/integrity/status"): "IntegrityStatusResponse",
+        ("post", "/integrity/verify"): "IntegrityVerifyResponse",
+        (
+            "post",
+            "/integrity/repair/net-mutual-debts",
+        ): "IntegrityNetMutualDebtsRepairResponse",
+        (
+            "post",
+            "/integrity/repair/cap-debts-to-trust-limits",
+        ): "IntegrityCapDebtsRepairResponse",
+    }
+    for (method, path), component in operation_refs.items():
+        expected_ref = f"#/components/schemas/{component}"
+        canonical_schema = canonical["paths"][path][method]["responses"]["200"][
+            "content"
+        ]["application/json"]["schema"]
+        generated_schema = generated["paths"][f"/api/v1{path}"][method]["responses"][
+            "200"
+        ]["content"]["application/json"]["schema"]
+        assert canonical_schema == {"$ref": expected_ref}
+        assert generated_schema == {"$ref": expected_ref}
+
+    exact_shapes = {
+        "AdminFeatureFlags": (
+            {"multipath_enabled", "full_multipath_enabled", "clearing_enabled"},
+            {"multipath_enabled", "full_multipath_enabled", "clearing_enabled"},
+        ),
+        "AdminParticipantStatusResponse": (
+            {"pid", "status"},
+            {"pid", "status"},
+        ),
+        "AdminAbortTxResponse": ({"tx_id", "status"}, {"tx_id", "status"}),
+        "AdminDeleteResponse": ({"deleted"}, {"deleted"}),
+        "AdminEquivalentUsageResponse": (
+            {"code", "trustlines", "debts", "integrity_checkpoints"},
+            {"code", "trustlines", "debts", "integrity_checkpoints"},
+        ),
+        "IntegrityStatusResponse": (
+            {"status", "last_check", "equivalents", "alerts"},
+            {"status", "last_check", "equivalents", "alerts"},
+        ),
+        "IntegrityVerifyResponse": (
+            {"status", "checked_at", "equivalents", "alerts"},
+            {"status", "checked_at", "equivalents", "alerts"},
+        ),
+        "IntegrityNetMutualDebtsRepairResponse": (
+            {"ok", "action", "netted_pairs", "updated", "deleted"},
+            {"ok", "action", "netted_pairs", "updated", "deleted"},
+        ),
+        "IntegrityCapDebtsRepairResponse": (
+            {"ok", "action", "scanned", "updated", "deleted"},
+            {"ok", "action", "scanned", "updated", "deleted"},
+        ),
+    }
+    for component, (properties, required) in exact_shapes.items():
+        _assert_exact_object_schema(
+            schemas[component],
+            properties=properties,
+            required=required,
+        )
+        assert set(generated_schemas[component]["properties"]) == properties
+
+    generated_exact_components = {
+        "AdminFeatureFlags",
+        "AdminParticipantStatusResponse",
+        "AdminAbortTxResponse",
+        "AdminDeleteResponse",
+        "AdminEquivalentUsageResponse",
+        "IntegrityNetMutualDebtsRepairResponse",
+        "IntegrityCapDebtsRepairResponse",
+    }
+    for component in generated_exact_components:
+        properties, required = exact_shapes[component]
+        _assert_exact_object_schema(
+            generated_schemas[component],
+            properties=properties,
+            required=required,
+        )
+
+    # These response models have defaults, so Pydantic's generated construction
+    # schema is intentionally looser than the serialized response projection.
+    # Pin that distinction explicitly instead of letting requiredness/extras go
+    # unchecked; the canonical response remains exact and both routes pass alerts.
+    for component, required in {
+        "IntegrityStatusResponse": {"status", "last_check", "equivalents"},
+        "IntegrityVerifyResponse": {"status", "checked_at", "equivalents"},
+    }.items():
+        generated_schema = generated_schemas[component]
+        assert set(generated_schema["required"]) == required
+        assert "additionalProperties" not in generated_schema
+
+    assert schemas["AdminParticipantStatusResponse"]["properties"]["status"][
+        "enum"
+    ] == ["active", "suspended"]
+    assert schemas["AdminAbortTxResponse"]["properties"]["status"]["pattern"] == (
+        "^aborted$"
+    )
+    assert schemas["Equivalent"]["properties"]["code"] == {
+        "$ref": "#/components/schemas/EquivalentCode"
+    }
+    assert set(schemas["Equivalent"]["properties"]) == {
+        "code",
+        "symbol",
+        "description",
+        "precision",
+        "metadata",
+        "is_active",
+        "created_at",
+        "updated_at",
+    }
+    assert set(schemas["Equivalent"]["required"]) == {
+        "code",
+        "precision",
+        "is_active",
+        "created_at",
+        "updated_at",
+    }
+    assert "additionalProperties" not in schemas["Equivalent"]
+    assert set(generated_schemas["Equivalent"]["properties"]) == set(
+        schemas["Equivalent"]["properties"]
+    )
+    assert set(generated_schemas["Equivalent"]["required"]) == set(
+        schemas["Equivalent"]["required"]
+    )
+    assert schemas["Equivalent"]["properties"]["precision"]["minimum"] == 0
+    assert schemas["Equivalent"]["properties"]["precision"]["maximum"] == 18
+    assert generated_schemas["Equivalent"]["properties"]["code"]["pattern"] == (
+        schemas["EquivalentCode"]["pattern"]
+    )
+    assert (
+        generated_schemas["Equivalent"]["properties"]["precision"]["minimum"]
+        == schemas["Equivalent"]["properties"]["precision"]["minimum"]
+    )
+    assert (
+        generated_schemas["Equivalent"]["properties"]["precision"]["maximum"]
+        == schemas["Equivalent"]["properties"]["precision"]["maximum"]
+    )
+    for timestamp_field in ("created_at", "updated_at"):
+        assert schemas["Equivalent"]["properties"][timestamp_field]["format"] == (
+            "date-time"
+        )
+        assert (
+            generated_schemas["Equivalent"]["properties"][timestamp_field]["format"]
+            == "date-time"
+        )
+
+    health_values = ["healthy", "warning", "critical"]
+    assert schemas["IntegrityStatusResponse"]["properties"]["status"]["enum"] == (
+        health_values
+    )
+    assert schemas["IntegrityVerifyResponse"]["properties"]["status"]["enum"] == (
+        health_values
+    )
+    assert schemas["IntegrityNetMutualDebtsRepairResponse"]["properties"]["action"][
+        "enum"
+    ] == ["net-mutual-debts"]
+    assert schemas["IntegrityCapDebtsRepairResponse"]["properties"]["action"][
+        "enum"
+    ] == ["cap-debts-to-trust-limits"]
+
+
+def test_run_status_schema_preserves_stop_and_counter_fields() -> None:
+    canonical = _load_openapi_yaml()
+    schema = canonical["components"]["schemas"]["RunStatus"]
+    generated = _load_fastapi_openapi()["components"]["schemas"]["RunStatus"]
+
+    _assert_exact_object_schema(
+        schema,
+        properties={
+            "api_version",
+            "run_id",
+            "scenario_id",
+            "mode",
+            "state",
+            "started_at",
+            "stopped_at",
+            "stop_requested_at",
+            "stop_source",
+            "stop_reason",
+            "stop_client",
+            "sim_time_ms",
+            "intensity_percent",
+            "ops_sec",
+            "queue_depth",
+            "errors_total",
+            "committed_total",
+            "rejected_total",
+            "attempts_total",
+            "timeouts_total",
+            "errors_last_1m",
+            "consec_all_rejected_ticks",
+            "last_error",
+            "last_event_type",
+            "current_phase",
+        },
+        required={"api_version", "run_id", "scenario_id", "mode", "state"},
+    )
+    assert set(generated["properties"]) == set(schema["properties"])
+    assert set(generated["required"]) == {"run_id", "scenario_id", "mode", "state"}
+
+    for name in {
+        "sim_time_ms",
+        "intensity_percent",
+        "ops_sec",
+        "queue_depth",
+        "errors_total",
+        "committed_total",
+        "rejected_total",
+        "attempts_total",
+        "timeouts_total",
+        "errors_last_1m",
+        "consec_all_rejected_ticks",
+    }:
+        assert schema["properties"][name]["nullable"] is True
+        assert schema["properties"][name]["minimum"] == 0
+
+    for name in {"started_at", "stopped_at", "stop_requested_at"}:
+        assert schema["properties"][name]["nullable"] is True
+        assert schema["properties"][name]["format"] == "date-time"
+    for name in {"stop_source", "stop_reason", "stop_client"}:
+        assert schema["properties"][name] == {"type": "string", "nullable": True}
+
+
+def test_simulator_event_union_tracks_producer_families_and_wire_aliases() -> None:
+    from app.schemas.simulator import (
+        SimulatorAuditDriftEvent,
+        SimulatorEvent,
+        SimulatorRunStatusEvent,
+        SimulatorTxFailedEvent,
+        SimulatorTxUpdatedEvent,
+    )
+
+    canonical = _load_openapi_yaml()
+    schemas = canonical["components"]["schemas"]
+    expected_refs = [
+        f"#/components/schemas/{event_type.__name__}"
+        for event_type in get_args(SimulatorEvent)
+    ]
+
+    assert [item["$ref"] for item in schemas["SimulatorEvent"]["oneOf"]] == (
+        expected_refs
+    )
+    assert expected_refs == [
+        "#/components/schemas/SimulatorTxUpdatedEvent",
+        "#/components/schemas/SimulatorTxFailedEvent",
+        "#/components/schemas/SimulatorClearingDoneEvent",
+        "#/components/schemas/SimulatorAuditDriftEvent",
+        "#/components/schemas/SimulatorTopologyChangedEvent",
+        "#/components/schemas/SimulatorRunStatusEvent",
+    ]
+
+    for model in (SimulatorTxUpdatedEvent, SimulatorTxFailedEvent):
+        model_properties = model.model_json_schema(by_alias=True)["properties"]
+        assert "from" in model_properties
+        assert "from_" not in model_properties
+    for component in ("SimulatorTxUpdatedEvent", "SimulatorTxFailedEvent"):
+        assert "from" in schemas[component]["properties"]
+        assert "from_" not in schemas[component]["properties"]
+    assert schemas["SimulatorEventEdgeRef"]["required"] == ["from", "to"]
+    assert "from_" not in schemas["SimulatorEventEdgeRef"]["properties"]
+
+    assert set(schemas["SimulatorAuditDriftEvent"]["properties"]) == {
+        "event_id",
+        "ts",
+        "type",
+        "equivalent",
+        "tick_index",
+        "severity",
+        "total_drift",
+        "drifts",
+        "source",
+    }
+    assert set(SimulatorAuditDriftEvent.model_json_schema()["properties"]) == set(
+        schemas["SimulatorAuditDriftEvent"]["properties"]
+    )
+    assert set(schemas["SimulatorTopologyChangedEvent"]["properties"]) == {
+        "event_id",
+        "ts",
+        "type",
+        "equivalent",
+        "payload",
+        "reason",
+    }
+    assert set(schemas["TopologyChangedPayload"]["properties"]) == {
+        "added_nodes",
+        "removed_nodes",
+        "frozen_nodes",
+        "added_edges",
+        "removed_edges",
+        "frozen_edges",
+        "node_patch",
+        "edge_patch",
+    }
+    assert schemas["SimulatorTxUpdatedEvent"]["properties"]["amount_flyout"] == {
+        "type": "boolean",
+        "nullable": True,
+    }
+    assert set(schemas["SimulatorRunStatusEvent"]["properties"]) == {
+        "event_id",
+        "ts",
+        "type",
+        "run_id",
+        "scenario_id",
+        "state",
+        "sim_time_ms",
+        "intensity_percent",
+        "ops_sec",
+        "queue_depth",
+        "attempts_total",
+        "committed_total",
+        "rejected_total",
+        "errors_total",
+        "timeouts_total",
+        "consec_all_rejected_ticks",
+        "last_event_type",
+        "current_phase",
+        "last_error",
+    }
+    assert set(SimulatorRunStatusEvent.model_json_schema()["properties"]) == set(
+        schemas["SimulatorRunStatusEvent"]["properties"]
+    )
+
+
+def test_simulator_events_documents_replay_cursor_and_gone_response() -> None:
+    spec = _load_openapi_yaml()
+    generated = _load_fastapi_openapi()
+    for canonical_path, generated_path in (
+        ("/simulator/events", "/api/v1/simulator/events"),
+        (
+            "/simulator/runs/{run_id}/events",
+            "/api/v1/simulator/runs/{run_id}/events",
+        ),
+    ):
+        path_item = spec["paths"][canonical_path]
+        operation = path_item["get"]
+        generated_item = generated["paths"][generated_path]
+        generated_operation = generated_item["get"]
+
+        parameters = _normalized_parameters(operation, path_item, spec)
+        assert parameters[("header", "Last-Event-ID")] == {
+            "required": False,
+            "schema": {"type": "string"},
+        }
+        assert _normalized_parameters(
+            generated_operation, generated_item, generated
+        )[("header", "Last-Event-ID")] == parameters[("header", "Last-Event-ID")]
+
+        responses = _normalized_responses(operation, spec)
+        assert responses["410"]["content"]["application/json"] == _normalize_schema(
+            {"$ref": "#/components/schemas/ErrorEnvelope"}, spec
+        )
+        assert generated_operation["responses"]["410"]["content"]["application/json"][
+            "schema"
+        ] == {"$ref": "#/components/schemas/ErrorEnvelope"}
+
+        without_cursor = copy.deepcopy(operation)
+        without_cursor["parameters"] = [
+            parameter
+            for parameter in without_cursor["parameters"]
+            if parameter.get("name") != "Last-Event-ID"
+        ]
+        assert parameters != _normalized_parameters(without_cursor, path_item, spec)
+
+        without_gone = copy.deepcopy(operation)
+        del without_gone["responses"]["410"]
+        assert responses != _normalized_responses(without_gone, spec)
+
+
 def test_payment_create_declares_exact_response_statuses_and_error_envelopes() -> None:
     spec = _load_openapi_yaml()
     operation = spec["paths"]["/payments"]["post"]
@@ -521,7 +1017,9 @@ def test_root_health_and_versioned_api_are_explicitly_classified() -> None:
         ) == _normalized_security(versioned_operation, versioned_item, generated)
 
 
-def test_openapi_paths_methods_parameters_and_required_bodies_match_app() -> None:
+def test_openapi_paths_methods_business_parameter_identities_and_required_bodies_match_and_schemas_are_ratcheted() -> (
+    None
+):
     canonical = _load_openapi_yaml()
     generated = _load_fastapi_openapi()
 

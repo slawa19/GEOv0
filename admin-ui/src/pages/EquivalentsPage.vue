@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
 import { useAuthStore } from '../stores/auth'
@@ -9,6 +9,7 @@ import TooltipLabel from '../ui/TooltipLabel.vue'
 import LoadErrorAlert from '../ui/LoadErrorAlert.vue'
 import { t } from '../i18n'
 import { useLatestRequest } from '../composables/useLatestRequest'
+import { carryScenarioQuery, toLocationQueryRaw } from '../router/query'
 
 type Equivalent = { code: string; precision: number; description: string; is_active: boolean }
 type UsageCounts = { trustlines?: number; incidents?: number; debts?: number; integrity_checkpoints?: number }
@@ -19,8 +20,10 @@ const error = ref<string | null>(null)
 const includeInactive = ref(false)
 const items = ref<Equivalent[]>([])
 const loadRequests = useLatestRequest()
+let pageActive = true
 
 const router = useRouter()
+const route = useRoute()
 const authStore = useAuthStore()
 
 const createOpen = ref(false)
@@ -42,6 +45,7 @@ async function warmUsage(code: string) {
   usageLoadingByCode[key] = true
   try {
     const usage = assertSuccess(await api.getEquivalentUsage(key))
+    if (!pageActive) return
     const u = usage as unknown as Record<string, unknown>
     usageByCode[key] = {
       trustlines: Number(u.trustlines ?? 0),
@@ -53,7 +57,7 @@ async function warmUsage(code: string) {
   } catch {
     // best-effort only
   } finally {
-    usageLoadingByCode[key] = false
+    if (pageActive) usageLoadingByCode[key] = false
   }
 }
 
@@ -104,11 +108,13 @@ async function createEq() {
         is_active: Boolean(createForm.is_active),
       }),
     ).created
+    if (!pageActive) return
     ElMessage.success(t('equivalents.created', { code: created.code }))
     createOpen.value = false
     includeInactive.value = true
     await load()
   } catch (e: unknown) {
+    if (!pageActive) return
     const msg = e instanceof Error ? e.message : String(e)
     ElMessage.error(msg || t('equivalents.createFailed'))
   }
@@ -123,10 +129,12 @@ async function saveEdit() {
         description: editForm.description,
       }),
     ).updated
+    if (!pageActive) return
     ElMessage.success(t('equivalents.updated', { code: updated.code }))
     editOpen.value = false
     await load()
   } catch (e: unknown) {
+    if (!pageActive) return
     const msg = e instanceof Error ? e.message : String(e)
     ElMessage.error(msg || t('equivalents.updateFailed'))
   }
@@ -150,12 +158,17 @@ async function setActive(row: Equivalent, next: boolean) {
     return
   }
 
+  if (!pageActive) return
   try {
-    assertSuccess(await api.setEquivalentActive(row.code, next, reason))
+    const updated = assertSuccess(await api.setEquivalentActive(row.code, next, reason)).updated
+    if (!pageActive) return
+    const index = items.value.findIndex((item) => item.code === row.code)
+    if (index >= 0) items.value[index] = updated
     ElMessage.success(next ? t('equivalents.activated', { code: row.code }) : t('equivalents.deactivated', { code: row.code }))
     includeInactive.value = true
     await load()
   } catch (e: unknown) {
+    if (!pageActive) return
     const msg = e instanceof Error ? e.message : String(e)
     ElMessage.error(msg || t('equivalents.updateFailed'))
   }
@@ -180,6 +193,8 @@ async function deleteEq(row: Equivalent) {
     usageLine = ''
   }
 
+  if (!pageActive) return
+
   let reason: string
   try {
     reason = await ElMessageBox.prompt(
@@ -199,12 +214,15 @@ async function deleteEq(row: Equivalent) {
     return
   }
 
+  if (!pageActive) return
   try {
     assertSuccess(await api.deleteEquivalent(row.code, reason))
+    if (!pageActive) return
     ElMessage.success(t('equivalents.deleted', { code: row.code }))
     includeInactive.value = true
     await load()
   } catch (e: unknown) {
+    if (!pageActive) return
     const err = e as { message?: unknown; details?: Record<string, unknown> }
     const details = err?.details
     const tl = details?.trustlines
@@ -230,11 +248,17 @@ async function deleteEq(row: Equivalent) {
 }
 
 function goAudit(row: Equivalent) {
-  void router.push({ path: '/audit-log', query: { code: row.code, q: row.code } })
+  void router.push({
+    path: '/audit-log',
+    query: toLocationQueryRaw({ ...carryScenarioQuery(route.query), code: row.code, q: row.code }),
+  })
 }
 
 onMounted(() => void load())
 watch(includeInactive, () => void load())
+onBeforeUnmount(() => {
+  pageActive = false
+})
 
 const activeCount = computed(() => items.value.filter((e) => e.is_active).length)
 </script>

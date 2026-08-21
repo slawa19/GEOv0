@@ -1,6 +1,6 @@
 from uuid import UUID
 from decimal import Decimal
-from typing import List, Optional, Literal
+from typing import List, Literal
 from sqlalchemy import func, select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.utils.exceptions import (
@@ -22,6 +22,7 @@ from app.schemas.trustline import TrustLineCloseRequest, TrustLineCreateRequest,
 from sqlalchemy import inspect as sa_inspect
 from app.utils.validation import validate_equivalent_code, validate_trustline_policy
 from app.core.integrity import compute_integrity_checkpoint_for_equivalent
+from app.core.payments.router import PaymentRouter
 
 class TrustLineService:
     def __init__(self, session: AsyncSession):
@@ -71,14 +72,10 @@ class TrustLineService:
         if not equivalent:
             raise NotFoundException(f"Equivalent '{data.equivalent}' not found")
 
-        checkpoint_before = None
-        try:
-            checkpoint_before = await compute_integrity_checkpoint_for_equivalent(
-                self.session,
-                equivalent_id=equivalent.id,
-            )
-        except Exception:
-            checkpoint_before = None
+        checkpoint_before = await compute_integrity_checkpoint_for_equivalent(
+            self.session,
+            equivalent_id=equivalent.id,
+        )
 
         # Check for duplicate active trustline
         stmt = select(TrustLine).where(
@@ -107,36 +104,34 @@ class TrustLineService:
 
         await self.session.flush()
 
-        try:
-            checkpoint_after = await compute_integrity_checkpoint_for_equivalent(
-                self.session,
-                equivalent_id=equivalent.id,
-            )
-            invariants_status = checkpoint_after.invariants_status or {}
-            passed = bool(invariants_status.get("passed", True))
-            before_sum = checkpoint_before.checksum if checkpoint_before else ""
-            after_sum = checkpoint_after.checksum or before_sum
+        checkpoint_after = await compute_integrity_checkpoint_for_equivalent(
+            self.session,
+            equivalent_id=equivalent.id,
+        )
+        invariants_status = checkpoint_after.invariants_status or {}
+        passed = bool(invariants_status.get("passed", False))
+        before_sum = checkpoint_before.checksum if checkpoint_before else ""
+        after_sum = checkpoint_after.checksum or before_sum
 
-            self.session.add(
-                IntegrityAuditLog(
-                    operation_type="TRUST_LINE_CREATE",
-                    tx_id=None,
-                    equivalent_code=equivalent.code,
-                    state_checksum_before=before_sum,
-                    state_checksum_after=after_sum,
-                    affected_participants={
-                        "from": from_participant.pid,
-                        "to": to_participant.pid,
-                    },
-                    invariants_checked=invariants_status.get("checks") or invariants_status,
-                    verification_passed=passed,
-                    error_details=None if passed else invariants_status,
-                )
+        self.session.add(
+            IntegrityAuditLog(
+                operation_type="TRUST_LINE_CREATE",
+                tx_id=None,
+                equivalent_code=equivalent.code,
+                state_checksum_before=before_sum,
+                state_checksum_after=after_sum,
+                affected_participants={
+                    "from": from_participant.pid,
+                    "to": to_participant.pid,
+                },
+                invariants_checked=invariants_status.get("checks") or invariants_status,
+                verification_passed=passed,
+                error_details=None if passed else invariants_status,
             )
-        except Exception:
-            pass
+        )
 
         await self.session.commit()
+        PaymentRouter.invalidate_cache(equivalent.code)
         await self.session.refresh(trustline)
         
         # Hydrate extra fields for response
@@ -171,14 +166,10 @@ class TrustLineService:
         except Exception:
             raise InvalidSignatureException("Invalid signature")
 
-        checkpoint_before = None
-        try:
-            checkpoint_before = await compute_integrity_checkpoint_for_equivalent(
-                self.session,
-                equivalent_id=trustline.equivalent_id,
-            )
-        except Exception:
-            checkpoint_before = None
+        checkpoint_before = await compute_integrity_checkpoint_for_equivalent(
+            self.session,
+            equivalent_id=trustline.equivalent_id,
+        )
 
         if data.limit is not None:
             used = await self._get_used_amount(trustline)
@@ -199,48 +190,63 @@ class TrustLineService:
 
         await self.session.flush()
 
-        try:
-            checkpoint_after = await compute_integrity_checkpoint_for_equivalent(
-                self.session,
-                equivalent_id=trustline.equivalent_id,
-            )
-            invariants_status = checkpoint_after.invariants_status or {}
-            passed = bool(invariants_status.get("passed", True))
-            before_sum = checkpoint_before.checksum if checkpoint_before else ""
-            after_sum = checkpoint_after.checksum or before_sum
+        checkpoint_after = await compute_integrity_checkpoint_for_equivalent(
+            self.session,
+            equivalent_id=trustline.equivalent_id,
+        )
+        invariants_status = checkpoint_after.invariants_status or {}
+        passed = bool(invariants_status.get("passed", False))
+        before_sum = checkpoint_before.checksum if checkpoint_before else ""
+        after_sum = checkpoint_after.checksum or before_sum
 
-            # Resolve PIDs for readability.
-            from_pid = (
-                await self.session.execute(select(Participant.pid).where(Participant.id == trustline.from_participant_id))
-            ).scalar_one_or_none()
-            to_pid = (
-                await self.session.execute(select(Participant.pid).where(Participant.id == trustline.to_participant_id))
-            ).scalar_one_or_none()
-            eq_code = (
-                await self.session.execute(select(Equivalent.code).where(Equivalent.id == trustline.equivalent_id))
-            ).scalar_one_or_none()
-
-            self.session.add(
-                IntegrityAuditLog(
-                    operation_type="TRUST_LINE_UPDATE",
-                    tx_id=None,
-                    equivalent_code=str(eq_code or trustline.equivalent_id),
-                    state_checksum_before=before_sum,
-                    state_checksum_after=after_sum,
-                    affected_participants={
-                        "from": str(from_pid or trustline.from_participant_id),
-                        "to": str(to_pid or trustline.to_participant_id),
-                        "trustline_id": str(trustline_id),
-                    },
-                    invariants_checked=invariants_status.get("checks") or invariants_status,
-                    verification_passed=passed,
-                    error_details=None if passed else invariants_status,
+        # Resolve PIDs for readability.
+        from_pid = (
+            await self.session.execute(
+                select(Participant.pid).where(
+                    Participant.id == trustline.from_participant_id
                 )
             )
-        except Exception:
-            pass
+        ).scalar_one_or_none()
+        to_pid = (
+            await self.session.execute(
+                select(Participant.pid).where(
+                    Participant.id == trustline.to_participant_id
+                )
+            )
+        ).scalar_one_or_none()
+        eq_code = (
+            await self.session.execute(
+                select(Equivalent.code).where(
+                    Equivalent.id == trustline.equivalent_id
+                )
+            )
+        ).scalar_one_or_none()
 
+        self.session.add(
+            IntegrityAuditLog(
+                operation_type="TRUST_LINE_UPDATE",
+                tx_id=None,
+                equivalent_code=str(eq_code or trustline.equivalent_id),
+                state_checksum_before=before_sum,
+                state_checksum_after=after_sum,
+                affected_participants={
+                    "from": str(from_pid or trustline.from_participant_id),
+                    "to": str(to_pid or trustline.to_participant_id),
+                    "trustline_id": str(trustline_id),
+                },
+                invariants_checked=invariants_status.get("checks") or invariants_status,
+                verification_passed=passed,
+                error_details=None if passed else invariants_status,
+            )
+        )
+
+        equivalent_code = (
+            await self.session.execute(
+                select(Equivalent.code).where(Equivalent.id == trustline.equivalent_id)
+            )
+        ).scalar_one()
         await self.session.commit()
+        PaymentRouter.invalidate_cache(equivalent_code)
         await self.session.refresh(trustline)
         return await self._hydrate_trustline(trustline)
 
@@ -274,60 +280,71 @@ class TrustLineService:
         if used > 0 or reverse_used > 0:
             raise BadRequestException("Cannot close trustline with non-zero debt")
 
-        checkpoint_before = None
-        try:
-            checkpoint_before = await compute_integrity_checkpoint_for_equivalent(
-                self.session,
-                equivalent_id=trustline.equivalent_id,
-            )
-        except Exception:
-            checkpoint_before = None
+        checkpoint_before = await compute_integrity_checkpoint_for_equivalent(
+            self.session,
+            equivalent_id=trustline.equivalent_id,
+        )
 
         trustline.status = 'closed'
 
         await self.session.flush()
 
-        try:
-            checkpoint_after = await compute_integrity_checkpoint_for_equivalent(
-                self.session,
-                equivalent_id=trustline.equivalent_id,
-            )
-            invariants_status = checkpoint_after.invariants_status or {}
-            passed = bool(invariants_status.get("passed", True))
-            before_sum = checkpoint_before.checksum if checkpoint_before else ""
-            after_sum = checkpoint_after.checksum or before_sum
+        checkpoint_after = await compute_integrity_checkpoint_for_equivalent(
+            self.session,
+            equivalent_id=trustline.equivalent_id,
+        )
+        invariants_status = checkpoint_after.invariants_status or {}
+        passed = bool(invariants_status.get("passed", False))
+        before_sum = checkpoint_before.checksum if checkpoint_before else ""
+        after_sum = checkpoint_after.checksum or before_sum
 
-            from_pid = (
-                await self.session.execute(select(Participant.pid).where(Participant.id == trustline.from_participant_id))
-            ).scalar_one_or_none()
-            to_pid = (
-                await self.session.execute(select(Participant.pid).where(Participant.id == trustline.to_participant_id))
-            ).scalar_one_or_none()
-            eq_code = (
-                await self.session.execute(select(Equivalent.code).where(Equivalent.id == trustline.equivalent_id))
-            ).scalar_one_or_none()
-
-            self.session.add(
-                IntegrityAuditLog(
-                    operation_type="TRUST_LINE_CLOSE",
-                    tx_id=None,
-                    equivalent_code=str(eq_code or trustline.equivalent_id),
-                    state_checksum_before=before_sum,
-                    state_checksum_after=after_sum,
-                    affected_participants={
-                        "from": str(from_pid or trustline.from_participant_id),
-                        "to": str(to_pid or trustline.to_participant_id),
-                        "trustline_id": str(trustline_id),
-                    },
-                    invariants_checked=invariants_status.get("checks") or invariants_status,
-                    verification_passed=passed,
-                    error_details=None if passed else invariants_status,
+        from_pid = (
+            await self.session.execute(
+                select(Participant.pid).where(
+                    Participant.id == trustline.from_participant_id
                 )
             )
-        except Exception:
-            pass
+        ).scalar_one_or_none()
+        to_pid = (
+            await self.session.execute(
+                select(Participant.pid).where(
+                    Participant.id == trustline.to_participant_id
+                )
+            )
+        ).scalar_one_or_none()
+        eq_code = (
+            await self.session.execute(
+                select(Equivalent.code).where(
+                    Equivalent.id == trustline.equivalent_id
+                )
+            )
+        ).scalar_one_or_none()
 
+        self.session.add(
+            IntegrityAuditLog(
+                operation_type="TRUST_LINE_CLOSE",
+                tx_id=None,
+                equivalent_code=str(eq_code or trustline.equivalent_id),
+                state_checksum_before=before_sum,
+                state_checksum_after=after_sum,
+                affected_participants={
+                    "from": str(from_pid or trustline.from_participant_id),
+                    "to": str(to_pid or trustline.to_participant_id),
+                    "trustline_id": str(trustline_id),
+                },
+                invariants_checked=invariants_status.get("checks") or invariants_status,
+                verification_passed=passed,
+                error_details=None if passed else invariants_status,
+            )
+        )
+
+        equivalent_code = (
+            await self.session.execute(
+                select(Equivalent.code).where(Equivalent.id == trustline.equivalent_id)
+            )
+        ).scalar_one()
         await self.session.commit()
+        PaymentRouter.invalidate_cache(equivalent_code)
 
     async def get_by_participant(
         self,

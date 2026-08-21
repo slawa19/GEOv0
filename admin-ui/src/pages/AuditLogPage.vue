@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
 import TooltipLabel from '../ui/TooltipLabel.vue'
@@ -11,12 +11,16 @@ import { debounce } from '../utils/debounce'
 import { t } from '../i18n'
 import type { AuditLogEntry } from '../types/domain'
 import { useLatestRequest } from '../composables/useLatestRequest'
+import { readQueryString, toLocationQueryRaw } from '../router/query'
+import { useRouteHydrationGuard } from '../composables/useRouteHydrationGuard'
 
 const loading = ref(false)
 const error = ref<string | null>(null)
 
 const route = useRoute()
+const router = useRouter()
 const q = ref('')
+let scheduledSearchQ = ''
 
 const page = ref(1)
 const perPage = ref(20)
@@ -27,6 +31,30 @@ const loadRequests = useLatestRequest()
 const drawerOpen = ref(false)
 const selected = ref<AuditLogEntry | null>(null)
 
+const { isApplying: applyingRouteQuery, isActive: isAuditRoute, run: withRouteHydration } =
+  useRouteHydrationGuard(route, '/audit-log')
+
+function applyRouteQueryToFilter(): boolean {
+  const changed = withRouteHydration(() => {
+    const nextQ = readQueryString(route.query.q)
+    if (q.value === nextQ) return false
+    q.value = nextQ
+    return true
+  })
+  return Boolean(changed)
+}
+
+function syncFilterToRouteQuery() {
+  if (!isAuditRoute.value) return
+  const query: Record<string, unknown> = { ...route.query }
+  const nextQ = q.value
+  if (nextQ !== '') query.q = nextQ
+  else delete query.q
+  if (readQueryString(route.query.q) !== nextQ) {
+    void router.replace({ query: toLocationQueryRaw(query) })
+  }
+}
+
 async function load() {
   const request = loadRequests.begin()
   const requestPage = page.value
@@ -35,10 +63,11 @@ async function load() {
   error.value = null
   try {
     // NOTE: audit-log search must be server-side. Client-side filtering of a single loaded page is misleading.
+    const searchQ = q.value.trim()
     const data = assertSuccess(await api.listAuditLog({
       page: requestPage,
       per_page: requestPerPage,
-      q: q.value || undefined,
+      q: searchQ || undefined,
     }))
     if (!request.isCurrent()) return
     total.value = data.total
@@ -62,7 +91,11 @@ function openRow(row: AuditLogEntry) {
   drawerOpen.value = true
 }
 
-onMounted(() => void load())
+onMounted(() => {
+  applyRouteQueryToFilter()
+  scheduledSearchQ = q.value.trim()
+  void load()
+})
 watch(page, () => void load())
 watch(perPage, () => {
   page.value = 1
@@ -70,22 +103,33 @@ watch(perPage, () => {
 })
 
 const debouncedReload = debounce(() => {
-  page.value = 1
-  void load()
+  if (page.value !== 1) page.value = 1
+  else void load()
 }, 250)
+
+function scheduleReloadIfNormalizedSearchChanged() {
+  const nextSearchQ = q.value.trim()
+  if (nextSearchQ === scheduledSearchQ) return
+  scheduledSearchQ = nextSearchQ
+  debouncedReload()
+}
 
 onBeforeUnmount(() => debouncedReload.cancel())
 
 watch(
   () => route.query.q,
-  (v) => {
-    if (typeof v === 'string') q.value = v
+  () => {
+    const changed = applyRouteQueryToFilter()
+    if (changed) {
+      scheduleReloadIfNormalizedSearchChanged()
+    }
   },
-  { immediate: true },
 )
 
 watch(q, () => {
-  debouncedReload()
+  if (applyingRouteQuery.value) return
+  syncFilterToRouteQuery()
+  scheduleReloadIfNormalizedSearchChanged()
 })
 </script>
 

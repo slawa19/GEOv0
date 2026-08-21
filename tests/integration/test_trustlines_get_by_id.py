@@ -1,4 +1,5 @@
 from decimal import Decimal
+from datetime import datetime, timedelta
 import base64
 
 import pytest
@@ -40,7 +41,12 @@ async def test_get_trustline_by_id(client, db_session, auth_user):
         },
     )
     assert create_resp.status_code == 201
-    trustline_id = create_resp.json()["id"]
+    create_body = create_resp.json()
+    trustline_id = create_body["id"]
+    for field in ("created_at", "updated_at"):
+        assert datetime.fromisoformat(
+            create_body[field].replace("Z", "+00:00")
+        ).utcoffset() == timedelta(0)
 
     get_resp = await client.get(f"/api/v1/trustlines/{trustline_id}", headers=auth_user["headers"])
     assert get_resp.status_code == 200
@@ -49,3 +55,7 @@ async def test_get_trustline_by_id(client, db_session, auth_user):
     assert body["id"] == trustline_id
     assert body["to"] == "bob"
     assert body["equivalent"] == "USD"
+    for field in ("created_at", "updated_at"):
+        assert datetime.fromisoformat(
+            body[field].replace("Z", "+00:00")
+        ).utcoffset() == timedelta(0)

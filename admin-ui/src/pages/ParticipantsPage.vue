@@ -44,6 +44,7 @@ const loadRequests = useLatestRequest()
 
 const drawerOpen = ref(false)
 const selected = ref<Participant | null>(null)
+let pageActive = true
 
 const { isApplying: applyingRouteQuery, isActive: isParticipantsRoute, run: withRouteHydration } =
   useRouteHydrationGuard(route, '/participants')
@@ -149,12 +150,18 @@ async function promptReason(title: string): Promise<string | null> {
 
 async function freeze(row: Participant) {
   const reason = await promptReason(t('participant.prompt.freezeTitle', { pid: row.pid }))
-  if (!reason) return
+  if (!reason || !pageActive) return
   try {
-    assertSuccess(await api.freezeParticipant(row.pid, reason))
+    const result = assertSuccess(await api.freezeParticipant(row.pid, reason))
+    if (!pageActive) return
+    const updated = { ...row, status: result.status }
+    const index = items.value.findIndex((item) => item.pid === row.pid)
+    if (index >= 0) items.value[index] = updated
+    if (selected.value?.pid === row.pid) selected.value = updated
     ElMessage.success(t('participant.frozen', { pid: row.pid }))
     await load()
   } catch (e: unknown) {
+    if (!pageActive) return
     const msg = e instanceof Error ? e.message : String(e)
     void toastApiError(e, { fallbackTitle: msg || t('participant.freezeFailed') })
   }
@@ -162,12 +169,18 @@ async function freeze(row: Participant) {
 
 async function unfreeze(row: Participant) {
   const reason = await promptReason(t('participant.prompt.unfreezeTitle', { pid: row.pid }))
-  if (!reason) return
+  if (!reason || !pageActive) return
   try {
-    assertSuccess(await api.unfreezeParticipant(row.pid, reason))
+    const result = assertSuccess(await api.unfreezeParticipant(row.pid, reason))
+    if (!pageActive) return
+    const updated = { ...row, status: result.status }
+    const index = items.value.findIndex((item) => item.pid === row.pid)
+    if (index >= 0) items.value[index] = updated
+    if (selected.value?.pid === row.pid) selected.value = updated
     ElMessage.success(t('participant.unfrozen', { pid: row.pid }))
     await load()
   } catch (e: unknown) {
+    if (!pageActive) return
     const msg = e instanceof Error ? e.message : String(e)
     void toastApiError(e, { fallbackTitle: msg || t('participant.unfreezeFailed') })
   }
@@ -223,7 +236,10 @@ const debouncedReload = debounce(() => {
   void load()
 }, DEBOUNCE_SEARCH_MS)
 
-onBeforeUnmount(() => debouncedReload.cancel())
+onBeforeUnmount(() => {
+  pageActive = false
+  debouncedReload.cancel()
+})
 
 watch([q, status, type], () => {
   if (applyingRouteQuery.value) return

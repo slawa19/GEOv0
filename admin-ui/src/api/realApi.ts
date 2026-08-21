@@ -1,7 +1,34 @@
 import { assertSuccess, type ApiEnvelope, ApiException } from './envelope'
 import { toastApiError } from './errorToast'
 import { mapUiStatusToAdmin, normalizeAdminStatusToUi } from './statusMapping'
+import {
+  AdminConfigPatchResponseSchema,
+  AdminConfigResponseSchema,
+  AdminAbortTxResponseSchema,
+  AdminEquivalentDeleteResponseSchema,
+  AdminEquivalentMutationResponseSchema,
+  AdminEquivalentUsageResponseSchema,
+  AdminFeatureFlagsSchema,
+  AdminParticipantActionResponseSchema,
+  IntegrityRepairCapDebtsResponseSchema,
+  IntegrityRepairNetMutualDebtsResponseSchema,
+  IntegrityStatusResponseSchema,
+  IntegrityVerifyResponseSchema,
+  flattenAdminConfig,
+  type AdminAbortTxResponse,
+  type AdminConfigPatchResponse,
+  type AdminConfigResponse,
+  type AdminEquivalentDeleteResponse,
+  type AdminEquivalentUsageResponse,
+  type AdminFeatureFlags,
+  type AdminParticipantActionResponse,
+  type IntegrityRepairCapDebtsResponse,
+  type IntegrityRepairNetMutualDebtsResponse,
+  type IntegrityStatusResponse,
+  type IntegrityVerifyResponse,
+} from './adminContracts'
 import { z, type ZodTypeAny } from 'zod'
+import { isUnitIntervalDecimalString } from '../utils/decimal'
 import type {
   AuditLogEntry,
   ClearingCycles,
@@ -92,7 +119,7 @@ const TrustlineSchema = z
     available: DecimalString,
     status: z.string(),
     created_at: z.string(),
-    policy: z.record(z.string(), z.unknown()).optional(),
+    policy: z.record(z.string(), z.unknown()).nullable().optional(),
   })
   .passthrough()
 
@@ -104,7 +131,7 @@ const IncidentSchema = z
     equivalent: z.string(),
     age_seconds: z.number(),
     sla_seconds: z.number(),
-    created_at: z.string().optional(),
+    created_at: z.string().nullable().optional(),
   })
   .passthrough()
 
@@ -112,7 +139,7 @@ const EquivalentSchema = z
   .object({
     code: z.string(),
     precision: z.number(),
-    description: z.string(),
+    description: z.string().nullable().optional(),
     is_active: z.boolean(),
   })
   .passthrough()
@@ -130,16 +157,17 @@ const AuditLogEntrySchema = z
   .object({
     id: z.string(),
     timestamp: z.string(),
-    actor_id: z.string(),
-    actor_role: z.string(),
+    actor_id: z.string().nullable().optional(),
+    actor_role: z.string().nullable().optional(),
     action: z.string(),
-    object_type: z.string(),
-    object_id: z.string(),
+    object_type: z.string().nullable().optional(),
+    object_id: z.string().nullable().optional(),
     reason: z.string().nullable().optional(),
     before_state: z.unknown().optional(),
     after_state: z.unknown().optional(),
-    request_id: z.string().optional(),
-    ip_address: z.string().optional(),
+    request_id: z.string().nullable().optional(),
+    ip_address: z.string().nullable().optional(),
+    user_agent: z.string().nullable().optional(),
   })
   .passthrough()
 
@@ -260,6 +288,23 @@ const LiquiditySummarySchema = z
     top_bottleneck_edges: z.array(TrustlineSchema),
   })
   .passthrough()
+
+function paginatedSchema(itemSchema: ZodTypeAny) {
+  return z
+    .object({
+      items: z.array(itemSchema),
+      page: z.number().int().min(1),
+      per_page: z.number().int().min(1).max(200),
+      total: z.number().int().min(0),
+    })
+    .passthrough()
+}
+
+const ParticipantsListSchema = paginatedSchema(ParticipantSchema)
+const TrustlinesListSchema = paginatedSchema(TrustlineSchema)
+const AuditLogListSchema = paginatedSchema(AuditLogEntrySchema)
+const IncidentsListSchema = paginatedSchema(IncidentSchema)
+const EquivalentsListSchema = z.object({ items: z.array(EquivalentSchema) }).passthrough()
 
 function isProdBuild(): boolean {
   const forced = (globalThis as unknown as { __GEO_ADMINUI_FORCE_PROD__?: unknown })?.__GEO_ADMINUI_FORCE_PROD__
@@ -511,27 +556,6 @@ export async function requestJson<T>(
   }
 }
 
-let featureFlagsPatchQueue: Promise<unknown> = Promise.resolve()
-
-function enqueueFeatureFlagsPatch<T>(job: () => Promise<T>): Promise<T> {
-  const run = featureFlagsPatchQueue.then(job, job)
-  featureFlagsPatchQueue = run.then(
-    () => undefined,
-    () => undefined,
-  )
-  return run
-}
-
-function bestEffortTotal(page: number, perPage: number, itemsLen: number): number {
-  const p = Math.max(1, page || 1)
-  const pp = Math.max(1, perPage || 1)
-  const offset = (p - 1) * pp
-  // Backend list endpoints currently don't return total. We approximate:
-  // - if last page (itemsLen < pp) => total = offset + itemsLen
-  // - else => total = offset + itemsLen + 1 (signals “has next page”)
-  return itemsLen < pp ? offset + itemsLen : offset + itemsLen + 1
-}
-
 export function buildQuery(pathname: string, params: Record<string, unknown>): string {
   const rawBase = baseUrl()
 
@@ -558,6 +582,20 @@ export function buildQuery(pathname: string, params: Record<string, unknown>): s
   return u.pathname + u.search
 }
 
+function validatedOptionalThreshold(value: string | number | null | undefined): string | undefined {
+  if (value === null || value === undefined) return undefined
+  const threshold = String(value).trim()
+  if (!threshold) return undefined
+  if (!isUnitIntervalDecimalString(threshold)) {
+    throw new ApiException({
+      status: 422,
+      code: 'VALIDATION_ERROR',
+      message: 'Threshold must be a decimal between 0 and 1',
+    })
+  }
+  return threshold
+}
+
 export const realApi = {
   health(): Promise<ApiEnvelope<Record<string, unknown>>> {
     return requestJson('/api/v1/health')
@@ -573,49 +611,64 @@ export const realApi = {
 
   async getConfig(): Promise<ApiEnvelope<Record<string, unknown>>> {
     // Backend returns { items: [{ key, value, mutable }] }. UI currently expects a flat object.
-    const raw = await requestJson<{ items: Array<{ key: string; value: unknown; mutable?: boolean }> }>(
-      '/api/v1/admin/config',
-      { admin: true },
-    )
-    const data = assertSuccess(raw).items || []
-    const mapped: Record<string, unknown> = {}
-    for (const it of data) mapped[it.key] = it.value
-    return { success: true, data: mapped }
+    const raw = await requestJson<AdminConfigResponse>('/api/v1/admin/config', {
+      admin: true,
+      schema: AdminConfigResponseSchema,
+    })
+    return { success: true, data: flattenAdminConfig(assertSuccess(raw)) }
   },
 
-  patchConfig(patch: Record<string, unknown>): Promise<ApiEnvelope<{ updated: string[] }>> {
-    return requestJson('/api/v1/admin/config', { method: 'PATCH', body: { updates: patch }, admin: true })
-  },
-
-  getFeatureFlags(): Promise<ApiEnvelope<Record<string, unknown>>> {
-    return requestJson('/api/v1/admin/feature-flags', { admin: true })
-  },
-
-  async patchFeatureFlags(patch: Record<string, unknown>): Promise<ApiEnvelope<Record<string, unknown>>> {
-    // Backend expects full payload: { multipath_enabled, full_multipath_enabled, clearing_enabled, reason? }
-    // Serialize calls within the same UI instance to reduce local lost-updates.
-    return enqueueFeatureFlagsPatch(async () => {
-      const current =
-        assertSuccess(await requestJson<Record<string, unknown>>('/api/v1/admin/feature-flags', { admin: true })) || {}
-      const body = { ...current, ...patch }
-      return requestJson('/api/v1/admin/feature-flags', { method: 'PATCH', body, admin: true })
+  patchConfig(patch: Record<string, unknown>): Promise<ApiEnvelope<AdminConfigPatchResponse>> {
+    return requestJson('/api/v1/admin/config', {
+      method: 'PATCH',
+      body: { updates: patch },
+      admin: true,
+      schema: AdminConfigPatchResponseSchema,
     })
   },
 
-  integrityStatus(): Promise<ApiEnvelope<Record<string, unknown>>> {
-    return requestJson('/api/v1/integrity/status', { admin: true })
+  getFeatureFlags(): Promise<ApiEnvelope<AdminFeatureFlags>> {
+    return requestJson('/api/v1/admin/feature-flags', { admin: true, schema: AdminFeatureFlagsSchema })
   },
 
-  integrityVerify(): Promise<ApiEnvelope<Record<string, unknown>>> {
-    return requestJson('/api/v1/integrity/verify', { method: 'POST', body: {}, admin: true })
+  patchFeatureFlags(patch: Record<string, unknown>): Promise<ApiEnvelope<AdminFeatureFlags>> {
+    return requestJson('/api/v1/admin/feature-flags', {
+      method: 'PATCH',
+      body: patch,
+      admin: true,
+      schema: AdminFeatureFlagsSchema,
+    })
   },
 
-  integrityRepairNetMutualDebts(): Promise<ApiEnvelope<Record<string, unknown>>> {
-    return requestJson('/api/v1/integrity/repair/net-mutual-debts', { method: 'POST', body: {}, admin: true })
+  integrityStatus(): Promise<ApiEnvelope<IntegrityStatusResponse>> {
+    return requestJson('/api/v1/integrity/status', { admin: true, schema: IntegrityStatusResponseSchema })
   },
 
-  integrityRepairCapDebtsToTrustLimits(): Promise<ApiEnvelope<Record<string, unknown>>> {
-    return requestJson('/api/v1/integrity/repair/cap-debts-to-trust-limits', { method: 'POST', body: {}, admin: true })
+  integrityVerify(): Promise<ApiEnvelope<IntegrityVerifyResponse>> {
+    return requestJson('/api/v1/integrity/verify', {
+      method: 'POST',
+      body: {},
+      admin: true,
+      schema: IntegrityVerifyResponseSchema,
+    })
+  },
+
+  integrityRepairNetMutualDebts(): Promise<ApiEnvelope<IntegrityRepairNetMutualDebtsResponse>> {
+    return requestJson('/api/v1/integrity/repair/net-mutual-debts', {
+      method: 'POST',
+      body: {},
+      admin: true,
+      schema: IntegrityRepairNetMutualDebtsResponseSchema,
+    })
+  },
+
+  integrityRepairCapDebtsToTrustLimits(): Promise<ApiEnvelope<IntegrityRepairCapDebtsResponse>> {
+    return requestJson('/api/v1/integrity/repair/cap-debts-to-trust-limits', {
+      method: 'POST',
+      body: {},
+      admin: true,
+      schema: IntegrityRepairCapDebtsResponseSchema,
+    })
   },
 
   // The endpoints below should be aligned to OpenAPI; adjust pathname/query as backend stabilizes.
@@ -632,11 +685,11 @@ export const realApi = {
 
     const payload = await requestJson<Paginated<Participant>>(
       buildQuery('/api/v1/admin/participants', { ...params, status: status || undefined, page, per_page }),
-      { admin: true },
+      { admin: true, schema: ParticipantsListSchema },
     )
 
     const backend = assertSuccess(payload)
-    const items = (backend.items || []).map((p) => ({
+    const items = backend.items.map((p) => ({
       ...p,
       status: normalizeAdminStatusToUi(p.status),
     }))
@@ -645,9 +698,9 @@ export const realApi = {
       success: true,
       data: {
         items,
-        page: backend.page ?? page,
-        per_page: backend.per_page ?? per_page,
-        total: typeof backend.total === 'number' ? backend.total : bestEffortTotal(page, per_page, items.length),
+        page: backend.page,
+        per_page: backend.per_page,
+        total: backend.total,
       },
     }
   },
@@ -657,7 +710,7 @@ export const realApi = {
   },
 
   trustlineBottlenecks(params: { threshold?: string; limit?: number; equivalent?: string }): Promise<ApiEnvelope<{ threshold: number; items: Trustline[] }>> {
-    const threshold = String(params.threshold ?? '').trim() || undefined
+    const threshold = validatedOptionalThreshold(params.threshold)
     const limit = params.limit ?? 10
     const equivalent = String(params.equivalent ?? '').trim() || undefined
     return requestJson<{ threshold: number; items: Trustline[] }>(
@@ -667,7 +720,7 @@ export const realApi = {
   },
 
   liquiditySummary(params: { equivalent?: string; threshold?: string; limit?: number }): Promise<ApiEnvelope<LiquiditySummary>> {
-    const threshold = String(params.threshold ?? '').trim() || undefined
+    const threshold = validatedOptionalThreshold(params.threshold)
     const limit = params.limit ?? 10
     const equivalentRaw = String(params.equivalent ?? '').trim().toUpperCase()
     const equivalent = equivalentRaw && equivalentRaw !== 'ALL' ? equivalentRaw : undefined
@@ -678,31 +731,33 @@ export const realApi = {
   },
 
   async freezeParticipant(pid: string, reason: string): Promise<ApiEnvelope<{ pid: string; status: string }>> {
-    const r = await requestJson<{ pid: string; status: string }>(
+    const r = await requestJson<AdminParticipantActionResponse>(
       `/api/v1/admin/participants/${encodeURIComponent(pid)}/freeze`,
       {
-      method: 'POST',
-      body: { reason },
-      admin: true,
+        method: 'POST',
+        body: { reason },
+        admin: true,
+        schema: AdminParticipantActionResponseSchema,
       },
     )
 
     if (!r.success) return r
-    return { success: true, data: { pid: r.data?.pid || pid, status: normalizeAdminStatusToUi(r.data?.status) } }
+    return { success: true, data: { pid: r.data.pid, status: normalizeAdminStatusToUi(r.data.status) } }
   },
 
   async unfreezeParticipant(pid: string, reason: string): Promise<ApiEnvelope<{ pid: string; status: string }>> {
-    const r = await requestJson<{ pid: string; status: string }>(
+    const r = await requestJson<AdminParticipantActionResponse>(
       `/api/v1/admin/participants/${encodeURIComponent(pid)}/unfreeze`,
       {
-      method: 'POST',
-      body: { reason },
-      admin: true,
+        method: 'POST',
+        body: { reason },
+        admin: true,
+        schema: AdminParticipantActionResponseSchema,
       },
     )
 
     if (!r.success) return r
-    return { success: true, data: { pid: r.data?.pid || pid, status: normalizeAdminStatusToUi(r.data?.status) } }
+    return { success: true, data: { pid: r.data.pid, status: normalizeAdminStatusToUi(r.data.status) } }
   },
 
   async listTrustlines(params: {
@@ -718,17 +773,16 @@ export const realApi = {
 
     const payload = await requestJson<Paginated<Trustline>>(
       buildQuery('/api/v1/admin/trustlines', { ...params, page, per_page }),
-      { admin: true },
+      { admin: true, schema: TrustlinesListSchema },
     )
     const backend = assertSuccess(payload)
-    const items = backend.items || []
     return {
       success: true,
       data: {
-        items,
-        page: backend.page ?? page,
-        per_page: backend.per_page ?? per_page,
-        total: typeof backend.total === 'number' ? backend.total : bestEffortTotal(page, per_page, items.length),
+        items: backend.items,
+        page: backend.page,
+        per_page: backend.per_page,
+        total: backend.total,
       },
     }
   },
@@ -745,17 +799,16 @@ export const realApi = {
     const per_page = params.per_page ?? 50
     const payload = await requestJson<Paginated<AuditLogEntry>>(
       buildQuery('/api/v1/admin/audit-log', { ...params, page, per_page }),
-      { admin: true },
+      { admin: true, schema: AuditLogListSchema },
     )
     const backend = assertSuccess(payload)
-    const items = backend.items || []
     return {
       success: true,
       data: {
-        items,
-        page: backend.page ?? page,
-        per_page: backend.per_page ?? per_page,
-        total: typeof backend.total === 'number' ? backend.total : bestEffortTotal(page, per_page, items.length),
+        items: backend.items,
+        page: backend.page,
+        per_page: backend.per_page,
+        total: backend.total,
       },
     }
   },
@@ -765,9 +818,9 @@ export const realApi = {
       buildQuery('/api/v1/admin/equivalents', {
         include_inactive: params.include_inactive ? true : undefined,
       }),
-      { admin: true },
+      { admin: true, schema: EquivalentsListSchema },
     )
-    const items = assertSuccess(payload).items || []
+    const items = assertSuccess(payload).items
     return { success: true, data: { items } }
   },
 
@@ -786,6 +839,7 @@ export const realApi = {
         is_active: input.is_active ?? true,
       },
       admin: true,
+      schema: AdminEquivalentMutationResponseSchema,
     })
     return { success: true, data: { created: assertSuccess(created) } }
   },
@@ -798,6 +852,7 @@ export const realApi = {
       method: 'PATCH',
       body: patch,
       admin: true,
+      schema: AdminEquivalentMutationResponseSchema,
     })
     return { success: true, data: { updated: assertSuccess(updated) } }
   },
@@ -807,19 +862,24 @@ export const realApi = {
       method: 'PATCH',
       body: { is_active: isActive, reason },
       admin: true,
+      schema: AdminEquivalentMutationResponseSchema,
     })
     return { success: true, data: { updated: assertSuccess(updated) } }
   },
 
-  getEquivalentUsage(code: string): Promise<ApiEnvelope<Record<string, unknown>>> {
-    return requestJson(`/api/v1/admin/equivalents/${encodeURIComponent(code)}/usage`, { admin: true })
+  getEquivalentUsage(code: string): Promise<ApiEnvelope<AdminEquivalentUsageResponse>> {
+    return requestJson(`/api/v1/admin/equivalents/${encodeURIComponent(code)}/usage`, {
+      admin: true,
+      schema: AdminEquivalentUsageResponseSchema,
+    })
   },
 
-  deleteEquivalent(code: string, reason: string): Promise<ApiEnvelope<{ deleted: string }>> {
+  deleteEquivalent(code: string, reason: string): Promise<ApiEnvelope<AdminEquivalentDeleteResponse>> {
     return requestJson(`/api/v1/admin/equivalents/${encodeURIComponent(code)}`, {
       method: 'DELETE',
       body: { reason },
       admin: true,
+      schema: AdminEquivalentDeleteResponseSchema,
     })
   },
 
@@ -831,14 +891,14 @@ export const realApi = {
     const per_page = params.per_page ?? 20
     return requestJson<Paginated<Incident>>(
       buildQuery('/api/v1/admin/incidents', { page, per_page }),
-      { admin: true },
+      { admin: true, schema: IncidentsListSchema },
     )
   },
 
-  abortTx(txId: string, reason: string): Promise<ApiEnvelope<{ tx_id: string; status: 'aborted' }>> {
-    return requestJson<{ tx_id: string; status: 'aborted' }>(
+  abortTx(txId: string, reason: string): Promise<ApiEnvelope<AdminAbortTxResponse>> {
+    return requestJson<AdminAbortTxResponse>(
       `/api/v1/admin/transactions/${encodeURIComponent(txId)}/abort`,
-      { method: 'POST', body: { reason }, admin: true },
+      { method: 'POST', body: { reason }, admin: true, schema: AdminAbortTxResponseSchema },
     )
   },
 
@@ -886,11 +946,10 @@ export const realApi = {
     params?: { equivalent?: string | null; threshold?: string | number | null },
   ): Promise<ApiEnvelope<ParticipantMetrics>> {
     const eq = params?.equivalent ? String(params.equivalent) : undefined
-    const thrRaw = params?.threshold
-    const threshold = thrRaw === null || thrRaw === undefined || thrRaw === '' ? undefined : Number(thrRaw)
+    const threshold = validatedOptionalThreshold(params?.threshold)
 
     const pathname = `/api/v1/admin/participants/${encodeURIComponent(pid)}/metrics`
-    const url = buildQuery(pathname, { equivalent: eq, threshold: Number.isFinite(threshold) ? threshold : undefined })
+    const url = buildQuery(pathname, { equivalent: eq, threshold })
     return await requestJson<ParticipantMetrics>(url, { admin: true, schema: ParticipantMetricsSchema })
   },
 }

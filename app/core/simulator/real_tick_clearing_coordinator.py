@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from decimal import Decimal
 from typing import Any, Awaitable, Callable, Literal
 
 from app.core.simulator.adaptive_clearing_policy import (
@@ -104,11 +105,17 @@ class RealTickClearingCoordinator:
         tick_t0: float,
         clearing_enabled: bool,
         safe_int_env: Callable[[str, int], int],
-        run_clearing: Callable[[], Awaitable[dict[str, float]]],
-        run_clearing_for_eq: Callable[..., Awaitable[dict[str, float]]] | None = None,
+        run_clearing: Callable[[], Awaitable[dict[str, Decimal]]],
+        run_clearing_for_eq: Callable[..., Awaitable[dict[str, Decimal]]] | None = None,
         payments_result: Any | None = None,
-    ) -> dict[str, float]:
-        clearing_volume_by_eq: dict[str, float] = {str(eq): 0.0 for eq in equivalents}
+    ) -> dict[str, Decimal]:
+        # 2026-08-20 / p007_t715: the cleared volume is money and feeds the
+        # `clearing_volume` metric series, so it stays Decimal across every
+        # branch here - including the early returns, which must not hand the
+        # caller a float zero.
+        clearing_volume_by_eq: dict[str, Decimal] = {
+            str(eq): Decimal("0") for eq in equivalents
+        }
 
         if not clearing_enabled:
             return clearing_volume_by_eq
@@ -178,15 +185,17 @@ class RealTickClearingCoordinator:
         planned_len: int,
         tick_t0: float,
         safe_int_env: Callable[[str, int], int],
-        run_clearing_for_eq: Callable[..., Awaitable[dict[str, float]]] | None,
+        run_clearing_for_eq: Callable[..., Awaitable[dict[str, Decimal]]] | None,
         payments_result: Any | None,
-    ) -> dict[str, float]:
+    ) -> dict[str, Decimal]:
         # IMPORTANT: process equivalents in a deterministic order.
         # This matters when tick-level caps (tick budget / max-eq-per-tick) are enabled:
         # we must ensure "which eq makes it into the first K" does not depend on input order.
         eqs_sorted: list[str] = sorted(str(eq) for eq in (equivalents or []))
 
-        clearing_volume_by_eq: dict[str, float] = {str(eq): 0.0 for eq in eqs_sorted}
+        clearing_volume_by_eq: dict[str, Decimal] = {
+            str(eq): Decimal("0") for eq in eqs_sorted
+        }
         state = self._adaptive_state
         policy = self._adaptive_policy
         cfg = self._adaptive_config
@@ -388,11 +397,24 @@ class RealTickClearingCoordinator:
                     ),
                     timeout=hard_timeout_sec,
                 )
-                volume = float(result.get(eq, 0.0)) if isinstance(result, dict) else 0.0
+                raw_volume = result.get(eq) if isinstance(result, dict) else None
+                if raw_volume is None:
+                    volume = Decimal("0")
+                elif isinstance(raw_volume, Decimal):
+                    volume = raw_volume
+                else:
+                    volume = Decimal(str(raw_volume))
                 clearing_volume_by_eq[eq] = volume
 
                 cost_ms = (time.monotonic() - eq_t0) * 1000.0
-                state.update_clearing_result(eq, volume=volume, cost_ms=cost_ms, tick=tick_index)
+                # float is deliberate here and only here: the backoff policy is a
+                # heuristic, not a money value. It compares the volume against
+                # ZERO_VOLUME_EPS to decide whether clearing this equivalent is
+                # worth retrying. The conversion is made at the call site so the
+                # boundary between money and heuristic stays visible in the code.
+                state.update_clearing_result(
+                    eq, volume=float(volume), cost_ms=cost_ms, tick=tick_index
+                )
 
                 self._logger.warning(
                     "simulator.real.adaptive_clearing_eq_done run_id=%s tick=%s eq=%s volume=%.2f cost_ms=%s",
@@ -442,10 +464,12 @@ class RealTickClearingCoordinator:
         planned_len: int,
         tick_t0: float,
         safe_int_env: Callable[[str, int], int],
-        run_clearing: Callable[[], Awaitable[dict[str, float]]],
+        run_clearing: Callable[[], Awaitable[dict[str, Decimal]]],
         payments_result: Any | None,
-    ) -> dict[str, float]:
-        clearing_volume_by_eq: dict[str, float] = {str(eq): 0.0 for eq in equivalents}
+    ) -> dict[str, Decimal]:
+        clearing_volume_by_eq: dict[str, Decimal] = {
+            str(eq): Decimal("0") for eq in equivalents
+        }
         tick_index = int(run.tick_index)
 
         # Commit payments BEFORE clearing to release the DB write lock.
@@ -475,7 +499,7 @@ class RealTickClearingCoordinator:
             safe_int_env=safe_int_env
         )
 
-        clearing_task: asyncio.Task[dict[str, float]] | None = None
+        clearing_task: asyncio.Task[dict[str, Decimal]] | None = None
         with self._lock:
             existing = run._real_clearing_task
             if existing is not None and existing.done():

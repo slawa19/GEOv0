@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_DOWN
@@ -59,6 +58,19 @@ def _atoms_to_decimal(atoms: int, precision: int) -> Decimal:
     return (Decimal(atoms) / scale).quantize(Decimal(1) / scale)
 
 
+def is_ratio_below_threshold(
+    *, numerator: Decimal, denominator: Decimal, threshold: Decimal
+) -> bool:
+    """Compare a decimal ratio without division or binary-float conversion."""
+
+    numerator_dec = Decimal(str(numerator))
+    denominator_dec = Decimal(str(denominator))
+    threshold_dec = Decimal(str(threshold))
+    if denominator_dec <= 0 or threshold_dec < 0:
+        return False
+    return numerator_dec < denominator_dec * threshold_dec
+
+
 def _hhi_from_shares(shares: list[float]) -> float:
     return float(sum((s or 0.0) * (s or 0.0) for s in shares))
 
@@ -75,7 +87,7 @@ async def compute_participant_metrics(
     *,
     pid: str,
     equivalent: str | None,
-    threshold: float | None,
+    threshold: Decimal | None,
 ) -> AdminParticipantMetricsResponse:
     pid = str(pid or "").strip()
     if not pid:
@@ -430,7 +442,7 @@ async def _compute_capacity(
     *,
     participant_id: Any,
     eq: _EquivalentInfo,
-    threshold: float | None,
+    threshold: Decimal | None,
 ) -> AdminParticipantCapacity:
     # Capacity around participant: trustlines where from/to = participant.
     tl = TrustLine
@@ -470,7 +482,7 @@ async def _compute_capacity(
 
     bottlenecks: list[AdminParticipantCapacityBottleneck] = []
 
-    thr = float(threshold) if threshold is not None else None
+    thr = Decimal(str(threshold)) if threshold is not None else None
 
     for trustline, used_amt in rows:
         used = used_amt or Decimal("0")
@@ -501,8 +513,11 @@ async def _compute_capacity(
             out_limit += trustline.limit or Decimal("0")
             out_used += used
             if thr is not None and trustline.status == "active" and (trustline.limit or Decimal("0")) > 0:
-                ratio = float(available / (trustline.limit or Decimal("0")))
-                if ratio < thr:
+                if is_ratio_below_threshold(
+                    numerator=available,
+                    denominator=trustline.limit or Decimal("0"),
+                    threshold=thr,
+                ):
                     bottlenecks.append(
                         AdminParticipantCapacityBottleneck(dir="out", other=to_pid, trustline=t_schema)
                     )
@@ -510,8 +525,11 @@ async def _compute_capacity(
             in_limit += trustline.limit or Decimal("0")
             in_used += used
             if thr is not None and trustline.status == "active" and (trustline.limit or Decimal("0")) > 0:
-                ratio = float(available / (trustline.limit or Decimal("0")))
-                if ratio < thr:
+                if is_ratio_below_threshold(
+                    numerator=available,
+                    denominator=trustline.limit or Decimal("0"),
+                    threshold=thr,
+                ):
                     bottlenecks.append(
                         AdminParticipantCapacityBottleneck(dir="in", other=from_pid, trustline=t_schema)
                     )

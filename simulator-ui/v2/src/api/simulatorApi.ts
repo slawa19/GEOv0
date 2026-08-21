@@ -1,4 +1,22 @@
 import { httpJson, httpUrl, type HttpConfig } from './http'
+import {
+  decodeBottlenecksResponse,
+  decodeClearingOnceResponse,
+  decodeGraphSnapshotResponse,
+  decodeMetricsResponse,
+  decodeRunStatusResponse,
+  decodeScenariosListResponse,
+  decodeScenarioSummaryResponse,
+  decodeSimulatorActionClearingRealResponse,
+  decodeSimulatorActionParticipantsListResponse,
+  decodeSimulatorActionPaymentRealResponse,
+  decodeSimulatorActionTrustlineCloseResponse,
+  decodeSimulatorActionTrustlineCreateResponse,
+  decodeSimulatorActionTrustlineUpdateResponse,
+  decodeSimulatorActionTrustlinesListResponse,
+  decodeSimulatorPaymentTargetsResponse,
+  decodeTxOnceResponse,
+} from './simulatorContracts'
 import type {
   ActiveRunResponse,
   ArtifactIndexResponse,
@@ -30,12 +48,26 @@ import type {
   TxOnceResponse,
 } from './simulatorTypes'
 
+async function simulatorContractJson<T>(
+  cfg: HttpConfig,
+  path: string,
+  decoder: (value: unknown) => T,
+  init?: RequestInit,
+): Promise<T> {
+  const value = await httpJson<unknown>(cfg, path, init)
+  return decoder(value)
+}
+
 export function listScenarios(cfg: HttpConfig): Promise<ScenariosListResponse> {
-  return httpJson(cfg, '/simulator/scenarios')
+  return simulatorContractJson(cfg, '/simulator/scenarios', decodeScenariosListResponse)
 }
 
 export function getScenario(cfg: HttpConfig, scenarioId: string): Promise<ScenarioSummary> {
-  return httpJson(cfg, `/simulator/scenarios/${encodeURIComponent(scenarioId)}`)
+  return simulatorContractJson(
+    cfg,
+    `/simulator/scenarios/${encodeURIComponent(scenarioId)}`,
+    decodeScenarioSummaryResponse,
+  )
 }
 
 export function getScenarioPreview(
@@ -45,7 +77,11 @@ export function getScenarioPreview(
   opts?: { mode?: SimulatorMode },
 ): Promise<SimulatorGraphSnapshot> {
   const q = new URLSearchParams({ equivalent, ...(opts?.mode ? { mode: opts.mode } : {}) }).toString()
-  return httpJson(cfg, `/simulator/scenarios/${encodeURIComponent(scenarioId)}/graph/preview?${q}`)
+  return simulatorContractJson(
+    cfg,
+    `/simulator/scenarios/${encodeURIComponent(scenarioId)}/graph/preview?${q}`,
+    decodeGraphSnapshotResponse,
+  )
 }
 
 export function uploadScenario(cfg: HttpConfig, req: { scenario: unknown; scenario_id?: string }): Promise<ScenarioSummary> {
@@ -67,15 +103,19 @@ export function getActiveRun(cfg: HttpConfig): Promise<ActiveRunResponse> {
 }
 
 export function getRun(cfg: HttpConfig, runId: string): Promise<RunStatus> {
-  return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}`)
+  return simulatorContractJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}`, decodeRunStatusResponse)
 }
 
 export function pauseRun(cfg: HttpConfig, runId: string): Promise<RunStatus> {
-  return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/pause`, { method: 'POST' })
+  return simulatorContractJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/pause`, decodeRunStatusResponse, {
+    method: 'POST',
+  })
 }
 
 export function resumeRun(cfg: HttpConfig, runId: string): Promise<RunStatus> {
-  return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/resume`, { method: 'POST' })
+  return simulatorContractJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/resume`, decodeRunStatusResponse, {
+    method: 'POST',
+  })
 }
 
 export function stopRun(
@@ -88,23 +128,33 @@ export function stopRun(
     ...(opts?.reason ? { reason: opts.reason } : {}),
   }).toString()
   const suffix = q ? `?${q}` : ''
-  return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/stop${suffix}`, { method: 'POST' })
-}
-
-export function restartRun(cfg: HttpConfig, runId: string): Promise<RunStatus> {
-  return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/restart`, { method: 'POST' })
+  return simulatorContractJson(
+    cfg,
+    `/simulator/runs/${encodeURIComponent(runId)}/stop${suffix}`,
+    decodeRunStatusResponse,
+    { method: 'POST' },
+  )
 }
 
 export function setIntensity(cfg: HttpConfig, runId: string, intensity_percent: number): Promise<RunStatus> {
-  return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/intensity`, {
-    method: 'POST',
-    body: JSON.stringify({ intensity_percent }),
-  })
+  return simulatorContractJson(
+    cfg,
+    `/simulator/runs/${encodeURIComponent(runId)}/intensity`,
+    decodeRunStatusResponse,
+    {
+      method: 'POST',
+      body: JSON.stringify({ intensity_percent }),
+    },
+  )
 }
 
 export function getSnapshot(cfg: HttpConfig, runId: string, equivalent: string): Promise<SimulatorGraphSnapshot> {
   const q = new URLSearchParams({ equivalent }).toString()
-  return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/graph/snapshot?${q}`)
+  return simulatorContractJson(
+    cfg,
+    `/simulator/runs/${encodeURIComponent(runId)}/graph/snapshot?${q}`,
+    decodeGraphSnapshotResponse,
+  )
 }
 
 export function getMetrics(
@@ -119,7 +169,11 @@ export function getMetrics(
     to_ms: String(params.to_ms),
     step_ms: String(params.step_ms),
   }).toString()
-  return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/metrics?${q}`)
+  return simulatorContractJson(
+    cfg,
+    `/simulator/runs/${encodeURIComponent(runId)}/metrics?${q}`,
+    decodeMetricsResponse,
+  )
 }
 
 export function getBottlenecks(
@@ -133,7 +187,11 @@ export function getBottlenecks(
     ...(params.limit != null ? { limit: String(params.limit) } : {}),
     ...(params.min_score != null ? { min_score: String(params.min_score) } : {}),
   }).toString()
-  return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/bottlenecks?${q}`)
+  return simulatorContractJson(
+    cfg,
+    `/simulator/runs/${encodeURIComponent(runId)}/bottlenecks?${q}`,
+    decodeBottlenecksResponse,
+  )
 }
 
 export function listArtifacts(cfg: HttpConfig, runId: string): Promise<ArtifactIndexResponse> {
@@ -146,10 +204,15 @@ export function artifactDownloadUrl(cfg: HttpConfig, runId: string, name: string
 }
 
 export function actionTxOnce(cfg: HttpConfig, runId: string, req: TxOnceRequest): Promise<TxOnceResponse> {
-  return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/actions/tx-once`, {
-    method: 'POST',
-    body: JSON.stringify(req),
-  })
+  return simulatorContractJson(
+    cfg,
+    `/simulator/runs/${encodeURIComponent(runId)}/actions/tx-once`,
+    decodeTxOnceResponse,
+    {
+      method: 'POST',
+      body: JSON.stringify(req),
+    },
+  )
 }
 
 export function actionClearingOnce(
@@ -157,10 +220,15 @@ export function actionClearingOnce(
   runId: string,
   req: ClearingOnceRequest,
 ): Promise<ClearingOnceResponse> {
-  return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/actions/clearing-once`, {
-    method: 'POST',
-    body: JSON.stringify(req),
-  })
+  return simulatorContractJson(
+    cfg,
+    `/simulator/runs/${encodeURIComponent(runId)}/actions/clearing-once`,
+    decodeClearingOnceResponse,
+    {
+      method: 'POST',
+      body: JSON.stringify(req),
+    },
+  )
 }
 
 // ============================
@@ -173,11 +241,16 @@ export function actionTrustlineCreate(
   req: SimulatorActionTrustlineCreateRequest,
   init?: RequestInit,
 ): Promise<SimulatorActionTrustlineCreateResponse> {
-  return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/actions/trustline-create`, {
-    ...(init ?? {}),
-    method: 'POST',
-    body: JSON.stringify(req),
-  })
+  return simulatorContractJson(
+    cfg,
+    `/simulator/runs/${encodeURIComponent(runId)}/actions/trustline-create`,
+    decodeSimulatorActionTrustlineCreateResponse,
+    {
+      ...(init ?? {}),
+      method: 'POST',
+      body: JSON.stringify(req),
+    },
+  )
 }
 
 export function actionTrustlineUpdate(
@@ -186,11 +259,16 @@ export function actionTrustlineUpdate(
   req: SimulatorActionTrustlineUpdateRequest,
   init?: RequestInit,
 ): Promise<SimulatorActionTrustlineUpdateResponse> {
-  return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/actions/trustline-update`, {
-    ...(init ?? {}),
-    method: 'POST',
-    body: JSON.stringify(req),
-  })
+  return simulatorContractJson(
+    cfg,
+    `/simulator/runs/${encodeURIComponent(runId)}/actions/trustline-update`,
+    decodeSimulatorActionTrustlineUpdateResponse,
+    {
+      ...(init ?? {}),
+      method: 'POST',
+      body: JSON.stringify(req),
+    },
+  )
 }
 
 export function actionTrustlineClose(
@@ -199,11 +277,16 @@ export function actionTrustlineClose(
   req: SimulatorActionTrustlineCloseRequest,
   init?: RequestInit,
 ): Promise<SimulatorActionTrustlineCloseResponse> {
-  return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/actions/trustline-close`, {
-    ...(init ?? {}),
-    method: 'POST',
-    body: JSON.stringify(req),
-  })
+  return simulatorContractJson(
+    cfg,
+    `/simulator/runs/${encodeURIComponent(runId)}/actions/trustline-close`,
+    decodeSimulatorActionTrustlineCloseResponse,
+    {
+      ...(init ?? {}),
+      method: 'POST',
+      body: JSON.stringify(req),
+    },
+  )
 }
 
 export function actionPaymentReal(
@@ -212,11 +295,16 @@ export function actionPaymentReal(
   req: SimulatorActionPaymentRealRequest,
   init?: RequestInit,
 ): Promise<SimulatorActionPaymentRealResponse> {
-  return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/actions/payment-real`, {
-    ...(init ?? {}),
-    method: 'POST',
-    body: JSON.stringify(req),
-  })
+  return simulatorContractJson(
+    cfg,
+    `/simulator/runs/${encodeURIComponent(runId)}/actions/payment-real`,
+    decodeSimulatorActionPaymentRealResponse,
+    {
+      ...(init ?? {}),
+      method: 'POST',
+      body: JSON.stringify(req),
+    },
+  )
 }
 
 export function actionClearingReal(
@@ -225,15 +313,24 @@ export function actionClearingReal(
   req: SimulatorActionClearingRealRequest,
   init?: RequestInit,
 ): Promise<SimulatorActionClearingRealResponse> {
-  return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/actions/clearing-real`, {
-    ...(init ?? {}),
-    method: 'POST',
-    body: JSON.stringify(req),
-  })
+  return simulatorContractJson(
+    cfg,
+    `/simulator/runs/${encodeURIComponent(runId)}/actions/clearing-real`,
+    decodeSimulatorActionClearingRealResponse,
+    {
+      ...(init ?? {}),
+      method: 'POST',
+      body: JSON.stringify(req),
+    },
+  )
 }
 
 export function getParticipantsList(cfg: HttpConfig, runId: string): Promise<SimulatorActionParticipantsListResponse> {
-  return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/actions/participants-list`)
+  return simulatorContractJson(
+    cfg,
+    `/simulator/runs/${encodeURIComponent(runId)}/actions/participants-list`,
+    decodeSimulatorActionParticipantsListResponse,
+  )
 }
 
 export function getTrustlinesList(
@@ -246,7 +343,11 @@ export function getTrustlinesList(
     equivalent,
     ...(participantPid ? { participant_pid: participantPid } : {}),
   }).toString()
-  return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/actions/trustlines-list?${q}`)
+  return simulatorContractJson(
+    cfg,
+    `/simulator/runs/${encodeURIComponent(runId)}/actions/trustlines-list?${q}`,
+    decodeSimulatorActionTrustlinesListResponse,
+  )
 }
 
 // ============================
@@ -265,7 +366,11 @@ export function getPaymentTargets(
     from_pid: fromPid,
     ...(opts?.maxHops != null ? { max_hops: String(opts.maxHops) } : {}),
   }).toString()
-  return httpJson(cfg, `/simulator/runs/${encodeURIComponent(runId)}/payment-targets?${q}`)
+  return simulatorContractJson(
+    cfg,
+    `/simulator/runs/${encodeURIComponent(runId)}/payment-targets?${q}`,
+    decodeSimulatorPaymentTargetsResponse,
+  )
 }
 
 // ============================

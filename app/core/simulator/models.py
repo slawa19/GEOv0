@@ -29,10 +29,19 @@ class InjectResult:
 
 
 @dataclass(frozen=True)
+class TrustDriftLimitUpdate:
+    creditor_pid: str
+    debtor_pid: str
+    equivalent: str
+    new_limit: Decimal
+
+
+@dataclass(frozen=True)
 class TrustDriftResult:
     updated_count: int
     touched_equivalents: set[str] = field(default_factory=set)
     touched_edges_by_eq: dict[str, set[tuple[str, str]]] = field(default_factory=dict)
+    committed_limit_updates: tuple[TrustDriftLimitUpdate, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -65,6 +74,10 @@ class ScenarioRecord:
 class _Subscription:
     equivalent: str
     queue: "asyncio.Queue[dict[str, Any]]"
+    replay_bootstrap_pending: bool = False
+    replay_bootstrap_tail: "deque[dict[str, Any]]" = field(default_factory=deque)
+    closed: bool = False
+    close_reason: str | None = None
 
 
 @dataclass

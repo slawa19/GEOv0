@@ -1,9 +1,22 @@
 # GEO v0.1 — ключевые решения и дефолты MVP
 
+```text
+Статус: Stable
+Область: core
+Последнее обновление: 2026-08-11
+```
+
 **Версия:** 0.1  
 **Дата:** Декабрь 2025
 
 Краткая сводка ключевых архитектурных решений и рекомендуемых дефолтов для MVP.
+
+> **Локальный runtime root:** изменяемое состояние по умолчанию размещается под
+> ignored-каталогом `.local-run/`: SQLite backend — `.local-run/geov0.db`, test
+> DB/cache/basetemp — `.local-run/test-runs/<TaskSlug>/`, Playwright output —
+> `.local-run/playwright/`. Корневой `geov0.db` считается legacy/user data и не
+> переносится или не удаляется автоматически; его использование требует явного
+> `DATABASE_URL`. Tracked fixtures не смешиваются с runtime output.
 
 ---
 
@@ -151,8 +164,8 @@
 Каноничные входные артефакты и доки:
 - RU обзор (для пользователей + для технарей): [simulator/scenarios-and-engine.md](simulator/scenarios-and-engine.md)
 - Индекс документации симулятора: [simulator/README.md](simulator/README.md)
-- JSON Schema сценария: [fixtures/simulator/scenario.schema.json](fixtures/simulator/scenario.schema.json)
-- Примеры сценариев: [fixtures/simulator/](fixtures/simulator/)
+- JSON Schema сценария: [`../../fixtures/simulator/scenario.schema.json`](../../fixtures/simulator/scenario.schema.json)
+- Примеры сценариев: [`../../fixtures/simulator/`](../../fixtures/simulator/)
 
 Дефолты runtime (env‑override допускается):
 - `SIMULATOR_TICK_MS_BASE=1000`
@@ -196,6 +209,22 @@ Real mode: артефакты (dev perf)
 - Демо-кнопки (Single TX / Run Clearing) реализуются как backend actions, которые эмитят те же `tx.updated` / `clearing.*`.
 - Спецификация: [simulator/backend/backend-driven-demo-mode-spec.md](simulator/backend/backend-driven-demo-mode-spec.md)
 
+#### 1.11.1. Порядок SSE replay и абсолютных patch
+
+**Решение 2026-08-11:** отдельное поле `seq`/`version`/`ts` в `NodePatch`/`EdgePatch` не вводится.
+Production backend не может доставить ранее не виденное patch-событие после события с большим
+producer sequence: `publish_event()` выделяет id, пишет replay buffer и доставляет подписчикам под
+одним lock; подписка под тем же lock устанавливает полный replay-prefix и status, а возникший во
+время bootstrap live-tail сохраняется в producer order. При переполнении подписка закрывается и
+восстанавливает полный суффикс от последнего доставленного `Last-Event-ID`; если суффикс уже не
+сохранён или не помещается, backend отвечает replay-unavailable/410, а не выдаёт разрыв.
+
+Все production producers используют `publish_event`; `broadcast()` с заранее выданным id остаётся
+compatibility-path только для узких test doubles. Поэтому никогда не виденное событие с меньшим id
+не является поддерживаемым wire outcome, а producer-sequence gate в UI дублировал бы backend
+ordering contract и ошибочно отбрасывал бы данные при нестандартном id. Дедупликация по `event_id`
+и монотонный reconnect cursor сохраняются.
+
 ### 1.12. Защита конкурентных платежей и клиринга (Concurrency Control)
 
 Для предотвращения Lost Update при одновременной работе фонового клиринга и пользовательских платежей принята стратегия **Defence in Depth**:
@@ -210,6 +239,57 @@ Real mode: артефакты (dev perf)
 - `asyncio.shield` запрещён для длинных операций в `RealTickOrchestrator`.
 - Задачи клиринга, не уложившиеся в time budget, отменяются (`task.cancel()`) и ожидаются, чтобы гарантировать освобождение ресурсов БД до начала следующей фазы платежей.
 
+**Решение 2026-08-11 для payment serialization:** lock identity денежного сегмента —
+`(equivalent, unordered participant UUID pair)`. Канонизация применяется только к advisory-lock;
+направление flow, trustline и audit остаётся бизнес-направлением `creditor -> debtor`.
+
+Для всех payment transitions действует единый порядок захвата: полный отсортированный набор
+equivalent-owner locks → transaction lock → канонические pair locks. Service, Admin abort и recovery
+входят в этот протокол через `PaymentEngine`. Real tick до денежной работы захватывает полный набор
+configured equivalents, а executor перед staged actions фиксирует полный отсортированный planned set.
+Конфликт внешнего `SERIALIZABLE` snapshot не ретраится внутри savepoint. Engine-owned UoW может
+целиком повториться после rollback, но staged real tick использует fail-fast: откатывает tick,
+записывает `REAL_MODE_TICK_FAILED` и не переигрывает тот же batch. Следующий heartbeat планирует
+новый tick.
+
+Clearing участвует в том же equivalent-owner domain на одной явно закреплённой физической DB
+connection. После preflight рабочая транзакция завершается; на pinned connection берётся
+session-level lock той же canonical identity, acquisition-транзакция откатывается для свежего
+`SERIALIZABLE` snapshot, затем там же заново читаются `Debt FOR UPDATE` и `PrepareLock`. Денежный UoW
+завершается до exact unlock; неопределённый unlock приводит к invalidation/физическому закрытию
+connection, а не возврату её в pool. Поэтому уже подготовленный payment виден clearing после
+ожидания, новый prepare не проходит между пустым conflict snapshot и денежной мутацией, и одна
+попытка не требует двух pool connections. Ожидание ограничено общим advisory budget; PostgreSQL
+`55P03` отображается в существующий timeout contract. Направление Debt/TrustLine и payload не
+канонизируется и не меняется. Эта PostgreSQL-граница принимает только `AsyncSession`, привязанную к
+`AsyncEngine`: externally bound `AsyncConnection` отклоняется до preflight, потому что сервис не
+может вернуть чужое соединение в pool перед захватом своей единственной pinned connection.
+
+Протокол не имеет mixed-version bridge. Upgrade и rollback требуют coordinated quiescence:
+остановить API payment writers, clearing workers, real ticks, Admin abort и recovery; дождаться
+завершения или отката их DB-транзакций и освобождения advisory locks; развернуть одну версию на всех
+owner surfaces; затем возобновить writers. Одновременная работа старого directional/неinterlocked и
+нового общего протоколов не поддерживается.
+
+#### 1.12.1. Владение и подтверждение транзакции клиринга
+
+**Решение 2026-08-11:** `ClearingService.execute_clearing_with_amount()` владеет execution-UoW.
+Возвращённый положительный amount означает durable commit; любой skip (`None`) завершает attempt
+rollback и освобождает его row locks. Caller-owned режим `commit=False` для клиринга не вводится.
+
+Occurrence имеет стабильный UUIDv5 от канонического неупорядоченного набора Debt UUID. После потери
+подтверждения повтор того же набора возвращает durable `Transaction.payload.amount` и не создаёт
+второй Transaction, audit или денежный эффект. Набор с новым Debt UUID — новая occurrence и не
+поглощается replay-защитой. Это внутренний протокол; новый HTTP idempotency contract для
+`POST /clearing/auto` не вводится.
+
+Commit дренируется до terminal result. Если cancellation пришла после durable commit, внутренний
+`ClearingCommittedAfterCancellation` несёт `tx_id` и фактическую сумму: Real/Interact publisher
+сначала учитывает результат и выпускает partial `clearing.done`, затем сохраняет cancellation.
+Candidate amount не является источником accounting; aggregate, per-edge trust growth и SSE получают
+только фактическую сумму сервиса. Очисткой `PrepareLock` для terminal payment abort целиком владеет
+`PaymentEngine`; recovery не повторяет его DELETE/commit.
+
 ### 1.13. Simulator (prod demo): анонимные посетители через cookie (per-owner runs)
 
 Решение: для прод-демо симулятора без логина используем **анонимную cookie-сессию**, которая задаёт `owner_id` для run’ов. Все control-plane эндпоинты симулятора работают в семантике **per-owner active run**.
@@ -219,7 +299,101 @@ Real mode: артефакты (dev perf)
 - Для CLI/автотестов вводим admin-only owner override через `X-Simulator-Owner`.
 - Для cookie-mode: обязателен `SIMULATOR_SESSION_SECRET` (guardrail вне dev/test) и CSRF защита минимум через `Origin` allowlist.
 
-Каноничная спецификация: [simulator/backend/anonymous-visitors-cookie-runs-spec.md](simulator/backend/anonymous-visitors-cookie-runs-spec.md)
+Историческая спецификация решения: [simulator/backend/archive/anonymous-visitors-cookie-runs-spec.md](simulator/backend/archive/anonymous-visitors-cookie-runs-spec.md)
+
+### 1.14. Аутентификация WebSocket без токена в URL
+
+**Решение 2026-08-11:** access token для `/api/v1/ws` передаётся через WebSocket-подпротоколы:
+клиент открывает `new WebSocket(url, ["bearer", access_token])`, сервер выбирает только фиксированный
+подпротокол `bearer`. Сам токен не возвращается как выбранный подпротокол и не попадает в path,
+который uvicorn пишет в журнал рукопожатия.
+
+Документированный ранее URL `?token={access_token}` несовместим с требованием не оставлять секрет
+в request log, поэтому переход намеренно **не обратно совместим**: query-токен не принимается, а
+handshake без корректной пары подпротоколов отклоняется до принятия. ASGI TestClient наблюдает close
+`1008`, тогда как uvicorn представляет тот же pre-accept отказ как HTTP `403`; клиент не зависит от
+конкретного transport-кода. WebSocket остаётся опциональным для MVP; клиент сохраняет нормативный
+REST/polling fallback.
+
+### 1.15. Liveness, readiness и состояние контейнера
+
+**Решение 2026-08-11:** `/healthz` и `/api/v1/healthz` — liveness и всегда отвечают HTTP 200, пока
+процесс способен обслужить запрос. `/health` и `/api/v1/health` — readiness: при отказе
+контролируемой фоновой задачи они сохраняют тело со `status: degraded`, но отвечают HTTP 503.
+
+Оба поставляемых образа используют `/health` в Docker `HEALTHCHECK`. Поэтому degraded переводит
+контейнер в `unhealthy` и делает отказ видимым Docker/Compose и внешнему оркестратору; сам
+HEALTHCHECK не обещает автоматический restart. `/healthz` остаётся отдельным операторским способом
+отличить живой, но неготовый процесс от остановленного.
+
+### 1.16. Публичная проверка БД и admin diagnostic
+
+**Решение 2026-08-11:** `/health/db` и `/api/v1/health/db` остаются публичными readiness-путями,
+но на ошибке возвращают только `status`, `reachable`, `latency_ms` и timestamp. Exception text,
+dialect, пользователь, host и имя базы в публичный ответ не попадают.
+
+Детали нужны оператору, поэтому отдельный `GET /api/v1/admin/health/db` требует
+`X-Admin-Token` и может вернуть dialect и строку исключения. Это не alias публичного пути, а
+отдельный admin operation в `api/openapi.yaml`; отсутствие обязательного header не считается
+успешной диагностикой.
+
+### 1.17. Конкурентные ошибки и прерывание платежа
+
+**Решение 2026-08-11:** PostgreSQL `40001` (serialization failure) и `40P01` (deadlock) на границе
+`PaymentService` — временный конфликт, а не внутренняя ошибка. REST переиспользует существующий
+контракт HTTP 409 / `E008`; `details` содержит только `retryable: true` и
+`conflict_kind: database_concurrency`. Текст драйвера и SQLSTATE в публичный ответ не попадают.
+Новый HTTP 503 или новый business code не вводятся.
+
+После ожидания advisory lock PostgreSQL может представить невидимый конкурентный insert Debt как
+`40001` либо как `23505`. `23505` считается временным конфликтом только для операции `commit`, SQL
+`INSERT INTO debts` и точного constraint `uq_debts_debtor_creditor_equivalent`; любой другой unique
+violation остаётся неретраимым. Это узкое исключение не публикует имя constraint, SQL или детали
+драйвера клиенту и не расширяет общий retry-предикат для `prepare`, `abort` или staged savepoint.
+
+Interactive-действие симулятора отвечает code `CONFLICT`, а не `PAYMENT_REJECTED`. В real tick тот
+же конфликт не засчитывается как терминальный отказ отдельного платежа: владелец внешней транзакции
+делает rollback, tick получает `REAL_MODE_TICK_FAILED`, а тот же batch не переигрывается. Следующий
+heartbeat планирует новый tick.
+
+При timeout или `CancelledError` после возможной записи `Transaction` cleanup доводится до
+terminal result до закрытия session: для commit-path выполняются rollback, read-before-abort и
+идемпотентный abort; staged-path оставляет окончательный rollback владельцу внешней транзакции.
+Исходный `CancelledError` сохраняется. Уже наблюдённый `COMMITTED` никогда не переводится в
+`ABORTED`.
+
+### 1.18. Black остаётся диагностикой
+
+**Решение 2026-08-11:** Black не переводится в блокирующий CI-gate в программе 006. Каноническая
+область диагностики остаётся `app migrations`, версия закреплена как `black==24.1.1`, а шаг
+`Black diagnostics` сохраняет `continue-on-error: true`. Ruff является отдельным блокирующим
+policy и этим решением не ослабляется.
+
+Свежий замер на чистой product-области после Волн 1–4: `python -m black --check app migrations` —
+exit `1`, `99 files would be reformatted`, `42 files would be left unchanged`. `black --diff` —
+exit `0`, 11529 raw output lines; 4991 строк начинаются с `+`/`-`, из них 198 — заголовки файлов,
+4793 — содержательные строки diff. Массовый механический срез в текущей волне создал бы шум и
+потерю полезного `git blame` без изменения продуктового поведения.
+
+Результат Black нельзя называть зелёным или required gate. Будущий перевод в blocking требует
+отдельного датированного решения и самостоятельного форматирующего среза с закреплённой версией,
+чистым деревом, полным verification и review; улучшение нельзя молча смешивать с функциональным
+изменением.
+
+### 1.19. OpenAPI: semantic drift ratchet, а не parity-gate
+
+**Решение 2026-08-11:** контрактный тест между `api/openapi.yaml` и generated FastAPI
+OpenAPI называется **exact semantic-drift ratchet**, а не проверкой semantic parity.
+Он строго сверяет paths, methods, **business** parameter identities, request-body presence/
+requiredness и selected success-status contracts. Auth transport headers (включая identity и
+requiredness), schemas, остальные responses и security фиксируются двусторонними count+digest
+храповиками: тест падает и при ухудшении, и при незаписанном улучшении.
+
+Свежий пересчёт после T501: полностью совпадают 2 из 88 operations — `GET /health` и
+`GET /admin/health/db`; 86 operations имеют минимум одну зафиксированную категорию
+дрейфа. Это не parity. Сокращение долга делается узкими contract slices: каждая
+правка в wire/schema снижает соответствующий ratchet и обновляет count+digest в том же
+срезе. Массовое приведение 86 operations к parity в программу 006 не входит.
 
 ---
 
@@ -290,4 +464,4 @@ Real mode: артефакты (dev perf)
 - [config-reference.md](config-reference.md) — полный реестр параметров с описанием
 - [02-protocol-spec.md](02-protocol-spec.md) — спецификация протокола
 - [03-architecture.md](03-architecture.md) — архитектура системы
-- [admin/specs/archive/admin-console-minimal-spec.md](admin/specs/archive/admin-console-minimal-spec.md) — спецификация админки
+- [admin-ui/specs/archive/admin-console-minimal-spec.md](admin-ui/specs/archive/admin-console-minimal-spec.md) — историческая спецификация админки

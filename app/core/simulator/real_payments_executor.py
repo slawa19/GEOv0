@@ -17,7 +17,11 @@ from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter
 from app.core.simulator.viz_patch_helper import VizPatchHelper
 from app.core.simulator.models import RunRecord
 from app.db.models.participant import Participant
-from app.utils.exceptions import GeoException, TimeoutException
+from app.utils.exceptions import (
+    GeoException,
+    RetryablePaymentConflictException,
+    TimeoutException,
+)
 
 
 @dataclass(frozen=True)
@@ -75,6 +79,17 @@ class DeferredRealPaymentEffects:
 
         for item in sorted(self.items, key=lambda observation: observation.seq):
             if resolution != "commit" and item.outcome == "committed":
+                if resolution == "unknown" and item.payment_effects is not None:
+                    try:
+                        item.payment_effects.invalidate_routing_cache_once()
+                    except Exception:
+                        self.logger.warning(
+                            "simulator.real.payment_unknown_cache_invalidation_failed "
+                            "run_id=%s seq=%s",
+                            self.run_id,
+                            item.seq,
+                            exc_info=True,
+                        )
                 continue
             try:
                 self._apply_observation(item)
@@ -272,6 +287,18 @@ class RealPaymentsExecutor:
             run=run,
         )
 
+        planned_equivalents = sorted(
+            {
+                str(action.equivalent).strip().upper()
+                for action in (planned or [])
+                if str(action.equivalent).strip()
+            }
+        )
+        if planned_equivalents:
+            await PaymentService(session).acquire_staged_equivalent_owner_locks(
+                planned_equivalents
+            )
+
         sem = asyncio.Semaphore(max(1, int(max_in_flight)))
         action_db_lock = asyncio.Lock()
 
@@ -396,6 +423,11 @@ class RealPaymentsExecutor:
                         route_edges,
                         staged.post_commit_effects,
                     )
+                except RetryablePaymentConflictException:
+                    # The outer tick transaction is no longer safe to use. Do not
+                    # count a transient conflict as a terminal payment rejection;
+                    # propagate so the tick-level rollback/replay policy owns it.
+                    raise
                 except Exception as e:
                     code = "INTERNAL_ERROR"
                     status = None

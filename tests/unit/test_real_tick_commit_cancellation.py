@@ -75,12 +75,18 @@ class _Artifacts:
 
 
 class _DecayEngine:
+    def __init__(self) -> None:
+        self.committed_effects = 0
+
     async def apply_trust_decay(self, **_kwargs):
         return SimpleNamespace(
             updated_count=1,
             touched_equivalents={"UAH"},
             touched_edges_by_eq={"UAH": set()},
         )
+
+    def apply_committed_effects(self, **_kwargs) -> None:
+        self.committed_effects += 1
 
 
 def _run() -> RunRecord:
@@ -182,7 +188,7 @@ async def _cancel_during_commit(task, session: _ControlledSession) -> None:
 
 @pytest.mark.parametrize("boundary", ["clearing", "persistence", "trust"])
 @pytest.mark.asyncio
-async def test_repeated_cancellation_waits_for_successful_commit_outcome(boundary: str):
+async def test_repeated_cancellation_bounds_wait_and_marks_commit_unknown(boundary: str):
     session = _ControlledSession()
     resolution = _Resolution()
     task = asyncio.create_task(_public_commit_path(boundary, session, resolution))
@@ -195,22 +201,26 @@ async def test_repeated_cancellation_waits_for_successful_commit_outcome(boundar
     await asyncio.sleep(0)
     await asyncio.sleep(0)
 
-    assert not task.done()
-    session.release_commit.set()
     with pytest.raises(asyncio.CancelledError) as cancelled:
         await task
     assert cancelled.value.args == ("first cancellation",)
 
-    assert session.commits == 1
-    assert session.rollbacks == 0
-    assert resolution.commits == 1
+    assert session.commits == 0
+    # The cancelled commit is drained before the owner session can close, then
+    # the same session is rolled back to a terminal cleanup outcome.
+    assert session.rollbacks == 1
+    assert resolution.commits == 0
     assert resolution.rollbacks == 0
-    assert resolution.unknowns == 0
+    assert resolution.unknowns == 1
+
+    session.release_commit.set()
+    await asyncio.wait_for(session.commit_started.wait(), timeout=1.0)
+    await asyncio.sleep(0)
 
 
 @pytest.mark.parametrize("boundary", ["clearing", "persistence", "trust"])
 @pytest.mark.asyncio
-async def test_commit_failure_drains_rollback_under_repeated_cancellation(boundary: str):
+async def test_repeated_cancellation_bounds_rollback_wait_and_marks_unknown(boundary: str):
     session = _ControlledSession(
         commit_error=RuntimeError("commit failed"),
         block_rollback=True,
@@ -227,18 +237,18 @@ async def test_commit_failure_drains_rollback_under_repeated_cancellation(bounda
     task.cancel("cancel during rollback")
     await asyncio.sleep(0)
     await asyncio.sleep(0)
-    assert not task.done()
-
-    session.release_rollback.set()
     with pytest.raises(asyncio.CancelledError) as cancelled:
         await task
     assert cancelled.value.args == ("cancel during commit",)
 
     assert session.commits == 0
-    assert session.rollbacks == 1
+    assert session.rollbacks == 0
     assert resolution.commits == 0
-    assert resolution.rollbacks == 1
-    assert resolution.unknowns == 0
+    assert resolution.rollbacks == 0
+    assert resolution.unknowns == 1
+
+    session.release_rollback.set()
+    await asyncio.sleep(0)
 
 
 @pytest.mark.asyncio
@@ -331,6 +341,7 @@ async def test_persistence_cancellation_waits_for_commit_and_resolves_commit():
 async def test_trust_drift_cancellation_waits_for_commit_and_resolves_commit():
     session = _ControlledSession()
     resolution = _Resolution()
+    decay_engine = _DecayEngine()
     coordinator = RealTickTrustDriftCoordinator(logger=logging.getLogger(__name__))
     task = asyncio.create_task(
         coordinator.apply_trust_decay_and_broadcast(
@@ -340,7 +351,7 @@ async def test_trust_drift_cancellation_waits_for_commit_and_resolves_commit():
             tick_index=1,
             debt_snapshot={},
             scenario={},
-            trust_drift_engine=_DecayEngine(),  # type: ignore[arg-type]
+            trust_drift_engine=decay_engine,  # type: ignore[arg-type]
             build_edge_patch_for_equivalent=_unexpected_edge_patch,
             broadcast_topology_edge_patch=lambda **_kwargs: None,
             on_commit=resolution.apply_deferred_effects,
@@ -356,6 +367,38 @@ async def test_trust_drift_cancellation_waits_for_commit_and_resolves_commit():
     assert resolution.commits == 1
     assert resolution.rollbacks == 0
     assert resolution.unknowns == 0
+    assert decay_engine.committed_effects == 1
+
+
+@pytest.mark.asyncio
+async def test_trust_drift_commit_failure_does_not_apply_staged_effects():
+    session = _ControlledSession(commit_error=RuntimeError("trust commit failed"))
+    session.release_commit.set()
+    resolution = _Resolution()
+    decay_engine = _DecayEngine()
+    coordinator = RealTickTrustDriftCoordinator(logger=logging.getLogger(__name__))
+
+    with pytest.raises(RuntimeError, match="trust commit failed"):
+        await coordinator.apply_trust_decay_and_broadcast(
+            session=session,
+            run_id="commit-failure",
+            run=_run(),
+            tick_index=1,
+            debt_snapshot={},
+            scenario={},
+            trust_drift_engine=decay_engine,  # type: ignore[arg-type]
+            build_edge_patch_for_equivalent=_unexpected_edge_patch,
+            broadcast_topology_edge_patch=lambda **_kwargs: None,
+            on_commit=resolution.apply_deferred_effects,
+            on_rollback=resolution.apply_rollback_observations,
+            on_unknown=resolution.apply_unknown_transaction_observations,
+        )
+
+    assert session.rollbacks == 1
+    assert resolution.commits == 0
+    assert resolution.rollbacks == 1
+    assert resolution.unknowns == 0
+    assert decay_engine.committed_effects == 0
 
 
 async def _unexpected_edge_patch(**_kwargs):

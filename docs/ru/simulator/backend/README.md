@@ -1,5 +1,11 @@
 # Simulator Backend (RU)
 
+```text
+Статус: Stable
+Область: simulator
+Последнее обновление: 2026-08-11
+```
+
 Входная точка документации backend-части симулятора: REST/SSE control plane, runner, storage и интеграция с core payments/clearing.
 
 ## Авторитетность

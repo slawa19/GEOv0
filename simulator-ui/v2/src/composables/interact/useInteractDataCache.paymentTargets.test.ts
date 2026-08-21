@@ -14,6 +14,16 @@ type MockedCacheActions = CacheActions & {
   fetchPaymentTargets: ReturnType<typeof vi.fn<CacheActions['fetchPaymentTargets']>>
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
 describe('useInteractDataCache: payment-targets cache TTL/refresh-policy', () => {
   function mk() {
     const actions: MockedCacheActions = {
@@ -106,6 +116,131 @@ describe('useInteractDataCache: payment-targets cache TTL/refresh-policy', () =>
     await cache.refreshPaymentTargets({ fromPid: 'alice', maxHops: 1 })
     expect(actions.fetchPaymentTargets).toHaveBeenCalledTimes(2)
 
+    scope.stop()
+  })
+
+  it('snapshot invalidation keeps a late same-key success from overwriting the newer result', async () => {
+    const { actions, cache, snapshot, scope } = mk()
+    const oldRequest = deferred<PaymentTargetsResult>()
+    const newRequest = deferred<PaymentTargetsResult>()
+    actions.fetchPaymentTargets
+      .mockImplementationOnce(() => oldRequest.promise)
+      .mockImplementationOnce(() => newRequest.promise)
+
+    const oldRefresh = cache.refreshPaymentTargets({ fromPid: 'alice', maxHops: 2, force: true })
+    snapshot.value = {
+      equivalent: 'UAH',
+      generated_at: '2026-01-01T00:00:01Z',
+      nodes: [],
+      links: [],
+    }
+    await nextTick()
+
+    const newRefresh = cache.refreshPaymentTargets({ fromPid: 'alice', maxHops: 2, force: true })
+    newRequest.resolve([{ to_pid: 'new-target', hops: 1 }] as PaymentTargetsResult)
+    await newRefresh
+
+    oldRequest.resolve([{ to_pid: 'old-target', hops: 1 }] as PaymentTargetsResult)
+    await oldRefresh
+
+    const key = cache.paymentTargetsKey({ runId: 'run_test', eq: 'UAH', fromPid: 'alice', maxHops: 2 })
+    expect(cache.paymentTargetsByKey.value.get(key)).toEqual(new Set(['new-target']))
+    expect(cache.paymentTargetsLastErrorByKey.value.get(key)).toBeUndefined()
+    expect(cache.paymentTargetsLoadingByKey.value.get(key)).toBeUndefined()
+    scope.stop()
+  })
+
+  it('snapshot invalidation keeps a late same-key error from degrading the newer result', async () => {
+    const { actions, cache, snapshot, scope } = mk()
+    const oldRequest = deferred<PaymentTargetsResult>()
+    const newRequest = deferred<PaymentTargetsResult>()
+    actions.fetchPaymentTargets
+      .mockImplementationOnce(() => oldRequest.promise)
+      .mockImplementationOnce(() => newRequest.promise)
+
+    const oldRefresh = cache.refreshPaymentTargets({ fromPid: 'alice', maxHops: 2, force: true })
+    snapshot.value = {
+      equivalent: 'UAH',
+      generated_at: '2026-01-01T00:00:01Z',
+      nodes: [],
+      links: [],
+    }
+    await nextTick()
+
+    const newRefresh = cache.refreshPaymentTargets({ fromPid: 'alice', maxHops: 2, force: true })
+    newRequest.resolve([{ to_pid: 'new-target', hops: 1 }] as PaymentTargetsResult)
+    await newRefresh
+
+    oldRequest.reject(new Error('old request failed late'))
+    await oldRefresh
+
+    const key = cache.paymentTargetsKey({ runId: 'run_test', eq: 'UAH', fromPid: 'alice', maxHops: 2 })
+    expect(cache.paymentTargetsByKey.value.get(key)).toEqual(new Set(['new-target']))
+    expect(cache.paymentTargetsLastErrorByKey.value.get(key)).toBeUndefined()
+    expect(cache.paymentTargetsLoadingByKey.value.get(key)).toBeUndefined()
+    scope.stop()
+  })
+
+  it('run switch publishes new participants even when the old fetch resolves last', async () => {
+    const { actions, runId, cache, scope } = mk()
+    await nextTick()
+    actions.fetchParticipants.mockClear()
+    let resolveOld!: (value: ParticipantsResult) => void
+    const oldFetch = new Promise<ParticipantsResult>((resolve) => {
+      resolveOld = resolve
+    })
+    actions.fetchParticipants
+      .mockImplementationOnce(async () => await oldFetch)
+      .mockResolvedValue([{ pid: 'new', name: 'New', type: 'person', status: 'active' }] as ParticipantsResult)
+
+    const oldRefresh = cache.refreshParticipants({ force: true })
+    runId.value = 'run_new'
+    await nextTick()
+    await Promise.resolve()
+    expect(cache.participants.value.map((item) => item.pid)).toEqual(['new'])
+
+    resolveOld([{ pid: 'old', name: 'Old', type: 'person', status: 'active' }] as ParticipantsResult)
+    await oldRefresh
+    expect(cache.participants.value.map((item) => item.pid)).toEqual(['new'])
+    scope.stop()
+  })
+
+  it('run switch ignores late trustline success/error/loading from the old run', async () => {
+    const { actions, runId, cache, scope } = mk()
+    await nextTick()
+    actions.fetchTrustlines.mockClear()
+    let rejectOld!: (reason: unknown) => void
+    const oldFetch = new Promise<TrustlinesResult>((_resolve, reject) => {
+      rejectOld = reject
+    })
+    const newTrustline = {
+      from_pid: 'new-a',
+      from_name: 'New A',
+      to_pid: 'new-b',
+      to_name: 'New B',
+      equivalent: 'UAH',
+      limit: '10',
+      used: '0',
+      available: '10',
+      status: 'active',
+    }
+    actions.fetchTrustlines
+      .mockImplementationOnce(async () => await oldFetch)
+      .mockResolvedValue([newTrustline] as TrustlinesResult)
+
+    const oldRefresh = cache.refreshTrustlines({ force: true })
+    expect(cache.trustlinesLoading.value).toBe(true)
+    runId.value = 'run_new'
+    await nextTick()
+    await Promise.resolve()
+    expect(cache.trustlines.value.map((item) => item.from_pid)).toEqual(['new-a'])
+    expect(cache.trustlinesLoading.value).toBe(false)
+
+    rejectOld(new Error('old run failed last'))
+    await oldRefresh
+    expect(cache.trustlines.value.map((item) => item.from_pid)).toEqual(['new-a'])
+    expect(cache.trustlinesLastError.value).toBeNull()
+    expect(cache.trustlinesLoading.value).toBe(false)
     scope.stop()
   })
 })
