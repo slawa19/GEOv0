@@ -402,6 +402,7 @@ const {
   // selection + overlays
   hoveredEdge,
   clearHoveredEdge,
+  addActiveEdge,
   edgeTooltipStyle: calcEdgeTooltipStyle,
   selectedNode,
   getNodeScreenCenter,
@@ -853,13 +854,29 @@ const analyticsDockStyle = resolveOverlayDockStyle('real-metrics-panel')
 /**
  * A bottleneck row asks to be shown on the graph.
  *
- * Edge targets frame the edge; node targets open the node's inspector card, which is the same
- * thing the graph navigator does with a node. Both are visible responses — a row that reported
- * "focus" and then did nothing would be worse than no button at all.
+ * Edge targets frame the edge and then mark it; node targets open the node's inspector card, which
+ * is the same thing the graph navigator does with a node. Both are visible responses — a row that
+ * reported "focus" and then did nothing would be worse than no button at all.
+ *
+ * Framing alone is not an answer to "which edge": the camera fits a segment, and where trustlines
+ * run in parallel the fitted region holds several of them. The active-edge highlight is the app's
+ * existing way of naming one edge, so the row borrows it rather than inventing a second marker.
+ *
+ * The highlight goes on strictly *after* `focusOnEdge` confirms the edge is still in the snapshot.
+ * A `false` there means the graph moved on between the panel's poll and this click; painting a
+ * highlight anyway would point at whatever edge now owns that key — a second wrong answer layered
+ * on a camera that correctly refused to move.
+ *
+ * TTL: 3000ms. The overlay fades over its last 1200ms, so this is ~1.8s at full strength and then
+ * a visible decay — long enough for a gaze to travel from the panel row to the canvas after the
+ * camera jumps, short enough that it is unambiguously gone before the next row is clicked. The
+ * automatic effects sit either side of it on purpose: 1500ms for a single scripted transfer pulse,
+ * 5200ms for a clearing cascade that lights many edges at once and has to outlast its own animation.
  */
 function focusBottleneckTarget(target: BottleneckTarget): void {
   if (target.kind === 'edge') {
-    focusOnEdge(target.from, target.to)
+    if (!focusOnEdge(target.from, target.to)) return
+    addActiveEdge(keyEdge(target.from, target.to), 3000)
     return
   }
   inspectNodeFromNavigator(target.id)

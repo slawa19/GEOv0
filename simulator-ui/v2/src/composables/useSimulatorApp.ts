@@ -214,6 +214,12 @@ export type SimulatorAppApi = {
   hasNodeCardInspectorOpen: ComputedRef<boolean>
   hoveredEdge: FxOverlaysApi['hoveredEdge']
   clearHoveredEdge: FxOverlaysApi['clearHoveredEdge']
+  /**
+   * The active-edge highlight sink. Exposed because a caller outside the FX composables needs to
+   * name one edge on the graph — a bottleneck row saying "this one, not its neighbour" — and this
+   * overlay is already the app's single way of saying that.
+   */
+  addActiveEdge: FxOverlaysApi['addActiveEdge']
   edgeTooltipStyle: PickingAndHoverApi['edgeTooltipStyle']
   selectedNode: ViewWiringApi['selectedNode']
   selectedNodeScreenCenter: ViewWiringApi['selectedNodeScreenCenter']
@@ -1869,6 +1875,7 @@ export function useSimulatorApp(opts?: {
     hasNodeCardInspectorOpen,
     hoveredEdge,
     clearHoveredEdge,
+    addActiveEdge,
     edgeTooltipStyle: pickingAndHover.edgeTooltipStyle,
     selectedNode: viewWiring.selectedNode,
     selectedNodeScreenCenter,

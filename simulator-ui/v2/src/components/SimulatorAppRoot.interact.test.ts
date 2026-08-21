@@ -9,7 +9,26 @@ import type {
 } from '../api/simulatorTypes'
 import type { MetricsStreamPhase } from '../composables/useMetricsPolling'
 import type { GraphSnapshot } from '../types'
+import type { LayoutLinkLike, LayoutNode } from '../types/layout'
+import { useAppViewWiring } from '../composables/useAppViewWiring'
+import { useOverlayState } from '../composables/useOverlayState'
+import { keyEdge } from '../utils/edgeKey'
 import { resolveOverlayDockStyle } from '../ui-kit/overlaySurfaceCatalog'
+
+/**
+ * Layout fixture behind the mocked app: a 1000x600 viewport, two placed participants, and by
+ * default the single edge between them. Same geometry as `useAppViewWiring.test.ts`, so the
+ * framing a test asserts is the camera's documented framing and not an artefact of pan clamping.
+ */
+const TEST_LAYOUT_NODES: LayoutNode[] = [
+  { id: 'alice', __x: 100, __y: 100 },
+  { id: 'bob', __x: 300, __y: 300 },
+]
+const TEST_LAYOUT_LINK_ALICE_BOB: LayoutLinkLike = {
+  __key: keyEdge('alice', 'bob'),
+  source: 'alice',
+  target: 'bob',
+}
 
 type TestAnchor = { x: number; y: number }
 type TestSelectedNode = {
@@ -105,6 +124,14 @@ type GeoTestGlobals = {
   __GEO_TEST_ANALYTICS_UNAVAILABLE_REASON_REF?: Ref<string>
   __GEO_TEST_ANALYTICS_IS_VISIBLE?: () => boolean
   __GEO_TEST_FOCUS_ON_EDGE?: ReturnType<typeof vi.fn>
+
+  // Camera + highlight, wired to the real composables rather than to spies, so a test can ask
+  // what the graph is showing instead of asking which functions ran (spec 007, §4.2 item 4).
+  __GEO_TEST_LAYOUT_LINKS?: LayoutLinkLike[]
+  __GEO_TEST_CAMERA?: { panX: number; panY: number; zoom: number }
+  __GEO_TEST_WORLD_TO_SCREEN?: (x: number, y: number) => { x: number; y: number }
+  __GEO_TEST_ACTIVE_EDGES?: Map<string, number>
+  __GEO_TEST_PRUNE_ACTIVE_EDGES?: (nowMs: number) => void
 }
 
 function setGeoTestGlobal<K extends keyof GeoTestGlobals>(key: K, value: GeoTestGlobals[K]): void {
@@ -372,6 +399,50 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
         )
       })
 
+      // --- camera + active-edge highlight: real composables, not spies ---------------------
+      //
+      // `focusOnEdge` and `addActiveEdge` are the two halves of "show me this bottleneck", and
+      // both are only meaningful as state. Stubbing them would make the tests below assert that
+      // the component called something; wiring the real ones makes them assert that the camera
+      // moved and that the graph is highlighting that edge — and, crucially, lets the real
+      // wiring decide on its own that an edge is absent, instead of a test declaring it absent.
+      const fxOverlayState = useOverlayState({
+        getLayoutNodeById: (id: string) => TEST_LAYOUT_NODES.find((n) => n.id === id),
+        sizeForNode: () => ({ w: 40, h: 40 }),
+        getCameraZoom: () => 1,
+        setFlash: () => undefined,
+        resetFxState: () => undefined,
+        nowMs: () => 0,
+      })
+      setGeoTestGlobal('__GEO_TEST_ACTIVE_EDGES', fxOverlayState.activeEdges)
+      setGeoTestGlobal('__GEO_TEST_PRUNE_ACTIVE_EDGES', fxOverlayState.pruneActiveEdges)
+
+      const viewWiringSelectedNodeId = ref<string | null>(null)
+      const viewWiring = useAppViewWiring({
+        canvasEl: ref(null),
+        hostEl: ref(null),
+
+        getLayoutNodes: () => TEST_LAYOUT_NODES,
+        getLayoutW: () => 1000,
+        getLayoutH: () => 600,
+        isTestMode: () => false,
+
+        setClampCameraPan: () => undefined,
+
+        selectedNodeId: viewWiringSelectedNodeId,
+        setSelectedNodeId: (id) => {
+          viewWiringSelectedNodeId.value = id
+        },
+
+        getNodeById: () => null,
+        getLayoutNodeById: (id) => TEST_LAYOUT_NODES.find((n) => n.id === id) ?? null,
+
+        getLayoutLinks: () =>
+          getGeoTestGlobal('__GEO_TEST_LAYOUT_LINKS') ?? [TEST_LAYOUT_LINK_ALICE_BOB],
+      })
+      setGeoTestGlobal('__GEO_TEST_CAMERA', viewWiring.camera)
+      setGeoTestGlobal('__GEO_TEST_WORLD_TO_SCREEN', viewWiring.worldToScreen)
+
       return {
         apiMode,
 
@@ -545,6 +616,7 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
         // selection + overlays
         hoveredEdge: reactive({ key: null, fromId: '', toId: '', amountText: '' }),
         clearHoveredEdge: vi.fn(),
+        addActiveEdge: fxOverlayState.addActiveEdge,
         edgeTooltipStyle: () => ({}),
         selectedNode: computed(() => selectedNode.value),
         selectedNodeScreenCenter: computed(() => selectedNodeScreenCenter.value),
@@ -656,7 +728,7 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
           return String(n.id) === String(id) ? n : null
         },
         focusOnEdge: (() => {
-          const fn = vi.fn(() => true)
+          const fn = vi.fn((fromId: string, toId: string) => viewWiring.focusOnEdge(fromId, toId))
           setGeoTestGlobal('__GEO_TEST_FOCUS_ON_EDGE', fn)
           return fn
         })(),
@@ -4320,6 +4392,11 @@ describe('SimulatorAppRoot - analytics overlay surface (spec 007, T705)', () => 
       '__GEO_TEST_ANALYTICS_UNAVAILABLE_REASON_REF',
       '__GEO_TEST_ANALYTICS_IS_VISIBLE',
       '__GEO_TEST_FOCUS_ON_EDGE',
+      '__GEO_TEST_LAYOUT_LINKS',
+      '__GEO_TEST_CAMERA',
+      '__GEO_TEST_WORLD_TO_SCREEN',
+      '__GEO_TEST_ACTIVE_EDGES',
+      '__GEO_TEST_PRUNE_ACTIVE_EDGES',
     )
   })
 
@@ -4513,6 +4590,155 @@ describe('SimulatorAppRoot - analytics overlay surface (spec 007, T705)', () => 
     }
   })
 
+  /**
+   * Spec 007 §4.2, acceptance item 4: after acting on a bottleneck row the edge is *highlighted*,
+   * so the user can see which one was meant.
+   *
+   * Framing is not enough on its own. The camera fits a segment, and where several trustlines run
+   * between neighbouring participants the fitted region contains all of them — the user is left
+   * looking at a bundle and guessing. These tests read the highlight overlay itself, which is the
+   * same state the renderer paints from.
+   */
+  it('a bottleneck row both frames the edge and marks it, so the user can tell which one', async () => {
+    setUrl('/?mode=real')
+    getSimStorage().readAnalyticsPanelOpen.mockReturnValue(true)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = mountSimulatorAppRoot(host)
+
+    try {
+      await nextTick()
+
+      const phase = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_PHASE_REF')
+      const bottlenecks = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_REF')
+      bottlenecks.value = makeAnalyticsBottlenecks({ kind: 'edge', from: 'alice', to: 'bob' })
+      phase.value = 'ready'
+      await nextTick()
+
+      const camera = getRequiredGeoTestGlobal('__GEO_TEST_CAMERA')
+      const activeEdges = getRequiredGeoTestGlobal('__GEO_TEST_ACTIVE_EDGES')
+
+      // A known starting point, so "moved" cannot be confused with "was already there".
+      camera.panX = 7
+      camera.panY = 8
+      camera.zoom = 1.25
+      expect(activeEdges.size).toBe(0)
+
+      const focusBtn = analyticsDock(host)!.querySelector(
+        '.bnl__actions button',
+      ) as HTMLButtonElement
+      expect(focusBtn).toBeTruthy()
+      focusBtn.click()
+      await nextTick()
+
+      // The camera framed the segment: tight axis is Y, so zoom = 440 / 200.
+      expect(camera.zoom).toBeCloseTo(2.2)
+      expect(camera.panX).toBeCloseTo(60)
+      expect(camera.panY).toBeCloseTo(-140)
+
+      // Both ends of the edge really are on screen afterwards.
+      const worldToScreen = getRequiredGeoTestGlobal('__GEO_TEST_WORLD_TO_SCREEN')
+      const aliceOnScreen = worldToScreen(100, 100)
+      const bobOnScreen = worldToScreen(300, 300)
+      expect(aliceOnScreen.x).toBeCloseTo(280)
+      expect(aliceOnScreen.y).toBeCloseTo(80)
+      expect(bobOnScreen.x).toBeCloseTo(720)
+      expect(bobOnScreen.y).toBeCloseTo(520)
+
+      // ...and exactly that edge is lit, at full strength, and nothing else is.
+      expect([...activeEdges.keys()]).toEqual([keyEdge('alice', 'bob')])
+      expect(activeEdges.get(keyEdge('alice', 'bob'))).toBe(1)
+    } finally {
+      app.unmount()
+      host.remove()
+    }
+  })
+
+  it('the highlight outlives the camera jump and then expires on its own', async () => {
+    setUrl('/?mode=real')
+    getSimStorage().readAnalyticsPanelOpen.mockReturnValue(true)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = mountSimulatorAppRoot(host)
+
+    try {
+      await nextTick()
+
+      const phase = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_PHASE_REF')
+      const bottlenecks = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_REF')
+      bottlenecks.value = makeAnalyticsBottlenecks({ kind: 'edge', from: 'alice', to: 'bob' })
+      phase.value = 'ready'
+      await nextTick()
+
+      const activeEdges = getRequiredGeoTestGlobal('__GEO_TEST_ACTIVE_EDGES')
+      const prune = getRequiredGeoTestGlobal('__GEO_TEST_PRUNE_ACTIVE_EDGES')
+
+      // The overlay's clock is pinned at 0 in the mock, so these are elapsed milliseconds.
+      ;(analyticsDock(host)!.querySelector('.bnl__actions button') as HTMLButtonElement).click()
+      await nextTick()
+
+      // Still at full strength well past the moment the eye reaches the canvas: the highlight is
+      // a deliberate answer to a click, not a flicker that is gone before it is looked at.
+      prune(1_500)
+      expect(activeEdges.get(keyEdge('alice', 'bob'))).toBe(1)
+
+      // And it is temporary — no stale marker survives to confuse the next row that is clicked.
+      prune(5_000)
+      expect(activeEdges.size).toBe(0)
+    } finally {
+      app.unmount()
+      host.remove()
+    }
+  })
+
+  it('an edge the snapshot no longer has is neither framed nor highlighted', async () => {
+    setUrl('/?mode=real')
+    getSimStorage().readAnalyticsPanelOpen.mockReturnValue(true)
+
+    // The panel still lists `alice → bob` — it was polled before the graph changed — but the
+    // laid-out snapshot no longer has that edge. This is the case the highlight must not paper
+    // over: the camera honestly refuses to move, and a marker drawn anyway would point at
+    // whatever now sits under that key.
+    setGeoTestGlobal('__GEO_TEST_LAYOUT_LINKS', [])
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = mountSimulatorAppRoot(host)
+
+    try {
+      await nextTick()
+
+      const phase = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_PHASE_REF')
+      const bottlenecks = getRequiredGeoTestGlobal('__GEO_TEST_ANALYTICS_BOTTLENECKS_REF')
+      bottlenecks.value = makeAnalyticsBottlenecks({ kind: 'edge', from: 'alice', to: 'bob' })
+      phase.value = 'ready'
+      await nextTick()
+
+      const camera = getRequiredGeoTestGlobal('__GEO_TEST_CAMERA')
+      const activeEdges = getRequiredGeoTestGlobal('__GEO_TEST_ACTIVE_EDGES')
+
+      camera.panX = 7
+      camera.panY = 8
+      camera.zoom = 1.25
+
+      const focusBtn = analyticsDock(host)!.querySelector(
+        '.bnl__actions button',
+      ) as HTMLButtonElement
+      focusBtn.click()
+      await nextTick()
+
+      expect(camera.panX).toBe(7)
+      expect(camera.panY).toBe(8)
+      expect(camera.zoom).toBe(1.25)
+      expect(activeEdges.size).toBe(0)
+    } finally {
+      app.unmount()
+      host.remove()
+    }
+  })
+
   it('a node bottleneck opens that node instead of pretending an edge was framed', async () => {
     setUrl('/?mode=real')
     getSimStorage().readAnalyticsPanelOpen.mockReturnValue(true)
@@ -4533,6 +4759,7 @@ describe('SimulatorAppRoot - analytics overlay surface (spec 007, T705)', () => 
       const wmOpen = getRequiredGeoTestGlobal('__GEO_TEST_WM_OPEN')
       wmOpen.mockClear()
       const focusOnEdge = getRequiredGeoTestGlobal('__GEO_TEST_FOCUS_ON_EDGE')
+      const activeEdges = getRequiredGeoTestGlobal('__GEO_TEST_ACTIVE_EDGES')
 
       const focusBtn = analyticsDock(host)!.querySelector(
         '.bnl__actions button',
@@ -4542,6 +4769,8 @@ describe('SimulatorAppRoot - analytics overlay surface (spec 007, T705)', () => 
       await nextTick()
 
       expect(focusOnEdge).not.toHaveBeenCalled()
+      // A node has no edge to name, so the edge highlight stays out of it entirely.
+      expect(activeEdges.size).toBe(0)
 
       const opened = wmOpen.mock.calls
         .map((c) => c[0] as { type?: string; data?: { nodeId?: unknown } } | undefined)
