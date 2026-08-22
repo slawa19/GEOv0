@@ -11,12 +11,20 @@ def run_perimeter_pids(run) -> "set[str] | None":
     obligations of another run's participants or consume their trust.  That is the same P1
     the Interact Mode routes had (`F-010-3`), on the path that runs by itself.
 
-    `None` means the perimeter is not being applied, and it is returned only before seeding,
-    where the run has no participants to speak of and its money paths have nothing to do
-    either.  An EMPTY set would mean nobody, which is not the same thing.
+    Three states, and the difference between the last two is the whole point:
+
+    * `None` — the participant list has not been LOADED yet, so no perimeter can be applied.
+      `tick_real_mode` loads it before reaching any money path
+      (`app/core/simulator/real_tick_orchestrator.py:249-252`, after seeding at `:237-247`),
+      so this state is not reachable from clearing or payments.
+    * an EMPTY set — the list was loaded and the run has nobody in it.  That is a perimeter
+      admitting nobody, NOT an absence of one.  Collapsing it into `None` would mean a run
+      with an empty scenario clears and routes across the whole equivalent, which is the
+      shape of `F-009-1` all over again.
+    * a non-empty set — the run.
     """
 
     participants = getattr(run, "_real_participants", None)
-    if not participants:
+    if participants is None:
         return None
     return {str(pid) for (_uuid, pid) in participants}

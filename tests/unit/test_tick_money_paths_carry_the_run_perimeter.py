@@ -77,18 +77,26 @@ def test_every_tick_money_call_passes_the_perimeter(path: pathlib.Path, expected
 def test_the_perimeter_helper_distinguishes_unseeded_from_empty() -> None:
     """None means "not applied"; an empty set would mean "nobody", and they are not the same.
 
-    Getting this backwards in either direction is a defect this wave has already made twice:
-    reading "cannot establish" as "no restriction" is F-009-1, and reading "not seeded yet"
-    as "nobody" would stop the tick from doing anything at all.
+    Getting this backwards in either direction is a defect this wave has already made:
+    reading "cannot establish" as "no restriction" is F-009-1, while reading "not loaded yet"
+    as "nobody" would stop the tick working at all.  The first version of this helper made
+    the first mistake - an empty participant list returned None, so a run with an empty
+    scenario would have cleared and routed across the whole equivalent.
     """
 
     from types import SimpleNamespace
 
     from app.core.simulator.run_perimeter import run_perimeter_pids
 
+    # Not loaded yet -> no perimeter can be applied. The tick loads the list before any
+    # money path is reached, so this state is not reachable from clearing or payments.
     assert run_perimeter_pids(SimpleNamespace(_real_participants=None)) is None
-    assert run_perimeter_pids(SimpleNamespace(_real_participants=[])) is None
     assert run_perimeter_pids(SimpleNamespace()) is None
+
+    # Loaded and empty -> a perimeter admitting NOBODY, not the absence of one. Collapsing
+    # this into None would let a run with an empty scenario clear and route across the whole
+    # equivalent, which is the shape of F-009-1 again.
+    assert run_perimeter_pids(SimpleNamespace(_real_participants=[])) == set()
 
     import uuid
 
