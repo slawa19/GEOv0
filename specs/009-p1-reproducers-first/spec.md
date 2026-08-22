@@ -196,8 +196,7 @@ bottlenecks откатывает чужой тик и рапортует усп�
 - `simulator-ui/v2/src/components/TrustlineManagementPanel.*` unit-покрытие — поверхность `F-009-5`
 
 Тиры целиком остаются гейтом, но **не** заменяют список выше. Сегодняшние числа, от которых считается
-регрессия: дефолтный backend — `1208 passed, 2 skipped, 53 deselected`; Postgres marker-тир —
-`49 passed, 152 deselected`; матрица Phase 2 — `3 passed`; `simulator-ui/v2` — `876 passed`;
+регрессия: дефолтный backend; Postgres marker-тир; матрица конкурентности Phase 2.
 `admin-ui` — `236 passed` (замерено 2026-08-21).
 
 **4. Запрещённые способы доказательства.**

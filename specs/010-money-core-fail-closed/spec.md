@@ -226,8 +226,7 @@ fail-closed автоматика не может.
 - `tests/integration/test_payment_prepare_capacity_policy.py`
 - `tests/unit/test_trustline_audit_fail_closed.py`
 
-Тиры целиком остаются гейтом и не заменяют список: дефолтный backend — `1208 passed, 2 skipped,
-53 deselected`; Postgres marker-тир — `49 passed, 152 deselected`; матрица Phase 2 — `3 passed`
+Тиры целиком остаются гейтом и не заменяют список: дефолтный backend; Postgres marker-тир; матрица конкурентности Phase 2.
 (замерено 2026-08-21).
 
 **4. Запрещённые способы доказательства.**

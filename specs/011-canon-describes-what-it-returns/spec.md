@@ -216,10 +216,9 @@ GET  /api/v1/simulator/runs/{run_id}/payment-targets
 - `tests/integration/test_simulator_sse_smoke.py`
 - `tests/integration/test_simulator_artifacts_events_ndjson.py`
 - `tests/unit/test_interact_actions_backend_p1.py` — восемь скрытых маршрутов
-- `npm --prefix simulator-ui/v2 run test:unit` (`876 passed`) и `npm --prefix admin-ui run test`
-  (`236 passed`) — потребители канона; команды названы целиком, а не «unit-набор»
+- `npm --prefix simulator-ui/v2 run test:unit` и `npm --prefix admin-ui run test` — потребители канона; команды названы целиком, а не «unit-набор»
 
-Тиры целиком: дефолтный backend — `1208 passed, 2 skipped, 53 deselected` (замерено 2026-08-21).
+Тиры целиком: дефолтный backend; (замерено 2026-08-21).
 
 **4. Запрещённые способы доказательства.**
 

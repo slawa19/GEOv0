@@ -282,12 +282,11 @@ export function formatAmount2(v: number): string {
 - `tests/integration/test_payment_prepare_capacity_policy.py`
 - `tests/integration/test_payment_inverse_multisegment_postgres.py`
 - `tests/unit/test_admin_trustlines_bottlenecks.py`, `tests/unit/test_admin_trustlines_list.py`
-- `npm --prefix simulator-ui/v2 run test:unit` — сегодня `876 passed`
-- `npm --prefix admin-ui run test` — сегодня `236 passed`
+- `npm --prefix simulator-ui/v2 run test:unit`
+- `npm --prefix admin-ui run test`
 - `npm --prefix simulator-ui/v2 run typecheck` и `npm --prefix admin-ui run lint`
 
-Тиры целиком: дефолтный backend — `1208 passed, 2 skipped, 53 deselected`; Postgres marker-тир —
-`49 passed, 152 deselected` (замерено 2026-08-21).
+Тиры целиком: дефолтный backend; Postgres marker-тир; (замерено 2026-08-21).
 
 **4. Запрещённые способы доказательства.**
 
