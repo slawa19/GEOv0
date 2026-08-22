@@ -329,3 +329,67 @@ async def test_the_sql_producer_itself_is_scoped(db_session):
     assert len(await service.find_triangles_sql(eq.id, allowed_participant_ids=own_scope)) == 3, (
         "the predicate must admit the owning run, not reject everything"
     )
+
+
+# Found by external review of this batch: two ways the perimeter was still bypassable.
+
+
+@pytest.mark.asyncio
+async def test_a_committed_replay_is_not_returned_to_a_foreign_scope(db_session):
+    """The replay shortcut returned before the guard, handing over a stranger's amount.
+
+    `_execute_clearing_with_amount` answers an already-committed execution from the recorded
+    transaction and returns that amount straight away - ahead of the locked re-read and
+    therefore ahead of the perimeter check.  A scoped caller replaying a cycle of another
+    run's debts would be told the foreign clearing succeeded, as its own result.
+    """
+
+    eq, _people = await _seed_two_runs(db_session)
+    service = ClearingService(db_session)
+    cycle = (await service.find_cycles(_EQ, max_depth=6))[0]
+
+    # Clear it legitimately first, so a committed CLEARING transaction exists for this cycle.
+    cleared = await service.execute_clearing_with_amount(
+        cycle, allowed_participant_pids={"b1", "b2", "b3"}
+    )
+    assert cleared == Decimal("100"), cleared
+
+    # Now a foreign run replays the same cycle.
+    with pytest.raises(GeoException):
+        await service.execute_clearing_with_amount(
+            cycle, allowed_participant_pids={"a1", "a2", "a3"}
+        )
+
+
+@pytest.mark.asyncio
+async def test_an_unavailable_perimeter_is_not_reported_as_an_empty_result(
+    client, db_session, run_a_only, monkeypatch
+):
+    """A perimeter that cannot be measured must not read as "nothing to clear".
+
+    `_run_scoped_pids_or_none` is fail-closed: it returns an empty set both when the run is
+    genuinely empty and when the snapshot cannot be built at all.  Passing that straight into
+    detection makes the route answer 200 with zero cycles - a failed authorisation
+    measurement dressed as a completed, empty clearing.
+    """
+
+    import app.api.v1.simulator as simulator_module
+
+    await _seed_two_runs(db_session)
+
+    async def _no_snapshot(**_kwargs):
+        raise RuntimeError("snapshot unavailable")
+
+    monkeypatch.setattr(simulator_module.runtime, "build_graph_snapshot", _no_snapshot)
+
+    resp = await client.post(
+        "/api/v1/simulator/runs/run-a/actions/clearing-real",
+        headers={"X-Admin-Token": settings.ADMIN_TOKEN},
+        json={"equivalent": _EQ, "max_depth": 6, "client_action_id": "rt_010_4_unavailable"},
+    )
+
+    assert resp.status_code != 200, (
+        "the run perimeter could not be established, but the route reported a completed "
+        f"clearing: {resp.status_code} {resp.text}"
+    )
+    assert resp.json()["code"] == "RUN_PERIMETER_UNAVAILABLE", resp.text

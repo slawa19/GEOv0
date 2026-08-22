@@ -161,6 +161,8 @@ class ClearingService:
     async def _read_committed_execution_amount(
         session: AsyncSession,
         tx_id: str,
+        *,
+        allowed_participant_pids: "AbstractSet[str] | None" = None,
     ) -> Decimal | None:
         transaction = (
             await session.execute(
@@ -172,6 +174,31 @@ class ClearingService:
         ).scalar_one_or_none()
         if transaction is None or transaction.state != "COMMITTED":
             return None
+
+        # 2026-08-22 / p010, found by external review of this batch.  The replay shortcut
+        # returns BEFORE the locked re-read, and therefore before the perimeter check that
+        # stands on those rows -- so without this a scoped caller replaying another run's
+        # cycle would be handed the foreign amount as its own success.  The recorded
+        # transaction carries the participants of every edge, so it can answer for itself.
+        if allowed_participant_pids is not None:
+            edges = (transaction.payload or {}).get("edges")
+            if not isinstance(edges, list) or not edges:
+                # A payload that cannot be checked is not a payload that passes.
+                logger.error(
+                    "event=clearing.replay_scope_unverifiable tx_id=%s", tx_id
+                )
+                raise GeoException()
+            touched = {
+                str(edge.get(role) or "")
+                for edge in edges
+                if isinstance(edge, dict)
+                for role in ("debtor", "creditor")
+            }
+            if not touched or not touched <= set(allowed_participant_pids):
+                logger.error(
+                    "event=clearing.replay_escaped_scope tx_id=%s", tx_id
+                )
+                raise GeoException()
         try:
             amount = Decimal(str((transaction.payload or {})["amount"]))
         except Exception as exc:
@@ -182,8 +209,15 @@ class ClearingService:
             raise GeoException()
         return amount
 
-    async def _committed_execution_amount(self, tx_id: str) -> Decimal | None:
-        return await self._read_committed_execution_amount(self.session, tx_id)
+    async def _committed_execution_amount(
+        self,
+        tx_id: str,
+        *,
+        allowed_participant_pids: "AbstractSet[str] | None" = None,
+    ) -> Decimal | None:
+        return await self._read_committed_execution_amount(
+            self.session, tx_id, allowed_participant_pids=allowed_participant_pids
+        )
 
     @staticmethod
     def _postgres_error_codes(exc: BaseException) -> set[str]:
@@ -212,7 +246,12 @@ class ClearingService:
     def _is_retryable_concurrency_error(cls, exc: BaseException) -> bool:
         return bool(cls._postgres_error_codes(exc) & {"40001", "40P01"})
 
-    async def _reconcile_committed_execution(self, tx_id: str) -> Decimal | None:
+    async def _reconcile_committed_execution(
+        self,
+        tx_id: str,
+        *,
+        allowed_participant_pids: "AbstractSet[str] | None" = None,
+    ) -> Decimal | None:
         """Resolve one ambiguous occurrence from a fresh transaction snapshot."""
         try:
             await self.session.rollback()
@@ -235,6 +274,7 @@ class ClearingService:
                     amount = await self._read_committed_execution_amount(
                         recovery_session,
                         tx_id,
+                        allowed_participant_pids=allowed_participant_pids,
                     )
             except Exception as exc:
                 last_error = exc
@@ -1175,7 +1215,9 @@ class ClearingService:
 
         if self._dialect_name() not in {"postgresql", "postgres"} or not cycle:
             return await self._execute_clearing_with_amount(
-                cycle, allowed_participant_ids=allowed_ids
+                cycle,
+                allowed_participant_ids=allowed_ids,
+                allowed_participant_pids=allowed_participant_pids,
             )
 
         bind = getattr(self.session, "bind", None)
@@ -1197,7 +1239,9 @@ class ClearingService:
             debt_ids = [uuid.UUID(str(edge["debt_id"])) for edge in cycle]
         except Exception:
             return await self._execute_clearing_with_amount(
-                cycle, allowed_participant_ids=allowed_ids
+                cycle,
+                allowed_participant_ids=allowed_ids,
+                allowed_participant_pids=allowed_participant_pids,
             )
 
         execution_tx_id = self._execution_tx_id(debt_ids)
@@ -1227,7 +1271,9 @@ class ClearingService:
             if replay_amount is not None:
                 return replay_amount
             return await self._execute_clearing_with_amount(
-                cycle, allowed_participant_ids=allowed_ids
+                cycle,
+                allowed_participant_ids=allowed_ids,
+                allowed_participant_pids=allowed_participant_pids,
             )
 
         equivalent_ids = {debt.equivalent_id for debt in preflight_debts}
@@ -1322,6 +1368,7 @@ class ClearingService:
                     cycle,
                     interlocked_equivalent_id=equivalent_id,
                     allowed_participant_ids=allowed_ids,
+                    allowed_participant_pids=allowed_participant_pids,
                 )
                 result_available = True
             finally:
@@ -1367,6 +1414,7 @@ class ClearingService:
         *,
         interlocked_equivalent_id: uuid.UUID | None = None,
         allowed_participant_ids: "set[uuid.UUID] | None" = None,
+        allowed_participant_pids: "AbstractSet[str] | None" = None,
     ) -> Decimal | None:
         """Execute clearing for a specific cycle and return the *actual* cleared amount.
 
@@ -1408,12 +1456,15 @@ class ClearingService:
 
         execution_tx_id = self._execution_tx_id(debt_ids)
         try:
-            replay_amount = await self._committed_execution_amount(execution_tx_id)
+            replay_amount = await self._committed_execution_amount(
+                execution_tx_id, allowed_participant_pids=allowed_participant_pids
+            )
         except Exception as exc:
             if self._is_retryable_concurrency_error(exc):
                 try:
                     replay_amount = await self._reconcile_committed_execution(
-                        execution_tx_id
+                        execution_tx_id,
+                        allowed_participant_pids=allowed_participant_pids,
                     )
                 except Exception as reconciliation_error:
                     await self._raise_unexpected_execution(reconciliation_error)
@@ -1438,7 +1489,8 @@ class ClearingService:
             if self._is_retryable_concurrency_error(exc):
                 try:
                     replay_amount = await self._reconcile_committed_execution(
-                        execution_tx_id
+                        execution_tx_id,
+                        allowed_participant_pids=allowed_participant_pids,
                     )
                 except Exception as reconciliation_error:
                     await self._raise_unexpected_execution(reconciliation_error)
@@ -1451,7 +1503,8 @@ class ClearingService:
             # we waited for its Debt rows. Resolve that durable result before skip.
             try:
                 replay_amount = await self._committed_execution_amount(
-                    execution_tx_id
+                    execution_tx_id,
+                    allowed_participant_pids=allowed_participant_pids,
                 )
             except Exception as exc:
                 await self._raise_unexpected_execution(exc)

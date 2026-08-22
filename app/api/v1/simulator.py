@@ -638,17 +638,41 @@ async def _run_scoped_pids_or_none(*, run_id: str, session) -> Optional[set[str]
     by an exception, on the one path with no coverage.  It is fail-closed now: an
     unestablishable perimeter admits nobody.
     """
+    pids, _available = await _run_perimeter(run_id=run_id, session=session)
+    return pids
+
+
+async def _run_perimeter(*, run_id: str, session) -> tuple[set[str], bool]:
+    """The run's participants, plus whether the perimeter could be measured at all.
+
+    2026-08-22 / p010, found by external review.  `_run_scoped_pids_or_none` collapses two
+    different situations into an empty set: a genuinely empty run, and a snapshot that could
+    not be built.  For AUTHORISATION that is right -- neither admits anybody.  For REPORTING
+    it is not: a route that feeds the empty set into detection answers "0 cycles cleared,
+    200 OK", which dresses a failed authorisation measurement as a completed, empty piece of
+    work.  Callers that report an outcome to a user need the second value; callers that only
+    decide whether to admit a participant do not.
+    """
     try:
         snap = await runtime.build_graph_snapshot(run_id=run_id, equivalent="", session=session)
     except Exception:
         logger.warning(
             "simulator.actions.perimeter_unavailable run_id=%s", str(run_id), exc_info=True
         )
-        return set()
+        return set(), False
     nodes = getattr(snap, "nodes", None) or []
     pids = {str(getattr(n, "id", "") or "").strip() for n in nodes}
     pids.discard("")
-    return pids
+    return pids, True
+
+
+def _perimeter_unavailable_error(run_id: str) -> JSONResponse:
+    return _action_error(
+        status_code=503,
+        code="RUN_PERIMETER_UNAVAILABLE",
+        message="Run perimeter could not be established",
+        details={"run_id": str(run_id)},
+    )
 
 
 async def _resolve_participant_or_error(
@@ -975,7 +999,11 @@ async def action_trustline_create(
     if (seed_err := await _ensure_run_seeded(run_id, db)) is not None:
         return seed_err
 
-    scoped_pids = await _run_scoped_pids_or_none(run_id=run_id, session=db)
+    scoped_pids, perimeter_available = await _run_perimeter(run_id=run_id, session=db)
+    if not perimeter_available:
+        # Same reason as `action_clearing_real`: an unmeasurable perimeter must not be
+        # reported as NO_ROUTE, which would read as a fact about the graph.
+        return _perimeter_unavailable_error(run_id)
     from_p, err = await _resolve_participant_or_error(
         session=db, pid=req.from_pid, field="from_pid", scoped_pids=scoped_pids
     )
@@ -1753,7 +1781,11 @@ async def action_clearing_real(
     # perimeter is computed once here and given to BOTH detection and execution: detection
     # so the cycle is never found, execution so a cycle that arrives by any other route is
     # still refused.
-    scoped_pids = await _run_scoped_pids_or_none(run_id=run_id, session=db)
+    scoped_pids, perimeter_available = await _run_perimeter(run_id=run_id, session=db)
+    if not perimeter_available:
+        # Reporting "nothing to clear" here would hide a failed authorisation measurement
+        # behind a successful-looking empty result.
+        return _perimeter_unavailable_error(run_id)
 
     service = ClearingService(db)
 
