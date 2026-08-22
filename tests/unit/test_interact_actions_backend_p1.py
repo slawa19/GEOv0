@@ -1553,14 +1553,14 @@ async def test_action_trustline_create_after_close_is_a_declared_outcome(
     predicate `TrustLine.status != "closed"`.  Fixing `F-009-3` in the service therefore
     does not close this call site.
 
-    The assertion deliberately does not pick a side of the open product fork (reopen,
-    delete-on-close, declared conflict, or accepted irreversibility).  It only requires
-    that two ordinary calls by one user produce a *declared* HTTP outcome instead of an
-    unhandled database error surfacing as 500.
+    The behaviour is the one the protocol prescribes: TRUST_LINE_CREATE is blocked only by
+    an ACTIVE line (`docs/ru/02-protocol-spec.md:333`), so recreating after close yields a
+    NEW incarnation with a new id, and the closed row stays as history (`:379`).
 
-    Note on the gate: the Postgres proof for this class is `RT-009-3`
-    (`tests/integration/test_p1_trustline_reopen_postgres.py`).  This test exists to show
-    that the second call site is independently affected, not to re-prove the constraint.
+    Note on the gate: this test runs against the model schema, so it pins the *behaviour*,
+    not the migration.  The migration itself is gated by `RT-009-3`
+    (`tests/integration/test_p1_trustline_reopen_postgres.py`) under the Postgres tier with
+    `GEO_TEST_USE_MIGRATED_SCHEMA=1`.
     """
     await _seed_alice_bob_uah(db_session)
     headers = {"X-Admin-Token": settings.ADMIN_TOKEN}

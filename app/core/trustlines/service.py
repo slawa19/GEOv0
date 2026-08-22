@@ -25,6 +25,26 @@ from app.utils.validation import validate_equivalent_code, validate_trustline_po
 from app.core.integrity import compute_integrity_checkpoint_for_equivalent
 from app.core.payments.router import PaymentRouter
 
+_LIVE_TRUSTLINE_INDEX = "uq_trust_lines_live_from_to_equivalent"
+
+
+def _is_live_trustline_uniqueness_violation(exc: IntegrityError) -> bool:
+    """True only for a clash with the live-trustline partial unique index.
+
+    The index name appears in the driver message on both PostgreSQL ("duplicate key value
+    violates unique constraint ...") and SQLite ("UNIQUE constraint failed: ..." naming the
+    columns).  Matching on identity keeps unrelated IntegrityErrors from being renamed into
+    a conflict the caller can neither understand nor act on.
+    """
+    text = f"{exc.orig} {exc}"
+    if _LIVE_TRUSTLINE_INDEX in text:
+        return True
+    lowered = text.lower()
+    return "trust_lines" in lowered and (
+        "from_participant_id" in lowered and "to_participant_id" in lowered
+    )
+
+
 class TrustLineService:
     def __init__(self, session: AsyncSession):
         self.session = session
@@ -109,16 +129,27 @@ class TrustLineService:
             policy=data.policy or {},
             status='active'
         )
+        # NOTE ON TRANSACTION SHAPE.  The INSERT is deliberately left staged in the
+        # caller-owned transaction rather than isolated in a SAVEPOINT.  The fail-closed
+        # contract of this service depends on it: if any later step fails (checkpoint,
+        # audit), the exception propagates and the caller's rollback must remove the row.
+        # `tests/unit/test_trustline_audit_fail_closed.py` pins exactly that, and an
+        # earlier attempt to wrap the flush in a savepoint broke it.
+        #
+        # The uniqueness race is handled at the commit below instead, which is where the
+        # conflict actually surfaces: a competing transaction that has not committed yet
+        # does not block this INSERT.
         self.session.add(trustline)
-
-        # The guard above and the INSERT are not atomic: two concurrent creates can both
-        # observe "no live line" and both insert.  The partial unique index rejects the
-        # loser, and that rejection must reach the caller as a declared conflict rather
-        # than as an unhandled database error (fail-closed, §9 anti-vacuum).
         try:
             await self.session.flush()
         except IntegrityError as exc:
-            await self.session.rollback()
+            # The conflict surfaces here when the competing transaction has already
+            # committed.  Translate it into a declared conflict WITHOUT rolling back
+            # ourselves: the transaction is already aborted, and the caller's own rollback
+            # is what removes the staged row -- the same mechanism the fail-closed contract
+            # relies on.
+            if not _is_live_trustline_uniqueness_violation(exc):
+                raise
             raise ConflictException(
                 "Active trustline already exists",
                 details={"reason": "CONCURRENT_TRUSTLINE_CREATE"},
@@ -150,10 +181,24 @@ class TrustLineService:
             )
         )
 
-        await self.session.commit()
+        # The uniqueness conflict can surface HERE rather than at the flush above: a
+        # competing transaction that has not committed yet does not block the INSERT, and
+        # PostgreSQL raises only when the winner commits.  Both points must therefore map
+        # to the same declared conflict.
+        try:
+            await self.session.commit()
+        except IntegrityError as exc:
+            await self.session.rollback()
+            if not _is_live_trustline_uniqueness_violation(exc):
+                raise
+            raise ConflictException(
+                "Active trustline already exists",
+                details={"reason": "CONCURRENT_TRUSTLINE_CREATE"},
+            ) from exc
+
         PaymentRouter.invalidate_cache(equivalent.code)
         await self.session.refresh(trustline)
-        
+
         # Hydrate extra fields for response
         return await self._hydrate_trustline(trustline)
 

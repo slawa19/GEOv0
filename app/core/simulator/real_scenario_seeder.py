@@ -190,12 +190,16 @@ class RealScenarioSeeder:
                 if limit < 0:
                     continue
 
+                # Only a LIVE row occupies the triple: since migration 019 a closed
+                # incarnation may coexist with it, so an unfiltered lookup can return
+                # several rows and raise MultipleResultsFound.
                 existing = (
                     await session.execute(
                         select(TrustLine).where(
                             TrustLine.from_participant_id == p_from.id,
                             TrustLine.to_participant_id == p_to.id,
                             TrustLine.equivalent_id == eq_by_code[eq].id,
+                            TrustLine.status != "closed",
                         )
                     )
                 ).scalar_one_or_none()

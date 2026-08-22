@@ -141,6 +141,11 @@ class SnapshotBuilder:
                         TrustLine.equivalent_id == eq.id,
                         TrustLine.from_participant_id.in_(participant_ids),
                         TrustLine.to_participant_id.in_(participant_ids),
+                        # LIVE rows only.  Since migration 019 a closed incarnation may
+                        # coexist with the live one; folding both into a dict keyed by
+                        # pair would let history overwrite the current line in whatever
+                        # order the rows arrive.
+                        TrustLine.status != "closed",
                     )
                 )
             ).all()

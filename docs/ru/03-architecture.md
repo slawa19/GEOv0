@@ -497,7 +497,13 @@ CREATE TABLE trust_lines (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     
-    UNIQUE(from_participant_id, to_participant_id, equivalent_id)
+    -- Уникальность действует только среди ЖИВЫХ строк: закрытая линия — это история,
+    -- и по протоколу (§5.1) создание блокирует лишь АКТИВНАЯ линия.
+    -- Реализовано частичным уникальным индексом, см. миграцию
+    -- 019_trust_lines_partial_unique_live и программу 009.
+    -- CREATE UNIQUE INDEX uq_trust_lines_live_from_to_equivalent
+    --     ON trust_lines (from_participant_id, to_participant_id, equivalent_id)
+    --     WHERE status <> 'closed'
 );
 
 CREATE INDEX idx_trust_lines_from ON trust_lines(from_participant_id);

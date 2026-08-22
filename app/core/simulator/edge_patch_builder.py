@@ -77,7 +77,12 @@ class EdgePatchBuilder:
                     TrustLine.to_participant_id,
                     TrustLine.limit,
                     TrustLine.status,
-                ).where(TrustLine.equivalent_id == eq_id)
+                ).where(
+                    TrustLine.equivalent_id == eq_id,
+                    # LIVE rows only — see snapshot_builder for the same reason
+                    # (migration 019 allows a closed incarnation alongside the live one).
+                    TrustLine.status != "closed",
+                )
             )
         ).all()
 

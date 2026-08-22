@@ -302,10 +302,12 @@ class InjectExecutor:
 
             tl = (
                 await session.execute(
+                    # Live row only (migration 019): a closed incarnation may coexist.
                     select(TrustLine.limit, TrustLine.status).where(
                         TrustLine.from_participant_id == creditor_id,
                         TrustLine.to_participant_id == debtor_id,
                         TrustLine.equivalent_id == eq_id,
+                        TrustLine.status != "closed",
                     )
                 )
             ).one_or_none()
@@ -479,13 +481,15 @@ class InjectExecutor:
                             from_pid_str = pid
                             to_pid_str = sponsor_pid
 
-                        # Idempotency: skip if trustline already exists.
+                        # Idempotency: skip if a LIVE trustline already exists.
+                        # A closed incarnation does not occupy the triple (migration 019).
                         existing_tl = (
                             await session.execute(
                                 select(TrustLine.id).where(
                                     TrustLine.from_participant_id == from_id,
                                     TrustLine.to_participant_id == to_id,
                                     TrustLine.equivalent_id == eq_id,
+                                    TrustLine.status != "closed",
                                 )
                             )
                         ).scalar_one_or_none()
@@ -586,13 +590,15 @@ class InjectExecutor:
                     skipped += 1
                     return False
 
-                # Idempotency: skip if trustline already exists.
+                # Idempotency: skip if a LIVE trustline already exists.
+                # A closed incarnation does not occupy the triple (migration 019).
                 existing_tl = (
                     await session.execute(
                         select(TrustLine.id).where(
                             TrustLine.from_participant_id == from_id,
                             TrustLine.to_participant_id == to_id,
                             TrustLine.equivalent_id == eq_id,
+                            TrustLine.status != "closed",
                         )
                     )
                 ).scalar_one_or_none()

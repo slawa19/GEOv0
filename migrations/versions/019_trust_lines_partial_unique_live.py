@@ -58,12 +58,27 @@ def _dialect() -> str:
     return op.get_bind().dialect.name
 
 
+def _existing_names(bind) -> tuple[set[str], set[str]]:
+    """Actual unique-constraint and index names on `trust_lines`, whatever created them."""
+    inspector = sa.inspect(bind)
+    constraints = {
+        c.get("name")
+        for c in inspector.get_unique_constraints("trust_lines")
+        if c.get("name")
+    }
+    indexes = {i.get("name") for i in inspector.get_indexes("trust_lines") if i.get("name")}
+    return constraints, indexes
+
+
 def upgrade() -> None:
+    bind = op.get_bind()
     dialect = _dialect()
+    constraints, indexes = _existing_names(bind)
 
     if dialect in {"postgresql", "postgres"}:
-        # The constraint may have been materialised either as a table constraint or as a
-        # unique index depending on how the schema was created; drop whichever exists.
+        # The old uniqueness may be materialised as a table constraint or as a standalone
+        # unique index depending on how the schema was created; both forms are dropped
+        # idempotently.
         op.execute(f'ALTER TABLE trust_lines DROP CONSTRAINT IF EXISTS "{_OLD_CONSTRAINT}"')
         op.execute(f'DROP INDEX IF EXISTS "{_OLD_CONSTRAINT}"')
         op.execute(
@@ -73,21 +88,28 @@ def upgrade() -> None:
         )
         return
 
-    # SQLite (and anything else): the constraint lives inside the table definition, so it
-    # is dropped by batch-recreating the table.
-    with op.batch_alter_table("trust_lines") as batch:
-        try:
+    # SQLite and anything else.
+    #
+    # A table-level constraint can only be removed by recreating the table, which is what
+    # batch mode does.  But batch mode raises `ValueError: No such constraint` *on exit*
+    # when the reflected table does not carry that name — and that exception escapes any
+    # try/except placed around `drop_constraint` itself.  So the batch step runs ONLY when
+    # the constraint is actually there.  A schema built by `Base.metadata.create_all` from
+    # the current model has nothing to drop, and that is a normal, expected state.
+    if _OLD_CONSTRAINT in constraints:
+        with op.batch_alter_table("trust_lines") as batch:
             batch.drop_constraint(_OLD_CONSTRAINT, type_="unique")
-        except Exception:
-            # Older SQLite files may carry it as an index instead; the index branch below
-            # covers that case, and a missing constraint is not an error for this step.
-            pass
-    op.execute(f'DROP INDEX IF EXISTS "{_OLD_CONSTRAINT}"')
-    op.execute(
-        f'CREATE UNIQUE INDEX IF NOT EXISTS "{_LIVE_INDEX}" '
-        f'ON trust_lines ({", ".join(_COLUMNS)}) '
-        "WHERE status <> 'closed'"
-    )
+    elif _OLD_CONSTRAINT in indexes:
+        op.execute(f'DROP INDEX IF EXISTS "{_OLD_CONSTRAINT}"')
+
+    # Re-read: batch mode recreates the table, so index names must be checked again.
+    _, indexes_after = _existing_names(bind)
+    if _LIVE_INDEX not in indexes_after:
+        op.execute(
+            f'CREATE UNIQUE INDEX "{_LIVE_INDEX}" '
+            f'ON trust_lines ({", ".join(_COLUMNS)}) '
+            "WHERE status <> 'closed'"
+        )
 
 
 def downgrade() -> None:
