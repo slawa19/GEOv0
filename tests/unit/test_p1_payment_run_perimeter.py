@@ -370,3 +370,54 @@ async def test_the_staged_path_without_a_perimeter_keeps_its_old_behaviour(db_se
         idempotency_key=None,
     )
     assert staged is not None
+
+
+@pytest.mark.asyncio
+async def test_an_idempotent_replay_does_not_hand_back_a_foreign_route(db_session):
+    """The idempotency shortcut returns before the perimeter check.
+
+    Found by external review of this batch. `_create_payment_impl` answers a known
+    idempotency key from the stored transaction and returns immediately, ahead of the
+    narrowing and the postcondition. If that transaction was written by an unscoped caller -
+    the hub, or this very code before the perimeter existed - its stored route may run
+    through a participant of another run, and the scoped caller is handed it as its own
+    result.
+
+    Exactly the shape already closed on the clearing side, where a committed replay was
+    validated against the perimeter instead of being trusted.
+    """
+
+    from app.core.payments.service import PaymentService
+    from app.utils.exceptions import GeoException
+
+    _eq, people = await _seed(db_session)
+    PaymentRouter.invalidate_cache()
+
+    idem = "replay-through-a-stranger"
+
+    # An unscoped caller creates it, the way it existed before the perimeter.
+    first = await PaymentService(db_session).create_payment_internal(
+        people["a1"].id,
+        to_pid="a2",
+        equivalent=_EQ,
+        amount="50",
+        idempotency_key=idem,
+        commit=True,
+    )
+    assert first is not None
+    assert await _debts_touching(db_session, people["b1"].id) > 0, (
+        "the stand needs the stored route to actually run through b1"
+    )
+
+    # The same request replayed by a caller that IS scoped must not be told this succeeded
+    # for it: the route it would be handed leaves its run.
+    with pytest.raises(GeoException):
+        await PaymentService(db_session).create_payment_internal(
+            people["a1"].id,
+            to_pid="a2",
+            equivalent=_EQ,
+            amount="50",
+            idempotency_key=idem,
+            commit=True,
+            allowed_participant_pids={"a1", "a2"},
+        )

@@ -202,12 +202,38 @@ class PaymentService:
         *,
         sender_id: uuid.UUID,
         request_fingerprint: str,
+        allowed_participant_pids: "AbstractSet[str] | None" = None,
     ) -> PaymentResult:
         """Apply one idempotency policy to both lookup and insert-race rows."""
         if existing_tx.type != "PAYMENT":
             raise ConflictException("tx_id already used")
         if existing_tx.initiator_id != sender_id:
             raise ConflictException("tx_id already used")
+
+        # 2026-08-22 / p010, found by external review.  This shortcut returns a stored
+        # result BEFORE the narrowing and the postcondition, so without this check a scoped
+        # caller replaying an idempotency key is handed whatever route was recorded - and
+        # that transaction may have been written by an unscoped caller, or by this code
+        # before the perimeter existed, with a route running through another run.  The
+        # clearing side already refuses a committed replay it cannot vouch for; this is the
+        # same rule on the payment side.
+        if allowed_participant_pids is not None:
+            escaped = {
+                str(pid)
+                for route in ((existing_tx.payload or {}).get("routes") or [])
+                for pid in (route.get("path") or [])
+                if str(pid) not in allowed_participant_pids
+            }
+            if escaped:
+                logger.error(
+                    "event=payment.idempotent_replay_escaped_perimeter tx_id=%s pids=%s",
+                    str(existing_tx.tx_id),
+                    sorted(escaped),
+                )
+                raise RoutingException(
+                    "No route found with sufficient capacity",
+                    insufficient_capacity=False,
+                )
 
         existing_payload = existing_tx.payload or {}
         existing_fp = (existing_payload.get("idempotency") or {}).get("fingerprint")
@@ -584,6 +610,7 @@ class PaymentService:
                 existing_tx,
                 sender_id=sender_id,
                 request_fingerprint=request_fingerprint,
+                allowed_participant_pids=allowed_participant_pids,
             )
 
         # 2. Routing
@@ -779,6 +806,7 @@ class PaymentService:
                             existing_tx,
                             sender_id=sender_id,
                             request_fingerprint=request_fingerprint,
+                            allowed_participant_pids=allowed_participant_pids,
                         )
                     raise
                 except DBAPIError as exc:
