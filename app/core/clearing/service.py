@@ -2,9 +2,9 @@ import asyncio
 import logging
 import uuid
 from decimal import Decimal
-from typing import Dict, List, Set
+from typing import AbstractSet, Dict, List, Set
 
-from sqlalchemy import select, and_, func, text
+from sqlalchemy import bindparam, select, and_, func, text
 from sqlalchemy.ext.asyncio import (
     AsyncConnection,
     AsyncEngine,
@@ -161,6 +161,8 @@ class ClearingService:
     async def _read_committed_execution_amount(
         session: AsyncSession,
         tx_id: str,
+        *,
+        allowed_participant_pids: "AbstractSet[str] | None" = None,
     ) -> Decimal | None:
         transaction = (
             await session.execute(
@@ -172,6 +174,31 @@ class ClearingService:
         ).scalar_one_or_none()
         if transaction is None or transaction.state != "COMMITTED":
             return None
+
+        # 2026-08-22 / p010, found by external review of this batch.  The replay shortcut
+        # returns BEFORE the locked re-read, and therefore before the perimeter check that
+        # stands on those rows -- so without this a scoped caller replaying another run's
+        # cycle would be handed the foreign amount as its own success.  The recorded
+        # transaction carries the participants of every edge, so it can answer for itself.
+        if allowed_participant_pids is not None:
+            edges = (transaction.payload or {}).get("edges")
+            if not isinstance(edges, list) or not edges:
+                # A payload that cannot be checked is not a payload that passes.
+                logger.error(
+                    "event=clearing.replay_scope_unverifiable tx_id=%s", tx_id
+                )
+                raise GeoException()
+            touched = {
+                str(edge.get(role) or "")
+                for edge in edges
+                if isinstance(edge, dict)
+                for role in ("debtor", "creditor")
+            }
+            if not touched or not touched <= set(allowed_participant_pids):
+                logger.error(
+                    "event=clearing.replay_escaped_scope tx_id=%s", tx_id
+                )
+                raise GeoException()
         try:
             amount = Decimal(str((transaction.payload or {})["amount"]))
         except Exception as exc:
@@ -182,8 +209,15 @@ class ClearingService:
             raise GeoException()
         return amount
 
-    async def _committed_execution_amount(self, tx_id: str) -> Decimal | None:
-        return await self._read_committed_execution_amount(self.session, tx_id)
+    async def _committed_execution_amount(
+        self,
+        tx_id: str,
+        *,
+        allowed_participant_pids: "AbstractSet[str] | None" = None,
+    ) -> Decimal | None:
+        return await self._read_committed_execution_amount(
+            self.session, tx_id, allowed_participant_pids=allowed_participant_pids
+        )
 
     @staticmethod
     def _postgres_error_codes(exc: BaseException) -> set[str]:
@@ -212,7 +246,12 @@ class ClearingService:
     def _is_retryable_concurrency_error(cls, exc: BaseException) -> bool:
         return bool(cls._postgres_error_codes(exc) & {"40001", "40P01"})
 
-    async def _reconcile_committed_execution(self, tx_id: str) -> Decimal | None:
+    async def _reconcile_committed_execution(
+        self,
+        tx_id: str,
+        *,
+        allowed_participant_pids: "AbstractSet[str] | None" = None,
+    ) -> Decimal | None:
         """Resolve one ambiguous occurrence from a fresh transaction snapshot."""
         try:
             await self.session.rollback()
@@ -235,6 +274,7 @@ class ClearingService:
                     amount = await self._read_committed_execution_amount(
                         recovery_session,
                         tx_id,
+                        allowed_participant_pids=allowed_participant_pids,
                     )
             except Exception as exc:
                 last_error = exc
@@ -292,6 +332,47 @@ class ClearingService:
             return float(val)
         return val
 
+    def _scope_predicate(self, columns: tuple[str, ...]) -> str:
+        """SQL that confines a cycle to an allowlist of participants.
+
+        2026-08-22 / p010 (`F-010-3`).  The predicate belongs in the WHERE clause, ahead of
+        `ORDER BY ... LIMIT`, and NOT in a filter applied to the result of `find_cycles`.
+        The detection queries rank every cycle of the equivalent and keep only the first 100
+        (triangles) or 50 (quadrangles), so a post-filter can legitimately be handed a full
+        page of another run's cycles, discard all of them, and leave the caller with a
+        silent "no cycles" while its own cycle sat below the cut.  That is a false green of
+        exactly the kind this wave exists to remove.
+
+        Only the unique vertices need naming: the JOINs already tie the remaining ends to
+        them.
+        """
+        return " ".join(
+            f"AND {col} IN :allowed_participant_ids" for col in columns
+        )
+
+    def _scope_binds(self, allowed_participant_ids):
+        """Bind material for `_scope_predicate`, or None when the scope is not applied."""
+        if allowed_participant_ids is None:
+            return None
+        # Raw text() needs an expanding bind for IN, and SQLite stores UUIDs as bare hex.
+        return [self._bind_uuid(pid) for pid in sorted(allowed_participant_ids)]
+
+    async def _resolve_scope_ids(self, allowed_participant_pids):
+        """Resolve a pid perimeter to participant ids once, or None when not applied."""
+        if allowed_participant_pids is None:
+            return None
+        if not allowed_participant_pids:
+            return set()
+        return set(
+            (
+                await self.session.execute(
+                    select(Participant.id).where(
+                        Participant.pid.in_(sorted(allowed_participant_pids))
+                    )
+                )
+            ).scalars().all()
+        )
+
     def _sql_auto_clearing_ok(self, alias: str) -> str:
         """Dialect-aware SQL predicate: trustline policy permits auto-clearing.
 
@@ -345,8 +426,17 @@ class ClearingService:
             out.append(cycle)
         return out
 
-    async def find_triangles_sql(self, equivalent_id: uuid.UUID) -> List[List[Dict]]:
-        """Find 3-node debt cycles using a SQL JOIN."""
+    async def find_triangles_sql(
+        self,
+        equivalent_id: uuid.UUID,
+        *,
+        allowed_participant_ids: "set[uuid.UUID] | None" = None,
+    ) -> List[List[Dict]]:
+        """Find 3-node debt cycles using a SQL JOIN.
+
+        `allowed_participant_ids` confines the cycle to one run's participants; None keeps
+        the historic global behaviour, which the hub and the simulator tick still rely on.
+        """
 
         dialect = self._dialect_name()
 
@@ -359,6 +449,15 @@ class ClearingService:
         # as bound parameters. Normalize binds for SQLite only.
         equivalent_id_param = self._bind_uuid(equivalent_id)
         min_amount_param = self._bind_decimal(Decimal("0.01"))
+
+        # a = d1.debtor, b = d1.creditor (= d2.debtor), c = d2.creditor (= d3.debtor);
+        # d3.creditor is a by the JOIN, so three columns name every vertex.
+        scope_binds = self._scope_binds(allowed_participant_ids)
+        scope_sql = (
+            ""
+            if scope_binds is None
+            else self._scope_predicate(("d1.debtor_id", "d1.creditor_id", "d2.creditor_id"))
+        )
 
         query = text(
             f"""
@@ -397,18 +496,21 @@ class ClearingService:
             WHERE d1.equivalent_id = :equivalent_id
               AND d1.amount > 0 AND d2.amount > 0 AND d3.amount > 0
               AND {least_expr} > :min_amount
+              {scope_sql}
             ORDER BY clear_amount DESC
             LIMIT 100
             """
         )
 
-        result = await self.session.execute(
-            query,
-            {
-                "equivalent_id": equivalent_id_param,
-                "min_amount": min_amount_param,
-            },
-        )
+        params = {
+            "equivalent_id": equivalent_id_param,
+            "min_amount": min_amount_param,
+        }
+        if scope_binds is not None:
+            query = query.bindparams(bindparam("allowed_participant_ids", expanding=True))
+            params["allowed_participant_ids"] = scope_binds
+
+        result = await self.session.execute(query, params)
 
         cycles: List[List[Dict]] = []
         for row in result:
@@ -437,7 +539,12 @@ class ClearingService:
 
         return cycles
 
-    async def find_quadrangles_sql(self, equivalent_id: uuid.UUID) -> List[List[Dict]]:
+    async def find_quadrangles_sql(
+        self,
+        equivalent_id: uuid.UUID,
+        *,
+        allowed_participant_ids: "set[uuid.UUID] | None" = None,
+    ) -> List[List[Dict]]:
         """Find 4-node debt cycles using a SQL JOIN."""
 
         dialect = self._dialect_name()
@@ -448,6 +555,17 @@ class ClearingService:
 
         equivalent_id_param = self._bind_uuid(equivalent_id)
         min_amount_param = self._bind_decimal(Decimal("0.01"))
+
+        # a = d1.debtor, b = d1.creditor (= d2.debtor), c = d2.creditor (= d3.debtor),
+        # d = d3.creditor (= d4.debtor); d4.creditor is a by the JOIN.
+        scope_binds = self._scope_binds(allowed_participant_ids)
+        scope_sql = (
+            ""
+            if scope_binds is None
+            else self._scope_predicate(
+                ("d1.debtor_id", "d1.creditor_id", "d2.creditor_id", "d3.creditor_id")
+            )
+        )
 
         query = text(
             f"""
@@ -488,18 +606,21 @@ class ClearingService:
               AND d1.debtor_id != d3.creditor_id
               AND d1.creditor_id != d3.creditor_id
               AND {least_expr} > :min_amount
+              {scope_sql}
             ORDER BY clear_amount DESC
             LIMIT 50
             """
         )
 
-        result = await self.session.execute(
-            query,
-            {
-                "equivalent_id": equivalent_id_param,
-                "min_amount": min_amount_param,
-            },
-        )
+        params = {
+            "equivalent_id": equivalent_id_param,
+            "min_amount": min_amount_param,
+        }
+        if scope_binds is not None:
+            query = query.bindparams(bindparam("allowed_participant_ids", expanding=True))
+            params["allowed_participant_ids"] = scope_binds
+
+        result = await self.session.execute(query, params)
 
         cycles: List[List[Dict]] = []
         for row in result:
@@ -702,11 +823,26 @@ class ClearingService:
         return locked
 
     async def find_cycles(
-        self, equivalent_code: str, max_depth: int = 6
+        self,
+        equivalent_code: str,
+        max_depth: int = 6,
+        *,
+        allowed_participant_pids: "AbstractSet[str] | None" = None,
     ) -> List[List[Dict]]:
         """
         Find closed cycles of debts for a given equivalent.
         Returns list of cycles, where each cycle is a list of Debt objects (or dicts representing edges).
+
+        `allowed_participant_pids` confines detection to one run's participants
+        (2026-08-22 / p010, `F-010-3`).  Three states, and the difference between the last
+        two is the whole point:
+
+        * `None` — no perimeter is being applied.  The hub routes, the admin preview and the
+          simulator tick all rely on this and pass nothing.
+        * a non-empty set — only cycles whose every vertex is in the set.
+        * an EMPTY set — nobody.  `_run_scoped_pids_or_none` returns exactly that when the
+          perimeter cannot be established (`app/api/v1/simulator.py:641-651`), and reading it
+          as "no restriction" would be a literal return of `F-009-1`.
 
         Algorithm:
         1. Load all debts for this equivalent into memory (Graph).
@@ -743,13 +879,36 @@ class ClearingService:
                 )
             raise GeoException(f"Equivalent {equivalent_code} not found")
 
+        allowed_ids: "set[uuid.UUID] | None" = None
+        if allowed_participant_pids is not None:
+            if not allowed_participant_pids:
+                # An empty perimeter admits nobody, so there is nothing to look for.
+                return []
+            # Resolved once, here: the route loops over find_cycles up to a hundred times
+            # (`app/api/v1/simulator.py:1771`), and the money code below works in UUIDs while
+            # the perimeter arrives as pids.  A failure here must abort rather than fall into
+            # the broad SQL fallback beneath, which would silently drop the perimeter.
+            allowed_ids = set(
+                (
+                    await self.session.execute(
+                        select(Participant.id).where(
+                            Participant.pid.in_(sorted(allowed_participant_pids))
+                        )
+                    )
+                ).scalars().all()
+            )
+            if not allowed_ids:
+                return []
+
         # FIX-012: Prefer SQL JOIN based search for short cycles (3–4) when running with a real AsyncSession.
         use_sql = isinstance(self.session, AsyncSession)
         if use_sql and max_depth >= 3:
             locked_pairs = await self._locked_pairs_for_equivalent(equivalent.id)
             cycles: List[List[Dict]] = []
             try:
-                cycles = await self.find_triangles_sql(equivalent.id)
+                cycles = await self.find_triangles_sql(
+                    equivalent.id, allowed_participant_ids=allowed_ids
+                )
                 if cycles and locked_pairs:
                     filtered: List[List[Dict]] = []
                     for cycle in cycles:
@@ -776,7 +935,9 @@ class ClearingService:
 
                 # If triangles exist but are all filtered out (policy/locks), try quadrangles.
                 if max_depth >= 4 and not cycles:
-                    cycles = await self.find_quadrangles_sql(equivalent.id)
+                    cycles = await self.find_quadrangles_sql(
+                        equivalent.id, allowed_participant_ids=allowed_ids
+                    )
                     if cycles and locked_pairs:
                         filtered = []
                         for cycle in cycles:
@@ -853,9 +1014,14 @@ class ClearingService:
         # 1. Load Graph
         # Node: Participant ID
         # Edge: Debt (debtor -> creditor, amount)
-        stmt = select(Debt).where(
-            and_(Debt.equivalent_id == equivalent.id, Debt.amount > 0)
-        )
+        # The perimeter narrows the LOAD, not the result: with both ends of every edge
+        # inside the allowlist, no cycle the DFS can build reaches outside it, so no output
+        # filter is needed here (2026-08-22 / p010, `F-010-3`).
+        conditions = [Debt.equivalent_id == equivalent.id, Debt.amount > 0]
+        if allowed_ids is not None:
+            conditions.append(Debt.debtor_id.in_(allowed_ids))
+            conditions.append(Debt.creditor_id.in_(allowed_ids))
+        stmt = select(Debt).where(and_(*conditions))
         all_debts = (await self.session.execute(stmt)).scalars().all()
 
         # Exclude edges that are involved in active prepared payments.
@@ -1013,14 +1179,46 @@ class ClearingService:
             )
         return final_cycles
 
-    async def execute_clearing(self, cycle: List[Dict]) -> bool:
+    async def execute_clearing(
+        self,
+        cycle: List[Dict],
+        *,
+        allowed_participant_pids: "AbstractSet[str] | None" = None,
+    ) -> bool:
         """Backward-compatible API: execute clearing and return success flag."""
-        return (await self.execute_clearing_with_amount(cycle)) is not None
+        return (
+            await self.execute_clearing_with_amount(
+                cycle, allowed_participant_pids=allowed_participant_pids
+            )
+        ) is not None
 
-    async def execute_clearing_with_amount(self, cycle: List[Dict]) -> Decimal | None:
-        """Execute one clearing attempt inside the shared payment owner domain."""
+    async def execute_clearing_with_amount(
+        self,
+        cycle: List[Dict],
+        *,
+        allowed_participant_pids: "AbstractSet[str] | None" = None,
+    ) -> Decimal | None:
+        """Execute one clearing attempt inside the shared payment owner domain.
+
+        `allowed_participant_pids` is the run perimeter (2026-08-22 / p010, `F-010-3`).  It is
+        carried through EVERY path into `_execute_clearing_with_amount` on purpose: a single
+        forgotten transition would be a way around the guard, and the guard is the second
+        line of defence — detection is the first, and a caller may hand us a cycle that
+        detection never produced.
+        """
+        allowed_ids = await self._resolve_scope_ids(allowed_participant_pids)
+        if allowed_participant_pids is not None and not allowed_ids:
+            # An empty perimeter admits nobody; there is nothing this cycle can legally be.
+            await self._raise_unexpected_execution(
+                RuntimeError("Clearing cycle escaped participant scope: empty perimeter")
+            )
+
         if self._dialect_name() not in {"postgresql", "postgres"} or not cycle:
-            return await self._execute_clearing_with_amount(cycle)
+            return await self._execute_clearing_with_amount(
+                cycle,
+                allowed_participant_ids=allowed_ids,
+                allowed_participant_pids=allowed_participant_pids,
+            )
 
         bind = getattr(self.session, "bind", None)
         if isinstance(bind, AsyncConnection):
@@ -1040,7 +1238,11 @@ class ClearingService:
         try:
             debt_ids = [uuid.UUID(str(edge["debt_id"])) for edge in cycle]
         except Exception:
-            return await self._execute_clearing_with_amount(cycle)
+            return await self._execute_clearing_with_amount(
+                cycle,
+                allowed_participant_ids=allowed_ids,
+                allowed_participant_pids=allowed_participant_pids,
+            )
 
         execution_tx_id = self._execution_tx_id(debt_ids)
         try:
@@ -1062,13 +1264,18 @@ class ClearingService:
         if len(preflight_debts) != len(debt_ids):
             try:
                 replay_amount = await self._reconcile_committed_execution(
-                    execution_tx_id
+                    execution_tx_id,
+                    allowed_participant_pids=allowed_participant_pids,
                 )
             except Exception as exc:
                 await self._raise_unexpected_execution(exc)
             if replay_amount is not None:
                 return replay_amount
-            return await self._execute_clearing_with_amount(cycle)
+            return await self._execute_clearing_with_amount(
+                cycle,
+                allowed_participant_ids=allowed_ids,
+                allowed_participant_pids=allowed_participant_pids,
+            )
 
         equivalent_ids = {debt.equivalent_id for debt in preflight_debts}
         if len(equivalent_ids) != 1:
@@ -1161,6 +1368,8 @@ class ClearingService:
                 result = await self._execute_clearing_with_amount(
                     cycle,
                     interlocked_equivalent_id=equivalent_id,
+                    allowed_participant_ids=allowed_ids,
+                    allowed_participant_pids=allowed_participant_pids,
                 )
                 result_available = True
             finally:
@@ -1205,6 +1414,8 @@ class ClearingService:
         cycle: List[Dict],
         *,
         interlocked_equivalent_id: uuid.UUID | None = None,
+        allowed_participant_ids: "set[uuid.UUID] | None" = None,
+        allowed_participant_pids: "AbstractSet[str] | None" = None,
     ) -> Decimal | None:
         """Execute clearing for a specific cycle and return the *actual* cleared amount.
 
@@ -1246,12 +1457,15 @@ class ClearingService:
 
         execution_tx_id = self._execution_tx_id(debt_ids)
         try:
-            replay_amount = await self._committed_execution_amount(execution_tx_id)
+            replay_amount = await self._committed_execution_amount(
+                execution_tx_id, allowed_participant_pids=allowed_participant_pids
+            )
         except Exception as exc:
             if self._is_retryable_concurrency_error(exc):
                 try:
                     replay_amount = await self._reconcile_committed_execution(
-                        execution_tx_id
+                        execution_tx_id,
+                        allowed_participant_pids=allowed_participant_pids,
                     )
                 except Exception as reconciliation_error:
                     await self._raise_unexpected_execution(reconciliation_error)
@@ -1276,7 +1490,8 @@ class ClearingService:
             if self._is_retryable_concurrency_error(exc):
                 try:
                     replay_amount = await self._reconcile_committed_execution(
-                        execution_tx_id
+                        execution_tx_id,
+                        allowed_participant_pids=allowed_participant_pids,
                     )
                 except Exception as reconciliation_error:
                     await self._raise_unexpected_execution(reconciliation_error)
@@ -1289,7 +1504,8 @@ class ClearingService:
             # we waited for its Debt rows. Resolve that durable result before skip.
             try:
                 replay_amount = await self._committed_execution_amount(
-                    execution_tx_id
+                    execution_tx_id,
+                    allowed_participant_pids=allowed_participant_pids,
                 )
             except Exception as exc:
                 await self._raise_unexpected_execution(exc)
@@ -1305,6 +1521,30 @@ class ClearingService:
             await self._raise_unexpected_execution(
                 GeoException("Clearing cycle identity changed after interlock")
             )
+
+        # 2026-08-22 / p010 (`F-010-3`).  The authoritative perimeter check, and the only
+        # one: it stands on the rows just re-read under FOR UPDATE, so it cannot be fooled
+        # by a cycle that changed between detection and execution, and it runs before the
+        # amount is computed and before any side effect.
+        #
+        # Not the preflight read: that snapshot is discarded when the original transaction
+        # rolls back and a separate interlock connection opens a new one.  Not the later
+        # `participant_ids` assembly either: by then several more queries have run.
+        #
+        # A violation is a fail-closed internal refusal, not a `None`.  `None` is the
+        # caller's signal for "candidate skipped" and would let the request finish as a
+        # successful zero result (`app/api/v1/simulator.py:1784-1785`), which is precisely
+        # the silent outcome this finding is about.
+        if allowed_participant_ids is not None:
+            touched = {
+                participant_id
+                for debt in debts
+                for participant_id in (debt.debtor_id, debt.creditor_id)
+            }
+            if not touched <= allowed_participant_ids:
+                await self._raise_unexpected_execution(
+                    GeoException("Clearing cycle escaped participant scope")
+                )
 
         # 1. Determine clearing amount (min amount in cycle)
         clear_amount = min([d.amount for d in debts])
@@ -1554,7 +1794,10 @@ class ClearingService:
                 ):
                     commit_cancellation = commit_error
                 reconciliation_task = asyncio.create_task(
-                    self._reconcile_committed_execution(tx_id_str)
+                    self._reconcile_committed_execution(
+                        tx_id_str,
+                        allowed_participant_pids=allowed_participant_pids,
+                    )
                 )
                 reconciliation_cancellation = await self._drain_task(
                     reconciliation_task
@@ -1595,7 +1838,8 @@ class ClearingService:
             if self._is_retryable_concurrency_error(exc):
                 try:
                     replay_amount = await self._reconcile_committed_execution(
-                        execution_tx_id
+                        execution_tx_id,
+                        allowed_participant_pids=allowed_participant_pids,
                     )
                 except Exception as reconciliation_error:
                     await self._raise_unexpected_execution(reconciliation_error)

@@ -36,7 +36,12 @@ async def test_simulator_run_events_sse_real_mode_emits_tx_failed_on_timeout(
         equivalent,
         amount,
         idempotency_key,
+        allowed_participant_pids=None,
     ):
+        # 2026-08-22 / p010 (`F-010-4`): the tick must hand the run perimeter to the staged
+        # payment. Asserted rather than swallowed with **kwargs: a double that tolerates a
+        # missing perimeter keeps passing after the caller stops sending one.
+        assert allowed_participant_pids, allowed_participant_pids
         nonlocal injected
         injected += 1
         raise TimeoutException("timeout")

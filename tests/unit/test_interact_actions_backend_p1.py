@@ -663,6 +663,10 @@ async def test_action_payment_real_happy_mocked(client, db_session, interact_act
     headers = {"X-Admin-Token": settings.ADMIN_TOKEN}
 
     async def _mock_create_payment_internal(self, *_args, **_kwargs):
+        # 2026-08-22 / p010: every other payment double here takes **_kwargs and would
+        # swallow a missing perimeter without a word, so at least one has to assert that it
+        # arrives. Without this, the route could stop scoping and the whole file stays green.
+        assert _kwargs.get("allowed_participant_pids") == {"alice", "bob"}, _kwargs
         return SimpleNamespace(tx_id=uuid.uuid4(), status="committed", routes=[])
 
     monkeypatch.setattr(interact_actions_enabled.PaymentService, "create_payment_internal", _mock_create_payment_internal)
@@ -1172,13 +1176,37 @@ async def test_action_clearing_real_total_cleared_amount_is_actual_not_precalc(
     )
     await db_session.commit()
 
+    # 2026-08-22 / p010: the cycle runs alice -> bob -> carol -> alice, so the run has to
+    # contain carol as well.  The shared fixture registers alice and bob only, and since the
+    # clearing route began honouring the run perimeter (`F-010-3`) a cycle through a
+    # participant the run does not contain is correctly refused.  The old shape - a run
+    # clearing a cycle that leaves it - is exactly what the perimeter exists to stop.
+    import app.api.v1.simulator as simulator_module_for_perimeter
+
+    _register_run_perimeter(
+        simulator_module_for_perimeter,
+        monkeypatch,
+        [
+            {"id": "alice", "name": "Alice", "type": "person", "status": "active"},
+            {"id": "bob", "name": "Bob", "type": "person", "status": "active"},
+            {"id": "carol", "name": "Carol", "type": "person", "status": "active"},
+        ],
+    )
+
     # Make find_cycles lie about per-edge amounts to ensure endpoint doesn't pre-calc based on it.
     import app.core.clearing.service as clearing_service_module
 
     original_find_cycles = clearing_service_module.ClearingService.find_cycles
 
-    async def _find_cycles_with_stale_amounts(self, equivalent_code: str, max_depth: int = 6):
-        cycles = await original_find_cycles(self, equivalent_code, max_depth=max_depth)
+    async def _find_cycles_with_stale_amounts(
+        self, equivalent_code: str, max_depth: int = 6, *, allowed_participant_pids=None
+    ):
+        cycles = await original_find_cycles(
+            self,
+            equivalent_code,
+            max_depth=max_depth,
+            allowed_participant_pids=allowed_participant_pids,
+        )
         for cycle in cycles:
             for edge in cycle:
                 edge["amount"] = "999"  # wrong pre-calc amount
@@ -1254,17 +1282,24 @@ async def test_action_clearing_real_emits_durable_partial_done_before_sanitized_
     find_calls = 0
     execute_calls = 0
 
-    async def _find_cycles(self, equivalent_code: str, max_depth: int = 6):
+    async def _find_cycles(
+        self, equivalent_code: str, max_depth: int = 6, *, allowed_participant_pids=None
+    ):
         nonlocal find_calls
         assert equivalent_code == "UAH"
         assert max_depth == 6
+        # 2026-08-22 / p010: the double asserts the run perimeter arrives, rather than
+        # tolerating the new keyword with **kwargs.  A double that merely swallows the
+        # argument would keep passing if the route stopped scoping.
+        assert allowed_participant_pids == {"alice", "bob"}, allowed_participant_pids
         cycle = cycles[min(find_calls, len(cycles) - 1)]
         find_calls += 1
         return [cycle]
 
-    async def _execute_clearing(self, cycle):
+    async def _execute_clearing(self, cycle, *, allowed_participant_pids=None):
         nonlocal execute_calls
         execute_calls += 1
+        assert allowed_participant_pids == {"alice", "bob"}, allowed_participant_pids
         if failure_kind == "committed_cancel" and execute_calls == 1:
             raise ClearingCommittedAfterCancellation(
                 tx_id="clearing-committed",

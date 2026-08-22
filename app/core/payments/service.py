@@ -4,7 +4,7 @@ import logging
 import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable, List, Literal
+from typing import AbstractSet, Any, Awaitable, Callable, List, Literal
 
 from sqlalchemy import select, and_, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -202,6 +202,7 @@ class PaymentService:
         *,
         sender_id: uuid.UUID,
         request_fingerprint: str,
+        allowed_participant_pids: "AbstractSet[str] | None" = None,
     ) -> PaymentResult:
         """Apply one idempotency policy to both lookup and insert-race rows."""
         if existing_tx.type != "PAYMENT":
@@ -213,6 +214,49 @@ class PaymentService:
         existing_fp = (existing_payload.get("idempotency") or {}).get("fingerprint")
         if existing_fp is not None and existing_fp != request_fingerprint:
             raise ConflictException("tx_id already used for a different request")
+
+        # 2026-08-22 / p010.  This shortcut returns a stored result BEFORE the narrowing and
+        # the postcondition, so a scoped caller replaying an idempotency key would otherwise
+        # be handed whatever route was recorded - and that transaction may have been written
+        # by an unscoped caller, or by this code before the perimeter existed, with a route
+        # through another run.
+        #
+        # Placed AFTER the fingerprint comparison on purpose, and the first version had it
+        # before: reusing a tx_id for a DIFFERENT request is a declared 409 conflict owned by
+        # another program, and checking the route first turned that into a routing 400
+        # whenever the stored route also left the perimeter.  Establish that the row is a
+        # replay of THIS request, then ask whose route it is.
+        if allowed_participant_pids is not None:
+            routes = (existing_payload.get("routes") or [])
+            paths = [route.get("path") or [] for route in routes]
+            if not paths or not all(paths):
+                # A payload whose route cannot be read is not a payload that passes - the
+                # same rule the clearing replay guard applies, and the first version of this
+                # one silently did the opposite for rows with no recorded routes.
+                logger.error(
+                    "event=payment.idempotent_replay_unverifiable tx_id=%s",
+                    str(existing_tx.tx_id),
+                )
+                raise RoutingException(
+                    "No route found with sufficient capacity",
+                    insufficient_capacity=False,
+                )
+            escaped = {
+                str(pid)
+                for path in paths
+                for pid in path
+                if str(pid) not in allowed_participant_pids
+            }
+            if escaped:
+                logger.error(
+                    "event=payment.idempotent_replay_escaped_perimeter tx_id=%s pids=%s",
+                    str(existing_tx.tx_id),
+                    sorted(escaped),
+                )
+                raise RoutingException(
+                    "No route found with sufficient capacity",
+                    insufficient_capacity=False,
+                )
 
         if existing_tx.state in {
             "NEW",
@@ -255,6 +299,46 @@ class PaymentService:
             commit=True,
         )
 
+    @staticmethod
+    def _confine_router_to_perimeter(router, allowed: "AbstractSet[str]") -> None:
+        """Narrow the router INSTANCE to one run's participants.
+
+        2026-08-22 / p010 (`F-010-3`).  The endpoints of a payment were already scoped, but
+        the graph the route is chosen from covers the whole equivalent, so the hops in
+        between belonged to nobody in particular - a payment inside run A would consume the
+        trust of a participant of run B and create debt rows in their name.
+
+        Instance state only.  A cache hit copies the graph and the policy maps into the
+        instance (`app/core/payments/router.py:167-173`), and a cache miss stores its own
+        copies (`:342-351`), so narrowing here cannot reach the shared cache.  The cache key
+        stays `equivalent_code`: making it composite would silently break the two callers
+        that reach into `_graph_cache` directly and the invalidation done per equivalent by
+        trustlines, clearing and integrity - none of which this program may edit.
+
+        `graph` is what actually decides the route; the policy maps default to permissive
+        (`router.py:369-373`), so narrowing them changes no outcome today and is here to keep
+        the structures consistent for whoever reads them next.  The blocked-participant sets
+        are values of a DENY list and are copied unchanged - intersecting them with an allow
+        list is backwards, and would weaken the restriction the day someone applies it to an
+        endpoint rather than a hop.
+        """
+
+        router.graph = {
+            u: {v: cap for v, cap in adj.items() if v in allowed}
+            for u, adj in router.graph.items()
+            if u in allowed
+        }
+        router.edge_can_be_intermediate = {
+            u: {v: flag for v, flag in adj.items() if v in allowed}
+            for u, adj in router.edge_can_be_intermediate.items()
+            if u in allowed
+        }
+        router.edge_blocked_participants = {
+            u: {v: blocked for v, blocked in adj.items() if v in allowed}
+            for u, adj in router.edge_blocked_participants.items()
+            if u in allowed
+        }
+
     async def create_payment_internal(
         self,
         sender_id: uuid.UUID,
@@ -266,6 +350,7 @@ class PaymentService:
         constraints: PaymentConstraints | None = None,
         idempotency_key: str | None = None,
         commit: bool = True,
+        allowed_participant_pids: "AbstractSet[str] | None" = None,
     ) -> PaymentResult:
         """Internal-only payment path for the simulator runner.
 
@@ -299,6 +384,7 @@ class PaymentService:
             idempotency_key=idempotency_key,
             require_signature=False,
             commit=commit,
+            allowed_participant_pids=allowed_participant_pids,
         )
 
     async def create_payment_internal_staged(
@@ -311,8 +397,15 @@ class PaymentService:
         description: str | None = None,
         constraints: PaymentConstraints | None = None,
         idempotency_key: str | None = None,
+        allowed_participant_pids: "AbstractSet[str] | None" = None,
     ) -> StagedPaymentResult:
-        """Flush an internal payment into the caller transaction without publishing it."""
+        """Flush an internal payment into the caller transaction without publishing it.
+
+        2026-08-22 / p010 (`F-010-4`): the run perimeter reaches this path too.  Closing it
+        only on `create_payment_internal` left the simulator tick able to route a run's
+        payment through another run's participant - the same P1, on the path that runs by
+        itself and is therefore both more repeatable and less visible.
+        """
 
         tx_id = (idempotency_key or "").strip() or str(uuid.uuid4())
         req = PaymentCreateRequest(
@@ -332,6 +425,7 @@ class PaymentService:
             require_signature=False,
             commit=False,
             deferred_effects=deferred_effects,
+            allowed_participant_pids=allowed_participant_pids,
         )
         return StagedPaymentResult(
             result=result,
@@ -389,6 +483,7 @@ class PaymentService:
         require_signature: bool,
         commit: bool,
         deferred_effects: list[PaymentPostCommitEffects] | None = None,
+        allowed_participant_pids: "AbstractSet[str] | None" = None,
     ) -> PaymentResult:
         """
         Create and execute a payment.
@@ -533,6 +628,7 @@ class PaymentService:
                 existing_tx,
                 sender_id=sender_id,
                 request_fingerprint=request_fingerprint,
+                allowed_participant_pids=allowed_participant_pids,
             )
 
         # 2. Routing
@@ -601,6 +697,23 @@ class PaymentService:
                 except asyncio.TimeoutError:
                     raise TimeoutException("Routing timed out")
 
+                # The route is chosen from the graph, so the perimeter has to be applied
+                # here -- after the graph is built (and possibly served from the shared
+                # cache), before a route is picked.
+                if allowed_participant_pids is not None:
+                    if not allowed_participant_pids:
+                        # An empty perimeter admits nobody.  `_run_scoped_pids_or_none`
+                        # returns exactly that when the perimeter cannot be established, and
+                        # treating it as "no restriction" would be a literal return of
+                        # `F-009-1`.
+                        raise RoutingException(
+                            "No route found with sufficient capacity",
+                            insufficient_capacity=False,
+                        )
+                    self._confine_router_to_perimeter(
+                        self.router, allowed_participant_pids
+                    )
+
                 try:
                     routes_found = await asyncio.wait_for(
                         asyncio.to_thread(
@@ -637,6 +750,27 @@ class PaymentService:
                         "No route found with sufficient capacity",
                         insufficient_capacity=True,
                     )
+
+                # Postcondition, and not a formality: the narrowing above and this check
+                # fail independently, so either alone would let the route-level test pass.
+                # It also covers the receiver, whom `_create_payment_impl` resolves from the
+                # global participant table (`:448-451`) rather than from the perimeter.
+                if allowed_participant_pids is not None:
+                    escaped = {
+                        pid
+                        for path, _amount in routes_found
+                        for pid in path
+                        if pid not in allowed_participant_pids
+                    }
+                    if escaped:
+                        logger.error(
+                            "event=payment.route_escaped_perimeter pids=%s",
+                            sorted(escaped),
+                        )
+                        raise RoutingException(
+                            "No route found with sufficient capacity",
+                            insufficient_capacity=False,
+                        )
 
                 routes_payload = [
                     {"path": path, "amount": str(route_amount)}
@@ -690,6 +824,7 @@ class PaymentService:
                             existing_tx,
                             sender_id=sender_id,
                             request_fingerprint=request_fingerprint,
+                            allowed_participant_pids=allowed_participant_pids,
                         )
                     raise
                 except DBAPIError as exc:

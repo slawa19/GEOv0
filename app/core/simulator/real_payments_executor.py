@@ -16,6 +16,7 @@ from app.core.simulator.rejection_codes import map_rejection_code
 from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter
 from app.core.simulator.viz_patch_helper import VizPatchHelper
 from app.core.simulator.models import RunRecord
+from app.core.simulator.run_perimeter import run_perimeter_pids
 from app.db.models.participant import Participant
 from app.utils.exceptions import (
     GeoException,
@@ -387,6 +388,7 @@ class RealPaymentsExecutor:
                                 to_pid=str(action.receiver_pid),
                                 equivalent=str(action.equivalent),
                                 amount=str(action.amount),
+                                allowed_participant_pids=run_perimeter_pids(run),
                                 idempotency_key=idem,
                             )
 
