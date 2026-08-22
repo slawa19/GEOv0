@@ -1735,6 +1735,14 @@ async def action_clearing_real(
     # instances. Keep the wire identifier independent of that session state.
     eq_code = str(eq.code)
 
+    # 2026-08-22 / p010 (`F-010-3`).  This route used to hand `ClearingService` an
+    # equivalent code and nothing else, so a run could clear a cycle made entirely of
+    # another run's participants -- and be told the amount as its own result.  The
+    # perimeter is computed once here and given to BOTH detection and execution: detection
+    # so the cycle is never found, execution so a cycle that arrives by any other route is
+    # still refused.
+    scoped_pids = await _run_scoped_pids_or_none(run_id=run_id, session=db)
+
     service = ClearingService(db)
 
     executed: list[SimulatorActionClearingCycle] = []
@@ -1769,7 +1777,11 @@ async def action_clearing_real(
     try:
         # Auto-clear loop: best-effort match ClearingService.auto_clear(), but keep per-cycle details.
         for _ in range(0, 100):
-            cycles = await service.find_cycles(eq_code, max_depth=int(req.max_depth))
+            cycles = await service.find_cycles(
+                eq_code,
+                max_depth=int(req.max_depth),
+                allowed_participant_pids=scoped_pids,
+            )
             if not cycles:
                 break
 
@@ -1777,7 +1789,9 @@ async def action_clearing_real(
             for cycle in cycles:
                 commit_cancellation = None
                 try:
-                    clear_amt = await service.execute_clearing_with_amount(cycle)
+                    clear_amt = await service.execute_clearing_with_amount(
+                        cycle, allowed_participant_pids=scoped_pids
+                    )
                 except ClearingCommittedAfterCancellation as exc:
                     clear_amt = exc.cleared_amount
                     commit_cancellation = exc

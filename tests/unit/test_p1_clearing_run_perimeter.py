@@ -33,6 +33,8 @@ import pytest
 from sqlalchemy import select
 
 from app.config import settings
+from app.core.clearing.service import ClearingService
+from app.utils.exceptions import GeoException
 from app.core.simulator.models import RunRecord
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
@@ -160,4 +162,170 @@ async def test_clearing_real_does_not_touch_another_runs_participants(
         "run A cleared a cycle made entirely of run B's participants: the debts of a run "
         f"the caller has no relationship to changed from {before} to {after}. Zeroed rows "
         "are deleted, so an empty list means the obligations are gone, not merely reduced"
+    )
+
+
+@pytest.fixture
+def run_b_too(monkeypatch):
+    """Same fixture, but the run owns b1/b2/b3 - the participants of the cycle."""
+
+    import app.api.v1.simulator as simulator_module
+
+    monkeypatch.setenv("SIMULATOR_ACTIONS_ENABLE", "1")
+    monkeypatch.setattr(
+        simulator_module.runtime,
+        "get_run",
+        lambda run_id: SimpleNamespace(
+            run_id=str(run_id),
+            state="running",
+            owner_id="",
+            _real_seeded=True,
+            _real_seeding_lock=None,
+        ),
+    )
+    run = RunRecord(run_id="run-b", scenario_id="scn-b", mode="real", state="running")
+    run._scenario_raw = {
+        "participants": [
+            {"id": "b1", "name": "B1", "type": "person", "status": "active"},
+            {"id": "b2", "name": "B2", "type": "person", "status": "active"},
+            {"id": "b3", "name": "B3", "type": "person", "status": "active"},
+        ],
+        "trustlines": [],
+    }
+    monkeypatch.setitem(simulator_module.runtime._runs, "run-b", run)
+    return simulator_module
+
+
+@pytest.mark.asyncio
+async def test_the_owning_run_still_clears_its_own_cycle(client, db_session, run_b_too):
+    """Anti-vacuum: the perimeter must refuse strangers, not disable clearing.
+
+    Without this, a fix that simply broke cycle detection would make the test above pass.
+    """
+
+    eq, _people = await _seed_two_runs(db_session)
+    eq_id = eq.id
+    before = await _debt_amounts(db_session, eq_id)
+    assert before == [Decimal("100")] * 3, before
+
+    resp = await client.post(
+        "/api/v1/simulator/runs/run-b/actions/clearing-real",
+        headers={"X-Admin-Token": settings.ADMIN_TOKEN},
+        json={"equivalent": _EQ, "max_depth": 6, "client_action_id": "rt_010_4_positive"},
+    )
+
+    assert resp.status_code == 200, resp.text
+    payload = resp.json()
+    after = await _debt_amounts(db_session, eq_id)
+
+    assert int(payload["cleared_cycles"]) == 1, (
+        f"the run that owns the cycle could not clear it: {payload}"
+    )
+    assert after == [], (
+        "the owning run's cycle should be cleared to zero and the rows removed, "
+        f"got {after}"
+    )
+
+
+# The two layers are independent on purpose: detection so a foreign cycle is never found,
+# execution so one that arrives by any other route is still refused.  The route-level tests
+# above pass with EITHER layer alone, so each needs its own case - otherwise removing one
+# leaves the suite green and the defence silently halved.
+
+
+@pytest.mark.asyncio
+async def test_detection_layer_does_not_return_a_foreign_cycle(db_session):
+    eq, _people = await _seed_two_runs(db_session)
+    service = ClearingService(db_session)
+
+    unscoped = await service.find_cycles(_EQ, max_depth=6)
+    assert len(unscoped) == 1, (
+        "the stand must contain exactly one detectable cycle, otherwise this test is not "
+        f"measuring the perimeter: {unscoped}"
+    )
+
+    scoped = await service.find_cycles(
+        _EQ, max_depth=6, allowed_participant_pids={"a1", "a2", "a3"}
+    )
+    assert scoped == [], f"detection returned another run's cycle: {scoped}"
+
+
+@pytest.mark.asyncio
+async def test_detection_treats_an_empty_perimeter_as_nobody(db_session):
+    """`_run_scoped_pids_or_none` returns an empty set when the perimeter cannot be built.
+
+    Reading that as "no restriction" would be a literal return of F-009-1.
+    """
+
+    await _seed_two_runs(db_session)
+    service = ClearingService(db_session)
+
+    assert await service.find_cycles(_EQ, max_depth=6, allowed_participant_pids=set()) == []
+
+
+@pytest.mark.asyncio
+async def test_execution_layer_refuses_a_cycle_outside_the_perimeter(db_session):
+    """Even a cycle handed in directly must be refused, not silently skipped."""
+
+    eq, _people = await _seed_two_runs(db_session)
+    # The refusal rolls back, which expires ORM instances; read the id while it is loaded.
+    eq_id = eq.id
+    service = ClearingService(db_session)
+
+    cycle = (await service.find_cycles(_EQ, max_depth=6))[0]
+
+    with pytest.raises(GeoException):
+        await service.execute_clearing_with_amount(
+            cycle, allowed_participant_pids={"a1", "a2", "a3"}
+        )
+
+    after = await _debt_amounts(db_session, eq_id)
+    assert after == [Decimal("100")] * 3, (
+        f"the refused execution still changed the debts: {after}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_sql_producer_itself_is_scoped(db_session):
+    """Pin the SQL predicate directly, not through `find_cycles`.
+
+    `find_cycles` wraps the whole SQL block in a broad `except Exception` and falls through
+    to the DFS producer (`app/core/clearing/service.py:924`).  Since the DFS load is narrowed
+    too, a scoped-SQL that is simply BROKEN still yields a correct empty result - silently,
+    and by loading every debt of the equivalent instead of a handful.  So the route-level
+    and `find_cycles`-level tests cannot tell a working predicate from a broken one, and
+    this case exists to.
+    """
+
+    eq, _people = await _seed_two_runs(db_session)
+    service = ClearingService(db_session)
+
+    # The raw producer emits one row per starting vertex; `find_cycles` dedupes them later
+    # (`_deduplicate_cycles`).  Three rotations of the same triangle is the correct shape here.
+    unscoped = await service.find_triangles_sql(eq.id)
+    assert len(unscoped) == 3, f"the stand must have one triangle, three rotations: {unscoped}"
+
+    foreign_scope = set(
+        (
+            await db_session.execute(
+                select(Participant.id).where(Participant.pid.in_(["a1", "a2", "a3"]))
+            )
+        ).scalars().all()
+    )
+    assert len(foreign_scope) == 3
+
+    scoped = await service.find_triangles_sql(
+        eq.id, allowed_participant_ids=foreign_scope
+    )
+    assert scoped == [], f"the SQL producer returned another run's cycle: {scoped}"
+
+    own_scope = set(
+        (
+            await db_session.execute(
+                select(Participant.id).where(Participant.pid.in_(["b1", "b2", "b3"]))
+            )
+        ).scalars().all()
+    )
+    assert len(await service.find_triangles_sql(eq.id, allowed_participant_ids=own_scope)) == 3, (
+        "the predicate must admit the owning run, not reject everything"
     )
