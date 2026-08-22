@@ -1577,6 +1577,17 @@ async def action_payment_real(
     try:
         router = PaymentRouter(db)
         await router.build_topology(eq.code)
+        if scoped_pids is not None:
+            # 2026-08-22 / p010 (`F-010-3`).  The pre-check must see the SAME perimeter the
+            # routing will use.  Left global, it would answer "a path exists" on a route
+            # that runs through another run, scoped routing would rightly find none, and the
+            # endpoint would report INSUFFICIENT_CAPACITY for something that is really
+            # NO_ROUTE -- an answer that disagrees with the fact.
+            router.topology_adj = {
+                u: (vs & scoped_pids)
+                for u, vs in router.topology_adj.items()
+                if u in scoped_pids
+            }
         any_path_exists = router.has_topology_path(
             str(from_p.pid),
             str(to_p.pid),
@@ -1594,6 +1605,7 @@ async def action_payment_real(
             amount=req.amount,
             idempotency_key=None,
             commit=True,
+            allowed_participant_pids=scoped_pids,
         )
     except RetryablePaymentConflictException as exc:
         return _action_error(

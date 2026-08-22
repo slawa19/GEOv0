@@ -663,6 +663,10 @@ async def test_action_payment_real_happy_mocked(client, db_session, interact_act
     headers = {"X-Admin-Token": settings.ADMIN_TOKEN}
 
     async def _mock_create_payment_internal(self, *_args, **_kwargs):
+        # 2026-08-22 / p010: every other payment double here takes **_kwargs and would
+        # swallow a missing perimeter without a word, so at least one has to assert that it
+        # arrives. Without this, the route could stop scoping and the whole file stays green.
+        assert _kwargs.get("allowed_participant_pids") == {"alice", "bob"}, _kwargs
         return SimpleNamespace(tx_id=uuid.uuid4(), status="committed", routes=[])
 
     monkeypatch.setattr(interact_actions_enabled.PaymentService, "create_payment_internal", _mock_create_payment_internal)

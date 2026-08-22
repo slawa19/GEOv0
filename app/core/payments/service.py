@@ -4,7 +4,7 @@ import logging
 import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable, List, Literal
+from typing import AbstractSet, Any, Awaitable, Callable, List, Literal
 
 from sqlalchemy import select, and_, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -255,6 +255,46 @@ class PaymentService:
             commit=True,
         )
 
+    @staticmethod
+    def _confine_router_to_perimeter(router, allowed: "AbstractSet[str]") -> None:
+        """Narrow the router INSTANCE to one run's participants.
+
+        2026-08-22 / p010 (`F-010-3`).  The endpoints of a payment were already scoped, but
+        the graph the route is chosen from covers the whole equivalent, so the hops in
+        between belonged to nobody in particular - a payment inside run A would consume the
+        trust of a participant of run B and create debt rows in their name.
+
+        Instance state only.  A cache hit copies the graph and the policy maps into the
+        instance (`app/core/payments/router.py:167-173`), and a cache miss stores its own
+        copies (`:342-351`), so narrowing here cannot reach the shared cache.  The cache key
+        stays `equivalent_code`: making it composite would silently break the two callers
+        that reach into `_graph_cache` directly and the invalidation done per equivalent by
+        trustlines, clearing and integrity - none of which this program may edit.
+
+        `graph` is what actually decides the route; the policy maps default to permissive
+        (`router.py:369-373`), so narrowing them changes no outcome today and is here to keep
+        the structures consistent for whoever reads them next.  The blocked-participant sets
+        are values of a DENY list and are copied unchanged - intersecting them with an allow
+        list is backwards, and would weaken the restriction the day someone applies it to an
+        endpoint rather than a hop.
+        """
+
+        router.graph = {
+            u: {v: cap for v, cap in adj.items() if v in allowed}
+            for u, adj in router.graph.items()
+            if u in allowed
+        }
+        router.edge_can_be_intermediate = {
+            u: {v: flag for v, flag in adj.items() if v in allowed}
+            for u, adj in router.edge_can_be_intermediate.items()
+            if u in allowed
+        }
+        router.edge_blocked_participants = {
+            u: {v: blocked for v, blocked in adj.items() if v in allowed}
+            for u, adj in router.edge_blocked_participants.items()
+            if u in allowed
+        }
+
     async def create_payment_internal(
         self,
         sender_id: uuid.UUID,
@@ -266,6 +306,7 @@ class PaymentService:
         constraints: PaymentConstraints | None = None,
         idempotency_key: str | None = None,
         commit: bool = True,
+        allowed_participant_pids: "AbstractSet[str] | None" = None,
     ) -> PaymentResult:
         """Internal-only payment path for the simulator runner.
 
@@ -299,6 +340,7 @@ class PaymentService:
             idempotency_key=idempotency_key,
             require_signature=False,
             commit=commit,
+            allowed_participant_pids=allowed_participant_pids,
         )
 
     async def create_payment_internal_staged(
@@ -389,6 +431,7 @@ class PaymentService:
         require_signature: bool,
         commit: bool,
         deferred_effects: list[PaymentPostCommitEffects] | None = None,
+        allowed_participant_pids: "AbstractSet[str] | None" = None,
     ) -> PaymentResult:
         """
         Create and execute a payment.
@@ -601,6 +644,23 @@ class PaymentService:
                 except asyncio.TimeoutError:
                     raise TimeoutException("Routing timed out")
 
+                # The route is chosen from the graph, so the perimeter has to be applied
+                # here -- after the graph is built (and possibly served from the shared
+                # cache), before a route is picked.
+                if allowed_participant_pids is not None:
+                    if not allowed_participant_pids:
+                        # An empty perimeter admits nobody.  `_run_scoped_pids_or_none`
+                        # returns exactly that when the perimeter cannot be established, and
+                        # treating it as "no restriction" would be a literal return of
+                        # `F-009-1`.
+                        raise RoutingException(
+                            "No route found with sufficient capacity",
+                            insufficient_capacity=False,
+                        )
+                    self._confine_router_to_perimeter(
+                        self.router, allowed_participant_pids
+                    )
+
                 try:
                     routes_found = await asyncio.wait_for(
                         asyncio.to_thread(
@@ -637,6 +697,27 @@ class PaymentService:
                         "No route found with sufficient capacity",
                         insufficient_capacity=True,
                     )
+
+                # Postcondition, and not a formality: the narrowing above and this check
+                # fail independently, so either alone would let the route-level test pass.
+                # It also covers the receiver, whom `_create_payment_impl` resolves from the
+                # global participant table (`:448-451`) rather than from the perimeter.
+                if allowed_participant_pids is not None:
+                    escaped = {
+                        pid
+                        for path, _amount in routes_found
+                        for pid in path
+                        if pid not in allowed_participant_pids
+                    }
+                    if escaped:
+                        logger.error(
+                            "event=payment.route_escaped_perimeter pids=%s",
+                            sorted(escaped),
+                        )
+                        raise RoutingException(
+                            "No route found with sufficient capacity",
+                            insufficient_capacity=False,
+                        )
 
                 routes_payload = [
                     {"path": path, "amount": str(route_amount)}
