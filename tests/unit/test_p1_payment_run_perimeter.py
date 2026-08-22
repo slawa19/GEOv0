@@ -421,3 +421,85 @@ async def test_an_idempotent_replay_does_not_hand_back_a_foreign_route(db_sessio
             commit=True,
             allowed_participant_pids={"a1", "a2"},
         )
+
+
+@pytest.mark.asyncio
+async def test_a_replay_whose_route_cannot_be_read_is_refused(db_session):
+    """A payload that cannot be checked is not a payload that passes.
+
+    Found by the remediation review of this very fix. A stored PAYMENT row with no `routes`
+    - a legacy shape, or one written before routes were recorded - produced an empty set of
+    participants, so nothing "escaped" and the result was returned to a scoped caller
+    unchecked. The clearing replay guard refuses exactly this case; the payment one did not,
+    which made the two halves of one rule disagree.
+    """
+
+    from app.core.payments.service import PaymentService
+    from app.db.models.transaction import Transaction
+    from app.utils.exceptions import GeoException
+
+    _eq, people = await _seed(db_session)
+    PaymentRouter.invalidate_cache()
+
+    db_session.add(
+        Transaction(
+            tx_id="legacy-without-routes",
+            idempotency_key="legacy-without-routes",
+            type="PAYMENT",
+            initiator_id=people["a1"].id,
+            payload={"amount": "50"},  # no `routes` at all
+            state="COMMITTED",
+        )
+    )
+    await db_session.commit()
+
+    with pytest.raises(GeoException):
+        await PaymentService(db_session).create_payment_internal(
+            people["a1"].id,
+            to_pid="a2",
+            equivalent=_EQ,
+            amount="50",
+            idempotency_key="legacy-without-routes",
+            commit=True,
+            allowed_participant_pids={"a1", "a2"},
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_reused_key_for_a_different_request_stays_a_conflict(db_session):
+    """The perimeter check must not pre-empt the idempotency classifier.
+
+    Reusing a tx_id for a DIFFERENT canonical request is a documented 409 conflict. Placing
+    the perimeter check ahead of the fingerprint comparison turned that into a routing 400
+    whenever the stored route also left the perimeter - a quiet change to a taxonomy another
+    program owns.
+    """
+
+    from app.core.payments.service import PaymentService
+    from app.utils.exceptions import ConflictException
+
+    _eq, people = await _seed(db_session)
+    PaymentRouter.invalidate_cache()
+
+    idem = "same-key-different-request"
+    await PaymentService(db_session).create_payment_internal(
+        people["a1"].id,
+        to_pid="a2",
+        equivalent=_EQ,
+        amount="50",
+        idempotency_key=idem,
+        commit=True,
+    )
+
+    # Same key, different amount -> different fingerprint. The stored route also leaves the
+    # perimeter, so both rules apply and the order decides which answer the caller gets.
+    with pytest.raises(ConflictException):
+        await PaymentService(db_session).create_payment_internal(
+            people["a1"].id,
+            to_pid="a2",
+            equivalent=_EQ,
+            amount="17",
+            idempotency_key=idem,
+            commit=True,
+            allowed_participant_pids={"a1", "a2"},
+        )

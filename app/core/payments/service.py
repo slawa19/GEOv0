@@ -210,18 +210,41 @@ class PaymentService:
         if existing_tx.initiator_id != sender_id:
             raise ConflictException("tx_id already used")
 
-        # 2026-08-22 / p010, found by external review.  This shortcut returns a stored
-        # result BEFORE the narrowing and the postcondition, so without this check a scoped
-        # caller replaying an idempotency key is handed whatever route was recorded - and
-        # that transaction may have been written by an unscoped caller, or by this code
-        # before the perimeter existed, with a route running through another run.  The
-        # clearing side already refuses a committed replay it cannot vouch for; this is the
-        # same rule on the payment side.
+        existing_payload = existing_tx.payload or {}
+        existing_fp = (existing_payload.get("idempotency") or {}).get("fingerprint")
+        if existing_fp is not None and existing_fp != request_fingerprint:
+            raise ConflictException("tx_id already used for a different request")
+
+        # 2026-08-22 / p010.  This shortcut returns a stored result BEFORE the narrowing and
+        # the postcondition, so a scoped caller replaying an idempotency key would otherwise
+        # be handed whatever route was recorded - and that transaction may have been written
+        # by an unscoped caller, or by this code before the perimeter existed, with a route
+        # through another run.
+        #
+        # Placed AFTER the fingerprint comparison on purpose, and the first version had it
+        # before: reusing a tx_id for a DIFFERENT request is a declared 409 conflict owned by
+        # another program, and checking the route first turned that into a routing 400
+        # whenever the stored route also left the perimeter.  Establish that the row is a
+        # replay of THIS request, then ask whose route it is.
         if allowed_participant_pids is not None:
+            routes = (existing_payload.get("routes") or [])
+            paths = [route.get("path") or [] for route in routes]
+            if not paths or not all(paths):
+                # A payload whose route cannot be read is not a payload that passes - the
+                # same rule the clearing replay guard applies, and the first version of this
+                # one silently did the opposite for rows with no recorded routes.
+                logger.error(
+                    "event=payment.idempotent_replay_unverifiable tx_id=%s",
+                    str(existing_tx.tx_id),
+                )
+                raise RoutingException(
+                    "No route found with sufficient capacity",
+                    insufficient_capacity=False,
+                )
             escaped = {
                 str(pid)
-                for route in ((existing_tx.payload or {}).get("routes") or [])
-                for pid in (route.get("path") or [])
+                for path in paths
+                for pid in path
                 if str(pid) not in allowed_participant_pids
             }
             if escaped:
@@ -234,11 +257,6 @@ class PaymentService:
                     "No route found with sufficient capacity",
                     insufficient_capacity=False,
                 )
-
-        existing_payload = existing_tx.payload or {}
-        existing_fp = (existing_payload.get("idempotency") or {}).get("fingerprint")
-        if existing_fp is not None and existing_fp != request_fingerprint:
-            raise ConflictException("tx_id already used for a different request")
 
         if existing_tx.state in {
             "NEW",
