@@ -82,13 +82,35 @@ def has_raise(body) -> bool:
     )
 
 
+def walk_stopping_at_nested_try(node):
+    """Как `walk_no_nested_funcs`, но не спускается и в ВЛОЖЕННЫЕ try.
+
+    2026-08-22: прежняя версия делала `continue` на узле `ast.Try`, но генератор к тому
+    моменту уже положил его детей в стек, поэтому тело вложенного try и тела его
+    обработчиков всё равно обходились. Вызов, лежащий во вложенном try с собственным
+    пробрасывающим обработчиком, приписывался внешнему проглатывающему, и `rollback_swallow`
+    завышался. Докстринг ниже описывал более узкое поведение, чем код.
+    """
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        yield current
+        for child in ast.iter_child_nodes(current):
+            if isinstance(
+                child,
+                (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef, ast.Try),
+            ):
+                continue
+            stack.append(child)
+
+
 def direct_txn_calls(try_node: ast.Try):
     """rollback()/commit() в НЕПОСРЕДСТВЕННОМ теле try, без вложенных try и handlers."""
     found = []
     for stmt in try_node.body:
-        for sub in walk_no_nested_funcs(stmt):
-            if isinstance(sub, ast.Try):
-                continue
+        if isinstance(stmt, ast.Try):
+            continue
+        for sub in walk_stopping_at_nested_try(stmt):
             if (
                 isinstance(sub, ast.Call)
                 and isinstance(sub.func, ast.Attribute)
