@@ -416,8 +416,14 @@ async def test_serializable_conflict_without_committed_occurrence_stays_failure_
                 super().__init__(session)
                 self._pause_initial_replay = True
 
-            async def _committed_execution_amount(self, tx_id: str):
-                amount = await super()._committed_execution_amount(tx_id)
+            async def _committed_execution_amount(
+                self, tx_id: str, *, allowed_participant_pids=None
+            ):
+                # 2026-08-22 / p010: the perimeter is forwarded rather than dropped, so this
+                # observer cannot mask a call that lost it.
+                amount = await super()._committed_execution_amount(
+                    tx_id, allowed_participant_pids=allowed_participant_pids
+                )
                 if self._pause_initial_replay:
                     self._pause_initial_replay = False
                     assert amount is None
