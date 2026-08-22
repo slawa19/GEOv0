@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Запуск полного стека GEO: Backend + Admin UI + Simulator UI в real mode.
 
@@ -1068,6 +1068,13 @@ if ($ResetDb) {
         Write-Host "     DB initialized with $FixturesCommunity" -ForegroundColor Green
     } else {
         Write-Host "     DB exists: $LocalDatabasePath" -ForegroundColor Gray
+        # 2026-08-22 / p009: an existing SQLite DB used to be left completely untouched, so
+        # a database created before migration 019 kept the old unconditional trust-line
+        # UNIQUE forever -- Alembic refuses to run on SQLite, and this was the only script
+        # that could have fixed it. init_sqlite_db.py is idempotent (create_all is
+        # checkfirst, and the rebuild only fires on the stale shape), so running it here
+        # costs nothing and is the only place the repair can reach an existing database.
+        Invoke-PythonScript -PythonExe $Python -ScriptPath (Join-Path $RepoRoot 'scripts\init_sqlite_db.py') -Description "init_sqlite_db.py (schema check)"
     }
 }
 

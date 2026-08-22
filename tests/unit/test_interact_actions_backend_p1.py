@@ -11,6 +11,7 @@ from sqlalchemy import select
 
 from app.config import settings
 from app.core.clearing.service import ClearingCommittedAfterCancellation
+from app.core.simulator.models import RunRecord
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
@@ -52,7 +53,44 @@ def interact_actions_enabled(monkeypatch):
         ),
     )
 
+    # 2026-08-22 / p009: the stub above is not enough to make the run perimeter real.
+    # `_run_scoped_pids_or_none` goes through `runtime.build_graph_snapshot`, which reads
+    # the REAL run registry (`runtime_impl.py:142-148`), not the stubbed `get_run`.  With
+    # no entry there the snapshot raised, the perimeter fell into its `except` branch and
+    # returned None -- and None DISABLES scoping.  So every test in this file used to run
+    # with the P1 guard switched off, and the only test that appeared to prove the guard
+    # worked did so by patching `build_graph_snapshot` itself.
+    #
+    # Registering a real run makes the perimeter genuinely alice+bob, so the guard is
+    # exercised for real by every test here, and `mallory` is refused by the production
+    # code path rather than by a fake.
+    _register_run_perimeter(
+        simulator_module,
+        monkeypatch,
+        [
+            {"id": "alice", "name": "Alice", "type": "person", "status": "active"},
+            {"id": "bob", "name": "Bob", "type": "person", "status": "active"},
+        ],
+    )
     return simulator_module
+
+
+def _register_run_perimeter(simulator_module, monkeypatch, participants):
+    """Put a real run in the runtime registry so the perimeter is the production one.
+
+    `_run_scoped_pids_or_none` reads the REAL registry through
+    `runtime.build_graph_snapshot` (`runtime_impl.py:142-148`), not the stubbed
+    `runtime.get_run`.  A test that stubs only `get_run` leaves the perimeter
+    unestablishable, and since 2026-08-22 that is fail-closed — so the run has to be
+    registered for the endpoint to see any participant at all.
+    """
+    run = RunRecord(
+        run_id="test-run", scenario_id="test-scenario", mode="real", state="running"
+    )
+    run._scenario_raw = {"participants": list(participants), "trustlines": []}
+    # setitem reverts on teardown, so the global registry is not left dirty.
+    monkeypatch.setitem(simulator_module.runtime._runs, "test-run", run)
+    return run
 
 
 async def _seed_alice_bob_uah(db_session):
@@ -100,6 +138,10 @@ async def test_action_trustline_close_seeds_when_run_paused(client, db_session, 
             {"from": "SHOP", "to": "VASYL", "equivalent": "UAH", "limit": "700", "status": "active"}
         ],
     }
+
+    # The perimeter is fail-closed since 2026-08-22, so the run has to exist in the real
+    # registry too -- stubbing `get_run` alone left `SHOP`/`VASYL` outside every perimeter.
+    _register_run_perimeter(simulator_module, monkeypatch, scenario["participants"])
 
     # Provide a real-mode RunRecord-like object compatible with _get_run_checked + _ensure_run_seeded.
     run = SimpleNamespace(
@@ -1489,6 +1531,14 @@ async def test_trustline_create_used_read_error_returns_503_and_error_envelope(
             _real_seeding_lock=None,
         ),
     )
+    _register_run_perimeter(
+        simulator_module,
+        monkeypatch,
+        [
+            {"id": "alice", "name": "Alice", "type": "person", "status": "active"},
+            {"id": "bob", "name": "Bob", "type": "person", "status": "active"},
+        ],
+    )
 
     alice = Participant(
         pid="alice",
@@ -1666,8 +1716,68 @@ async def test_mutating_action_is_run_scoped_like_its_read_sibling(
         json={"from_pid": "alice", "to_pid": "mallory", "equivalent": "UAH", "limit": "10"},
     )
 
-    assert mutation.status_code != 200, (
+    # Assert the declared contract, not merely "not a success".  `!= 200` was satisfied by
+    # an HTTP 500 from a broken perimeter, which is the opposite of the intended outcome:
+    # `_resolve_participant_or_error` promises exactly the response the read side implies.
+    assert mutation.status_code == 404, (
         "a mutating interact action accepted a participant the run does not contain, "
         "while the read endpoint of the same family hides it: "
         f"{mutation.status_code} {mutation.text}"
     )
+    assert mutation.json()["code"] == "PARTICIPANT_NOT_FOUND", mutation.text
+
+
+@pytest.mark.parametrize(
+    ("path", "payload"),
+    [
+        (
+            "trustline-update",
+            {"from_pid": "alice", "to_pid": "mallory", "equivalent": "UAH", "new_limit": "5"},
+        ),
+        (
+            "trustline-close",
+            {"from_pid": "alice", "to_pid": "mallory", "equivalent": "UAH"},
+        ),
+        (
+            "payment-real",
+            {"from_pid": "alice", "to_pid": "mallory", "equivalent": "UAH", "amount": "1"},
+        ),
+    ],
+)
+async def test_every_mutating_action_is_run_scoped_not_just_create(
+    client, db_session, interact_actions_enabled, path, payload
+):
+    """RT-009-1, the three call sites the original reproducer left uncovered.
+
+    `T901` scoped four call sites; the test above exercised one.  Reverting `scoped_pids=`
+    on `action_trustline_update`, `action_trustline_close` or `action_payment_real` left
+    the whole suite green -- an independent scan of the merged wave found this.  A fix
+    with no test that can fail for it is not closed, it is unobserved.
+    """
+    # No `build_graph_snapshot` patch on purpose: the perimeter here comes from the run
+    # registered by the fixture, so this exercises SnapshotBuilder -> scenario_to_snapshot,
+    # the production path, instead of a fake standing in for it.
+    await _seed_alice_bob_uah(db_session)
+    db_session.add(
+        Participant(
+            pid="mallory",
+            display_name="Mallory",
+            public_key="M" * 64,
+            type="person",
+            status="active",
+            profile={},
+        )
+    )
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/v1/simulator/runs/test-run/actions/{path}",
+        headers={"X-Admin-Token": settings.ADMIN_TOKEN},
+        json=payload,
+    )
+
+    assert resp.status_code == 404, (
+        f"{path} accepted a participant outside the run perimeter: "
+        f"{resp.status_code} {resp.text}"
+    )
+    assert resp.json()["code"] == "PARTICIPANT_NOT_FOUND", resp.text

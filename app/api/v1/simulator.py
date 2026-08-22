@@ -620,19 +620,31 @@ async def _run_scoped_pids_or_none(*, run_id: str, session) -> Optional[set[str]
     (`participants-list`).  Mutating actions must see the same perimeter, so they resolve
     participants against this set — see `_resolve_participant_or_error`.
 
-    Returning None means "the perimeter cannot be established" and disables scoping.  It is
-    reserved for the case where the snapshot cannot be built at all.
+    The perimeter is the run's own participant list and nothing else.  `build_graph_snapshot`
+    derives its nodes from `run._scenario_raw` via `scenario_to_snapshot`
+    (`app/core/simulator/snapshot_builder.py:65-66`), and with an empty `equivalent` the
+    DB-enrichment step returns immediately (`:88-90`).  Seeding therefore has no influence
+    on this value at all.
 
-    An EMPTY snapshot is NOT that case and is returned as an empty set, i.e. fail-closed.
-    An earlier version conflated the two on the grounds that lazy seeding needs the
-    permissive branch; an external review showed the argument does not hold, because every
-    caller runs `_ensure_run_seeded` first (see `:959`, `:1189`, `:1351`, `:1512`).  After
-    seeding, an empty snapshot means an empty run — and an empty run contains nobody.
+    2026-08-22 / p009: an earlier revision of this docstring justified the fail-closed
+    decision by "every caller runs `_ensure_run_seeded` first".  That argument is wrong —
+    seeding is irrelevant here, as above — even though the decision it defended is right.
+    The correct reason is simpler: `_scenario_raw` is set when the run is created
+    (`app/core/simulator/run_lifecycle.py`), so a run always has a participant list, and an
+    empty one means an empty run — which contains nobody.
+
+    A snapshot that cannot be built at all is not a licence to mutate.  This function used
+    to return None there, and None DISABLED scoping — a P1 authorisation guard switched off
+    by an exception, on the one path with no coverage.  It is fail-closed now: an
+    unestablishable perimeter admits nobody.
     """
     try:
         snap = await runtime.build_graph_snapshot(run_id=run_id, equivalent="", session=session)
     except Exception:
-        return None
+        logger.warning(
+            "simulator.actions.perimeter_unavailable run_id=%s", str(run_id), exc_info=True
+        )
+        return set()
     nodes = getattr(snap, "nodes", None) or []
     pids = {str(getattr(n, "id", "") or "").strip() for n in nodes}
     pids.discard("")
@@ -1064,7 +1076,19 @@ async def action_trustline_create(
     # Guard and INSERT are not atomic; the partial unique index rejects a concurrent
     # duplicate, and that rejection must surface as a declared 409 rather than as an
     # unhandled database error (fail-closed).
+    # 2026-08-22 / p009_t905 (`F-009-6`).  The readback happens INSIDE the transaction and
+    # nothing after the commit performs a mandatory database read.  This route is one of
+    # the three aggravated ones: the runtime snapshot mutation and the router cache
+    # invalidation below run only after the readback, so a failure there used to leave the
+    # database and the run's in-memory topology permanently out of step -- not until the
+    # next read, but for the lifetime of the run.  `RT-009-5` shows the failure is
+    # reachable.
     try:
+        # The flush is explicit and INSIDE this handler on purpose.  `refresh()` needs a
+        # persistent instance, and the flush is where the uniqueness conflict surfaces on
+        # PostgreSQL -- putting it outside would turn a declared 409 into an unhandled 500.
+        await db.flush()
+        await db.refresh(tl)
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
@@ -1084,7 +1108,6 @@ async def action_trustline_create(
                 "reason": "CONCURRENT_TRUSTLINE_CREATE",
             },
         )
-    await db.refresh(tl)
 
     # Keep runtime snapshot/cache consistent with action.
     _mutate_runtime_trustline_topology_best_effort(
@@ -1272,8 +1295,10 @@ async def action_trustline_update(
         )
 
     tl.limit = new_limit_dec
-    await db.commit()
+    # See the note in `action_trustline_create`: readback before commit.
+    await db.flush()
     await db.refresh(tl)
+    await db.commit()
 
     # Keep runtime snapshot consistent with action (limit change).
     _mutate_runtime_trustline_topology_best_effort(
@@ -1439,8 +1464,10 @@ async def action_trustline_close(
         )
 
     tl.status = "closed"
-    await db.commit()
+    # See the note in `action_trustline_create`: readback before commit.
+    await db.flush()
     await db.refresh(tl)
+    await db.commit()
 
     # Keep runtime snapshot/cache consistent with action.
     _mutate_runtime_trustline_topology_best_effort(

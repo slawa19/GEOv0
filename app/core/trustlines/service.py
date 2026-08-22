@@ -47,28 +47,43 @@ def _is_live_trustline_uniqueness_violation(exc: IntegrityError) -> bool:
     if orig is None:
         return False
 
-    # Walk the whole cause chain: drivers wrap differently and nesting depth is not fixed.
+    # Collect the whole cause chain once: drivers wrap differently, nesting depth is not
+    # fixed, and the facts we need are spread across several links of it.  This is the
+    # shape `ClearingService._postgres_error_codes` already uses in this codebase.
+    chain: list = []
     seen: set[int] = set()
     node = orig
     while node is not None and id(node) not in seen:
         seen.add(id(node))
-        name = getattr(node, "constraint_name", None)
+        chain.append(node)
+        node = getattr(node, "__cause__", None) or getattr(node, "__context__", None)
+
+    for link in chain:
+        name = getattr(link, "constraint_name", None)
         if name:
             # The driver told us exactly which constraint failed -- no guessing needed.
             return str(name) == _LIVE_TRUSTLINE_INDEX
-        node = getattr(node, "__cause__", None) or getattr(node, "__context__", None)
 
-    # PostgreSQL without a constraint name: 23505 is unique_violation.
-    node = orig
-    while node is not None:
-        sqlstate = getattr(node, "sqlstate", None) or getattr(node, "pgcode", None)
-        if sqlstate == "23505":
-            table = str(getattr(node, "table_name", "") or "")
-            detail = f"{getattr(node, 'detail', '') or ''} {node}"
-            if table and table != "trust_lines":
-                return False
-            return _matches_live_triple(detail)
-        node = getattr(node, "__cause__", None) or getattr(node, "__context__", None)
+    # PostgreSQL without a constraint name: 23505 is unique_violation.  The sqlstate and
+    # the table/detail need NOT live on the same link: SQLAlchemy's asyncpg adapter raises
+    # a wrapper carrying only `pgcode`/`sqlstate` and chains the real asyncpg error, which
+    # is the one holding `table_name` and `detail`
+    # (sqlalchemy/dialects/postgresql/asyncpg.py:785-796).  Reading them off the first link
+    # with a sqlstate therefore saw an empty table and a message without the DETAIL line,
+    # and rejected a genuine live-triple conflict -- a 500 on exactly the path this
+    # classifier exists to keep declared.
+    if any(
+        (getattr(link, "sqlstate", None) or getattr(link, "pgcode", None)) == "23505"
+        for link in chain
+    ):
+        tables = [str(getattr(link, "table_name", "") or "") for link in chain]
+        tables = [t for t in tables if t]
+        if tables and all(t != "trust_lines" for t in tables):
+            return False
+        detail = " ".join(
+            f"{getattr(link, 'detail', '') or ''} {link}" for link in chain
+        )
+        return _matches_live_triple(detail)
 
     text = str(orig)
     lowered = text.lower()
@@ -231,6 +246,17 @@ class TrustLineService:
         # competing transaction that has not committed yet does not block the INSERT, and
         # PostgreSQL raises only when the winner commits.  Both points must therefore map
         # to the same declared conflict.
+        # 2026-08-22 / p009_t905 (`F-009-6`).  Everything the response needs is read and
+        # materialised INSIDE the uncommitted transaction, and after the commit this path
+        # performs no mandatory database read.  Before, the readback happened after the
+        # commit, so a failure there reported a mutation that had already happened as
+        # failed -- and the retry it invites is not idempotent.  `RT-009-5` shows the
+        # failure is reachable, not theoretical.  With the readback moved before the
+        # commit, the same failure now happens while the transaction is still open and
+        # honestly undoes the mutation instead of misreporting it.
+        await self.session.refresh(trustline)
+        response = await self._hydrate_trustline(trustline)
+
         try:
             await self.session.commit()
         except IntegrityError as exc:
@@ -242,11 +268,10 @@ class TrustLineService:
                 details={"reason": "CONCURRENT_TRUSTLINE_CREATE"},
             ) from exc
 
+        # In-memory only; `expire_on_commit=False` (`app/db/session.py:78`) keeps the
+        # hydrated attributes valid, so serialising the response touches no connection.
         PaymentRouter.invalidate_cache(equivalent.code)
-        await self.session.refresh(trustline)
-
-        # Hydrate extra fields for response
-        return await self._hydrate_trustline(trustline)
+        return response
 
     async def update(self, trustline_id: UUID, user_id: UUID, data: TrustLineUpdateRequest) -> TrustLine:
         stmt = select(TrustLine).where(TrustLine.id == trustline_id)
@@ -367,10 +392,13 @@ class TrustLineService:
                 select(Equivalent.code).where(Equivalent.id == trustline.equivalent_id)
             )
         ).scalar_one()
+        # See the note in `create`: readback before commit, no mandatory read after it.
+        await self.session.refresh(trustline)
+        response = await self._hydrate_trustline(trustline)
+
         await self.session.commit()
         PaymentRouter.invalidate_cache(equivalent_code)
-        await self.session.refresh(trustline)
-        return await self._hydrate_trustline(trustline)
+        return response
 
     async def close(self, trustline_id: UUID, user_id: UUID, data: TrustLineCloseRequest) -> None:
         stmt = select(TrustLine).where(TrustLine.id == trustline_id)
@@ -516,7 +544,10 @@ class TrustLineService:
                 raise NotFoundException(f"Equivalent '{equivalent}' not found")
             query = query.where(TrustLine.equivalent_id == eq.id)
 
-        query = query.order_by(TrustLine.created_at.desc())
+        # `created_at` is not unique -- fixtures write identical values in bulk, and since
+        # migration 019 a triple can hold several rows.  Without a unique tie-break the
+        # offset/limit pages below may repeat or skip rows between requests.
+        query = query.order_by(TrustLine.created_at.desc(), TrustLine.id.asc())
 
         if offset is not None:
             query = query.offset(offset)
@@ -582,7 +613,10 @@ class TrustLineService:
                 return []
             query = query.where(TrustLine.equivalent_id == eq.id)
 
-        query = query.order_by(TrustLine.created_at.desc())
+        # `created_at` is not unique -- fixtures write identical values in bulk, and since
+        # migration 019 a triple can hold several rows.  Without a unique tie-break the
+        # offset/limit pages below may repeat or skip rows between requests.
+        query = query.order_by(TrustLine.created_at.desc(), TrustLine.id.asc())
 
         if offset is not None:
             query = query.offset(offset)

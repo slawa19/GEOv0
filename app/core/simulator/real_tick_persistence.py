@@ -109,29 +109,45 @@ class RealTickPersistence:
             int(run.tick_index) % int(bottlenecks_every_n) == 0
         )
 
+        # 2026-08-22 / p009: the writers swallow their own failures by design, so their
+        # return value is the only signal that the tick actually reached storage.  A
+        # patched-out writer in a test returns None; only an explicit False means "not
+        # written".
+        wrote_everything = True
+
         if should_write_metrics:
-            await simulator_storage.write_tick_metrics(
-                run_id=run.run_id,
-                t_ms=int(run.sim_time_ms),
-                per_equivalent=per_eq,
-                metric_values_by_eq=per_eq_metric_values,
-                session=session,
-                commit=False,
+            wrote_everything &= (
+                await simulator_storage.write_tick_metrics(
+                    run_id=run.run_id,
+                    t_ms=int(run.sim_time_ms),
+                    per_equivalent=per_eq,
+                    metric_values_by_eq=per_eq_metric_values,
+                    session=session,
+                    commit=False,
+                )
+                is not False
             )
 
         if should_write_bottlenecks and self._db_enabled():
             for eq in equivalents:
-                await simulator_storage.write_tick_bottlenecks(
-                    run_id=run.run_id,
-                    equivalent=str(eq),
-                    computed_at=computed_at,
-                    edge_stats=per_eq_edge_stats.get(str(eq), {}),
-                    session=session,
-                    limit=50,
-                    commit=False,
+                wrote_everything &= (
+                    await simulator_storage.write_tick_bottlenecks(
+                        run_id=run.run_id,
+                        equivalent=str(eq),
+                        computed_at=computed_at,
+                        edge_stats=per_eq_edge_stats.get(str(eq), {}),
+                        session=session,
+                        limit=50,
+                        commit=False,
+                    )
+                    is not False
                 )
 
-        if should_write_metrics or should_write_bottlenecks:
+        # Marking a tick flushed is what makes `flush_pending_storage` skip it on stop
+        # (`:202-204`).  Marking it after a swallowed failure turns a retryable write error
+        # into permanent loss with no signal beyond one log line -- that is the reported
+        # half of `F-009-2` that the SAVEPOINT of `T902` did not close.
+        if (should_write_metrics or should_write_bottlenecks) and wrote_everything:
             with self._lock:
                 run._real_last_tick_storage_flushed_tick = int(run.tick_index)
 
@@ -204,14 +220,18 @@ class RealTickPersistence:
             return
 
         try:
+            wrote_everything = True
             async with db_session.AsyncSessionLocal() as session:
                 try:
-                    await simulator_storage.write_tick_metrics(
-                        run_id=str(payload.get("run_id") or run.run_id),
-                        t_ms=int(payload.get("t_ms") or 0),
-                        per_equivalent=payload.get("per_equivalent") or {},
-                        metric_values_by_eq=payload.get("metric_values_by_eq") or {},
-                        session=session,
+                    wrote_everything &= (
+                        await simulator_storage.write_tick_metrics(
+                            run_id=str(payload.get("run_id") or run.run_id),
+                            t_ms=int(payload.get("t_ms") or 0),
+                            per_equivalent=payload.get("per_equivalent") or {},
+                            metric_values_by_eq=payload.get("metric_values_by_eq") or {},
+                            session=session,
+                        )
+                        is not False
                     )
                     if self._db_enabled() and isinstance(payload.get("bottlenecks"), dict):
                         computed_at = (
@@ -223,13 +243,16 @@ class RealTickPersistence:
                         )
                         equivalents = payload.get("bottlenecks", {}).get("equivalents") or []
                         for eq in equivalents:
-                            await simulator_storage.write_tick_bottlenecks(
-                                run_id=str(payload.get("run_id") or run.run_id),
-                                equivalent=str(eq),
-                                computed_at=computed_at,
-                                edge_stats=edge_stats_by_eq.get(str(eq), {}) or {},
-                                session=session,
-                                limit=50,
+                            wrote_everything &= (
+                                await simulator_storage.write_tick_bottlenecks(
+                                    run_id=str(payload.get("run_id") or run.run_id),
+                                    equivalent=str(eq),
+                                    computed_at=computed_at,
+                                    edge_stats=edge_stats_by_eq.get(str(eq), {}) or {},
+                                    session=session,
+                                    limit=50,
+                                )
+                                is not False
                             )
                 except Exception:
                     try:
@@ -238,8 +261,17 @@ class RealTickPersistence:
                         pass
                     raise
 
-            with self._lock:
-                run._real_last_tick_storage_flushed_tick = int(last_tick)
+            if wrote_everything:
+                with self._lock:
+                    run._real_last_tick_storage_flushed_tick = int(last_tick)
+            else:
+                # This is the retry path itself.  Claiming the tick is flushed after a
+                # swallowed failure here would end the last chance the data had.
+                self._logger.warning(
+                    "simulator.real.flush_pending_storage_incomplete run_id=%s tick=%s",
+                    str(run_id),
+                    int(last_tick),
+                )
         except Exception:
             self._logger.warning(
                 "simulator.real.flush_pending_storage_failed run_id=%s",
