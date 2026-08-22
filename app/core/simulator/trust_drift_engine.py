@@ -247,13 +247,16 @@ class TrustDriftEngine:
             if not creditor_uuid or not debtor_uuid:
                 continue
 
-            # Get current limit from DB
+            # Get current limit from DB.  Drift applies to the ACTIVE line only: a
+            # closed incarnation is history and a frozen one is quarantined, and since
+            # migration 019 both may coexist with the active row.
             tl_limit_row = (
                 await clearing_session.execute(
                     select(TrustLine.limit).where(
                         TrustLine.from_participant_id == creditor_uuid,
                         TrustLine.to_participant_id == debtor_uuid,
                         TrustLine.equivalent_id == eq_id,
+                        TrustLine.status == "active",
                     )
                 )
             ).scalar_one_or_none()
@@ -283,6 +286,9 @@ class TrustDriftEngine:
                         TrustLine.from_participant_id == creditor_uuid,
                         TrustLine.to_participant_id == debtor_uuid,
                         TrustLine.equivalent_id == eq_id,
+                        # ACTIVE only: migration 019 lets a closed incarnation coexist,
+                        # and drift must never rewrite history.
+                        TrustLine.status == "active",
                     )
                     .values(limit=new_limit)
                 )
@@ -447,6 +453,9 @@ class TrustDriftEngine:
                     TrustLine.from_participant_id == creditor_uuid,
                     TrustLine.to_participant_id == debtor_uuid,
                     TrustLine.equivalent_id == eq_id,
+                    # ACTIVE only: migration 019 lets a closed incarnation coexist,
+                    # and drift must never rewrite history.
+                    TrustLine.status == "active",
                 )
                 .values(limit=new_limit)
             )

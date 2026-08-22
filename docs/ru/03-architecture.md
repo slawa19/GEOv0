@@ -497,8 +497,16 @@ CREATE TABLE trust_lines (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     
-    UNIQUE(from_participant_id, to_participant_id, equivalent_id)
+    -- Безусловного UNIQUE(from, to, equivalent) здесь НЕТ и быть не должно: по §5.1
+    -- протокола создание линии блокирует лишь АКТИВНАЯ линия, а закрытие сохраняет
+    -- строку как историю. Уникальность обеспечивается частичным индексом ниже.
 );
+
+-- Не более одной ЖИВОЙ линии на тройку; закрытых инкарнаций может быть сколько угодно,
+-- каждая со своим id. См. миграцию 019_trust_lines_partial_unique_live и программу 009.
+CREATE UNIQUE INDEX uq_trust_lines_live_from_to_equivalent
+    ON trust_lines (from_participant_id, to_participant_id, equivalent_id)
+    WHERE status <> 'closed';
 
 CREATE INDEX idx_trust_lines_from ON trust_lines(from_participant_id);
 CREATE INDEX idx_trust_lines_to ON trust_lines(to_participant_id);

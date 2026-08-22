@@ -191,7 +191,13 @@ async def _compute_balance_rows(
             & (debt.creditor_id == tl.from_participant_id)
             & (debt.equivalent_id == tl.equivalent_id),
         )
-        .where(tl.from_participant_id == participant_id)
+        .where(
+            tl.from_participant_id == participant_id,
+            # LIVE rows only.  Since migration 019 a closed incarnation can coexist with
+            # the live one; summing both would double-count the limit AND join the same
+            # debt row twice, corrupting the money shown to the operator.
+            tl.status != "closed",
+        )
         .group_by(eq.code)
     )
 
@@ -208,7 +214,11 @@ async def _compute_balance_rows(
             & (debt.creditor_id == tl.from_participant_id)
             & (debt.equivalent_id == tl.equivalent_id),
         )
-        .where(tl.to_participant_id == participant_id)
+        .where(
+            tl.to_participant_id == participant_id,
+            # LIVE rows only — same reason as the outgoing aggregate.
+            tl.status != "closed",
+        )
         .group_by(eq.code)
     )
 
@@ -462,6 +472,8 @@ async def _compute_capacity(
         .where(
             tl.equivalent_id == eq.id,
             (tl.from_participant_id == participant_id) | (tl.to_participant_id == participant_id),
+            # LIVE rows only — see the note on the outgoing aggregate above.
+            tl.status != "closed",
         )
     )
 

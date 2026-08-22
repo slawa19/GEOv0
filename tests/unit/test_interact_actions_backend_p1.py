@@ -373,30 +373,29 @@ async def test_action_trustline_close_happy_and_has_debt(client, db_session, int
     assert p1["ok"] is True
     assert p1["trustline_id"] == trustline_id
 
-    # Debt case: use a different equivalent code to avoid DB-level UNIQUE constraint
-    # (trust_lines is unique on from/to/equivalent regardless of status).
-    usd = Equivalent(code="USD", precision=2, is_active=True)
-    db_session.add(usd)
-    await db_session.commit()
-
-    rc_usd = await client.post(
+    # Debt case: recreate the SAME triple.  Until spec 009 / T903 this required switching
+    # to another equivalent code, because `uq_trust_lines_from_to_equivalent` was declared
+    # without `status` and refused the row the protocol permits.  Migration
+    # 019_trust_lines_partial_unique_live narrowed uniqueness to live rows, so the workaround
+    # is gone and the test now exercises the real user path (F-009-7 / T906).
+    rc_again = await client.post(
         "/api/v1/simulator/runs/test-run/actions/trustline-create",
         headers=headers,
         json={
             "from_pid": "alice",
             "to_pid": "bob",
-            "equivalent": "USD",
+            "equivalent": "UAH",
             "limit": "10",
         },
     )
-    assert rc_usd.status_code == 200, rc_usd.text
+    assert rc_again.status_code == 200, rc_again.text
 
-    # Arrange debt
+    # Arrange debt on the same triple the recreated line covers.
     db_session.add(
         Debt(
             debtor_id=bob.id,
             creditor_id=alice.id,
-            equivalent_id=usd.id,
+            equivalent_id=uah.id,
             amount=Decimal("1"),
         )
     )
@@ -409,7 +408,7 @@ async def test_action_trustline_close_happy_and_has_debt(client, db_session, int
         json={
             "from_pid": "alice",
             "to_pid": "bob",
-            "equivalent": "USD",
+            "equivalent": "UAH",
             "client_action_id": "c_tl_close_2",
         },
     )
@@ -1538,3 +1537,137 @@ async def test_trustline_create_used_read_error_returns_503_and_error_envelope(
     assert body.get("details", {}).get("from_pid") == "alice"
     assert body.get("details", {}).get("to_pid") == "bob"
 
+
+
+@pytest.mark.asyncio
+async def test_action_trustline_create_after_close_is_a_declared_outcome(
+    client,
+    db_session,
+    interact_actions_enabled,
+):
+    """RT-009-4: the Interact Mode route carries its own copy of the closed-trustline defect.
+
+    Program 009, finding `F-009-4` (`B-A1a-016`).  The route does not go through
+    `TrustLineService`: it builds the `TrustLine` itself and commits without catching
+    `IntegrityError` (`app/api/v1/simulator.py:983-1015`), reusing the same defective
+    predicate `TrustLine.status != "closed"`.  Fixing `F-009-3` in the service therefore
+    does not close this call site.
+
+    The behaviour is the one the protocol prescribes: TRUST_LINE_CREATE is blocked only by
+    an ACTIVE line (`docs/ru/02-protocol-spec.md:333`), so recreating after close yields a
+    NEW incarnation with a new id, and the closed row stays as history (`:379`).
+
+    Note on the gate: this test runs against the model schema, so it pins the *behaviour*,
+    not the migration.  The migration itself is gated by `RT-009-3`
+    (`tests/integration/test_p1_trustline_reopen_postgres.py`) under the Postgres tier with
+    `GEO_TEST_USE_MIGRATED_SCHEMA=1`.
+    """
+    await _seed_alice_bob_uah(db_session)
+    headers = {"X-Admin-Token": settings.ADMIN_TOKEN}
+
+    created = await client.post(
+        "/api/v1/simulator/runs/test-run/actions/trustline-create",
+        headers=headers,
+        json={"from_pid": "alice", "to_pid": "bob", "equivalent": "UAH", "limit": "10"},
+    )
+    assert created.status_code == 200, created.text
+
+    closed = await client.post(
+        "/api/v1/simulator/runs/test-run/actions/trustline-close",
+        headers=headers,
+        json={
+            "from_pid": "alice",
+            "to_pid": "bob",
+            "equivalent": "UAH",
+            "client_action_id": "rt_009_4_close",
+        },
+    )
+    assert closed.status_code == 200, closed.text
+
+    # Same triple again — no equivalent switching, unlike the workaround at :376-377.
+    again = await client.post(
+        "/api/v1/simulator/runs/test-run/actions/trustline-create",
+        headers=headers,
+        json={"from_pid": "alice", "to_pid": "bob", "equivalent": "UAH", "limit": "10"},
+    )
+
+    assert again.status_code != 500, (
+        "recreating a closed trustline through the Interact Mode route surfaced an "
+        f"unhandled database error: {again.status_code} {again.text}"
+    )
+    # Acceptance for the behaviour chosen after reading the protocol: TRUST_LINE_CREATE is
+    # blocked only by an ACTIVE line (docs/ru/02-protocol-spec.md:333), so a new
+    # incarnation must be created.
+    assert again.status_code == 200, again.text
+    assert again.json()["trustline_id"] != created.json()["trustline_id"], (
+        "the new incarnation must be a new row, not the reopened old one"
+    )
+
+
+@pytest.mark.asyncio
+async def test_mutating_action_is_run_scoped_like_its_read_sibling(
+    client, db_session, interact_actions_enabled, monkeypatch
+):
+    """RT-009-1: read and write of the same family must see the same perimeter.
+
+    Program 009, finding `F-009-1` (`C-A1a-003`, P1).
+
+    `participants-list` is scoped to the run snapshot -- the sibling test above pins that.
+    But `_resolve_participant_or_error` (`app/api/v1/simulator.py`) resolves by
+    `select(Participant).where(Participant.pid == ...)` over the GLOBAL table, with no run
+    binding at all.  So a mutating interact action accepts a participant the run does not
+    contain, while the read endpoint of the same family hides it.
+
+    Asymmetry between read and write inside one family is a defect, not a decision: the
+    owner of a run can act on a participant that is not part of it.
+    """
+    import app.api.v1.simulator as simulator_module
+
+    await _seed_alice_bob_uah(db_session)
+    db_session.add(
+        Participant(
+            pid="mallory",
+            display_name="Mallory",
+            public_key="M" * 64,
+            type="person",
+            status="active",
+            profile={},
+        )
+    )
+    await db_session.commit()
+
+    async def _fake_build_graph_snapshot(*, run_id: str, equivalent: str, session=None):
+        # The run contains alice and bob only -- mallory belongs to somebody else.
+        return SimulatorGraphSnapshot(
+            equivalent=str(equivalent),
+            generated_at=datetime.now(timezone.utc),
+            nodes=[
+                SimulatorGraphNode(id="alice", name="Alice", type="person", status="active"),
+                SimulatorGraphNode(id="bob", name="Bob", type="person", status="active"),
+            ],
+            links=[],
+        )
+
+    monkeypatch.setattr(simulator_module.runtime, "build_graph_snapshot", _fake_build_graph_snapshot)
+    headers = {"X-Admin-Token": settings.ADMIN_TOKEN}
+
+    # The read side hides the foreign participant.
+    listing = await client.get(
+        "/api/v1/simulator/runs/test-run/actions/participants-list",
+        headers=headers,
+    )
+    assert listing.status_code == 200, listing.text
+    assert "mallory" not in [x["pid"] for x in listing.json()["items"]]
+
+    # The write side must hide it too.
+    mutation = await client.post(
+        "/api/v1/simulator/runs/test-run/actions/trustline-create",
+        headers=headers,
+        json={"from_pid": "alice", "to_pid": "mallory", "equivalent": "UAH", "limit": "10"},
+    )
+
+    assert mutation.status_code != 200, (
+        "a mutating interact action accepted a participant the run does not contain, "
+        "while the read endpoint of the same family hides it: "
+        f"{mutation.status_code} {mutation.text}"
+    )

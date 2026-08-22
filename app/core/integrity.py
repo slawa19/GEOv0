@@ -32,7 +32,16 @@ async def compute_integrity_checkpoint_for_equivalent(
         await session.execute(
             select(TrustLine.from_participant_id, TrustLine.to_participant_id, TrustLine.limit, TrustLine.status)
             .where(TrustLine.equivalent_id == equivalent_id)
-            .order_by(TrustLine.from_participant_id.asc(), TrustLine.to_participant_id.asc())
+            # `id` is a tie-breaker, not decoration: since migration 019 a closed
+            # incarnation may share (from, to) with the live one, and ordering by the pair
+            # alone leaves their relative position -- and therefore the checksum -- up to
+            # the planner.  A non-deterministic integrity checksum is worse than no
+            # checksum: it turns a stable state into a false alarm.
+            .order_by(
+                TrustLine.from_participant_id.asc(),
+                TrustLine.to_participant_id.asc(),
+                TrustLine.id.asc(),
+            )
         )
     ).all()
 

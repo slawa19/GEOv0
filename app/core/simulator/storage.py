@@ -626,21 +626,48 @@ async def write_tick_bottlenecks(
         if not items:
             return
 
-        session.add_all(items)
         if commit:
-            await session.commit()
+            # The caller delegated the commit to us, so returning the session usable is
+            # part of the job we accepted - same reasoning as write_tick_metrics.
+            session.add_all(items)
+            try:
+                await session.commit()
+            except Exception:
+                try:
+                    await session.rollback()
+                except Exception:
+                    pass
+                raise
         else:
-            await session.flush()
+            # 2026-08-21 / p009_t902: the session belongs to the CALLER - the real-mode
+            # tick passes its own session with commit=False
+            # (`real_tick_persistence.py:122-133`).  The previous code called
+            # `await session.rollback()` here, which discarded everything the tick had
+            # staged; the outer `except` then swallowed the failure, and the owner went on
+            # to commit and fire `on_commit`, reporting success for work that no longer
+            # existed.  That is finding B-A2b-001 (registry 008), recorded by program 007
+            # as open debt T717(а).
+            #
+            # A failed bottlenecks write must undo ONLY this write.  This mirrors the fix
+            # slice T715 already applied to `write_tick_metrics` above - the shape is not
+            # invented here, it is the one this codebase already accepted.
+            savepoint = await session.begin_nested()
+            try:
+                session.add_all(items)
+                await session.flush()
+                await savepoint.commit()
+            except Exception:
+                try:
+                    await savepoint.rollback()
+                except Exception:
+                    pass
+                raise
     except Exception:
         logger.exception(
             "simulator.storage.write_tick_bottlenecks_failed run_id=%s equivalent=%s",
             str(run_id),
             str(equivalent),
         )
-        try:
-            await session.rollback()
-        except Exception:
-            pass
         return
 
 

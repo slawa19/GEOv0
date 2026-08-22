@@ -2,6 +2,7 @@ from uuid import UUID
 from decimal import Decimal
 from typing import List, Literal
 from sqlalchemy import func, select, and_, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.utils.exceptions import (
     BadRequestException,
@@ -23,6 +24,72 @@ from sqlalchemy import inspect as sa_inspect
 from app.utils.validation import validate_equivalent_code, validate_trustline_policy
 from app.core.integrity import compute_integrity_checkpoint_for_equivalent
 from app.core.payments.router import PaymentRouter
+
+_LIVE_TRUSTLINE_INDEX = "uq_trust_lines_live_from_to_equivalent"
+
+
+def _is_live_trustline_uniqueness_violation(exc: IntegrityError) -> bool:
+    """True only for a clash with the live-trustline partial unique index.
+
+    Identity matters: renaming an unrelated IntegrityError into "trustline already exists"
+    hands the caller a conflict they can neither understand nor act on.
+
+    Only the DRIVER error is inspected, never `str(exc)`: the latter embeds the INSERT
+    statement, whose column list contains `from_participant_id`/`to_participant_id`, so a
+    text match against it classifies *every* failing INSERT on this table as a uniqueness
+    clash.  An external review demonstrated exactly that.
+
+    A second review then showed the text fallback was still too loose.  It now requires the
+    full triple, an explicit uniqueness signal AND the table name, and it walks the whole
+    `__cause__` chain rather than one level.
+    """
+    orig = getattr(exc, "orig", None)
+    if orig is None:
+        return False
+
+    # Walk the whole cause chain: drivers wrap differently and nesting depth is not fixed.
+    seen: set[int] = set()
+    node = orig
+    while node is not None and id(node) not in seen:
+        seen.add(id(node))
+        name = getattr(node, "constraint_name", None)
+        if name:
+            # The driver told us exactly which constraint failed -- no guessing needed.
+            return str(name) == _LIVE_TRUSTLINE_INDEX
+        node = getattr(node, "__cause__", None) or getattr(node, "__context__", None)
+
+    # PostgreSQL without a constraint name: 23505 is unique_violation.
+    node = orig
+    while node is not None:
+        sqlstate = getattr(node, "sqlstate", None) or getattr(node, "pgcode", None)
+        if sqlstate == "23505":
+            table = str(getattr(node, "table_name", "") or "")
+            detail = f"{getattr(node, 'detail', '') or ''} {node}"
+            if table and table != "trust_lines":
+                return False
+            return _matches_live_triple(detail)
+        node = getattr(node, "__cause__", None) or getattr(node, "__context__", None)
+
+    text = str(orig)
+    lowered = text.lower()
+    if "unique" not in lowered:
+        # CHECK, NOT NULL and foreign-key violations keep their own meaning.
+        return False
+    if _LIVE_TRUSTLINE_INDEX in text:
+        return True
+    if "trust_lines" not in lowered:
+        return False
+    return _matches_live_triple(text)
+
+
+def _matches_live_triple(text: str) -> bool:
+    """All three columns of the live index must be named, not just two of them."""
+    lowered = text.lower()
+    return all(
+        column in lowered
+        for column in ("from_participant_id", "to_participant_id", "equivalent_id")
+    )
+
 
 class TrustLineService:
     def __init__(self, session: AsyncSession):
@@ -77,7 +144,15 @@ class TrustLineService:
             equivalent_id=equivalent.id,
         )
 
-        # Check for duplicate active trustline
+        # Only a LIVE line blocks a new one.  This matches the protocol precondition of
+        # TRUST_LINE_CREATE — «Не существует активной линии (from, to, equivalent)»
+        # (docs/ru/02-protocol-spec.md:333) — and, since migration
+        # 019_trust_lines_partial_unique_live, it also matches the database: uniqueness is
+        # enforced over `status <> 'closed'` only.
+        #
+        # Before that migration the constraint was unconditional, so a closed incarnation
+        # made the INSERT below fail with a raw IntegrityError -> HTTP 500 on two ordinary
+        # user calls (finding F-009-3 / B-A3-004).
         stmt = select(TrustLine).where(
             and_(
                 TrustLine.from_participant_id == from_participant_id,
@@ -100,9 +175,31 @@ class TrustLineService:
             policy=data.policy or {},
             status='active'
         )
+        # NOTE ON TRANSACTION SHAPE.  The INSERT is deliberately left staged in the
+        # caller-owned transaction rather than isolated in a SAVEPOINT.  The fail-closed
+        # contract of this service depends on it: if any later step fails (checkpoint,
+        # audit), the exception propagates and the caller's rollback must remove the row.
+        # `tests/unit/test_trustline_audit_fail_closed.py` pins exactly that, and an
+        # earlier attempt to wrap the flush in a savepoint broke it.
+        #
+        # The uniqueness race is handled at the commit below instead, which is where the
+        # conflict actually surfaces: a competing transaction that has not committed yet
+        # does not block this INSERT.
         self.session.add(trustline)
-
-        await self.session.flush()
+        try:
+            await self.session.flush()
+        except IntegrityError as exc:
+            # The conflict surfaces here when the competing transaction has already
+            # committed.  Translate it into a declared conflict WITHOUT rolling back
+            # ourselves: the transaction is already aborted, and the caller's own rollback
+            # is what removes the staged row -- the same mechanism the fail-closed contract
+            # relies on.
+            if not _is_live_trustline_uniqueness_violation(exc):
+                raise
+            raise ConflictException(
+                "Active trustline already exists",
+                details={"reason": "CONCURRENT_TRUSTLINE_CREATE"},
+            ) from exc
 
         checkpoint_after = await compute_integrity_checkpoint_for_equivalent(
             self.session,
@@ -130,10 +227,24 @@ class TrustLineService:
             )
         )
 
-        await self.session.commit()
+        # The uniqueness conflict can surface HERE rather than at the flush above: a
+        # competing transaction that has not committed yet does not block the INSERT, and
+        # PostgreSQL raises only when the winner commits.  Both points must therefore map
+        # to the same declared conflict.
+        try:
+            await self.session.commit()
+        except IntegrityError as exc:
+            await self.session.rollback()
+            if not _is_live_trustline_uniqueness_violation(exc):
+                raise
+            raise ConflictException(
+                "Active trustline already exists",
+                details={"reason": "CONCURRENT_TRUSTLINE_CREATE"},
+            ) from exc
+
         PaymentRouter.invalidate_cache(equivalent.code)
         await self.session.refresh(trustline)
-        
+
         # Hydrate extra fields for response
         return await self._hydrate_trustline(trustline)
 
@@ -147,6 +258,17 @@ class TrustLineService:
 
         if trustline.from_participant_id != user_id:
             raise ForbiddenException("Not authorized to update this trustline")
+
+        # TRUST_LINE_UPDATE requires an ACTIVE line (docs/ru/02-protocol-spec.md:355).
+        # Before migration 019 a closed row was the only row for its triple, so this was
+        # merely a missing check; now a closed incarnation coexists with a live one, and
+        # without this guard its id stays patchable forever -- i.e. recorded history could
+        # be rewritten after the fact.
+        if str(trustline.status) == "closed":
+            raise ConflictException(
+                "Cannot update a closed trustline",
+                details={"reason": "TRUSTLINE_CLOSED", "trustline_id": str(trustline_id)},
+            )
 
         if not isinstance(getattr(data, "signature", None), str) or not data.signature:
             raise InvalidSignatureException("Missing signature")
@@ -260,6 +382,17 @@ class TrustLineService:
 
         if trustline.from_participant_id != user_id:
             raise ForbiddenException("Not authorized to close this trustline")
+
+        # Symmetry with `update()`: a closed row is history.  Closing it again would write a
+        # fresh TRUST_LINE_CLOSE audit entry and recompute checkpoints for a line that was
+        # closed long ago -- history written after the fact.  Harmless to the state, wrong
+        # in the journal.  Found by an independent scan after migration 019 made a closed
+        # incarnation coexist with a live one.
+        if str(trustline.status) == "closed":
+            raise ConflictException(
+                "Trustline is already closed",
+                details={"reason": "TRUSTLINE_CLOSED", "trustline_id": str(trustline_id)},
+            )
 
         if not isinstance(getattr(data, "signature", None), str) or not data.signature:
             raise InvalidSignatureException("Missing signature")
@@ -545,6 +678,14 @@ class TrustLineService:
         return trustline
 
     async def _get_used_amount(self, trustline: TrustLine) -> Decimal:
+        # A CLOSED line is history: the debt on this pair belongs to whatever incarnation is
+        # live now, not to it.  Reporting the successor's debt as a closed line's `used`
+        # would show an operator a foreign amount -- and, with `available = limit - used`,
+        # a negative capacity on a line that no longer exists.  Closing requires zero debt
+        # (protocol §5.3), so a closed line's own `used` is zero by construction.
+        if str(getattr(trustline, "status", "")) == "closed":
+            return Decimal("0")
+
         # used = debt where debtor is 'to' and creditor is 'from'
         stmt = select(Debt.amount).where(
             and_(
@@ -558,6 +699,11 @@ class TrustLineService:
         return amount if amount is not None else Decimal('0')
 
     async def _get_reverse_used_amount(self, trustline: TrustLine) -> Decimal:
+        # Same reasoning as `_get_used_amount`: a closed incarnation must not display the
+        # live successor's debt.
+        if str(getattr(trustline, "status", "")) == "closed":
+            return Decimal("0")
+
         # Reverse debt: debtor is 'from' and creditor is 'to'
         stmt = select(Debt.amount).where(
             and_(
