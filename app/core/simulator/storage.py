@@ -325,8 +325,14 @@ async def write_tick_metrics(
     metric_values_by_eq: Optional[dict[str, dict[str, Optional[Decimal | float]]]] = None,
     session=None,
     commit: bool = True,
-) -> None:
+) -> bool:
     """Upsert one tick worth of metric points. Best-effort: never raises.
+
+    Returns True when the points are written (or when there was nothing to write) and
+    False when the write failed and was swallowed.  2026-08-22 / p009: the swallow is
+    deliberate -- a metrics failure must not kill the tick -- but returning None made
+    failure indistinguishable from success, and the caller marked the tick flushed on
+    both, which turned a transient write error into permanent data loss.
 
     Transaction contract (2026-08-20 / p007_t715): when `session` is supplied it
     belongs to the caller. This function wraps its statements in a SAVEPOINT and
@@ -346,7 +352,7 @@ async def write_tick_metrics(
     """
 
     if not db_enabled():
-        return
+        return True  # nothing to write is not a failure
 
     try:
 
@@ -555,7 +561,9 @@ async def write_tick_metrics(
             str(run_id),
             int(t_ms),
         )
-        return
+        return False
+
+    return True
 
 
 async def write_tick_bottlenecks(
@@ -567,9 +575,15 @@ async def write_tick_bottlenecks(
     session,
     limit: int = 50,
     commit: bool = True,
-) -> None:
+) -> bool:
+    """Write one tick worth of bottleneck rows. Best-effort: never raises.
+
+    Returns True when the rows are written (or when there was nothing to write) and False
+    when the write failed and was swallowed -- see `write_tick_metrics` for why the
+    distinction is not cosmetic.
+    """
     if not db_enabled():
-        return
+        return True
 
     try:
         items: list[SimulatorRunBottleneck] = []
@@ -624,7 +638,7 @@ async def write_tick_bottlenecks(
         items.sort(key=lambda r: (float(r.score), str(r.target_id)), reverse=True)
         items = items[: int(limit)]
         if not items:
-            return
+            return True  # nothing to write is not a failure
 
         if commit:
             # The caller delegated the commit to us, so returning the session usable is
@@ -668,7 +682,9 @@ async def write_tick_bottlenecks(
             str(run_id),
             str(equivalent),
         )
-        return
+        return False
+
+    return True
 
 
 async def reconcile_stale_runs() -> int:
