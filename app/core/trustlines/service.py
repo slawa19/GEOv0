@@ -2,6 +2,7 @@ from uuid import UUID
 from decimal import Decimal
 from typing import List, Literal
 from sqlalchemy import func, select, and_, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.utils.exceptions import (
     BadRequestException,
@@ -77,7 +78,15 @@ class TrustLineService:
             equivalent_id=equivalent.id,
         )
 
-        # Check for duplicate active trustline
+        # Only a LIVE line blocks a new one.  This matches the protocol precondition of
+        # TRUST_LINE_CREATE — «Не существует активной линии (from, to, equivalent)»
+        # (docs/ru/02-protocol-spec.md:333) — and, since migration
+        # 019_trust_lines_partial_unique_live, it also matches the database: uniqueness is
+        # enforced over `status <> 'closed'` only.
+        #
+        # Before that migration the constraint was unconditional, so a closed incarnation
+        # made the INSERT below fail with a raw IntegrityError -> HTTP 500 on two ordinary
+        # user calls (finding F-009-3 / B-A3-004).
         stmt = select(TrustLine).where(
             and_(
                 TrustLine.from_participant_id == from_participant_id,
@@ -102,7 +111,18 @@ class TrustLineService:
         )
         self.session.add(trustline)
 
-        await self.session.flush()
+        # The guard above and the INSERT are not atomic: two concurrent creates can both
+        # observe "no live line" and both insert.  The partial unique index rejects the
+        # loser, and that rejection must reach the caller as a declared conflict rather
+        # than as an unhandled database error (fail-closed, §9 anti-vacuum).
+        try:
+            await self.session.flush()
+        except IntegrityError as exc:
+            await self.session.rollback()
+            raise ConflictException(
+                "Active trustline already exists",
+                details={"reason": "CONCURRENT_TRUSTLINE_CREATE"},
+            ) from exc
 
         checkpoint_after = await compute_integrity_checkpoint_for_equivalent(
             self.session,

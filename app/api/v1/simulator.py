@@ -16,6 +16,7 @@ from fastapi import APIRouter, Body, Depends, Header, Query, Request
 from starlette.responses import FileResponse, Response, StreamingResponse, JSONResponse
 
 from sqlalchemy import and_, func, select
+from sqlalchemy.exc import IntegrityError
 
 from app.api import deps
 from app.config import settings
@@ -980,6 +981,13 @@ async def action_trustline_create(
             },
         )
 
+    # Second, independent copy of the create guard: this route builds the TrustLine itself
+    # and never goes through TrustLineService, so fixing the service alone does not close
+    # it (finding F-009-4 / B-A1a-016).
+    #
+    # Only a LIVE line blocks a new one — protocol precondition of TRUST_LINE_CREATE,
+    # docs/ru/02-protocol-spec.md:333.  Since migration 019_trust_lines_partial_unique_live
+    # the database agrees: uniqueness is enforced over `status <> 'closed'` only.
     existing = (
         await db.execute(
             select(TrustLine.id).where(
@@ -1012,7 +1020,24 @@ async def action_trustline_create(
         status="active",
     )
     db.add(tl)
-    await db.commit()
+    # Guard and INSERT are not atomic; the partial unique index rejects a concurrent
+    # duplicate, and that rejection must surface as a declared 409 rather than as an
+    # unhandled database error (fail-closed).
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        return _action_error(
+            status_code=409,
+            code="TRUSTLINE_EXISTS",
+            message="Active trustline already exists",
+            details={
+                "from_pid": from_p.pid,
+                "to_pid": to_p.pid,
+                "equivalent": eq.code,
+                "reason": "CONCURRENT_TRUSTLINE_CREATE",
+            },
+        )
     await db.refresh(tl)
 
     # Keep runtime snapshot/cache consistent with action.

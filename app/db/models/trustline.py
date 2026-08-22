@@ -1,6 +1,6 @@
 import uuid
 from decimal import Decimal
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, JSON, Numeric, String, UniqueConstraint, Uuid, func
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, JSON, Numeric, String, Uuid, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
@@ -28,7 +28,20 @@ class TrustLine(Base):
     equivalent = relationship("Equivalent")
 
     __table_args__ = (
-        UniqueConstraint('from_participant_id', 'to_participant_id', 'equivalent_id', name='uq_trust_lines_from_to_equivalent'),
+        # Uniqueness holds among LIVE rows only, matching the protocol precondition of
+        # TRUST_LINE_CREATE: «Не существует активной линии (from, to, equivalent)»
+        # (docs/ru/02-protocol-spec.md:333).  Closing keeps the row (`:379`), so a closed
+        # incarnation must not block a new one — see migration
+        # 019_trust_lines_partial_unique_live and spec 009 (F-009-3 / F-009-4).
+        Index(
+            'uq_trust_lines_live_from_to_equivalent',
+            'from_participant_id',
+            'to_participant_id',
+            'equivalent_id',
+            unique=True,
+            sqlite_where=text("status <> 'closed'"),
+            postgresql_where=text("status <> 'closed'"),
+        ),
         CheckConstraint("status IN ('active', 'frozen', 'closed')", name='chk_trust_line_status'),
         CheckConstraint('"limit" >= 0', name='chk_trust_line_limit_positive'),
         Index('ix_trust_lines_from_status', 'from_participant_id', 'status'),

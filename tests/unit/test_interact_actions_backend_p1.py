@@ -373,30 +373,29 @@ async def test_action_trustline_close_happy_and_has_debt(client, db_session, int
     assert p1["ok"] is True
     assert p1["trustline_id"] == trustline_id
 
-    # Debt case: use a different equivalent code to avoid DB-level UNIQUE constraint
-    # (trust_lines is unique on from/to/equivalent regardless of status).
-    usd = Equivalent(code="USD", precision=2, is_active=True)
-    db_session.add(usd)
-    await db_session.commit()
-
-    rc_usd = await client.post(
+    # Debt case: recreate the SAME triple.  Until spec 009 / T903 this required switching
+    # to another equivalent code, because `uq_trust_lines_from_to_equivalent` was declared
+    # without `status` and refused the row the protocol permits.  Migration
+    # 019_trust_lines_partial_unique_live narrowed uniqueness to live rows, so the workaround
+    # is gone and the test now exercises the real user path (F-009-7 / T906).
+    rc_again = await client.post(
         "/api/v1/simulator/runs/test-run/actions/trustline-create",
         headers=headers,
         json={
             "from_pid": "alice",
             "to_pid": "bob",
-            "equivalent": "USD",
+            "equivalent": "UAH",
             "limit": "10",
         },
     )
-    assert rc_usd.status_code == 200, rc_usd.text
+    assert rc_again.status_code == 200, rc_again.text
 
-    # Arrange debt
+    # Arrange debt on the same triple the recreated line covers.
     db_session.add(
         Debt(
             debtor_id=bob.id,
             creditor_id=alice.id,
-            equivalent_id=usd.id,
+            equivalent_id=uah.id,
             amount=Decimal("1"),
         )
     )
@@ -409,7 +408,7 @@ async def test_action_trustline_close_happy_and_has_debt(client, db_session, int
         json={
             "from_pid": "alice",
             "to_pid": "bob",
-            "equivalent": "USD",
+            "equivalent": "UAH",
             "client_action_id": "c_tl_close_2",
         },
     )
@@ -1538,3 +1537,68 @@ async def test_trustline_create_used_read_error_returns_503_and_error_envelope(
     assert body.get("details", {}).get("from_pid") == "alice"
     assert body.get("details", {}).get("to_pid") == "bob"
 
+
+
+@pytest.mark.asyncio
+async def test_action_trustline_create_after_close_is_a_declared_outcome(
+    client,
+    db_session,
+    interact_actions_enabled,
+):
+    """RT-009-4: the Interact Mode route carries its own copy of the closed-trustline defect.
+
+    Program 009, finding `F-009-4` (`B-A1a-016`).  The route does not go through
+    `TrustLineService`: it builds the `TrustLine` itself and commits without catching
+    `IntegrityError` (`app/api/v1/simulator.py:983-1015`), reusing the same defective
+    predicate `TrustLine.status != "closed"`.  Fixing `F-009-3` in the service therefore
+    does not close this call site.
+
+    The assertion deliberately does not pick a side of the open product fork (reopen,
+    delete-on-close, declared conflict, or accepted irreversibility).  It only requires
+    that two ordinary calls by one user produce a *declared* HTTP outcome instead of an
+    unhandled database error surfacing as 500.
+
+    Note on the gate: the Postgres proof for this class is `RT-009-3`
+    (`tests/integration/test_p1_trustline_reopen_postgres.py`).  This test exists to show
+    that the second call site is independently affected, not to re-prove the constraint.
+    """
+    await _seed_alice_bob_uah(db_session)
+    headers = {"X-Admin-Token": settings.ADMIN_TOKEN}
+
+    created = await client.post(
+        "/api/v1/simulator/runs/test-run/actions/trustline-create",
+        headers=headers,
+        json={"from_pid": "alice", "to_pid": "bob", "equivalent": "UAH", "limit": "10"},
+    )
+    assert created.status_code == 200, created.text
+
+    closed = await client.post(
+        "/api/v1/simulator/runs/test-run/actions/trustline-close",
+        headers=headers,
+        json={
+            "from_pid": "alice",
+            "to_pid": "bob",
+            "equivalent": "UAH",
+            "client_action_id": "rt_009_4_close",
+        },
+    )
+    assert closed.status_code == 200, closed.text
+
+    # Same triple again — no equivalent switching, unlike the workaround at :376-377.
+    again = await client.post(
+        "/api/v1/simulator/runs/test-run/actions/trustline-create",
+        headers=headers,
+        json={"from_pid": "alice", "to_pid": "bob", "equivalent": "UAH", "limit": "10"},
+    )
+
+    assert again.status_code != 500, (
+        "recreating a closed trustline through the Interact Mode route surfaced an "
+        f"unhandled database error: {again.status_code} {again.text}"
+    )
+    # Acceptance for the behaviour chosen after reading the protocol: TRUST_LINE_CREATE is
+    # blocked only by an ACTIVE line (docs/ru/02-protocol-spec.md:333), so a new
+    # incarnation must be created.
+    assert again.status_code == 200, again.text
+    assert again.json()["trustline_id"] != created.json()["trustline_id"], (
+        "the new incarnation must be a new row, not the reopened old one"
+    )
