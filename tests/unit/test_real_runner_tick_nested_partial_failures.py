@@ -179,7 +179,12 @@ async def test_real_runner_tick_real_mode_uses_nested_tx_and_survives_one_action
         equivalent,
         amount,
         idempotency_key,
+        allowed_participant_pids=None,
     ):
+        # 2026-08-22 / p010 (`F-010-4`): the tick must hand the run perimeter to the staged
+        # payment. Asserted rather than swallowed with **kwargs: a double that tolerates a
+        # missing perimeter keeps passing after the caller stops sending one.
+        assert allowed_participant_pids, allowed_participant_pids
         calls["n"] += 1
         if calls["n"] == 1:
             raise BadRequestException("bad payment")
