@@ -193,7 +193,6 @@ async def test_concurrent_create_of_the_same_triple_yields_one_line_and_a_declar
         pytest.skip("Postgres-only gate: real concurrent transactions are the subject")
 
     from tests.conftest import TestingSessionLocal
-    from app.core.trustlines import service as trustline_service_module
 
     # The seed must be visible to OTHER sessions, so it cannot go through the `db_session`
     # fixture: that one keeps a per-test transaction which is rolled back and never becomes
@@ -217,25 +216,31 @@ async def test_concurrent_create_of_the_same_triple_yields_one_line_and_a_declar
     # `compute_integrity_checkpoint_for_equivalent` is called once BEFORE the guard, so
     # releasing both tasks there guarantees they pass the guard while neither has
     # committed -- which is the schedule the index has to arbitrate.
-    original_checkpoint = trustline_service_module.compute_integrity_checkpoint_for_equivalent
+    # THE RENDEZVOUS POINT MATTERS.  `create` calls `flush()` exactly once, between the
+    # duplicate guard and the INSERT, so wrapping it holds both tasks at the only place
+    # where the schedule is the one under test: both have passed the guard, neither has
+    # inserted.
+    #
+    # An earlier version synchronised on the first integrity checkpoint instead.  That call
+    # happens BEFORE the guard, so one task could pass guard, insert and commit while the
+    # other was still computing its checkpoint; the loser would then meet the row at the
+    # guard and get an ordinary conflict -- leaving this test green with both
+    # `except IntegrityError` branches deleted.  External review caught that.
     barrier = asyncio.Barrier(2)
-    arrived: set[int] = set()
-
-    async def _sync_first_checkpoint(*args, **kwargs):
-        task = id(asyncio.current_task())
-        if task not in arrived:
-            arrived.add(task)
-            await asyncio.wait_for(barrier.wait(), timeout=10.0)
-        return await original_checkpoint(*args, **kwargs)
-
-    monkeypatch.setattr(
-        trustline_service_module,
-        "compute_integrity_checkpoint_for_equivalent",
-        _sync_first_checkpoint,
-    )
 
     async def _create():
         async with TestingSessionLocal() as session:
+            original_flush = session.flush
+            waited = False
+
+            async def _flush_once_both_are_past_the_guard(*args, **kwargs):
+                nonlocal waited
+                if not waited:
+                    waited = True
+                    await asyncio.wait_for(barrier.wait(), timeout=15.0)
+                return await original_flush(*args, **kwargs)
+
+            session.flush = _flush_once_both_are_past_the_guard  # type: ignore[method-assign]
             service = TrustLineService(session)
             try:
                 await service.create(

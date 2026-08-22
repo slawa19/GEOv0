@@ -620,10 +620,14 @@ async def _run_scoped_pids_or_none(*, run_id: str, session) -> Optional[set[str]
     (`participants-list`).  Mutating actions must see the same perimeter, so they resolve
     participants against this set — see `_resolve_participant_or_error`.
 
-    Returning None means "cannot tell".  Callers treat that as *no scoping* rather than as
-    an empty perimeter: a run that has not been seeded yet legitimately has no snapshot,
-    and refusing every mutation in that state would break lazy seeding, which
-    `test_action_trustline_close_seeds_when_run_paused` pins as intended behaviour.
+    Returning None means "the perimeter cannot be established" and disables scoping.  It is
+    reserved for the case where the snapshot cannot be built at all.
+
+    An EMPTY snapshot is NOT that case and is returned as an empty set, i.e. fail-closed.
+    An earlier version conflated the two on the grounds that lazy seeding needs the
+    permissive branch; an external review showed the argument does not hold, because every
+    caller runs `_ensure_run_seeded` first (see `:959`, `:1189`, `:1351`, `:1512`).  After
+    seeding, an empty snapshot means an empty run — and an empty run contains nobody.
     """
     try:
         snap = await runtime.build_graph_snapshot(run_id=run_id, equivalent="", session=session)
@@ -632,7 +636,7 @@ async def _run_scoped_pids_or_none(*, run_id: str, session) -> Optional[set[str]
     nodes = getattr(snap, "nodes", None) or []
     pids = {str(getattr(n, "id", "") or "").strip() for n in nodes}
     pids.discard("")
-    return pids or None
+    return pids
 
 
 async def _resolve_participant_or_error(

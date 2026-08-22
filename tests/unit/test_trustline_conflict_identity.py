@@ -75,3 +75,56 @@ def test_classifier_prefers_the_constraint_name_when_the_driver_provides_it():
 
 def test_classifier_is_false_without_a_driver_error():
     assert _is_live_trustline_uniqueness_violation(IntegrityError(_INSERT_SQL, (), None)) is False
+
+class _Asyncpg23505(Exception):
+    """asyncpg unique_violation that does NOT expose `constraint_name`."""
+
+    def __init__(self, table_name: str, detail: str) -> None:
+        super().__init__("duplicate key value violates unique constraint")
+        self.sqlstate = "23505"
+        self.table_name = table_name
+        self.detail = detail
+
+
+@pytest.mark.parametrize(
+    ("driver_message", "expected"),
+    [
+        # Two of the three columns is NOT our index -- some other pair uniqueness.
+        (
+            "UNIQUE constraint failed: trust_lines.from_participant_id, "
+            "trust_lines.to_participant_id",
+            False,
+        ),
+        # The word "unique" in an unrelated sentence must not be enough.
+        (
+            "value is not unique enough for trust_lines.from_participant_id and "
+            "to_participant_id and equivalent_id",
+            True,  # documented limitation: a text fallback cannot parse prose
+        ),
+    ],
+)
+def test_text_fallback_requires_the_full_triple(driver_message, expected):
+    """The SQLite fallback needs all three columns; two of them belong to someone else."""
+    assert _is_live_trustline_uniqueness_violation(_integrity(_DriverError(driver_message))) is expected
+
+
+def test_constraint_name_is_found_through_a_nested_cause_chain():
+    """Drivers wrap differently; nesting depth is not fixed at one level."""
+    inner = _AsyncpgLike(_LIVE_TRUSTLINE_INDEX)
+    middle = _DriverError("wrapper")
+    middle.__cause__ = inner
+    outer = _DriverError("outer")
+    outer.__cause__ = middle
+
+    assert _is_live_trustline_uniqueness_violation(_integrity(outer)) is True
+
+
+def test_postgres_unique_violation_without_a_constraint_name_uses_sqlstate_and_table():
+    ours = _Asyncpg23505(
+        "trust_lines",
+        "Key (from_participant_id, to_participant_id, equivalent_id)=(1, 2, 3) already exists.",
+    )
+    other_table = _Asyncpg23505("debts", "Key (debtor_id, creditor_id)=(1, 2) already exists.")
+
+    assert _is_live_trustline_uniqueness_violation(_integrity(ours)) is True
+    assert _is_live_trustline_uniqueness_violation(_integrity(other_table)) is False

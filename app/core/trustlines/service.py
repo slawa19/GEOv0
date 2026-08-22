@@ -37,18 +37,38 @@ def _is_live_trustline_uniqueness_violation(exc: IntegrityError) -> bool:
     Only the DRIVER error is inspected, never `str(exc)`: the latter embeds the INSERT
     statement, whose column list contains `from_participant_id`/`to_participant_id`, so a
     text match against it classifies *every* failing INSERT on this table as a uniqueness
-    clash.  An external review demonstrated exactly that — a `CHECK constraint failed:
-    chk_trust_line_status` was reported as a concurrent-create conflict.
+    clash.  An external review demonstrated exactly that.
+
+    A second review then showed the text fallback was still too loose.  It now requires the
+    full triple, an explicit uniqueness signal AND the table name, and it walks the whole
+    `__cause__` chain rather than one level.
     """
     orig = getattr(exc, "orig", None)
     if orig is None:
         return False
 
-    # asyncpg surfaces the constraint by name; that is the exact signal when available.
-    cause = getattr(orig, "__cause__", None)
-    name = getattr(cause, "constraint_name", None) or getattr(orig, "constraint_name", None)
-    if name:
-        return str(name) == _LIVE_TRUSTLINE_INDEX
+    # Walk the whole cause chain: drivers wrap differently and nesting depth is not fixed.
+    seen: set[int] = set()
+    node = orig
+    while node is not None and id(node) not in seen:
+        seen.add(id(node))
+        name = getattr(node, "constraint_name", None)
+        if name:
+            # The driver told us exactly which constraint failed -- no guessing needed.
+            return str(name) == _LIVE_TRUSTLINE_INDEX
+        node = getattr(node, "__cause__", None) or getattr(node, "__context__", None)
+
+    # PostgreSQL without a constraint name: 23505 is unique_violation.
+    node = orig
+    while node is not None:
+        sqlstate = getattr(node, "sqlstate", None) or getattr(node, "pgcode", None)
+        if sqlstate == "23505":
+            table = str(getattr(node, "table_name", "") or "")
+            detail = f"{getattr(node, 'detail', '') or ''} {node}"
+            if table and table != "trust_lines":
+                return False
+            return _matches_live_triple(detail)
+        node = getattr(node, "__cause__", None) or getattr(node, "__context__", None)
 
     text = str(orig)
     lowered = text.lower()
@@ -57,10 +77,17 @@ def _is_live_trustline_uniqueness_violation(exc: IntegrityError) -> bool:
         return False
     if _LIVE_TRUSTLINE_INDEX in text:
         return True
-    # SQLite spells it out as "UNIQUE constraint failed: trust_lines.from_participant_id, ..."
-    return (
-        "trust_lines.from_participant_id" in lowered
-        and "trust_lines.to_participant_id" in lowered
+    if "trust_lines" not in lowered:
+        return False
+    return _matches_live_triple(text)
+
+
+def _matches_live_triple(text: str) -> bool:
+    """All three columns of the live index must be named, not just two of them."""
+    lowered = text.lower()
+    return all(
+        column in lowered
+        for column in ("from_participant_id", "to_participant_id", "equivalent_id")
     )
 
 
@@ -231,6 +258,17 @@ class TrustLineService:
 
         if trustline.from_participant_id != user_id:
             raise ForbiddenException("Not authorized to update this trustline")
+
+        # TRUST_LINE_UPDATE requires an ACTIVE line (docs/ru/02-protocol-spec.md:355).
+        # Before migration 019 a closed row was the only row for its triple, so this was
+        # merely a missing check; now a closed incarnation coexists with a live one, and
+        # without this guard its id stays patchable forever -- i.e. recorded history could
+        # be rewritten after the fact.
+        if str(trustline.status) == "closed":
+            raise ConflictException(
+                "Cannot update a closed trustline",
+                details={"reason": "TRUSTLINE_CLOSED", "trustline_id": str(trustline_id)},
+            )
 
         if not isinstance(getattr(data, "signature", None), str) or not data.signature:
             raise InvalidSignatureException("Missing signature")
