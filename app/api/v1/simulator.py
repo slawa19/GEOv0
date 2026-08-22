@@ -1076,7 +1076,19 @@ async def action_trustline_create(
     # Guard and INSERT are not atomic; the partial unique index rejects a concurrent
     # duplicate, and that rejection must surface as a declared 409 rather than as an
     # unhandled database error (fail-closed).
+    # 2026-08-22 / p009_t905 (`F-009-6`).  The readback happens INSIDE the transaction and
+    # nothing after the commit performs a mandatory database read.  This route is one of
+    # the three aggravated ones: the runtime snapshot mutation and the router cache
+    # invalidation below run only after the readback, so a failure there used to leave the
+    # database and the run's in-memory topology permanently out of step -- not until the
+    # next read, but for the lifetime of the run.  `RT-009-5` shows the failure is
+    # reachable.
     try:
+        # The flush is explicit and INSIDE this handler on purpose.  `refresh()` needs a
+        # persistent instance, and the flush is where the uniqueness conflict surfaces on
+        # PostgreSQL -- putting it outside would turn a declared 409 into an unhandled 500.
+        await db.flush()
+        await db.refresh(tl)
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
@@ -1096,7 +1108,6 @@ async def action_trustline_create(
                 "reason": "CONCURRENT_TRUSTLINE_CREATE",
             },
         )
-    await db.refresh(tl)
 
     # Keep runtime snapshot/cache consistent with action.
     _mutate_runtime_trustline_topology_best_effort(
@@ -1284,8 +1295,10 @@ async def action_trustline_update(
         )
 
     tl.limit = new_limit_dec
-    await db.commit()
+    # See the note in `action_trustline_create`: readback before commit.
+    await db.flush()
     await db.refresh(tl)
+    await db.commit()
 
     # Keep runtime snapshot consistent with action (limit change).
     _mutate_runtime_trustline_topology_best_effort(
@@ -1451,8 +1464,10 @@ async def action_trustline_close(
         )
 
     tl.status = "closed"
-    await db.commit()
+    # See the note in `action_trustline_create`: readback before commit.
+    await db.flush()
     await db.refresh(tl)
+    await db.commit()
 
     # Keep runtime snapshot/cache consistent with action.
     _mutate_runtime_trustline_topology_best_effort(

@@ -246,6 +246,17 @@ class TrustLineService:
         # competing transaction that has not committed yet does not block the INSERT, and
         # PostgreSQL raises only when the winner commits.  Both points must therefore map
         # to the same declared conflict.
+        # 2026-08-22 / p009_t905 (`F-009-6`).  Everything the response needs is read and
+        # materialised INSIDE the uncommitted transaction, and after the commit this path
+        # performs no mandatory database read.  Before, the readback happened after the
+        # commit, so a failure there reported a mutation that had already happened as
+        # failed -- and the retry it invites is not idempotent.  `RT-009-5` shows the
+        # failure is reachable, not theoretical.  With the readback moved before the
+        # commit, the same failure now happens while the transaction is still open and
+        # honestly undoes the mutation instead of misreporting it.
+        await self.session.refresh(trustline)
+        response = await self._hydrate_trustline(trustline)
+
         try:
             await self.session.commit()
         except IntegrityError as exc:
@@ -257,11 +268,10 @@ class TrustLineService:
                 details={"reason": "CONCURRENT_TRUSTLINE_CREATE"},
             ) from exc
 
+        # In-memory only; `expire_on_commit=False` (`app/db/session.py:78`) keeps the
+        # hydrated attributes valid, so serialising the response touches no connection.
         PaymentRouter.invalidate_cache(equivalent.code)
-        await self.session.refresh(trustline)
-
-        # Hydrate extra fields for response
-        return await self._hydrate_trustline(trustline)
+        return response
 
     async def update(self, trustline_id: UUID, user_id: UUID, data: TrustLineUpdateRequest) -> TrustLine:
         stmt = select(TrustLine).where(TrustLine.id == trustline_id)
@@ -382,10 +392,13 @@ class TrustLineService:
                 select(Equivalent.code).where(Equivalent.id == trustline.equivalent_id)
             )
         ).scalar_one()
+        # See the note in `create`: readback before commit, no mandatory read after it.
+        await self.session.refresh(trustline)
+        response = await self._hydrate_trustline(trustline)
+
         await self.session.commit()
         PaymentRouter.invalidate_cache(equivalent_code)
-        await self.session.refresh(trustline)
-        return await self._hydrate_trustline(trustline)
+        return response
 
     async def close(self, trustline_id: UUID, user_id: UUID, data: TrustLineCloseRequest) -> None:
         stmt = select(TrustLine).where(TrustLine.id == trustline_id)

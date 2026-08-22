@@ -41,8 +41,12 @@ class AuthService:
             used=False
         )
         self.db.add(auth_challenge)
-        await self.db.commit()
+        # 2026-08-22 / p009_t905 (`F-009-6`): read the server-generated values back INSIDE
+        # the transaction, so a readback failure undoes the mutation instead of reporting
+        # a mutation that already happened as failed. See `RT-009-5`.
+        await self.db.flush()
         await self.db.refresh(auth_challenge)
+        await self.db.commit()
         return auth_challenge
 
     async def login(self, pid: str, challenge: str, signature: str, device_info: dict | None = None) -> dict:

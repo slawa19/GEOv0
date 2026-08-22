@@ -50,9 +50,7 @@ from app.db.models.trustline import TrustLine
 from app.schemas.trustline import TrustLineCreateRequest
 from app.core.auth.canonical import canonical_json
 from app.core.auth.crypto import generate_keypair
-from sqlalchemy.exc import DBAPIError
-
-from app.utils.exceptions import ConflictException, GeoException
+from app.utils.exceptions import ConflictException
 
 pytestmark = pytest.mark.postgres
 
@@ -177,30 +175,38 @@ async def test_connection_loss_after_commit_is_not_reported_as_a_failed_mutation
             armed["done"] = True
             _terminate_backend_from_another_connection(url, pid)
 
-        with pytest.raises(Exception) as excinfo:
-            await TrustLineService(session).create(sender_id, request)
+        created = await TrustLineService(session).create(sender_id, request)
 
     assert armed["done"], (
         "the connection was never dropped, so this run did not exercise the subject"
     )
 
-    raised = excinfo.value
-    assert not isinstance(raised, GeoException), (
-        "the failure must be the raw driver error, not a declared outcome -- that is "
-        f"exactly why the API answers 500: {type(raised).__name__}: {raised}"
-    )
-    # Name the failure precisely, so this cannot pass on some unrelated exception:
-    # SQLAlchemy's InterfaceError wrapping asyncpg's "connection is closed"...
-    assert isinstance(raised, DBAPIError), f"{type(raised).__name__}: {raised}"
-    assert "connection is closed" in str(raised), str(raised)
-    # ...and it must be the REFRESH that failed, not the commit or anything before it.
-    statement = str(getattr(raised, "statement", "") or "")
-    assert statement.lstrip().upper().startswith("SELECT"), statement
-    assert "trust_lines" in statement, statement
+    # THE CONTRACT.  The commit is durable, so the caller is told the truth: success.
+    # Before 2026-08-22 this raised SQLAlchemy's InterfaceError wrapping asyncpg's
+    # "connection is closed" on the SELECT the refresh issued, and since that is not a
+    # GeoException the API answered HTTP 500 for a mutation that had already happened.
+    # The readback now runs inside the transaction, so nothing after the commit needs the
+    # connection at all -- and the connection being gone can no longer be mistaken for the
+    # operation having failed.
+    assert created is not None
 
-    # Fact 1: the mutation is durable despite the reported failure.  A brand-new session on
-    # a brand-new connection is the only honest observer here.
-    async with sessionmaker() as observer:
+    # The response really is complete without touching the database again: these are the
+    # fields the wire contract requires, and `expire_on_commit=False` keeps them valid.
+    assert str(created.status) == "active"
+    assert created.id is not None
+    assert created.created_at is not None, (
+        "a server-generated value that is only available after a readback -- if this is "
+        "None the readback did not happen before the commit"
+    )
+    assert str(getattr(created, "equivalent_code", "") or "") == eq_code
+    assert str(getattr(created, "to_pid", "") or "") == to_pid
+
+    # Fact 1: the mutation is durable, and now the report matches it.  The observer gets
+    # its OWN engine: the engine under test is pinned to the single connection that was
+    # just terminated, and reusing it would test the pool rather than the database.
+    observer_engine = create_async_engine(url)
+    observer_maker = async_sessionmaker(observer_engine, expire_on_commit=False)
+    async with observer_maker() as observer:
         rows = (
             await observer.execute(
                 select(TrustLine)
@@ -209,21 +215,19 @@ async def test_connection_loss_after_commit_is_not_reported_as_a_failed_mutation
             )
         ).scalars().all()
 
-    assert len(rows) == 1, (
-        "the caller was told the operation failed; if the row is absent the finding is "
-        f"refuted, if it is present the report was false. rows={rows}"
-    )
+    assert len(rows) == 1, f"rows={rows}"
     assert str(rows[0].status) == "active"
 
-    # Fact 2: the retry is not idempotent -- the user who is told "it failed" and tries
-    # again is told the line already exists.
-    async with sessionmaker() as retry_session:
+    # Fact 2: the retry is still not idempotent -- which is exactly why reporting failure
+    # was harmful.  The advice a 500 implies (try again) leads straight to a conflict, so
+    # the only honest answer for a durable mutation is the success it actually was.
+    async with observer_maker() as retry_session:
         with pytest.raises(ConflictException):
             await TrustLineService(retry_session).create(sender_id, request)
 
     # This test commits for real, outside the transaction the shared fixture would roll
     # back, so it has to clear up after itself rather than leave rows in a shared database.
-    async with sessionmaker() as cleanup:
+    async with observer_maker() as cleanup:
         eq_id = (
             await cleanup.execute(select(Equivalent.id).where(Equivalent.code == eq_code))
         ).scalar_one_or_none()
@@ -235,3 +239,5 @@ async def test_connection_loss_after_commit_is_not_reported_as_a_failed_mutation
         )
         await cleanup.execute(delete(Participant).where(Participant.id == sender_id))
         await cleanup.commit()
+
+    await observer_engine.dispose()

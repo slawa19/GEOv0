@@ -67,13 +67,17 @@ class ParticipantService:
             verification_level=0
         )
         self.db.add(participant)
+        # 2026-08-22 / p009_t905 (`F-009-6`): read the server-generated values back INSIDE
+        # the transaction, so a readback failure undoes the mutation instead of reporting
+        # a mutation that already happened as failed. See `RT-009-5`.
+        await self.db.flush()
+        await self.db.refresh(participant)
         try:
             await self.db.commit()
         except IntegrityError:
             # Covers race conditions against unique constraints (pid/public_key).
             await self.db.rollback()
             raise ConflictException("Participant already exists")
-        await self.db.refresh(participant)
         return participant
 
     async def get_participant(self, pid: str) -> Participant:
@@ -168,8 +172,10 @@ class ParticipantService:
             current_profile.update(data.profile.model_dump(exclude_unset=True))
             participant.profile = current_profile
 
-        await self.db.commit()
+        # See the note in `register`: readback before commit.
+        await self.db.flush()
         await self.db.refresh(participant)
+        await self.db.commit()
         return participant
 
     async def list_participants(
