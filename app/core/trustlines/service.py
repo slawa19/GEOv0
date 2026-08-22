@@ -383,6 +383,17 @@ class TrustLineService:
         if trustline.from_participant_id != user_id:
             raise ForbiddenException("Not authorized to close this trustline")
 
+        # Symmetry with `update()`: a closed row is history.  Closing it again would write a
+        # fresh TRUST_LINE_CLOSE audit entry and recompute checkpoints for a line that was
+        # closed long ago -- history written after the fact.  Harmless to the state, wrong
+        # in the journal.  Found by an independent scan after migration 019 made a closed
+        # incarnation coexist with a live one.
+        if str(trustline.status) == "closed":
+            raise ConflictException(
+                "Trustline is already closed",
+                details={"reason": "TRUSTLINE_CLOSED", "trustline_id": str(trustline_id)},
+            )
+
         if not isinstance(getattr(data, "signature", None), str) or not data.signature:
             raise InvalidSignatureException("Missing signature")
 
@@ -667,6 +678,14 @@ class TrustLineService:
         return trustline
 
     async def _get_used_amount(self, trustline: TrustLine) -> Decimal:
+        # A CLOSED line is history: the debt on this pair belongs to whatever incarnation is
+        # live now, not to it.  Reporting the successor's debt as a closed line's `used`
+        # would show an operator a foreign amount -- and, with `available = limit - used`,
+        # a negative capacity on a line that no longer exists.  Closing requires zero debt
+        # (protocol §5.3), so a closed line's own `used` is zero by construction.
+        if str(getattr(trustline, "status", "")) == "closed":
+            return Decimal("0")
+
         # used = debt where debtor is 'to' and creditor is 'from'
         stmt = select(Debt.amount).where(
             and_(
@@ -680,6 +699,11 @@ class TrustLineService:
         return amount if amount is not None else Decimal('0')
 
     async def _get_reverse_used_amount(self, trustline: TrustLine) -> Decimal:
+        # Same reasoning as `_get_used_amount`: a closed incarnation must not display the
+        # live successor's debt.
+        if str(getattr(trustline, "status", "")) == "closed":
+            return Decimal("0")
+
         # Reverse debt: debtor is 'from' and creditor is 'to'
         stmt = select(Debt.amount).where(
             and_(

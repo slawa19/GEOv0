@@ -9,7 +9,7 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import TypeAdapter, ValidationError, WithJsonSchema
-from sqlalchemy import String, cast, desc, func, select, and_, union_all
+from sqlalchemy import case, String, cast, desc, func, select, and_, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -78,6 +78,31 @@ from app.utils.validation import validate_equivalent_code, validate_equivalent_p
 
 from app.schemas.metrics import AdminParticipantMetricsResponse
 
+
+
+# Live rows first, then a stable tie-break.  Used by the admin graph queries: since
+# migration 019 a closed incarnation may share (from, to, equivalent) with the live one, so
+# a query that does not order deterministically returns them in planner order, and a query
+# that does not de-duplicate emits BOTH as graph edges -- attaching the same `Debt` row to
+# each and doubling `used`/`available`.
+_TRUSTLINE_LIVE_FIRST = case((TrustLine.status == "closed", 1), else_=0)
+
+
+def _dedupe_trustline_rows(rows, *, equivalent_index: int, from_index: int, to_index: int):
+    """Keep one row per (equivalent, from, to) -- the live one when it exists.
+
+    Restores the "one edge per triple" shape the graph had while the unique constraint was
+    unconditional, without hiding pairs whose only incarnation is closed.
+    """
+    seen: set[tuple] = set()
+    out = []
+    for row in rows:
+        key = (row[equivalent_index], row[from_index], row[to_index])
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(row)
+    return out
 
 router = APIRouter(prefix="/admin", dependencies=[Depends(deps.require_admin)])
 
@@ -1618,10 +1643,21 @@ async def admin_graph_snapshot(
                 Debt.equivalent_id == TrustLine.equivalent_id,
             ),
         )
-        .order_by(EquivalentModel.code.asc(), p_from.pid.asc(), p_to.pid.asc())
+        .order_by(
+            EquivalentModel.code.asc(),
+            p_from.pid.asc(),
+            p_to.pid.asc(),
+            _TRUSTLINE_LIVE_FIRST.asc(),
+            TrustLine.id.asc(),
+        )
     )
 
-    tl_rows = (await db.execute(tl_stmt)).all()
+    tl_rows = _dedupe_trustline_rows(
+        (await db.execute(tl_stmt)).all(),
+        equivalent_index=6,
+        from_index=7,
+        to_index=9,
+    )
     trustlines: list[TrustLineSchema] = []
     for (
         tl_id,
@@ -1995,7 +2031,13 @@ async def admin_graph_ego(
         tl_stmt = tl_stmt.where(EquivalentModel.code == equivalent)
     if status_filter:
         tl_stmt = tl_stmt.where(TrustLine.status.in_(list(status_filter)))
-    tl_rows = (await db.execute(tl_stmt)).all()
+    tl_stmt = tl_stmt.order_by(_TRUSTLINE_LIVE_FIRST.asc(), TrustLine.id.asc())
+    tl_rows = _dedupe_trustline_rows(
+        (await db.execute(tl_stmt)).all(),
+        equivalent_index=6,
+        from_index=7,
+        to_index=9,
+    )
     trustlines: list[TrustLineSchema] = []
     for (
         tl_id,
