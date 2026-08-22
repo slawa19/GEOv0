@@ -128,3 +128,69 @@ def test_postgres_unique_violation_without_a_constraint_name_uses_sqlstate_and_t
 
     assert _is_live_trustline_uniqueness_violation(_integrity(ours)) is True
     assert _is_live_trustline_uniqueness_violation(_integrity(other_table)) is False
+
+
+class _SqlAlchemyAsyncpgWrapper(Exception):
+    """What SQLAlchemy's asyncpg adapter actually raises.
+
+    `sqlalchemy/dialects/postgresql/asyncpg.py:785-796` builds a fresh exception whose
+    message is `"%s: %s" % (type(error), error)`, copies **only** `pgcode`/`sqlstate` onto
+    it, and chains the real asyncpg error via `raise ... from error`.  So the sqlstate and
+    the `table_name`/`detail` live on *different* links of the chain.
+    """
+
+    def __init__(self, sqlstate: str) -> None:
+        super().__init__(
+            "<class 'asyncpg.exceptions.UniqueViolationError'>: "
+            "duplicate key value violates unique constraint"
+        )
+        self.sqlstate = sqlstate
+        self.pgcode = sqlstate
+
+
+class _AsyncpgNoConstraintName(Exception):
+    """asyncpg's own error when PostgreSQL omits the constraint field.
+
+    Every unset field defaults to None (`asyncpg/exceptions/_base.py`), so
+    `constraint_name` is absent and only `table_name`/`detail` identify the clash.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("duplicate key value violates unique constraint")
+        self.constraint_name = None
+        self.sqlstate = "23505"
+        self.table_name = "trust_lines"
+        self.detail = (
+            "Key (from_participant_id, to_participant_id, equivalent_id)=(1, 2, 3) "
+            "already exists."
+        )
+
+
+def test_asyncpg_wrapper_does_not_hide_the_facts_on_the_chained_error() -> None:
+    """A live-triple clash must stay declared when the driver splits it across the chain.
+
+    Found by an independent scan of the merged wave.  The classifier read `table_name` and
+    `detail` off the FIRST link carrying a sqlstate.  Under SQLAlchemy's asyncpg adapter
+    that link is the wrapper, which has neither, so the check fell through to a message
+    without the DETAIL line, returned False, and the IntegrityError re-raised as HTTP 500 --
+    the exact outcome this classifier exists to prevent.
+    """
+    wrapper = _SqlAlchemyAsyncpgWrapper("23505")
+    wrapper.__cause__ = _AsyncpgNoConstraintName()
+
+    assert _is_live_trustline_uniqueness_violation(_integrity(wrapper)) is True
+
+
+def test_asyncpg_wrapper_still_rejects_a_clash_on_another_table() -> None:
+    """The chain walk must not become a blanket yes for any 23505."""
+
+    class _OtherTable(_AsyncpgNoConstraintName):
+        def __init__(self) -> None:
+            super().__init__()
+            self.table_name = "audit_log"
+            self.detail = "Key (event_id)=(7) already exists."
+
+    wrapper = _SqlAlchemyAsyncpgWrapper("23505")
+    wrapper.__cause__ = _OtherTable()
+
+    assert _is_live_trustline_uniqueness_violation(_integrity(wrapper)) is False

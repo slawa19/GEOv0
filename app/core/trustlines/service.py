@@ -47,28 +47,43 @@ def _is_live_trustline_uniqueness_violation(exc: IntegrityError) -> bool:
     if orig is None:
         return False
 
-    # Walk the whole cause chain: drivers wrap differently and nesting depth is not fixed.
+    # Collect the whole cause chain once: drivers wrap differently, nesting depth is not
+    # fixed, and the facts we need are spread across several links of it.  This is the
+    # shape `ClearingService._postgres_error_codes` already uses in this codebase.
+    chain: list = []
     seen: set[int] = set()
     node = orig
     while node is not None and id(node) not in seen:
         seen.add(id(node))
-        name = getattr(node, "constraint_name", None)
+        chain.append(node)
+        node = getattr(node, "__cause__", None) or getattr(node, "__context__", None)
+
+    for link in chain:
+        name = getattr(link, "constraint_name", None)
         if name:
             # The driver told us exactly which constraint failed -- no guessing needed.
             return str(name) == _LIVE_TRUSTLINE_INDEX
-        node = getattr(node, "__cause__", None) or getattr(node, "__context__", None)
 
-    # PostgreSQL without a constraint name: 23505 is unique_violation.
-    node = orig
-    while node is not None:
-        sqlstate = getattr(node, "sqlstate", None) or getattr(node, "pgcode", None)
-        if sqlstate == "23505":
-            table = str(getattr(node, "table_name", "") or "")
-            detail = f"{getattr(node, 'detail', '') or ''} {node}"
-            if table and table != "trust_lines":
-                return False
-            return _matches_live_triple(detail)
-        node = getattr(node, "__cause__", None) or getattr(node, "__context__", None)
+    # PostgreSQL without a constraint name: 23505 is unique_violation.  The sqlstate and
+    # the table/detail need NOT live on the same link: SQLAlchemy's asyncpg adapter raises
+    # a wrapper carrying only `pgcode`/`sqlstate` and chains the real asyncpg error, which
+    # is the one holding `table_name` and `detail`
+    # (sqlalchemy/dialects/postgresql/asyncpg.py:785-796).  Reading them off the first link
+    # with a sqlstate therefore saw an empty table and a message without the DETAIL line,
+    # and rejected a genuine live-triple conflict -- a 500 on exactly the path this
+    # classifier exists to keep declared.
+    if any(
+        (getattr(link, "sqlstate", None) or getattr(link, "pgcode", None)) == "23505"
+        for link in chain
+    ):
+        tables = [str(getattr(link, "table_name", "") or "") for link in chain]
+        tables = [t for t in tables if t]
+        if tables and all(t != "trust_lines" for t in tables):
+            return False
+        detail = " ".join(
+            f"{getattr(link, 'detail', '') or ''} {link}" for link in chain
+        )
+        return _matches_live_triple(detail)
 
     text = str(orig)
     lowered = text.lower()
