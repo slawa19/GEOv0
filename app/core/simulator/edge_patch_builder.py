@@ -239,6 +239,10 @@ class EdgePatchBuilder:
                     ).where(
                         TrustLine.equivalent_id == helper.equivalent_id,
                         tl_cond,
+                        # LIVE rows only: migration 019 allows a closed incarnation
+                        # alongside the live one, and this dict is keyed by pair, so a
+                        # closed row could overwrite the current line.
+                        TrustLine.status != "closed",
                     )
                 )
             ).all()

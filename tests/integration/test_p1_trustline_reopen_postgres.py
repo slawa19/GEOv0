@@ -171,6 +171,7 @@ async def test_recreating_a_closed_trustline_does_not_raise_a_raw_db_error(db_se
 @pytest.mark.asyncio
 async def test_concurrent_create_of_the_same_triple_yields_one_line_and_a_declared_conflict(
     db_session,
+    monkeypatch,
 ):
     """RT-009-7: the race the guard cannot cover on its own.
 
@@ -192,6 +193,7 @@ async def test_concurrent_create_of_the_same_triple_yields_one_line_and_a_declar
         pytest.skip("Postgres-only gate: real concurrent transactions are the subject")
 
     from tests.conftest import TestingSessionLocal
+    from app.core.trustlines import service as trustline_service_module
 
     # The seed must be visible to OTHER sessions, so it cannot go through the `db_session`
     # fixture: that one keeps a per-test transaction which is rolled back and never becomes
@@ -206,6 +208,31 @@ async def test_concurrent_create_of_the_same_triple_yields_one_line_and_a_declar
 
     payload = {"to": receiver_pid, "equivalent": eq_code, "limit": str(Decimal("10"))}
     signature = _sign(sender_priv, payload)
+
+    # WITHOUT A BARRIER THIS TEST PROVES NOTHING.  If one task committed before the other
+    # even reached its duplicate guard, the loser would get an ordinary ConflictException
+    # from the guard itself, and the test would stay green with both `except IntegrityError`
+    # branches deleted.  External review caught exactly that.
+    #
+    # `compute_integrity_checkpoint_for_equivalent` is called once BEFORE the guard, so
+    # releasing both tasks there guarantees they pass the guard while neither has
+    # committed -- which is the schedule the index has to arbitrate.
+    original_checkpoint = trustline_service_module.compute_integrity_checkpoint_for_equivalent
+    barrier = asyncio.Barrier(2)
+    arrived: set[int] = set()
+
+    async def _sync_first_checkpoint(*args, **kwargs):
+        task = id(asyncio.current_task())
+        if task not in arrived:
+            arrived.add(task)
+            await asyncio.wait_for(barrier.wait(), timeout=10.0)
+        return await original_checkpoint(*args, **kwargs)
+
+    monkeypatch.setattr(
+        trustline_service_module,
+        "compute_integrity_checkpoint_for_equivalent",
+        _sync_first_checkpoint,
+    )
 
     async def _create():
         async with TestingSessionLocal() as session:
@@ -224,41 +251,46 @@ async def test_concurrent_create_of_the_same_triple_yields_one_line_and_a_declar
             except ConflictException:
                 return "conflict"
 
-    first, second = await asyncio.gather(_create(), _create(), return_exceptions=True)
+    try:
+        first, second = await asyncio.gather(_create(), _create(), return_exceptions=True)
 
-    for outcome in (first, second):
-        assert not isinstance(outcome, BaseException), (
-            f"a concurrent create escaped as a non-domain error: {outcome!r}"
-        )
-
-    assert sorted([first, second]) == ["conflict", "created"], (
-        f"exactly one create must win and the other must be a declared conflict, got {first!r}/{second!r}"
-    )
-
-    async with TestingSessionLocal() as verify:
-        rows = (
-            await verify.execute(
-                select(TrustLine).where(
-                    TrustLine.from_participant_id == sender_id,
-                    TrustLine.to_participant_id == receiver_id,
-                    TrustLine.equivalent_id == eq_id,
-                )
+        for outcome in (first, second):
+            assert not isinstance(outcome, BaseException), (
+                f"a concurrent create escaped as a non-domain error: {outcome!r}"
             )
-        ).scalars().all()
-    live = [r for r in rows if str(r.status) != "closed"]
-    assert len(live) == 1, f"the partial unique index must leave exactly one live row, found {len(live)}"
 
-    # This test deliberately bypasses the per-test transaction of the `db_session` fixture
-    # (concurrency needs real committed transactions), so it must undo its own writes.
-    # Leaving them behind poisons later tests in the same tier: observed as an unrelated
-    # interlock failure and a 10x slowdown of the whole Postgres run.
-    async with TestingSessionLocal() as cleanup:
-        await cleanup.execute(
-            delete(IntegrityAuditLog).where(IntegrityAuditLog.equivalent_code == eq_code)
+        assert sorted([first, second]) == ["conflict", "created"], (
+            "exactly one create must win and the other must be a declared conflict, "
+            f"got {first!r}/{second!r}"
         )
-        await cleanup.execute(delete(TrustLine).where(TrustLine.equivalent_id == eq_id))
-        await cleanup.execute(
-            delete(Participant).where(Participant.id.in_([sender_id, receiver_id]))
+
+        async with TestingSessionLocal() as verify:
+            rows = (
+                await verify.execute(
+                    select(TrustLine).where(
+                        TrustLine.from_participant_id == sender_id,
+                        TrustLine.to_participant_id == receiver_id,
+                        TrustLine.equivalent_id == eq_id,
+                    )
+                )
+            ).scalars().all()
+        live = [r for r in rows if str(r.status) != "closed"]
+        assert len(live) == 1, (
+            f"the partial unique index must leave exactly one live row, found {len(live)}"
         )
-        await cleanup.execute(delete(Equivalent).where(Equivalent.id == eq_id))
-        await cleanup.commit()
+    finally:
+        # This test deliberately bypasses the per-test transaction of the `db_session`
+        # fixture (concurrency needs real committed transactions), so it must undo its own
+        # writes -- and it must do so even when an assertion above fails.  Leaving them
+        # behind poisons later tests in the same tier: observed once as an unrelated
+        # interlock failure and a 10x slowdown of the whole Postgres run.
+        async with TestingSessionLocal() as cleanup:
+            await cleanup.execute(
+                delete(IntegrityAuditLog).where(IntegrityAuditLog.equivalent_code == eq_code)
+            )
+            await cleanup.execute(delete(TrustLine).where(TrustLine.equivalent_id == eq_id))
+            await cleanup.execute(
+                delete(Participant).where(Participant.id.in_([sender_id, receiver_id]))
+            )
+            await cleanup.execute(delete(Equivalent).where(Equivalent.id == eq_id))
+            await cleanup.commit()

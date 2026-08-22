@@ -31,17 +31,36 @@ _LIVE_TRUSTLINE_INDEX = "uq_trust_lines_live_from_to_equivalent"
 def _is_live_trustline_uniqueness_violation(exc: IntegrityError) -> bool:
     """True only for a clash with the live-trustline partial unique index.
 
-    The index name appears in the driver message on both PostgreSQL ("duplicate key value
-    violates unique constraint ...") and SQLite ("UNIQUE constraint failed: ..." naming the
-    columns).  Matching on identity keeps unrelated IntegrityErrors from being renamed into
-    a conflict the caller can neither understand nor act on.
+    Identity matters: renaming an unrelated IntegrityError into "trustline already exists"
+    hands the caller a conflict they can neither understand nor act on.
+
+    Only the DRIVER error is inspected, never `str(exc)`: the latter embeds the INSERT
+    statement, whose column list contains `from_participant_id`/`to_participant_id`, so a
+    text match against it classifies *every* failing INSERT on this table as a uniqueness
+    clash.  An external review demonstrated exactly that — a `CHECK constraint failed:
+    chk_trust_line_status` was reported as a concurrent-create conflict.
     """
-    text = f"{exc.orig} {exc}"
+    orig = getattr(exc, "orig", None)
+    if orig is None:
+        return False
+
+    # asyncpg surfaces the constraint by name; that is the exact signal when available.
+    cause = getattr(orig, "__cause__", None)
+    name = getattr(cause, "constraint_name", None) or getattr(orig, "constraint_name", None)
+    if name:
+        return str(name) == _LIVE_TRUSTLINE_INDEX
+
+    text = str(orig)
+    lowered = text.lower()
+    if "unique" not in lowered:
+        # CHECK, NOT NULL and foreign-key violations keep their own meaning.
+        return False
     if _LIVE_TRUSTLINE_INDEX in text:
         return True
-    lowered = text.lower()
-    return "trust_lines" in lowered and (
-        "from_participant_id" in lowered and "to_participant_id" in lowered
+    # SQLite spells it out as "UNIQUE constraint failed: trust_lines.from_participant_id, ..."
+    return (
+        "trust_lines.from_participant_id" in lowered
+        and "trust_lines.to_participant_id" in lowered
     )
 
 

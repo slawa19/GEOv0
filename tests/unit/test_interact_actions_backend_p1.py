@@ -1602,3 +1602,72 @@ async def test_action_trustline_create_after_close_is_a_declared_outcome(
     assert again.json()["trustline_id"] != created.json()["trustline_id"], (
         "the new incarnation must be a new row, not the reopened old one"
     )
+
+
+@pytest.mark.asyncio
+async def test_mutating_action_is_run_scoped_like_its_read_sibling(
+    client, db_session, interact_actions_enabled, monkeypatch
+):
+    """RT-009-1: read and write of the same family must see the same perimeter.
+
+    Program 009, finding `F-009-1` (`C-A1a-003`, P1).
+
+    `participants-list` is scoped to the run snapshot -- the sibling test above pins that.
+    But `_resolve_participant_or_error` (`app/api/v1/simulator.py`) resolves by
+    `select(Participant).where(Participant.pid == ...)` over the GLOBAL table, with no run
+    binding at all.  So a mutating interact action accepts a participant the run does not
+    contain, while the read endpoint of the same family hides it.
+
+    Asymmetry between read and write inside one family is a defect, not a decision: the
+    owner of a run can act on a participant that is not part of it.
+    """
+    import app.api.v1.simulator as simulator_module
+
+    await _seed_alice_bob_uah(db_session)
+    db_session.add(
+        Participant(
+            pid="mallory",
+            display_name="Mallory",
+            public_key="M" * 64,
+            type="person",
+            status="active",
+            profile={},
+        )
+    )
+    await db_session.commit()
+
+    async def _fake_build_graph_snapshot(*, run_id: str, equivalent: str, session=None):
+        # The run contains alice and bob only -- mallory belongs to somebody else.
+        return SimulatorGraphSnapshot(
+            equivalent=str(equivalent),
+            generated_at=datetime.now(timezone.utc),
+            nodes=[
+                SimulatorGraphNode(id="alice", name="Alice", type="person", status="active"),
+                SimulatorGraphNode(id="bob", name="Bob", type="person", status="active"),
+            ],
+            links=[],
+        )
+
+    monkeypatch.setattr(simulator_module.runtime, "build_graph_snapshot", _fake_build_graph_snapshot)
+    headers = {"X-Admin-Token": settings.ADMIN_TOKEN}
+
+    # The read side hides the foreign participant.
+    listing = await client.get(
+        "/api/v1/simulator/runs/test-run/actions/participants-list",
+        headers=headers,
+    )
+    assert listing.status_code == 200, listing.text
+    assert "mallory" not in [x["pid"] for x in listing.json()["items"]]
+
+    # The write side must hide it too.
+    mutation = await client.post(
+        "/api/v1/simulator/runs/test-run/actions/trustline-create",
+        headers=headers,
+        json={"from_pid": "alice", "to_pid": "mallory", "equivalent": "UAH", "limit": "10"},
+    )
+
+    assert mutation.status_code != 200, (
+        "a mutating interact action accepted a participant the run does not contain, "
+        "while the read endpoint of the same family hides it: "
+        f"{mutation.status_code} {mutation.text}"
+    )

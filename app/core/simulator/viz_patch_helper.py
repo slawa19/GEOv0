@@ -111,6 +111,9 @@ class VizPatchHelper:
                     TrustLine.equivalent_id == self.equivalent_id,
                     TrustLine.from_participant_id.in_(participant_ids),
                     TrustLine.to_participant_id.in_(participant_ids),
+                    # LIVE rows only (migration 019): limits of closed incarnations must
+                    # not skew the width quantiles.
+                    TrustLine.status != "closed",
                 )
                 .execution_options(populate_existing=True)
             )

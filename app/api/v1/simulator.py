@@ -18,6 +18,10 @@ from starlette.responses import FileResponse, Response, StreamingResponse, JSONR
 from sqlalchemy import and_, func, select
 from sqlalchemy.exc import IntegrityError
 
+from app.core.trustlines.service import (
+    _is_live_trustline_uniqueness_violation,
+)
+
 from app.api import deps
 from app.config import settings
 from app.core.simulator.runtime import runtime
@@ -609,27 +613,55 @@ def _require_run_accepts_actions_or_error(run_id: str) -> Optional[JSONResponse]
     return None
 
 
+async def _run_scoped_pids_or_none(*, run_id: str, session) -> Optional[set[str]]:
+    """PIDs the run actually contains, or None when the perimeter cannot be established.
+
+    The read side of the interact family is scoped to the run snapshot
+    (`participants-list`).  Mutating actions must see the same perimeter, so they resolve
+    participants against this set — see `_resolve_participant_or_error`.
+
+    Returning None means "cannot tell".  Callers treat that as *no scoping* rather than as
+    an empty perimeter: a run that has not been seeded yet legitimately has no snapshot,
+    and refusing every mutation in that state would break lazy seeding, which
+    `test_action_trustline_close_seeds_when_run_paused` pins as intended behaviour.
+    """
+    try:
+        snap = await runtime.build_graph_snapshot(run_id=run_id, equivalent="", session=session)
+    except Exception:
+        return None
+    nodes = getattr(snap, "nodes", None) or []
+    pids = {str(getattr(n, "id", "") or "").strip() for n in nodes}
+    pids.discard("")
+    return pids or None
+
+
 async def _resolve_participant_or_error(
-    *, session, pid: str, field: str
+    *, session, pid: str, field: str, scoped_pids: Optional[set[str]] = None
 ) -> tuple[Optional[Participant], Optional[JSONResponse]]:
+    """Resolve a participant, optionally restricted to the perimeter of one run.
+
+    `scoped_pids` closes finding F-009-1 (`C-A1a-003`, P1): without it this resolver read
+    the GLOBAL `Participant` table, so a mutating interact action accepted a participant
+    the run does not contain while `participants-list` of the same family hid it.  A
+    foreign participant now produces exactly the response the read side implies —
+    `PARTICIPANT_NOT_FOUND` — rather than a successful mutation.
+    """
     pid_s = str(pid or "").strip()
+    not_found = _action_error(
+        status_code=404,
+        code="PARTICIPANT_NOT_FOUND",
+        message="Participant not found",
+        details={"field": field, "pid": pid_s},
+    )
     if not pid_s:
-        return None, _action_error(
-            status_code=404,
-            code="PARTICIPANT_NOT_FOUND",
-            message="Participant not found",
-            details={"field": field, "pid": pid_s},
-        )
+        return None, not_found
+    if scoped_pids is not None and pid_s not in scoped_pids:
+        return None, not_found
     row = (
         await session.execute(select(Participant).where(Participant.pid == pid_s))
     ).scalar_one_or_none()
     if row is None:
-        return None, _action_error(
-            status_code=404,
-            code="PARTICIPANT_NOT_FOUND",
-            message="Participant not found",
-            details={"field": field, "pid": pid_s},
-        )
+        return None, not_found
     return row, None
 
 
@@ -927,10 +959,15 @@ async def action_trustline_create(
     if (seed_err := await _ensure_run_seeded(run_id, db)) is not None:
         return seed_err
 
-    from_p, err = await _resolve_participant_or_error(session=db, pid=req.from_pid, field="from_pid")
+    scoped_pids = await _run_scoped_pids_or_none(run_id=run_id, session=db)
+    from_p, err = await _resolve_participant_or_error(
+        session=db, pid=req.from_pid, field="from_pid", scoped_pids=scoped_pids
+    )
     if err is not None:
         return err
-    to_p, err = await _resolve_participant_or_error(session=db, pid=req.to_pid, field="to_pid")
+    to_p, err = await _resolve_participant_or_error(
+        session=db, pid=req.to_pid, field="to_pid", scoped_pids=scoped_pids
+    )
     if err is not None:
         return err
     eq, err = await _resolve_equivalent_or_error(session=db, code=req.equivalent)
@@ -1025,8 +1062,13 @@ async def action_trustline_create(
     # unhandled database error (fail-closed).
     try:
         await db.commit()
-    except IntegrityError:
+    except IntegrityError as exc:
         await db.rollback()
+        # Identity check, not a blanket rename: a CHECK or foreign-key violation must not
+        # be reported as "trustline already exists".  The service-side classifier is
+        # reused so both call sites answer the same question the same way.
+        if not _is_live_trustline_uniqueness_violation(exc):
+            raise
         return _action_error(
             status_code=409,
             code="TRUSTLINE_EXISTS",
@@ -1147,10 +1189,15 @@ async def action_trustline_update(
     if (seed_err := await _ensure_run_seeded(run_id, db)) is not None:
         return seed_err
 
-    from_p, err = await _resolve_participant_or_error(session=db, pid=req.from_pid, field="from_pid")
+    scoped_pids = await _run_scoped_pids_or_none(run_id=run_id, session=db)
+    from_p, err = await _resolve_participant_or_error(
+        session=db, pid=req.from_pid, field="from_pid", scoped_pids=scoped_pids
+    )
     if err is not None:
         return err
-    to_p, err = await _resolve_participant_or_error(session=db, pid=req.to_pid, field="to_pid")
+    to_p, err = await _resolve_participant_or_error(
+        session=db, pid=req.to_pid, field="to_pid", scoped_pids=scoped_pids
+    )
     if err is not None:
         return err
     eq, err = await _resolve_equivalent_or_error(session=db, code=req.equivalent)
@@ -1304,10 +1351,15 @@ async def action_trustline_close(
     if (seed_err := await _ensure_run_seeded(run_id, db)) is not None:
         return seed_err
 
-    from_p, err = await _resolve_participant_or_error(session=db, pid=req.from_pid, field="from_pid")
+    scoped_pids = await _run_scoped_pids_or_none(run_id=run_id, session=db)
+    from_p, err = await _resolve_participant_or_error(
+        session=db, pid=req.from_pid, field="from_pid", scoped_pids=scoped_pids
+    )
     if err is not None:
         return err
-    to_p, err = await _resolve_participant_or_error(session=db, pid=req.to_pid, field="to_pid")
+    to_p, err = await _resolve_participant_or_error(
+        session=db, pid=req.to_pid, field="to_pid", scoped_pids=scoped_pids
+    )
     if err is not None:
         return err
     eq, err = await _resolve_equivalent_or_error(session=db, code=req.equivalent)
@@ -1460,10 +1512,15 @@ async def action_payment_real(
     if (seed_err := await _ensure_run_seeded(run_id, db)) is not None:
         return seed_err
 
-    from_p, err = await _resolve_participant_or_error(session=db, pid=req.from_pid, field="from_pid")
+    scoped_pids = await _run_scoped_pids_or_none(run_id=run_id, session=db)
+    from_p, err = await _resolve_participant_or_error(
+        session=db, pid=req.from_pid, field="from_pid", scoped_pids=scoped_pids
+    )
     if err is not None:
         return err
-    to_p, err = await _resolve_participant_or_error(session=db, pid=req.to_pid, field="to_pid")
+    to_p, err = await _resolve_participant_or_error(
+        session=db, pid=req.to_pid, field="to_pid", scoped_pids=scoped_pids
+    )
     if err is not None:
         return err
     eq, err = await _resolve_equivalent_or_error(session=db, code=req.equivalent)
