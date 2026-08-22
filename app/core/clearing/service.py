@@ -1264,7 +1264,8 @@ class ClearingService:
         if len(preflight_debts) != len(debt_ids):
             try:
                 replay_amount = await self._reconcile_committed_execution(
-                    execution_tx_id
+                    execution_tx_id,
+                    allowed_participant_pids=allowed_participant_pids,
                 )
             except Exception as exc:
                 await self._raise_unexpected_execution(exc)
@@ -1793,7 +1794,10 @@ class ClearingService:
                 ):
                     commit_cancellation = commit_error
                 reconciliation_task = asyncio.create_task(
-                    self._reconcile_committed_execution(tx_id_str)
+                    self._reconcile_committed_execution(
+                        tx_id_str,
+                        allowed_participant_pids=allowed_participant_pids,
+                    )
                 )
                 reconciliation_cancellation = await self._drain_task(
                     reconciliation_task
@@ -1834,7 +1838,8 @@ class ClearingService:
             if self._is_retryable_concurrency_error(exc):
                 try:
                     replay_amount = await self._reconcile_committed_execution(
-                        execution_tx_id
+                        execution_tx_id,
+                        allowed_participant_pids=allowed_participant_pids,
                     )
                 except Exception as reconciliation_error:
                     await self._raise_unexpected_execution(reconciliation_error)

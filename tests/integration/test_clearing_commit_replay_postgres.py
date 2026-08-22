@@ -698,8 +698,12 @@ async def test_post_commit_boundary_reconciles_and_new_cycle_still_executes_post
         service = ClearingService(service_session)
         real_reconcile = service._reconcile_committed_execution
 
-        async def _reconcile_then_delay_result(tx_id):
-            amount = await real_reconcile(tx_id)
+        async def _reconcile_then_delay_result(tx_id, *, allowed_participant_pids=None):
+            # 2026-08-22 / p010: forwarded, not dropped, so this double cannot hide a
+            # reconcile call that lost the run perimeter on the way.
+            amount = await real_reconcile(
+                tx_id, allowed_participant_pids=allowed_participant_pids
+            )
             reconciliation_observed.set()
             await release_reconciliation.wait()
             return amount
