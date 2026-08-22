@@ -70,9 +70,14 @@ class ParticipantService:
         # 2026-08-22 / p009_t905 (`F-009-6`): read the server-generated values back INSIDE
         # the transaction, so a readback failure undoes the mutation instead of reporting
         # a mutation that already happened as failed. See `RT-009-5`.
-        await self.db.flush()
-        await self.db.refresh(participant)
         try:
+            # The flush is INSIDE the handler on purpose.  Moving the readback before the
+            # commit also moves where the uniqueness violation surfaces: the pre-check
+            # above cannot see a competitor that inserts between it and this write, and
+            # that race is precisely what this handler answers.  Outside the handler it
+            # would become an unhandled 500 on the path whose job is to report conflicts.
+            await self.db.flush()
+            await self.db.refresh(participant)
             await self.db.commit()
         except IntegrityError:
             # Covers race conditions against unique constraints (pid/public_key).
