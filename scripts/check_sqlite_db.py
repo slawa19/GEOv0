@@ -58,6 +58,10 @@ def main() -> None:
     )
 
     # TrustLine direction: from (creditor) -> to (debtor)
+    # Since migration 019 a closed incarnation may share the triple with the live
+    # one, so both joins must exclude closed rows: otherwise one debt matches two
+    # lines and the violation counter doubles (and a closed line with a stale
+    # limit reports a violation that does not exist).
     # Debt direction: debtor -> creditor
     print(
         "debts missing trustline edge:",
@@ -70,6 +74,7 @@ left join trust_lines tl
   on tl.from_participant_id = d.creditor_id
  and tl.to_participant_id = d.debtor_id
  and tl.equivalent_id = d.equivalent_id
+ and tl.status <> 'closed'
 where tl.id is null
 """,
         ),
@@ -85,6 +90,7 @@ join trust_lines tl
   on tl.from_participant_id = d.creditor_id
  and tl.to_participant_id = d.debtor_id
  and tl.equivalent_id = d.equivalent_id
+ and tl.status <> 'closed'
 where d.amount > tl."limit" + 1e-9
 """,
         ),

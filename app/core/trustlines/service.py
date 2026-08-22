@@ -516,7 +516,10 @@ class TrustLineService:
                 raise NotFoundException(f"Equivalent '{equivalent}' not found")
             query = query.where(TrustLine.equivalent_id == eq.id)
 
-        query = query.order_by(TrustLine.created_at.desc())
+        # `created_at` is not unique -- fixtures write identical values in bulk, and since
+        # migration 019 a triple can hold several rows.  Without a unique tie-break the
+        # offset/limit pages below may repeat or skip rows between requests.
+        query = query.order_by(TrustLine.created_at.desc(), TrustLine.id.asc())
 
         if offset is not None:
             query = query.offset(offset)
@@ -582,7 +585,10 @@ class TrustLineService:
                 return []
             query = query.where(TrustLine.equivalent_id == eq.id)
 
-        query = query.order_by(TrustLine.created_at.desc())
+        # `created_at` is not unique -- fixtures write identical values in bulk, and since
+        # migration 019 a triple can hold several rows.  Without a unique tie-break the
+        # offset/limit pages below may repeat or skip rows between requests.
+        query = query.order_by(TrustLine.created_at.desc(), TrustLine.id.asc())
 
         if offset is not None:
             query = query.offset(offset)

@@ -144,12 +144,16 @@ async def _seed_from_seeds_dir(repo_root: str) -> None:
                     if not (p_from and p_to and eq):
                         continue
 
+                    # Only a LIVE row occupies the triple: since migration 019 a closed
+                    # incarnation may coexist with it, so an unfiltered lookup can return
+                    # several rows and raise MultipleResultsFound.
                     existing = (
                         await session.execute(
                             select(TrustLine).where(
                                 TrustLine.from_participant_id == p_from.id,
                                 TrustLine.to_participant_id == p_to.id,
                                 TrustLine.equivalent_id == eq.id,
+                                TrustLine.status != "closed",
                             )
                         )
                     ).scalar_one_or_none()
@@ -321,6 +325,8 @@ async def _seed_from_admin_fixtures_datasets(
             }
 
             # --- TrustLines ---
+            # A closed incarnation does not occupy the triple since migration 019, so it
+            # must not make the seeder skip the live line the fixture asks for.
             existing_trustlines = set(
                 (
                     await session.execute(
@@ -328,7 +334,7 @@ async def _seed_from_admin_fixtures_datasets(
                             TrustLine.from_participant_id,
                             TrustLine.to_participant_id,
                             TrustLine.equivalent_id,
-                        )
+                        ).where(TrustLine.status != "closed")
                     )
                 ).all()
             )
