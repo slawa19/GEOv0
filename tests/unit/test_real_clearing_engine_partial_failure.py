@@ -83,9 +83,13 @@ class _SuccessThenE010Service:
     async def find_cycles(
         self, _equivalent: str, *, max_depth: int, allowed_participant_pids=None
     ) -> list:
-        # 2026-08-22 / p010: the tick must pass the run perimeter; a double that swallowed
-        # the keyword would keep passing if it stopped.
-        assert allowed_participant_pids is None or isinstance(allowed_participant_pids, set)
+        # 2026-08-22 / p010: this double deliberately does NOT assert the perimeter.  Its
+        # run has no `_real_participants`, so the value is None whether the tick passes it
+        # or not, and an assertion here would be true in both cases - the vacuous shape this
+        # program keeps finding elsewhere.  The wiring is covered by
+        # `tests/unit/test_tick_money_paths_carry_the_run_perimeter.py`, and a double whose
+        # run DOES have participants asserts it in
+        # `tests/unit/test_real_runner_tick_nested_partial_failures.py`.
         assert max_depth >= 1
         self.find_calls += 1
         if self.failure_kind == "cancelled_find" and self.find_calls > 2:

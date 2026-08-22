@@ -393,3 +393,61 @@ async def test_an_unavailable_perimeter_is_not_reported_as_an_empty_result(
         f"clearing: {resp.status_code} {resp.text}"
     )
     assert resp.json()["code"] == "RUN_PERIMETER_UNAVAILABLE", resp.text
+
+
+@pytest.mark.parametrize(
+    ("path", "payload"),
+    [
+        (
+            "trustline-create",
+            {"from_pid": "b1", "to_pid": "b2", "equivalent": _EQ, "limit": "10"},
+        ),
+        (
+            "trustline-update",
+            {"from_pid": "b1", "to_pid": "b2", "equivalent": _EQ, "new_limit": "5"},
+        ),
+        (
+            "trustline-close",
+            {"from_pid": "b1", "to_pid": "b2", "equivalent": _EQ},
+        ),
+        (
+            "payment-real",
+            {"from_pid": "b1", "to_pid": "b2", "equivalent": _EQ, "amount": "1"},
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_no_mutating_route_reports_an_unmeasurable_perimeter_as_a_fact(
+    client, db_session, run_a_only, monkeypatch, path, payload
+):
+    """An unmeasurable perimeter must not be answered as a statement about the run.
+
+    `_run_scoped_pids_or_none` is fail-closed and returns an empty set both when the run is
+    empty and when the snapshot cannot be built.  For authorisation that is right.  For an
+    ANSWER it is not: with an empty set every participant resolves to
+    `404 PARTICIPANT_NOT_FOUND`, so the caller is told a participant that exists, in a run
+    that contains them, is not there.  That is the same class the clearing route was fixed
+    for - a failed measurement of authority dressed as a finding about the data.
+
+    All four mutating routes, because the first fix reached only one of them.
+    """
+
+    import app.api.v1.simulator as simulator_module
+
+    await _seed_two_runs(db_session)
+
+    async def _no_snapshot(**_kwargs):
+        raise RuntimeError("snapshot unavailable")
+
+    monkeypatch.setattr(simulator_module.runtime, "build_graph_snapshot", _no_snapshot)
+
+    resp = await client.post(
+        f"/api/v1/simulator/runs/run-a/actions/{path}",
+        headers={"X-Admin-Token": settings.ADMIN_TOKEN},
+        json=payload,
+    )
+
+    assert resp.json().get("code") == "RUN_PERIMETER_UNAVAILABLE", (
+        f"{path} answered {resp.status_code} {resp.text} for a perimeter it could not "
+        "measure, instead of saying so"
+    )

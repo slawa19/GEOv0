@@ -267,7 +267,7 @@ async def test_an_empty_perimeter_admits_nobody(db_session):
     PaymentRouter.invalidate_cache()
 
     service = PaymentService(db_session)
-    with pytest.raises(RoutingException):
+    with pytest.raises(RoutingException) as excinfo:
         await service.create_payment_internal(
             people["a1"].id,
             to_pid="a2",
@@ -277,6 +277,18 @@ async def test_an_empty_perimeter_admits_nobody(db_session):
             commit=True,
             allowed_participant_pids=set(),
         )
+
+    # Without the explicit empty-perimeter branch the narrowing would empty the graph and
+    # raise the SAME exception type, only classified as INSUFFICIENT_CAPACITY - a statement
+    # about capacity rather than about authority. Asserting the type alone would leave this
+    # branch unpinned.
+    from app.utils.error_codes import ErrorCode
+
+    assert excinfo.value.code == ErrorCode.E001, (
+        f"an empty perimeter was reported as {excinfo.value.code} - a statement about "
+        "capacity, which says the graph was consulted and found wanting. It was not: "
+        "nobody was admitted to it"
+    )
 
 
 @pytest.mark.asyncio

@@ -30,6 +30,19 @@ This test is therefore not a reproducer but a regression guard on a verdict: it 
 behaviour the REFUTED verdict of `F-010-2` rests on, so that a future change to pooling,
 bind handling or `join_transaction_mode` cannot quietly turn a correct answer into a stale
 one without failing something.
+
+**The isolation level is SERIALIZABLE on purpose, and the first version of this test got it
+wrong.**  A stale snapshot is only possible when the snapshot belongs to the transaction
+rather than to the statement, i.e. under REPEATABLE READ or SERIALIZABLE.  Built on a
+default engine the test ran under READ COMMITTED, where every statement takes a new
+snapshot - so the assertion below would have held even if the mechanism the verdict rests
+on did not exist, which is the shape of an assertion satisfied by the wrong outcome.
+Production runs SERIALIZABLE on every connection (`app/config.py:68`,
+`app/db/session.py:62`), so that is what this measures.
+
+The connection identity is asserted too: without it, "the answer was fresh" cannot be told
+apart from "the connection was silently replaced", and the replacement IS the mechanism the
+verdict names.
 """
 
 from __future__ import annotations
@@ -58,7 +71,9 @@ def _url() -> str:
 
 @pytest_asyncio.fixture
 async def engine():
-    eng = create_async_engine(_url())
+    # SERIALIZABLE, as production runs it: under READ COMMITTED a stale snapshot cannot
+    # occur at all, and the measurement below would be vacuous.
+    eng = create_async_engine(_url(), isolation_level="SERIALIZABLE")
     try:
         yield eng
     finally:
@@ -116,9 +131,13 @@ async def test_the_recovery_read_still_sees_durable_state_after_a_failed_rollbac
                 bind=connection, class_=AsyncSession, expire_on_commit=False, autoflush=False
             )
             answer = None
+            recovery_pid = None
             raised = None
             try:
                 async with recovery_maker() as recovery:
+                    recovery_pid = int(
+                        (await recovery.execute(text("SELECT pg_backend_pid()"))).scalar_one()
+                    )
                     answer = (
                         await recovery.execute(
                             select(Equivalent).where(Equivalent.code == durable_code)
@@ -137,6 +156,12 @@ async def test_the_recovery_read_still_sees_durable_state_after_a_failed_rollbac
             "is durably committed. Applied to a clearing, that means reporting 'no "
             "committed occurrence' about one that DID commit - the same class as F-009-6, "
             "and F-010-2 would be real"
+        )
+        assert recovery_pid is not None and recovery_pid != pid, (
+            "the recovery read ran on the SAME backend as the failed rollback "
+            f"({recovery_pid}), so the freshness above is not explained by the mechanism "
+            "the verdict names - the connection being invalidated and transparently "
+            "replaced. Without that, the verdict rests on something unmeasured"
         )
     finally:
         async with maker() as cleanup:
