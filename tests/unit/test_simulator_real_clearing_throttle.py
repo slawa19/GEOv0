@@ -46,7 +46,9 @@ class _DummyClearingService:
     def __init__(self, session) -> None:
         self._n = 0
 
-    async def find_cycles(self, equivalent_code: str, max_depth: int = 6):
+    async def find_cycles(
+        self, equivalent_code: str, max_depth: int = 6, *, allowed_participant_pids=None
+    ):
         # Return 12 executable cycles, then stop.
         if self._n >= 12:
             return []
@@ -56,7 +58,9 @@ class _DummyClearingService:
     async def execute_clearing(self, cycle) -> bool:
         return True
 
-    async def execute_clearing_with_amount(self, cycle) -> Decimal | None:
+    async def execute_clearing_with_amount(
+        self, cycle, *, allowed_participant_pids=None
+    ) -> Decimal | None:
         return Decimal("1")
 
 

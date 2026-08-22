@@ -353,8 +353,15 @@ class PaymentService:
         description: str | None = None,
         constraints: PaymentConstraints | None = None,
         idempotency_key: str | None = None,
+        allowed_participant_pids: "AbstractSet[str] | None" = None,
     ) -> StagedPaymentResult:
-        """Flush an internal payment into the caller transaction without publishing it."""
+        """Flush an internal payment into the caller transaction without publishing it.
+
+        2026-08-22 / p010 (`F-010-4`): the run perimeter reaches this path too.  Closing it
+        only on `create_payment_internal` left the simulator tick able to route a run's
+        payment through another run's participant - the same P1, on the path that runs by
+        itself and is therefore both more repeatable and less visible.
+        """
 
         tx_id = (idempotency_key or "").strip() or str(uuid.uuid4())
         req = PaymentCreateRequest(
@@ -374,6 +381,7 @@ class PaymentService:
             require_signature=False,
             commit=False,
             deferred_effects=deferred_effects,
+            allowed_participant_pids=allowed_participant_pids,
         )
         return StagedPaymentResult(
             result=result,

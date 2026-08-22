@@ -310,3 +310,51 @@ async def test_narrowing_does_not_poison_the_shared_graph_cache(db_session, monk
         "a scoped call poisoned the shared cache: the next unscoped caller lost a "
         "participant that has nothing to do with that run"
     )
+
+
+@pytest.mark.asyncio
+async def test_the_staged_path_honours_the_perimeter_too(db_session):
+    """F-010-4: the tick uses the staged entry point, which had no perimeter at all.
+
+    Closing only `create_payment_internal` left the automatic path able to route a run's
+    payment through another run's participant - the same P1, on the path that runs by itself
+    and is therefore both more repeatable and less visible than the interactive one.
+    """
+
+    from app.core.payments.service import PaymentService
+    from app.utils.exceptions import RoutingException
+
+    _eq, people = await _seed(db_session)
+    PaymentRouter.invalidate_cache()
+
+    service = PaymentService(db_session)
+    with pytest.raises(RoutingException):
+        await service.create_payment_internal_staged(
+            people["a1"].id,
+            to_pid="a2",
+            equivalent=_EQ,
+            amount="50",
+            idempotency_key=None,
+            allowed_participant_pids={"a1", "a2"},
+        )
+
+    assert await _debts_touching(db_session, people["b1"].id) == 0
+
+
+@pytest.mark.asyncio
+async def test_the_staged_path_without_a_perimeter_keeps_its_old_behaviour(db_session):
+    """Anti-vacuum: the hub and any caller that passes nothing must be unaffected."""
+
+    from app.core.payments.service import PaymentService
+
+    _eq, people = await _seed(db_session)
+    PaymentRouter.invalidate_cache()
+
+    staged = await PaymentService(db_session).create_payment_internal_staged(
+        people["a1"].id,
+        to_pid="a2",
+        equivalent=_EQ,
+        amount="50",
+        idempotency_key=None,
+    )
+    assert staged is not None

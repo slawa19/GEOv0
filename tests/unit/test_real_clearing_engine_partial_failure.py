@@ -80,7 +80,12 @@ class _SuccessThenE010Service:
         ]
         type(self).instance = self
 
-    async def find_cycles(self, _equivalent: str, *, max_depth: int) -> list:
+    async def find_cycles(
+        self, _equivalent: str, *, max_depth: int, allowed_participant_pids=None
+    ) -> list:
+        # 2026-08-22 / p010: the tick must pass the run perimeter; a double that swallowed
+        # the keyword would keep passing if it stopped.
+        assert allowed_participant_pids is None or isinstance(allowed_participant_pids, set)
         assert max_depth >= 1
         self.find_calls += 1
         if self.failure_kind == "cancelled_find" and self.find_calls > 2:
@@ -107,7 +112,9 @@ class _SuccessThenE010Service:
     async def execute_clearing(self, _cycle) -> bool:
         return (await self._execute()) is not None
 
-    async def execute_clearing_with_amount(self, _cycle) -> Decimal | None:
+    async def execute_clearing_with_amount(
+        self, _cycle, *, allowed_participant_pids=None
+    ) -> Decimal | None:
         return await self._execute()
 
 
@@ -227,13 +234,17 @@ class _ExactAmountService:
     def __init__(self, _session) -> None:
         self.calls = 0
 
-    async def find_cycles(self, equivalent: str, *, max_depth: int) -> list:
+    async def find_cycles(
+        self, equivalent: str, *, max_depth: int, allowed_participant_pids=None
+    ) -> list:
         # Only USD has a cycle; EUR clears nothing this tick.
         if self.calls or str(equivalent) != "USD":
             return []
         return [[{"debtor": "alice", "creditor": "bob", "amount": "1.00"}]]
 
-    async def execute_clearing_with_amount(self, _cycle) -> Decimal | None:
+    async def execute_clearing_with_amount(
+        self, _cycle, *, allowed_participant_pids=None
+    ) -> Decimal | None:
         self.calls += 1
         return _TOO_PRECISE_FOR_FLOAT
 

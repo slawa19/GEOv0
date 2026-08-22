@@ -18,6 +18,7 @@ from app.core.clearing.service import (
     ClearingService,
 )
 from app.core.simulator.edge_patch_builder import EdgePatchBuilder
+from app.core.simulator.run_perimeter import run_perimeter_pids
 from app.core.simulator.models import RunRecord
 from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter
 from app.core.simulator.viz_patch_helper import VizPatchHelper
@@ -149,7 +150,11 @@ class RealClearingEngine:
                         int(max_depth),
                     )
                     _fc_t0 = time.monotonic()
-                    cycles = await service.find_cycles(eq, max_depth=max_depth)
+                    cycles = await service.find_cycles(
+                        eq,
+                        max_depth=max_depth,
+                        allowed_participant_pids=run_perimeter_pids(run),
+                    )
                     _fc_ms = int((time.monotonic() - _fc_t0) * 1000.0)
                     if _fc_ms > 500:
                         self._logger.warning(
@@ -239,7 +244,11 @@ class RealClearingEngine:
                         )
                         _loop_fc_t0 = time.monotonic()
                         try:
-                            cycles = await service.find_cycles(eq, max_depth=max_depth)
+                            cycles = await service.find_cycles(
+                        eq,
+                        max_depth=max_depth,
+                        allowed_participant_pids=run_perimeter_pids(run),
+                    )
                         except asyncio.CancelledError:
                             raise
                         except Exception as exc:
@@ -299,7 +308,10 @@ class RealClearingEngine:
                             commit_cancellation = None
                             try:
                                 actual_amount = (
-                                    await service.execute_clearing_with_amount(cycle)
+                                    await service.execute_clearing_with_amount(
+                                        cycle,
+                                        allowed_participant_pids=run_perimeter_pids(run),
+                                    )
                                 )
                             except ClearingCommittedAfterCancellation as exc:
                                 actual_amount = exc.cleared_amount
