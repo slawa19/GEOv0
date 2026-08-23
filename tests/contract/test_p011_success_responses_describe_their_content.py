@@ -51,6 +51,9 @@ _HTTP_METHODS = {"get", "post", "put", "patch", "delete"}
 # now state their variants. The payments trio also needed the predicate to stop treating
 # `additionalProperties: false` with no properties as silence: that describes the empty
 # object, which is what a plain abort really returns.
+# 2026-08-23 / T1102: five more (15 -> 10). TrustLine.policy declares the five keys the
+# validator allows, and the two STABLE integrity nodes - invariants_status and the
+# integrity audit after_state - state their fixed key sets.
 UNDESCRIBED_SUCCESS_RESPONSES = {
     ("GET", "/admin/audit-log"),
     ("GET", "/admin/graph/ego"),
@@ -62,12 +65,7 @@ UNDESCRIBED_SUCCESS_RESPONSES = {
     ("GET", "/admin/trustlines"),
     ("GET", "/admin/trustlines/bottlenecks"),
     ("GET", "/integrity/audit-log"),
-    ("GET", "/integrity/checksum/{equivalent}"),
     ("GET", "/simulator/events/poll"),
-    ("GET", "/trustlines"),
-    ("POST", "/trustlines"),
-    ("GET", "/trustlines/{id}"),
-    ("PATCH", "/trustlines/{id}"),
 }
 
 
