@@ -139,7 +139,8 @@ paths:
           description: DB OK
           content:
             application/json:
-              schema: {}
+              schema:
+                $ref: '#/components/schemas/AdminDbHealth'
         '403':
           description: Admin token required
           content:
@@ -161,6 +162,10 @@ paths:
                         nullable: true
         '503':
           description: Database unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminDbHealth'
         '422':
           description: Validation error
           content:
@@ -3971,6 +3976,39 @@ components:
         run_id:
           type: string
           nullable: true
+
+    AdminDbHealth:
+      # 011/T1102. Built literally by the handler (app/api/v1/health.py:132-140 on success,
+      # :143-151 on failure), so the key set is fixed rather than serialized from a model.
+      # This body was declared `schema: {}` until 2026-08-23 - the emptiest possible description,
+      # and one the opacity guard could not even see until its predicate learned to look for it.
+      type: object
+      required: [status, db, timestamp]
+      properties:
+        status:
+          type: string
+          enum: [ok, error]
+        db:
+          type: object
+          required: [dialect, reachable, latency_ms]
+          properties:
+            dialect:
+              # SQLAlchemy backend name, e.g. `sqlite` or `postgresql`.
+              type: string
+            reachable:
+              type: boolean
+            latency_ms:
+              # Null on the failure path, where no round trip completed.
+              type: integer
+              nullable: true
+              minimum: 0
+        details:
+          # Present only on the 503 body, carrying the exception text.
+          type: string
+          nullable: true
+        timestamp:
+          type: string
+          format: date-time
 
     AdminParticipantStatusChange:
       # 011/T1102. What `_set_participant_status` really emits (app/api/v1/admin.py:859,

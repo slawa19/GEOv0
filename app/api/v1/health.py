@@ -12,7 +12,7 @@ from sqlalchemy.engine.url import make_url
 from app.api import deps
 from app.db.session import engine
 from app.config import settings
-from app.schemas.common import ErrorEnvelope, HealthResponse
+from app.schemas.common import AdminDbHealthResponse, ErrorEnvelope, HealthResponse
 from app.utils.background_jobs import background_health_status
 
 
@@ -113,8 +113,9 @@ async def health_db_check():
     "/admin/health/db",
     tags=["Admin"],
     responses={
+        200: {"model": AdminDbHealthResponse, "description": "DB OK"},
         403: {"model": ErrorEnvelope, "description": "Admin token required"},
-        503: {"description": "Database unavailable"},
+        503: {"model": AdminDbHealthResponse, "description": "Database unavailable"},
     },
 )
 async def health_db_diagnostic(
