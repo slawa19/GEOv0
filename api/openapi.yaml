@@ -237,6 +237,10 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /admin/whoami:
     get:
@@ -281,6 +285,8 @@ paths:
                 $ref: '#/components/schemas/AdminFeatureFlags'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
     patch:
       tags: [Admin]
       summary: Patch feature flags (admin)
@@ -306,6 +312,10 @@ paths:
                 $ref: '#/components/schemas/AdminFeatureFlags'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /admin/participants:
     get:
@@ -353,6 +363,10 @@ paths:
                 $ref: '#/components/schemas/AdminParticipantsListResponse'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /admin/participants/stats:
     get:
@@ -374,6 +388,8 @@ paths:
                 $ref: '#/components/schemas/AdminParticipantsStatsResponse'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /admin/participants/{pid}/freeze:
     post:
@@ -404,6 +420,10 @@ paths:
           $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /admin/participants/{pid}/unfreeze:
     post:
@@ -434,6 +454,10 @@ paths:
           $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /admin/participants/{pid}/ban:
     post:
@@ -464,6 +488,10 @@ paths:
           $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /admin/participants/{pid}/unban:
     post:
@@ -494,6 +522,10 @@ paths:
           $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /admin/audit-log:
     get:
@@ -544,6 +576,10 @@ paths:
                 $ref: '#/components/schemas/AdminAuditLogListResponse'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /admin/equivalents:
     get:
@@ -571,6 +607,10 @@ paths:
                 $ref: '#/components/schemas/EquivalentsList'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
     post:
       tags: [Admin]
       summary: Create equivalent (admin)
@@ -596,6 +636,10 @@ paths:
                 $ref: '#/components/schemas/Equivalent'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /admin/equivalents/{code}:
     patch:
@@ -632,6 +676,10 @@ paths:
           $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
     delete:
       tags: [Admin]
@@ -669,6 +717,10 @@ paths:
           $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /admin/equivalents/{code}/usage:
     get:
@@ -697,6 +749,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /admin/migrations:
     get:
@@ -718,6 +772,8 @@ paths:
                 $ref: '#/components/schemas/AdminMigrationsStatus'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /admin/trustlines:
     get:
@@ -778,6 +834,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /admin/trustlines/bottlenecks:
     get:
@@ -820,6 +878,10 @@ paths:
                 $ref: '#/components/schemas/AdminTrustLinesBottlenecksResponse'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /admin/liquidity/summary:
     get:
@@ -862,6 +924,10 @@ paths:
                 $ref: '#/components/schemas/AdminLiquiditySummaryResponse'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /admin/incidents:
     get:
@@ -898,6 +964,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /admin/transactions/{tx_id}/abort:
     post:
@@ -936,6 +1004,10 @@ paths:
           $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /admin/graph/snapshot:
     get:
@@ -968,6 +1040,8 @@ paths:
                 $ref: '#/components/schemas/AdminGraphSnapshotResponse'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /admin/graph/ego:
     get:
@@ -1021,6 +1095,10 @@ paths:
                 $ref: '#/components/schemas/AdminGraphEgoResponse'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /simulator/graph/snapshot:
     get:
@@ -1043,6 +1121,10 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /simulator/graph/ego:
     get:
@@ -1077,6 +1159,10 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /simulator/events:
     get:
@@ -1118,6 +1204,10 @@ paths:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /simulator/events/poll:
     get:
@@ -1168,6 +1258,10 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /simulator/scenarios:
     get:
@@ -1184,6 +1278,10 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/SimulatorIdentityUnprocessable'
     post:
       tags: [Simulator]
       summary: Upload a simulator scenario (Real Mode control plane)
@@ -1206,6 +1304,10 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /simulator/scenarios/{scenario_id}:
     get:
@@ -1226,6 +1328,10 @@ paths:
           $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/SimulatorIdentityUnprocessable'
 
   /simulator/scenarios/{scenario_id}/graph/preview:
     get:
@@ -1258,6 +1364,10 @@ paths:
           $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /simulator/session/ensure:
     post:
@@ -1380,6 +1490,10 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /simulator/admin/runs/stop-all:
     post:
@@ -1426,6 +1540,10 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /simulator/runs:
     post:
@@ -1452,6 +1570,10 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /simulator/runs/active:
     get:
@@ -1468,6 +1590,10 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/SimulatorIdentityUnprocessable'
 
   /simulator/runs/{run_id}:
     get:
@@ -1488,6 +1614,10 @@ paths:
           $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/SimulatorIdentityUnprocessable'
 
   /simulator/runs/{run_id}/pause:
     post:
@@ -1508,6 +1638,10 @@ paths:
           $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/SimulatorIdentityUnprocessable'
 
   /simulator/runs/{run_id}/resume:
     post:
@@ -1528,6 +1662,10 @@ paths:
           $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/SimulatorIdentityUnprocessable'
 
   /simulator/runs/{run_id}/stop:
     post:
@@ -1558,6 +1696,10 @@ paths:
           $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/SimulatorIdentityUnprocessable'
 
   /simulator/runs/{run_id}/restart:
     post:
@@ -1578,6 +1720,10 @@ paths:
           $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/SimulatorIdentityUnprocessable'
 
   /simulator/runs/{run_id}/intensity:
     post:
@@ -1606,6 +1752,10 @@ paths:
           $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /simulator/runs/{run_id}/events:
     get:
@@ -1646,6 +1796,10 @@ paths:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /simulator/runs/{run_id}/actions/tx-once:
     post:
@@ -1759,6 +1913,10 @@ paths:
           $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /simulator/runs/{run_id}/metrics:
     get:
@@ -1802,6 +1960,10 @@ paths:
           $ref: '#/components/responses/ServiceUnavailable'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /simulator/runs/{run_id}/bottlenecks:
     get:
@@ -1840,6 +2002,10 @@ paths:
           $ref: '#/components/responses/ServiceUnavailable'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /simulator/runs/{run_id}/artifacts:
     get:
@@ -1860,6 +2026,10 @@ paths:
           $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/SimulatorIdentityUnprocessable'
 
   /simulator/runs/{run_id}/artifacts/{name}:
     get:
@@ -1882,6 +2052,10 @@ paths:
           $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/SimulatorIdentityUnprocessable'
 
   /admin/clearing/cycles:
     get:
@@ -1921,6 +2095,10 @@ paths:
                 $ref: '#/components/schemas/AdminClearingCyclesResponse'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /admin/participants/{pid}/metrics:
     get:
@@ -1955,6 +2133,10 @@ paths:
                 $ref: '#/components/schemas/AdminParticipantMetricsResponse'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /equivalents:
     get:
@@ -1971,6 +2153,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /auth/challenge:
     post:
@@ -1994,6 +2178,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /auth/login:
     post:
@@ -2019,6 +2205,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /auth/refresh:
     post:
@@ -2044,6 +2232,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /participants:
     get:
@@ -2093,6 +2283,10 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
     post:
       tags: [Participants]
@@ -2115,6 +2309,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /participants/search:
     get:
@@ -2164,6 +2360,10 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /participants/me:
     get:
@@ -2180,6 +2380,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
     patch:
       tags: [Participants]
@@ -2203,6 +2405,10 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /participants/{pid}:
     get:
@@ -2223,6 +2429,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /trustlines:
     get:
@@ -2268,6 +2476,10 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
     post:
       tags: [TrustLines]
@@ -2291,6 +2503,10 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /trustlines/{id}:
     get:
@@ -2311,6 +2527,10 @@ paths:
           $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
     patch:
       tags: [TrustLines]
@@ -2338,6 +2558,10 @@ paths:
           $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
     delete:
       tags: [TrustLines]
@@ -2370,6 +2594,10 @@ paths:
           $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /clearing/cycles:
     get:
@@ -2400,6 +2628,10 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /clearing/auto:
     post:
@@ -2430,6 +2662,10 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /payments/capacity:
     get:
@@ -2467,6 +2703,10 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /payments/max-flow:
     get:
@@ -2497,6 +2737,10 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /payments:
     post:
@@ -2630,6 +2874,10 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /payments/{tx_id}:
     get:
@@ -2655,6 +2903,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /balance:
     get:
@@ -2671,6 +2921,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /balance/debts:
     get:
@@ -2699,6 +2951,10 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /integrity/status:
     get:
@@ -2715,6 +2971,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /integrity/checksum/{equivalent}:
     get:
@@ -2739,6 +2997,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /integrity/verify:
     post:
@@ -2763,6 +3023,10 @@ paths:
           $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /integrity/repair/net-mutual-debts:
     post:
@@ -2779,6 +3043,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /integrity/repair/cap-debts-to-trust-limits:
     post:
@@ -2795,6 +3061,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /integrity/audit-log:
     get:
@@ -2825,6 +3093,10 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   # Interact Mode control plane (011/T1101, published 2026-08-23).
   # These eight operations were registered and callable all along; only their schema
@@ -3243,6 +3515,35 @@ components:
             $ref: '#/components/schemas/ErrorEnvelope'
     TooManyRequests:
       description: Rate limit exceeded
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Forbidden:
+      description: >-
+        The credentials were recognised and are not permitted here: a missing or wrong
+        X-Admin-Token, a cookie-auth simulator request whose Origin is not in the CSRF
+        allowlist, or a participant whose account is not active.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    UnprocessableEntity:
+      description: >-
+        Request validation failed: a missing, malformed or out-of-range parameter or body.
+        On the simulator surface this status also answers an X-Simulator-Owner override that
+        is empty or does not match ^[A-Za-z0-9._:-]{1,64}$, which require_simulator_actor
+        rejects before the handler runs.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    SimulatorIdentityUnprocessable:
+      description: >-
+        The simulator identity transport was rejected before the handler ran: an
+        X-Simulator-Owner override that is empty or does not match ^[A-Za-z0-9._:-]{1,64}$.
+        This operation has no falsifiable request parameter of its own, so this is the only
+        422 it answers.
       content:
         application/json:
           schema:

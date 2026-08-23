@@ -207,10 +207,39 @@ SUCCESS_SCHEMA_DRIFT_COUNT = 62
 #     `Optional[Dict[str, Any]] = None` (`app/schemas/common.py:15`), so the canon was simply
 #     wrong about nullability and redundant about additionalProperties, which OpenAPI defaults to
 #     true anyway. Corrected to what the code returns.
+# 2026-08-23 / p011_t1106: 83 -> 53, the largest single move this ledger has made, and the first
+# time it has moved because both documents were corrected at once rather than reconciled.
+#
+# The new guard, `tests/contract/test_p011_reachable_statuses_are_declared.py`, derives every
+# status a route can answer from the route table and the dependency closure. It found 136
+# reachable statuses api/openapi.yaml did not declare and 127 the application's own schema did not
+# declare - 401 and 403 come out of GeoException subclasses raised inside dependencies, which
+# `get_openapi` cannot see. Both sides were closed in one change, because closing either alone
+# moves this digest across most of 78 operations and the ratchet would then be blessed twice over
+# an unreadable diff.
+#
+# Thirty operations leave. None enters. The 53 that remain have two named causes and no others:
+#
+#   46  a canon-only 4xx that the generated document cannot learn - 404, 400, 409, 500, 504 raised
+#       three or four frames deep in app/core/**. That is signal S6, which the T1106 survey
+#       rejected as underivable: a rule loose enough to derive it would demand those statuses
+#       across the whole surface and write into authority number one statuses the service never
+#       returns. Closing these needs a per-operation reading, not a rule.
+#   13  a generated-only 422 that is NOT reachable. FastAPI stamps 422 on any operation with any
+#       flat parameter, and on these the only parameter is an optional X-Admin-Token. Verified by
+#       execution: /admin/config, /admin/whoami and /admin/migrations answer 403 for a wrong token
+#       and 200 for a valid one, and no input produces 422. They are left in place deliberately -
+#       the canon must not copy them, and suppressing them from the generated document is a
+#       separate decision about what the application publishes.
+#
+# Three response components were added rather than bodies invented at 136 sites: Forbidden,
+# UnprocessableEntity, and SimulatorIdentityUnprocessable. The last exists because ten simulator
+# operations reach 422 with no falsifiable parameter at all - only a malformed X-Simulator-Owner -
+# and describing those as "request validation failed" would have been a new false statement.
 ERROR_RESPONSE_DRIFT_SHA256 = (
-    "f895c1ae7b091a4754aa93aff104ffb2e5b67228f83aafe0a36c88a19df9c0d5"
+    "3513dd236b89d3cd1fb9dbdab8214a3370db478931c4b5bdb10a10ed82a698b4"
 )
-ERROR_RESPONSE_DRIFT_COUNT = 83
+ERROR_RESPONSE_DRIFT_COUNT = 53
 # 2026-08-23 / p011_t1101: 59 -> 67, see the note above TRANSPORT_HEADER_DRIFT_SHA256.
 # Missed by the first pass of this task: the error-response assert aborts before this one, so a
 # run that stops there says nothing about security drift. Measured directly instead.

@@ -67,7 +67,10 @@ by counter-checks in this file.
   with no falsifiable parameter at all - 10 canon entries below rest on this signal alone - and
   it survives the S1b override, because it is a `GeoException` raised in a dependency and not a
   `RequestValidationError`. It is the only signal with no FastAPI machinery behind it, so
-  `test_a_malformed_simulator_owner_header_really_answers_422` executes it.
+  `test_a_malformed_simulator_owner_header_really_answers_422` executes it. Those ten operations
+  are the ones the canon now answers with `SimulatorIdentityUnprocessable`: for them the identity
+  header is the *only* way a `422` can happen, and a generic "validation failed" description
+  would have been the same kind of untrue statement this programme is removing.
 
 * **S5 - the rate limiter implies `429`.** Not restated here: `_declare_rate_limit_status` from
   `app/main.py` is *called* on a probe document to learn the set, so this guard and the schema
@@ -89,8 +92,9 @@ are a generated-only one (they come from `GeoException`s raised inside dependenc
 decorator carries `responses=`). A single list would let one side's progress mask the other's
 regression.
 
-Both lists may only shrink. Closing them is a separate change; this file exists so that nothing
-can grow them.
+Both lists may only shrink, and as of 2026-08-23 both are **empty** - all 263 pairs were closed
+by declaring them, on both sides, with no change to any response a client receives. This file now
+exists so that nothing can put an entry back.
 """
 
 from __future__ import annotations
@@ -341,297 +345,43 @@ def _measure() -> tuple[set[tuple[str, str]], set[tuple[str, str]]]:
 
 
 # ------------------------------------------------------------------------------------------
-# The two fixed lists. Measured 2026-08-23 with the rule above, and re-derived entry for entry
-# against the T1106 survey: 136 canon-side pairs over 78 operations, 127 generated-side over 79.
+# The two fixed lists, and they are EMPTY. Closed 2026-08-23 by T1106's second half:
+# 136 canon-side pairs over 78 operations and 127 generated-side over 79, all of them declared
+# without one line of behaviour changing.
 #
-# Zero `429` and zero `400` entries on either side: those two classes are already closed
-# (`T1103a` and `T1101`), and the lists record that by having nothing to say about them. The
-# eight Interact Mode action operations are the worked example of what "done" looks like.
+#   * the canon side by `api/openapi.yaml` itself - 70 x 403 through a new shared
+#     `#/components/responses/Forbidden`, 54 x 422 through a new `UnprocessableEntity`,
+#     10 x 422 through a new `SimulatorIdentityUnprocessable` (the S4-only operations, which
+#     have no falsifiable parameter and so can answer 422 for exactly one reason), and the two
+#     remaining 401s through the existing `Unauthorized`. Every body is `ErrorEnvelope`; no new
+#     shape was invented.
+#   * the generated side by ONE function - `_declare_auth_statuses` in `app/main.py`, the
+#     sibling of `_declare_rate_limit_status`, deriving 401/403 from the same dependency closure
+#     this file derives them from and `setdefault`-ing them into the emitted document. Not 79
+#     decorator edits, and nothing a client receives changed.
+#
+# What the closure deliberately did NOT do, because it would have written falsehoods into
+# authority number one: `app.openapi()` declares `422` on 13 operations where it is unreachable
+# (FastAPI stamps it on any operation with any flat parameter, and on those the only parameter
+# is the optional `X-Admin-Token`). Copying the generated document into the canon would have
+# closed this list and made the canon wrong. Those 13 remain a generated-side over-declaration
+# and a named cause in `ERROR_RESPONSE_DRIFT`; this guard is one-directional and cannot see
+# them, which is the same property that protects `GET /admin/health/db` below.
+#
+# Empty is the point. Both lists may only shrink, so from here any new entry is a regression and
+# the assertion names it. Do not repopulate either list to make a change pass.
 #
 # NOT in these lists, and it must stay that way: `GET /admin/health/db`. It declares `403`
 # correctly and the rule is blind to it (see the module docstring). A later pass reading these
 # lists as "the statuses to add" must not read the guard as "the statuses to remove".
 # ------------------------------------------------------------------------------------------
 
-# The canon is silent about `403` almost everywhere (declared on 18 of 96 operations, 87 can
-# answer it) and about `422` on most of the surface. These close by editing `api/openapi.yaml`:
-# no application behaviour is wrong, the document is merely silent.
-UNDECLARED_REACHABLE_CANON: set[tuple[str, str]] = {
-    # 2 x 401
-    ("GET /simulator/admin/runs", "401"),  # S2
-    ("POST /simulator/admin/runs/stop-all", "401"),  # S2
-    # 70 x 403
-    ("DELETE /admin/equivalents/{code}", "403"),  # S3
-    ("DELETE /trustlines/{id}", "403"),  # S3
-    ("GET /admin/audit-log", "403"),  # S3
-    ("GET /admin/clearing/cycles", "403"),  # S3
-    ("GET /admin/equivalents", "403"),  # S3
-    ("GET /admin/equivalents/{code}/usage", "403"),  # S3
-    ("GET /admin/feature-flags", "403"),  # S3
-    ("GET /admin/graph/ego", "403"),  # S3
-    ("GET /admin/graph/snapshot", "403"),  # S3
-    ("GET /admin/liquidity/summary", "403"),  # S3
-    ("GET /admin/migrations", "403"),  # S3
-    ("GET /admin/participants", "403"),  # S3
-    ("GET /admin/participants/stats", "403"),  # S3
-    ("GET /admin/participants/{pid}/metrics", "403"),  # S3
-    ("GET /admin/trustlines/bottlenecks", "403"),  # S3
-    ("GET /balance", "403"),  # S3
-    ("GET /balance/debts", "403"),  # S3
-    ("GET /clearing/cycles", "403"),  # S3
-    ("GET /equivalents", "403"),  # S3
-    ("GET /integrity/audit-log", "403"),  # S3
-    ("GET /integrity/checksum/{equivalent}", "403"),  # S3
-    ("GET /integrity/status", "403"),  # S3
-    ("GET /participants", "403"),  # S3
-    ("GET /participants/me", "403"),  # S3
-    ("GET /participants/search", "403"),  # S3
-    ("GET /participants/{pid}", "403"),  # S3
-    ("GET /payments", "403"),  # S3
-    ("GET /payments/capacity", "403"),  # S3
-    ("GET /payments/max-flow", "403"),  # S3
-    ("GET /payments/{tx_id}", "403"),  # S3
-    ("GET /simulator/events", "403"),  # S3
-    ("GET /simulator/events/poll", "403"),  # S3
-    ("GET /simulator/graph/ego", "403"),  # S3
-    ("GET /simulator/graph/snapshot", "403"),  # S3
-    ("GET /simulator/runs/active", "403"),  # S3
-    ("GET /simulator/runs/{run_id}", "403"),  # S3
-    ("GET /simulator/runs/{run_id}/artifacts", "403"),  # S3
-    ("GET /simulator/runs/{run_id}/artifacts/{name}", "403"),  # S3
-    ("GET /simulator/runs/{run_id}/bottlenecks", "403"),  # S3
-    ("GET /simulator/runs/{run_id}/events", "403"),  # S3
-    ("GET /simulator/runs/{run_id}/graph/snapshot", "403"),  # S3
-    ("GET /simulator/runs/{run_id}/metrics", "403"),  # S3
-    ("GET /simulator/scenarios", "403"),  # S3
-    ("GET /simulator/scenarios/{scenario_id}", "403"),  # S3
-    ("GET /simulator/scenarios/{scenario_id}/graph/preview", "403"),  # S3
-    ("GET /trustlines", "403"),  # S3
-    ("GET /trustlines/{id}", "403"),  # S3
-    ("PATCH /admin/config", "403"),  # S3
-    ("PATCH /admin/equivalents/{code}", "403"),  # S3
-    ("PATCH /admin/feature-flags", "403"),  # S3
-    ("PATCH /participants/me", "403"),  # S3
-    ("PATCH /trustlines/{id}", "403"),  # S3
-    ("POST /admin/equivalents", "403"),  # S3
-    ("POST /admin/participants/{pid}/ban", "403"),  # S3
-    ("POST /admin/participants/{pid}/freeze", "403"),  # S3
-    ("POST /admin/participants/{pid}/unban", "403"),  # S3
-    ("POST /admin/participants/{pid}/unfreeze", "403"),  # S3
-    ("POST /admin/transactions/{tx_id}/abort", "403"),  # S3
-    ("POST /clearing/auto", "403"),  # S3
-    ("POST /integrity/repair/cap-debts-to-trust-limits", "403"),  # S3
-    ("POST /integrity/repair/net-mutual-debts", "403"),  # S3
-    ("POST /integrity/verify", "403"),  # S3
-    ("POST /simulator/runs", "403"),  # S3
-    ("POST /simulator/runs/{run_id}/intensity", "403"),  # S3
-    ("POST /simulator/runs/{run_id}/pause", "403"),  # S3
-    ("POST /simulator/runs/{run_id}/restart", "403"),  # S3
-    ("POST /simulator/runs/{run_id}/resume", "403"),  # S3
-    ("POST /simulator/runs/{run_id}/stop", "403"),  # S3
-    ("POST /simulator/scenarios", "403"),  # S3
-    ("POST /trustlines", "403"),  # S3
-    # 64 x 422
-    ("DELETE /admin/equivalents/{code}", "422"),  # S1
-    ("DELETE /trustlines/{id}", "422"),  # S1
-    ("GET /admin/audit-log", "422"),  # S1
-    ("GET /admin/clearing/cycles", "422"),  # S1
-    ("GET /admin/equivalents", "422"),  # S1
-    ("GET /admin/graph/ego", "422"),  # S1
-    ("GET /admin/incidents", "422"),  # S1
-    ("GET /admin/liquidity/summary", "422"),  # S1
-    ("GET /admin/participants", "422"),  # S1
-    ("GET /admin/participants/{pid}/metrics", "422"),  # S1
-    ("GET /admin/trustlines", "422"),  # S1
-    ("GET /admin/trustlines/bottlenecks", "422"),  # S1
-    ("GET /balance/debts", "422"),  # S1
-    ("GET /clearing/cycles", "422"),  # S1
-    ("GET /integrity/audit-log", "422"),  # S1
-    ("GET /participants", "422"),  # S1
-    ("GET /participants/search", "422"),  # S1
-    ("GET /payments", "422"),  # S1
-    ("GET /payments/capacity", "422"),  # S1
-    ("GET /payments/max-flow", "422"),  # S1
-    ("GET /simulator/admin/runs", "422"),  # S1+S4
-    ("GET /simulator/events", "422"),  # S1+S4
-    ("GET /simulator/events/poll", "422"),  # S1+S4
-    ("GET /simulator/graph/ego", "422"),  # S1+S4
-    ("GET /simulator/graph/snapshot", "422"),  # S1+S4
-    ("GET /simulator/runs/active", "422"),  # S4
-    ("GET /simulator/runs/{run_id}", "422"),  # S4
-    ("GET /simulator/runs/{run_id}/artifacts", "422"),  # S4
-    ("GET /simulator/runs/{run_id}/artifacts/{name}", "422"),  # S4
-    ("GET /simulator/runs/{run_id}/bottlenecks", "422"),  # S1+S4
-    ("GET /simulator/runs/{run_id}/events", "422"),  # S1+S4
-    ("GET /simulator/runs/{run_id}/graph/snapshot", "422"),  # S1+S4
-    ("GET /simulator/runs/{run_id}/metrics", "422"),  # S1+S4
-    ("GET /simulator/scenarios", "422"),  # S4
-    ("GET /simulator/scenarios/{scenario_id}", "422"),  # S4
-    ("GET /simulator/scenarios/{scenario_id}/graph/preview", "422"),  # S1+S4
-    ("GET /trustlines", "422"),  # S1
-    ("GET /trustlines/{id}", "422"),  # S1
-    ("PATCH /admin/config", "422"),  # S1
-    ("PATCH /admin/equivalents/{code}", "422"),  # S1
-    ("PATCH /admin/feature-flags", "422"),  # S1
-    ("PATCH /participants/me", "422"),  # S1
-    ("PATCH /trustlines/{id}", "422"),  # S1
-    ("POST /admin/equivalents", "422"),  # S1
-    ("POST /admin/participants/{pid}/ban", "422"),  # S1
-    ("POST /admin/participants/{pid}/freeze", "422"),  # S1
-    ("POST /admin/participants/{pid}/unban", "422"),  # S1
-    ("POST /admin/participants/{pid}/unfreeze", "422"),  # S1
-    ("POST /admin/transactions/{tx_id}/abort", "422"),  # S1
-    ("POST /auth/challenge", "422"),  # S1
-    ("POST /auth/login", "422"),  # S1
-    ("POST /auth/refresh", "422"),  # S1
-    ("POST /clearing/auto", "422"),  # S1
-    ("POST /integrity/verify", "422"),  # S1
-    ("POST /participants", "422"),  # S1
-    ("POST /simulator/admin/runs/stop-all", "422"),  # S1+S4
-    ("POST /simulator/runs", "422"),  # S1+S4
-    ("POST /simulator/runs/{run_id}/intensity", "422"),  # S1+S4
-    ("POST /simulator/runs/{run_id}/pause", "422"),  # S4
-    ("POST /simulator/runs/{run_id}/restart", "422"),  # S4
-    ("POST /simulator/runs/{run_id}/resume", "422"),  # S4
-    ("POST /simulator/runs/{run_id}/stop", "422"),  # S4
-    ("POST /simulator/scenarios", "422"),  # S1+S4
-    ("POST /trustlines", "422"),  # S1
-}
+UNDECLARED_REACHABLE_CANON: set[tuple[str, str]] = set()
 
 # `app.openapi()` learns a status only from `responses=` on the decorator, and `401`/`403` are
-# raised inside dependencies, so it knows about neither. The cheap close is a sibling of
-# `_declare_rate_limit_status` in `app/main.py`, not 79 decorator edits.
-UNDECLARED_REACHABLE_GENERATED: set[tuple[str, str]] = {
-    # 50 x 401
-    ("DELETE /trustlines/{id}", "401"),  # S2
-    ("GET /balance", "401"),  # S2
-    ("GET /balance/debts", "401"),  # S2
-    ("GET /clearing/cycles", "401"),  # S2
-    ("GET /equivalents", "401"),  # S2
-    ("GET /integrity/audit-log", "401"),  # S2
-    ("GET /integrity/checksum/{equivalent}", "401"),  # S2
-    ("GET /integrity/status", "401"),  # S2
-    ("GET /participants", "401"),  # S2
-    ("GET /participants/me", "401"),  # S2
-    ("GET /participants/search", "401"),  # S2
-    ("GET /participants/{pid}", "401"),  # S2
-    ("GET /payments", "401"),  # S2
-    ("GET /payments/capacity", "401"),  # S2
-    ("GET /payments/max-flow", "401"),  # S2
-    ("GET /payments/{tx_id}", "401"),  # S2
-    ("GET /simulator/admin/runs", "401"),  # S2
-    ("GET /simulator/events", "401"),  # S2
-    ("GET /simulator/events/poll", "401"),  # S2
-    ("GET /simulator/graph/ego", "401"),  # S2
-    ("GET /simulator/graph/snapshot", "401"),  # S2
-    ("GET /simulator/runs/active", "401"),  # S2
-    ("GET /simulator/runs/{run_id}", "401"),  # S2
-    ("GET /simulator/runs/{run_id}/artifacts", "401"),  # S2
-    ("GET /simulator/runs/{run_id}/artifacts/{name}", "401"),  # S2
-    ("GET /simulator/runs/{run_id}/bottlenecks", "401"),  # S2
-    ("GET /simulator/runs/{run_id}/events", "401"),  # S2
-    ("GET /simulator/runs/{run_id}/graph/snapshot", "401"),  # S2
-    ("GET /simulator/runs/{run_id}/metrics", "401"),  # S2
-    ("GET /simulator/scenarios", "401"),  # S2
-    ("GET /simulator/scenarios/{scenario_id}", "401"),  # S2
-    ("GET /simulator/scenarios/{scenario_id}/graph/preview", "401"),  # S2
-    ("GET /trustlines", "401"),  # S2
-    ("GET /trustlines/{id}", "401"),  # S2
-    ("PATCH /participants/me", "401"),  # S2
-    ("PATCH /trustlines/{id}", "401"),  # S2
-    ("POST /clearing/auto", "401"),  # S2
-    ("POST /integrity/verify", "401"),  # S2
-    ("POST /payments", "401"),  # S2
-    ("POST /simulator/admin/runs/stop-all", "401"),  # S2
-    ("POST /simulator/runs", "401"),  # S2
-    ("POST /simulator/runs/{run_id}/actions/clearing-once", "401"),  # S2
-    ("POST /simulator/runs/{run_id}/actions/tx-once", "401"),  # S2
-    ("POST /simulator/runs/{run_id}/intensity", "401"),  # S2
-    ("POST /simulator/runs/{run_id}/pause", "401"),  # S2
-    ("POST /simulator/runs/{run_id}/restart", "401"),  # S2
-    ("POST /simulator/runs/{run_id}/resume", "401"),  # S2
-    ("POST /simulator/runs/{run_id}/stop", "401"),  # S2
-    ("POST /simulator/scenarios", "401"),  # S2
-    ("POST /trustlines", "401"),  # S2
-    # 77 x 403
-    ("DELETE /admin/equivalents/{code}", "403"),  # S3
-    ("DELETE /trustlines/{id}", "403"),  # S3
-    ("GET /admin/audit-log", "403"),  # S3
-    ("GET /admin/clearing/cycles", "403"),  # S3
-    ("GET /admin/config", "403"),  # S3
-    ("GET /admin/equivalents", "403"),  # S3
-    ("GET /admin/equivalents/{code}/usage", "403"),  # S3
-    ("GET /admin/feature-flags", "403"),  # S3
-    ("GET /admin/graph/ego", "403"),  # S3
-    ("GET /admin/graph/snapshot", "403"),  # S3
-    ("GET /admin/incidents", "403"),  # S3
-    ("GET /admin/liquidity/summary", "403"),  # S3
-    ("GET /admin/migrations", "403"),  # S3
-    ("GET /admin/participants", "403"),  # S3
-    ("GET /admin/participants/stats", "403"),  # S3
-    ("GET /admin/participants/{pid}/metrics", "403"),  # S3
-    ("GET /admin/trustlines", "403"),  # S3
-    ("GET /admin/trustlines/bottlenecks", "403"),  # S3
-    ("GET /admin/whoami", "403"),  # S3
-    ("GET /balance", "403"),  # S3
-    ("GET /balance/debts", "403"),  # S3
-    ("GET /clearing/cycles", "403"),  # S3
-    ("GET /equivalents", "403"),  # S3
-    ("GET /integrity/audit-log", "403"),  # S3
-    ("GET /integrity/checksum/{equivalent}", "403"),  # S3
-    ("GET /integrity/status", "403"),  # S3
-    ("GET /participants", "403"),  # S3
-    ("GET /participants/me", "403"),  # S3
-    ("GET /participants/search", "403"),  # S3
-    ("GET /participants/{pid}", "403"),  # S3
-    ("GET /payments", "403"),  # S3
-    ("GET /payments/capacity", "403"),  # S3
-    ("GET /payments/max-flow", "403"),  # S3
-    ("GET /payments/{tx_id}", "403"),  # S3
-    ("GET /simulator/admin/runs", "403"),  # S3
-    ("GET /simulator/events", "403"),  # S3
-    ("GET /simulator/events/poll", "403"),  # S3
-    ("GET /simulator/graph/ego", "403"),  # S3
-    ("GET /simulator/graph/snapshot", "403"),  # S3
-    ("GET /simulator/runs/active", "403"),  # S3
-    ("GET /simulator/runs/{run_id}", "403"),  # S3
-    ("GET /simulator/runs/{run_id}/artifacts", "403"),  # S3
-    ("GET /simulator/runs/{run_id}/artifacts/{name}", "403"),  # S3
-    ("GET /simulator/runs/{run_id}/bottlenecks", "403"),  # S3
-    ("GET /simulator/runs/{run_id}/events", "403"),  # S3
-    ("GET /simulator/runs/{run_id}/graph/snapshot", "403"),  # S3
-    ("GET /simulator/runs/{run_id}/metrics", "403"),  # S3
-    ("GET /simulator/scenarios", "403"),  # S3
-    ("GET /simulator/scenarios/{scenario_id}", "403"),  # S3
-    ("GET /simulator/scenarios/{scenario_id}/graph/preview", "403"),  # S3
-    ("GET /trustlines", "403"),  # S3
-    ("GET /trustlines/{id}", "403"),  # S3
-    ("PATCH /admin/config", "403"),  # S3
-    ("PATCH /admin/equivalents/{code}", "403"),  # S3
-    ("PATCH /admin/feature-flags", "403"),  # S3
-    ("PATCH /participants/me", "403"),  # S3
-    ("PATCH /trustlines/{id}", "403"),  # S3
-    ("POST /admin/equivalents", "403"),  # S3
-    ("POST /admin/participants/{pid}/ban", "403"),  # S3
-    ("POST /admin/participants/{pid}/freeze", "403"),  # S3
-    ("POST /admin/participants/{pid}/unban", "403"),  # S3
-    ("POST /admin/participants/{pid}/unfreeze", "403"),  # S3
-    ("POST /admin/transactions/{tx_id}/abort", "403"),  # S3
-    ("POST /clearing/auto", "403"),  # S3
-    ("POST /integrity/repair/cap-debts-to-trust-limits", "403"),  # S3
-    ("POST /integrity/repair/net-mutual-debts", "403"),  # S3
-    ("POST /integrity/verify", "403"),  # S3
-    ("POST /payments", "403"),  # S3
-    ("POST /simulator/admin/runs/stop-all", "403"),  # S3
-    ("POST /simulator/runs", "403"),  # S3
-    ("POST /simulator/runs/{run_id}/intensity", "403"),  # S3
-    ("POST /simulator/runs/{run_id}/pause", "403"),  # S3
-    ("POST /simulator/runs/{run_id}/restart", "403"),  # S3
-    ("POST /simulator/runs/{run_id}/resume", "403"),  # S3
-    ("POST /simulator/runs/{run_id}/stop", "403"),  # S3
-    ("POST /simulator/scenarios", "403"),  # S3
-    ("POST /trustlines", "403"),  # S3
-}
+# raised inside dependencies, so it knew about neither. Closed by `_declare_auth_statuses` in
+# `app/main.py` rather than by 79 decorator edits - see the header above.
+UNDECLARED_REACHABLE_GENERATED: set[tuple[str, str]] = set()
 
 
 # ------------------------------------------------------------------------------------------
@@ -883,8 +633,8 @@ def test_the_guard_bites_when_a_declaration_is_deleted() -> None:
     assert after_generated == before_generated, (
         "mutating the canon moved the generated side; the two documents are measured "
         "independently and a canon edit must not change what app.openapi() is missing. "
-        "(tx-once does carry a pre-existing generated-side 401 gap - the point is that it did "
-        "not change.)"
+        "(Both sides are empty now, so this reads as 'still empty'; it was written when tx-once "
+        "carried a generated-side 401 gap and the point was that a canon edit left it alone.)"
     )
 
     # And the ratchet built on it fails, with the pair named in the message.
@@ -915,10 +665,11 @@ async def test_require_admin_really_answers_403_and_never_401(client) -> None:
 async def test_a_malformed_simulator_owner_header_really_answers_422(client) -> None:
     """Anti-vacuum: S4 is the one signal with no FastAPI machinery behind it.
 
-    Twenty-six entries in the canon list - and all ten that rest on S4 alone - exist only because
+    Twenty-six `422` declarations in `api/openapi.yaml` - and all ten that rest on S4 alone,
+    which is why `SimulatorIdentityUnprocessable` exists - are true only because
     `require_simulator_actor` raises `GeoException(..., status_code=422)` on a malformed
-    `X-Simulator-Owner`. If the regex or that status code changes, those entries become fiction,
-    and a guard reading the route table would never find out.
+    `X-Simulator-Owner`. If the regex or that status code changes, the canon becomes fiction at
+    twenty-six sites, and a guard reading the route table would never find out.
 
     `GET /simulator/runs/active` is deliberate: its only inputs are two optional string headers,
     so it has no falsifiable parameter at all and S1 derives nothing for it.
