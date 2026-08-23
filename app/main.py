@@ -571,7 +571,27 @@ async def healthz_check():
     return {"status": "ok"}
 
 
-@app.get("/health/db")
+@app.get(
+    "/health/db",
+    responses={
+        503: {
+            # 2026-08-22 / p011_t1105.  Declared inline rather than as ErrorEnvelope because
+            # the canonical shape for this route is its own `{status: error}` object
+            # (`api/openapi.yaml:108-118`); a mismatched schema would keep the operation in
+            # the drift under a different heading instead of removing it.
+            "description": "DB unavailable",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "required": ["status"],
+                        "properties": {"status": {"type": "string", "enum": ["error"]}},
+                    }
+                }
+            },
+        }
+    },
+)
 async def health_db_check():
     try:
         t0 = time.perf_counter()

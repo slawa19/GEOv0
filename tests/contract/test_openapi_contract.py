@@ -70,10 +70,21 @@ SUCCESS_SCHEMA_DRIFT_COUNT = 71
 # canonical contract (real mode refuses to substitute synthetic data). FastAPI does
 # not know about it because the routes carry no `responses=`, so both operations —
 # which already drifted for other reasons — gained a canonical-only 503; count stays 84.
+# 2026-08-22 / p011_t1105 (`F-011-6`, inherited as `T716(а)` from 007): three operations
+# declared 503 only in the canon, so a client generated from the application had no branch
+# for a status the service returns. All three now declare it, and the measured delta is:
+#   GET /simulator/runs/{run_id}/metrics      canonical-only 503 gone; entry REMAINS,
+#                                             still drifting on 400/401/404 vs generated 422
+#   GET /simulator/runs/{run_id}/bottlenecks  canonical-only 503 gone; entry REMAINS,
+#                                             still drifting on 401/404 vs generated 422
+#   GET /health/db                            503 was its ONLY difference -> entry REMOVED,
+#                                             which is why the count moves 84 -> 83
+# The count moving at all is the exception rather than the rule here: an operation leaves
+# this dictionary only when its LAST difference is resolved.
 ERROR_RESPONSE_DRIFT_SHA256 = (
-    "b0af8a86310cdf916a93a5fcae795b95effa067204d89108c15a4c3e6ef214ec"
+    "0d472e512df258ade66be6f7b2fb262e12a28f36af56ea1e882f7e0f2f85a1e6"
 )
-ERROR_RESPONSE_DRIFT_COUNT = 84
+ERROR_RESPONSE_DRIFT_COUNT = 83
 SECURITY_DRIFT_SHA256 = (
     "7fe6aad6a6fdae404bcea8e2a7696bb1e0788cbc95c2634ba90a3520ca89a5bd"
 )
