@@ -54,12 +54,12 @@ _HTTP_METHODS = {"get", "post", "put", "patch", "delete"}
 # 2026-08-23 / T1102: five more (15 -> 10). TrustLine.policy declares the five keys the
 # validator allows, and the two STABLE integrity nodes - invariants_status and the
 # integrity audit after_state - state their fixed key sets.
+# 2026-08-23 / T1102: /admin/health/db struck off (10 -> 9). It was the operation the empty
+# `schema: {}` had hidden; both sides now declare the body the handler builds literally.
 UNDESCRIBED_SUCCESS_RESPONSES = {
     ("GET", "/admin/audit-log"),
     ("GET", "/admin/graph/ego"),
     ("GET", "/admin/graph/snapshot"),
-    # Found only after the predicate learned that `{}` describes nothing (2026-08-23).
-    ("GET", "/admin/health/db"),
     ("GET", "/admin/liquidity/summary"),
     ("GET", "/admin/participants/{pid}/metrics"),
     ("GET", "/admin/trustlines"),

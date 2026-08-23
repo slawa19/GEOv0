@@ -29,6 +29,7 @@ from app.main import app
 DOCUMENTATION_ONLY = {
     ("POST", "/api/v1/admin/participants/{pid}/ban"): "AdminParticipantStatusChange",
     ("POST", "/api/v1/admin/participants/{pid}/unban"): "AdminParticipantStatusChange",
+    ("GET", "/api/v1/admin/health/db"): "AdminDbHealthResponse",
 }
 
 
