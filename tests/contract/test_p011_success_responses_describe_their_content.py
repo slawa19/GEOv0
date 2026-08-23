@@ -45,11 +45,10 @@ _HTTP_METHODS = {"get", "post", "put", "patch", "delete"}
 # pointed at the hole. The list grew because the guard got sharper, not the canon worse.
 # 2026-08-23 / T1102: the five operations the application already described, and the canon
 # did not, are struck off (35 -> 30).
+# 2026-08-23 / T1102: ten more struck off (30 -> 20) whose only opacity was a node in
+# ACCEPTED_FREE_FORM above - declared-open content, not a gap.
 UNDESCRIBED_SUCCESS_RESPONSES = {
     ("GET", "/admin/audit-log"),
-    ("GET", "/admin/equivalents"),
-    ("POST", "/admin/equivalents"),
-    ("PATCH", "/admin/equivalents/{code}"),
     ("GET", "/admin/graph/ego"),
     ("GET", "/admin/graph/snapshot"),
     # Found only after the predicate learned that `{}` describes nothing (2026-08-23).
@@ -58,17 +57,10 @@ UNDESCRIBED_SUCCESS_RESPONSES = {
     ("GET", "/admin/participants/{pid}/metrics"),
     ("GET", "/admin/trustlines"),
     ("GET", "/admin/trustlines/bottlenecks"),
-    ("GET", "/equivalents"),
     ("GET", "/integrity/audit-log"),
     ("GET", "/integrity/checksum/{equivalent}"),
     ("GET", "/integrity/status"),
     ("POST", "/integrity/verify"),
-    ("GET", "/participants"),
-    ("POST", "/participants"),
-    ("GET", "/participants/me"),
-    ("PATCH", "/participants/me"),
-    ("GET", "/participants/search"),
-    ("GET", "/participants/{pid}"),
     ("GET", "/payments"),
     ("POST", "/payments"),
     ("GET", "/payments/{tx_id}"),
@@ -86,21 +78,59 @@ def _canon() -> dict[str, Any]:
         return yaml.safe_load(handle)
 
 
-def _deref(node: Any, document: dict, seen: frozenset) -> tuple[Any, frozenset]:
+# Nodes whose content is genuinely open, with the reason each one is open. These are NOT gaps:
+# the code emits arbitrary content there, so inventing `properties` would make authority number
+# one describe something the service never promises - worse than describing nothing. Established
+# 2026-08-23 by enumerating every writer.
+#
+# This is an allowlist of (schema, property) pairs rather than a rule like "a description makes it
+# fine", because a rule of that shape is satisfied by adding prose. Adding a row here is a claim
+# about the code, and `test_accepted_free_form_nodes_are_still_free_form` below checks the claim
+# still holds.
+ACCEPTED_FREE_FORM: dict[tuple[str, str], str] = {
+    ("ParticipantProfile", "contacts"): (
+        "client-supplied JSON echoed unmodified; the only writers are the create/update handlers "
+        "(app/core/participants/service.py:65 and :175-178) and no validator constrains it"
+    ),
+    ("Equivalent", "metadata"): (
+        "admin-supplied JSON stored verbatim (app/api/v1/admin.py:1150, :1236). A validator exists "
+        "- validate_equivalent_metadata - but is called only from scripts/seed_db.py and tests, "
+        "never from app/, so the API path accepts any object"
+    ),
+    ("StoredEquivalent", "metadata"): "same column and writers as Equivalent.metadata",
+}
+
+
+def _deref(node: Any, document: dict, seen: frozenset) -> tuple[Any, frozenset, str | None]:
+    """Resolve $refs, and report the name of the last component resolved through.
+
+    The name is what lets `ACCEPTED_FREE_FORM` be keyed by (schema, property): without it the
+    walker only ever sees anonymous sub-objects and cannot tell `Equivalent.metadata` from any
+    other bare object.
+    """
+
+    component: str | None = None
     while isinstance(node, dict) and "$ref" in node:
         ref = node["$ref"]
         if ref in seen:
-            return None, seen
+            return None, seen, component
         seen = seen | {ref}
+        component = ref.rsplit("/", 1)[-1]
         cursor: Any = document
         for part in ref.lstrip("#/").split("/"):
             cursor = cursor.get(part, {}) if isinstance(cursor, dict) else {}
         node = cursor
-    return node, seen
+    return node, seen, component
 
 
-def is_undescribed(schema: Any, document: dict, seen: frozenset = frozenset()) -> bool:
-    schema, seen = _deref(schema, document, seen)
+def is_undescribed(
+    schema: Any,
+    document: dict,
+    seen: frozenset = frozenset(),
+    component: str | None = None,
+) -> bool:
+    schema, seen, resolved = _deref(schema, document, seen)
+    component = resolved or component
     if not isinstance(schema, dict):
         return False
 
@@ -115,7 +145,7 @@ def is_undescribed(schema: Any, document: dict, seen: frozenset = frozenset()) -
 
     for keyword in ("allOf", "oneOf", "anyOf"):
         for branch in schema.get(keyword) or []:
-            if is_undescribed(branch, document, seen):
+            if is_undescribed(branch, document, seen, component):
                 return True
 
     declared_type = schema.get("type")
@@ -127,14 +157,16 @@ def is_undescribed(schema: Any, document: dict, seen: frozenset = frozenset()) -
     if declared_type == "object" or properties is not None or additional is not None:
         if not properties and not composed and not typed_map:
             return True
-        for value in (properties or {}).values():
-            if is_undescribed(value, document, seen):
+        for name, value in (properties or {}).items():
+            if (component, name) in ACCEPTED_FREE_FORM:
+                continue
+            if is_undescribed(value, document, seen, component):
                 return True
-        if typed_map and is_undescribed(additional, document, seen):
+        if typed_map and is_undescribed(additional, document, seen, component):
             return True
 
     if (declared_type == "array" or "items" in schema) and schema.get("items") is not None:
-        if is_undescribed(schema["items"], document, seen):
+        if is_undescribed(schema["items"], document, seen, component):
             return True
 
     return False
@@ -186,6 +218,40 @@ def test_the_list_has_no_stale_entries() -> None:
     assert not stale, (
         f"these operations are described now; remove them from the list: {stale}"
     )
+
+
+def test_accepted_free_form_nodes_are_still_free_form() -> None:
+    """Counter-check: every accepted exemption must still name a real, still-open node.
+
+    Without this the allowlist rots in both directions - a node that got described would stay
+    exempt and nobody would notice, and a renamed schema would silently exempt nothing while
+    still looking like protection.
+    """
+
+    document = _canon()
+    schemas = document.get("components", {}).get("schemas", {})
+
+    for (schema_name, property_name), reason in sorted(ACCEPTED_FREE_FORM.items()):
+        schema = schemas.get(schema_name)
+        assert schema is not None, (
+            f"{schema_name} no longer exists; the exemption for {property_name} exempts nothing"
+        )
+        node = (schema.get("properties") or {}).get(property_name)
+        assert node is not None, (
+            f"{schema_name}.{property_name} no longer exists; drop the exemption"
+        )
+        resolved, _seen, _component = _deref(node, document, frozenset())
+        assert isinstance(resolved, dict), f"{schema_name}.{property_name} did not resolve"
+        assert not resolved.get("properties"), (
+            f"{schema_name}.{property_name} now declares properties, so it is no longer "
+            f"free-form. Remove it from ACCEPTED_FREE_FORM - the reason recorded there "
+            f"({reason.split(';')[0]}) no longer holds."
+        )
+        # A declared-open node must actually be declared open, not merely undescribed.
+        assert resolved.get("additionalProperties") is not False, (
+            f"{schema_name}.{property_name} forbids additional properties yet declares none, "
+            f"which describes an object that can only ever be empty"
+        )
 
 
 def test_the_predicate_detects_the_forms_it_claims_to() -> None:
