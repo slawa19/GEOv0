@@ -56,10 +56,10 @@ _HTTP_METHODS = {"get", "post", "put", "patch", "delete"}
 # integrity audit after_state - state their fixed key sets.
 # 2026-08-23 / T1102: /admin/health/db struck off (10 -> 9). It was the operation the empty
 # `schema: {}` had hidden; both sides now declare the body the handler builds literally.
+# 2026-08-23 / T1102: the two graph reads struck off (9 -> 7); their audit and transaction
+# leaves are open by design and recorded in ACCEPTED_FREE_FORM above.
 UNDESCRIBED_SUCCESS_RESPONSES = {
     ("GET", "/admin/audit-log"),
-    ("GET", "/admin/graph/ego"),
-    ("GET", "/admin/graph/snapshot"),
     ("GET", "/admin/liquidity/summary"),
     ("GET", "/admin/participants/{pid}/metrics"),
     ("GET", "/admin/trustlines"),
@@ -95,6 +95,18 @@ ACCEPTED_FREE_FORM: dict[tuple[str, str], str] = {
         "never from app/, so the API path accepts any object"
     ),
     ("StoredEquivalent", "metadata"): "same column and writers as Equivalent.metadata",
+    ("AdminAuditLogItem", "before_state"): (
+        "an audit snapshot: ten writer paths each store the shape their own action needs "
+        "(app/api/v1/admin.py, app/api/v1/auth.py, app/api/v1/integrity.py), and two of the "
+        "leaves are themselves open - equivalent metadata and a transaction error blob. This is "
+        "a historical log, so rows keep whatever shape the code held when they were written"
+    ),
+    ("AdminAuditLogItem", "after_state"): "same column family and writers as before_state",
+    ("AdminGraphTransactionError", "details"): (
+        "the .details of whatever GeoException aborted the transaction, stored raw in the "
+        "transactions.error JSON column - the same open tail as PaymentError.details, reached "
+        "through a different read"
+    ),
     ("PaymentError", "details"): (
         "documented variants plus a deliberately open tail: both abort paths forward the "
         ".details of whatever 4xx GeoException prepare or commit raised "

@@ -121,8 +121,11 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # five keys validate_trustline_policy allows, and the two stable integrity nodes state their key
 # sets. Same reason as slice 4 for the count holding: the canon is now more precise than the
 # generated schema, whose pydantic side is Dict[str, Any].
+# 2026-08-23 / p011_t1102, slice 7: still 64, digest moves. The two admin graph reads describe
+# their bodies, including honest item schemas for the three collections the response model types
+# as `list[Any]` and therefore does not shape at all.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "c9b2d42bdeac8d770541ba41271ec8c78f71cdc54c0349464d49acdd41b7508b"
+    "db998226422ed42a2b7809ee2bfb4edcde35f75ca5a7c031e329f56d633b977b"
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 64
 # 2026-08-11 / T501: public DB health no longer declares exception details;
