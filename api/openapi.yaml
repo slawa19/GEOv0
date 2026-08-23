@@ -345,14 +345,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                required: [items]
-                properties:
-                  items:
-                    type: array
-                    items:
-                      type: object
-                      additionalProperties: true
+                $ref: '#/components/schemas/AdminParticipantsListResponse'
         '429':
           $ref: '#/components/responses/TooManyRequests'
 
@@ -373,8 +366,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: '#/components/schemas/AdminParticipantsStatsResponse'
         '429':
           $ref: '#/components/responses/TooManyRequests'
 
@@ -900,8 +892,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: '#/components/schemas/AdminIncidentsListResponse'
         '403':
           $ref: '#/components/responses/Unauthorized'
         '429':
@@ -1453,8 +1444,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: '#/components/schemas/ActiveRunResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '429':
@@ -1909,8 +1899,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: '#/components/schemas/AdminClearingCyclesResponse'
         '429':
           $ref: '#/components/responses/TooManyRequests'
 
@@ -3837,6 +3826,151 @@ components:
       properties:
         reason:
           type: string
+
+    # 011/T1102 (2026-08-23): five operations whose bodies the application already described
+    # and the canon did not. Transcribed by hand from the response models, in the style of this
+    # document - the canon is authority number one, not a build artifact of the code.
+    AdminClearingCycleEdge:
+      type: object
+      required: [equivalent, debtor, creditor, amount]
+      properties:
+        equivalent:
+          type: string
+        debtor:
+          type: string
+        creditor:
+          type: string
+        amount:
+          # Money stays an exact decimal string (AGENTS.md section 8), never a float.
+          type: string
+
+    AdminClearingCyclesForEquivalent:
+      type: object
+      required: [cycles]
+      properties:
+        cycles:
+          # A cycle is an ordered list of edges, so this is an array of arrays.
+          type: array
+          items:
+            type: array
+            items:
+              $ref: '#/components/schemas/AdminClearingCycleEdge'
+
+    AdminClearingCyclesResponse:
+      type: object
+      required: [equivalents]
+      properties:
+        equivalents:
+          # Keyed by equivalent code; the key set is data, not contract.
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/AdminClearingCyclesForEquivalent'
+
+    AdminIncidentItem:
+      type: object
+      required: [tx_id, state, initiator_pid, equivalent, age_seconds, sla_seconds]
+      properties:
+        tx_id:
+          type: string
+        state:
+          type: string
+        initiator_pid:
+          type: string
+        equivalent:
+          type: string
+        age_seconds:
+          type: integer
+          minimum: 0
+        sla_seconds:
+          type: integer
+          minimum: 0
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    AdminIncidentsListResponse:
+      type: object
+      required: [page, per_page, total, items]
+      properties:
+        page:
+          type: integer
+          minimum: 1
+        per_page:
+          type: integer
+          minimum: 1
+          maximum: 200
+        total:
+          type: integer
+          minimum: 0
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminIncidentItem'
+
+    AdminParticipantListItem:
+      type: object
+      required: [pid, display_name, type, status, verification_level, created_at]
+      properties:
+        pid:
+          type: string
+        display_name:
+          type: string
+        type:
+          type: string
+        status:
+          type: string
+        verification_level:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+
+    AdminParticipantsListResponse:
+      type: object
+      required: [page, per_page, total, items]
+      properties:
+        page:
+          type: integer
+          minimum: 1
+        per_page:
+          type: integer
+          minimum: 1
+          maximum: 200
+        total:
+          type: integer
+          minimum: 0
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminParticipantListItem'
+
+    AdminParticipantsStatsResponse:
+      type: object
+      properties:
+        participants_by_status:
+          type: object
+          additionalProperties:
+            type: integer
+        participants_by_type:
+          type: object
+          additionalProperties:
+            type: integer
+        total_participants:
+          type: integer
+          minimum: 0
+          default: 0
+
+    ActiveRunResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        api_version:
+          type: string
+          default: simulator-api/1
+        run_id:
+          type: string
+          nullable: true
 
     AdminParticipantStatusChange:
       # 011/T1102. What `_set_participant_status` really emits (app/api/v1/admin.py:859,
