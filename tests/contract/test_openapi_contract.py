@@ -87,10 +87,24 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 #  -> "v": {"nullable": true, "type": "string"}
 # Both sides moved together, so this entry still drifts only for the unrelated
 # pre-existing reasons, and the entry count stays 71.
+# 2026-08-23 / p011_t1102 (`F-011-1`): 71 -> 69. Ban and unban stop answering "some object" and
+# declare the two keys `_set_participant_status` really emits (`app/api/v1/admin.py:859`).
+#
+# The mechanism is worth stating, because the first attempt got it wrong: describing the CANON
+# alone does not remove an entry. Both operations were already in this dictionary, and stayed in
+# it with a different canonical half, because their handlers carry no `response_model` and the
+# generated side was still empty. An entry leaves only when BOTH sides state the same shape.
+#
+# So the application declares it too - through `responses={200: {"model": ...}}`, never
+# `response_model=`. That distinction is the whole reason this is safe: `responses` documents,
+# while `response_model` would make FastAPI filter the handler output down to the declared
+# fields, which is a wire change and forbidden here. Verified in isolation on this FastAPI
+# version: with `responses=` a key absent from the model still reaches the client, with
+# `response_model=` it is silently dropped.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "ccb4001a18a198528e7915b308c7cd98983ff42b8c223da10dba9aab520370ee"
+    "daf649bad1a0c89e7742cad1883bf6baed72dca8eb173259fb8d8d7391497466"
 )
-SUCCESS_SCHEMA_DRIFT_COUNT = 71
+SUCCESS_SCHEMA_DRIFT_COUNT = 69
 # 2026-08-11 / T501: public DB health no longer declares exception details;
 # the new admin diagnostic operation matches generated responses, so count stays 84.
 # 2026-08-20 / p007_unblock_f0071: simulator metrics/bottlenecks declare 503 in the

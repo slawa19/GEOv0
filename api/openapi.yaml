@@ -462,8 +462,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: '#/components/schemas/AdminParticipantStatusChange'
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
@@ -493,8 +492,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: '#/components/schemas/AdminParticipantStatusChange'
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
@@ -3839,6 +3837,23 @@ components:
       properties:
         reason:
           type: string
+
+    AdminParticipantStatusChange:
+      # 011/T1102. What `_set_participant_status` really emits (app/api/v1/admin.py:859,
+      # returned unchanged at :876): exactly two keys, both always present, both non-null.
+      # All four callers share this shape and differ only in the status literal they write -
+      # freeze -> suspended (:892), unfreeze -> active (:912), ban -> deleted (:929),
+      # unban -> active (:946). The pre-existing AdminParticipantStatusResponse cannot be
+      # reused for ban: it permits only active|suspended, and ban writes deleted.
+      type: object
+      additionalProperties: false
+      required: [pid, status]
+      properties:
+        pid:
+          type: string
+        status:
+          type: string
+          enum: [active, suspended, deleted]
 
     AdminParticipantStatusResponse:
       type: object

@@ -23,6 +23,7 @@ from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.db.models.transaction import Transaction
 from app.schemas.admin import (
+    AdminParticipantStatusChange,
     AdminAuditLogItem,
     AdminAuditLogListResponse,
     AdminAbortTxRequest,
@@ -916,7 +917,10 @@ async def unfreeze_participant(
     )
 
 
-@router.post("/participants/{pid}/ban")
+@router.post(
+    "/participants/{pid}/ban",
+    responses={200: {"model": AdminParticipantStatusChange}},
+)
 async def ban_participant(
     pid: str,
     body: AdminParticipantActionRequest,
@@ -933,7 +937,10 @@ async def ban_participant(
     )
 
 
-@router.post("/participants/{pid}/unban")
+@router.post(
+    "/participants/{pid}/unban",
+    responses={200: {"model": AdminParticipantStatusChange}},
+)
 async def unban_participant(
     pid: str,
     body: AdminParticipantActionRequest,
