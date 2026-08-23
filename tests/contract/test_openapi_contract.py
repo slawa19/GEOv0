@@ -104,7 +104,7 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # Both sides moved together, so this entry still drifts only for the unrelated
 # pre-existing reasons, and the entry count stays 71.
 # 2026-08-23 / p011_t1102 (`F-011-1`): 71 -> 69. Ban and unban stop answering "some object" and
-# declare the two keys `_set_participant_status` really emits (`app/api/v1/admin.py:859`).
+# declare the two keys `_set_participant_status` really emits (`app/api/v1/admin.py:860`).
 #
 # The mechanism is worth stating, because the first attempt got it wrong: describing the CANON
 # alone does not remove an entry. Both operations were already in this dictionary, and stayed in
@@ -226,11 +226,18 @@ SUCCESS_SCHEMA_DRIFT_COUNT = 62
 #       across the whole surface and write into authority number one statuses the service never
 #       returns. Closing these needs a per-operation reading, not a rule.
 #   13  a generated-only 422 that is NOT reachable. FastAPI stamps 422 on any operation with any
-#       flat parameter, and on these the only parameter is an optional X-Admin-Token. Verified by
-#       execution: /admin/config, /admin/whoami and /admin/migrations answer 403 for a wrong token
-#       and 200 for a valid one, and no input produces 422. They are left in place deliberately -
-#       the canon must not copy them, and suppressing them from the generated document is a
-#       separate decision about what the application publishes.
+#       flat parameter at all, and on these every parameter is string-like - nothing to coerce and
+#       nothing that can be missing. The first version of this note said "the only parameter is an
+#       optional X-Admin-Token"; that is true of nine and wrong about four, found by T1108.
+#       GET /payments/{tx_id} has no admin header at all, only a required `str` path parameter;
+#       /integrity/checksum/{equivalent} and /admin/equivalents/{code}/usage add a `str` path
+#       parameter to the header; /admin/graph/snapshot adds two optional `str | None` query
+#       parameters. The operative property is string-likeness - which is exactly the S1 exemption
+#       the guard already implements - not the optionality of one header. Verified by execution on
+#       /admin/config, /admin/whoami and /admin/migrations (403 for a wrong token, 200 for a valid
+#       one, no input yielding 422) and by dumping `get_flat_params` for all thirteen. They are
+#       left in place deliberately - the canon must not copy them, and suppressing them from the
+#       generated document is a separate decision about what the application publishes.
 #
 # Three response components were added rather than bodies invented at 136 sites: Forbidden,
 # UnprocessableEntity, and SimulatorIdentityUnprocessable. The last exists because ten simulator
@@ -326,7 +333,19 @@ def _normalize_schema(
             if parameter:
                 return normalized
             if isinstance(normalized, dict):
-                return _drop_inert_nullable({**normalized, "nullable": True})
+                if "type" in normalized:
+                    return {**normalized, "nullable": True}
+                if any(key in normalized for key in ("oneOf", "anyOf", "allOf")):
+                    # 011/T1108: `nullable` beside a composition asserts nothing, so dropping it
+                    # here would silently erase the nullability the `anyOf` carried - a canon that
+                    # declares a composed field non-nullable would then compare EQUAL to a model
+                    # that declares it Optional, which is the F-011-10 defect made invisible to
+                    # the gate. State the null explicitly instead of losing it. No site reaches
+                    # this branch today; it is here so that the first one to do so is measured
+                    # rather than absorbed.
+                    return {"oneOf": [normalized, {"enum": [None]}]}
+                # A typeless, uncomposed schema already admits null, so there is nothing to keep.
+                return normalized
 
     normalized: dict[str, Any] = {}
     for key, item in value.items():
@@ -1375,6 +1394,28 @@ def test_the_normalizer_drops_only_the_nullable_that_says_nothing() -> None:
     assert _normalize_schema({"type": "string"}, document) != _normalize_schema(
         {"type": "string", "nullable": True}, document
     )
+
+    # The risky path is the one the first version of this test did not exercise: the `anyOf`
+    # collapse, where the normalizer SYNTHESISES the nullability rather than reading it. If the
+    # collapsed branch has no type of its own, dropping the keyword there would erase the fact
+    # that the field can be null, and a canon declaring it non-nullable would compare equal to a
+    # model declaring it Optional - `F-011-10` made invisible to the gate. Found by T1108.
+    composed_nullable = _normalize_schema(
+        {"anyOf": [{"oneOf": [{"type": "string"}, {"type": "integer"}]}, {"type": "null"}]},
+        document,
+    )
+    composed_plain = _normalize_schema(
+        {"oneOf": [{"type": "string"}, {"type": "integer"}]}, document
+    )
+    assert composed_nullable != composed_plain, (
+        "a composed field that can be null must not normalize to the same thing as one that "
+        "cannot"
+    )
+    assert {"enum": [None]} in composed_nullable["oneOf"]
+
+    # But a typeless, uncomposed schema already admits null, so nothing is added there - this is
+    # what keeps the two `Optional[Any]` request bodies matching instead of drifting forever.
+    assert _normalize_schema({"anyOf": [{}, {"type": "null"}]}, document) == {}
 
 
 def test_openapi_success_error_responses_and_security_are_ratcheted() -> None:

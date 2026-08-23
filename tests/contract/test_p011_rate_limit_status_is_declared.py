@@ -20,6 +20,7 @@ expectation cannot drift out of step with how the routers are mounted.
 from __future__ import annotations
 
 import os
+import re
 
 import pytest
 import yaml
@@ -38,9 +39,21 @@ def _reset_rate_limit_counters() -> None:
     deps._rate_limit_counters.clear()
 
 
+def _schema_path(path: str) -> str:
+    """Drop the Starlette converter, so `/participants/{pid:path}` matches the canon's key.
+
+    011/T1108: without this the one operation declared with a `:path` converter never matched a
+    canonical key, and the lookup below skipped it silently - a guard that claimed 96 operations
+    and could not see one of them. The newer general status guard already normalised this; this
+    file did not, because it was written first.
+    """
+
+    return re.sub(r":[^{}]+\}", "}", path)
+
+
 def _rate_limited_operations() -> set[tuple[str, str]]:
     return {
-        (method, route.path)
+        (method, _schema_path(route.path))
         for route in app.routes
         if isinstance(route, APIRoute)
         if any(
@@ -106,12 +119,39 @@ def test_every_rate_limited_operation_declares_429() -> None:
     canonical = _canonical_operations()
     reachable = _rate_limited_operations()
 
+    # Anti-vacuum: an operation the limiter answers for and the canon does not document at all is
+    # a hole, not a pass. The previous version reached the canon through `if key in canonical`,
+    # which turned every such operation into silence - and one really was being skipped.
+    missing = sorted(key for key in reachable if key not in canonical)
+    assert not missing, (
+        f"{len(missing)} rate-limited operations are absent from api/openapi.yaml entirely, so "
+        f"this guard would have skipped them rather than checking them: {missing}"
+    )
+
     undeclared = sorted(
-        key for key in reachable if key in canonical and "429" not in (
-            canonical[key].get("responses") or {}
-        )
+        key for key in reachable if "429" not in (canonical[key].get("responses") or {})
     )
     assert not undeclared, (
         f"{len(undeclared)} operations can answer 429 but do not declare it: {undeclared[:10]}"
         + (" ..." if len(undeclared) > 10 else "")
     )
+
+
+def test_the_path_converter_does_not_hide_an_operation() -> None:
+    """Guard the guard: the normalisation above is the whole reason one operation is visible.
+
+    `GET /participants/{pid}` is declared in the application as `{pid:path}`. Before T1108 the
+    lookup compared the raw Starlette path against the canon key, never matched, and dropped the
+    operation. The two assertions below are the before and after of that bug.
+    """
+
+    assert _schema_path("/api/v1/participants/{pid:path}") == "/api/v1/participants/{pid}"
+    assert _schema_path("/api/v1/admin/participants/{pid}/ban") == (
+        "/api/v1/admin/participants/{pid}/ban"
+    ), "a path with no converter must pass through untouched"
+
+    reachable = _rate_limited_operations()
+    assert ("GET", "/api/v1/participants/{pid}") in reachable, (
+        "the converter-declared operation must be in the measured set, not silently absent"
+    )
+    assert ("GET", "/api/v1/participants/{pid}") in _canonical_operations()

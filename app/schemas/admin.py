@@ -62,7 +62,7 @@ class AdminParticipantStatusResponse(BaseModel):
 
 
 class AdminParticipantStatusChange(BaseModel):
-    """What `_set_participant_status` actually returns (`app/api/v1/admin.py:859`).
+    """What `_set_participant_status` actually returns (`app/api/v1/admin.py:860`).
 
     011/T1102. Used for DOCUMENTATION ONLY, via `responses={200: {"model": ...}}`, never as
     `response_model=`. That distinction is load-bearing: `responses` describes, while
@@ -70,7 +70,7 @@ class AdminParticipantStatusChange(BaseModel):
     is a wire change and forbidden by this program. The handler returns a plain dict.
 
     `AdminParticipantStatusResponse` above cannot serve here - it permits only
-    `active|suspended`, and `ban` writes `deleted` (`app/api/v1/admin.py:929`).
+    `active|suspended`, and `ban` writes `deleted` (`app/api/v1/admin.py:933`).
     """
 
     pid: str

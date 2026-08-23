@@ -39,8 +39,10 @@ by counter-checks in this file.
     constraints: `page: int = Query(1, ge=1)` yields `422` twice over, on a bad parse and on
     `ge`. Requiring `required` alone would have missed 24 operations.
   - FastAPI's own condition - *any* flat parameter implies `422` - is deliberately **not** used.
-    It over-declares on 13 operations whose only flat parameter is the optional `X-Admin-Token`
-    header, which is this programme's defect facing the other way.
+    It over-declares on 13 operations whose flat parameters are all string-like - nine of them
+    carrying only the optional `X-Admin-Token`, the other four a `str` path or `str | None` query
+    parameter besides, or instead of, the header. Declaring a status the service cannot return
+    is this programme's defect facing the other way.
 
 * **S1b - on a simulator action route the same validation answers `400`.**
   `request_validation_exception_handler` returns the flat `SimulatorActionError` envelope with
@@ -362,8 +364,12 @@ def _measure() -> tuple[set[tuple[str, str]], set[tuple[str, str]]]:
 #
 # What the closure deliberately did NOT do, because it would have written falsehoods into
 # authority number one: `app.openapi()` declares `422` on 13 operations where it is unreachable
-# (FastAPI stamps it on any operation with any flat parameter, and on those the only parameter
-# is the optional `X-Admin-Token`). Copying the generated document into the canon would have
+# (FastAPI stamps it on any operation with any flat parameter, and on those every parameter is
+# string-like - nothing to coerce and nothing that can be missing. An earlier wording here said
+# "the only parameter is the optional X-Admin-Token"; T1108 measured it and that is true of nine
+# of the thirteen: `GET /payments/{tx_id}` has no admin header at all, and three others add a
+# `str` path or `str | None` query parameter.) Copying the generated document into the canon would
+# have
 # closed this list and made the canon wrong. Those 13 remain a generated-side over-declaration
 # and a named cause in `ERROR_RESPONSE_DRIFT`; this guard is one-directional and cannot see
 # them, which is the same property that protects `GET /admin/health/db` below.

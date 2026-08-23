@@ -102,7 +102,8 @@ ACCEPTED_FREE_FORM: dict[tuple[str, str], str] = {
         "(app/core/participants/service.py:65 and :175-178) and no validator constrains it"
     ),
     ("Equivalent", "metadata"): (
-        "admin-supplied JSON stored verbatim (app/api/v1/admin.py:1150, :1236). A validator exists "
+        "admin-supplied JSON stored verbatim (app/api/v1/admin.py:1157 on create, :1243 on patch; "
+        "the anchors first written here pointed four and seven lines short). A validator exists "
         "- validate_equivalent_metadata - but is called only from scripts/seed_db.py and tests, "
         "never from app/, so the API path accepts any object"
     ),
@@ -121,8 +122,11 @@ ACCEPTED_FREE_FORM: dict[tuple[str, str], str] = {
     ),
     ("PaymentError", "details"): (
         "documented variants plus a deliberately open tail: both abort paths forward the "
-        ".details of whatever 4xx GeoException prepare or commit raised "
-        "(app/core/payments/service.py:896-903), so a new details= anywhere under "
+        ".details of whatever 4xx GeoException prepare or commit raised. The prepare path "
+        "classifies at app/core/payments/service.py:898-903 and writes at :922 and :938; the "
+        "commit path forwards at :1001, :1017, :1067 and :1083. The single 896-903 anchor first "
+        "written here covered one branch of the two and started mid-expression. So a new details= "
+        "anywhere under "
         "app/core/payments/ changes this node with no schema change. The known shapes are "
         "described in the canon; the tail cannot be closed without making a real response "
         "non-conforming"
