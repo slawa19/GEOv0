@@ -142,6 +142,15 @@ class SimulatorTxUpdatedEvent(BaseModel):
     edges: Optional[List[SimulatorTxUpdatedEventEdge]] = None
     node_badges: Optional[List[SimulatorTxUpdatedNodeBadge]] = None
 
+    # Optional patches to update the graph without a full snapshot refresh.
+    # Declared here so the emitter no longer appends keys the model does not know
+    # (011/T1104, `F-011-5`). Item shape stays `Dict[str, Any]` — the same choice
+    # `SimulatorClearingDoneEvent` already makes below — because typing the items
+    # would make `model_dump` materialize every optional patch key as an explicit
+    # null inside each item, which changes the wire that consumers already read.
+    node_patch: Optional[List[Dict[str, Any]]] = None
+    edge_patch: Optional[List[Dict[str, Any]]] = None
+
     @model_validator(mode="after")
     def _validate_amount_flyout_contract(self) -> "SimulatorTxUpdatedEvent":
         if self.amount_flyout is True:
