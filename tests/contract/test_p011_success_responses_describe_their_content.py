@@ -43,9 +43,10 @@ _HTTP_METHODS = {"get", "post", "put", "patch", "delete"}
 # 2026-08-23: `GET /admin/health/db` added (34 -> 35). It was never described - it declares
 # `schema: {}` - but the predicate could not see an empty schema until external review
 # pointed at the hole. The list grew because the guard got sharper, not the canon worse.
+# 2026-08-23 / T1102: the five operations the application already described, and the canon
+# did not, are struck off (35 -> 30).
 UNDESCRIBED_SUCCESS_RESPONSES = {
     ("GET", "/admin/audit-log"),
-    ("GET", "/admin/clearing/cycles"),
     ("GET", "/admin/equivalents"),
     ("POST", "/admin/equivalents"),
     ("PATCH", "/admin/equivalents/{code}"),
@@ -53,10 +54,7 @@ UNDESCRIBED_SUCCESS_RESPONSES = {
     ("GET", "/admin/graph/snapshot"),
     # Found only after the predicate learned that `{}` describes nothing (2026-08-23).
     ("GET", "/admin/health/db"),
-    ("GET", "/admin/incidents"),
     ("GET", "/admin/liquidity/summary"),
-    ("GET", "/admin/participants"),
-    ("GET", "/admin/participants/stats"),
     ("GET", "/admin/participants/{pid}/metrics"),
     ("GET", "/admin/trustlines"),
     ("GET", "/admin/trustlines/bottlenecks"),
@@ -75,7 +73,6 @@ UNDESCRIBED_SUCCESS_RESPONSES = {
     ("POST", "/payments"),
     ("GET", "/payments/{tx_id}"),
     ("GET", "/simulator/events/poll"),
-    ("GET", "/simulator/runs/active"),
     ("GET", "/trustlines"),
     ("POST", "/trustlines"),
     ("GET", "/trustlines/{id}"),

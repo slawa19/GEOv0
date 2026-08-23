@@ -101,10 +101,15 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # fields, which is a wire change and forbidden here. Verified in isolation on this FastAPI
 # version: with `responses=` a key absent from the model still reaches the client, with
 # `response_model=` it is silently dropped.
+# 2026-08-23 / p011_t1102, slice 2: 69 -> 64. The five operations whose bodies the application
+# already described and the canon did not - clearing/cycles, incidents, participants,
+# participants/stats, runs/active. Transcribed into the canon by hand, in the style of that
+# document; generating it from `app.openapi()` is forbidden by this program's own Non-goals and
+# was tried and thrown away earlier in the same session.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "daf649bad1a0c89e7742cad1883bf6baed72dca8eb173259fb8d8d7391497466"
+    "0c3013dbbeab6f3ac6e96315c1f968118d9ca852966f7868277d2ef19d7313cd"
 )
-SUCCESS_SCHEMA_DRIFT_COUNT = 69
+SUCCESS_SCHEMA_DRIFT_COUNT = 64
 # 2026-08-11 / T501: public DB health no longer declares exception details;
 # the new admin diagnostic operation matches generated responses, so count stays 84.
 # 2026-08-20 / p007_unblock_f0071: simulator metrics/bottlenecks declare 503 in the
