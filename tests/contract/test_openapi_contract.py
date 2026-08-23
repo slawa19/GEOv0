@@ -166,8 +166,13 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 #                with `details: null` was INVALID against the canon before and is VALID after.
 #   * `F-011-9`  the graph reads stop reusing AdminIncidentItem, whose `format: date-time` the
 #                graph path does not honour, and get AdminGraphIncidentItem instead.
+# 2026-08-23 / p011_t1102, slice 10: count holds at 62, digest moves. GET /integrity/audit-log was
+# the last operation on the undescribed list, and describing it does not clear it from here: its
+# three opaque leaves sit inside IntegrityAuditLogAfterState, whose pydantic side is
+# Dict[str, Any], so the canon is now more precise than the generated schema rather than equal to
+# it. Same reason slices 4 and 5 held their count.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "5f206a1fc946f14d5bf510595caf9e717aa47c1c94c934f043d39afa79338fc1"
+    "c9f7883a212a84eb8e3350e5692a8739fa99e0d3ed681457bb13e123b2349e00"
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 62
 # 2026-08-11 / T501: public DB health no longer declares exception details;

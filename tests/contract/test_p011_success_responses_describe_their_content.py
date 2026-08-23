@@ -69,9 +69,16 @@ _HTTP_METHODS = {"get", "post", "put", "patch", "delete"}
 # `return []`, so both sides now declare an array capped at zero items. The owner's decision,
 # delegated to external review; the canon's previous promise of six event variants was the
 # opposite defect to the rest of this programme.
-UNDESCRIBED_SUCCESS_RESPONSES = {
-    ("GET", "/integrity/audit-log"),
-}
+# 2026-08-23 / T1102: GET /integrity/audit-log struck off, and the list is EMPTY (1 -> 0).
+# Its three opaque leaves were all inside the after_state the canon already named -
+# affected_participants, invariants_checked and error_details - and none of them turned out to be
+# free form: seven writers in app/ build all three from literals, so nothing here went into
+# ACCEPTED_FREE_FORM.
+#
+# The list is empty, so this file stops being a shrinking ledger and becomes an absolute rule:
+# no 2xx response in api/openapi.yaml may answer "some object". Every deliberately open node is
+# named in ACCEPTED_FREE_FORM above, with the reason, and checked to still be open.
+UNDESCRIBED_SUCCESS_RESPONSES: set[tuple[str, str]] = set()
 
 
 def _canon() -> dict[str, Any]:

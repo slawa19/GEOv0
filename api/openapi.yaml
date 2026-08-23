@@ -5468,24 +5468,31 @@ components:
           type: string
           pattern: '^([0-9a-f]{64})?$'
         affected_participants:
-          # Shape chosen by the writer, keyed off operation_type: {from, to} for TRUST_LINE_CREATE,
-          # plus trustline_id for UPDATE/CLOSE, {participants} for PAYMENT, {participants, edges}
-          # for CLEARING, {drifts, tick_index, source} for SIMULATOR_AUDIT_DRIFT, and {} for
-          # INTEGRITY_VERIFY, which audits an equivalent rather than a set of participants.
-          type: object
-          additionalProperties: true
+          $ref: '#/components/schemas/IntegrityAuditLogAffectedParticipants'
         invariants_checked:
-          # Usually the `checks` node above; INTEGRITY_VERIFY stores dumped InvariantResult
-          # objects instead, and SIMULATOR_AUDIT_DRIFT a fourth vocabulary entirely.
-          type: object
-          additionalProperties: true
+          $ref: '#/components/schemas/IntegrityAuditLogInvariantsChecked'
         verification_passed:
           type: boolean
         error_details:
-          # Null exactly when verification_passed is true.
-          type: object
-          nullable: true
-          additionalProperties: true
+          # Null exactly when verification_passed is true - with one exception:
+          # SIMULATOR_AUDIT_DRIFT hard-codes verification_passed false and always writes a body.
+          #
+          # A `oneOf` is safe here where it was not for affected_participants, because the four
+          # branches are told apart by their required keys alone; none of them has to forbid
+          # additional keys, so an unexpected key on an old row still conforms.
+          oneOf:
+            # The five checkpoint writers store the whole `invariants_status` object.
+            - $ref: '#/components/schemas/IntegrityInvariantsStatus'
+            - $ref: '#/components/schemas/IntegrityAuditLogVerifyError'
+            - $ref: '#/components/schemas/IntegrityAuditLogDriftError'
+            # Two real values in one branch: `null` on every passing row, and the empty object
+            # that CLEARING stores when its after-checkpoint was swallowed (invariants_status is
+            # `{}`, so `passed` is false and `{}` itself is written). `nullable` sits here rather
+            # than beside the `oneOf` because in OpenAPI 3.0 it only widens `type` - see the note
+            # on IntegrityAuditLogCheckResult.details.
+            - type: object
+              nullable: true
+              additionalProperties: false
 
     InvariantViolationDetails:
       # The payload IntegrityViolationException carries (app/core/invariants.py).
@@ -5724,23 +5731,56 @@ components:
       additionalProperties: false
 
     IntegrityAuditLogItem:
+      # A projection of `integrity_audit_log`, NOT of `audit_log`: a different table, and six
+      # keys against AdminAuditLogItem's thirteen. There is no `id`, no `actor_role`, no
+      # `reason`, no `before_state`, no `request_id`, no `ip_address` and no `user_agent`, and
+      # `after_state` here is a synthesised nine-key object rather than a stored snapshot - which
+      # is why AdminAuditLogItem.after_state is in ACCEPTED_FREE_FORM and this one is not.
+      # The two schemas must not be merged.
+      #
+      # All six keys are always on the wire: the handler assigns every field
+      # (app/api/v1/integrity.py:497-516) and the route sets no response_model_exclude_none.
       type: object
-      required: [timestamp, action]
+      required: [timestamp, actor_id, action, object_type, object_id, after_state]
       properties:
         timestamp:
+          # The one timestamp in this body that pydantic renders: the validator at
+          # app/schemas/integrity.py:95-98 attaches UTC to the naive column value, so it goes out
+          # as `...T12:00:00Z`. Every other instant in the same body - error_details.checked_at
+          # and error_details.computed_at - is a string frozen by `.isoformat()` at write time
+          # and ends in `+00:00`. Both are valid RFC 3339; one body, two spellings.
           type: string
           format: date-time
         actor_id:
+          # Always null. The handler hard-codes `actor_id=None`
+          # (app/api/v1/integrity.py:500) - the integrity trail records no actor, and the column
+          # it would come from does not exist on integrity_audit_log. Contrast
+          # AdminAuditLogItem.actor_id, which is a real column.
           type: string
           nullable: true
         action:
+          # `f"integrity.{operation_type.lower()}"`, with INTEGRITY_VERIFY special-cased to
+          # `integrity.verify` (app/api/v1/integrity.py:492-496) - so `integrity.integrity_verify`
+          # is never emitted.
           type: string
+          enum:
+            - integrity.verify
+            - integrity.trust_line_create
+            - integrity.trust_line_update
+            - integrity.trust_line_close
+            - integrity.payment
+            - integrity.clearing
+            - integrity.simulator_audit_drift
         object_type:
+          # The literal the handler writes on every row. Optional on the model, never null on
+          # the wire.
           type: string
-          nullable: true
+          enum: [equivalent]
         object_id:
+          # `row.equivalent_code`, a NOT NULL column, so never null despite the Optional
+          # annotation. Same value and same caveat as after_state.equivalent: not
+          # EquivalentCode, because three writers can store a stringified UUID here.
           type: string
-          nullable: true
         after_state:
           $ref: '#/components/schemas/IntegrityAuditLogAfterState'
 
@@ -7315,3 +7355,238 @@ components:
               # absent entirely when `equivalent` was omitted, so it is not required.
               type: string
               nullable: true
+
+    IntegrityAuditLogClearingEdge:
+      # One entry per edge of the cleared cycle (app/core/clearing/service.py:1649-1656).
+      type: object
+      required: [debt_id, debtor, creditor, amount]
+      additionalProperties: false
+      properties:
+        debt_id:
+          # str(uuid) of the debt row, not a pid.
+          type: string
+        debtor:
+          # A pid, falling back to a stringified participant UUID when the pid lookup misses
+          # (`str(pid_by_id.get(debt.debtor_id, debt.debtor_id))`).
+          type: string
+        creditor:
+          type: string
+        amount:
+          # NOT this edge's own amount. `clear_amount` is the cycle-wide amount cleared on every
+          # edge and is loop-invariant, so every edge in one row carries the identical string.
+          # Money stays an exact decimal string (AGENTS.md section 8).
+          type: string
+
+    IntegrityAuditLogDriftItem:
+      # Built by audit_tick_balance (app/core/simulator/post_tick_audit.py:248-255) and copied
+      # verbatim into both affected_participants.drifts and error_details.drifts.
+      #
+      # Four keys, not five: this is NOT the drift item declared inline under
+      # PaymentError.details, which is built by the payment engine
+      # (app/core/payments/engine.py:1575-1586) and additionally carries `participant_uuid`.
+      # Two producers, two shapes, same field name - kept apart deliberately.
+      type: object
+      required: [participant_id, expected_delta, actual_delta, drift]
+      additionalProperties: false
+      properties:
+        participant_id:
+          # str(pid) - the post-tick auditor keys by pid and never emits the UUID.
+          type: string
+        expected_delta:
+          type: string
+        actual_delta:
+          type: string
+        drift:
+          # actual - expected, as an exact decimal string. Only participants whose |drift|
+          # exceeds 1e-8 are listed at all.
+          type: string
+
+    IntegrityAuditLogAffectedParticipants:
+      # Six writer shapes in one flat statement rather than a `oneOf`: this is a JSON column of a
+      # historical log, and a closed union would make an old row non-conforming. No key is
+      # required, because INTEGRITY_VERIFY writes `{}` (app/api/v1/integrity.py:272) - it audits
+      # an equivalent, not a set of participants.
+      #
+      #   TRUST_LINE_CREATE         {from, to}
+      #   TRUST_LINE_UPDATE/CLOSE   {from, to, trustline_id}
+      #   PAYMENT                   {participants}
+      #   CLEARING                  {participants, edges}
+      #   SIMULATOR_AUDIT_DRIFT     {drifts, tick_index, source}
+      #   INTEGRITY_VERIFY          {}
+      type: object
+      additionalProperties: true
+      properties:
+        from:
+          # Creditor side of the trust line. CREATE writes `from_participant.pid`; UPDATE and
+          # CLOSE write `str(from_pid or trustline.from_participant_id)`, so on those two a
+          # missing participant row degrades to a stringified UUID.
+          type: string
+        to:
+          type: string
+        trustline_id:
+          # str(uuid). TRUST_LINE_UPDATE and TRUST_LINE_CLOSE only - CREATE does not write it.
+          type: string
+        participants:
+          # PAYMENT: `sorted(participant_pids)`, the pids collected off the routed paths.
+          # CLEARING: the cycle's participants, each a pid or a stringified UUID fallback.
+          # Neither writer deduplicates further than the set it built from.
+          type: array
+          items:
+            type: string
+        edges:
+          # CLEARING only.
+          type: array
+          items:
+            $ref: '#/components/schemas/IntegrityAuditLogClearingEdge'
+        drifts:
+          # SIMULATOR_AUDIT_DRIFT only; the same list also lands in error_details.drifts.
+          type: array
+          items:
+            $ref: '#/components/schemas/IntegrityAuditLogDriftItem'
+        tick_index:
+          type: integer
+          minimum: 0
+        source:
+          # The single literal the orchestrator passes. The SSE audit.drift event admits
+          # `delta_check` as well; this writer does not.
+          type: string
+          enum: [post_tick_audit]
+
+    IntegrityAuditLogCheckResult:
+      # The value of one key of `invariants_checked`. Two producers write into the same slot:
+      #
+      # * the five checkpoint writers store `invariants_status["checks"]`
+      #   (app/core/integrity.py:79-114), whose entries are `{passed}` or
+      #   `{passed, violations, details}` - the `value` key never appears;
+      # * INTEGRITY_VERIFY stores `{k: v.model_dump() for k, v in invariants.items()}`
+      #   (app/api/v1/integrity.py:273), and a plain model_dump of InvariantResult has no
+      #   exclude_none, so ALL FOUR keys are present with explicit nulls.
+      #
+      # Only `passed` is common to both, so only `passed` is required. This is deliberately not
+      # a `$ref` to InvariantResult nor to IntegrityInvariantChecks: the checkpoint entries would
+      # fail InvariantResult's shape expectations and the verify dump is a different producer.
+      type: object
+      required: [passed]
+      additionalProperties: true
+      properties:
+        passed:
+          type: boolean
+        value:
+          # INTEGRITY_VERIFY only. The string "0" on the zero_sum pass path
+          # (app/api/v1/integrity.py:211), null everywhere else - including on every
+          # trust_limits and debt_symmetry entry.
+          type: string
+          nullable: true
+        violations:
+          # Absent on the checkpoint zero_sum entry (that check has no count to report, on either
+          # path); present and null on the INTEGRITY_VERIFY zero_sum entry.
+          type: integer
+          nullable: true
+          minimum: 0
+        details:
+          # Null when passed; otherwise the .details of the IntegrityViolationException, copied
+          # through unchanged by both producers - the same three variants the integrity endpoints
+          # return.
+          oneOf:
+            - $ref: '#/components/schemas/InvariantViolationDetails'
+            # NOT `nullable: true` beside the oneOf. In OpenAPI 3.0 `nullable` only widens
+            # `type`, so on a schema that declares no `type` it admits nothing - measured
+            # 2026-08-23 against openapi-schema-validator, where the pass-path `details: null`
+            # this endpoint really returns is rejected. The null needs a branch of its own.
+            - nullable: true
+              enum: [null]
+
+    IntegrityAuditLogPostTickBalance:
+      # SIMULATOR_AUDIT_DRIFT's own single-key vocabulary
+      # (app/core/simulator/real_tick_orchestrator.py:469-474). It shares no key name with the
+      # three protocol invariants.
+      type: object
+      required: [passed, total_drift]
+      additionalProperties: true
+      properties:
+        passed:
+          # Always false. The writer runs only on the `not audit.ok` branch, so a passing
+          # post-tick balance never produces a row at all.
+          type: boolean
+        total_drift:
+          # sum(|drift|) / 2 as an exact decimal string.
+          type: string
+
+    IntegrityAuditLogInvariantsChecked:
+      # A map from check name to outcome. Nothing is required: CLEARING writes `{}` whenever the
+      # after-checkpoint computation was swallowed (app/core/clearing/service.py:1726-1747,
+      # `invariants_status.get("checks") or invariants_status` over an empty dict), and
+      # SIMULATOR_AUDIT_DRIFT writes only `post_tick_balance`.
+      #
+      # The documented fallback to the whole `invariants_status` object is not reachable in
+      # practice: the sole writer of that column always sets a truthy three-key `checks`
+      # (app/core/integrity.py:117), so the `or` arm only ever yields `{}`.
+      type: object
+      additionalProperties: true
+      properties:
+        zero_sum:
+          $ref: '#/components/schemas/IntegrityAuditLogCheckResult'
+        trust_limits:
+          $ref: '#/components/schemas/IntegrityAuditLogCheckResult'
+        debt_symmetry:
+          $ref: '#/components/schemas/IntegrityAuditLogCheckResult'
+        post_tick_balance:
+          $ref: '#/components/schemas/IntegrityAuditLogPostTickBalance'
+
+    # REPLACEMENT of the existing InvariantResult. Only `details` changes, and only in the way
+    # described below: without it a real INTEGRITY_VERIFY row cannot conform, because every
+    # passing invariant in error_details.invariants carries `details: null`. The same one-line
+    # class is still open on IntegrityInvariantChecks.{zero_sum,trust_limits,debt_symmetry}
+    # .details, which this slice does not reach - see the programme note.
+
+    IntegrityAuditLogVerifyError:
+      # error_details as INTEGRITY_VERIFY writes it (app/api/v1/integrity.py:275-281).
+      type: object
+      required: [status, checked_at, invariants]
+      additionalProperties: true
+      properties:
+        status:
+          # `healthy` is impossible here: this object is written only on the `not passed` arm,
+          # and passed is `status == "healthy"`.
+          type: string
+          enum: [warning, critical]
+        checked_at:
+          # `_now().isoformat()` frozen into JSON at write time, so it ends in `+00:00` - unlike
+          # the sibling `timestamp` on the enclosing item, which pydantic renders with `Z`.
+          # See the note on IntegrityAuditLogItem.timestamp.
+          type: string
+          format: date-time
+        invariants:
+          # Always all three: the verify loop assigns every key on both its pass and its fail
+          # path (app/api/v1/integrity.py:205-245). These really are InvariantResult dumps, so
+          # the existing component is reused here rather than IntegrityAuditLogCheckResult.
+          type: object
+          required: [zero_sum, trust_limits, debt_symmetry]
+          additionalProperties:
+            $ref: '#/components/schemas/InvariantResult'
+          properties:
+            zero_sum:
+              $ref: '#/components/schemas/InvariantResult'
+            trust_limits:
+              $ref: '#/components/schemas/InvariantResult'
+            debt_symmetry:
+              $ref: '#/components/schemas/InvariantResult'
+
+    IntegrityAuditLogDriftError:
+      # error_details as SIMULATOR_AUDIT_DRIFT writes it
+      # (app/core/simulator/real_tick_orchestrator.py:476-479).
+      type: object
+      required: [drifts, severity]
+      additionalProperties: true
+      properties:
+        drifts:
+          # The same list as affected_participants.drifts on the same row - stored twice.
+          type: array
+          items:
+            $ref: '#/components/schemas/IntegrityAuditLogDriftItem'
+        severity:
+          # `warning` when total_drift is under 1% of the tick volume, `critical` otherwise and
+          # whenever the ratio cannot be computed (app/core/simulator/real_tick_orchestrator.py
+          # :413-421).
+          type: string
+          enum: [warning, critical]
