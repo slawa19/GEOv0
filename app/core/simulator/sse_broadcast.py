@@ -613,14 +613,20 @@ class SseEventEmitter:
                     evt_kwargs["amount"] = str(amount)
                 if intensity_key is not None:
                     evt_kwargs["intensity_key"] = str(intensity_key)
-                evt = SimulatorTxUpdatedEvent(**evt_kwargs).model_dump(
-                    mode="json", by_alias=True
+                # The model declares both patch fields (011/T1104), so they go through
+                # the constructor instead of being appended to the dumped dict. They are
+                # excluded from the dump when absent because the wire never carried them
+                # as explicit nulls, and this program does not change wire shapes.
+                evt_kwargs["edge_patch"] = edge_patch or None
+                evt_kwargs["node_patch"] = node_patch or None
+                absent = {
+                    key
+                    for key in ("edge_patch", "node_patch")
+                    if evt_kwargs[key] is None
+                }
+                return SimulatorTxUpdatedEvent(**evt_kwargs).model_dump(
+                    mode="json", by_alias=True, exclude=absent or None
                 )
-                if edge_patch:
-                    evt["edge_patch"] = edge_patch
-                if node_patch:
-                    evt["node_patch"] = node_patch
-                return evt
 
             return self._publish(run_id=run_id, run=run, payload_factory=build)
         except Exception:
