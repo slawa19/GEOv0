@@ -37,6 +37,12 @@ _HTTP_METHODS = {"get", "post", "put", "patch", "delete"}
 
 # Measured 2026-08-23 with the predicate below. This list may only shrink: every entry is an
 # operation whose 2xx body the canon does not describe, and `T1102` exists to empty it.
+#
+# 2026-08-23 / T1102: ban and unban struck off (36 -> 34) - the canon now states the two keys
+# `_set_participant_status` really emits, rather than `additionalProperties: true`.
+# 2026-08-23: `GET /admin/health/db` added (34 -> 35). It was never described - it declares
+# `schema: {}` - but the predicate could not see an empty schema until external review
+# pointed at the hole. The list grew because the guard got sharper, not the canon worse.
 UNDESCRIBED_SUCCESS_RESPONSES = {
     ("GET", "/admin/audit-log"),
     ("GET", "/admin/clearing/cycles"),
@@ -45,13 +51,13 @@ UNDESCRIBED_SUCCESS_RESPONSES = {
     ("PATCH", "/admin/equivalents/{code}"),
     ("GET", "/admin/graph/ego"),
     ("GET", "/admin/graph/snapshot"),
+    # Found only after the predicate learned that `{}` describes nothing (2026-08-23).
+    ("GET", "/admin/health/db"),
     ("GET", "/admin/incidents"),
     ("GET", "/admin/liquidity/summary"),
     ("GET", "/admin/participants"),
     ("GET", "/admin/participants/stats"),
-    ("POST", "/admin/participants/{pid}/ban"),
     ("GET", "/admin/participants/{pid}/metrics"),
-    ("POST", "/admin/participants/{pid}/unban"),
     ("GET", "/admin/trustlines"),
     ("GET", "/admin/trustlines/bottlenecks"),
     ("GET", "/equivalents"),
@@ -101,6 +107,15 @@ def is_undescribed(schema: Any, document: dict, seen: frozenset = frozenset()) -
     if not isinstance(schema, dict):
         return False
 
+    # An empty schema is the emptiest description there is, and the first version of this
+    # predicate let it through: the object branch below only opens on `type`/`properties`/
+    # `additionalProperties`, none of which `{}` has. External review found the hole
+    # (2026-08-23) and `GET /admin/health/db` was already sitting in it, declaring `schema: {}`
+    # and passing this guard. A guard blind to the emptiest case is the anti-vacuum defect
+    # AGENTS.md section 9 warns about.
+    if not schema:
+        return True
+
     for keyword in ("allOf", "oneOf", "anyOf"):
         for branch in schema.get(keyword) or []:
             if is_undescribed(branch, document, seen):
@@ -138,10 +153,19 @@ def _measure() -> set[tuple[str, str]]:
             for status, response in (operation.get("responses") or {}).items():
                 if not str(status).startswith("2"):
                     continue
-                for media in (response.get("content") or {}).values():
-                    if media.get("schema") is None:
-                        continue
-                    if is_undescribed(media["schema"], document):
+                content = response.get("content") or {}
+                if not content:
+                    # 204/205/304 carry no body by definition; any other 2xx that declares no
+                    # content is undescribed, not exempt. Skipping these silently was the second
+                    # half of the same hole.
+                    if str(status) not in {"204", "205", "304"}:
+                        found.add((method.upper(), path))
+                    continue
+                for media in content.values():
+                    # A media type with no `schema` key describes nothing either. Checked here
+                    # rather than inside the predicate, which answers about a schema and is
+                    # legitimately False for a non-dict.
+                    if "schema" not in media or is_undescribed(media["schema"], document):
                         found.add((method.upper(), path))
     return found
 
