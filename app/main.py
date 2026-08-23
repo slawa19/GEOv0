@@ -790,11 +790,30 @@ def _declare_auth_statuses(document: dict) -> None:
 
     `tests/contract/test_p011_reachable_statuses_are_declared.py` re-derives this set
     independently from the same route table and fails if the two ever disagree.
+
+    **The body of a `401` is not always the envelope** (011/T1109). A security scheme runs inside
+    FastAPI's dependency solver, before any application code and therefore before the exception
+    handlers that produce `ErrorEnvelope`. `deps.reusable_oauth2` is
+    `OAuth2PasswordBearer(auto_error=True)`, so on the operations that depend on it a request with
+    no `Authorization` header - or one whose scheme is not `Bearer` - is refused by the scheme
+    itself with FastAPI's own flat `{"detail": "Not authenticated"}`, and
+    `get_current_participant` never runs. Only a request that *does* carry a `Bearer` token
+    reaches it and gets the envelope. Both halves were measured on all 20 of those operations,
+    and declaring only the envelope made this document reject the commonest `401` the service
+    sends. So those operations declare the union, and every other `401` here keeps the plain
+    envelope: the scheme on the simulator and integrity surfaces is `auto_error=False`, returns
+    `None`, and every `401` there comes from application code.
+
+    That set is derived like the others - any `SecurityBase` in the closure whose `auto_error` is
+    true, not a list of paths and not a name-check on `reusable_oauth2`. `api/openapi.yaml` states
+    the same union at `components/responses/UnauthorizedBearer`, so the two documents converge on
+    it instead of drifting apart.
     """
 
     import re
 
     from fastapi.routing import APIRoute
+    from fastapi.security.base import SecurityBase
 
     from app.api import deps
 
@@ -836,13 +855,53 @@ def _declare_auth_statuses(document: dict) -> None:
             },
         }
 
+    def envelope_or_detail(description: str) -> dict:
+        # The union `api/openapi.yaml` spells at `components/responses/UnauthorizedBearer`. The
+        # generated document has no `components/responses`, so it is stated inline here; the
+        # contract gate resolves `$ref`s before comparing, and the two sides normalize equal.
+        return {
+            "description": description,
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "oneOf": [
+                            {"$ref": "#/components/schemas/ErrorEnvelope"},
+                            {
+                                "type": "object",
+                                "required": ["detail"],
+                                "properties": {"detail": {"type": "string"}},
+                            },
+                        ]
+                    }
+                }
+            },
+        }
+
+    def scheme_answers_first(calls: set) -> bool:
+        # An `auto_error=True` security scheme raises FastAPI's own `HTTPException` from inside
+        # the solver, so its body is the flat `{"detail": ...}` rather than an `ErrorEnvelope`.
+        return any(
+            isinstance(call, SecurityBase) and getattr(call, "auto_error", False)
+            for call in calls
+        )
+
     reachable: dict[str, dict[str, set[str]]] = {}
+    # The subset of the `401` operations whose flat shape is reachable. Kept apart from
+    # `reachable` rather than folded into it as a pseudo-status, so that the reachability rule
+    # above stays a statement about statuses and this stays a statement about bodies.
+    flat_401: dict[str, set[str]] = {}
     for route in app.routes:
         if not isinstance(route, APIRoute):
             continue
         calls = dependency_closure(route.dependant)
+        hard_scheme = scheme_answers_first(calls)
         statuses = set()
         if calls & authentication:
+            statuses.add("401")
+        if hard_scheme:
+            # The scheme can answer `401` on its own, whatever the dependency behind it does.
+            # Measured as a no-op today - all 20 such routes also depend on
+            # `get_current_participant` - but the rule is about the scheme, not about them.
             statuses.add("401")
         if calls & authorisation:
             statuses.add("403")
@@ -851,6 +910,10 @@ def _declare_auth_statuses(document: dict) -> None:
         by_method = reachable.setdefault(schema_path(route.path), {})
         for method in route.methods:
             by_method.setdefault(method.lower(), set()).update(statuses)
+        if hard_scheme:
+            flat_401.setdefault(schema_path(route.path), set()).update(
+                method.lower() for method in route.methods
+            )
 
     for path, path_item in (document.get("paths") or {}).items():
         by_method = reachable.get(path)
@@ -869,7 +932,20 @@ def _declare_auth_statuses(document: dict) -> None:
             # result. Overwriting that with the plain envelope below would delete a true statement
             # from the published schema.
             if "401" in statuses:
-                responses.setdefault("401", envelope("Unauthorized"))
+                if method in flat_401.get(path, ()):
+                    responses.setdefault(
+                        "401",
+                        envelope_or_detail(
+                            "No usable bearer credential. Two shapes are reachable: a missing "
+                            "Authorization header, or one carrying a scheme other than Bearer, "
+                            "is refused by the security scheme itself with the flat "
+                            '{"detail": "Not authenticated"}; a Bearer token that is present '
+                            "but rejected reaches get_current_participant and is answered with "
+                            "ErrorEnvelope (E006)."
+                        ),
+                    )
+                else:
+                    responses.setdefault("401", envelope("Unauthorized"))
             if "403" in statuses:
                 responses.setdefault(
                     "403",

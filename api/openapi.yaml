@@ -2150,7 +2150,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/EquivalentsList'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/UnauthorizedBearer'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '403':
@@ -2280,7 +2280,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ParticipantsList'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/UnauthorizedBearer'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '403':
@@ -2357,7 +2357,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ParticipantsList'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/UnauthorizedBearer'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '403':
@@ -2377,7 +2377,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ParticipantWithStats'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/UnauthorizedBearer'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '403':
@@ -2402,7 +2402,7 @@ paths:
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/UnauthorizedBearer'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '403':
@@ -2426,7 +2426,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/UnauthorizedBearer'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '403':
@@ -2473,7 +2473,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/TrustLinesList'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/UnauthorizedBearer'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '403':
@@ -2500,7 +2500,7 @@ paths:
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/UnauthorizedBearer'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '403':
@@ -2522,7 +2522,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/TrustLine'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/UnauthorizedBearer'
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
@@ -2553,7 +2553,7 @@ paths:
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/UnauthorizedBearer'
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
@@ -2589,7 +2589,7 @@ paths:
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/UnauthorizedBearer'
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
@@ -2625,7 +2625,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ClearingCyclesResponse'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/UnauthorizedBearer'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '403':
@@ -2659,7 +2659,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ClearingAutoResponse'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/UnauthorizedBearer'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '403':
@@ -2698,7 +2698,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/CapacityResponse'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/UnauthorizedBearer'
         '400':
           $ref: '#/components/responses/BadRequest'
         '429':
@@ -2732,7 +2732,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/MaxFlowResponse'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/UnauthorizedBearer'
         '400':
           $ref: '#/components/responses/BadRequest'
         '429':
@@ -2773,17 +2773,7 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
         '401':
-          description: Missing or invalid bearer authentication
-          content:
-            application/json:
-              schema:
-                oneOf:
-                  - $ref: '#/components/schemas/ErrorEnvelope'
-                  - type: object
-                    required: [detail]
-                    properties:
-                      detail:
-                        type: string
+          $ref: '#/components/responses/UnauthorizedBearer'
         '400':
           $ref: '#/components/responses/BadRequest'
         '403':
@@ -2871,7 +2861,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PaymentsList'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/UnauthorizedBearer'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '403':
@@ -2898,7 +2888,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PaymentResult'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/UnauthorizedBearer'
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
@@ -2918,7 +2908,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/BalanceSummary'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/UnauthorizedBearer'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '403':
@@ -2948,7 +2938,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/DebtsDetails'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/UnauthorizedBearer'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '403':
@@ -3039,8 +3029,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/IntegrityNetMutualDebtsRepairResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+        # 011/T1109: no `401` here. Both repair operations are guarded by
+        # `require_admin` alone, which has no Unauthorized branch at all - executed with no
+        # header and with a wrong X-Admin-Token, both answer 403. The canon used to name a
+        # status the service does not return, which is this programme's defect facing the
+        # other way, and the reachability guard is one-directional by design so nothing
+        # caught it.
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '403':
@@ -3057,8 +3051,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/IntegrityCapDebtsRepairResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+        # 011/T1109: no `401` here. Both repair operations are guarded by
+        # `require_admin` alone, which has no Unauthorized branch at all - executed with no
+        # header and with a wrong X-Admin-Token, both answer 403. The canon used to name a
+        # status the service does not return, which is this programme's defect facing the
+        # other way, and the reachability guard is one-directional by design so nothing
+        # caught it.
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '403':
@@ -3507,6 +3505,34 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorEnvelope'
+    # Two shapes, and the reason is the order in which the two layers answer: the security
+    # scheme runs inside FastAPI's dependency solver, before any application code and therefore
+    # before the exception handlers that produce ErrorEnvelope. On the operations whose bearer
+    # credential is mandatory - OAuth2PasswordBearer(auto_error=True), app/api/deps.py - a request
+    # with no Authorization header, or one whose scheme is not Bearer, is refused by the scheme
+    # itself with FastAPI's own flat {"detail": "Not authenticated"}. Only once a Bearer token is
+    # actually present does get_current_participant run and raise UnauthorizedException, which the
+    # global handler wraps in ErrorEnvelope (E006). Both halves are measured; declaring only the
+    # envelope made authority number one reject the commonest 401 the service sends.
+    # The plain `Unauthorized` above stays correct for the operations whose scheme is
+    # auto_error=False (the simulator and integrity surfaces): there the scheme returns None and
+    # every 401 comes from application code.
+    UnauthorizedBearer:
+      description: >-
+        No usable bearer credential. Two shapes are reachable: a missing Authorization header,
+        or one carrying a scheme other than Bearer, is refused by the security scheme itself
+        with the flat {"detail": "Not authenticated"}; a Bearer token that is present but
+        rejected reaches get_current_participant and is answered with ErrorEnvelope (E006).
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/ErrorEnvelope'
+              - type: object
+                required: [detail]
+                properties:
+                  detail:
+                    type: string
     NotFound:
       description: Not found
       content:

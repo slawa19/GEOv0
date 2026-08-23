@@ -281,8 +281,32 @@ SUCCESS_SCHEMA_DRIFT_COUNT = 63
 # UnprocessableEntity, and SimulatorIdentityUnprocessable. The last exists because ten simulator
 # operations reach 422 with no falsifiable parameter at all - only a malformed X-Simulator-Owner -
 # and describing those as "request validation failed" would have been a new false statement.
+# 2026-08-23 / p011_t1109: count holds at 53, digest moves, and the decomposition above stops
+# being false. Two changes, both closing findings from the final external review.
+#
+# The 401 body. `OAuth2PasswordBearer(auto_error=True)` answers inside the dependency solver,
+# before the handlers that build ErrorEnvelope exist to run - so twenty operations really send a
+# flat `{"detail": "Not authenticated"}` for any request whose Authorization SCHEME is not Bearer,
+# and the envelope only once a Bearer token is present and rejected. The canon declared the
+# envelope alone on nineteen of the twenty. Both documents now state the union through one shared
+# component, so the ten of those already in this dictionary change content and none enters or
+# leaves - and POST /payments, which had the honest union all along, converged onto the canon
+# instead of moving.
+#
+# The phantom 401. POST /integrity/repair/net-mutual-debts and /cap-debts-to-trust-limits declared
+# a 401 they cannot answer: both are guarded by require_admin alone, which has no Unauthorized
+# branch, and executed with no header and with a wrong token both answer 403. That is this
+# programme's defect facing the other way, and the reachability guard is one-directional by design
+# so nothing caught it. Removed. Both operations stay in this dictionary on their generated-only
+# 422 alone.
+#
+# Decomposition now, measured rather than asserted: of the 53, forty-four carry a canon-only 4xx
+# raised deep in app/core/**, thirteen carry the non-reachable generated-only 422 FastAPI stamps on
+# any operation with a flat parameter, four carry both, and NOTHING carries a third cause. The
+# previous version of this note claimed two causes and no others while POST /payments 401 was a
+# third; external review caught the claim, and closing the 401 body made it true.
 ERROR_RESPONSE_DRIFT_SHA256 = (
-    "3513dd236b89d3cd1fb9dbdab8214a3370db478931c4b5bdb10a10ed82a698b4"
+    "17f0f6722b9b7ab900ebdde7a9e6ea25c58b282c01938cccfe69364cf7b68992"
 )
 ERROR_RESPONSE_DRIFT_COUNT = 53
 # 2026-08-23 / p011_t1101: 59 -> 67, see the note above TRANSPORT_HEADER_DRIFT_SHA256.
