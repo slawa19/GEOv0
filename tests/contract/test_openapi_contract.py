@@ -300,9 +300,11 @@ SUCCESS_SCHEMA_DRIFT_COUNT = 63
 # so nothing caught it. Removed. Both operations stay in this dictionary on their generated-only
 # 422 alone.
 #
-# Decomposition now, measured rather than asserted: of the 53, forty-four carry a canon-only 4xx
-# raised deep in app/core/**, thirteen carry the non-reachable generated-only 422 FastAPI stamps on
-# any operation with a flat parameter, four carry both, and NOTHING carries a third cause. The
+# Decomposition now, measured rather than asserted: of the 53, forty-four carry a canon-only
+# error status raised deep in app/core/** - mostly 4xx, and also one 500 and one 504, so
+# "canon-only 4xx" was the wrong shorthand and external review said so - thirteen carry the
+# non-reachable generated-only 422 FastAPI stamps on any operation with a flat parameter, four
+# carry both, and NOTHING carries a third cause. The
 # previous version of this note claimed two causes and no others while POST /payments 401 was a
 # third; external review caught the claim, and closing the 401 body made it true.
 ERROR_RESPONSE_DRIFT_SHA256 = (
