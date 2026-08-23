@@ -109,10 +109,24 @@ SUCCESS_SCHEMA_DRIFT_COUNT = 71
 # The count moving at all is the exception rather than the rule here: an operation leaves
 # this dictionary only when its LAST difference is resolved.
 # 2026-08-23 / p011_t1101: 83 -> 91, see the note above TRANSPORT_HEADER_DRIFT_SHA256.
+# 2026-08-23 / p011_t1103a (`F-011-3`): 91 -> 83 in the same session, and the two moves are worth
+# reading together. Publishing the eight raised this count by widening the denominator; declaring
+# 429 and reconciling the shared envelopes then lowered it by 8, so the ledger ends where it began
+# while covering eight more operations than it could see before.
+#
+# Two changes did the work:
+#   - `429` is now declared on both sides for exactly the 95 operations the limiter can answer for
+#     (derived from the route table, `_RATE_LIMIT_EXEMPT_PATHS` honoured), so those rows match
+#     instead of drifting as generated-only.
+#   - `ErrorEnvelope.error.details` and `SimulatorActionError.details` said
+#     `additionalProperties: true` in the canon and omitted `nullable`. The models declare
+#     `Optional[Dict[str, Any]] = None` (`app/schemas/common.py:15`), so the canon was simply
+#     wrong about nullability and redundant about additionalProperties, which OpenAPI defaults to
+#     true anyway. Corrected to what the code returns.
 ERROR_RESPONSE_DRIFT_SHA256 = (
-    "efd19e343a2e6a48604133da902aeb472390a3872c8b6d69a41b094874f14187"
+    "f895c1ae7b091a4754aa93aff104ffb2e5b67228f83aafe0a36c88a19df9c0d5"
 )
-ERROR_RESPONSE_DRIFT_COUNT = 91
+ERROR_RESPONSE_DRIFT_COUNT = 83
 # 2026-08-23 / p011_t1101: 59 -> 67, see the note above TRANSPORT_HEADER_DRIFT_SHA256.
 # Missed by the first pass of this task: the error-response assert aborts before this one, so a
 # run that stops there says nothing about security drift. Measured directly instead.
@@ -1051,9 +1065,25 @@ def test_root_health_and_versioned_api_are_explicitly_classified() -> None:
         assert _request_body(root_operation, generated) == _request_body(
             versioned_operation, generated
         )
-        assert _normalized_responses(
-            root_operation, generated
-        ) == _normalized_responses(versioned_operation, generated)
+        # 2026-08-23 / p011_t1103a: the twins now differ by exactly one status, and the
+        # difference is real rather than drift. The versioned route is mounted under
+        # `Depends(deps.rate_limit)` and can answer 429; the root route is declared with
+        # @app.get, inherits no router dependencies, and cannot (`F-011-4`). T1103b decided on
+        # 2026-08-23 to keep that asymmetry, so the declaration states it instead of hiding it.
+        # Everything else about the twins must still match exactly.
+        root_responses = _normalized_responses(root_operation, generated)
+        versioned_responses = _normalized_responses(versioned_operation, generated)
+        assert "429" not in root_responses, (
+            f"{path} is outside the limiter but declares 429"
+        )
+        assert "429" in versioned_responses, (
+            f"/api/v1{path} is rate limited but does not declare 429"
+        )
+        assert root_responses == {
+            status: schema
+            for status, schema in versioned_responses.items()
+            if status != "429"
+        }
         assert _normalized_security(
             root_operation, root_item, generated
         ) == _normalized_security(versioned_operation, versioned_item, generated)
