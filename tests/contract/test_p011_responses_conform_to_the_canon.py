@@ -51,6 +51,27 @@ of this file exist because a hardening nobody has tried to break proves nothing:
    run is an ordinary thing and must not be a failure; a false green is not. The fail-closed half
    - "the wrapper is alive and recording" - stays where it belongs, in
    `test_the_harness_records_a_real_response`, which makes a real request in the smallest tier.
+
+**T1110: and then the allowance list became the next way to pass without checking anything.**
+Point 1 above bought its fail-closed behaviour with a list of excused rows, and external review
+found that the list had itself failed open. The row for
+`GET /simulator/runs/{run_id}/artifacts/{name}` said "an honest binary download" over a route
+that serves `status.json`, `summary.json`, `last_tick.json`, `events.ndjson` and `bundle.zip`
+through one `FileResponse` (app/api/v1/simulator.py:2938) - so a real JSON body, and a body of
+broken JSON, both came back `OBSERVED set() CHECKED 0 AGGREGATE PASS`. Two more things changed:
+
+4. The engine classifies on what ARRIVED, not on what the canon promised, and a media type the
+   canon does not declare for an operation is a finding rather than a skippable category. See
+   `openapi_response_conformance.classify_response_declaration`.
+5. An allowance row now has to name the media types it excuses, and the aggregate confronts the
+   row with every response recorded under it. `UNVALIDATED_2XX_ALLOWANCE` maps to `Allowance`,
+   not to prose, for exactly that reason - the prose was never compared to anything.
+
+The canon was the other half of it, and the larger half: `api/openapi.yaml` declared one
+`application/octet-stream` body for that route, which is a media type it never sends. It now
+declares the four JSON documents, the `text/plain` the NDJSON export really arrives as, and both
+spellings of the ZIP type - so the JSON artifacts are VALIDATED and the allowance row covers only
+what genuinely has no schema.
 """
 
 from __future__ import annotations
@@ -62,7 +83,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import httpx
 import pytest
@@ -76,6 +97,7 @@ from tests.contract.openapi_response_conformance import (
     Harness,
     canon_operations,
     guarded_record,
+    is_json_media_type,
     load_canon,
     match_path,
     normalize_node,
@@ -168,24 +190,69 @@ _LEDGER_QUORUM = 60
 # 70 of 96 declared operations observed, and exactly TWO unvalidated rows. Both are structural,
 # not debt - neither is a body anyone could validate against `api/openapi.yaml`, and neither
 # counts towards the 70:
-UNVALIDATED_2XX_ALLOWANCE: dict[str, str] = {
-    "no-canonical-path GET /openapi.json 200": (
-        "the generated document itself. `test_openapi_contract.py` fetches `/openapi.json` to "
-        "diff it against `api/openapi.yaml`, and that route is FastAPI's own - it is not, and "
-        "must not be, an operation the canon declares. There is nothing here to validate: the "
-        "body IS a schema document, and the check that it is right is the contract diff, not "
-        "this one."
+class Allowance(NamedTuple):
+    """One excused row, and the claim about the RESPONSE that excuses it.
+
+    `media_types` is the whole point of this type existing. Until `T1110` the allowance was
+    `key -> prose`, and the aggregate compared nothing but the key: the row said "a binary
+    download, nothing to validate" and the engine happily filed a real `application/json` body
+    under it, because the row's justification was never confronted with the response. Measured
+    at `62b018a`, driving the reviewer's payloads through the harness:
+
+        PAYLOAD b'{"status":"ok"}'  OBSERVED set() CHECKED 0  AGGREGATE PASS
+        PAYLOAD b'{broken'          OBSERVED set() CHECKED 0  AGGREGATE PASS
+
+    Now every media type recorded under a row has to appear in `media_types`, so a row survives
+    only while what arrives under it is still what the row says arrives. Start sending something
+    else - anything else - and the allowance fails instead of covering it.
+    """
+
+    media_types: tuple[str, ...]
+    reason: str
+
+
+# Categories in which an allowance row may cover a JSON response. Exactly one, and not because
+# JSON is unvalidatable there: `/openapi.json` is not an operation of the canon at all, so there
+# is no schema in this document to check it against, and the check that it is right is a whole
+# other test. Everywhere else a JSON body means a schema was owed and an allowance row is the
+# wrong answer - see `_assert_the_session_is_conformant`.
+_CATEGORIES_THAT_MAY_EXCUSE_JSON = frozenset({"no-canonical-path"})
+
+
+UNVALIDATED_2XX_ALLOWANCE: dict[str, Allowance] = {
+    "no-canonical-path GET /openapi.json 200": Allowance(
+        media_types=("application/json",),
+        reason=(
+            "the generated document itself. `test_openapi_contract.py` fetches `/openapi.json` "
+            "to diff it against `api/openapi.yaml`, and that route is FastAPI's own - it is "
+            "not, and must not be, an operation the canon declares, so this document holds no "
+            "schema to check it against. It IS `application/json` and the row says so; the body "
+            "is read and compared, by the contract diff rather than by this check. This is the "
+            "only row allowed to name a JSON media type, and "
+            "`_CATEGORIES_THAT_MAY_EXCUSE_JSON` is why."
+        ),
     ),
     (
         "declared-with-no-json-media-type "
         "GET /simulator/runs/{run_id}/artifacts/{name} 200"
-    ): (
-        "a file download. The canon declares `application/octet-stream` with "
-        "`{type: string, format: binary}` (api/openapi.yaml), and the handler returns a "
-        "starlette `FileResponse` (app/api/v1/simulator.py:2938). A binary stream has no JSON "
-        "body to validate; the operation is exercised by "
-        "tests/integration/test_simulator_artifacts_events_ndjson.py, and what it returns is "
-        "checked there."
+    ): Allowance(
+        media_types=("text/plain", "application/zip", "application/x-zip-compressed"),
+        reason=(
+            "the two artifacts this suite really downloads, and neither has a JSON body. "
+            "`events.ndjson` arrives as `text/plain` (mimetypes knows no `.ndjson`, so the "
+            "`FileResponse` at app/api/v1/simulator.py:2938 falls back) and `bundle.zip` as "
+            "`application/zip` or `application/x-zip-compressed` depending on the host's "
+            "mimetypes database. All three are now DECLARED in the canon for this operation, so "
+            "this row means what it says: the canon describes the media type that arrived, and "
+            "that media type has no schema to validate against. What it no longer covers is the "
+            "rest of the route: `status.json`, `summary.json` and `last_tick.json` arrive as "
+            "`application/json`, the canon declares that too, and their bodies are VALIDATED. "
+            "A JSON body can no longer reach this row - the engine will not put it here and "
+            "`_CATEGORIES_THAT_MAY_EXCUSE_JSON` would reject it if it did. The downloads are "
+            "driven by tests/integration/test_simulator_artifacts_events_ndjson.py and "
+            "tests/integration/test_simulator_super_smoke.py, and what they contain is checked "
+            "there."
+        ),
     ),
 }
 
@@ -311,6 +378,42 @@ def _assert_the_session_is_conformant(report: dict[str, Any], written: str | Non
         "SSE, and the reason belongs in the allowance.\n\n"
         + "\n".join(f"  {key}" + (f"    [{detail[key]}]" if detail.get(key) else "")
                     for key in unexpected)
+        + summary
+    )
+
+    # 2b. An allowance row is a CLAIM about the responses behind it, and until T1110 nothing
+    #     compared the claim to them. The key alone says only "this operation, this status, this
+    #     category" - and `GET /simulator/runs/{run_id}/artifacts/{name} 200` is one key over a
+    #     route that serves JSON, NDJSON and ZIP, so a row written for the zip excused the JSON
+    #     too. Every media type recorded under a row must be one the row names.
+    falsified: list[str] = []
+    for row in report["unvalidated_2xx_detail"]:
+        allowed = UNVALIDATED_2XX_ALLOWANCE.get(row["key"])
+        if allowed is None:
+            continue
+        for media in row["media_types"]:
+            if media not in allowed.media_types:
+                falsified.append(
+                    f"  {row['key']}\n      carried {media or '<no content-type header>'}, "
+                    f"which the row does not name (it names "
+                    f"{', '.join(allowed.media_types)})"
+                )
+            elif (
+                is_json_media_type(media)
+                and row["category"] not in _CATEGORIES_THAT_MAY_EXCUSE_JSON
+            ):
+                falsified.append(
+                    f"  {row['key']}\n      carried {media}, and a JSON body is not excusable "
+                    f"under category {row['category']}: the canon owes it a schema"
+                )
+    assert not falsified, (
+        f"{len(falsified)} allowance row(s) no longer describe the responses they excuse. A row "
+        "in UNVALIDATED_2XX_ALLOWANCE is a claim that nothing validatable arrived under it, and "
+        "this assertion is what turns that claim into a measurement. Do NOT widen the row's "
+        "`media_types` to make this pass: if what arrived is JSON, the canon has to declare it "
+        "with a schema so the body is validated; if it is a new binary type the service really "
+        "sends, the canon has to declare that too, and only then does the row get to name it.\n"
+        + "\n".join(falsified)
         + summary
     )
 
@@ -895,18 +998,26 @@ def test_counter_check_a_streamed_body_nobody_read_is_a_category_and_not_a_crash
 def test_counter_check_a_non_json_media_declaration_is_named_rather_than_skipped() -> None:
     """The legitimate case, and the proof that "legitimate" still has to be written down.
 
-    `GET /simulator/runs/{run_id}/artifacts/{name}` declares `application/octet-stream`. Nothing
-    can be validated against a `format: binary` string, so the row exists, is allowed by name in
+    `GET /simulator/runs/{run_id}/artifacts/{name}` declares `text/plain` for `events.ndjson`.
+    Nothing can be validated against a `type: string`, so the row exists, is allowed by name in
     UNVALIDATED_2XX_ALLOWANCE, and does NOT count as coverage.
+
+    **Moved by T1110**, and this is the one existing counter-check that had to move. It used to
+    send `application/octet-stream` for a file called `report.json`, which was a response the
+    service never produces: `FileResponse` with no `media_type` sends what
+    `mimetypes.guess_type` says, and the canon no longer declares `octet-stream` for this
+    operation because nothing ever arrives under it. The body it drives now is the real one -
+    `events.ndjson`, `text/plain`, measured off a live `FileResponse` - and the assertion is the
+    same assertion.
     """
 
     harness = _recorded(
         load_canon(),
         _response(
             "GET",
-            "/api/v1/simulator/runs/r1/artifacts/report.json",
-            content=b"\x00\x01",
-            content_type="application/octet-stream",
+            "/api/v1/simulator/runs/r1/artifacts/events.ndjson",
+            content=b'{"type":"tick"}\n',
+            content_type="text/plain; charset=utf-8",
         ),
     )
 
@@ -920,7 +1031,362 @@ def test_counter_check_a_non_json_media_declaration_is_named_rather_than_skipped
         "this is the allowance's own subject; if it is no longer there the row above would be a "
         "failure and this test would be asserting the wrong thing"
     )
+    # The charset parameter must not defeat the allowance's media-type check.
+    assert harness.report()["unvalidated_2xx_detail"][0]["media_types"] == ["text/plain"]
     # ... and being allowed, it does not fail the aggregate.
+    _assert_the_session_is_conformant(harness.report())
+
+
+# ------------------------------------------------------------------------------------------
+# T1110. The allowance list added by T1109 to close the fail-open findings opened one of its own:
+# `GET /simulator/runs/{run_id}/artifacts/{name}` is a HETEROGENEOUS route excused by a single
+# row written as though it were a binary download. Reproduced here before anything was changed,
+# at `62b018a`:
+#
+#   FILERESPONSE status.json     'application/json'
+#   FILERESPONSE summary.json    'application/json'
+#   FILERESPONSE last_tick.json  'application/json'
+#   FILERESPONSE events.ndjson   'text/plain; charset=utf-8'
+#   FILERESPONSE bundle.zip      'application/x-zip-compressed'
+#
+#   PAYLOAD b'{"status":"ok"}'  OBSERVED set() CHECKED 0  AGGREGATE PASS
+#   PAYLOAD b'{broken'          OBSERVED set() CHECKED 0  AGGREGATE PASS
+#
+# Two independent causes, and both are covered below: `Harness.record` classified from the media
+# type the CANON declared and returned before reading the body, and the aggregate compared the
+# allowance by key and never looked at the `content-type` it had recorded next to it.
+# ------------------------------------------------------------------------------------------
+
+
+_ARTIFACT_ROUTE = "/simulator/runs/{run_id}/artifacts/{name}"
+_ARTIFACT_ALLOWANCE_KEY = f"declared-with-no-json-media-type GET {_ARTIFACT_ROUTE} 200"
+
+# The three JSON artifacts, exactly as the application writes them. Not invented shapes: each is
+# the literal dict at the anchor named beside it, so a schema that these bodies satisfy is a
+# schema the service satisfies.
+#
+# app/core/simulator/artifacts.py:67 - `init_run_artifacts`, the FIRST shape of status.json.
+_STATUS_JSON = json.dumps(
+    {
+        "api_version": "simulator-api/1",
+        "run_id": "run_abc",
+        "scenario_id": "sc_1",
+        "mode": "real",
+        "created_at": "2026-08-24T00:00:00+00:00",
+        "seed": 42,
+    }
+).encode()
+
+# The second shape: `get_run_status(...).model_dump(mode="json", by_alias=True)` on stop
+# (app/core/simulator/runtime_impl.py:198 -> artifacts.py:343) - a `RunStatus`, the same document
+# `GET /simulator/runs/{run_id}` returns.
+_RUN_STATUS = {
+    "api_version": "simulator-api/1",
+    "run_id": "run_abc",
+    "scenario_id": "sc_1",
+    "mode": "real",
+    "state": "stopped",
+}
+
+# app/core/simulator/artifacts.py:313-344 - summary.json.
+_SUMMARY_JSON = json.dumps(
+    {
+        "api_version": "simulator-api/1",
+        "generated_at": "2026-08-24T00:00:01+00:00",
+        "run_id": "run_abc",
+        "scenario_id": "sc_1",
+        "mode": "real",
+        "state": "stopped",
+        "status": _RUN_STATUS,
+    }
+).encode()
+
+# app/core/simulator/artifacts.py:64 - last_tick.json as the init path writes it.
+_LAST_TICK_JSON = b'{"tick_index": 0, "sim_time_ms": 0}'
+
+
+def _canon_with_the_artifact_route_binary_only() -> dict[str, Any]:
+    """The canon as it stood at `62b018a`: one binary media type for the whole route."""
+
+    document = copy.deepcopy(load_canon())
+    document["paths"][_ARTIFACT_ROUTE]["get"]["responses"]["200"]["content"] = {
+        "application/octet-stream": {"schema": {"type": "string", "format": "binary"}}
+    }
+    return document
+
+
+def test_counter_check_mode_json_from_the_artifact_route_is_validated_not_excused() -> None:
+    """Mode `JSON_UNDER_A_BINARY_DECLARATION`: `OBSERVED set() CHECKED 0  AGGREGATE PASS`.
+
+    The reviewer's first payload. A real `status.json` body, `application/json`, from the route
+    whose allowance row called it a binary download. Against `62b018a` this was `bodies_checked=0`
+    with the row silently allowed; the canon now declares `application/json` for this operation
+    and the engine classifies on what arrived, so the body is VALIDATED and counts as coverage.
+
+    All four JSON documents the route can serve are driven, one per `oneOf` branch, so the canon's
+    new declaration is exercised rather than asserted: the init `status.json`, the `RunStatus`
+    that overwrites it on stop, `summary.json` and `last_tick.json`.
+    """
+
+    harness = _recorded(
+        load_canon(),
+        *(
+            _response(
+                "GET",
+                f"/api/v1/simulator/runs/r1/artifacts/{name}",
+                content=body,
+                content_type="application/json",
+            )
+            for name, body in (
+                ("status.json", _STATUS_JSON),
+                ("status.json", json.dumps(_RUN_STATUS).encode()),
+                ("summary.json", _SUMMARY_JSON),
+                ("last_tick.json", _LAST_TICK_JSON),
+            )
+        ),
+    )
+
+    assert harness.bodies_checked == 4, (
+        "the reviewer reproduction: a real JSON body from this route was skipped as a binary "
+        "download and never validated"
+    )
+    assert ("GET", _ARTIFACT_ROUTE) in harness.observed
+    assert harness.unvalidated_keys() == []
+    assert harness.report()["non_conforming"] == [], (
+        "every one of the four bodies is the literal dict its writer builds; a finding here "
+        "means the schemas added for them describe something else"
+    )
+    _assert_the_session_is_conformant(harness.report())
+
+
+def test_counter_check_mode_broken_json_from_the_artifact_route_is_a_failure() -> None:
+    """Mode `BROKEN_JSON_UNDER_A_BINARY_DECLARATION`: the same PASS over a body that is garbage.
+
+    The reviewer's second payload. `b'{broken'` under `application/json` also came back
+    `AGGREGATE PASS` at `62b018a` - the allowance row excused it without anyone reading a byte.
+    It is now `body-did-not-parse`, which no row allows and which the aggregate raises on.
+    """
+
+    harness = _recorded(
+        load_canon(),
+        _response(
+            "GET",
+            "/api/v1/simulator/runs/r1/artifacts/status.json",
+            content=b"{broken",
+            content_type="application/json",
+        ),
+    )
+
+    assert harness.bodies_checked == 0
+    assert harness.observed == set()
+    assert harness.unvalidated_keys() == [f"body-did-not-parse GET {_ARTIFACT_ROUTE} 200"]
+
+    with pytest.raises(AssertionError, match="body-did-not-parse"):
+        _assert_the_session_is_conformant(harness.report())
+
+
+def test_counter_check_json_the_canon_does_not_declare_is_a_finding_not_a_row() -> None:
+    """The engine rule, held independently of the canon that currently satisfies it.
+
+    Sabotage the document back to `application/octet-stream` only and send the same real JSON
+    body. The point is that fixing `api/openapi.yaml` is not what closed this: even with a canon
+    that declares nothing but a binary type, a JSON body is a FINDING - not a category, because a
+    category can be written into UNVALIDATED_2XX_ALLOWANCE and this must not be excusable.
+    """
+
+    harness = _recorded(
+        _canon_with_the_artifact_route_binary_only(),
+        _response(
+            "GET",
+            "/api/v1/simulator/runs/r1/artifacts/status.json",
+            content=_STATUS_JSON,
+            content_type="application/json",
+        ),
+    )
+
+    assert harness.bodies_checked == 0
+    assert harness.observed == set()
+    assert harness.unvalidated_keys() == [], (
+        "this must not be filed as a skippable category - the allowance list would then be able "
+        "to excuse it, which is the hole T1110 closed"
+    )
+    finding = harness.report()["non_conforming"]
+    assert len(finding) == 1, finding
+    assert finding[0]["operation"] == f"GET {_ARTIFACT_ROUTE} 200"
+    assert finding[0]["value"] == "application/json"
+    assert "does not declare" in finding[0]["message"]
+
+    with pytest.raises(AssertionError, match="do not validate against api/openapi.yaml"):
+        _assert_the_session_is_conformant(harness.report())
+
+
+def test_counter_check_the_artifact_schema_rejects_a_body_that_is_not_an_object() -> None:
+    """`type: object` under `application/json` is load-bearing, not decoration.
+
+    Every JSON artifact the application writes is a JSON object (status.json, summary.json,
+    last_tick.json). If the route ever served a bare array under `.json`, the canon would be
+    wrong and this says so - which is the difference between validating a body and merely
+    parsing it.
+    """
+
+    harness = _recorded(
+        load_canon(),
+        _response(
+            "GET",
+            "/api/v1/simulator/runs/r1/artifacts/status.json",
+            content=b"[1, 2, 3]",
+            content_type="application/json",
+        ),
+    )
+
+    assert harness.bodies_checked == 1
+    nodes = [row["node"] for row in harness.report()["non_conforming"]]
+    assert nodes == ["$"], harness.report()["non_conforming"]
+
+    with pytest.raises(AssertionError, match="do not validate against api/openapi.yaml"):
+        _assert_the_session_is_conformant(harness.report())
+
+
+def test_counter_check_an_allowance_row_is_checked_against_the_response_it_excuses() -> None:
+    """The aggregate half. A row may not cover a media type it does not name.
+
+    The engine now keeps JSON out of `declared-with-no-json-media-type`, so the allowance's own
+    check is demonstrated with a media type the canon declares and the row does not: a canon that
+    also served `application/pdf` here would produce the very same key, and at `62b018a` the
+    aggregate would have waved it through because it compared keys and nothing else.
+    """
+
+    document = copy.deepcopy(load_canon())
+    document["paths"][_ARTIFACT_ROUTE]["get"]["responses"]["200"]["content"][
+        "application/pdf"
+    ] = {"schema": {"type": "string", "format": "binary"}}
+
+    harness = _recorded(
+        document,
+        _response(
+            "GET",
+            "/api/v1/simulator/runs/r1/artifacts/report.pdf",
+            content=b"%PDF-1.4",
+            content_type="application/pdf",
+        ),
+    )
+
+    assert harness.unvalidated_keys() == [_ARTIFACT_ALLOWANCE_KEY]
+    assert _ARTIFACT_ALLOWANCE_KEY in UNVALIDATED_2XX_ALLOWANCE
+    assert "application/pdf" not in UNVALIDATED_2XX_ALLOWANCE[
+        _ARTIFACT_ALLOWANCE_KEY
+    ].media_types
+
+    with pytest.raises(AssertionError, match="no longer describe the responses they excuse"):
+        _assert_the_session_is_conformant(harness.report())
+
+
+def test_counter_check_a_row_records_every_media_type_that_arrived_under_it() -> None:
+    """One key, several responses - and the row has to remember all of them.
+
+    `unvalidated_detail` used to be assigned rather than accumulated, so the last response under
+    a key overwrote every earlier one. On this route that is not hypothetical: `events.ndjson`
+    and `bundle.zip` share the key within a single session, and a `application/json` detail
+    could have been overwritten by a `text/plain` one that arrived after it - leaving a row whose
+    recorded justification was true of only the last response behind it.
+    """
+
+    harness = _recorded(
+        load_canon(),
+        _response(
+            "GET",
+            "/api/v1/simulator/runs/r1/artifacts/events.ndjson",
+            content=b'{"type":"tick"}\n',
+            content_type="text/plain; charset=utf-8",
+        ),
+        _response(
+            "GET",
+            "/api/v1/simulator/runs/r1/artifacts/bundle.zip",
+            content=b"PK\x03\x04",
+            content_type="application/x-zip-compressed",
+        ),
+    )
+
+    assert harness.unvalidated_keys() == [_ARTIFACT_ALLOWANCE_KEY]
+    row = harness.report()["unvalidated_2xx_detail"][0]
+    assert row["media_types"] == ["application/x-zip-compressed", "text/plain"], row
+    _assert_the_session_is_conformant(harness.report())
+
+
+async def test_counter_check_every_artifact_the_app_writes_arrives_under_a_declared_media_type(
+    tmp_path: Path,
+) -> None:
+    """The reviewer's own reproduction, kept as a test: real `FileResponse` objects.
+
+    `artifacts_download` is `return FileResponse(path)` with no `media_type`
+    (app/api/v1/simulator.py:2938), so the wire type is `mimetypes.guess_type(name)` with
+    starlette's `text/plain` fallback - a fact about the host, not about this repository, which
+    is why it is measured here rather than asserted from the helper in
+    `app/core/simulator/helpers.py`. Every file the application writes into a run's artifacts
+    directory is driven through a real `FileResponse` and its media type has to be one the canon
+    declares for the download operation. If mimetypes ever answers differently, or a new artifact
+    is added, this fails and the canon gets updated - which is the whole of what T1110 is about.
+    """
+
+    from starlette.applications import Starlette
+    from starlette.responses import FileResponse
+    from starlette.routing import Route
+
+    # app/core/simulator/artifacts.py: :64 :67 :84 (init), :343 :344 (finalize), :333 (bundle),
+    # :361 (real tick). This list is the artifacts directory as the application builds it.
+    written = {
+        "status.json": _STATUS_JSON,
+        "summary.json": _SUMMARY_JSON,
+        "last_tick.json": _LAST_TICK_JSON,
+        "events.ndjson": b'{"type":"tick"}\n',
+        "bundle.zip": b"PK\x03\x04",
+    }
+    for name, payload in written.items():
+        (tmp_path / name).write_bytes(payload)
+
+    async def download(request: Any) -> Any:
+        return FileResponse(tmp_path / request.path_params["name"])
+
+    app = Starlette(
+        routes=[Route("/api/v1/simulator/runs/{run_id}/artifacts/{name}", download)]
+    )
+
+    declared = {
+        media.lower()
+        for media in load_canon()["paths"][_ARTIFACT_ROUTE]["get"]["responses"]["200"]["content"]
+    }
+
+    harness = _harness_over(load_canon())
+    transport = httpx.ASGITransport(app=app)
+    arrived: dict[str, str] = {}
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        for name in written:
+            # `send(build_request(...))` and not `get(...)`: the session-wide wrapper patches
+            # `AsyncClient.request`, and these five responses come from a Starlette app built
+            # here, not from the application. Letting them reach `HARNESS` would credit
+            # `GET /simulator/runs/{run_id}/artifacts/{name}` as observed coverage in the
+            # full-session report on the strength of a fixture - measured: it did, and the
+            # report said 71 operations and 784 bodies where the suite really produced 70 and
+            # 781. Coverage means validation of the real service's traffic.
+            response = await client.send(
+                client.build_request("GET", f"/api/v1/simulator/runs/r1/artifacts/{name}")
+            )
+            assert response.status_code == 200, name
+            media = response.headers["content-type"].split(";", 1)[0].strip().lower()
+            arrived[name] = media
+            guarded_record(harness, response)
+
+    undeclared = {name: media for name, media in arrived.items() if media not in declared}
+    assert not undeclared, (
+        "the canon does not declare the media type these artifacts really arrive under; it "
+        f"declares {sorted(declared)}\n  " + "\n  ".join(
+            f"{name}: {media}" for name, media in sorted(undeclared.items())
+        )
+    )
+
+    # The three JSON artifacts are validated; the other two are the honest allowance row.
+    assert harness.bodies_checked == 3, arrived
+    assert harness.unvalidated_keys() == [_ARTIFACT_ALLOWANCE_KEY]
     _assert_the_session_is_conformant(harness.report())
 
 

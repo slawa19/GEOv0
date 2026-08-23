@@ -45,6 +45,24 @@ Python-дефолт, и строили строку, которую прилож
 Остаток — не контрактный дефект, а гигиена схемы: либо `nullable=False` + server default, либо
 явное решение, что `null` допустим, и тогда канон обязан это сказать. Владельца нет.
 
+### Индекс артефактов симулятора обещает content type, которого выгрузка не отдаёт
+
+Внесено 2026-08-24 при закрытии 011. `artifact_content_type` (`app/core/simulator/helpers.py:8`)
+возвращает `application/json`, `application/x-ndjson`, `application/zip` — и вызывается **только**
+из `list_artifacts` (`app/core/simulator/artifacts.py:153`) и `sync_artifacts`
+(`app/core/simulator/storage.py:158`). Сама выгрузка
+(`GET /simulator/runs/{run_id}/artifacts/{name}`, `app/api/v1/simulator.py:2938`) отдаёт
+`FileResponse(path)` **без** `media_type`, поэтому тип на проволоке — догадка `mimetypes`.
+
+Измерено: `events.ndjson` приезжает как `text/plain`, тогда как индекс объявляет для того же файла
+`application/x-ndjson`. `bundle.zip` зависит от машины: `application/x-zip-compressed` под Windows
+(реестр), `application/zip` в других окружениях — поэтому канон вынужден объявлять оба.
+
+Канон описывает то, что **отдаёт выгрузка**, и это правильно для 011. Разрыв между индексом и
+выгрузкой — поведенческий: закрыть его значит передать `media_type=artifact_content_type(name)` в
+`FileResponse`, а это меняет заголовок, который получает клиент, и запрещено `## Non-goals` 011.
+Владельца нет.
+
 ## Требуют отдельной спеки, не узкой правки
 
 | Пункт | Sev | Current / Intended / Optimal | Evidence |

@@ -2040,9 +2040,68 @@ paths:
         - $ref: '#/components/parameters/ArtifactNamePath'
       responses:
         '200':
-          description: Artifact content
+          # 011/T1110 (2026-08-24): this declared ONE media type, `application/octet-stream`, for
+          # an operation that is not binary and never sends that type at all. The handler
+          # (app/api/v1/simulator.py:2938) is `return FileResponse(path)` with no `media_type`, so
+          # starlette sets it from `mimetypes.guess_type(name)` with `text/plain` as the fallback,
+          # and `get_artifact_path` (app/core/simulator/artifacts.py:189) serves any file in the
+          # run's artifacts directory. Everything the application writes there is listed below,
+          # with the writer and the media type each one really arrives under - measured by driving
+          # real `FileResponse` objects, not read off the helper.
+          #
+          #   status.json     artifacts.py:67 (init) and :343 (finalize)   application/json
+          #   summary.json    artifacts.py:344                             application/json
+          #   last_tick.json  artifacts.py:64 (init) and :361 (real tick)  application/json
+          #   events.ndjson   artifacts.py:84, appended by the writer loop text/plain
+          #   bundle.zip      artifacts.py:333 (on stop)                   application/zip
+          #                                                                or application/x-zip-compressed
+          #
+          # Two of those deserve saying out loud, because they are the service disagreeing with
+          # itself and the canon's job is to report that rather than tidy it away:
+          #
+          # * `events.ndjson` arrives as `text/plain`. `mimetypes` knows no `.ndjson`, so
+          #   starlette falls back. The artifacts INDEX advertises `application/x-ndjson` for the
+          #   same file (app/core/simulator/helpers.py:8, surfaced through ArtifactItem.content_type),
+          #   so the index and the download do not agree. Declaring `application/x-ndjson` here
+          #   would describe the index instead of this operation.
+          # * `bundle.zip` arrives as `application/zip` or `application/x-zip-compressed`
+          #   depending on the host's mimetypes database - the latter is what a Windows registry
+          #   lookup returns, and it is what this repository's own test run produced. Both are
+          #   declared because both really occur; the handler passing an explicit `media_type`
+          #   would remove the fork, and that is an application change, not a canon one.
+          description: |
+            Artifact content. The media type follows the artifact's file name, because the
+            handler returns a `FileResponse` with no explicit `media_type`.
           content:
-            application/octet-stream:
+            # status.json, summary.json and last_tick.json - and `oneOf` rather than
+            # `type: object`, because "some object" is exactly the thing
+            # `test_p011_success_responses_describe_their_content` forbids and it would leave the
+            # body no better checked than the octet-stream it replaced. Four branches and not
+            # three: `status.json` has TWO shapes over a run's life. `init_run_artifacts` writes
+            # the small record below, and `finalize_run_artifacts` overwrites the same file on
+            # stop with `get_run_status(run_id).model_dump(mode="json", by_alias=True)`
+            # (app/core/simulator/runtime_impl.py:198 -> run_lifecycle.py:431 -> artifacts.py:343),
+            # which is the very document `GET /simulator/runs/{run_id}` returns.
+            #
+            # The branches are mutually exclusive by construction - every one of them is
+            # `additionalProperties: false` and no two share a key set - so `oneOf` is a true
+            # "exactly one of these documents" and not a disguised `anyOf`.
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/SimulatorArtifactStatusInit'
+                  - $ref: '#/components/schemas/RunStatus'
+                  - $ref: '#/components/schemas/SimulatorArtifactSummary'
+                  - $ref: '#/components/schemas/SimulatorArtifactLastTick'
+            # events.ndjson, and any artifact whose extension mimetypes cannot guess.
+            text/plain:
+              schema:
+                type: string
+            application/zip:
+              schema:
+                type: string
+                format: binary
+            application/x-zip-compressed:
               schema:
                 type: string
                 format: binary
@@ -7042,6 +7101,99 @@ components:
         current_phase:
           type: string
           nullable: true
+      additionalProperties: false
+
+    # 011/T1110 (2026-08-24): the three JSON documents `GET /simulator/runs/{run_id}/artifacts/
+    # {name}` really serves. Until now that operation declared one `application/octet-stream`
+    # body, and the conformance harness therefore skipped every JSON artifact as "a binary
+    # download" - including a body of broken JSON, measured. Each schema below was read off the
+    # writer named in its comment, and `additionalProperties: false` on all three is what makes
+    # the `oneOf` at the operation unambiguous.
+
+    SimulatorArtifactStatusInit:
+      # `status.json` as `init_run_artifacts` first writes it (app/core/simulator/artifacts.py:67):
+      # six literals off the RunRecord, written when the run is created. This is only the FIRST of
+      # the file's two shapes - `finalize_run_artifacts` overwrites it with a `RunStatus` on stop
+      # (artifacts.py:343), which is why the operation lists both.
+      type: object
+      required: [api_version, run_id, scenario_id, mode, created_at, seed]
+      properties:
+        api_version:
+          type: string
+          example: simulator-api/1
+        run_id:
+          type: string
+        scenario_id:
+          type: string
+        mode:
+          # RunMode = Literal["fixtures", "real"] (app/schemas/simulator.py:376). A plain string
+          # on the wire, because the artifact is written with `json.dumps`, not by pydantic.
+          type: string
+          enum: [fixtures, real]
+        created_at:
+          type: string
+          format: date-time
+        seed:
+          # RunRecord.seed is `int = 0` (app/core/simulator/models.py:143); never null.
+          type: integer
+      additionalProperties: false
+
+    SimulatorArtifactSummary:
+      # `summary.json` (app/core/simulator/artifacts.py:313-344, written on stop). Six literals
+      # plus the run status, and `status` is not a copy of anything - it is the same
+      # `status_payload` argument that becomes `status.json`, so it is a `RunStatus`.
+      type: object
+      required: [api_version, generated_at, run_id, scenario_id, mode, state, status]
+      properties:
+        api_version:
+          type: string
+          example: simulator-api/1
+        generated_at:
+          type: string
+          format: date-time
+        run_id:
+          type: string
+        scenario_id:
+          type: string
+        mode:
+          type: string
+          enum: [fixtures, real]
+        state:
+          $ref: '#/components/schemas/RunState'
+        status:
+          $ref: '#/components/schemas/RunStatus'
+      additionalProperties: false
+
+    SimulatorArtifactLastTick:
+      # `last_tick.json`. Two writers, one schema: `init_run_artifacts` writes the two required
+      # keys at run creation (app/core/simulator/artifacts.py:64) and the real-mode tick loop
+      # writes all seven, throttled (real_tick_persistence.py:178 -> artifacts.py:361). The five
+      # counters are optional because the init record genuinely lacks them, not because they are
+      # ever null - every one is written through `int(...)`.
+      type: object
+      required: [tick_index, sim_time_ms]
+      properties:
+        tick_index:
+          type: integer
+          minimum: 0
+        sim_time_ms:
+          type: integer
+          minimum: 0
+        budget:
+          type: integer
+          minimum: 0
+        committed:
+          type: integer
+          minimum: 0
+        rejected:
+          type: integer
+          minimum: 0
+        errors:
+          type: integer
+          minimum: 0
+        timeouts:
+          type: integer
+          minimum: 0
       additionalProperties: false
 
     SetIntensityRequest:

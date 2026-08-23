@@ -209,8 +209,18 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # with a server default and both helpers always write the key, so the stricter one was right. The
 # incident `state` also stopped being a bare string: the query filters to six of the nine
 # transaction states.
+# 2026-08-24 / p011_t1109b: count holds at 63, digest moves, exactly one entry changes content and
+# nothing enters or leaves. GET /simulator/runs/{run_id}/artifacts/{name} declared
+# `application/octet-stream` - a media type it never sends. The download hands the path to
+# FileResponse without a media_type, so the wire type is whatever mimetypes guesses: JSON for the
+# four documents the run writes, `text/plain` for events.ndjson, and zip for the bundle. The canon
+# now declares those, with the four JSON documents described rather than waved at - the empty
+# undescribed-response ledger refused `{type: object}` and forced the real shapes out.
+#
+# The operation was already in this dictionary (canonical octet-stream against generated
+# `application/json: {}`) and stays in it.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "d0c6cc29ecb4d645e54fd9aca7837132c7715531a52fa9db6978b8013fa1ace7"
+    "42c96781dd788fa0821e3f3c54672470e6622275631a1aff41e2fef03926b92c"
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 63
 # 2026-08-11 / T501: public DB health no longer declares exception details;
