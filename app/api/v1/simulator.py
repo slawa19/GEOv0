@@ -359,6 +359,31 @@ async def _compute_viz_patches_best_effort(
         return None, None
 
 
+# 011/T1109: 403 really has two shapes on the Interact Mode routes, and declaring one of them
+# would be the same defect this program catalogues. `_require_actions_enabled_or_error` and the
+# access checks answer with the flat `SimulatorActionError` (ACTIONS_DISABLED, ACCESS_DENIED),
+# while `require_simulator_actor` raises `ForbiddenException` before the handler runs - bad admin
+# token, inactive participant, failed CSRF origin check - and the global handler wraps that in
+# `ErrorEnvelope`. Verified by response, not by reading: a bad X-Admin-Token returns
+# {"error": {"code": "E006", ...}} and a disabled flag returns {"code": "ACTIONS_DISABLED", ...}.
+_ACTION_FORBIDDEN_RESPONSE: dict[str, Any] = {
+    "description": (
+        "Actions disabled or access denied (flat SimulatorActionError), or the identity was "
+        "rejected before the handler ran (ErrorEnvelope)"
+    ),
+    "content": {
+        "application/json": {
+            "schema": {
+                "oneOf": [
+                    {"$ref": "#/components/schemas/SimulatorActionError"},
+                    {"$ref": "#/components/schemas/ErrorEnvelope"},
+                ]
+            }
+        }
+    },
+}
+
+
 def _actions_enabled() -> bool:
     return str(os.environ.get("SIMULATOR_ACTIONS_ENABLE", "") or "").strip() in {"1", "true", "TRUE", "yes"}
 
@@ -954,7 +979,7 @@ class ClearingOnceResponseBody(BaseModel):
     responses={
         400: {"model": SimulatorActionError, "description": "Invalid request payload for the action (flat envelope)"},
         401: {"model": ErrorEnvelope, "description": "Missing or invalid simulator identity"},
-        403: {"model": SimulatorActionError, "description": "Simulator actions disabled (ACTIONS_DISABLED) or access denied (flat envelope)"},
+        403: _ACTION_FORBIDDEN_RESPONSE,
         404: {"model": SimulatorActionError, "description": "Run, participant, equivalent or trustline not found (flat envelope)"},
         409: {"model": SimulatorActionError, "description": "Run is terminal, or the action conflicts with current state (flat envelope)"},
         422: {"model": ErrorEnvelope, "description": "Invalid simulator identity transport (for example, X-Simulator-Owner)"},
@@ -1208,7 +1233,7 @@ async def action_trustline_create(
     responses={
         400: {"model": SimulatorActionError, "description": "Invalid request payload for the action (flat envelope)"},
         401: {"model": ErrorEnvelope, "description": "Missing or invalid simulator identity"},
-        403: {"model": SimulatorActionError, "description": "Simulator actions disabled (ACTIONS_DISABLED) or access denied (flat envelope)"},
+        403: _ACTION_FORBIDDEN_RESPONSE,
         404: {"model": SimulatorActionError, "description": "Run, participant, equivalent or trustline not found (flat envelope)"},
         409: {"model": SimulatorActionError, "description": "Run is terminal, or the action conflicts with current state (flat envelope)"},
         422: {"model": ErrorEnvelope, "description": "Invalid simulator identity transport (for example, X-Simulator-Owner)"},
@@ -1397,7 +1422,7 @@ async def action_trustline_update(
     responses={
         400: {"model": SimulatorActionError, "description": "Invalid request payload for the action (flat envelope)"},
         401: {"model": ErrorEnvelope, "description": "Missing or invalid simulator identity"},
-        403: {"model": SimulatorActionError, "description": "Simulator actions disabled (ACTIONS_DISABLED) or access denied (flat envelope)"},
+        403: _ACTION_FORBIDDEN_RESPONSE,
         404: {"model": SimulatorActionError, "description": "Run, participant, equivalent or trustline not found (flat envelope)"},
         409: {"model": SimulatorActionError, "description": "Run is terminal, or the action conflicts with current state (flat envelope)"},
         422: {"model": ErrorEnvelope, "description": "Invalid simulator identity transport (for example, X-Simulator-Owner)"},
@@ -1575,7 +1600,7 @@ async def action_trustline_close(
     responses={
         400: {"model": SimulatorActionError, "description": "Invalid request payload for the action (flat envelope)"},
         401: {"model": ErrorEnvelope, "description": "Missing or invalid simulator identity"},
-        403: {"model": SimulatorActionError, "description": "Simulator actions disabled (ACTIONS_DISABLED) or access denied (flat envelope)"},
+        403: _ACTION_FORBIDDEN_RESPONSE,
         404: {"model": SimulatorActionError, "description": "Run, participant, equivalent or trustline not found (flat envelope)"},
         409: {"model": SimulatorActionError, "description": "Run is terminal, or the action conflicts with current state (flat envelope)"},
         422: {"model": ErrorEnvelope, "description": "Invalid simulator identity transport (for example, X-Simulator-Owner)"},
@@ -1782,8 +1807,9 @@ async def action_payment_real(
     "/runs/{run_id}/actions/clearing-real",
     response_model=SimulatorActionClearingRealResponse,
     responses={
+        400: {"model": SimulatorActionError, "description": "Invalid request payload for the action (flat envelope)"},
         401: {"model": ErrorEnvelope, "description": "Missing or invalid simulator identity"},
-        403: {"model": SimulatorActionError, "description": "Simulator actions disabled (ACTIONS_DISABLED) or access denied (flat envelope)"},
+        403: _ACTION_FORBIDDEN_RESPONSE,
         404: {"model": SimulatorActionError, "description": "Run, participant, equivalent or trustline not found (flat envelope)"},
         409: {"model": SimulatorActionError, "description": "Run is terminal, or the action conflicts with current state (flat envelope)"},
         422: {"model": ErrorEnvelope, "description": "Invalid simulator identity transport (for example, X-Simulator-Owner)"},
@@ -1964,7 +1990,7 @@ async def action_clearing_real(
     response_model=SimulatorActionParticipantsListResponse,
     responses={
         401: {"model": ErrorEnvelope, "description": "Missing or invalid simulator identity"},
-        403: {"model": SimulatorActionError, "description": "Simulator actions disabled (ACTIONS_DISABLED) or access denied (flat envelope)"},
+        403: _ACTION_FORBIDDEN_RESPONSE,
         404: {"model": SimulatorActionError, "description": "Run, participant, equivalent or trustline not found (flat envelope)"},
         422: {"model": ErrorEnvelope, "description": "Invalid simulator identity transport (for example, X-Simulator-Owner)"},
     },
@@ -2021,7 +2047,7 @@ async def action_participants_list(
     response_model=SimulatorActionTrustlinesListResponse,
     responses={
         401: {"model": ErrorEnvelope, "description": "Missing or invalid simulator identity"},
-        403: {"model": SimulatorActionError, "description": "Simulator actions disabled (ACTIONS_DISABLED) or access denied (flat envelope)"},
+        403: _ACTION_FORBIDDEN_RESPONSE,
         404: {"model": SimulatorActionError, "description": "Run, participant, equivalent or trustline not found (flat envelope)"},
         422: {"model": ErrorEnvelope, "description": "Invalid simulator identity transport (for example, X-Simulator-Owner)"},
         503: {"model": SimulatorActionError, "description": "Run perimeter, trustline usage, seeding or engine unavailable (flat envelope)"},
@@ -2183,7 +2209,7 @@ async def action_trustlines_list(
     response_model=SimulatorPaymentTargetsResponse,
     responses={
         401: {"model": ErrorEnvelope, "description": "Missing or invalid simulator identity"},
-        403: {"model": SimulatorActionError, "description": "Simulator actions disabled (ACTIONS_DISABLED) or access denied (flat envelope)"},
+        403: _ACTION_FORBIDDEN_RESPONSE,
         404: {"model": SimulatorActionError, "description": "Run, participant, equivalent or trustline not found (flat envelope)"},
         422: {"model": ErrorEnvelope, "description": "Invalid simulator identity transport (for example, X-Simulator-Owner)"},
         503: {"model": SimulatorActionError, "description": "Run perimeter, trustline usage, seeding or engine unavailable (flat envelope)"},

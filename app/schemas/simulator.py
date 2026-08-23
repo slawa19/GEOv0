@@ -687,11 +687,27 @@ class SimulatorActionEdgeRef(BaseModel):
 
     # Response payloads must use key `from` (not `from_`) regardless of model_dump(by_alias=...).
     # FastAPI response serialization may or may not request `by_alias=True`, so make this explicit.
+    #
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
+    # 011/T1109: the serializer stays exactly as it was - `serialize_by_alias` was tried and
+    # emits `from_`, which would change the wire - but the published schema no longer follows
+    # its `Dict[str, str]` annotation. Pydantic derived the serialization schema from that
+    # annotation and described each edge as an arbitrary string map, losing `from` and `to`:
+    # protected wire keys under AGENTS.md section 8. The override below states what this model
+    # actually emits, which is the whole point of program 011.
     @model_serializer(mode="plain")
     def _serialize(self) -> Dict[str, str]:
         return {"from": self.from_, "to": self.to}
+
+    @classmethod
+    def __get_pydantic_json_schema__(cls, core_schema, handler) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["from", "to"],
+            "properties": {"from": {"type": "string"}, "to": {"type": "string"}},
+        }
 
 
 class SimulatorActionClearingCycle(BaseModel):

@@ -3007,6 +3007,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SimulatorActionClearingRealResponse'
+        '400':
+          $ref: '#/components/responses/SimulatorActionBadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -3256,11 +3258,17 @@ components:
           schema:
             $ref: '#/components/schemas/SimulatorActionError'
     SimulatorActionForbidden:
-      description: Simulator actions disabled (ACTIONS_DISABLED) or access denied (flat envelope)
+      description: >-
+        Actions disabled or access denied (flat SimulatorActionError), or the identity was
+        rejected before the handler ran (ErrorEnvelope). Both shapes are reachable: the guard
+        inside the handler answers flat, while require_simulator_actor raises before it and the
+        global handler wraps the result.
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/SimulatorActionError'
+            oneOf:
+              - $ref: '#/components/schemas/SimulatorActionError'
+              - $ref: '#/components/schemas/ErrorEnvelope'
     SimulatorActionNotFound:
       description: Run, participant, equivalent or trustline not found (flat envelope)
       content:
@@ -3565,8 +3573,13 @@ components:
 
     SimulatorActionEdgeRef:
       type: object
-      additionalProperties:
-        type: string
+      additionalProperties: false
+      required: [from, to]
+      properties:
+        from:
+          type: string
+        to:
+          type: string
     SimulatorActionError:
       type: object
       additionalProperties: false
