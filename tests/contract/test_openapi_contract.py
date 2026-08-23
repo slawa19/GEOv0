@@ -187,10 +187,32 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # only 3.0.3 spelling of "X or null" is a `oneOf` with an explicit null branch, and the generated
 # side's 3.1 `anyOf: [X, null]` was already being collapsed. Comparing the two spellings recorded
 # a difference that does not exist.
+# 2026-08-23 / p011_t1108: 62 -> 63, and the growth is named, as the monotonicity invariant in the
+# spec requires. GET /admin/config ENTERS. Nothing else moves.
+#
+# `AdminConfigItem.value` used to say `description: Any JSON value` and nothing else, and the
+# undescribed-response guard passed it only because that guard's rule was "is the dict empty"
+# rather than "is there a constraint here at all". Sharpening the guard (T1108) exposed it, and it
+# turned out never to have been free form: `value` is `getattr(settings, key)` over the closed
+# twelve-item literal in `_runtime_config_items`, measured on the real settings object as six
+# booleans, five integers and one string. The canon now says that union.
+#
+# The generated side cannot follow, because the model field is `Any`. So this is the slice-4 and
+# slice-5 situation again - the canon became more precise than the generated schema - except that
+# here it adds an entry instead of changing one, because the two sides previously agreed on saying
+# nothing. Tightening the pydantic field would change response validation on an admin read, which
+# this programme does not do.
+# Also 2026-08-23 / p011_t1108, same slice: count holds at 63, digest moves again. The two graph
+# reads change content because AdminGraphIncidentItem and AdminGraphTransactionItem disagreed with
+# each other about the same column - one declared `created_at` required and non-nullable, the
+# other optional and nullable, both fed by helpers written the same way. The column is NOT NULL
+# with a server default and both helpers always write the key, so the stricter one was right. The
+# incident `state` also stopped being a bare string: the query filters to six of the nine
+# transaction states.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "5b833ed75e7274da777ea8bb47a053407bf01705249df50805276d26b8ed625f"
+    "d0c6cc29ecb4d645e54fd9aca7837132c7715531a52fa9db6978b8013fa1ace7"
 )
-SUCCESS_SCHEMA_DRIFT_COUNT = 62
+SUCCESS_SCHEMA_DRIFT_COUNT = 63
 # 2026-08-11 / T501: public DB health no longer declares exception details;
 # the new admin diagnostic operation matches generated responses, so count stays 84.
 # 2026-08-20 / p007_unblock_f0071: simulator metrics/bottlenecks declare 503 in the

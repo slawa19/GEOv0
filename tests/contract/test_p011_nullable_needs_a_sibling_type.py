@@ -52,10 +52,19 @@ this predicate catches it for free.
 model and its writers, never against the canon's own prose:
 
 * `null` really does reach the wire -> keep the composition, add a `{nullable: true, enum: [null]}`
-  branch, drop the inert sibling. This is what nine sites needed.
+  branch, drop the inert sibling. **Fifteen** sites needed this.
 * `null` never occurs -> the `nullable: true` was simply false; delete it and leave the
-  composition alone. This is what nine sites needed. Adding a null branch to those would have
-  made a lie validate, which is the same defect facing the other way.
+  composition alone. **Eleven** sites needed this. Adding a null branch to those would have made
+  a lie validate, which is the same defect facing the other way.
+
+The split is 15 + 11 = 26, measured by walking this predicate over the canon at the fix's parent
+and reading each site's shape afterwards. Three earlier statements of it - two here saying "nine",
+one in the commit message saying twelve and eleven - added up to 18 and 23 and were simply wrong;
+T1108 caught them. **And 18 of the 26 were written by this wave**, in slices 4 through 8: at the
+programme's own starting commit the predicate finds 8. The defect is mostly one this wave
+introduced and then repaired, which is worth knowing, because the schema-authoring habit that
+produced those 18 is the same one that produced the `nullable`-beside-a-non-null-`enum` sites the
+second guard in this file now covers.
 
 `test_sanctioned_null_branches_sit_inside_a_composition` below keeps the exemption from becoming
 a loophole: `{nullable: true, enum: [null]}` is meaningful only as a member of a `oneOf`/`anyOf`,

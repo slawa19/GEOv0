@@ -4075,10 +4075,25 @@ components:
       required: [key, value, mutable]
       properties:
         key:
+          # One of the twelve runtime settings `_runtime_config_items` names
+          # (app/api/v1/admin.py:261-276). That list is a literal, so the key set is closed - but
+          # it is not enumerated here, so a new setting can appear without the canon going stale
+          # in the same commit.
           type: string
         value:
-          description: Any JSON value
+          # 011/T1108: this said `description: Any JSON value` and nothing else, and the
+          # undescribed-response guard passed it only because its rule was "is the dict empty"
+          # rather than "is there a constraint here at all". The value is `getattr(settings, key)`
+          # over that closed list of twelve, so it was never free form - it is a union of three
+          # scalar types, measured on the real settings object: six booleans, five integers and
+          # one string (LOG_LEVEL). Nothing on the list is a float, an array or an object.
+          oneOf:
+            - type: string
+            - type: boolean
+            - type: integer
         mutable:
+          # All twelve are currently mutable; the flag is per item so a read-only setting can join
+          # the list without a schema change.
           type: boolean
 
     AdminConfigResponse:
@@ -4418,7 +4433,7 @@ components:
       # 011/`F-011-9`: the very same stuck-payment row as AdminIncidentItem, with the very same
       # keys, but served through the graph reads - and one field differs on the wire.
       # `_graph_fetch_incidents` puts `tx.created_at` into a plain dict (app/api/v1/admin.py:217)
-      # which lands in a `list[Any]` field (app/schemas/graph.py:32), so the UTC-attaching
+      # which lands in a `list[Any]` field (app/schemas/graph.py:39), so the UTC-attaching
       # validator on AdminIncidentItem never runs. Under SQLite the column comes back naive and
       # the value goes out with no offset, while GET /admin/incidents serves the same row with a
       # trailing Z. Proved by running the production models on one naive datetime: the item model
@@ -4429,12 +4444,22 @@ components:
       # behavioural fix - making both paths agree - changes the wire and is therefore out of scope
       # for 011 by its own Non-goals; it is recorded as a debt with no owner in this programme.
       type: object
-      required: [tx_id, state, initiator_pid, equivalent, age_seconds, sla_seconds]
+      # 011/T1108: `created_at` used to be absent from `required` and declared nullable, while the
+      # sibling AdminGraphTransactionItem - fed from the same column by a helper written the same
+      # way - declared it required and non-nullable. At most one of those could be right. The
+      # helper always writes the key (app/api/v1/admin.py:217) and the column is NOT NULL with a
+      # server default (app/db/models/transaction.py:18), so the sibling was right.
+      required: [tx_id, state, initiator_pid, equivalent, age_seconds, sla_seconds, created_at]
       properties:
         tx_id:
           type: string
         state:
+          # The query filters to `_ACTIVE_PAYMENT_TX_STATES` (app/api/v1/admin.py:113-120), so this
+          # is six of the nine transaction states, not all nine. The first version of this schema
+          # left it a bare string - the most constrained field on the read carrying the least
+          # description, in a programme about describing what is returned.
           type: string
+          enum: [NEW, ROUTED, PREPARE_IN_PROGRESS, PREPARED, PROPOSED, WAITING]
         initiator_pid:
           type: string
         equivalent:
@@ -4449,7 +4474,6 @@ components:
           # Deliberately without `format: date-time` - the offset is missing here. Same reasoning
           # as AdminGraphTransactionItem.created_at, reached by a different route.
           type: string
-          nullable: true
 
     AdminIncidentItem:
       # Served by GET /admin/incidents, where the response model does run and its validator
@@ -5024,7 +5048,7 @@ components:
       type: object
       # 011/T1102 (2026-08-23): `required` named six of the ten fields the model declares
       # without a default, and `updated_at` was missing from `properties` altogether even
-      # though every trustline read emits it (app/schemas/trustline.py:24). The three fields
+      # though every trustline read emits it (app/schemas/trustline.py:23). The three fields
       # left out - policy, from_display_name, to_display_name - default to null in the model,
       # so nothing guarantees them; no read sets response_model_exclude_none, so in practice
       # all three do reach the wire.
@@ -5466,8 +5490,11 @@ components:
           # and no read on this route sets `exclude_none`).
           #
           # The tail is OPEN, and that is the point: both abort paths forward the `.details` of
-          # whatever 4xx GeoException prepare or commit raised (app/core/payments/service.py:896-903),
-          # so adding a `details=` to any 4xx raise changes this object with no schema change.
+          # whatever 4xx GeoException prepare or commit raised. The prepare path classifies at
+          # app/core/payments/service.py:898-903 and writes at :922 and :938; the commit path
+          # forwards at :1001, :1017, :1067 and :1083. (One 896-903 range used to stand for all of
+          # that; T1108 found it covering a single branch of two and starting mid-expression.)
+          # So adding a `details=` to any 4xx raise changes this object with no schema change.
           # The branches below therefore DOCUMENT what the code emits today. `anyOf`, never
           # `oneOf`: a closed union would make an unlisted-but-real response non-conforming, and
           # a `oneOf` with a catch-all is worse still - every documented payload would match two
