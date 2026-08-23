@@ -740,14 +740,20 @@ def _declare_rate_limit_status(document: dict) -> None:
         for method, operation in path_item.items():
             if method not in methods or not isinstance(operation, dict):
                 continue
-            operation.setdefault("responses", {})["429"] = {
-                "description": "Rate limit exceeded",
-                "content": {
-                    "application/json": {
-                        "schema": {"$ref": "#/components/schemas/ErrorEnvelope"}
-                    }
+            # setdefault on the status too: a route that declares its own 429 keeps it. Nothing
+            # does today, so this is latent rather than observable - but silently replacing a
+            # route-level declaration is exactly the kind of thing that gets noticed a year later.
+            operation.setdefault("responses", {}).setdefault(
+                "429",
+                {
+                    "description": "Rate limit exceeded",
+                    "content": {
+                        "application/json": {
+                            "schema": {"$ref": "#/components/schemas/ErrorEnvelope"}
+                        }
+                    },
                 },
-            }
+            )
 
 
 app.openapi = _custom_openapi
