@@ -1264,28 +1264,46 @@ authenticated"}` прямо от `OAuth2PasswordBearer`, а не конверт;
 совпали независимо. Выборка канона против кода сошлась по всем пяти проверенным местам. Изменений
 поведения не обнаружено.
 
-### Гейты на `6a5bfe8` — то, чего в спеке не было и на что ревью указало отдельно
+### Гейты на `7bf20ff` — последнем коммите с кодом
 
-Записывается по требованию критерия закрытия: числа без команды и без exit code доказательством не
-являются.
+Записывается по требованию критерия закрытия и по прямому указанию второго круга ревью: **числа
+без команды и без exit code доказательством не являются**, а таблица, озаглавленная прошлым SHA,
+не воспроизводится. Ниже — прогоны на `7bf20ff`; всё, что после него, трогает только текст спеки,
+`specs/README.md` и передачу.
 
 | Шаг | Команда | Результат |
 |---|---|---|
-| Backend tier | `pytest tests -q -m "not postgres" -p no:randomly` | `1382 passed, 2 skipped`, exit `0` |
-| Контрактный набор | `pytest tests/contract -q` | `104 passed` |
-| **Postgres-тир** | `pytest tests/integration -q -m postgres` на `geov0_test_ci` | **`59 passed, 173 deselected`** |
-| Alembic single head | `verify_local.ps1` | ok |
-| `admin-ui` lint / unit / build | `npm --prefix admin-ui run lint / test / build` | ok / `236 passed` / exit `0` |
-| `simulator-ui/v2` typecheck / unit / build | `npm --prefix simulator-ui/v2 run typecheck / test:unit / build` | ok / `876 passed` / exit `0` |
+| Backend tier | `ENV=test pytest tests -q -m "not postgres" -p no:randomly` | `1403 passed, 2 skipped, 59 deselected`; 1 known failure, exit `0` |
+| Контрактный набор | `ENV=test pytest tests/contract -q` | `125 passed` |
+| **Postgres-тир** | `pytest tests/integration -q -m postgres` на `geov0_test_ci`, `GEO_TEST_USE_MIGRATED_SCHEMA=1` | **`59 passed, 173 deselected`**, exit `0` |
+| Alembic single head | шаг `verify_local.ps1` | ok |
+| `admin-ui` lint | `npm --prefix admin-ui run lint` | `0 errors, 117 warnings` (baseline, ни один файл UI этой волной не тронут) |
+| `admin-ui` unit | `npm --prefix admin-ui run test` | `33 files, 236 passed` |
+| `admin-ui` build | `npm --prefix admin-ui run build` | `✓ built`, exit `0` |
+| `simulator-ui/v2` typecheck | `npm --prefix simulator-ui/v2 run typecheck` | exit `0` |
+| `simulator-ui/v2` unit | `npm --prefix simulator-ui/v2 run test:unit` | `106 files, 876 passed` |
+| `simulator-ui/v2` build | `npm --prefix simulator-ui/v2 run build` с шимом `pwsh` | `✓ built`, exit `0` |
+
+**Единственное падение backend — пред-существующее и не этой волны.**
+`test_fail_on_conflict_checks_all_services_before_any_stop[powershell.exe-0]` проверено во
+временном worktree на `main`: **падает и там**. Причина видна в выводе — PowerShell переносит
+строку внутри искомой фразы (`not 
+stopped`); тест гоняет скрипт лаунчера, которого эта ветка не
+касалась.
 
 **Postgres-тир прогнан впервые за программу** — каждая предыдущая передача несла его как
 незакрытый пробел.
 
-**Сам `verify_local.ps1` при этом упал, и это не регрессия.** Два артефакта машины, оба
-задокументированы: Windows PowerShell 5.1 оборачивает stderr от `node` в `NativeCommandError` и
-роняет шаг при exit `0` (сборка `admin-ui`, запущенная напрямую, проходит), а `pwsh` на машине не
-установлен, из-за чего `prebuild` симулятора падает до сборки — обойдено шимом отдельным прогоном,
-потому что шим и бэкенд-тесты вместе несовместимы. Ни один UI-файл этой волной не тронут.
+**`verify_local.ps1` целиком на этой машине не проходит, и это не регрессия.** Два артефакта
+окружения, оба задокументированы в памяти проекта: Windows PowerShell 5.1 оборачивает stderr от
+`node` в `NativeCommandError` и роняет шаг при exit `0` (сборка `admin-ui`, запущенная напрямую,
+проходит), а `pwsh` на машине не установлен, из-за чего `prebuild` симулятора падает до сборки —
+обойдено шимом **отдельным прогоном**, потому что шим и бэкенд-тесты вместе несовместимы
+(`shutil.which` находит второй «интерпретатор» и параметризует им 53 теста). Ни один файл обоих UI
+этой волной не тронут — проверено `git log --name-only main..HEAD`.
+
+**Не заявляется:** E2E, container-паритет, CI. Ни один из трёх в этой сессии не запускался; CI к
+тому же не идёт на push в ветку — только на PR, push в `main`, расписание и ручной dispatch.
 
 ### Закрытие находок `T1109` — два документа сошлись на союзе, а главный гейт перестал проходить вхолостую
 
