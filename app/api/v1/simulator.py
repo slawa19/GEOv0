@@ -2755,7 +2755,11 @@ async def graph_snapshot_for_run(
     return await runtime.build_graph_snapshot(run_id=run_id, equivalent=equivalent, session=db)
 
 
-@router.get("/runs/{run_id}/metrics", response_model=MetricsResponse)
+@router.get(
+    "/runs/{run_id}/metrics",
+    response_model=MetricsResponse,
+    responses={503: {"model": ErrorEnvelope, "description": "Measured data is unavailable"}},
+)
 async def metrics_for_run(
     run_id: str,
     equivalent: str = Query(...),
@@ -2774,7 +2778,11 @@ async def metrics_for_run(
     )
 
 
-@router.get("/runs/{run_id}/bottlenecks", response_model=BottlenecksResponse)
+@router.get(
+    "/runs/{run_id}/bottlenecks",
+    response_model=BottlenecksResponse,
+    responses={503: {"model": ErrorEnvelope, "description": "Measured data is unavailable"}},
+)
 async def bottlenecks_for_run(
     run_id: str,
     equivalent: str = Query(...),
