@@ -969,8 +969,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: '#/components/schemas/AdminGraphSnapshotResponse'
         '429':
           $ref: '#/components/responses/TooManyRequests'
 
@@ -1023,8 +1022,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: '#/components/schemas/AdminGraphEgoResponse'
         '429':
           $ref: '#/components/responses/TooManyRequests'
 
@@ -3870,6 +3868,202 @@ components:
           type: object
           additionalProperties:
             $ref: '#/components/schemas/AdminClearingCyclesForEquivalent'
+
+    # 011/T1102 (2026-08-23): the two admin graph reads, whose 200 bodies the canon declared as a
+    # bare object. Transcribed by hand from AdminGraphSnapshotResponse and its ego subclass
+    # (app/schemas/graph.py:12-63) and from the two handlers that fill them. The participant block
+    # and the whole viz computation are duplicated line for line between the handlers, so one set
+    # of schemas describes both.
+    AdminGraphParticipant:
+      type: object
+      required: [pid, display_name, type, status]
+      properties:
+        pid:
+          type: string
+        display_name:
+          type: string
+        type:
+          type: string
+          enum: [person, business, hub]
+        status:
+          # Lower-cased on the way out, so this is the DB vocabulary
+          # (app/db/models/participant.py:22), not the filter words the UI sends in.
+          type: string
+          enum: [active, suspended, left, deleted]
+        # The four viz fields are filled only when `equivalent` is supplied AND names an existing
+        # equivalent AND the participant set is non-empty; otherwise all four stay null. The keys
+        # are always present either way. `?equivalent=NOSUCH` is a 200 with four nulls, because
+        # validate_equivalent_code checks the format only.
+        net_balance_atoms:
+          # Integer atoms via str(int): no decimal point, negative for a net debtor. NOT a money
+          # amount - the major-unit value is this divided by 10 ** precision.
+          type: string
+          nullable: true
+        net_sign:
+          type: integer
+          nullable: true
+          enum: [-1, 0, 1]
+        viz_color_key:
+          type: string
+          nullable: true
+          enum:
+            - suspended
+            - left
+            - deleted
+            - business
+            - person
+            - debt-0
+            - debt-1
+            - debt-2
+            - debt-3
+            - debt-4
+            - debt-5
+            - debt-6
+            - debt-7
+            - debt-8
+        viz_size:
+          # Node dimensions in pixels. The field is typed dict[str, int] (app/schemas/graph.py:22)
+          # and the only writer builds exactly {"w", "h"}: the two real keys are named, and the
+          # map stays as open as the type rather than being closed to a shape the annotation does
+          # not promise.
+          type: object
+          nullable: true
+          properties:
+            w:
+              type: integer
+            h:
+              type: integer
+          additionalProperties:
+            type: integer
+
+    AdminGraphDebt:
+      # Structurally the same four fields as AdminClearingCycleEdge, but a different model on a
+      # different read; kept separate so one response cannot silently retype the other.
+      type: object
+      required: [equivalent, debtor, creditor, amount]
+      properties:
+        equivalent:
+          type: string
+        debtor:
+          type: string
+        creditor:
+          type: string
+        amount:
+          # Money stays an exact decimal string (AGENTS.md section 8), never a float.
+          type: string
+
+    AdminGraphTransactionItem:
+      # Built as a plain dict by _graph_fetch_transactions and placed in a list[Any] field, so no
+      # response model shapes it.
+      type: object
+      required: [tx_id, type, state, initiator_pid, created_at, updated_at]
+      properties:
+        tx_id:
+          type: string
+        type:
+          type: string
+          enum:
+            - TRUST_LINE_CREATE
+            - TRUST_LINE_UPDATE
+            - TRUST_LINE_CLOSE
+            - PAYMENT
+            - CLEARING
+            - COMPENSATION
+            - COMMODITY_REDEMPTION
+        state:
+          type: string
+          enum:
+            - NEW
+            - ROUTED
+            - PREPARE_IN_PROGRESS
+            - PREPARED
+            - COMMITTED
+            - ABORTED
+            - PROPOSED
+            - WAITING
+            - REJECTED
+        initiator_pid:
+          type: string
+        created_at:
+          # Deliberately NOT `format: date-time` - see `F-011-9`. These values are copied raw from
+          # the column into a list[Any] field, so the UTC-attaching validator never runs, and
+          # under SQLite they carry no offset. The same row served by GET /admin/incidents does
+          # carry one. Declaring a format the service does not guarantee is the defect this
+          # program exists to remove.
+          type: string
+        updated_at:
+          type: string
+        equivalent:
+          # payload.get("equivalent"); both writers store a string, null when a row has no key.
+          type: string
+          nullable: true
+        error:
+          nullable: true
+          oneOf:
+            - $ref: '#/components/schemas/AdminGraphTransactionError'
+
+    AdminGraphTransactionError:
+      # The abort payload the payment engine writes into the transactions.error JSON column.
+      # There is no reader-side validation, so nothing is required and the tail stays open.
+      type: object
+      additionalProperties: true
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+
+    AdminGraphSnapshotResponse:
+      type: object
+      required: [participants, trustlines, equivalents, debts, incidents, audit_log, transactions]
+      properties:
+        participants:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminGraphParticipant'
+        trustlines:
+          # Direction is from -> to = creditor -> debtor. One edge per (equivalent, from, to).
+          type: array
+          items:
+            $ref: '#/components/schemas/TrustLine'
+        equivalents:
+          # Always the full table on both reads - the dropdown reads this list, so the ego read
+          # deliberately does not narrow it.
+          type: array
+          items:
+            $ref: '#/components/schemas/StoredEquivalent'
+        debts:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminGraphDebt'
+        # The three below are list[Any] on the model, so their item shape comes from the fetch
+        # helper. Each is present and empty unless named in the `include` CSV.
+        incidents:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminIncidentItem'
+        audit_log:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminAuditLogItem'
+        transactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminGraphTransactionItem'
+
+    AdminGraphEgoResponse:
+      # The ego read returns the snapshot body plus the root; the subclass appends its field, so
+      # root_pid is the last key on the wire.
+      allOf:
+        - $ref: '#/components/schemas/AdminGraphSnapshotResponse'
+        - type: object
+          properties:
+            root_pid:
+              type: string
+              nullable: true
 
     AdminIncidentItem:
       type: object
