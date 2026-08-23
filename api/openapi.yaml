@@ -69,6 +69,8 @@ paths:
                     minimum: 0
                   timestamp:
                     type: string
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /healthz:
     get:
@@ -87,6 +89,8 @@ paths:
                   status:
                     type: string
                     enum: [ok]
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /health/db:
     get:
@@ -116,6 +120,8 @@ paths:
                   status:
                     type: string
                     enum: [error]
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /admin/health/db:
     get:
@@ -174,6 +180,8 @@ paths:
                       details:
                         type: object
                         nullable: true
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /admin/config:
     get:
@@ -195,6 +203,8 @@ paths:
                 $ref: '#/components/schemas/AdminConfigResponse'
         '403':
           $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
     patch:
       tags: [Admin]
       summary: Patch runtime config subset (admin)
@@ -220,6 +230,8 @@ paths:
                 $ref: '#/components/schemas/AdminConfigPatchResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /admin/whoami:
     get:
@@ -241,6 +253,8 @@ paths:
                 $ref: '#/components/schemas/AdminWhoAmIResponse'
         '403':
           $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /admin/feature-flags:
     get:
@@ -260,6 +274,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AdminFeatureFlags'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
     patch:
       tags: [Admin]
       summary: Patch feature flags (admin)
@@ -283,6 +299,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AdminFeatureFlags'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /admin/participants:
     get:
@@ -335,6 +353,8 @@ paths:
                     items:
                       type: object
                       additionalProperties: true
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /admin/participants/stats:
     get:
@@ -355,6 +375,8 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /admin/participants/{pid}/freeze:
     post:
@@ -383,6 +405,8 @@ paths:
                 $ref: '#/components/schemas/AdminParticipantStatusResponse'
         '404':
           $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /admin/participants/{pid}/unfreeze:
     post:
@@ -411,6 +435,8 @@ paths:
                 $ref: '#/components/schemas/AdminParticipantStatusResponse'
         '404':
           $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /admin/participants/{pid}/ban:
     post:
@@ -440,6 +466,8 @@ paths:
                 additionalProperties: true
         '404':
           $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /admin/participants/{pid}/unban:
     post:
@@ -469,6 +497,8 @@ paths:
                 additionalProperties: true
         '404':
           $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /admin/audit-log:
     get:
@@ -518,6 +548,8 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /admin/equivalents:
     get:
@@ -543,6 +575,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EquivalentsList'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
     post:
       tags: [Admin]
       summary: Create equivalent (admin)
@@ -566,6 +600,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Equivalent'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /admin/equivalents/{code}:
     patch:
@@ -600,6 +636,8 @@ paths:
           $ref: '#/components/responses/Conflict'
         '404':
           $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
     delete:
       tags: [Admin]
@@ -635,6 +673,8 @@ paths:
                 $ref: '#/components/schemas/AdminDeleteResponse'
         '404':
           $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /admin/equivalents/{code}/usage:
     get:
@@ -661,6 +701,8 @@ paths:
                 $ref: '#/components/schemas/AdminEquivalentUsageResponse'
         '404':
           $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /admin/migrations:
     get:
@@ -680,6 +722,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AdminMigrationsStatus'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /admin/trustlines:
     get:
@@ -739,6 +783,8 @@ paths:
                 additionalProperties: true
         '403':
           $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /admin/trustlines/bottlenecks:
     get:
@@ -780,6 +826,8 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /admin/liquidity/summary:
     get:
@@ -821,6 +869,8 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /admin/incidents:
     get:
@@ -856,6 +906,8 @@ paths:
                 additionalProperties: true
         '403':
           $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /admin/transactions/{tx_id}/abort:
     post:
@@ -892,6 +944,8 @@ paths:
                 $ref: '#/components/schemas/AdminAbortTxResponse'
         '404':
           $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /admin/graph/snapshot:
     get:
@@ -923,6 +977,8 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /admin/graph/ego:
     get:
@@ -975,6 +1031,8 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /simulator/graph/snapshot:
     get:
@@ -995,6 +1053,8 @@ paths:
                 $ref: '#/components/schemas/SimulatorGraphSnapshot'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /simulator/graph/ego:
     get:
@@ -1027,6 +1087,8 @@ paths:
                 $ref: '#/components/schemas/SimulatorGraphSnapshot'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /simulator/events:
     get:
@@ -1066,6 +1128,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /simulator/events/poll:
     get:
@@ -1094,6 +1158,8 @@ paths:
                   $ref: '#/components/schemas/SimulatorEvent'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /simulator/scenarios:
     get:
@@ -1108,6 +1174,8 @@ paths:
                 $ref: '#/components/schemas/ScenariosListResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
     post:
       tags: [Simulator]
       summary: Upload a simulator scenario (Real Mode control plane)
@@ -1128,6 +1196,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /simulator/scenarios/{scenario_id}:
     get:
@@ -1146,6 +1216,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /simulator/scenarios/{scenario_id}/graph/preview:
     get:
@@ -1176,6 +1248,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /simulator/session/ensure:
     post:
@@ -1296,6 +1370,8 @@ paths:
                     type: integer
         '403':
           $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /simulator/admin/runs/stop-all:
     post:
@@ -1340,6 +1416,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '403':
           $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /simulator/runs:
     post:
@@ -1364,6 +1442,8 @@ paths:
           $ref: '#/components/responses/Conflict'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /simulator/runs/active:
     get:
@@ -1379,6 +1459,8 @@ paths:
                 additionalProperties: true
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /simulator/runs/{run_id}:
     get:
@@ -1397,6 +1479,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /simulator/runs/{run_id}/pause:
     post:
@@ -1415,6 +1499,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /simulator/runs/{run_id}/resume:
     post:
@@ -1433,6 +1519,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /simulator/runs/{run_id}/stop:
     post:
@@ -1461,6 +1549,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /simulator/runs/{run_id}/restart:
     post:
@@ -1479,6 +1569,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /simulator/runs/{run_id}/intensity:
     post:
@@ -1505,6 +1597,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /simulator/runs/{run_id}/events:
     get:
@@ -1543,6 +1637,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /simulator/runs/{run_id}/actions/tx-once:
     post:
@@ -1587,6 +1683,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /simulator/runs/{run_id}/actions/clearing-once:
     post:
@@ -1631,6 +1729,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /simulator/runs/{run_id}/graph/snapshot:
     get:
@@ -1650,6 +1750,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /simulator/runs/{run_id}/metrics:
     get:
@@ -1691,6 +1793,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /simulator/runs/{run_id}/bottlenecks:
     get:
@@ -1727,6 +1831,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /simulator/runs/{run_id}/artifacts:
     get:
@@ -1745,6 +1851,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /simulator/runs/{run_id}/artifacts/{name}:
     get:
@@ -1765,6 +1873,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /admin/clearing/cycles:
     get:
@@ -1803,6 +1913,8 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /admin/participants/{pid}/metrics:
     get:
@@ -1836,6 +1948,8 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /equivalents:
     get:
@@ -1850,6 +1964,8 @@ paths:
                 $ref: '#/components/schemas/EquivalentsList'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /auth/challenge:
     post:
@@ -1871,6 +1987,8 @@ paths:
                 $ref: '#/components/schemas/ChallengeResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /auth/login:
     post:
@@ -1894,6 +2012,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /auth/refresh:
     post:
@@ -1917,6 +2037,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /participants:
     get:
@@ -1964,6 +2086,8 @@ paths:
                 $ref: '#/components/schemas/ParticipantsList'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
     post:
       tags: [Participants]
@@ -1984,6 +2108,8 @@ paths:
                 $ref: '#/components/schemas/Participant'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /participants/search:
     get:
@@ -2031,6 +2157,8 @@ paths:
                 $ref: '#/components/schemas/ParticipantsList'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /participants/me:
     get:
@@ -2045,6 +2173,8 @@ paths:
                 $ref: '#/components/schemas/ParticipantWithStats'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
     patch:
       tags: [Participants]
@@ -2066,6 +2196,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /participants/{pid}:
     get:
@@ -2084,6 +2216,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /trustlines:
     get:
@@ -2127,6 +2261,8 @@ paths:
                 $ref: '#/components/schemas/TrustLinesList'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
     post:
       tags: [TrustLines]
@@ -2148,6 +2284,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /trustlines/{id}:
     get:
@@ -2166,6 +2304,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
     patch:
       tags: [TrustLines]
@@ -2191,6 +2331,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
     delete:
       tags: [TrustLines]
@@ -2221,6 +2363,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /clearing/cycles:
     get:
@@ -2249,6 +2393,8 @@ paths:
                 $ref: '#/components/schemas/ClearingCyclesResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /clearing/auto:
     post:
@@ -2277,6 +2423,8 @@ paths:
                 $ref: '#/components/schemas/ClearingAutoResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /payments/capacity:
     get:
@@ -2312,6 +2460,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /payments/max-flow:
     get:
@@ -2340,6 +2490,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /payments:
     post:
@@ -2471,6 +2623,8 @@ paths:
                 $ref: '#/components/schemas/PaymentsList'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /payments/{tx_id}:
     get:
@@ -2494,6 +2648,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /balance:
     get:
@@ -2508,6 +2664,8 @@ paths:
                 $ref: '#/components/schemas/BalanceSummary'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /balance/debts:
     get:
@@ -2534,6 +2692,8 @@ paths:
                 $ref: '#/components/schemas/DebtsDetails'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /integrity/status:
     get:
@@ -2548,6 +2708,8 @@ paths:
                 $ref: '#/components/schemas/IntegrityStatusResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /integrity/checksum/{equivalent}:
     get:
@@ -2570,6 +2732,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /integrity/verify:
     post:
@@ -2592,6 +2756,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /integrity/repair/net-mutual-debts:
     post:
@@ -2606,6 +2772,8 @@ paths:
                 $ref: '#/components/schemas/IntegrityNetMutualDebtsRepairResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /integrity/repair/cap-debts-to-trust-limits:
     post:
@@ -2620,6 +2788,8 @@ paths:
                 $ref: '#/components/schemas/IntegrityCapDebtsRepairResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /integrity/audit-log:
     get:
@@ -2648,6 +2818,8 @@ paths:
                 $ref: '#/components/schemas/IntegrityAuditLogResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   # Interact Mode control plane (011/T1101, published 2026-08-23).
   # These eight operations were registered and callable all along; only their schema
@@ -2693,6 +2865,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SimulatorActionError'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /simulator/runs/{run_id}/actions/trustline-update:
     post:
@@ -2731,6 +2905,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SimulatorActionError'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /simulator/runs/{run_id}/actions/trustline-close:
     post:
@@ -2769,6 +2945,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SimulatorActionError'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /simulator/runs/{run_id}/actions/payment-real:
     post:
@@ -2807,6 +2985,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SimulatorActionError'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /simulator/runs/{run_id}/actions/clearing-real:
     post:
@@ -2849,6 +3029,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SimulatorActionError'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /simulator/runs/{run_id}/actions/participants-list:
     get:
@@ -2871,6 +3053,8 @@ paths:
           $ref: '#/components/responses/SimulatorActionNotFound'
         '422':
           $ref: '#/components/responses/SimulatorActionUnprocessable'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /simulator/runs/{run_id}/actions/trustlines-list:
     get:
@@ -2909,6 +3093,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SimulatorActionError'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /simulator/runs/{run_id}/payment-targets:
     get:
@@ -2969,6 +3155,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SimulatorActionError'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
 components:
   securitySchemes:
@@ -3042,6 +3230,12 @@ components:
             $ref: '#/components/schemas/ErrorEnvelope'
     NotFound:
       description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    TooManyRequests:
+      description: Rate limit exceeded
       content:
         application/json:
           schema:
@@ -3385,7 +3579,6 @@ components:
         details:
           type: object
           nullable: true
-          additionalProperties: true
 
     TxOnceRequestBody:
       type: object
@@ -3548,7 +3741,7 @@ components:
               type: string
             details:
               type: object
-              additionalProperties: true
+              nullable: true
 
     AdminConfigItem:
       type: object

@@ -691,8 +691,63 @@ def _custom_openapi() -> dict:
                 },
             }
 
+    _declare_rate_limit_status(document)
+
     app.openapi_schema = document
     return document
+
+
+def _declare_rate_limit_status(document: dict) -> None:
+    """Declare 429 on exactly the operations the limiter can answer for (011/T1103a).
+
+    `F-011-3`: every HTTP router is mounted with `Depends(deps.rate_limit)`, so nearly the whole
+    surface can return 429, yet the canon named it once in the entire document.  The set is
+    derived from the route table rather than listed, so it cannot fall out of step with how the
+    routers are mounted - and `_RATE_LIMIT_EXEMPT_PATHS` is honoured, because declaring 429 for a
+    route the limiter returns early on would be the very defect this program catalogues.
+    """
+
+    import re
+
+    from fastapi.routing import APIRoute
+
+    from app.api import deps
+
+    def schema_path(path: str) -> str:
+        # Starlette keeps the converter (`/participants/{pid:path}`); OpenAPI does not. Without
+        # this the operation silently misses its 429 because the keys never match.
+        return re.sub(r"\{([^{}:]+):[^{}]+\}", lambda m: "{" + m.group(1) + "}", path)
+
+    limited: dict[str, set[str]] = {}
+    for route in app.routes:
+        if not isinstance(route, APIRoute):
+            continue
+        if route.path in deps._RATE_LIMIT_EXEMPT_PATHS:
+            continue
+        if not any(
+            dependency.call is deps.rate_limit
+            for dependency in route.dependant.dependencies
+        ):
+            continue
+        limited.setdefault(schema_path(route.path), set()).update(
+            method.lower() for method in route.methods
+        )
+
+    for path, path_item in (document.get("paths") or {}).items():
+        methods = limited.get(path)
+        if not methods or not isinstance(path_item, dict):
+            continue
+        for method, operation in path_item.items():
+            if method not in methods or not isinstance(operation, dict):
+                continue
+            operation.setdefault("responses", {})["429"] = {
+                "description": "Rate limit exceeded",
+                "content": {
+                    "application/json": {
+                        "schema": {"$ref": "#/components/schemas/ErrorEnvelope"}
+                    }
+                },
+            }
 
 
 app.openapi = _custom_openapi
