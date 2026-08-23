@@ -24,6 +24,27 @@
 | Судьба `/ws` и `event_bus` | — | Маршрут живой, производитель есть, потребителя нет. Решение keep-or-deprecate заблокировано за F-005-1 (токен в query string) | `app/api/v1/websocket.py:17`; производитель — `event_bus.publish(` в `app/core/payments/service.py:94` |
 | `docs/ru/pwa/` | — | Домена `pwa` нет в каноне `documentation-rules.md` §2.2, входящих ссылок нет. Мёртвый документ или отложенная работа | `docs/ru/pwa/specs/pwa-client-ui-spec.md` |
 
+### Схемная гигиена: `trustlines.policy` — nullable-колонка, в которую никто не пишет `null`
+
+Внесено 2026-08-23 при закрытии 011. Колонка объявлена nullable и имеет **только Python-side
+`default=`** (`app/db/models/trustline.py:15-21`), который срабатывает лишь когда атрибут не задан;
+server default отсутствует. При этом **ни один писатель приложения не пишет `null`**: `create`
+кладёт `data.policy or {}` (`app/core/trustlines/service.py:190`), `update` кладёт словарь
+(`:334-336`), симуляторное действие не передаёт kwarg и получает дефолт ORM
+(`app/api/v1/simulator.py:1116-1121`), инжектор и real-mode-сидер передают словари
+(`inject_executor.py:506`, `:622`; `real_scenario_seeder.py:213-224`), `scripts/seed_db.py:359-382`
+приводит не-словарь к `{}`.
+
+Разрыв нашёлся так: два юнит-теста вставляли `policy=None` **прямо через ORM**, минуя
+Python-дефолт, и строили строку, которую приложение написать не может — из-за чего проверка
+конформности ответов канону видела `policy: null` на проволоке. Фикстуры исправлены на `{}`
+(`tests/unit/test_admin_liquidity_summary.py`, `tests/unit/test_admin_trustlines_bottlenecks.py`),
+и канон **сознательно** продолжает утверждать, что `policy` — объект: объявить его nullable значило
+бы ослабить верное утверждение ради строки, которой служба не производит.
+
+Остаток — не контрактный дефект, а гигиена схемы: либо `nullable=False` + server default, либо
+явное решение, что `null` допустим, и тогда канон обязан это сказать. Владельца нет.
+
 ## Требуют отдельной спеки, не узкой правки
 
 | Пункт | Sev | Current / Intended / Optimal | Evidence |

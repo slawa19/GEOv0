@@ -46,6 +46,26 @@ settings.RECOVERY_ENABLED = False
 settings.INTEGRITY_CHECKPOINT_ENABLED = False
 
 
+# RT-011-10 / runtime conformance. Wrap httpx for the WHOLE session before any test runs,
+# so `test_p011_responses_conform_to_the_canon` sees every 2xx body the suite produces and
+# not only the ones made after some test happened to import the harness. Installing at
+# module import time is deliberate: this conftest is imported before collection, which is
+# the only point that is unambiguously earlier than every request.
+from tests.contract import openapi_response_conformance as _openapi_conformance  # noqa: E402
+
+_openapi_conformance.HARNESS.install()
+
+
+def pytest_collection_modifyitems(session, config, items) -> None:
+    """Defer the aggregate conformance assertion to the very end of the session.
+
+    It reads a registry that is only complete once everything else has run, and
+    `tests/contract` sorts before `tests/integration` and `tests/unit`.
+    """
+
+    _openapi_conformance.move_report_test_last(items)
+
+
 def pytest_collection_finish(session: pytest.Session) -> None:
     """Fail closed when selected PostgreSQL tests use another DB backend."""
     selected_postgres = [

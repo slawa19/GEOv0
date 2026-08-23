@@ -171,8 +171,24 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # three opaque leaves sit inside IntegrityAuditLogAfterState, whose pydantic side is
 # Dict[str, Any], so the canon is now more precise than the generated schema rather than equal to
 # it. Same reason slices 4 and 5 held their count.
+# 2026-08-23 / p011_t1108: count holds at 62, digest moves, and this one was found by review
+# rather than by the gate. Sixteen entries change content because eleven canon nodes now admit the
+# null the service really sends there - twelve operations were returning 2xx bodies that
+# api/openapi.yaml REJECTED, with this whole suite green, because nothing in the repository
+# validated a response against the canon. `tests/contract/test_p011_responses_conform_to_the_canon.py`
+# now does, over every body the suite produces.
+#
+# Two shapes did it. `nullable: true` beside an `enum` that has no `null` in it still rejects null,
+# and the F-011-10 guard passed those because they do have a sibling `type`. And a property that
+# can be null declared as a bare `$ref` or a bare typed schema has nothing to be wrong about -
+# `Participant.profile` was invisible to both guards and to every fixture in the suite.
+#
+# The digest also absorbs the symmetric half of a normalization that already existed: the canon's
+# only 3.0.3 spelling of "X or null" is a `oneOf` with an explicit null branch, and the generated
+# side's 3.1 `anyOf: [X, null]` was already being collapsed. Comparing the two spellings recorded
+# a difference that does not exist.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "c9f7883a212a84eb8e3350e5692a8739fa99e0d3ed681457bb13e123b2349e00"
+    "5b833ed75e7274da777ea8bb47a053407bf01705249df50805276d26b8ed625f"
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 62
 # 2026-08-11 / T501: public DB health no longer declares exception details;
@@ -322,6 +338,27 @@ def _normalize_schema(
     all_of = value.get("allOf")
     if len(value) == 1 and isinstance(all_of, list) and len(all_of) == 1:
         return _normalize_schema(all_of[0], document, parameter=parameter)
+
+    # 011/T1108: the canon's only way to say "X or null" in OpenAPI 3.0.3 is a `oneOf` with an
+    # explicit null branch - `nullable` beside a composition asserts nothing, which is `F-011-10`,
+    # and the guard forbids it. FastAPI emits the 3.1 spelling, which the `anyOf` branch below
+    # already collapses to `{..., nullable: True}`. Collapsing the canon's spelling the same way is
+    # the symmetric half: without it four properties drift on spelling alone while meaning exactly
+    # the same thing, and the ledger records a difference that does not exist.
+    one_of = value.get("oneOf")
+    if len(value) == 1 and isinstance(one_of, list) and len(one_of) == 2:
+        null_branches = [
+            item for item in one_of if _resolve_ref(item, document).get("enum") == [None]
+        ]
+        others = [
+            item for item in one_of if _resolve_ref(item, document).get("enum") != [None]
+        ]
+        if len(null_branches) == 1 and len(others) == 1:
+            normalized_other = _normalize_schema(others[0], document, parameter=parameter)
+            if parameter:
+                return normalized_other
+            if isinstance(normalized_other, dict) and "type" in normalized_other:
+                return {**normalized_other, "nullable": True}
 
     any_of = value.get("anyOf")
     if isinstance(any_of, list) and len(any_of) == 2:
@@ -1416,6 +1453,31 @@ def test_the_normalizer_drops_only_the_nullable_that_says_nothing() -> None:
     # But a typeless, uncomposed schema already admits null, so nothing is added there - this is
     # what keeps the two `Optional[Any]` request bodies matching instead of drifting forever.
     assert _normalize_schema({"anyOf": [{}, {"type": "null"}]}, document) == {}
+
+    # The canon's 3.0.3 spelling of the same thing must collapse to the same normal form as the
+    # generated side's 3.1 spelling - otherwise the canon is penalised for using the only wording
+    # OpenAPI 3.0.3 allows, and the ledger records a difference that is not one.
+    canon_spelling = _normalize_schema(
+        {"oneOf": [{"type": "string"}, {"nullable": True, "enum": [None]}]}, document
+    )
+    generated_spelling = _normalize_schema(
+        {"anyOf": [{"type": "string"}, {"type": "null"}]}, document
+    )
+    assert canon_spelling == generated_spelling == {"type": "string", "nullable": True}
+
+    # And the collapse must not swallow a real two-branch union. `oneOf: [A, B]` with no null
+    # branch, and a three-branch union that happens to include null, both stay as they are.
+    union = {"oneOf": [{"type": "string"}, {"type": "integer"}]}
+    assert _normalize_schema(dict(union), document) == union
+    three = {
+        "oneOf": [{"type": "string"}, {"type": "integer"}, {"nullable": True, "enum": [None]}]
+    }
+    assert _normalize_schema(dict(three), document) == {
+        "oneOf": [{"type": "string"}, {"type": "integer"}, {"enum": [None]}]
+    }, (
+        "a union of more than one non-null branch must keep its branches; collapsing it would "
+        "erase a real alternative. Only the inert `nullable` on the null branch itself is dropped"
+    )
 
 
 def test_openapi_success_error_responses_and_security_are_ratcheted() -> None:

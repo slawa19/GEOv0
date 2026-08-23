@@ -60,6 +60,36 @@ model and its writers, never against the canon's own prose:
 `test_sanctioned_null_branches_sit_inside_a_composition` below keeps the exemption from becoming
 a loophole: `{nullable: true, enum: [null]}` is meaningful only as a member of a `oneOf`/`anyOf`,
 and as a property schema in its own right it would declare a field that can only ever be null.
+
+--------------------------------------------------------------------------------------------
+**The second shape, added 2026-08-23: `nullable: true` beside an `enum` that omits `null`.**
+
+The rule above asks for a sibling `type`, and these nodes all had one - so they passed it, and
+they were still broken. `nullable` widens a `type`. It does not widen an `enum`, and where both
+are present the `enum` is the narrower constraint, so the pair says "null is allowed" and then
+lists the values null is not among. Measured, and re-run in
+`test_nullable_does_not_widen_an_enum` at the bottom of this file:
+
+    {"type": "integer", "nullable": True, "enum": [-1, 0, 1]}       + None  ->  REJECTED
+    {"type": "integer", "nullable": True, "enum": [-1, 0, 1, None]} + None  ->  ACCEPTED,
+                                                                       and 5 still REJECTED
+
+Five sites carried it. Two were written by this wave -- `AdminGraphParticipant.net_sign` and
+`.viz_color_key` -- and they were the worst of the five, because `_attach_net_viz` returns
+before computing anything when `?equivalent=` is absent (app/api/v1/admin.py:1482-1485). The
+DEFAULT call to `GET /admin/graph/snapshot` therefore returned a body the canon rejected on
+every participant, and the whole contract suite was green.
+
+The fix is the same decision as above, taken per site against the writers, and it went both
+ways: three sites gained `null` as an enum MEMBER (the two graph nodes plus
+`SimulatorGraphNode.net_sign`, all three of which really do emit null), and two had the
+`nullable: true` DELETED (`SimulatorGraphNodePatch.net_sign`, whose only writer computes an int
+at app/core/simulator/viz_patch_helper.py:284-292, and `MetricSeries.unit`, whose two writers
+both pass a unit from a literal table). Widening all five would have made two lies validate.
+
+This guard is static, so it reads nodes no test ever exercises. Its runtime complement -
+`test_p011_responses_conform_to_the_canon.py` - validates real 2xx bodies against this document
+and catches what a reader cannot see; neither subsumes the other.
 """
 
 from __future__ import annotations
@@ -121,6 +151,38 @@ def offending_sites(document: Any) -> list[str]:
     return found
 
 
+def nullable_beside_a_non_null_enum(document: Any) -> list[str]:
+    """Every `nullable: true` sitting next to an `enum` that does not list `null`.
+
+    Disjoint from `offending_sites` by construction: that predicate fires only where there is
+    NO sibling `type`, and every node this one has ever flagged had one. Keeping them separate
+    keeps the two failure messages giving different advice, because the fixes differ - one adds
+    a branch to a composition, the other edits an enum.
+    """
+
+    found: list[str] = []
+
+    def walk(node: Any, path: str) -> None:
+        if isinstance(node, dict):
+            enum = node.get("enum")
+            if (
+                node.get("nullable") is True
+                and isinstance(enum, list)
+                and not any(value is None for value in enum)
+            ):
+                found.append(path or "<root>")
+            for key, value in node.items():
+                if key in _NOT_SCHEMA_POSITIONS:
+                    continue
+                walk(value, f"{path}.{key}" if path else str(key))
+        elif isinstance(node, list):
+            for index, value in enumerate(node):
+                walk(value, f"{path}[{index}]")
+
+    walk(document, "")
+    return found
+
+
 def sanctioned_null_branches(document: Any) -> list[tuple[str, bool]]:
     """Locate every `{nullable: true, enum: [null]}` and say whether it sits in a composition."""
 
@@ -164,6 +226,20 @@ def test_canon_declares_no_nullable_without_a_sibling_type() -> None:
         "if it does not, delete the `nullable: true` and leave the composition alone. Do not "
         "add a null branch to make a false claim validate.\n\nSites:\n  "
         + "\n  ".join(sites)
+    )
+
+
+def test_canon_declares_no_nullable_beside_an_enum_that_forbids_null() -> None:
+    sites = nullable_beside_a_non_null_enum(_canon())
+    assert sites == [], (
+        f"{len(sites)} node(s) in api/openapi.yaml carry `nullable: true` next to an `enum` "
+        "that does not contain `null`. The enum is the narrower constraint and it wins, so "
+        "each of these FORBIDS the null it appears to allow - the same defect as the guard "
+        "above, wearing a sibling `type` so that guard cannot see it.\n\nDecide each one "
+        "against the writers: if null reaches the wire, add `null` to the enum (and keep the "
+        "`nullable: true`, which is then true and doing work); if it does not, delete the "
+        "`nullable: true` and leave the enum alone. Do not widen an enum to silence this.\n\n"
+        "Sites:\n  " + "\n  ".join(sites)
     )
 
 
@@ -261,6 +337,101 @@ def test_predicate_passes_the_fixed_form(name: str, schema: dict[str, Any]) -> N
     )
 
 
+# The second shape, reduced. `AdminGraphParticipant.net_sign` was literally this.
+_BROKEN_ENUM_INT = {"type": "integer", "nullable": True, "enum": [-1, 0, 1]}
+_BROKEN_ENUM_STR = {"type": "string", "nullable": True, "enum": ["a", "b"]}
+
+_FIXED_ENUM_WIDENED = {"type": "integer", "nullable": True, "enum": [-1, 0, 1, None]}
+_FIXED_NULLABLE_DELETED = {"type": "integer", "enum": [-1, 0, 1]}
+
+
+@pytest.mark.parametrize(
+    "name,schema",
+    [
+        ("nullable beside an integer enum", _BROKEN_ENUM_INT),
+        ("nullable beside a string enum", _BROKEN_ENUM_STR),
+    ],
+)
+def test_enum_predicate_flags_the_broken_form(name: str, schema: dict[str, Any]) -> None:
+    sites = nullable_beside_a_non_null_enum(_document_around(schema))
+    assert sites == [
+        "paths./thing.post.requestBody.content.application/json.schema.properties.field"
+    ], f"the predicate did not flag {name}: {sites}"
+
+
+@pytest.mark.parametrize(
+    "name,schema",
+    [
+        ("null added to the enum, nullable kept", _FIXED_ENUM_WIDENED),
+        ("nullable deleted, enum left alone", _FIXED_NULLABLE_DELETED),
+        ("an enum with no nullable at all", {"type": "string", "enum": ["a"]}),
+        ("nullable with no enum beside it", {"type": "string", "nullable": True}),
+    ],
+)
+def test_enum_predicate_passes_the_fixed_form(name: str, schema: dict[str, Any]) -> None:
+    assert nullable_beside_a_non_null_enum(_document_around(schema)) == [], (
+        f"the predicate wrongly flagged {name}"
+    )
+
+
+def test_the_two_predicates_do_not_shadow_each_other() -> None:
+    """Each shape must be caught by its own guard, and by exactly one of them.
+
+    If either predicate silently absorbed the other's cases, deleting one guard would look
+    harmless while removing real coverage - and the two failure messages give opposite advice.
+    """
+
+    with_type = _document_around(copy.deepcopy(_BROKEN_ENUM_INT))
+    assert nullable_beside_a_non_null_enum(with_type) != []
+    assert offending_sites(with_type) == []
+
+    without_type = _document_around(copy.deepcopy(_BROKEN_ONEOF))
+    assert offending_sites(without_type) != []
+    assert nullable_beside_a_non_null_enum(without_type) == []
+
+
+def test_enum_predicate_ignores_an_example_that_looks_like_one() -> None:
+    document = _document_around(
+        {"type": "object", "example": {"nullable": True, "enum": ["a", "b"]}}
+    )
+    assert nullable_beside_a_non_null_enum(document) == []
+
+
+def test_enum_predicate_reaches_into_components_and_responses() -> None:
+    """The five real sites were all in `components/schemas`, two levels inside `properties`."""
+
+    document = {
+        "openapi": "3.0.3",
+        "components": {
+            "schemas": {
+                "A": {"type": "object", "properties": {"n": copy.deepcopy(_BROKEN_ENUM_INT)}}
+            }
+        },
+        "paths": {
+            "/x": {
+                "get": {
+                    "responses": {
+                        "200": {
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "array",
+                                        "items": copy.deepcopy(_BROKEN_ENUM_STR),
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    }
+    assert sorted(nullable_beside_a_non_null_enum(document)) == [
+        "components.schemas.A.properties.n",
+        "paths./x.get.responses.200.content.application/json.schema.items",
+    ]
+
+
 def test_predicate_reaches_every_depth_the_defect_hides_at() -> None:
     """Four of the original 26 sites were two `properties` levels down, inside a request body.
 
@@ -333,15 +504,12 @@ def test_stray_null_branch_check_bites() -> None:
 def test_openapi_30_really_ignores_nullable_without_a_sibling_type() -> None:
     """The measured evidence in the docstring, re-run rather than remembered.
 
-    Skipped where `openapi-schema-validator` is absent: it is not in requirements-dev.txt, so
-    this cannot be the load-bearing half of the guard. Everything above is dependency-free.
+    `openapi-schema-validator` is a declared dev dependency as of 2026-08-23, so this executes
+    unconditionally. It used to be guarded with `importorskip`, which meant the premise of the
+    whole file could pass by not running - the exact vacuum this programme keeps finding.
     """
 
-    validator_module = pytest.importorskip(
-        "openapi_schema_validator",
-        reason="openapi-schema-validator is not a declared dev dependency",
-    )
-    oas30 = validator_module.OAS30Validator
+    from openapi_schema_validator import OAS30Validator as oas30
 
     thing = {"type": "object", "required": ["a"], "properties": {"a": {"type": "string"}}}
     conforming = {"a": "x"}
@@ -364,3 +532,36 @@ def test_openapi_30_really_ignores_nullable_without_a_sibling_type() -> None:
     # And the control: beside a `type`, `nullable` does exactly what it looks like.
     assert accepts({"type": "string", "nullable": True}, None)
     assert not accepts({"type": "string"}, None)
+
+
+def test_nullable_does_not_widen_an_enum() -> None:
+    """The premise of the SECOND guard, executed. This is the whole of `F-011-10`'s general form.
+
+    A reader sees `nullable: true` and stops. The validator reads the `enum` as well, finds
+    `null` absent from it, and refuses - which is why five nodes with a perfectly good sibling
+    `type` still described a body the service could not send.
+    """
+
+    from openapi_schema_validator import OAS30Validator as oas30
+
+    def accepts(schema: dict[str, Any], instance: Any) -> bool:
+        return not list(oas30(schema).iter_errors(instance))
+
+    broken = {"type": "integer", "nullable": True, "enum": [-1, 0, 1]}
+    assert not accepts(broken, None)
+    assert accepts(broken, 1)
+
+    widened = {"type": "integer", "nullable": True, "enum": [-1, 0, 1, None]}
+    assert accepts(widened, None)
+    assert accepts(widened, 1)
+    # Widening for null must not widen for anything else.
+    assert not accepts(widened, 5)
+
+    # The other direction: with the `nullable` deleted the enum says exactly what it meant.
+    deleted = {"type": "integer", "enum": [-1, 0, 1]}
+    assert not accepts(deleted, None)
+    assert accepts(deleted, 0)
+
+    # Strings behave the same way - `viz_color_key` and `MetricSeries.unit` were this shape.
+    assert not accepts({"type": "string", "nullable": True, "enum": ["a"]}, None)
+    assert accepts({"type": "string", "nullable": True, "enum": ["a", None]}, None)

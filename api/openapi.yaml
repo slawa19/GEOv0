@@ -4224,13 +4224,28 @@ components:
           type: string
           nullable: true
         net_sign:
+          # `null` is a MEMBER of the enum, not a `nullable` beside it. In OpenAPI 3.0.3
+          # `nullable` widens a sibling `type`; it does not widen an `enum`, and the enum is
+          # the narrower of the two, so the pair rejected the null this very schema says is
+          # the default answer. Measured with OAS30Validator (`F-011-10`, general form):
+          #   {type: integer, nullable: true, enum: [-1, 0, 1]}       + null -> REJECTED
+          #   {type: integer, nullable: true, enum: [-1, 0, 1, null]} + null -> ACCEPTED,
+          #                                                             and 5 still rejected.
+          # This is not hypothetical: `_attach_net_viz` returns before computing anything when
+          # `equivalent` is absent (app/api/v1/admin.py:1482-1485), and the participants are
+          # built with net_sign=None at :1460 / :1846 - so the DEFAULT call to
+          # /admin/graph/snapshot and /admin/graph/ego returned a body this node rejected, on
+          # every participant. `nullable: true` is kept because it is now true and doing work.
           type: integer
           nullable: true
-          enum: [-1, 0, 1]
+          enum: [-1, 0, 1, null]
         viz_color_key:
+          # Same class, same writers: :1461 / :1847 set it to None, and only the five branches
+          # at :1594-1603 (and :1977-1986 for the ego read) ever assign a string.
           type: string
           nullable: true
           enum:
+            - null
             - suspended
             - left
             - deleted
@@ -4883,9 +4898,37 @@ components:
           type: string
           format: date-time
         profile:
-          $ref: '#/components/schemas/ParticipantProfile'
+          # Null whenever the participant was created without one. `create_participant` passes
+          # `profile=None` EXPLICITLY in that case (app/core/participants/service.py:65), which
+          # bypasses the column's Python-side `default=dict`
+          # (app/db/models/participant.py:16) - a `default=` fires only for an unset attribute -
+          # so the column really holds NULL and every read of that participant emits
+          # `"profile": null`. Measured on POST /participants 201 with the profile key omitted.
+          #
+          # This one was invisible to BOTH guards until it was measured: a bare `$ref` carries no
+          # `nullable` for the static guard to judge, and every fixture in the suite sent
+          # `profile: {}`, so no observed body contradicted the canon. `test_a_participant_
+          # created_without_a_profile_conforms` now exercises it, which is the only reason this
+          # line is a measurement rather than a guess.
+          oneOf:
+            - $ref: '#/components/schemas/ParticipantProfile'
+            - nullable: true
+              enum: [null]
         public_stats:
-          $ref: '#/components/schemas/ParticipantPublicStats'
+          # Present and null on three of the four reads that emit a Participant. Only
+          # `get_participant_by_pid` fills it (app/core/participants/service.py:102-105); the
+          # create response, PATCH /participants/me and the search list all serialise a model
+          # whose field defaults to None (app/schemas/participant.py:36), and no read sets
+          # `response_model_exclude_none`, so the key is present carrying null.
+          #
+          # A bare `$ref` cannot say that: OpenAPI 3.0.3 ignores every sibling of a `$ref`, so
+          # `nullable: true` next to one is inert (`F-011-10`). The composition with an explicit
+          # null branch is the spelling this canon already uses, and the only one the validator
+          # acts on.
+          oneOf:
+            - $ref: '#/components/schemas/ParticipantPublicStats'
+            - nullable: true
+              enum: [null]
 
     ParticipantProfile:
       type: object
@@ -5530,17 +5573,39 @@ components:
         amount:
           type: string
         routes:
+          # All three of the nodes below are present-and-null on ordinary responses, and all
+          # three were declared as though they never could be. An ordinary SUCCESSFUL payment
+          # is the counter-example, not an edge case.
+          #
+          # `routes`: `get_payment` sets it to None whenever the stored payload carries no
+          # routes, and again when the list comes out empty (`or None`,
+          # app/core/payments/service.py:1275-1277). `nullable` beside `type: array` is the
+          # honest spelling here - unlike beside a `$ref`, it does exactly what it looks like.
           type: array
+          nullable: true
           items:
             $ref: '#/components/schemas/PaymentRoute'
         error:
-          $ref: '#/components/schemas/PaymentError'
+          # A successful payment sends `error: null`: the COMMITTED result at
+          # app/core/payments/service.py:1206-1215 is built without an `error=` at all, and the
+          # field defaults to None (app/schemas/payment.py:67). `get_payment` does the same
+          # explicitly at :1280. This was a bare `$ref`, whose siblings 3.0.3 ignores, so the
+          # null branch has to be a member of a composition.
+          oneOf:
+            - $ref: '#/components/schemas/PaymentError'
+            - nullable: true
+              enum: [null]
         created_at:
           type: string
           format: date-time
         committed_at:
+          # Null on any result that is not COMMITTED, and on a COMMITTED one whose transaction
+          # row has not been read back: `committed_at = tx.updated_at if tx.state ==
+          # "COMMITTED" else None` (app/core/payments/service.py:1279), and the commit path
+          # leaves it None unless the readback at :1196-1200 finds the row.
           type: string
           format: date-time
+          nullable: true
 
     PaymentsList:
       type: object
@@ -6129,9 +6194,14 @@ components:
           type: string
           nullable: true
         net_sign:
+          # Null observed on the wire from GET /simulator/runs/{run_id}/graph/snapshot:
+          # `scenario_to_snapshot` builds every node WITHOUT net_sign
+          # (app/core/simulator/snapshot_builder.py:351-359), and the field defaults to None
+          # (app/schemas/simulator.py:29). Only the real-mode path at :270 ever assigns it.
+          # `nullable` beside the enum did not admit that null - see AdminGraphParticipant.
           type: integer
           nullable: true
-          enum: [-1, 0, 1]
+          enum: [-1, 0, 1, null]
         viz_color_key:
           type: string
           nullable: true
@@ -6248,7 +6318,15 @@ components:
           additionalProperties:
             $ref: '#/components/schemas/SimulatorPaletteEntry'
         limits:
-          $ref: '#/components/schemas/SimulatorGraphLimits'
+          # Observed null from GET /simulator/runs/{run_id}/graph/snapshot. The field is
+          # Optional with a None default (app/schemas/simulator.py:86) and
+          # `scenario_to_snapshot` does not set it, so the scenario-derived snapshot serialises
+          # the key as null. Same reason as public_stats above: a bare `$ref` cannot carry a
+          # `nullable` sibling in 3.0.3, so the null goes in as a branch.
+          oneOf:
+            - $ref: '#/components/schemas/SimulatorGraphLimits'
+            - nullable: true
+              enum: [null]
       additionalProperties: true
 
     SimulatorGraphNodePatch:
@@ -6264,8 +6342,14 @@ components:
           type: string
           nullable: true
         net_sign:
+          # The opposite decision to the snapshot node above, on the same-looking pair. A PATCH
+          # node is emitted by exactly one writer, `viz_patch_helper._nodes_patch`, and it sets
+          # net_sign from `atoms_to_net_sign(atoms)` - an int, unconditionally
+          # (app/core/simulator/viz_patch_helper.py:284-292). Null never reaches this field, so
+          # the `nullable: true` was simply false; it is deleted rather than laundered into the
+          # enum. Adding `null` here would have made a lie validate, which is the same defect
+          # facing the other way (`F-011-10`).
           type: integer
-          nullable: true
           enum: [-1, 0, 1]
         viz_color_key:
           type: string
@@ -6961,8 +7045,14 @@ components:
         key:
           $ref: '#/components/schemas/MetricSeriesKey'
         unit:
+          # `nullable: true` deleted, not widened. The model types it Optional
+          # (`MetricUnit = Optional[Literal[...]]`, app/schemas/simulator.py:510-515), but both
+          # constructors pass a unit from a literal (key, unit) table - the real-mode path at
+          # app/core/simulator/metrics_bottlenecks.py:237 and the synthetic one at :322, over
+          # the seven pairs listed at :169-182 - and `extra="forbid"` keeps anything else from
+          # building one. Null never reaches the wire, so the enum was already the truth and
+          # the `nullable` beside it was a promise the enum refused to keep.
           type: string
-          nullable: true
           enum: ['%', count, amount]
         points:
           type: array
