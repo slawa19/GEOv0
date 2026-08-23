@@ -4642,8 +4642,94 @@ components:
         message:
           type: string
         details:
-          type: object
-          additionalProperties: true
+          # Read back verbatim from the transactions.error JSON column
+          # (app/core/payments/service.py:1282-1286). Its single writer coerces a missing payload
+          # to {} (app/core/payments/engine.py:1761-1778), so today it is always an object -
+          # nullable only because a legacy row written before that writer can lack the key, and
+          # `.get("details")` then yields null.
+          #
+          # The tail is OPEN, and that is the point: both abort paths forward the `.details` of
+          # whatever 4xx GeoException prepare or commit raised (app/core/payments/service.py:896-903),
+          # so adding a `details=` to any 4xx raise changes this object with no schema change.
+          # The branches below therefore DOCUMENT what the code emits today. `anyOf`, never
+          # `oneOf`: a closed union would make an unlisted-but-real response non-conforming, and
+          # a `oneOf` with a catch-all is worse still - every documented payload would match two
+          # branches and be rejected for matching more than one.
+          nullable: true
+          anyOf:
+            # Plain abort with no diagnostic payload - cancellation and timeout (E007), the
+            # default abort (E010), and the E002 raised when routing finds no capacious path.
+            - type: object
+              additionalProperties: false
+            # E002, insufficient capacity on one hop (app/core/payments/engine.py:767, :949).
+            # available / needed / reserved are money, so exact decimal strings.
+            - type: object
+              required: [available, needed, reserved, from, to]
+              properties:
+                available:
+                  type: string
+                needed:
+                  type: string
+                reserved:
+                  type: string
+                from:
+                  type: string
+                to:
+                  type: string
+              additionalProperties: false
+            # E008 from RetryablePaymentConflictException (app/utils/exceptions.py:78-81):
+            # a retryable database serialization failure. `retryable` is the client-facing
+            # signal that the same payment may be resubmitted.
+            - type: object
+              required: [retryable, conflict_kind]
+              properties:
+                retryable:
+                  type: boolean
+                conflict_kind:
+                  type: string
+              additionalProperties: false
+            # E008 from the post-apply per-participant delta check
+            # (app/core/payments/engine.py:1594). `equivalent` is deliberately a plain string,
+            # NOT EquivalentCode: the producer falls back to the equivalent UUID when the code
+            # cannot be read, and the code pattern would reject a real response.
+            - type: object
+              required: [invariant, source, equivalent, equivalent_id, total_drift, drifts]
+              properties:
+                invariant:
+                  type: string
+                  enum: [PAYMENT_DELTA_DRIFT]
+                source:
+                  type: string
+                equivalent:
+                  type: string
+                equivalent_id:
+                  type: string
+                total_drift:
+                  type: string
+                drifts:
+                  type: array
+                  items:
+                    type: object
+                    required: [participant_id, participant_uuid, expected_delta, actual_delta, drift]
+                    properties:
+                      participant_id:
+                        type: string
+                      participant_uuid:
+                        type: string
+                      expected_delta:
+                        type: string
+                      actual_delta:
+                        type: string
+                      drift:
+                        type: string
+                    additionalProperties: false
+              additionalProperties: false
+            # E008 from the three protocol invariants re-checked before commit - the same three
+            # shapes the integrity endpoints return, from the same producers.
+            - $ref: '#/components/schemas/InvariantViolationDetails'
+            # The open tail. Any other 4xx GeoException raised in prepare or commit reaches this
+            # node with its own details; this branch is what keeps such a response conforming.
+            - type: object
 
     PaymentResult:
       type: object
@@ -4744,6 +4830,81 @@ components:
               amount:
                 type: string
 
+    InvariantViolationDetails:
+      # The payload IntegrityViolationException carries (app/core/invariants.py).
+      # Shared because two surfaces return exactly these three shapes: the integrity
+      # endpoints via InvariantResult.details, and a payment abort via
+      # PaymentError.details when the engine re-checks invariants before commit
+      # (app/core/payments/engine.py:1248-1255).
+      oneOf:
+      # check_zero_sum. Keys are equivalent ids, values the signed imbalance - money, so
+      # exact decimal strings (AGENTS.md section 8), never numbers.
+      - type: object
+        required: [invariant, violations]
+        properties:
+          invariant:
+            type: string
+            enum: [ZERO_SUM_VIOLATION]
+          violations:
+            type: object
+            additionalProperties:
+              type: string
+        additionalProperties: false
+      # check_trust_limits, item built at app/core/invariants.py:136-145.
+      - type: object
+        required: [invariant, violations]
+        properties:
+          invariant:
+            type: string
+            enum: [TRUST_LIMIT_VIOLATION]
+          violations:
+            type: array
+            items:
+              type: object
+              required: [debtor_id, creditor_id, equivalent_id, debt_amount, trust_limit, violation_amount]
+              properties:
+                debtor_id:
+                  type: string
+                creditor_id:
+                  type: string
+                equivalent_id:
+                  type: string
+                debt_amount:
+                  type: string
+                trust_limit:
+                  type: string
+                violation_amount:
+                  type: string
+              additionalProperties: false
+        additionalProperties: false
+      # check_debt_symmetry, item built at app/core/invariants.py:218-227.
+      - type: object
+        required: [invariant, violations]
+        properties:
+          invariant:
+            type: string
+            enum: [DEBT_SYMMETRY_VIOLATION]
+          violations:
+            type: array
+            items:
+              type: object
+              required: [participant_a, participant_b, equivalent_id, debt_a_to_b, debt_b_to_a, net_debt]
+              properties:
+                participant_a:
+                  type: string
+                participant_b:
+                  type: string
+                equivalent_id:
+                  type: string
+                debt_a_to_b:
+                  type: string
+                debt_b_to_a:
+                  type: string
+                net_debt:
+                  type: string
+              additionalProperties: false
+        additionalProperties: false
+
     InvariantResult:
       type: object
       required: [passed]
@@ -4757,9 +4918,22 @@ components:
           type: integer
           nullable: true
         details:
-          type: object
+          # Null when `passed` is true; otherwise the details of the IntegrityViolationException,
+          # copied through unchanged by the two endpoints that build this object
+          # (app/api/v1/integrity.py:108, :121, :135 and :213, :226, :240). So the shape here is
+          # exactly what app/core/invariants.py raises: three variants, told apart by `invariant`.
+          #
+          # `violations` is an OBJECT in the zero-sum variant and an ARRAY in the other two. That
+          # asymmetry is in the producers, not a transcription slip - which is why this is a
+          # oneOf of three whole objects rather than one object with a loose `violations`.
+          #
+          # CLEARING_NEUTRALITY_VIOLATION (app/core/invariants.py:284-287) is deliberately absent:
+          # verify_clearing_neutrality has one caller, the clearing service, and its exception
+          # never becomes an InvariantResult. Declaring a shape this endpoint cannot return would
+          # be the mirror of the defect program 011 exists to fix.
           nullable: true
-          additionalProperties: true
+          oneOf:
+            - $ref: '#/components/schemas/InvariantViolationDetails'
       additionalProperties: false
 
     EquivalentIntegrityStatus:

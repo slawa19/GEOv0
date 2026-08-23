@@ -47,6 +47,10 @@ _HTTP_METHODS = {"get", "post", "put", "patch", "delete"}
 # did not, are struck off (35 -> 30).
 # 2026-08-23 / T1102: ten more struck off (30 -> 20) whose only opacity was a node in
 # ACCEPTED_FREE_FORM above - declared-open content, not a gap.
+# 2026-08-23 / T1102: five more (20 -> 15) - InvariantResult.details and PaymentError.details
+# now state their variants. The payments trio also needed the predicate to stop treating
+# `additionalProperties: false` with no properties as silence: that describes the empty
+# object, which is what a plain abort really returns.
 UNDESCRIBED_SUCCESS_RESPONSES = {
     ("GET", "/admin/audit-log"),
     ("GET", "/admin/graph/ego"),
@@ -59,11 +63,6 @@ UNDESCRIBED_SUCCESS_RESPONSES = {
     ("GET", "/admin/trustlines/bottlenecks"),
     ("GET", "/integrity/audit-log"),
     ("GET", "/integrity/checksum/{equivalent}"),
-    ("GET", "/integrity/status"),
-    ("POST", "/integrity/verify"),
-    ("GET", "/payments"),
-    ("POST", "/payments"),
-    ("GET", "/payments/{tx_id}"),
     ("GET", "/simulator/events/poll"),
     ("GET", "/trustlines"),
     ("POST", "/trustlines"),
@@ -98,6 +97,14 @@ ACCEPTED_FREE_FORM: dict[tuple[str, str], str] = {
         "never from app/, so the API path accepts any object"
     ),
     ("StoredEquivalent", "metadata"): "same column and writers as Equivalent.metadata",
+    ("PaymentError", "details"): (
+        "documented variants plus a deliberately open tail: both abort paths forward the "
+        ".details of whatever 4xx GeoException prepare or commit raised "
+        "(app/core/payments/service.py:896-903), so a new details= anywhere under "
+        "app/core/payments/ changes this node with no schema change. The known shapes are "
+        "described in the canon; the tail cannot be closed without making a real response "
+        "non-conforming"
+    ),
 }
 
 
@@ -155,7 +162,11 @@ def is_undescribed(
     typed_map = isinstance(additional, dict) and bool(additional)
 
     if declared_type == "object" or properties is not None or additional is not None:
-        if not properties and not composed and not typed_map:
+        # `additionalProperties: false` with no properties is not silence - it describes an
+        # object that can hold nothing, which is a complete and useful statement. The abort
+        # payload of PaymentError.details is exactly that case.
+        describes_the_empty_object = additional is False
+        if not properties and not composed and not typed_map and not describes_the_empty_object:
             return True
         for name, value in (properties or {}).items():
             if (component, name) in ACCEPTED_FREE_FORM:

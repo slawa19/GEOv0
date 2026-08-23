@@ -106,8 +106,15 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # participants/stats, runs/active. Transcribed into the canon by hand, in the style of that
 # document; generating it from `app.openapi()` is forbidden by this program's own Non-goals and
 # was tried and thrown away earlier in the same session.
+# 2026-08-23 / p011_t1102, slice 4: count stays 64, digest moves. InvariantResult.details and
+# PaymentError.details now state their variants instead of `additionalProperties: true`, which
+# changes five entries - GET /integrity/status, POST /integrity/verify and the three payments
+# operations - without adding or removing any. They stay in this dictionary because the canon got
+# more precise than the generated schema, not less: the pydantic side is `Dict[str, Any]`, and
+# tightening it there would change response validation on the money routes, which this program
+# does not do.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "0c3013dbbeab6f3ac6e96315c1f968118d9ca852966f7868277d2ef19d7313cd"
+    "3bdc07e09efbe6025d5b9755d270ea76ca6fe63ae7a406a2def281e4d333080b"
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 64
 # 2026-08-11 / T501: public DB health no longer declares exception details;
