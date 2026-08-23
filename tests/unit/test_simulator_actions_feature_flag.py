@@ -28,35 +28,48 @@ async def test_simulator_actions_endpoints_disabled_returns_403_actions_disabled
     assert body.get("details", {}).get("env") == "SIMULATOR_ACTIONS_ENABLE"
 
 
-def test_simulator_actions_openapi_visibility_follows_simulator_actions_enable(monkeypatch):
-    """Action endpoints are registered but must be hidden from OpenAPI when the flag is off."""
+def test_simulator_actions_are_documented_regardless_of_the_feature_flag() -> None:
+    """Interact Mode operations are published; the flag gates execution, not documentation.
+
+    Until 2026-08-23 these eight routes carried `include_in_schema=_actions_enabled()`, so the
+    schema hid them whenever the flag was off.  That hid nothing from a caller - the routes are
+    registered and reachable in every deployment, and the guard above answers 403
+    ACTIONS_DISABLED on its own - it only hid them from the canon and from the contract gate,
+    which is how five money-moving operations came to have no contract check at all.
+
+    Published by 011/T1101 after the owner referred the decision to external review.  The flag
+    keeps its real job, asserted by the test above: execution still refuses when it is off.
+    """
 
     import app.api.v1.simulator as simulator_module
 
-    action_path = "/api/v1/simulator/runs/{run_id}/actions/participants-list"
+    action_paths = {
+        "/api/v1/simulator/runs/{run_id}/actions/trustline-create",
+        "/api/v1/simulator/runs/{run_id}/actions/trustline-update",
+        "/api/v1/simulator/runs/{run_id}/actions/trustline-close",
+        "/api/v1/simulator/runs/{run_id}/actions/payment-real",
+        "/api/v1/simulator/runs/{run_id}/actions/clearing-real",
+        "/api/v1/simulator/runs/{run_id}/actions/participants-list",
+        "/api/v1/simulator/runs/{run_id}/actions/trustlines-list",
+        "/api/v1/simulator/runs/{run_id}/payment-targets",
+    }
 
-    orig = os.environ.get("SIMULATOR_ACTIONS_ENABLE")
-    try:
-        # Disabled: actions must not show up in schema.
-        monkeypatch.delenv("SIMULATOR_ACTIONS_ENABLE", raising=False)
-        importlib.reload(simulator_module)
-        app_disabled = FastAPI()
-        app_disabled.include_router(simulator_module.router, prefix="/api/v1")
-        paths_disabled = set((app_disabled.openapi() or {}).get("paths", {}).keys())
-        assert action_path not in paths_disabled
-
-        # Enabled: actions must be present in schema.
-        monkeypatch.setenv("SIMULATOR_ACTIONS_ENABLE", "1")
-        importlib.reload(simulator_module)
-        app_enabled = FastAPI()
-        app_enabled.include_router(simulator_module.router, prefix="/api/v1")
-        paths_enabled = set((app_enabled.openapi() or {}).get("paths", {}).keys())
-        assert action_path in paths_enabled
-    finally:
-        # Best-effort restore to avoid leaking a reloaded module with a different include_in_schema.
-        if orig is None:
-            monkeypatch.delenv("SIMULATOR_ACTIONS_ENABLE", raising=False)
+    for value in (None, "1"):
+        # include_in_schema is evaluated at import, so the flag is exercised by reloading the
+        # module rather than by monkeypatching the environment of an already-imported one.
+        if value is None:
+            os.environ.pop("SIMULATOR_ACTIONS_ENABLE", None)
         else:
-            monkeypatch.setenv("SIMULATOR_ACTIONS_ENABLE", orig)
+            os.environ["SIMULATOR_ACTIONS_ENABLE"] = value
         importlib.reload(simulator_module)
+        app = FastAPI()
+        app.include_router(simulator_module.router, prefix="/api/v1")
+        published = set((app.openapi() or {}).get("paths", {}).keys())
+        missing = action_paths - published
+        assert not missing, (
+            f"Interact Mode operations missing from the schema with "
+            f"SIMULATOR_ACTIONS_ENABLE={value!r}: {sorted(missing)}"
+        )
 
+    os.environ.pop("SIMULATOR_ACTIONS_ENABLE", None)
+    importlib.reload(simulator_module)

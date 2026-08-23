@@ -31,10 +31,37 @@ PARAMETER_SCHEMA_DRIFT_SHA256 = (
     "09c00b95eafbd980730a4709209a7038c7e791e66a819bb169353529c3cccbe3"
 )
 PARAMETER_SCHEMA_DRIFT_COUNT = 22
+# 2026-08-23 / p011_t1101 (`F-011-2`): the eight Interact Mode operations were published, so
+# they enter these dictionaries for the first time. The ratchet only ever walked operations the
+# canon already declared, which is exactly why a money-moving surface could drift unmeasured.
+#
+# All three counts move by +8 - one entry per newly published operation - and every new entry
+# reproduces a class already measured on older operations, verified pair by pair:
+#   TRANSPORT_HEADER 59 -> 67  canon declares neither X-Admin-Token nor X-Simulator-Owner for
+#                              these eight. It cannot: both are optional identity transports here,
+#                              and the canonical policy guard below requires every declared
+#                              X-Admin-Token to be `required: true`. Declaring it was tried and
+#                              reverted.
+#   SECURITY         59 -> 67  same cause - `_normalized_security` deliberately folds the transport
+#                              headers in, so the same eight gaps surface a second time.
+#   ERROR_RESPONSE   83 -> 91  the shared envelopes differ canon-vs-generated (`details` carries
+#                              `additionalProperties: true` in the canon, `nullable: true` in the
+#                              generated form). Pre-existing on ErrorEnvelope and
+#                              SimulatorActionError alike; the eight inherit it by referencing them.
+#
+# What did NOT move is the point: SUCCESS 71, REQUEST 13, PARAMETER 22 are untouched, because the
+# canon was written to state what the code really returns wherever it honestly could
+# (`default: true` on `ok`, `minimum` on `cleared_cycles`/`hops`, the `max_depth` bounds).
+#
+# This is coverage growth, not a licence to raise a ratchet. Monotonicity holds for a FIXED set of
+# compared operations; widening the denominator may raise a count only with a named, per-entry
+# demonstration that no old entry got worse and each new one reproduces a measured class.
+# Reconciling the shared envelopes globally would lower ERROR_RESPONSE, and is a separate slice:
+# it touches every operation and needs its own measurement.
 TRANSPORT_HEADER_DRIFT_SHA256 = (
-    "a1b51fa7bd53346733f5debe5284e46449e2d36ac790ea2b9ceea1159ff492f1"
+    "493a3f3d4477b5914d93645788bb8987e460116e66e19a641fb69eff821502a2"
 )
-TRANSPORT_HEADER_DRIFT_COUNT = 59
+TRANSPORT_HEADER_DRIFT_COUNT = 67
 REQUEST_SCHEMA_DRIFT_SHA256 = (
     "7eee1624c958db4900f2d24bf529bf7e6bab92aff055fd15403eb847dd7e5c25"
 )
@@ -81,14 +108,18 @@ SUCCESS_SCHEMA_DRIFT_COUNT = 71
 #                                             which is why the count moves 84 -> 83
 # The count moving at all is the exception rather than the rule here: an operation leaves
 # this dictionary only when its LAST difference is resolved.
+# 2026-08-23 / p011_t1101: 83 -> 91, see the note above TRANSPORT_HEADER_DRIFT_SHA256.
 ERROR_RESPONSE_DRIFT_SHA256 = (
-    "0d472e512df258ade66be6f7b2fb262e12a28f36af56ea1e882f7e0f2f85a1e6"
+    "efd19e343a2e6a48604133da902aeb472390a3872c8b6d69a41b094874f14187"
 )
-ERROR_RESPONSE_DRIFT_COUNT = 83
+ERROR_RESPONSE_DRIFT_COUNT = 91
+# 2026-08-23 / p011_t1101: 59 -> 67, see the note above TRANSPORT_HEADER_DRIFT_SHA256.
+# Missed by the first pass of this task: the error-response assert aborts before this one, so a
+# run that stops there says nothing about security drift. Measured directly instead.
 SECURITY_DRIFT_SHA256 = (
-    "7fe6aad6a6fdae404bcea8e2a7696bb1e0788cbc95c2634ba90a3520ca89a5bd"
+    "7b2c25ac469d081cae5e570eb5c82d1e25ed5731480d484669f4e50a1a32bb45"
 )
-SECURITY_DRIFT_COUNT = 59
+SECURITY_DRIFT_COUNT = 67
 
 
 def _repo_root() -> Path:

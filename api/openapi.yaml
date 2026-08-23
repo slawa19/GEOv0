@@ -2649,6 +2649,327 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
+  # Interact Mode control plane (011/T1101, published 2026-08-23).
+  # These eight operations were registered and callable all along; only their schema
+  # visibility was tied to SIMULATOR_ACTIONS_ENABLE, which gated nothing - the runtime
+  # guard returns 403 ACTIONS_DISABLED independently of it. Errors here use the flat
+  # SimulatorActionError envelope, not ErrorEnvelope: they are assembled by _action_error,
+  # which returns a raw JSONResponse, so response_model of the route does not apply.
+
+  /simulator/runs/{run_id}/actions/trustline-create:
+    post:
+      tags: [Simulator]
+      summary: Create a trust line inside a run (Interact Mode)
+      parameters:
+        - $ref: '#/components/parameters/RunIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SimulatorActionTrustlineCreateRequest'
+      responses:
+        '200':
+          description: Trust line created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulatorActionTrustlineCreateResponse'
+        '400':
+          $ref: '#/components/responses/SimulatorActionBadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/SimulatorActionForbidden'
+        '404':
+          $ref: '#/components/responses/SimulatorActionNotFound'
+        '409':
+          $ref: '#/components/responses/SimulatorActionConflict'
+        '422':
+          $ref: '#/components/responses/SimulatorActionUnprocessable'
+        '503':
+          description: Action unavailable - RUN_PERIMETER_UNAVAILABLE, TRUSTLINE_USED_UNAVAILABLE or SEEDING_FAILED (flat envelope)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulatorActionError'
+
+  /simulator/runs/{run_id}/actions/trustline-update:
+    post:
+      tags: [Simulator]
+      summary: Change the limit of a trust line inside a run (Interact Mode)
+      parameters:
+        - $ref: '#/components/parameters/RunIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SimulatorActionTrustlineUpdateRequest'
+      responses:
+        '200':
+          description: Trust line limit changed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulatorActionTrustlineUpdateResponse'
+        '400':
+          $ref: '#/components/responses/SimulatorActionBadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/SimulatorActionForbidden'
+        '404':
+          $ref: '#/components/responses/SimulatorActionNotFound'
+        '409':
+          $ref: '#/components/responses/SimulatorActionConflict'
+        '422':
+          $ref: '#/components/responses/SimulatorActionUnprocessable'
+        '503':
+          description: Action unavailable - RUN_PERIMETER_UNAVAILABLE, TRUSTLINE_USED_UNAVAILABLE or SEEDING_FAILED (flat envelope)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulatorActionError'
+
+  /simulator/runs/{run_id}/actions/trustline-close:
+    post:
+      tags: [Simulator]
+      summary: Close a trust line inside a run (Interact Mode)
+      parameters:
+        - $ref: '#/components/parameters/RunIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SimulatorActionTrustlineCloseRequest'
+      responses:
+        '200':
+          description: Trust line closed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulatorActionTrustlineCloseResponse'
+        '400':
+          $ref: '#/components/responses/SimulatorActionBadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/SimulatorActionForbidden'
+        '404':
+          $ref: '#/components/responses/SimulatorActionNotFound'
+        '409':
+          $ref: '#/components/responses/SimulatorActionConflict'
+        '422':
+          $ref: '#/components/responses/SimulatorActionUnprocessable'
+        '503':
+          description: Action unavailable - RUN_PERIMETER_UNAVAILABLE, TRUSTLINE_USED_UNAVAILABLE or SEEDING_FAILED (flat envelope)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulatorActionError'
+
+  /simulator/runs/{run_id}/actions/payment-real:
+    post:
+      tags: [Simulator]
+      summary: Execute a real payment inside a run (Interact Mode)
+      parameters:
+        - $ref: '#/components/parameters/RunIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SimulatorActionPaymentRealRequest'
+      responses:
+        '200':
+          description: Payment executed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulatorActionPaymentRealResponse'
+        '400':
+          $ref: '#/components/responses/SimulatorActionBadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/SimulatorActionForbidden'
+        '404':
+          $ref: '#/components/responses/SimulatorActionNotFound'
+        '409':
+          $ref: '#/components/responses/SimulatorActionConflict'
+        '422':
+          $ref: '#/components/responses/SimulatorActionUnprocessable'
+        '503':
+          description: Action unavailable - RUN_PERIMETER_UNAVAILABLE, SEEDING_FAILED or ENGINE_TIMEOUT (flat envelope)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulatorActionError'
+
+  /simulator/runs/{run_id}/actions/clearing-real:
+    post:
+      tags: [Simulator]
+      summary: Execute a real clearing round inside a run (Interact Mode)
+      parameters:
+        - $ref: '#/components/parameters/RunIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SimulatorActionClearingRealRequest'
+      responses:
+        '200':
+          description: Clearing executed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulatorActionClearingRealResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/SimulatorActionForbidden'
+        '404':
+          $ref: '#/components/responses/SimulatorActionNotFound'
+        '409':
+          $ref: '#/components/responses/SimulatorActionConflict'
+        '422':
+          $ref: '#/components/responses/SimulatorActionUnprocessable'
+        '500':
+          description: Clearing execution failed (CLEARING_FAILED)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulatorActionError'
+        '503':
+          description: Action unavailable - RUN_PERIMETER_UNAVAILABLE or SEEDING_FAILED (flat envelope)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulatorActionError'
+
+  /simulator/runs/{run_id}/actions/participants-list:
+    get:
+      tags: [Simulator]
+      summary: List participants visible inside a run (Interact Mode)
+      parameters:
+        - $ref: '#/components/parameters/RunIdPath'
+      responses:
+        '200':
+          description: Participants of the run
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulatorActionParticipantsListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/SimulatorActionForbidden'
+        '404':
+          $ref: '#/components/responses/SimulatorActionNotFound'
+        '422':
+          $ref: '#/components/responses/SimulatorActionUnprocessable'
+
+  /simulator/runs/{run_id}/actions/trustlines-list:
+    get:
+      tags: [Simulator]
+      summary: List trust lines inside a run (Interact Mode)
+      parameters:
+        - $ref: '#/components/parameters/RunIdPath'
+        - in: query
+          name: equivalent
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: participant_pid
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Trust lines of the run
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulatorActionTrustlinesListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/SimulatorActionForbidden'
+        '404':
+          $ref: '#/components/responses/SimulatorActionNotFound'
+        '422':
+          $ref: '#/components/responses/SimulatorActionUnprocessable'
+        '503':
+          description: Action unavailable - SEEDING_FAILED (flat envelope)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulatorActionError'
+
+  /simulator/runs/{run_id}/payment-targets:
+    get:
+      tags: [Simulator]
+      summary: List reachable payment targets for a participant (Interact Mode)
+      parameters:
+        - $ref: '#/components/parameters/RunIdPath'
+        - in: query
+          name: equivalent
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: from_pid
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: max_hops
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 8
+            default: 6
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 200
+        - in: query
+          name: include_max_available
+          required: false
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Reachable payment targets
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulatorPaymentTargetsResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/SimulatorActionForbidden'
+        '404':
+          $ref: '#/components/responses/SimulatorActionNotFound'
+        '422':
+          $ref: '#/components/responses/SimulatorActionUnprocessable'
+        '503':
+          description: Action unavailable - SEEDING_FAILED (flat envelope)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulatorActionError'
+
 components:
   securitySchemes:
     BearerAuth:
@@ -2734,7 +3055,324 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorEnvelope'
 
+    SimulatorActionBadRequest:
+      description: Invalid request payload for the action (flat envelope)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/SimulatorActionError'
+    SimulatorActionForbidden:
+      description: Simulator actions disabled (ACTIONS_DISABLED) or access denied (flat envelope)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/SimulatorActionError'
+    SimulatorActionNotFound:
+      description: Run, participant, equivalent or trustline not found (flat envelope)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/SimulatorActionError'
+    SimulatorActionConflict:
+      description: Run is terminal, or the action conflicts with current state (flat envelope)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/SimulatorActionError'
+    SimulatorActionUnprocessable:
+      description: Invalid simulator identity transport (for example, X-Simulator-Owner)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+
   schemas:
+    # Interact Mode control plane payloads (011/T1101, added 2026-08-23).
+    # Money-carrying fields (limit, used, available, amount, cleared amounts) are exact
+    # decimal strings, per AGENTS.md section 8 - never floats.
+    SimulatorActionTrustlineCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [from_pid, to_pid, equivalent, limit]
+      properties:
+        from_pid:
+          type: string
+        to_pid:
+          type: string
+        equivalent:
+          type: string
+        limit:
+          type: string
+        client_action_id:
+          type: string
+          nullable: true
+
+    SimulatorActionTrustlineCreateResponse:
+      type: object
+      additionalProperties: false
+      required: [trustline_id, from_pid, to_pid, equivalent, limit]
+      properties:
+        ok:
+          type: boolean
+          default: true
+        trustline_id:
+          type: string
+        from_pid:
+          type: string
+        to_pid:
+          type: string
+        equivalent:
+          type: string
+        limit:
+          type: string
+        client_action_id:
+          type: string
+          nullable: true
+
+    SimulatorActionTrustlineUpdateRequest:
+      type: object
+      additionalProperties: false
+      required: [from_pid, to_pid, equivalent, new_limit]
+      properties:
+        from_pid:
+          type: string
+        to_pid:
+          type: string
+        equivalent:
+          type: string
+        new_limit:
+          type: string
+        client_action_id:
+          type: string
+          nullable: true
+
+    SimulatorActionTrustlineUpdateResponse:
+      type: object
+      additionalProperties: false
+      required: [trustline_id, old_limit, new_limit]
+      properties:
+        ok:
+          type: boolean
+          default: true
+        trustline_id:
+          type: string
+        old_limit:
+          type: string
+        new_limit:
+          type: string
+        client_action_id:
+          type: string
+          nullable: true
+
+    SimulatorActionTrustlineCloseRequest:
+      type: object
+      additionalProperties: false
+      required: [from_pid, to_pid, equivalent]
+      properties:
+        from_pid:
+          type: string
+        to_pid:
+          type: string
+        equivalent:
+          type: string
+        client_action_id:
+          type: string
+          nullable: true
+
+    SimulatorActionTrustlineCloseResponse:
+      type: object
+      additionalProperties: false
+      required: [trustline_id]
+      properties:
+        ok:
+          type: boolean
+          default: true
+        trustline_id:
+          type: string
+        client_action_id:
+          type: string
+          nullable: true
+
+    SimulatorActionPaymentRealRequest:
+      type: object
+      additionalProperties: false
+      required: [from_pid, to_pid, equivalent, amount]
+      properties:
+        from_pid:
+          type: string
+        to_pid:
+          type: string
+        equivalent:
+          type: string
+        amount:
+          type: string
+        client_action_id:
+          type: string
+          nullable: true
+
+    SimulatorActionPaymentRealResponse:
+      type: object
+      additionalProperties: false
+      required: [payment_id, from_pid, to_pid, equivalent, amount, status]
+      properties:
+        ok:
+          type: boolean
+          default: true
+        payment_id:
+          type: string
+        from_pid:
+          type: string
+        to_pid:
+          type: string
+        equivalent:
+          type: string
+        amount:
+          type: string
+        status:
+          type: string
+        client_action_id:
+          type: string
+          nullable: true
+
+    SimulatorActionClearingRealRequest:
+      type: object
+      additionalProperties: false
+      required: [equivalent]
+      properties:
+        equivalent:
+          type: string
+        max_depth:
+          type: integer
+          minimum: 1
+          maximum: 12
+          default: 6
+        client_action_id:
+          type: string
+          nullable: true
+
+    SimulatorActionClearingRealResponse:
+      type: object
+      additionalProperties: false
+      required: [equivalent, cleared_cycles, total_cleared_amount, cycles]
+      properties:
+        ok:
+          type: boolean
+          default: true
+        equivalent:
+          type: string
+        cleared_cycles:
+          type: integer
+          minimum: 0
+        total_cleared_amount:
+          type: string
+        cycles:
+          type: array
+          items:
+            $ref: '#/components/schemas/SimulatorActionClearingCycle'
+        client_action_id:
+          type: string
+          nullable: true
+
+    SimulatorActionClearingCycle:
+      type: object
+      additionalProperties: false
+      required: [cleared_amount, edges]
+      properties:
+        cleared_amount:
+          type: string
+        edges:
+          type: array
+          items:
+            $ref: '#/components/schemas/SimulatorActionEdgeRef'
+
+    SimulatorActionParticipantItem:
+      type: object
+      additionalProperties: false
+      required: [pid, name, type, status]
+      properties:
+        pid:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+        status:
+          type: string
+
+    SimulatorActionParticipantsListResponse:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SimulatorActionParticipantItem'
+
+    SimulatorActionTrustlineListItem:
+      type: object
+      additionalProperties: false
+      required: [from_pid, from_name, to_pid, to_name, equivalent, limit, used, reverse_used, available, status]
+      properties:
+        from_pid:
+          type: string
+        from_name:
+          type: string
+        to_pid:
+          type: string
+        to_name:
+          type: string
+        equivalent:
+          type: string
+        limit:
+          type: string
+        used:
+          type: string
+        reverse_used:
+          type: string
+        available:
+          type: string
+        status:
+          type: string
+
+    SimulatorActionTrustlinesListResponse:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SimulatorActionTrustlineListItem'
+
+    SimulatorPaymentTargetsItem:
+      type: object
+      additionalProperties: false
+      required: [to_pid, hops]
+      properties:
+        to_pid:
+          type: string
+        hops:
+          type: integer
+          minimum: 1
+        max_available:
+          type: string
+          nullable: true
+
+    SimulatorPaymentTargetsResponse:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SimulatorPaymentTargetsItem'
+
+    SimulatorActionEdgeRef:
+      type: object
+      additionalProperties:
+        type: string
     SimulatorActionError:
       type: object
       additionalProperties: false
