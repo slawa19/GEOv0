@@ -62,8 +62,12 @@ TRANSPORT_HEADER_DRIFT_SHA256 = (
     "493a3f3d4477b5914d93645788bb8987e460116e66e19a641fb69eff821502a2"
 )
 TRANSPORT_HEADER_DRIFT_COUNT = 67
+# 2026-08-23 / p011_t1102, slice 5: count unchanged at 13, digest moves. Describing
+# TrustLine.policy touches the create and update REQUEST bodies too - the same node is
+# declared on all three schemas, and leaving one of the three vague would have been a
+# worse contract than moving this digest.
 REQUEST_SCHEMA_DRIFT_SHA256 = (
-    "7eee1624c958db4900f2d24bf529bf7e6bab92aff055fd15403eb847dd7e5c25"
+    "13ca2f723f165fead05ea9358c76ade34f64714651637b47596d7b52e679872f"
 )
 REQUEST_SCHEMA_DRIFT_COUNT = 13
 # 2026-08-20 / p007_unblock_f0071: MetricPoint.v became nullable on both sides
@@ -113,8 +117,12 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # more precise than the generated schema, not less: the pydantic side is `Dict[str, Any]`, and
 # tightening it there would change response validation on the money routes, which this program
 # does not do.
+# 2026-08-23 / p011_t1102, slice 5: still 64, digest moves again. TrustLine.policy declares the
+# five keys validate_trustline_policy allows, and the two stable integrity nodes state their key
+# sets. Same reason as slice 4 for the count holding: the canon is now more precise than the
+# generated schema, whose pydantic side is Dict[str, Any].
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "3bdc07e09efbe6025d5b9755d270ea76ca6fe63ae7a406a2def281e4d333080b"
+    "c9b2d42bdeac8d770541ba41271ec8c78f71cdc54c0349464d49acdd41b7508b"
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 64
 # 2026-08-11 / T501: public DB health no longer declares exception details;

@@ -4400,6 +4400,36 @@ components:
         policy:
           type: object
           additionalProperties: true
+          # 011/T1102: the five keys were named in the description but never declared, so a
+          # generated client got nothing typed. `additionalProperties` stays true on
+          # purpose (`F-011-8`): validate_trustline_policy rejects unknown keys on
+          # POST/PATCH /trustlines, but the simulator scenario seeder writes arbitrary
+          # JSON into the same column without calling it, and those rows are served by
+          # these same responses.
+          properties:
+            auto_clearing:
+              type: boolean
+              nullable: true
+            can_be_intermediate:
+              type: boolean
+              nullable: true
+            max_hop_usage:
+              # The validator parses with Decimal(str(value)) and requires >= 0, so a numeric
+              # string and a number are both accepted (app/utils/validation.py:210-219).
+              oneOf:
+                - type: string
+                - type: number
+              nullable: true
+            daily_limit:
+              oneOf:
+                - type: string
+                - type: number
+              nullable: true
+            blocked_participants:
+              type: array
+              nullable: true
+              items:
+                type: string
           description: |
             TrustLine policy settings.
 
@@ -4436,6 +4466,36 @@ components:
         policy:
           type: object
           additionalProperties: true
+          # 011/T1102: the five keys were named in the description but never declared, so a
+          # generated client got nothing typed. `additionalProperties` stays true on
+          # purpose (`F-011-8`): validate_trustline_policy rejects unknown keys on
+          # POST/PATCH /trustlines, but the simulator scenario seeder writes arbitrary
+          # JSON into the same column without calling it, and those rows are served by
+          # these same responses.
+          properties:
+            auto_clearing:
+              type: boolean
+              nullable: true
+            can_be_intermediate:
+              type: boolean
+              nullable: true
+            max_hop_usage:
+              # The validator parses with Decimal(str(value)) and requires >= 0, so a numeric
+              # string and a number are both accepted (app/utils/validation.py:210-219).
+              oneOf:
+                - type: string
+                - type: number
+              nullable: true
+            daily_limit:
+              oneOf:
+                - type: string
+                - type: number
+              nullable: true
+            blocked_participants:
+              type: array
+              nullable: true
+              items:
+                type: string
           description: |
             Optional TrustLine policy.
 
@@ -4457,6 +4517,36 @@ components:
         policy:
           type: object
           additionalProperties: true
+          # 011/T1102: the five keys were named in the description but never declared, so a
+          # generated client got nothing typed. `additionalProperties` stays true on
+          # purpose (`F-011-8`): validate_trustline_policy rejects unknown keys on
+          # POST/PATCH /trustlines, but the simulator scenario seeder writes arbitrary
+          # JSON into the same column without calling it, and those rows are served by
+          # these same responses.
+          properties:
+            auto_clearing:
+              type: boolean
+              nullable: true
+            can_be_intermediate:
+              type: boolean
+              nullable: true
+            max_hop_usage:
+              # The validator parses with Decimal(str(value)) and requires >= 0, so a numeric
+              # string and a number are both accepted (app/utils/validation.py:210-219).
+              oneOf:
+                - type: string
+                - type: number
+              nullable: true
+            daily_limit:
+              oneOf:
+                - type: string
+                - type: number
+              nullable: true
+            blocked_participants:
+              type: array
+              nullable: true
+              items:
+                type: string
           description: |
             Optional TrustLine policy update.
 
@@ -4830,6 +4920,163 @@ components:
               amount:
                 type: string
 
+    IntegrityInvariantChecks:
+      # All three checks always run and always record an outcome, so all three keys are present
+      # whenever `checks` is (app/core/integrity.py:79-114). The value shapes deliberately are not
+      # one shared schema: zero_sum has no violation count to report and never writes a
+      # `violations` key - not on the pass path and not on the failure path either.
+      type: object
+      required: [zero_sum, trust_limits, debt_symmetry]
+      additionalProperties: true
+      properties:
+        zero_sum:
+          type: object
+          required: [passed]
+          additionalProperties: true
+          properties:
+            passed:
+              type: boolean
+            details:
+              nullable: true
+              oneOf:
+                - $ref: '#/components/schemas/InvariantViolationDetails'
+        trust_limits:
+          type: object
+          required: [passed, violations]
+          additionalProperties: true
+          properties:
+            passed:
+              type: boolean
+            violations:
+              type: integer
+              minimum: 0
+            details:
+              nullable: true
+              oneOf:
+                - $ref: '#/components/schemas/InvariantViolationDetails'
+        debt_symmetry:
+          type: object
+          required: [passed, violations]
+          additionalProperties: true
+          properties:
+            passed:
+              type: boolean
+            violations:
+              type: integer
+              minimum: 0
+            details:
+              nullable: true
+              oneOf:
+                - $ref: '#/components/schemas/InvariantViolationDetails'
+
+    IntegrityInvariantsStatus:
+      # The `invariants_status` JSON column, handed back verbatim by
+      # GET /integrity/checksum/{equivalent} (app/api/v1/integrity.py:178). Sole writer:
+      # compute_integrity_checkpoint_for_equivalent (app/core/integrity.py:58-124).
+      #
+      # Only the five keys of the opening literal are required. The status/checks/alerts/passed
+      # block was added later, so rows written before it carry the five base keys and nothing
+      # else - and a JSON column keeps whatever it was given, which is also why this stays open.
+      type: object
+      required: [computed_at, debts_count, trustlines_count, debts_non_negative, debts_negative_count]
+      additionalProperties: true
+      properties:
+        computed_at:
+          # `datetime.now(timezone.utc).isoformat()` frozen into JSON, not a datetime rendered by
+          # the response model - so it ends in `+00:00`, unlike every timestamp pydantic emits.
+          type: string
+          format: date-time
+        debts_count:
+          type: integer
+          minimum: 0
+        trustlines_count:
+          type: integer
+          minimum: 0
+        debts_non_negative:
+          type: boolean
+        debts_negative_count:
+          type: integer
+          minimum: 0
+        status:
+          type: string
+          enum: [healthy, warning, critical]
+        checks:
+          $ref: '#/components/schemas/IntegrityInvariantChecks'
+        alerts:
+          # Bare check names, one per failed check - a different vocabulary from the
+          # sentence-style alerts on IntegrityStatusResponse.
+          type: array
+          items:
+            type: string
+            enum: [zero_sum, trust_limits, debt_symmetry]
+        passed:
+          type: boolean
+
+    IntegrityAuditLogAfterState:
+      # Not a stored blob: the handler builds this dict field by field from an
+      # integrity_audit_log row (app/api/v1/integrity.py:504-514), so all nine keys are always
+      # present however old the row is.
+      type: object
+      additionalProperties: true
+      required:
+        - operation_type
+        - tx_id
+        - equivalent
+        - state_checksum_before
+        - state_checksum_after
+        - affected_participants
+        - invariants_checked
+        - verification_passed
+        - error_details
+      properties:
+        operation_type:
+          # The seven writers. This value selects the shape of the three open objects below.
+          type: string
+          enum:
+            - TRUST_LINE_CREATE
+            - TRUST_LINE_UPDATE
+            - TRUST_LINE_CLOSE
+            - INTEGRITY_VERIFY
+            - PAYMENT
+            - CLEARING
+            - SIMULATOR_AUDIT_DRIFT
+        tx_id:
+          # Only PAYMENT and CLEARING run inside a transaction; the other five write null.
+          type: string
+          nullable: true
+        equivalent:
+          # An equivalent code in practice, but deliberately not EquivalentCode: three writers
+          # fall back to a stringified UUID when the code lookup misses, which the code pattern
+          # would reject.
+          type: string
+        state_checksum_before:
+          # sha-256 hex, or the empty string: the column is NOT NULL, so "no prior checkpoint"
+          # is spelled "" rather than null.
+          type: string
+          pattern: '^([0-9a-f]{64})?$'
+        state_checksum_after:
+          type: string
+          pattern: '^([0-9a-f]{64})?$'
+        affected_participants:
+          # Shape chosen by the writer, keyed off operation_type: {from, to} for TRUST_LINE_CREATE,
+          # plus trustline_id for UPDATE/CLOSE, {participants} for PAYMENT, {participants, edges}
+          # for CLEARING, {drifts, tick_index, source} for SIMULATOR_AUDIT_DRIFT, and {} for
+          # INTEGRITY_VERIFY, which audits an equivalent rather than a set of participants.
+          type: object
+          additionalProperties: true
+        invariants_checked:
+          # Usually the `checks` node above; INTEGRITY_VERIFY stores dumped InvariantResult
+          # objects instead, and SIMULATOR_AUDIT_DRIFT a fourth vocabulary entirely.
+          type: object
+          additionalProperties: true
+        verification_passed:
+          type: boolean
+        error_details:
+          # Null exactly when verification_passed is true.
+          type: object
+          nullable: true
+          additionalProperties: true
+
     InvariantViolationDetails:
       # The payload IntegrityViolationException carries (app/core/invariants.py).
       # Shared because two surfaces return exactly these three shapes: the integrity
@@ -4987,8 +5234,7 @@ components:
           type: string
           format: date-time
         invariants_status:
-          type: object
-          additionalProperties: true
+          $ref: '#/components/schemas/IntegrityInvariantsStatus'
 
     IntegrityVerifyRequest:
       type: object
@@ -5078,9 +5324,7 @@ components:
           type: string
           nullable: true
         after_state:
-          type: object
-          nullable: true
-          additionalProperties: true
+          $ref: '#/components/schemas/IntegrityAuditLogAfterState'
 
     IntegrityAuditLogResponse:
       type: object
