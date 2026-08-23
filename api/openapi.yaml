@@ -1122,28 +1122,48 @@ paths:
   /simulator/events/poll:
     get:
       tags: [Simulator]
-      summary: Events poll (fallback)
+      summary: Events poll (fallback) - always empty in the MVP
+      description: |
+        The polling fallback for clients that cannot hold an SSE connection. It has never had a
+        replay buffer: the handler returns an empty array and reads neither query parameter
+        (`app/api/v1/simulator.py`, `# MVP: no replay buffer.`).
+
+        Until this version the canon promised an array of `SimulatorEvent` - six variants a client
+        would write parsing code for and never receive (`F-011-7`). The contract now states what
+        exists. When a replay buffer is built, lifting `maxItems: 0` will be a deliberate contract
+        change, not the belated delivery of this old promise.
       parameters:
         - in: query
           name: equivalent
           required: true
           schema:
             $ref: '#/components/schemas/EquivalentCode'
+          description: >-
+            Ignored in the MVP - the handler returns an empty array without reading it. Required so
+            that the eventual replay buffer keeps the same call shape.
         - in: query
           name: after
           required: false
           schema:
             type: string
-          description: Return events strictly after this event_id
+          description: >-
+            Ignored in the MVP. Reserved for the cursor semantics a replay buffer would need; the
+            previous wording, "Return events strictly after this event_id", described behaviour
+            that does not exist.
       responses:
         '200':
-          description: Array of events
+          description: >-
+            Always an empty array: the MVP has no replay buffer, so no event is ever returned.
           content:
             application/json:
               schema:
+                # `maxItems: 0` makes the item schema unreachable, which is why it is left empty
+                # rather than pointing at SimulatorEvent. That schema stays in this document - it
+                # still describes the SSE stream, which is the debt recorded under RT-011-5.
                 type: array
-                items:
-                  $ref: '#/components/schemas/SimulatorEvent'
+                maxItems: 0
+                items: {}
+              example: []
         '401':
           $ref: '#/components/responses/Unauthorized'
         '429':
@@ -3600,7 +3620,13 @@ components:
           type: string
           nullable: true
         seed:
-          nullable: true
+          # Deliberately an EMPTY schema. The field is `Optional[Any]`
+          # (app/api/v1/simulator.py:944) and the runtime only interpolates it into a hash seed
+          # (`f"{run_id}:{eq}:{seed}"`, app/core/simulator/runtime_impl.py:539), so any JSON
+          # value is accepted, null included, and an empty schema states exactly that. What stood
+          # here was a lone `nullable: true`, which in OpenAPI 3.0.3 modifies a sibling `type`
+          # and nothing else - with no `type` to modify it stated nothing at all (`F-011-10`).
+          {}
         client_action_id:
           type: string
           nullable: true
@@ -3635,7 +3661,9 @@ components:
           type: string
           nullable: true
         seed:
-          nullable: true
+          # Empty schema, same reason as TxOnceRequestBody.seed above: `Optional[Any]`
+          # (app/api/v1/simulator.py:960), interpolated into a hash seed and nothing more.
+          {}
         client_action_id:
           type: string
           nullable: true
@@ -3993,9 +4021,18 @@ components:
           type: string
           nullable: true
         error:
-          nullable: true
+          # NULL is the common case on the wire: `tx.error` is copied raw out of the column
+          # (app/api/v1/admin.py:255) and only an aborted transaction ever has one. The seed
+          # pack ships the null explicitly - most of its rows carry `"error": null`
+          # (admin-fixtures/packs/greenfield-village-100-v2/v1/datasets/transactions.json).
+          #
+          # The null is a BRANCH, not a sibling `nullable: true`. In OpenAPI 3.0.3 `nullable`
+          # modifies a sibling `type` and nothing else, so beside a bare `oneOf` it is inert and
+          # the schema rejected the null it claimed to allow (`F-011-10`).
           oneOf:
             - $ref: '#/components/schemas/AdminGraphTransactionError'
+            - nullable: true
+              enum: [null]
 
     AdminGraphTransactionError:
       # The abort payload the payment engine writes into the transactions.error JSON column.
@@ -4039,7 +4076,8 @@ components:
         incidents:
           type: array
           items:
-            $ref: '#/components/schemas/AdminIncidentItem'
+            # NOT AdminIncidentItem: same row, same keys, different wire. See F-011-9.
+            $ref: '#/components/schemas/AdminGraphIncidentItem'
         audit_log:
           type: array
           items:
@@ -4060,7 +4098,46 @@ components:
               type: string
               nullable: true
 
+    AdminGraphIncidentItem:
+      # 011/`F-011-9`: the very same stuck-payment row as AdminIncidentItem, with the very same
+      # keys, but served through the graph reads - and one field differs on the wire.
+      # `_graph_fetch_incidents` puts `tx.created_at` into a plain dict (app/api/v1/admin.py:217)
+      # which lands in a `list[Any]` field (app/schemas/graph.py:32), so the UTC-attaching
+      # validator on AdminIncidentItem never runs. Under SQLite the column comes back naive and
+      # the value goes out with no offset, while GET /admin/incidents serves the same row with a
+      # trailing Z. Proved by running the production models on one naive datetime: the item model
+      # yields `2026-08-23T12:00:00Z`, the graph response `2026-08-23T12:00:00`.
+      #
+      # Hence no `format: date-time` here. Declaring one would make authority number one promise
+      # something the service does not deliver, which is the defect this programme removes. The
+      # behavioural fix - making both paths agree - changes the wire and is therefore out of scope
+      # for 011 by its own Non-goals; it is recorded as a debt with no owner in this programme.
+      type: object
+      required: [tx_id, state, initiator_pid, equivalent, age_seconds, sla_seconds]
+      properties:
+        tx_id:
+          type: string
+        state:
+          type: string
+        initiator_pid:
+          type: string
+        equivalent:
+          type: string
+        age_seconds:
+          type: integer
+          minimum: 0
+        sla_seconds:
+          type: integer
+          minimum: 0
+        created_at:
+          # Deliberately without `format: date-time` - the offset is missing here. Same reasoning
+          # as AdminGraphTransactionItem.created_at, reached by a different route.
+          type: string
+          nullable: true
+
     AdminIncidentItem:
+      # Served by GET /admin/incidents, where the response model does run and its validator
+      # attaches UTC. The graph reads use AdminGraphIncidentItem instead - see F-011-9.
       type: object
       required: [tx_id, state, initiator_pid, equivalent, age_seconds, sla_seconds]
       properties:
@@ -4606,7 +4683,15 @@ components:
       # though every trustline read emits it (app/schemas/trustline.py:24). The three fields
       # left out - policy, from_display_name, to_display_name - default to null in the model,
       # so nothing guarantees them; no read sets response_model_exclude_none, so in practice
-      # all three do reach the wire, present and null.
+      # all three do reach the wire.
+      #
+      # Present, but not null, and the first version of this note said null on all three. The
+      # wire test corrected it: `policy` is `{}`, never null, because TrustLineService.create
+      # writes `policy=data.policy or {}` (app/core/trustlines/service.py:190) - which also means
+      # the ORM column's five-key default (app/db/models/trustline.py:15-21) never fires for an
+      # API-created line. The two display names are non-null wherever the query joins the
+      # participant rows, and null only on the metrics capacity path, exactly as
+      # AdminParticipantCapacityBottleneck says of itself.
       required: [id, from, to, equivalent, limit, used, available, status, created_at, updated_at]
       properties:
         id:
@@ -4654,16 +4739,32 @@ components:
               nullable: true
             max_hop_usage:
               # The validator parses with Decimal(str(value)) and requires >= 0, so a numeric
-              # string and a number are both accepted (app/utils/validation.py:210-219).
+              # string and a number are both accepted (app/utils/validation.py:212-219).
+              #
+              # An explicit null is ACCEPTED too, and that is why the null branch is spelled out
+              # here on the read schema and on both write schemas alike.
+              # `validate_trustline_policy` skips the key outright when the value is null -
+              # `if key not in policy or policy[key] is None: continue`
+              # (app/utils/validation.py:210-211) - and the service then stores the policy dict
+              # verbatim into the JSON column (app/core/trustlines/service.py:190, :334-336), so
+              # a null written through POST/PATCH /trustlines is read straight back out by every
+              # TrustLine response.
+              #
+              # A BRANCH, not a sibling `nullable: true`: in OpenAPI 3.0.3 `nullable` modifies a
+              # sibling `type` and nothing else, so beside a bare `oneOf` it was inert and this
+              # node forbade the null it claimed to allow (`F-011-10`).
               oneOf:
                 - type: string
                 - type: number
-              nullable: true
+                - nullable: true
+                  enum: [null]
             daily_limit:
+              # Same validator branch, same accepted-and-persisted null.
               oneOf:
                 - type: string
                 - type: number
-              nullable: true
+                - nullable: true
+                  enum: [null]
             blocked_participants:
               type: array
               nullable: true
@@ -4723,16 +4824,32 @@ components:
               nullable: true
             max_hop_usage:
               # The validator parses with Decimal(str(value)) and requires >= 0, so a numeric
-              # string and a number are both accepted (app/utils/validation.py:210-219).
+              # string and a number are both accepted (app/utils/validation.py:212-219).
+              #
+              # An explicit null is ACCEPTED too, and that is why the null branch is spelled out
+              # here on the read schema and on both write schemas alike.
+              # `validate_trustline_policy` skips the key outright when the value is null -
+              # `if key not in policy or policy[key] is None: continue`
+              # (app/utils/validation.py:210-211) - and the service then stores the policy dict
+              # verbatim into the JSON column (app/core/trustlines/service.py:190, :334-336), so
+              # a null written through POST/PATCH /trustlines is read straight back out by every
+              # TrustLine response.
+              #
+              # A BRANCH, not a sibling `nullable: true`: in OpenAPI 3.0.3 `nullable` modifies a
+              # sibling `type` and nothing else, so beside a bare `oneOf` it was inert and this
+              # node forbade the null it claimed to allow (`F-011-10`).
               oneOf:
                 - type: string
                 - type: number
-              nullable: true
+                - nullable: true
+                  enum: [null]
             daily_limit:
+              # Same validator branch, same accepted-and-persisted null.
               oneOf:
                 - type: string
                 - type: number
-              nullable: true
+                - nullable: true
+                  enum: [null]
             blocked_participants:
               type: array
               nullable: true
@@ -4774,16 +4891,32 @@ components:
               nullable: true
             max_hop_usage:
               # The validator parses with Decimal(str(value)) and requires >= 0, so a numeric
-              # string and a number are both accepted (app/utils/validation.py:210-219).
+              # string and a number are both accepted (app/utils/validation.py:212-219).
+              #
+              # An explicit null is ACCEPTED too, and that is why the null branch is spelled out
+              # here on the read schema and on both write schemas alike.
+              # `validate_trustline_policy` skips the key outright when the value is null -
+              # `if key not in policy or policy[key] is None: continue`
+              # (app/utils/validation.py:210-211) - and the service then stores the policy dict
+              # verbatim into the JSON column (app/core/trustlines/service.py:190, :334-336), so
+              # a null written through POST/PATCH /trustlines is read straight back out by every
+              # TrustLine response.
+              #
+              # A BRANCH, not a sibling `nullable: true`: in OpenAPI 3.0.3 `nullable` modifies a
+              # sibling `type` and nothing else, so beside a bare `oneOf` it was inert and this
+              # node forbade the null it claimed to allow (`F-011-10`).
               oneOf:
                 - type: string
                 - type: number
-              nullable: true
+                - nullable: true
+                  enum: [null]
             daily_limit:
+              # Same validator branch, same accepted-and-persisted null.
               oneOf:
                 - type: string
                 - type: number
-              nullable: true
+                - nullable: true
+                  enum: [null]
             blocked_participants:
               type: array
               nullable: true
@@ -4975,10 +5108,18 @@ components:
           type: string
         details:
           # Read back verbatim from the transactions.error JSON column
-          # (app/core/payments/service.py:1282-1286). Its single writer coerces a missing payload
-          # to {} (app/core/payments/engine.py:1761-1778), so today it is always an object -
-          # nullable only because a legacy row written before that writer can lack the key, and
-          # `.get("details")` then yields null.
+          # (app/core/payments/service.py:1282-1286). The payment engine's abort writer coerces a
+          # missing payload to {} (app/core/payments/engine.py:1761-1778), so a row it wrote
+          # always carries an object.
+          #
+          # It is NOT the only writer, which is why the null branch below is real rather than a
+          # concession to hypothetical legacy rows: `scripts/seed_db.py:459` stores
+          # `error=item.get("error")` straight from a fixtures pack, bypassing that normalizer
+          # entirely, and the shipped pack's ABORTED rows carry `{"code", "message"}` with no
+          # `details` key at all (admin-fixtures/.../transactions.json:29, :346). For those rows
+          # `.get("details")` yields None and `PaymentError` serializes `"details": null`
+          # (executed; `details` is `Optional[Dict[str, Any]] = None` on app/schemas/payment.py:57
+          # and no read on this route sets `exclude_none`).
           #
           # The tail is OPEN, and that is the point: both abort paths forward the `.details` of
           # whatever 4xx GeoException prepare or commit raised (app/core/payments/service.py:896-903),
@@ -4987,7 +5128,10 @@ components:
           # `oneOf`: a closed union would make an unlisted-but-real response non-conforming, and
           # a `oneOf` with a catch-all is worse still - every documented payload would match two
           # branches and be rejected for matching more than one.
-          nullable: true
+          #
+          # The null is the last branch rather than a sibling `nullable: true`. In OpenAPI 3.0.3
+          # `nullable` modifies a sibling `type` and nothing else, so beside a bare `anyOf` it was
+          # inert and this node rejected the null it claimed to allow (`F-011-10`).
           anyOf:
             # Plain abort with no diagnostic payload - cancellation and timeout (E007), the
             # default abort (E010), and the E002 raised when routing finds no capacious path.
@@ -5062,6 +5206,9 @@ components:
             # The open tail. Any other 4xx GeoException raised in prepare or commit reaches this
             # node with its own details; this branch is what keeps such a response conforming.
             - type: object
+            # The seeded abort rows described above, which carry no `details` key at all.
+            - nullable: true
+              enum: [null]
 
     PaymentResult:
       type: object
@@ -5179,7 +5326,14 @@ components:
             passed:
               type: boolean
             details:
-              nullable: true
+              # Absent or an object - never null, unlike the `details` on InvariantResult below.
+              # This node is a plain dict literal, not a pydantic model, so an unset key is simply
+              # missing: the pass path writes `{"passed": true}` / `{"passed": true,
+              # "violations": 0}` and no `details` at all, and the failure path writes
+              # `exc.details`, which every raise in app/core/invariants.py supplies as a dict
+              # (app/core/integrity.py:79-114). The `nullable: true` that stood here was untrue,
+              # and inert besides - in OpenAPI 3.0.3 `nullable` modifies a sibling `type` and
+              # nothing else, so beside a bare `oneOf` it stated nothing (`F-011-10`).
               oneOf:
                 - $ref: '#/components/schemas/InvariantViolationDetails'
         trust_limits:
@@ -5193,7 +5347,14 @@ components:
               type: integer
               minimum: 0
             details:
-              nullable: true
+              # Absent or an object - never null, unlike the `details` on InvariantResult below.
+              # This node is a plain dict literal, not a pydantic model, so an unset key is simply
+              # missing: the pass path writes `{"passed": true}` / `{"passed": true,
+              # "violations": 0}` and no `details` at all, and the failure path writes
+              # `exc.details`, which every raise in app/core/invariants.py supplies as a dict
+              # (app/core/integrity.py:79-114). The `nullable: true` that stood here was untrue,
+              # and inert besides - in OpenAPI 3.0.3 `nullable` modifies a sibling `type` and
+              # nothing else, so beside a bare `oneOf` it stated nothing (`F-011-10`).
               oneOf:
                 - $ref: '#/components/schemas/InvariantViolationDetails'
         debt_symmetry:
@@ -5207,7 +5368,14 @@ components:
               type: integer
               minimum: 0
             details:
-              nullable: true
+              # Absent or an object - never null, unlike the `details` on InvariantResult below.
+              # This node is a plain dict literal, not a pydantic model, so an unset key is simply
+              # missing: the pass path writes `{"passed": true}` / `{"passed": true,
+              # "violations": 0}` and no `details` at all, and the failure path writes
+              # `exc.details`, which every raise in app/core/invariants.py supplies as a dict
+              # (app/core/integrity.py:79-114). The `nullable: true` that stood here was untrue,
+              # and inert besides - in OpenAPI 3.0.3 `nullable` modifies a sibling `type` and
+              # nothing else, so beside a bare `oneOf` it stated nothing (`F-011-10`).
               oneOf:
                 - $ref: '#/components/schemas/InvariantViolationDetails'
 
@@ -5420,9 +5588,17 @@ components:
           # verify_clearing_neutrality has one caller, the clearing service, and its exception
           # never becomes an InvariantResult. Declaring a shape this endpoint cannot return would
           # be the mirror of the defect program 011 exists to fix.
-          nullable: true
+          #
+          # The null is a BRANCH here, and it is the ordinary case: this IS a pydantic model
+          # (`details: Optional[Dict[str, Any]] = None`, app/schemas/integrity.py:19) and no read
+          # on either endpoint sets `exclude_none`, so every PASSING invariant emits
+          # `"details": null` (executed). A sibling `nullable: true` could not say that - in
+          # OpenAPI 3.0.3 it modifies a sibling `type` and nothing else, so beside a bare `oneOf`
+          # it was inert and rejected the null it claimed to allow (`F-011-10`).
           oneOf:
             - $ref: '#/components/schemas/InvariantViolationDetails'
+            - nullable: true
+              enum: [null]
       additionalProperties: false
 
     EquivalentIntegrityStatus:
@@ -5639,21 +5815,36 @@ components:
           type: string
         target:
           type: string
+        # None of the three is ever null on the wire, so none of them carries a null branch.
+        # The `nullable: true` that stood beside each `oneOf` was inert anyway - in OpenAPI 3.0.3
+        # `nullable` modifies a sibling `type` and nothing else (`F-011-10`) - but it was also
+        # untrue, on both schemas, for two different reasons.
+        #
+        # On the SNAPSHOT link: `scenario_to_snapshot` sets `used=0` unconditionally and takes
+        # `trust_limit`/`available` from the scenario's `limit`
+        # (app/core/simulator/snapshot_builder.py:373-384), and `limit` is `required` on every
+        # trustline in fixtures/simulator/scenario.schema.json under
+        # `anyOf: [integer, number, string]`, which rejects a missing key and an explicit null
+        # alike - verified by feeding both through `validate_scenario_or_400`. Real mode then
+        # overwrites all three with money strings (snapshot_builder.py:232-234).
+        #
+        # On the PATCH: there is no pydantic model at all, only two hand-built dicts.
+        # `build_edge_patch_for_equivalent` sets all three to money strings
+        # (app/core/simulator/edge_patch_builder.py:161-163); `build_edge_patch_for_pairs` sets
+        # `used`/`available` and OMITS `trust_limit` entirely (edge_patch_builder.py:269-277).
+        # Absent, or a value - never null.
         trust_limit:
           oneOf:
             - type: string
             - type: number
-          nullable: true
         used:
           oneOf:
             - type: string
             - type: number
-          nullable: true
         available:
           oneOf:
             - type: string
             - type: number
-          nullable: true
         status:
           type: string
           nullable: true
@@ -5756,21 +5947,36 @@ components:
           type: string
         target:
           type: string
+        # None of the three is ever null on the wire, so none of them carries a null branch.
+        # The `nullable: true` that stood beside each `oneOf` was inert anyway - in OpenAPI 3.0.3
+        # `nullable` modifies a sibling `type` and nothing else (`F-011-10`) - but it was also
+        # untrue, on both schemas, for two different reasons.
+        #
+        # On the SNAPSHOT link: `scenario_to_snapshot` sets `used=0` unconditionally and takes
+        # `trust_limit`/`available` from the scenario's `limit`
+        # (app/core/simulator/snapshot_builder.py:373-384), and `limit` is `required` on every
+        # trustline in fixtures/simulator/scenario.schema.json under
+        # `anyOf: [integer, number, string]`, which rejects a missing key and an explicit null
+        # alike - verified by feeding both through `validate_scenario_or_400`. Real mode then
+        # overwrites all three with money strings (snapshot_builder.py:232-234).
+        #
+        # On the PATCH: there is no pydantic model at all, only two hand-built dicts.
+        # `build_edge_patch_for_equivalent` sets all three to money strings
+        # (app/core/simulator/edge_patch_builder.py:161-163); `build_edge_patch_for_pairs` sets
+        # `used`/`available` and OMITS `trust_limit` entirely (edge_patch_builder.py:269-277).
+        # Absent, or a value - never null.
         trust_limit:
           oneOf:
             - type: string
             - type: number
-          nullable: true
         used:
           oneOf:
             - type: string
             - type: number
-          nullable: true
         available:
           oneOf:
             - type: string
             - type: number
-          nullable: true
         status:
           type: string
           nullable: true
@@ -7052,29 +7258,47 @@ components:
           items:
             $ref: '#/components/schemas/AdminParticipantBalanceRow'
         counterparty:
-          allOf:
+          # All six of these are `required` AND present-and-null whenever `equivalent` was
+          # omitted: compute_participant_metrics returns at app/core/admin/metrics.py:120 before
+          # any of them is computed, and each is `Optional[...] = None` on the response model
+          # (app/schemas/metrics.py:107-112) with no `exclude_none` anywhere on the route.
+          #
+          # `allOf` with a sibling `nullable: true` did NOT say that. In OpenAPI 3.0.3 `nullable`
+          # modifies a sibling `type` and nothing else, so beside a bare `allOf` it was inert and
+          # all six rejected the null they claimed to allow: a real 200 body from
+          # GET /admin/participants/{pid}/metrics failed validation against this document on all
+          # six properties, twice each - "None for not nullable" and "None is not of type
+          # 'object'" (`F-011-10`). The composition keyword therefore changes from `allOf` to
+          # `oneOf`: a null branch cannot be added to an `allOf`, where every branch must match.
+          oneOf:
             - $ref: '#/components/schemas/AdminParticipantCounterpartySplit'
-          nullable: true
+            - nullable: true
+              enum: [null]
         concentration:
-          allOf:
+          oneOf:
             - $ref: '#/components/schemas/AdminParticipantConcentration'
-          nullable: true
+            - nullable: true
+              enum: [null]
         distribution:
-          allOf:
+          oneOf:
             - $ref: '#/components/schemas/AdminParticipantNetDistribution'
-          nullable: true
+            - nullable: true
+              enum: [null]
         rank:
-          allOf:
+          oneOf:
             - $ref: '#/components/schemas/AdminParticipantRank'
-          nullable: true
+            - nullable: true
+              enum: [null]
         capacity:
-          allOf:
+          oneOf:
             - $ref: '#/components/schemas/AdminParticipantCapacity'
-          nullable: true
+            - nullable: true
+              enum: [null]
         activity:
-          allOf:
+          oneOf:
             - $ref: '#/components/schemas/AdminParticipantActivity'
-          nullable: true
+            - nullable: true
+              enum: [null]
         meta:
           # Declared dict[str, Any] "for forward compatibility", but there is exactly one writer
           # and it stores exactly one key (app/core/admin/metrics.py:163-165). The object is empty

@@ -66,8 +66,20 @@ TRANSPORT_HEADER_DRIFT_COUNT = 67
 # TrustLine.policy touches the create and update REQUEST bodies too - the same node is
 # declared on all three schemas, and leaving one of the three vague would have been a
 # worse contract than moving this digest.
+# 2026-08-23 / p011_t1102 (`F-011-10`): count holds at 13, digest moves. The trustline policy
+# request bodies declared `max_hop_usage` and `daily_limit` as `nullable: true` beside a `oneOf`,
+# which admits no null at all - and validate_trustline_policy explicitly accepts null there
+# (app/utils/validation.py:210-211). They now carry an explicit null branch.
+#
+# The count holding needed one change to the comparator, recorded because it is a change of
+# instrument rather than of contract. `_drop_inert_nullable` now discards a `nullable` with no
+# sibling `type`, the same way `title` is discarded: it asserts nothing on either side. Without
+# it the two `Optional[Any]` seed bodies would have drifted permanently, canon `seed: {}` against
+# generated `seed: {nullable: true}` - a difference the canon cannot answer, because the guard
+# added in this slice forbids the canon from writing the form at all while FastAPI keeps emitting
+# it. Measured: with the normalization the pair matches and the count returns to 13.
 REQUEST_SCHEMA_DRIFT_SHA256 = (
-    "13ca2f723f165fead05ea9358c76ade34f64714651637b47596d7b52e679872f"
+    "2fc89128f9b2146d7d6be86669fedecae68ac41b8ad7bb0257211cd52f268c24"
 )
 REQUEST_SCHEMA_DRIFT_COUNT = 13
 # 2026-08-20 / p007_unblock_f0071: MetricPoint.v became nullable on both sides
@@ -142,10 +154,22 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # Four trustline reads and the two graph reads change without leaving: `TrustLine` gained
 # `updated_at`, which every read emits and the canon never declared, and its `required` grew from
 # six names to the ten the model declares without a default.
+# 2026-08-23 / p011_t1102, slice 9 plus `F-011-7` and `F-011-10`: 63 -> 62. Three changes land
+# together because they share this file and this document, and their effects were measured apart:
+#   * `F-011-7`  GET /simulator/events/poll LEAVES. The canon promised an array of SimulatorEvent
+#                and the handler is `# MVP: no replay buffer.` + `return []`. Both sides now say
+#                `type: array, maxItems: 0` - the application through `responses=`, never
+#                `response_model=`. This is the only operation that leaves.
+#   * `F-011-10` 26 nodes wrote `nullable: true` with no sibling `type`, where it modifies nothing
+#                and null is rejected. Content-only: no operation enters or leaves, but every
+#                entry touching a fixed schema changes. Proved on a real body - InvariantResult
+#                with `details: null` was INVALID against the canon before and is VALID after.
+#   * `F-011-9`  the graph reads stop reusing AdminIncidentItem, whose `format: date-time` the
+#                graph path does not honour, and get AdminGraphIncidentItem instead.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "721564535d774d3b60a78826786fd263b63a9113f9b15202caa11f742ca70f2a"
+    "5f206a1fc946f14d5bf510595caf9e717aa47c1c94c934f043d39afa79338fc1"
 )
-SUCCESS_SCHEMA_DRIFT_COUNT = 63
+SUCCESS_SCHEMA_DRIFT_COUNT = 62
 # 2026-08-11 / T501: public DB health no longer declares exception details;
 # the new admin diagnostic operation matches generated responses, so count stays 84.
 # 2026-08-20 / p007_unblock_f0071: simulator metrics/bottlenecks declare 503 in the
@@ -224,6 +248,26 @@ def _resolve_ref(value: Any, document: dict[str, Any]) -> Any:
     return _resolve_ref(current, document)
 
 
+def _drop_inert_nullable(schema: dict[str, Any]) -> dict[str, Any]:
+    """Remove a `nullable` that asserts nothing, the way `title` is removed.
+
+    011/`F-011-10`: in OpenAPI 3.0.3 `nullable` modifies a sibling `type` and nothing else. On a
+    schema with no `type` it permits nothing, so comparing it is comparing noise - and the two
+    sides produce that noise for different reasons. `api/openapi.yaml` may not contain the form at
+    all any more (`tests/contract/test_p011_nullable_needs_a_sibling_type.py` forbids it), while
+    FastAPI still emits it for every `Optional[Any]` field, which no canon edit can answer.
+
+    Dropping it is not a weakening: an untyped schema already admits null. Measured when
+    introduced - with the canon fixed but this normalization absent, the two `Optional[Any]` seed
+    bodies drifted forever with `seed: {}` against `seed: {nullable: true}`; with it they match
+    and the count returns to where it was.
+    """
+
+    if schema.get("nullable") is True and "type" not in schema:
+        return {key: value for key, value in schema.items() if key != "nullable"}
+    return schema
+
+
 def _normalize_schema(
     value: Any,
     document: dict[str, Any],
@@ -248,7 +292,7 @@ def _normalize_schema(
             if parameter:
                 return normalized
             if isinstance(normalized, dict):
-                return {**normalized, "nullable": True}
+                return _drop_inert_nullable({**normalized, "nullable": True})
 
     normalized: dict[str, Any] = {}
     for key, item in value.items():
@@ -267,7 +311,7 @@ def _normalize_schema(
             ]
         else:
             normalized[key] = item
-    return normalized
+    return _drop_inert_nullable(normalized)
 
 
 def _operation_pairs(
@@ -1254,6 +1298,48 @@ def test_openapi_paths_methods_business_parameter_identities_and_required_bodies
         request_schema_drift,
         REQUEST_SCHEMA_DRIFT_SHA256,
         REQUEST_SCHEMA_DRIFT_COUNT,
+    )
+
+
+def test_the_normalizer_drops_only_the_nullable_that_says_nothing() -> None:
+    """Guard the comparator change made for `F-011-10`.
+
+    `_drop_inert_nullable` removes a keyword from both sides before they are compared, so it can
+    hide a real difference if it reaches too far. It must remove `nullable` only where OpenAPI
+    3.0.3 gives it no meaning - beside no `type` at all - and must leave every effective one
+    standing, at every depth.
+    """
+
+    document: dict[str, Any] = {}
+
+    assert _normalize_schema({"nullable": True}, document) == {}
+    assert _normalize_schema({"type": "string", "nullable": True}, document) == {
+        "type": "string",
+        "nullable": True,
+    }, "a nullable with a sibling type is the whole point of the keyword and must survive"
+    assert _normalize_schema({"type": "object", "nullable": False}, document) == {
+        "type": "object",
+        "nullable": False,
+    }
+
+    nested = _normalize_schema(
+        {
+            "type": "object",
+            "properties": {
+                "inert": {"nullable": True},
+                "effective": {"type": "integer", "nullable": True},
+            },
+        },
+        document,
+    )
+    assert nested["properties"] == {
+        "inert": {},
+        "effective": {"type": "integer", "nullable": True},
+    }, "the rule must apply by depth, not only at the top of a schema"
+
+    # And it must not make two genuinely different schemas compare equal.
+    assert _normalize_schema({"type": "string"}, document) != _normalize_schema(
+        {"type": "string", "nullable": True}, document
     )
 
 

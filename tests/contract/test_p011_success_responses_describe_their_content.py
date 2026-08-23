@@ -64,9 +64,13 @@ _HTTP_METHODS = {"get", "post", "put", "patch", "delete"}
 # that already existed. Two of the three names this task had guessed were wrong: the models are
 # AdminTrustLinesListResponse and AdminAuditLogListResponse, and `AdminAuditLogResponse` is a
 # different, unreferenced schema that a guessed name would have silently retyped.
+# 2026-08-23 / `F-011-7`: /simulator/events/poll struck off (2 -> 1). Not by describing a body -
+# by describing the absence of one. The handler is a comment saying there is no replay buffer and
+# `return []`, so both sides now declare an array capped at zero items. The owner's decision,
+# delegated to external review; the canon's previous promise of six event variants was the
+# opposite defect to the rest of this programme.
 UNDESCRIBED_SUCCESS_RESPONSES = {
     ("GET", "/integrity/audit-log"),
-    ("GET", "/simulator/events/poll"),
 }
 
 
@@ -187,8 +191,22 @@ def is_undescribed(
         if typed_map and is_undescribed(additional, document, seen, component):
             return True
 
-    if (declared_type == "array" or "items" in schema) and schema.get("items") is not None:
-        if is_undescribed(schema["items"], document, seen, component):
+    if declared_type == "array" or "items" in schema:
+        # An array that can hold nothing describes itself completely, whatever its `items` say -
+        # the item schema is unreachable. This is not a loophole for `items: {}`: it opens only on
+        # an integral `maxItems: 0`, and `test_an_uncapped_empty_item_schema_is_still_opaque`
+        # below holds the line by checking the same array without the cap.
+        #
+        # The case is `GET /simulator/events/poll` (`F-011-7`): the handler is a comment saying
+        # there is no replay buffer and `return []`. Describing six event variants there would be
+        # the opposite defect - a canon promising what the service never sends.
+        max_items = schema.get("maxItems")
+        capped_empty = isinstance(max_items, int) and not isinstance(max_items, bool) and max_items == 0
+        if capped_empty:
+            return False
+        if schema.get("items") is not None and is_undescribed(
+            schema["items"], document, seen, component
+        ):
             return True
 
     return False
@@ -318,4 +336,29 @@ def test_the_predicate_detects_the_forms_it_claims_to() -> None:
     # A fully described object must not trip it.
     assert not is_undescribed(
         {"type": "object", "properties": {"id": {"type": "string"}}}, document
+    )
+
+
+def test_an_uncapped_empty_item_schema_is_still_opaque() -> None:
+    """Guard the exemption: only `maxItems: 0` earns it, and only as an integer.
+
+    `F-011-7` let one array through with `items: {}` because it can never hold an element. That
+    exemption is exactly the shape of a loophole - `items: {}` is the emptiest item schema there
+    is - so this test states where the line runs. If a future edit ever drops the cap, or writes
+    it as a boolean (`True == 1` in Python, and `maxItems: true` must not read as a cap), the
+    array goes back to being undescribed.
+    """
+
+    document: dict[str, Any] = {}
+
+    assert not is_undescribed({"type": "array", "maxItems": 0, "items": {}}, document)
+
+    assert is_undescribed({"type": "array", "items": {}}, document), (
+        "an array with an empty item schema and no cap describes nothing"
+    )
+    assert is_undescribed({"type": "array", "maxItems": 1, "items": {}}, document), (
+        "a cap that still admits an element does not excuse an empty item schema"
+    )
+    assert is_undescribed({"type": "array", "maxItems": True, "items": {}}, document), (
+        "`maxItems: true` is not a cap of zero, however Python compares it"
     )
