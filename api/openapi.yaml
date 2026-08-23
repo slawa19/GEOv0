@@ -541,8 +541,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: '#/components/schemas/AdminAuditLogListResponse'
         '429':
           $ref: '#/components/responses/TooManyRequests'
 
@@ -774,8 +773,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: '#/components/schemas/AdminTrustLinesListResponse'
         '403':
           $ref: '#/components/responses/Unauthorized'
         '429':
@@ -819,8 +817,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: '#/components/schemas/AdminTrustLinesBottlenecksResponse'
         '429':
           $ref: '#/components/responses/TooManyRequests'
 
@@ -862,8 +859,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: '#/components/schemas/AdminLiquiditySummaryResponse'
         '429':
           $ref: '#/components/responses/TooManyRequests'
 
@@ -1936,8 +1932,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: '#/components/schemas/AdminParticipantMetricsResponse'
         '429':
           $ref: '#/components/responses/TooManyRequests'
 
@@ -4249,11 +4244,16 @@ components:
       properties:
         id:
           type: string
+          # UUID columns, and the
+          # model types them as UUID (app/schemas/admin.py:94-96), so the wire carries the
+          # canonical hyphenated form. The canon left the format off both of them.
+          format: uuid
         timestamp:
           type: string
           format: date-time
         actor_id:
           type: string
+          format: uuid
           nullable: true
         actor_role:
           type: string
@@ -4270,13 +4270,14 @@ components:
           type: string
           nullable: true
         before_state:
+          # Open by design and listed in ACCEPTED_FREE_FORM with the
+          # reason; `additionalProperties` is not spelled out because true is the OpenAPI
+          # default, the same correction slice 3 made to the error envelopes.
           type: object
           nullable: true
-          additionalProperties: true
         after_state:
           type: object
           nullable: true
-          additionalProperties: true
         request_id:
           type: string
           nullable: true
@@ -4600,7 +4601,13 @@ components:
 
     TrustLine:
       type: object
-      required: [id, from, to, equivalent, limit, used]
+      # 011/T1102 (2026-08-23): `required` named six of the ten fields the model declares
+      # without a default, and `updated_at` was missing from `properties` altogether even
+      # though every trustline read emits it (app/schemas/trustline.py:24). The three fields
+      # left out - policy, from_display_name, to_display_name - default to null in the model,
+      # so nothing guarantees them; no read sets response_model_exclude_none, so in practice
+      # all three do reach the wire, present and null.
+      required: [id, from, to, equivalent, limit, used, available, status, created_at, updated_at]
       properties:
         id:
           type: string
@@ -4673,6 +4680,9 @@ components:
           enum: [active, frozen, closed]
           description: TrustLine status
         created_at:
+          type: string
+          format: date-time
+        updated_at:
           type: string
           format: date-time
 
@@ -6547,3 +6557,537 @@ components:
           type: string
           nullable: true
       additionalProperties: false
+
+    # 011/T1102 (2026-08-23): the five remaining admin reads, whose 200 bodies the canon declared
+    # as a bare object. Every key below was read off the response models (app/schemas/admin.py,
+    # app/schemas/metrics.py, app/schemas/trustline.py) AND observed on the wire by calling the
+    # five routes against a seeded SQLite database.
+    #
+    # A note that applies to all of them: none of these routes sets response_model_exclude_none or
+    # response_model_exclude_unset, so FastAPI emits EVERY declared field on every response. A
+    # field that is "optional" in Python is present-and-null on the wire, which is why the
+    # `required:` lists below are exhaustive and the optionality shows up as `nullable: true`.
+
+    AdminTrustLinesListResponse:
+      # GET /admin/trustlines (app/api/v1/admin.py:1396). AdminPaginatedMeta + items, the same
+      # four-key shape as AdminParticipantsListResponse and AdminIncidentsListResponse.
+      type: object
+      required: [page, per_page, total, items]
+      properties:
+        page:
+          type: integer
+          minimum: 1
+        per_page:
+          type: integer
+          minimum: 1
+          maximum: 200
+        total:
+          # The unpaginated count from TrustLineService.count_all with the same filters.
+          type: integer
+          minimum: 0
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/TrustLine'
+
+    AdminAuditLogListResponse:
+      # GET /admin/audit-log (app/api/v1/admin.py:960). Distinct from the existing
+      # AdminAuditLogResponse, which carries `items` alone and is not referenced by any operation.
+      type: object
+      required: [page, per_page, total, items]
+      properties:
+        page:
+          type: integer
+          minimum: 1
+        per_page:
+          type: integer
+          minimum: 1
+          maximum: 200
+        total:
+          type: integer
+          minimum: 0
+        items:
+          # Rows are ORM AuditLog objects validated straight into AdminAuditLogItem, newest
+          # timestamp first. before_state/after_state stay open - see ACCEPTED_FREE_FORM.
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminAuditLogItem'
+
+    AdminTrustLinesBottlenecksResponse:
+      # GET /admin/trustlines/bottlenecks (app/api/v1/admin.py:693).
+      type: object
+      required: [threshold, items]
+      properties:
+        threshold:
+          # A NUMBER here, not a decimal string: the handler parses the query into a Decimal and
+          # then calls float() on it before building the response
+          # (app/api/v1/admin.py:709, AdminTrustLinesBottlenecksResponse.threshold: float).
+          # It is a ratio, not money, so AGENTS.md section 8 does not apply. Contrast
+          # AdminParticipantMetricsResponse.meta.threshold, which is the same query parameter
+          # served as a decimal string.
+          type: number
+          minimum: 0
+          maximum: 1
+        items:
+          # Active trustlines with limit > 0 whose available/limit ratio is strictly below
+          # `threshold`, ordered by available ascending then created_at ascending, capped at the
+          # `limit` query parameter. `used` is the matching Debt row (0 when there is none) and
+          # `available` is limit - used, both computed in the query, not stored.
+          type: array
+          items:
+            $ref: '#/components/schemas/TrustLine'
+
+    AdminLiquidityNetRow:
+      # One ranked participant in the three top-N lists of the liquidity summary.
+      type: object
+      required: [pid, display_name, net]
+      properties:
+        pid:
+          type: string
+        display_name:
+          type: string
+        net:
+          # Money: total credited minus total debited across the selected equivalent(s), as an
+          # exact decimal string (AGENTS.md section 8). Negative for a net debtor. NOT atoms -
+          # this is the raw Debt.amount sum in major units.
+          type: string
+
+    AdminLiquiditySummaryResponse:
+      # GET /admin/liquidity/summary (app/api/v1/admin.py:712).
+      type: object
+      required:
+        - equivalent
+        - threshold
+        - updated_at
+        - active_trustlines
+        - bottlenecks
+        - incidents_over_sla
+        - total_limit
+        - total_used
+        - total_available
+        - top_creditors
+        - top_debtors
+        - top_by_abs_net
+        - top_bottleneck_edges
+      properties:
+        equivalent:
+          # The `equivalent` query parameter, trimmed and upper-cased, or null when it was omitted
+          # or blank (app/api/v1/admin.py:719-720). Echoed with no lookup: an unknown code is a 200
+          # with this field set and every aggregate at zero, not a 404. Deliberately NOT
+          # $ref EquivalentCode - nothing validates the pattern on this route.
+          type: string
+          nullable: true
+        threshold:
+          # A NUMBER, via float(Decimal(...)) - see the note on
+          # AdminTrustLinesBottlenecksResponse.threshold.
+          type: number
+          minimum: 0
+          maximum: 1
+        updated_at:
+          # datetime.now(timezone.utc) at handler entry, so it is always offset-aware and the
+          # format is honest here (unlike the raw column copies in AdminGraphTransactionItem).
+          type: string
+          format: date-time
+        active_trustlines:
+          # COUNT over trustlines with status = 'active', filtered by equivalent when given.
+          type: integer
+          minimum: 0
+        bottlenecks:
+          # The TOTAL number of edges below the threshold, not the length of
+          # top_bottleneck_edges: the helper counts every match and only then applies `limit`
+          # (app/api/v1/admin.py:667-668).
+          type: integer
+          minimum: 0
+        incidents_over_sla:
+          # PAYMENT transactions still in a non-terminal state whose updated_at is older than
+          # PAYMENT_TX_STUCK_TIMEOUT_SECONDS. When `equivalent` is given the filter is applied in
+          # Python against payload["equivalent"], so a row with no equivalent in its payload is
+          # excluded from a filtered count but included in the unfiltered one.
+          type: integer
+          minimum: 0
+        total_limit:
+          # Money, exact decimal string: SUM of TrustLine.limit over active lines.
+          type: string
+        total_used:
+          # Money: SUM of coalesce(Debt.amount, 0) over the same lines.
+          type: string
+        total_available:
+          # Money: SUM of (limit - used). Equals total_limit - total_used.
+          type: string
+        top_creditors:
+          # Net > 0, descending, capped at the `limit` query parameter.
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminLiquidityNetRow'
+        top_debtors:
+          # Net < 0, ascending (most negative first), same cap.
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminLiquidityNetRow'
+        top_by_abs_net:
+          # Ranked by abs(net) with no sign filter, so its rows overlap the two lists above.
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminLiquidityNetRow'
+        top_bottleneck_edges:
+          # The same rows GET /admin/trustlines/bottlenecks returns for this threshold, limit and
+          # equivalent - one shared helper builds both (_load_admin_trustline_bottlenecks).
+          type: array
+          items:
+            $ref: '#/components/schemas/TrustLine'
+
+    AdminParticipantBalanceRow:
+      # One equivalent's aggregates for the participant. All six amounts are money as exact
+      # decimal strings. Rows count LIVE trustlines only (status != 'closed'): since migration 019
+      # a closed incarnation can coexist with the live one and summing both double-counts
+      # (app/core/admin/metrics.py:196-199).
+      type: object
+      required:
+        - equivalent
+        - outgoing_limit
+        - outgoing_used
+        - incoming_limit
+        - incoming_used
+        - total_debt
+        - total_credit
+        - net
+      properties:
+        equivalent:
+          type: string
+        outgoing_limit:
+          # Participant is the creditor (trustline `from`).
+          type: string
+        outgoing_used:
+          type: string
+        incoming_limit:
+          # Participant is the debtor (trustline `to`).
+          type: string
+        incoming_used:
+          type: string
+        total_debt:
+          # SUM of Debt.amount where the participant is the debtor. Unlike the four limit/used
+          # figures this is not restricted to live trustlines - it reads the debts table.
+          type: string
+        total_credit:
+          type: string
+        net:
+          # total_credit - total_debt; negative for a net debtor.
+          type: string
+
+    AdminParticipantCounterpartySplitRow:
+      type: object
+      required: [pid, display_name, amount, share]
+      properties:
+        pid:
+          type: string
+        display_name:
+          # Never null: falls back to the pid when the column is blank
+          # (app/core/admin/metrics.py:324).
+          type: string
+        amount:
+          # Money, exact decimal string.
+          type: string
+        share:
+          # amount / total as a float, or 0.0 when the total is zero. A ratio, not money - the one
+          # place in this family where float(Decimal / Decimal) is applied to money-derived values.
+          type: number
+
+    AdminParticipantCounterpartySplit:
+      # Who the participant owes and who owes them, for the requested equivalent only.
+      type: object
+      required: [eq, totalDebt, totalCredit, creditors, debtors]
+      properties:
+        eq:
+          type: string
+        totalDebt:
+          # camelCase on the wire: the field is total_debt in Python with
+          # serialization_alias="totalDebt" (app/schemas/metrics.py:31-32), and FastAPI serializes
+          # responses with by_alias=True. Money, exact decimal string.
+          type: string
+        totalCredit:
+          # Same aliasing as totalDebt.
+          type: string
+        creditors:
+          # Counterparties the participant owes (participant is the debtor), sorted by amount
+          # descending then pid. `share` is of totalDebt.
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminParticipantCounterpartySplitRow'
+        debtors:
+          # Counterparties who owe the participant; `share` is of totalCredit.
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminParticipantCounterpartySplitRow'
+
+    AdminParticipantConcentrationSide:
+      type: object
+      required: [top1, top5, hhi]
+      properties:
+        top1:
+          # Largest single counterparty share, 0.0 when there are none.
+          type: number
+        top5:
+          # Sum of the five largest shares.
+          type: number
+        hhi:
+          # Herfindahl-Hirschman index as the sum of squared shares, so it is on the 0..1 scale,
+          # not the 0..10000 scale the name usually implies (app/core/admin/metrics.py:74-75).
+          type: number
+
+    AdminParticipantConcentration:
+      # Computed purely from the counterparty split - no extra query.
+      type: object
+      required: [eq, outgoing, incoming]
+      properties:
+        eq:
+          type: string
+        outgoing:
+          # Shares of the `creditors` list, i.e. concentration of what the participant owes.
+          $ref: '#/components/schemas/AdminParticipantConcentrationSide'
+        incoming:
+          # Shares of the `debtors` list.
+          $ref: '#/components/schemas/AdminParticipantConcentrationSide'
+
+    AdminParticipantNetDistributionBin:
+      type: object
+      required: [from_atoms, to_atoms, count]
+      properties:
+        from_atoms:
+          # Integer atoms via str(int): no decimal point, negative allowed. NOT a money amount -
+          # the major-unit value is this divided by 10 ** equivalent precision. Bin bounds are
+          # half-open [from_atoms, to_atoms) except the last bin, whose to_atoms is the maximum.
+          type: string
+        to_atoms:
+          type: string
+        count:
+          type: integer
+          minimum: 0
+
+    AdminParticipantNetDistribution:
+      # Net position of EVERY participant in the system for this equivalent, bucketed - the
+      # requested participant is one point in it, not the subject.
+      type: object
+      required: [eq, min_atoms, max_atoms, bins]
+      properties:
+        eq:
+          type: string
+        min_atoms:
+          # Same atoms-as-string convention as the bin bounds.
+          type: string
+        max_atoms:
+          type: string
+        bins:
+          # Exactly 20 bins of equal integer width, or a single degenerate bin holding every
+          # participant when max == min (app/core/admin/metrics.py:405-411).
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminParticipantNetDistributionBin'
+
+    AdminParticipantRank:
+      type: object
+      required: [eq, rank, n, percentile, net]
+      properties:
+        eq:
+          type: string
+        rank:
+          # 1-based, 1 = largest net. The code keeps a 0 branch for a pid missing from the
+          # participants table, which the handler's own earlier lookup makes unreachable.
+          type: integer
+          minimum: 0
+        n:
+          # Total participants ranked, i.e. every row of the participants table.
+          type: integer
+          minimum: 0
+        percentile:
+          # (n - rank) / (n - 1), and exactly 1.0 when n <= 1.
+          type: number
+        net:
+          # Money, exact decimal string - but it has been through atoms and back
+          # (_decimal_to_atoms truncates toward zero at the equivalent's precision, then
+          # _atoms_to_decimal quantizes), so it can differ from AdminParticipantBalanceRow.net in
+          # the sub-precision digits and it carries exactly `precision` decimal places.
+          type: string
+
+    AdminParticipantCapacitySide:
+      type: object
+      required: [limit, used, pct]
+      properties:
+        limit:
+          # Money, exact decimal string; live trustlines only (status != 'closed').
+          type: string
+        used:
+          type: string
+        pct:
+          # used / limit as a float, 0.0 when limit is 0. A ratio, not money.
+          type: number
+
+    AdminParticipantCapacityBottleneck:
+      type: object
+      required: [dir, other, trustline]
+      properties:
+        dir:
+          # Direction relative to the requested participant: "out" = they are the creditor.
+          type: string
+          enum: [out, in]
+        other:
+          # The counterparty PID, or the raw participant UUID as a string if the pid lookup misses
+          # (app/core/admin/metrics.py:503-504).
+          type: string
+        trustline:
+          # from_display_name and to_display_name are hard-coded to null on this path
+          # (app/core/admin/metrics.py:511-512) - unlike the same schema served by
+          # /admin/trustlines/bottlenecks, which joins the names.
+          $ref: '#/components/schemas/TrustLine'
+
+    AdminParticipantCapacity:
+      type: object
+      required: [eq, out, inc, bottlenecks]
+      properties:
+        eq:
+          type: string
+        out:
+          # Lines where the participant is the creditor.
+          $ref: '#/components/schemas/AdminParticipantCapacitySide'
+        inc:
+          # Lines where the participant is the debtor. Note the key is `inc`, not `in`.
+          $ref: '#/components/schemas/AdminParticipantCapacitySide'
+        bottlenecks:
+          # ALWAYS EMPTY unless the `threshold` query parameter is supplied: the guard is
+          # `thr is not None`, and threshold has no default on this route
+          # (app/api/v1/admin.py:2227, app/core/admin/metrics.py:527). Sorted by dir, then
+          # counterparty pid, then trustline id. A line the participant sits on both ends of
+          # would appear twice, once per direction.
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminParticipantCapacityBottleneck'
+
+    AdminParticipantActivity:
+      # Event counts in trailing windows. "Now" is not the clock: it is the maximum timestamp
+      # found among the participant's trustlines, their audit rows and ALL transactions, falling
+      # back to utcnow only when none exists (app/core/admin/metrics.py:608).
+      type: object
+      required:
+        - windows
+        - trustline_created
+        - trustline_closed
+        - incident_count
+        - participant_ops
+        - payment_committed
+        - clearing_committed
+        - has_transactions
+      properties:
+        windows:
+          # Always literally [7, 30, 90]; no parameter changes it.
+          type: array
+          items:
+            type: integer
+        trustline_created:
+          # Keys are the window sizes as decimal strings - "7", "30", "90" - because the Python
+          # type is dict[int, int] and JSON object keys are strings. Windows are cumulative and
+          # nested, so the 90 count includes the 30 count.
+          type: object
+          additionalProperties:
+            type: integer
+        trustline_closed:
+          type: object
+          additionalProperties:
+            type: integer
+        incident_count:
+          # Stuck PAYMENT transactions the participant initiated. Not filtered by equivalent.
+          type: object
+          additionalProperties:
+            type: integer
+        participant_ops:
+          # Audit rows against this pid whose action starts with PARTICIPANT_ or
+          # admin.participants. - two vocabularies, both matched.
+          type: object
+          additionalProperties:
+            type: integer
+        payment_committed:
+          type: object
+          additionalProperties:
+            type: integer
+        clearing_committed:
+          type: object
+          additionalProperties:
+            type: integer
+        has_transactions:
+          # True when the pre-filter query returned any committed PAYMENT/CLEARING row in the
+          # widest window AT ALL - it is not about this participant, so it can be true while every
+          # count above is zero (app/core/admin/metrics.py:683).
+          type: boolean
+
+    AdminParticipantMetricsResponse:
+      # GET /admin/participants/{pid}/metrics (app/api/v1/admin.py:2223), assembled by
+      # compute_participant_metrics. Six of the nine keys are filled only when `equivalent` is
+      # supplied; without it the handler returns early and they are present-and-null
+      # (app/core/admin/metrics.py:120).
+      type: object
+      required:
+        - pid
+        - equivalent
+        - balance_rows
+        - counterparty
+        - concentration
+        - distribution
+        - rank
+        - capacity
+        - activity
+        - meta
+      properties:
+        pid:
+          # The path parameter, trimmed. A blank or unknown pid is a 404, so this is never empty.
+          type: string
+        equivalent:
+          # Trimmed and upper-cased, null when omitted. Unlike the liquidity summary this route
+          # DOES validate it: validate_equivalent_code enforces the format and an unknown code is
+          # a 404, so a non-null value here always names a real equivalent.
+          type: string
+          nullable: true
+        balance_rows:
+          # One row per equivalent, ordered by code, when `equivalent` is omitted; exactly one row
+          # when it is given. Equivalents the participant has no exposure to still get a row of
+          # zeros.
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminParticipantBalanceRow'
+        counterparty:
+          allOf:
+            - $ref: '#/components/schemas/AdminParticipantCounterpartySplit'
+          nullable: true
+        concentration:
+          allOf:
+            - $ref: '#/components/schemas/AdminParticipantConcentration'
+          nullable: true
+        distribution:
+          allOf:
+            - $ref: '#/components/schemas/AdminParticipantNetDistribution'
+          nullable: true
+        rank:
+          allOf:
+            - $ref: '#/components/schemas/AdminParticipantRank'
+          nullable: true
+        capacity:
+          allOf:
+            - $ref: '#/components/schemas/AdminParticipantCapacity'
+          nullable: true
+        activity:
+          allOf:
+            - $ref: '#/components/schemas/AdminParticipantActivity'
+          nullable: true
+        meta:
+          # Declared dict[str, Any] "for forward compatibility", but there is exactly one writer
+          # and it stores exactly one key (app/core/admin/metrics.py:163-165). The object is empty
+          # when `equivalent` was omitted, because that path returns before meta is built.
+          # additionalProperties stays true to match the annotation.
+          type: object
+          additionalProperties: true
+          properties:
+            threshold:
+              # A decimal STRING here - the raw Decimal from the query parameter, serialized by
+              # pydantic's Any-field inference. The SAME query parameter is a `number` on
+              # /admin/liquidity/summary and /admin/trustlines/bottlenecks, which call float() on
+              # it. Null when the caller supplied `equivalent` but not `threshold`; the key is
+              # absent entirely when `equivalent` was omitted, so it is not required.
+              type: string
+              nullable: true

@@ -58,12 +58,13 @@ _HTTP_METHODS = {"get", "post", "put", "patch", "delete"}
 # `schema: {}` had hidden; both sides now declare the body the handler builds literally.
 # 2026-08-23 / T1102: the two graph reads struck off (9 -> 7); their audit and transaction
 # leaves are open by design and recorded in ACCEPTED_FREE_FORM above.
+# 2026-08-23 / T1102: the five admin money reads struck off (7 -> 2). Unlike the graph pair
+# these were never shapeless - all five have declared a real `response_model` all along
+# (app/schemas/admin.py, app/schemas/metrics.py) and the canon was simply stale against models
+# that already existed. Two of the three names this task had guessed were wrong: the models are
+# AdminTrustLinesListResponse and AdminAuditLogListResponse, and `AdminAuditLogResponse` is a
+# different, unreferenced schema that a guessed name would have silently retyped.
 UNDESCRIBED_SUCCESS_RESPONSES = {
-    ("GET", "/admin/audit-log"),
-    ("GET", "/admin/liquidity/summary"),
-    ("GET", "/admin/participants/{pid}/metrics"),
-    ("GET", "/admin/trustlines"),
-    ("GET", "/admin/trustlines/bottlenecks"),
     ("GET", "/integrity/audit-log"),
     ("GET", "/simulator/events/poll"),
 }

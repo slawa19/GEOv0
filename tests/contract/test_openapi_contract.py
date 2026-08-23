@@ -124,10 +124,28 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # 2026-08-23 / p011_t1102, slice 7: still 64, digest moves. The two admin graph reads describe
 # their bodies, including honest item schemas for the three collections the response model types
 # as `list[Any]` and therefore does not shape at all.
+# 2026-08-23 / p011_t1102, slice 8: 64 -> 63, and the one that leaves is GET /admin/audit-log.
+# The five admin money reads all declare a real `response_model`, so describing them in the canon
+# alone was never going to be enough - what was left over after the canon caught up was measured
+# operation by operation:
+#   GET /admin/audit-log                       LEAVES. Its last two differences were canon gaps in
+#                                              AdminAuditLogItem: `id`/`actor_id` are UUID columns
+#                                              typed as UUID in the model, and the canon declared
+#                                              them as bare strings.
+#   GET /admin/trustlines                      remain, all four for the same reason: they serve
+#   GET /admin/trustlines/bottlenecks          TrustLine, whose `policy` the canon describes key by
+#   GET /admin/liquidity/summary               key while the model says Dict[str, Any] (slice 5),
+#   GET /admin/participants/{pid}/metrics      and whose `equivalent` the canon constrains by
+#                                              pattern. The last one also declares its six
+#                                              conditional metric blocks as nullable, which the
+#                                              generated schema does not say at all.
+# Four trustline reads and the two graph reads change without leaving: `TrustLine` gained
+# `updated_at`, which every read emits and the canon never declared, and its `required` grew from
+# six names to the ten the model declares without a default.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "db998226422ed42a2b7809ee2bfb4edcde35f75ca5a7c031e329f56d633b977b"
+    "721564535d774d3b60a78826786fd263b63a9113f9b15202caa11f742ca70f2a"
 )
-SUCCESS_SCHEMA_DRIFT_COUNT = 64
+SUCCESS_SCHEMA_DRIFT_COUNT = 63
 # 2026-08-11 / T501: public DB health no longer declares exception details;
 # the new admin diagnostic operation matches generated responses, so count stays 84.
 # 2026-08-20 / p007_unblock_f0071: simulator metrics/bottlenecks declare 503 in the
