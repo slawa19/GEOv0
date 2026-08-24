@@ -477,7 +477,13 @@ def validate_trustline_policy(policy: dict[str, Any]) -> None:
             # declares the field `oneOf` string|number|null; a number is a parsed value, not
             # a client spelling, so it is re-spelled plainly before the grammar rather than
             # judged on how Python would print it (`1e16` arrives as a float and must not be
-            # refused for `str()`'s exponent).
+            # refused for `str()`'s exponent).  REACHABILITY CAVEAT (T1210-bis): on the signed
+            # HTTP path a FRACTIONAL number never gets this far today - `canonical_json`
+            # refuses floats, so it dies before `verify_signature` with an honest 400 (see
+            # trustlines/service.py), and only integers arrive here as numbers.  That the
+            # canon admits a number the canonical form cannot carry is a recorded contract
+            # fork, not this validator's to settle; the value rule here stays caller-agnostic
+            # so whichever way the fork lands, no number is refused for its Python spelling.
             #
             # Refusals keep the grammar's own message and `details` instead of the blanket
             # "must be a number" the first edition raised: a capacity complaint relabelled as
