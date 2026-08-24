@@ -40,9 +40,12 @@ Dev-диагностика (localhost only):
 - `globalThis.__geo_real_mode_diag` — счётчики SSE/нормализации/лейблов и burst-throttling в real-mode.
 - `globalThis.__geo_timers_stats()` — статистика managed timers (сколько очисток, сколько keepCritical, last_clear snapshot).
 
-Примечание: на раннем MVP можно сделать polling-режим:
+Примечание: polling-маршрут существует, но **буфера повтора в MVP нет**:
 - `GET /api/v1/simulator/events/poll?equivalent=UAH&after=evt_...`
-  - Возвращает массив событий.
+  - Всегда возвращает пустой массив. Оба параметра обработчиком не читаются, и контракт объявляет
+    ответ как массив с `maxItems: 0` (`F-011-7` программы 011). Прежняя формулировка «возвращает
+    массив событий» описывала поведение, которого нет. Единственный работающий канал событий —
+    SSE `GET /api/v1/simulator/runs/{run_id}/events`.
 
 ---
 

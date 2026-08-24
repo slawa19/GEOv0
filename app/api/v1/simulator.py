@@ -2556,10 +2556,46 @@ async def events_stream_active_run(
     )
 
 
-@router.get("/events/poll")
+# 011/`F-011-7`: the polling fallback has never had a replay buffer, so the handler below returns
+# an empty array unconditionally and reads neither query parameter. The canon used to promise an
+# array of SimulatorEvent - six event variants a client would write parsing code for and never
+# receive. The owner's decision (delegated to external review, verdict A) is that the contract
+# states what exists: an array that is always empty. `maxItems: 0` says exactly that, and it says
+# it in a way a future replay buffer cannot inherit by accident - lifting the cap will be a
+# deliberate contract change rather than the belated delivery of an old promise.
+#
+# Declared as a raw schema rather than a `model`, because "empty array" is not a pydantic type; and
+# through `responses=`, never `response_model=`, which would make FastAPI filter the reply.
+_EVENTS_POLL_EMPTY_RESPONSE: dict[str, Any] = {
+    "description": (
+        "Always an empty array: the MVP has no replay buffer, so no event is ever returned and "
+        "the `equivalent` and `after` parameters are not read"
+    ),
+    "content": {
+        "application/json": {
+            "schema": {"type": "array", "maxItems": 0, "items": {}},
+            "example": [],
+        }
+    },
+}
+
+
+@router.get("/events/poll", responses={200: _EVENTS_POLL_EMPTY_RESPONSE})
 async def events_poll_active_run(
-    equivalent: str = Query(...),
-    after: Optional[str] = Query(None),
+    equivalent: str = Query(
+        ...,
+        description=(
+            "Ignored in the MVP: the handler returns an empty array without reading it "
+            "(`F-011-7`). Required so the eventual replay buffer keeps the same call shape."
+        ),
+    ),
+    after: Optional[str] = Query(
+        None,
+        description=(
+            "Ignored in the MVP. Reserved for the cursor semantics a replay buffer would need "
+            "(`F-011-7`)."
+        ),
+    ),
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
     # MVP: no replay buffer.

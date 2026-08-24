@@ -20,9 +20,48 @@
 | Admin: экраны Transactions / Clearing | — | **Не фронтовая работа, но объём меньше заявленного.** Списочных `GET /admin/transactions[/{tx_id}]` нет; есть только `POST /admin/transactions/{tx_id}/abort` (`admin.py:996`) и `GET /admin/clearing/cycles` (`:2056`). **Нюанс:** `GET /payments` и `GET /payments/{tx_id}` уже существуют с фильтрами `direction/status/equivalent/from_date/to_date/page/per_page` — они лишь заскоуплены на запрашивающего, и обхода для админа в коде нет. Задача = «снять requester-scoping за админским маршрутом», а не новая фича. **Поправка:** архивная рекомендация «использовать user API» неверна — у админского токена нет участника, к которому можно привязаться | `app/api/v1/payments.py:107` (список), `:91` (деталь); requester вшит в WHERE — `app/core/payments/service.py:1054-1070`, ветки `is_admin` нет. Неверная рекомендация — `docs/ru/archive/ui-spec-revision-proposal-2026-01-10.md:525-526`. Требование — `UNFINISHED.md` п.2 |
 | Admin Liquidity Phase 2 (Bottlenecks edges, Participants net position, Concentration/HHI, Clearing impact) | — | Осознанно вне MVP. HHI/top-shares частично реализованы, но на странице Graph, а не как экран Liquidity | `admin-ui/src/composables/useGraphAnalytics.ts`, `operatorAdvice.ts:32-34,184-197`. Churn/Gini нет нигде |
 | `audit.drift` не в принятом union нормализатора | P3 | Событие производится, но нормализатор относит его в `ignored('unknown')`. Переклассифицировано как продуктовое решение по наблюдаемости, а не доказанный дефект | основной производитель `app/core/simulator/real_tick_orchestrator.py:425`, второй — `app/core/simulator/real_payments_executor.py:152`; `simulator-ui/v2/src/api/normalizeSimulatorEvent.ts:568`; диагностический бакет `useSimulatorRealMode.ts:94` |
-| `/simulator/events/poll` всегда возвращает `[]` | P3 | OpenAPI документирует массив событий; в коде комментарий «MVP: no replay buffer». Либо реализовать, либо убрать из контракта | `simulator.py:2407-2414`; `api/openapi.yaml:1013-1016` |
+| ~~`/simulator/events/poll` всегда возвращает `[]`~~ — **закрыт 2026-08-23 программой 011** | P3 | Развилка вынесена владельцу и решена делегированием внешнему ревьюеру (`VERDICT-F0117: A`): контракт описывает то, что есть. Оба документа объявляют массив с `maxItems: 0`, а описания `equivalent`/`after` больше не обещают семантику курсора, которой в MVP нет. Реализация replay-буфера остаётся отдельной продуктовой функцией и **не** является долгом этой строки. Прежние якоря этой строки к моменту закрытия оба указывали не туда — обработчик уехал на `simulator.py:2583`, а `openapi.yaml:1013-1016` попал внутрь другого пути | `app/api/v1/simulator.py` (`# MVP: no replay buffer.`); `api/openapi.yaml` (`/simulator/events/poll`); `specs/011-canon-describes-what-it-returns/spec.md`, `F-011-7` |
 | Судьба `/ws` и `event_bus` | — | Маршрут живой, производитель есть, потребителя нет. Решение keep-or-deprecate заблокировано за F-005-1 (токен в query string) | `app/api/v1/websocket.py:17`; производитель — `event_bus.publish(` в `app/core/payments/service.py:94` |
 | `docs/ru/pwa/` | — | Домена `pwa` нет в каноне `documentation-rules.md` §2.2, входящих ссылок нет. Мёртвый документ или отложенная работа | `docs/ru/pwa/specs/pwa-client-ui-spec.md` |
+
+### Схемная гигиена: `trustlines.policy` — nullable-колонка, в которую никто не пишет `null`
+
+Внесено 2026-08-23 при закрытии 011. Колонка объявлена nullable и имеет **только Python-side
+`default=`** (`app/db/models/trustline.py:15-21`), который срабатывает лишь когда атрибут не задан;
+server default отсутствует. При этом **ни один писатель приложения не пишет `null`**: `create`
+кладёт `data.policy or {}` (`app/core/trustlines/service.py:190`), `update` кладёт словарь
+(`:334-336`), симуляторное действие не передаёт kwarg и получает дефолт ORM
+(`app/api/v1/simulator.py:1116-1121`), инжектор и real-mode-сидер передают словари
+(`inject_executor.py:506`, `:622`; `real_scenario_seeder.py:213-224`), `scripts/seed_db.py:359-382`
+приводит не-словарь к `{}`.
+
+Разрыв нашёлся так: два юнит-теста вставляли `policy=None` **прямо через ORM**, минуя
+Python-дефолт, и строили строку, которую приложение написать не может — из-за чего проверка
+конформности ответов канону видела `policy: null` на проволоке. Фикстуры исправлены на `{}`
+(`tests/unit/test_admin_liquidity_summary.py`, `tests/unit/test_admin_trustlines_bottlenecks.py`),
+и канон **сознательно** продолжает утверждать, что `policy` — объект: объявить его nullable значило
+бы ослабить верное утверждение ради строки, которой служба не производит.
+
+Остаток — не контрактный дефект, а гигиена схемы: либо `nullable=False` + server default, либо
+явное решение, что `null` допустим, и тогда канон обязан это сказать. Владельца нет.
+
+### Индекс артефактов симулятора обещает content type, которого выгрузка не отдаёт
+
+Внесено 2026-08-24 при закрытии 011. `artifact_content_type` (`app/core/simulator/helpers.py:8`)
+возвращает `application/json`, `application/x-ndjson`, `application/zip` — и вызывается **только**
+из `list_artifacts` (`app/core/simulator/artifacts.py:153`) и `sync_artifacts`
+(`app/core/simulator/storage.py:158`). Сама выгрузка
+(`GET /simulator/runs/{run_id}/artifacts/{name}`, `app/api/v1/simulator.py:2938`) отдаёт
+`FileResponse(path)` **без** `media_type`, поэтому тип на проволоке — догадка `mimetypes`.
+
+Измерено: `events.ndjson` приезжает как `text/plain`, тогда как индекс объявляет для того же файла
+`application/x-ndjson`. `bundle.zip` зависит от машины: `application/x-zip-compressed` под Windows
+(реестр), `application/zip` в других окружениях — поэтому канон вынужден объявлять оба.
+
+Канон описывает то, что **отдаёт выгрузка**, и это правильно для 011. Разрыв между индексом и
+выгрузкой — поведенческий: закрыть его значит передать `media_type=artifact_content_type(name)` в
+`FileResponse`, а это меняет заголовок, который получает клиент, и запрещено `## Non-goals` 011.
+Владельца нет.
 
 ## Требуют отдельной спеки, не узкой правки
 
@@ -226,6 +265,21 @@ exit `0`, `17 passed`; перестановка guard'ов больше не м�
 «Пробелы покрытия без владельца»: `integrity.py`/`invariants.py` без независимой проверки, паритет
 ORM↔миграции только для одной таблицы, ни одного браузерного прогона реального SSE, admin
 real-transport smoke вне CI, конкурентность auth challenge/refresh помечена `UNVERIFIED / NO FIX`.
+
+## Долги волны 011 — поведенческие, вне её Non-goals
+
+Внесены 2026-08-23 при закрытии программы 011. Каждый из трёх найден внутри волны, ни один не может
+быть в ней исправлен: у 011 в `## Non-goals` стоит «не менять поведение приложения», а все три
+требуют именно этого. Владельца нет ни у одного.
+
+| Долг | В чём он | Почему не в 011 | Якоря |
+|---|---|---|---|
+| `F-011-8` | Политика trust-линии валидируется на публичном пути (`validate_trustline_policy` на `POST`/`PATCH /trustlines`) и **не** валидируется на симуляторном: сидер сценариев пишет в ту же колонку произвольный JSON, и эти строки отдаются теми же ответами | Закрытие требует либо валидации на втором пути, либо санации хранимых строк — и то и другое меняет поведение | `app/utils/validation.py`, `api/openapi.yaml` (`TrustLine.policy`, `additionalProperties: true` намеренно) |
+| `F-011-9`, поведенческая часть | Одна и та же временная метка уходит в двух форматах: через модель — с `Z`, через `list[Any]` графового ответа — без смещения. Три поля: `AdminGraphTransactionItem.created_at/updated_at` и `incidents[].created_at` | Починка добавит смещение в строку на проволоке. Решение внешнего ревьюера `VERDICT-F0119: DESCRIBE_ONLY`; **в 012 не передаётся** — 012 владеет денежным представлением, а не временем | `app/api/v1/admin.py:217`, `:252-253`; `app/schemas/graph.py:32` |
+| Разрыв generated-схемы SSE | Ни одна из четырёх схем SSE-событий не попадает в `app.openapi()`: эти модели нигде не служат `response_model`, а SSE-маршруты возвращают `StreamingResponse`. Клиент, сгенерированный из приложения, не знает **всего семейства событий**, а не отдельных полей | Требует либо публикации схем через отдельный механизм, либо изменения способа отдачи потока | Установлено `RT-011-5`; защищённый §8 контракт SSE существует только в `api/openapi.yaml` |
+
+Кандидат-получатель для всех трёх — 013 либо отдельная узкая спека. Ни один из них не «мелкая
+правка»: первые два меняют то, что видит клиент, третий меняет способ публикации контракта.
 
 ## Принятые риски — датированные решения владельца
 

@@ -5,3 +5,9 @@ prometheus-client
 aiosqlite==0.20.0
 black==24.1.1
 ruff==0.1.14
+# RT-011-10. Two contract guards validate real data against api/openapi.yaml with
+# OAS30Validator: the static one in tests/contract/test_p011_nullable_needs_a_sibling_type.py
+# and the runtime one in tests/contract/test_p011_responses_conform_to_the_canon.py. Both are
+# load-bearing, so the dependency is declared here - an importorskip around them would make
+# them pass silently on a machine that lacks it, which is the vacuum they exist to close.
+openapi-schema-validator==0.9.0

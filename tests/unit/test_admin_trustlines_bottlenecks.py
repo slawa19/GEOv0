@@ -54,7 +54,7 @@ async def test_admin_trustlines_bottlenecks_filters_and_sorts(client, db_session
         to_participant_id=alice.id,
         equivalent_id=uah.id,
         limit=Decimal("100.00"),
-        policy=None,
+        policy={},
         status="active",
     )
     # Non-matching rows (status != active / different equivalent)
@@ -63,7 +63,7 @@ async def test_admin_trustlines_bottlenecks_filters_and_sorts(client, db_session
         to_participant_id=charlie.id,
         equivalent_id=usd.id,
         limit=Decimal("100.00"),
-        policy=None,
+        policy={},
         status="frozen",
     )
     db_session.add_all([tl1, tl2, tl_boundary, tl3])

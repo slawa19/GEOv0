@@ -38,6 +38,14 @@ _HTTP_METHODS = {"get", "post", "put", "patch", "delete"}
 # Measured 2026-08-23 with the predicate below. This list may only shrink: every entry is an
 # operation whose 2xx body the canon does not describe, and `T1102` exists to empty it.
 #
+# The opening figure of 36 is NOT reproducible with the predicate as it stands: it was
+# measured before the predicate learned to see an empty schema, an annotation-only schema,
+# an array without `items` and an empty composition, and before the free-form allowlist
+# stopped leaking by property name. Re-running today's rule over the canon at the start of
+# the programme gives a larger number. The history below records what each step measured
+# with the rule in force at the time; the figures are comparable to their neighbours, not
+# across a sharpening. T1108 raised this, and it is worth saying rather than quietly
+# leaving a number that no longer reproduces.
 # 2026-08-23 / T1102: ban and unban struck off (36 -> 34) - the canon now states the two keys
 # `_set_participant_status` really emits, rather than `additionalProperties: true`.
 # 2026-08-23: `GET /admin/health/db` added (34 -> 35). It was never described - it declares
@@ -58,15 +66,27 @@ _HTTP_METHODS = {"get", "post", "put", "patch", "delete"}
 # `schema: {}` had hidden; both sides now declare the body the handler builds literally.
 # 2026-08-23 / T1102: the two graph reads struck off (9 -> 7); their audit and transaction
 # leaves are open by design and recorded in ACCEPTED_FREE_FORM above.
-UNDESCRIBED_SUCCESS_RESPONSES = {
-    ("GET", "/admin/audit-log"),
-    ("GET", "/admin/liquidity/summary"),
-    ("GET", "/admin/participants/{pid}/metrics"),
-    ("GET", "/admin/trustlines"),
-    ("GET", "/admin/trustlines/bottlenecks"),
-    ("GET", "/integrity/audit-log"),
-    ("GET", "/simulator/events/poll"),
-}
+# 2026-08-23 / T1102: the five admin money reads struck off (7 -> 2). Unlike the graph pair
+# these were never shapeless - all five have declared a real `response_model` all along
+# (app/schemas/admin.py, app/schemas/metrics.py) and the canon was simply stale against models
+# that already existed. Two of the three names this task had guessed were wrong: the models are
+# AdminTrustLinesListResponse and AdminAuditLogListResponse, and `AdminAuditLogResponse` is a
+# different, unreferenced schema that a guessed name would have silently retyped.
+# 2026-08-23 / `F-011-7`: /simulator/events/poll struck off (2 -> 1). Not by describing a body -
+# by describing the absence of one. The handler is a comment saying there is no replay buffer and
+# `return []`, so both sides now declare an array capped at zero items. The owner's decision,
+# delegated to external review; the canon's previous promise of six event variants was the
+# opposite defect to the rest of this programme.
+# 2026-08-23 / T1102: GET /integrity/audit-log struck off, and the list is EMPTY (1 -> 0).
+# Its three opaque leaves were all inside the after_state the canon already named -
+# affected_participants, invariants_checked and error_details - and none of them turned out to be
+# free form: seven writers in app/ build all three from literals, so nothing here went into
+# ACCEPTED_FREE_FORM.
+#
+# The list is empty, so this file stops being a shrinking ledger and becomes an absolute rule:
+# no 2xx response in api/openapi.yaml may answer "some object". Every deliberately open node is
+# named in ACCEPTED_FREE_FORM above, with the reason, and checked to still be open.
+UNDESCRIBED_SUCCESS_RESPONSES: set[tuple[str, str]] = set()
 
 
 def _canon() -> dict[str, Any]:
@@ -90,7 +110,8 @@ ACCEPTED_FREE_FORM: dict[tuple[str, str], str] = {
         "(app/core/participants/service.py:65 and :175-178) and no validator constrains it"
     ),
     ("Equivalent", "metadata"): (
-        "admin-supplied JSON stored verbatim (app/api/v1/admin.py:1150, :1236). A validator exists "
+        "admin-supplied JSON stored verbatim (app/api/v1/admin.py:1157 on create, :1243 on patch; "
+        "the anchors first written here pointed four and seven lines short). A validator exists "
         "- validate_equivalent_metadata - but is called only from scripts/seed_db.py and tests, "
         "never from app/, so the API path accepts any object"
     ),
@@ -109,8 +130,11 @@ ACCEPTED_FREE_FORM: dict[tuple[str, str], str] = {
     ),
     ("PaymentError", "details"): (
         "documented variants plus a deliberately open tail: both abort paths forward the "
-        ".details of whatever 4xx GeoException prepare or commit raised "
-        "(app/core/payments/service.py:896-903), so a new details= anywhere under "
+        ".details of whatever 4xx GeoException prepare or commit raised. The prepare path "
+        "classifies at app/core/payments/service.py:898-903 and writes at :922 and :938; the "
+        "commit path forwards at :1001, :1017, :1067 and :1083. The single 896-903 anchor first "
+        "written here covered one branch of the two and started mid-expression. So a new details= "
+        "anywhere under "
         "app/core/payments/ changes this node with no schema change. The known shapes are "
         "described in the canon; the tail cannot be closed without making a real response "
         "non-conforming"
@@ -140,6 +164,25 @@ def _deref(node: Any, document: dict, seen: frozenset) -> tuple[Any, frozenset, 
     return node, seen, component
 
 
+# The keywords that actually constrain a value. Everything else in a schema object - description,
+# title, example, deprecated, readOnly, xml - is annotation: useful to a reader, empty to a client
+# and to this guard. Established by T1108 after four mutations of the old rule went unnoticed.
+DESCRIBING_KEYWORDS = frozenset(
+    {
+        "type",
+        "properties",
+        "additionalProperties",
+        "items",
+        "allOf",
+        "oneOf",
+        "anyOf",
+        "enum",
+        "const",
+        "$ref",
+    }
+)
+
+
 def is_undescribed(
     schema: Any,
     document: dict,
@@ -151,18 +194,27 @@ def is_undescribed(
     if not isinstance(schema, dict):
         return False
 
-    # An empty schema is the emptiest description there is, and the first version of this
-    # predicate let it through: the object branch below only opens on `type`/`properties`/
-    # `additionalProperties`, none of which `{}` has. External review found the hole
-    # (2026-08-23) and `GET /admin/health/db` was already sitting in it, declaring `schema: {}`
-    # and passing this guard. A guard blind to the emptiest case is the anti-vacuum defect
-    # AGENTS.md section 9 warns about.
-    if not schema:
+    # A schema that carries no constraining keyword describes nothing, whatever else it carries.
+    #
+    # This started as `if not schema: return True`, which external review asked for when it found
+    # that `schema: {}` slipped through - the object branch below only opens on `type`/
+    # `properties`/`additionalProperties`. That fix was one annotation key wide. T1108 showed it:
+    # `{description: "the health payload"}` passed, and `description` is exactly the key a human
+    # would add beside a schema they meant to write later. So the test is now "is there a
+    # constraint here at all", not "is the dict empty".
+    #
+    # `$ref` is in the set because a reference is resolved above this line; if resolution failed
+    # the target is the thing to look at, not this node.
+    if not DESCRIBING_KEYWORDS & set(schema):
         return True
 
     for keyword in ("allOf", "oneOf", "anyOf"):
-        for branch in schema.get(keyword) or []:
-            if is_undescribed(branch, document, seen, component):
+        branches = schema.get(keyword)
+        if isinstance(branches, list) and not branches:
+            # `oneOf: []` satisfies nothing and describes nothing. T1108 found it passing.
+            return True
+        for branch in branches or []:
+            if is_undescribed(branch, document, seen):
                 return True
 
     declared_type = schema.get("type")
@@ -181,13 +233,34 @@ def is_undescribed(
         for name, value in (properties or {}).items():
             if (component, name) in ACCEPTED_FREE_FORM:
                 continue
-            if is_undescribed(value, document, seen, component):
+            # `component` is deliberately NOT passed down. It names the schema we are inside, and
+            # `_deref` sets it again whenever a child is a `$ref`. Inheriting it made the
+            # allowlist leak by property name: an opaque node called `details` or `before_state`
+            # anywhere below an exempted component was silently exempt too, at any depth. T1108
+            # demonstrated it. Every real entry is a direct property of its named component.
+            if is_undescribed(value, document, seen):
                 return True
-        if typed_map and is_undescribed(additional, document, seen, component):
+        if typed_map and is_undescribed(additional, document, seen):
             return True
 
-    if (declared_type == "array" or "items" in schema) and schema.get("items") is not None:
-        if is_undescribed(schema["items"], document, seen, component):
+    if declared_type == "array" or "items" in schema:
+        # An array that can hold nothing describes itself completely, whatever its `items` say -
+        # the item schema is unreachable. This is not a loophole for `items: {}`: it opens only on
+        # an integral `maxItems: 0`, and `test_an_uncapped_empty_item_schema_is_still_opaque`
+        # below holds the line by checking the same array without the cap.
+        #
+        # The case is `GET /simulator/events/poll` (`F-011-7`): the handler is a comment saying
+        # there is no replay buffer and `return []`. Describing six event variants there would be
+        # the opposite defect - a canon promising what the service never sends.
+        max_items = schema.get("maxItems")
+        capped_empty = isinstance(max_items, int) and not isinstance(max_items, bool) and max_items == 0
+        if capped_empty:
+            return False
+        # An array with no `items` at all says nothing about what it holds. T1108: `{type: array}`
+        # used to pass, because the branch only opened when `items` was present.
+        if schema.get("items") is None:
+            return True
+        if is_undescribed(schema["items"], document, seen):
             return True
 
     return False
@@ -232,7 +305,12 @@ def test_no_new_undescribed_success_response() -> None:
 
 
 def test_the_list_has_no_stale_entries() -> None:
-    """Described operations must leave the list, or it stops meaning anything."""
+    """Described operations must leave the list, or it stops meaning anything.
+
+    With the list empty this assertion is vacuously true, and it is kept rather than deleted: it
+    becomes live again the moment anyone adds an entry, which is exactly when it is wanted. The
+    test above is the one that bites today, and its bite is mutation-checked.
+    """
 
     measured = _measure()
     stale = sorted(UNDESCRIBED_SUCCESS_RESPONSES - measured)
@@ -317,4 +395,112 @@ def test_the_predicate_detects_the_forms_it_claims_to() -> None:
     # A fully described object must not trip it.
     assert not is_undescribed(
         {"type": "object", "properties": {"id": {"type": "string"}}}, document
+    )
+
+
+def test_an_uncapped_empty_item_schema_is_still_opaque() -> None:
+    """Guard the exemption: only `maxItems: 0` earns it, and only as an integer.
+
+    `F-011-7` let one array through with `items: {}` because it can never hold an element. That
+    exemption is exactly the shape of a loophole - `items: {}` is the emptiest item schema there
+    is - so this test states where the line runs. If a future edit ever drops the cap, or writes
+    it as a boolean (`True == 1` in Python, and `maxItems: true` must not read as a cap), the
+    array goes back to being undescribed.
+    """
+
+    document: dict[str, Any] = {}
+
+    assert not is_undescribed({"type": "array", "maxItems": 0, "items": {}}, document)
+
+    assert is_undescribed({"type": "array", "items": {}}, document), (
+        "an array with an empty item schema and no cap describes nothing"
+    )
+    assert is_undescribed({"type": "array", "maxItems": 1, "items": {}}, document), (
+        "a cap that still admits an element does not excuse an empty item schema"
+    )
+    assert is_undescribed({"type": "array", "maxItems": True, "items": {}}, document), (
+        "`maxItems: true` is not a cap of zero, however Python compares it"
+    )
+
+
+def test_the_holes_t1108_found_in_this_predicate_are_closed() -> None:
+    """Four mutations that should have broken this guard and did not, plus a leaking allowlist.
+
+    The first fix for `schema: {}` was `if not schema: return True` - literally-empty only. That is
+    one annotation key wide, and `description` is exactly the key a human adds beside a schema they
+    mean to fill in later. Every form below passed the guard before T1108.
+    """
+
+    document: dict[str, Any] = {"components": {"schemas": {}}}
+
+    assert is_undescribed({}, document), "the case external review found must stay caught"
+    assert is_undescribed({"description": "the health payload"}, document), (
+        "an annotation is not a description: a client learns nothing from it"
+    )
+    assert is_undescribed({"title": "Health", "example": {"status": "ok"}}, document)
+    assert is_undescribed({"type": "array"}, document), (
+        "an array with no `items` says nothing about what it holds"
+    )
+    assert is_undescribed({"oneOf": []}, document), "an empty composition satisfies nothing"
+    assert is_undescribed({"allOf": []}, document)
+
+    # A component gutted to an annotation is the same hole reached through a $ref.
+    gutted = {"components": {"schemas": {"TrustLine": {"description": "a trust line"}}}}
+    assert is_undescribed({"$ref": "#/components/schemas/TrustLine"}, gutted)
+
+    # And the forms that really do describe something must still pass.
+    assert not is_undescribed({"type": "string"}, document)
+    assert not is_undescribed({"enum": ["a", "b"]}, document)
+    assert not is_undescribed({"type": "array", "items": {"type": "string"}}, document)
+
+
+def test_the_free_form_allowlist_does_not_leak_by_property_name() -> None:
+    """An exemption is for one property of one named schema, not for a name at any depth.
+
+    `component` names the schema being walked, and `_deref` sets it again for every `$ref` child.
+    While it was also passed down into inline children, any opaque node called `details` or
+    `before_state` ANYWHERE below an exempted component was silently exempt - which is the cheapest
+    possible way to make this guard green while the canon stays silent. Found by T1108.
+    """
+
+    exempted_schema, exempted_property = next(iter(ACCEPTED_FREE_FORM))
+
+    document = {
+        "components": {
+            "schemas": {
+                exempted_schema: {
+                    "type": "object",
+                    "properties": {
+                        exempted_property: {"type": "object"},
+                        "nested": {
+                            "type": "object",
+                            # Same NAME, one level down, and nothing exempts it.
+                            "properties": {exempted_property: {"type": "object"}},
+                        },
+                    },
+                }
+            }
+        }
+    }
+
+    assert is_undescribed(
+        {"$ref": f"#/components/schemas/{exempted_schema}"}, document
+    ), (
+        f"an opaque node named {exempted_property!r} nested below {exempted_schema} must not "
+        "inherit that schema's exemption"
+    )
+
+    # The exemption itself must still work at the level it was written for.
+    direct_only = {
+        "components": {
+            "schemas": {
+                exempted_schema: {
+                    "type": "object",
+                    "properties": {exempted_property: {"type": "object"}},
+                }
+            }
+        }
+    }
+    assert not is_undescribed(
+        {"$ref": f"#/components/schemas/{exempted_schema}"}, direct_only
     )

@@ -66,8 +66,20 @@ TRANSPORT_HEADER_DRIFT_COUNT = 67
 # TrustLine.policy touches the create and update REQUEST bodies too - the same node is
 # declared on all three schemas, and leaving one of the three vague would have been a
 # worse contract than moving this digest.
+# 2026-08-23 / p011_t1102 (`F-011-10`): count holds at 13, digest moves. The trustline policy
+# request bodies declared `max_hop_usage` and `daily_limit` as `nullable: true` beside a `oneOf`,
+# which admits no null at all - and validate_trustline_policy explicitly accepts null there
+# (app/utils/validation.py:210-211). They now carry an explicit null branch.
+#
+# The count holding needed one change to the comparator, recorded because it is a change of
+# instrument rather than of contract. `_drop_inert_nullable` now discards a `nullable` with no
+# sibling `type`, the same way `title` is discarded: it asserts nothing on either side. Without
+# it the two `Optional[Any]` seed bodies would have drifted permanently, canon `seed: {}` against
+# generated `seed: {nullable: true}` - a difference the canon cannot answer, because the guard
+# added in this slice forbids the canon from writing the form at all while FastAPI keeps emitting
+# it. Measured: with the normalization the pair matches and the count returns to 13.
 REQUEST_SCHEMA_DRIFT_SHA256 = (
-    "13ca2f723f165fead05ea9358c76ade34f64714651637b47596d7b52e679872f"
+    "2fc89128f9b2146d7d6be86669fedecae68ac41b8ad7bb0257211cd52f268c24"
 )
 REQUEST_SCHEMA_DRIFT_COUNT = 13
 # 2026-08-20 / p007_unblock_f0071: MetricPoint.v became nullable on both sides
@@ -92,7 +104,7 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # Both sides moved together, so this entry still drifts only for the unrelated
 # pre-existing reasons, and the entry count stays 71.
 # 2026-08-23 / p011_t1102 (`F-011-1`): 71 -> 69. Ban and unban stop answering "some object" and
-# declare the two keys `_set_participant_status` really emits (`app/api/v1/admin.py:859`).
+# declare the two keys `_set_participant_status` really emits (`app/api/v1/admin.py:860`).
 #
 # The mechanism is worth stating, because the first attempt got it wrong: describing the CANON
 # alone does not remove an entry. Both operations were already in this dictionary, and stayed in
@@ -124,10 +136,93 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # 2026-08-23 / p011_t1102, slice 7: still 64, digest moves. The two admin graph reads describe
 # their bodies, including honest item schemas for the three collections the response model types
 # as `list[Any]` and therefore does not shape at all.
+# 2026-08-23 / p011_t1102, slice 8: 64 -> 63, and the one that leaves is GET /admin/audit-log.
+# The five admin money reads all declare a real `response_model`, so describing them in the canon
+# alone was never going to be enough - what was left over after the canon caught up was measured
+# operation by operation:
+#   GET /admin/audit-log                       LEAVES. Its last two differences were canon gaps in
+#                                              AdminAuditLogItem: `id`/`actor_id` are UUID columns
+#                                              typed as UUID in the model, and the canon declared
+#                                              them as bare strings.
+#   GET /admin/trustlines                      remain, all four for the same reason: they serve
+#   GET /admin/trustlines/bottlenecks          TrustLine, whose `policy` the canon describes key by
+#   GET /admin/liquidity/summary               key while the model says Dict[str, Any] (slice 5),
+#   GET /admin/participants/{pid}/metrics      and whose `equivalent` the canon constrains by
+#                                              pattern. The last one also declares its six
+#                                              conditional metric blocks as nullable, which the
+#                                              generated schema does not say at all.
+# Four trustline reads and the two graph reads change without leaving: `TrustLine` gained
+# `updated_at`, which every read emits and the canon never declared, and its `required` grew from
+# six names to the ten the model declares without a default.
+# 2026-08-23 / p011_t1102, slice 9 plus `F-011-7` and `F-011-10`: 63 -> 62. Three changes land
+# together because they share this file and this document, and their effects were measured apart:
+#   * `F-011-7`  GET /simulator/events/poll LEAVES. The canon promised an array of SimulatorEvent
+#                and the handler is `# MVP: no replay buffer.` + `return []`. Both sides now say
+#                `type: array, maxItems: 0` - the application through `responses=`, never
+#                `response_model=`. This is the only operation that leaves.
+#   * `F-011-10` 26 nodes wrote `nullable: true` with no sibling `type`, where it modifies nothing
+#                and null is rejected. Content-only: no operation enters or leaves, but every
+#                entry touching a fixed schema changes. Proved on a real body - InvariantResult
+#                with `details: null` was INVALID against the canon before and is VALID after.
+#   * `F-011-9`  the graph reads stop reusing AdminIncidentItem, whose `format: date-time` the
+#                graph path does not honour, and get AdminGraphIncidentItem instead.
+# 2026-08-23 / p011_t1102, slice 10: count holds at 62, digest moves. GET /integrity/audit-log was
+# the last operation on the undescribed list, and describing it does not clear it from here: its
+# three opaque leaves sit inside IntegrityAuditLogAfterState, whose pydantic side is
+# Dict[str, Any], so the canon is now more precise than the generated schema rather than equal to
+# it. Same reason slices 4 and 5 held their count.
+# 2026-08-23 / p011_t1108: count holds at 62, digest moves, and this one was found by review
+# rather than by the gate. Sixteen entries change content because eleven canon nodes now admit the
+# null the service really sends there - twelve operations were returning 2xx bodies that
+# api/openapi.yaml REJECTED, with this whole suite green, because nothing in the repository
+# validated a response against the canon. `tests/contract/test_p011_responses_conform_to_the_canon.py`
+# now does, over every body the suite produces.
+#
+# Two shapes did it. `nullable: true` beside an `enum` that has no `null` in it still rejects null,
+# and the F-011-10 guard passed those because they do have a sibling `type`. And a property that
+# can be null declared as a bare `$ref` or a bare typed schema has nothing to be wrong about -
+# `Participant.profile` was invisible to both guards and to every fixture in the suite.
+#
+# The digest also absorbs the symmetric half of a normalization that already existed: the canon's
+# only 3.0.3 spelling of "X or null" is a `oneOf` with an explicit null branch, and the generated
+# side's 3.1 `anyOf: [X, null]` was already being collapsed. Comparing the two spellings recorded
+# a difference that does not exist.
+# 2026-08-23 / p011_t1108: 62 -> 63, and the growth is named, as the monotonicity invariant in the
+# spec requires. GET /admin/config ENTERS. Nothing else moves.
+#
+# `AdminConfigItem.value` used to say `description: Any JSON value` and nothing else, and the
+# undescribed-response guard passed it only because that guard's rule was "is the dict empty"
+# rather than "is there a constraint here at all". Sharpening the guard (T1108) exposed it, and it
+# turned out never to have been free form: `value` is `getattr(settings, key)` over the closed
+# twelve-item literal in `_runtime_config_items`, measured on the real settings object as six
+# booleans, five integers and one string. The canon now says that union.
+#
+# The generated side cannot follow, because the model field is `Any`. So this is the slice-4 and
+# slice-5 situation again - the canon became more precise than the generated schema - except that
+# here it adds an entry instead of changing one, because the two sides previously agreed on saying
+# nothing. Tightening the pydantic field would change response validation on an admin read, which
+# this programme does not do.
+# Also 2026-08-23 / p011_t1108, same slice: count holds at 63, digest moves again. The two graph
+# reads change content because AdminGraphIncidentItem and AdminGraphTransactionItem disagreed with
+# each other about the same column - one declared `created_at` required and non-nullable, the
+# other optional and nullable, both fed by helpers written the same way. The column is NOT NULL
+# with a server default and both helpers always write the key, so the stricter one was right. The
+# incident `state` also stopped being a bare string: the query filters to six of the nine
+# transaction states.
+# 2026-08-24 / p011_t1109b: count holds at 63, digest moves, exactly one entry changes content and
+# nothing enters or leaves. GET /simulator/runs/{run_id}/artifacts/{name} declared
+# `application/octet-stream` - a media type it never sends. The download hands the path to
+# FileResponse without a media_type, so the wire type is whatever mimetypes guesses: JSON for the
+# four documents the run writes, `text/plain` for events.ndjson, and zip for the bundle. The canon
+# now declares those, with the four JSON documents described rather than waved at - the empty
+# undescribed-response ledger refused `{type: object}` and forced the real shapes out.
+#
+# The operation was already in this dictionary (canonical octet-stream against generated
+# `application/json: {}`) and stays in it.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "db998226422ed42a2b7809ee2bfb4edcde35f75ca5a7c031e329f56d633b977b"
+    "42c96781dd788fa0821e3f3c54672470e6622275631a1aff41e2fef03926b92c"
 )
-SUCCESS_SCHEMA_DRIFT_COUNT = 64
+SUCCESS_SCHEMA_DRIFT_COUNT = 63
 # 2026-08-11 / T501: public DB health no longer declares exception details;
 # the new admin diagnostic operation matches generated responses, so count stays 84.
 # 2026-08-20 / p007_unblock_f0071: simulator metrics/bottlenecks declare 503 in the
@@ -160,10 +255,72 @@ SUCCESS_SCHEMA_DRIFT_COUNT = 64
 #     `Optional[Dict[str, Any]] = None` (`app/schemas/common.py:15`), so the canon was simply
 #     wrong about nullability and redundant about additionalProperties, which OpenAPI defaults to
 #     true anyway. Corrected to what the code returns.
+# 2026-08-23 / p011_t1106: 83 -> 53, the largest single move this ledger has made, and the first
+# time it has moved because both documents were corrected at once rather than reconciled.
+#
+# The new guard, `tests/contract/test_p011_reachable_statuses_are_declared.py`, derives every
+# status a route can answer from the route table and the dependency closure. It found 136
+# reachable statuses api/openapi.yaml did not declare and 127 the application's own schema did not
+# declare - 401 and 403 come out of GeoException subclasses raised inside dependencies, which
+# `get_openapi` cannot see. Both sides were closed in one change, because closing either alone
+# moves this digest across most of 78 operations and the ratchet would then be blessed twice over
+# an unreadable diff.
+#
+# Thirty operations leave. None enters. The 53 that remain have two named causes and no others:
+#
+#   46  a canon-only 4xx that the generated document cannot learn - 404, 400, 409, 500, 504 raised
+#       three or four frames deep in app/core/**. That is signal S6, which the T1106 survey
+#       rejected as underivable: a rule loose enough to derive it would demand those statuses
+#       across the whole surface and write into authority number one statuses the service never
+#       returns. Closing these needs a per-operation reading, not a rule.
+#   13  a generated-only 422 that is NOT reachable. FastAPI stamps 422 on any operation with any
+#       flat parameter at all, and on these every parameter is string-like - nothing to coerce and
+#       nothing that can be missing. The first version of this note said "the only parameter is an
+#       optional X-Admin-Token"; that is true of nine and wrong about four, found by T1108.
+#       GET /payments/{tx_id} has no admin header at all, only a required `str` path parameter;
+#       /integrity/checksum/{equivalent} and /admin/equivalents/{code}/usage add a `str` path
+#       parameter to the header; /admin/graph/snapshot adds two optional `str | None` query
+#       parameters. The operative property is string-likeness - which is exactly the S1 exemption
+#       the guard already implements - not the optionality of one header. Verified by execution on
+#       /admin/config, /admin/whoami and /admin/migrations (403 for a wrong token, 200 for a valid
+#       one, no input yielding 422) and by dumping `get_flat_params` for all thirteen. They are
+#       left in place deliberately - the canon must not copy them, and suppressing them from the
+#       generated document is a separate decision about what the application publishes.
+#
+# Three response components were added rather than bodies invented at 136 sites: Forbidden,
+# UnprocessableEntity, and SimulatorIdentityUnprocessable. The last exists because ten simulator
+# operations reach 422 with no falsifiable parameter at all - only a malformed X-Simulator-Owner -
+# and describing those as "request validation failed" would have been a new false statement.
+# 2026-08-23 / p011_t1109: count holds at 53, digest moves, and the decomposition above stops
+# being false. Two changes, both closing findings from the final external review.
+#
+# The 401 body. `OAuth2PasswordBearer(auto_error=True)` answers inside the dependency solver,
+# before the handlers that build ErrorEnvelope exist to run - so twenty operations really send a
+# flat `{"detail": "Not authenticated"}` for any request whose Authorization SCHEME is not Bearer,
+# and the envelope only once a Bearer token is present and rejected. The canon declared the
+# envelope alone on nineteen of the twenty. Both documents now state the union through one shared
+# component, so the ten of those already in this dictionary change content and none enters or
+# leaves - and POST /payments, which had the honest union all along, converged onto the canon
+# instead of moving.
+#
+# The phantom 401. POST /integrity/repair/net-mutual-debts and /cap-debts-to-trust-limits declared
+# a 401 they cannot answer: both are guarded by require_admin alone, which has no Unauthorized
+# branch, and executed with no header and with a wrong token both answer 403. That is this
+# programme's defect facing the other way, and the reachability guard is one-directional by design
+# so nothing caught it. Removed. Both operations stay in this dictionary on their generated-only
+# 422 alone.
+#
+# Decomposition now, measured rather than asserted: of the 53, forty-four carry a canon-only
+# error status raised deep in app/core/** - mostly 4xx, and also one 500 and one 504, so
+# "canon-only 4xx" was the wrong shorthand and external review said so - thirteen carry the
+# non-reachable generated-only 422 FastAPI stamps on any operation with a flat parameter, four
+# carry both, and NOTHING carries a third cause. The
+# previous version of this note claimed two causes and no others while POST /payments 401 was a
+# third; external review caught the claim, and closing the 401 body made it true.
 ERROR_RESPONSE_DRIFT_SHA256 = (
-    "f895c1ae7b091a4754aa93aff104ffb2e5b67228f83aafe0a36c88a19df9c0d5"
+    "17f0f6722b9b7ab900ebdde7a9e6ea25c58b282c01938cccfe69364cf7b68992"
 )
-ERROR_RESPONSE_DRIFT_COUNT = 83
+ERROR_RESPONSE_DRIFT_COUNT = 53
 # 2026-08-23 / p011_t1101: 59 -> 67, see the note above TRANSPORT_HEADER_DRIFT_SHA256.
 # Missed by the first pass of this task: the error-response assert aborts before this one, so a
 # run that stops there says nothing about security drift. Measured directly instead.
@@ -206,6 +363,26 @@ def _resolve_ref(value: Any, document: dict[str, Any]) -> Any:
     return _resolve_ref(current, document)
 
 
+def _drop_inert_nullable(schema: dict[str, Any]) -> dict[str, Any]:
+    """Remove a `nullable` that asserts nothing, the way `title` is removed.
+
+    011/`F-011-10`: in OpenAPI 3.0.3 `nullable` modifies a sibling `type` and nothing else. On a
+    schema with no `type` it permits nothing, so comparing it is comparing noise - and the two
+    sides produce that noise for different reasons. `api/openapi.yaml` may not contain the form at
+    all any more (`tests/contract/test_p011_nullable_needs_a_sibling_type.py` forbids it), while
+    FastAPI still emits it for every `Optional[Any]` field, which no canon edit can answer.
+
+    Dropping it is not a weakening: an untyped schema already admits null. Measured when
+    introduced - with the canon fixed but this normalization absent, the two `Optional[Any]` seed
+    bodies drifted forever with `seed: {}` against `seed: {nullable: true}`; with it they match
+    and the count returns to where it was.
+    """
+
+    if schema.get("nullable") is True and "type" not in schema:
+        return {key: value for key, value in schema.items() if key != "nullable"}
+    return schema
+
+
 def _normalize_schema(
     value: Any,
     document: dict[str, Any],
@@ -220,6 +397,27 @@ def _normalize_schema(
     if len(value) == 1 and isinstance(all_of, list) and len(all_of) == 1:
         return _normalize_schema(all_of[0], document, parameter=parameter)
 
+    # 011/T1108: the canon's only way to say "X or null" in OpenAPI 3.0.3 is a `oneOf` with an
+    # explicit null branch - `nullable` beside a composition asserts nothing, which is `F-011-10`,
+    # and the guard forbids it. FastAPI emits the 3.1 spelling, which the `anyOf` branch below
+    # already collapses to `{..., nullable: True}`. Collapsing the canon's spelling the same way is
+    # the symmetric half: without it four properties drift on spelling alone while meaning exactly
+    # the same thing, and the ledger records a difference that does not exist.
+    one_of = value.get("oneOf")
+    if len(value) == 1 and isinstance(one_of, list) and len(one_of) == 2:
+        null_branches = [
+            item for item in one_of if _resolve_ref(item, document).get("enum") == [None]
+        ]
+        others = [
+            item for item in one_of if _resolve_ref(item, document).get("enum") != [None]
+        ]
+        if len(null_branches) == 1 and len(others) == 1:
+            normalized_other = _normalize_schema(others[0], document, parameter=parameter)
+            if parameter:
+                return normalized_other
+            if isinstance(normalized_other, dict) and "type" in normalized_other:
+                return {**normalized_other, "nullable": True}
+
     any_of = value.get("anyOf")
     if isinstance(any_of, list) and len(any_of) == 2:
         non_null = [
@@ -230,7 +428,19 @@ def _normalize_schema(
             if parameter:
                 return normalized
             if isinstance(normalized, dict):
-                return {**normalized, "nullable": True}
+                if "type" in normalized:
+                    return {**normalized, "nullable": True}
+                if any(key in normalized for key in ("oneOf", "anyOf", "allOf")):
+                    # 011/T1108: `nullable` beside a composition asserts nothing, so dropping it
+                    # here would silently erase the nullability the `anyOf` carried - a canon that
+                    # declares a composed field non-nullable would then compare EQUAL to a model
+                    # that declares it Optional, which is the F-011-10 defect made invisible to
+                    # the gate. State the null explicitly instead of losing it. No site reaches
+                    # this branch today; it is here so that the first one to do so is measured
+                    # rather than absorbed.
+                    return {"oneOf": [normalized, {"enum": [None]}]}
+                # A typeless, uncomposed schema already admits null, so there is nothing to keep.
+                return normalized
 
     normalized: dict[str, Any] = {}
     for key, item in value.items():
@@ -249,7 +459,7 @@ def _normalize_schema(
             ]
         else:
             normalized[key] = item
-    return normalized
+    return _drop_inert_nullable(normalized)
 
 
 def _operation_pairs(
@@ -1236,6 +1446,95 @@ def test_openapi_paths_methods_business_parameter_identities_and_required_bodies
         request_schema_drift,
         REQUEST_SCHEMA_DRIFT_SHA256,
         REQUEST_SCHEMA_DRIFT_COUNT,
+    )
+
+
+def test_the_normalizer_drops_only_the_nullable_that_says_nothing() -> None:
+    """Guard the comparator change made for `F-011-10`.
+
+    `_drop_inert_nullable` removes a keyword from both sides before they are compared, so it can
+    hide a real difference if it reaches too far. It must remove `nullable` only where OpenAPI
+    3.0.3 gives it no meaning - beside no `type` at all - and must leave every effective one
+    standing, at every depth.
+    """
+
+    document: dict[str, Any] = {}
+
+    assert _normalize_schema({"nullable": True}, document) == {}
+    assert _normalize_schema({"type": "string", "nullable": True}, document) == {
+        "type": "string",
+        "nullable": True,
+    }, "a nullable with a sibling type is the whole point of the keyword and must survive"
+    assert _normalize_schema({"type": "object", "nullable": False}, document) == {
+        "type": "object",
+        "nullable": False,
+    }
+
+    nested = _normalize_schema(
+        {
+            "type": "object",
+            "properties": {
+                "inert": {"nullable": True},
+                "effective": {"type": "integer", "nullable": True},
+            },
+        },
+        document,
+    )
+    assert nested["properties"] == {
+        "inert": {},
+        "effective": {"type": "integer", "nullable": True},
+    }, "the rule must apply by depth, not only at the top of a schema"
+
+    # And it must not make two genuinely different schemas compare equal.
+    assert _normalize_schema({"type": "string"}, document) != _normalize_schema(
+        {"type": "string", "nullable": True}, document
+    )
+
+    # The risky path is the one the first version of this test did not exercise: the `anyOf`
+    # collapse, where the normalizer SYNTHESISES the nullability rather than reading it. If the
+    # collapsed branch has no type of its own, dropping the keyword there would erase the fact
+    # that the field can be null, and a canon declaring it non-nullable would compare equal to a
+    # model declaring it Optional - `F-011-10` made invisible to the gate. Found by T1108.
+    composed_nullable = _normalize_schema(
+        {"anyOf": [{"oneOf": [{"type": "string"}, {"type": "integer"}]}, {"type": "null"}]},
+        document,
+    )
+    composed_plain = _normalize_schema(
+        {"oneOf": [{"type": "string"}, {"type": "integer"}]}, document
+    )
+    assert composed_nullable != composed_plain, (
+        "a composed field that can be null must not normalize to the same thing as one that "
+        "cannot"
+    )
+    assert {"enum": [None]} in composed_nullable["oneOf"]
+
+    # But a typeless, uncomposed schema already admits null, so nothing is added there - this is
+    # what keeps the two `Optional[Any]` request bodies matching instead of drifting forever.
+    assert _normalize_schema({"anyOf": [{}, {"type": "null"}]}, document) == {}
+
+    # The canon's 3.0.3 spelling of the same thing must collapse to the same normal form as the
+    # generated side's 3.1 spelling - otherwise the canon is penalised for using the only wording
+    # OpenAPI 3.0.3 allows, and the ledger records a difference that is not one.
+    canon_spelling = _normalize_schema(
+        {"oneOf": [{"type": "string"}, {"nullable": True, "enum": [None]}]}, document
+    )
+    generated_spelling = _normalize_schema(
+        {"anyOf": [{"type": "string"}, {"type": "null"}]}, document
+    )
+    assert canon_spelling == generated_spelling == {"type": "string", "nullable": True}
+
+    # And the collapse must not swallow a real two-branch union. `oneOf: [A, B]` with no null
+    # branch, and a three-branch union that happens to include null, both stay as they are.
+    union = {"oneOf": [{"type": "string"}, {"type": "integer"}]}
+    assert _normalize_schema(dict(union), document) == union
+    three = {
+        "oneOf": [{"type": "string"}, {"type": "integer"}, {"nullable": True, "enum": [None]}]
+    }
+    assert _normalize_schema(dict(three), document) == {
+        "oneOf": [{"type": "string"}, {"type": "integer"}, {"enum": [None]}]
+    }, (
+        "a union of more than one non-null branch must keep its branches; collapsing it would "
+        "erase a real alternative. Only the inert `nullable` on the null branch itself is dropped"
     )
 
 

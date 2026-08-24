@@ -154,7 +154,7 @@ async def test_admin_liquidity_summary_keeps_high_precision_threshold(client, db
             to_participant_id=bob.id,
             equivalent_id=uah.id,
             limit=Decimal("100.00"),
-            policy=None,
+            policy={},
             status="active",
         )
     )

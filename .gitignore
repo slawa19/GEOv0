@@ -42,6 +42,10 @@ docker-compose.override.yaml
 
 # pytest local sqlite artifacts (should never be committed)
 .pytest_geov0.db*
+# Per-runner databases: the pattern above names one file, and a runner that picks its own
+# name (.pytest_post_tick_audit_drift_runner.db-journal) escaped it into git status.
+.pytest_*.db
+.pytest_*.db-journal
 
 # Allow committed test data/fixtures if the project ever stores them as DB files
 !fixtures/**/*.db
