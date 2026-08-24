@@ -26,7 +26,9 @@ def to_money_str(value: Decimal, precision: int) -> str:
     """Render a money value as a plain decimal string that never loses it.
 
     THE RULE: at least `precision` fraction digits, and never fewer digits than the value
-    actually needs.  Exponent notation is impossible by construction.
+    actually needs.  Exponent notation is impossible by construction.  A non-finite
+    `Decimal` raises `ValueError` rather than rendering an invented `"0"` - see the note at
+    the check below.
 
     WHY NOT A PLAIN `quantize(..., ROUND_DOWN)` (012 / `RT-012-2`).  That is what every money
     producer in `app/core/simulator/` did, and `Equivalent.precision` is a DISPLAY parameter,
@@ -68,7 +70,16 @@ def to_money_str(value: Decimal, precision: int) -> str:
         except (InvalidOperation, ValueError, TypeError):
             return "0"
     if not value.is_finite():
-        return "0"
+        # T1210 finding 13, second half.  This used to return "0" - a number the ledger does
+        # not hold, invented at the render layer, which is the one place money strings are
+        # supposed to be faithful.  `NaN`/`Infinity` cannot arrive here from honest state:
+        # the door refuses non-finite input, `Numeric` arithmetic over finites stays finite,
+        # and the simulator's inject path gates on `is_storable_money` (False for these)
+        # before rendering.  So a non-finite value IS corrupt state, and the renderer's job
+        # is to be loud about it, not to print a plausible zero over it.  (The unparseable-
+        # input fallback above still answers "0" - that is a typing accident, not a ledger
+        # value, and its callers rely on it; recorded, deliberately unchanged.)
+        raise ValueError(f"non-finite money value cannot be rendered: {value!r}")
 
     quantum = Decimal(1).scaleb(-precision)
     # `quantize` obeys the ambient context's `prec`, and the default 28 is narrower than the

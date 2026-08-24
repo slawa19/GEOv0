@@ -842,3 +842,22 @@ def test_the_minimum_digit_promise_does_not_depend_on_the_ambient_decimal_contex
         f"fraction digits its equivalent declares, independent of decimal.getcontext().prec"
     )
     assert Decimal(rendered) == value
+
+
+@pytest.mark.parametrize("bad", ["NaN", "Infinity", "-Infinity"])
+def test_a_non_finite_value_is_refused_loudly_not_rendered_as_zero(bad: str) -> None:
+    """`to_money_str(NaN)` raises; it must never print `"0"` over corrupt state.
+
+    T1210 finding 13, second half.  The renderer used to answer `"0"` for `NaN`/`Infinity` -
+    a number the ledger does not hold, invented at the one layer whose whole job (T1207) is
+    to be faithful to the value.  Non-finite values cannot arrive from honest state (the door
+    refuses them on input, `Numeric` arithmetic over finites stays finite, the inject path
+    gates on `is_storable_money`), so one reaching the renderer IS corrupt state and the
+    renderer must be loud about it.
+
+    MUTATION THIS CATCHES: restoring `return "0"` on the `is_finite()` branch in
+    `app/utils/money.py`.
+    """
+
+    with pytest.raises(ValueError):
+        to_money_str(Decimal(bad), 2)
