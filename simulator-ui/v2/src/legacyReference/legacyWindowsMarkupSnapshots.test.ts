@@ -43,13 +43,20 @@ async function renderOuterHtml(component: Component, props: Record<string, unkno
 
 describe('Legacy windows reference — markup snapshots', () => {
   it('NodeCardOverlay', async () => {
+    // 012 / `T1208`, `C-B4-3-002`. This node used to carry `net_balance: '42'` — a
+    // major-unit field the fixture pipeline does not produce and `src/fixtures.ts` does not
+    // even read, so the only assertion in the whole suite that observed a rendered balance
+    // exercised a branch that does not exist in production, and the atoms branch (the
+    // `F-012-6` defect: raw atoms on screen, wrong by 10^precision) stayed unobservable.
+    // The node now carries what the pipeline actually produces: magnitude atoms plus a sign.
     const node: GraphNode = {
       id: 'bob',
       name: 'Bob',
       type: 'person',
       status: 'active',
       viz_color_key: 'unknown',
-      net_balance: '42',
+      net_balance_atoms: '4200',
+      net_sign: 1,
     }
 
     const html = await renderOuterHtml(NodeCardOverlay, {

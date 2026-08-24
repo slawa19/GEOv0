@@ -23,6 +23,8 @@ import type {
 import { connectSse, type SseParsedMessage } from '../api/sse'
 import { normalizeSimulatorEvent } from '../api/normalizeSimulatorEvent'
 import { ApiError, authHeaders } from '../api/http'
+import { fetchEquivalentPrecisions } from '../api/equivalentsApi'
+import { resetEquivalentPrecisions, setEquivalentPrecisions } from '../config/equivalentPrecision'
 
 import type { ClearingDoneEvent, EdgePatch, NodePatch, TxUpdatedEvent } from '../types'
 import type { SimulatorAppState } from '../types/simulatorApp'
@@ -1018,6 +1020,24 @@ export function useSimulatorRealMode(opts: {
     { flush: 'post' },
   )
 
+  /**
+   * Loads `Equivalent.precision` for every active equivalent (012 / `F-012-4`).
+   *
+   * Best-effort by design: an anonymous cookie-auth visitor can read neither
+   * `GET /equivalents` (participant JWT) nor `GET /admin/equivalents` (admin token), and
+   * that is not an error worth putting in front of the operator — the shipped fixture
+   * precisions stay in force. A failure here must never keep real mode from booting.
+   */
+  async function refreshEquivalentPrecisions() {
+    try {
+      setEquivalentPrecisions(
+        await fetchEquivalentPrecisions({ apiBase: real.apiBase, accessToken: real.accessToken }),
+      )
+    } catch {
+      // Keep whatever precisions are already in force.
+    }
+  }
+
   async function refreshScenarios() {
     // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
     await ensureAnonSessionOnce()
@@ -1262,12 +1282,18 @@ export function useSimulatorRealMode(opts: {
       if (!v) {
         teardownRefreshSnapshot()
         stopSse()
+        // Demo mode must not keep formatting money at a precision only the backend knew.
+        resetEquivalentPrecisions()
         return
       }
       initialBootInProgress = true
       void (async () => {
         try {
           await ensureAnonSessionOnce()
+          // Deliberately not awaited: the catalogue is not needed to boot, and the boot
+          // sequence's ordering is characterized by tests. The precision registry is
+          // reactive, so a card already on screen re-renders when the answer arrives.
+          void refreshEquivalentPrecisions()
           await refreshScenarios()
 
           ensureScenarioSelectionValid()

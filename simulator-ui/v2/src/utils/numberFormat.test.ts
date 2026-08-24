@@ -1,21 +1,32 @@
 import { describe, expect, it } from 'vitest'
-import { asFiniteNumber, formatAmount2, parseAmountNumber, parseAmountNumberOrZero, parseAmountStringOrNull } from './numberFormat'
+import * as numberFormat from './numberFormat'
+import { parseAmountNumber, parseAmountNumberOrZero, parseAmountStringOrNull } from './numberFormat'
+
+/**
+ * 012 / `T1208`, `MISSED-B4-NUMFMT-FIXED2`. This suite used to open with
+ *
+ *   expect(formatAmount2(1.234)).toBe('1.23')
+ *
+ * which pinned the two defects of `F-012-5` as the expected contract: money arriving as a
+ * JS `number`, and a fraction-digit count that was the constant 2 whatever the equivalent
+ * declared. The formatter is gone (see the module docstring); its replacement lives in
+ * `utils/money.ts` and is tested in `money.test.ts`, parametrised by `precision` with a
+ * substitution counter-check, never against a hard-coded two-digit string.
+ *
+ * What is left here formats nothing. It parses amount-like input for sorting, for the
+ * saturation predicate on trustline rows, and for normalising a form field before submit.
+ */
 
 describe('utils/numberFormat', () => {
-  it('asFiniteNumber coerces numbers and strings, else 0', () => {
-    expect(asFiniteNumber(12)).toBe(12)
-    expect(asFiniteNumber('3.5')).toBe(3.5)
-    expect(asFiniteNumber('nope')).toBe(0)
-    expect(asFiniteNumber(NaN)).toBe(0)
-    expect(asFiniteNumber(Infinity)).toBe(0)
-    expect(asFiniteNumber(null)).toBe(0)
-  })
-
-  it('formatAmount2 formats finite numbers with 2 decimals', () => {
-    expect(formatAmount2(0)).toBe('0.00')
-    expect(formatAmount2(1.2)).toBe('1.20')
-    expect(formatAmount2(1.234)).toBe('1.23')
-    expect(formatAmount2(NaN)).toBe('0.00')
+  it('exports exactly the helpers this suite exercises, and no money formatter', () => {
+    // `C-B4-3-001`: the module carried 7 exports and the suite imported 5, leaving the two
+    // float money formatters untested. Asserting the export list makes that gap impossible
+    // to reopen silently — a new export must be named here, and therefore tested.
+    expect(Object.keys(numberFormat).sort()).toEqual([
+      'parseAmountNumber',
+      'parseAmountNumberOrZero',
+      'parseAmountStringOrNull',
+    ])
   })
 
   it('parseAmountStringOrNull normalizes and validates amount strings', () => {
@@ -43,6 +54,13 @@ describe('utils/numberFormat', () => {
     expect(parseAmountStringOrNull('1.2.3')).toBeNull()
     expect(parseAmountStringOrNull('1 2')).toBeNull()
     expect(parseAmountStringOrNull('-1')).toBeNull()
+  })
+
+  it('parseAmountStringOrNull does not round-trip an amount through a double', () => {
+    // It normalizes text and hands the text on; the scale the caller submitted survives.
+    // A `Number()` round-trip would turn the first into '10.1' and shorten the second.
+    expect(parseAmountStringOrNull('10.10')).toBe('10.10')
+    expect(parseAmountStringOrNull('10000000000.12345679')).toBe('10000000000.12345679')
   })
 
   it('parseAmountNumber is strict (invalid -> NaN)', () => {

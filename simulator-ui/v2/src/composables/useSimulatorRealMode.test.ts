@@ -71,6 +71,14 @@ vi.mock('../api/simulatorApi', () => {
   }
 })
 
+// The equivalents catalogue is unrelated to SSE reconnect behaviour, and real mode loads it
+// on boot (012 / `F-012-4`). Stubbed so these cases characterize reconnect, not the network.
+vi.mock('../api/equivalentsApi', () => {
+  return {
+    fetchEquivalentPrecisions: vi.fn(async () => []),
+  }
+})
+
 vi.mock('../api/sse', () => {
   return {
     connectSse: vi.fn(async (opts: SseConnectOpts) => {
