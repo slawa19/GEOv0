@@ -326,11 +326,10 @@ class ClearingService:
             return uid.hex
         return uid
 
-    def _bind_decimal(self, val: Decimal) -> object:
-        """Return Decimal in a format supported by the current DBAPI for raw SQL binds."""
-        if self._is_sqlite():
-            return float(val)
-        return val
+    # `_bind_decimal` USED TO LIVE HERE AND IS GONE (2026-08-24 / p012 `F-012-3`, `T1202`).
+    # Its only job was to hand the removed `Decimal("0.01")` clearing threshold to the SQLite
+    # DBAPI as a `float`, and it was the only place any of the four money modules converted a
+    # money value to binary floating point.  With the threshold dropped it had no callers.
 
     def _scope_predicate(self, columns: tuple[str, ...]) -> str:
         """SQL that confines a cycle to an allowlist of participants.
@@ -436,6 +435,48 @@ class ClearingService:
 
         `allowed_participant_ids` confines the cycle to one run's participants; None keeps
         the historic global behaviour, which the hub and the simulator tick still rely on.
+
+        THE `min_amount` THRESHOLD IS GONE, AND THE REASON IS MEASURED (2026-08-24 / p012,
+        `F-012-3`, `T1202`).  This query used to carry `AND LEAST(...) > :min_amount` with
+        `min_amount` bound to a hardcoded `Decimal("0.01")`.  The comparison is strict and the
+        shipped default `precision` is 2, so a triangle whose every leg is exactly `0.01` - the
+        smallest amount that equivalent can express - was invisible here.  Measured on
+        PostgreSQL 16.9: `UAH` at precision 2 with every leg `0.01` found 0 triangles, `0.02`
+        found 3.  `find_cycles` returns early when this query is non-empty, so a graph holding
+        one ordinary cycle and one at the boundary reported one of two, verbatim through
+        `GET /api/v1/clearing/cycles`.
+
+        THREE ALTERNATIVES WERE WEIGHED AND THE THRESHOLD WAS DROPPED RATHER THAN TAUGHT TO
+        READ `precision`:
+
+        * IT WAS NOT PROTECTING ANYTHING FROM DUST.  The Python DFS underneath filters on
+          `Debt.amount > 0` alone, and `find_cycles` falls through to it whenever this query
+          comes back empty.  Measured: a triangle of three `0.005` debts - below the precision-2
+          quantum, and storable today - is found and cleared by that fallback right now.  So the
+          threshold never suppressed a single sub-quantum cycle system-wide.  All it did was
+          make the fast path and the fallback disagree about what a real debt is.
+
+        * IT WAS NOT PAYING FOR ITSELF IN THE PLAN, and this was the open question the survey
+          admitted it had not measured.  `LEAST(d1.amount, d2.amount, d3.amount)` spans three
+          joined tables, so no index can serve it and PostgreSQL can only apply it as a post-join
+          `Join Filter`, after the expensive expansion that dominates the query.  Measured with
+          `EXPLAIN (ANALYZE, BUFFERS)` on 400 participants / 4000 debts / 4000 trust lines with a
+          realistic 2% of debts at the boundary: 61898 shared buffers with the predicate against
+          62204 without - 0.5% - and execution 77.8 ms against 81.0 ms median over five runs,
+          inside the run-to-run spread of both (74.7-85.2 against 75.5-91.5).  It is not a
+          performance predicate, and keeping it "for the plan" would have been a claim the
+          numbers do not support.
+
+        * TEACHING IT `precision` WOULD HAVE DECIDED SOMETHING THIS PROGRAMME DEFERRED.  A
+          threshold of `>= 10**-precision` reads "an amount below one quantum is not money" -
+          which is exactly the semantics `VERDICT-DOOR: C` deferred to a separate versioned
+          decision with a data audit, because `precision` is admin-editable and the door
+          deliberately still accepts `0.05` for a precision-1 `HOUR`.  Enacting it here, in the
+          detector only, would have created debts that are storable, payable and permanently
+          unclearable - and it would still have left the fast path and the fallback disagreeing.
+
+        `d1.amount > 0 AND d2.amount > 0 AND d3.amount > 0` already says "a real debt", it is
+        per-table so the planner can push it down, and it is the same rule the DFS applies.
         """
 
         dialect = self._dialect_name()
@@ -445,10 +486,9 @@ class ClearingService:
             # SQLite supports scalar min(x, y, z) as a LEAST replacement.
             least_expr = "min(d1.amount, d2.amount, d3.amount)"
 
-        # NOTE: When executing raw SQL (text()), sqlite3 DBAPI does not accept uuid.UUID/Decimal
-        # as bound parameters. Normalize binds for SQLite only.
+        # NOTE: When executing raw SQL (text()), sqlite3 DBAPI does not accept uuid.UUID
+        # as a bound parameter. Normalize binds for SQLite only.
         equivalent_id_param = self._bind_uuid(equivalent_id)
-        min_amount_param = self._bind_decimal(Decimal("0.01"))
 
         # a = d1.debtor, b = d1.creditor (= d2.debtor), c = d2.creditor (= d3.debtor);
         # d3.creditor is a by the JOIN, so three columns name every vertex.
@@ -495,7 +535,6 @@ class ClearingService:
                                                             AND {self._sql_auto_clearing_ok('t3')}
             WHERE d1.equivalent_id = :equivalent_id
               AND d1.amount > 0 AND d2.amount > 0 AND d3.amount > 0
-              AND {least_expr} > :min_amount
               {scope_sql}
             ORDER BY clear_amount DESC
             LIMIT 100
@@ -504,7 +543,6 @@ class ClearingService:
 
         params = {
             "equivalent_id": equivalent_id_param,
-            "min_amount": min_amount_param,
         }
         if scope_binds is not None:
             query = query.bindparams(bindparam("allowed_participant_ids", expanding=True))
@@ -545,7 +583,12 @@ class ClearingService:
         *,
         allowed_participant_ids: "set[uuid.UUID] | None" = None,
     ) -> List[List[Dict]]:
-        """Find 4-node debt cycles using a SQL JOIN."""
+        """Find 4-node debt cycles using a SQL JOIN.
+
+        The `min_amount` threshold is gone here for the same measured reasons as in
+        `find_triangles_sql`, which carries the full argument; this query held the identical
+        `AND LEAST(...) > :min_amount` and hid four-node cycles at the boundary the same way.
+        """
 
         dialect = self._dialect_name()
 
@@ -554,7 +597,6 @@ class ClearingService:
             least_expr = "min(d1.amount, d2.amount, d3.amount, d4.amount)"
 
         equivalent_id_param = self._bind_uuid(equivalent_id)
-        min_amount_param = self._bind_decimal(Decimal("0.01"))
 
         # a = d1.debtor, b = d1.creditor (= d2.debtor), c = d2.creditor (= d3.debtor),
         # d = d3.creditor (= d4.debtor); d4.creditor is a by the JOIN.
@@ -605,7 +647,6 @@ class ClearingService:
               AND d1.debtor_id != d2.creditor_id
               AND d1.debtor_id != d3.creditor_id
               AND d1.creditor_id != d3.creditor_id
-              AND {least_expr} > :min_amount
               {scope_sql}
             ORDER BY clear_amount DESC
             LIMIT 50
@@ -614,7 +655,6 @@ class ClearingService:
 
         params = {
             "equivalent_id": equivalent_id_param,
-            "min_amount": min_amount_param,
         }
         if scope_binds is not None:
             query = query.bindparams(bindparam("allowed_participant_ids", expanding=True))
