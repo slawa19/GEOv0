@@ -13,6 +13,7 @@ from app.core.simulator.cache_invalidator import (
 )
 from app.core.simulator.artifacts import ArtifactsManager
 from app.core.simulator.models import InjectResult, RunRecord
+from app.core.simulator.net_balance_utils import to_money_str
 from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
@@ -232,6 +233,10 @@ class InjectExecutor:
 
         # Resolve equivalents lazily.
         eq_id_by_code: dict[str, uuid.UUID] = {}
+        # 012 / T1207: the same lookup now also carries `Equivalent.precision`, because the
+        # trustline limits this method reports over `topology.changed` are money strings and
+        # had none.
+        eq_precision_by_code: dict[str, int] = {}
 
         # Track new entities for cache invalidation after commit.
         affected_equivalents: set[str] = set()
@@ -243,18 +248,27 @@ class InjectExecutor:
         inject_debt_edges_by_eq: dict[str, set[tuple[str, str]]] = {}
 
         async def resolve_eq_id(eq_code: str) -> uuid.UUID | None:
-            """Lazily resolve equivalent code → UUID from DB."""
+            """Lazily resolve equivalent code → UUID (and cache its precision) from DB."""
 
             eq_upper = eq_code.strip().upper()
             cached = eq_id_by_code.get(eq_upper)
             if cached is not None:
                 return cached
             row = (
-                await session.execute(select(Equivalent.id).where(Equivalent.code == eq_upper))
-            ).scalar_one_or_none()
+                await session.execute(
+                    select(Equivalent.id, Equivalent.precision).where(
+                        Equivalent.code == eq_upper
+                    )
+                )
+            ).one_or_none()
             if row is not None:
-                eq_id_by_code[eq_upper] = row
-            return row
+                eq_id_by_code[eq_upper] = row[0]
+                eq_precision_by_code[eq_upper] = int(row[1] or 2)
+                return row[0]
+            return None
+
+        def eq_precision(eq_code: str) -> int:
+            return int(eq_precision_by_code.get(eq_code.strip().upper(), 2))
 
         default_tl_policy = {
             "auto_clearing": True,
@@ -534,7 +548,12 @@ class InjectExecutor:
                                 "from": from_pid_str,
                                 "to": to_pid_str,
                                 "equivalent": eq_code,
-                                "limit": str(tl_limit_val),
+                                # 012 / T1207: was `str(Decimal)`, which puts
+                                # `1E-8` (and, from a scenario written as
+                                # `"1e3"`, `1E+3`) into `topology.changed`.
+                                "limit": to_money_str(
+                                    tl_limit_val, eq_precision(eq_code)
+                                ),
                                 "status": "active",
                             }
                         )
@@ -661,7 +680,8 @@ class InjectExecutor:
                         "from": from_pid_val,
                         "to": to_pid_val,
                         "equivalent": eq_code,
-                        "limit": str(tl_limit_val),
+                        # 012 / T1207: see the sibling site above.
+                        "limit": to_money_str(tl_limit_val, eq_precision(eq_code)),
                         "status": "active",
                     }
                 )

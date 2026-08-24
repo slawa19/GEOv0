@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from decimal import Decimal, InvalidOperation, ROUND_DOWN
+from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
 
 from sqlalchemy import func, select
@@ -12,7 +12,11 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.core.simulator.models import RunRecord, ScenarioRecord
-from app.core.simulator.net_balance_utils import atoms_to_net_sign, net_decimal_to_atoms
+from app.core.simulator.net_balance_utils import (
+    atoms_to_net_sign,
+    net_decimal_to_atoms,
+    to_money_str,
+)
 from app.core.simulator import viz_rules
 from app.core.simulator.scenario_equivalent import effective_equivalent
 from app.schemas.simulator import (
@@ -167,11 +171,13 @@ class SnapshotBuilder:
         eq, pid_to_rec, pid_to_id, debt_by_pair, tl_by_pair = loaded
 
         precision = int(getattr(eq, "precision", 2) or 2)
-        scale10 = Decimal(10) ** precision
-        money_quant = Decimal(1) / scale10
 
         def _to_money_str(v: Decimal) -> str:
-            return format(v.quantize(money_quant, rounding=ROUND_DOWN), "f")
+            # 012 / T1207: was a private `format(v.quantize(1/10**precision, ROUND_DOWN), "f")`
+            # copy of what `edge_patch_builder` used to do.  Both views render the same
+            # trustline, so both must render it the same way; see `to_money_str` for why
+            # `precision` is a minimum and not a maximum.
+            return to_money_str(v, precision)
 
         def _parse_amount(v: object) -> float | None:
             if v is None:

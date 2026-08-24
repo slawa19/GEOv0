@@ -6,7 +6,7 @@ import secrets
 import time
 import uuid
 import hashlib
-from decimal import Decimal, ROUND_DOWN
+from decimal import Decimal
 from typing import Any, Awaitable, Callable
 
 from sqlalchemy import select
@@ -18,6 +18,7 @@ from app.core.clearing.service import (
     ClearingService,
 )
 from app.core.simulator.edge_patch_builder import EdgePatchBuilder
+from app.core.simulator.net_balance_utils import to_money_str
 from app.core.simulator.run_perimeter import run_perimeter_pids
 from app.core.simulator.models import RunRecord
 from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter
@@ -58,6 +59,34 @@ class RealClearingEngine:
             return bool(self._should_warn_this_tick_cb(run, key))
         except Exception:
             return True
+
+    def _cleared_amount_str(self, run: RunRecord, eq: Any, amount: Decimal) -> str:
+        """The single rendering of `clearing.done.cleared_amount`.
+
+        012 / `T1207`.  This field used to be produced three times in this file with two
+        different scales: `Decimal("0.01")` hard-coded before the viz helper exists, then
+        re-quantised by `Equivalent.precision` once it does, and hard-coded to `0.01` again on
+        the `CancelledError` path -- which never reached the second one.  So the same cleared
+        amount was reported at scale 2 or at scale `precision` depending only on whether the
+        clearing had been cancelled, and a `precision`-4 equivalent lost two digits precisely
+        when something had gone wrong.  All three sites now call this.
+
+        Precision comes from the `VizPatchHelper` cached on the run, which is where this
+        module already keeps it; no DB round trip is added to the tick.  Before the first
+        helper for an equivalent exists the fallback is 2 -- the same default the rest of the
+        codebase uses for a missing `Equivalent.precision` -- and, crucially, it is now the
+        same fallback on both paths instead of a different one on each.
+        """
+
+        precision = 2
+        try:
+            with self._lock:
+                helper = (run._real_viz_by_eq or {}).get(str(eq))
+            if helper is not None:
+                precision = int(getattr(helper, "precision", 2) or 2)
+        except Exception:
+            precision = 2
+        return to_money_str(amount, precision)
 
     async def tick_real_mode_clearing(
         self,
@@ -433,15 +462,13 @@ class RealClearingEngine:
 
                     cleared_amount_str: str | None = None
                     if cleared_amount_dec > 0:
-                        try:
-                            cleared_amount_str = format(
-                                cleared_amount_dec.quantize(
-                                    Decimal("0.01"), rounding=ROUND_DOWN
-                                ),
-                                "f",
-                            )
-                        except Exception:
-                            cleared_amount_str = str(cleared_amount_dec)
+                        # The `except: str(cleared_amount_dec)` fallback that used to sit here
+                        # was the exponential-money escape hatch (`1E-8` on the wire);
+                        # `to_money_str` is total and cannot raise, so there is nothing to
+                        # fall back to.
+                        cleared_amount_str = self._cleared_amount_str(
+                            run, eq, cleared_amount_dec
+                        )
 
                     self._logger.warning(
                         "simulator.real.clearing_patch_start run_id=%s tick=%s eq=%s touched_nodes=%s touched_edges=%s cleared_cycles=%s",
@@ -475,17 +502,12 @@ class RealClearingEngine:
                                 run._real_viz_by_eq[str(eq)] = helper
 
                         if cleared_amount_dec > 0:
-                            try:
-                                precision = int(getattr(helper, "precision", 2) or 2)
-                                money_quant = Decimal(1) / (Decimal(10) ** precision)
-                                cleared_amount_str = format(
-                                    cleared_amount_dec.quantize(
-                                        money_quant, rounding=ROUND_DOWN
-                                    ),
-                                    "f",
-                                )
-                            except Exception:
-                                pass
+                            # Recomputed now that the helper (and therefore the equivalent's
+                            # precision) is certainly cached on the run.  Same function as the
+                            # two other sites, so this can only add digits, never change form.
+                            cleared_amount_str = self._cleared_amount_str(
+                                run, eq, cleared_amount_dec
+                            )
 
                         participant_ids: list[uuid.UUID] = []
                         if run._real_participants:
@@ -636,11 +658,11 @@ class RealClearingEngine:
                             equivalent=eq,
                             plan_id=plan_id or f"plan_{secrets.token_hex(6)}",
                             cleared_cycles=cleared_cycles,
-                            cleared_amount=format(
-                                cleared_amount_dec.quantize(
-                                    Decimal("0.01"), rounding=ROUND_DOWN
-                                ),
-                                "f",
+                            # Was a hard-coded `Decimal("0.01")` while the happy path above
+                            # used `Equivalent.precision`: one field, two scales, chosen by
+                            # whether the clearing was cancelled.
+                            cleared_amount=self._cleared_amount_str(
+                                run, eq, cleared_amount_dec
                             ),
                             cycle_edges=fallback_edges or None,
                             node_patch=None,
