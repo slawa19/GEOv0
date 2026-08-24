@@ -3,7 +3,7 @@ import { computed, ref, type ComputedRef, type Ref } from 'vue'
 import { api } from '../api'
 import { assertSuccess } from '../api/envelope'
 import type { Equivalent } from '../types/domain'
-import { formatDecimalFixed } from '../utils/decimal'
+import { formatDecimalMinScale } from '../utils/decimal'
 
 /**
  * Единственный источник точности денежной ячейки admin-ui (F-012-7).
@@ -14,8 +14,14 @@ import { formatDecimalFixed } from '../utils/decimal'
  * разрешение, которого у единицы нет.
  *
  * Форма взята с `LiquidityPage.vue`, где она уже была верной: резолвим `precision` по коду
- * эквивалента строки и передаём его в `formatDecimalFixed`; при неизвестной точности печатаем
- * прочерк, а не число с выдуманным числом знаков.
+ * эквивалента строки и передаём его в форматтер; при неизвестной точности печатаем прочерк, а не
+ * число с выдуманным числом знаков.
+ *
+ * `T1211`: точность — МИНИМУМ знаков, никогда не максимум. Здесь стоял `formatDecimalFixed`,
+ * округлявший половину вверх до ровно `precision`, и это меняло величину, а не написание:
+ * `0.05 HOUR` (precision 1) — сумма, которую дверь принимает и `Numeric(20, 8)` хранит точно, —
+ * показывалась оператору как `0.1`. Правило совпадает с `to_money_str` бэкенда и с
+ * `simulator-ui/v2/src/utils/money.ts`; расхождение между тремя формами и было дефектом.
  */
 export const PRECISION_UNAVAILABLE = '—'
 
@@ -54,7 +60,7 @@ export function formatMoneyWithPrecision(
   precision: number | null | undefined,
 ): string {
   if (precision === null || precision === undefined) return PRECISION_UNAVAILABLE
-  return formatDecimalFixed(value, precision)
+  return formatDecimalMinScale(value, precision)
 }
 
 /** Формат денежной ячейки по коду эквивалента самой строки. */

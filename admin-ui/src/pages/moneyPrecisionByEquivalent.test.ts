@@ -10,30 +10,46 @@ import TrustlinesPage from './TrustlinesPage.vue'
 import type { Trustline } from '../types/domain'
 
 /**
- * RT-012-6 (F-012-7) — reproducer on the real money callers of `admin-ui`.
+ * RT-012-6 (F-012-7, дополнен `T1211`) — репродьюсер на реальных денежных вызывающих `admin-ui`.
  *
- * `DashboardPage.vue:106-107` and `TrustlinesPage.vue:124-125` both define
- * `function money(v: string) { return formatDecimalFixed(v, 2) }` and apply it to every
- * amount in their tables, whatever equivalent the row belongs to. The two is written out
- * at the call site, so this is not a test of the `digits = 2` default of
- * `formatDecimalFixed` (`utils/decimal.ts:85`) — no production caller omits that argument.
+ * `DashboardPage.vue` и `TrustlinesPage.vue` печатали каждую сумму своей таблицы двумя знаками,
+ * какому бы эквиваленту строка ни принадлежала. Верная форма уже существовала рядом, в
+ * `LiquidityPage.vue`: резолвить точность по коду эквивалента самой строки. Репродьюсер судит
+ * отрисованные ячейки, а не функцию, поэтому остаётся верным для любой починки, которая даёт
+ * правильные знаки, а не только для одной сигнатуры.
  *
- * The right form already exists next door: `LiquidityPage.vue:217-220` resolves the
- * precision of the equivalent and passes it. This reproducer asserts on rendered table
- * cells rather than on `money` itself, so it stays true for any fix that gets the digits
- * right, not only for one particular signature.
+ * `T1211` — ВТОРОЙ ДЕФЕКТ, КОТОРЫЙ ЭТОТ ТЕСТ ПРОПУСКАЛ. Выборка состояла из одной суммы `12.3`
+ * при точностях 1 и 2: для HOUR она уже ровно в точности, для UAH требуется только добивка.
+ * Обе строки удовлетворяются и НЕВЕРНОЙ реализацией «точность как максимум с округлением
+ * половины вверх», при которой `0.05 HOUR` — сумма, принимаемая дверью и хранимая
+ * `Numeric(20, 8)` точно, — показывается оператору как `0.1`. Это изменение величины, а не
+ * написания, и старый оракул «ровно `precision` знаков» его закреплял.
  *
- * `seeds/equivalents.json` ships HOUR with precision 1 and UAH with precision 2, so a
- * table holding both cannot be correct with a constant digit count.
+ * Правило: `Equivalent.precision` — МИНИМУМ знаков, никогда не максимум (`app/utils/money.py`).
+ * Ниже каждая строка несёт собственную сумму, выбранную так, чтобы занять свою позицию
+ * относительно объявленной точности, а оракул — точная строка. Полнота выборки охраняется
+ * отдельным ассертом-часовым: он воспроизводит снятую реализацию и требует, чтобы хотя бы одна
+ * строка на ней краснела.
+ *
+ * `seeds/equivalents.json` поставляет HOUR с precision 1 рядом с UAH с precision 2.
  */
 
-const PRECISION_BY_EQUIVALENT: Record<string, number> = {
-  HOUR: 1,
-  UAH: 2,
-}
+type Row = { code: string; precision: number; limit: string; expected: string; why: string }
 
-/** Same amount in both rows: the digits on screen must still differ. */
-const LIMIT = '12.3'
+const ROWS_SPEC: Row[] = [
+  // scale > precision: величина точнее объявленного разрешения. Старая реализация печатала `0.1`.
+  { code: 'HOUR', precision: 1, limit: '0.05', expected: '0.05', why: 'величина точнее precision' },
+  // scale < precision: добивка до объявленного минимума.
+  { code: 'UAH', precision: 2, limit: '12.3', expected: '12.30', why: 'добивка до precision' },
+  // Та же сумма, что у UAH, при другой точности: строки обязаны различаться.
+  { code: 'SAT', precision: 0, limit: '12.3', expected: '12.3', why: 'precision 0 не усекает' },
+]
+
+const PRECISION_BY_EQUIVALENT: Record<string, number> = Object.fromEntries(
+  ROWS_SPEC.map((r) => [r.code, r.precision]),
+)
+
+const SPEC_BY_EQUIVALENT = new Map(ROWS_SPEC.map((r) => [r.code, r]))
 
 const apiMock = vi.hoisted(() => ({
   listTrustlines: vi.fn(),
@@ -57,20 +73,20 @@ function paginated<T>(items: T[]) {
   return ok({ items, page: 1, per_page: 20, total: items.length })
 }
 
-function trustline(equivalent: string): Trustline {
+function trustline(spec: Row): Trustline {
   return {
-    equivalent,
-    from: `FROM_${equivalent}`,
-    to: `TO_${equivalent}`,
-    limit: LIMIT,
+    equivalent: spec.code,
+    from: `FROM_${spec.code}`,
+    to: `TO_${spec.code}`,
+    limit: spec.limit,
     used: '0',
-    available: LIMIT,
+    available: spec.limit,
     status: 'active',
     created_at: '2026-08-24T00:00:00Z',
   }
 }
 
-const ROWS = Object.keys(PRECISION_BY_EQUIVALENT).map(trustline)
+const ROWS = ROWS_SPEC.map(trustline)
 
 async function mountPage(component: object, path: string): Promise<VueWrapper> {
   const pinia = createPinia()
@@ -87,11 +103,6 @@ async function mountPage(component: object, path: string): Promise<VueWrapper> {
   await nextTick()
   await flushPromises()
   return wrapper
-}
-
-function fractionDigits(rendered: string): number {
-  const dot = rendered.indexOf('.')
-  return dot < 0 ? 0 : rendered.length - dot - 1
 }
 
 /**
@@ -113,12 +124,13 @@ function renderedLimitByEquivalent(wrapper: VueWrapper): Map<string, string> {
     if (equivalent === undefined || limitCell === undefined) continue
     if (!(equivalent in PRECISION_BY_EQUIVALENT)) continue
 
+    const spec = SPEC_BY_EQUIVALENT.get(equivalent) as Row
     expect(
       Number(limitCell),
       `Column layout changed: the fourth cell of the ${equivalent} row reads "${limitCell}", which is `
-        + `not the trust limit ${LIMIT}. This reproducer is reading the wrong column and must be `
+        + `not the trust limit ${spec.limit}. This reproducer is reading the wrong column and must be `
         + 're-anchored before its verdict means anything.',
-    ).toBeCloseTo(Number(LIMIT), 6)
+    ).toBeCloseTo(Number(spec.limit), 6)
 
     byEquivalent.set(equivalent, limitCell)
   }
@@ -159,44 +171,80 @@ describe.each([
   { name: 'DashboardPage bottlenecks table', component: DashboardPage, path: '/' },
   { name: 'TrustlinesPage table', component: TrustlinesPage, path: '/trustlines' },
 ])('RT-012-6: $name renders money by the row equivalent', ({ component, path }) => {
-  it('shows each amount with as many fraction digits as its own equivalent declares', async () => {
+  it('sentinel: the sample must redden under the implementation T1211 removed', () => {
+    // Отрицательный контроль — снятая `formatDecimalFixed`: ровно `precision` знаков,
+    // округление половины вверх. Если ни одна строка на ней не краснеет, выборка подобрана
+    // согласиться и весь файл ничего не доказывает.
+    const asMaximumHalfUp = (value: string, digits: number): string => {
+      const [int = '0', frac = ''] = value.split('.')
+      const scaled = BigInt(int + frac.padEnd(Math.max(frac.length, digits), '0'))
+      const drop = Math.max(0, frac.length - digits)
+      const div = 10n ** BigInt(drop)
+      const q = scaled / div + (drop > 0 && (scaled % div) * 2n >= div ? 1n : 0n)
+      const s = q.toString().padStart(digits + 1, '0')
+      return digits === 0 ? s : `${s.slice(0, s.length - digits)}.${s.slice(s.length - digits)}`
+    }
+
+    const distinguishing = ROWS_SPEC.filter(
+      (r) => asMaximumHalfUp(r.limit, r.precision) !== r.expected,
+    )
+    expect(
+      distinguishing.map((r) => r.code),
+      'Ни одна строка не отличает «минимум знаков» от снятого «максимум знаков»: выборка '
+        + 'подобрана согласиться, и оба ассерта ниже пройдут без починки.',
+    ).not.toHaveLength(0)
+
+    expect(
+      distinguishing.some(
+        (r) => Number(asMaximumHalfUp(r.limit, r.precision)) !== Number(r.expected),
+      ),
+      'Различающие строки есть, но все они про написание. Нужна хотя бы одна, где старая '
+        + 'реализация показывала оператору другое ЧИСЛО.',
+    ).toBe(true)
+  })
+
+  it('shows each amount with the digits its equivalent declares, and never fewer than it needs', async () => {
     const wrapper = await mountPage(component, path)
     const rendered = renderedLimitByEquivalent(wrapper)
 
-    for (const [equivalent, precision] of Object.entries(PRECISION_BY_EQUIVALENT)) {
-      const cell = rendered.get(equivalent) as string
+    for (const spec of ROWS_SPEC) {
+      const cell = rendered.get(spec.code) as string
 
       expect(
-        fractionDigits(cell),
-        `The row is an ${equivalent} trust line and ${equivalent} declares precision ${precision}, `
-          + `but the operator sees "${cell}" — ${fractionDigits(cell)} fraction digits. Extra digits `
-          + 'assert a resolution the unit does not have, and an operator comparing a limit against a '
-          + 'threshold reads a number the ledger cannot express.',
-      ).toBe(precision)
+        cell,
+        `Строка — трастлайн в ${spec.code}, ${spec.code} объявляет precision ${spec.precision}, `
+          + `лимит ${spec.limit} (${spec.why}). Оператор обязан увидеть "${spec.expected}", `
+          + `а видит "${cell}". Точность объявляет минимум знаков: недостающие знаки меняют саму `
+          + 'величину, а не её написание.',
+      ).toBe(spec.expected)
     }
 
     wrapper.unmount()
   })
 
-  it('reacts to the equivalent: two rows of different precision must not render one amount identically', async () => {
+  it('reacts to the equivalent: one amount at two precisions must not render identically', async () => {
     const wrapper = await mountPage(component, path)
     const rendered = renderedLimitByEquivalent(wrapper)
 
-    const asHour = rendered.get('HOUR') as string
+    const uah = SPEC_BY_EQUIVALENT.get('UAH') as Row
+    const sat = SPEC_BY_EQUIVALENT.get('SAT') as Row
+
+    expect(
+      uah.limit === sat.limit && uah.precision !== sat.precision,
+      'Counter-check premise: обе строки обязаны нести ОДНУ сумму при РАЗНОЙ точности, '
+        + 'иначе различие вывода ничего не доказывает.',
+    ).toBe(true)
+
     const asUah = rendered.get('UAH') as string
+    const asSat = rendered.get('SAT') as string
 
     expect(
-      PRECISION_BY_EQUIVALENT.HOUR === PRECISION_BY_EQUIVALENT.UAH,
-      'Counter-check premise: HOUR and UAH must declare different precision, otherwise this case proves nothing.',
-    ).toBe(false)
-
-    expect(
-      asHour,
-      `Both rows carry the limit ${LIMIT}; HOUR (precision ${PRECISION_BY_EQUIVALENT.HOUR}) renders as `
-        + `"${asHour}" and UAH (precision ${PRECISION_BY_EQUIVALENT.UAH}) as "${asUah}". Identical output `
-        + 'means the page formats every equivalent the same way, so the digits it shows tell the operator '
-        + 'nothing about the unit being displayed.',
-    ).not.toBe(asUah)
+      asUah,
+      `Обе строки несут лимит ${uah.limit}; UAH (precision ${uah.precision}) печатается как `
+        + `"${asUah}", SAT (precision ${sat.precision}) — как "${asSat}". Одинаковый вывод значит, `
+        + 'что страница форматирует любой эквивалент одинаково, и знаки не говорят оператору '
+        + 'ничего о единице.',
+    ).not.toBe(asSat)
 
     wrapper.unmount()
   })
