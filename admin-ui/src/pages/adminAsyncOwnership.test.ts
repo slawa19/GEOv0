@@ -76,6 +76,12 @@ function paginated<T>(items: T[]) {
   return ok({ items, page: 1, per_page: 20, total: items.length })
 }
 
+/** Сколько дробных знаков реально напечатано — ожидание выводится из precision, а не вписано. */
+function fractionDigits(rendered: string): number {
+  const dot = rendered.indexOf('.')
+  return dot < 0 ? 0 : rendered.length - dot - 1
+}
+
 function setupState(wrapper: VueWrapper) {
   return (wrapper.vm.$ as unknown as { setupState: Record<string, any> }).setupState
 }
@@ -378,6 +384,9 @@ describe('mounted non-Graph list request ownership', () => {
   })
 
   it('Liquidity formats with normalized loaded precision and degrades when it is missing', async () => {
+    // Величина со знаками сверх любой из проверяемых precision: округление обязано быть видно.
+    const AMOUNT = '1.23456'
+
     apiMock.listEquivalents.mockResolvedValue(ok({
       items: [{ code: 'NEW', precision: 4, description: 'New', is_active: true }],
     }))
@@ -402,7 +411,25 @@ describe('mounted non-Graph list request ownership', () => {
 
     expect(state.selectedEq).toBe('NEW')
     expect(state.selectedPrecision).toBe(4)
-    expect(state.money('0.0001')).toBe('0.0001')
+
+    // T1208: раньше здесь стояло `expect(state.money('0.0001')).toBe('0.0001')` — вход дословно
+    // равен ожиданию, поэтому ассерт устоял бы и на форматтере-тождестве, то есть ровно на том
+    // режиме отказа, который у `formatDecimalFixed` есть (`C-C3-2-002`: неразобранный вход
+    // возвращается как есть). Ожидание теперь выводится из объявленной precision, а не вписано.
+    const atFour = state.money(AMOUNT, 'NEW')
+    expect(fractionDigits(atFour)).toBe(4)
+
+    // Контрпроверка подменой: другая объявленная precision обязана изменить вывод, иначе тест
+    // неотличим от своего отсутствия.
+    state.equivalentsList = [{ code: 'NEW', precision: 1, description: 'New', is_active: true }]
+    await nextTick()
+    expect(state.selectedPrecision).toBe(1)
+    const atOne = state.money(AMOUNT, 'NEW')
+    expect(fractionDigits(atOne)).toBe(1)
+    expect(atOne).not.toBe(atFour)
+
+    state.equivalentsList = [{ code: 'NEW', precision: 4, description: 'New', is_active: true }]
+    await nextTick()
     expect(state.showCountKpis).toBe(true)
     expect(state.showMoneyKpis).toBe(true)
     expect(wrapper.find('[data-testid="liquidity-count-kpis"]').exists()).toBe(true)
@@ -411,7 +438,7 @@ describe('mounted non-Graph list request ownership', () => {
     state.equivalentsList = []
     await nextTick()
     expect(state.selectedPrecision).toBeNull()
-    expect(state.money('0.0001')).toBe('—')
+    expect(state.money(AMOUNT, 'NEW')).toBe('—')
     expect(state.showCountKpis).toBe(true)
     expect(state.showMoneyKpis).toBe(false)
     expect(wrapper.find('[data-testid="liquidity-count-kpis"]').exists()).toBe(true)

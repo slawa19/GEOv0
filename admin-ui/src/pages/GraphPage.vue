@@ -196,6 +196,15 @@ const {
   statusFilter,
 })
 
+/**
+ * Денежная ячейка графа печатается по точности эквивалента строки (F-012-7).
+ * Каталог `precisionByEq` уже загружен `useGraphData`; вызывающий обязан назвать эквивалент,
+ * иначе величина печатается прочерком, а не выдуманным числом знаков.
+ */
+function moneyByEquivalent(value: string, equivalent: unknown): string {
+  return money(value, equivalent, precisionByEq.value)
+}
+
 const graphAnalytics = useGraphAnalytics({
   isRealMode,
   threshold,
@@ -722,7 +731,7 @@ const graphLiveAnnouncement = computed(() => {
     :precision-by-eq="precisionByEq"
     :atoms-to-decimal="atomsToDecimal"
     :reload-current-view="reloadDrawer"
-    :money="money"
+    :money="moneyByEquivalent"
     :pct="pct"
     :selected-rank="selectedRank"
     :selected-concentration="selectedConcentration"

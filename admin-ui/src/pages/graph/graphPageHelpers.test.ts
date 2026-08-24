@@ -12,6 +12,7 @@ import {
   labelPartsToMode,
   makeMetricsKey,
   modeToLabelParts,
+  money,
   pct,
   reloadGraphView,
   syncGraphCoreForView,
@@ -338,5 +339,56 @@ describe('graphPageHelpers', () => {
     })
 
     expect(q2).toEqual({ pid: 'bob', depth: 1, equivalent: 'USD', participant_pid: 'bob' })
+  })
+})
+
+describe('graphPageHelpers.money (F-012-7)', () => {
+  // Каталог, а не константа теста: точность объявляет эквивалент, и обе объявленные различны.
+  const CATALOGUE = new Map<string, number>([['HOUR', 1], ['UAH', 2], ['SAT', 0]])
+  const AMOUNT = '12.345'
+
+  function fractionDigits(rendered: string): number {
+    const dot = rendered.indexOf('.')
+    return dot < 0 ? 0 : rendered.length - dot - 1
+  }
+
+  it.each([...CATALOGUE.entries()])(
+    'prints %s with exactly the fraction digits its equivalent declares',
+    (code, precision) => {
+      const rendered = money(AMOUNT, code, CATALOGUE)
+      expect(
+        fractionDigits(rendered),
+        `${code} declares precision ${precision}, but the cell reads "${rendered}".`,
+      ).toBe(precision)
+    },
+  )
+
+  it('reacts to the declared precision: substituting it must change the output', () => {
+    const asHour = money(AMOUNT, 'HOUR', CATALOGUE)
+    const asUah = money(AMOUNT, 'UAH', CATALOGUE)
+
+    expect(
+      CATALOGUE.get('HOUR') === CATALOGUE.get('UAH'),
+      'Counter-check premise: the two equivalents must declare different precision.',
+    ).toBe(false)
+    expect(
+      asHour,
+      'One amount rendered identically for two precisions means the digits carry no information.',
+    ).not.toBe(asUah)
+
+    // Та же величина, тот же код — но каталог объявляет другую точность.
+    const substituted = money(AMOUNT, 'HOUR', new Map([['HOUR', 3]]))
+    expect(substituted).not.toBe(asHour)
+    expect(fractionDigits(substituted)).toBe(3)
+  })
+
+  it('prints a dash instead of inventing digits when the equivalent is unknown', () => {
+    expect(money(AMOUNT, 'NOPE', CATALOGUE)).toBe('—')
+    expect(money(AMOUNT, '', CATALOGUE)).toBe('—')
+    expect(money(AMOUNT, null, CATALOGUE)).toBe('—')
+  })
+
+  it('normalizes the equivalent code the way the rest of admin-ui does', () => {
+    expect(money(AMOUNT, ' hour ', CATALOGUE)).toBe(money(AMOUNT, 'HOUR', CATALOGUE))
   })
 })

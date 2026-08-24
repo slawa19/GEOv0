@@ -508,18 +508,31 @@ export function useGraphAnalytics(opts: {
       if (eqCode && e !== eqCode) continue
       const p = precisionOf(e)
       if (p === null) return null
-      const lim = decimalToAtoms(t.limit, p)
-      const used = decimalToAtoms(t.used, p)
-      if (t.from === pid) {
-        outLimit += lim
-        outUsed += used
-        if (isBottleneck(t)) bottlenecks.push({ dir: 'out', other: t.to, t })
-      } else if (t.to === pid) {
-        inLimit += lim
-        inUsed += used
-        if (isBottleneck(t)) bottlenecks.push({ dir: 'in', other: t.from, t })
+
+      const isOutgoing = t.from === pid
+      const isIncoming = !isOutgoing && t.to === pid
+      if (!isOutgoing && !isIncoming) continue
+
+      // F-012-8: ёмкость суммируется только внутри одного эквивалента. Атом HOUR и атом UAH —
+      // разные единицы даже при равной precision, и их сумма не является величиной.
+      if (eqCode) {
+        const lim = decimalToAtoms(t.limit, p)
+        const used = decimalToAtoms(t.used, p)
+        if (isOutgoing) {
+          outLimit += lim
+          outUsed += used
+        } else {
+          inLimit += lim
+          inUsed += used
+        }
       }
+
+      // Узкое место — отношение available/limit внутри одной линии доверия: величина
+      // безразмерная, поэтому считать такие линии по всем эквивалентам осмысленно.
+      if (isBottleneck(t)) bottlenecks.push({ dir: isOutgoing ? 'out' : 'in', other: isOutgoing ? t.to : t.from, t })
     }
+
+    if (!eqCode) return { eq: null, out: null, inc: null, bottlenecks }
 
     const outPct = outLimit > 0n ? Number(outUsed) / Number(outLimit) : 0
     const inPct = inLimit > 0n ? Number(inUsed) / Number(inLimit) : 0

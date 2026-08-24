@@ -80,9 +80,15 @@ export function isUnitIntervalDecimalString(value: unknown): boolean {
   return dec.i <= pow10(dec.scale)
 }
 
-// Formats a decimal string to exactly `digits` fraction digits (default 2).
-// Uses integer math and rounds half-up.
-export function formatDecimalFixed(input: string, digits = 2): string {
+// Formats a decimal string to exactly `digits` fraction digits, using integer math and
+// rounding half-up.
+//
+// F-012-7: у `digits` был дефолт 2. Ни один продакшен-вызывающий его не опускал (замерено:
+// четыре сайта, все с явным аргументом), поэтому дефолт ничего не защищал — он только позволял
+// следующему вызывающему напечатать два знака, не приняв решения о точности. Убран: теперь
+// количество знаков обязан назвать вызывающий, а назвать его правильно помогает
+// `composables/useEquivalentPrecision.ts`.
+export function formatDecimalFixed(input: string, digits: number): string {
   const dec = parseDecimal(String(input ?? ''))
   if (!dec) return String(input ?? '')
 

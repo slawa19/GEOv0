@@ -107,9 +107,12 @@ function renderedLimitByEquivalent(wrapper: VueWrapper): Map<string, string> {
     if (cells.length < 4) continue
 
     const equivalent = cells[0]
+    const limitCell = cells[3]
+    // `cells.length < 4` уже отсеян выше; guard существует только ради строгой индексации
+    // TypeScript и не может изменить вердикт ни одного ассерта ниже.
+    if (equivalent === undefined || limitCell === undefined) continue
     if (!(equivalent in PRECISION_BY_EQUIVALENT)) continue
 
-    const limitCell = cells[3]
     expect(
       Number(limitCell),
       `Column layout changed: the fourth cell of the ${equivalent} row reads "${limitCell}", which is `
