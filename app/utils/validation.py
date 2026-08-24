@@ -466,16 +466,40 @@ def validate_trustline_policy(policy: dict[str, Any]) -> None:
             continue
         value = policy[key]
         if key == "daily_limit":
-            # `daily_limit` IS a money quantity by the protocol - informational-only in the
-            # MVP, but a bound that will one day be compared against amounts.  It therefore
-            # uses the money grammar rather than "whatever `Decimal()` will swallow": no
-            # float, no exponent, and the same storage capacity, so the day it is enforced
-            # the comparison does not need a representation change.  `max_hop_usage` is a hop
-            # count, not money, and keeps the looser rule.
-            try:
-                as_decimal = parse_money_amount(value, field=f"policy.{key}")
-            except BadRequestException:
+            # `daily_limit` IS a money quantity by the protocol, so a STRING here obeys the
+            # money wire GRAMMAR - plain decimal, no exponent, no NaN/Infinity (the same
+            # input-form rule as every other money string in 012).  What it does NOT obey,
+            # since T1210 finding 12, is the STORAGE CAPACITY rule: this value lives in the
+            # `policy` JSON column, not in a `Numeric(20, 8)` money column, so bounding it to
+            # scale 8 / magnitude 10**12 refused values the column stores verbatim - a
+            # forward-looking rule for an enforcement day that has not come, on a column that
+            # has no capacity to protect.  A JSON NUMBER stays admissible because the canon
+            # declares the field `oneOf` string|number|null; a number is a parsed value, not
+            # a client spelling, so it is re-spelled plainly before the grammar rather than
+            # judged on how Python would print it (`1e16` arrives as a float and must not be
+            # refused for `str()`'s exponent).
+            #
+            # Refusals keep the grammar's own message and `details` instead of the blanket
+            # "must be a number" the first edition raised: a capacity complaint relabelled as
+            # a type complaint told the client its number was not a number.  "must be a
+            # number" is reserved for values of a non-numeric TYPE (bool, dict, list, ...);
+            # a malformed string gets the grammar's "Invalid amount format" naming the field.
+            if isinstance(value, bool) or not isinstance(value, (str, int, float)):
                 raise BadRequestException(f"trustline.policy.{key} must be a number")
+            candidate = value
+            if not isinstance(candidate, str):
+                try:
+                    candidate = format(Decimal(str(candidate)), "f")
+                except (InvalidOperation, ValueError):
+                    raise BadRequestException(f"trustline.policy.{key} must be a number")
+            as_decimal = parse_amount_decimal(
+                candidate,
+                max_scale=MONEY_MAX_LEXICAL_SCALE,
+                max_precision=DEFAULT_MAX_AMOUNT_PRECISION,
+                max_integer_digits=None,
+                require_positive=False,
+                field=f"policy.{key}",
+            )
         else:
             try:
                 as_decimal = Decimal(str(value))
