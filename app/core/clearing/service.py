@@ -22,6 +22,7 @@ from app.db.models.audit_log import IntegrityAuditLog
 from app.utils.error_codes import ErrorCode
 from app.utils.exceptions import GeoException, TimeoutException
 from app.utils.metrics import CLEARING_EVENTS_TOTAL
+from app.utils.money import to_money_str
 from app.core.payments.engine import PaymentEngine
 from app.core.payments.router import PaymentRouter
 from app.core.invariants import InvariantChecker
@@ -30,6 +31,12 @@ from app.core.integrity import compute_integrity_checkpoint_for_equivalent
 logger = logging.getLogger(__name__)
 
 _CLEARING_REPLAY_NAMESPACE = uuid.UUID("7438b16f-c629-4aeb-8b97-4bf113704c93")
+
+# The longest cycle the SQL fast path can express, in edges.  `find_triangles_sql` joins three
+# `debts` rows and `find_quadrangles_sql` four; there is no five-table variant, so five is
+# beyond their reach by construction rather than by configuration.  `find_cycles` uses this to
+# decide whether its early return can answer the question it was asked - see the comment there.
+_SQL_DETECTOR_MAX_CYCLE_LENGTH = 4
 
 
 class ClearingCommittedAfterCancellation(asyncio.CancelledError):
@@ -401,7 +408,27 @@ class ClearingService:
         )
 
     @staticmethod
-    def _deduplicate_cycles(cycles: List[List[Dict]]) -> List[List[Dict]]:
+    def _debt_id_key(raw: object) -> str:
+        """One spelling for one debt id, whatever produced the string.
+
+        012, second round.  The raw-SQL detectors and the ORM DFS do not agree on how a debt id
+        LOOKS, and until `find_cycles` merged their answers nothing had to notice.  Measured on
+        SQLite, one debt, one graph: the DFS says `'333e9737-a7cc-4017-812d-fa3719bef0c9'` and
+        `find_triangles_sql` says `'333e9737a7cc4017812dfa3719bef0c9'` - the driver hands raw
+        SQL the stored 32-hex form while the ORM's `Uuid` type reconstructs a `uuid.UUID`.  On
+        PostgreSQL asyncpg returns `uuid.UUID` on both paths and the two agree, which is exactly
+        how a de-duplication keyed on the spelling passes the Postgres tier and reports every
+        cycle twice on the default one.  So the key is the VALUE, not the text.
+        """
+
+        text = str(raw or "")
+        try:
+            return str(uuid.UUID(text))
+        except (ValueError, AttributeError, TypeError):
+            return text
+
+    @classmethod
+    def _deduplicate_cycles(cls, cycles: List[List[Dict]]) -> List[List[Dict]]:
         """Stable dedupe by unordered set of debt ids.
 
         SQL cycle queries can emit the same logical cycle multiple times (different rotation).
@@ -414,7 +441,7 @@ class ClearingService:
         out: List[List[Dict]] = []
         for cycle in cycles:
             try:
-                key = tuple(sorted(str(e.get("debt_id", "")) for e in cycle))
+                key = tuple(sorted(cls._debt_id_key(e.get("debt_id", "")) for e in cycle))
             except Exception:
                 key = tuple()
             if not key:
@@ -425,16 +452,48 @@ class ClearingService:
             out.append(cycle)
         return out
 
+    async def _equivalent_precision(self, equivalent_id: uuid.UUID) -> int:
+        """The digits this equivalent declares, for rendering only.
+
+        012, second round.  The three detectors and the CLEARING payload all printed amounts
+        with bare `str(Decimal)`, which puts `1E-8` on the wire for a value `Numeric(20, 8)`
+        holds exactly.  `to_money_str` needs the equivalent's `precision`, and the SQL
+        detectors are addressed by `equivalent_id` alone, so this reads it when the caller has
+        not already got the row.  `find_cycles` and `_execute_clearing_with_amount` both do,
+        and pass it, so the extra query is only for a direct caller (tests, and any future
+        one).  Rendering is the ONLY use: no comparison, no admission rule and no stored value
+        depends on it, so a wrong or missing `precision` can widen or narrow the digits shown
+        and can never hide a cycle -- which is the distinction `VERDICT-DOOR: C` deferred.
+        """
+
+        try:
+            precision = (
+                await self.session.execute(
+                    select(Equivalent.precision).where(Equivalent.id == equivalent_id)
+                )
+            ).scalar_one_or_none()
+        except Exception:
+            return 2
+        try:
+            return int(precision)
+        except (TypeError, ValueError):
+            return 2
+
     async def find_triangles_sql(
         self,
         equivalent_id: uuid.UUID,
         *,
         allowed_participant_ids: "set[uuid.UUID] | None" = None,
+        precision: int | None = None,
     ) -> List[List[Dict]]:
         """Find 3-node debt cycles using a SQL JOIN.
 
         `allowed_participant_ids` confines the cycle to one run's participants; None keeps
         the historic global behaviour, which the hub and the simulator tick still rely on.
+
+        `precision` is a RENDERING parameter and nothing else - it decides how many digits the
+        returned `amount` strings carry, never which rows come back.  Omitted, it is read from
+        the equivalent.
 
         THE `min_amount` THRESHOLD IS GONE, AND THE REASON IS MEASURED (2026-08-24 / p012,
         `F-012-3`, `T1202`).  This query used to carry `AND LEAST(...) > :min_amount` with
@@ -478,6 +537,9 @@ class ClearingService:
         `d1.amount > 0 AND d2.amount > 0 AND d3.amount > 0` already says "a real debt", it is
         per-table so the planner can push it down, and it is the same rule the DFS applies.
         """
+
+        if precision is None:
+            precision = await self._equivalent_precision(equivalent_id)
 
         dialect = self._dialect_name()
 
@@ -552,25 +614,31 @@ class ClearingService:
 
         cycles: List[List[Dict]] = []
         for row in result:
+            # `to_money_str`, not `str(Decimal)`: asyncpg hands back `Numeric(20, 8)` at the
+            # column's scale, so a stored `0.00000001` is `Decimal('1E-8')` and `str()` puts
+            # that exponent literal straight into `GET /api/v1/clearing/cycles`.  It also ends
+            # the two-scales-for-one-debt effect this raw-SQL path had against the ORM DFS
+            # below: the driver decides the scale of the value it returns, and the renderer
+            # takes that decision back.
             cycles.append(
                 [
                     {
                         "debt_id": str(row.debt1_id),
                         "debtor": str(row.a),
                         "creditor": str(row.b),
-                        "amount": str(row.amount1),
+                        "amount": to_money_str(row.amount1, precision),
                     },
                     {
                         "debt_id": str(row.debt2_id),
                         "debtor": str(row.b),
                         "creditor": str(row.c),
-                        "amount": str(row.amount2),
+                        "amount": to_money_str(row.amount2, precision),
                     },
                     {
                         "debt_id": str(row.debt3_id),
                         "debtor": str(row.c),
                         "creditor": str(row.a),
-                        "amount": str(row.amount3),
+                        "amount": to_money_str(row.amount3, precision),
                     },
                 ]
             )
@@ -582,13 +650,20 @@ class ClearingService:
         equivalent_id: uuid.UUID,
         *,
         allowed_participant_ids: "set[uuid.UUID] | None" = None,
+        precision: int | None = None,
     ) -> List[List[Dict]]:
         """Find 4-node debt cycles using a SQL JOIN.
 
         The `min_amount` threshold is gone here for the same measured reasons as in
         `find_triangles_sql`, which carries the full argument; this query held the identical
         `AND LEAST(...) > :min_amount` and hid four-node cycles at the boundary the same way.
+
+        `precision`, likewise, only decides how many digits the returned `amount` strings
+        carry; it selects no rows.
         """
+
+        if precision is None:
+            precision = await self._equivalent_precision(equivalent_id)
 
         dialect = self._dialect_name()
 
@@ -670,25 +745,25 @@ class ClearingService:
                         "debt_id": str(row.debt1_id),
                         "debtor": str(row.a),
                         "creditor": str(row.b),
-                        "amount": str(row.amt1),
+                        "amount": to_money_str(row.amt1, precision),
                     },
                     {
                         "debt_id": str(row.debt2_id),
                         "debtor": str(row.b),
                         "creditor": str(row.c),
-                        "amount": str(row.amt2),
+                        "amount": to_money_str(row.amt2, precision),
                     },
                     {
                         "debt_id": str(row.debt3_id),
                         "debtor": str(row.c),
                         "creditor": str(row.d),
-                        "amount": str(row.amt3),
+                        "amount": to_money_str(row.amt3, precision),
                     },
                     {
                         "debt_id": str(row.debt4_id),
                         "debtor": str(row.d),
                         "creditor": str(row.a),
-                        "amount": str(row.amt4),
+                        "amount": to_money_str(row.amt4, precision),
                     },
                 ]
             )
@@ -941,13 +1016,37 @@ class ClearingService:
                 return []
 
         # FIX-012: Prefer SQL JOIN based search for short cycles (3–4) when running with a real AsyncSession.
+        #
+        # THE EARLY RETURN BELOW IS CONDITIONAL, AND THE CONDITION IS THE SQL DETECTORS' REACH
+        # (012, second round).  These two queries find cycles of exactly 3 and exactly 4 edges.
+        # The DFS underneath finds 3..`max_depth`, and `max_depth` defaults to SIX on the API
+        # (`app/api/v1/clearing.py:20,34`).  So "return the SQL answer whenever it is non-empty"
+        # is not a shortcut, it is a different question answered: with a triangle anywhere in the
+        # graph, every 5- and 6-edge cycle disappears from `GET /api/v1/clearing/cycles`.
+        # Measured on a `UAH` graph holding one `0.01` triangle and one disjoint 5-node cycle of
+        # `50`, at every depth 3..6: 1 cycle, lengths [3].  Removing the `min_amount` threshold
+        # made this STRICTLY WORSE rather than closing it - the fast path is now non-empty more
+        # often, so it suppresses the fallback more often.
+        #
+        # `auto_clear` was never the victim: it loops until `find_cycles` comes back empty, so
+        # it reaches the long cycle on a later pass.  The READ endpoint answers once.
+        #
+        # So the SQL result is returned early only when nothing longer was asked for.  Past that
+        # depth both detectors run and their answers are merged (see the end of this method):
+        # neither is a superset of the other - the SQL side is capped at `LIMIT 100` and ordered
+        # by amount, the DFS stops descending a branch at its first cycle and at 50 overall - so
+        # a union is the only combination whose answer does not depend on which one happened to
+        # be non-empty.
+        sql_cycles: List[List[Dict]] = []
         use_sql = isinstance(self.session, AsyncSession)
         if use_sql and max_depth >= 3:
             locked_pairs = await self._locked_pairs_for_equivalent(equivalent.id)
             cycles: List[List[Dict]] = []
             try:
                 cycles = await self.find_triangles_sql(
-                    equivalent.id, allowed_participant_ids=allowed_ids
+                    equivalent.id,
+                    allowed_participant_ids=allowed_ids,
+                    precision=equivalent.precision,
                 )
                 if cycles and locked_pairs:
                     filtered: List[List[Dict]] = []
@@ -976,7 +1075,9 @@ class ClearingService:
                 # If triangles exist but are all filtered out (policy/locks), try quadrangles.
                 if max_depth >= 4 and not cycles:
                     cycles = await self.find_quadrangles_sql(
-                        equivalent.id, allowed_participant_ids=allowed_ids
+                        equivalent.id,
+                        allowed_participant_ids=allowed_ids,
+                        precision=equivalent.precision,
                     )
                     if cycles and locked_pairs:
                         filtered = []
@@ -1049,7 +1150,15 @@ class ClearingService:
                         except Exception:
                             pass
 
-                return cycles
+                sql_cycles = cycles
+
+                # `_SQL_DETECTOR_MAX_CYCLE_LENGTH` edges is everything the two queries above can
+                # express.  Ask for no more than that and the SQL answer is complete for the
+                # question, so returning it here costs nothing and skips loading the graph.  Ask
+                # for more and it is not, so fall through: the DFS runs and the two answers are
+                # merged below.
+                if max_depth <= _SQL_DETECTOR_MAX_CYCLE_LENGTH:
+                    return sql_cycles
 
         # 1. Load Graph
         # Node: Participant ID
@@ -1193,10 +1302,36 @@ class ClearingService:
                             "creditor": str(
                                 pid_by_id.get(edge.creditor_id, edge.creditor_id)
                             ),
-                            "amount": str(edge.amount),
+                            # Same renderer as the two SQL detectors above.  `Debt.amount` is a
+                            # `Numeric(20, 8)`, so `str()` here printed `1E-8` for a value the
+                            # ledger holds exactly - and printed the SAME debt at a different
+                            # scale than the raw-SQL path did, which made one payload's digits
+                            # depend on which detector answered.
+                            "amount": to_money_str(edge.amount, equivalent.precision),
                         }
                     )
                 final_cycles.append(cycle_data)
+
+        if final_cycles:
+            final_cycles = await self._filter_cycles_by_auto_clearing_policy_sql(
+                final_cycles, equivalent_id=equivalent.id
+            )
+
+        # MERGE, not pick.  Reached only when `max_depth` exceeds the SQL detectors' reach, so
+        # `sql_cycles` is a partial answer by construction and the DFS one is partial too (it
+        # abandons a branch at its first cycle and stops at fifty).  Both sides have already
+        # been through the lock filter and `_filter_cycles_by_auto_clearing_policy_sql`, so the
+        # union needs no further admission check - only de-duplication, which is by debt-id set
+        # and therefore blind to which detector produced the edge, and to the order the edges
+        # come in.  `sql_cycles` is empty whenever the SQL path found nothing or raised.
+        #
+        # `_deduplicate_cycles` keeps the FIRST occurrence, so for a cycle both detectors found
+        # the DFS rendition is the one that survives.  That is immaterial only because the two
+        # now render money identically - which is the other half of this change, and the reason
+        # the SQL renderers have reproducers that address them directly rather than through
+        # here (`test_p012_money_form_and_detector_reach_postgres.py`).
+        if sql_cycles:
+            final_cycles = self._deduplicate_cycles(final_cycles + sql_cycles)
 
         # Prefer shorter cycles first for auto_clear().
         final_cycles.sort(key=len)
@@ -1212,10 +1347,6 @@ class ClearingService:
             logger.debug(
                 "event=clearing.metrics_inc_failed metric=CLEARING_EVENTS_TOTAL label=find_cycles.success",
                 exc_info=True,
-            )
-        if final_cycles:
-            final_cycles = await self._filter_cycles_by_auto_clearing_policy_sql(
-                final_cycles, equivalent_id=equivalent.id
             )
         return final_cycles
 
@@ -1674,6 +1805,36 @@ class ClearingService:
         except Exception as exc:
             await self._raise_unexpected_execution(exc)
 
+        # 012, second round.  THE PAYLOAD AMOUNT IS A REPRESENTATION, NOT A STORAGE FORMAT, and
+        # that was checked before it was changed rather than assumed.  `transactions.payload` is
+        # re-parsed on replay by `_read_committed_execution_amount` (`:203`) as
+        # `Decimal(str(payload["amount"]))`, and `Decimal("1E-8") == Decimal("0.00000001")` is
+        # the same value of the same type - the round trip is exact either way.  Nothing else in
+        # the repository reads this field: it is in no hash (`compute_integrity_checkpoint_for_
+        # equivalent` digests `debts` and `trust_lines` rows, never a payload), in no signature
+        # (CLEARING rows are not signed), and in no key (`idempotency_key` is
+        # `clearing:{tx_id}`, and `tx_id` is a uuid5 over the sorted DEBT IDS alone), and the
+        # only other CLEARING-payload readers - `app/core/admin/metrics.py:723` and
+        # `app/api/v1/admin.py:203,1035` - read `equivalent` and `edges[].debtor/creditor`.
+        # `to_money_str` never drops a digit the value carries, so the amount a replay hands
+        # back still equals the amount that was applied to the debts.  Rows written before this
+        # change keep their old string and parse identically, so no backfill and no migration.
+        #
+        # The reason to change it at all is the T1201 rollout condition: the audit that has to
+        # run over `transactions.payload->>'amount'` looking for `scale >= 9`.  Measured here:
+        # a `cast(... as numeric)` audit reads `'1E-8'` correctly (scale 8), but any audit that
+        # counts digits in the TEXT - the obvious way to write it, and the only way that also
+        # catches a value `numeric` cannot hold - sees no fraction digits at all in `1E-8` and
+        # silently passes the row. An exponential literal in the audited column is a trap laid
+        # for the audit, whichever way it is eventually written.
+        payload_precision = 2
+        if equivalent is not None:
+            try:
+                payload_precision = int(equivalent.precision)
+            except (TypeError, ValueError):
+                payload_precision = 2
+        clear_amount_str = to_money_str(clear_amount, payload_precision)
+
         debts_by_id: Dict[uuid.UUID, Debt] = {d.id: d for d in debts}
         edges_payload: List[Dict[str, str]] = []
         for edge in cycle:
@@ -1691,7 +1852,7 @@ class ClearingService:
                     "debt_id": str(debt.id),
                     "debtor": str(pid_by_id.get(debt.debtor_id, debt.debtor_id)),
                     "creditor": str(pid_by_id.get(debt.creditor_id, debt.creditor_id)),
-                    "amount": str(clear_amount),
+                    "amount": clear_amount_str,
                 }
             )
 
@@ -1734,7 +1895,7 @@ class ClearingService:
             payload={
                 # Backward-compatible fields.
                 "cycle": [str(e["debt_id"]) for e in cycle],
-                "amount": str(clear_amount),
+                "amount": clear_amount_str,
                 # Enriched fields for audit/debugging.
                 "equivalent": str(
                     equivalent.code if equivalent else debts[0].equivalent_id

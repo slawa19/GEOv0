@@ -55,12 +55,21 @@ async def test_clearing_deletes_zero_debts(db_session):
 
     assert tx.state == "COMMITTED"
     assert tx.payload["equivalent"] == eq.code
-    assert tx.payload["amount"] == "10"
+    # 012, second round: the payload amount is rendered by the one money-string renderer, so a
+    # precision-2 equivalent stores "10.00".  The literal used to be "10", and that literal was
+    # only ever true on SQLite: PostgreSQL returns `Numeric(20, 8)` at the column's scale, so
+    # `str(clear_amount)` there wrote "10.00000000" for this same clearing, and for the smallest
+    # storable amount it wrote the exponent literal "1E-8" into the column the T1201 rollout
+    # condition has to audit.  The value is unchanged and still re-parses to Decimal("10") on
+    # replay - which is what `test_p012_money_form_and_detector_reach_postgres.py` asserts
+    # against the amount actually applied, rather than against a literal.
+    assert tx.payload["amount"] == "10.00"
+    assert Decimal(tx.payload["amount"]) == Decimal("10")
     assert isinstance(tx.payload.get("edges"), list)
     assert len(tx.payload["edges"]) == 3
     for edge in tx.payload["edges"]:
         assert set(edge.keys()) == {"debt_id", "debtor", "creditor", "amount"}
-        assert edge["amount"] == "10"
+        assert edge["amount"] == "10.00"
 
     audit = (
         await db_session.execute(

@@ -245,7 +245,16 @@ class BalanceService:
         equivalent = (await self.session.execute(select(Equivalent).where(Equivalent.code == equivalent_code))).scalar_one_or_none()
         if not equivalent:
             raise NotFoundException(f"Equivalent {equivalent_code} not found")
-            
+
+        # 012/T1202. `str(Decimal)` here was the SAME defect `get_summary` fixed sixty lines
+        # above, left standing on the neighbouring route: a stored `0.00000001` came out of
+        # `Numeric(20, 8)` as `Decimal('1E-8')` and went on the wire as the literal `'1E-8'`.
+        # The equivalent is already loaded for the id lookup, so its `precision` is free here.
+        try:
+            precision = int(equivalent.precision)
+        except (TypeError, ValueError):
+            precision = 2
+
         outgoing_res = []
         incoming_res = []
         
@@ -264,7 +273,7 @@ class BalanceService:
                     creditor=d.creditor.pid,
                     creditor_name=d.creditor.display_name or "",
                     equivalent=equivalent_code,
-                    amount=str(d.amount)
+                    amount=to_money_str(d.amount, precision)
                 ))
                 
         if direction in ['incoming', 'all']:
@@ -282,7 +291,7 @@ class BalanceService:
                     debtor=d.debtor.pid,
                     debtor_name=d.debtor.display_name or "",
                     equivalent=equivalent_code,
-                    amount=str(d.amount)
+                    amount=to_money_str(d.amount, precision)
                 ))
                 
         return DebtsDetails(outgoing=outgoing_res, incoming=incoming_res)
