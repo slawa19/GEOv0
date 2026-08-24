@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import uuid
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import AbstractSet, Dict, List, Set
 
 from sqlalchemy import bindparam, select, and_, func, text
@@ -1344,8 +1344,32 @@ class ClearingService:
         if sql_cycles:
             final_cycles = self._deduplicate_cycles(final_cycles + sql_cycles)
 
-        # Prefer shorter cycles first for auto_clear().
-        final_cycles.sort(key=len)
+        # Shorter cycles first for auto_clear(); WITHIN a length, largest clearable amount
+        # first (T1211, external review).  The SQL detectors deliberately ORDER BY
+        # `LEAST(...) DESC` - the executable amount of a cycle is its smallest edge - and
+        # `auto_clear` executes the first cycle that succeeds, so ordering IS behavior: the
+        # first edition of this merge sorted by length alone, which let DFS discovery order
+        # replace that heuristic among same-length cycles, and for two cycles SHARING an edge
+        # the executed-first cycle decides which debts remain.  The reviewer reproduced a
+        # different final ledger from the order alone.  Sorting the union restores the
+        # recorded heuristic for every cycle regardless of which detector found it (the DFS
+        # side never had it - it was simply never merged in front of SQL results before).
+        def _executable_amount(cycle: List[Dict]) -> Decimal:
+            try:
+                return min(Decimal(str(edge.get("amount", "0"))) for edge in cycle)
+            except (InvalidOperation, ValueError, TypeError):
+                return Decimal(0)
+
+        def _cycle_order_key(cycle: List[Dict]) -> tuple:
+            # The debt-id set as the last component makes equal-amount ties deterministic
+            # (concatenation order would otherwise decide, i.e. which detector ran first).
+            return (
+                len(cycle),
+                -_executable_amount(cycle),
+                tuple(sorted(self._debt_id_key(e.get("debt_id", "")) for e in cycle)),
+            )
+
+        final_cycles.sort(key=_cycle_order_key)
 
         logger.info(
             "event=clearing.find_cycles_done equivalent=%s cycles=%s",
@@ -2067,10 +2091,23 @@ class ClearingService:
         count = 0
         while True:
             try:
+                # Depth ladder (T1211, external review).  The union in `find_cycles` is right
+                # for a READ answer, but past the SQL reach it loads the whole graph and runs
+                # the DFS on every call - and this loop calls it once per cleared cycle.  An
+                # executor does not need the complete answer, it needs one executable cycle,
+                # shortest first - which is what the ladder preserves: ask the SQL-complete
+                # depth first (early return, no graph load), widen to the caller's depth only
+                # when nothing short is left.  Every short cycle is still cleared before any
+                # long one, so the final state is the ladder-free state.
                 cycles = await self.find_cycles(
                     equivalent_code,
-                    max_depth=max_depth,
+                    max_depth=min(max_depth, _SQL_DETECTOR_MAX_CYCLE_LENGTH),
                 )
+                if not cycles and max_depth > _SQL_DETECTOR_MAX_CYCLE_LENGTH:
+                    cycles = await self.find_cycles(
+                        equivalent_code,
+                        max_depth=max_depth,
+                    )
             except GeoException as exc:
                 if exc.code != ErrorCode.E010.value:
                     raise

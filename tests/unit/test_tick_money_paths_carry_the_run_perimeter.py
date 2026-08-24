@@ -52,7 +52,11 @@ def _guarded_calls(path: pathlib.Path):
 
 @pytest.mark.parametrize(
     ("path", "expected_calls"),
-    [(_EXECUTOR, 1), (_CLEARING, 3)],
+    # clearing_engine grew from 3 to 4 with the T1211 depth ladder: `find_cycles` is called
+    # twice in sequence (SQL-complete depth first, full depth only when that comes back
+    # empty), and BOTH legs carry the perimeter - which is exactly what the guard below
+    # verifies for each call it finds.
+    [(_EXECUTOR, 1), (_CLEARING, 4)],
     ids=["payments_executor", "clearing_engine"],
 )
 def test_every_tick_money_call_passes_the_perimeter(path: pathlib.Path, expected_calls: int) -> None:

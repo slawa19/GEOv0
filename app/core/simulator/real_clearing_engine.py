@@ -14,6 +14,7 @@ from sqlalchemy import select
 import app.db.session as db_session
 from app.config import settings
 from app.core.clearing.service import (
+    _SQL_DETECTOR_MAX_CYCLE_LENGTH,
     ClearingCommittedAfterCancellation,
     ClearingService,
 )
@@ -179,11 +180,20 @@ class RealClearingEngine:
                         int(max_depth),
                     )
                     _fc_t0 = time.monotonic()
+                    # Depth ladder, same as `auto_clear` (T1211): an executor needs one
+                    # executable cycle shortest-first, not the complete union - ask the
+                    # SQL-complete depth first (no graph load), widen only when empty.
                     cycles = await service.find_cycles(
                         eq,
-                        max_depth=max_depth,
+                        max_depth=min(max_depth, _SQL_DETECTOR_MAX_CYCLE_LENGTH),
                         allowed_participant_pids=run_perimeter_pids(run),
                     )
+                    if not cycles and max_depth > _SQL_DETECTOR_MAX_CYCLE_LENGTH:
+                        cycles = await service.find_cycles(
+                            eq,
+                            max_depth=max_depth,
+                            allowed_participant_pids=run_perimeter_pids(run),
+                        )
                     _fc_ms = int((time.monotonic() - _fc_t0) * 1000.0)
                     if _fc_ms > 500:
                         self._logger.warning(
