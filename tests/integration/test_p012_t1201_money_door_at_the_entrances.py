@@ -173,9 +173,11 @@ async def test_the_smallest_storable_limit_is_signable_by_a_client_that_signs_wh
     signature over the string it actually sent could never verify, and the smallest limit
     `Numeric(20, 8)` can hold was unreachable through the front door.
 
-    MUTATION THIS CATCHES: `signed_payload["limit"] = str(data.limit)` (or any other
-    re-spelling between the wire and `verify_signature`) in `app/core/trustlines/service.py`,
-    in either `create` or `update`.
+    MUTATION THIS CATCHES: any re-spelling between the wire and `verify_signature` in
+    `app/core/trustlines/service.py`, in either `create` or `update` - e.g.
+    `signed_payload["limit"] = str(Decimal(data.limit))`, which turns `"0.00000001"` into
+    `"1E-8"`.  (An earlier edition named `str(data.limit)` - an identity now that
+    `data.limit` IS a `str`; the T1210-bis test-honesty pass corrected the claim.)
     """
 
     await _seed_equivalent(db_session)
@@ -311,8 +313,11 @@ async def test_the_payment_door_still_refuses_exponent_notation_written_by_a_cli
     side of the invariant after all. It is also what `T1209` has told 011 the canon must forbid
     with `pattern: ^-?\\d+(\\.\\d+)?$`.
 
-    MUTATION THIS CATCHES: dropping the `"e" in lowered` guard in `parse_amount_decimal`, or
-    extending the door's `Decimal` re-spelling to strings.
+    MUTATION THIS CATCHES: loosening `_AMOUNT_STR_RE` to admit exponent forms, or extending
+    the door's `Decimal` re-spelling to strings.  (An earlier edition named "dropping the
+    `"e" in lowered` guard" - that mutation is invisible: the regex refuses all four forms
+    on its own, so the guard is redundant and no test can catch its removal.  Found by the
+    T1210-bis test-honesty pass.)
     """
 
     await _seed_equivalent(db_session)
@@ -404,4 +409,127 @@ async def test_a_payment_amount_with_trailing_zeros_commits_and_is_not_renormali
     assert body.get("amount") == amount, (
         f"the API answered with amount={body.get('amount')!r} for a signed {amount!r}. The door "
         f"must not restate a number the signature covers."
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("limit", ["-1", "-0.00000001"])
+async def test_a_negative_limit_is_refused_at_the_door_on_create_and_update(
+    client: AsyncClient, db_session, limit: str
+) -> None:
+    """The schema's old `ge=0` lives on behind the door, and this is its only pin.
+
+    The retype to `str` (69f7800) moved the non-negativity rule from pydantic (`ge=0`, a
+    framework-enforced 422 visible in the generated schema) into two keyword arguments -
+    `require_non_negative=True` at the create and update doors.  The T1210-bis call-site
+    audit measured that NOTHING pinned the moved guard: no test posted a negative limit in
+    any form, so deleting either keyword re-admitted a negative `Numeric(20, 8)` limit
+    silently - the exact "guard with no test" class this repository's review lessons record.
+
+    Refusal must be E009 and must precede the signature check (UNSIGNABLE probe), like every
+    other door rule.  Zero stays admissible: the bound reproduces the schema's old `ge=0`,
+    and reconciling it with the protocol's stricter `limit > 0` (docs/en/02-protocol-spec.md:341)
+    is a recorded fork, not this test's claim.
+
+    MUTATION THIS CATCHES: dropping `require_non_negative=True` from either call in
+    `app/core/trustlines/service.py`.
+    """
+
+    await _seed_equivalent(db_session)
+    lender = await register_and_login(client, f"Door_Negative_{limit.replace('.', '_').replace('-', 'm')}_L")
+    borrower = await register_and_login(client, f"Door_Negative_{limit.replace('.', '_').replace('-', 'm')}_B")
+
+    response = await client.post(
+        "/api/v1/trustlines",
+        headers=lender["headers"],
+        json={
+            "to": borrower["pid"],
+            "equivalent": EQUIVALENT,
+            "limit": limit,
+            "signature": UNSIGNABLE,
+        },
+    )
+    assert response.status_code == 400 and _error_code(response) == "E009", (
+        f"a negative limit {limit!r} must be refused by the door (E009) before the signature "
+        f"check; got {response.status_code} {response.text}. E005 means the guard is gone and "
+        f"only the garbage signature stopped a negative limit from being stored."
+    )
+
+    # The update door holds the same rule.  Create a real line, then try to update it negative.
+    lender_key = SigningKey(base64.b64decode(lender["priv"]))
+    created = await client.post(
+        "/api/v1/trustlines",
+        headers=lender["headers"],
+        json={
+            "to": borrower["pid"],
+            "equivalent": EQUIVALENT,
+            "limit": "5.00",
+            "signature": _sign_trustline_create_request(
+                signing_key=lender_key,
+                to_pid=borrower["pid"],
+                equivalent=EQUIVALENT,
+                limit="5.00",
+            ),
+        },
+    )
+    assert created.status_code == 201, f"setup failed: {created.text}"
+
+    updated = await client.patch(
+        f"/api/v1/trustlines/{created.json()['id']}",
+        headers=lender["headers"],
+        json={"limit": limit, "signature": UNSIGNABLE},
+    )
+    assert updated.status_code == 400 and _error_code(updated) == "E009", (
+        f"the update door must refuse a negative limit {limit!r} with E009 before the "
+        f"signature check; got {updated.status_code} {updated.text}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_float_in_the_policy_is_refused_as_a_payload_error_not_a_signature_failure(
+    client: AsyncClient, db_session
+) -> None:
+    """`{"policy": {"max_hop_usage": 0.5}}` gets a 400 about the payload, not a 401 about the key.
+
+    The canon declares `max_hop_usage`/`daily_limit` as `oneOf` string|number, so a JSON
+    number with a fraction is a canon-blessed request - and pydantic hands it to the service
+    as `float`.  `canonical_json` refuses floats by design; while that call sat INSIDE the
+    `try` around `verify_signature`, the refusal was relabelled "Invalid signature" (E005),
+    telling the client its key was wrong when its signature was never checked at all
+    (T1210-bis finding B - the same relabelling class as the capacity complaint
+    `validate_trustline_policy` used to dress as "must be a number").
+
+    That such a policy cannot currently be SIGNED at all - the canon admits a number the
+    canonical form cannot carry - is a recorded contract fork; whichever way it lands, the
+    refusal the client sees must name the payload, not the signature.
+
+    MUTATION THIS CATCHES: moving `canonical_json(signed_payload)` back inside the `try` in
+    `app/core/trustlines/service.py` create or update.
+    """
+
+    await _seed_equivalent(db_session)
+    lender = await register_and_login(client, "Door_FloatPolicy_Lender")
+    borrower = await register_and_login(client, "Door_FloatPolicy_Borrower")
+
+    response = await client.post(
+        "/api/v1/trustlines",
+        headers=lender["headers"],
+        json={
+            "to": borrower["pid"],
+            "equivalent": EQUIVALENT,
+            "limit": "10.00",
+            "policy": {"max_hop_usage": 0.5},
+            "signature": UNSIGNABLE,
+        },
+    )
+
+    assert response.status_code == 400 and _error_code(response) == "E009", (
+        f"a float inside policy must surface as the canonical-form refusal (400/E009 naming "
+        f"the float), got {response.status_code} {response.text}. E005 here means "
+        f"canonical_json is back inside the try and the payload error is dressed as a "
+        f"signature failure."
+    )
+    assert "float" in response.text.lower(), (
+        f"the refusal must name the actual problem (a float in the canonical payload); got "
+        f"{response.text}"
     )

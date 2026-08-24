@@ -164,8 +164,13 @@ class ParticipantService:
         if not signed_payload:
             raise BadRequestException("No changes provided")
 
+        # `canonical_json` outside the try, as in `create_participant` above: `profile` is
+        # free-form (`extra="allow"`), so a JSON number with a fraction arrives as `float`,
+        # which `canonical_json` refuses by design - that refusal is a 400 about the payload,
+        # not a signature failure, and inside the try it was relabelled "Invalid signature".
+        message = canonical_json(signed_payload)
         try:
-            verify_signature(participant.public_key, canonical_json(signed_payload), data.signature)
+            verify_signature(participant.public_key, message, data.signature)
         except Exception:
             raise InvalidSignatureException("Invalid signature")
 

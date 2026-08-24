@@ -620,22 +620,29 @@ class ClearingService:
             # the two-scales-for-one-debt effect this raw-SQL path had against the ORM DFS
             # below: the driver decides the scale of the value it returns, and the renderer
             # takes that decision back.
+            #
+            # `_debt_id_key` for `debt_id`, not bare `str()`, for the same one-form reason:
+            # on SQLite this raw-SQL path sees the stored 32-hex spelling while the DFS emits
+            # the hyphenated one, so a merged answer could mix two spellings of the same kind
+            # of id in one payload (T1210-bis).  The dedup key already normalized this way;
+            # the RENDITION now matches the key.  (Both detectors, same rule - quadrangles
+            # below inherit this comment.)
             cycles.append(
                 [
                     {
-                        "debt_id": str(row.debt1_id),
+                        "debt_id": self._debt_id_key(row.debt1_id),
                         "debtor": str(row.a),
                         "creditor": str(row.b),
                         "amount": to_money_str(row.amount1, precision),
                     },
                     {
-                        "debt_id": str(row.debt2_id),
+                        "debt_id": self._debt_id_key(row.debt2_id),
                         "debtor": str(row.b),
                         "creditor": str(row.c),
                         "amount": to_money_str(row.amount2, precision),
                     },
                     {
-                        "debt_id": str(row.debt3_id),
+                        "debt_id": self._debt_id_key(row.debt3_id),
                         "debtor": str(row.c),
                         "creditor": str(row.a),
                         "amount": to_money_str(row.amount3, precision),
@@ -742,25 +749,25 @@ class ClearingService:
             cycles.append(
                 [
                     {
-                        "debt_id": str(row.debt1_id),
+                        "debt_id": self._debt_id_key(row.debt1_id),
                         "debtor": str(row.a),
                         "creditor": str(row.b),
                         "amount": to_money_str(row.amt1, precision),
                     },
                     {
-                        "debt_id": str(row.debt2_id),
+                        "debt_id": self._debt_id_key(row.debt2_id),
                         "debtor": str(row.b),
                         "creditor": str(row.c),
                         "amount": to_money_str(row.amt2, precision),
                     },
                     {
-                        "debt_id": str(row.debt3_id),
+                        "debt_id": self._debt_id_key(row.debt3_id),
                         "debtor": str(row.c),
                         "creditor": str(row.d),
                         "amount": to_money_str(row.amt3, precision),
                     },
                     {
-                        "debt_id": str(row.debt4_id),
+                        "debt_id": self._debt_id_key(row.debt4_id),
                         "debtor": str(row.d),
                         "creditor": str(row.a),
                         "amount": to_money_str(row.amt4, precision),
@@ -1065,16 +1072,17 @@ class ClearingService:
                             filtered.append(cycle)
                     cycles = filtered
 
-                cycles = self._deduplicate_cycles(cycles)
-
-                if cycles:
-                    cycles = await self._filter_cycles_by_auto_clearing_policy_sql(
-                        cycles, equivalent_id=equivalent.id
-                    )
-
-                # If triangles exist but are all filtered out (policy/locks), try quadrangles.
-                if max_depth >= 4 and not cycles:
-                    cycles = await self.find_quadrangles_sql(
+                # BOTH lengths, unconditionally, whenever the depth asks for both (T1210-bis
+                # finding A).  The previous gate ran quadrangles only when the filtered
+                # triangles came back EMPTY - "if triangles exist but are all filtered out,
+                # try quadrangles" - which re-created, one step down, exactly the shape the
+                # merge below exists to kill: at max_depth=4 (a legal API input, ge=3) a
+                # single triangle hid every quadrangle from a "complete" early return, and at
+                # 5-6 it starved the SQL side down to triangles, leaving quadrangles to the
+                # DFS's 50-raw-cycle cap alone.  A union's answer must not depend on which
+                # detector happened to be non-empty - including the union of these two.
+                if max_depth >= 4:
+                    cycles = cycles + await self.find_quadrangles_sql(
                         equivalent.id,
                         allowed_participant_ids=allowed_ids,
                         precision=equivalent.precision,
@@ -1096,12 +1104,12 @@ class ClearingService:
                                 filtered.append(cycle)
                         cycles = filtered
 
-                    cycles = self._deduplicate_cycles(cycles)
+                cycles = self._deduplicate_cycles(cycles)
 
-                    if cycles:
-                        cycles = await self._filter_cycles_by_auto_clearing_policy_sql(
-                            cycles, equivalent_id=equivalent.id
-                        )
+                if cycles:
+                    cycles = await self._filter_cycles_by_auto_clearing_policy_sql(
+                        cycles, equivalent_id=equivalent.id
+                    )
             except Exception:
                 logger.warning(
                     "event=clearing.find_cycles_sql_failed equivalent=%s",
@@ -1323,7 +1331,10 @@ class ClearingService:
         # been through the lock filter and `_filter_cycles_by_auto_clearing_policy_sql`, so the
         # union needs no further admission check - only de-duplication, which is by debt-id set
         # and therefore blind to which detector produced the edge, and to the order the edges
-        # come in.  `sql_cycles` is empty whenever the SQL path found nothing or raised.
+        # come in.  `sql_cycles` is empty whenever the SQL path found nothing or raised -
+        # though the raised case is a graceful fallback only on SQLite: on PostgreSQL a
+        # failed raw query aborts the transaction, so the DFS's own queries then fail too
+        # and `find_cycles` errors out anyway (T1210-bis; pre-existing, recorded not fixed).
         #
         # `_deduplicate_cycles` keeps the FIRST occurrence, so for a cycle both detectors found
         # the DFS rendition is the one that survives.  That is immaterial only because the two

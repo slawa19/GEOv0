@@ -147,8 +147,18 @@ class TrustLineService:
         if data.policy is not None:
             signed_payload["policy"] = data.policy
 
+        # `canonical_json` OUTSIDE the try (the `POST /payments` shape, T1210-bis finding B).
+        # It refuses floats by design, and `policy` may legitimately carry one: the canon
+        # declares `max_hop_usage`/`daily_limit` as `oneOf` string|number, so a JSON number
+        # with a fraction arrives here as `float`.  Inside the try that refusal was relabelled
+        # "Invalid signature" - a client whose policy the canon blesses got a 401 it could not
+        # act on, for a request whose signature was never even checked.  Outside, it surfaces
+        # as the honest 400 naming the float.  (That such a policy is UNSIGNABLE at all - the
+        # canon admits a number the canonical form cannot carry - is a recorded contract fork,
+        # not this call site's to settle.)
+        message = canonical_json(signed_payload)
         try:
-            verify_signature(from_participant.public_key, canonical_json(signed_payload), data.signature)
+            verify_signature(from_participant.public_key, message, data.signature)
         except Exception:
             raise InvalidSignatureException("Invalid signature")
 
@@ -337,8 +347,11 @@ class TrustLineService:
         if data.policy is not None:
             signed_payload["policy"] = data.policy
 
+        # Same hoist as `create`: `policy` can carry a canon-blessed float, and its refusal
+        # by `canonical_json` must not be relabelled as a signature failure.
+        message = canonical_json(signed_payload)
         try:
-            verify_signature(user.public_key, canonical_json(signed_payload), data.signature)
+            verify_signature(user.public_key, message, data.signature)
         except Exception:
             raise InvalidSignatureException("Invalid signature")
 
@@ -459,8 +472,11 @@ class TrustLineService:
             raise NotFoundException("Sender not found")
 
         signed_payload: dict = {"id": str(trustline_id)}
+        # Hoisted like create/update; no float can occur in this payload, kept uniform so the
+        # next field added here does not resurrect the relabelling.
+        message = canonical_json(signed_payload)
         try:
-            verify_signature(user.public_key, canonical_json(signed_payload), data.signature)
+            verify_signature(user.public_key, message, data.signature)
         except Exception:
             raise InvalidSignatureException("Invalid signature")
 
