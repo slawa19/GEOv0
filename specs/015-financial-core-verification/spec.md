@@ -258,6 +258,8 @@ tests/unit/test_scenario_inject_topology.py::test_inject_debt_updates_existing_d
 
 - **Запрещено** доказывать сверку величины синтетическим повреждением через ORM в той же сессии, где она затем читается: это доказывает работу кэша, а не сверки. Повреждение вносится отдельным соединением или прямым SQL.
 - **Запрещено** проверять поведение под конкурентностью на SQLite. Всё, что касается блокировок, owner-lock, `FOR UPDATE` и гонок ремонта с PREPARE, идёт только в Postgres-тир: маркер `postgres` (`pytest.ini:14-16`), fail-closed хук (`tests/conftest.py:69-81`), суффикс `*_postgres.py` (`tests/unit/test_postgres_test_taxonomy.py:123`), запуск `verify_local.ps1 -BackendMarker postgres`.
+- **Запрещено считать зелёный PR доказательством прогона Postgres-тира.** Джоба `postgres` закрыта условием `github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'` (`.github/workflows/quality.yml:158`) и на `pull_request` **не идёт**; тем же условием закрыты `container-smoke` (`:230`), `simulator-super-smoke` (`:679`), `admin-e2e` (`:712`) и `simulator-visual-e2e` (`:738`). Поскольку почти все находки о конкурентности в этой программе проверяются только на Postgres, зелёный PR здесь ничего о них не говорит. Evidence — ручной `workflow_dispatch` либо локальный прогон, записанный с командой и exit code.
+
 - **Запрещено** засчитывать `RT-015-3` по логу или метрике: единственное доказательство — завершение запроса под таймаутом.
 - **Запрещено** закрывать `F-015-4` тестом, наблюдающим только запись в журнал. Проверяется исход операции, а не строка аудита.
 - **Запрещено** принимать `UNVERIFIABLE` как успешный результат сверки в любом гейте.
