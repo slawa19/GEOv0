@@ -271,6 +271,12 @@ class SnapshotBuilder:
             debit = debit_sum.get(rec.id, Decimal("0"))
             net = credit - debit
 
+            # 012 / T1210 finding 6: these next four lines emit ONE net in TWO encodings -
+            # the amount (`net_balance`, minimum-digits) and an integer at the equivalent's
+            # quantum (`net_balance_atoms`/`net_sign`, which `viz_color_key` and `viz_size`
+            # below are derived from).  They may differ in RESOLUTION and never in SIGN or in
+            # whether the balance exists at all; the guarantee is `net_decimal_to_atoms`'s and
+            # is pinned by tests/integration/test_p012_t1210_net_balance_agrees_with_its_atoms.py.
             atoms = net_decimal_to_atoms(net, precision=precision)
             node.net_balance_atoms = str(abs(atoms))
             node.net_sign = atoms_to_net_sign(atoms)

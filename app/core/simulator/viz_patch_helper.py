@@ -285,6 +285,11 @@ class VizPatchHelper:
                 viz_shape_key = "circle"
 
             net = credit_sum.get(p.id, Decimal("0")) - debit_sum.get(p.id, Decimal("0"))
+            # 012 / T1210 finding 6: one net, two encodings in one payload - `net_balance`
+            # (the amount) and `net_balance_atoms`/`net_sign` (the quantised integer that
+            # `viz_color_key` and `viz_size` are read from).  They may differ in RESOLUTION,
+            # never in SIGN or in whether the balance exists; see `net_decimal_to_atoms` and
+            # tests/integration/test_p012_t1210_net_balance_agrees_with_its_atoms.py.
             atoms = net_decimal_to_atoms(net, precision=precision)
             net_sign: int = atoms_to_net_sign(atoms)
 
