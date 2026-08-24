@@ -1,4 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import {
+  equivalentPrecision,
+  resetEquivalentPrecisions,
+  setEquivalentPrecisions,
+} from '../config/equivalentPrecision'
 import type { GraphSnapshot } from '../types'
 import { computeNodeEdgeStats } from './useSelectedNodeEdgeStats'
 
@@ -52,10 +57,49 @@ function renderOutLimit(equivalent: string, trustLimit: string): string {
 }
 
 describe('RT-012-4: node-card trust limits ignore the equivalent precision', () => {
+  // 012 / T1210 finding 8. These cases used to declare GRAM and MICRO in the table above and
+  // nowhere else: neither code exists anywhere in the repository, so `equivalentPrecision()` fell
+  // through to the default of 2 - and because the rule is MINIMUM digits, a value carrying exactly
+  // its own precision renders in full under any formatter that does not truncate. So the
+  // digit-count assertions held against code entirely blind to the equivalent: the review mutated
+  // `equivalentPrecision` to return a constant 1 and four of the five cases still passed.
+  //
+  // The catalogue is now pushed through the real registry, so the code has to READ these
+  // precisions instead of coinciding with them. The first test below holds that line: a code in
+  // the table that the registry does not answer for is a row measuring the default, and a row
+  // measuring the default proves nothing here.
+  beforeEach(() => {
+    setEquivalentPrecisions(
+      Object.entries(PRECISION_BY_EQUIVALENT).map(([code, precision]) => ({ code, precision })),
+    )
+  })
+
+  afterEach(() => {
+    resetEquivalentPrecisions()
+  })
+
+  it('every equivalent in the case table is really registered at that precision', () => {
+    for (const [code, declared] of Object.entries(PRECISION_BY_EQUIVALENT)) {
+      expect(
+        equivalentPrecision(code),
+        `${code} appears in this file's table at precision ${declared}, but the registry answers `
+          + `${equivalentPrecision(code)}. A row driven by an unregistered code measures the `
+          + 'default, and under the minimum-digit rule that passes even against a formatter that '
+          + 'ignores the equivalent entirely.',
+      ).toBe(declared)
+    }
+  })
+
+  // Each amount carries FEWER digits than its equivalent declares, which is what makes these rows
+  // load-bearing under a minimum-digit rule: a correct renderer pads up to `precision`, and one
+  // that ignores the equivalent cannot. The first version used an amount with exactly `precision`
+  // digits everywhere, so every row rendered in full whatever precision was believed, and the
+  // assertion degenerated into a one-sided check (T1210 finding 8).
   it.each([
-    { equivalent: 'GRAM', limit: '12.3456' },
-    { equivalent: 'HOUR', limit: '12.3' },
-    { equivalent: 'UAH', limit: '12.34' },
+    { equivalent: 'GRAM', limit: '12.3' },
+    { equivalent: 'MICRO', limit: '12.3' },
+    { equivalent: 'HOUR', limit: '12' },
+    { equivalent: 'UAH', limit: '12.3' },
   ])(
     'renders a $equivalent trust limit with exactly the digits that equivalent declares',
     ({ equivalent, limit }) => {
@@ -69,12 +113,17 @@ describe('RT-012-4: node-card trust limits ignore the equivalent precision', () 
           + `digits claim a precision the equivalent does not have, fewer hide value the ledger holds.`,
       ).toBe(precision)
 
+      // The VALUE must survive, not the spelling. Padding `12.3` to `12.3000` at precision 4 is
+      // the rule working, not a defect; dropping a digit, or moving one, is the defect. Comparing
+      // the string verbatim here would forbid the padding the assertion above requires - the two
+      // halves would contradict each other, which is what the first version of this file did once
+      // its inputs stopped carrying exactly `precision` digits.
       expect(
-        rendered,
-        `A ${equivalent} trust limit of ${limit} is exactly representable at precision ${precision}, `
-          + `so the node card must show it unchanged. It shows "${rendered}" instead, i.e. the operator `
-          + 'reads a different limit than the one that is in force.',
-      ).toBe(limit)
+        Number(rendered),
+        `A ${equivalent} trust limit of ${limit} must still be worth ${limit} after rendering at `
+          + `precision ${precision}. The node card shows "${rendered}", which is a different amount - `
+          + 'the operator reads a limit other than the one in force.',
+      ).toBe(Number(limit))
     },
   )
 
