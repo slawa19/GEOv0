@@ -205,9 +205,15 @@ async def test_auto_clear_over_a_shared_edge_clears_the_large_cycle_and_leaves_t
 
     Clearing the amount-100 cycle first consumes the shared edge entirely (one clearing
     transaction; the small cycle dies with the shared edge).  Clearing the amount-10 cycle
-    first leaves [b->d 10, d->a 10] in two transactions - the reviewer reproduced exactly
-    that under the length-only sort.  Same graph, different remaining debtors: this is the
-    behavioral half of the finding, and it is what auto_clear's callers actually observe.
+    first leaves [b->d 10, d->a 10] in two transactions.  Same graph, different remaining
+    debtors: this is the behavioral half of the finding, and what auto_clear's callers see.
+
+    WHAT THIS PINS, honestly (1b's review of a9d742e): with the depth ladder, auto_clear
+    reaches this graph through the SQL fast path at depth 4, where `ORDER BY LEAST(...)
+    DESC` supplies the order - so a mutated UNION sort leaves this test green, and this pin
+    holds "fast path + executor contract", not the union's sorting.  The union sort has its
+    own behavioral pin in `test_auto_clear_orders_the_union_when_the_sql_path_is_down`,
+    which chokes the SQL detectors so the DFS+union path is the one that answers.
     """
 
     await _seed_graph(db_session, edges=_SHARED_EDGE)
@@ -228,4 +234,44 @@ async def test_auto_clear_over_a_shared_edge_clears_the_large_cycle_and_leaves_t
         f"one clearing and residual debts b->c/c->a, got cleared={cleared} "
         f"remaining={remaining!r}. Residuals at b->d/d->a mean the small cycle executed "
         f"first - discovery order decided the final ledger."
+    )
+
+
+@pytest.mark.asyncio
+async def test_auto_clear_orders_the_union_when_the_sql_path_is_down(
+    db_session, monkeypatch
+) -> None:
+    """The union's own ordering, pinned behaviorally: SQL detectors down, same final ledger.
+
+    With `find_triangles_sql`/`find_quadrangles_sql` raising, `find_cycles` falls back to
+    the DFS on every ladder rung, `sql_cycles` stays empty, and the answer's order is
+    decided solely by the union sort (`_cycle_order_key`).  Insertion order favors the
+    small cycle, so under a length-only sort the small cycle executes first and the ledger
+    ends at [b->d, d->a] - this is the behavioral pin the fast-path variant above cannot
+    hold (1b's review of a9d742e).
+
+    MUTATION THIS CATCHES: `final_cycles.sort(key=len)` on the merged answer.
+    """
+
+    async def _down(self, *args, **kwargs):
+        raise RuntimeError("SQL detector down (test)")
+
+    monkeypatch.setattr(ClearingService, "find_triangles_sql", _down)
+    monkeypatch.setattr(ClearingService, "find_quadrangles_sql", _down)
+
+    await _seed_graph(db_session, edges=_SHARED_EDGE)
+
+    service = ClearingService(db_session)
+    cleared = await service.auto_clear(_EQ, max_depth=6)
+
+    result = await db_session.execute(
+        select(Debt, Participant.pid)
+        .join(Participant, Participant.id == Debt.debtor_id)
+        .where(Debt.amount > 0)
+    )
+    remaining = sorted((pid, str(debt.amount)) for debt, pid in result.all())
+    assert cleared == 1 and [p for p, _ in remaining] == ["b", "c"], (
+        f"with the SQL path down the union sort alone must still execute the amount-100 "
+        f"cycle first: expected one clearing and residual b->c/c->a, got cleared={cleared} "
+        f"remaining={remaining!r}"
     )

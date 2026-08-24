@@ -428,6 +428,31 @@ class ClearingService:
             return text
 
     @classmethod
+    def _cycle_order_key(cls, cycle: List[Dict]) -> tuple:
+        """Shorter first; within a length, largest executable amount first (T1211).
+
+        The executable amount of a cycle is its smallest edge - the `LEAST(...)` the SQL
+        detectors deliberately ORDER BY DESC, because `auto_clear` executes the first cycle
+        that succeeds and ordering therefore IS behavior (for two cycles sharing an edge it
+        decides which debts remain).  The debt-id set as the last component makes
+        equal-amount ties deterministic across tiers and detectors, instead of leaving them
+        to discovery or `ORDER BY` residue.  Used on the merged answer AND on the fast-path
+        early return, so a caller sees one ordering rule regardless of which path answered.
+        """
+
+        def _executable_amount() -> Decimal:
+            try:
+                return min(Decimal(str(edge.get("amount", "0"))) for edge in cycle)
+            except (InvalidOperation, ValueError, TypeError):
+                return Decimal(0)
+
+        return (
+            len(cycle),
+            -_executable_amount(),
+            tuple(sorted(cls._debt_id_key(e.get("debt_id", "")) for e in cycle)),
+        )
+
+    @classmethod
     def _deduplicate_cycles(cls, cycles: List[List[Dict]]) -> List[List[Dict]]:
         """Stable dedupe by unordered set of debt ids.
 
@@ -1166,6 +1191,10 @@ class ClearingService:
                 # for more and it is not, so fall through: the DFS runs and the two answers are
                 # merged below.
                 if max_depth <= _SQL_DETECTOR_MAX_CYCLE_LENGTH:
+                    # Same ordering rule as the merged answer below (1b's review of
+                    # a9d742e): the raw `ORDER BY ... DESC` has no secondary key, so
+                    # equal-amount ties were tier-dependent residue on this path.
+                    sql_cycles.sort(key=self._cycle_order_key)
                     return sql_cycles
 
         # 1. Load Graph
@@ -1354,22 +1383,7 @@ class ClearingService:
         # different final ledger from the order alone.  Sorting the union restores the
         # recorded heuristic for every cycle regardless of which detector found it (the DFS
         # side never had it - it was simply never merged in front of SQL results before).
-        def _executable_amount(cycle: List[Dict]) -> Decimal:
-            try:
-                return min(Decimal(str(edge.get("amount", "0"))) for edge in cycle)
-            except (InvalidOperation, ValueError, TypeError):
-                return Decimal(0)
-
-        def _cycle_order_key(cycle: List[Dict]) -> tuple:
-            # The debt-id set as the last component makes equal-amount ties deterministic
-            # (concatenation order would otherwise decide, i.e. which detector ran first).
-            return (
-                len(cycle),
-                -_executable_amount(cycle),
-                tuple(sorted(self._debt_id_key(e.get("debt_id", "")) for e in cycle)),
-            )
-
-        final_cycles.sort(key=_cycle_order_key)
+        final_cycles.sort(key=self._cycle_order_key)
 
         logger.info(
             "event=clearing.find_cycles_done equivalent=%s cycles=%s",
