@@ -33,12 +33,21 @@ class TrustLine(TrustLineBase):
 class TrustLineCreateRequest(BaseModel):
     to: str
     equivalent: str
-    limit: Decimal = Field(..., ge=0)
+    # A string, verbatim, because the signature is taken over it verbatim (012 / T1201).
+    # `api/openapi.yaml` has declared `limit: type: string` all along; typing it `Decimal`
+    # here made pydantic re-spell the client's money before the service could sign-check it,
+    # so for `"0.00000001"` the server rebuilt the payload with `str(Decimal('1E-8'))` and
+    # the client's Ed25519 signature could never verify.  The `ge=0` bound moved with the
+    # rest of the money rules into `parse_money_amount(..., require_non_negative=True)`,
+    # which the service calls before the signature check.  Same contract as
+    # `PaymentCreateRequest.amount`.
+    limit: str
     policy: Optional[Dict[str, Any]] = None
     signature: str
 
 class TrustLineUpdateRequest(BaseModel):
-    limit: Optional[Decimal] = Field(default=None, ge=0)
+    # Same contract as `TrustLineCreateRequest.limit`.
+    limit: Optional[str] = None
     policy: Optional[Dict[str, Any]] = None
     signature: str
 

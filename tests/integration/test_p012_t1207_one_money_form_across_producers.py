@@ -820,3 +820,25 @@ def test_every_value_that_did_move_was_one_the_precision_could_not_express(
             f"so there was nothing here to fix and {new!r} is an unlicensed change"
         )
         assert "e" not in new.lower()
+
+
+def test_the_minimum_digit_promise_does_not_depend_on_the_ambient_decimal_context() -> None:
+    """THE RULE at the widest corner the door and the schema jointly admit: 12 + 18 digits.
+
+    `quantize` obeys the ambient context's `prec` (default 28), and a value at the door's
+    magnitude bound padded to `precision: 18` has a 30-digit coefficient.  Before this pin,
+    `to_money_str(Decimal("999999999999.12345678"), 18)` raised `InvalidOperation` inside the
+    renderer's `try`, fell through to the show-all branch, and returned 8 fraction digits
+    where the docstring promises at least 18 - found by external review (012, second circle).
+
+    MUTATION THIS CATCHES: removing the `localcontext` sizing around the `quantize` call in
+    `app/utils/money.py`.
+    """
+
+    value = Decimal("999999999999.12345678")
+    rendered = to_money_str(value, 18)
+    assert rendered == "999999999999.123456780000000000", (
+        f"got {rendered!r}: the value at the magnitude bound must render with the full 18 "
+        f"fraction digits its equivalent declares, independent of decimal.getcontext().prec"
+    )
+    assert Decimal(rendered) == value

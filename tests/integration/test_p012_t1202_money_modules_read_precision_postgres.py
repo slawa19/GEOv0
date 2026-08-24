@@ -65,6 +65,7 @@ inherited from a fixture, and the parametrised cases would be meaningless otherw
 
 from __future__ import annotations
 
+import inspect
 import uuid
 from decimal import Decimal
 
@@ -73,6 +74,7 @@ import pytest_asyncio
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1 import clearing as clearing_route
 from app.core.balance.service import BalanceService
 from app.core.clearing.service import ClearingService
 from app.db.models.debt import Debt
@@ -81,6 +83,27 @@ from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 
 pytestmark = pytest.mark.postgres
+
+
+def _api_default_max_depth() -> int:
+    """The depth `GET /api/v1/clearing/cycles` uses when the caller names none.
+
+    THIS MODULE ORIGINALLY ASKED AT `max_depth=3`, AND THAT WAS THE HOLE (found by external
+    review, 2026-08-24).  Three is the ONE depth at which the SQL fast path and the Python DFS
+    have equal reach - the SQL detectors join three and four `debts` rows and can express
+    nothing longer - so it is the one depth at which `find_cycles` returning the SQL answer
+    early cannot be wrong.  Asking there made "the two detectors agree" true by choice of
+    population: at the route's real default of six, a graph with any triangle in it reported
+    NO longer cycle at all.  Read from the route rather than repeated, so the guard cannot
+    drift away from what users get; the reach itself is covered by
+    `test_p012_money_form_and_detector_reach_postgres.py`.
+    """
+
+    marker = inspect.signature(clearing_route.list_cycles).parameters["max_depth"].default
+    return int(getattr(marker, "default", marker))
+
+
+API_DEFAULT_MAX_DEPTH = _api_default_max_depth()
 
 
 # `LEAST(...) > 0.01` is the predicate under test, so the amounts below are chosen against the
@@ -254,16 +277,27 @@ async def test_the_sql_detector_and_the_dfs_fallback_agree_on_what_a_real_debt_i
     """Two detectors, one graph, one answer.
 
     `find_cycles` prefers the SQL detector and returns early when it is non-empty, falling
-    through to the Python DFS only when SQL comes back empty.  That preference is sound only if
-    the two admit the same debts.  Before the fix the DFS filtered on `Debt.amount > 0` and the
-    SQL added `LEAST(...) > 0.01`, so on this graph the fallback found the cycle the fast path
-    could not - the disagreement, observed without monkeypatching or disabling any guard.
+    through to the Python DFS only when SQL comes back empty.  Before the fix the DFS filtered
+    on `Debt.amount > 0` and the SQL added `LEAST(...) > 0.01`, so on this graph the fallback
+    found the cycle the fast path could not - the disagreement, observed without monkeypatching
+    or disabling any guard.
 
     Audited, so that "they agree" is a claim and not a hope: both paths require `amount > 0`,
     both exclude pairs locked by a prepared payment, and both run every candidate through
     `_filter_cycles_by_auto_clearing_policy_sql` -> `_cycle_respects_auto_clearing`, which
     demands an active controlling trust line with `auto_clearing` on for every edge, exactly as
-    the SQL JOINs do.  The threshold was the only admission rule that differed.
+    the SQL JOINs do.  The threshold was the only ADMISSION rule that differed.
+
+    CORRECTED 2026-08-24 BY EXTERNAL REVIEW, AND THE CORRECTION IS THE POINT.  The first
+    version of this docstring went one step further and said the preference "is sound only if
+    the two admit the same debts" - i.e. that equal admission makes the early return sound.
+    That is false, because admission is not the only way the two differ: the SQL detectors
+    REACH three and four edges and the DFS reaches `max_depth`, so at any depth above four the
+    early return answers a narrower question than the one asked, and dropping the threshold
+    made it do so more often rather than less.  The reach half is `find_cycles`' own problem
+    and is measured in `test_p012_money_form_and_detector_reach_postgres.py`; this test is
+    about admission alone, and now asks at the route's default depth so that it cannot be read
+    as evidence about reach.
     """
 
     eq = await _equivalent(db_session, "UAH", 2)
@@ -272,7 +306,7 @@ async def test_the_sql_detector_and_the_dfs_fallback_agree_on_what_a_real_debt_i
 
     service = ClearingService(db_session)
     via_sql = _cycle_debt_id_sets(await service.find_triangles_sql(eq.id))
-    via_find_cycles = _cycle_debt_id_sets(await service.find_cycles("UAH", max_depth=3))
+    via_find_cycles = _cycle_debt_id_sets(await service.find_cycles("UAH", max_depth=API_DEFAULT_MAX_DEPTH))
 
     assert (expected in via_sql) == (expected in via_find_cycles), (
         "the SQL fast path and the detector `find_cycles` actually answers with disagree "
@@ -303,7 +337,7 @@ async def test_a_graph_with_an_ordinary_and_a_boundary_cycle_reports_both(
     )
 
     service = ClearingService(db_session)
-    found = _cycle_debt_id_sets(await service.find_cycles("UAH", max_depth=3))
+    found = _cycle_debt_id_sets(await service.find_cycles("UAH", max_depth=API_DEFAULT_MAX_DEPTH))
 
     assert ordinary in found, "control: the ordinary cycle must be reported"
     assert boundary in found, (
@@ -353,7 +387,7 @@ async def test_the_detector_does_not_privately_decide_that_sub_quantum_debt_is_n
 
     service = ClearingService(db_session)
     via_sql = _cycle_debt_id_sets(await service.find_triangles_sql(eq.id))
-    via_find_cycles = _cycle_debt_id_sets(await service.find_cycles("UAH", max_depth=3))
+    via_find_cycles = _cycle_debt_id_sets(await service.find_cycles("UAH", max_depth=API_DEFAULT_MAX_DEPTH))
 
     assert expected in via_find_cycles, (
         "control: the DFS fallback finds this cycle today, which is the whole point - the "

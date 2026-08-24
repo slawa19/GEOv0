@@ -17,7 +17,7 @@ those are the names T1201 and T1207 published.
 
 from __future__ import annotations
 
-from decimal import Decimal, InvalidOperation, ROUND_DOWN
+from decimal import Decimal, InvalidOperation, ROUND_DOWN, localcontext
 
 __all__ = ["to_money_str"]
 
@@ -71,10 +71,19 @@ def to_money_str(value: Decimal, precision: int) -> str:
         return "0"
 
     quantum = Decimal(1).scaleb(-precision)
-    try:
-        quantized = value.quantize(quantum, rounding=ROUND_DOWN)
-    except InvalidOperation:
-        quantized = None
+    # `quantize` obeys the ambient context's `prec`, and the default 28 is narrower than the
+    # padded coefficient can get: 12 integer digits (the door's magnitude bound) plus
+    # `precision: 18` (the widest `Equivalent.precision` admits) is 30.  Under the default
+    # context, `to_money_str(Decimal("999999999999.12345678"), 18)` raised `InvalidOperation`
+    # inside the `try` and fell through to the show-all branch - 8 fraction digits where THE
+    # RULE promises at least 18.  The promise must not depend on whichever context happens to
+    # be installed, so the operation runs in one sized for the coefficient it produces.
+    with localcontext() as ctx:
+        ctx.prec = max(ctx.prec, max(value.adjusted() + 1, 0) + precision + 2)
+        try:
+            quantized = value.quantize(quantum, rounding=ROUND_DOWN)
+        except InvalidOperation:
+            quantized = None
 
     if quantized is not None and quantized == value:
         return format(quantized, "f")

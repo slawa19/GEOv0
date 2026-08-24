@@ -36,16 +36,24 @@ class is therefore invisible, or visible with the wrong shape and the wrong caus
 tier: a green or red SQLite run says nothing about production. The executable form of that
 measurement is `tests/unit/test_p012_numeric_scale_rounding_is_invisible_on_sqlite.py`.
 
-WHAT THE FIX IS EXPECTED TO DO (T1201). Reject at the door what the column cannot hold:
-`DEFAULT_MAX_AMOUNT_SCALE` (`app/utils/validation.py:91`, today 18) is brought down to the scale
-of the money columns (`Numeric(20, 8)` - `app/db/models/debt.py:14`,
-`app/db/models/trustline.py:14`), so `parse_amount_decimal` refuses `0.123456789` with a 4xx
-before a signature is ever bound to a number that cannot be stored. The assertions below are
-written as that disjunction - **either the door refuses the amount, or the ledger holds exactly
-what was signed** - so the fix turns them green without any edit here, and re-raising
-`DEFAULT_MAX_AMOUNT_SCALE` back to 18 turns them red again. The spec names that second direction
-as the mandatory counter-check; `test_rt_012_1_counter_check_the_door_admits_more_scale_than_the_column_stores`
-below makes it executable rather than a promise.
+WHAT THE FIX DOES (T1201). Reject at the door what the column cannot hold. `POST /payments`
+parses its amount with `parse_money_amount` (`app/core/payments/service.py:510`), which refuses
+any value `Numeric(20, 8)` cannot keep unchanged - `MONEY_MAX_SCALE` fraction digits and
+`MONEY_MAX_INTEGER_DIGITS` integer digits - with a 400/E009 before a signature is ever bound to
+a number that cannot be stored. The assertions below are written as a disjunction - **either the
+door refuses the amount, or the ledger holds exactly what was signed** - so the fix turns them
+green without any edit here.
+
+THE COUNTER-CHECK, AND WHY THIS PARAGRAPH USED TO BE WRONG. The first edition of this module
+said the flip constant was `DEFAULT_MAX_AMOUNT_SCALE` and that the counter-check demonstrated
+it. Measured 2026-08-24: setting `DEFAULT_MAX_AMOUNT_SCALE` back to 18 leaves five of these six
+tests GREEN, and the only failure is the counter-check's own `assert DEFAULT_MAX_AMOUNT_SCALE ==
+STORAGE_SCALE` - a literal compared against a literal. The reason is that `parse_money_amount`
+passes its bounds explicitly and no production caller reaches `parse_amount_decimal` bare, so
+that constant is dead for money and this module was never sensitive to it. The counter-check
+below now flips `MONEY_MAX_SCALE` - the constant the door actually reads - and does not merely
+assert that the door's verdict changes: it re-submits a signed payment over HTTP with the
+constant widened and reads the row back, i.e. it reproduces `F-012-1` end to end on demand.
 
 Not fixed here and not asserted here: which rounding mode the system should use. `ROUND_DOWN` in
 `edge_patch_builder.py` against PostgreSQL's half-up is a question the spec routes to 015.
@@ -68,8 +76,9 @@ from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
+from app.utils import validation
 from app.utils.exceptions import BadRequestException
-from app.utils.validation import DEFAULT_MAX_AMOUNT_SCALE, parse_amount_decimal
+from app.utils.validation import MONEY_MAX_SCALE, parse_money_amount
 from tests.integration.p012_pg_http import make_pg_client_fixture
 from tests.integration.test_scenarios import (
     _sign_payment_request,
@@ -82,13 +91,15 @@ pytestmark = pytest.mark.postgres
 
 # The `debts.amount` / `trust_lines.limit` declaration. Read back from the live catalog in the
 # counter-check rather than trusted as a literal, because the whole finding is a disagreement
-# between this number and DEFAULT_MAX_AMOUNT_SCALE.
+# between this number and what the door admits.
 STORAGE_SCALE = 8
 
 TRUSTLINE_LIMIT = "100.00"
 
-# Every amount below is accepted by `parse_amount_decimal` today (scale <= 18) and cannot be held
-# by `NUMERIC(20,8)`. The third column is what PostgreSQL 16.9 was measured to store.
+# Every amount below was accepted by the door before T1201 and cannot be held by
+# `NUMERIC(20,8)`: each has a ninth significant fraction digit, so the VALUE itself is
+# unstorable - not merely its spelling. The second column is what PostgreSQL 16.9 was
+# measured to store.
 UNSTORABLE_AMOUNTS = [
     # scale 9, rounds UP: the ledger ends up holding MORE than the participant signed.
     ("0.123456789", "0.12345679"),
@@ -96,7 +107,7 @@ UNSTORABLE_AMOUNTS = [
     ("0.123456785", "0.12345679"),
     # scale 9, rounds to zero: chk_debt_amount_positive fires, and the sender gets HTTP 500.
     ("0.000000001", "0"),
-    # scale 18 - the largest scale the door accepts today.
+    # scale 18 - the longest fraction the wire grammar allows to be spelled at all.
     ("0.123456789012345678", "0.12345679"),
 ]
 
@@ -304,8 +315,8 @@ async def test_rt_012_1_a_signed_amount_the_column_cannot_hold_reaches_the_ledge
         f"(delta {stored - signed:+}). The signature covers the string {amount!r} verbatim, so "
         f"the ledger now records an obligation the sender never authorised - and here it is "
         f"LARGER than the authorised one. The door "
-        f"(app/core/payments/service.py:504 -> parse_amount_decimal, "
-        f"DEFAULT_MAX_AMOUNT_SCALE={DEFAULT_MAX_AMOUNT_SCALE}) admitted a scale the column "
+        f"(app/core/payments/service.py:510 -> parse_money_amount, "
+        f"MONEY_MAX_SCALE={MONEY_MAX_SCALE}) admitted a value the column "
         f"(Numeric(20, {STORAGE_SCALE})) cannot hold, and nothing between them quantised.\n{_WHY}"
     )
 
@@ -337,19 +348,35 @@ async def test_rt_012_1_control_a_scale_8_amount_survives_the_chain_unchanged(
     )
 
 
-async def test_rt_012_1_counter_check_the_door_admits_more_scale_than_the_column_stores() -> None:
-    """The counter-check the spec mandates, made executable rather than promised.
+async def test_rt_012_1_counter_check_widening_the_door_reproduces_the_finding_end_to_end(
+    pg_client: AsyncClient, scenario: _Scenario, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The mandatory counter-check, on the constant the door reads, performed rather than described.
 
-    The reproducer above is a disjunction, so it must be shown to be sensitive to the single
-    constant T1201 will change - otherwise it would be indistinguishable from a test that merely
-    records today's behaviour. The storage scale is read out of the live PostgreSQL catalog, not
-    written here as a literal: the finding IS the disagreement between that number and
-    `DEFAULT_MAX_AMOUNT_SCALE`, so hard-coding both sides would assert nothing.
+    WHY THIS REPLACED THE PREVIOUS ONE. The reproducer above is a disjunction, so it has to be
+    shown sensitive to the fix - otherwise it is indistinguishable from a test that records
+    today's behaviour. The first edition claimed that sensitivity for `DEFAULT_MAX_AMOUNT_SCALE`
+    and demonstrated it with `assert DEFAULT_MAX_AMOUNT_SCALE == STORAGE_SCALE`, a literal
+    against a literal, plus a flip performed on `parse_amount_decimal(..., max_scale=18)` - a
+    call no production caller makes. Measured: putting `DEFAULT_MAX_AMOUNT_SCALE` back to 18
+    left five of the six tests in this module green, the sixth being that self-referential
+    assert. The constant is not the door for money; `MONEY_MAX_SCALE` is, and the door that
+    reads it is `parse_money_amount` (`app/core/payments/service.py:510`).
 
-    Direction of the gate: while `DEFAULT_MAX_AMOUNT_SCALE` exceeds the column scale, the
-    reproducer above is red. Lower it to the column scale and the same amounts are refused at
-    `parse_amount_decimal`, which is the green branch of the disjunction. Raise it back to 18 and
-    they are red again.
+    WHAT THIS ONE DOES INSTEAD. Three steps, in order:
+
+    1. the live column scale is read out of the PostgreSQL catalog - the finding IS a
+       disagreement between the column and the door, so hard-coding both sides would assert
+       nothing;
+    2. the door is shown to refuse the reproducer's amounts today, through the production entry
+       point;
+    3. `MONEY_MAX_SCALE` is widened to 18 and the SAME signed payment is submitted over HTTP,
+       and the `debts` row is read back as text. If the amounts are then admitted AND the ledger
+       holds a different number from the one signed, this module's green above is caused by the
+       door and nothing else - because with the door widened, `F-012-1` happens again, here, now.
+
+    The one thing this cannot demonstrate is that `DEFAULT_MAX_AMOUNT_SCALE` matters, and the
+    last assertion says so out loud rather than leaving the earlier claim standing.
     """
 
     from tests.conftest import TestingSessionLocal
@@ -375,37 +402,66 @@ async def test_rt_012_1_counter_check_the_door_admits_more_scale_than_the_column
         f"'Не менять Numeric(20, 8)' non-goal was crossed or this module's premise moved; "
         f"re-measure before trusting anything above."
     )
-
-    # 2026-08-24, T1201 landed. This used to assert `DEFAULT_MAX_AMOUNT_SCALE > STORAGE_SCALE`,
-    # written as a self-obsoleting marker whose own message read "that is the T1201 fix". It was
-    # an `assert`, so the fix turned this module red for the one reason that is not a defect.
-    # Rewritten to state the post-fix invariant; the demonstrative flip below is unchanged in
-    # substance and is still the point of the test.
-    assert DEFAULT_MAX_AMOUNT_SCALE == STORAGE_SCALE, (
-        f"the door defaults to scale {DEFAULT_MAX_AMOUNT_SCALE} and the column holds "
-        f"{STORAGE_SCALE}. Any gap is `F-012-1` again: an amount admitted at the door and "
-        f"rounded by the column, with the signature still covering the original string. If the "
-        f"column grew, move this constant with it deliberately - do not widen the door to match "
-        f"a capacity nobody verified."
+    assert MONEY_MAX_SCALE == STORAGE_SCALE, (
+        f"the door keeps {MONEY_MAX_SCALE} fraction digits and the column holds "
+        f"{STORAGE_SCALE}. Any gap is `F-012-1` again. If the column grew, move the constant "
+        f"with it deliberately - do not widen the door to match a capacity nobody verified."
     )
 
-    # The one-constant flip, demonstrated rather than described - now in the direction that
-    # re-opens the hole rather than the one that has it open.
+    # Step 2: today, through the entry point the payment service actually calls.
     for amount, _ in UNSTORABLE_AMOUNTS:
         with pytest.raises(BadRequestException):
-            parse_amount_decimal(amount, require_positive=True)
-        assert parse_amount_decimal(
-            amount, max_scale=18, require_positive=True
-        ) == Decimal(amount), (
-            f"widening the door back to scale 18 no longer admits {amount!r}, so this "
-            f"counter-check has stopped demonstrating the flip it exists to demonstrate, and "
-            f"the reproducer above can no longer be trusted to react to the door at all."
-        )
+            parse_money_amount(amount, require_positive=True)
 
-    # And the control amount must survive the narrowed door, or the fix would break valid money.
-    assert parse_amount_decimal(
-        "0.12345678", max_scale=STORAGE_SCALE, require_positive=True
-    ) == Decimal("0.12345678"), (
+    # Step 3: widen the one constant and watch the finding come back. `parse_money_amount` reads
+    # `MONEY_MAX_SCALE` from the module at call time (via `is_storable_money`), so this patch
+    # reaches the running application, not a copy of it.
+    monkeypatch.setattr(validation, "MONEY_MAX_SCALE", 18)
+
+    amount, measured_storage = UNSTORABLE_AMOUNTS[0]
+    assert parse_money_amount(amount, require_positive=True) == Decimal(amount), (
+        f"with MONEY_MAX_SCALE widened to 18 the door still refuses {amount!r}, so it is not "
+        f"that constant which decides the verdict and this module cannot be said to react to "
+        f"the door at all."
+    )
+
+    status_code, body = await _submit_signed_payment(pg_client, scenario, amount)
+    assert status_code == 200 and body.get("status") == "COMMITTED", (
+        f"with the door widened, the signed payment of {amount!r} should be accepted exactly as "
+        f"it was before T1201; got {status_code} {body!r}. If it is refused for some other "
+        f"reason, the flip demonstrated here is not the flip the reproducer above depends on."
+    )
+
+    rows = await _ledger_rows(scenario["equivalent_id"])
+    assert rows == [measured_storage], (
+        f"with the door widened, PostgreSQL was expected to hold {measured_storage!r} for a "
+        f"signed {amount!r} - the rounding that IS `F-012-1`. It holds {rows!r} instead, so "
+        f"either the storage stopped rounding or something else now quantises, and the "
+        f"reproducer above is green for a reason other than the door."
+    )
+    assert Decimal(rows[0]) != Decimal(amount), (
+        f"{_WHY}\n(reproduced deliberately by this counter-check with MONEY_MAX_SCALE=18)"
+    )
+
+    # THE CLAIM THAT IS NOT ASSERTED, and deliberately so. `DEFAULT_MAX_AMOUNT_SCALE` is
+    # currently 8, but it is a
+    # conservative default for a caller that reaches `parse_amount_decimal` without arguments,
+    # and no production caller does. Setting it back to 18 was measured on 2026-08-24 to leave
+    # this whole module green. Asserting a value here would recreate exactly the literal-
+    # against-literal check this test replaced: it would fail on a change that alters nothing
+    # about `F-012-1`, and pass while the money bound is wide open.
+
+
+async def test_rt_012_1_counter_check_the_control_amount_survives_a_widened_door() -> None:
+    """The other direction: the narrowing must not be what makes the control pass.
+
+    A door that refused everything would turn the disjunction above green while breaking every
+    payment in the system. The control test asserts scale-8 money commits; this asserts the door
+    admits it identically whether `MONEY_MAX_SCALE` is 8 or 18, so the control is measuring the
+    chain and not the bound.
+    """
+
+    assert parse_money_amount("0.12345678", require_positive=True) == Decimal("0.12345678"), (
         "narrowing the door to the storage scale must keep every exactly-representable amount "
         "acceptable; a fix that rejects 0.12345678 would be a regression, not a fix."
     )

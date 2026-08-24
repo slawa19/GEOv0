@@ -78,8 +78,16 @@ TRANSPORT_HEADER_DRIFT_COUNT = 67
 # generated `seed: {nullable: true}` - a difference the canon cannot answer, because the guard
 # added in this slice forbids the canon from writing the form at all while FastAPI keeps emitting
 # it. Measured: with the normalization the pair matches and the count returns to 13.
+# 2026-08-24 / 012 second circle: count holds at 13, digest moves. `TrustLineCreateRequest.limit`
+# and `TrustLineUpdateRequest.limit` are now typed `str` in pydantic, so the generated `limit`
+# node moves from Decimal's `anyOf [number, string]` to the `type: string` the canon has declared
+# all along (POST now matches the canon exactly; PATCH differs only by the `nullable: true` every
+# Optional field carries). The two trustline entries stay in the drift set for their pre-existing
+# `policy` differences only - no entry got worse. The retype is load-bearing: the service signs
+# the client's limit string verbatim (a `Decimal` schema made the server verify against
+# `str(Decimal)`'s respelling, so `"0.00000001"` was unsignable - E-012 second-circle review).
 REQUEST_SCHEMA_DRIFT_SHA256 = (
-    "2fc89128f9b2146d7d6be86669fedecae68ac41b8ad7bb0257211cd52f268c24"
+    "1119e12aa27858c5256e5331176abae34412dd0fef18cdba5a56e5f60dcfcf88"
 )
 REQUEST_SCHEMA_DRIFT_COUNT = 13
 # 2026-08-20 / p007_unblock_f0071: MetricPoint.v became nullable on both sides

@@ -100,13 +100,13 @@ async def test_recreating_a_closed_trustline_does_not_raise_a_raw_db_error(db_se
     eq, sender, sender_priv, receiver = await _make_pair(db_session)
     service = TrustLineService(db_session)
 
-    create_payload = {"to": receiver.pid, "equivalent": eq.code, "limit": str(Decimal("100"))}
+    create_payload = {"to": receiver.pid, "equivalent": eq.code, "limit": "100"}
     first = await service.create(
         sender.id,
         TrustLineCreateRequest(
             to=receiver.pid,
             equivalent=eq.code,
-            limit=Decimal("100"),
+            limit="100",
             signature=_sign(sender_priv, create_payload),
         ),
     )
@@ -123,7 +123,7 @@ async def test_recreating_a_closed_trustline_does_not_raise_a_raw_db_error(db_se
     second_request = TrustLineCreateRequest(
         to=receiver.pid,
         equivalent=eq.code,
-        limit=Decimal("100"),
+        limit="100",
         signature=_sign(sender_priv, create_payload),
     )
 
@@ -205,7 +205,7 @@ async def test_concurrent_create_of_the_same_triple_yields_one_line_and_a_declar
         eq_code = eq.code
         receiver_pid = receiver.pid
 
-    payload = {"to": receiver_pid, "equivalent": eq_code, "limit": str(Decimal("10"))}
+    payload = {"to": receiver_pid, "equivalent": eq_code, "limit": "10"}
     signature = _sign(sender_priv, payload)
 
     # WITHOUT A BARRIER THIS TEST PROVES NOTHING.  If one task committed before the other
@@ -248,7 +248,7 @@ async def test_concurrent_create_of_the_same_triple_yields_one_line_and_a_declar
                     TrustLineCreateRequest(
                         to=receiver_pid,
                         equivalent=eq_code,
-                        limit=Decimal("10"),
+                        limit="10",
                         signature=signature,
                     ),
                 )

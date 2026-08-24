@@ -46,10 +46,10 @@ async def test_trustline_create_rejects_invalid_signature(db_session):
     other_pub, other_priv = generate_keypair()
     signing_key = SigningKey(base64.b64decode(other_priv))
 
-    payload = {"to": "bob", "equivalent": "USD", "limit": str(Decimal("10"))}
+    payload = {"to": "bob", "equivalent": "USD", "limit": "10"}
     bad_sig = base64.b64encode(signing_key.sign(canonical_json(payload)).signature).decode("utf-8")
 
-    req = TrustLineCreateRequest(to="bob", equivalent="USD", limit=Decimal("10"), signature=bad_sig)
+    req = TrustLineCreateRequest(to="bob", equivalent="USD", limit="10", signature=bad_sig)
 
     service = TrustLineService(db_session)
     with pytest.raises(InvalidSignatureException) as exc:

@@ -90,9 +90,18 @@ def validate_tx_id(tx_id: str) -> str:
 
 # 012/T1201: this was 18 while every money column is Numeric(20, 8), which is the whole of
 # `F-012-1` - a participant signed one number and the ledger kept another, larger one. It is now
-# the storage scale, so the generic default is the safe one and a money path that reaches for
-# `parse_amount_decimal` without arguments cannot re-open the hole. Widening it re-opens F-012-1;
-# `test_p012_rt1_...` demonstrates exactly that flip rather than describing it.
+# the storage scale, so a money path that reached for `parse_amount_decimal` without arguments
+# could not re-open the hole.
+#
+# HOW MUCH THIS CONSTANT ACTUALLY DEFENDS: nothing today, and the first edition of this comment
+# claimed otherwise.  It said "widening it re-opens F-012-1, and `test_p012_rt1_...` demonstrates
+# that flip".  Measured 2026-08-24 by putting it back to 18: five of the six tests in that module
+# stayed green, and the single failure was the counter-check asserting this constant against a
+# literal.  The reason is that `parse_money_amount` - the only door money passes through - always
+# passes its bounds explicitly, and no production caller reaches `parse_amount_decimal` bare
+# (`grep -rn parse_amount_decimal app/` finds this file only).  So this is a conservative default
+# for a future bare caller, not the money bound.  The money bound is `MONEY_MAX_SCALE` below, and
+# the counter-check in `test_p012_rt1_...` now flips THAT one, over HTTP.
 DEFAULT_MAX_AMOUNT_SCALE = 8
 DEFAULT_MAX_AMOUNT_PRECISION = 50  # total digits in the decimal string (excluding sign and '.')
 
@@ -118,6 +127,30 @@ DEFAULT_MAX_AMOUNT_PRECISION = 50  # total digits in the decimal string (excludi
 # invalidate stored rows.
 MONEY_MAX_SCALE = 8
 MONEY_MAX_INTEGER_DIGITS = 12
+
+# The door's one LEXICAL bound, and it is not a storage bound.
+#
+# 012/T1201 first edition bounded the money door on the SCALE OF THE STRING, which refused
+# `"0.100000000"` - a value `Numeric(20, 8)` holds exactly, and one this repository's own
+# renderer produces: `to_money_str` treats `Equivalent.precision` as a MINIMUM number of
+# fraction digits, so any equivalent with `precision > 8` renders `0.1` as `"0.1000000000"` and
+# the door then answered 400/E009 to its own output.  Judging the spelling instead of the value
+# is what made the door and `is_storable_money` - documented as its predicate form - disagree.
+#
+# What survives of the lexical rule is a bound on LENGTH, for pathological input only: a caller
+# may not spell a fraction longer than any of our own producers can emit for money the ledger
+# holds.  18 is that number because `Equivalent.precision` is declared `ge=0, le=18`
+# (`app/schemas/equivalents.py:39`, `app/schemas/admin.py:218`) and `to_money_str` pads to
+# `precision`, so for a value that fits `Numeric(20, 8)` it returns at most 18 fraction digits.
+# It is also exactly the scale the door accepted before T1201, so nothing that used to be
+# admitted becomes a 400 because of this bound.
+#
+# CAVEAT (012, second round): the `le=18` this leans on is itself contested - protocol §3.2
+# declares `precision` as 0..8 (`docs/ru/02-protocol-spec.md:143,155`), and whether the document
+# or the schema is the one to move is recorded as an open fork in spec 015.  Whichever way that
+# lands, this bound only gets tighter (8 also covers every producer), so no admitted spelling is
+# retroactively wrong - the number just should not be read as protocol-derived until 015 answers.
+MONEY_MAX_LEXICAL_SCALE = 18
 
 _AMOUNT_STR_RE = re.compile(r"^-?\d+(?:\.\d+)?$")
 _FORBIDDEN_AMOUNT_LITERALS = {
@@ -242,54 +275,18 @@ def parse_amount_decimal(
     return as_decimal
 
 
-def parse_money_amount(
-    amount: Any,
-    *,
-    field: str = "amount",
-    require_positive: bool = False,
-) -> Decimal:
-    """The money door: parse an amount the ledger columns can hold exactly, or refuse it.
-
-    Everything `parse_amount_decimal` refuses is refused here too (float literals, exponent
-    notation, whitespace, NaN/Infinity), plus the two storage-capacity bounds:
-
-    * at most `MONEY_MAX_SCALE` (8) fraction digits, and
-    * at most `MONEY_MAX_INTEGER_DIGITS` (12) significant integer digits, i.e.
-      `abs(value) < 10**12`.
-
-    Refusal is `BadRequestException` -> HTTP 400 / `E009`, the existing classification for a
-    scale overflow.  No new error code: callers that own a different envelope (the simulator
-    Interact API) translate it themselves.
-
-    WHY BOTH BOUNDS.  `Numeric(20, 8)` is 20 significant digits of which 8 are the fraction.
-    Values that overflow either half are lost differently and both losses are silent to the
-    caller: too many fraction digits are ROUNDED by PostgreSQL (in both directions, so the
-    ledger can end up holding more than was signed), while too large a magnitude raises
-    `numeric field overflow` deep inside the commit and escapes as HTTP 500.  Narrowing only
-    the scale leaves the second escape open.
-
-    WHY NOT `Equivalent.precision`.  Deferred by product decision: precision is a
-    representation parameter declared `ge=0, le=18`, so it neither bounds the column nor closes
-    this finding, and an admin lowering it would retroactively invalidate stored rows.
-    """
-
-    return parse_amount_decimal(
-        amount,
-        max_scale=MONEY_MAX_SCALE,
-        max_precision=DEFAULT_MAX_AMOUNT_PRECISION,
-        max_integer_digits=MONEY_MAX_INTEGER_DIGITS,
-        require_positive=require_positive,
-        field=field,
-    )
-
-
 def is_storable_money(value: Any) -> bool:
     """True when `value` fits `Numeric(20, 8)` exactly - no rounding, no overflow.
 
-    The predicate form of `parse_money_amount`, for the writers that do not answer an HTTP
-    request and therefore cannot raise a 400: scenario seeding and inject execution build
-    `Decimal`s out of arbitrary config and drop rows they cannot use.  They need the same
-    capacity rule, applied with their own (skip-and-log) blast radius.
+    THE money capacity rule, and the only one.  `parse_money_amount` below is this predicate
+    plus an HTTP-shaped refusal and the wire grammar; the writers that do not answer an HTTP
+    request and therefore cannot raise a 400 (scenario seeding, inject execution: they build
+    `Decimal`s out of arbitrary config and drop rows they cannot use) call it directly, with
+    their own skip-and-log blast radius.
+
+    It is a question about a VALUE, not about how the value was written.  `Decimal("0.1")`,
+    `Decimal("0.100000000")` and `Decimal("1E-1")` are the same number and get the same answer,
+    because `Numeric(20, 8)` gives them the same answer.
     """
 
     if not isinstance(value, Decimal):
@@ -315,6 +312,130 @@ def is_storable_money(value: Any) -> bool:
         return value == value.quantize(Decimal("1E-%d" % MONEY_MAX_SCALE))
     except InvalidOperation:
         return False
+
+
+def parse_money_amount(
+    amount: Any,
+    *,
+    field: str = "amount",
+    require_positive: bool = False,
+    require_non_negative: bool = False,
+) -> Decimal:
+    """The money door: parse an amount the ledger columns can hold exactly, or refuse it.
+
+    Two rules, and they are deliberately of different kinds:
+
+    * the WIRE GRAMMAR, applied to strings - a plain decimal string and nothing else: no
+      `float` literals, no exponent notation, no NaN/Infinity, no surrounding whitespace, at
+      most `MONEY_MAX_LEXICAL_SCALE` fraction digits and `DEFAULT_MAX_AMOUNT_PRECISION` digits
+      in total.  That is a bound on what may be *written*, for pathological input.
+    * the CAPACITY RULE, applied to the value: `is_storable_money`, i.e. the value must survive
+      `Numeric(20, 8)` unchanged - representable at scale 8 and `abs(value) < 10**12`.
+
+    Refusal is `BadRequestException` -> HTTP 400 / `E009`, the existing classification for a
+    scale overflow.  No new error code: callers that own a different envelope (the simulator
+    Interact API) translate it themselves.
+
+    WHY THE CAPACITY RULE IS ON THE VALUE (012/T1201, fixed 2026-08-24).  The first edition
+    bounded the *lexical* scale of the string at 8 and called `is_storable_money` "the predicate
+    form of `parse_money_amount`" ten lines below.  They disagreed, and the door was the wrong
+    one of the two:
+
+        '0.100000000'      door REFUSED, is_storable_money True, Numeric(20,8) holds it exactly
+        '1000.0000000000'  door REFUSED, is_storable_money True, ditto
+        '1E+3'             door REFUSED, is_storable_money True, ditto
+
+    `## Intended` licenses refusing *the value that cannot be stored exactly*.  `0.1` with
+    trailing zeros is not that value, and refusing it was a compatibility break the programme
+    inflicted on itself twice: `to_money_str` treats `Equivalent.precision` as a MINIMUM number
+    of fraction digits, so any equivalent with `precision > 8` renders `0.1` as `"0.1000000000"`
+    and the door answered 400/E009 to its own renderer; and `POST /trustlines` refused
+    `"limit": "1e3"` while accepting `"limit": 1e3`.  The door now asks the same question the
+    predicate asks, by calling it.
+
+    WHY BOTH CAPACITY BOUNDS.  `Numeric(20, 8)` is 20 significant digits of which 8 are the
+    fraction.  Values that overflow either half are lost differently and both losses are silent
+    to the caller: too many fraction digits are ROUNDED by PostgreSQL (in both directions, so
+    the ledger can end up holding more than was signed), while too large a magnitude raises
+    `numeric field overflow` deep inside the commit and escapes as HTTP 500.  Narrowing only the
+    scale leaves the second escape open.
+
+    EXPONENT NOTATION, DECIDED RATHER THAN INHERITED.  A `str` carrying `e`/`E` is refused, and
+    a `Decimal` whose `str()` happens to carry one is not.  The programme's invariant ("money
+    never leaves in exponent form") is an OUTPUT rule, so it does not settle the input question
+    by itself; two things do.  First, `T1209` has already told 011 that the canon must declare
+    money fields with `pattern: ^-?\\d+(\\.\\d+)?$` - accepting `"1e3"` here would contradict, on
+    the server, the contract 012 is asking the canon to publish.  Second, for `POST /payments`
+    the signature is taken over the amount STRING verbatim, so an accepted `"1e3"` would put
+    exponent-form money into `transactions.payload`, i.e. into stored history - which is the
+    output rule after all.
+
+    But a `Decimal` is a value that has already been parsed, and its spelling is Python's, not
+    the client's - so a `Decimal` argument is re-spelled plainly (`format(v, "f")`) before the
+    grammar runs, and only the capacity rule can refuse it.  That branch now serves INTERNAL
+    callers (the clearing engine, admin repairs); no HTTP entrance feeds this door a `Decimal`
+    any more.  `trustlines/service.py` used to: `limit` was typed `Decimal` on the schema, so
+    `{"limit": "1e3"}` arrived as `Decimal('1E+3')` and `{"limit": 1e3}` as `Decimal('1000')`,
+    the door refused one spelling and admitted the other for the same value, and - worse - the
+    service rebuilt the SIGNED payload from `str(data.limit)`, so for `"0.00000001"` the client
+    signed `"0.00000001"` while the server verified against `"1E-8"`, and the smallest storable
+    limit was unsignable.  The honest fix was the one this note used to defer as "owned by the
+    canon": `api/openapi.yaml` had declared `limit: type: string` all along, and the schema now
+    agrees (`TrustLineCreateRequest.limit: str`), so the trust-line door sees the client's own
+    string, exponent notation is refused where a client writes it, and the signature covers the
+    verbatim string - exactly the `POST /payments` contract.
+    `tests/integration/test_p012_t1201_money_door_at_the_entrances.py` holds the decision.
+
+    WHY NOT `Equivalent.precision`.  Deferred by product decision (`VERDICT-DOOR: C`):
+    precision is a representation parameter declared `ge=0, le=18`, so it neither bounds the
+    column nor closes this finding, and an admin lowering it would retroactively invalidate
+    stored rows.
+    """
+
+    def _reject(message: str, **extra: Any) -> BadRequestException:
+        details: dict[str, Any] = {"field": field}
+        details.update(extra)
+        return BadRequestException(message, details=details)
+
+    if isinstance(amount, Decimal):
+        # A value, not a spelling - see EXPONENT NOTATION above.  Non-finite `Decimal`s are
+        # left to the grammar, which already owns that vocabulary.
+        amount = format(amount, "f") if amount.is_finite() else str(amount)
+
+    value = parse_amount_decimal(
+        amount,
+        max_scale=MONEY_MAX_LEXICAL_SCALE,
+        max_precision=DEFAULT_MAX_AMOUNT_PRECISION,
+        max_integer_digits=None,
+        # Positivity is checked below, AFTER capacity, so that every input refused before this
+        # change keeps the message it had: `parse_amount_decimal` would otherwise answer
+        # "Amount must be positive" for e.g. "-0.123456789", which used to be
+        # "Invalid amount format".
+        require_positive=False,
+        field=field,
+    )
+
+    if not is_storable_money(value):
+        # The same `details` shape the lexical bounds used to raise, so the two capacity
+        # failures stay distinguishable to a client: the fraction is lost by rounding, the
+        # magnitude by overflow.
+        if abs(value) >= Decimal(10) ** MONEY_MAX_INTEGER_DIGITS:
+            raise _reject(
+                "Invalid amount format", max_integer_digits=MONEY_MAX_INTEGER_DIGITS
+            )
+        raise _reject("Invalid amount format", max_scale=MONEY_MAX_SCALE)
+
+    if require_positive and value <= 0:
+        raise _reject("Amount must be positive")
+
+    # A trust-line limit may be zero but not negative.  This lived on the pydantic schema as
+    # `ge=0` while `limit` was typed `Decimal`; when the field became a `str` (signed verbatim,
+    # see `TrustLineCreateRequest.limit`) the bound moved here, behind the same door and with
+    # the same refusal envelope as every other money rule.
+    if require_non_negative and value < 0:
+        raise _reject("Amount must be non-negative")
+
+    return value
 
 
 _ALLOWED_TRUSTLINE_POLICY_KEYS = {
