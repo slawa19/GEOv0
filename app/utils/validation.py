@@ -88,8 +88,36 @@ def validate_tx_id(tx_id: str) -> str:
 # Additionally we enforce conservative scale/precision bounds to avoid pathological inputs
 # (e.g. extremely long fractions).
 
-DEFAULT_MAX_AMOUNT_SCALE = 18
+# 012/T1201: this was 18 while every money column is Numeric(20, 8), which is the whole of
+# `F-012-1` - a participant signed one number and the ledger kept another, larger one. It is now
+# the storage scale, so the generic default is the safe one and a money path that reaches for
+# `parse_amount_decimal` without arguments cannot re-open the hole. Widening it re-opens F-012-1;
+# `test_p012_rt1_...` demonstrates exactly that flip rather than describing it.
+DEFAULT_MAX_AMOUNT_SCALE = 8
 DEFAULT_MAX_AMOUNT_PRECISION = 50  # total digits in the decimal string (excluding sign and '.')
+
+# --- Money: the storage-capacity door (012 / F-012-1, T1201) ---
+#
+# `Debt.amount` and `TrustLine.limit` are `Numeric(20, 8)` (`app/db/models/debt.py`,
+# `app/db/models/trustline.py`).  PostgreSQL does NOT truncate what does not fit: it rounds,
+# in both directions, and it rounds silently.  Measured on PostgreSQL 16.9:
+#
+#   0.123456789          -> 0.12345679   (the ledger keeps MORE than was signed)
+#   0.000000001          -> 0            (the value disappears; the positivity CHECK then
+#                                         fires and escapes as HTTP 500 E010)
+#   1000000000000        -> NumericValueOutOfRangeError, i.e. a 500 as well
+#
+# Both bounds below are therefore load-bearing, and they are two different escapes of the
+# same class.  `MONEY_MAX_SCALE` is the fraction the column can hold; `MONEY_MAX_INTEGER_DIGITS`
+# is what is left of `precision 20` once the scale is spent, i.e. `abs(value) < 10**12`.
+# Narrowing the scale alone still admits `12345678901234567890`, which PostgreSQL refuses.
+#
+# These are facts about the COLUMN, not about `Equivalent.precision`.  Rejecting on precision
+# is a separate, deferred product decision (variant B): precision is declared `ge=0, le=18`,
+# so it does not even close this finding, and an admin editing it would retroactively
+# invalidate stored rows.
+MONEY_MAX_SCALE = 8
+MONEY_MAX_INTEGER_DIGITS = 12
 
 _AMOUNT_STR_RE = re.compile(r"^-?\d+(?:\.\d+)?$")
 _FORBIDDEN_AMOUNT_LITERALS = {
@@ -108,7 +136,9 @@ def parse_amount_decimal(
     *,
     max_scale: int | None = DEFAULT_MAX_AMOUNT_SCALE,
     max_precision: int | None = DEFAULT_MAX_AMOUNT_PRECISION,
+    max_integer_digits: int | None = None,
     require_positive: bool = False,
+    field: str | None = None,
 ) -> Decimal:
     """Parse and validate an API amount as a strict decimal string.
 
@@ -125,34 +155,52 @@ def parse_amount_decimal(
 
     Raises BadRequestException("Invalid amount format") or
     BadRequestException("Amount must be positive").
+
+    NOTE ON THE DEFAULTS.  These are generic parser bounds, not storage bounds: the default
+    `max_scale` of 18 is wider than the `Numeric(20, 8)` money columns.  Anything that will be
+    written to `Debt.amount` or `TrustLine.limit` must go through `parse_money_amount` instead,
+    which supplies the capacity bounds.  See the `MONEY_MAX_*` note above.
+
+    `field` is diagnostic only: when given, the raised `BadRequestException` carries
+    `details` naming the offending field and the bound it broke.  The messages themselves are
+    deliberately unchanged - they are asserted verbatim by
+    `tests/integration/test_payments_amount_validation.py` and are part of the public 400/E009
+    shape.
     """
 
+    def _reject(message: str, **extra: Any) -> BadRequestException:
+        if field is None:
+            return BadRequestException(message)
+        details: dict[str, Any] = {"field": field}
+        details.update(extra)
+        return BadRequestException(message, details=details)
+
     if amount is None:
-        raise BadRequestException("Invalid amount format")
+        raise _reject("Invalid amount format")
 
     amount_str = amount if isinstance(amount, str) else str(amount)
 
     if not amount_str:
-        raise BadRequestException("Invalid amount format")
+        raise _reject("Invalid amount format")
 
     # No implicit normalization: reject any surrounding whitespace.
     if amount_str != amount_str.strip():
-        raise BadRequestException("Invalid amount format")
+        raise _reject("Invalid amount format")
 
     lowered = amount_str.lower()
 
     # Explicitly forbid special float-like literals even if some callers pass them as strings.
     if lowered in _FORBIDDEN_AMOUNT_LITERALS:
-        raise BadRequestException("Invalid amount format")
+        raise _reject("Invalid amount format")
 
     # Exponent notation is forbidden (canonical JSON recommendation and DoS hardening).
     if "e" in lowered:
-        raise BadRequestException("Invalid amount format")
+        raise _reject("Invalid amount format")
 
     # Strict decimal string: optional '-' then digits, optional fraction with at least 1 digit.
     # Note: '+' is intentionally NOT supported.
     if _AMOUNT_STR_RE.fullmatch(amount_str) is None:
-        raise BadRequestException("Invalid amount format")
+        raise _reject("Invalid amount format")
 
     unsigned = amount_str[1:] if amount_str.startswith("-") else amount_str
     if "." in unsigned:
@@ -163,25 +211,110 @@ def parse_amount_decimal(
         scale = 0
 
     if max_scale is not None and scale > max_scale:
-        raise BadRequestException("Invalid amount format")
+        raise _reject("Invalid amount format", max_scale=max_scale)
 
     if max_precision is not None and (len(int_part) + len(frac_part)) > max_precision:
-        raise BadRequestException("Invalid amount format")
+        raise _reject("Invalid amount format", max_precision=max_precision)
+
+    # Magnitude, i.e. how many integer digits the target can hold.  Counted on the
+    # SIGNIFICANT digits so that the long-standing tolerance for leading zeros ("0001.23")
+    # is preserved: it is the VALUE that has to fit, not the spelling.
+    if max_integer_digits is not None:
+        significant_int_digits = len(int_part.lstrip("0"))
+        if significant_int_digits > max_integer_digits:
+            raise _reject(
+                "Invalid amount format", max_integer_digits=max_integer_digits
+            )
 
     try:
         as_decimal = Decimal(amount_str)
     except (InvalidOperation, ValueError):
-        raise BadRequestException("Invalid amount format")
+        raise _reject("Invalid amount format")
 
     # Decimal() could still theoretically produce non-finite values for special inputs,
     # so keep an explicit guard.
     if not as_decimal.is_finite():
-        raise BadRequestException("Invalid amount format")
+        raise _reject("Invalid amount format")
 
     if require_positive and as_decimal <= 0:
-        raise BadRequestException("Amount must be positive")
+        raise _reject("Amount must be positive")
 
     return as_decimal
+
+
+def parse_money_amount(
+    amount: Any,
+    *,
+    field: str = "amount",
+    require_positive: bool = False,
+) -> Decimal:
+    """The money door: parse an amount the ledger columns can hold exactly, or refuse it.
+
+    Everything `parse_amount_decimal` refuses is refused here too (float literals, exponent
+    notation, whitespace, NaN/Infinity), plus the two storage-capacity bounds:
+
+    * at most `MONEY_MAX_SCALE` (8) fraction digits, and
+    * at most `MONEY_MAX_INTEGER_DIGITS` (12) significant integer digits, i.e.
+      `abs(value) < 10**12`.
+
+    Refusal is `BadRequestException` -> HTTP 400 / `E009`, the existing classification for a
+    scale overflow.  No new error code: callers that own a different envelope (the simulator
+    Interact API) translate it themselves.
+
+    WHY BOTH BOUNDS.  `Numeric(20, 8)` is 20 significant digits of which 8 are the fraction.
+    Values that overflow either half are lost differently and both losses are silent to the
+    caller: too many fraction digits are ROUNDED by PostgreSQL (in both directions, so the
+    ledger can end up holding more than was signed), while too large a magnitude raises
+    `numeric field overflow` deep inside the commit and escapes as HTTP 500.  Narrowing only
+    the scale leaves the second escape open.
+
+    WHY NOT `Equivalent.precision`.  Deferred by product decision: precision is a
+    representation parameter declared `ge=0, le=18`, so it neither bounds the column nor closes
+    this finding, and an admin lowering it would retroactively invalidate stored rows.
+    """
+
+    return parse_amount_decimal(
+        amount,
+        max_scale=MONEY_MAX_SCALE,
+        max_precision=DEFAULT_MAX_AMOUNT_PRECISION,
+        max_integer_digits=MONEY_MAX_INTEGER_DIGITS,
+        require_positive=require_positive,
+        field=field,
+    )
+
+
+def is_storable_money(value: Any) -> bool:
+    """True when `value` fits `Numeric(20, 8)` exactly - no rounding, no overflow.
+
+    The predicate form of `parse_money_amount`, for the writers that do not answer an HTTP
+    request and therefore cannot raise a 400: scenario seeding and inject execution build
+    `Decimal`s out of arbitrary config and drop rows they cannot use.  They need the same
+    capacity rule, applied with their own (skip-and-log) blast radius.
+    """
+
+    if not isinstance(value, Decimal):
+        try:
+            value = Decimal(str(value))
+        except (InvalidOperation, ValueError, TypeError):
+            return False
+    if not value.is_finite():
+        return False
+
+    # Magnitude first: `quantize` below raises on operands too large for the arithmetic
+    # context, so asking about the fraction before the magnitude would fail for exactly the
+    # values this predicate exists to reject.
+    if abs(value) >= Decimal(10) ** MONEY_MAX_INTEGER_DIGITS:
+        return False
+
+    exponent = value.as_tuple().exponent
+    if not isinstance(exponent, int) or exponent >= -MONEY_MAX_SCALE:
+        return True
+    # More fraction digits than the column declares - storable only if they are all zero,
+    # because PostgreSQL would otherwise round rather than truncate.
+    try:
+        return value == value.quantize(Decimal("1E-%d" % MONEY_MAX_SCALE))
+    except InvalidOperation:
+        return False
 
 
 _ALLOWED_TRUSTLINE_POLICY_KEYS = {
@@ -211,10 +344,22 @@ def validate_trustline_policy(policy: dict[str, Any]) -> None:
         if key not in policy or policy[key] is None:
             continue
         value = policy[key]
-        try:
-            as_decimal = Decimal(str(value))
-        except (InvalidOperation, ValueError):
-            raise BadRequestException(f"trustline.policy.{key} must be a number")
+        if key == "daily_limit":
+            # `daily_limit` IS a money quantity by the protocol - informational-only in the
+            # MVP, but a bound that will one day be compared against amounts.  It therefore
+            # uses the money grammar rather than "whatever `Decimal()` will swallow": no
+            # float, no exponent, and the same storage capacity, so the day it is enforced
+            # the comparison does not need a representation change.  `max_hop_usage` is a hop
+            # count, not money, and keeps the looser rule.
+            try:
+                as_decimal = parse_money_amount(value, field=f"policy.{key}")
+            except BadRequestException:
+                raise BadRequestException(f"trustline.policy.{key} must be a number")
+        else:
+            try:
+                as_decimal = Decimal(str(value))
+            except (InvalidOperation, ValueError):
+                raise BadRequestException(f"trustline.policy.{key} must be a number")
         if as_decimal < 0:
             raise BadRequestException(f"trustline.policy.{key} must be >= 0")
 

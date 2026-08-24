@@ -21,7 +21,11 @@ from app.db.models.debt import Debt
 from app.db.models.audit_log import IntegrityAuditLog
 from app.schemas.trustline import TrustLineCloseRequest, TrustLineCreateRequest, TrustLineUpdateRequest
 from sqlalchemy import inspect as sa_inspect
-from app.utils.validation import validate_equivalent_code, validate_trustline_policy
+from app.utils.validation import (
+    parse_money_amount,
+    validate_equivalent_code,
+    validate_trustline_policy,
+)
 from app.core.integrity import compute_integrity_checkpoint_for_equivalent
 from app.core.payments.router import PaymentRouter
 
@@ -117,6 +121,13 @@ class TrustLineService:
         from_participant = await self.session.get(Participant, from_participant_id)
         if not from_participant:
             raise NotFoundException("Sender not found")
+
+        # Storage-capacity door (012 / F-012-1).  `TrustLine.limit` is Numeric(20, 8) and this
+        # service never validated the amount at all -- the schema only bounds it with `ge=0`.
+        # Checked BEFORE `verify_signature` and before any write, and checked on exactly the
+        # string that is about to be signed, so a limit the column cannot hold can never
+        # become a signed commitment.
+        parse_money_amount(str(data.limit), field="limit")
 
         # Signature validation (proof-of-possession + binding of request fields).
         signed_payload: dict = {
@@ -301,6 +312,10 @@ class TrustLineService:
         user = await self.session.get(Participant, user_id)
         if not user:
             raise NotFoundException("Sender not found")
+
+        # Same storage-capacity door as `create`, before the signature and before the write.
+        if data.limit is not None:
+            parse_money_amount(str(data.limit), field="limit")
 
         signed_payload: dict = {"id": str(trustline_id)}
         if data.limit is not None:

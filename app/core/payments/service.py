@@ -36,7 +36,7 @@ from app.utils.exceptions import (
     TimeoutException,
 )
 from app.utils.error_codes import ErrorCode
-from app.utils.validation import validate_equivalent_code, validate_tx_id, parse_amount_decimal
+from app.utils.validation import validate_equivalent_code, validate_tx_id, parse_money_amount
 
 logger = logging.getLogger(__name__)
 
@@ -501,7 +501,15 @@ class PaymentService:
             pass
 
         try:
-            amount = parse_amount_decimal(request.amount, require_positive=True)
+            # Storage-capacity door (012 / F-012-1).  Deliberately the FIRST thing this
+            # method does with the request: the signature is taken over `request.amount`
+            # verbatim further down (`payload` / `verify_signature` below), so an amount
+            # the ledger cannot hold must never become a signed obligation - and the
+            # rounds-to-zero case must not reach the positivity CHECK, where it used to
+            # escape as HTTP 500 E010 instead of a 400 naming the amount.
+            amount = parse_money_amount(
+                request.amount, field="amount", require_positive=True
+            )
         except BadRequestException:
             # Preserve existing metrics semantics for invalid user input.
             try:

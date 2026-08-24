@@ -24,6 +24,7 @@ from app.schemas.simulator import (
     TopologyChangedPayload,
 )
 from app.core.simulator.scenario_equivalent import effective_equivalent
+from app.utils.validation import is_storable_money
 
 
 def invalidate_caches_after_inject(
@@ -284,6 +285,18 @@ class InjectExecutor:
             if amount <= 0:
                 skipped += 1
                 return False
+            # Storage-capacity door (012 / F-012-1).  The quantize above already bounds the
+            # fraction, but nothing bounded the magnitude: a `Debt.amount` of 1e12 or more
+            # does not fit Numeric(20, 8) and aborts the whole inject transaction with
+            # `numeric field overflow`.  An inject entry that cannot be applied is skipped,
+            # which is this executor's declared behaviour for every other unusable field.
+            if not is_storable_money(amount):
+                self._logger.warning(
+                    "simulator.real.inject.inject_debt.amount_unstorable amount=%s",
+                    amount,
+                )
+                skipped += 1
+                return False
 
             if max_total_amount is not None and total_applied + amount > max_total_amount:
                 skipped += 1
@@ -447,6 +460,15 @@ class InjectExecutor:
                             continue
                         if tl_limit_val <= 0:
                             continue
+                        # Storage-capacity door (012 / F-012-1) - see op_inject_debt.
+                        if not is_storable_money(tl_limit_val):
+                            self._logger.warning(
+                                "simulator.real.inject.add_participant.limit_unstorable "
+                                "sponsor=%s limit=%s",
+                                sponsor_pid,
+                                tl_limit_val,
+                            )
+                            continue
 
                         # Resolve sponsor participant ID.
                         sponsor_id = pid_to_participant_id.get(sponsor_pid)
@@ -547,6 +569,17 @@ class InjectExecutor:
                     skipped += 1
                     return False
                 if tl_limit_val <= 0:
+                    skipped += 1
+                    return False
+                # Storage-capacity door (012 / F-012-1) - see op_inject_debt.
+                if not is_storable_money(tl_limit_val):
+                    self._logger.warning(
+                        "simulator.real.inject.create_trustline.limit_unstorable "
+                        "from=%s to=%s limit=%s",
+                        from_pid_val,
+                        to_pid_val,
+                        tl_limit_val,
+                    )
                     skipped += 1
                     return False
 

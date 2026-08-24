@@ -14,7 +14,7 @@ from app.core.simulator.scenario_equivalent import (
     effective_equivalent,
     scenario_default_equivalent,
 )
-from app.utils.validation import validate_equivalent_code
+from app.utils.validation import is_storable_money, validate_equivalent_code
 
 
 class RealScenarioSeeder:
@@ -188,6 +188,14 @@ class RealScenarioSeeder:
                 except (InvalidOperation, ValueError):
                     continue
                 if limit < 0:
+                    continue
+                # Storage-capacity door (012 / F-012-1).  A scenario limit that does not fit
+                # `Numeric(20, 8)` would be silently rounded on write, or abort the whole
+                # seeding transaction with `numeric field overflow`.  Skipping the single
+                # trustline keeps the blast radius of a bad config entry where the rest of
+                # this loop already puts it -- one edge missing, not a scenario that will not
+                # load -- and matches how every other malformed field here is handled.
+                if not is_storable_money(limit):
                     continue
 
                 # Only a LIVE row occupies the triple: since migration 019 a closed

@@ -376,23 +376,31 @@ async def test_rt_012_1_counter_check_the_door_admits_more_scale_than_the_column
         f"re-measure before trusting anything above."
     )
 
-    assert DEFAULT_MAX_AMOUNT_SCALE > STORAGE_SCALE, (
-        f"DEFAULT_MAX_AMOUNT_SCALE is {DEFAULT_MAX_AMOUNT_SCALE}, no longer wider than the "
-        f"storage scale {STORAGE_SCALE}. That is the T1201 fix, and it means the reproducer in "
-        f"this module must now be GREEN by its rejection branch. If it is still red, the door "
-        f"was narrowed without the rejection actually reaching the payment path."
+    # 2026-08-24, T1201 landed. This used to assert `DEFAULT_MAX_AMOUNT_SCALE > STORAGE_SCALE`,
+    # written as a self-obsoleting marker whose own message read "that is the T1201 fix". It was
+    # an `assert`, so the fix turned this module red for the one reason that is not a defect.
+    # Rewritten to state the post-fix invariant; the demonstrative flip below is unchanged in
+    # substance and is still the point of the test.
+    assert DEFAULT_MAX_AMOUNT_SCALE == STORAGE_SCALE, (
+        f"the door defaults to scale {DEFAULT_MAX_AMOUNT_SCALE} and the column holds "
+        f"{STORAGE_SCALE}. Any gap is `F-012-1` again: an amount admitted at the door and "
+        f"rounded by the column, with the signature still covering the original string. If the "
+        f"column grew, move this constant with it deliberately - do not widen the door to match "
+        f"a capacity nobody verified."
     )
 
-    # The one-constant flip, demonstrated rather than described.
+    # The one-constant flip, demonstrated rather than described - now in the direction that
+    # re-opens the hole rather than the one that has it open.
     for amount, _ in UNSTORABLE_AMOUNTS:
-        assert parse_amount_decimal(amount, require_positive=True) == Decimal(amount), (
-            f"parse_amount_decimal no longer accepts {amount!r} at the default max_scale, so the "
-            f"reproducer's premise ('the door admits it') has changed and must be re-measured."
-        )
         with pytest.raises(BadRequestException):
-            parse_amount_decimal(
-                amount, max_scale=STORAGE_SCALE, require_positive=True
-            )
+            parse_amount_decimal(amount, require_positive=True)
+        assert parse_amount_decimal(
+            amount, max_scale=18, require_positive=True
+        ) == Decimal(amount), (
+            f"widening the door back to scale 18 no longer admits {amount!r}, so this "
+            f"counter-check has stopped demonstrating the flip it exists to demonstrate, and "
+            f"the reproducer above can no longer be trusted to react to the door at all."
+        )
 
     # And the control amount must survive the narrowed door, or the fix would break valid money.
     assert parse_amount_decimal(

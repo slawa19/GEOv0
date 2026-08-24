@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from decimal import Decimal, ROUND_DOWN
+from decimal import Decimal, InvalidOperation, ROUND_DOWN
 from typing import Any
 
 from sqlalchemy import and_, func, or_, select
@@ -14,6 +14,64 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.core.simulator.models import RunRecord
+
+
+def to_money_str(value: Decimal, precision: int) -> str:
+    """Render a money value as a plain decimal string that never loses it.
+
+    THE RULE: at least `precision` fraction digits, and never fewer digits than the value
+    actually needs.  Exponent notation is impossible by construction.
+
+    WHY NOT A PLAIN `quantize(..., ROUND_DOWN)` (012 / `RT-012-2`).  That is what this file
+    did, and `Equivalent.precision` is a DISPLAY parameter, not the ledger's quantum: the door
+    accepts, and `Numeric(20, 8)` faithfully stores, values finer than `precision`.  The
+    shipped `HOUR` has `precision: 1`, so a real, committed, stored debt of `0.05 HOUR` was
+    floored to `"0.0"` -- the obligation exists and the graph says it does not, in the one
+    direction nobody audits.  Rejecting `0.05` at the door instead was considered and
+    deliberately rejected: precision is editable by an admin, so it would retroactively
+    invalidate rows that are already in the ledger.
+
+    So `precision` keeps its job of setting the MINIMUM number of digits shown -- a
+    precision-2 equivalent still renders `0.05` as `"0.05"` and zero as `"0.00"`, byte for
+    byte as before -- and loses only its power to erase what does not divide by it.
+
+    It also fixes the second producer in this file, which used bare `str(Decimal)` and put
+    literal `1E-8` on the wire for a trustline one storage quantum short of fully used.
+    """
+
+    try:
+        precision = int(precision)
+    except (TypeError, ValueError):
+        precision = 2
+    if precision < 0:
+        precision = 0
+
+    if not isinstance(value, Decimal):
+        # `str()` first: going through `float` here would reintroduce, in the renderer, the
+        # binary rounding this whole change exists to remove.
+        try:
+            value = Decimal(str(value))
+        except (InvalidOperation, ValueError, TypeError):
+            return "0"
+    if not value.is_finite():
+        return "0"
+
+    quantum = Decimal(1).scaleb(-precision)
+    try:
+        quantized = value.quantize(quantum, rounding=ROUND_DOWN)
+    except InvalidOperation:
+        quantized = None
+
+    if quantized is not None and quantized == value:
+        return format(quantized, "f")
+
+    # The value carries more than `precision` can express.  Show all of it rather than any
+    # of it: `format(..., "f")` is plain-decimal by definition, and the trailing zeros the
+    # column pads to scale 8 are noise, not information.
+    text = format(value, "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text or "0"
 
 
 class EdgePatchBuilder:
@@ -63,11 +121,8 @@ class EdgePatchBuilder:
         eq_id = eq_row[0]
         precision = int(eq_row[1] or 2)
 
-        scale10 = Decimal(10) ** precision
-        money_quant = Decimal(1) / scale10
-
         def _to_money_str(v: Decimal) -> str:
-            return format(v.quantize(money_quant, rounding=ROUND_DOWN), "f")
+            return to_money_str(v, precision)
 
         # Load trustlines for this equivalent.
         tl_rows = (
@@ -270,8 +325,11 @@ class EdgePatchBuilder:
                 {
                     "source": src_pid,
                     "target": dst_pid,
-                    "used": str(used_amt),
-                    "available": str(available_amt),
+                    # Was `str(...)`, which put money on the wire in exponential
+                    # notation (`1E-8`) and ignored `helper.precision`, which is right
+                    # here.  Same renderer as the other producer above.
+                    "used": to_money_str(used_amt, helper.precision),
+                    "available": to_money_str(available_amt, helper.precision),
                     **edge_viz,
                 }
             )

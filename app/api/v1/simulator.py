@@ -100,7 +100,7 @@ from app.utils.exceptions import (
     RoutingException,
     TimeoutException,
 )
-from app.utils.validation import parse_amount_decimal
+from app.utils.validation import parse_money_amount
 
 router = APIRouter(prefix="/simulator")
 
@@ -1003,7 +1003,7 @@ async def action_trustline_create(
 
     # Validate and normalize amounts early.
     try:
-        limit_dec = parse_amount_decimal(req.limit, require_positive=False)
+        limit_dec = parse_money_amount(req.limit, field="limit")
         if limit_dec < 0:
             raise BadRequestException("Invalid limit")
     except BadRequestException:
@@ -1256,7 +1256,7 @@ async def action_trustline_update(
         return err
 
     try:
-        new_limit_dec = parse_amount_decimal(req.new_limit, require_positive=False)
+        new_limit_dec = parse_money_amount(req.new_limit, field="new_limit")
         if new_limit_dec < 0:
             raise BadRequestException("Invalid new_limit")
     except BadRequestException:
@@ -1648,7 +1648,7 @@ async def action_payment_real(
 
     # Amount validation per spec.
     try:
-        _ = parse_amount_decimal(req.amount, require_positive=True)
+        _ = parse_money_amount(req.amount, field="amount", require_positive=True)
     except BadRequestException as exc:
         return _action_error(
             status_code=400,
