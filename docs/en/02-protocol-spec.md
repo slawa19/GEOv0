@@ -326,7 +326,7 @@ The protocol is transport-agnostic. Recommended options:
   "from": "PID_A",
   "to": "PID_B",
   "equivalent": "UAH",
-  "limit": 1000.00,
+  "limit": "1000.00",
   "policy": {
     "auto_clearing": true,
     "can_be_intermediate": true
@@ -338,7 +338,7 @@ The protocol is transport-agnostic. Recommended options:
 
 - `from` (A) signature is required  
 - No existing active TrustLine `(from, to, equivalent)`  
-- `limit` > 0  
+- `limit` ≥ 0  
 
 **Algorithm:**
 
@@ -355,7 +355,7 @@ The protocol is transport-agnostic. Recommended options:
 ```json
 {
   "trust_line_id": "uuid",
-  "limit": 1500.00,
+  "limit": "1500.00",
   "policy": { /* updated fields */ }
 }
 ```
@@ -440,7 +440,7 @@ The protocol is transport-agnostic. Recommended options:
   "payload": {
     "to": "PID_B",
     "equivalent": "UAH",
-    "amount": 100.00,
+    "amount": "100.00",
     "description": "Service payment",
     "constraints": {
       "max_hops": 4,
@@ -1195,7 +1195,7 @@ Hub A opens a TrustLine to Hub B:
   "from": "HUB_A_PID",
   "to": "HUB_B_PID",
   "equivalent": "UAH",
-  "limit": 100000.00,
+  "limit": "100000.00",
   "policy": {
     "auto_clearing": true,
     "settlement_schedule": "weekly",

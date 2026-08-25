@@ -320,7 +320,7 @@ PID: "5HueCGU8rMjxEXxiPuD5BDku4MkFqeZyd4dZ1jvhTVqvbTLvyTJ"
   "from": "PID_A",
   "to": "PID_B",
   "equivalent": "UAH",
-  "limit": 1000.00,
+  "limit": "1000.00",
   "policy": {
     "auto_clearing": true,
     "can_be_intermediate": true
@@ -346,7 +346,7 @@ PID: "5HueCGU8rMjxEXxiPuD5BDku4MkFqeZyd4dZ1jvhTVqvbTLvyTJ"
 ```json
 {
   "trust_line_id": "uuid",
-  "limit": 1500.00,
+  "limit": "1500.00",
   "policy": { /* обновлённые поля */ }
 }
 ```
@@ -1209,7 +1209,7 @@ Hub A открывает линию доверия Hub B:
   "from": "HUB_A_PID",
   "to": "HUB_B_PID",
   "equivalent": "UAH",
-  "limit": 100000.00,
+  "limit": "100000.00",
   "policy": {
     "auto_clearing": true,
     "settlement_schedule": "weekly",
