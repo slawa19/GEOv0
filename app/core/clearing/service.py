@@ -543,13 +543,25 @@ class ClearingService:
         * IT WAS NOT PAYING FOR ITSELF IN THE PLAN, and this was the open question the survey
           admitted it had not measured.  `LEAST(d1.amount, d2.amount, d3.amount)` spans three
           joined tables, so no index can serve it and PostgreSQL can only apply it as a post-join
-          `Join Filter`, after the expensive expansion that dominates the query.  Measured with
-          `EXPLAIN (ANALYZE, BUFFERS)` on 400 participants / 4000 debts / 4000 trust lines with a
-          realistic 2% of debts at the boundary: 61898 shared buffers with the predicate against
-          62204 without - 0.5% - and execution 77.8 ms against 81.0 ms median over five runs,
-          inside the run-to-run spread of both (74.7-85.2 against 75.5-91.5).  It is not a
-          performance predicate, and keeping it "for the plan" would have been a claim the
-          numbers do not support.
+          `Join Filter`, after the expensive expansion that dominates the query.  It is not a
+          performance predicate, and keeping it "for the plan" would have been a claim the numbers
+          do not support.
+
+          THE CONCLUSION HELD ACROSS TWO REVIEW ROUNDS; THE NUMBERS UNDER IT DID NOT, and are
+          corrected here rather than left to rot.  What stood here was "61898 buffers against
+          62204 - 0.5% - and 77.8 ms against 81.0 ms median".  The first round found the figure was
+          a RETELLING: no artefact, no generator, nothing in the tree to re-run.  The second found
+          the anti-vacuum was luck - the population did not guarantee the predicate anything to
+          discard, so the comparison could have been printed over a predicate that filtered
+          nothing.  The timing half was worse than stale: "inside the run-to-run spread of both"
+          was two runs described as a property, and over five runs the medians of ONE variant span
+          87.6 to 238.6 ms while the buffer counts repeat to the digit.
+
+          Live numbers, on a population with planted boundary triangles and a script that exits
+          non-zero if the predicate discarded nothing: 62116 shared buffers with the predicate
+          against 62638 without, a delta of 522 - 0.833% of the statement.  Regenerate with
+          `scripts/measure_clearing_min_amount_plan.py`; the run is in
+          `specs/012-money-precision-and-representation/evidence/`.
 
         * TEACHING IT `precision` WOULD HAVE DECIDED SOMETHING THIS PROGRAMME DEFERRED.  A
           threshold of `>= 10**-precision` reads "an amount below one quantum is not money" -
