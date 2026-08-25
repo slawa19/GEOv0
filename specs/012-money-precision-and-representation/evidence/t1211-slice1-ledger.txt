@@ -1,0 +1,11 @@
+﻿T1211 evidence ledger
+frozen_sha: dd1218d2d76452a19ecb56da867f41e7d67e77aa (branch claude/012-money-s1, clone clean, HEAD verified)
+review_root: C:\Users\admin\AppData\Local\Temp\geov0-t1211-557fcbee1f624047bf57398d0b6a74bb
+codex_path: C:\Users\admin\AppData\Local\OpenAI\Codex\bin\a7c12ebff69fb123\codex.exe
+codex_version: codex-cli 0.144.0-alpha.4
+model_requested: gpt-5.6-sol, model_reasoning_effort=high; resolved model ID not locally confirmable
+credential: ДОСТИЖИМ ревьюеру; риск принят владельцем 2026-08-14 (specs/BACKLOG.md:336-364)
+slice A (prompt, whole wave): prompt by geov0-a7 (ask_t1211.md) + scope-exclusion note for specs/015; stdin
+slice B (mechanical diff review --base review-base=e45e721): diff INCLUDES docs(015) commits - dilution recorded, findings against 015 docs are out of scope and routed to geov0-a2
+stop-line: declared to all four sessions before freeze; acks from 1b, df, a2; a7 committed to silence in advance
+postgres gate on frozen SHA: pytest tests/integration -q -m postgres -k "p012 or clearing", run INSIDE the frozen clone, dedicated DB geov0_test_agent_012_s2_signfix: 80 passed, 353 deselected, exit 0 (2026-08-24)

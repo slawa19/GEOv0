@@ -1,0 +1,34 @@
+﻿T1211 fix-round re-review evidence ledger
+frozen_sha: a8257a125ae8e97c60dd60adc96f34faa3251e04 (clone clean, HEAD verified; range dd1218d..a8257a1)
+review_root: C:\Users\admin\AppData\Local\Temp\geov0-t1211b-394229bbce024a04adee09692946a422
+codex_path: C:\Users\admin\AppData\Local\OpenAI\Codex\bin\a7c12ebff69fb123\codex.exe
+codex_version: codex-cli 0.144.0-alpha.4
+model_requested: gpt-5.6-sol, model_reasoning_effort=high; resolved model ID not locally confirmable
+credential: ДОСТИЖИМ ревьюеру; риск принят владельцем 2026-08-14 (specs/BACKLOG.md:336-364)
+slice A: a7's prompt ask_t1211b.md (markers VERDICT-FIXROUND/SENTINELS/READY-TO-CLOSE/DONE), stdin
+slice B: mechanical review --base review-base=dd1218d (fix-round diff; docs/015 commits in range recorded as dilution, out of scope)
+stop-line: round 2 declared to 1b/a2/df (acks received), a7 silent by agreement
+gates on FROZEN sha (comparability note per a7): postgres numbers recorded twice - FULL marker (comparable to a7's 114 on b925306) and the p012-or-clearing SELECTOR (comparable to my 80 on dd1218d); '80 -> full-marker N' is a selector change, not coverage growth
+postgres gates on FROZEN a8257a1 (run inside the frozen clone, dedicated DB geov0_test_agent_012_s2_signfix, 2026-08-25):
+  FULL marker (-m postgres): 114 passed, 320 deselected, exit 0  [comparable to a7's 114 on b925306]
+  selector (-m postgres -k "p012 or clearing"): 81 passed, 353 deselected, exit 0  [comparable to my 81 on dd1218d-era runs; the earlier '80' was the same selector before the shared-edge order test was added]
+slice A note: first launch used the pre-update prompt (a7 updated ask_t1211b.md after my substitution); killed before completion, relaunched with the updated prompt (engine-asymmetry question included). Only the relaunched run's output counts.
+post-freeze delta: 8f35f08 (test(012): float guard + Verification plan corrections) landed on the branch AFTER the freeze, outside the reviewed range a8257a1. NO production code: one new AST-guard test module + spec/plan text. Recorded per the 011 unreviewed-delta discipline; internal review of the delta by geov0-f5 (in place of the frozen-range reviewer). Note: the reviewer on a8257a1 reads the UNCORRECTED plan - an independent report of its false invariant counts as confirmation, already fixed in the delta.
+fix-round closure (2026-08-25):
+  slice A verdicts: VERDICT-FIXROUND: FINDINGS, VERDICT-SENTINELS: WEAK, VERDICT-READY-TO-CLOSE: NO
+  slice B: 1 finding (P2 engine ladder decorative) - same defect as slice A P1-1
+  fixes, each cross-reviewed per §15 (fix-delta circle exhausted, remainder internal):
+    e5a199c engine ladder survives to the execution loop (geov0-f5; reviewed by geov0-1b: approved, independent mutation run)
+    9e8152e sentinels/conformance domain closed, 21 -> 38 rows, 13 wrong implementations, negative-zero measured on PG16 (geov0-a7; reviewed by geov0-f5: approved, all 38 rows independently replicated against a reference implementation, 0 mismatches)
+    ed9bda3 catalogue failure drops instead of keeping previous backend's precision, generation-checked (geov0-a7; reviewed by geov0-f5: approved)
+    9f51763 float guard extended to AnnAssign, acknowledged sites named with reasons + existence check (geov0-a7; reviewed by geov0-f5: approved)
+    1c2e3aa measurement generator anti-vacuum is a mechanism, not luck: planted boundary triangles, plan-counter parse bound to the LEAST node, exit 1 with no comparative output when nothing discarded (geov0-a7, independently verified with a degenerate population)
+    da548ad superseded plan numbers replaced in all three places incl. production comment; live figures 62116/62638, delta 0.833%; the timing claim withdrawn as the wave's 7th false statement (geov0-a7; form approved by geov0-f5 for the clearing/service.py surface)
+    8f35f08 (pre-slice delta) reviewed by geov0-f5: approved; its guard-coverage note closed in 9f51763
+  registry: T1211 repeat-slice record and changelog in 8b04e68
+pre-merge gates on 8b04e68 (2026-08-25, dedicated DBs):
+  backend default tier (-m "not slow and not postgres"): 1858 passed, 2 skipped, 1 failed - the failure is test_run_full_stack_database_url_redaction.py::test_fail_on_conflict_checks_all_services_before_any_stop[powershell.exe-0], REPRODUCED IDENTICALLY ON origin/main (31a2a80): the assert seeks the substring "not stopped" but powershell.exe console wrapping breaks the phrase across a line ("not \nstopped") in this environment. KNOWN BASELINE, environment-sensitive test robustness, launcher untouched by the wave; candidate for program 014 (false-green/fragile guards).
+  backend postgres marker: 120 passed, 320 deselected, exit 0 (114 -> 120: the round's new PG pins)
+  admin-ui npm test: 301 passed (36 files)
+  simulator-ui npm test:unit: 988 passed
+baseline-failure classification STRENGTHENED (a7, by measurement): the launcher test's verdict is a function of the runner's console width, not of the code - same tree, same commit, green at a wide console and red at columns=80, where the wrap falls between "not" and "stopped". The class is 8 of 24 substring asserts on PowerShell stdout (any containing a space); today the SHORTEST fails by wrap accident while a 57-char phrase is exposed hardest. Carries no information about the code in either color. Recorded for program 014 (false-green-guards) by a7; the uniform fix (normalize whitespace before comparison) must cover all eight at once, with a pin.
