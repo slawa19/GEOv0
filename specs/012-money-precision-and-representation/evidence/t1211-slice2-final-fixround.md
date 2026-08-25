@@ -1,10 +1,17 @@
+> **Редакционная правка при переносе в репозиторий, 2026-08-25.** Отчёт приведён дословно, кроме
+> одного: ревьюер печатал якоря абсолютными путями внутрь своего замороженного клона
+> (`<TEMP>/geov0-t1211b-394229bbce024a04adee09692946a422/frozen/<путь>`), а §15 запрещает абсолютные пути в дереве. Префикс до `frozen/`
+> снят, поэтому якоря стали repo-relative; **замена механическая и обратимая** — исходный корень
+> назван здесь. Ничего кроме префиксов и хвостовых пробелов не менялось: ни формулировок, ни
+> вердиктов, ни чисел.
+
 Итог: фикс-раунд не готов к закрытию. Нашёл две P1-регрессии/недоделки, слабость новых часовых и неполную anti-vacuum проверку артефакта плана.
 
 ## Находки
 
 ### P1 — лестница глубины фактически не работает в цикле `RealClearingEngine`
 
-В [real_clearing_engine.py:183](/C:/Users/admin/AppData/Local/Temp/geov0-t1211b-394229bbce024a04adee09692946a422/frozen/app/core/simulator/real_clearing_engine.py:183) сначала выполняется поиск с глубиной 4 и при пустом результате — с глубиной 6. Но полученный список используется только для приоритизации/визуализации. Исполнительный цикл на [real_clearing_engine.py:284](/C:/Users/admin/AppData/Local/Temp/geov0-t1211b-394229bbce024a04adee09692946a422/frozen/app/core/simulator/real_clearing_engine.py:284) сразу заново вызывает:
+В [real_clearing_engine.py:183](/app/core/simulator/real_clearing_engine.py:183) сначала выполняется поиск с глубиной 4 и при пустом результате — с глубиной 6. Но полученный список используется только для приоритизации/визуализации. Исполнительный цикл на [real_clearing_engine.py:284](/app/core/simulator/real_clearing_engine.py:284) сразу заново вызывает:
 
 ```python
 find_cycles(..., max_depth=max_depth)
@@ -31,7 +38,7 @@ test_tick_money_paths_carry_the_run_perimeter.py: 3 passed
 
 ### P1 — после неудачной смены backend используется precision предыдущего backend
 
-В [useSimulatorRealMode.ts:1048](/C:/Users/admin/AppData/Local/Temp/geov0-t1211b-394229bbce024a04adee09692946a422/frozen/simulator-ui/v2/src/composables/useSimulatorRealMode.ts:1048) ошибка загрузки каталога оставляет «whatever precisions are already in force». Watcher на `apiBase` запускает новую загрузку, но не инвалидирует старый каталог.
+В [useSimulatorRealMode.ts:1048](/simulator-ui/v2/src/composables/useSimulatorRealMode.ts:1048) ошибка загрузки каталога оставляет «whatever precisions are already in force». Watcher на `apiBase` запускает новую загрузку, но не инвалидирует старый каталог.
 
 Воспроизведение в in-memory Vitest-пробе:
 
@@ -71,7 +78,7 @@ moneyPrecisionByEquivalent.test.ts: 6 passed
 
 Она также проходит общую таблицу: отрицательные случаи там есть только для precision 1 и 2.
 
-Общая таблица существенно лучше одиночного часового: она отвергает half-up maximum, усечение, отсутствие добивки, всегда восемь знаков, сохранение лишних нулей, общую потерю знака и float round-trip. Но в [money-rendering-conformance.json:31](/C:/Users/admin/AppData/Local/Temp/geov0-t1211b-394229bbce024a04adee09692946a422/frozen/api/money-rendering-conformance.json:31) представлены только precision:
+Общая таблица существенно лучше одиночного часового: она отвергает half-up maximum, усечение, отсутствие добивки, всегда восемь знаков, сохранение лишних нулей, общую потерю знака и float round-trip. Но в [money-rendering-conformance.json:31](/api/money-rendering-conformance.json:31) представлены только precision:
 
 ```text
 [0, 1, 2, 8]
@@ -113,7 +120,7 @@ without predicate rows = 100
 
 ```text
 docs/en/02-protocol-spec.md:341: trailing whitespace.
-+- `limit` ≥ 0  
++- `limit` ≥ 0
 ```
 
 На предмет денежной семантики не влияет.
@@ -158,7 +165,7 @@ docs/en/02-protocol-spec.md:341: trailing whitespace.
 
 Frozen-дерево осталось чистым и находится ровно на `a8257a125ae8e97c60dd60adc96f34faa3251e04`. Из-за read-only файловой системы canonical runner и тесты, создающие temp/DB, запустить нельзя. UI-прогоны были debug-only через установленный `node_modules` другого checkout на том же SHA; проверяемые UI-файлы совпадали. Полный/Postgres gate не выполнялся.
 
-VERDICT-FIXROUND: FINDINGS  
-VERDICT-SENTINELS: WEAK  
-VERDICT-READY-TO-CLOSE: NO  
+VERDICT-FIXROUND: FINDINGS
+VERDICT-SENTINELS: WEAK
+VERDICT-READY-TO-CLOSE: NO
 VERDICT-DONE

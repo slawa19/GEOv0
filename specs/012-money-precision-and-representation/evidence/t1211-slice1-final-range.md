@@ -2,14 +2,14 @@ The patch can misstate valid monetary values in the admin UI, substantially regr
 
 Full review comments:
 
-- [P1] Preserve fractional digits beyond display precision — C:\Users\admin\AppData\Local\Temp\geov0-t1211-557fcbee1f624047bf57398d0b6a74bb\frozen\admin-ui\src\composables\useEquivalentPrecision.ts:57-57
+- [P1] Preserve fractional digits beyond display precision — admin-ui\src\composables\useEquivalentPrecision.ts:57-57
   When a valid stored value has more fractional digits than `Equivalent.precision` (for example `0.05 HOUR` at precision 1), this calls `formatDecimalFixed` and rounds it to `0.1`. The backend explicitly accepts and stores such values exactly and its new renderer treats precision as a minimum, so every admin surface using this helper can display a different monetary amount from the ledger. Use a minimum-precision formatter that retains significant extra digits.
 
-- [P1] Retain a fast detector path for clearing execution loops — C:\Users\admin\AppData\Local\Temp\geov0-t1211-557fcbee1f624047bf57398d0b6a74bb\frozen\app\core\clearing\service.py:1163-1169
+- [P1] Retain a fast detector path for clearing execution loops — app\core\clearing\service.py:1163-1169
   With the default `max_depth=6`, a non-empty SQL result now always falls through to loading every debt and running the DFS before returning. Both `auto_clear` and `RealClearingEngine` call `find_cycles` repeatedly while executing one cycle at a time, so graphs containing ordinary triangles lose the previous SQL fast path and pay for the quadrangle query plus full graph traversal on every iteration; this can consume the simulator's clearing time budget or make a large auto-clear batch dramatically slower. The complete union is useful for read endpoints, but execution callers need a way to request an immediately executable short cycle.
 
-- [P2] Guard against stale precision catalogue completions — C:\Users\admin\AppData\Local\Temp\geov0-t1211-557fcbee1f624047bf57398d0b6a74bb\frozen\simulator-ui\v2\src\composables\useSimulatorRealMode.ts:1033-1035
+- [P2] Guard against stale precision catalogue completions — simulator-ui\v2\src\composables\useSimulatorRealMode.ts:1033-1035
   If the catalogue request is still pending when the user leaves real mode, the mode watcher resets the precision registry, but this unowned async completion subsequently calls `setEquivalentPrecisions` and repopulates it. Demo fixtures can then be interpreted using precision from the former backend rather than their shipped precision, including scaling atom-only balances incorrectly. Capture the request context or sequence and discard the result when mode, API base, or credentials have changed.
 
-- [P2] Reload precision when connection credentials change — C:\Users\admin\AppData\Local\Temp\geov0-t1211-557fcbee1f624047bf57398d0b6a74bb\frozen\simulator-ui\v2\src\composables\useSimulatorRealMode.ts:1279-1281
+- [P2] Reload precision when connection credentials change — simulator-ui\v2\src\composables\useSimulatorRealMode.ts:1279-1281
   This watcher only reacts to entering or leaving real mode, even though `apiBase` and `accessToken` are editable while real mode remains active. For example, starting anonymously makes the catalogue fetch fail, and entering an admin token later never retries it, leaving custom equivalents formatted with the default precision; switching API bases similarly retains the previous backend's catalogue. Include the connection context in the refresh trigger while retaining stale-result protection.

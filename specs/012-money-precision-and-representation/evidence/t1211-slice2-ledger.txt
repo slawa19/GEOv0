@@ -1,7 +1,7 @@
-﻿T1211 fix-round re-review evidence ledger
+T1211 fix-round re-review evidence ledger
 frozen_sha: a8257a125ae8e97c60dd60adc96f34faa3251e04 (clone clean, HEAD verified; range dd1218d..a8257a1)
-review_root: C:\Users\admin\AppData\Local\Temp\geov0-t1211b-394229bbce024a04adee09692946a422
-codex_path: C:\Users\admin\AppData\Local\OpenAI\Codex\bin\a7c12ebff69fb123\codex.exe
+review_root: <TEMP>/geov0-t1211b-394229bbce024a04adee09692946a422
+codex_path: <LOCALAPPDATA>/OpenAI/Codex\bin\a7c12ebff69fb123\codex.exe
 codex_version: codex-cli 0.144.0-alpha.4
 model_requested: gpt-5.6-sol, model_reasoning_effort=high; resolved model ID not locally confirmable
 credential: ДОСТИЖИМ ревьюеру; риск принят владельцем 2026-08-14 (specs/BACKLOG.md:336-364)
@@ -32,3 +32,31 @@ pre-merge gates on 8b04e68 (2026-08-25, dedicated DBs):
   admin-ui npm test: 301 passed (36 files)
   simulator-ui npm test:unit: 988 passed
 baseline-failure classification STRENGTHENED (a7, by measurement): the launcher test's verdict is a function of the runner's console width, not of the code - same tree, same commit, green at a wide console and red at columns=80, where the wrap falls between "not" and "stopped". The class is 8 of 24 substring asserts on PowerShell stdout (any containing a space); today the SHORTEST fails by wrap accident while a 57-char phrase is exposed hardest. Carries no information about the code in either color. Recorded for program 014 (false-green-guards) by a7; the uniform fix (normalize whitespace before comparison) must cover all eight at once, with a pin.
+
+--- ЗАМОРОЗКА КЛОНА (обе итерации; отличаются только FROZEN_SHA и BASE) ---
+  git clone --no-hardlinks --quiet D:/www/projects/2025/GEOv0 <reviewRoot>/frozen
+  git -C <clone> checkout --detach --quiet <FROZEN_SHA>
+  git -C <clone> branch review-base <BASE>
+  проверка: git -C <clone> rev-parse HEAD == <FROZEN_SHA>; git -C <clone> status --porcelain пуст
+  круг 2: FROZEN_SHA=a8257a125ae8e97c60dd60adc96f34faa3251e04, BASE=dd1218d
+
+--- КОМАНДЫ ПРОГОНОВ ---
+  Те же две команды, что в круге 1 (см. t1211-slice1-ledger.txt), с заменами:
+    промпт  prompt_t1211.md -> prompt_t1211b.md (= ask_t1211b.md с подстановкой SHA, ФИНАЛЬНАЯ редакция)
+    выходы  final_wave.md   -> final_fixround.md,  final_range.md   -> final_fixrange.md
+            progress_wave.log -> progress_fixround.log, progress_range.log -> progress_fixrange.log
+
+--- ПРОВЕРКА ЗАВЕРШЕНИЯ ---
+  exit code == 0; -o файл непуст; маркеры на конце:
+    VERDICT-FIXROUND, VERDICT-SENTINELS, VERDICT-READY-TO-CLOSE, VERDICT-DONE
+  Срез A перезапускался дважды из-за правок промпта до финальной редакции. Перед каждым перезапуском
+  убитый прогон останавливался, а его final_*.md и progress_*.log удалялись, поэтому засчитан
+  ровно один прогон — последний.
+
+--- ПОПРАВКА К СТРОКЕ «backend default tier ... 1 failed» (внесена 2026-08-25) ---
+  Цифра «1 failed» верна для прогона geov0-f5 и ЕГО ширины консоли. Прогон владельца на том же
+  дереве дал ДВА падения, и оба воспроизводят F-014-11. То есть **количество красных ассертов
+  этого класса само является функцией ширины консоли** — ровно то, что запись F-014-11 и
+  утверждает («следующая ширина поднимет другой»). Классификация не меняется: baseline,
+  нечувствительный к коду; предмет — программа 014, задача T1412, где починка обязана покрыть
+  все восемь ассертов разом.
