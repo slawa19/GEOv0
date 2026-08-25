@@ -62,7 +62,7 @@ async def test_create_fails_closed_when_actual_invariant_checker_is_unavailable(
             TrustLineCreateRequest(
                 to=receiver.pid,
                 equivalent=equivalent.code,
-                limit=Decimal("10"),
+                limit="10",
                 signature="test-signature",
             ),
         )
@@ -129,7 +129,7 @@ async def test_create_checkpoint_failure_is_not_swallowed_or_committed(
             TrustLineCreateRequest(
                 to=receiver.pid,
                 equivalent=equivalent.code,
-                limit=Decimal("10"),
+                limit="10",
                 signature="test-signature",
             ),
         )
@@ -207,7 +207,7 @@ async def test_update_checkpoint_failure_is_not_swallowed_or_committed(
         await TrustLineService(db_session).update(
             trustline_id,
             sender.id,
-            TrustLineUpdateRequest(limit=Decimal("20"), signature="test-signature"),
+            TrustLineUpdateRequest(limit="20", signature="test-signature"),
         )
 
     commit.assert_not_awaited()

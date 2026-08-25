@@ -6,7 +6,7 @@ import secrets
 import time
 import uuid
 import hashlib
-from decimal import Decimal, ROUND_DOWN
+from decimal import Decimal
 from typing import Any, Awaitable, Callable
 
 from sqlalchemy import select
@@ -14,10 +14,12 @@ from sqlalchemy import select
 import app.db.session as db_session
 from app.config import settings
 from app.core.clearing.service import (
+    _SQL_DETECTOR_MAX_CYCLE_LENGTH,
     ClearingCommittedAfterCancellation,
     ClearingService,
 )
 from app.core.simulator.edge_patch_builder import EdgePatchBuilder
+from app.core.simulator.net_balance_utils import to_money_str
 from app.core.simulator.run_perimeter import run_perimeter_pids
 from app.core.simulator.models import RunRecord
 from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter
@@ -58,6 +60,34 @@ class RealClearingEngine:
             return bool(self._should_warn_this_tick_cb(run, key))
         except Exception:
             return True
+
+    def _cleared_amount_str(self, run: RunRecord, eq: Any, amount: Decimal) -> str:
+        """The single rendering of `clearing.done.cleared_amount`.
+
+        012 / `T1207`.  This field used to be produced three times in this file with two
+        different scales: `Decimal("0.01")` hard-coded before the viz helper exists, then
+        re-quantised by `Equivalent.precision` once it does, and hard-coded to `0.01` again on
+        the `CancelledError` path -- which never reached the second one.  So the same cleared
+        amount was reported at scale 2 or at scale `precision` depending only on whether the
+        clearing had been cancelled, and a `precision`-4 equivalent lost two digits precisely
+        when something had gone wrong.  All three sites now call this.
+
+        Precision comes from the `VizPatchHelper` cached on the run, which is where this
+        module already keeps it; no DB round trip is added to the tick.  Before the first
+        helper for an equivalent exists the fallback is 2 -- the same default the rest of the
+        codebase uses for a missing `Equivalent.precision` -- and, crucially, it is now the
+        same fallback on both paths instead of a different one on each.
+        """
+
+        precision = 2
+        try:
+            with self._lock:
+                helper = (run._real_viz_by_eq or {}).get(str(eq))
+            if helper is not None:
+                precision = int(getattr(helper, "precision", 2) or 2)
+        except Exception:
+            precision = 2
+        return to_money_str(amount, precision)
 
     async def tick_real_mode_clearing(
         self,
@@ -150,11 +180,49 @@ class RealClearingEngine:
                         int(max_depth),
                     )
                     _fc_t0 = time.monotonic()
-                    cycles = await service.find_cycles(
-                        eq,
-                        max_depth=max_depth,
-                        allowed_participant_pids=run_perimeter_pids(run),
-                    )
+
+                    # Depth ladder (T1211): an executor needs one executable cycle
+                    # shortest-first, not the complete union - ask the SQL-complete depth
+                    # first (early return, no graph load), widen to the caller's depth only
+                    # when the short rung is EMPTY.
+                    #
+                    # WHY empty-only HERE while `auto_clear` also widens on all-candidates-
+                    # failed: every failure-without-exception path of the execution -
+                    # exactly six, `_execute_clearing_with_amount` returns None at
+                    # :1651 (empty cycle), :1676 (invalid debt ids), :1736 (Debt rows gone),
+                    # :1774 (amount <= 0), :1804 (locked pair), :1823 (auto_clearing policy)
+                    # - is either unreachable from detector output or filtered from the NEXT
+                    # `find_cycles` answer by the same predicate (locks: the same
+                    # `_locked_pairs_for_equivalent`; policy: the find-side filter calls the
+                    # execution's own `_cycle_respects_auto_clearing`).  So a PERSISTENT
+                    # cause empties the short rung by the next tick and the wide rung fires;
+                    # a TRANSIENT one costs at most this tick, and the next tick retries by
+                    # design (per-tick time budget is why this ladder exists).  `auto_clear`
+                    # has no next tick - its one call must widen in-place.  THIS REASONING
+                    # LEANS ON THOSE SIX PATHS: adding a seventh None-return to the
+                    # execution breaks it, and whoever adds one must revisit this ladder.
+                    #
+                    # One ladder for the preflight AND the execution loop below: the first
+                    # loop iteration consumes this preflight answer (already prioritized),
+                    # later iterations re-find through the same ladder.  The first edition
+                    # laddered only this preflight while the loop re-found at full depth
+                    # every iteration - the preflight answer never survived to execution
+                    # (T1211 fix-round, both slices, measured find_depths=[4, 6, 6]).
+                    async def _ladder_find() -> list:
+                        found = await service.find_cycles(
+                            eq,
+                            max_depth=min(max_depth, _SQL_DETECTOR_MAX_CYCLE_LENGTH),
+                            allowed_participant_pids=run_perimeter_pids(run),
+                        )
+                        if not found and max_depth > _SQL_DETECTOR_MAX_CYCLE_LENGTH:
+                            found = await service.find_cycles(
+                                eq,
+                                max_depth=max_depth,
+                                allowed_participant_pids=run_perimeter_pids(run),
+                            )
+                        return found
+
+                    cycles = await _ladder_find()
                     _fc_ms = int((time.monotonic() - _fc_t0) * 1000.0)
                     if _fc_ms > 500:
                         self._logger.warning(
@@ -200,6 +268,7 @@ class RealClearingEngine:
                     clearing_started = time.monotonic()
                     progress_last_log = 0.0
                     execution_error: Exception | None = None
+                    consumed_preflight = False
 
                     while True:
                         now = time.monotonic()
@@ -242,34 +311,38 @@ class RealClearingEngine:
                             str(eq),
                             int(cleared_cycles),
                         )
-                        _loop_fc_t0 = time.monotonic()
-                        try:
-                            cycles = await service.find_cycles(
-                        eq,
-                        max_depth=max_depth,
-                        allowed_participant_pids=run_perimeter_pids(run),
-                    )
-                        except asyncio.CancelledError:
-                            raise
-                        except Exception as exc:
-                            if cleared_cycles <= 0:
+                        if consumed_preflight:
+                            _loop_fc_t0 = time.monotonic()
+                            try:
+                                cycles = await _ladder_find()
+                            except asyncio.CancelledError:
                                 raise
-                            execution_error = exc
-                            break
-                        _loop_fc_ms = int((time.monotonic() - _loop_fc_t0) * 1000.0)
-                        if _loop_fc_ms > 500:
-                            self._logger.warning(
-                                "simulator.real.clearing_find_cycles_loop_slow run_id=%s tick=%s eq=%s elapsed_ms=%s",
-                                str(run.run_id),
-                                int(run.tick_index),
-                                str(eq),
-                                int(_loop_fc_ms),
-                            )
-                        if not cycles:
-                            break
+                            except Exception as exc:
+                                if cleared_cycles <= 0:
+                                    raise
+                                execution_error = exc
+                                break
+                            _loop_fc_ms = int((time.monotonic() - _loop_fc_t0) * 1000.0)
+                            if _loop_fc_ms > 500:
+                                self._logger.warning(
+                                    "simulator.real.clearing_find_cycles_loop_slow run_id=%s tick=%s eq=%s elapsed_ms=%s",
+                                    str(run.run_id),
+                                    int(run.tick_index),
+                                    str(eq),
+                                    int(_loop_fc_ms),
+                                )
+                            if not cycles:
+                                break
 
-                        # Keep execution order aligned with visualization policy.
-                        cycles = _prioritize_cycle_for_tick(list(cycles))
+                            # Keep execution order aligned with visualization policy.
+                            cycles = _prioritize_cycle_for_tick(list(cycles))
+                        else:
+                            # First iteration executes the preflight answer - the same
+                            # (already prioritized) list the visualization plan was built
+                            # from; re-finding here discarded the preflight ladder entirely,
+                            # and re-prioritizing would rotate the list a second time,
+                            # misaligning execution with the published plan.
+                            consumed_preflight = True
 
                         executed = False
                         for cycle in cycles:
@@ -433,15 +506,13 @@ class RealClearingEngine:
 
                     cleared_amount_str: str | None = None
                     if cleared_amount_dec > 0:
-                        try:
-                            cleared_amount_str = format(
-                                cleared_amount_dec.quantize(
-                                    Decimal("0.01"), rounding=ROUND_DOWN
-                                ),
-                                "f",
-                            )
-                        except Exception:
-                            cleared_amount_str = str(cleared_amount_dec)
+                        # The `except: str(cleared_amount_dec)` fallback that used to sit here
+                        # was the exponential-money escape hatch (`1E-8` on the wire);
+                        # `to_money_str` is total and cannot raise, so there is nothing to
+                        # fall back to.
+                        cleared_amount_str = self._cleared_amount_str(
+                            run, eq, cleared_amount_dec
+                        )
 
                     self._logger.warning(
                         "simulator.real.clearing_patch_start run_id=%s tick=%s eq=%s touched_nodes=%s touched_edges=%s cleared_cycles=%s",
@@ -475,17 +546,12 @@ class RealClearingEngine:
                                 run._real_viz_by_eq[str(eq)] = helper
 
                         if cleared_amount_dec > 0:
-                            try:
-                                precision = int(getattr(helper, "precision", 2) or 2)
-                                money_quant = Decimal(1) / (Decimal(10) ** precision)
-                                cleared_amount_str = format(
-                                    cleared_amount_dec.quantize(
-                                        money_quant, rounding=ROUND_DOWN
-                                    ),
-                                    "f",
-                                )
-                            except Exception:
-                                pass
+                            # Recomputed now that the helper (and therefore the equivalent's
+                            # precision) is certainly cached on the run.  Same function as the
+                            # two other sites, so this can only add digits, never change form.
+                            cleared_amount_str = self._cleared_amount_str(
+                                run, eq, cleared_amount_dec
+                            )
 
                         participant_ids: list[uuid.UUID] = []
                         if run._real_participants:
@@ -636,11 +702,11 @@ class RealClearingEngine:
                             equivalent=eq,
                             plan_id=plan_id or f"plan_{secrets.token_hex(6)}",
                             cleared_cycles=cleared_cycles,
-                            cleared_amount=format(
-                                cleared_amount_dec.quantize(
-                                    Decimal("0.01"), rounding=ROUND_DOWN
-                                ),
-                                "f",
+                            # Was a hard-coded `Decimal("0.01")` while the happy path above
+                            # used `Equivalent.precision`: one field, two scales, chosen by
+                            # whether the clearing was cancelled.
+                            cleared_amount=self._cleared_amount_str(
+                                run, eq, cleared_amount_dec
                             ),
                             cycle_edges=fallback_edges or None,
                             node_patch=None,

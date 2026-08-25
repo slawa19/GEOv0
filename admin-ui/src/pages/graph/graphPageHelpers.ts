@@ -1,5 +1,5 @@
 import type { GraphRebuildOptions, LabelMode } from '../../composables/useGraphVisualization'
-import { formatDecimalFixed } from '../../utils/decimal'
+import { formatMoneyByEquivalent } from '../../composables/useEquivalentPrecision'
 
 export async function waitForLatestPendingGraphLoad(
   getPending: () => Promise<unknown> | null,
@@ -19,8 +19,20 @@ export function makeMetricsKey(pid: string, eqCode: string | null, threshold: st
   return `${p}|${eq}|thr=${thr}`
 }
 
-export function money(v: string): string {
-  return formatDecimalFixed(v, 2)
+/**
+ * Денежная ячейка графа (F-012-7).
+ *
+ * Раньше здесь стояло `formatDecimalFixed(v, 2)`: два знака для любой величины. Это отменяло уже
+ * верную точность, с которой аналитика графа отдаёт свои строки (`atomsToDecimal(…, precision)`
+ * в `useGraphAnalytics`), и приписывало её же величинам эквивалента с `precision: 1`.
+ * Точность обязан назвать вызывающий — кодом эквивалента строки, а не местом вывода.
+ */
+export function money(
+  value: string,
+  equivalent: unknown,
+  precisionByEq: ReadonlyMap<string, number>,
+): string {
+  return formatMoneyByEquivalent(value, equivalent, precisionByEq)
 }
 
 function clamp(n: number, min: number, max: number): number {

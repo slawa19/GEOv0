@@ -8,6 +8,7 @@ import OperatorAdvicePanel from '../../ui/OperatorAdvicePanel.vue'
 import { t } from '../../i18n'
 import { labelTrustlineStatus } from '../../i18n/labels'
 import { buildGraphDrawerAdvice } from '../../advice/operatorAdvice'
+import { PRECISION_UNAVAILABLE, precisionForEquivalent } from '../../composables/useEquivalentPrecision'
 
 import type { DrawerTab, SelectedInfo } from '../../composables/useGraphVisualization'
 import type { ClearingCycles } from './graphTypes'
@@ -72,10 +73,17 @@ type SelectedConcentration = {
   incoming: { top1: number; top5: number; hhi: number; level: { label: string; type: 'success' | 'warning' | 'danger' } }
 }
 
+type CapacitySide = { limit: bigint; used: bigint; pct: number }
+
+/**
+ * `out`/`inc` есть только когда выбран один эквивалент (F-012-8): суммировать лимиты разных
+ * эквивалентов в одну ёмкость нельзя, а доля использования такой суммы — не доля.
+ * `bottlenecks` — счёт линий по безразмерному отношению, он осмыслен и при ALL.
+ */
 type SelectedCapacity = {
   eq: string | null
-  out: { limit: bigint; used: bigint; pct: number }
-  inc: { limit: bigint; used: bigint; pct: number }
+  out: CapacitySide | null
+  inc: CapacitySide | null
   bottlenecks: Array<{ dir: 'out' | 'in'; other: string; t: { limit: string; used: string; available: string } }>
 }
 
@@ -126,7 +134,7 @@ const props = defineProps<{
   atomsToDecimal: (atoms: bigint, precision: number) => string
 
   reloadCurrentView: () => void
-  money: (v: string) => string
+  money: (v: string, equivalent: unknown) => string
   pct: (x: number, digits?: number) => string
 
   selectedRank: SelectedRank | null
@@ -164,6 +172,34 @@ const props = defineProps<{
 
 const route = useRoute()
 
+/**
+ * Границы гистограммы нетто-позиций (F-012-7).
+ *
+ * Раньше здесь стояло `precisionByEq.get(eq) ?? 2`: неизвестная точность молча становилась двумя
+ * знаками, то есть подписи под гистограммой утверждали разрешение, которого никто не объявлял.
+ * Атомы без точности в мажорную величину не переводятся вовсе — тогда печатается прочерк.
+ */
+/**
+ * Обе стороны ёмкости сразу — или ничего. Нарезка на месте использования дала бы шаблону
+ * право напечатать долю от суммы разных эквивалентов (F-012-8).
+ */
+const capacitySides = computed(() => {
+  const capacity = props.selectedCapacity
+  if (!capacity || !capacity.out || !capacity.inc) return null
+  return { out: capacity.out, inc: capacity.inc }
+})
+
+const netDistributionRange = computed(() => {
+  const dist = props.netDistribution
+  if (!dist) return { min: PRECISION_UNAVAILABLE, max: PRECISION_UNAVAILABLE }
+  const precision = precisionForEquivalent(props.precisionByEq, dist.eq)
+  if (precision === null) return { min: PRECISION_UNAVAILABLE, max: PRECISION_UNAVAILABLE }
+  return {
+    min: props.money(props.atomsToDecimal(dist.min, precision), dist.eq),
+    max: props.money(props.atomsToDecimal(dist.max, precision), dist.eq),
+  }
+})
+
 const adviceItems = computed(() => {
   return buildGraphDrawerAdvice({
     ctx: {
@@ -186,8 +222,8 @@ const adviceItems = computed(() => {
       },
       capacity: props.selectedCapacity
         ? {
-            outPct: props.selectedCapacity.out.pct,
-            inPct: props.selectedCapacity.inc.pct,
+            outPct: props.selectedCapacity.out?.pct ?? null,
+            inPct: props.selectedCapacity.inc?.pct ?? null,
             bottlenecksCount: props.selectedCapacity.bottlenecks.length,
           }
         : null,
@@ -328,7 +364,7 @@ const adviceItems = computed(() => {
                   class="kpi"
                 >
                   <div class="kpi__value">
-                    {{ money(selectedRank.net) }} {{ selectedRank.eq }}
+                    {{ money(selectedRank.net, selectedRank.eq) }} {{ selectedRank.eq }}
                   </div>
                   <div class="kpi__hint muted">
                     {{ t('graph.analytics.netPosition.hint') }}
@@ -489,27 +525,36 @@ const adviceItems = computed(() => {
                   v-if="selectedCapacity"
                   class="kpi"
                 >
-                  <div class="kpi__row">
-                    <span class="muted">{{ t('graph.analytics.capacity.outgoingUsed') }}</span>
-                    <span class="kpi__metric">{{ pct(selectedCapacity.out.pct, 0) }}</span>
-                  </div>
-                  <el-progress
-                    :percentage="Math.round((selectedCapacity.out.pct || 0) * 100)"
-                    :stroke-width="10"
-                    :show-text="false"
-                  />
+                  <template v-if="capacitySides">
+                    <div class="kpi__row">
+                      <span class="muted">{{ t('graph.analytics.capacity.outgoingUsed') }}</span>
+                      <span class="kpi__metric">{{ pct(capacitySides.out.pct, 0) }}</span>
+                    </div>
+                    <el-progress
+                      :percentage="Math.round((capacitySides.out.pct || 0) * 100)"
+                      :stroke-width="10"
+                      :show-text="false"
+                    />
+                    <div
+                      class="kpi__row"
+                      style="margin-top: 10px"
+                    >
+                      <span class="muted">{{ t('graph.analytics.capacity.incomingUsed') }}</span>
+                      <span class="kpi__metric">{{ pct(capacitySides.inc.pct, 0) }}</span>
+                    </div>
+                    <el-progress
+                      :percentage="Math.round((capacitySides.inc.pct || 0) * 100)"
+                      :stroke-width="10"
+                      :show-text="false"
+                    />
+                  </template>
                   <div
-                    class="kpi__row"
-                    style="margin-top: 10px"
+                    v-else
+                    class="kpi__hint muted"
+                    data-testid="graph-capacity-cross-equivalent"
                   >
-                    <span class="muted">{{ t('graph.analytics.capacity.incomingUsed') }}</span>
-                    <span class="kpi__metric">{{ pct(selectedCapacity.inc.pct, 0) }}</span>
+                    {{ t('graph.analytics.capacity.pickEquivalent') }}
                   </div>
-                  <el-progress
-                    :percentage="Math.round((selectedCapacity.inc.pct || 0) * 100)"
-                    :stroke-width="10"
-                    :show-text="false"
-                  />
                   <div
                     v-if="analytics.showBottlenecks"
                     class="kpi__hint muted"
@@ -647,7 +692,7 @@ const adviceItems = computed(() => {
                   width="120"
                 >
                   <template #default="{ row }">
-                    {{ money(row.available) }}
+                    {{ money(row.available, row.equivalent) }}
                   </template>
                 </el-table-column>
                 <el-table-column
@@ -655,7 +700,7 @@ const adviceItems = computed(() => {
                   width="120"
                 >
                   <template #default="{ row }">
-                    {{ money(row.used) }}
+                    {{ money(row.used, row.equivalent) }}
                   </template>
                 </el-table-column>
                 <el-table-column
@@ -663,7 +708,7 @@ const adviceItems = computed(() => {
                   width="120"
                 >
                   <template #default="{ row }">
-                    {{ money(row.limit) }}
+                    {{ money(row.limit, row.equivalent) }}
                   </template>
                 </el-table-column>
               </el-table>
@@ -716,7 +761,7 @@ const adviceItems = computed(() => {
                   width="120"
                 >
                   <template #default="{ row }">
-                    {{ money(row.available) }}
+                    {{ money(row.available, row.equivalent) }}
                   </template>
                 </el-table-column>
                 <el-table-column
@@ -724,7 +769,7 @@ const adviceItems = computed(() => {
                   width="120"
                 >
                   <template #default="{ row }">
-                    {{ money(row.used) }}
+                    {{ money(row.used, row.equivalent) }}
                   </template>
                 </el-table-column>
                 <el-table-column
@@ -732,7 +777,7 @@ const adviceItems = computed(() => {
                   width="120"
                 >
                   <template #default="{ row }">
-                    {{ money(row.limit) }}
+                    {{ money(row.limit, row.equivalent) }}
                   </template>
                 </el-table-column>
               </el-table>
@@ -812,8 +857,8 @@ const adviceItems = computed(() => {
                 />
               </div>
               <div class="hist__labels muted">
-                <span>{{ money(atomsToDecimal(netDistribution.min, precisionByEq.get(netDistribution.eq) ?? 2)) }}</span>
-                <span>{{ money(atomsToDecimal(netDistribution.max, precisionByEq.get(netDistribution.eq) ?? 2)) }}</span>
+                <span>{{ netDistributionRange.min }}</span>
+                <span>{{ netDistributionRange.max }}</span>
               </div>
             </el-card>
 
@@ -839,7 +884,7 @@ const adviceItems = computed(() => {
                 min-width="120"
               >
                 <template #default="{ row }">
-                  {{ money(row.outgoing_limit) }}
+                  {{ money(row.outgoing_limit, row.equivalent) }}
                 </template>
               </el-table-column>
               <el-table-column
@@ -848,7 +893,7 @@ const adviceItems = computed(() => {
                 min-width="120"
               >
                 <template #default="{ row }">
-                  {{ money(row.outgoing_used) }}
+                  {{ money(row.outgoing_used, row.equivalent) }}
                 </template>
               </el-table-column>
               <el-table-column
@@ -857,7 +902,7 @@ const adviceItems = computed(() => {
                 min-width="120"
               >
                 <template #default="{ row }">
-                  {{ money(row.incoming_limit) }}
+                  {{ money(row.incoming_limit, row.equivalent) }}
                 </template>
               </el-table-column>
               <el-table-column
@@ -866,7 +911,7 @@ const adviceItems = computed(() => {
                 min-width="120"
               >
                 <template #default="{ row }">
-                  {{ money(row.incoming_used) }}
+                  {{ money(row.incoming_used, row.equivalent) }}
                 </template>
               </el-table-column>
               <el-table-column
@@ -875,7 +920,7 @@ const adviceItems = computed(() => {
                 min-width="120"
               >
                 <template #default="{ row }">
-                  {{ money(row.total_debt) }}
+                  {{ money(row.total_debt, row.equivalent) }}
                 </template>
               </el-table-column>
               <el-table-column
@@ -884,7 +929,7 @@ const adviceItems = computed(() => {
                 min-width="120"
               >
                 <template #default="{ row }">
-                  {{ money(row.total_credit) }}
+                  {{ money(row.total_credit, row.equivalent) }}
                 </template>
               </el-table-column>
               <el-table-column
@@ -893,7 +938,7 @@ const adviceItems = computed(() => {
                 min-width="120"
               >
                 <template #default="{ row }">
-                  {{ money(row.net) }}
+                  {{ money(row.net, row.equivalent) }}
                 </template>
               </el-table-column>
             </el-table>
@@ -942,7 +987,7 @@ const adviceItems = computed(() => {
                       min-width="120"
                     >
                       <template #default="{ row }">
-                        {{ money(row.amount) }}
+                        {{ money(row.amount, selectedCounterpartySplit.eq) }}
                       </template>
                     </el-table-column>
                     <el-table-column
@@ -993,7 +1038,7 @@ const adviceItems = computed(() => {
                       min-width="120"
                     >
                       <template #default="{ row }">
-                        {{ money(row.amount) }}
+                        {{ money(row.amount, selectedCounterpartySplit.eq) }}
                       </template>
                     </el-table-column>
                     <el-table-column
@@ -1138,7 +1183,7 @@ const adviceItems = computed(() => {
             </el-card>
 
             <el-card
-              v-if="analyticsEq && analytics.showCapacity && selectedCapacity"
+              v-if="analyticsEq && analytics.showCapacity && selectedCapacity && capacitySides"
               shadow="never"
               class="mb"
             >
@@ -1156,12 +1201,12 @@ const adviceItems = computed(() => {
                   />
                 </div>
                 <el-progress
-                  :percentage="Math.round((selectedCapacity.out.pct || 0) * 100)"
+                  :percentage="Math.round((capacitySides.out.pct || 0) * 100)"
                   :stroke-width="10"
                   :show-text="false"
                 />
                 <div class="capRow__value">
-                  {{ pct(selectedCapacity.out.pct, 0) }}
+                  {{ pct(capacitySides.out.pct, 0) }}
                 </div>
               </div>
               <div class="capRow">
@@ -1172,12 +1217,12 @@ const adviceItems = computed(() => {
                   />
                 </div>
                 <el-progress
-                  :percentage="Math.round((selectedCapacity.inc.pct || 0) * 100)"
+                  :percentage="Math.round((capacitySides.inc.pct || 0) * 100)"
                   :stroke-width="10"
                   :show-text="false"
                 />
                 <div class="capRow__value">
-                  {{ pct(selectedCapacity.inc.pct, 0) }}
+                  {{ pct(capacitySides.inc.pct, 0) }}
                 </div>
               </div>
               <div
@@ -1231,7 +1276,7 @@ const adviceItems = computed(() => {
                       min-width="220"
                     >
                       <template #default="{ row }">
-                        {{ money(row.t.limit) }} / {{ money(row.t.used) }} / {{ money(row.t.available) }}
+                        {{ money(row.t.limit, selectedCapacity.eq) }} / {{ money(row.t.used, selectedCapacity.eq) }} / {{ money(row.t.available, selectedCapacity.eq) }}
                       </template>
                     </el-table-column>
                   </el-table>
@@ -1357,7 +1402,7 @@ const adviceItems = computed(() => {
                   <span class="mono">{{ e.debtor }}</span>
                   <span class="muted">→</span>
                   <span class="mono">{{ e.creditor }}</span>
-                  <span class="muted">({{ e.equivalent }} {{ money(e.amount) }})</span>
+                  <span class="muted">({{ e.equivalent }} {{ money(e.amount, e.equivalent) }})</span>
                 </div>
               </div>
             </div>
@@ -1401,13 +1446,13 @@ const adviceItems = computed(() => {
             {{ labelTrustlineStatus(selected.status) }}
           </el-descriptions-item>
           <el-descriptions-item :label="t('trustlines.limit')">
-            {{ money(selected.limit) }}
+            {{ money(selected.limit, selected.equivalent) }}
           </el-descriptions-item>
           <el-descriptions-item :label="t('trustlines.used')">
-            {{ money(selected.used) }}
+            {{ money(selected.used, selected.equivalent) }}
           </el-descriptions-item>
           <el-descriptions-item :label="t('trustlines.available')">
-            {{ money(selected.available) }}
+            {{ money(selected.available, selected.equivalent) }}
           </el-descriptions-item>
           <el-descriptions-item :label="t('trustlines.createdAt')">
             {{ selected.created_at }}

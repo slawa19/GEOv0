@@ -2,18 +2,25 @@ from __future__ import annotations
 
 import logging
 import uuid
-from decimal import Decimal, ROUND_DOWN
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import and_, func, or_, select
 
 from app.core.simulator import viz_rules
+from app.core.simulator.net_balance_utils import to_money_str
 from app.core.simulator.viz_patch_helper import VizPatchHelper
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.core.simulator.models import RunRecord
+
+# `to_money_str` was introduced here by T1201 and moved to `net_balance_utils` by T1207 so
+# that `viz_patch_helper` -- which this module imports -- can call it without a cycle.  The
+# name stays importable from here because that is where T1201 published it; the rule and its
+# reasoning live in the docstring at the new home and are not to be re-litigated in a copy.
+__all__ = ["EdgePatchBuilder", "to_money_str"]
 
 
 class EdgePatchBuilder:
@@ -63,11 +70,8 @@ class EdgePatchBuilder:
         eq_id = eq_row[0]
         precision = int(eq_row[1] or 2)
 
-        scale10 = Decimal(10) ** precision
-        money_quant = Decimal(1) / scale10
-
         def _to_money_str(v: Decimal) -> str:
-            return format(v.quantize(money_quant, rounding=ROUND_DOWN), "f")
+            return to_money_str(v, precision)
 
         # Load trustlines for this equivalent.
         tl_rows = (
@@ -270,8 +274,11 @@ class EdgePatchBuilder:
                 {
                     "source": src_pid,
                     "target": dst_pid,
-                    "used": str(used_amt),
-                    "available": str(available_amt),
+                    # Was `str(...)`, which put money on the wire in exponential
+                    # notation (`1E-8`) and ignored `helper.precision`, which is right
+                    # here.  Same renderer as the other producer above.
+                    "used": to_money_str(used_amt, helper.precision),
+                    "available": to_money_str(available_amt, helper.precision),
                     **edge_viz,
                 }
             )

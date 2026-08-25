@@ -20,6 +20,7 @@ export const RU: Record<string, string> = {
   'common.n_a': 'н/д',
   'common.noData': 'Нет данных',
   'common.pending': 'В ожидании',
+  'money.precisionUnavailable': 'Для части эквивалентов на этом экране не загружена точность, поэтому их величины скрыты.',
   'common.precision': 'Точность',
   'common.reasonIsRequired': 'требуется причина',
   'common.reasonRequired': 'Причина (обязательно)',
@@ -78,6 +79,7 @@ export const RU: Record<string, string> = {
   'liquidity.title': 'Ликвидность',
   'liquidity.loadFailed': 'Не удалось загрузить снимок ликвидности',
   'liquidity.precisionUnavailable': 'Выберите эквивалент с загруженной точностью для отображения денежных итогов.',
+  'liquidity.netPositionsPickEquivalent': 'Нетто-позиции показываются по одному эквиваленту — выберите его. При «все» порядок списков задавала бы сумма величин разных единиц.',
   'liquidity.controls.equivalent': 'Эквивалент',
   'liquidity.controls.threshold': 'Порог bottleneck',
   'liquidity.controls.note': 'Режим',
@@ -609,6 +611,7 @@ export const RU: Record<string, string> = {
   'graph.analytics.capacity.tooltip': 'Сводная ёмкость trustlines вокруг участника: used% = total_used / total_limit (входящие/исходящие).',
   'graph.analytics.capacity.outgoingUsed': 'Исходящее used',
   'graph.analytics.capacity.incomingUsed': 'Входящее used',
+  'graph.analytics.capacity.pickEquivalent': 'Выберите один эквивалент: ёмкости разных эквивалентов не складываются в одну долю.',
 
   'graph.analytics.activity.title': 'Активность / churn',
   'graph.analytics.activity.columnWindow': '7 / 30 / 90д',

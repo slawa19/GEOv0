@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import uuid
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import AbstractSet, Dict, List, Set
 
 from sqlalchemy import bindparam, select, and_, func, text
@@ -22,6 +22,7 @@ from app.db.models.audit_log import IntegrityAuditLog
 from app.utils.error_codes import ErrorCode
 from app.utils.exceptions import GeoException, TimeoutException
 from app.utils.metrics import CLEARING_EVENTS_TOTAL
+from app.utils.money import to_money_str
 from app.core.payments.engine import PaymentEngine
 from app.core.payments.router import PaymentRouter
 from app.core.invariants import InvariantChecker
@@ -30,6 +31,12 @@ from app.core.integrity import compute_integrity_checkpoint_for_equivalent
 logger = logging.getLogger(__name__)
 
 _CLEARING_REPLAY_NAMESPACE = uuid.UUID("7438b16f-c629-4aeb-8b97-4bf113704c93")
+
+# The longest cycle the SQL fast path can express, in edges.  `find_triangles_sql` joins three
+# `debts` rows and `find_quadrangles_sql` four; there is no five-table variant, so five is
+# beyond their reach by construction rather than by configuration.  `find_cycles` uses this to
+# decide whether its early return can answer the question it was asked - see the comment there.
+_SQL_DETECTOR_MAX_CYCLE_LENGTH = 4
 
 
 class ClearingCommittedAfterCancellation(asyncio.CancelledError):
@@ -326,11 +333,10 @@ class ClearingService:
             return uid.hex
         return uid
 
-    def _bind_decimal(self, val: Decimal) -> object:
-        """Return Decimal in a format supported by the current DBAPI for raw SQL binds."""
-        if self._is_sqlite():
-            return float(val)
-        return val
+    # `_bind_decimal` USED TO LIVE HERE AND IS GONE (2026-08-24 / p012 `F-012-3`, `T1202`).
+    # Its only job was to hand the removed `Decimal("0.01")` clearing threshold to the SQLite
+    # DBAPI as a `float`, and it was the only place any of the four money modules converted a
+    # money value to binary floating point.  With the threshold dropped it had no callers.
 
     def _scope_predicate(self, columns: tuple[str, ...]) -> str:
         """SQL that confines a cycle to an allowlist of participants.
@@ -402,7 +408,52 @@ class ClearingService:
         )
 
     @staticmethod
-    def _deduplicate_cycles(cycles: List[List[Dict]]) -> List[List[Dict]]:
+    def _debt_id_key(raw: object) -> str:
+        """One spelling for one debt id, whatever produced the string.
+
+        012, second round.  The raw-SQL detectors and the ORM DFS do not agree on how a debt id
+        LOOKS, and until `find_cycles` merged their answers nothing had to notice.  Measured on
+        SQLite, one debt, one graph: the DFS says `'333e9737-a7cc-4017-812d-fa3719bef0c9'` and
+        `find_triangles_sql` says `'333e9737a7cc4017812dfa3719bef0c9'` - the driver hands raw
+        SQL the stored 32-hex form while the ORM's `Uuid` type reconstructs a `uuid.UUID`.  On
+        PostgreSQL asyncpg returns `uuid.UUID` on both paths and the two agree, which is exactly
+        how a de-duplication keyed on the spelling passes the Postgres tier and reports every
+        cycle twice on the default one.  So the key is the VALUE, not the text.
+        """
+
+        text = str(raw or "")
+        try:
+            return str(uuid.UUID(text))
+        except (ValueError, AttributeError, TypeError):
+            return text
+
+    @classmethod
+    def _cycle_order_key(cls, cycle: List[Dict]) -> tuple:
+        """Shorter first; within a length, largest executable amount first (T1211).
+
+        The executable amount of a cycle is its smallest edge - the `LEAST(...)` the SQL
+        detectors deliberately ORDER BY DESC, because `auto_clear` executes the first cycle
+        that succeeds and ordering therefore IS behavior (for two cycles sharing an edge it
+        decides which debts remain).  The debt-id set as the last component makes
+        equal-amount ties deterministic across tiers and detectors, instead of leaving them
+        to discovery or `ORDER BY` residue.  Used on the merged answer AND on the fast-path
+        early return, so a caller sees one ordering rule regardless of which path answered.
+        """
+
+        def _executable_amount() -> Decimal:
+            try:
+                return min(Decimal(str(edge.get("amount", "0"))) for edge in cycle)
+            except (InvalidOperation, ValueError, TypeError):
+                return Decimal(0)
+
+        return (
+            len(cycle),
+            -_executable_amount(),
+            tuple(sorted(cls._debt_id_key(e.get("debt_id", "")) for e in cycle)),
+        )
+
+    @classmethod
+    def _deduplicate_cycles(cls, cycles: List[List[Dict]]) -> List[List[Dict]]:
         """Stable dedupe by unordered set of debt ids.
 
         SQL cycle queries can emit the same logical cycle multiple times (different rotation).
@@ -415,7 +466,7 @@ class ClearingService:
         out: List[List[Dict]] = []
         for cycle in cycles:
             try:
-                key = tuple(sorted(str(e.get("debt_id", "")) for e in cycle))
+                key = tuple(sorted(cls._debt_id_key(e.get("debt_id", "")) for e in cycle))
             except Exception:
                 key = tuple()
             if not key:
@@ -426,17 +477,106 @@ class ClearingService:
             out.append(cycle)
         return out
 
+    async def _equivalent_precision(self, equivalent_id: uuid.UUID) -> int:
+        """The digits this equivalent declares, for rendering only.
+
+        012, second round.  The three detectors and the CLEARING payload all printed amounts
+        with bare `str(Decimal)`, which puts `1E-8` on the wire for a value `Numeric(20, 8)`
+        holds exactly.  `to_money_str` needs the equivalent's `precision`, and the SQL
+        detectors are addressed by `equivalent_id` alone, so this reads it when the caller has
+        not already got the row.  `find_cycles` and `_execute_clearing_with_amount` both do,
+        and pass it, so the extra query is only for a direct caller (tests, and any future
+        one).  Rendering is the ONLY use: no comparison, no admission rule and no stored value
+        depends on it, so a wrong or missing `precision` can widen or narrow the digits shown
+        and can never hide a cycle -- which is the distinction `VERDICT-DOOR: C` deferred.
+        """
+
+        try:
+            precision = (
+                await self.session.execute(
+                    select(Equivalent.precision).where(Equivalent.id == equivalent_id)
+                )
+            ).scalar_one_or_none()
+        except Exception:
+            return 2
+        try:
+            return int(precision)
+        except (TypeError, ValueError):
+            return 2
+
     async def find_triangles_sql(
         self,
         equivalent_id: uuid.UUID,
         *,
         allowed_participant_ids: "set[uuid.UUID] | None" = None,
+        precision: int | None = None,
     ) -> List[List[Dict]]:
         """Find 3-node debt cycles using a SQL JOIN.
 
         `allowed_participant_ids` confines the cycle to one run's participants; None keeps
         the historic global behaviour, which the hub and the simulator tick still rely on.
+
+        `precision` is a RENDERING parameter and nothing else - it decides how many digits the
+        returned `amount` strings carry, never which rows come back.  Omitted, it is read from
+        the equivalent.
+
+        THE `min_amount` THRESHOLD IS GONE, AND THE REASON IS MEASURED (2026-08-24 / p012,
+        `F-012-3`, `T1202`).  This query used to carry `AND LEAST(...) > :min_amount` with
+        `min_amount` bound to a hardcoded `Decimal("0.01")`.  The comparison is strict and the
+        shipped default `precision` is 2, so a triangle whose every leg is exactly `0.01` - the
+        smallest amount that equivalent can express - was invisible here.  Measured on
+        PostgreSQL 16.9: `UAH` at precision 2 with every leg `0.01` found 0 triangles, `0.02`
+        found 3.  `find_cycles` returns early when this query is non-empty, so a graph holding
+        one ordinary cycle and one at the boundary reported one of two, verbatim through
+        `GET /api/v1/clearing/cycles`.
+
+        THREE ALTERNATIVES WERE WEIGHED AND THE THRESHOLD WAS DROPPED RATHER THAN TAUGHT TO
+        READ `precision`:
+
+        * IT WAS NOT PROTECTING ANYTHING FROM DUST.  The Python DFS underneath filters on
+          `Debt.amount > 0` alone, and `find_cycles` falls through to it whenever this query
+          comes back empty.  Measured: a triangle of three `0.005` debts - below the precision-2
+          quantum, and storable today - is found and cleared by that fallback right now.  So the
+          threshold never suppressed a single sub-quantum cycle system-wide.  All it did was
+          make the fast path and the fallback disagree about what a real debt is.
+
+        * IT WAS NOT PAYING FOR ITSELF IN THE PLAN, and this was the open question the survey
+          admitted it had not measured.  `LEAST(d1.amount, d2.amount, d3.amount)` spans three
+          joined tables, so no index can serve it and PostgreSQL can only apply it as a post-join
+          `Join Filter`, after the expensive expansion that dominates the query.  It is not a
+          performance predicate, and keeping it "for the plan" would have been a claim the numbers
+          do not support.
+
+          THE CONCLUSION HELD ACROSS TWO REVIEW ROUNDS; THE NUMBERS UNDER IT DID NOT, and are
+          corrected here rather than left to rot.  What stood here was "61898 buffers against
+          62204 - 0.5% - and 77.8 ms against 81.0 ms median".  The first round found the figure was
+          a RETELLING: no artefact, no generator, nothing in the tree to re-run.  The second found
+          the anti-vacuum was luck - the population did not guarantee the predicate anything to
+          discard, so the comparison could have been printed over a predicate that filtered
+          nothing.  The timing half was worse than stale: "inside the run-to-run spread of both"
+          was two runs described as a property, and over five runs the medians of ONE variant span
+          87.6 to 238.6 ms while the buffer counts repeat to the digit.
+
+          Live numbers, on a population with planted boundary triangles and a script that exits
+          non-zero if the predicate discarded nothing: 62116 shared buffers with the predicate
+          against 62638 without, a delta of 522 - 0.833% of the statement.  Regenerate with
+          `scripts/measure_clearing_min_amount_plan.py`; the run is in
+          `specs/012-money-precision-and-representation/evidence/`.
+
+        * TEACHING IT `precision` WOULD HAVE DECIDED SOMETHING THIS PROGRAMME DEFERRED.  A
+          threshold of `>= 10**-precision` reads "an amount below one quantum is not money" -
+          which is exactly the semantics `VERDICT-DOOR: C` deferred to a separate versioned
+          decision with a data audit, because `precision` is admin-editable and the door
+          deliberately still accepts `0.05` for a precision-1 `HOUR`.  Enacting it here, in the
+          detector only, would have created debts that are storable, payable and permanently
+          unclearable - and it would still have left the fast path and the fallback disagreeing.
+
+        `d1.amount > 0 AND d2.amount > 0 AND d3.amount > 0` already says "a real debt", it is
+        per-table so the planner can push it down, and it is the same rule the DFS applies.
         """
+
+        if precision is None:
+            precision = await self._equivalent_precision(equivalent_id)
 
         dialect = self._dialect_name()
 
@@ -445,10 +585,9 @@ class ClearingService:
             # SQLite supports scalar min(x, y, z) as a LEAST replacement.
             least_expr = "min(d1.amount, d2.amount, d3.amount)"
 
-        # NOTE: When executing raw SQL (text()), sqlite3 DBAPI does not accept uuid.UUID/Decimal
-        # as bound parameters. Normalize binds for SQLite only.
+        # NOTE: When executing raw SQL (text()), sqlite3 DBAPI does not accept uuid.UUID
+        # as a bound parameter. Normalize binds for SQLite only.
         equivalent_id_param = self._bind_uuid(equivalent_id)
-        min_amount_param = self._bind_decimal(Decimal("0.01"))
 
         # a = d1.debtor, b = d1.creditor (= d2.debtor), c = d2.creditor (= d3.debtor);
         # d3.creditor is a by the JOIN, so three columns name every vertex.
@@ -495,7 +634,6 @@ class ClearingService:
                                                             AND {self._sql_auto_clearing_ok('t3')}
             WHERE d1.equivalent_id = :equivalent_id
               AND d1.amount > 0 AND d2.amount > 0 AND d3.amount > 0
-              AND {least_expr} > :min_amount
               {scope_sql}
             ORDER BY clear_amount DESC
             LIMIT 100
@@ -504,7 +642,6 @@ class ClearingService:
 
         params = {
             "equivalent_id": equivalent_id_param,
-            "min_amount": min_amount_param,
         }
         if scope_binds is not None:
             query = query.bindparams(bindparam("allowed_participant_ids", expanding=True))
@@ -514,25 +651,38 @@ class ClearingService:
 
         cycles: List[List[Dict]] = []
         for row in result:
+            # `to_money_str`, not `str(Decimal)`: asyncpg hands back `Numeric(20, 8)` at the
+            # column's scale, so a stored `0.00000001` is `Decimal('1E-8')` and `str()` puts
+            # that exponent literal straight into `GET /api/v1/clearing/cycles`.  It also ends
+            # the two-scales-for-one-debt effect this raw-SQL path had against the ORM DFS
+            # below: the driver decides the scale of the value it returns, and the renderer
+            # takes that decision back.
+            #
+            # `_debt_id_key` for `debt_id`, not bare `str()`, for the same one-form reason:
+            # on SQLite this raw-SQL path sees the stored 32-hex spelling while the DFS emits
+            # the hyphenated one, so a merged answer could mix two spellings of the same kind
+            # of id in one payload (T1210-bis).  The dedup key already normalized this way;
+            # the RENDITION now matches the key.  (Both detectors, same rule - quadrangles
+            # below inherit this comment.)
             cycles.append(
                 [
                     {
-                        "debt_id": str(row.debt1_id),
+                        "debt_id": self._debt_id_key(row.debt1_id),
                         "debtor": str(row.a),
                         "creditor": str(row.b),
-                        "amount": str(row.amount1),
+                        "amount": to_money_str(row.amount1, precision),
                     },
                     {
-                        "debt_id": str(row.debt2_id),
+                        "debt_id": self._debt_id_key(row.debt2_id),
                         "debtor": str(row.b),
                         "creditor": str(row.c),
-                        "amount": str(row.amount2),
+                        "amount": to_money_str(row.amount2, precision),
                     },
                     {
-                        "debt_id": str(row.debt3_id),
+                        "debt_id": self._debt_id_key(row.debt3_id),
                         "debtor": str(row.c),
                         "creditor": str(row.a),
-                        "amount": str(row.amount3),
+                        "amount": to_money_str(row.amount3, precision),
                     },
                 ]
             )
@@ -544,8 +694,20 @@ class ClearingService:
         equivalent_id: uuid.UUID,
         *,
         allowed_participant_ids: "set[uuid.UUID] | None" = None,
+        precision: int | None = None,
     ) -> List[List[Dict]]:
-        """Find 4-node debt cycles using a SQL JOIN."""
+        """Find 4-node debt cycles using a SQL JOIN.
+
+        The `min_amount` threshold is gone here for the same measured reasons as in
+        `find_triangles_sql`, which carries the full argument; this query held the identical
+        `AND LEAST(...) > :min_amount` and hid four-node cycles at the boundary the same way.
+
+        `precision`, likewise, only decides how many digits the returned `amount` strings
+        carry; it selects no rows.
+        """
+
+        if precision is None:
+            precision = await self._equivalent_precision(equivalent_id)
 
         dialect = self._dialect_name()
 
@@ -554,7 +716,6 @@ class ClearingService:
             least_expr = "min(d1.amount, d2.amount, d3.amount, d4.amount)"
 
         equivalent_id_param = self._bind_uuid(equivalent_id)
-        min_amount_param = self._bind_decimal(Decimal("0.01"))
 
         # a = d1.debtor, b = d1.creditor (= d2.debtor), c = d2.creditor (= d3.debtor),
         # d = d3.creditor (= d4.debtor); d4.creditor is a by the JOIN.
@@ -605,7 +766,6 @@ class ClearingService:
               AND d1.debtor_id != d2.creditor_id
               AND d1.debtor_id != d3.creditor_id
               AND d1.creditor_id != d3.creditor_id
-              AND {least_expr} > :min_amount
               {scope_sql}
             ORDER BY clear_amount DESC
             LIMIT 50
@@ -614,7 +774,6 @@ class ClearingService:
 
         params = {
             "equivalent_id": equivalent_id_param,
-            "min_amount": min_amount_param,
         }
         if scope_binds is not None:
             query = query.bindparams(bindparam("allowed_participant_ids", expanding=True))
@@ -627,28 +786,28 @@ class ClearingService:
             cycles.append(
                 [
                     {
-                        "debt_id": str(row.debt1_id),
+                        "debt_id": self._debt_id_key(row.debt1_id),
                         "debtor": str(row.a),
                         "creditor": str(row.b),
-                        "amount": str(row.amt1),
+                        "amount": to_money_str(row.amt1, precision),
                     },
                     {
-                        "debt_id": str(row.debt2_id),
+                        "debt_id": self._debt_id_key(row.debt2_id),
                         "debtor": str(row.b),
                         "creditor": str(row.c),
-                        "amount": str(row.amt2),
+                        "amount": to_money_str(row.amt2, precision),
                     },
                     {
-                        "debt_id": str(row.debt3_id),
+                        "debt_id": self._debt_id_key(row.debt3_id),
                         "debtor": str(row.c),
                         "creditor": str(row.d),
-                        "amount": str(row.amt3),
+                        "amount": to_money_str(row.amt3, precision),
                     },
                     {
-                        "debt_id": str(row.debt4_id),
+                        "debt_id": self._debt_id_key(row.debt4_id),
                         "debtor": str(row.d),
                         "creditor": str(row.a),
-                        "amount": str(row.amt4),
+                        "amount": to_money_str(row.amt4, precision),
                     },
                 ]
             )
@@ -901,13 +1060,37 @@ class ClearingService:
                 return []
 
         # FIX-012: Prefer SQL JOIN based search for short cycles (3–4) when running with a real AsyncSession.
+        #
+        # THE EARLY RETURN BELOW IS CONDITIONAL, AND THE CONDITION IS THE SQL DETECTORS' REACH
+        # (012, second round).  These two queries find cycles of exactly 3 and exactly 4 edges.
+        # The DFS underneath finds 3..`max_depth`, and `max_depth` defaults to SIX on the API
+        # (`app/api/v1/clearing.py:20,34`).  So "return the SQL answer whenever it is non-empty"
+        # is not a shortcut, it is a different question answered: with a triangle anywhere in the
+        # graph, every 5- and 6-edge cycle disappears from `GET /api/v1/clearing/cycles`.
+        # Measured on a `UAH` graph holding one `0.01` triangle and one disjoint 5-node cycle of
+        # `50`, at every depth 3..6: 1 cycle, lengths [3].  Removing the `min_amount` threshold
+        # made this STRICTLY WORSE rather than closing it - the fast path is now non-empty more
+        # often, so it suppresses the fallback more often.
+        #
+        # `auto_clear` was never the victim: it loops until `find_cycles` comes back empty, so
+        # it reaches the long cycle on a later pass.  The READ endpoint answers once.
+        #
+        # So the SQL result is returned early only when nothing longer was asked for.  Past that
+        # depth both detectors run and their answers are merged (see the end of this method):
+        # neither is a superset of the other - the SQL side is capped at `LIMIT 100` and ordered
+        # by amount, the DFS stops descending a branch at its first cycle and at 50 overall - so
+        # a union is the only combination whose answer does not depend on which one happened to
+        # be non-empty.
+        sql_cycles: List[List[Dict]] = []
         use_sql = isinstance(self.session, AsyncSession)
         if use_sql and max_depth >= 3:
             locked_pairs = await self._locked_pairs_for_equivalent(equivalent.id)
             cycles: List[List[Dict]] = []
             try:
                 cycles = await self.find_triangles_sql(
-                    equivalent.id, allowed_participant_ids=allowed_ids
+                    equivalent.id,
+                    allowed_participant_ids=allowed_ids,
+                    precision=equivalent.precision,
                 )
                 if cycles and locked_pairs:
                     filtered: List[List[Dict]] = []
@@ -926,17 +1109,20 @@ class ClearingService:
                             filtered.append(cycle)
                     cycles = filtered
 
-                cycles = self._deduplicate_cycles(cycles)
-
-                if cycles:
-                    cycles = await self._filter_cycles_by_auto_clearing_policy_sql(
-                        cycles, equivalent_id=equivalent.id
-                    )
-
-                # If triangles exist but are all filtered out (policy/locks), try quadrangles.
-                if max_depth >= 4 and not cycles:
-                    cycles = await self.find_quadrangles_sql(
-                        equivalent.id, allowed_participant_ids=allowed_ids
+                # BOTH lengths, unconditionally, whenever the depth asks for both (T1210-bis
+                # finding A).  The previous gate ran quadrangles only when the filtered
+                # triangles came back EMPTY - "if triangles exist but are all filtered out,
+                # try quadrangles" - which re-created, one step down, exactly the shape the
+                # merge below exists to kill: at max_depth=4 (a legal API input, ge=3) a
+                # single triangle hid every quadrangle from a "complete" early return, and at
+                # 5-6 it starved the SQL side down to triangles, leaving quadrangles to the
+                # DFS's 50-raw-cycle cap alone.  A union's answer must not depend on which
+                # detector happened to be non-empty - including the union of these two.
+                if max_depth >= 4:
+                    cycles = cycles + await self.find_quadrangles_sql(
+                        equivalent.id,
+                        allowed_participant_ids=allowed_ids,
+                        precision=equivalent.precision,
                     )
                     if cycles and locked_pairs:
                         filtered = []
@@ -955,12 +1141,12 @@ class ClearingService:
                                 filtered.append(cycle)
                         cycles = filtered
 
-                    cycles = self._deduplicate_cycles(cycles)
+                cycles = self._deduplicate_cycles(cycles)
 
-                    if cycles:
-                        cycles = await self._filter_cycles_by_auto_clearing_policy_sql(
-                            cycles, equivalent_id=equivalent.id
-                        )
+                if cycles:
+                    cycles = await self._filter_cycles_by_auto_clearing_policy_sql(
+                        cycles, equivalent_id=equivalent.id
+                    )
             except Exception:
                 logger.warning(
                     "event=clearing.find_cycles_sql_failed equivalent=%s",
@@ -1009,7 +1195,19 @@ class ClearingService:
                         except Exception:
                             pass
 
-                return cycles
+                sql_cycles = cycles
+
+                # `_SQL_DETECTOR_MAX_CYCLE_LENGTH` edges is everything the two queries above can
+                # express.  Ask for no more than that and the SQL answer is complete for the
+                # question, so returning it here costs nothing and skips loading the graph.  Ask
+                # for more and it is not, so fall through: the DFS runs and the two answers are
+                # merged below.
+                if max_depth <= _SQL_DETECTOR_MAX_CYCLE_LENGTH:
+                    # Same ordering rule as the merged answer below (1b's review of
+                    # a9d742e): the raw `ORDER BY ... DESC` has no secondary key, so
+                    # equal-amount ties were tier-dependent residue on this path.
+                    sql_cycles.sort(key=self._cycle_order_key)
+                    return sql_cycles
 
         # 1. Load Graph
         # Node: Participant ID
@@ -1153,13 +1351,51 @@ class ClearingService:
                             "creditor": str(
                                 pid_by_id.get(edge.creditor_id, edge.creditor_id)
                             ),
-                            "amount": str(edge.amount),
+                            # Same renderer as the two SQL detectors above.  `Debt.amount` is a
+                            # `Numeric(20, 8)`, so `str()` here printed `1E-8` for a value the
+                            # ledger holds exactly - and printed the SAME debt at a different
+                            # scale than the raw-SQL path did, which made one payload's digits
+                            # depend on which detector answered.
+                            "amount": to_money_str(edge.amount, equivalent.precision),
                         }
                     )
                 final_cycles.append(cycle_data)
 
-        # Prefer shorter cycles first for auto_clear().
-        final_cycles.sort(key=len)
+        if final_cycles:
+            final_cycles = await self._filter_cycles_by_auto_clearing_policy_sql(
+                final_cycles, equivalent_id=equivalent.id
+            )
+
+        # MERGE, not pick.  Reached only when `max_depth` exceeds the SQL detectors' reach, so
+        # `sql_cycles` is a partial answer by construction and the DFS one is partial too (it
+        # abandons a branch at its first cycle and stops at fifty).  Both sides have already
+        # been through the lock filter and `_filter_cycles_by_auto_clearing_policy_sql`, so the
+        # union needs no further admission check - only de-duplication, which is by debt-id set
+        # and therefore blind to which detector produced the edge, and to the order the edges
+        # come in.  `sql_cycles` is empty whenever the SQL path found nothing or raised -
+        # though the raised case is a graceful fallback only on SQLite: on PostgreSQL a
+        # failed raw query aborts the transaction, so the DFS's own queries then fail too
+        # and `find_cycles` errors out anyway (T1210-bis; pre-existing, recorded not fixed).
+        #
+        # `_deduplicate_cycles` keeps the FIRST occurrence, so for a cycle both detectors found
+        # the DFS rendition is the one that survives.  That is immaterial only because the two
+        # now render money identically - which is the other half of this change, and the reason
+        # the SQL renderers have reproducers that address them directly rather than through
+        # here (`test_p012_money_form_and_detector_reach_postgres.py`).
+        if sql_cycles:
+            final_cycles = self._deduplicate_cycles(final_cycles + sql_cycles)
+
+        # Shorter cycles first for auto_clear(); WITHIN a length, largest clearable amount
+        # first (T1211, external review).  The SQL detectors deliberately ORDER BY
+        # `LEAST(...) DESC` - the executable amount of a cycle is its smallest edge - and
+        # `auto_clear` executes the first cycle that succeeds, so ordering IS behavior: the
+        # first edition of this merge sorted by length alone, which let DFS discovery order
+        # replace that heuristic among same-length cycles, and for two cycles SHARING an edge
+        # the executed-first cycle decides which debts remain.  The reviewer reproduced a
+        # different final ledger from the order alone.  Sorting the union restores the
+        # recorded heuristic for every cycle regardless of which detector found it (the DFS
+        # side never had it - it was simply never merged in front of SQL results before).
+        final_cycles.sort(key=self._cycle_order_key)
 
         logger.info(
             "event=clearing.find_cycles_done equivalent=%s cycles=%s",
@@ -1172,10 +1408,6 @@ class ClearingService:
             logger.debug(
                 "event=clearing.metrics_inc_failed metric=CLEARING_EVENTS_TOTAL label=find_cycles.success",
                 exc_info=True,
-            )
-        if final_cycles:
-            final_cycles = await self._filter_cycles_by_auto_clearing_policy_sql(
-                final_cycles, equivalent_id=equivalent.id
             )
         return final_cycles
 
@@ -1634,6 +1866,36 @@ class ClearingService:
         except Exception as exc:
             await self._raise_unexpected_execution(exc)
 
+        # 012, second round.  THE PAYLOAD AMOUNT IS A REPRESENTATION, NOT A STORAGE FORMAT, and
+        # that was checked before it was changed rather than assumed.  `transactions.payload` is
+        # re-parsed on replay by `_read_committed_execution_amount` (`:203`) as
+        # `Decimal(str(payload["amount"]))`, and `Decimal("1E-8") == Decimal("0.00000001")` is
+        # the same value of the same type - the round trip is exact either way.  Nothing else in
+        # the repository reads this field: it is in no hash (`compute_integrity_checkpoint_for_
+        # equivalent` digests `debts` and `trust_lines` rows, never a payload), in no signature
+        # (CLEARING rows are not signed), and in no key (`idempotency_key` is
+        # `clearing:{tx_id}`, and `tx_id` is a uuid5 over the sorted DEBT IDS alone), and the
+        # only other CLEARING-payload readers - `app/core/admin/metrics.py:723` and
+        # `app/api/v1/admin.py:203,1035` - read `equivalent` and `edges[].debtor/creditor`.
+        # `to_money_str` never drops a digit the value carries, so the amount a replay hands
+        # back still equals the amount that was applied to the debts.  Rows written before this
+        # change keep their old string and parse identically, so no backfill and no migration.
+        #
+        # The reason to change it at all is the T1201 rollout condition: the audit that has to
+        # run over `transactions.payload->>'amount'` looking for `scale >= 9`.  Measured here:
+        # a `cast(... as numeric)` audit reads `'1E-8'` correctly (scale 8), but any audit that
+        # counts digits in the TEXT - the obvious way to write it, and the only way that also
+        # catches a value `numeric` cannot hold - sees no fraction digits at all in `1E-8` and
+        # silently passes the row. An exponential literal in the audited column is a trap laid
+        # for the audit, whichever way it is eventually written.
+        payload_precision = 2
+        if equivalent is not None:
+            try:
+                payload_precision = int(equivalent.precision)
+            except (TypeError, ValueError):
+                payload_precision = 2
+        clear_amount_str = to_money_str(clear_amount, payload_precision)
+
         debts_by_id: Dict[uuid.UUID, Debt] = {d.id: d for d in debts}
         edges_payload: List[Dict[str, str]] = []
         for edge in cycle:
@@ -1651,7 +1913,7 @@ class ClearingService:
                     "debt_id": str(debt.id),
                     "debtor": str(pid_by_id.get(debt.debtor_id, debt.debtor_id)),
                     "creditor": str(pid_by_id.get(debt.creditor_id, debt.creditor_id)),
-                    "amount": str(clear_amount),
+                    "amount": clear_amount_str,
                 }
             )
 
@@ -1694,7 +1956,7 @@ class ClearingService:
             payload={
                 # Backward-compatible fields.
                 "cycle": [str(e["debt_id"]) for e in cycle],
-                "amount": str(clear_amount),
+                "amount": clear_amount_str,
                 # Enriched fields for audit/debugging.
                 "equivalent": str(
                     equivalent.code if equivalent else debts[0].equivalent_id
@@ -1853,17 +2115,92 @@ class ClearingService:
         Returns number of cleared cycles.
         """
         count = 0
+        # Depth ladder (T1211, external review).  The union in `find_cycles` is right for a
+        # READ answer, but past the SQL reach it loads the whole graph and runs the DFS on
+        # every call - and this loop calls it once per cleared cycle.  An executor does not
+        # need the complete answer, it needs one executable cycle, shortest first - so ask
+        # the SQL-complete depth first (early return, no graph load) and widen to the
+        # caller's depth only when the short rung yields nothing EXECUTABLE.
+        #
+        # "Nothing executable", not "nothing found" - the distinction is the ladder's own
+        # counterexample, caught before the fix-round re-review: this loop tries candidates
+        # until one succeeds, so when every short cycle fails transiently (locks, concurrent
+        # prepare) a ladder that widens only on EMPTY would stop here, while the ladder-free
+        # answer had the executable 5-6-cycles as later candidates in the same list.  Hence
+        # the widening also runs after a short rung whose candidates all failed; a failed
+        # short cycle may be attempted once more on the wide rung, which is harmless (it
+        # skips again, or a released lock lets it through).
+        rungs = [min(max_depth, _SQL_DETECTOR_MAX_CYCLE_LENGTH)]
+        if max_depth > _SQL_DETECTOR_MAX_CYCLE_LENGTH:
+            rungs.append(max_depth)
         while True:
+            executed = False
+            for rung in rungs:
+                cycles = await self._auto_clear_find(equivalent_code, rung, count)
+                if not cycles:
+                    continue
+                executed = await self._auto_clear_try_candidates(cycles, equivalent_code, count)
+                if executed:
+                    count += 1
+                    break
+
+            if not executed:
+                break
+
+            if count > 100:  # Safety break
+                break
+
+        return count
+
+    async def _auto_clear_find(
+        self, equivalent_code: str, max_depth: int, count: int
+    ) -> List[List[Dict]]:
+        """One rung of `auto_clear`'s ladder, with its original error envelope."""
+
+        try:
+            return await self.find_cycles(equivalent_code, max_depth=max_depth)
+        except GeoException as exc:
+            if exc.code != ErrorCode.E010.value:
+                raise
+            logger.exception(
+                "event=clearing.auto_clear_find_failed equivalent=%s "
+                "cleared_cycles=%s",
+                equivalent_code,
+                count,
+            )
+            raise GeoException(
+                details={
+                    "cleared_cycles": count,
+                    "partial": count > 0,
+                }
+            ) from exc
+        except Exception as exc:
+            logger.exception(
+                "event=clearing.auto_clear_find_failed equivalent=%s "
+                "cleared_cycles=%s",
+                equivalent_code,
+                count,
+            )
+            raise GeoException(
+                details={
+                    "cleared_cycles": count,
+                    "partial": count > 0,
+                }
+            ) from exc
+
+    async def _auto_clear_try_candidates(
+        self, cycles: List[List[Dict]], equivalent_code: str, count: int
+    ) -> bool:
+        """Try cycles until one succeeds; False when all candidates fail (locks/concurrency)."""
+
+        for cycle in cycles:
             try:
-                cycles = await self.find_cycles(
-                    equivalent_code,
-                    max_depth=max_depth,
-                )
+                success = await self.execute_clearing(cycle)
             except GeoException as exc:
                 if exc.code != ErrorCode.E010.value:
                     raise
                 logger.exception(
-                    "event=clearing.auto_clear_find_failed equivalent=%s "
+                    "event=clearing.auto_clear_execute_failed equivalent=%s "
                     "cleared_cycles=%s",
                     equivalent_code,
                     count,
@@ -1876,7 +2213,7 @@ class ClearingService:
                 ) from exc
             except Exception as exc:
                 logger.exception(
-                    "event=clearing.auto_clear_find_failed equivalent=%s "
+                    "event=clearing.auto_clear_execute_failed equivalent=%s "
                     "cleared_cycles=%s",
                     equivalent_code,
                     count,
@@ -1887,51 +2224,6 @@ class ClearingService:
                         "partial": count > 0,
                     }
                 ) from exc
-            if not cycles:
-                break
-
-            # Try cycles until one succeeds. If all candidates fail (e.g. due to locks/concurrency), stop.
-            executed = False
-            for cycle in cycles:
-                try:
-                    success = await self.execute_clearing(cycle)
-                except GeoException as exc:
-                    if exc.code != ErrorCode.E010.value:
-                        raise
-                    logger.exception(
-                        "event=clearing.auto_clear_execute_failed equivalent=%s "
-                        "cleared_cycles=%s",
-                        equivalent_code,
-                        count,
-                    )
-                    raise GeoException(
-                        details={
-                            "cleared_cycles": count,
-                            "partial": count > 0,
-                        }
-                    ) from exc
-                except Exception as exc:
-                    logger.exception(
-                        "event=clearing.auto_clear_execute_failed equivalent=%s "
-                        "cleared_cycles=%s",
-                        equivalent_code,
-                        count,
-                    )
-                    raise GeoException(
-                        details={
-                            "cleared_cycles": count,
-                            "partial": count > 0,
-                        }
-                    ) from exc
-                if success:
-                    count += 1
-                    executed = True
-                    break
-
-            if not executed:
-                break
-
-            if count > 100:  # Safety break
-                break
-
-        return count
+            if success:
+                return True
+        return False

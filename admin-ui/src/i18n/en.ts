@@ -20,6 +20,7 @@ export const EN: Record<string, string> = {
   'common.n_a': 'n/a',
   'common.noData': 'No data',
   'common.pending': 'Pending',
+  'money.precisionUnavailable': 'Precision is not loaded for some equivalents on this screen, so their amounts are hidden.',
   'common.precision': 'Precision',
   'common.reasonIsRequired': 'reason is required',
   'common.reasonRequired': 'Reason (required)',
@@ -78,6 +79,7 @@ export const EN: Record<string, string> = {
   'liquidity.title': 'Liquidity analytics',
   'liquidity.loadFailed': 'Failed to load liquidity snapshot',
   'liquidity.precisionUnavailable': 'Select an equivalent with loaded precision to display monetary totals.',
+  'liquidity.netPositionsPickEquivalent': 'Net positions are shown per equivalent: pick one. Across all equivalents the ranking would come from adding amounts of different units into one number.',
   'liquidity.controls.equivalent': 'Equivalent',
   'liquidity.controls.threshold': 'Bottleneck threshold',
   'liquidity.controls.thresholdPlaceholder': '0.10',
@@ -609,6 +611,7 @@ export const EN: Record<string, string> = {
   'graph.analytics.capacity.tooltip': 'Aggregate trustline capacity around the participant: used% = total_used / total_limit (incoming/outgoing).',
   'graph.analytics.capacity.outgoingUsed': 'Outgoing used',
   'graph.analytics.capacity.incomingUsed': 'Incoming used',
+  'graph.analytics.capacity.pickEquivalent': 'Pick a single equivalent: capacity of different equivalents cannot be added into one share.',
 
   'graph.analytics.activity.title': 'Activity / churn',
   'graph.analytics.activity.columnWindow': '7 / 30 / 90d',

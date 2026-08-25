@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import { useLatestRequest } from '../../composables/useLatestRequest'
 
+import { renderWithPrecisionAsMaximum } from '../../test/precisionAsMaximum'
+
 import {
   atomsToDecimal,
   buildFocusModeQuery,
@@ -12,6 +14,7 @@ import {
   labelPartsToMode,
   makeMetricsKey,
   modeToLabelParts,
+  money,
   pct,
   reloadGraphView,
   syncGraphCoreForView,
@@ -338,5 +341,120 @@ describe('graphPageHelpers', () => {
     })
 
     expect(q2).toEqual({ pid: 'bob', depth: 1, equivalent: 'USD', participant_pid: 'bob' })
+  })
+})
+
+describe('graphPageHelpers.money (F-012-7, T1211)', () => {
+  // Каталог, а не константа теста: точность объявляет эквивалент, и все объявленные различны.
+  const CATALOGUE = new Map<string, number>([['HOUR', 1], ['UAH', 2], ['SAT', 0]])
+
+  /**
+   * `T1211`. Здесь стояла одна сумма `12.345` и оракул «ровно `precision` знаков». Оракул был
+   * НЕВЕРЕН: правило — «`precision` знаков КАК МИНИМУМ, никогда как максимум», потому что
+   * `Equivalent.precision` параметр отображения, а не квант леджера. Тест закреплял округление,
+   * которое меняет величину: `0.05 HOUR` (`precision: 1`) хранится точно и печаталось как `0.1`.
+   *
+   * Выборка тоже была подобрана согласиться — одно значение, у которого `scale > precision` для
+   * всех трёх кодов. Такая популяция удовлетворяется и неверной реализацией «максимум знаков».
+   * Ниже каждая из трёх позиций относительно `precision` представлена явно, оракул — точная
+   * строка, а не количество знаков, и сама эта полнота охраняется ассертом-часовым.
+   */
+  const CASES: Array<{ value: string; code: string; expected: string; why: string }> = [
+    // scale > precision — величина точнее, чем объявленное разрешение: показать целиком.
+    { value: '0.05', code: 'HOUR', expected: '0.05', why: 'дверь принимает и Numeric(20,8) хранит 0.05 точно' },
+    { value: '12.345', code: 'HOUR', expected: '12.345', why: 'три знака у precision 1' },
+    { value: '1.999', code: 'UAH', expected: '1.999', why: 'округление до 2.00 приписало бы копейку' },
+    { value: '12.3', code: 'SAT', expected: '12.3', why: 'precision 0 не превращает величину в целое' },
+    // scale === precision — байт в байт как раньше.
+    { value: '12.3', code: 'HOUR', expected: '12.3', why: 'ровно объявленная точность' },
+    { value: '12.34', code: 'UAH', expected: '12.34', why: 'ровно объявленная точность' },
+    // scale < precision — добивка до объявленного минимума.
+    { value: '12.3', code: 'UAH', expected: '12.30', why: 'минимум знаков объявляет эквивалент' },
+    { value: '12', code: 'UAH', expected: '12.00', why: 'целое печатается с объявленными знаками' },
+    // Хвостовые нули ниже precision — добивка колонки, а не информация леджера.
+    { value: '12.300', code: 'HOUR', expected: '12.3', why: 'нули ниже precision снимаются' },
+    { value: '12.00', code: 'SAT', expected: '12', why: 'precision 0 и нечего показывать' },
+    // Знак и ноль.
+    { value: '-0.05', code: 'HOUR', expected: '-0.05', why: 'знак не теряется вместе с точностью' },
+    { value: '-0.00', code: 'UAH', expected: '0.00', why: 'ноль не долг, и минус читался бы как долг' },
+  ]
+
+  function fractionDigits(rendered: string): number {
+    const dot = rendered.indexOf('.')
+    return dot < 0 ? 0 : rendered.length - dot - 1
+  }
+
+  it('sentinel: the population must be able to tell a wrong implementation apart', () => {
+    const scaleOf = (v: string) => fractionDigits(v)
+    const precisionOf = (code: string) => CATALOGUE.get(code) as number
+
+    // Без каждой из трёх групп выборка вырождается: только «scale > precision» пропускает
+    // усечение, только «scale < precision» пропускает отсутствие добивки, а без «=» нельзя
+    // утверждать, что уже верные строки не изменились.
+    for (const [name, ok] of [
+      ['scale > precision', CASES.some((c) => scaleOf(c.value) > precisionOf(c.code))],
+      ['scale = precision', CASES.some((c) => scaleOf(c.value) === precisionOf(c.code))],
+      ['scale < precision', CASES.some((c) => scaleOf(c.value) < precisionOf(c.code))],
+    ] as const) {
+      expect(ok, `Выборка потеряла случай «${name}» и перестала различать реализации.`).toBe(true)
+    }
+
+    // Отрицательный контроль — снятая реализация, общая на все денежные наборы admin-ui.
+    // Выборка обязана содержать случай, на котором «точность как максимум с округлением
+    // половины вверх» даёт ДРУГОЙ ОТВЕТ, иначе весь блок ниже проходит и без починки.
+    const distinguishing = CASES.filter(
+      (c) => renderWithPrecisionAsMaximum(c.value, precisionOf(c.code)) !== c.expected,
+    )
+    expect(
+      distinguishing.length,
+      'Ни один случай не отличает верное правило от снятого «точность как максимум»: '
+        + 'выборка подобрана согласиться, и блок ниже проходит с любой из двух реализаций.',
+    ).toBeGreaterThan(0)
+
+    // И хотя бы один такой случай обязан менять ВЕЛИЧИНУ, а не написание — ради этого правило
+    // и менялось.
+    expect(
+      distinguishing.some(
+        (c) => Number(renderWithPrecisionAsMaximum(c.value, precisionOf(c.code))) !== Number(c.expected),
+      ),
+      'Различающие случаи есть, но все они про написание. Нужен хотя бы один, где старая '
+        + 'реализация показывала другое ЧИСЛО.',
+    ).toBe(true)
+  })
+
+  it.each(CASES)('renders $value as $code -> $expected ($why)', ({ value, code, expected }) => {
+    expect(
+      money(value, code, CATALOGUE),
+      `${code} declares precision ${CATALOGUE.get(code)}; ${value} must read "${expected}".`,
+    ).toBe(expected)
+  })
+
+  it('reacts to the declared precision: one amount, two precisions, two strings', () => {
+    // `12.3` выбрано намеренно: UAH добивает его до `12.30`, SAT оставляет `12.3`. Величина
+    // одна, строки разные — значит знаки несут информацию об единице.
+    const asUah = money('12.3', 'UAH', CATALOGUE)
+    const asSat = money('12.3', 'SAT', CATALOGUE)
+
+    expect(
+      CATALOGUE.get('UAH') === CATALOGUE.get('SAT'),
+      'Counter-check premise: the two equivalents must declare different precision.',
+    ).toBe(false)
+    expect(
+      asUah,
+      'One amount rendered identically for two precisions means the digits carry no information.',
+    ).not.toBe(asSat)
+
+    // Та же величина, тот же код — но каталог объявляет другую точность.
+    expect(money('12.3', 'HOUR', new Map([['HOUR', 4]]))).toBe('12.3000')
+  })
+
+  it('prints a dash instead of inventing digits when the equivalent is unknown', () => {
+    expect(money('12.345', 'NOPE', CATALOGUE)).toBe('—')
+    expect(money('12.345', '', CATALOGUE)).toBe('—')
+    expect(money('12.345', null, CATALOGUE)).toBe('—')
+  })
+
+  it('normalizes the equivalent code the way the rest of admin-ui does', () => {
+    expect(money('12.345', ' hour ', CATALOGUE)).toBe(money('12.345', 'HOUR', CATALOGUE))
   })
 })

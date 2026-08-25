@@ -3,7 +3,8 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
-import { formatDecimalFixed, isRatioBelowThreshold } from '../utils/decimal'
+import { isRatioBelowThreshold } from '../utils/decimal'
+import { useEquivalentPrecision } from '../composables/useEquivalentPrecision'
 import { formatIsoInTimeZone } from '../utils/datetime'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import CopyIconButton from '../ui/CopyIconButton.vue'
@@ -121,8 +122,15 @@ function isBottleneck(row: Trustline): boolean {
   return isRatioBelowThreshold({ numerator: row.available, denominator: row.limit, threshold: threshold.value })
 }
 
-function money(v: string): string {
-  return formatDecimalFixed(v, 2)
+const { money, catalogueSettled, hasUnknownPrecision, loadEquivalentPrecision } = useEquivalentPrecision()
+
+async function loadEquivalents() {
+  try {
+    await loadEquivalentPrecision()
+  } catch {
+    // The catalogue is the only source of precision; without it money cells stay '—'
+    // (see precisionMissing) instead of asserting a digit count nobody declared.
+  }
 }
 
 function fmtTs(iso: string): string {
@@ -178,6 +186,7 @@ function goEquivalent(eq: string) {
 
 onMounted(() => {
   applyRouteQueryToFilters()
+  void loadEquivalents()
   void load()
 })
 watch(page, () => void load())
@@ -225,6 +234,11 @@ const statusOptions = computed(() => [
 
 const bottlenecksCount = computed(() =>
   items.value.filter((row) => String(row.status || '').trim().toLowerCase() === 'active' && isBottleneck(row)).length,
+)
+
+// Пока каталог не ответил, «точность неизвестна» — ещё не вывод, а состояние загрузки.
+const precisionMissing = computed(
+  () => catalogueSettled.value && hasUnknownPrecision(items.value.map((row) => row.equivalent)),
 )
 
 const trustlinesAdviceItems = computed(() =>
@@ -308,6 +322,15 @@ const trustlinesAdviceItems = computed(() =>
     />
 
     <div v-else>
+      <el-alert
+        v-if="precisionMissing"
+        data-testid="trustlines-precision-unavailable"
+        :title="t('money.precisionUnavailable')"
+        type="warning"
+        show-icon
+        :closable="false"
+        class="mb"
+      />
       <OperatorAdvicePanel :items="trustlinesAdviceItems" />
       <el-table
         :data="items"
@@ -383,7 +406,7 @@ const trustlinesAdviceItems = computed(() =>
             />
           </template>
           <template #default="scope">
-            {{ money(scope.row.limit) }}
+            {{ money(scope.row.limit, scope.row.equivalent) }}
           </template>
         </el-table-column>
         <el-table-column
@@ -397,7 +420,7 @@ const trustlinesAdviceItems = computed(() =>
             />
           </template>
           <template #default="scope">
-            {{ money(scope.row.used) }}
+            {{ money(scope.row.used, scope.row.equivalent) }}
           </template>
         </el-table-column>
         <el-table-column
@@ -411,7 +434,7 @@ const trustlinesAdviceItems = computed(() =>
             />
           </template>
           <template #default="scope">
-            <span :class="{ bottleneck: isBottleneck(scope.row) }">{{ money(scope.row.available) }}</span>
+            <span :class="{ bottleneck: isBottleneck(scope.row) }">{{ money(scope.row.available, scope.row.equivalent) }}</span>
           </template>
         </el-table-column>
         <el-table-column
@@ -517,13 +540,13 @@ const trustlinesAdviceItems = computed(() =>
           </span>
         </el-descriptions-item>
         <el-descriptions-item :label="t('trustlines.limit')">
-          {{ money(selected.limit) }}
+          {{ money(selected.limit, selected.equivalent) }}
         </el-descriptions-item>
         <el-descriptions-item :label="t('trustlines.used')">
-          {{ money(selected.used) }}
+          {{ money(selected.used, selected.equivalent) }}
         </el-descriptions-item>
         <el-descriptions-item :label="t('trustlines.available')">
-          <span :class="{ bottleneck: isBottleneck(selected) }">{{ money(selected.available) }}</span>
+          <span :class="{ bottleneck: isBottleneck(selected) }">{{ money(selected.available, selected.equivalent) }}</span>
           <el-tag
             v-if="isBottleneck(selected)"
             type="danger"

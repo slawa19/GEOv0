@@ -1,0 +1,279 @@
+{
+  "$comment": [
+    "THE MONEY RENDERING RULE, as a table three independent implementations must agree on.",
+    "",
+    "WHY THIS FILE EXISTS (012 / T1211). One rule - `Equivalent.precision` is the MINIMUM number",
+    "of fraction digits a money string carries, never the maximum - is implemented three times, in",
+    "three languages, in three projects that share no module: `app/utils/money.py::to_money_str`,",
+    "`simulator-ui/v2/src/utils/money.ts::formatMoney`, and",
+    "`admin-ui/src/utils/decimal.ts::formatDecimalMinScale`. There is no npm workspace and no shared",
+    "package between the two UIs, so the duplication cannot be removed cheaply.",
+    "",
+    "The duplication is not cosmetic: it was the MECHANISM of a P1. The backend and the simulator UI",
+    "carried the rule correctly while admin-ui quantized to exactly `precision` with ROUND_HALF_UP,",
+    "so `0.05` of the shipped HOUR (precision 1) - a value the door accepts and Numeric(20, 8) stores",
+    "exactly - was shown to operators as `0.1`. Three private test suites all passed. Nothing in the",
+    "tree compared the three copies to each other, so nothing could notice.",
+    "",
+    "This table is that comparison. Each implementation has a test that reads THIS file and asserts",
+    "its own output against `expected`, so a copy that drifts fails in its own project, and a case",
+    "added here is answered by all three at once:",
+    "  - tests/unit/test_p012_t1211_money_rendering_conformance.py",
+    "  - simulator-ui/v2/src/utils/money.conformance.test.ts",
+    "  - admin-ui/src/utils/decimal.conformance.test.ts",
+    "",
+    "SCOPE. Valid plain decimal strings only. The three implementations deliberately differ on",
+    "malformed input (the backend raises on non-finite, admin-ui returns the input unchanged,",
+    "simulator-ui renders zero) and those differences are documented at each call site, not here.",
+    "Exponent notation is not in the table because it cannot be produced by any of the three.",
+    "",
+    "ONE DIVERGENCE IS RECORDED RATHER THAN LEVELLED, and deliberately kept out of the cases: the",
+    "backend renders Decimal('-0.00') as '-0.00' where both UIs render '0.00'. It is out because",
+    "the cases are a contract all three must meet and here they do not; it is left alone because",
+    "no route through the ledger produces a signed zero - measured on PostgreSQL 16, not argued,",
+    "and pinned by tests/integration/",
+    "test_p012_t1211_negative_zero_cannot_come_back_from_the_ledger_postgres.py.",
+    "",
+    "THE DOMAIN IS PART OF THE CONTRACT, NOT A CONVENIENCE SAMPLE. T1211's repeat review broke the",
+    "first version of this table by observing that its 21 cases used only precisions 0, 1, 2 and 8",
+    "out of the contract's 0..18, with negatives only at 1 and 2. Three plausible wrong",
+    "implementations passed every case: capping display precision at the storage scale 8,",
+    "supporting only the sampled precisions, and losing the sign only at precision 0. A table that",
+    "cannot tell those apart is not evidence, however many rows it has - which is why the guard",
+    "on this file is no longer a row count but a list of CLASSES it must contain (precision 0, a",
+    "precision between the sampled ones, one past the storage scale, the contract's widest, signs",
+    "at each of those, and all three scale-versus-precision relations). Adding a case is cheap;",
+    "deleting one now costs a named class."
+  ],
+  "rule": "precision is the minimum number of fraction digits, and never fewer than the value itself needs",
+  "cases": [
+    {
+      "value": "0.05",
+      "precision": 1,
+      "expected": "0.05",
+      "why": "finer than the declared precision: shown in full, not rounded to 0.1"
+    },
+    {
+      "value": "0.05",
+      "precision": 2,
+      "expected": "0.05",
+      "why": "exactly at the declared precision"
+    },
+    {
+      "value": "12.345",
+      "precision": 1,
+      "expected": "12.345",
+      "why": "two digits finer than declared"
+    },
+    {
+      "value": "12.345",
+      "precision": 2,
+      "expected": "12.345",
+      "why": "one digit finer than declared"
+    },
+    {
+      "value": "1.999",
+      "precision": 2,
+      "expected": "1.999",
+      "why": "rounding here would invent a whole unit"
+    },
+    {
+      "value": "12.3",
+      "precision": 0,
+      "expected": "12.3",
+      "why": "precision 0 does not make the amount an integer"
+    },
+    {
+      "value": "12.3",
+      "precision": 1,
+      "expected": "12.3",
+      "why": "exactly at the declared precision"
+    },
+    {
+      "value": "12.3",
+      "precision": 2,
+      "expected": "12.30",
+      "why": "coarser than declared: padded up"
+    },
+    {
+      "value": "12",
+      "precision": 2,
+      "expected": "12.00",
+      "why": "an integer amount still shows the declared digits"
+    },
+    {
+      "value": "12",
+      "precision": 0,
+      "expected": "12",
+      "why": "nothing to pad and nothing to drop"
+    },
+    {
+      "value": "12.300",
+      "precision": 1,
+      "expected": "12.3",
+      "why": "trailing zeros below precision are column padding, not information"
+    },
+    {
+      "value": "12.00",
+      "precision": 0,
+      "expected": "12",
+      "why": "same, all the way down to an integer"
+    },
+    {
+      "value": "12.3000",
+      "precision": 2,
+      "expected": "12.30",
+      "why": "dropped only as far as the declared minimum"
+    },
+    {
+      "value": "-0.05",
+      "precision": 1,
+      "expected": "-0.05",
+      "why": "the sign survives the precision"
+    },
+    {
+      "value": "-12.3",
+      "precision": 2,
+      "expected": "-12.30",
+      "why": "padding applies to negatives unchanged"
+    },
+    {
+      "value": "0",
+      "precision": 2,
+      "expected": "0.00",
+      "why": "zero is shown at the declared precision"
+    },
+    {
+      "value": "0.00",
+      "precision": 0,
+      "expected": "0",
+      "why": "zero with nothing declared to show"
+    },
+    {
+      "value": "0.00000001",
+      "precision": 2,
+      "expected": "0.00000001",
+      "why": "the storage quantum survives a coarse display precision"
+    },
+    {
+      "value": "123456789012.12345678",
+      "precision": 8,
+      "expected": "123456789012.12345678",
+      "why": "widest value the door admits, at storage scale"
+    },
+    {
+      "value": "999999999999.99999999",
+      "precision": 2,
+      "expected": "999999999999.99999999",
+      "why": "door bound, precision coarser than the value"
+    },
+    {
+      "value": "1.5",
+      "precision": 8,
+      "expected": "1.50000000",
+      "why": "padding all the way to storage scale"
+    },
+    {
+      "value": "1.5",
+      "precision": 3,
+      "expected": "1.500",
+      "why": "precision between the sampled ones: padding must not depend on which values were sampled"
+    },
+    {
+      "value": "1.5",
+      "precision": 9,
+      "expected": "1.500000000",
+      "why": "past storage scale 8: display precision is not capped by the column's scale"
+    },
+    {
+      "value": "1.5",
+      "precision": 12,
+      "expected": "1.500000000000",
+      "why": "well past storage scale, still padded in full"
+    },
+    {
+      "value": "1.5",
+      "precision": 18,
+      "expected": "1.500000000000000000",
+      "why": "the widest precision the contract admits"
+    },
+    {
+      "value": "0",
+      "precision": 18,
+      "expected": "0.000000000000000000",
+      "why": "zero at the widest precision"
+    },
+    {
+      "value": "0.05",
+      "precision": 18,
+      "expected": "0.050000000000000000",
+      "why": "a value finer than most precisions, padded to the widest"
+    },
+    {
+      "value": "12.345",
+      "precision": 12,
+      "expected": "12.345000000000",
+      "why": "three significant fraction digits padded out to twelve"
+    },
+    {
+      "value": "0.00000001",
+      "precision": 9,
+      "expected": "0.000000010",
+      "why": "the storage quantum padded one digit past the storage scale"
+    },
+    {
+      "value": "12.300",
+      "precision": 9,
+      "expected": "12.300000000",
+      "why": "trailing zeros are not stripped when the value is coarser than the precision"
+    },
+    {
+      "value": "999999999999.99999999",
+      "precision": 18,
+      "expected": "999999999999.999999990000000000",
+      "why": "the door's widest magnitude at the contract's widest precision"
+    },
+    {
+      "value": "-1.5",
+      "precision": 0,
+      "expected": "-1.5",
+      "why": "a sign at precision 0: dropping it here passed every earlier case"
+    },
+    {
+      "value": "-12",
+      "precision": 0,
+      "expected": "-12",
+      "why": "a negative integer at precision 0, nothing to pad or strip"
+    },
+    {
+      "value": "-0.05",
+      "precision": 0,
+      "expected": "-0.05",
+      "why": "negative, finer than the precision, at the precision the sample was missing"
+    },
+    {
+      "value": "-0.05",
+      "precision": 9,
+      "expected": "-0.050000000",
+      "why": "a sign past the storage scale"
+    },
+    {
+      "value": "-12.300",
+      "precision": 1,
+      "expected": "-12.3",
+      "why": "sign survives stripping, not only padding"
+    },
+    {
+      "value": "12.0",
+      "precision": 0,
+      "expected": "12",
+      "why": "a declared precision 0 must not be read as absent and defaulted to 2"
+    },
+    {
+      "value": "0",
+      "precision": 0,
+      "expected": "0",
+      "why": "zero at precision 0 is a bare zero, not 0.00"
+    }
+  ]
+}

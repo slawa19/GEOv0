@@ -3,7 +3,8 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ApiException, assertSuccess } from '../api/envelope'
 import { api } from '../api'
-import { formatDecimalFixed, isUnitIntervalDecimalString } from '../utils/decimal'
+import { isUnitIntervalDecimalString } from '../utils/decimal'
+import { useEquivalentPrecision } from '../composables/useEquivalentPrecision'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
 import type { AuditLogEntry, Incident, Trustline } from '../types/domain'
@@ -103,8 +104,20 @@ async function loadAudit() {
   }
 }
 
-function money(v: string): string {
-  return formatDecimalFixed(v, 2)
+const { money, catalogueSettled, hasUnknownPrecision, loadEquivalentPrecision } = useEquivalentPrecision()
+
+// Пока каталог не ответил, «точность неизвестна» — ещё не вывод, а состояние загрузки.
+const bottlenecksPrecisionMissing = computed(
+  () => catalogueSettled.value && hasUnknownPrecision(bottleneckItems.value.map((row) => row.equivalent)),
+)
+
+async function loadEquivalents() {
+  try {
+    await loadEquivalentPrecision()
+  } catch {
+    // The catalogue is the only source of precision: without it money cells stay '—'
+    // (see bottlenecksPrecisionMissing), which is honest. The dashboard itself keeps working.
+  }
 }
 
 async function loadBottlenecks() {
@@ -183,6 +196,7 @@ function goTrustlinesWithThreshold() {
 onMounted(() => {
   void load()
   void loadAudit()
+  void loadEquivalents()
   void loadBottlenecks()
   void loadIncidents()
   void loadParticipantStats()
@@ -506,6 +520,16 @@ const typeRows = computed(() => {
           </template>
 
           <el-alert
+            v-if="bottlenecksPrecisionMissing"
+            data-testid="dashboard-precision-unavailable"
+            :title="t('money.precisionUnavailable')"
+            type="warning"
+            show-icon
+            :closable="false"
+            class="mb"
+          />
+
+          <el-alert
             v-if="bottlenecksError"
             :title="bottlenecksError"
             type="warning"
@@ -573,7 +597,7 @@ const typeRows = computed(() => {
               width="110"
             >
               <template #default="scope">
-                {{ money(scope.row.limit) }}
+                {{ money(scope.row.limit, scope.row.equivalent) }}
               </template>
             </el-table-column>
             <el-table-column
@@ -582,7 +606,7 @@ const typeRows = computed(() => {
               width="110"
             >
               <template #default="scope">
-                <span class="bad">{{ money(scope.row.available) }}</span>
+                <span class="bad">{{ money(scope.row.available, scope.row.equivalent) }}</span>
               </template>
             </el-table-column>
             <el-table-column

@@ -35,8 +35,10 @@ export type GraphAdviceContext = {
   } | null
 
   capacity?: {
-    outPct: number
-    inPct: number
+    // `null` — эквивалент не выбран: доли использования нет, потому что суммировать лимиты
+    // разных эквивалентов в одну ёмкость нельзя (F-012-8). Счёт узких мест при этом есть.
+    outPct: number | null
+    inPct: number | null
     bottlenecksCount: number
   } | null
 }
@@ -156,11 +158,11 @@ export function buildGraphDrawerAdvice(opts: {
       })
     }
 
-    const outSev = severityForPct(outPct)
-    const inSev = severityForPct(inPct)
+    const outSev = outPct === null ? 'info' : severityForPct(outPct)
+    const inSev = inPct === null ? 'info' : severityForPct(inPct)
     const maxSev: AdviceSeverity = outSev === 'danger' || inSev === 'danger' ? 'danger' : outSev === 'warning' || inSev === 'warning' ? 'warning' : 'info'
 
-    if (maxSev !== 'info') {
+    if (maxSev !== 'info' && outPct !== null && inPct !== null) {
       items.push({
         id: 'GRAPH_CAPACITY_NEAR_LIMIT',
         severity: maxSev,

@@ -3,7 +3,9 @@ import { computed } from 'vue'
 import type { GraphNode } from '../types'
 import type { TrustlineInfo } from '../api/simulatorTypes'
 import { VIZ_MAPPING } from '../vizMapping'
-import { fmtAmt, parseAmountNumber } from '../utils/numberFormat'
+import { parseAmountNumber } from '../utils/numberFormat'
+import { equivalentPrecision } from '../config/equivalentPrecision'
+import { atomsToMoney, formatMoney } from '../utils/money'
 
 type NodeEdgeStats = {
   outLimitText: string
@@ -69,21 +71,54 @@ const nodeColor = computed(() => {
   return VIZ_MAPPING.node.color[key]?.fill ?? VIZ_MAPPING.node.color.unknown.fill
 })
 
+/**
+ * Fraction digits the equivalent this card is labelled with declares (012 / `F-012-4`).
+ * `equivalentText` is the snapshot's equivalent code (`SimulatorAppRoot.vue:1358`).
+ */
+const precision = computed(() => equivalentPrecision(props.equivalentText))
+
+/**
+ * Signed balance in major units.
+ *
+ * 012 / `F-012-6`: the atoms branch used to print `net_balance_atoms` verbatim, and atoms
+ * are an integer count of 10^-precision units — so on every shipped fixture (0 of 100 nodes
+ * carry a major-unit `net_balance`, and `fixtures.ts` does not even read that field) the
+ * card showed a balance 10^precision times too large. Both branches now render through the
+ * equivalent's precision, so the card cannot show a number that is not an amount of
+ * anything.
+ */
 function netText(node: GraphNode): string | null {
   const major = node.net_balance
-  if (major != null && String(major).trim() !== '') return String(major)
+  if (major != null && String(major).trim() !== '') return formatMoney(String(major), precision.value)
 
   const atoms = node.net_balance_atoms
   if (atoms == null) return null
 
   const s = String(atoms)
   // Back-compat: older fixtures used signed atoms already.
-  if (s.startsWith('-')) return s
+  const signed = s.startsWith('-')
+    ? s
+    : node.net_sign === -1
+      ? `-${s}`
+      : node.net_sign === 0
+        ? '0'
+        : s
 
-  const sign = node.net_sign
-  if (sign === -1) return `-${s}`
-  if (sign === 0) return '0'
-  return s
+  // Unparseable atoms: show what arrived rather than invent a scale for it.
+  return atomsToMoney(signed, precision.value) ?? signed
+}
+
+/**
+ * Money on a trustline row, at the precision that row's own equivalent declares.
+ *
+ * These three fields (`used`, `limit`, `available`) used to go through `fmtAmt`, which did
+ * `parseFloat` and then dropped a `.00` fraction — the same "money as a `number`" defect
+ * as `formatAmount2`, on the same card: a UAH limit of `10.00` printed as `10`, and any
+ * digit past the double's ~15 significant ones was gone before formatting began. The row
+ * carries its own `equivalent`, so it does not have to borrow the card's.
+ */
+function rowMoney(tl: TrustlineInfo, value: unknown): string {
+  return formatMoney(value, equivalentPrecision(tl.equivalent || props.equivalentText))
 }
 
 /** Trustlines that involve this node (outgoing or incoming). */
@@ -207,11 +242,11 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
                 'nco-trustline-row',
                 { 'nco-trustline-row--saturated': isSaturatedAvailable(tl.available) },
               ]"
-              :title="`avail: ${fmtAmt(tl.available)}`"
+              :title="`avail: ${rowMoney(tl, tl.available)}`"
             >
               <span class="nco-trustline-row__peer ds-mono">{{ tl.to_name }}</span>
-              <span class="nco-trustline-row__amounts ds-mono">{{ fmtAmt(tl.used) }}&thinsp;/&thinsp;{{ fmtAmt(tl.limit) }}</span>
-              <span class="nco-trustline-row__avail ds-mono">avail: {{ fmtAmt(tl.available) }}</span>
+              <span class="nco-trustline-row__amounts ds-mono">{{ rowMoney(tl, tl.used) }}&thinsp;/&thinsp;{{ rowMoney(tl, tl.limit) }}</span>
+              <span class="nco-trustline-row__avail ds-mono">avail: {{ rowMoney(tl, tl.available) }}</span>
               <button
                 class="ds-btn ds-btn--ghost ds-btn--icon nco-trustline-row__edit"
                 type="button"
@@ -231,11 +266,11 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
                 'nco-trustline-row',
                 { 'nco-trustline-row--saturated': isSaturatedAvailable(tl.available) },
               ]"
-              :title="`avail: ${fmtAmt(tl.available)}`"
+              :title="`avail: ${rowMoney(tl, tl.available)}`"
             >
               <span class="nco-trustline-row__peer ds-mono">{{ tl.from_name }}</span>
-              <span class="nco-trustline-row__amounts ds-mono">{{ fmtAmt(tl.used) }}&thinsp;/&thinsp;{{ fmtAmt(tl.limit) }}</span>
-              <span class="nco-trustline-row__avail ds-mono">avail: {{ fmtAmt(tl.available) }}</span>
+              <span class="nco-trustline-row__amounts ds-mono">{{ rowMoney(tl, tl.used) }}&thinsp;/&thinsp;{{ rowMoney(tl, tl.limit) }}</span>
+              <span class="nco-trustline-row__avail ds-mono">avail: {{ rowMoney(tl, tl.available) }}</span>
               <button
                 class="ds-btn ds-btn--ghost ds-btn--icon nco-trustline-row__edit"
                 type="button"

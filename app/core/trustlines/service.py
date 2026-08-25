@@ -21,7 +21,11 @@ from app.db.models.debt import Debt
 from app.db.models.audit_log import IntegrityAuditLog
 from app.schemas.trustline import TrustLineCloseRequest, TrustLineCreateRequest, TrustLineUpdateRequest
 from sqlalchemy import inspect as sa_inspect
-from app.utils.validation import validate_equivalent_code, validate_trustline_policy
+from app.utils.validation import (
+    parse_money_amount,
+    validate_equivalent_code,
+    validate_trustline_policy,
+)
 from app.core.integrity import compute_integrity_checkpoint_for_equivalent
 from app.core.payments.router import PaymentRouter
 
@@ -118,17 +122,43 @@ class TrustLineService:
         if not from_participant:
             raise NotFoundException("Sender not found")
 
-        # Signature validation (proof-of-possession + binding of request fields).
+        # Storage-capacity door (012 / F-012-1).  `TrustLine.limit` is Numeric(20, 8) and this
+        # service never validated the amount at all -- the schema only bounds it with `ge=0`.
+        # Checked BEFORE `verify_signature` and before any write, so a limit the column cannot
+        # hold can never become a signed commitment.
+        #
+        # `data.limit` is the client's own STRING (`TrustLineCreateRequest.limit: str`, as
+        # `api/openapi.yaml` has declared all along), for the same reason `request.amount` is
+        # one at `POST /payments`: the signature below is taken over it verbatim.  While the
+        # schema typed it `Decimal`, pydantic destroyed the client's spelling before this
+        # method ran, and whatever we signed was a spelling `str(Decimal)` re-invented -- for
+        # `"0.00000001"` that is `"1E-8"`, so the client's signature over its own bytes could
+        # never verify and the smallest storable limit was unsignable.  `require_non_negative`
+        # is the schema's former `ge=0`, now behind the door with the other money rules.
+        limit = parse_money_amount(data.limit, field="limit", require_non_negative=True)
+
+        # Signature validation (proof-of-possession + binding of request fields).  `limit` is
+        # the client's string verbatim -- see the door note above.
         signed_payload: dict = {
             "to": data.to,
             "equivalent": data.equivalent,
-            "limit": str(data.limit),
+            "limit": data.limit,
         }
         if data.policy is not None:
             signed_payload["policy"] = data.policy
 
+        # `canonical_json` OUTSIDE the try (the `POST /payments` shape, T1210-bis finding B).
+        # It refuses floats by design, and `policy` may legitimately carry one: the canon
+        # declares `max_hop_usage`/`daily_limit` as `oneOf` string|number, so a JSON number
+        # with a fraction arrives here as `float`.  Inside the try that refusal was relabelled
+        # "Invalid signature" - a client whose policy the canon blesses got a 401 it could not
+        # act on, for a request whose signature was never even checked.  Outside, it surfaces
+        # as the honest 400 naming the float.  (That such a policy is UNSIGNABLE at all - the
+        # canon admits a number the canonical form cannot carry - is a recorded contract fork,
+        # not this call site's to settle.)
+        message = canonical_json(signed_payload)
         try:
-            verify_signature(from_participant.public_key, canonical_json(signed_payload), data.signature)
+            verify_signature(from_participant.public_key, message, data.signature)
         except Exception:
             raise InvalidSignatureException("Invalid signature")
 
@@ -186,7 +216,7 @@ class TrustLineService:
             from_participant_id=from_participant_id,
             to_participant_id=to_participant.id,
             equivalent_id=equivalent.id,
-            limit=data.limit,
+            limit=limit,
             policy=data.policy or {},
             status='active'
         )
@@ -302,14 +332,26 @@ class TrustLineService:
         if not user:
             raise NotFoundException("Sender not found")
 
+        # Same storage-capacity door as `create`, before the signature and before the write;
+        # `data.limit` is the client's string and the signature covers it verbatim, so the
+        # parsed `Decimal` is kept apart from the signed payload -- see the note in `create`.
+        new_limit = None
+        if data.limit is not None:
+            new_limit = parse_money_amount(
+                data.limit, field="limit", require_non_negative=True
+            )
+
         signed_payload: dict = {"id": str(trustline_id)}
         if data.limit is not None:
-            signed_payload["limit"] = str(data.limit)
+            signed_payload["limit"] = data.limit
         if data.policy is not None:
             signed_payload["policy"] = data.policy
 
+        # Same hoist as `create`: `policy` can carry a canon-blessed float, and its refusal
+        # by `canonical_json` must not be relabelled as a signature failure.
+        message = canonical_json(signed_payload)
         try:
-            verify_signature(user.public_key, canonical_json(signed_payload), data.signature)
+            verify_signature(user.public_key, message, data.signature)
         except Exception:
             raise InvalidSignatureException("Invalid signature")
 
@@ -318,14 +360,14 @@ class TrustLineService:
             equivalent_id=trustline.equivalent_id,
         )
 
-        if data.limit is not None:
+        if new_limit is not None:
             used = await self._get_used_amount(trustline)
-            if data.limit < used:
+            if new_limit < used:
                 raise BadRequestException(
                     "Cannot reduce trustline limit below used amount",
-                    details={"used": str(used), "limit": str(data.limit)},
+                    details={"used": str(used), "limit": data.limit},
                 )
-            trustline.limit = data.limit
+            trustline.limit = new_limit
         
         if data.policy is not None:
             validate_trustline_policy(data.policy)
@@ -430,8 +472,11 @@ class TrustLineService:
             raise NotFoundException("Sender not found")
 
         signed_payload: dict = {"id": str(trustline_id)}
+        # Hoisted like create/update; no float can occur in this payload, kept uniform so the
+        # next field added here does not resurrect the relabelling.
+        message = canonical_json(signed_payload)
         try:
-            verify_signature(user.public_key, canonical_json(signed_payload), data.signature)
+            verify_signature(user.public_key, message, data.signature)
         except Exception:
             raise InvalidSignatureException("Invalid signature")
 

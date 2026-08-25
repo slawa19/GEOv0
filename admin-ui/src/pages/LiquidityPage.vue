@@ -12,7 +12,12 @@ import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
 import OperatorAdvicePanel from '../ui/OperatorAdvicePanel.vue'
 
 import { t } from '../i18n'
-import { compareDecimalStrings, formatDecimalFixed, isUnitIntervalDecimalString } from '../utils/decimal'
+import { compareDecimalStrings, isUnitIntervalDecimalString } from '../utils/decimal'
+import {
+  buildPrecisionByEquivalent,
+  formatMoneyWithPrecision,
+  precisionForEquivalent,
+} from '../composables/useEquivalentPrecision'
 import { formatIsoInTimeZone } from '../utils/datetime'
 import { buildLiquidityAdvice } from '../advice/operatorAdvice'
 import { carryScenarioQuery, readQueryString, toLocationQueryRaw } from '../router/query'
@@ -130,15 +135,7 @@ async function load() {
 
 const equivalents = computed(() => (equivalentsList.value || []).filter((e) => e.is_active))
 
-const precisionByEq = computed(() => {
-  const m = new Map<string, number>()
-  for (const e of equivalentsList.value || []) {
-    const code = String(e.code || '').trim().toUpperCase()
-    const precision = Number(e.precision)
-    if (code && Number.isInteger(precision) && precision >= 0) m.set(code, precision)
-  }
-  return m
-})
+const precisionByEq = computed(() => buildPrecisionByEquivalent(equivalentsList.value))
 
 const selectedEq = computed(() => {
   const k = String(eq.value || '').trim().toUpperCase()
@@ -149,17 +146,25 @@ const activeTrustlinesCount = computed(() => summary.value?.active_trustlines)
 const bottlenecksCount = computed(() => summary.value?.bottlenecks)
 const incidentsOverSlaCount = computed(() => summary.value?.incidents_over_sla)
 
-const selectedPrecision = computed(() => {
-  const k = selectedEq.value
-  if (!k) return null
-  return precisionByEq.value.get(k) ?? null
-})
+const selectedPrecision = computed(() => precisionForEquivalent(precisionByEq.value, selectedEq.value))
 
 const totalLimit = computed(() => (summary.value ? String(summary.value.total_limit) : null))
 const totalUsed = computed(() => (summary.value ? String(summary.value.total_used) : null))
 const totalAvailable = computed(() => (summary.value ? String(summary.value.total_available) : null))
 const showCountKpis = computed(() => summary.value !== null)
 const showMoneyKpis = computed(() => summary.value !== null && selectedPrecision.value !== null)
+
+/**
+ * F-012-8 (`C-C3-1-007`). При `ALL` продюсер (`app/api/v1/admin.py:750-786`) не фильтрует по
+ * эквиваленту, и `sum(delta)` складывает долги всех эквивалентов в одно число. Само число
+ * страница уже прятала (`money` печатал прочерк), но **состав и порядок** трёх списков задаются
+ * именно этой суммой: скрытая величина продолжала определять видимое — кто «крупнейший кредитор».
+ * Поэтому при `ALL` списки не показываются вовсе, а не показываются с прочерками.
+ *
+ * Список bottleneck-рёбер рядом остаётся: его членство — отношение available/limit внутри одной
+ * линии доверия, величина безразмерная, и каждая строка несёт свой эквивалент.
+ */
+const netPositionsByOneEquivalent = computed(() => selectedEq.value !== null)
 
 const topCreditors = computed(() => summary.value?.top_creditors ?? [])
 const topDebtors = computed(() => summary.value?.top_debtors ?? [])
@@ -214,10 +219,9 @@ const lastUpdatedLabel = computed(() => {
   return formatIsoInTimeZone(lastLoadedAt.value.toISOString(), timeZone.value)
 })
 
-function money(v: string, equivalent: unknown = selectedEq.value): string {
-  const code = String(equivalent || '').trim().toUpperCase()
-  const precision = code ? precisionByEq.value.get(code) : undefined
-  return precision === undefined ? '—' : formatDecimalFixed(v, precision)
+/** Точность берётся у эквивалента строки; вызывающий обязан его назвать. */
+function money(v: string, equivalent: unknown): string {
+  return formatMoneyWithPrecision(v, precisionForEquivalent(precisionByEq.value, equivalent))
 }
 </script>
 
@@ -497,121 +501,133 @@ function money(v: string, equivalent: unknown = selectedEq.value): string {
             </div>
           </template>
 
-          <el-table
-            :data="topByAbsNet"
-            size="small"
-            class="geoTable"
-          >
-            <el-table-column
-              prop="pid"
-              :label="t('participant.columns.pid')"
-              width="140"
-            >
-              <template #default="scope">
-                <el-button
-                  link
-                  type="primary"
-                  @click="goParticipant(scope.row.pid)"
-                >
-                  <TableCellEllipsis :text="scope.row.pid" />
-                </el-button>
-              </template>
-            </el-table-column>
-
-            <el-table-column
-              prop="display_name"
-              :label="t('participant.drawer.displayName')"
-            >
-              <template #default="scope">
-                <TableCellEllipsis :text="scope.row.display_name || '—'" />
-              </template>
-            </el-table-column>
-
-            <el-table-column
-              prop="net"
-              :label="t('liquidity.net.net')"
-              width="140"
-            >
-              <template #default="scope">
-                <el-text :type="compareDecimalStrings(scope.row.net, '0') >= 0 ? 'success' : 'danger'">
-                  {{ money(scope.row.net) }}
-                </el-text>
-              </template>
-            </el-table-column>
-          </el-table>
-
-          <el-empty
-            v-if="!topByAbsNet.length && !loading"
-            :description="t('liquidity.empty.noDebts')"
+          <el-alert
+            v-if="!netPositionsByOneEquivalent"
+            data-testid="liquidity-net-cross-equivalent"
+            type="info"
+            show-icon
+            :closable="false"
+            class="mb"
+            :title="t('liquidity.netPositionsPickEquivalent')"
           />
 
-          <el-divider />
-
-          <el-row :gutter="12">
-            <el-col :span="12">
-              <el-text type="success">{{ t('liquidity.net.topCreditors') }}</el-text>
-              <el-table
-                :data="topCreditors"
-                size="small"
-                class="geoTable"
+          <template v-else>
+            <el-table
+              :data="topByAbsNet"
+              size="small"
+              class="geoTable"
+            >
+              <el-table-column
+                prop="pid"
+                :label="t('participant.columns.pid')"
+                width="140"
               >
-                <el-table-column
-                  prop="pid"
-                  :label="t('participant.columns.pid')"
-                  width="140"
-                >
-                  <template #default="scope">
-                    <el-button
-                      link
-                      type="primary"
-                      @click="goParticipant(scope.row.pid)"
-                    >
-                      <TableCellEllipsis :text="scope.row.pid" />
-                    </el-button>
-                  </template>
-                </el-table-column>
-                <el-table-column
-                  prop="net"
-                  :label="t('liquidity.net.net')"
-                  width="140"
-                >
-                  <template #default="scope">{{ money(scope.row.net) }}</template>
-                </el-table-column>
-              </el-table>
-            </el-col>
+                <template #default="scope">
+                  <el-button
+                    link
+                    type="primary"
+                    @click="goParticipant(scope.row.pid)"
+                  >
+                    <TableCellEllipsis :text="scope.row.pid" />
+                  </el-button>
+                </template>
+              </el-table-column>
 
-            <el-col :span="12">
-              <el-text type="danger">{{ t('liquidity.net.topDebtors') }}</el-text>
-              <el-table
-                :data="topDebtors"
-                size="small"
-                class="geoTable"
+              <el-table-column
+                prop="display_name"
+                :label="t('participant.drawer.displayName')"
               >
-                <el-table-column
-                  prop="pid"
-                  :label="t('participant.columns.pid')"
-                  width="140"
+                <template #default="scope">
+                  <TableCellEllipsis :text="scope.row.display_name || '—'" />
+                </template>
+              </el-table-column>
+
+              <el-table-column
+                prop="net"
+                :label="t('liquidity.net.net')"
+                width="140"
+              >
+                <template #default="scope">
+                  <el-text :type="compareDecimalStrings(scope.row.net, '0') >= 0 ? 'success' : 'danger'">
+                    {{ money(scope.row.net, selectedEq) }}
+                  </el-text>
+                </template>
+              </el-table-column>
+            </el-table>
+
+            <el-empty
+              v-if="!topByAbsNet.length && !loading"
+              :description="t('liquidity.empty.noDebts')"
+            />
+
+            <el-divider />
+
+            <el-row :gutter="12">
+              <el-col :span="12">
+                <el-text type="success">{{ t('liquidity.net.topCreditors') }}</el-text>
+                <el-table
+                  :data="topCreditors"
+                  size="small"
+                  class="geoTable"
                 >
-                  <template #default="scope">
-                    <el-button
-                      link
-                      type="primary"
-                      @click="goParticipant(scope.row.pid)"
-                    >
-                      <TableCellEllipsis :text="scope.row.pid" />
-                    </el-button>
-                  </template>
-                </el-table-column>
-                <el-table-column
-                  prop="net"
-                  :label="t('liquidity.net.net')"
-                  width="140"
+                  <el-table-column
+                    prop="pid"
+                    :label="t('participant.columns.pid')"
+                    width="140"
+                  >
+                    <template #default="scope">
+                      <el-button
+                        link
+                        type="primary"
+                        @click="goParticipant(scope.row.pid)"
+                      >
+                        <TableCellEllipsis :text="scope.row.pid" />
+                      </el-button>
+                    </template>
+                  </el-table-column>
+                  <el-table-column
+                    prop="net"
+                    :label="t('liquidity.net.net')"
+                    width="140"
+                  >
+                    <template #default="scope">{{ money(scope.row.net, selectedEq) }}</template>
+                  </el-table-column>
+                </el-table>
+              </el-col>
+
+              <el-col :span="12">
+                <el-text type="danger">{{ t('liquidity.net.topDebtors') }}</el-text>
+                <el-table
+                  :data="topDebtors"
+                  size="small"
+                  class="geoTable"
                 >
-                  <template #default="scope">{{ money(scope.row.net) }}</template>
-                </el-table-column>
-              </el-table>
-            </el-col>
-          </el-row>
+                  <el-table-column
+                    prop="pid"
+                    :label="t('participant.columns.pid')"
+                    width="140"
+                  >
+                    <template #default="scope">
+                      <el-button
+                        link
+                        type="primary"
+                        @click="goParticipant(scope.row.pid)"
+                      >
+                        <TableCellEllipsis :text="scope.row.pid" />
+                      </el-button>
+                    </template>
+                  </el-table-column>
+                  <el-table-column
+                    prop="net"
+                    :label="t('liquidity.net.net')"
+                    width="140"
+                  >
+                    <template #default="scope">{{ money(scope.row.net, selectedEq) }}</template>
+                  </el-table-column>
+                </el-table>
+              </el-col>
+            </el-row>
+          </template>
         </el-card>
       </el-col>
     </el-row>

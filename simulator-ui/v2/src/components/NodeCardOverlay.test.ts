@@ -4,7 +4,6 @@ import { createApp, h, nextTick, type Component } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
 import NodeCardOverlay from './NodeCardOverlay.vue'
-import { fmtAmt } from '../utils/numberFormat'
 
 const nodeCardOverlaySource = readFileSync(resolve(process.cwd(), 'src/components/NodeCardOverlay.vue'), 'utf8')
 
@@ -147,14 +146,21 @@ describe('NodeCardOverlay (Interact Mode flags)', () => {
     host.remove()
   })
 
-  it('NC-2: trustline row renders available column (fmtAmt(tl.available))', async () => {
+  /**
+   * 012 / `T1208`, `C-B4-1-001`. This case used to compute its own expectation by calling
+   * the very formatter under test — `toBe(`avail: ${fmtAmt('9.00')}`)`, i.e. f(x) === f(x),
+   * an assertion structurally unable to fail whatever the formatter did with the money. It
+   * now states the amount it expects, and a second case substitutes the equivalent to show
+   * the expectation is not a constant.
+   */
+  function availableTextFor(equivalent: string): Promise<string> {
     const trustlines = [
       {
         from_pid: 'alice',
         from_name: 'Alice',
         to_pid: 'bob',
         to_name: 'Bob',
-        equivalent: 'UAH',
+        equivalent,
         limit: '10.00',
         used: '1.00',
         available: '9.00',
@@ -165,16 +171,36 @@ describe('NodeCardOverlay (Interact Mode flags)', () => {
     const { app, host } = mountNodeCard({
       node: { id: 'alice', name: 'Alice', status: 'active', type: 'person' },
       interactTrustlines: trustlines,
+      equivalentText: equivalent,
     })
-    await nextTick()
 
-    const avail = host.querySelector('.nco-trustline-row__avail') as HTMLElement | null
-    expect(avail).toBeTruthy()
-    expect(avail?.classList.contains('ds-mono')).toBe(true)
-    expect((avail?.textContent ?? '').trim()).toBe(`avail: ${fmtAmt('9.00')}`)
+    return nextTick().then(() => {
+      const avail = host.querySelector('.nco-trustline-row__avail') as HTMLElement | null
+      expect(avail).toBeTruthy()
+      expect(avail?.classList.contains('ds-mono')).toBe(true)
+      const text = (avail?.textContent ?? '').trim()
+      app.unmount()
+      host.remove()
+      return text
+    })
+  }
 
-    app.unmount()
-    host.remove()
+  it('NC-2: trustline row renders available at the precision its equivalent declares', async () => {
+    // UAH declares precision 2, so 9.00 available must read as 9.00 — not as `9`, which is
+    // what the previous `parseFloat`-based formatter printed.
+    expect(await availableTextFor('UAH')).toBe('avail: 9.00')
+  })
+
+  it('NC-2: the same available amount must not render identically under UAH and HOUR', async () => {
+    const asUah = await availableTextFor('UAH')
+    const asHour = await availableTextFor('HOUR')
+
+    expect(
+      asHour,
+      `9.00 available renders as "${asUah}" under UAH (precision 2) and as "${asHour}" under `
+        + 'HOUR (precision 1). Identical output means the row is blind to its own equivalent.',
+    ).not.toBe(asUah)
+    expect(asHour).toBe('avail: 9.0')
   })
 
   it('NC-3: trustline with available="0" gets saturated class', async () => {

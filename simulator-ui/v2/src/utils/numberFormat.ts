@@ -1,13 +1,25 @@
-import { renderOrDash } from './valueFormat'
-
-export function asFiniteNumber(v: unknown): number {
-  if (typeof v === 'number') return Number.isFinite(v) ? v : 0
-  if (typeof v === 'string') {
-    const n = Number(v)
-    return Number.isFinite(n) ? n : 0
-  }
-  return 0
-}
+/**
+ * Numeric helpers for amount-like input.
+ *
+ * WHAT IS NOT HERE ANY MORE, and why (012 / `F-012-5`, `T1208` / `C-B4-3-001`). This module
+ * used to export four functions that turned money into a JS `number`:
+ *
+ *  - `formatAmount2(v: number)` -> `v.toFixed(2)`: the digit count was the constant 2 and
+ *    the input was already a double. Replaced by `utils/money.ts` `formatMoney(value,
+ *    precision)`, which takes a string and the equivalent's declared precision.
+ *  - `fmtAmt`: `parseFloat` then drop a `.00` fraction. Its only caller was the node card's
+ *    trustline rows, which now use `formatMoney` too.
+ *  - `fmtInt`: locale-dependent `toLocaleString`, zero callers anywhere in the app.
+ *  - `asFiniteNumber`: the coercion that fed `formatAmount2`, left without callers once the
+ *    trust-limit totals became exact string arithmetic.
+ *
+ * `fmtAmt` and `fmtInt` were the two exports `C-B4-3-001` measured as untested; they are
+ * gone rather than covered, because nothing calls them and a callerless money-through-float
+ * formatter is an invitation, not an asset.
+ *
+ * What remains parses amount-like input for NON-display purposes: sorting, saturation
+ * predicates, and normalising a form field before it is submitted. None of it formats money.
+ */
 
 /**
  * Parses amount-like values from snapshot/API into a number.
@@ -68,24 +80,4 @@ export function parseAmountStringOrNull(v: unknown): string | null {
     return normalized
   }
   return null
-}
-
-export function formatAmount2(v: number): string {
-  if (!Number.isFinite(v)) return '0.00'
-  return v.toFixed(2)
-}
-
-/** Format integer with locale separators; invalid input -> '0'. */
-export function fmtInt(n: unknown): string {
-  const v = Number(n ?? 0)
-  if (!Number.isFinite(v)) return '0'
-  return v.toLocaleString(undefined, { maximumFractionDigits: 0 })
-}
-
-/** Format amount: drop redundant .00 fraction; null/undefined -> '—'. */
-export function fmtAmt(v: unknown): string {
-  if (v == null) return '—'
-  const n = typeof v === 'number' ? v : parseFloat(String(v))
-  if (!Number.isFinite(n)) return renderOrDash(v)
-  return Number.isInteger(n) ? String(Math.round(n)) : String(n)
 }

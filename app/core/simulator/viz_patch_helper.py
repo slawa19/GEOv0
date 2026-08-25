@@ -3,7 +3,7 @@ from __future__ import annotations
 import bisect
 import uuid
 from dataclasses import dataclass, field
-from decimal import Decimal, ROUND_DOWN
+from decimal import Decimal
 from typing import Any, Iterable
 
 from sqlalchemy import func, select
@@ -12,7 +12,11 @@ from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
-from app.core.simulator.net_balance_utils import atoms_to_net_sign, net_decimal_to_atoms
+from app.core.simulator.net_balance_utils import (
+    atoms_to_net_sign,
+    net_decimal_to_atoms,
+    to_money_str,
+)
 
 
 @dataclass
@@ -262,11 +266,12 @@ class VizPatchHelper:
         debit_sum = {r.debtor_id: (r.amount or Decimal("0")) for r in debit_rows}
 
         precision = int(self.precision)
-        scale10 = Decimal(10) ** precision
-        money_quant = Decimal(1) / scale10
 
         def _to_money_str(v: Decimal) -> str:
-            return format(v.quantize(money_quant, rounding=ROUND_DOWN), "f")
+            # 012 / T1207: third copy of the same floor-by-precision renderer.  Node patches
+            # and the snapshot report the same `net_balance`, so they must agree byte for
+            # byte; `to_money_str` is the single form.
+            return to_money_str(v, precision)
         out: list[dict[str, Any]] = []
         for pid in pid_list:
             p = pid_to_participant.get(pid)
@@ -280,6 +285,11 @@ class VizPatchHelper:
                 viz_shape_key = "circle"
 
             net = credit_sum.get(p.id, Decimal("0")) - debit_sum.get(p.id, Decimal("0"))
+            # 012 / T1210 finding 6: one net, two encodings in one payload - `net_balance`
+            # (the amount) and `net_balance_atoms`/`net_sign` (the quantised integer that
+            # `viz_color_key` and `viz_size` are read from).  They may differ in RESOLUTION,
+            # never in SIGN or in whether the balance exists; see `net_decimal_to_atoms` and
+            # tests/integration/test_p012_t1210_net_balance_agrees_with_its_atoms.py.
             atoms = net_decimal_to_atoms(net, precision=precision)
             net_sign: int = atoms_to_net_sign(atoms)
 

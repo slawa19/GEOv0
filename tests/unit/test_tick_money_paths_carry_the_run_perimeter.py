@@ -52,6 +52,12 @@ def _guarded_calls(path: pathlib.Path):
 
 @pytest.mark.parametrize(
     ("path", "expected_calls"),
+    # clearing_engine: 3 -> 4 with the T1211 depth ladder (two-leg preflight), then 4 -> 3
+    # with the fix-round re-review: both ladder legs live in the one `_ladder_find` helper
+    # (two `find_cycles` calls, both carrying the perimeter), the execution loop's own
+    # full-depth call - the one that made the preflight ladder decorative - is gone in
+    # favor of consuming the preflight and refreshing through the helper, and the third
+    # guarded call is `execute_clearing_with_amount`.
     [(_EXECUTOR, 1), (_CLEARING, 3)],
     ids=["payments_executor", "clearing_engine"],
 )

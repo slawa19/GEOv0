@@ -98,7 +98,7 @@ async def _run_operation(
             TrustLineCreateRequest(
                 to=receiver.pid,
                 equivalent="USD",
-                limit=Decimal("10"),
+                limit="10",
                 signature="test-signature",
             ),
         )
@@ -107,7 +107,7 @@ async def _run_operation(
         return await service.update(
             trustline.id,
             sender.id,
-            TrustLineUpdateRequest(limit=Decimal("20"), signature="test-signature"),
+            TrustLineUpdateRequest(limit="20", signature="test-signature"),
         )
     if operation == "close":
         assert trustline is not None

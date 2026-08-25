@@ -76,6 +76,12 @@ function paginated<T>(items: T[]) {
   return ok({ items, page: 1, per_page: 20, total: items.length })
 }
 
+/** Сколько дробных знаков реально напечатано — ожидание выводится из precision, а не вписано. */
+function fractionDigits(rendered: string): number {
+  const dot = rendered.indexOf('.')
+  return dot < 0 ? 0 : rendered.length - dot - 1
+}
+
 function setupState(wrapper: VueWrapper) {
   return (wrapper.vm.$ as unknown as { setupState: Record<string, any> }).setupState
 }
@@ -378,6 +384,18 @@ describe('mounted non-Graph list request ownership', () => {
   })
 
   it('Liquidity formats with normalized loaded precision and degrades when it is missing', async () => {
+    // `T1211`. Здесь стояла одна величина `1.23456` и оракул «ровно `precision` знаков» —
+    // тот же неверный оракул, что закрепляли `graphPageHelpers.test.ts` и `RT-012-6`.
+    // `Equivalent.precision` задаёт МИНИМУМ знаков, никогда не максимум, поэтому величина
+    // точнее объявленной точности обязана дойти до оператора целиком, а не округлиться.
+    //
+    // Одной величины здесь и не хватало для контрпроверки подменой: под верным правилом
+    // `1.23456` печатается одинаково при precision 4 и 1 (обе меньше её масштаба), так что
+    // подмена точности перестала бы что-либо менять. Различает точности величина ГРУБЕЕ их —
+    // на ней работает добивка.
+    const AMOUNT_FINE = '1.23456'
+    const AMOUNT_COARSE = '1.2'
+
     apiMock.listEquivalents.mockResolvedValue(ok({
       items: [{ code: 'NEW', precision: 4, description: 'New', is_active: true }],
     }))
@@ -402,7 +420,35 @@ describe('mounted non-Graph list request ownership', () => {
 
     expect(state.selectedEq).toBe('NEW')
     expect(state.selectedPrecision).toBe(4)
-    expect(state.money('0.0001')).toBe('0.0001')
+
+    // T1208: раньше здесь стояло `expect(state.money('0.0001')).toBe('0.0001')` — вход дословно
+    // равен ожиданию, поэтому ассерт устоял бы и на форматтере-тождестве, то есть ровно на том
+    // режиме отказа, который у форматтера есть (`C-C3-2-002`: неразобранный вход возвращается
+    // как есть). Поэтому величина ГРУБЕЕ точности несёт основной вердикт: её ожидание не равно
+    // входу дословно, а выводится из объявленной precision добивкой.
+    const coarseAtFour = state.money(AMOUNT_COARSE, 'NEW')
+    expect(coarseAtFour, 'precision 4 объявляет минимум четыре знака').toBe('1.2000')
+    expect(fractionDigits(coarseAtFour)).toBe(4)
+
+    // Величина точнее объявленной точности доходит целиком: `precision` — минимум, не максимум.
+    expect(
+      state.money(AMOUNT_FINE, 'NEW'),
+      'Округление до объявленной точности изменило бы величину, а не её написание.',
+    ).toBe(AMOUNT_FINE)
+
+    // Контрпроверка подменой: другая объявленная precision обязана изменить вывод, иначе тест
+    // неотличим от своего отсутствия.
+    state.equivalentsList = [{ code: 'NEW', precision: 1, description: 'New', is_active: true }]
+    await nextTick()
+    expect(state.selectedPrecision).toBe(1)
+    const coarseAtOne = state.money(AMOUNT_COARSE, 'NEW')
+    expect(coarseAtOne).toBe('1.2')
+    expect(fractionDigits(coarseAtOne)).toBe(1)
+    expect(coarseAtOne).not.toBe(coarseAtFour)
+    expect(state.money(AMOUNT_FINE, 'NEW')).toBe(AMOUNT_FINE)
+
+    state.equivalentsList = [{ code: 'NEW', precision: 4, description: 'New', is_active: true }]
+    await nextTick()
     expect(state.showCountKpis).toBe(true)
     expect(state.showMoneyKpis).toBe(true)
     expect(wrapper.find('[data-testid="liquidity-count-kpis"]').exists()).toBe(true)
@@ -411,7 +457,7 @@ describe('mounted non-Graph list request ownership', () => {
     state.equivalentsList = []
     await nextTick()
     expect(state.selectedPrecision).toBeNull()
-    expect(state.money('0.0001')).toBe('—')
+    expect(state.money(AMOUNT_FINE, 'NEW')).toBe('—')
     expect(state.showCountKpis).toBe(true)
     expect(state.showMoneyKpis).toBe(false)
     expect(wrapper.find('[data-testid="liquidity-count-kpis"]').exists()).toBe(true)

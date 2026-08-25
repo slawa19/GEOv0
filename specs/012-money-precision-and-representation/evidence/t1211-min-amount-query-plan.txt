@@ -1,0 +1,136 @@
+﻿server:       PostgreSQL 16.9, compiled by Visual C++ build 1943, 64-bit
+graph:        400 random participants, 4000 debt edges, 1 in 50 exactly at the dropped threshold 0.01
+              + 12 planted triangles (36 dedicated participants, 36 edges) with ALL three
+              edges at 0.01, so the predicate provably has cycles to discard rather than by luck
+repetitions:  5 per variant, EXPLAIN (ANALYZE, BUFFERS, TIMING)
+read:         the buffer counts are the result.  They are deterministic for this
+              seeded population and repeat exactly across runs, while the execution
+              times move more between runs of this script than between the two
+              variants, so the times do not discriminate and are printed only as
+              order of magnitude.
+
+anti-vacuum:  the LEAST(...) filter appears on 1 plan node(s) and removed 87 rows;
+              the predicate did filter, so the two lines below compare real work.
+--- WITH min_amount: exec ms  min=128.0 median=153.1 max=275.1  toplevel_Buffers: shared hit=62116
+--- WITHOUT min_amount: exec ms  min=118.5 median=130.0 max=207.2  toplevel_Buffers: shared hit=62638
+buffer delta: 62638 - 62116 = 522 shared hits, 0.833% of the statement - what dropping the
+              predicate costs, measured on a population where it did filter.
+cycles found (ORDER BY/LIMIT stripped): with=852 without=939 -> predicate rejects 87
+              (the plans above keep the detector's real LIMIT 100, under which
+               both variants return 100 rows and the counts distinguish nothing)
+
+===== PLAN WITH min_amount =====
+Limit  (cost=690.92..690.95 rows=1 width=134) (actual time=152.561..152.630 rows=100 loops=1)
+  Buffers: shared hit=62116
+  ->  Unique  (cost=690.92..690.95 rows=1 width=134) (actual time=152.560..152.621 rows=100 loops=1)
+        Buffers: shared hit=62116
+        ->  Sort  (cost=690.92..690.92 rows=1 width=134) (actual time=152.558..152.573 rows=100 loops=1)
+              Sort Key: (LEAST(d1.amount, d2.amount, d3.amount)) DESC, d1.id, d1.debtor_id, d1.creditor_id, d1.amount, d2.id, d2.creditor_id, d2.amount, d3.id, d3.amount
+              Sort Method: quicksort  Memory: 151kB
+              Buffers: shared hit=62116
+              ->  Nested Loop  (cost=185.21..690.91 rows=1 width=134) (actual time=6.319..150.271 rows=852 loops=1)
+                    Join Filter: (d2.creditor_id = t3.to_participant_id)
+                    Buffers: shared hit=62116
+                    ->  Nested Loop  (cost=184.93..690.41 rows=1 width=194) (actual time=6.265..141.722 rows=852 loops=1)
+                          Join Filter: (d1.creditor_id = t2.to_participant_id)
+                          Buffers: shared hit=59560
+                          ->  Hash Join  (cost=184.65..687.43 rows=6 width=226) (actual time=6.226..134.153 rows=852 loops=1)
+                                Hash Cond: ((d1.creditor_id = d2.debtor_id) AND (d3.debtor_id = d2.creditor_id))
+                                Join Filter: (LEAST(d1.amount, d2.amount, d3.amount) > 0.01)
+                                Rows Removed by Join Filter: 87
+                                Buffers: shared hit=57004
+                                ->  Nested Loop  (cost=0.57..499.09 rows=812 width=172) (actual time=0.170..114.995 rows=39877 loops=1)
+                                      Buffers: shared hit=56941
+                                      ->  Nested Loop  (cost=0.29..435.89 rows=98 width=102) (actual time=0.135..50.073 rows=4036 loops=1)
+                                            Buffers: shared hit=12171
+                                            ->  Seq Scan on debts d1  (cost=0.00..123.54 rows=4036 width=70) (actual time=0.061..2.537 rows=4036 loops=1)
+                                                  Filter: ((amount > '0'::numeric) AND (equivalent_id = '6859cfc4-5993-4c95-bca5-5488f3bd0829'::uuid))
+                                                  Buffers: shared hit=63
+                                            ->  Memoize  (cost=0.29..0.49 rows=1 width=48) (actual time=0.011..0.011 rows=1 loops=4036)
+                                                  Cache Key: d1.creditor_id, d1.debtor_id
+                                                  Cache Mode: logical
+                                                  Hits: 0  Misses: 4036  Evictions: 0  Overflows: 0  Memory Usage: 694kB
+                                                  Buffers: shared hit=12108
+                                                  ->  Index Scan using uq_trust_lines_live_from_to_equivalent on trust_lines t1  (cost=0.28..0.48 rows=1 width=48) (actual time=0.008..0.009 rows=1 loops=4036)
+                                                        Index Cond: ((from_participant_id = d1.creditor_id) AND (to_participant_id = d1.debtor_id) AND (equivalent_id = '6859cfc4-5993-4c95-bca5-5488f3bd0829'::uuid))
+                                                        Filter: (((status)::text = 'active'::text) AND ((policy IS NULL) OR ((policy ->> 'auto_clearing'::text) IS NULL) OR (lower((policy ->> 'auto_clearing'::text)) <> ALL ('{false,0,no,off}'::text[]))))
+                                                        Buffers: shared hit=12108
+                                      ->  Index Scan using ix_debts_creditor_id on debts d3  (cost=0.28..0.55 rows=9 width=70) (actual time=0.004..0.013 rows=10 loops=4036)
+                                            Index Cond: (creditor_id = d1.debtor_id)
+                                            Filter: ((amount > '0'::numeric) AND (equivalent_id = '6859cfc4-5993-4c95-bca5-5488f3bd0829'::uuid))
+                                            Buffers: shared hit=44770
+                                ->  Hash  (cost=123.54..123.54 rows=4036 width=70) (actual time=5.705..5.706 rows=4036 loops=1)
+                                      Buckets: 4096  Batches: 1  Memory Usage: 438kB
+                                      Buffers: shared hit=63
+                                      ->  Seq Scan on debts d2  (cost=0.00..123.54 rows=4036 width=70) (actual time=0.031..2.668 rows=4036 loops=1)
+                                            Filter: ((amount > '0'::numeric) AND (equivalent_id = '6859cfc4-5993-4c95-bca5-5488f3bd0829'::uuid))
+                                            Buffers: shared hit=63
+                          ->  Index Scan using uq_trust_lines_live_from_to_equivalent on trust_lines t2  (cost=0.28..0.48 rows=1 width=48) (actual time=0.008..0.008 rows=1 loops=852)
+                                Index Cond: ((from_participant_id = d2.creditor_id) AND (to_participant_id = d2.debtor_id) AND (equivalent_id = '6859cfc4-5993-4c95-bca5-5488f3bd0829'::uuid))
+                                Filter: (((status)::text = 'active'::text) AND ((policy IS NULL) OR ((policy ->> 'auto_clearing'::text) IS NULL) OR (lower((policy ->> 'auto_clearing'::text)) <> ALL ('{false,0,no,off}'::text[]))))
+                                Buffers: shared hit=2556
+                    ->  Index Scan using uq_trust_lines_live_from_to_equivalent on trust_lines t3  (cost=0.28..0.48 rows=1 width=48) (actual time=0.008..0.008 rows=1 loops=852)
+                          Index Cond: ((from_participant_id = d3.creditor_id) AND (to_participant_id = d3.debtor_id) AND (equivalent_id = '6859cfc4-5993-4c95-bca5-5488f3bd0829'::uuid))
+                          Filter: (((status)::text = 'active'::text) AND ((policy IS NULL) OR ((policy ->> 'auto_clearing'::text) IS NULL) OR (lower((policy ->> 'auto_clearing'::text)) <> ALL ('{false,0,no,off}'::text[]))))
+                          Buffers: shared hit=2556
+Planning:
+  Buffers: shared hit=216
+Planning Time: 166.797 ms
+Execution Time: 153.139 ms
+
+===== PLAN WITHOUT min_amount =====
+Limit  (cost=696.38..696.41 rows=1 width=134) (actual time=120.032..120.080 rows=100 loops=1)
+  Buffers: shared hit=62638
+  ->  Unique  (cost=696.38..696.41 rows=1 width=134) (actual time=120.030..120.072 rows=100 loops=1)
+        Buffers: shared hit=62638
+        ->  Sort  (cost=696.38..696.38 rows=1 width=134) (actual time=120.029..120.038 rows=100 loops=1)
+              Sort Key: (LEAST(d1.amount, d2.amount, d3.amount)) DESC, d1.id, d1.debtor_id, d1.creditor_id, d1.amount, d2.id, d2.creditor_id, d2.amount, d3.id, d3.amount
+              Sort Method: quicksort  Memory: 163kB
+              Buffers: shared hit=62638
+              ->  Nested Loop  (cost=185.21..696.37 rows=1 width=134) (actual time=3.599..118.023 rows=939 loops=1)
+                    Join Filter: (d2.creditor_id = t3.to_participant_id)
+                    Buffers: shared hit=62638
+                    ->  Nested Loop  (cost=184.93..695.87 rows=1 width=194) (actual time=3.564..110.805 rows=939 loops=1)
+                          Join Filter: (d1.creditor_id = t2.to_participant_id)
+                          Buffers: shared hit=59821
+                          ->  Hash Join  (cost=184.65..687.43 rows=17 width=226) (actual time=3.525..103.572 rows=939 loops=1)
+                                Hash Cond: ((d1.creditor_id = d2.debtor_id) AND (d3.debtor_id = d2.creditor_id))
+                                Buffers: shared hit=57004
+                                ->  Nested Loop  (cost=0.57..499.09 rows=812 width=172) (actual time=0.090..89.236 rows=39877 loops=1)
+                                      Buffers: shared hit=56941
+                                      ->  Nested Loop  (cost=0.29..435.89 rows=98 width=102) (actual time=0.066..38.893 rows=4036 loops=1)
+                                            Buffers: shared hit=12171
+                                            ->  Seq Scan on debts d1  (cost=0.00..123.54 rows=4036 width=70) (actual time=0.036..2.025 rows=4036 loops=1)
+                                                  Filter: ((amount > '0'::numeric) AND (equivalent_id = '6859cfc4-5993-4c95-bca5-5488f3bd0829'::uuid))
+                                                  Buffers: shared hit=63
+                                            ->  Memoize  (cost=0.29..0.49 rows=1 width=48) (actual time=0.008..0.008 rows=1 loops=4036)
+                                                  Cache Key: d1.creditor_id, d1.debtor_id
+                                                  Cache Mode: logical
+                                                  Hits: 0  Misses: 4036  Evictions: 0  Overflows: 0  Memory Usage: 694kB
+                                                  Buffers: shared hit=12108
+                                                  ->  Index Scan using uq_trust_lines_live_from_to_equivalent on trust_lines t1  (cost=0.28..0.48 rows=1 width=48) (actual time=0.006..0.006 rows=1 loops=4036)
+                                                        Index Cond: ((from_participant_id = d1.creditor_id) AND (to_participant_id = d1.debtor_id) AND (equivalent_id = '6859cfc4-5993-4c95-bca5-5488f3bd0829'::uuid))
+                                                        Filter: (((status)::text = 'active'::text) AND ((policy IS NULL) OR ((policy ->> 'auto_clearing'::text) IS NULL) OR (lower((policy ->> 'auto_clearing'::text)) <> ALL ('{false,0,no,off}'::text[]))))
+                                                        Buffers: shared hit=12108
+                                      ->  Index Scan using ix_debts_creditor_id on debts d3  (cost=0.28..0.55 rows=9 width=70) (actual time=0.003..0.010 rows=10 loops=4036)
+                                            Index Cond: (creditor_id = d1.debtor_id)
+                                            Filter: ((amount > '0'::numeric) AND (equivalent_id = '6859cfc4-5993-4c95-bca5-5488f3bd0829'::uuid))
+                                            Buffers: shared hit=44770
+                                ->  Hash  (cost=123.54..123.54 rows=4036 width=70) (actual time=3.146..3.146 rows=4036 loops=1)
+                                      Buckets: 4096  Batches: 1  Memory Usage: 438kB
+                                      Buffers: shared hit=63
+                                      ->  Seq Scan on debts d2  (cost=0.00..123.54 rows=4036 width=70) (actual time=0.026..1.388 rows=4036 loops=1)
+                                            Filter: ((amount > '0'::numeric) AND (equivalent_id = '6859cfc4-5993-4c95-bca5-5488f3bd0829'::uuid))
+                                            Buffers: shared hit=63
+                          ->  Index Scan using uq_trust_lines_live_from_to_equivalent on trust_lines t2  (cost=0.28..0.48 rows=1 width=48) (actual time=0.007..0.007 rows=1 loops=939)
+                                Index Cond: ((from_participant_id = d2.creditor_id) AND (to_participant_id = d2.debtor_id) AND (equivalent_id = '6859cfc4-5993-4c95-bca5-5488f3bd0829'::uuid))
+                                Filter: (((status)::text = 'active'::text) AND ((policy IS NULL) OR ((policy ->> 'auto_clearing'::text) IS NULL) OR (lower((policy ->> 'auto_clearing'::text)) <> ALL ('{false,0,no,off}'::text[]))))
+                                Buffers: shared hit=2817
+                    ->  Index Scan using uq_trust_lines_live_from_to_equivalent on trust_lines t3  (cost=0.28..0.48 rows=1 width=48) (actual time=0.006..0.006 rows=1 loops=939)
+                          Index Cond: ((from_participant_id = d3.creditor_id) AND (to_participant_id = d3.debtor_id) AND (equivalent_id = '6859cfc4-5993-4c95-bca5-5488f3bd0829'::uuid))
+                          Filter: (((status)::text = 'active'::text) AND ((policy IS NULL) OR ((policy ->> 'auto_clearing'::text) IS NULL) OR (lower((policy ->> 'auto_clearing'::text)) <> ALL ('{false,0,no,off}'::text[]))))
+                          Buffers: shared hit=2817
+Planning:
+  Buffers: shared hit=216
+Planning Time: 125.103 ms
+Execution Time: 120.710 ms

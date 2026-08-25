@@ -313,7 +313,7 @@ Protokół jest niezależny od warstwy transportu. Zalecane warianty:
   "from": "PID_A",
   "to": "PID_B",
   "equivalent": "UAH",
-  "limit": 1000.00,
+  "limit": "1000.00",
   "policy": {
     "auto_clearing": true,
     "can_be_intermediate": true
@@ -325,7 +325,7 @@ Protokół jest niezależny od warstwy transportu. Zalecane warianty:
 
 - Podpis `from` (A) jest obowiązkowy
 - Nie istnieje aktywna linia `(from, to, equivalent)`
-- `limit` > 0
+- `limit` ≥ 0
 
 **Algorytm:**
 
@@ -341,7 +341,7 @@ Protokół jest niezależny od warstwy transportu. Zalecane warianty:
 ```json
 {
   "trust_line_id": "uuid",
-  "limit": 1500.00,
+  "limit": "1500.00",
   "policy": { /* zaktualizowane pola */ }
 }
 ```
@@ -425,7 +425,7 @@ Protokół jest niezależny od warstwy transportu. Zalecane warianty:
   "payload": {
     "to": "PID_B",
     "equivalent": "UAH",
-    "amount": 100.00,
+    "amount": "100.00",
     "description": "Opłata za usługi",
     "constraints": {
       "max_hops": 4,
@@ -1187,7 +1187,7 @@ Hub A otwiera linię zaufania do Hub B:
   "from": "HUB_A_PID",
   "to": "HUB_B_PID",
   "equivalent": "UAH",
-  "limit": 100000.00,
+  "limit": "100000.00",
   "policy": {
     "auto_clearing": true,
     "settlement_schedule": "weekly",

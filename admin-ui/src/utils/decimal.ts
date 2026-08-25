@@ -80,31 +80,42 @@ export function isUnitIntervalDecimalString(value: unknown): boolean {
   return dec.i <= pow10(dec.scale)
 }
 
-// Formats a decimal string to exactly `digits` fraction digits (default 2).
-// Uses integer math and rounds half-up.
-export function formatDecimalFixed(input: string, digits = 2): string {
+// Renders a money value with AT LEAST `minDigits` fraction digits, and never fewer digits than
+// the value itself needs. Integer math throughout; no `Number` ever holds an amount.
+//
+// THE RULE is `app/utils/money.py`'s `to_money_str`, copied rather than invented, and the same
+// one `simulator-ui/v2/src/utils/money.ts` already carries: **`Equivalent.precision` is the
+// MINIMUM number of fraction digits, never the maximum.**
+//
+// T1211: what stood here was `formatDecimalFixed(input, digits)` - `quantize` to exactly `digits`
+// with ROUND_HALF_UP - and it was the admin UI's only money formatter. `precision` as a maximum
+// changes the VALUE, not its spelling: `0.05` of the shipped `HOUR` (`precision: 1`) is accepted
+// by the door, stored exactly by `Numeric(20, 8)`, and was shown to the operator as `0.1` -
+// double the obligation, in the one direction nobody audits. `1.999 UAH` read `2.00`.
+// `formatDecimalFixed` is gone rather than kept beside this: after the money path moved off it,
+// it had zero callers (measured), and a half-up fixed formatter sitting in the utils module the
+// money cells import is exactly how this defect arrived - the same reasoning F-012-7 used to
+// remove its `digits = 2` default one task earlier.
+export function formatDecimalMinScale(input: string, minDigits: number): string {
   const dec = parseDecimal(String(input ?? ''))
   if (!dec) return String(input ?? '')
 
-  const target = Math.max(0, Math.floor(digits))
-  if (dec.scale === target) return formatBigIntFixed(dec.i, target)
+  const target = Math.max(0, Math.floor(minDigits))
+  let { i, scale } = dec
 
-  if (dec.scale < target) {
-    const mul = pow10(target - dec.scale)
-    return formatBigIntFixed(dec.i * mul, target)
+  // Down to `target`: trailing zeros below the declared precision are the storage column's
+  // padding, not information the ledger holds.
+  while (scale > target && i % 10n === 0n) {
+    i /= 10n
+    scale -= 1
+  }
+  // Up to `target`: a value coarser than the precision still shows every declared digit.
+  if (scale < target) {
+    i *= pow10(target - scale)
+    scale = target
   }
 
-  // dec.scale > target: round half-up
-  const diff = dec.scale - target
-  const div = pow10(diff)
-  const neg = dec.i < 0n
-  const abs = neg ? -dec.i : dec.i
-  const q = abs / div
-  const r = abs % div
-  const half = div / 2n
-  const rounded = r >= half ? q + 1n : q
-  const signed = neg ? -rounded : rounded
-  return formatBigIntFixed(signed, target)
+  return formatBigIntFixed(i, scale)
 }
 
 export function isRatioBelowThreshold(opts: {

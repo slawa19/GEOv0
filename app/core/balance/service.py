@@ -12,6 +12,7 @@ from sqlalchemy.orm import joinedload
 from app.db.models.debt import Debt
 from app.db.models.trustline import TrustLine
 from app.db.models.equivalent import Equivalent
+from app.utils.money import to_money_str
 from app.schemas.balance import BalanceSummary, BalanceEquivalent, DebtsDetails, OutgoingDebt, IncomingDebt
 from app.utils.exceptions import NotFoundException
 from app.config import settings
@@ -117,6 +118,21 @@ class BalanceService:
         # Group by Equivalent
         equivalents_map: Dict[str, Dict[str, Decimal]] = {}
 
+        # 012/T1202: the digits each equivalent declares. Free to collect - every query above
+        # already `joinedload`s the Equivalent, so this adds no round trip - and it is what lets
+        # the response show a HOUR balance with one digit and a UAH one with two, instead of
+        # showing every field at the storage scale of eight.
+        precision_by_code: Dict[str, int] = {}
+
+        def note_precision(equivalent) -> str:
+            code = equivalent.code
+            if code not in precision_by_code:
+                try:
+                    precision_by_code[code] = int(equivalent.precision)
+                except (TypeError, ValueError):
+                    precision_by_code[code] = 2
+            return code
+
         def get_eq_entry(code: str) -> Dict[str, Decimal]:
             if code not in equivalents_map:
                 equivalents_map[code] = {
@@ -130,14 +146,14 @@ class BalanceService:
         # Debts I Owe: key=(creditor_id, code), value=amount
         debts_i_owe: Dict[tuple[uuid.UUID, str], Decimal] = {}
         for d in my_debts:
-            code = d.equivalent.code
+            code = note_precision(d.equivalent)
             debts_i_owe[(d.creditor_id, code)] = d.amount
             get_eq_entry(code)['total_debt'] += d.amount
 
         # Debts Others Owe Me: key=(debtor_id, code), value=amount
         debts_others_owe: Dict[tuple[uuid.UUID, str], Decimal] = {}
         for d in others_debts:
-            code = d.equivalent.code
+            code = note_precision(d.equivalent)
             debts_others_owe[(d.debtor_id, code)] = d.amount
             get_eq_entry(code)['total_credit'] += d.amount
 
@@ -149,7 +165,7 @@ class BalanceService:
 
         # Spend capacity comes from Incoming TrustLines (Peer -> Me)
         for tl in in_tls:
-            code = tl.equivalent.code
+            code = note_precision(tl.equivalent)
             limit = tl.limit
             peer_id = tl.from_participant_id
 
@@ -161,7 +177,7 @@ class BalanceService:
 
         # Receive capacity comes from Outgoing TrustLines (Me -> Peer)
         for tl in out_tls:
-            code = tl.equivalent.code
+            code = note_precision(tl.equivalent)
             limit = tl.limit
             peer_id = tl.to_participant_id
 
@@ -194,14 +210,29 @@ class BalanceService:
 
         results: list[BalanceEquivalent] = []
         for code, data in equivalents_map.items():
+            precision = precision_by_code.get(code, 2)
             results.append(
+                # 012/T1202: `str(Decimal)` here put EXPONENTIAL money on a money-core response.
+                # Two equal debts of 5.00 UAH make `Decimal('5.00000000') - Decimal('5.00000000')`,
+                # whose `str()` is the literal `'0E-8'` - on `GET /api/v1/balance`, on an entirely
+                # ordinary graph. The same payload rendered zero three different ways ('0' from a
+                # Decimal('0') default, '0E-8' from a subtraction, '0.00000000' from a stored
+                # value) and showed every field at storage scale 8 whatever the equivalent
+                # declares. `to_money_str` gives at least `precision` digits and never fewer than
+                # the value needs, so nothing is lost and the exponent is impossible.
                 BalanceEquivalent(
                     code=code,
-                    total_debt=str(data['total_debt']),
-                    total_credit=str(data['total_credit']),
-                    net_balance=str(data['total_credit'] - data['total_debt']),
-                    available_to_spend=str(max(Decimal('0'), data['spend_capacity'])),
-                    available_to_receive=str(max(Decimal('0'), data['receive_capacity'])),
+                    total_debt=to_money_str(data['total_debt'], precision),
+                    total_credit=to_money_str(data['total_credit'], precision),
+                    net_balance=to_money_str(
+                        data['total_credit'] - data['total_debt'], precision
+                    ),
+                    available_to_spend=to_money_str(
+                        max(Decimal('0'), data['spend_capacity']), precision
+                    ),
+                    available_to_receive=to_money_str(
+                        max(Decimal('0'), data['receive_capacity']), precision
+                    ),
                 )
             )
 
@@ -214,7 +245,16 @@ class BalanceService:
         equivalent = (await self.session.execute(select(Equivalent).where(Equivalent.code == equivalent_code))).scalar_one_or_none()
         if not equivalent:
             raise NotFoundException(f"Equivalent {equivalent_code} not found")
-            
+
+        # 012/T1202. `str(Decimal)` here was the SAME defect `get_summary` fixed sixty lines
+        # above, left standing on the neighbouring route: a stored `0.00000001` came out of
+        # `Numeric(20, 8)` as `Decimal('1E-8')` and went on the wire as the literal `'1E-8'`.
+        # The equivalent is already loaded for the id lookup, so its `precision` is free here.
+        try:
+            precision = int(equivalent.precision)
+        except (TypeError, ValueError):
+            precision = 2
+
         outgoing_res = []
         incoming_res = []
         
@@ -233,7 +273,7 @@ class BalanceService:
                     creditor=d.creditor.pid,
                     creditor_name=d.creditor.display_name or "",
                     equivalent=equivalent_code,
-                    amount=str(d.amount)
+                    amount=to_money_str(d.amount, precision)
                 ))
                 
         if direction in ['incoming', 'all']:
@@ -251,7 +291,7 @@ class BalanceService:
                     debtor=d.debtor.pid,
                     debtor_name=d.debtor.display_name or "",
                     equivalent=equivalent_code,
-                    amount=str(d.amount)
+                    amount=to_money_str(d.amount, precision)
                 ))
                 
         return DebtsDetails(outgoing=outgoing_res, incoming=incoming_res)

@@ -23,6 +23,8 @@ import type {
 import { connectSse, type SseParsedMessage } from '../api/sse'
 import { normalizeSimulatorEvent } from '../api/normalizeSimulatorEvent'
 import { ApiError, authHeaders } from '../api/http'
+import { fetchEquivalentPrecisions } from '../api/equivalentsApi'
+import { resetEquivalentPrecisions, setEquivalentPrecisions } from '../config/equivalentPrecision'
 
 import type { ClearingDoneEvent, EdgePatch, NodePatch, TxUpdatedEvent } from '../types'
 import type { SimulatorAppState } from '../types/simulatorApp'
@@ -1018,6 +1020,63 @@ export function useSimulatorRealMode(opts: {
     { flush: 'post' },
   )
 
+  /**
+   * Generation of the outstanding equivalents-catalogue load (`T1211`). The precision
+   * registry is global and shared with demo mode, so a response may only be installed
+   * while it is still the newest load anyone asked for.
+   *
+   * A generation stands in for the whole connection context because every change to that
+   * context bumps it: leaving real mode invalidates the outstanding load, and a change of
+   * `apiBase` or `accessToken` while real mode stays on starts a fresh one (see the
+   * connection-context watcher). An older generation is therefore, by construction, an
+   * answer to a question nobody is asking any more.
+   */
+  let equivalentPrecisionsSeq = 0
+
+  function invalidateEquivalentPrecisionsLoad() {
+    equivalentPrecisionsSeq += 1
+  }
+
+  /**
+   * Loads `Equivalent.precision` for every active equivalent (012 / `F-012-4`).
+   *
+   * Best-effort by design: an anonymous cookie-auth visitor can read neither
+   * `GET /equivalents` (participant JWT) nor `GET /admin/equivalents` (admin token), and
+   * that is not an error worth putting in front of the operator — the shipped fixture
+   * precisions stay in force. A failure here must never keep real mode from booting.
+   *
+   * A failure DROPS the catalogue rather than keeping it. This loader runs in exactly two
+   * places — real-mode boot (:1318) and the connection-context watcher (:1397) — so on a
+   * failure the registry never holds a still-valid catalogue for the backend now being
+   * addressed: it is either empty (boot) or the PREVIOUS backend's (context changed).
+   * Keeping the latter is not a stale-but-plausible value, it is a wrong scale:
+   * `NodeCardOverlay.vue:108` turns `net_balance_atoms` into major units through it, so
+   * carrying backend A's precision into backend B's data misplaces the decimal point by
+   * `10^(A-B)`. Dropping it lands in the state an anonymous visitor is already in and that
+   * `equivalentPrecision` documents as normal — layer 2, the shipped fixture value.
+   *
+   * The cost is narrow and accepted: when only the credential changed and the new read
+   * fails, a catalogue that did belong to this same backend is dropped too. That degrades
+   * to a documented fallback, whereas the alternative invents knowledge about a backend
+   * whose catalogue was never read.
+   */
+  async function refreshEquivalentPrecisions() {
+    const seq = ++equivalentPrecisionsSeq
+    // Pinned at issue time: `real.*` can already describe a different backend by the time
+    // the response lands, and the request must not be a mix of the two.
+    const request = { apiBase: real.apiBase, accessToken: real.accessToken }
+    try {
+      const rows = await fetchEquivalentPrecisions(request)
+      if (seq !== equivalentPrecisionsSeq) return
+      setEquivalentPrecisions(rows)
+    } catch {
+      // Same generation check as the success path: a rejection from an abandoned context
+      // must not destroy a catalogue a newer load already installed.
+      if (seq !== equivalentPrecisionsSeq) return
+      resetEquivalentPrecisions()
+    }
+  }
+
   async function refreshScenarios() {
     // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
     await ensureAnonSessionOnce()
@@ -1262,12 +1321,19 @@ export function useSimulatorRealMode(opts: {
       if (!v) {
         teardownRefreshSnapshot()
         stopSse()
+        // Demo mode must not keep formatting money at a precision only the backend knew.
+        invalidateEquivalentPrecisionsLoad()
+        resetEquivalentPrecisions()
         return
       }
       initialBootInProgress = true
       void (async () => {
         try {
           await ensureAnonSessionOnce()
+          // Deliberately not awaited: the catalogue is not needed to boot, and the boot
+          // sequence's ordering is characterized by tests. The precision registry is
+          // reactive, so a card already on screen re-renders when the answer arrives.
+          void refreshEquivalentPrecisions()
           await refreshScenarios()
 
           ensureScenarioSelectionValid()
@@ -1323,6 +1389,31 @@ export function useSimulatorRealMode(opts: {
       })()
     },
     { immediate: true },
+  )
+
+  /**
+   * The connection context is editable *while real mode stays on* (`T1211`): the operator
+   * pastes an admin token after an anonymous start, or repoints `apiBase` at another
+   * backend. The boot watcher above never fires again in either case, so without this the
+   * catalogue read is a one-shot — a token that arrives late is never retried, and a
+   * catalogue read from the previous backend keeps formatting amounts fetched from the new
+   * one.
+   *
+   * Only the catalogue is re-read here; the rest of the boot sequence is deliberately not
+   * repeated on a keystroke. The stale-response guard inside `refreshEquivalentPrecisions`
+   * is what makes this safe — the re-read routinely overlaps a load that is still open.
+   */
+  watch(
+    () => [isRealMode.value, real.apiBase, real.accessToken] as const,
+    ([realMode, apiBase, accessToken], previous) => {
+      if (!realMode) return
+      // Entering real mode is the boot watcher's job; re-reading here too would double the
+      // request on every mount.
+      const [prevRealMode, prevApiBase, prevAccessToken] = previous ?? [realMode, apiBase, accessToken]
+      if (realMode !== prevRealMode) return
+      if (apiBase === prevApiBase && accessToken === prevAccessToken) return
+      void refreshEquivalentPrecisions()
+    },
   )
 
   // When user selects a different scenario (and no run is active), reload scene so preview graph appears.
