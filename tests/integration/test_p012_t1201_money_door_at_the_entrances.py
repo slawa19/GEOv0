@@ -427,9 +427,12 @@ async def test_a_negative_limit_is_refused_at_the_door_on_create_and_update(
     silently - the exact "guard with no test" class this repository's review lessons record.
 
     Refusal must be E009 and must precede the signature check (UNSIGNABLE probe), like every
-    other door rule.  Zero stays admissible: the bound reproduces the schema's old `ge=0`,
-    and reconciling it with the protocol's stricter `limit > 0` (docs/en/02-protocol-spec.md:341)
-    is a recorded fork, not this test's claim.
+    other door rule.  Zero stays admissible - decided, not merely inherited: the owner's
+    verdict is ALLOW_ZERO, and the "protocol requires `limit > 0`" fork this docstring once
+    recorded turned out to be no fork at all - `docs/en` is a dated translation
+    (`docs/ru/documentation-rules.md` §0), and the authoritative RU tree has always said
+    `>= 0`.  The sixth false claim of this wave: check which documentation tree is the
+    source, not only the number.
 
     MUTATION THIS CATCHES: dropping `require_non_negative=True` from either call in
     `app/core/trustlines/service.py`.
