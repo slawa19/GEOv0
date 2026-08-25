@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import { useLatestRequest } from '../../composables/useLatestRequest'
 
+import { renderWithPrecisionAsMaximum } from '../../test/precisionAsMaximum'
+
 import {
   atomsToDecimal,
   buildFocusModeQuery,
@@ -397,23 +399,11 @@ describe('graphPageHelpers.money (F-012-7, T1211)', () => {
       expect(ok, `Выборка потеряла случай «${name}» и перестала различать реализации.`).toBe(true)
     }
 
-    // Отрицательный контроль: сама снятая реализация. Выборка обязана содержать случай, на
-    // котором «точность как максимум с округлением половины вверх» даёт ДРУГОЙ ОТВЕТ, — иначе
-    // весь блок ниже проходит и без починки, как проходил до `T1211`.
-    const asMaximumHalfUp = (value: string, digits: number): string => {
-      const neg = value.startsWith('-')
-      const [int = '0', frac = ''] = (neg ? value.slice(1) : value).split('.')
-      const scaled = BigInt(int + frac.padEnd(Math.max(frac.length, digits), '0'))
-      const drop = Math.max(0, frac.length - digits)
-      const div = 10n ** BigInt(drop)
-      const q = scaled / div + (drop > 0 && (scaled % div) * 2n >= div ? 1n : 0n)
-      const s = q.toString().padStart(digits + 1, '0')
-      const out = digits === 0 ? s : `${s.slice(0, s.length - digits)}.${s.slice(s.length - digits)}`
-      return neg && /[1-9]/.test(q.toString()) ? `-${out}` : out
-    }
-
+    // Отрицательный контроль — снятая реализация, общая на все денежные наборы admin-ui.
+    // Выборка обязана содержать случай, на котором «точность как максимум с округлением
+    // половины вверх» даёт ДРУГОЙ ОТВЕТ, иначе весь блок ниже проходит и без починки.
     const distinguishing = CASES.filter(
-      (c) => asMaximumHalfUp(c.value, precisionOf(c.code)) !== c.expected,
+      (c) => renderWithPrecisionAsMaximum(c.value, precisionOf(c.code)) !== c.expected,
     )
     expect(
       distinguishing.length,
@@ -425,7 +415,7 @@ describe('graphPageHelpers.money (F-012-7, T1211)', () => {
     // и менялось.
     expect(
       distinguishing.some(
-        (c) => Number(asMaximumHalfUp(c.value, precisionOf(c.code))) !== Number(c.expected),
+        (c) => Number(renderWithPrecisionAsMaximum(c.value, precisionOf(c.code))) !== Number(c.expected),
       ),
       'Различающие случаи есть, но все они про написание. Нужен хотя бы один, где старая '
         + 'реализация показывала другое ЧИСЛО.',

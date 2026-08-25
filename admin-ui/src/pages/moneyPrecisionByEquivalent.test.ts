@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import DashboardPage from './DashboardPage.vue'
 import TrustlinesPage from './TrustlinesPage.vue'
 import type { Trustline } from '../types/domain'
+import { renderWithPrecisionAsMaximum } from '../test/precisionAsMaximum'
 
 /**
  * RT-012-6 (F-012-7, дополнен `T1211`) — репродьюсер на реальных денежных вызывающих `admin-ui`.
@@ -172,21 +173,11 @@ describe.each([
   { name: 'TrustlinesPage table', component: TrustlinesPage, path: '/trustlines' },
 ])('RT-012-6: $name renders money by the row equivalent', ({ component, path }) => {
   it('sentinel: the sample must redden under the implementation T1211 removed', () => {
-    // Отрицательный контроль — снятая `formatDecimalFixed`: ровно `precision` знаков,
-    // округление половины вверх. Если ни одна строка на ней не краснеет, выборка подобрана
-    // согласиться и весь файл ничего не доказывает.
-    const asMaximumHalfUp = (value: string, digits: number): string => {
-      const [int = '0', frac = ''] = value.split('.')
-      const scaled = BigInt(int + frac.padEnd(Math.max(frac.length, digits), '0'))
-      const drop = Math.max(0, frac.length - digits)
-      const div = 10n ** BigInt(drop)
-      const q = scaled / div + (drop > 0 && (scaled % div) * 2n >= div ? 1n : 0n)
-      const s = q.toString().padStart(digits + 1, '0')
-      return digits === 0 ? s : `${s.slice(0, s.length - digits)}.${s.slice(s.length - digits)}`
-    }
-
+    // Отрицательный контроль — снятая `formatDecimalFixed`, общая на все денежные наборы
+    // admin-ui. Если ни одна строка на ней не краснеет, выборка подобрана согласиться и весь
+    // файл ничего не доказывает.
     const distinguishing = ROWS_SPEC.filter(
-      (r) => asMaximumHalfUp(r.limit, r.precision) !== r.expected,
+      (r) => renderWithPrecisionAsMaximum(r.limit, r.precision) !== r.expected,
     )
     expect(
       distinguishing.map((r) => r.code),
@@ -196,7 +187,7 @@ describe.each([
 
     expect(
       distinguishing.some(
-        (r) => Number(asMaximumHalfUp(r.limit, r.precision)) !== Number(r.expected),
+        (r) => Number(renderWithPrecisionAsMaximum(r.limit, r.precision)) !== Number(r.expected),
       ),
       'Различающие строки есть, но все они про написание. Нужна хотя бы одна, где старая '
         + 'реализация показывала оператору другое ЧИСЛО.',
