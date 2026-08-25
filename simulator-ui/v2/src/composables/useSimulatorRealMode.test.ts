@@ -1,4 +1,4 @@
-import { computed, effectScope, nextTick, ref, type Ref } from 'vue'
+import { computed, effectScope, nextTick, reactive, ref, type Ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
 import { useSimulatorRealMode, type RealModeState } from './useSimulatorRealMode'
@@ -105,7 +105,10 @@ vi.mock('../api/sse', () => {
 })
 
 function createRealState(): RealModeState {
-  return {
+  // `reactive`, exactly as production builds this state (`useSimulatorApp.ts:546`). With a
+  // plain object every watcher this composable registers on `real.*` is inert, so the whole
+  // file would characterize real mode against a half-dead reactive graph.
+  return reactive<RealModeState>({
     apiBase: 'http://x',
     accessToken: '',
     loadingScenarios: false,
@@ -130,7 +133,7 @@ function createRealState(): RealModeState {
       rejectedByCode: {},
       errorsByCode: {},
     },
-  }
+  })
 }
 
 function deferred() {
@@ -238,7 +241,11 @@ describe('useSimulatorRealMode - refreshSnapshot debounce regression', () => {
     // §10: Pre-set runId so the immediate watcher does not call getActiveRun and trigger an
     // extra loadScene() before the test body runs. Anonymous visitors use cookie-auth, so
     // getActiveRun is now called even without accessToken — the test must account for this.
-    const real = { ...createRealState(), runId: 'r1' as string | null, accessToken: 't' }
+    // Assigned, not spread: spreading the reactive proxy would copy its values into a plain
+    // object and hand this case the very dead harness `createRealState` exists to avoid.
+    const real = createRealState()
+    real.runId = 'r1'
+    real.accessToken = 't'
 
     const loadScene = vi.fn(async () => undefined)
 
@@ -342,6 +349,19 @@ describe('useSimulatorRealMode - refreshSnapshot debounce regression', () => {
     real.accessToken = 't'
     real.runId = 'r1'
 
+    // `real` is reactive here, exactly as in production, so the immediate boot watcher runs
+    // for real: it attaches to r1 and legitimately loads the scene once
+    // (`useSimulatorRealMode.ts` boot sequence -> refreshSnapshot). That producer has
+    // nothing to do with debouncing, and a spy shared between two producers measures
+    // neither — so let boot finish, account for its call explicitly, and start counting
+    // from zero.
+    await vi.advanceTimersByTimeAsync(100)
+    expect(
+      loadScene,
+      'Precondition: the boot sequence loads the scene exactly once before this case begins.',
+    ).toHaveBeenCalledTimes(1)
+    loadScene.mockClear()
+
     const p1 = h.refreshSnapshot()
     h.refreshSnapshot() // mark pending while debounce timer is active
     await p1
@@ -352,7 +372,11 @@ describe('useSimulatorRealMode - refreshSnapshot debounce regression', () => {
     real.runId = 'r2'
 
     await vi.advanceTimersByTimeAsync(100)
-    expect(loadScene).toHaveBeenCalledTimes(1)
+    expect(
+      loadScene,
+      'The pending debounced refresh was queued for run r1. r2 is a different run context, so '
+        + 'firing it would load a scene for a run the operator has already left.',
+    ).toHaveBeenCalledTimes(1)
 
     vi.useRealTimers()
   })

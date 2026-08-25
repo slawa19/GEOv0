@@ -1021,6 +1021,23 @@ export function useSimulatorRealMode(opts: {
   )
 
   /**
+   * Generation of the outstanding equivalents-catalogue load (`T1211`). The precision
+   * registry is global and shared with demo mode, so a response may only be installed
+   * while it is still the newest load anyone asked for.
+   *
+   * A generation stands in for the whole connection context because every change to that
+   * context bumps it: leaving real mode invalidates the outstanding load, and a change of
+   * `apiBase` or `accessToken` while real mode stays on starts a fresh one (see the
+   * connection-context watcher). An older generation is therefore, by construction, an
+   * answer to a question nobody is asking any more.
+   */
+  let equivalentPrecisionsSeq = 0
+
+  function invalidateEquivalentPrecisionsLoad() {
+    equivalentPrecisionsSeq += 1
+  }
+
+  /**
    * Loads `Equivalent.precision` for every active equivalent (012 / `F-012-4`).
    *
    * Best-effort by design: an anonymous cookie-auth visitor can read neither
@@ -1029,10 +1046,14 @@ export function useSimulatorRealMode(opts: {
    * precisions stay in force. A failure here must never keep real mode from booting.
    */
   async function refreshEquivalentPrecisions() {
+    const seq = ++equivalentPrecisionsSeq
+    // Pinned at issue time: `real.*` can already describe a different backend by the time
+    // the response lands, and the request must not be a mix of the two.
+    const request = { apiBase: real.apiBase, accessToken: real.accessToken }
     try {
-      setEquivalentPrecisions(
-        await fetchEquivalentPrecisions({ apiBase: real.apiBase, accessToken: real.accessToken }),
-      )
+      const rows = await fetchEquivalentPrecisions(request)
+      if (seq !== equivalentPrecisionsSeq) return
+      setEquivalentPrecisions(rows)
     } catch {
       // Keep whatever precisions are already in force.
     }
@@ -1283,6 +1304,7 @@ export function useSimulatorRealMode(opts: {
         teardownRefreshSnapshot()
         stopSse()
         // Demo mode must not keep formatting money at a precision only the backend knew.
+        invalidateEquivalentPrecisionsLoad()
         resetEquivalentPrecisions()
         return
       }
@@ -1349,6 +1371,31 @@ export function useSimulatorRealMode(opts: {
       })()
     },
     { immediate: true },
+  )
+
+  /**
+   * The connection context is editable *while real mode stays on* (`T1211`): the operator
+   * pastes an admin token after an anonymous start, or repoints `apiBase` at another
+   * backend. The boot watcher above never fires again in either case, so without this the
+   * catalogue read is a one-shot — a token that arrives late is never retried, and a
+   * catalogue read from the previous backend keeps formatting amounts fetched from the new
+   * one.
+   *
+   * Only the catalogue is re-read here; the rest of the boot sequence is deliberately not
+   * repeated on a keystroke. The stale-response guard inside `refreshEquivalentPrecisions`
+   * is what makes this safe — the re-read routinely overlaps a load that is still open.
+   */
+  watch(
+    () => [isRealMode.value, real.apiBase, real.accessToken] as const,
+    ([realMode, apiBase, accessToken], previous) => {
+      if (!realMode) return
+      // Entering real mode is the boot watcher's job; re-reading here too would double the
+      // request on every mount.
+      const [prevRealMode, prevApiBase, prevAccessToken] = previous ?? [realMode, apiBase, accessToken]
+      if (realMode !== prevRealMode) return
+      if (apiBase === prevApiBase && accessToken === prevAccessToken) return
+      void refreshEquivalentPrecisions()
+    },
   )
 
   // When user selects a different scenario (and no run is active), reload scene so preview graph appears.
