@@ -64,7 +64,7 @@ def _is_time(text: str) -> bool:
 def _float_sites():
     """Every place the money path types or constructs a `float`, with why it was allowed."""
 
-    typed, constructed = [], []
+    typed, constructed, declared = [], [], []
     for file in _iter_money_files():
         relative = file.relative_to(REPO_ROOT).as_posix()
         tree = ast.parse(file.read_text(encoding="utf-8"))
@@ -77,10 +77,32 @@ def _float_sites():
                     typed.append((relative, node.lineno, f"{node.name} -> ", node.name))
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "float":
                 constructed.append((relative, node.lineno, ast.unparse(node), ast.unparse(node)))
-    return typed, constructed
+            # Annotated assignments - module attributes, instance attributes, dataclass and class
+            # fields.  Added after internal review of the first version pointed out that the set of
+            # places a `float` can be TYPED is wider than the set this guard sampled: it read
+            # function signatures only, so a money field typed `float` on a class inside these six
+            # modules would have gone unseen.  That is the wave's own lesson - the sample was drawn
+            # from implementations, not values - applied to the guard itself.
+            if isinstance(node, ast.AnnAssign) and node.annotation and "float" in ast.unparse(node.annotation):
+                declared.append((relative, node.lineno, ast.unparse(node.target), ast.unparse(node.annotation)))
+    return typed, constructed, declared
 
 
-TYPED, CONSTRUCTED = _float_sites()
+TYPED, CONSTRUCTED, DECLARED = _float_sites()
+
+#: Annotated `float` attributes that are clocks rather than ledger values, each named with its
+#: reason.  A token-matching allowlist is too weak here: two of these three are caches whose float
+#: is a timestamp, and their NAMES say "cache", not "time", so any rule loose enough to admit them
+#: by name would also admit a cache of amounts.  So each site is acknowledged individually - and
+#: the list is asserted EXHAUSTED, so an entry that stops matching fails rather than lingering.
+KNOWN_NON_MONEY_FLOAT_ATTRIBUTES = {
+    ("app/core/payments/engine.py", "self._advisory_lock_deadline"):
+        "an advisory-lock deadline in monotonic seconds",
+    ("app/core/payments/router.py", "_graph_cache"):
+        "the cache tuple's first slot is a monotonic timestamp; the amounts in it are Decimal",
+    ("app/core/balance/service.py", "_summary_cache"):
+        "same shape: a monotonic timestamp beside a summary whose money fields are strings",
+}
 
 
 def test_the_scan_actually_reached_the_money_path() -> None:
@@ -119,6 +141,32 @@ def test_no_money_value_is_converted_to_a_float(site) -> None:
         f"(`_bind_decimal`, which handed Decimal(\"0.01\") to the SQLite driver as float(val)) and "
         f"it was enough to make the fast path and the fallback disagree. Convert through `str()` "
         f"and `Decimal`, or, if this is a clock value, name it so."
+    )
+
+
+@pytest.mark.parametrize(
+    "site", DECLARED, ids=[f"{s[0]}:{s[1]}:{s[2]}" for s in DECLARED] or None
+)
+def test_no_money_attribute_is_declared_as_a_float(site) -> None:
+    relative, line, target, annotation = site
+    reason = KNOWN_NON_MONEY_FLOAT_ATTRIBUTES.get((relative, target))
+    assert reason is not None, (
+        f"{relative}:{line} declares `{target}: {annotation}`. If this holds a ledger value, a "
+        f"binary double cannot: the column is Numeric(20, 8) and a double carries ~15-16 "
+        f"significant decimal digits. If it is a clock or a cache timestamp, add it to "
+        f"KNOWN_NON_MONEY_FLOAT_ATTRIBUTES with the reason - the point is that somebody decided, "
+        f"not that the name looked harmless."
+    )
+
+
+def test_every_acknowledged_float_attribute_still_exists() -> None:
+    """An acknowledgement that matches nothing is a permission waiting to be reused."""
+
+    present = {(site[0], site[2]) for site in DECLARED}
+    stale = sorted(set(KNOWN_NON_MONEY_FLOAT_ATTRIBUTES) - present)
+    assert not stale, (
+        f"These acknowledged float attributes no longer exist: {stale}. Remove them - an entry "
+        f"kept past its site will one day be read as covering a different site with the same name."
     )
 
 
