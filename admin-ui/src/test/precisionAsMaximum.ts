@@ -15,6 +15,19 @@
  * different private copies - one handling negatives, one not - which is the same drift, at
  * small scale, that the three copies of the real rule produced at large scale
  * (`api/money-rendering-conformance.json`).
+ *
+ * IS IT REALLY THE REMOVED FUNCTION? Measured once, deliberately not pinned: swept against
+ * `git show dd1218d:admin-ui/src/utils/decimal.ts`'s `formatDecimalFixed` over 3456
+ * value/precision pairs (four magnitudes x fifteen fraction patterns x both signs x
+ * precisions 0,1,2,3,4,8) - zero divergences.
+ *
+ * That equivalence is NOT load-bearing and is not re-checked by anything. What the suites
+ * need from this function is not fidelity to one deleted commit but that it be A PLAUSIBLE
+ * WRONG IMPLEMENTATION they must distinguish - precision as a maximum, rounding half-up. If
+ * it drifts from the historic original while staying that, nothing is lost. Said out loud
+ * because the opposite assumption would make a future reader treat a harmless edit here as a
+ * broken guard, and because the wave's own lesson is that an unstated premise outlives the
+ * person who held it.
  */
 export function renderWithPrecisionAsMaximum(value: string, digits: number): string {
   const negative = value.startsWith('-')

@@ -20,7 +20,7 @@ all three at once, and a copy that drifts fails in its own project.
 from __future__ import annotations
 
 import json
-from decimal import Decimal
+from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 import pytest
@@ -46,6 +46,90 @@ def test_to_money_str_conforms_to_the_shared_table(case: dict) -> None:
     assert rendered == case["expected"], (
         f"Shared contract case: {case['why']}. If the backend is right and the table is wrong, "
         f"change the table - and then the two UI implementations answer for it too."
+    )
+
+
+#: Eight ways to get the rule wrong, each one something a person could plausibly write.
+#:
+#: The table below is evidence only if it can TELL THESE APART from the rule.  A sample that
+#: every implementation satisfies proves nothing, and mutating production code cannot reveal
+#: that - the blind element is the measurer.  This wave found five of its own proofs standing
+#: on such samples, so the sample is asserted here rather than assumed.
+#:
+#: `_as_maximum_half_up` is the implementation T1211 actually removed from `admin-ui`; the
+#: other seven are near misses that a reimplementation could land on.
+def _as_maximum_half_up(value: str, precision: int) -> str:
+    return format(Decimal(value).quantize(Decimal(1).scaleb(-precision), rounding=ROUND_HALF_UP), "f")
+
+
+def _as_maximum_truncating(value: str, precision: int) -> str:
+    return format(Decimal(value).quantize(Decimal(1).scaleb(-precision), rounding=ROUND_DOWN), "f")
+
+
+def _pads_but_never_strips(value: str, precision: int) -> str:
+    parsed = Decimal(value)
+    if -parsed.as_tuple().exponent >= precision:
+        return format(parsed, "f")
+    return format(parsed.quantize(Decimal(1).scaleb(-precision)), "f")
+
+
+def _always_storage_scale(value: str, precision: int) -> str:
+    return format(Decimal(value).quantize(Decimal("1E-8")), "f")
+
+
+def _echoes_the_input(value: str, precision: int) -> str:
+    return value
+
+
+def _strips_every_trailing_zero(value: str, precision: int) -> str:
+    text = format(Decimal(value), "f")
+    if "." not in text:
+        return text
+    return text.rstrip("0").rstrip(".") or "0"
+
+
+def _loses_the_sign(value: str, precision: int) -> str:
+    magnitude = abs(Decimal(value))
+    scale = -magnitude.as_tuple().exponent
+    if scale < precision:
+        return format(magnitude.quantize(Decimal(1).scaleb(-precision)), "f")
+    text = format(magnitude, "f")
+    return text.rstrip("0").rstrip(".") if scale > precision else text
+
+
+def _goes_through_a_float(value: str, precision: int) -> str:
+    return f"{float(value):.{precision}f}"
+
+
+WRONG_IMPLEMENTATIONS = [
+    ("precision as a maximum, half-up (the one T1211 removed)", _as_maximum_half_up),
+    ("precision as a maximum, truncating", _as_maximum_truncating),
+    ("pads up but never strips padding zeros", _pads_but_never_strips),
+    ("ignores precision, always renders at storage scale", _always_storage_scale),
+    ("ignores precision, echoes the input", _echoes_the_input),
+    ("strips every trailing zero, including declared ones", _strips_every_trailing_zero),
+    ("right digits, lost sign", _loses_the_sign),
+    ("routes the amount through a float", _goes_through_a_float),
+]
+
+
+@pytest.mark.parametrize("label,wrong", WRONG_IMPLEMENTATIONS, ids=[w[0] for w in WRONG_IMPLEMENTATIONS])
+def test_the_table_can_tell_a_wrong_implementation_apart(label: str, wrong) -> None:
+    """The sample is asserted, not assumed: every wrong variant must fail at least one case."""
+
+    disagreements = []
+    for case in _CASES:
+        try:
+            rendered = wrong(case["value"], case["precision"])
+        except Exception as exc:  # noqa: BLE001 - a variant that raises is caught too
+            rendered = f"<raised {type(exc).__name__}>"
+        if rendered != case["expected"]:
+            disagreements.append(f"{case['value']}@{case['precision']}")
+
+    assert disagreements, (
+        f"The table cannot distinguish the rule from '{label}'. Every case is satisfied by BOTH, "
+        f"so all three readers would pass against this wrong implementation and the table would "
+        f"be evidence of nothing. Add a case that separates them."
     )
 
 
