@@ -11,6 +11,17 @@
  * every money-rendering suite here asserts its own sample against this function: at least
  * one case must come out differently, or the suite would pass without the fix.
  *
+ * IT IS THE SECONDARY GUARD, NOT THE PRIMARY ONE, and T1211's repeat review is why that has to be
+ * said here. One negative control proves only that the sample is not equivalent to ONE wrong
+ * function; it says nothing about the class of plausible errors. The reviewer demonstrated it:
+ * a mutation that loses the sign only at precision 0 passed both local suites untouched.
+ *
+ * The primary guard is `api/money-rendering-conformance.json`, which admin-ui's own
+ * `decimal.conformance.test.ts` runs against this very formatter, and which is measured against
+ * thirteen wrong implementations in
+ * `tests/unit/test_p012_t1211_money_rendering_conformance.py`. That mutation reddens there.
+ * Do not read a green local suite as coverage of the rule.
+ *
  * It lives in one place because the two suites that needed it had already grown two slightly
  * different private copies - one handling negatives, one not - which is the same drift, at
  * small scale, that the three copies of the real rule produced at large scale

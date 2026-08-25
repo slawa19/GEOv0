@@ -338,7 +338,7 @@ The protocol is transport-agnostic. Recommended options:
 
 - `from` (A) signature is required  
 - No existing active TrustLine `(from, to, equivalent)`  
-- `limit` ≥ 0  
+- `limit` ≥ 0
 
 **Algorithm:**
 

@@ -36,8 +36,65 @@ _CASES = _TABLE["cases"]
 def test_the_shared_table_is_actually_read() -> None:
     """Without this, an unreadable or emptied table would make every case below vacuous."""
 
-    assert len(_CASES) > 10, f"The shared table at {TABLE_PATH} carries too few cases to prove anything."
+    assert _CASES, f"The shared table at {TABLE_PATH} is empty or unreadable."
     assert "minimum" in _TABLE["rule"]
+
+
+#: What the table must COVER, not how many rows it has.
+#:
+#: T1211's repeat review broke the first version of this guard by pointing out that
+#: `len(cases) > 10` lets the table shrink from 21 rows to 11 without a word - and that the 21
+#: rows sampled only precisions 0, 1, 2 and 8 out of the contract's 0..18, with negatives only at
+#: 1 and 2.  Three plausible wrong implementations walked through untouched: capping display
+#: precision at the storage scale 8, supporting only the sampled precisions, and losing the sign
+#: only at precision 0.
+#:
+#: A count cannot catch that; a count is satisfied by twenty copies of one case.  So the table is
+#: held to CLASSES it must contain.  Deleting rows now costs a class, and a class failure names
+#: what went missing.
+def _scale_of(value: str) -> int:
+    _, _, fraction = value.partition(".")
+    return len(fraction)
+
+
+REQUIRED_COVERAGE = {
+    "precision 0 is declared, not absent":
+        lambda cs: any(c["precision"] == 0 for c in cs),
+    "a precision between the historically sampled ones":
+        lambda cs: any(3 <= c["precision"] <= 7 for c in cs),
+    "a precision past the storage scale 8":
+        lambda cs: any(c["precision"] > 8 for c in cs),
+    "the contract's widest precision, 18":
+        lambda cs: any(c["precision"] == 18 for c in cs),
+    "a negative at precision 0":
+        lambda cs: any(c["value"].startswith("-") and c["precision"] == 0 for c in cs),
+    "a negative past the storage scale":
+        lambda cs: any(c["value"].startswith("-") and c["precision"] > 8 for c in cs),
+    "a negative that is stripped rather than padded":
+        lambda cs: any(
+            c["value"].startswith("-") and _scale_of(c["value"]) > c["precision"] for c in cs
+        ),
+    "a value finer than its precision":
+        lambda cs: any(_scale_of(c["value"]) > c["precision"] for c in cs),
+    "a value exactly at its precision":
+        lambda cs: any(_scale_of(c["value"]) == c["precision"] for c in cs),
+    "a value coarser than its precision":
+        lambda cs: any(_scale_of(c["value"]) < c["precision"] for c in cs),
+    "trailing zeros stripped down to the precision":
+        lambda cs: any(
+            _scale_of(c["value"]) > c["precision"] and c["value"].rstrip("0") != c["value"]
+            for c in cs
+        ),
+}
+
+
+@pytest.mark.parametrize("requirement", sorted(REQUIRED_COVERAGE), ids=lambda r: r)
+def test_the_table_covers_the_class_it_claims_to(requirement: str) -> None:
+    assert REQUIRED_COVERAGE[requirement](_CASES), (
+        f"The shared table no longer contains {requirement}. Every implementation reading it "
+        f"would go green without ever being asked about this class - which is how a table of 21 "
+        f"rows sampling four precisions let three wrong implementations through."
+    )
 
 
 @pytest.mark.parametrize("case", _CASES, ids=lambda c: f"{c['value']}@{c['precision']}")
@@ -101,6 +158,37 @@ def _goes_through_a_float(value: str, precision: int) -> str:
     return f"{float(value):.{precision}f}"
 
 
+# The three below were found by T1211's repeat review passing the FIRST version of this table.
+# They are the reason the coverage requirements above exist, and they are kept here so the table
+# is measured against them on every run rather than against a story about them.
+def _caps_display_precision_at_the_storage_scale(value: str, precision: int) -> str:
+    """Confuses the display precision with `Numeric(20, 8)`'s scale. Plausible: 8 is everywhere."""
+    return to_money_str(Decimal(value), min(precision, 8))
+
+
+def _supports_only_the_historically_sampled_precisions(value: str, precision: int) -> str:
+    """Handles 0, 1, 2, 8 and silently defaults the rest - what a table of four precisions invites."""
+    return to_money_str(Decimal(value), precision if precision in (0, 1, 2, 8) else 2)
+
+
+def _loses_the_sign_only_at_precision_zero(value: str, precision: int) -> str:
+    """A sign bug narrow enough to survive a sample whose negatives all sat at precision 1 and 2."""
+    rendered = to_money_str(Decimal(value), precision)
+    return rendered.lstrip("-") if precision == 0 else rendered
+
+
+def _reads_precision_zero_as_absent(value: str, precision: int) -> str:
+    """Not hypothetical: `int(getattr(eq, "precision", 2) or 2)` is live in five simulator
+    producers, and `or 2` turns a declared 0 into 2. Recorded by T1210 and deliberately unfixed
+    there; the table must at least be able to SEE it."""
+    return to_money_str(Decimal(value), precision or 2)
+
+
+def _pads_one_digit_short(value: str, precision: int) -> str:
+    """An off-by-one in the padding loop - the cheapest possible slip in this rule."""
+    return to_money_str(Decimal(value), max(0, precision - 1))
+
+
 WRONG_IMPLEMENTATIONS = [
     ("precision as a maximum, half-up (the one T1211 removed)", _as_maximum_half_up),
     ("precision as a maximum, truncating", _as_maximum_truncating),
@@ -110,6 +198,11 @@ WRONG_IMPLEMENTATIONS = [
     ("strips every trailing zero, including declared ones", _strips_every_trailing_zero),
     ("right digits, lost sign", _loses_the_sign),
     ("routes the amount through a float", _goes_through_a_float),
+    ("caps display precision at the storage scale 8", _caps_display_precision_at_the_storage_scale),
+    ("supports only the historically sampled precisions", _supports_only_the_historically_sampled_precisions),
+    ("loses the sign only at precision 0", _loses_the_sign_only_at_precision_zero),
+    ("reads a declared precision 0 as absent and defaults to 2", _reads_precision_zero_as_absent),
+    ("pads one digit short", _pads_one_digit_short),
 ]
 
 
