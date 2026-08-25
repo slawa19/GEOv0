@@ -553,3 +553,168 @@ describe('T1211 — every connection-context change bumps the catalogue generati
     })
   }
 })
+
+/**
+ * T1211 fix-round — the FAILURE path of the catalogue load.
+ *
+ * The cases above all walk a load that SUCCEEDS. A load can also fail, and the loader's
+ * `catch` used to keep "whatever precisions are already in force"
+ * (`useSimulatorRealMode.ts:1048`). Since the loader only ever runs at boot or after the
+ * connection context changed, "already in force" on a failure is never a still-valid
+ * catalogue for the current backend — it is the PREVIOUS backend's. That is not a missing
+ * value, it is a wrong one, and `NodeCardOverlay.vue:108` converts `net_balance_atoms`
+ * through it, so the error lands as a power of ten on a money figure.
+ *
+ * What must be in force after a failure is the same state an anonymous visitor is already
+ * in — no catalogue, so the shipped fixture precision answers (`equivalentPrecision`
+ * layer 2). That state is documented and deliberate; the previous backend's numbers are
+ * neither.
+ */
+describe('T1211 fix-round — a failed catalogue load must not leave the old one in force', () => {
+  it('drops the previous backend catalogue when the new backend fails to answer', async () => {
+    const A_HOUR_PRECISION: number = 4
+    expect(
+      A_HOUR_PRECISION === SHIPPED_EQUIVALENT_PRECISION.HOUR,
+      'Counter-check premise: backend A must disagree with the shipped HOUR fixture, or '
+        + '"dropped" and "kept" would read the same.',
+    ).toBe(false)
+
+    fetchMock.mockImplementation(async (cfg: HttpConfig) => {
+      if (cfg.apiBase === 'http://backend-b') throw new Error('HTTP 500 Internal Server Error')
+      return [{ code: 'HOUR', precision: A_HOUR_PRECISION }]
+    })
+
+    const harness = createHarness()
+    harness.real.accessToken = 'admin-token'
+    try {
+      harness.isRealModeRef.value = true
+      await settle()
+      expect(
+        equivalentPrecision('HOUR'),
+        'Precondition: backend A answered, so its precision is in force.',
+      ).toBe(A_HOUR_PRECISION)
+
+      harness.real.apiBase = 'http://backend-b'
+      await settle()
+
+      expect(
+        equivalentPrecision('HOUR'),
+        `The catalogue of backend B could not be read, so nothing is known about B's `
+          + `precisions and the shipped fixture value (${SHIPPED_EQUIVALENT_PRECISION.HOUR}) `
+          + `must answer. Reading ${A_HOUR_PRECISION} means amounts fetched from B are scaled `
+          + "by backend A's precision — a power-of-ten error on a money figure.",
+      ).toBe(SHIPPED_EQUIVALENT_PRECISION.HOUR)
+    } finally {
+      harness.scope.stop()
+    }
+  })
+
+  it('adopts the new catalogue when a failed load is followed by a successful one', async () => {
+    const A_HOUR_PRECISION: number = 4
+    const C_HOUR_PRECISION: number = 7
+    expect(
+      A_HOUR_PRECISION === C_HOUR_PRECISION,
+      'Counter-check premise: the two readable backends must disagree, or recovery would be '
+        + 'indistinguishable from never having dropped A.',
+    ).toBe(false)
+
+    fetchMock.mockImplementation(async (cfg: HttpConfig) => {
+      if (cfg.apiBase === 'http://backend-b') throw new Error('HTTP 500 Internal Server Error')
+      if (cfg.apiBase === 'http://backend-c') return [{ code: 'HOUR', precision: C_HOUR_PRECISION }]
+      return [{ code: 'HOUR', precision: A_HOUR_PRECISION }]
+    })
+
+    const harness = createHarness()
+    harness.real.accessToken = 'admin-token'
+    try {
+      harness.isRealModeRef.value = true
+      await settle()
+
+      harness.real.apiBase = 'http://backend-b'
+      await settle()
+      expect(equivalentPrecision('HOUR')).toBe(SHIPPED_EQUIVALENT_PRECISION.HOUR)
+
+      harness.real.apiBase = 'http://backend-c'
+      await settle()
+
+      expect(
+        equivalentPrecision('HOUR'),
+        'A failure must leave the registry able to accept the next catalogue; reading anything '
+          + `other than ${C_HOUR_PRECISION} means the failure left the loader wedged.`,
+      ).toBe(C_HOUR_PRECISION)
+    } finally {
+      harness.scope.stop()
+    }
+  })
+
+  it('falls back to the shipped precision when the load fails with no catalogue ever held', async () => {
+    fetchMock.mockImplementation(async () => {
+      throw new Error('HTTP 401 Unauthorized')
+    })
+
+    const harness = createHarness()
+    try {
+      harness.isRealModeRef.value = true
+      await settle()
+
+      expect(
+        equivalentPrecision('HOUR'),
+        'A failure on the very first load has no previous catalogue to drop; the shipped '
+          + 'fixture precision must simply stay in force.',
+      ).toBe(SHIPPED_EQUIVALENT_PRECISION.HOUR)
+      expect(
+        equivalentPrecision('CTX'),
+        'And a code no fixture ships still resolves to the default.',
+      ).toBe(DEFAULT_MONEY_PRECISION)
+    } finally {
+      harness.scope.stop()
+    }
+  })
+
+  it('does not let a stale failure wipe the catalogue a newer load already installed', async () => {
+    // The mirror of the stale-success case: if the `catch` clears unconditionally, a slow
+    // rejection from an abandoned context destroys a good catalogue that landed after it.
+    const FRESH_HOUR_PRECISION: number = 7
+    expect(
+      FRESH_HOUR_PRECISION === SHIPPED_EQUIVALENT_PRECISION.HOUR,
+      'Counter-check premise: the fresh catalogue must differ from the shipped fixture, or '
+        + '"survived" and "wiped" would read the same.',
+    ).toBe(false)
+
+    const slowFailure = { reject: (_e: Error) => undefined as void }
+    const firstEntered = firstCallSignal()
+    fetchMock.mockImplementation((cfg: HttpConfig) => {
+      if (!String(cfg.accessToken ?? '').trim()) {
+        firstEntered.seen()
+        return new Promise<EquivalentPrecisionRow[]>((_resolve, reject) => {
+          slowFailure.reject = reject
+        })
+      }
+      return Promise.resolve([{ code: 'HOUR', precision: FRESH_HOUR_PRECISION }])
+    })
+
+    const harness = createHarness()
+    try {
+      harness.isRealModeRef.value = true
+      await firstEntered.promise
+      await settle()
+
+      harness.real.accessToken = 'admin-token'
+      await settle()
+      expect(equivalentPrecision('HOUR')).toBe(FRESH_HOUR_PRECISION)
+
+      // The abandoned anonymous request finally rejects.
+      slowFailure.reject(new Error('HTTP 401 Unauthorized'))
+      await settle()
+
+      expect(
+        equivalentPrecision('HOUR'),
+        `The rejection belongs to a connection context that no longer exists. Reading `
+          + `${SHIPPED_EQUIVALENT_PRECISION.HOUR} instead of ${FRESH_HOUR_PRECISION} means a `
+          + 'stale failure was allowed to destroy a catalogue read under the current credential.',
+      ).toBe(FRESH_HOUR_PRECISION)
+    } finally {
+      harness.scope.stop()
+    }
+  })
+})

@@ -1044,6 +1044,21 @@ export function useSimulatorRealMode(opts: {
    * `GET /equivalents` (participant JWT) nor `GET /admin/equivalents` (admin token), and
    * that is not an error worth putting in front of the operator — the shipped fixture
    * precisions stay in force. A failure here must never keep real mode from booting.
+   *
+   * A failure DROPS the catalogue rather than keeping it. This loader runs in exactly two
+   * places — real-mode boot (:1318) and the connection-context watcher (:1397) — so on a
+   * failure the registry never holds a still-valid catalogue for the backend now being
+   * addressed: it is either empty (boot) or the PREVIOUS backend's (context changed).
+   * Keeping the latter is not a stale-but-plausible value, it is a wrong scale:
+   * `NodeCardOverlay.vue:108` turns `net_balance_atoms` into major units through it, so
+   * carrying backend A's precision into backend B's data misplaces the decimal point by
+   * `10^(A-B)`. Dropping it lands in the state an anonymous visitor is already in and that
+   * `equivalentPrecision` documents as normal — layer 2, the shipped fixture value.
+   *
+   * The cost is narrow and accepted: when only the credential changed and the new read
+   * fails, a catalogue that did belong to this same backend is dropped too. That degrades
+   * to a documented fallback, whereas the alternative invents knowledge about a backend
+   * whose catalogue was never read.
    */
   async function refreshEquivalentPrecisions() {
     const seq = ++equivalentPrecisionsSeq
@@ -1055,7 +1070,10 @@ export function useSimulatorRealMode(opts: {
       if (seq !== equivalentPrecisionsSeq) return
       setEquivalentPrecisions(rows)
     } catch {
-      // Keep whatever precisions are already in force.
+      // Same generation check as the success path: a rejection from an abandoned context
+      // must not destroy a catalogue a newer load already installed.
+      if (seq !== equivalentPrecisionsSeq) return
+      resetEquivalentPrecisions()
     }
   }
 
