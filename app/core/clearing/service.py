@@ -2103,30 +2103,92 @@ class ClearingService:
         Returns number of cleared cycles.
         """
         count = 0
+        # Depth ladder (T1211, external review).  The union in `find_cycles` is right for a
+        # READ answer, but past the SQL reach it loads the whole graph and runs the DFS on
+        # every call - and this loop calls it once per cleared cycle.  An executor does not
+        # need the complete answer, it needs one executable cycle, shortest first - so ask
+        # the SQL-complete depth first (early return, no graph load) and widen to the
+        # caller's depth only when the short rung yields nothing EXECUTABLE.
+        #
+        # "Nothing executable", not "nothing found" - the distinction is the ladder's own
+        # counterexample, caught before the fix-round re-review: this loop tries candidates
+        # until one succeeds, so when every short cycle fails transiently (locks, concurrent
+        # prepare) a ladder that widens only on EMPTY would stop here, while the ladder-free
+        # answer had the executable 5-6-cycles as later candidates in the same list.  Hence
+        # the widening also runs after a short rung whose candidates all failed; a failed
+        # short cycle may be attempted once more on the wide rung, which is harmless (it
+        # skips again, or a released lock lets it through).
+        rungs = [min(max_depth, _SQL_DETECTOR_MAX_CYCLE_LENGTH)]
+        if max_depth > _SQL_DETECTOR_MAX_CYCLE_LENGTH:
+            rungs.append(max_depth)
         while True:
+            executed = False
+            for rung in rungs:
+                cycles = await self._auto_clear_find(equivalent_code, rung, count)
+                if not cycles:
+                    continue
+                executed = await self._auto_clear_try_candidates(cycles, equivalent_code, count)
+                if executed:
+                    count += 1
+                    break
+
+            if not executed:
+                break
+
+            if count > 100:  # Safety break
+                break
+
+        return count
+
+    async def _auto_clear_find(
+        self, equivalent_code: str, max_depth: int, count: int
+    ) -> List[List[Dict]]:
+        """One rung of `auto_clear`'s ladder, with its original error envelope."""
+
+        try:
+            return await self.find_cycles(equivalent_code, max_depth=max_depth)
+        except GeoException as exc:
+            if exc.code != ErrorCode.E010.value:
+                raise
+            logger.exception(
+                "event=clearing.auto_clear_find_failed equivalent=%s "
+                "cleared_cycles=%s",
+                equivalent_code,
+                count,
+            )
+            raise GeoException(
+                details={
+                    "cleared_cycles": count,
+                    "partial": count > 0,
+                }
+            ) from exc
+        except Exception as exc:
+            logger.exception(
+                "event=clearing.auto_clear_find_failed equivalent=%s "
+                "cleared_cycles=%s",
+                equivalent_code,
+                count,
+            )
+            raise GeoException(
+                details={
+                    "cleared_cycles": count,
+                    "partial": count > 0,
+                }
+            ) from exc
+
+    async def _auto_clear_try_candidates(
+        self, cycles: List[List[Dict]], equivalent_code: str, count: int
+    ) -> bool:
+        """Try cycles until one succeeds; False when all candidates fail (locks/concurrency)."""
+
+        for cycle in cycles:
             try:
-                # Depth ladder (T1211, external review).  The union in `find_cycles` is right
-                # for a READ answer, but past the SQL reach it loads the whole graph and runs
-                # the DFS on every call - and this loop calls it once per cleared cycle.  An
-                # executor does not need the complete answer, it needs one executable cycle,
-                # shortest first - which is what the ladder preserves: ask the SQL-complete
-                # depth first (early return, no graph load), widen to the caller's depth only
-                # when nothing short is left.  Every short cycle is still cleared before any
-                # long one, so the final state is the ladder-free state.
-                cycles = await self.find_cycles(
-                    equivalent_code,
-                    max_depth=min(max_depth, _SQL_DETECTOR_MAX_CYCLE_LENGTH),
-                )
-                if not cycles and max_depth > _SQL_DETECTOR_MAX_CYCLE_LENGTH:
-                    cycles = await self.find_cycles(
-                        equivalent_code,
-                        max_depth=max_depth,
-                    )
+                success = await self.execute_clearing(cycle)
             except GeoException as exc:
                 if exc.code != ErrorCode.E010.value:
                     raise
                 logger.exception(
-                    "event=clearing.auto_clear_find_failed equivalent=%s "
+                    "event=clearing.auto_clear_execute_failed equivalent=%s "
                     "cleared_cycles=%s",
                     equivalent_code,
                     count,
@@ -2139,7 +2201,7 @@ class ClearingService:
                 ) from exc
             except Exception as exc:
                 logger.exception(
-                    "event=clearing.auto_clear_find_failed equivalent=%s "
+                    "event=clearing.auto_clear_execute_failed equivalent=%s "
                     "cleared_cycles=%s",
                     equivalent_code,
                     count,
@@ -2150,51 +2212,6 @@ class ClearingService:
                         "partial": count > 0,
                     }
                 ) from exc
-            if not cycles:
-                break
-
-            # Try cycles until one succeeds. If all candidates fail (e.g. due to locks/concurrency), stop.
-            executed = False
-            for cycle in cycles:
-                try:
-                    success = await self.execute_clearing(cycle)
-                except GeoException as exc:
-                    if exc.code != ErrorCode.E010.value:
-                        raise
-                    logger.exception(
-                        "event=clearing.auto_clear_execute_failed equivalent=%s "
-                        "cleared_cycles=%s",
-                        equivalent_code,
-                        count,
-                    )
-                    raise GeoException(
-                        details={
-                            "cleared_cycles": count,
-                            "partial": count > 0,
-                        }
-                    ) from exc
-                except Exception as exc:
-                    logger.exception(
-                        "event=clearing.auto_clear_execute_failed equivalent=%s "
-                        "cleared_cycles=%s",
-                        equivalent_code,
-                        count,
-                    )
-                    raise GeoException(
-                        details={
-                            "cleared_cycles": count,
-                            "partial": count > 0,
-                        }
-                    ) from exc
-                if success:
-                    count += 1
-                    executed = True
-                    break
-
-            if not executed:
-                break
-
-            if count > 100:  # Safety break
-                break
-
-        return count
+            if success:
+                return True
+        return False

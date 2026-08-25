@@ -275,3 +275,46 @@ async def test_auto_clear_orders_the_union_when_the_sql_path_is_down(
         f"cycle first: expected one clearing and residual b->c/c->a, got cleared={cleared} "
         f"remaining={remaining!r}"
     )
+
+
+@pytest.mark.asyncio
+async def test_the_ladder_widens_when_short_cycles_exist_but_none_executes(
+    db_session, monkeypatch
+) -> None:
+    """A transiently unexecutable triangle must not hide an executable 5-cycle from auto_clear.
+
+    The ladder's own counterexample, caught before the fix-round re-review: auto_clear tries
+    candidates until one succeeds, so a ladder that widens only on EMPTY stops when every
+    short cycle fails transiently (locks, concurrent prepare) - while the ladder-free answer
+    carried the executable long cycles as later candidates in the same list.  The ladder now
+    widens after a short rung whose candidates all failed.
+
+    The transient failure is staged by wrapping execute_clearing to refuse 3-cycles (return
+    False, the lock/concurrency signal) while executing everything else for real.
+
+    MUTATION THIS CATCHES: widening the ladder only when the short rung found nothing
+    (`if not cycles and max_depth > ...` as the sole widening condition).
+    """
+
+    await _seed_graph(
+        db_session, [["t1", "t2", "t3"], ["f1", "f2", "f3", "f4", "f5"]]
+    )
+
+    real_execute = ClearingService.execute_clearing
+
+    async def _refuse_triangles(self, cycle, *args, **kwargs):
+        if len(cycle) == 3:
+            return False
+        return await real_execute(self, cycle, *args, **kwargs)
+
+    monkeypatch.setattr(ClearingService, "execute_clearing", _refuse_triangles)
+
+    service = ClearingService(db_session)
+    cleared = await service.auto_clear(_EQ, max_depth=6)
+
+    assert cleared == 1, (
+        f"with the triangle transiently unexecutable, auto_clear must widen and clear the "
+        f"5-cycle; got cleared={cleared}. Zero means the ladder stopped at a non-empty short "
+        f"rung whose candidates all failed - the exact input where 'the final state is the "
+        f"ladder-free state' was false."
+    )
