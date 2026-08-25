@@ -180,20 +180,49 @@ class RealClearingEngine:
                         int(max_depth),
                     )
                     _fc_t0 = time.monotonic()
-                    # Depth ladder, same as `auto_clear` (T1211): an executor needs one
-                    # executable cycle shortest-first, not the complete union - ask the
-                    # SQL-complete depth first (no graph load), widen only when empty.
-                    cycles = await service.find_cycles(
-                        eq,
-                        max_depth=min(max_depth, _SQL_DETECTOR_MAX_CYCLE_LENGTH),
-                        allowed_participant_pids=run_perimeter_pids(run),
-                    )
-                    if not cycles and max_depth > _SQL_DETECTOR_MAX_CYCLE_LENGTH:
-                        cycles = await service.find_cycles(
+
+                    # Depth ladder (T1211): an executor needs one executable cycle
+                    # shortest-first, not the complete union - ask the SQL-complete depth
+                    # first (early return, no graph load), widen to the caller's depth only
+                    # when the short rung is EMPTY.
+                    #
+                    # WHY empty-only HERE while `auto_clear` also widens on all-candidates-
+                    # failed: every failure-without-exception path of the execution -
+                    # exactly six, `_execute_clearing_with_amount` returns None at
+                    # :1651 (empty cycle), :1676 (invalid debt ids), :1736 (Debt rows gone),
+                    # :1774 (amount <= 0), :1804 (locked pair), :1823 (auto_clearing policy)
+                    # - is either unreachable from detector output or filtered from the NEXT
+                    # `find_cycles` answer by the same predicate (locks: the same
+                    # `_locked_pairs_for_equivalent`; policy: the find-side filter calls the
+                    # execution's own `_cycle_respects_auto_clearing`).  So a PERSISTENT
+                    # cause empties the short rung by the next tick and the wide rung fires;
+                    # a TRANSIENT one costs at most this tick, and the next tick retries by
+                    # design (per-tick time budget is why this ladder exists).  `auto_clear`
+                    # has no next tick - its one call must widen in-place.  THIS REASONING
+                    # LEANS ON THOSE SIX PATHS: adding a seventh None-return to the
+                    # execution breaks it, and whoever adds one must revisit this ladder.
+                    #
+                    # One ladder for the preflight AND the execution loop below: the first
+                    # loop iteration consumes this preflight answer (already prioritized),
+                    # later iterations re-find through the same ladder.  The first edition
+                    # laddered only this preflight while the loop re-found at full depth
+                    # every iteration - the preflight answer never survived to execution
+                    # (T1211 fix-round, both slices, measured find_depths=[4, 6, 6]).
+                    async def _ladder_find() -> list:
+                        found = await service.find_cycles(
                             eq,
-                            max_depth=max_depth,
+                            max_depth=min(max_depth, _SQL_DETECTOR_MAX_CYCLE_LENGTH),
                             allowed_participant_pids=run_perimeter_pids(run),
                         )
+                        if not found and max_depth > _SQL_DETECTOR_MAX_CYCLE_LENGTH:
+                            found = await service.find_cycles(
+                                eq,
+                                max_depth=max_depth,
+                                allowed_participant_pids=run_perimeter_pids(run),
+                            )
+                        return found
+
+                    cycles = await _ladder_find()
                     _fc_ms = int((time.monotonic() - _fc_t0) * 1000.0)
                     if _fc_ms > 500:
                         self._logger.warning(
@@ -239,6 +268,7 @@ class RealClearingEngine:
                     clearing_started = time.monotonic()
                     progress_last_log = 0.0
                     execution_error: Exception | None = None
+                    consumed_preflight = False
 
                     while True:
                         now = time.monotonic()
@@ -281,34 +311,38 @@ class RealClearingEngine:
                             str(eq),
                             int(cleared_cycles),
                         )
-                        _loop_fc_t0 = time.monotonic()
-                        try:
-                            cycles = await service.find_cycles(
-                        eq,
-                        max_depth=max_depth,
-                        allowed_participant_pids=run_perimeter_pids(run),
-                    )
-                        except asyncio.CancelledError:
-                            raise
-                        except Exception as exc:
-                            if cleared_cycles <= 0:
+                        if consumed_preflight:
+                            _loop_fc_t0 = time.monotonic()
+                            try:
+                                cycles = await _ladder_find()
+                            except asyncio.CancelledError:
                                 raise
-                            execution_error = exc
-                            break
-                        _loop_fc_ms = int((time.monotonic() - _loop_fc_t0) * 1000.0)
-                        if _loop_fc_ms > 500:
-                            self._logger.warning(
-                                "simulator.real.clearing_find_cycles_loop_slow run_id=%s tick=%s eq=%s elapsed_ms=%s",
-                                str(run.run_id),
-                                int(run.tick_index),
-                                str(eq),
-                                int(_loop_fc_ms),
-                            )
-                        if not cycles:
-                            break
+                            except Exception as exc:
+                                if cleared_cycles <= 0:
+                                    raise
+                                execution_error = exc
+                                break
+                            _loop_fc_ms = int((time.monotonic() - _loop_fc_t0) * 1000.0)
+                            if _loop_fc_ms > 500:
+                                self._logger.warning(
+                                    "simulator.real.clearing_find_cycles_loop_slow run_id=%s tick=%s eq=%s elapsed_ms=%s",
+                                    str(run.run_id),
+                                    int(run.tick_index),
+                                    str(eq),
+                                    int(_loop_fc_ms),
+                                )
+                            if not cycles:
+                                break
 
-                        # Keep execution order aligned with visualization policy.
-                        cycles = _prioritize_cycle_for_tick(list(cycles))
+                            # Keep execution order aligned with visualization policy.
+                            cycles = _prioritize_cycle_for_tick(list(cycles))
+                        else:
+                            # First iteration executes the preflight answer - the same
+                            # (already prioritized) list the visualization plan was built
+                            # from; re-finding here discarded the preflight ladder entirely,
+                            # and re-prioritizing would rotate the list a second time,
+                            # misaligning execution with the published plan.
+                            consumed_preflight = True
 
                         executed = False
                         for cycle in cycles:

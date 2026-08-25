@@ -52,11 +52,13 @@ def _guarded_calls(path: pathlib.Path):
 
 @pytest.mark.parametrize(
     ("path", "expected_calls"),
-    # clearing_engine grew from 3 to 4 with the T1211 depth ladder: `find_cycles` is called
-    # twice in sequence (SQL-complete depth first, full depth only when that comes back
-    # empty), and BOTH legs carry the perimeter - which is exactly what the guard below
-    # verifies for each call it finds.
-    [(_EXECUTOR, 1), (_CLEARING, 4)],
+    # clearing_engine: 3 -> 4 with the T1211 depth ladder (two-leg preflight), then 4 -> 3
+    # with the fix-round re-review: both ladder legs live in the one `_ladder_find` helper
+    # (two `find_cycles` calls, both carrying the perimeter), the execution loop's own
+    # full-depth call - the one that made the preflight ladder decorative - is gone in
+    # favor of consuming the preflight and refreshing through the helper, and the third
+    # guarded call is `execute_clearing_with_amount`.
+    [(_EXECUTOR, 1), (_CLEARING, 3)],
     ids=["payments_executor", "clearing_engine"],
 )
 def test_every_tick_money_call_passes_the_perimeter(path: pathlib.Path, expected_calls: int) -> None:

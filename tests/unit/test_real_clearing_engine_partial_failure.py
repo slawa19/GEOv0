@@ -92,9 +92,14 @@ class _SuccessThenE010Service:
         # `tests/unit/test_real_runner_tick_nested_partial_failures.py`.
         assert max_depth >= 1
         self.find_calls += 1
-        if self.failure_kind == "cancelled_find" and self.find_calls > 2:
+        # Threshold moved 2 -> 1 with the T1211 engine-ladder fix: the execution loop's
+        # first iteration now CONSUMES the preflight answer instead of re-finding, so the
+        # second `find_cycles` call is the first post-execution refresh (it used to be the
+        # third).  The five scenarios' semantics are unchanged - each still flips on the
+        # first find AFTER the first execution.
+        if self.failure_kind == "cancelled_find" and self.find_calls > 1:
             raise asyncio.CancelledError
-        if self.failure_kind == "cancelled_finalize" and self.find_calls > 2:
+        if self.failure_kind == "cancelled_finalize" and self.find_calls > 1:
             return []
         return [self.cycle]
 
