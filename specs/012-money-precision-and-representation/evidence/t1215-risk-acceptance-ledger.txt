@@ -1,0 +1,54 @@
+Closure risk acceptance for programme 012 — delegated external holder
+=====================================================================
+
+WHAT THIS IS. Not a review. A process DECISION, of the class `AGENTS.md` §15 reserves to the
+owner ("Право снять требование есть только у владельца") and which this repository has once
+before delegated to an external holder — see the 2026-08-25 record in specs/BACKLOG.md. The
+owner delegated the wave's product fork on the same day with "choose the optimal option".
+
+WHY IT WAS NEEDED. Both §15 external circles for 012 ended `READY-TO-CLOSE: NO`. The single
+permitted fix-delta circle was spent by T1214. The findings of T1214 were fixed afterwards, in
+`3aa6b83`, which therefore has no external review of its own and cannot get one. Closure was
+available only through a new dated acceptance; the 2026-08-25 acceptance does not cover this
+delta and says in terms that no code changed after `8b04e68`, which stopped being true.
+
+INDEPENDENCE. The holder is deliberately NOT the model that produced the findings: T1213 and
+T1214 ran on `gpt-6-astra`; this decision ran on `gpt-5.6-sol`. A reviewer signing off its own
+findings would not be evidence of anything.
+
+CLI              codex-cli 0.154.0
+Binary           C:\Users\admin\tools\node-v22.12.0-win-x64\codex.cmd
+Model requested  gpt-5.6-sol   (requested value recorded; not a confirmed resolved model id)
+Reasoning        high          (-c model_reasoning_effort="high"; echoed by the CLI header)
+Sandbox          --sandbox read-only
+Working root     frozen standalone clone at `3aa6b83`
+Prompt           frozen before launch, not edited after; it stated the rule, the precedent, what
+                 is verified, what is not, and asked for a decision plus the exact content the
+                 record must carry.
+Command          Get-Content prompt_riskaccept.txt -Raw | codex exec --sandbox read-only \
+                     -C <clone> -m gpt-5.6-sol -c model_reasoning_effort="high" \
+                     -o final_riskaccept.md -
+Completion       exit 0, non-empty -o file -> t1215-risk-acceptance-decision.md
+
+Markers returned
+  VERDICT-012-CLOSURE-RISK ... ACCEPT
+  VERDICT-BLOCKER ............ NONE
+  VERDICT-RECORD-SCOPE ....... 422ed50^..3aa6b83
+
+Conditions the holder attached, all executed before the status was changed:
+  1. The spec header named `d15bf2b` and tasks only through T1213 - corrected to `ff619d7` and
+     T1214.
+  2. `specs/README.md` still said the repeat external slice had not happened - corrected; the
+     row now says the programme is closed BY RISK ACCEPTANCE and not by a passed review.
+  3. T1213/T1214 called the clone "credential-free" without the filesystem qualification - the
+     qualification is now in the narrative, not only in the ledgers.
+  4. The CI limitation must name the final snapshot `ff619d7`, not `d15bf2b`.
+  5. The unverified list is EIGHT items; the earlier merge message said six, and that number is
+     not to be repeated.
+
+Record written: specs/BACKLOG.md, section "Принятые риски — датированные решения владельца",
+entry dated 2026-09-10.
+
+WHAT THIS DECISION DOES NOT DO. It does not make the review pass, does not validate the gates
+externally, does not cover any later programme, and does not turn the eight named limitations
+into verified ground. It lifts one requirement, for one programme, on one dated record.
