@@ -1061,9 +1061,15 @@ export const mockApi = {
         isRatioBelowThreshold({ numerator: t.available, denominator: t.limit, threshold }),
       )
 
+      // Третий экземпляр предиката, и единственный, где он мог РАСХОДИТЬСЯ с продакшеном.
+      // Бэкенд считает эту метрику как длину уже отфильтрованного по cutoff множества
+      // (`app/api/v1/admin.py:768-774` — `len(inc_payloads)`, второго предиката там нет), а мок
+      // накладывал сверху `age > sla`. На поставляемых фикстурах расхождения нет — все три строки
+      // предикату удовлетворяют, то есть мок был верен по совпадению данных, а не по правилу.
+      // `F-013-5`, 2026-09-10. Фильтр по эквиваленту сохранён: он есть и на бэкенде (`:769-772`).
       const incidentsOverSla = incidents.filter((i) => {
         if (eq && String(i.equivalent || '').trim().toUpperCase() !== eq) return false
-        return i.age_seconds > i.sla_seconds
+        return true
       })
 
       let totalLimit = '0'
