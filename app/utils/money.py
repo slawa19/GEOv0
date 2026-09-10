@@ -89,6 +89,16 @@ def to_money_str(value: Decimal, precision: int) -> str:
     # inside the `try` and fell through to the show-all branch - 8 fraction digits where THE
     # RULE promises at least 18.  The promise must not depend on whichever context happens to
     # be installed, so the operation runs in one sized for the coefficient it produces.
+    #
+    # CORRECTION (012 / S1, 2026-08-25): `Equivalent.precision` is now 0..8, so "the widest
+    # `Equivalent.precision` admits" is 8, not 18, and the widest IN-CANON coefficient is
+    # 12 + 8 = 20 - which fits the default `prec` of 28.  The sizing below is kept anyway, and
+    # for a reason that does not depend on the canon: `precision` is a plain `int` parameter
+    # here and this function knows nothing about `Equivalent`, so it must stay faithful for any
+    # caller; and the promise is explicitly about the AMBIENT context, which a caller may have
+    # narrowed.  Measured: with this sizing removed, `to_money_str(Decimal("999999999999.5"), 8)`
+    # under `prec=19` loses its padding and returns "999999999999.5".  Both corners are pinned
+    # by `test_the_minimum_digit_promise_does_not_depend_on_the_ambient_decimal_context`.
     with localcontext() as ctx:
         ctx.prec = max(ctx.prec, max(value.adjusted() + 1, 0) + precision + 2)
         try:

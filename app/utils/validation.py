@@ -15,11 +15,29 @@ def validate_equivalent_code(code: str) -> None:
 
 
 def validate_equivalent_precision(precision: int) -> int:
+    """`Equivalent.precision` is 0..8, because 8 is what the ledger can keep.
+
+    NARROWED FROM 18 (012 / S1, owner's decision, 2026-08-25).  Three places in this system
+    wrote down the same quantity and said three different things: the protocol declared 0-8
+    (`docs/ru/02-protocol-spec.md:143` and `:155`), the storage said 8 in its column type
+    (`Numeric(20, 8)`), and this function plus the canon said 0-18.  An admin could therefore
+    declare `precision: 12`, and the ledger would silently round every value to eight
+    (measured: `1.234567890123` -> `1.23456789`, `0.000000000123` -> `0`), while `to_money_str`
+    padded the rounded value back out to twelve digits - four digits of invented certainty -
+    and `parse_money_amount` refused the declaration's own quantum as unstorable.  The
+    declared precision was wider than the storable one; that is the 012 class exactly.  The
+    fork was recorded as open in spec 015 and is now closed in favour of the protocol and the
+    column.  Nothing shipped needed more than 2 (measured across every shipped dataset).
+
+    `tests/integration/test_p012_t1212_declared_precision_exceeds_storage_scale_postgres.py`
+    holds the decision and the measurement it rests on.
+    """
+
     if (
         not isinstance(precision, int)
         or isinstance(precision, bool)
         or precision < 0
-        or precision > 18
+        or precision > MONEY_MAX_SCALE
     ):
         raise BadRequestException("Invalid equivalent precision")
     return precision
@@ -125,6 +143,15 @@ DEFAULT_MAX_AMOUNT_PRECISION = 50  # total digits in the decimal string (excludi
 # is a separate, deferred product decision (variant B): precision is declared `ge=0, le=18`,
 # so it does not even close this finding, and an admin editing it would retroactively
 # invalidate stored rows.
+#
+# CORRECTION (012 / S1, 2026-08-25).  The sentence above is kept as written because the
+# reasoning it records is still right - the column bound and the precision bound are different
+# questions, and narrowing precision does NOT close F-012-1 - but one fact in it has since
+# changed: `Equivalent.precision` is no longer `le=18`, it is `le=MONEY_MAX_SCALE`
+# (`validate_equivalent_precision` above).  So the two numbers now coincide at 8, and they
+# coincide for two independent reasons rather than one: the column can keep eight fraction
+# digits, and the protocol declares the display precision as 0-8.  A future change to either
+# must still be argued separately.
 MONEY_MAX_SCALE = 8
 MONEY_MAX_INTEGER_DIGITS = 12
 
@@ -150,6 +177,17 @@ MONEY_MAX_INTEGER_DIGITS = 12
 # or the schema is the one to move is recorded as an open fork in spec 015.  Whichever way that
 # lands, this bound only gets tighter (8 also covers every producer), so no admitted spelling is
 # retroactively wrong - the number just should not be read as protocol-derived until 015 answers.
+#
+# THE FORK IS ANSWERED (012 / S1, 2026-08-25): the schema moved, not the document.
+# `Equivalent.precision` is now 0..8, so the widest fraction any of our producers can emit for
+# storable money is 8 digits, not 18 - the derivation above no longer supports the number 18.
+#
+# 18 IS DELIBERATELY KEPT ANYWAY, and it is now a bare pathological-input bound rather than a
+# producer-derived one.  Lowering it to 8 would be a change to what the DOOR ACCEPTS, not a
+# consequence of the precision decision: `"0.100000000"` is a value `Numeric(20, 8)` holds
+# exactly, `is_storable_money` says True for it, and refusing it on spelling is exactly the
+# mistake T1201's first edition made and this comment exists to record.  Narrowing it is a
+# separate door decision with its own compatibility question, and it is not made here.
 MONEY_MAX_LEXICAL_SCALE = 18
 
 _AMOUNT_STR_RE = re.compile(r"^-?\d+(?:\.\d+)?$")
@@ -390,6 +428,11 @@ def parse_money_amount(
     precision is a representation parameter declared `ge=0, le=18`, so it neither bounds the
     column nor closes this finding, and an admin lowering it would retroactively invalidate
     stored rows.
+
+    CORRECTION (012 / S1, 2026-08-25): `precision` is now declared `ge=0, le=8`.  The paragraph
+    above is otherwise unchanged and still holds - narrowing precision did not close this
+    finding, because precision is a DISPLAY parameter and the column bound is what refuses an
+    unstorable value.  Only the number in it is out of date.
     """
 
     def _reject(message: str, **extra: Any) -> BadRequestException:

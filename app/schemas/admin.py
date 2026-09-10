@@ -215,7 +215,12 @@ class AdminEquivalentCreateRequest(BaseModel):
     code: str = Field(..., pattern=r"^[A-Z0-9_]{1,16}$")
     symbol: Optional[str] = None
     description: Optional[str] = None
-    precision: int = Field(default=2, ge=0, le=18)
+    # 0..8, not 0..18 (012 / S1, 2026-08-25): `debts.amount` and `trust_lines.limit` are
+    # `Numeric(20, 8)`, and the protocol declares `precision` as 0-8
+    # (`docs/ru/02-protocol-spec.md:155`). A wider declaration promised a resolution the
+    # ledger silently rounds away. Must stay equal to `api/openapi.yaml` - the contract
+    # tests compare the generated schema against the canon.
+    precision: int = Field(default=2, ge=0, le=8)
     metadata: Optional[dict[str, Any]] = None
     is_active: bool = True
     reason: Optional[str] = None
@@ -224,7 +229,8 @@ class AdminEquivalentCreateRequest(BaseModel):
 class AdminEquivalentUpdateRequest(BaseModel):
     symbol: Optional[str] = None
     description: Optional[str] = None
-    precision: Optional[int] = Field(default=None, ge=0, le=18)
+    # See `AdminEquivalentCreateRequest.precision` above: 0..8, the storage scale.
+    precision: Optional[int] = Field(default=None, ge=0, le=8)
     metadata: Optional[dict[str, Any]] = None
     is_active: Optional[bool] = None
     reason: Optional[str] = None

@@ -43,7 +43,28 @@
     "on this file is no longer a row count but a list of CLASSES it must contain (precision 0, a",
     "precision between the sampled ones, one past the storage scale, the contract's widest, signs",
     "at each of those, and all three scale-versus-precision relations). Adding a case is cheap;",
-    "deleting one now costs a named class."
+    "deleting one now costs a named class.",
+    "",
+    "THE DOMAIN NARROWED ON 2026-08-25 (012 / S1), AND TEN CASES CHANGED STATUS RATHER THAN",
+    "LEAVING. `Equivalent.precision` was 0..18 when this table was written; it is now 0..8,",
+    "matching `Numeric(20, 8)` and protocol §3.2 (`docs/ru/02-protocol-spec.md:155`). So the ten",
+    "cases at precision 9, 12 and 18 are no longer CONTRACT - the canon cannot produce those",
+    "calls any more. Their `why` now says so, one by one, and none of them says 'the contract'.",
+    "",
+    "THEY ARE KEPT, AND THE REASON IS MEASURED, NOT PREFERRED. With those ten rows deleted, the",
+    "table's own discriminating-power check (`test_the_table_can_tell_a_wrong_implementation",
+    "_apart`) stops catching `_caps_display_precision_at_the_storage_scale` ENTIRELY: 0",
+    "disagreements out of 28 remaining cases, because `min(precision, 8)` is the identity on a",
+    "0..8 domain. `_supports_only_the_historically_sampled_precisions` drops from 11",
+    "disagreements to 1, i.e. one row away from vacuous. Both are real implementations a person",
+    "could write - the first is exactly what T1211's repeat review found walking through the",
+    "table's first version. So the ten rows are the guard on the two wrong implementations the",
+    "narrowing would otherwise hide, and the three readers must keep answering them.",
+    "",
+    "What that costs is honesty about their status, not the rows: all three implementations take",
+    "`precision` as a plain integer and none of them can see an `Equivalent`, so a caller passing",
+    "12 is a caller the functions still have to be right for. `to_money_str`'s own `localcontext`",
+    "sizing is pinned on the same footing (`app/utils/money.py`)."
   ],
   "rule": "precision is the minimum number of fraction digits, and never fewer than the value itself needs",
   "cases": [
@@ -174,6 +195,12 @@
       "why": "padding all the way to storage scale"
     },
     {
+      "value": "-1.5",
+      "precision": 8,
+      "expected": "-1.50000000",
+      "why": "a sign at the contract's widest precision, 8. Added 2026-08-25 with the narrowing: every negative in the table sat at 0, 1, 2 or 9, so nothing asked about a sign at the new top of the domain"
+    },
+    {
       "value": "1.5",
       "precision": 3,
       "expected": "1.500",
@@ -183,55 +210,55 @@
       "value": "1.5",
       "precision": 9,
       "expected": "1.500000000",
-      "why": "past storage scale 8: display precision is not capped by the column's scale"
+      "why": "past the storage scale 8 and now past the canon too: display precision must not be capped by the column's scale. Not reachable through Equivalent.precision since 012/S1; kept because it is the case that catches an implementation capping at 8"
     },
     {
       "value": "1.5",
       "precision": 12,
       "expected": "1.500000000000",
-      "why": "well past storage scale, still padded in full"
+      "why": "well past the storage scale, still padded in full. Beyond the canon's 0-8 domain; a robustness case for a caller passing a bare integer"
     },
     {
       "value": "1.5",
       "precision": 18,
       "expected": "1.500000000000000000",
-      "why": "the widest precision the contract admits"
+      "why": "the widest precision the contract admitted BEFORE 012/S1 narrowed it to 8. Kept as a robustness case, not as a contract bound"
     },
     {
       "value": "0",
       "precision": 18,
       "expected": "0.000000000000000000",
-      "why": "zero at the widest precision"
+      "why": "zero at the old contract maximum. Beyond the canon since 012/S1; kept so the padding rule is exercised far from the sampled precisions"
     },
     {
       "value": "0.05",
       "precision": 18,
       "expected": "0.050000000000000000",
-      "why": "a value finer than most precisions, padded to the widest"
+      "why": "a value finer than most precisions, padded out to the old maximum. Beyond the canon; robustness only"
     },
     {
       "value": "12.345",
       "precision": 12,
       "expected": "12.345000000000",
-      "why": "three significant fraction digits padded out to twelve"
+      "why": "three significant fraction digits padded out to twelve. Beyond the canon's 0-8; robustness only"
     },
     {
       "value": "0.00000001",
       "precision": 9,
       "expected": "0.000000010",
-      "why": "the storage quantum padded one digit past the storage scale"
+      "why": "the storage quantum padded one digit past the storage scale. Beyond the canon since 012/S1; this is the smallest input that separates the rule from an implementation capping display at 8"
     },
     {
       "value": "12.300",
       "precision": 9,
       "expected": "12.300000000",
-      "why": "trailing zeros are not stripped when the value is coarser than the precision"
+      "why": "trailing zeros are not stripped when the value is coarser than the precision. Beyond the canon; robustness only"
     },
     {
       "value": "999999999999.99999999",
       "precision": 18,
       "expected": "999999999999.999999990000000000",
-      "why": "the door's widest magnitude at the contract's widest precision"
+      "why": "the door's widest magnitude at the old contract maximum. Beyond the canon since 012/S1; kept because it is the corner where an unsized decimal context silently drops the padding"
     },
     {
       "value": "-1.5",
@@ -255,7 +282,7 @@
       "value": "-0.05",
       "precision": 9,
       "expected": "-0.050000000",
-      "why": "a sign past the storage scale"
+      "why": "a sign past the storage scale. Beyond the canon; robustness only - a sign bug must not hide behind a precision the canon stopped producing"
     },
     {
       "value": "-12.300",

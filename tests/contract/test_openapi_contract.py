@@ -86,8 +86,17 @@ TRANSPORT_HEADER_DRIFT_COUNT = 67
 # `policy` differences only - no entry got worse. The retype is load-bearing: the service signs
 # the client's limit string verbatim (a `Decimal` schema made the server verify against
 # `str(Decimal)`'s respelling, so `"0.00000001"` was unsignable - E-012 second-circle review).
+# 2026-08-25 / 012 S1 (Equivalent.precision narrowed to 0..8): count HOLDS at 13, digest moves.
+# `POST /admin/equivalents` and `PATCH /admin/equivalents/{code}` are already in this dictionary
+# and stay in it, for the difference they already had and nothing else: the canon writes
+# `maximum` as an integer and FastAPI emits pydantic's `le` as a float, so the pair reads
+# `8` against `8.0` today exactly as it read `18` against `18.0` before. Both sides moved
+# together (`api/openapi.yaml` and `app/schemas/admin.py`), no entry was added, none removed,
+# and no entry got worse - only the number recorded inside two existing entries changed.
+# Measured: the two admin-equivalent entries are the only ones whose content differs from the
+# previous digest.
 REQUEST_SCHEMA_DRIFT_SHA256 = (
-    "1119e12aa27858c5256e5331176abae34412dd0fef18cdba5a56e5f60dcfcf88"
+    "3dcb8cda4f88dc7f06ff06b38b9a392b4ef8c87dee2551ee3ecc2874bc4dbcd5"
 )
 REQUEST_SCHEMA_DRIFT_COUNT = 13
 # 2026-08-20 / p007_unblock_f0071: MetricPoint.v became nullable on both sides
@@ -227,8 +236,13 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 #
 # The operation was already in this dictionary (canonical octet-stream against generated
 # `application/json: {}`) and stays in it.
+# 2026-08-25 / 012 S1 (Equivalent.precision narrowed to 0..8): count HOLDS at 63, digest moves.
+# The `Equivalent` response schema carries `precision`, so every already-drifting operation that
+# returns one records the bound in its snapshot. Canon and generated moved together; the entries
+# keep exactly the differences they had before (int `8` vs pydantic's float `8.0`, the same shape
+# as the previous `18` vs `18.0`). Nothing entered or left the dictionary.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "42c96781dd788fa0821e3f3c54672470e6622275631a1aff41e2fef03926b92c"
+    "d90ee8c84ffbb1bc07d1cd1c2938cd232d32a6c373af3f2eef45dcc4e84a7630"
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 63
 # 2026-08-11 / T501: public DB health no longer declares exception details;
@@ -660,7 +674,11 @@ def test_admin_equivalent_mutation_inputs_preserve_canonical_bounds() -> None:
 
     assert equivalent_code["pattern"] == r"^[A-Z0-9_]{1,16}$"
     assert equivalent_precision["minimum"] == 0
-    assert equivalent_precision["maximum"] == 18
+    # 8, narrowed from 18 on 2026-08-25 (012 / S1): the storage scale of `Numeric(20, 8)` and
+    # the protocol's own 0-8 (`docs/ru/02-protocol-spec.md:155`). The number is asserted as a
+    # literal on purpose - reading it out of the canon would make this test agree with any
+    # bound the canon happens to carry.
+    assert equivalent_precision["maximum"] == 8
     assert canonical_create["code"] == {"$ref": "#/components/schemas/EquivalentCode"}
     for properties in (canonical_create, canonical_update):
         assert properties["precision"]["minimum"] == equivalent_precision["minimum"]
@@ -874,7 +892,9 @@ def test_selected_admin_and_integrity_success_schemas_are_exact() -> None:
         schemas["Equivalent"]["required"]
     )
     assert schemas["Equivalent"]["properties"]["precision"]["minimum"] == 0
-    assert schemas["Equivalent"]["properties"]["precision"]["maximum"] == 18
+    # 8, narrowed from 18 on 2026-08-25 (012 / S1) - see the note in
+    # `test_admin_equivalent_mutation_inputs_preserve_canonical_bounds`.
+    assert schemas["Equivalent"]["properties"]["precision"]["maximum"] == 8
     assert generated_schemas["Equivalent"]["properties"]["code"]["pattern"] == (
         schemas["EquivalentCode"]["pattern"]
     )

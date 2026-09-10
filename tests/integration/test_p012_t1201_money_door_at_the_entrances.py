@@ -232,9 +232,23 @@ async def test_a_trustline_limit_the_column_holds_exactly_is_accepted_with_trail
 ) -> None:
     """`"100.0000000000"` is 100, and the ledger keeps 100. Signed for real, so it is a 201.
 
-    Ten fraction digits is what `to_money_str` emits for an equivalent declaring
-    `precision: 10`, and `Equivalent.precision` is declared `ge=0, le=18`. The first edition of
-    the door refused this, i.e. refused its own renderer's output.
+    ORIGINAL JUSTIFICATION (T1201): ten fraction digits is what `to_money_str` emits for an
+    equivalent declaring `precision: 10`, and `Equivalent.precision` was declared `ge=0, le=18`.
+    The first edition of the door refused this, i.e. refused its own renderer's output.
+
+    CORRECTED (012 / S1, 2026-08-25): `Equivalent.precision` is now `ge=0, le=8`, so no
+    equivalent can declare 10 and our own renderer emits at most eight fraction digits for
+    storable money. THE PRODUCER JUSTIFICATION IS GONE; the test is not, and neither is the
+    input, for two reasons that never depended on it:
+
+      * the door's rule is about the VALUE, not its spelling - `"100.0000000000"` is the number
+        100, which `Numeric(20, 8)` holds exactly, and `is_storable_money` says True. Refusing
+        it would put the door and the predicate it documents as its own form back into
+        disagreement, which is the mistake T1201 exists to have fixed;
+      * `MONEY_MAX_LEXICAL_SCALE` is deliberately left at 18 (`app/utils/validation.py`), so
+        a caller may still WRITE ten fraction digits even though nothing here produces them.
+        This is the case that keeps the lexical bound from quietly collapsing onto the storage
+        scale without a decision.
 
     MUTATION THIS CATCHES: a lexical `max_scale=MONEY_MAX_SCALE` in `parse_money_amount`.
     """

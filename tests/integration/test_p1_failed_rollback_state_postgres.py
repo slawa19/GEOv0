@@ -87,7 +87,16 @@ async def test_a_failed_rollback_still_leaves_no_stale_value_behind(sessions) ->
             pid = int((await session.execute(text("SELECT pg_backend_pid()"))).scalar_one())
 
             # Mutate in the session, as `_apply_flow` does to a Debt before a retry.
-            row.precision = 9
+            #
+            # The NUMBER is arbitrary and always was: all this test needs is a value the row
+            # does not already hold, so that reading `2` back afterwards proves the read came
+            # from the database rather than from the mutated object. It was `9`; `9` started
+            # raising on 2026-08-25 when `Equivalent.precision` was narrowed to 0..8 and the
+            # model's `@validates` began refusing it. `3` is inside the domain and differs
+            # from the seeded `2`, which is the whole requirement. Nothing about the
+            # measurement below changes - this is not a "just past the bound" probe and never
+            # was; that probe lives in `test_equivalent_writer_and_legacy_reads.py`.
+            row.precision = 3
             await session.flush()
 
             _terminate(url, pid)

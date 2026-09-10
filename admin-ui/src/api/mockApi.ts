@@ -1272,7 +1272,7 @@ export const mockApi = {
         return { success: false, error: { code: 'VALIDATION_ERROR', message: 'invalid equivalent code' } }
       }
       if (!AdminEquivalentPrecisionSchema.safeParse(input.precision).success) {
-        return { success: false, error: { code: 'VALIDATION_ERROR', message: 'precision must be an integer from 0 to 18' } }
+        return { success: false, error: { code: 'VALIDATION_ERROR', message: 'precision must be an integer from 0 to 8' } }
       }
       const all = await getEquivalentsDataset()
       if (all.some((e) => e.code === code)) return { success: false, error: { code: 'CONFLICT', message: 'code already exists' } }
@@ -1303,7 +1303,7 @@ export const mockApi = {
   async updateEquivalent(code: string, patch: Partial<Pick<Equivalent, 'precision' | 'description'>>): Promise<ApiEnvelope<{ updated: Equivalent }>> {
     return withScenarioMutation('/api/v1/admin/equivalents', async () => {
       if (patch.precision !== undefined && !AdminEquivalentPrecisionSchema.safeParse(patch.precision).success) {
-        return { success: false, error: { code: 'VALIDATION_ERROR', message: 'precision must be an integer from 0 to 18' } }
+        return { success: false, error: { code: 'VALIDATION_ERROR', message: 'precision must be an integer from 0 to 8' } }
       }
       const key = code
       const all = await getEquivalentsDataset()

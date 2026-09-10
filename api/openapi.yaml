@@ -4084,7 +4084,13 @@ components:
         precision:
           type: integer
           minimum: 0
-          maximum: 18
+          # 0..8, narrowed from 0..18 (012 / S1, 2026-08-25). Two independent reasons, and
+          # they agree: the ledger stores money in `Numeric(20, 8)` (`debts.amount`,
+          # `trust_lines.limit`), so eight fraction digits is all it can keep; and the
+          # protocol declares `precision` as an integer 0-8
+          # (`docs/ru/02-protocol-spec.md:155`). A wider declaration was a promise the
+          # storage silently rounded away.
+          maximum: 8
         metadata:
           type: object
           nullable: true
@@ -4828,7 +4834,13 @@ components:
           type: integer
           default: 2
           minimum: 0
-          maximum: 18
+          # 0..8, narrowed from 0..18 (012 / S1, 2026-08-25). Two independent reasons, and
+          # they agree: the ledger stores money in `Numeric(20, 8)` (`debts.amount`,
+          # `trust_lines.limit`), so eight fraction digits is all it can keep; and the
+          # protocol declares `precision` as an integer 0-8
+          # (`docs/ru/02-protocol-spec.md:155`). A wider declaration was a promise the
+          # storage silently rounded away.
+          maximum: 8
         metadata:
           type: object
           nullable: true
@@ -4853,7 +4865,13 @@ components:
           type: integer
           nullable: true
           minimum: 0
-          maximum: 18
+          # 0..8, narrowed from 0..18 (012 / S1, 2026-08-25). Two independent reasons, and
+          # they agree: the ledger stores money in `Numeric(20, 8)` (`debts.amount`,
+          # `trust_lines.limit`), so eight fraction digits is all it can keep; and the
+          # protocol declares `precision` as an integer 0-8
+          # (`docs/ru/02-protocol-spec.md:155`). A wider declaration was a promise the
+          # storage silently rounded away.
+          maximum: 8
         metadata:
           type: object
           nullable: true

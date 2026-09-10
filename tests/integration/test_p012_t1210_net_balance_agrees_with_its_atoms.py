@@ -93,8 +93,15 @@ from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 
-# `Equivalent.precision` is declared `ge=0, le=18`; the same span `T1207` used.
-PRECISIONS = [0, 1, 2, 4, 8, 18]
+# `Equivalent.precision` is declared `ge=0, le=8`; the same span `T1207` used.
+#
+# 18 LEFT THE LIST WITH THE DOMAIN (012 / S1, 2026-08-25), for the reason measured in `T1207`:
+# this module writes an `Equivalent` row, and the ORM validator now refuses 18, so the case would
+# be testing the validator rather than the two encodings.  The invariant here is about the
+# QUANTUM (`sign(atoms) == sign(net)`, `atoms == 0 iff net == 0`), which every remaining
+# precision exercises, and the corner this module was built for is `_effective_precision`
+# coercing a declared 0 to 2 - not the top of the range.
+PRECISIONS = [0, 1, 2, 4, 8]
 
 # `Debt.amount` is `Numeric(20, 8)`.  A probe finer than this is not a test of the code, it is
 # a test of what the column silently did to it on write.

@@ -458,10 +458,13 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
         />
       </el-form-item>
       <el-form-item :label="t('common.precision')">
+        <!-- 0..8: the API and the canon narrowed the domain (012 / S1, 2026-08-25) to the
+             storage scale of Numeric(20, 8) and the protocol's own 0-8. Offering 18 here
+             would let an operator submit a value the server now answers 422 to. -->
         <el-input-number
           v-model="createForm.precision"
           :min="0"
-          :max="18"
+          :max="8"
         />
       </el-form-item>
       <el-form-item :label="t('common.description')">
@@ -501,10 +504,11 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
     </div>
     <el-form label-width="120">
       <el-form-item :label="t('common.precision')">
+        <!-- 0..8, same reason as the create dialog above. -->
         <el-input-number
           v-model="editForm.precision"
           :min="0"
-          :max="18"
+          :max="8"
         />
       </el-form-item>
       <el-form-item :label="t('common.description')">
