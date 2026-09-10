@@ -66,7 +66,7 @@ describe('equivalentPrecision', () => {
     //
     // The neighbouring case above looks like it covers this and does not: its precision 9 sits
     // on a row with an empty code, so the row is discarded for the code and the precision is
-    // never read. Found by external review (gpt-6-astra, medium, 2026-08-25).
+    // never read. Found by external review (gpt-6-astra, medium, 2026-09-10).
     setEquivalentPrecisions([{ code: 'LEGACY12', precision: 12 }])
     expect(equivalentPrecision('LEGACY12')).toBe(12)
   })

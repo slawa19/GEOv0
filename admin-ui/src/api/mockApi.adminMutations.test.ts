@@ -226,7 +226,7 @@ describe('mock Admin mutation state and audit contracts', () => {
     // strict response schema while reporting status 200 - a different failure, at a different
     // layer, with a message that names nothing an operator can act on.
     //
-    // Found by external review (gpt-6-astra, medium, 2026-08-25).
+    // Found by external review (gpt-6-astra, medium, 2026-09-10).
     const legacy = {
       code: 'LEGACY12',
       symbol: null,

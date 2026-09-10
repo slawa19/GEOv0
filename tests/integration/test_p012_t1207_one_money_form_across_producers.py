@@ -165,7 +165,7 @@ async def _fixture(session: AsyncSession, *, precision: int, limit: str, used: s
 #: A precision that WAS inside the domain until 2026-08-25 and is outside it now.
 #:
 #: THIS IS THE HOLE THE NARROWING OPENED IN THIS MODULE, and it was found by external review
-#: (gpt-6-astra, medium, 2026-08-25) refuting the note on `PRECISIONS` above. That note claimed
+#: (gpt-6-astra, medium, 2026-09-10) refuting the note on `PRECISIONS` above. That note claimed
 #: nothing was lost by dropping 18, on the grounds that the canon can no longer produce a
 #: precision past the storage scale. The canon cannot - but a DATABASE ROW can: a row written
 #: through the door that accepted it yesterday is still there, ORM hydration does not run

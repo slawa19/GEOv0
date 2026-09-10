@@ -1306,7 +1306,7 @@ export const mockApi = {
   // instead of touching the row; the mock said nothing and then threw INVALID_RESPONSE while
   // reporting 200. The gap predates 2026-08-25 - it applied to `precision: 19` rows - and the
   // narrowing to 0..8 widened it to every row from 9 to 18, which is why it is closed here.
-  // Found by external review (gpt-6-astra, medium, 2026-08-25).
+  // Found by external review (gpt-6-astra, medium, 2026-09-10).
   _legacyPrecisionBlocks(stored: Equivalent, patchedPrecision: number | undefined): ApiEnvelope<never> | null {
     const repaired = patchedPrecision === undefined ? stored.precision : patchedPrecision
     if (AdminEquivalentPrecisionSchema.safeParse(repaired).success) return null
