@@ -421,9 +421,14 @@ def test_the_lexical_bound_is_about_length_and_not_about_capacity() -> None:
     WHERE THE NUMBER 18 CAME FROM, AND WHAT IT RESTS ON NOW. It was the declared maximum of
     `Equivalent.precision` (`ge=0, le=18`), and since `to_money_str` pads to `precision`, 18 was
     the widest fraction this repository's renderer could emit for a value the ledger can hold.
-    THAT DERIVATION IS GONE as of 2026-08-25 (012 / S1): `Equivalent.precision` is `0..8`, so our
-    own producers now emit at most 8 fraction digits for storable money. 18 is kept anyway and is
-    now a bare pathological-input bound, argued next to the constant in
+    THAT DERIVATION IS WEAKENED, NOT GONE, as of 2026-08-25 (012 / S1): `Equivalent.precision`
+    is `0..8`, so no NEW equivalent can declare more - but a row written before that day still
+    can, ORM hydration does not re-validate it, and the producers render it at its own
+    precision. So our renderer still emits up to 18 fraction digits for such a row, and this
+    bound is still what admits that output back at the door. (The first edition of this
+    paragraph said producers "now emit at most 8"; external review refuted it the same day.)
+    18 is kept for that live reason as well as as a pathological-input bound, argued next to the
+    constant in
     `app/utils/validation.py`: lowering it would change what the DOOR ACCEPTS - `"0.100000000"`
     is a value `Numeric(20, 8)` holds exactly and `is_storable_money` admits - which is precisely
     the mistake `T1201`'s first edition made. What holds unchanged is the compatibility half: 18

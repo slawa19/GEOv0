@@ -234,15 +234,33 @@ async def test_admin_patch_rejects_invalid_legacy_code_before_mutation(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "code,legacy_precision,provenance",
+    LEGACY_PRECISIONS_OUTSIDE_THE_DOMAIN,
+    ids=[c[0] for c in LEGACY_PRECISIONS_OUTSIDE_THE_DOMAIN],
+)
 async def test_admin_patch_rejects_nonrepairing_legacy_precision_before_mutation(
     client,
     db_session,
+    code: str,
+    legacy_precision: int,
+    provenance: str,
 ) -> None:
+    """A PATCH that does not repair the precision must not touch the row at all.
+
+    PARAMETRIZED 2026-08-25 (012 / S1) over both kinds of out-of-domain row. `19` was never
+    valid; `12` is the class the narrowing CREATED, and it is the one that matters here - it is
+    the row a live database can actually be holding today, written through a door that accepted
+    it yesterday. Without this case the "no data migration is needed" claim rested on the repair
+    path alone, and the path an operator hits FIRST - an ordinary edit of the description - was
+    covered only for a precision no door ever admitted.
+    """
+
     await db_session.execute(
         insert(Equivalent.__table__).values(
-            code="LEGACY19",
+            code=code,
             description="before",
-            precision=19,
+            precision=legacy_precision,
             metadata={},
             is_active=True,
         )
@@ -250,31 +268,31 @@ async def test_admin_patch_rejects_nonrepairing_legacy_precision_before_mutation
     await db_session.commit()
 
     response = await client.patch(
-        "/api/v1/admin/equivalents/LEGACY19",
+        f"/api/v1/admin/equivalents/{code}",
         headers=_admin_headers(),
         json={"description": "after"},
     )
 
-    assert response.status_code == 409, response.text
+    assert response.status_code == 409, f"{code} ({provenance}): {response.text}"
     error = response.json()["error"]
     assert error["code"] == "E008"
     assert error["details"] == {
-        "code": "LEGACY19",
+        "code": code,
         "reason": "noncanonical_precision",
         "repair": "patch_precision",
     }
     stored = (
         await db_session.execute(
-            select(Equivalent).where(Equivalent.code == "LEGACY19")
+            select(Equivalent).where(Equivalent.code == code)
         )
     ).scalar_one()
     assert stored.description == "before"
-    assert stored.precision == 19
+    assert stored.precision == legacy_precision
     assert (
         await db_session.execute(
             select(AuditLog).where(
                 AuditLog.action == "admin.equivalents.patch",
-                AuditLog.object_id == "LEGACY19",
+                AuditLog.object_id == code,
             )
         )
     ).scalar_one_or_none() is None

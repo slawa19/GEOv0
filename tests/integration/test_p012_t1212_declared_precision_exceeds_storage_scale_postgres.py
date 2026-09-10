@@ -39,7 +39,7 @@ MEASURED 2026-08-25, PostgreSQL 16.9, database ``geov0_test_prec8``, schema at a
 THE DECISION THIS GUARDS (012 / S1, owner's decision).  ``Equivalent.precision`` is narrowed to
 ``0..8``, matching the protocol and the column.  Real usage never needed more: across every
 shipped equivalent dataset (``seeds/equivalents.json``, ``admin-fixtures/**/equivalents.json``,
-``admin-ui/{public,dist}/admin-fixtures/...``) the only declared precisions are ``2`` (17
+``admin-ui/public/admin-fixtures/...``) the only declared precisions are ``2`` (14
 occurrences) and ``1`` (one occurrence) - counted, not assumed, and re-counted by
 ``test_no_shipped_equivalent_declares_a_precision_the_ledger_cannot_keep`` below.
 
@@ -81,16 +81,40 @@ pytestmark = [pytest.mark.postgres]
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-#: Every file in the tree that ships `Equivalent` rows. Enumerated rather than globbed so that a
-#: new dataset appearing somewhere else does not silently escape the count below.
+#: Every file in the SOURCE tree that ships `Equivalent` rows.
+#:
+#: The list is written down AND re-derived below, because each half fails in a way the other does
+#: not: a hard-coded list misses a dataset added somewhere new, and a bare glob quietly reports
+#: zero files if the layout moves.  The two are compared, so both failures are named.
+#:
+#: `admin-ui/dist/...` WAS in this list and is deliberately gone (external review, gpt-6-astra,
+#: 2026-08-25).  It is BUILD OUTPUT: `.gitignore:152` ignores `admin-ui/dist/`, so it exists only
+#: on a machine that has run `npm --prefix admin-ui run build`.  This test passed locally for
+#: exactly that reason and would have failed on any clean checkout - the postgres CI job installs
+#: backend dependencies only.  A guard whose verdict depends on whether someone built the front
+#: end is the false-red twin of a false green, and the copy under `admin-ui/public/` is the source
+#: that `dist` is generated FROM, so nothing is left unmeasured by dropping it.
 SHIPPED_EQUIVALENT_DATASETS = [
     "seeds/equivalents.json",
     "admin-fixtures/v1/datasets/equivalents.json",
     "admin-fixtures/packs/greenfield-village-100-v2/v1/datasets/equivalents.json",
     "admin-fixtures/packs/riverside-town-50-v2/v1/datasets/equivalents.json",
     "admin-ui/public/admin-fixtures/v1/datasets/equivalents.json",
-    "admin-ui/dist/admin-fixtures/v1/datasets/equivalents.json",
 ]
+
+#: Directories that are not source: build output and installed dependencies.  A dataset found
+#: under one of these is a copy of a source dataset, and its presence depends on what has been
+#: built or installed on this machine rather than on what the repository ships.
+_NOT_SOURCE = {"dist", "node_modules", ".git", ".venv", ".local-run", "__pycache__"}
+
+
+def _discovered_equivalent_datasets() -> list[str]:
+    found = []
+    for path in REPO_ROOT.rglob("equivalents.json"):
+        if _NOT_SOURCE.intersection(path.relative_to(REPO_ROOT).parts):
+            continue
+        found.append(path.relative_to(REPO_ROOT).as_posix())
+    return sorted(found)
 
 
 def _admin_headers() -> dict[str, str]:
@@ -254,6 +278,13 @@ def test_no_shipped_equivalent_declares_a_precision_the_ledger_cannot_keep() -> 
     silently becomes a breaking change for that dataset, and this fails instead.
     """
 
+    assert _discovered_equivalent_datasets() == sorted(SHIPPED_EQUIVALENT_DATASETS), (
+        "the set of shipped equivalent datasets moved: found "
+        f"{_discovered_equivalent_datasets()}, expected {sorted(SHIPPED_EQUIVALENT_DATASETS)}. "
+        "Update the list AND re-run the count below - a dataset that escapes the list escapes "
+        "the migration measurement this test is."
+    )
+
     declared: dict[str, list[int]] = {}
     for relative in SHIPPED_EQUIVALENT_DATASETS:
         path = REPO_ROOT / relative
@@ -262,7 +293,7 @@ def test_no_shipped_equivalent_declares_a_precision_the_ledger_cannot_keep() -> 
         rows = payload if isinstance(payload, list) else payload.get("items", payload)
         declared[relative] = [int(row["precision"]) for row in rows if "precision" in row]
 
-    assert sum(len(v) for v in declared.values()) == 18, (
+    assert sum(len(v) for v in declared.values()) == 15, (
         f"the shipped equivalent count changed: {[(k, len(v)) for k, v in declared.items()]}"
     )
     over = {k: [p for p in v if p > MONEY_MAX_SCALE] for k, v in declared.items()}

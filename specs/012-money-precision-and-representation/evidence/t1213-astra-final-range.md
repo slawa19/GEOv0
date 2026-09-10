@@ -1,0 +1,6 @@
+The new fixture inventory test breaks the PostgreSQL CI tier by requiring untracked frontend build output. Canonical tests and database tests were not run in this read-only environment; the missing-file failure was reproduced through an isolated debug execution.
+
+Review comment:
+
+- [P1] Remove the build-output dependency from the PostgreSQL test — C:/Users/admin/AppData/Local/Temp/geov0-astra-review-1789047801/clone/tests/integration/test_p012_t1212_declared_precision_exceeds_storage_scale_postgres.py:92-92
+  On a clean checkout, `admin-ui/dist` is absent, and the scheduled/manual `postgres` CI job installs only backend dependencies before running this test. Consequently, the new test always fails that job. A debug-only execution reproduced `AssertionError: admin-ui/dist/admin-fixtures/v1/datasets/equivalents.json is gone; re-derive the list before trusting the count`. Enumerate canonical fixtures instead and adjust the expected count; repository guidance identifies `admin-fixtures/` as their owner ([AGENTS.md:306](AGENTS.md#L306)).

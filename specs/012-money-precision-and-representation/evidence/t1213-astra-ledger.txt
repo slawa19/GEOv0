@@ -1,0 +1,58 @@
+T1213 — independent external review of the T1212 delta
+======================================================
+
+Direction        Claude Code (orchestrator) -> Codex (external reviewer), per
+                 docs/external-review-runbook.md §3.
+CLI              codex-cli 0.154.0
+Binary           C:\Users\admin\tools\node-v22.12.0-win-x64\codex.cmd
+                 (installed 2026-08-25 via `npm i -g @openai/codex@0.154.0`; the pre-existing
+                 build at %LOCALAPPDATA%\OpenAI\Codex\bin\a7c12ebff69fb123\codex.exe is
+                 0.144.0-alpha.4 and REFUSES this model with
+                 "The 'gpt-6-astra' model requires a newer version of Codex" - probed, exit 1)
+Model requested  gpt-6-astra          (requested value recorded; the CLI does not report a
+                                       resolved per-run model id, so this is not a confirmed
+                                       resolution)
+Reasoning        medium               (-c model_reasoning_effort="medium"; echoed back by the CLI
+                                       header as "reasoning effort: medium" in both progress logs)
+Sandbox          --sandbox read-only
+Working root     frozen clone, `git clone --no-hardlinks` of the working repository
+Reviewed SHA     422ed50  ("fix(012): the declared precision could exceed the scale the ledger keeps")
+Base             1c22835, exposed to the reviewer as the named branch `review-base`
+Credential-free  the clone contains only tracked files; `.env*` present are `.env.example`,
+                 `admin-ui/.env.local.example`, `simulator-ui/v2/.env.example`. NOTE the standing
+                 machine-level risk accepted 2026-08-14 in specs/BACKLOG.md: the git credential
+                 store lives in the home directory and is reachable on this machine.
+
+Slice 1 - diff review (built-in review mode, target fixed mechanically)
+  codex exec --sandbox read-only -C <clone> review --base review-base \
+        -m gpt-6-astra -c model_reasoning_effort="medium" -o final_range.md
+  exit 0, non-empty -o file -> t1213-astra-final-range.md
+  NOTE: a first attempt passed a custom prompt as well and was refused by the CLI -
+        "the argument '--base <BRANCH>' cannot be used with '[PROMPT]'" (exit 2). The review was
+        re-run without it; the review criteria that could not be passed here were asked in slice 2.
+
+Slice 2 - decision questions (generic exec, prompt on stdin)
+  Get-Content prompt_questions.txt -Raw | codex exec --sandbox read-only -C <clone> \
+        -m gpt-6-astra -c model_reasoning_effort="medium" -o final_questions.md -
+  exit 0, non-empty -o file -> t1213-astra-final-questions.md
+
+Markers returned
+  VERDICT-T1212 / range slice ...... FINDINGS (one P1)
+  VERDICT-DECISION ................. KEEP-18
+  VERDICT-AUTHORITY ................ OUT-OF-SURFACE
+  VERDICT-LEXICAL-18 ............... KEEP
+  VERDICT-MIGRATION ................ SAFE
+  VERDICT-MISSED ................... FOUND
+
+Disposition (details in the spec, section `T1213`)
+  P1  guard depended on build output (admin-ui/dist) .............. CLOSED
+  P2  "nothing is lost" refuted: legacy rows above the domain ..... CLOSED (new test + mutation)
+  P2  admin-ui mock threw INVALID_RESPONSE where the backend 409s . CLOSED
+  P3  simulator-ui catalogue test proved nothing about legacy 12 .. CLOSED
+  P3  HOUR declared precision 1 in seeds, 2 in admin fixtures ..... RECORDED in specs/BACKLOG.md
+  VERDICT-DECISION / VERDICT-AUTHORITY ............................ OPEN, referred to the owner
+
+Reviewer's own qualification, recorded verbatim in substance: its runtime evidence came from
+debug-only in-memory probes; it did not run the canonical gates or the PostgreSQL tier. The
+gates were run by the orchestrator instead - backend tier, Postgres tier and both UI suites,
+after the fix round.

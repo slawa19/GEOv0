@@ -56,4 +56,18 @@ describe('equivalentPrecision', () => {
     expect(equivalentPrecision('X1')).toBe(2)
     expect(equivalentPrecision('X2')).toBe(3)
   })
+
+  it('keeps a legacy precision the API domain no longer admits', () => {
+    // `Equivalent.precision` narrowed from 0..18 to 0..8 on 2026-08-25 (012 / S1), and the
+    // narrowing was NOT applied to this reader on purpose: it reads what the catalogue
+    // ANSWERS, and a database row written before that day still answers 12. Clamping here
+    // would make this front end print an obligation at a resolution the row does not declare,
+    // which is the defect the whole 012 programme is about, only pointed the other way.
+    //
+    // The neighbouring case above looks like it covers this and does not: its precision 9 sits
+    // on a row with an empty code, so the row is discarded for the code and the precision is
+    // never read. Found by external review (gpt-6-astra, medium, 2026-08-25).
+    setEquivalentPrecisions([{ code: 'LEGACY12', precision: 12 }])
+    expect(equivalentPrecision('LEGACY12')).toBe(12)
+  })
 })

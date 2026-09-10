@@ -179,12 +179,22 @@ MONEY_MAX_INTEGER_DIGITS = 12
 # retroactively wrong - the number just should not be read as protocol-derived until 015 answers.
 #
 # THE FORK IS ANSWERED (012 / S1, 2026-08-25): the schema moved, not the document.
-# `Equivalent.precision` is now 0..8, so the widest fraction any of our producers can emit for
-# storable money is 8 digits, not 18 - the derivation above no longer supports the number 18.
+# `Equivalent.precision` is now 0..8, so no NEW equivalent can declare a precision past the
+# storage scale, and the derivation above no longer supports the number 18.
 #
-# 18 IS DELIBERATELY KEPT ANYWAY, and it is now a bare pathological-input bound rather than a
-# producer-derived one.  Lowering it to 8 would be a change to what the DOOR ACCEPTS, not a
-# consequence of the precision decision: `"0.100000000"` is a value `Numeric(20, 8)` holds
+# CORRECTION, SAME DAY, from external review (gpt-6-astra, medium): the sentence this replaces
+# said "the widest fraction any of our producers can emit is now 8 digits", and that is FALSE.
+# The domain narrowed; the DATA did not.  A row written when the door accepted `precision: 12`
+# is still in the database, ORM hydration does not run the model's `@validates`, and every money
+# producer reads `Equivalent.precision` off the row it loaded - so `to_money_str` still emits
+# twelve fraction digits for it, and the door still has to admit that spelling back.  Measured
+# on a legacy row through the real producers in
+# `tests/integration/test_p012_t1207_one_money_form_across_producers.py`
+# (`test_the_three_producers_agree_on_a_legacy_row_above_the_domain`).
+#
+# 18 IS THEREFORE KEPT FOR A LIVE REASON, not only as a pathological-input bound: it is what
+# keeps the renderer's output for a legacy row admissible at the door.  Lowering it to 8 would
+# also be a change to what the DOOR ACCEPTS - `"0.100000000"` is a value `Numeric(20, 8)` holds
 # exactly, `is_storable_money` says True for it, and refusing it on spelling is exactly the
 # mistake T1201's first edition made and this comment exists to record.  Narrowing it is a
 # separate door decision with its own compatibility question, and it is not made here.
