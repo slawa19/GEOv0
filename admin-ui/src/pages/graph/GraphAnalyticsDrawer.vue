@@ -6,7 +6,7 @@ import CopyIconButton from '../../ui/CopyIconButton.vue'
 import GraphAnalyticsTogglesCard from '../../ui/GraphAnalyticsTogglesCard.vue'
 import OperatorAdvicePanel from '../../ui/OperatorAdvicePanel.vue'
 import { t } from '../../i18n'
-import { activityTransactionCounts } from './graphPageHelpers'
+import { activityCounts, incidentRatioDisplay, type CountConfidence } from './graphPageHelpers'
 import { labelTrustlineStatus } from '../../i18n/labels'
 import { buildGraphDrawerAdvice } from '../../advice/operatorAdvice'
 import { PRECISION_UNAVAILABLE, precisionForEquivalent } from '../../composables/useEquivalentPrecision'
@@ -96,14 +96,21 @@ type SelectedActivity = {
   participantOps: Record<number, number>
   paymentCommitted: Record<number, number>
   clearingCommitted: Record<number, number>
-  // F-013-1 / T1302. `hasTransactions` no longer means "the array is non-empty"; it means the
-  // response named this collection in `included`, i.e. we are entitled to say anything about it
-  // at all. The other two qualify what we may say: `transactionsTruncated` turns every count into
-  // a lower bound, and `transactionsAttributable` is false when rows arrived carrying no field
-  // able to place this participant in them, so the counts would be undercounts.
-  hasTransactions: boolean
-  transactionsTruncated: boolean
-  transactionsAttributable: boolean
+  // F-013-1 / T1302, reshaped by F-013-R1/R2. One confidence per COLLECTION, sitting beside the
+  // counters derived from it, because the flat flags it replaces were a single vocabulary shared
+  // by two branches that mean different things by it - and the branches got merged.
+  //
+  //   transactions -> paymentCommitted, clearingCommitted
+  //   incidents    -> incidentCount
+  //   auditLog     -> participantOps
+  //
+  // `snapshotIncidents` is deliberately separate from `incidents`: the incident RATIO row is fed by
+  // the graph snapshot's incident collection on every branch, while the incident COUNTER can come
+  // from the metrics endpoint, which measures it server-side and owes the snapshot nothing.
+  transactions: CountConfidence
+  incidents: CountConfidence
+  auditLog: CountConfidence
+  snapshotIncidents: CountConfidence
 }
 
 type ConnectionRow = {
@@ -283,7 +290,15 @@ const adviceItems = computed(() => {
             v-if="showIncidents"
             :label="t('graph.drawer.incidentRatio')"
           >
-            {{ (incidentRatioByPid.get(selected.pid) || 0).toFixed(2) }}
+            <!--
+              F-013-R2. This row is fed by the snapshot's `incidents` collection, which this client
+              does not request - so `(ratio || 0).toFixed(2)` printed a hard, measurement-shaped
+              `0.00` against every participant in real mode. Three answers now: nothing when the
+              collection was not carried, a real 0.00 when it was carried whole and this
+              participant is absent from it, and a lower bound when it was cut (where an absence
+              may simply be a row the server dropped).
+            -->
+            {{ selectedActivity ? incidentRatioDisplay(incidentRatioByPid.get(selected.pid), selectedActivity.snapshotIncidents) : '—' }}
           </el-descriptions-item>
         </el-descriptions>
 
@@ -617,7 +632,7 @@ const adviceItems = computed(() => {
                         :label="t('graph.analytics.activity.incidentsInitiator')"
                         :tooltip-text="t('graph.analytics.activity.incidentsInitiatorTooltip')"
                       />
-                      <span class="metricRow__value">{{ selectedActivity.incidentCount[7] }} / {{ selectedActivity.incidentCount[30] }} / {{ selectedActivity.incidentCount[90] }}</span>
+                      <span class="metricRow__value">{{ activityCounts(selectedActivity.incidentCount, selectedActivity.windows, selectedActivity.incidents) }}</span>
                     </div>
                     <div class="metricRow">
                       <TooltipLabel
@@ -625,7 +640,7 @@ const adviceItems = computed(() => {
                         :label="t('graph.analytics.activity.participantOps')"
                         :tooltip-text="t('graph.analytics.activity.participantOpsTooltip')"
                       />
-                      <span class="metricRow__value">{{ selectedActivity.participantOps[7] }} / {{ selectedActivity.participantOps[30] }} / {{ selectedActivity.participantOps[90] }}</span>
+                      <span class="metricRow__value">{{ activityCounts(selectedActivity.participantOps, selectedActivity.windows, selectedActivity.auditLog) }}</span>
                     </div>
                   </div>
                 </div>
@@ -1325,7 +1340,7 @@ const adviceItems = computed(() => {
                     :label="t('graph.analytics.activity.incidentsInitiator')"
                     :tooltip-text="t('graph.analytics.activity.incidentsInitiatorTooltip')"
                   />
-                  <span class="metricRow__value">{{ selectedActivity.incidentCount[7] }} / {{ selectedActivity.incidentCount[30] }} / {{ selectedActivity.incidentCount[90] }}</span>
+                  <span class="metricRow__value">{{ activityCounts(selectedActivity.incidentCount, selectedActivity.windows, selectedActivity.incidents) }}</span>
                 </div>
                 <div class="metricRow">
                   <TooltipLabel
@@ -1333,7 +1348,7 @@ const adviceItems = computed(() => {
                     :label="t('graph.analytics.activity.participantOps')"
                     :tooltip-text="t('graph.analytics.activity.participantOpsTooltip')"
                   />
-                  <span class="metricRow__value">{{ selectedActivity.participantOps[7] }} / {{ selectedActivity.participantOps[30] }} / {{ selectedActivity.participantOps[90] }}</span>
+                  <span class="metricRow__value">{{ activityCounts(selectedActivity.participantOps, selectedActivity.windows, selectedActivity.auditLog) }}</span>
                 </div>
                 <div class="metricRow">
                   <TooltipLabel
@@ -1341,7 +1356,7 @@ const adviceItems = computed(() => {
                     :label="t('graph.analytics.activity.paymentsCommitted')"
                     :tooltip-text="t('graph.analytics.activity.paymentsCommittedTooltip')"
                   />
-                  <span class="metricRow__value">{{ activityTransactionCounts(selectedActivity.paymentCommitted, selectedActivity.windows, selectedActivity) }}</span>
+                  <span class="metricRow__value">{{ activityCounts(selectedActivity.paymentCommitted, selectedActivity.windows, selectedActivity.transactions) }}</span>
                 </div>
                 <div class="metricRow">
                   <TooltipLabel
@@ -1349,7 +1364,7 @@ const adviceItems = computed(() => {
                     :label="t('graph.analytics.activity.clearingCommitted')"
                     :tooltip-text="t('graph.analytics.activity.clearingCommittedTooltip')"
                   />
-                  <span class="metricRow__value">{{ activityTransactionCounts(selectedActivity.clearingCommitted, selectedActivity.windows, selectedActivity) }}</span>
+                  <span class="metricRow__value">{{ activityCounts(selectedActivity.clearingCommitted, selectedActivity.windows, selectedActivity.transactions) }}</span>
                 </div>
               </div>
               <!--
@@ -1359,7 +1374,7 @@ const adviceItems = computed(() => {
                 leaves a printed number standing.
               -->
               <el-alert
-                v-if="!selectedActivity.hasTransactions"
+                v-if="!selectedActivity.transactions.known"
                 type="warning"
                 show-icon
                 :title="t('graph.analytics.activity.transactionsNotIncludedTitle')"
@@ -1368,7 +1383,7 @@ const adviceItems = computed(() => {
                 style="margin-top: 10px"
               />
               <el-alert
-                v-else-if="!selectedActivity.transactionsAttributable"
+                v-else-if="selectedActivity.transactions.incomplete"
                 type="warning"
                 show-icon
                 :title="t('graph.analytics.activity.transactionsUnattributableTitle')"
@@ -1377,11 +1392,27 @@ const adviceItems = computed(() => {
                 style="margin-top: 10px"
               />
               <el-alert
-                v-else-if="selectedActivity.transactionsTruncated"
+                v-else-if="selectedActivity.transactions.lowerBound"
                 type="info"
                 show-icon
                 :title="t('graph.analytics.activity.transactionsTruncatedTitle')"
                 :description="t('graph.analytics.activity.transactionsTruncatedDescription')"
+                class="mb"
+                style="margin-top: 10px"
+              />
+              <!--
+                F-013-R2. `incidents` and `audit_log` are governed by the same `include` and this
+                client asks for neither, so the two counters above them are silent in real mode.
+                Silence with no explanation is its own trap - the row goes blank and the operator is
+                left to guess whether that is a fault - so it is said out loud, independently of the
+                transactions notice because the two collections fail independently.
+              -->
+              <el-alert
+                v-if="!selectedActivity.incidents.known || !selectedActivity.auditLog.known"
+                type="warning"
+                show-icon
+                :title="t('graph.analytics.activity.snapshotCollectionsNotIncludedTitle')"
+                :description="t('graph.analytics.activity.snapshotCollectionsNotIncludedDescription')"
                 class="mb"
                 style="margin-top: 10px"
               />

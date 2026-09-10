@@ -27,7 +27,7 @@ import { computed, ref } from 'vue'
 vi.mock('../api', () => ({ api: { participantMetrics: vi.fn() } }))
 
 import { useGraphAnalytics } from './useGraphAnalytics'
-import { activityTransactionCounts } from '../pages/graph/graphPageHelpers'
+import { activityCounts } from '../pages/graph/graphPageHelpers'
 import { realApi } from '../api/realApi'
 import type { SelectedInfo } from './useGraphVisualization'
 import type { AuditLogEntry, ClearingCycles, Debt, Incident, Participant, Transaction, Trustline } from '../pages/graph/graphTypes'
@@ -112,11 +112,11 @@ describe('F-013-1 / T1302: transactions - "not asked" is not "zero"', () => {
     const a = g.selectedActivity.value
     expect(a).toBeTruthy()
 
-    expect(a!.hasTransactions).toBe(false)
-    expect(a!.transactionsTruncated).toBe(false)
+    expect(a!.transactions.known).toBe(false)
+    expect(a!.transactions.lowerBound).toBe(false)
 
     // The display side must not print a zero it cannot justify.
-    expect(activityTransactionCounts(a!.paymentCommitted, a!.windows, a!)).toBe('— / — / —')
+    expect(activityCounts(a!.paymentCommitted, a!.windows, a!.transactions)).toBe('— / — / —')
   })
 
   it('ASKED AND EMPTY: the same empty array, but named in `included`, is a real measurement of zero', () => {
@@ -125,11 +125,11 @@ describe('F-013-1 / T1302: transactions - "not asked" is not "zero"', () => {
 
     // Byte-identical `transactions: []` to the case above, opposite conclusion. This is the pair
     // the old `transactions.length > 0` could not distinguish, and the whole of the finding.
-    expect(a!.hasTransactions).toBe(true)
-    expect(a!.transactionsTruncated).toBe(false)
-    expect(a!.transactionsAttributable).toBe(true)
+    expect(a!.transactions.known).toBe(true)
+    expect(a!.transactions.lowerBound).toBe(false)
+    expect(a!.transactions.incomplete).toBe(false)
     expect(a!.paymentCommitted[7]).toBe(0)
-    expect(activityTransactionCounts(a!.paymentCommitted, a!.windows, a!)).toBe('0 / 0 / 0')
+    expect(activityCounts(a!.paymentCommitted, a!.windows, a!.transactions)).toBe('0 / 0 / 0')
   })
 
   it('ASKED AND TRUNCATED: counts over a cut list are lower bounds and are printed as such', () => {
@@ -143,20 +143,20 @@ describe('F-013-1 / T1302: transactions - "not asked" is not "zero"', () => {
     })
     const a = g.selectedActivity.value
 
-    expect(a!.hasTransactions).toBe(true)
-    expect(a!.transactionsTruncated).toBe(true)
+    expect(a!.transactions.known).toBe(true)
+    expect(a!.transactions.lowerBound).toBe(true)
     expect(a!.paymentCommitted[7]).toBe(2)
 
     // The server returned a prefix of a longer list, so 2 is "at least 2" and must not read as a
     // total. Without this the card presents a lower bound in the typography of a fact.
-    expect(activityTransactionCounts(a!.paymentCommitted, a!.windows, a!)).toBe('≥2 / ≥2 / ≥2')
+    expect(activityCounts(a!.paymentCommitted, a!.windows, a!.transactions)).toBe('≥2 / ≥2 / ≥2')
   })
 
   it('`truncated` without `included` is ignored: a cut we were never told we received says nothing', () => {
     const g = analyticsFor({ transactions: [], included: [], truncated: ['transactions'] })
     const a = g.selectedActivity.value
-    expect(a!.hasTransactions).toBe(false)
-    expect(a!.transactionsTruncated).toBe(false)
+    expect(a!.transactions.known).toBe(false)
+    expect(a!.transactions.lowerBound).toBe(false)
   })
 
   // ---------------------------------------------------------------------------------------------
@@ -189,12 +189,20 @@ describe('F-013-1 / T1302: transactions - "not asked" is not "zero"', () => {
     const a = g.selectedActivity.value
 
     // The row carries no counterparties, so it cannot be attributed to PID_A - and it cannot be
-    // ruled out either. The count therefore stays at 0 AND is marked unattributable, so nothing
-    // prints it as a total. (The projection the spec prescribes - from/to for PAYMENT, edges for
-    // CLEARING - is not on the wire yet; when it arrives this flag goes quiet on its own.)
+    // ruled out either. The count therefore stays at 0 AND is marked incomplete, so nothing prints
+    // it as a total.
+    //
+    // The projection the spec prescribes - `from`/`to` for a PAYMENT, `edges` for a CLEARING - IS
+    // on the wire (`_graph_fetch_transactions`, 2026-09-10), and a row that carries it does go
+    // quiet. What this row proves is the remaining case: the producer emits each key only when the
+    // internal payload holds a non-empty value, so a row without them is still reachable and still
+    // has to be admitted rather than counted as a zero. The reads themselves are covered in
+    // `useGraphAnalytics.activityConfidence.test.ts` - deliberately not here, because every row in
+    // THIS file comes from a `producerRow()` that never sets those three fields, which is exactly
+    // why both reads could once be reverted with the whole suite green.
     expect(a!.paymentCommitted[7]).toBe(0)
-    expect(a!.transactionsAttributable).toBe(false)
-    expect(activityTransactionCounts(a!.paymentCommitted, a!.windows, a!)).toBe('— / — / —')
+    expect(a!.transactions.incomplete).toBe(true)
+    expect(activityCounts(a!.paymentCommitted, a!.windows, a!.transactions)).toBe('— / — / —')
   })
 
   // ---------------------------------------------------------------------------------------------
@@ -259,6 +267,6 @@ describe('F-013-1 / T1302: transactions - "not asked" is not "zero"', () => {
     expect(env.data.included).toBeUndefined()
 
     const g = analyticsFor({ transactions: [], included: [], truncated: [] })
-    expect(g.selectedActivity.value!.hasTransactions).toBe(false)
+    expect(g.selectedActivity.value!.transactions.known).toBe(false)
   })
 })

@@ -637,6 +637,9 @@ export const RU: Record<string, string> = {
   'graph.analytics.activity.transactionsUnattributableDescription': 'Снапшот несёт committed-транзакции, но в строках нет контрагентов, поэтому нельзя сказать, какие из них касаются этого участника. Любой счётчик был бы занижен.',
   'graph.analytics.activity.transactionsTruncatedTitle': 'Счётчики транзакций — нижняя оценка',
   'graph.analytics.activity.transactionsTruncatedDescription': 'Сервер вернул только последние транзакции и обрезал остальные, поэтому показанные числа — «не меньше чем», а не итоги.',
+  // F-013-R2. См. комментарий в en.ts.
+  'graph.analytics.activity.snapshotCollectionsNotIncludedTitle': 'Счётчики инцидентов и операций с участником не запрашивались',
+  'graph.analytics.activity.snapshotCollectionsNotIncludedDescription': 'Этот снимок не содержит коллекций incidents и audit_log, поэтому эти счётчики здесь не вычисляются. Они заполняются из эндпоинта метрик участника, когда тот отвечает. «Нет данных» — это не «ноль».',
 
   'graph.analytics.summary.pickEquivalentTitle': 'Выберите эквивалент (не ALL), чтобы включить карточки аналитики',
   'graph.analytics.summary.widgetsTitle': 'Виджеты сводки',
@@ -709,6 +712,7 @@ export const RU: Record<string, string> = {
   'app.status.unknownDetail': 'ответа о здоровье ещё не было - это не утверждение, что всё хорошо',
   'app.status.degraded': 'схема отстаёт от head',
   'app.status.migrationsBehindDetail': 'схема БД на {current}, head - {head}',
+  'app.status.serviceDegradedDetail': 'сервис сообщает о себе статус «{status}»',
   'app.status.apiSource': 'Источник API: {label}',
   'app.status.scenario': 'сценарий: {scenario}',
   'app.apiMode.mock': 'MOCK DATA',

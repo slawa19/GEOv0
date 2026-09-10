@@ -150,4 +150,32 @@ describe('RT-013-6: mock trustline filters must answer what production answers',
       rows: [{ equivalent: 'USD', from: 'p1', to: 'p2' }],
     })
   })
+
+  /**
+   * ДОБАВЛЕНО 2026-09-10 по итогам adversarial: `status` был последней копией того же расхождения,
+   * оставшейся строкой ниже исправленных фильтров.
+   *
+   * ЧТО ДЕЛАЕТ ПРОДАКШЕН: параметр типизирован закрытым литералом
+   * `Literal["active", "frozen", "closed"]` (`app/core/trustlines/service.py`), поэтому на
+   * `"ACTIVE"` FastAPI отвечает **422**, а не пустым списком и уж точно не строками.
+   * ЧТО ДЕЛАЛ МОК: `.trim().toLowerCase()` с обеих сторон — то есть находил.
+   *
+   * Оракул здесь — «не находит», а не «отвечает 422»: мок не воспроизводит валидацию FastAPI, и
+   * притворяться, что воспроизводит, было бы вторым расхождением вместо первого. Это записано
+   * прямо, чтобы следующий читатель не «доисправил» тест до кода ответа, которого мок не даёт.
+   */
+  it('a differently-cased status finds nothing: production answers 422, never rows', async () => {
+    installFixtures()
+    expect(await listed({ status: 'ACTIVE' })).toEqual({ total: 0, rows: [] })
+    expect(
+      await listed({ status: 'active' }),
+      'контроль: точное значение по-прежнему находит свои строки, иначе тест выродился в «ничего не находить»',
+    ).toEqual({
+      total: 2,
+      rows: [
+        { equivalent: 'USD', from: 'p1', to: 'p2' },
+        { equivalent: 'USD', from: 'p3', to: 'p2' },
+      ],
+    })
+  })
 })

@@ -15,48 +15,54 @@ type MockedCacheActions = CacheActions & {
   fetchPaymentTargets: ReturnType<typeof vi.fn<CacheActions['fetchPaymentTargets']>>
 }
 
-describe('useInteractDataCache: snapshot→trustlines mapping', () => {
-  function mk(snapshotValue: GraphSnapshot) {
-    const actions: MockedCacheActions = {
-      actionsDisabled: ref(false),
-      sendPayment: vi.fn(async () => {
-        throw new Error('not used in this test')
-      }),
-      createTrustline: vi.fn(async () => {
-        throw new Error('not used in this test')
-      }),
-      updateTrustline: vi.fn(async () => {
-        throw new Error('not used in this test')
-      }),
-      closeTrustline: vi.fn(async () => {
-        throw new Error('not used in this test')
-      }),
-      runClearing: vi.fn(async () => {
-        throw new Error('not used in this test')
-      }),
-      fetchParticipants: vi.fn<CacheActions['fetchParticipants']>(async () => [] as ParticipantsResult),
-      // Return a non-array so `useInteractDataCache` keeps using snapshot-derived trustlines.
-      fetchTrustlines: vi.fn<CacheActions['fetchTrustlines']>(async () => null as unknown as TrustlinesResult),
-      fetchPaymentTargets: vi.fn<CacheActions['fetchPaymentTargets']>(async () => [] as PaymentTargetsResult),
-    }
-
-    const runId = ref('run_test')
-    const equivalent = ref(snapshotValue.equivalent)
-    const snapshot = ref<GraphSnapshot | null>(snapshotValue)
-
-    const scope = effectScope()
-    const cache = scope.run(() =>
-      useInteractDataCache({
-        actions,
-        runId,
-        equivalent,
-        snapshot,
-        parseAmountStringOrNull,
-      }),
-    )!
-
-    return { actions, snapshot, cache, scope }
+function mk(
+  snapshotValue: GraphSnapshot,
+  fetchTrustlinesImpl?: CacheActions['fetchTrustlines'],
+) {
+  const actions: MockedCacheActions = {
+    actionsDisabled: ref(false),
+    sendPayment: vi.fn(async () => {
+      throw new Error('not used in this test')
+    }),
+    createTrustline: vi.fn(async () => {
+      throw new Error('not used in this test')
+    }),
+    updateTrustline: vi.fn(async () => {
+      throw new Error('not used in this test')
+    }),
+    closeTrustline: vi.fn(async () => {
+      throw new Error('not used in this test')
+    }),
+    runClearing: vi.fn(async () => {
+      throw new Error('not used in this test')
+    }),
+    fetchParticipants: vi.fn<CacheActions['fetchParticipants']>(async () => [] as ParticipantsResult),
+    // Return a non-array so `useInteractDataCache` keeps using snapshot-derived trustlines.
+    fetchTrustlines: vi.fn<CacheActions['fetchTrustlines']>(
+      fetchTrustlinesImpl ?? (async () => null as unknown as TrustlinesResult),
+    ),
+    fetchPaymentTargets: vi.fn<CacheActions['fetchPaymentTargets']>(async () => [] as PaymentTargetsResult),
   }
+
+  const runId = ref('run_test')
+  const equivalent = ref(snapshotValue.equivalent)
+  const snapshot = ref<GraphSnapshot | null>(snapshotValue)
+
+  const scope = effectScope()
+  const cache = scope.run(() =>
+    useInteractDataCache({
+      actions,
+      runId,
+      equivalent,
+      snapshot,
+      parseAmountStringOrNull,
+    }),
+  )!
+
+  return { actions, snapshot, cache, scope }
+}
+
+describe('useInteractDataCache: snapshot→trustlines mapping', () => {
 
   it('maps reverse_used from snapshot.links when present (14.7)', async () => {
     const { cache, scope } = mk({
@@ -169,3 +175,97 @@ describe('useInteractDataCache: snapshot→trustlines mapping', () => {
   })
 })
 
+/**
+ * `F-013-7` — СОСТОЯНИЕ ИСТОЧНИКА В САМОМ КЭШЕ.
+ *
+ * Почему этого не хватает в тестах корня: там `useInteractMode` замокан, и состояние источника
+ * выставляет тест. Здесь судится то, что НАСТОЯЩИЙ кэш выводит это состояние верно — иначе
+ * гард будет зелён в тестах и выключен в проде.
+ */
+describe('useInteractDataCache: trustlines source state (`F-013-7`)', () => {
+  const SNAPSHOT: GraphSnapshot = {
+    equivalent: 'UAH',
+    generated_at: '2026-01-01T00:00:00Z',
+    nodes: [
+      { id: 'alice', name: 'Alice' },
+      { id: 'bob', name: 'Bob' },
+    ],
+    links: [
+      { source: 'alice', target: 'bob', trust_limit: '100', used: '0', available: '100', status: 'active' },
+    ],
+  } as unknown as GraphSnapshot
+
+  it('без ответа источника состояние — never-asked, а снапшотная строка не считается ответом', async () => {
+    // Та же заглушка, что в соседнем блоке: ответ не массив, то есть кэш его не принимает.
+    const { cache, scope } = mk(SNAPSHOT)
+    await nextTick()
+    await Promise.resolve()
+
+    // Слитый список НЕПУСТ — в нём строка из снапшота. Именно так гард и обманывался.
+    expect(cache.trustlines.value.length).toBe(1)
+    expect(cache.findActiveTrustline('alice', 'bob')).toBeTruthy()
+
+    expect(cache.trustlinesFetchState.value).toEqual({ kind: 'never-asked' })
+    expect(
+      cache.findAnsweredTrustline('alice', 'bob'),
+      'строка из снапшотного фоллбэка выдана за ответ источника',
+    ).toBeNull()
+
+    scope.stop()
+  })
+
+  it('пустой ответ — это answered, а не never-asked', async () => {
+    const { cache, scope } = mk(SNAPSHOT, async () => [] as unknown as TrustlinesResult)
+    await nextTick()
+    await Promise.resolve()
+    await nextTick()
+
+    expect(cache.trustlinesFetchState.value).toEqual({ kind: 'answered' })
+    expect(cache.findAnsweredTrustline('alice', 'bob')).toBeNull()
+    // При пустом ОТВЕТЕ слитый список остаётся пустым — фоллбэк больше не применяется.
+    expect(cache.trustlines.value.length).toBe(0)
+
+    scope.stop()
+  })
+
+  it('ответ со строкой виден как ответ именно этой пары', async () => {
+    const { cache, scope } = mk(SNAPSHOT, async () => [
+      {
+        from_pid: 'alice',
+        from_name: 'Alice',
+        to_pid: 'bob',
+        to_name: 'Bob',
+        equivalent: 'UAH',
+        limit: '42',
+        used: '0',
+        available: '42',
+        status: 'active',
+      },
+    ] as unknown as TrustlinesResult)
+    await nextTick()
+    await Promise.resolve()
+    await nextTick()
+
+    expect(cache.trustlinesFetchState.value).toEqual({ kind: 'answered' })
+    expect(cache.findAnsweredTrustline('alice', 'bob')?.limit).toBe('42')
+    expect(cache.findAnsweredTrustline('bob', 'alice')).toBeNull()
+
+    scope.stop()
+  })
+
+  it('упавший запрос — это failed с текстом, а не молчаливый фоллбэк', async () => {
+    const { cache, scope } = mk(SNAPSHOT, async () => {
+      throw new Error('GET /trustlines failed: 503')
+    })
+    await nextTick()
+    await Promise.resolve()
+    await nextTick()
+
+    expect(cache.trustlinesFetchState.value).toEqual({ kind: 'failed', message: 'GET /trustlines failed: 503' })
+    expect(cache.findAnsweredTrustline('alice', 'bob')).toBeNull()
+    // А вот для ПРОСМОТРА снапшотный фоллбэк сохраняется — это так и задумано.
+    expect(cache.trustlines.value.length).toBe(1)
+
+    scope.stop()
+  })
+})

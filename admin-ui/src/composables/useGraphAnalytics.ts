@@ -3,7 +3,7 @@ import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
 import { api } from '../api'
 import { assertSuccess } from '../api/envelope'
 import { t } from '../i18n'
-import { makeMetricsKey } from '../pages/graph/graphPageHelpers'
+import { COUNT_MEASURED, collectionConfidence, makeMetricsKey } from '../pages/graph/graphPageHelpers'
 import { isRatioBelowThreshold, isUnitIntervalDecimalString } from '../utils/decimal'
 import type { ParticipantMetrics } from '../types/domain'
 import type {
@@ -559,9 +559,20 @@ export function useGraphAnalytics(opts: {
   //                     measurement and may be shown as a number.
   //   asked, cut     -> included and truncated both name it. Every count over the rows we hold is a
   //                     LOWER BOUND, because the server returned a prefix of a longer list.
-  const transactionsIncluded = computed(() => (opts.included.value || []).includes('transactions'))
-  const transactionsTruncated = computed(
-    () => transactionsIncluded.value && (opts.truncated.value || []).includes('transactions'),
+  //
+  // F-013-R2. All THREE optional collections, not just `transactions`. `incidentCount` is derived
+  // from `incidents` and `participantOps` from `audit_log`; the client asks for neither, so on this
+  // branch both are structurally empty in real mode and used to print a bare `0 / 0 / 0` beside
+  // counters that had just learnt to say the dash. A confidence per collection, carried next to the
+  // counters it governs, is what stops one collection's answer from being told about another's.
+  const snapshotTransactions = computed(() =>
+    collectionConfidence('transactions', opts.included.value, opts.truncated.value),
+  )
+  const snapshotIncidents = computed(() =>
+    collectionConfidence('incidents', opts.included.value, opts.truncated.value),
+  )
+  const snapshotAuditLog = computed(() =>
+    collectionConfidence('audit_log', opts.included.value, opts.truncated.value),
   )
 
   const selectedActivity = computed(() => {
@@ -575,12 +586,28 @@ export function useGraphAnalytics(opts: {
         participantOps: m.activity.participant_ops,
         paymentCommitted: m.activity.payment_committed,
         clearingCommitted: m.activity.clearing_committed,
-        hasTransactions: Boolean(m.activity.has_transactions),
-        // The per-participant metrics endpoint computes its own counters server-side over the whole
-        // table; it neither truncates nor depends on the snapshot's include, so on this branch the
-        // counts are totals and every row was attributable.
-        transactionsTruncated: false,
-        transactionsAttributable: true,
+        // F-013-R1. THIS BRANCH MEASURED. `/metrics` computes every counter above server-side over
+        // the whole table for this participant: it does not paginate, does not depend on the
+        // snapshot's `include`, and answers 0 by counting to 0. So all three counters are known,
+        // exact and complete, and a zero here is a fact about the system.
+        //
+        // What used to stand here was `hasTransactions: Boolean(m.activity.has_transactions)`, and
+        // it is the reason this comment exists. The server's `has_transactions` is a MEASUREMENT -
+        // `len(tx_rows) > 0` over committed PAYMENT/CLEARING in a 90-day window
+        // (app/core/admin/metrics.py) - while the client-side flag it was fed to means "the
+        // response named this collection at all". Merging the two made a quiet real system, which
+        // the server had actually measured as empty, report "Transaction activity was not
+        // requested" and print three dashes over counters it was holding. Nothing on this branch
+        // reads `has_transactions` any more: the counters already say everything it said, and they
+        // say it without claiming an ignorance we do not have.
+        transactions: COUNT_MEASURED,
+        incidents: COUNT_MEASURED,
+        auditLog: COUNT_MEASURED,
+        // ... but NOT the incident RATIO. `/metrics` publishes no ratio; the drawer's row is fed by
+        // the snapshot's `incidents` collection on every branch, so its confidence is the
+        // snapshot's on every branch too. A metrics answer must not make an uncarried collection
+        // look carried.
+        snapshotIncidents: snapshotIncidents.value,
       }
     }
 
@@ -694,9 +721,20 @@ export function useGraphAnalytics(opts: {
           typeof txRow.from === 'string' ? txRow.from : typeof payload.from === 'string' ? payload.from : ''
         const to =
           typeof txRow.to === 'string' ? txRow.to : typeof payload.to === 'string' ? payload.to : ''
-        if (from || to) {
+        if (from === pid || to === pid) {
+          // A naming settles the positive case outright, whichever half of the pair carries it.
           attributable = true
-          involved = from === pid || to === pid
+          involved = true
+        } else if (from && to) {
+          // BOTH counterparties named, neither of them ours: a real "not this participant's".
+          //
+          // F-013-R3. This used to be `if (from || to)`, which reached the same conclusion from ONE
+          // half of the pair - so a payment carrying `from` and no `to` (the producer emits each key
+          // only when the internal payload has a non-empty value for it) was recorded as not ours
+          // on the strength of a field nobody sent. The zero that produced is the same false zero
+          // this programme exists to remove, one level further down.
+          attributable = true
+          involved = false
         } else if (String(tx.initiator_pid || '') === pid) {
           // The initiator is definitely a party to its own payment. The converse does not hold -
           // being someone else's initiator says nothing about whether `pid` was the counterparty -
@@ -756,9 +794,17 @@ export function useGraphAnalytics(opts: {
       // question from "were we told anything about this collection at all", and conflating the two
       // is the whole of F-013-1: a page that never sent `include=transactions` reported a
       // confident zero for a period it had never enquired about.
-      hasTransactions: transactionsIncluded.value,
-      transactionsTruncated: transactionsTruncated.value,
-      transactionsAttributable: unattributable === 0,
+      //
+      // Every counter above this line was computed HERE, out of the snapshot's own arrays, so each
+      // one inherits the confidence of the collection it was counted from - and `incidents` and
+      // `audit_log` are not requested by this client at all, which is why theirs is silence.
+      transactions: {
+        ...snapshotTransactions.value,
+        incomplete: snapshotTransactions.value.known && unattributable > 0,
+      },
+      incidents: snapshotIncidents.value,
+      auditLog: snapshotAuditLog.value,
+      snapshotIncidents: snapshotIncidents.value,
     }
   })
 

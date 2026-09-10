@@ -1211,15 +1211,19 @@ export const mockApi = {
       const eq = params.equivalent ?? ''
       const creditor = params.creditor ?? ''
       const debtor = params.debtor ?? ''
-      // `status` is unchanged: it already compared for equality, and the backend types it as a
-      // closed literal set of lower-case values (`Literal["active", "frozen", "closed"]`).
-      const status = (params.status || '').trim().toLowerCase()
+      // `status` НОРМАЛИЗАЦИЮ ТЕРЯЕТ ТОЖЕ — доделка по итогам adversarial 2026-09-10. Комментарий
+      // здесь стоял обратный: «уже сравнивается на равенство, и бэкенд типизирует его закрытым
+      // литералом». Первое верно, второе и есть причина, по которой нормализация неверна:
+      // `Literal["active", "frozen", "closed"]` означает, что на `"ACTIVE"` FastAPI отвечает
+      // **422**, а мок с `.toLowerCase()` молча находил строки. Это была последняя копия того же
+      // расхождения, оставшаяся строкой ниже исправленных фильтров.
+      const status = params.status || ''
 
       const filtered = all.filter((t) => {
         if (eq && t.equivalent !== eq) return false
         if (creditor && t.from !== creditor) return false
         if (debtor && t.to !== debtor) return false
-        if (status && t.status.toLowerCase() !== status) return false
+        if (status && t.status !== status) return false
         return true
       })
 

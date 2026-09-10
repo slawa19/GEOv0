@@ -195,6 +195,19 @@ const TransactionSchema = z
     updated_at: z.string(),
     equivalent: z.string().nullable().optional(),
     error: z.record(z.string(), z.unknown()).nullable().optional(),
+    // ATTRIBUTION FIELDS, declared 2026-09-10 after the internal adversarial review pointed out
+    // that the canon gained them and this schema did not - so they reached the consumer only
+    // through `.passthrough()`, and the consumer had to launder every row through a cast. The rule
+    // written above this schema ("strict about every key it does declare") had been applied to the
+    // key removed and not to the three added.
+    //
+    // Present per type and never both: `from`/`to` on a PAYMENT, `edges` on a CLEARING, and absent
+    // when the internal payload does not carry them - which is why none of them is required.
+    from: z.string().optional(),
+    to: z.string().optional(),
+    edges: z
+      .array(z.object({ debtor: z.string(), creditor: z.string() }).passthrough())
+      .optional(),
   })
   .passthrough()
 

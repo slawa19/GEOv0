@@ -235,36 +235,93 @@ export function buildFocusModeQuery(input: {
   }
 }
 
-// F-013-1 / T1302. How a transaction-derived counter is allowed to be printed.
+// F-013-1 / T1302, corrected by the internal review of programme 013 (F-013-R1/R2).
 //
-// The Activity card used to print `0 / 0 / 0` whether the page had counted zero payments or had
-// never asked the server for any. Two different facts, one glyph. This function keeps the three
-// cases apart at the only place where they become pixels:
+// A counter on the Activity card is derived from ONE optional collection, and the response says
+// per collection what it carried. Three states have to survive the trip to the pixels:
 //
-//   * the collection was never carried  -> "-" per window. We have no measurement; a zero here is
-//     an assertion the client is not entitled to make.
-//   * some rows could not be attributed -> "-" per window, for the same reason: the rows exist and
-//     are missing from the count, so the number would be an undercount labelled as a total.
-//   * the collection was truncated      -> the counts are lower bounds over a prefix of a longer
-//     list, so each is printed with a leading "≥".
-//   * otherwise                         -> the plain number, which is now a real measurement.
+//   * we were not told about the collection -> "—" per window. A zero here is an assertion the
+//     client is not entitled to make.
+//   * we were told, and it is what it is    -> the plain number. Zero included: a measured zero is
+//     a fact and must read as one.
+//   * we were told a PREFIX of a longer list -> a leading "≥", because every count over a cut list
+//     is a lower bound.
+//
+// `incomplete` is the fourth case and collapses into the first: the rows arrived but some of them
+// carry nothing that can place this participant in them, so the count would be an undercount
+// wearing the typography of a total.
+//
+// WHY A PER-COLLECTION OBJECT AND NOT FLAGS ON THE ACTIVITY OBJECT. The defect this replaces was a
+// single name, `hasTransactions`, that meant "the array is non-empty" to one branch and "the
+// response named the collection" to another; the two got merged and a real system's measured zero
+// started printing "—". A value that travels WITH the collection it describes cannot be attached
+// to the wrong one by accident, and a second collection needs no second set of flags.
 export const UNKNOWN_ACTIVITY_COUNT = '—'
 
-export type ActivityCountConfidence = {
-  hasTransactions: boolean
-  transactionsTruncated: boolean
-  transactionsAttributable: boolean
+export type CountConfidence = {
+  /** The response named this collection at all. Nothing may be printed as a number without it. */
+  known: boolean
+  /** What we hold is a prefix of a longer list, so every count over it is "at least". */
+  lowerBound: boolean
+  /** Rows arrived that could not be placed against this participant; counts would undercount. */
+  incomplete: boolean
 }
 
-export function activityTransactionCounts(
+export const COUNT_UNKNOWN: CountConfidence = { known: false, lowerBound: false, incomplete: false }
+export const COUNT_MEASURED: CountConfidence = { known: true, lowerBound: false, incomplete: false }
+
+/**
+ * Read one collection's completeness out of a response's `included` / `truncated`.
+ *
+ * `truncated` is only meaningful for a collection `included` names: a cut we were never told we
+ * received is not a cut we know about, it is silence.
+ */
+export function collectionConfidence(
+  name: string,
+  included: string[] | null | undefined,
+  truncated: string[] | null | undefined,
+  incomplete = false,
+): CountConfidence {
+  const isIncluded = (included || []).includes(name)
+  if (!isIncluded) return COUNT_UNKNOWN
+  return {
+    known: true,
+    lowerBound: (truncated || []).includes(name),
+    incomplete,
+  }
+}
+
+/** One "7 / 30 / 90" cell of the Activity card, printed at the confidence of its collection. */
+export function activityCounts(
   counts: Record<number, number> | null | undefined,
   windows: number[] | null | undefined,
-  confidence: ActivityCountConfidence,
+  confidence: CountConfidence | null | undefined,
 ): string {
   const ws = (windows || []).slice()
-  if (!confidence.hasTransactions || !confidence.transactionsAttributable) {
+  if (!confidence || !confidence.known || confidence.incomplete) {
     return ws.map(() => UNKNOWN_ACTIVITY_COUNT).join(' / ')
   }
-  const prefix = confidence.transactionsTruncated ? '≥' : ''
+  const prefix = confidence.lowerBound ? '≥' : ''
   return ws.map((w) => `${prefix}${(counts || {})[w] ?? 0}`).join(' / ')
+}
+
+/**
+ * The drawer's incident-ratio row, which is fed by the snapshot's `incidents` collection on every
+ * branch - the per-participant metrics endpoint publishes no such ratio.
+ *
+ * The subtle case is a participant ABSENT from the map. On a complete list that absence is a
+ * measured "no incidents" and prints 0.00; on a CUT list it is indistinguishable from a row the
+ * server dropped, so it prints nothing. Before this, the row was `(ratio || 0).toFixed(2)` and
+ * printed a hard 0.00 for every participant in real mode, where the collection is never requested.
+ */
+export function incidentRatioDisplay(
+  ratio: number | null | undefined,
+  confidence: CountConfidence | null | undefined,
+): string {
+  if (!confidence || !confidence.known || confidence.incomplete) return UNKNOWN_ACTIVITY_COUNT
+  if (!Number.isFinite(Number(ratio))) {
+    return confidence.lowerBound ? UNKNOWN_ACTIVITY_COUNT : (0).toFixed(2)
+  }
+  const prefix = confidence.lowerBound ? '≥' : ''
+  return `${prefix}${Number(ratio).toFixed(2)}`
 }

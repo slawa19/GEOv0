@@ -194,4 +194,53 @@ describe('RT-013-3 — стор здоровья не отличает «не з
         'stores/health.ts:47 сохраняет ответ, но в сигнал здоровья он не входит',
     ).toBe(false)
   })
+
+  /**
+   * СОСТОЯНИЕ: опрос идёт, ответил ПЕРВЫЙ из трёх зондов, два других ещё не спрашивали.
+   * ЧЕСТНЫЙ UI: сказать нечего — треть доказательства не есть подтверждение.
+   * ЧТО БЫЛО: геттер проверял только `health === null`, поэтому всё окно между первым ответом и
+   *   последним экран рисовал подтверждённое здоровье. Нашёл внутренний adversarial 2026-09-10.
+   * ЯКОРЬ: `admin-ui/src/stores/health.ts` — `refresh()` ждёт три вызова последовательно.
+   *
+   * ОРАКУЛ ЗДЕСЬ — `confirmedHealthy` ПРОТИВ `screenWouldReportHealthy`, и это то, чего файлу не
+   * хватало: `confirmedHealthy` был определён с самого начала, но использовался только в
+   * предусловиях, ни разу не сравниваясь с тем, что покажет экран.
+   */
+  it('не докладывает здоровье, пока ответил только первый из трёх зондов', async () => {
+    const store = useHealthStore()
+    apiMock.health.mockResolvedValue(ok(HEALTH_OK))
+    apiMock.healthDb.mockImplementation(() => neverResolves())
+    void store.refresh()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(store.health, 'предусловие: первый ответ уже пришёл').not.toBeNull()
+    expect(store.healthDb, 'предусловие: второй ещё нет').toBeNull()
+    expect(
+      screenWouldReportHealthy(store),
+      'экран докладывает подтверждённое здоровье, имея один ответ из трёх: ' +
+        JSON.stringify({ health: store.health, healthDb: store.healthDb, migrations: store.migrations }),
+    ).toBe(confirmedHealthy(store))
+  })
+
+  /**
+   * СИТУАЦИЯ: все три ответа пришли, HTTP 200, но `/health` сообщает о себе `degraded`.
+   * ЧЕСТНЫЙ UI: это не «здоров».
+   * ЧТО БЫЛО: геттер не читал тело `/health` вовсе. Сегодня такой ответ приезжает с 503 и потому
+   *   становится `error`, но развилка не должна зависеть от кода ответа: недостижимое сегодня —
+   *   не то же самое, что неверное.
+   */
+  it('не докладывает здоровье, когда сервис сам сообщает degraded', async () => {
+    const store = useHealthStore()
+    apiMock.health.mockResolvedValue(ok({ status: 'degraded' }))
+    apiMock.healthDb.mockResolvedValue(ok(HEALTH_DB_OK))
+    apiMock.migrations.mockResolvedValue(ok(MIGRATIONS_UP_TO_DATE))
+    await store.refresh()
+
+    expect(store.error, 'предусловие: ошибки не было, ответ пришёл').toBeNull()
+    expect(
+      screenWouldReportHealthy(store),
+      'сервис сообщает о себе `degraded` в успешном ответе, а экран рисует подтверждённое здоровье',
+    ).toBe(false)
+  })
 })

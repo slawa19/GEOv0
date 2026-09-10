@@ -4,6 +4,7 @@ import type { GraphSnapshot } from '../../types'
 import { isActiveStatus } from '../../utils/status'
 import type { ParticipantInfo, TrustlineInfo } from '../../api/simulatorTypes'
 import type { useInteractActions } from '../useInteractActions'
+import { findAnsweredRow, type TrustlinesFetchState } from './trustlinesSourceState'
 
 function normalizeEq(v: unknown): string {
   return String(v ?? '').trim().toUpperCase()
@@ -26,6 +27,17 @@ export function useInteractDataCache(opts: {
   trustlines: ComputedRef<TrustlineInfo[]>
   trustlinesLoading: ComputedRef<boolean>
   trustlinesLastError: ComputedRef<string | null>
+  /**
+   * `F-013-7`: состояние источника trustlines как СОСТОЯНИЕ. Две величины выше его не описывают:
+   * при обеих снятых источник может быть и «ответившим», и «не спрошенным», а это разные вещи.
+   */
+  trustlinesFetchState: ComputedRef<TrustlinesFetchState>
+  /**
+   * Строка пары из того списка, который источник ДЕЙСТВИТЕЛЬНО прислал для текущих (run, eq).
+   * Отличается от `findActiveTrustline` тем, что не заглядывает в снапшотный фоллбэк: `null`
+   * значит «источник такой строки не присылал», а не «такой линии нет».
+   */
+  findAnsweredTrustline: (from: string | null, to: string | null) => TrustlineInfo | null
   refreshParticipants: (o?: { force?: boolean }) => Promise<void>
   refreshTrustlines: (o?: { force?: boolean }) => Promise<void>
   /** Phase 2.5: backend-first reachable payment targets (multi-hop). */
@@ -96,15 +108,47 @@ export function useInteractDataCache(opts: {
 
   const trustlinesLastErrorRef = ref<string | null>(null)
 
-  const trustlines = computed(() => {
+  /**
+   * Ответ источника ДЛЯ ТЕКУЩЕГО контекста (run + equivalent), без снапшотного фоллбэка.
+   * `null` — источник для этого контекста ещё ничего не присылал.
+   *
+   * Это та самая величина, которую `trustlines` ниже сливает со снапшотом и тем самым теряет:
+   * после слияния уже нельзя сказать, кто наполнил список. Всё, что решает МОЖНО ЛИ ДЕЙСТВОВАТЬ,
+   * обязано смотреть сюда, а не в слитый список (`F-013-7`).
+   */
+  const answeredTrustlines = computed<TrustlineInfo[] | null>(() => {
     const runId = normalizeRunId(opts.runId.value)
     const eq = normalizeEq(opts.equivalent.value)
     const fetchedOk =
       fetchedTrustlinesRunId.value === runId &&
       normalizeEq(fetchedTrustlinesEq.value) === eq &&
       fetchedTrustlines.value != null
-    return (fetchedOk ? fetchedTrustlines.value : null) ?? snapshotTrustlines.value
+    return fetchedOk ? fetchedTrustlines.value : null
   })
+
+  const trustlines = computed(() => {
+    return answeredTrustlines.value ?? snapshotTrustlines.value
+  })
+
+  /**
+   * `F-013-7`. Порядок ветвей здесь — это и есть содержание находки.
+   *
+   * «Ответил» проверяется ПЕРВЫМ и перебивает выполняющийся запрос: держать ответ и обновлять его
+   * — это устаревание, а не отсутствие, и блокировать по нему мутации значило бы гасить панель на
+   * каждый опрос. «Не спрашивали» — последняя ветвь, и она НЕ равна «ответил пусто»: в первом
+   * случае на экране числа снапшота, за которые не поручился никто.
+   */
+  const trustlinesFetchState = computed<TrustlinesFetchState>(() => {
+    if (answeredTrustlines.value != null) return { kind: 'answered' }
+    if (trustlinesLoadingRef.value) return { kind: 'loading' }
+    const message = trustlinesLastErrorRef.value
+    if (message) return { kind: 'failed', message }
+    return { kind: 'never-asked' }
+  })
+
+  function findAnsweredTrustline(from: string | null, to: string | null): TrustlineInfo | null {
+    return findAnsweredRow(answeredTrustlines.value, from, to)
+  }
 
   function invalidateTrustlinesCache(eq?: string) {
     const curEq = normalizeEq(eq ?? opts.equivalent.value)
@@ -457,6 +501,8 @@ export function useInteractDataCache(opts: {
     trustlines,
     trustlinesLoading,
     trustlinesLastError,
+    trustlinesFetchState,
+    findAnsweredTrustline,
     refreshParticipants,
     refreshTrustlines,
     refreshPaymentTargets,

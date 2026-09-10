@@ -9,6 +9,11 @@ import { parseAmountNumber, parseAmountStringOrNull } from '../utils/numberForma
 import { participantLabel } from '../utils/participants'
 import { isActiveStatus } from '../utils/status'
 import { renderOrDash } from '../utils/valueFormat'
+import {
+  canActOnTrustlineFigures,
+  trustlineFiguresNotice,
+  type TrustlineFiguresSource,
+} from '../composables/interact/trustlinesSourceState'
 import OverlaySelect from './common/OverlaySelect.vue'
 
 type Props = {
@@ -21,16 +26,20 @@ type Props = {
   available?: string | number | null
 
   /**
-   * `F-013-7`: state of the REST trustlines source that `used`/`currentLimit`/`available` are
-   * meant to come from.  The parent derives those three from `interactSelectedLink`, which
-   * silently falls back to the SSE snapshot whenever the trustlines array is empty -- so without
-   * these two flags this panel cannot tell "the backend says there is no such trustline" from
-   * "the backend has not answered".  Reading a stale number is tolerable; UPDATING or CLOSING a
-   * trustline on one is not, so the mutating controls below fail closed while the source is
-   * unsettled.  Optional so that fixture-only callers keep working; absent means "settled".
+   * `F-013-7`: чем обоснованы `used`/`currentLimit`/`available`. Родитель берёт их из
+   * `interactSelectedLink`, а тот при пустом ответе молча берёт числа из SSE-снапшота.
+   * Читать устаревшее число терпимо; ПРАВИТЬ или ЗАКРЫВАТЬ линию по нему — нет.
+   *
+   * ОБЯЗАТЕЛЬНЫЙ ПРОП, и это главное в нём. Раньше здесь были два НЕОБЯЗАТЕЛЬНЫХ
+   * флага со значением по умолчанию «всё хорошо»: fail-open умолчание на fail-closed гарде —
+   * вызывающий, забывший их передать, молча получал разрешённую мутацию. Отсутствие
+   * основания теперь читается как «оснований нет» и в типах, и в рантайме.
+   *
+   * Считает его родитель: только там виден НЕСЛИТЫЙ ответ источника. В пропе `trustlines`
+   * ниже строка из снапшота неотличима от строки из ответа бэкенда, и считать по ней
+   * основание значило бы воспроизвести ту же находку этажом ниже.
    */
-  trustlinesLoading?: boolean
-  trustlinesLastError?: string | null
+  figuresSource: TrustlineFiguresSource
 
   /** Optional dropdown data (prefer backend-driven list from Interact Actions API). */
   participants?: ParticipantInfo[]
@@ -63,25 +72,16 @@ const selectedTl = computed(() => {
 })
 
 /**
- * `F-013-7`: true when this panel has NO authoritative row for the selected pair AND the source
- * that would produce one has not settled.  `selectedTl` non-null is an answer from the REST
- * trustlines cache; `selectedTl` null while loading or after an error is silence, and the
- * `used`/`currentLimit`/`available` props then carry snapshot numbers instead.
+ * `F-013-7`: есть ли основание действовать по показанным числам.
  *
- * Note what this deliberately does NOT block: a refresh in flight while the previously fetched
- * row is still held.  That row is a real answer, only possibly stale, and blocking on it would
- * make the panel unusable during every poll.
+ * Что это СПЕЦИАЛЬНО НЕ блокирует, и оба случая судятся тестами:
+ *  - обновление в полёте, пока прежний ответ ещё на руках, — это устаревание, и гасить
+ *    панель на каждый опрос нельзя;
+ *  - «источник ответил, и линии у этой пары нет» — это ОТВЕТ, а не молчание.
  */
-const trustlineSourceUnsettled = computed(() => Boolean(props.trustlinesLoading) || Boolean(props.trustlinesLastError))
-const trustlineSourceUnavailable = computed(() => trustlineSourceUnsettled.value && selectedTl.value == null)
+const trustlineSourceUnavailable = computed(() => !canActOnTrustlineFigures(props.figuresSource))
 
-const sourceUnavailableText = computed<string | null>(() => {
-  if (!trustlineSourceUnavailable.value) return null
-  // Stated as a fact about the data, not as a policy about buttons: this panel is also open in
-  // the create and pick phases, where Create stays enabled because it does not read these figures.
-  if (props.trustlinesLoading) return 'Trustline data is still loading from the backend; the figures for this pair are not available yet.'
-  return `Trustline data could not be loaded: ${props.trustlinesLastError}. The figures for this pair are not available, and what the graph shows may be out of date.`
-})
+const sourceUnavailableText = computed<string | null>(() => trustlineFiguresNotice(props.figuresSource))
 
 const effectiveData = computed(() => {
   // Fail closed: show nothing rather than presenting the snapshot's numbers as this trustline's.

@@ -25,6 +25,10 @@ function mountPopup(overrides: Record<string, unknown> = {}) {
     phase: state.phase,
     state,
     unit: 'UAH',
+    // `F-013-7`: основание для чисел — обязательный проп, и его отсутствие теперь запрещает мутацию.
+    // Этот файл судит остальное поведение попапа, поэтому здесь источник ответил строкой;
+    // сам гард судится в EdgeDetailPopup.sourceUnavailable.test.ts, где умолчания намеренно нет.
+    figuresSource: { kind: 'row' } as const,
     used: '0.00',
     limit: '10.00',
     available: '10.00',

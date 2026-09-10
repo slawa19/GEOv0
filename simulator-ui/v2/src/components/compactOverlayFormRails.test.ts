@@ -107,6 +107,7 @@ describe('shared compact overlay form rails', () => {
             { pid: 'alice', name: 'Alice' },
             { pid: 'bob', name: 'Bob with a very long trustline label for compact rail checks' },
           ],
+          figuresSource: { kind: 'no-row' } as const,
           trustlines: [],
           busy: false,
           confirmTrustlineCreate: vi.fn(),

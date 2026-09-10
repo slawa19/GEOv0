@@ -637,6 +637,11 @@ export const EN: Record<string, string> = {
   'graph.analytics.activity.transactionsUnattributableDescription': 'The snapshot carries committed transactions, but the rows publish no counterparties, so we cannot tell which of them involve this participant. Any count would be an undercount.',
   'graph.analytics.activity.transactionsTruncatedTitle': 'Transaction counters are lower bounds',
   'graph.analytics.activity.transactionsTruncatedDescription': 'The server returned only the most recent transactions and cut the rest, so the numbers shown are at least this many, not totals.',
+  // F-013-R2. The counters derived from `incidents` and `audit_log`. This client requests neither
+  // collection, so in real mode both rows are blank; saying why is the difference between an
+  // honest silence and a screen that looks broken.
+  'graph.analytics.activity.snapshotCollectionsNotIncludedTitle': 'Incident and participant-op counters were not requested',
+  'graph.analytics.activity.snapshotCollectionsNotIncludedDescription': 'This snapshot does not carry the incidents and audit-log collections, so these counters cannot be computed here. They are filled in from the per-participant metrics endpoint when it answers. Absent is not the same as zero.',
 
   'graph.analytics.summary.pickEquivalentTitle': 'Pick an equivalent (not ALL) to enable analytics cards',
   'graph.analytics.summary.widgetsTitle': 'Summary widgets',
@@ -709,6 +714,7 @@ export const EN: Record<string, string> = {
   'app.status.unknownDetail': 'no health answer received yet - this is not a report that the system is well',
   'app.status.degraded': 'schema behind head',
   'app.status.migrationsBehindDetail': 'database schema is at {current}, head is {head}',
+  'app.status.serviceDegradedDetail': 'the service reports its own status as "{status}"',
   'app.status.apiSource': 'API source: {label}',
   'app.status.scenario': 'scenario: {scenario}',
   'app.apiMode.mock': 'MOCK DATA',

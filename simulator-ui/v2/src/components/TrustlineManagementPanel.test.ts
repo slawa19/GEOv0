@@ -51,6 +51,8 @@ describe('TrustlineManagementPanel', () => {
             { pid: 'alice', name: 'Alice' },
             { pid: 'bob', name: 'Bob' },
           ],
+          // `F-013-7`: основание для чисел — обязательный проп; здесь источник ответил.
+          figuresSource: { kind: 'no-row' } as const,
           trustlines: [],
           busy: false,
           confirmTrustlineCreate: vi.fn(),
@@ -96,6 +98,8 @@ describe('TrustlineManagementPanel', () => {
           currentLimit: '20',
           available: '10',
           participants: [],
+          // `F-013-7`: основание для чисел — обязательный проп; здесь источник ответил.
+          figuresSource: { kind: 'no-row' } as const,
           trustlines: [],
           busy: false,
           confirmTrustlineCreate: vi.fn(),
@@ -143,6 +147,8 @@ describe('TrustlineManagementPanel', () => {
           currentLimit: '10',
           available: '9',
           participants: [],
+          // `F-013-7`: основание для чисел — обязательный проп; здесь источник ответил.
+          figuresSource: { kind: 'no-row' } as const,
           trustlines: [],
           busy: false,
           confirmTrustlineCreate: vi.fn(),
@@ -184,6 +190,8 @@ describe('TrustlineManagementPanel', () => {
           currentLimit: '10',
           available: '10',
           participants: [],
+          // `F-013-7`: основание для чисел — обязательный проп; здесь источник ответил.
+          figuresSource: { kind: 'row' } as const,
           trustlines: [
             {
               from_pid: 'alice',
@@ -249,6 +257,8 @@ describe('TrustlineManagementPanel', () => {
             { pid: 'alice', name: 'Alice' },
             { pid: 'bob', name: 'Bob' },
           ],
+          // `F-013-7`: основание для чисел — обязательный проп; здесь источник ответил.
+          figuresSource: { kind: 'no-row' } as const,
           trustlines: [],
           busy: false,
           confirmTrustlineCreate,
@@ -298,6 +308,57 @@ describe('TrustlineManagementPanel', () => {
     host.remove()
   })
 
+  /**
+   * `F-013-7`, fail-open умолчание на fail-closed гарде.
+   *
+   * До починки основание для чисел приезжало двумя НЕОБЯЗАТЕЛЬНЫМИ флагами со значением
+   * по умолчанию «источник устоялся»: чтобы гарда не стало, достаточно было их не передать.
+   * Именно так был смонтирован legacy-снимок разметки и каждый тест в этом файле.
+   *
+   * Теперь это один ОБЯЗАТЕЛЬНЫЙ проп, и его отсутствие читается как «оснований нет» — типы ловят
+   * такого вызывающего на сборке, а этот тест — в рантайме.
+   */
+  it('F-013-7: a caller that passes no ground gets a refusal, not a permission', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const state = baseState({ fromPid: 'alice', toPid: 'bob' })
+
+    const app = createApp({
+      render: () =>
+        h(trustlineManagementPanelComponent, {
+          phase: 'editing-trustline',
+          state,
+          unit: 'EQ',
+          // Числа есть, и долга по ним нет — то есть каскад «долга нет → можно закрывать» сработал бы.
+          used: '0',
+          currentLimit: '100',
+          available: '100',
+          participants: [],
+          trustlines: [],
+          busy: false,
+          confirmTrustlineCreate: vi.fn(),
+          confirmTrustlineUpdate: vi.fn(),
+          confirmTrustlineClose: vi.fn(),
+          cancel: vi.fn(),
+        }),
+    })
+
+    app.mount(host)
+    await nextTick()
+
+    const closeBtn = host.querySelector('[data-testid="trustline-close-btn"]') as HTMLButtonElement | null
+    expect(closeBtn).toBeTruthy()
+    expect(
+      closeBtn?.disabled,
+      'панель без переданного основания разрешает закрытие линии',
+    ).toBe(true)
+    expect(host.querySelector('[data-testid="tl-source-unavailable"]')).toBeTruthy()
+
+    app.unmount()
+    host.remove()
+  })
+
   it('TL-3: marks existing trustlines as (exists) in create-flow To dropdown', async () => {
     const host = document.createElement('div')
     document.body.appendChild(host)
@@ -318,6 +379,8 @@ describe('TrustlineManagementPanel', () => {
             { pid: 'bob', name: 'Bob' },
             { pid: 'carol', name: 'Carol' },
           ],
+          // `F-013-7`: основание для чисел — обязательный проп; здесь источник ответил.
+          figuresSource: { kind: 'row' } as const,
           trustlines: [
             {
               from_pid: 'alice',
@@ -373,6 +436,8 @@ describe('TrustlineManagementPanel', () => {
           currentLimit: '10',
           available: '10',
           participants: [],
+          // `F-013-7`: основание для чисел — обязательный проп; здесь источник ответил.
+          figuresSource: { kind: 'no-row' } as const,
           trustlines: [],
           busy: false,
           confirmTrustlineCreate: vi.fn(),
@@ -429,6 +494,8 @@ describe('TrustlineManagementPanel', () => {
             { pid: 'alice', name: 'Alice' },
             { pid: 'bob', name: 'Bob' },
           ],
+          // `F-013-7`: основание для чисел — обязательный проп; здесь источник ответил.
+          figuresSource: { kind: 'no-row' } as const,
           trustlines: [],
           busy: false,
           confirmTrustlineCreate: vi.fn(),
@@ -473,6 +540,8 @@ describe('TrustlineManagementPanel', () => {
             { pid: 'alice', name: 'Alice' },
             { pid: 'bob', name: 'Bob' },
           ],
+          // `F-013-7`: основание для чисел — обязательный проп; здесь источник ответил.
+          figuresSource: { kind: 'row' } as const,
           trustlines: [
             {
               from_pid: 'alice',
@@ -525,6 +594,8 @@ describe('TrustlineManagementPanel', () => {
             { pid: 'alice', name: longName },
             { pid: 'bob', name: longName },
           ],
+          // `F-013-7`: основание для чисел — обязательный проп; здесь источник ответил.
+          figuresSource: { kind: 'row' } as const,
           trustlines: [
             {
               from_pid: 'alice',

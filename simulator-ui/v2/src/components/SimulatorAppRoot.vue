@@ -23,6 +23,11 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
  import { provideTopBarContext, type TopBarContext } from '../composables/useTopBarContext'
 
  import type { InteractPhase } from '../composables/useInteractMode'
+import {
+  canActOnTrustlineFigures,
+  resolveTrustlineFiguresSource,
+  type TrustlineFiguresSource,
+} from '../composables/interact/trustlinesSourceState'
 import { provideActivePanelState } from '../composables/useActivePanelState'
  import type { Point } from '../types/layout'
  import { useSimulatorStorage } from '../composables/usePersistedSimulatorPrefs'
@@ -657,39 +662,39 @@ const interactSelectedLink = computed<GraphLink | null>(() => {
 })
 
 /**
- * Пришла ли выбранная линия из АВТОРИТЕТНОГО источника, или из молчаливого фоллбэка на снапшот
- * (`F-013-7`, третья копия, 2026-09-10).
+ * ЧЕМ ОБОСНОВАНЫ числа выбранной линии (`F-013-7`, третья копия; расширено 2026-09-10).
  *
  * `interactSelectedLink` выше предпочитает REST-результат только когда массив непустой, иначе
  * молча берёт снапшот. Для ПРОСМОТРА это допустимо и так и задумано; для МУТИРУЮЩЕГО контрола —
- * нет: «источник ответил пусто» и «источник не ответил» на этом месте неразличимы, а решение
- * «разрешить закрыть линию» принимается по числам из второго случая.
+ * нет: решение «разрешить закрыть линию» принималось бы по чужим числам.
  *
- * Условие ровно то же, что в `TrustlineManagementPanel`: источник не устоялся (грузится или
- * упал) И авторитетной строки для этой пары у нас нет. Если строка есть — она настоящий ответ,
- * пусть и полученный раньше; это вопрос устаревания, а не отсутствия, и он здесь не решается.
+ * ПОЧЕМУ РЕШЕНИЕ ЖИВЁТ ЗДЕСЬ, А СОСТОЯНИЕ ИСТОЧНИКА — В КЭШЕ. Жизненный цикл запроса
+ * знает только `useInteractDataCache` — он и отдаёт `trustlinesFetchState` вместе с
+ * `findAnsweredTrustline`, который смотрит в НЕСЛИТЫЙ ответ. А какая пара выбрана и какой
+ * поверхности отвечать — знает только корень, рядом с тем самым фоллбэком, который он
+ * страхует. Компоненты получают готовое основание ПРОПОМ именно потому, что сами вычислить
+ * его не могут: им виден только слитый список, в котором строка из снапшота неотличима от
+ * строки из ответа бэкенда.
  */
-const interactLinkSourceUnavailable = computed<boolean>(() => {
-  const unsettled = trustlinesLoading.value || !!trustlinesLastError.value
-  if (!unsettled) return false
+const interactSelectedLinkFiguresSource = computed<TrustlineFiguresSource>(() => {
   const from = interact.mode.state.fromPid
   const to = interact.mode.state.toPid
-  if (!from || !to) return false
-  const tls = interact.mode.trustlines.value
-  const authoritative = Array.isArray(tls)
-    ? (tls.find((t) => t.from_pid === from && t.to_pid === to) ?? null)
-    : null
-  return authoritative == null
+  return resolveTrustlineFiguresSource(
+    interact.mode.trustlinesFetchState.value,
+    interact.mode.findAnsweredTrustline(from, to) != null,
+  )
 })
 
 /**
  * То же для окна edge-detail, с одной поправкой: в режиме `keepAlive` попап показывает
- * ЗАМОРОЖЕННУЮ линию — снимок настоящего ответа, снятый до того, как interact-состояние
- * очистили. Это тоже вопрос устаревания, а не отсутствия, поэтому блокировать там нечего.
+ * ЗАМОРОЖЕННУЮ линию — снимок ответа, снятый до того, как interact-состояние очистили (и
+ * ушло на ДРУГУЮ пару). Это вопрос устаревания, а не отсутствия, поэтому блокировать там нечего.
  */
-const wmEdgeDetailSourceUnavailable = computed<boolean>(() => {
-  if (wmEdgeDetail.state.value === 'keepAlive' && wmEdgeDetail.frozenLink.value != null) return false
-  return interactLinkSourceUnavailable.value
+const wmEdgeDetailFiguresSource = computed<TrustlineFiguresSource>(() => {
+  if (wmEdgeDetail.state.value === 'keepAlive' && wmEdgeDetail.frozenLink.value != null) {
+    return { kind: 'frozen' }
+  }
+  return interactSelectedLinkFiguresSource.value
 })
 
 function formatDemoActionError(e: unknown): string {
@@ -1092,6 +1097,9 @@ function goInteract() {
 function onEdgeDetailCloseLine() {
   // Delegate to mode action (will transition to idle on success).
   if (interactPhase.value !== 'editing-trustline') return
+  // `F-013-7`: отключённая кнопка — это видимость гарда, а не гард: этот обработчик
+  // вызывается по событию от попапа, и решение о мутации принимается здесь же, где известно основание.
+  if (!canActOnTrustlineFigures(wmEdgeDetailFiguresSource.value)) return
   captureInteractFlowOpener('[data-testid="actionbar-trustline"]', {
     focusOwnerType: 'edge-detail',
     preferFallback: true,
@@ -1380,7 +1388,7 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
           :available="emptyToNull(wmEdgeDetailEffectiveLink?.available)"
           :status="emptyToNullString(wmEdgeDetailEffectiveLink?.status)"
           :busy="wmEdgeDetailEffectiveBusy"
-          :source-unavailable="wmEdgeDetailSourceUnavailable"
+          :figures-source="wmEdgeDetailFiguresSource"
           :force-hidden="false"
           :close="() => uiCloseEdgeDetailWindow('action')"
           @change-limit="onEdgeDetailChangeLimit"
@@ -1440,8 +1448,7 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
           :used="emptyToNull(interactSelectedLink?.used)"
           :current-limit="emptyToNull(interactSelectedLink?.trust_limit)"
           :available="emptyToNull(interactSelectedLink?.available)"
-          :trustlines-loading="trustlinesLoading"
-          :trustlines-last-error="trustlinesLastError"
+          :figures-source="interactSelectedLinkFiguresSource"
           :participants="interact.mode.participants.value"
           :trustlines="interact.mode.trustlines.value"
           :busy="interact.mode.busy.value"

@@ -103,6 +103,12 @@ export type Transaction = {
   type: string
   initiator_pid: string
   equivalent?: string | null
+  /** PAYMENT: who paid. Absent when the internal payload did not carry it. */
+  from?: string
+  /** PAYMENT: who was paid. */
+  to?: string
+  /** CLEARING: the cycle reduced to who owed whom. Amounts and debt ids stay internal. */
+  edges?: Array<{ debtor: string; creditor: string }>
   payload?: Record<string, unknown>
   signatures?: unknown[] | null
   state: string
