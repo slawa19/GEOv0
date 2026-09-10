@@ -256,8 +256,14 @@ export function useInteractMode(opts: {
 
   // Refresh policy: when the underlying graph snapshot changes (tick / new graph),
   // revalidate payment targets for the current From (if the payment flow is active).
+  //
+  // ВТОРОЙ ПОТРЕБИТЕЛЬ ТОЙ ЖЕ РЕВИЗИИ, и он обязан двигаться вместе с первым (`F-013-2` /
+  // `T1303`, 2026-09-10). Очистка кэша в `useInteractDataCache` делает ответ ПУСТЫМ, а не
+  // свежим; перезапрашивает — вот этот watch. Если добавить `data_revision` только в один из
+  // двух, после патча останется либо устаревший набор целей, либо пустой, и оба варианта хуже
+  // третьего. Это тот же урок «сигнал построен в двух местах», что и в `F-013-4`.
   watch(
-    () => String(opts.snapshot.value?.generated_at ?? ''),
+    () => `${String(opts.snapshot.value?.generated_at ?? '')}|${opts.snapshot.value?.data_revision ?? 0}`,
     () => {
       prefetchPaymentTargetsForCurrentFrom({ force: true })
     },

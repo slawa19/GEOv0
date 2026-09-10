@@ -2,6 +2,7 @@ import type { LayoutNode } from '../../types/layout'
 import { getNodeShape } from '../../types/nodeShape'
 import { LruCache } from '../../utils/lruCache'
 import { getNodeScaledGeometry } from '../nodeGeometry'
+import { sizeForNode } from '../nodeSizing'
 import { roundedRectPath2D } from '../roundedRect'
 
 const OUTLINE_CACHE_SCALE_QUANT = 100
@@ -27,7 +28,19 @@ export function nodeOutlinePath2D(n: LayoutNode, scale = 1, invZoom = 1): Path2D
   // Cache across frames: key uses rounded positions (1px grid) to maximise hit rate
   // during physics micro-movements while still detecting real positional changes.
   const shapeKeyForCache = getNodeShape(n) ?? ''
-  const cacheKey = `${n.id}|${Math.round(n.__x)}|${Math.round(n.__y)}|${shapeKeyForCache}|${Math.round(scale * OUTLINE_CACHE_SCALE_QUANT)}|${Math.round(invZoom * OUTLINE_CACHE_INVZOOM_QUANT)}`
+  // SIZE IS PART OF THE KEY (F-013-3 / T1304, 2026-09-10). It was not, and `viz_size` arrives on
+  // `node_patch` (`api/normalizeSimulatorEvent.ts:99-107` -> `demo/patches.ts:51`) at unchanged
+  // position and zoom - so the node kept being drawn at the size it had before the patch, with no
+  // event able to clear it: the only invalidator keys on `${equivalent}|${generated_at}`, and
+  // patches do not move `generated_at` (that is F-013-2, the other half of this scenario).
+  //
+  // THE EFFECTIVE SIZE, NOT THE RAW `viz_size`. `sizeForNode` normalises missing, non-numeric and
+  // too-small values onto the same result, so keying on the raw field would multiply cache entries
+  // for spellings that draw identically - measured: six spellings produce four entries where one
+  // is correct. This is the same function the geometry below uses, so the key cannot disagree with
+  // what is drawn.
+  const sizeForKey = sizeForNode(n)
+  const cacheKey = `${n.id}|${Math.round(n.__x)}|${Math.round(n.__y)}|${shapeKeyForCache}|${sizeForKey.w}x${sizeForKey.h}|${Math.round(scale * OUTLINE_CACHE_SCALE_QUANT)}|${Math.round(invZoom * OUTLINE_CACHE_INVZOOM_QUANT)}`
 
   const cached = nodeOutlinePath2DCache.get(cacheKey)
   if (cached) return cached

@@ -340,8 +340,14 @@ export function useInteractDataCache(opts: {
 
   // Snapshot change implies the underlying graph semantics may have changed.
   // Keep behavior deterministic: clear payment-targets cache so consumers can re-fetch.
+  //
+  // `data_revision` ДОБАВЛЕН 2026-09-10 (`F-013-2` / `T1303`), и без него этот watch пропускал
+  // ровно те изменения, ради которых он нужен: `tx.updated` и `clearing.done` применяют патчи и
+  // НЕ двигают `generated_at` (`realEventPipeline.ts:349-350`, `:414-415` против `:236`, `:312`),
+  // поэтому после платежа, изменившего балансы, кэш целей продолжал отвечать доплатёжным
+  // множеством — и `canSendPayment` разрешал отправку по маршруту, которого уже нет.
   watch(
-    () => String(opts.snapshot.value?.generated_at ?? ''),
+    () => `${String(opts.snapshot.value?.generated_at ?? '')}|${opts.snapshot.value?.data_revision ?? 0}`,
     () => {
       paymentTargetsByKey.value = new Map()
       paymentTargetsLoadingByKey.value = new Map()

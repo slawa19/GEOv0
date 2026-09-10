@@ -38,6 +38,16 @@ export function createPatchApplier(opts: {
 }) {
   const { getSnapshot, getLayoutNodes, getLayoutLinks, keyEdge } = opts
 
+  /**
+   * `F-013-2` / `T1303`: применение патча — это изменение данных, и потребители, кэширующие
+   * производные от графа, обязаны иметь возможность это заметить. Счётчик живёт здесь, а не в
+   * обработчиках событий, ровно по правилу §16.1: иначе следующий вызывающий `applyNodePatches`
+   * унесёт с собой молчаливо устаревающий кэш.
+   */
+  function bumpDataRevision(snapshot: GraphSnapshot) {
+    snapshot.data_revision = (snapshot.data_revision ?? 0) + 1
+  }
+
   type PatchableNode = GraphSnapshot['nodes'][number] | LayoutNode
   type PatchableLink = GraphSnapshot['links'][number] | LayoutLink
 
@@ -83,6 +93,8 @@ export function createPatchApplier(opts: {
         applyNodePatchInPlace(layoutNodes[li], p)
       }
     }
+
+    bumpDataRevision(snapshot)
   }
 
   function applyEdgePatches(patches: EdgePatch[] | undefined) {
@@ -107,6 +119,8 @@ export function createPatchApplier(opts: {
         applyEdgePatchInPlace(layoutLinks[li], p)
       }
     }
+
+    bumpDataRevision(snapshot)
   }
 
   return { applyNodePatches, applyEdgePatches }
