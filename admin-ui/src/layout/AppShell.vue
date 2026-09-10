@@ -224,14 +224,38 @@ function navigate(path: string) {
           </el-breadcrumb>
 
           <div class="status">
+            <!-- Четыре ветки, потому что состояний четыре (F-013-4 / T1305). Здесь стояли две:
+                 `error` и всё остальное, отчего «мы ещё не спрашивали» рисовалось тем же зелёным,
+                 что и «спросили, всё хорошо». Развилку считает геттер `healthStore.status` -
+                 в шаблоне её быть не должно, иначе она разъедется со стором, как уже было. -->
             <el-tooltip
-              v-if="healthStore.error"
-              :content="healthStore.error"
+              v-if="healthStore.status === 'error'"
+              :content="healthStore.error || ''"
               placement="bottom"
               effect="dark"
             >
               <el-tag type="danger">
                 {{ t('app.status.healthError') }}
+              </el-tag>
+            </el-tooltip>
+            <el-tooltip
+              v-else-if="healthStore.status === 'degraded'"
+              :content="healthStore.degradedReason || ''"
+              placement="bottom"
+              effect="dark"
+            >
+              <el-tag type="warning">
+                {{ t('app.status.degraded') }}
+              </el-tag>
+            </el-tooltip>
+            <el-tooltip
+              v-else-if="healthStore.status === 'unknown'"
+              :content="t('app.status.unknownDetail')"
+              placement="bottom"
+              effect="dark"
+            >
+              <el-tag type="info">
+                {{ t('app.status.unknown') }}
               </el-tag>
             </el-tooltip>
             <el-tag

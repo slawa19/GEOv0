@@ -104,7 +104,11 @@ function healthBranch(wrapper: VueWrapper): Branch {
     .filter((tag) => (tag.element as HTMLElement).closest('.status') !== null)
   expect(statusTags.length, 'в .status не осталось ни одного el-tag — индикатор здоровья не найден').toBeGreaterThan(0)
 
+  // `expect(...).toBeGreaterThan(0)` убеждает vitest, но не `vue-tsc`: под `noUncheckedIndexedAccess`
+  // индексный доступ всё равно даёт `T | undefined`. Проверяем явно, иначе сборка админки красная,
+  // а сборка - гейт (`npm --prefix admin-ui run build` включает проверку типов).
   const indicator = statusTags[0]
+  if (!indicator) throw new Error('в .status не осталось ни одного el-tag — индикатор здоровья не найден')
   return {
     type: String(indicator.props('type') ?? ''),
     label: indicator.text().trim(),
@@ -244,6 +248,62 @@ describe('RT-013-3 — индикатор здоровья AppShell выдаёт
       reGreened.type,
       '«перепроверяем после сбоя» и «подтверждённо здорово» отрисованы ОДНОЙ веткой: ' +
         `${describeBranch(reGreened)} против контрольной ${describeBranch(healthy)}`,
+    ).not.toBe(healthy.type)
+  })
+
+  /**
+   * СОСТОЯНИЕ: цикл опроса УЖЕ проходил успешно (`health` наполнен), затем следующий упал, затем
+   *   начался третий и висит на запросах.
+   * ЧЕСТНЫЙ UI: последнее известное — «сломано», идёт перепроверка.
+   * ЧТО ВМЕСТО: экран зеленеет, и это ХУЖЕ соседнего случая выше — там за зелёным не стояло
+   *   ничего, а здесь за ним стоит УСТАРЕВШИЙ успешный ответ, который выглядит как основание.
+   *
+   * ЗАЧЕМ ЭТОТ СЛУЧАЙ ОТДЕЛЬНО, и это измерено, а не предположено. В соседнем тесте выше первый
+   * же опрос падает, поэтому `health` остаётся `null`, и при восстановленном дефекте экран
+   * попадает в ветку «неизвестно» — ассерт `not.toBe('success')` проходит, дефект не пойман.
+   * Проверено мутацией: возврат `error = null` до await роняет один тест из двух. Здесь
+   * `health` уже наполнен, поэтому «неизвестно» не спасает, и единственное, что отделяет экран
+   * от зелёного, — сохранённый прошлый вердикт.
+   * ЯКОРЬ РЕШЕНИЯ: `admin-ui/src/stores/health.ts` — `error` снимается только успехом.
+   */
+  it('после успешного цикла и последующего сбоя перепроверка не возвращает зелёное', async () => {
+    const healthy = await confirmedHealthyBranch()
+
+    apiMock.health.mockResolvedValue(ok(HEALTH_OK))
+    apiMock.healthDb.mockResolvedValue(ok(HEALTH_DB_OK))
+    apiMock.migrations.mockResolvedValue(ok(MIGRATIONS_UP_TO_DATE))
+    const { wrapper, store } = track(mountShell())
+    await flushPromises()
+    await nextTick()
+    expect(
+      healthBranch(wrapper).type,
+      'предусловие: первый цикл прошёл успешно и экран действительно зелёный',
+    ).toBe('success')
+    expect(store.health, 'предусловие: успешный ответ сохранён — именно он делает случай отличным от соседнего').not.toBeNull()
+
+    apiMock.health.mockRejectedValueOnce(new Error('health probe failed'))
+    await store.refresh()
+    await nextTick()
+    expect(
+      healthBranch(wrapper).type,
+      'предусловие: сбой второго цикла виден на экране',
+    ).toBe('danger')
+
+    // Третий цикл: запросы отправлены, ответов ещё нет.
+    apiMock.health.mockImplementation(() => neverResolves())
+    void store.refresh()
+    await nextTick()
+
+    const reChecking = healthBranch(wrapper)
+    expect(
+      reChecking.type,
+      `известная поломка стёрта началом перепроверки, и под зелёным лежит устаревший успешный ` +
+        `ответ: ${describeBranch(reChecking)}`,
+    ).not.toBe('success')
+    expect(
+      reChecking.type,
+      '«перепроверяем после сбоя, имея старый успех» и «подтверждённо здорово» отрисованы ОДНОЙ ' +
+        `веткой: ${describeBranch(reChecking)} против контрольной ${describeBranch(healthy)}`,
     ).not.toBe(healthy.type)
   })
 
