@@ -90,9 +90,25 @@ REQUIRED_COVERAGE = {
         lambda cs: any(c["value"].startswith("-") and c["precision"] == 8 for c in cs),
     "a negative past the storage scale":
         lambda cs: any(c["value"].startswith("-") and c["precision"] > 8 for c in cs),
+    # TIGHTENED 2026-09-10 (closure review). The predicate used to read
+    # `_scale_of(value) > precision`, which `-0.05` at precision 0 satisfies although NOTHING is
+    # stripped from it - the value is finer than its precision, so it is shown in full. Under the
+    # old form, deleting `-12.300`@1 left this class green with no negative-stripping case in the
+    # table at all. It now asks the only question that matters: did digits actually leave?
     "a negative that is stripped rather than padded":
         lambda cs: any(
-            c["value"].startswith("-") and _scale_of(c["value"]) > c["precision"] for c in cs
+            c["value"].startswith("-") and _scale_of(c["expected"]) < _scale_of(c["value"])
+            for c in cs
+        ),
+    # ADDED 2026-09-10 (closure review), and it is the class whose absence cost the most: not one
+    # of the 39 cases was a nonzero integer ending in zero, so a whole-string zero-stripper passed
+    # the entire table while rendering `120` at precision 0 as `12`.
+    "a nonzero integer whose last digit is zero":
+        lambda cs: any(
+            _scale_of(c["value"]) == 0
+            and c["value"].lstrip("-").endswith("0")
+            and c["value"].lstrip("-").strip("0") != ""
+            for c in cs
         ),
     "a value finer than its precision":
         lambda cs: any(_scale_of(c["value"]) > c["precision"] for c in cs),
@@ -165,6 +181,25 @@ def _strips_every_trailing_zero(value: str, precision: int) -> str:
     return text.rstrip("0").rstrip(".") or "0"
 
 
+def _strips_trailing_zeros_before_padding(value: str, precision: int) -> str:
+    """Strips trailing zeros from the WHOLE string, then pads the fraction to `precision`.
+
+    Found by the closure review 2026-09-10, and it is the most dangerous entry in this list: it
+    agreed with all 39 cases the table held before that date, because none of them was a nonzero
+    integer ending in zero. It renders `120` at precision 0 as `12`.
+
+    Plausible because the rule really is "strip what the precision does not need" - the mistake is
+    applying that to the magnitude as well as to the fraction.
+    """
+
+    text = format(Decimal(value), "f")
+    text = text.rstrip("0").rstrip(".") or "0"
+    if precision == 0:
+        return text
+    whole, _, frac = text.partition(".")
+    return f"{whole}.{frac.ljust(precision, '0')}"
+
+
 def _loses_the_sign(value: str, precision: int) -> str:
     magnitude = abs(Decimal(value))
     scale = -magnitude.as_tuple().exponent
@@ -222,6 +257,7 @@ WRONG_IMPLEMENTATIONS = [
     ("ignores precision, always renders at storage scale", _always_storage_scale),
     ("ignores precision, echoes the input", _echoes_the_input),
     ("strips every trailing zero, including declared ones", _strips_every_trailing_zero),
+    ("strips trailing zeros from the whole string, then pads", _strips_trailing_zeros_before_padding),
     ("right digits, lost sign", _loses_the_sign),
     ("routes the amount through a float", _goes_through_a_float),
     ("caps display precision at the storage scale 8", _caps_display_precision_at_the_storage_scale),

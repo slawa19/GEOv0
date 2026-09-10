@@ -195,7 +195,7 @@ MONEY_MAX_INTEGER_DIGITS = 12
 # `Equivalent.precision` is now 0..8, so no NEW equivalent can declare a precision past the
 # storage scale, and the derivation above no longer supports the number 18.
 #
-# CORRECTION, SAME DAY, from external review (gpt-6-astra, medium): the sentence this replaces
+# CORRECTION (2026-09-10, external review - gpt-6-astra, medium): the sentence this replaces
 # said "the widest fraction any of our producers can emit is now 8 digits", and that is FALSE.
 # The domain narrowed; the DATA did not.  A row written when the door accepted `precision: 12`
 # is still in the database, ORM hydration does not run the model's `@validates`, and every money

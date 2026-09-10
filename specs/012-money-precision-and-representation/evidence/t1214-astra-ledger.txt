@@ -1,0 +1,71 @@
+T1214 — closing external review (the §15 fix-delta circle) of programme 012
+==========================================================================
+
+Direction        Claude Code (orchestrator) -> Codex (external reviewer), per
+                 docs/external-review-runbook.md §3 and AGENTS.md §15.
+CLI              codex-cli 0.154.0
+Binary           C:\Users\admin\tools\node-v22.12.0-win-x64\codex.cmd
+Model requested  gpt-6-astra   (requested value; the CLI does not report a resolved per-run
+                                model id, so this is NOT recorded as a confirmed resolution)
+Reasoning        medium        (-c model_reasoning_effort="medium"; the CLI header echoed
+                                "reasoning effort: medium" in both progress logs)
+Sandbox          --sandbox read-only
+Working root     frozen standalone clone (`git clone --no-hardlinks`), not a worktree
+Reviewed SHA     c55feaa
+Base             422ed50, exposed as the named branch `review-base`
+                 (422ed50 is the SHA T1213 reviewed, so this circle covers exactly the
+                 fix-delta plus the closure reconciliation)
+Prompt freeze    the questions prompt was written in full before the run and NOT edited after
+                 launch; the tree was likewise frozen. Both freezes declared before starting.
+Credential-free  the clone contains only tracked files; `.env*` present are the three
+                 `.example` files. STANDING MACHINE RISK, unchanged and recorded 2026-08-14 in
+                 specs/BACKLOG.md: the git credential store lives in the home directory and is
+                 reachable on this machine, so "credential-free" here means the transferred
+                 set, not the filesystem.
+
+Slice 1 - diff review (built-in review mode; the target is fixed mechanically, not promised)
+  codex exec --sandbox read-only -C <clone> review --base review-base \
+        -m gpt-6-astra -c model_reasoning_effort="medium" -o final_range.md
+  exit 0, non-empty -o file -> t1214-astra-final-range.md
+  Result: no actionable regressions relative to the merge base.
+
+Slice 2 - closure questions (generic exec, prompt on stdin, six questions C1-C6)
+  Get-Content prompt_closure.txt -Raw | codex exec --sandbox read-only -C <clone> \
+        -m gpt-6-astra -c model_reasoning_effort="medium" -o final_closure.md -
+  exit 0, non-empty -o file -> t1214-astra-final-closure.md
+
+Markers returned
+  VERDICT-CLOSURE-RECORD .... OVERSTATED
+  VERDICT-UNVERIFIED-LIST ... INCOMPLETE
+  VERDICT-AUTHORITY ......... RATIONALISATION
+  VERDICT-015-HANDOFF ....... SOUND
+  VERDICT-SENTINELS ......... WEAK
+  VERDICT-012-CLOSURE ....... RISK-ACCEPT
+
+Disposition — all five P2 closed; details in the spec, section `T1214`
+  P2  a whole-string zero-stripper passes the entire table ......... CLOSED
+      Reproduced by the orchestrator before accepting: 0 disagreements over the 39-case table,
+      renders `120`@0 as `12`. After the fix: 4 disagreements over 44 cases, the new coverage
+      class reddens when the five added rows are removed, all 14 controls still separated,
+      both UI readers 45 passed.
+  P2  a sentinel satisfied without the property it names ........... CLOSED
+      `-0.05`@0 satisfied `scale(value) > precision` with nothing stripped; predicate replaced
+      by `scale(expected) < scale(value)`, verified to redden when `-12.300`@1 is removed.
+  P2  the "load-bearing rows" argument was circular ................ CLOSED (justification
+      replaced by legacy reachability; the rows themselves kept)
+  P2  the list of what is unverified was incomplete ................ CLOSED (three items added,
+      plus negative controls for the dataset census)
+  P2  the canon authority argument was a rationalisation ........... CLOSED (the operative
+      Owner surface now carries a dated, bounded exception instead of a standing prohibition
+      that the programme was breaking)
+  VERDICT-012-CLOSURE: RISK-ACCEPT ................................. the reviewer states
+      explicitly that recommending this route is NOT itself acceptance of the risk, and that
+      both historical READY-TO-CLOSE: NO results stay scoped to their revisions.
+
+Limits of this evidence, stated because a green report otherwise reads as a passed gate:
+  * The reviewer ran read-only and did NOT execute the canonical runner, the database tiers or
+    the UI suites. Every gate number in the closure record is the orchestrator's own local run,
+    not externally verified.
+  * The requested model is recorded; it is not a confirmed resolved model id.
+  * CI on `main` after the merge is NOT verified from this session - `gh` cannot authenticate
+    here. Named as a limitation, not skipped.

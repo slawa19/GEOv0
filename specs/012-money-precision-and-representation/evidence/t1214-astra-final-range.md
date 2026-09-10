@@ -1,0 +1,1 @@
+No actionable regressions were identified relative to the specified merge base. The mock mutation guards match backend legacy-precision handling, and the added tests preserve legacy rendering coverage. Tests were not executed during this read-only review.

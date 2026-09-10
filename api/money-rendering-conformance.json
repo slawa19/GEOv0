@@ -51,7 +51,16 @@
     "cases at precision 9, 12 and 18 are no longer CONTRACT - the canon cannot produce those",
     "calls any more. Their `why` now says so, one by one, and none of them says 'the contract'.",
     "",
-    "THEY ARE KEPT, AND THE REASON IS MEASURED, NOT PREFERRED. With those ten rows deleted, the",
+    "THEY ARE KEPT. THE FIRST REASON GIVEN HERE WAS CIRCULAR AND IS CORRECTED BELOW (2026-09-10,",
+    "closure review): deleting the rows reddens the table's OWN coverage requirements plus a mutant",
+    "kept on purpose, which shows the deletion is guarded, not that the rows are needed. The",
+    "non-circular reason is LEGACY REACHABILITY: a row written when the door accepted `precision:",
+    "12` is still in the database, ORM hydration does not re-validate it, and every producer",
+    "renders it at its own precision - so an implementation capping display at the storage scale is",
+    "wrong ON REACHABLE DATA, not merely on hypothetical input. The measurement below stands as a",
+    "measurement of the guard, and is kept for that.",
+    "",
+    "THE ORIGINAL MEASUREMENT. With those ten rows deleted, the",
     "table's own discriminating-power check (`test_the_table_can_tell_a_wrong_implementation",
     "_apart`) stops catching `_caps_display_precision_at_the_storage_scale` ENTIRELY: 0",
     "disagreements out of 28 remaining cases, because `min(precision, 8)` is the identity on a",
@@ -64,7 +73,21 @@
     "What that costs is honesty about their status, not the rows: all three implementations take",
     "`precision` as a plain integer and none of them can see an `Equivalent`, so a caller passing",
     "12 is a caller the functions still have to be right for. `to_money_str`'s own `localcontext`",
-    "sizing is pinned on the same footing (`app/utils/money.py`)."
+    "sizing is pinned on the same footing (`app/utils/money.py`).",
+    "",
+    "2026-09-10, CLOSURE REVIEW (gpt-6-astra, medium): THE TABLE STILL HAD A HOLE, AND IT WAS A",
+    "WHOLE CLASS OF VALUE RATHER THAN A PRECISION. Not one of the 39 cases was a nonzero integer",
+    "whose last digit is zero. So an implementation that does `text.rstrip('0').rstrip('.')` on",
+    "the ENTIRE decimal string before padding the fraction passed every single row - measured, 0",
+    "disagreements out of 39 - while rendering `120` at precision 0 as `12`. That is not a",
+    "cosmetic difference; it is a tenfold error in an amount of money, produced by a mistake a",
+    "person could plausibly make while implementing 'precision is a minimum, so strip what is",
+    "not needed'.",
+    "",
+    "Five cases close it, and `_strips_trailing_zeros_before_padding` joins the control set so",
+    "the table is measured against that mistake on every run. NOTE WHAT THIS IS THE THIRD",
+    "INSTANCE OF: the domain of PRECISIONS was the hole the previous review found, and the",
+    "domain of VALUES was this one. The sample keeps being the blind spot, never the code."
   ],
   "rule": "precision is the minimum number of fraction digits, and never fewer than the value itself needs",
   "cases": [
@@ -301,6 +324,36 @@
       "precision": 0,
       "expected": "0",
       "why": "zero at precision 0 is a bare zero, not 0.00"
+    },
+    {
+      "value": "120",
+      "precision": 0,
+      "expected": "120",
+      "why": "A NONZERO INTEGER WHOSE LAST DIGIT IS ZERO - the class this table did not contain at all until 2026-09-10, found by external review. Measured: an implementation that strips trailing zeros from the WHOLE string and then pads the fraction satisfied all 39 previous cases with zero disagreements, and renders this one as '12'. Money off by a factor of ten, invisible to the sample."
+    },
+    {
+      "value": "120",
+      "precision": 2,
+      "expected": "120.00",
+      "why": "the same integer padded: the zero belongs to the magnitude, the added zeros to the fraction, and an implementation that cannot tell them apart fails exactly here"
+    },
+    {
+      "value": "-120",
+      "precision": 0,
+      "expected": "-120",
+      "why": "sign plus an integer ending in zero, so a magnitude-eating strip cannot hide behind the sign handling"
+    },
+    {
+      "value": "10.00",
+      "precision": 0,
+      "expected": "10",
+      "why": "the fraction's trailing zeros ARE dropped down to precision 0 while the magnitude's zero is not - the one case that separates 'strip what the precision does not need' from 'strip trailing zeros'"
+    },
+    {
+      "value": "1050",
+      "precision": 1,
+      "expected": "1050.0",
+      "why": "a zero inside the magnitude and a zero added by the padding, in one string"
     }
   ]
 }
