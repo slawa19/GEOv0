@@ -34,8 +34,9 @@ WHAT THIS MODULE PINS, in order:
      and `str()` of it is the literal text `1E+3`.  Both signs are exercised.
 
   4. **Nothing already-correct moved.**  A differential over values exactly representable at
-     each precision, against the exact expression each producer used before, at precisions
-     0..18.  Asserted as a comparison against the old code, not as a table of expected
+     each precision, against the exact expression each producer used before, across the whole
+     declared domain of `Equivalent.precision` - 0..18 when this was written, 0..8 since
+     2026-08-25 (see `PRECISIONS`).  Asserted as a comparison against the old code, not as a table of expected
      strings - a test carrying its own expected two-digit constants is forbidden by section 4
      of the verification plan, and would only be checking itself.
 
@@ -58,11 +59,12 @@ import logging
 import threading
 import uuid
 from datetime import datetime, timezone
-from decimal import Decimal, ROUND_DOWN
+from decimal import Decimal, ROUND_DOWN, localcontext
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from sqlalchemy import insert, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.clearing.service import ClearingCommittedAfterCancellation
@@ -80,9 +82,24 @@ from app.db.models.trustline import TrustLine
 
 _LOG = logging.getLogger("test.p012.t1207")
 
-# `Equivalent.precision` is declared `ge=0, le=18` (app/schemas/equivalents.py).  The set below
+# `Equivalent.precision` is declared `ge=0, le=8` (app/schemas/equivalents.py).  The set below
 # spans the shipped values (`HOUR` is 1, the default is 2) and both ends of that range.
-PRECISIONS = [0, 1, 2, 4, 8, 18]
+#
+# THE TOP OF THE RANGE MOVED 18 -> 8 (012 / S1, 2026-08-25) because the DOMAIN moved: the ledger
+# keeps `Numeric(20, 8)` and the protocol declares 0-8, so the schema was narrowed to match.
+# These tests are NOT free to keep 18 as a robustness case the way the pure-function table in
+# `api/money-rendering-conformance.json` does: every one of them WRITES A REAL `Equivalent` ROW,
+# and the ORM validator (`app/db/models/equivalent.py:31`) now raises `BadRequestException` for
+# 18.  A run at 18 would be testing the validator, not the three producers this module compares.
+#
+# NOTHING IS LOST BY DROPPING IT, and that is traced rather than assumed.  All three producers
+# render through ONE function - `to_money_str` (`app/utils/money.py`), reached through
+# `net_balance_utils` from `edge_patch_builder.py:74,280` and `snapshot_builder.py:175` - and its
+# behaviour past the storage scale stays pinned where it is still reachable: the conformance
+# table keeps precisions 9, 12 and 18, and `test_the_minimum_digit_promise_does_not_depend_on_
+# the_ambient_decimal_context` below runs at both corners.  What this module tests is that the
+# producers AGREE, and agreement has no case that only precision 18 could exhibit.
+PRECISIONS = [0, 1, 2, 4, 8]
 
 _WHY_AGREEMENT = (
     "WHY THIS MATTERS: these are two views of one number.  A participant who opens the graph "
@@ -121,6 +138,88 @@ async def _fixture(session: AsyncSession, *, precision: int, limit: str, used: s
         profile={},
     )
     session.add_all([eq, creditor, debtor])
+    await session.commit()
+
+    session.add_all(
+        [
+            TrustLine(
+                from_participant_id=creditor.id,
+                to_participant_id=debtor.id,
+                equivalent_id=eq.id,
+                limit=Decimal(limit),
+                status="active",
+                policy={"auto_clearing": True},
+            ),
+            Debt(
+                debtor_id=debtor.id,
+                creditor_id=creditor.id,
+                equivalent_id=eq.id,
+                amount=Decimal(used),
+            ),
+        ]
+    )
+    await session.commit()
+    return eq, creditor, debtor
+
+
+#: A precision that WAS inside the domain until 2026-08-25 and is outside it now.
+#:
+#: THIS IS THE HOLE THE NARROWING OPENED IN THIS MODULE, and it was found by external review
+#: (gpt-6-astra, medium, 2026-08-25) refuting the note on `PRECISIONS` above. That note claimed
+#: nothing was lost by dropping 18, on the grounds that the canon can no longer produce a
+#: precision past the storage scale. The canon cannot - but a DATABASE ROW can: a row written
+#: through the door that accepted it yesterday is still there, ORM hydration does not run
+#: `@validates`, and every producer in this module reads `Equivalent.precision` straight off
+#: that row (`VizPatchHelper.create`, `SnapshotBuilder`, `EdgePatchBuilder`). So `precision > 8`
+#: is not unreachable input for these three functions; it is legacy input, and the disagreement
+#: this module exists to catch is exactly as possible on it as it ever was.
+LEGACY_PRECISION_ABOVE_THE_DOMAIN = 12
+
+
+async def _legacy_fixture(session: AsyncSession, *, precision: int, limit: str, used: str):
+    """The same fixture, with the equivalent written the only way such a row can exist.
+
+    A Core `insert` on the table bypasses the ORM validator - which is both how the row got
+    there historically (through a door that accepted it) and the only way to reproduce it now.
+    """
+
+    nonce = uuid.uuid4().hex[:10]
+    code = ("L" + nonce).upper()[:16]
+    await session.execute(
+        insert(Equivalent.__table__).values(
+            id=uuid.uuid4(),
+            code=code,
+            precision=precision,
+            metadata={},
+            is_active=True,
+        )
+    )
+    await session.commit()
+    eq = (
+        await session.execute(select(Equivalent).where(Equivalent.code == code))
+    ).scalar_one()
+    assert eq.precision == precision, (
+        "ORM hydration refused the legacy row, so this test is no longer reproducing the "
+        "state it exists for"
+    )
+
+    creditor = Participant(
+        pid=f"CR{nonce}",
+        display_name="creditor",
+        public_key=f"pk-cr-{nonce}",
+        type="person",
+        status="active",
+        profile={},
+    )
+    debtor = Participant(
+        pid=f"DB{nonce}",
+        display_name="debtor",
+        public_key=f"pk-db-{nonce}",
+        type="person",
+        status="active",
+        profile={},
+    )
+    session.add_all([creditor, debtor])
     await session.commit()
 
     session.add_all(
@@ -281,6 +380,64 @@ async def test_the_per_transaction_patch_agrees_with_the_other_two(
             f"build_edge_patch_for_pairs={by_pairs[field]!r}, "
             f"snapshot={getattr(snap.links[0], field)!r}.\n{_WHY_AGREEMENT}"
         )
+
+
+@pytest.mark.asyncio
+async def test_the_three_producers_agree_on_a_legacy_row_above_the_domain(
+    db_session: AsyncSession,
+) -> None:
+    """The agreement must hold for a row the canon can no longer create but the database holds.
+
+    ADDED 2026-08-25 after external review refuted the claim that dropping 18 from `PRECISIONS`
+    cost nothing (see `LEGACY_PRECISION_ABOVE_THE_DOMAIN`). The domain narrowed; the DATA did
+    not. This is the only test in the module whose equivalent is written past the bound, and it
+    is written through the table for that reason.
+
+    WHAT IT CATCHES that the parametrized tests no longer can: any producer that starts clamping
+    display precision to the storage scale - `min(precision, 8)`, or reading a bound instead of
+    the row - now disagrees with the two that do not, on a row that exists in production.
+    """
+
+    eq, creditor, debtor = await _legacy_fixture(
+        db_session,
+        precision=LEGACY_PRECISION_ABOVE_THE_DOMAIN,
+        limit="100.00000000",
+        used="99.99999999",
+    )
+    run = _run_for(eq, creditor, debtor)
+
+    builder = EdgePatchBuilder(logger=_LOG)
+    by_equivalent = (
+        await builder.build_edge_patch_for_equivalent(
+            session=db_session, run=run, equivalent_code=eq.code
+        )
+    )[0]
+
+    helper = await VizPatchHelper.create(db_session, equivalent_code=eq.code)
+    by_pairs = (
+        await builder.build_edge_patch_for_pairs(
+            session=db_session,
+            helper=helper,
+            edges_pairs=[(creditor.pid, debtor.pid)],
+            pid_to_participant={creditor.pid: creditor, debtor.pid: debtor},
+        )
+    )[0]
+
+    snap = await _snapshot_link(db_session, run, eq.code)
+
+    for field in ("used", "available"):
+        assert by_equivalent[field] == by_pairs[field] == getattr(snap.links[0], field), (
+            f"the three producers disagree on {field} for a legacy row at precision "
+            f"{LEGACY_PRECISION_ABOVE_THE_DOMAIN}: "
+            f"build_edge_patch_for_equivalent={by_equivalent[field]!r}, "
+            f"build_edge_patch_for_pairs={by_pairs[field]!r}, "
+            f"snapshot={getattr(snap.links[0], field)!r}.\n{_WHY_AGREEMENT}"
+        )
+
+    # And the rule itself still holds on such a row: precision is the MINIMUM number of fraction
+    # digits, so twelve is what they print - not eight, and not a value rounded to the column.
+    assert by_equivalent["used"] == "99.999999990000"
+    assert by_equivalent["available"] == "0.000000010000"
 
 
 @pytest.mark.asyncio
@@ -822,24 +979,62 @@ def test_every_value_that_did_move_was_one_the_precision_could_not_express(
         assert "e" not in new.lower()
 
 
-def test_the_minimum_digit_promise_does_not_depend_on_the_ambient_decimal_context() -> None:
-    """THE RULE at the widest corner the door and the schema jointly admit: 12 + 18 digits.
+#: THE RULE at the widest corner, before and after `Equivalent.precision` was narrowed to 0..8.
+#:
+#: ORIGINAL PIN (012, second circle).  `quantize` obeys the ambient context's `prec` (default 28),
+#: and a value at the door's magnitude bound padded to `precision: 18` has a 30-digit coefficient.
+#: `to_money_str(Decimal("999999999999.12345678"), 18)` raised `InvalidOperation` inside the
+#: renderer's `try`, fell through to the show-all branch, and returned 8 fraction digits where the
+#: docstring promises at least 18.
+#:
+#: REBASED, NOT DELETED (012 / S1, 2026-08-25).  `Equivalent.precision` is now 0..8, so
+#: `precision: 18` can no longer arrive from the canon - the input the original pin used became
+#: unreachable.  A PLAIN REBASE FROM 18 TO 8 WOULD HAVE MADE THIS PIN VACUOUS, and that is
+#: measured rather than assumed: with the `localcontext` sizing removed from `app/utils/money.py`,
+#: `to_money_str(Decimal("999999999999.12345678"), p)` is byte-identical to the real one for
+#: p = 8, 9, 12 and 16, and differs only from p = 17 upward.  The reason is arithmetic: the
+#: door bounds the magnitude at 12 integer digits, so an in-canon coefficient is at most
+#: 12 + 8 = 20 digits, which fits the default `prec` of 28 with room to spare.
+#:
+#: So the pin now runs at BOTH corners, and they check different halves of the same promise:
+#:
+#:   * `IN_CANON` - the widest input the door and the narrowed schema jointly admit, rendered
+#:     under an ambient context too narrow for the padded coefficient.  This is the promise the
+#:     docstring actually makes ("independent of decimal.getcontext().prec"), and it is the only
+#:     form of it that a 0..8 domain can still exercise.  Measured: with the sizing removed this
+#:     returns `"999999999999.5"`, i.e. the padding silently disappears.
+#:   * `PAST_THE_CANON` - the original input, kept deliberately.  `to_money_str` takes `precision`
+#:     as a plain `int` and has no idea an `Equivalent` exists; the canon no longer produces this
+#:     call, but the function must not become wrong for it.  Deleting the case would remove the
+#:     only coverage of the sizing under the DEFAULT context.
+#:
+#: MUTATION BOTH CATCH: removing the `localcontext` sizing around the `quantize` call in
+#: `app/utils/money.py`.
+AMBIENT_CONTEXT_CORNERS = [
+    ("in canon: 12 integer digits + precision 8, ambient prec too narrow to pad",
+     "999999999999.5", 8, 19, "999999999999.50000000"),
+    ("past the canon: 12 integer digits + precision 18, default ambient prec",
+     "999999999999.12345678", 18, 28, "999999999999.123456780000000000"),
+]
 
-    `quantize` obeys the ambient context's `prec` (default 28), and a value at the door's
-    magnitude bound padded to `precision: 18` has a 30-digit coefficient.  Before this pin,
-    `to_money_str(Decimal("999999999999.12345678"), 18)` raised `InvalidOperation` inside the
-    renderer's `try`, fell through to the show-all branch, and returned 8 fraction digits
-    where the docstring promises at least 18 - found by external review (012, second circle).
 
-    MUTATION THIS CATCHES: removing the `localcontext` sizing around the `quantize` call in
-    `app/utils/money.py`.
-    """
+@pytest.mark.parametrize(
+    "label,literal,precision,ambient_prec,expected",
+    AMBIENT_CONTEXT_CORNERS,
+    ids=[c[0] for c in AMBIENT_CONTEXT_CORNERS],
+)
+def test_the_minimum_digit_promise_does_not_depend_on_the_ambient_decimal_context(
+    label: str, literal: str, precision: int, ambient_prec: int, expected: str
+) -> None:
+    value = Decimal(literal)
+    with localcontext() as ctx:
+        ctx.prec = ambient_prec
+        rendered = to_money_str(value, precision)
 
-    value = Decimal("999999999999.12345678")
-    rendered = to_money_str(value, 18)
-    assert rendered == "999999999999.123456780000000000", (
-        f"got {rendered!r}: the value at the magnitude bound must render with the full 18 "
-        f"fraction digits its equivalent declares, independent of decimal.getcontext().prec"
+    assert rendered == expected, (
+        f"{label}: got {rendered!r}, expected {expected!r}. The value at the magnitude bound "
+        f"must render with the full {precision} fraction digits its caller asked for, "
+        f"independent of decimal.getcontext().prec"
     )
     assert Decimal(rendered) == value
 

@@ -9,8 +9,9 @@ result:
    `"1000.0000000000"` and `"1E+3"` were refused with 400/E009 while `Numeric(20, 8)` holds each
    of them exactly and the predicate said so. That is a compatibility break on the primary money
    API, and the programme inflicted it on itself twice over: `to_money_str` treats
-   `Equivalent.precision` as a MINIMUM number of fraction digits and `precision` is declared
-   `ge=0, le=18`, so for any equivalent with `precision > 8` the renderer emits a string its own
+   `Equivalent.precision` as a MINIMUM number of fraction digits and `precision` was declared
+   `ge=0, le=18` (narrowed to `le=8` on 2026-08-25 by 012 / S1 - see below), so for any
+   equivalent with `precision > 8` the renderer emitted a string its own
    door then rejected; and `POST /trustlines` refused `{"limit": "1e3"}` while accepting
    `{"limit": 1e3}`.
 
@@ -176,10 +177,18 @@ def test_the_renderer_output_is_admitted_by_the_door(value: str, precision: int)
     """Whatever `to_money_str` prints for a storable value, the door takes back.
 
     The two are the same programme's output and input sides, and they were not talking to each
-    other: `Equivalent.precision` is declared `ge=0, le=18` and `to_money_str` treats it as a
+    other: `Equivalent.precision` was declared `ge=0, le=18` and `to_money_str` treats it as a
     MINIMUM, so a `precision: 10` equivalent rendered `0.1` as `"0.1000000000"` and the door
-    answered 400/E009 to it. Stated over the whole declared range of `precision` rather than on
-    an example, because the example would have been picked after the fact.
+    answered 400/E009 to it. Stated over a whole range rather than on an example, because the
+    example would have been picked after the fact.
+
+    THE RANGE IS 0..18 AND STAYS 0..18 AFTER 012 / S1 (2026-08-25), which narrowed
+    `Equivalent.precision` to `0..8`. The range here was never really the schema's - it is
+    `MONEY_MAX_LEXICAL_SCALE`, deliberately left at 18, and this test is what holds the door and
+    the renderer together across ALL of it. `to_money_str` takes a plain `int`, so the pairing
+    must hold for every spelling the door still admits, not only for the ones an `Equivalent`
+    can now declare. Narrowing this range to 0..8 would make the mutation named below
+    undetectable at exactly the precisions where the two sides can still disagree.
 
     MUTATION THIS CATCHES: a lexical `max_scale=8` in the door - every `precision > 8` case
     reddens.
@@ -409,11 +418,22 @@ def test_the_lexical_bound_is_about_length_and_not_about_capacity() -> None:
 
     It is deliberately not a capacity rule and this test says so out loud: `0.` followed by 19
     zeros IS zero, which the column holds, and the door still refuses it as pathological input.
-    The number 18 is not arbitrary - it is the declared maximum of `Equivalent.precision`
-    (`ge=0, le=18`), and `to_money_str` pads to `precision`, so 18 is the widest fraction this
-    repository's renderer can emit for a value the ledger can hold. It is also exactly the scale
-    the door accepted before `T1201`, so nothing that used to be admitted became a 400 when the
-    capacity rule moved onto the value.
+    WHERE THE NUMBER 18 CAME FROM, AND WHAT IT RESTS ON NOW. It was the declared maximum of
+    `Equivalent.precision` (`ge=0, le=18`), and since `to_money_str` pads to `precision`, 18 was
+    the widest fraction this repository's renderer could emit for a value the ledger can hold.
+    THAT DERIVATION IS WEAKENED, NOT GONE, as of 2026-08-25 (012 / S1): `Equivalent.precision`
+    is `0..8`, so no NEW equivalent can declare more - but a row written before that day still
+    can, ORM hydration does not re-validate it, and the producers render it at its own
+    precision. So our renderer still emits up to 18 fraction digits for such a row, and this
+    bound is still what admits that output back at the door. (The first edition of this
+    paragraph said producers "now emit at most 8"; external review refuted it the same day.)
+    18 is kept for that live reason as well as as a pathological-input bound, argued next to the
+    constant in
+    `app/utils/validation.py`: lowering it would change what the DOOR ACCEPTS - `"0.100000000"`
+    is a value `Numeric(20, 8)` holds exactly and `is_storable_money` admits - which is precisely
+    the mistake `T1201`'s first edition made. What holds unchanged is the compatibility half: 18
+    is exactly the scale the door accepted before `T1201`, so nothing that used to be admitted
+    became a 400 when the capacity rule moved onto the value.
 
     This is the bound that keeps `tests/integration/test_payments_amount_validation.py`'s
     `"0." + "0" * 30` case answering "Invalid amount format".

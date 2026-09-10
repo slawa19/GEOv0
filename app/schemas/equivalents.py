@@ -36,7 +36,11 @@ class Equivalent(StoredEquivalent):
     """Strict response for successful mutations that enforce current bounds."""
 
     code: str = Field(pattern=r"^[A-Z0-9_]{1,16}$")
-    precision: int = Field(ge=0, le=18)
+    # 0..8, not 0..18 (012 / S1, 2026-08-25): the storage scale of `Numeric(20, 8)` and the
+    # protocol's own declaration (`docs/ru/02-protocol-spec.md:155`). `StoredEquivalent` above
+    # deliberately keeps NO bound, so legacy rows outside the domain stay readable and
+    # repairable through `PATCH /admin/equivalents/{code}`.
+    precision: int = Field(ge=0, le=8)
 
 
 class EquivalentsList(BaseModel):

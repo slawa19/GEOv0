@@ -1272,7 +1272,7 @@ export const mockApi = {
         return { success: false, error: { code: 'VALIDATION_ERROR', message: 'invalid equivalent code' } }
       }
       if (!AdminEquivalentPrecisionSchema.safeParse(input.precision).success) {
-        return { success: false, error: { code: 'VALIDATION_ERROR', message: 'precision must be an integer from 0 to 18' } }
+        return { success: false, error: { code: 'VALIDATION_ERROR', message: 'precision must be an integer from 0 to 8' } }
       }
       const all = await getEquivalentsDataset()
       if (all.some((e) => e.code === code)) return { success: false, error: { code: 'CONFLICT', message: 'code already exists' } }
@@ -1300,15 +1300,36 @@ export const mockApi = {
     })
   },
 
+  // A stored row whose precision is outside the current domain cannot be written back, because
+  // the mutation response schema is the STRICT one. The backend answers such a PATCH with 409
+  // and a repair instruction (`app/api/v1/admin.py`, `noncanonical_precision`/`patch_precision`)
+  // instead of touching the row; the mock said nothing and then threw INVALID_RESPONSE while
+  // reporting 200. The gap predates 2026-08-25 - it applied to `precision: 19` rows - and the
+  // narrowing to 0..8 widened it to every row from 9 to 18, which is why it is closed here.
+  // Found by external review (gpt-6-astra, medium, 2026-08-25).
+  _legacyPrecisionBlocks(stored: Equivalent, patchedPrecision: number | undefined): ApiEnvelope<never> | null {
+    const repaired = patchedPrecision === undefined ? stored.precision : patchedPrecision
+    if (AdminEquivalentPrecisionSchema.safeParse(repaired).success) return null
+    return {
+      success: false,
+      error: {
+        code: 'CONFLICT',
+        message: `legacy equivalent precision ${stored.precision} must be repaired by this PATCH (set precision to 0..8)`,
+      },
+    }
+  },
+
   async updateEquivalent(code: string, patch: Partial<Pick<Equivalent, 'precision' | 'description'>>): Promise<ApiEnvelope<{ updated: Equivalent }>> {
     return withScenarioMutation('/api/v1/admin/equivalents', async () => {
       if (patch.precision !== undefined && !AdminEquivalentPrecisionSchema.safeParse(patch.precision).success) {
-        return { success: false, error: { code: 'VALIDATION_ERROR', message: 'precision must be an integer from 0 to 18' } }
+        return { success: false, error: { code: 'VALIDATION_ERROR', message: 'precision must be an integer from 0 to 8' } }
       }
       const key = code
       const all = await getEquivalentsDataset()
       const eq = all.find((e) => e.code === key)
       if (!eq) return { success: false, error: { code: 'NOT_FOUND', message: 'equivalent not found' } }
+      const blocked = this._legacyPrecisionBlocks(eq, patch.precision)
+      if (blocked) return blocked
       const before = { ...eq }
       const updated = decodeAdminResponse(
         AdminEquivalentMutationResponseSchema,
@@ -1340,6 +1361,9 @@ export const mockApi = {
       const all = await getEquivalentsDataset()
       const eq = all.find((e) => e.code === key)
       if (!eq) return { success: false, error: { code: 'NOT_FOUND', message: 'equivalent not found' } }
+      // Activation carries no precision, so a legacy row can only be blocked, never repaired here.
+      const blocked = this._legacyPrecisionBlocks(eq, undefined)
+      if (blocked) return blocked
       const before = { ...eq }
       const updated = decodeAdminResponse(
         AdminEquivalentMutationResponseSchema,

@@ -14,7 +14,16 @@ import { addMoney, atomsToMoney, formatMoney, moneyText, normalizePrecision } fr
  * `precision` is the MINIMUM number of fraction digits, never the maximum.
  */
 
-/** Every precision `Equivalent.precision` allows is 0..18; these span the shipped range and both ends. */
+/**
+ * `Equivalent.precision` allows 0..8 since 2026-08-25 (012 / S1 narrowed it from 0..18 to the
+ * storage scale of `Numeric(20, 8)`, which is also what protocol §3.2 declares). 18 is KEPT in
+ * this list and is no longer a contract bound: `formatMoney` takes `precision` as a plain
+ * number and knows nothing about `Equivalent`, and it is one of the three implementations of
+ * one rule (`app/utils/money.py`, `admin-ui/src/utils/decimal.ts`) whose shared population is
+ * `api/money-rendering-conformance.json` - which keeps 9, 12 and 18 for the measured reason
+ * recorded there: without them the table stops telling a formatter that caps display at the
+ * storage scale apart from a correct one.
+ */
 const PRECISIONS = [0, 1, 2, 4, 8, 18]
 
 function fractionDigits(rendered: string): number {

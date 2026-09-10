@@ -21,7 +21,8 @@ import { computeNodeEdgeStats } from './useSelectedNodeEdgeStats'
  *   2. the amount travels as a JS `number`, so amounts the ledger can store exactly
  *      (`Numeric(20, 8)`) are already wrong before they reach the formatter.
  *
- * `Equivalent.precision` is an integer 0..18 (`app/schemas/equivalents.py:39`) and is
+ * `Equivalent.precision` is an integer 0..8 (`app/schemas/equivalents.py:39`; narrowed from
+ * 0..18 on 2026-08-25 by 012 / S1 to the storage scale, which protocol §3.2 also declares) and is
  * published to the frontend by `GET /api/v1/equivalents`; `simulator-ui/v2/src` never
  * asks for it (F-012-4). The catalogue below is therefore stated by the test, the way
  * the UI would have to state it once it does ask.

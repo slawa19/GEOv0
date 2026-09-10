@@ -53,7 +53,9 @@ def net_decimal_to_atoms(net: Decimal, *, precision: int) -> int:
     THIS MOVES NOTHING THAT WAS ALREADY RIGHT, and that is provable rather than hoped: the
     exception can only fire when `0 < abs(net) < q/2`, whereas any non-zero value that IS
     exactly representable at `precision` has `abs(net) >= q`.  Every such value keeps the
-    atoms it had, byte for byte, at every precision 0..18.
+    atoms it had, byte for byte, at every precision in the domain - which is 0..8 since
+    2026-08-25 (`012 / S1`), and was 0..18 when this was written.  The proof does not depend on
+    the top of the range: it is the inequality above, which holds for any `precision`.
 
     TWO ALTERNATIVES REJECTED, both measured rather than argued:
 

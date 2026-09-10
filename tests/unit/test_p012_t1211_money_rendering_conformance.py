@@ -57,17 +57,37 @@ def _scale_of(value: str) -> int:
     return len(fraction)
 
 
+#:
+#: THE DOMAIN NARROWED (012 / S1, 2026-08-25). `Equivalent.precision` is 0..8 now, not 0..18, so
+#: two of the classes below had to be re-decided rather than renumbered:
+#:
+#:   * "the contract's widest precision" IS 8. The class moved with the bound; that is the
+#:     mechanical half.
+#:   * "a precision past the storage scale 8" no longer describes anything the CANON can produce
+#:     - past the storage scale is now also past the contract. Deleting it was the obvious move
+#:     and it is the wrong one, measured: with the ten cases above 8 gone, the discriminating
+#:     check below stops catching `_caps_display_precision_at_the_storage_scale` altogether (0
+#:     disagreements out of 28 remaining cases - `min(precision, 8)` is the identity on a 0..8
+#:     domain), and `_supports_only_the_historically_sampled_precisions` falls from 11
+#:     disagreements to 1. The class is therefore KEPT and RENAMED to say what it now defends: a
+#:     caller outside the canon, which all three implementations still accept because none of
+#:     them can see an `Equivalent`.
+#:   * a new class was added at the same time - a negative at 8. Every negative in the table sat
+#:     at precision 0, 1, 2 or 9, so once 8 became the top of the domain nothing asked about a
+#:     sign there.
 REQUIRED_COVERAGE = {
     "precision 0 is declared, not absent":
         lambda cs: any(c["precision"] == 0 for c in cs),
     "a precision between the historically sampled ones":
         lambda cs: any(3 <= c["precision"] <= 7 for c in cs),
-    "a precision past the storage scale 8":
+    "a precision past the storage scale 8, i.e. past the canon's domain":
         lambda cs: any(c["precision"] > 8 for c in cs),
-    "the contract's widest precision, 18":
-        lambda cs: any(c["precision"] == 18 for c in cs),
+    "the contract's widest precision, 8":
+        lambda cs: any(c["precision"] == 8 for c in cs),
     "a negative at precision 0":
         lambda cs: any(c["value"].startswith("-") and c["precision"] == 0 for c in cs),
+    "a negative at the contract's widest precision, 8":
+        lambda cs: any(c["value"].startswith("-") and c["precision"] == 8 for c in cs),
     "a negative past the storage scale":
         lambda cs: any(c["value"].startswith("-") and c["precision"] > 8 for c in cs),
     "a negative that is stripped rather than padded":
@@ -162,7 +182,13 @@ def _goes_through_a_float(value: str, precision: int) -> str:
 # They are the reason the coverage requirements above exist, and they are kept here so the table
 # is measured against them on every run rather than against a story about them.
 def _caps_display_precision_at_the_storage_scale(value: str, precision: int) -> str:
-    """Confuses the display precision with `Numeric(20, 8)`'s scale. Plausible: 8 is everywhere."""
+    """Confuses the display precision with `Numeric(20, 8)`'s scale. Plausible: 8 is everywhere.
+
+    After the 012/S1 narrowing this is the variant the table can ONLY see through its cases
+    above precision 8 - on a 0..8 domain `min(precision, 8)` is the identity function. It is the
+    reason those ten cases were kept when they stopped being contract.
+    """
+
     return to_money_str(Decimal(value), min(precision, 8))
 
 

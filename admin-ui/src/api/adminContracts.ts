@@ -81,7 +81,16 @@ export const AdminAbortTxResponseSchema = z
   .strict()
 
 export const AdminEquivalentCodeSchema = z.string().regex(/^[A-Z0-9_]{1,16}$/)
-export const AdminEquivalentPrecisionSchema = z.number().int().min(0).max(18)
+// 0..8, narrowed from 0..18 on 2026-08-25 (012 / S1): the ledger stores money in
+// `Numeric(20, 8)` and protocol §3.2 declares `precision` as 0-8, so the API bound moved to
+// match (`app/schemas/admin.py`, `api/openapi.yaml`).
+//
+// This schema guards MUTATION input and the mutation RESPONSE, and both are produced by the
+// strict backend model that now emits at most 8. Reads are deliberately NOT bounded here:
+// `EquivalentSchema` in `realApi.ts` keeps `z.number()`, mirroring the backend's
+// `StoredEquivalent`, so a legacy row written when the door accepted 12 or 19 stays visible on
+// the list and repairable through PATCH instead of failing to decode.
+export const AdminEquivalentPrecisionSchema = z.number().int().min(0).max(8)
 const DateTimeSchema = z.string().datetime({ offset: true })
 
 export const AdminAuditLogEntrySchema = z

@@ -217,6 +217,59 @@ describe('mock Admin mutation state and audit contracts', () => {
     expect(assertSuccess(await mockApi.listEquivalents({ include_inactive: true })).items).toEqual([])
   })
 
+  it('refuses to write back a legacy equivalent whose precision the domain no longer admits', async () => {
+    // The domain of `Equivalent.precision` narrowed from 0..18 to 0..8 on 2026-08-25 (012 / S1),
+    // so a row written before that day can be OUTSIDE it while sitting in a live database. The
+    // backend answers a PATCH that does not repair such a row with 409 and a repair instruction
+    // (`app/api/v1/admin.py`, `noncanonical_precision` / `patch_precision`) and leaves the row
+    // untouched. The mock used to accept the write, then throw INVALID_RESPONSE from its own
+    // strict response schema while reporting status 200 - a different failure, at a different
+    // layer, with a message that names nothing an operator can act on.
+    //
+    // Found by external review (gpt-6-astra, medium, 2026-08-25).
+    const legacy = {
+      code: 'LEGACY12',
+      symbol: null,
+      precision: 12,
+      description: 'written when the door accepted 12',
+      metadata: null,
+      is_active: true,
+      created_at: '2026-08-08T12:00:00Z',
+      updated_at: '2026-08-08T12:00:00Z',
+    }
+    const mockWindow = Object.create(window) as Window
+    Object.defineProperty(mockWindow, 'location', { value: new URL('http://localhost/?scenario=happy') })
+    vi.stubGlobal('window', mockWindow)
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/scenarios/happy.json')) return jsonResponse({ name: 'happy', latency_ms: { min: 0, max: 0 } })
+      if (url.endsWith('/datasets/audit-log.json')) return jsonResponse([])
+      if (url.endsWith('/datasets/equivalents.json')) return jsonResponse([legacy])
+      return new Response('Not Found', { status: 404 })
+    }) as unknown as typeof fetch)
+
+    // An edit that does not repair the precision is refused, and refused as a CONFLICT rather
+    // than as a decoding accident.
+    // It comes back as a refusing ENVELOPE, the mock's form of a 4xx - not as a thrown
+    // INVALID_RESPONSE, which is what a decoding accident looks like and is what this used to be.
+    expect(await mockApi.updateEquivalent('LEGACY12', { description: 'after' })).toMatchObject({
+      success: false,
+      error: { code: 'CONFLICT' },
+    })
+    // So is activation, which carries no precision at all and therefore cannot repair anything.
+    expect(await mockApi.setEquivalentActive('LEGACY12', false, 'operator')).toMatchObject({
+      success: false,
+      error: { code: 'CONFLICT' },
+    })
+    // The row is untouched by both.
+    const after = assertSuccess(await mockApi.listEquivalents({ include_inactive: true })).items[0]
+    expect(after).toMatchObject({ code: 'LEGACY12', precision: 12, description: 'written when the door accepted 12', is_active: true })
+
+    // And the repair itself works, in one PATCH, exactly as on the backend.
+    const repaired = assertSuccess(await mockApi.updateEquivalent('LEGACY12', { precision: 8 }))
+    expect(repaired.updated).toMatchObject({ code: 'LEGACY12', precision: 8 })
+  })
+
   it('serializes concurrent aborts so audit and incident state cannot diverge', async () => {
     installFixtures()
     const concurrentIncidents = {
