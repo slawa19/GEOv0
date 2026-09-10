@@ -195,6 +195,8 @@ function analyticsFixture(analyticsEq: string | null) {
     incidents: ref<Incident[]>([]),
     auditLog: ref<AuditLogEntry[]>([]),
     transactions: ref<Transaction[]>([]),
+    included: ref<string[]>([]),
+    truncated: ref<string[]>([]),
     clearingCycles: ref<ClearingCycles | null>(null),
     selected,
   })

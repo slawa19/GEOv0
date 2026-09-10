@@ -18,6 +18,43 @@ import type {
   Trustline,
 } from '../pages/graph/graphTypes'
 
+// F-013-1 / T1302. The graph page reads `transactions` in the analytics drawer's Activity card,
+// and until now it never asked the server for them: `graphSnapshot` built its query with
+// `equivalent` alone, so the collection arrived empty on every load and the panel reported zero
+// committed payments for a period it had never enquired about.
+//
+// WHY ALWAYS-ON AND NOT PER-CALL. The drawer is fed from the snapshot the page already holds; making
+// the include conditional on the drawer being open would mean a second fetch on open, its own race
+// against the snapshot in flight, and a visible flip of the completeness signal from "not asked" to
+// "asked" while the user is reading it. The cost of asking unconditionally is bounded and measured:
+// the server caps this collection at ADMIN_GRAPH_INCLUDE_MAX_TRANSACTIONS (50) rows of eight scalar
+// fields, which is ~11.6 KB serialised against a ~192 KB snapshot body for the reference seed pack
+// (admin-fixtures/v1) - about 6%. There is no snapshot poll: the graph loads on mount, on an
+// equivalent change, on entering/leaving focus mode and on an explicit retry, so this is not a
+// per-second cost. Incidents and audit_log are NOT requested here - see the note on
+// readCompleteness below.
+const GRAPH_INCLUDE = ['transactions']
+
+// F-013-1 / T1302. Build the completeness metadata out of a response, tolerating its absence.
+//
+// A server that does not send `included` has told us nothing about which optional collections its
+// body carries; the canon does not mark the field required, so absence is a real case and not a bug.
+// The honest reading of absence is the empty list - "we know of no collection we may draw a
+// conclusion about" - never a guess that everything we asked for arrived.
+//
+// NOTE FOR WHOEVER TOUCHES `incidents` OR `audit_log` NEXT: this client asks for neither, so both
+// arrive empty in real mode for the same reason transactions did, and `incidentCount` /
+// `participantOps` in the Activity card are structurally zero there. That is the same defect in two
+// more collections; it is out of F-013-1's scope and is reported rather than silently half-fixed.
+export function readCompleteness(src: { included?: unknown; truncated?: unknown }): {
+  included: string[]
+  truncated: string[]
+} {
+  const asCodes = (v: unknown): string[] =>
+    Array.isArray(v) ? v.map((x) => String(x || '').trim().toLowerCase()).filter(Boolean) : []
+  return { included: asCodes(src.included), truncated: asCodes(src.truncated) }
+}
+
 export function normalizeEqCode(v: string): string {
   return String(v || '').trim().toUpperCase()
 }
@@ -119,6 +156,11 @@ export function useGraphData(opts: {
   const clearingCycles = ref<ClearingCycles | null>(null)
   const auditLog = ref<AuditLogEntry[]>([])
   const transactions = ref<Transaction[]>([])
+  // F-013-1 / T1302. What the last response said it actually carried, and which of those it cut.
+  // These are the only honest basis for "do we know anything about collection X" - an empty
+  // `transactions` array is produced both by "we did not ask" and by "we asked and there are none".
+  const included = ref<string[]>([])
+  const truncated = ref<string[]>([])
 
   const availableEquivalents = computed(() => {
     const fromDs = (equivalents.value || []).map((e) => normalizeEqCode(e.code)).filter(Boolean)
@@ -188,6 +230,8 @@ export function useGraphData(opts: {
     debts.value = p.debts || []
     auditLog.value = p.audit_log || []
     transactions.value = p.transactions || []
+    included.value = p.included || []
+    truncated.value = p.truncated || []
   }
 
   async function loadData(): Promise<boolean> {
@@ -200,7 +244,7 @@ export function useGraphData(opts: {
       // First load without equivalent to get full trustlines list for primary equivalent computation
       const snapEq = normalizeEqCode(opts.eq.value)
       const [snap, cycleResult] = await Promise.all([
-        api.graphSnapshot({ equivalent: snapEq || undefined }),
+        api.graphSnapshot({ equivalent: snapEq || undefined, include: GRAPH_INCLUDE }),
         api.clearingCycles().then(
           (value) => ({ status: 'fulfilled' as const, value }),
           (reason: unknown) => ({ status: 'rejected' as const, reason }),
@@ -215,6 +259,7 @@ export function useGraphData(opts: {
         debts: (s.debts || []) as Debt[],
         audit_log: (s.audit_log || []) as AuditLogEntry[],
         transactions: (s.transactions || []) as Transaction[],
+        ...readCompleteness(s),
       }
 
       if (viewRequest.isCurrent()) {
@@ -260,7 +305,7 @@ export function useGraphData(opts: {
     viewError.value = null
     try {
       const snapEq = normalizeEqCode(opts.eq.value)
-      const snap = await api.graphSnapshot({ equivalent: snapEq || undefined })
+      const snap = await api.graphSnapshot({ equivalent: snapEq || undefined, include: GRAPH_INCLUDE })
       if (!request.isCurrent()) return false
       const s = assertSuccess(snap)
       const payload: GraphSnapshotPayload = {
@@ -271,6 +316,7 @@ export function useGraphData(opts: {
         debts: (s.debts || []) as Debt[],
         audit_log: (s.audit_log || []) as AuditLogEntry[],
         transactions: (s.transactions || []) as Transaction[],
+        ...readCompleteness(s),
       }
       applySnapshotPayload(payload)
       fullSnapshot = payload
@@ -315,6 +361,8 @@ export function useGraphData(opts: {
           debts: [],
           audit_log: [],
           transactions: [],
+          included: [],
+          truncated: [],
         })
         return await loadData()
       }
@@ -326,7 +374,13 @@ export function useGraphData(opts: {
 
     try {
       const [ego, cycleResult] = await Promise.all([
-        api.graphEgo({ pid: query.pid, depth: query.depth, equivalent: query.equivalent, status: query.status }),
+        api.graphEgo({
+          pid: query.pid,
+          depth: query.depth,
+          equivalent: query.equivalent,
+          status: query.status,
+          include: GRAPH_INCLUDE,
+        }),
         api.clearingCycles({ participant_pid: query.participant_pid }).then(
           (value) => ({ status: 'fulfilled' as const, value }),
           (reason: unknown) => ({ status: 'rejected' as const, reason }),
@@ -342,6 +396,7 @@ export function useGraphData(opts: {
         debts: (e.debts || []) as Debt[],
         audit_log: (e.audit_log || []) as AuditLogEntry[],
         transactions: (e.transactions || []) as Transaction[],
+        ...readCompleteness(e),
       }
       if (!viewRequest.isCurrent()) return false
       applySnapshotPayload(payload)
@@ -423,6 +478,8 @@ export function useGraphData(opts: {
     participants,
     trustlines,
     incidents,
+    included,
+    truncated,
     equivalents,
     debts,
     clearingCycles,

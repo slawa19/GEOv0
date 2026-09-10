@@ -53,14 +53,30 @@ export const useHealthStore = defineStore('health', {
      */
     status(state): HealthStatus {
       if (state.error) return 'error'
-      // Ни одного успешного ответа - сказать нечего. `healthDb` и `migrations` сюда не входят:
-      // их отказ выбрасывает через `assertSuccess` и приходит уже как `error`.
-      if (state.health === null) return 'unknown'
-      if (state.migrations && state.migrations.is_up_to_date === false) return 'degraded'
+
+      // ВСЕ ТРИ ОТВЕТА, А НЕ ПЕРВЫЙ. Первая редакция проверяла только `health === null`, и это
+      // ловил внутренний adversarial: `refresh()` ждёт три вызова ПОСЛЕДОВАТЕЛЬНО и присваивает
+      // каждый по мере прихода, поэтому между первым ответом и последним геттер отвечал `ok` —
+      // экран рисовал подтверждённое здоровье, имея треть доказательства. Окно короткое, но это
+      // ровно та же ложь, что и всё остальное в `F-013-4`, и на медленной БД оно не короткое.
+      //
+      // Оракул для «подтверждённо здоров» уже был написан в тесте стора как `confirmedHealthy`:
+      // три непустых ответа плюс `is_up_to_date`. Здесь он же, в продакшене.
+      if (state.health === null || state.healthDb === null || state.migrations === null) return 'unknown'
+
+      // Ответ пришёл и в нём сказано, что что-то не так. Сегодня это два случая, и оба читаются
+      // из тела, а не из кода ответа: миграции не на head, и `/health`, отвечающий `degraded`
+      // (`app/api/v1/health.py:47-56` — оно приходит с 503 и потому обычно становится `error`,
+      // но если статус когда-нибудь приедет в 200, зелёного здесь всё равно не будет).
+      if (state.migrations.is_up_to_date === false) return 'degraded'
+      const reported = typeof state.health.status === 'string' ? state.health.status : null
+      if (reported !== null && reported !== 'ok') return 'degraded'
       return 'ok'
     },
     /** Что именно не так, когда `degraded`. Для подсказки, не для развилки. */
     degradedReason(state): string | null {
+      const reported = state.health && typeof state.health.status === 'string' ? state.health.status : null
+      if (reported !== null && reported !== 'ok') return t('app.status.serviceDegradedDetail', { status: reported })
       if (state.migrations && state.migrations.is_up_to_date === false) {
         const current = String(state.migrations.current_revision ?? '?')
         const head = String(state.migrations.head_revision ?? '?')

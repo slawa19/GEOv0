@@ -109,6 +109,10 @@ describe('Legacy windows reference — markup snapshots', () => {
       phase,
       state,
       unit: 'UAH',
+      // `F-013-7`: этот снимок раньше монтировал компонент БЕЗ основания и получал разрешённую
+      // мутацию по умолчанию — тот самый fail-open. Разметка снимка от этой строки НЕ меняется:
+      // источник ответил строкой, и попап выглядит так же, как раньше.
+      figuresSource: { kind: 'row' } as const,
       used: '12',
       reverseUsed: '0',
       limit: '100',
@@ -206,6 +210,9 @@ describe('Legacy windows reference — markup snapshots', () => {
       phase,
       state,
       unit: 'UAH',
+      // См. комментарий в EdgeDetailPopup выше: `figuresSource` — обязательный проп, и в этой
+      // фикстуре источник действительно ответил строкой alice→bob (`trustlines` ниже).
+      figuresSource: { kind: 'row' } as const,
       used: '12',
       currentLimit: '100',
       available: '88',

@@ -1,0 +1,1 @@
+Static review against the specified merge base found no clear, actionable regressions introduced by this patch. Tests were not run: UI dependencies and the repository virtual environment were absent, and the checkout was read-only.

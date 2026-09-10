@@ -234,3 +234,118 @@ export function buildFocusModeQuery(input: {
     participant_pid: pid,
   }
 }
+
+// F-013-1 / T1302, corrected by the internal review of programme 013 (F-013-R1/R2).
+//
+// A counter on the Activity card is derived from ONE optional collection, and the response says
+// per collection what it carried. Three states have to survive the trip to the pixels:
+//
+//   * we were not told about the collection -> "—" per window. A zero here is an assertion the
+//     client is not entitled to make.
+//   * we were told, and it is what it is    -> the plain number. Zero included: a measured zero is
+//     a fact and must read as one.
+//   * we were told a PREFIX of a longer list -> a leading "≥", because every count over a cut list
+//     is a lower bound.
+//
+// `incompleteWindows` is the fourth case and it collapses into the first - but only for the cells
+// it actually reaches. Rows arrived that carry nothing able to place this participant in them, so a
+// count taken without them is an undercount wearing the typography of a total.
+//
+// WHY A LIST OF WINDOWS AND NOT A BOOLEAN (external review of 013). The flag that stood here was
+// one boolean for the whole `transactions` collection, and both the payment cell and the clearing
+// cell read it. So a single committed payment with an unpublished recipient blanked a clearing zero
+// that had been counted to zero independently of it - and blanked it in all three windows, one of
+// which the doubtful row was too old to belong to. That is ignorance the system does not have,
+// manufactured by a fix against ignorance. A doubt is now recorded at the granularity the operator
+// reads it at: which counter, and which windows of it.
+//
+// WHY A PER-COLLECTION OBJECT AND NOT FLAGS ON THE ACTIVITY OBJECT. The defect this replaces was a
+// single name, `hasTransactions`, that meant "the array is non-empty" to one branch and "the
+// response named the collection" to another; the two got merged and a real system's measured zero
+// started printing "—". A value that travels WITH the collection it describes cannot be attached
+// to the wrong one by accident, and a second collection needs no second set of flags.
+export const UNKNOWN_ACTIVITY_COUNT = '—'
+
+export type CountConfidence = {
+  /** The response named this collection at all. Nothing may be printed as a number without it. */
+  known: boolean
+  /** What we hold is a prefix of a longer list, so every count over it is "at least". */
+  lowerBound: boolean
+  /**
+   * The windows (in days) of THIS counter in which a row arrived that could not be placed against
+   * this participant. A window listed here would print an undercount and prints nothing instead; a
+   * window NOT listed here is unaffected and keeps its number, because the row that raised the
+   * doubt could not have joined its count anyway.
+   */
+  incompleteWindows: readonly number[]
+}
+
+export const COUNT_UNKNOWN: CountConfidence = { known: false, lowerBound: false, incompleteWindows: [] }
+export const COUNT_MEASURED: CountConfidence = { known: true, lowerBound: false, incompleteWindows: [] }
+
+/**
+ * Read one collection's completeness out of a response's `included` / `truncated`.
+ *
+ * `truncated` is only meaningful for a collection `included` names: a cut we were never told we
+ * received is not a cut we know about, it is silence.
+ */
+export function collectionConfidence(
+  name: string,
+  included: string[] | null | undefined,
+  truncated: string[] | null | undefined,
+  incompleteWindows: readonly number[] = [],
+): CountConfidence {
+  const isIncluded = (included || []).includes(name)
+  // A collection we were never told about cannot have per-window doubts either: there is no count
+  // to undercount. "We were not told" already says everything, and says it for every window.
+  if (!isIncluded) return COUNT_UNKNOWN
+  return {
+    known: true,
+    lowerBound: (truncated || []).includes(name),
+    incompleteWindows,
+  }
+}
+
+/** One "7 / 30 / 90" cell of the Activity card, printed at the confidence of its collection. */
+export function activityCounts(
+  counts: Record<number, number> | null | undefined,
+  windows: number[] | null | undefined,
+  confidence: CountConfidence | null | undefined,
+): string {
+  const ws = (windows || []).slice()
+  if (!confidence || !confidence.known) {
+    return ws.map(() => UNKNOWN_ACTIVITY_COUNT).join(' / ')
+  }
+  // Per window, because that is per cell. A doubtful row clouds the windows it could be in and
+  // leaves the others reading the number they were counted to.
+  const clouded = new Set(confidence.incompleteWindows || [])
+  const prefix = confidence.lowerBound ? '≥' : ''
+  return ws
+    .map((w) => (clouded.has(w) ? UNKNOWN_ACTIVITY_COUNT : `${prefix}${(counts || {})[w] ?? 0}`))
+    .join(' / ')
+}
+
+/**
+ * The drawer's incident-ratio row, which is fed by the snapshot's `incidents` collection on every
+ * branch - the per-participant metrics endpoint publishes no such ratio.
+ *
+ * The subtle case is a participant ABSENT from the map. On a complete list that absence is a
+ * measured "no incidents" and prints 0.00; on a CUT list it is indistinguishable from a row the
+ * server dropped, so it prints nothing. Before this, the row was `(ratio || 0).toFixed(2)` and
+ * printed a hard 0.00 for every participant in real mode, where the collection is never requested.
+ */
+export function incidentRatioDisplay(
+  ratio: number | null | undefined,
+  confidence: CountConfidence | null | undefined,
+): string {
+  // Not a windowed figure: it is one number over the whole collection, so ANY unplaceable row in it
+  // is enough to make the ratio a lower bound of unknown size.
+  if (!confidence || !confidence.known || (confidence.incompleteWindows || []).length > 0) {
+    return UNKNOWN_ACTIVITY_COUNT
+  }
+  if (!Number.isFinite(Number(ratio))) {
+    return confidence.lowerBound ? UNKNOWN_ACTIVITY_COUNT : (0).toFixed(2)
+  }
+  const prefix = confidence.lowerBound ? '≥' : ''
+  return `${prefix}${Number(ratio).toFixed(2)}`
+}

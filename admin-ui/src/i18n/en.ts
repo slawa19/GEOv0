@@ -441,8 +441,8 @@ export const EN: Record<string, string> = {
   'incidents.title': 'Incidents',
   'incidents.loadFailed': 'Failed to load incidents',
   'incidents.none': 'No incidents',
-  'incidents.slaTooltip': 'Incidents where Age exceeds SLA\n(on this page).',
-  'incidents.slaBreaches': 'SLA breaches: {n}',
+  'incidents.slaTooltip': 'Every payment listed here is already past its SLA - the server\nreturns only stuck ones. There is no second half to this list.',
+  'incidents.allPastSla': '{n} stuck, all past SLA',
   'incidents.readOnlyAbortDisabled': 'Read-only role: abort is disabled',
   'incidents.abort.title': 'Force abort transaction',
   'incidents.abort.reasonRequired': 'Reason for abort (required)',
@@ -628,8 +628,20 @@ export const EN: Record<string, string> = {
   'graph.analytics.activity.paymentsCommittedTooltip': 'Count of committed PAYMENT transactions involving this participant (as sender or receiver), by updated_at window.',
   'graph.analytics.activity.clearingCommitted': 'Clearing committed',
   'graph.analytics.activity.clearingCommittedTooltip': 'Count of committed CLEARING transactions where this participant appears in any cycle edge (or is initiator), by updated_at window.',
-  'graph.analytics.activity.transactionsUnavailableTitle': 'Transactions-based activity is unavailable in fixtures',
-  'graph.analytics.activity.transactionsUnavailableDescription': 'Missing datasets/transactions.json in the current seed. In real mode this must come from API.',
+  // F-013-1 / T1302. Replaces a single 'unavailable in fixtures' notice that was wrong in two ways:
+  // it blamed the seed for what was actually a query the client never sent, and it stood next to a
+  // printed 0 that it did not contradict. Three notices now, one per state the response can be in.
+  'graph.analytics.activity.transactionsNotIncludedTitle': 'Transaction activity was not requested',
+  'graph.analytics.activity.transactionsNotIncludedDescription': 'This snapshot does not carry the transactions collection, so payment and clearing counters cannot be computed. Absent is not the same as zero.',
+  'graph.analytics.activity.transactionsUnattributableTitle': 'Some transaction activity cannot be attributed to this participant',
+  'graph.analytics.activity.transactionsUnattributableDescription': 'The snapshot carries committed transactions, and some of them publish no counterparties, so we cannot tell whether they involve this participant. Only the cells such a row could belong to are withheld and shown as —; the counters still showing a number were reached without it.',
+  'graph.analytics.activity.transactionsTruncatedTitle': 'Transaction counters are lower bounds',
+  'graph.analytics.activity.transactionsTruncatedDescription': 'The server returned only the most recent transactions and cut the rest, so the numbers shown are at least this many, not totals.',
+  // F-013-R2. The counters derived from `incidents` and `audit_log`. This client requests neither
+  // collection, so in real mode both rows are blank; saying why is the difference between an
+  // honest silence and a screen that looks broken.
+  'graph.analytics.activity.snapshotCollectionsNotIncludedTitle': 'Incident and participant-op counters were not requested',
+  'graph.analytics.activity.snapshotCollectionsNotIncludedDescription': 'This snapshot does not carry the incidents and audit-log collections, so these counters cannot be computed here. They are filled in from the per-participant metrics endpoint when it answers. Absent is not the same as zero.',
 
   'graph.analytics.summary.pickEquivalentTitle': 'Pick an equivalent (not ALL) to enable analytics cards',
   'graph.analytics.summary.widgetsTitle': 'Summary widgets',
@@ -702,6 +714,7 @@ export const EN: Record<string, string> = {
   'app.status.unknownDetail': 'no health answer received yet - this is not a report that the system is well',
   'app.status.degraded': 'schema behind head',
   'app.status.migrationsBehindDetail': 'database schema is at {current}, head is {head}',
+  'app.status.serviceDegradedDetail': 'the service reports its own status as "{status}"',
   'app.status.apiSource': 'API source: {label}',
   'app.status.scenario': 'scenario: {scenario}',
   'app.apiMode.mock': 'MOCK DATA',

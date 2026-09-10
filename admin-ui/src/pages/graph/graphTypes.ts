@@ -62,13 +62,16 @@ export type AuditLogEntry = {
   ip_address?: string
 }
 
+// F-013-1 / T1302. Mirrors the snapshot projection: `equivalent` is a top-level field, `payload`
+// is not published at all and is optional only because the mock fixture still ships one.
 export type Transaction = {
   id?: string
   tx_id: string
   idempotency_key?: string | null
   type: string
   initiator_pid: string
-  payload: Record<string, unknown>
+  equivalent?: string | null
+  payload?: Record<string, unknown>
   signatures?: unknown[] | null
   state: string
   error?: Record<string, unknown> | null
@@ -86,6 +89,10 @@ export type GraphSnapshotPayload = {
   debts: Debt[]
   audit_log: AuditLogEntry[]
   transactions: Transaction[]
+  // F-013-1 / T1302. Completeness metadata for the three optional collections, carried alongside
+  // them so no consumer has to infer "we have no data" from "the array is empty".
+  included: string[]
+  truncated: string[]
 }
 
 export type ClearingCycles = {

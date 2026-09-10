@@ -6,6 +6,7 @@ import { parseAmountNumber, parseAmountStringOrNull } from '../utils/numberForma
 import type { ParticipantInfo, SimulatorActionClearingRealResponse, TrustlineInfo } from '../api/simulatorTypes'
 import { useInteractActions } from './useInteractActions'
 import { useInteractDataCache } from './interact/useInteractDataCache'
+import type { TrustlinesFetchState } from './interact/trustlinesSourceState'
 import { useInteractFSM, type InteractPhase, type InteractState } from './interact/useInteractFSM'
 import { useInteractHistory, type InteractHistoryEntry as InteractHistoryEntryT } from './interact/useInteractHistory'
 
@@ -56,6 +57,10 @@ export function useInteractMode(opts: {
   trustlinesLoading: ComputedRef<boolean>
   /** Best-effort error signal for trustlines refresh failures (UI may show a degraded hint). */
   trustlinesLastError: ComputedRef<string | null>
+  /** `F-013-7`: source state as a state (never asked / loading / failed / answered). */
+  trustlinesFetchState: ComputedRef<TrustlinesFetchState>
+  /** `F-013-7`: the pair's row as the source actually answered it (no snapshot fallback). */
+  findAnsweredTrustline: (from: string | null, to: string | null) => TrustlineInfo | null
   availableCapacity: ComputedRef<string | null>
   /** BUG-4: node IDs that should be highlighted as available targets in the current picking phase. */
   availableTargetIds: ComputedRef<Set<string> | undefined>
@@ -190,6 +195,8 @@ export function useInteractMode(opts: {
   const trustlines = dataCache.trustlines
   const trustlinesLoading = dataCache.trustlinesLoading
   const trustlinesLastError = dataCache.trustlinesLastError
+  const trustlinesFetchState = dataCache.trustlinesFetchState
+  const findAnsweredTrustline = dataCache.findAnsweredTrustline
   const refreshParticipants = dataCache.refreshParticipants
   const refreshTrustlines = dataCache.refreshTrustlines
   const refreshPaymentTargets = dataCache.refreshPaymentTargets
@@ -256,8 +263,14 @@ export function useInteractMode(opts: {
 
   // Refresh policy: when the underlying graph snapshot changes (tick / new graph),
   // revalidate payment targets for the current From (if the payment flow is active).
+  //
+  // ВТОРОЙ ПОТРЕБИТЕЛЬ ТОЙ ЖЕ РЕВИЗИИ, и он обязан двигаться вместе с первым (`F-013-2` /
+  // `T1303`, 2026-09-10). Очистка кэша в `useInteractDataCache` делает ответ ПУСТЫМ, а не
+  // свежим; перезапрашивает — вот этот watch. Если добавить `data_revision` только в один из
+  // двух, после патча останется либо устаревший набор целей, либо пустой, и оба варианта хуже
+  // третьего. Это тот же урок «сигнал построен в двух местах», что и в `F-013-4`.
   watch(
-    () => String(opts.snapshot.value?.generated_at ?? ''),
+    () => `${String(opts.snapshot.value?.generated_at ?? '')}|${opts.snapshot.value?.data_revision ?? 0}`,
     () => {
       prefetchPaymentTargetsForCurrentFrom({ force: true })
     },
@@ -700,6 +713,8 @@ export function useInteractMode(opts: {
     trustlines,
     trustlinesLoading,
     trustlinesLastError,
+    trustlinesFetchState,
+    findAnsweredTrustline,
     availableCapacity,
     availableTargetIds,
     paymentToTargetIds,

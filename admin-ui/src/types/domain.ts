@@ -91,13 +91,25 @@ export type LiquiditySummary = {
   top_bottleneck_edges: Trustline[]
 }
 
+// F-013-1 / T1302. The graph snapshot's projection of a transaction. `payload` is NOT on that
+// wire - the producer lifts `equivalent` out of it and publishes nothing else - so `payload` is
+// optional here and `equivalent` is the top-level field a consumer must read. The mock fixture
+// still carries a full `payload`, which is exactly why a consumer test built on the fixture proves
+// nothing about real mode.
 export type Transaction = {
   id?: string
   tx_id: string
   idempotency_key?: string | null
   type: string
   initiator_pid: string
-  payload: Record<string, unknown>
+  equivalent?: string | null
+  /** PAYMENT: who paid. Absent when the internal payload did not carry it. */
+  from?: string
+  /** PAYMENT: who was paid. */
+  to?: string
+  /** CLEARING: the cycle reduced to who owed whom. Amounts and debt ids stay internal. */
+  edges?: Array<{ debtor: string; creditor: string }>
+  payload?: Record<string, unknown>
   signatures?: unknown[] | null
   state: string
   error?: Record<string, unknown> | null
@@ -113,6 +125,12 @@ export type GraphSnapshot = {
   debts: Debt[]
   audit_log: AuditLogEntry[]
   transactions: Transaction[]
+  // F-013-1 / T1302. `included` names the optional collections this body actually carries;
+  // `truncated` names those of them that hit the include limit, so their counts are lower bounds.
+  // Optional because the canon does not require them - a server that omits them has told us
+  // nothing, which is not the same as telling us the collection was empty.
+  included?: string[]
+  truncated?: string[]
 }
 
 export type ClearingCycleEdge = {

@@ -1061,9 +1061,15 @@ export const mockApi = {
         isRatioBelowThreshold({ numerator: t.available, denominator: t.limit, threshold }),
       )
 
+      // Третий экземпляр предиката, и единственный, где он мог РАСХОДИТЬСЯ с продакшеном.
+      // Бэкенд считает эту метрику как длину уже отфильтрованного по cutoff множества
+      // (`app/api/v1/admin.py:768-774` — `len(inc_payloads)`, второго предиката там нет), а мок
+      // накладывал сверху `age > sla`. На поставляемых фикстурах расхождения нет — все три строки
+      // предикату удовлетворяют, то есть мок был верен по совпадению данных, а не по правилу.
+      // `F-013-5`, 2026-09-10. Фильтр по эквиваленту сохранён: он есть и на бэкенде (`:769-772`).
       const incidentsOverSla = incidents.filter((i) => {
         if (eq && String(i.equivalent || '').trim().toUpperCase() !== eq) return false
-        return i.age_seconds > i.sla_seconds
+        return true
       })
 
       let totalLimit = '0'
@@ -1190,16 +1196,34 @@ export const mockApi = {
   }): Promise<ApiEnvelope<Paginated<Trustline>>> {
     return withScenario('/api/v1/admin/trustlines', async () => {
       const all = await loadJson<Trustline[]>('datasets/trustlines.json')
-      const eq = (params.equivalent || '').trim().toUpperCase()
-      const creditor = (params.creditor || '').trim().toLowerCase()
-      const debtor = (params.debtor || '').trim().toLowerCase()
-      const status = (params.status || '').trim().toLowerCase()
+
+      // `F-013-6` (013 / RT-013-6): equivalent/creditor/debtor are EXACT-EQUALITY filters,
+      // because that is what the operator gets in production.  `GET /api/v1/admin/trustlines`
+      // (`app/api/v1/admin.py:1396`) passes these values through untouched, and
+      // `TrustLineService.list_all` (`app/core/trustlines/service.py:618`) resolves them with
+      // `Participant.pid == creditor_pid` / `Equivalent.code == equivalent`, returning an empty
+      // page when they do not resolve -- `count_all` (`:675`) repeats the same resolution, so the
+      // count agrees.  Nothing on the way in normalises the value either: `realApi.listTrustlines`
+      // spreads the params into `buildQuery`, which only drops empty strings.  Substring matching
+      // here made the demo answer questions the product refuses; so did folding case, and so did
+      // trimming.  A free-text search would need its own `q` parameter and a backend that offers
+      // one -- this operation has neither, so adding `q` would only re-open the same gap.
+      const eq = params.equivalent ?? ''
+      const creditor = params.creditor ?? ''
+      const debtor = params.debtor ?? ''
+      // `status` НОРМАЛИЗАЦИЮ ТЕРЯЕТ ТОЖЕ — доделка по итогам adversarial 2026-09-10. Комментарий
+      // здесь стоял обратный: «уже сравнивается на равенство, и бэкенд типизирует его закрытым
+      // литералом». Первое верно, второе и есть причина, по которой нормализация неверна:
+      // `Literal["active", "frozen", "closed"]` означает, что на `"ACTIVE"` FastAPI отвечает
+      // **422**, а мок с `.toLowerCase()` молча находил строки. Это была последняя копия того же
+      // расхождения, оставшаяся строкой ниже исправленных фильтров.
+      const status = params.status || ''
 
       const filtered = all.filter((t) => {
-        if (eq && !t.equivalent.toUpperCase().includes(eq)) return false
-        if (creditor && !t.from.toLowerCase().includes(creditor)) return false
-        if (debtor && !t.to.toLowerCase().includes(debtor)) return false
-        if (status && t.status.toLowerCase() !== status) return false
+        if (eq && t.equivalent !== eq) return false
+        if (creditor && t.from !== creditor) return false
+        if (debtor && t.to !== debtor) return false
+        if (status && t.status !== status) return false
         return true
       })
 
@@ -1488,7 +1512,14 @@ export const mockApi = {
     })
   },
 
-  async graphSnapshot(params?: { equivalent?: string }): Promise<ApiEnvelope<GraphSnapshot>> {
+  // F-013-1 / T1302. `include` is accepted and deliberately ignored: this mock loads all three
+  // optional collections from fixtures unconditionally, and `included` below says so truthfully.
+  // `included` describes what the BODY CARRIES, not what the caller asked for, so reporting all
+  // three here is correct rather than a convenient lie. What is NOT fixed here is the deeper trap
+  // (recorded in specs/013-frontend-data-honesty/spec.md): these fixture rows carry a `payload`
+  // that the real producer does not publish, so a consumer test written against this mock is green
+  // and blind. The reproducer for this task therefore feeds the producer's shape by hand.
+  async graphSnapshot(params?: { equivalent?: string; include?: string[] }): Promise<ApiEnvelope<GraphSnapshot>> {
     return withScenario('/api/v1/admin/graph/snapshot', async () => {
       const eq = String(params?.equivalent || '').trim().toUpperCase()
       const participantsPath = eq ? `datasets/participants.viz-${eq}.json` : ''
@@ -1515,6 +1546,8 @@ export const mockApi = {
           debts,
           audit_log: auditLog,
           transactions,
+          included: ['incidents', 'audit_log', 'transactions'],
+          truncated: [],
         },
       }
     })
@@ -1527,7 +1560,7 @@ export const mockApi = {
     })
   },
 
-  async graphEgo(params: { pid: string; depth?: 1 | 2; equivalent?: string; status?: string[] }): Promise<ApiEnvelope<GraphSnapshot>> {
+  async graphEgo(params: { pid: string; depth?: 1 | 2; equivalent?: string; status?: string[]; include?: string[] }): Promise<ApiEnvelope<GraphSnapshot>> {
     return withScenario('/api/v1/admin/graph/ego', async () => {
       const pid = String(params.pid || '').trim()
       const depth = params.depth ?? 1
@@ -1590,6 +1623,10 @@ export const mockApi = {
           debts,
           audit_log: snap.audit_log,
           transactions: snap.transactions,
+          // F-013-1 / T1302. The ego view narrows the collections but carries the same three, so
+          // it inherits the completeness metadata of the snapshot it was built from.
+          included: snap.included,
+          truncated: snap.truncated,
         },
       }
     })

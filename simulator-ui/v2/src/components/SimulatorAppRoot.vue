@@ -23,6 +23,12 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
  import { provideTopBarContext, type TopBarContext } from '../composables/useTopBarContext'
 
  import type { InteractPhase } from '../composables/useInteractMode'
+import {
+  canActOnTrustlineFigures,
+  freezeTrustlineFiguresSource,
+  resolveTrustlineFiguresSource,
+  type TrustlineFiguresSource,
+} from '../composables/interact/trustlinesSourceState'
 import { provideActivePanelState } from '../composables/useActivePanelState'
  import type { Point } from '../types/layout'
  import { useSimulatorStorage } from '../composables/usePersistedSimulatorPrefs'
@@ -656,6 +662,48 @@ const interactSelectedLink = computed<GraphLink | null>(() => {
   return null
 })
 
+/**
+ * ЧЕМ ОБОСНОВАНЫ числа выбранной линии (`F-013-7`, третья копия; расширено 2026-09-10).
+ *
+ * `interactSelectedLink` выше предпочитает REST-результат только когда массив непустой, иначе
+ * молча берёт снапшот. Для ПРОСМОТРА это допустимо и так и задумано; для МУТИРУЮЩЕГО контрола —
+ * нет: решение «разрешить закрыть линию» принималось бы по чужим числам.
+ *
+ * ПОЧЕМУ РЕШЕНИЕ ЖИВЁТ ЗДЕСЬ, А СОСТОЯНИЕ ИСТОЧНИКА — В КЭШЕ. Жизненный цикл запроса
+ * знает только `useInteractDataCache` — он и отдаёт `trustlinesFetchState` вместе с
+ * `findAnsweredTrustline`, который смотрит в НЕСЛИТЫЙ ответ. А какая пара выбрана и какой
+ * поверхности отвечать — знает только корень, рядом с тем самым фоллбэком, который он
+ * страхует. Компоненты получают готовое основание ПРОПОМ именно потому, что сами вычислить
+ * его не могут: им виден только слитый список, в котором строка из снапшота неотличима от
+ * строки из ответа бэкенда.
+ */
+const interactSelectedLinkFiguresSource = computed<TrustlineFiguresSource>(() => {
+  const from = interact.mode.state.fromPid
+  const to = interact.mode.state.toPid
+  return resolveTrustlineFiguresSource(
+    interact.mode.trustlinesFetchState.value,
+    interact.mode.findAnsweredTrustline(from, to) != null,
+  )
+})
+
+/**
+ * То же для окна edge-detail, с одной поправкой: в режиме `keepAlive` попап показывает
+ * ЗАМОРОЖЕННУЮ линию — снимок, снятый до того, как interact-состояние очистили (и ушло на ДРУГУЮ
+ * пару), поэтому спрашивать про неё живое состояние источника бессмысленно: оно уже про другое.
+ *
+ * ЧТО ИЗМЕНИЛОСЬ 2026-09-10 (внешнее ревью 013, находка P3). Раньше здесь возвращалось `frozen`
+ * по одному лишь ФАКТУ наличия замороженной линии. Тогда «Send Payment», нажатый при неспрошенном
+ * или упавшем источнике, снимал предупреждение: жест пользователя превращал молчание бэкенда в
+ * его ответ. Теперь замораживается ОСНОВАНИЕ ВМЕСТЕ С ЧИСЛАМИ, и `frozen` получается только из
+ * того, что действительно БЫЛО ответом (`freezeTrustlineFiguresSource`).
+ */
+const wmEdgeDetailFiguresSource = computed<TrustlineFiguresSource>(() => {
+  if (wmEdgeDetail.state.value === 'keepAlive' && wmEdgeDetail.frozenLink.value != null) {
+    return freezeTrustlineFiguresSource(wmEdgeDetail.frozenFiguresSource.value)
+  }
+  return interactSelectedLinkFiguresSource.value
+})
+
 function formatDemoActionError(e: unknown): string {
   const msg = extractErrorMessage(e)
   // Structured API errors may carry a `bodyText` field with the raw response body.
@@ -1056,6 +1104,9 @@ function goInteract() {
 function onEdgeDetailCloseLine() {
   // Delegate to mode action (will transition to idle on success).
   if (interactPhase.value !== 'editing-trustline') return
+  // `F-013-7`: отключённая кнопка — это видимость гарда, а не гард: этот обработчик
+  // вызывается по событию от попапа, и решение о мутации принимается здесь же, где известно основание.
+  if (!canActOnTrustlineFigures(wmEdgeDetailFiguresSource.value)) return
   captureInteractFlowOpener('[data-testid="actionbar-trustline"]', {
     focusOwnerType: 'edge-detail',
     preferFallback: true,
@@ -1078,7 +1129,12 @@ function onEdgeDetailCloseLine() {
    // Spec: "инспектор остаётся открыт как «база контекста», а Interact-панель
    // открывается поверх для выполнения действия (Send Payment)."
    // Freeze the current link data before cancel() clears interact state.
-   wmEdgeDetail.allowKeepAlive({ frozenLink: interactSelectedLink.value })
+   // Основание замораживается ВМЕСТЕ с числами: снимок молчания обязан остаться снимком
+   // молчания (внешнее ревью 013, находка P3).
+   wmEdgeDetail.allowKeepAlive({
+     frozenLink: interactSelectedLink.value,
+     frozenFiguresSource: interactSelectedLinkFiguresSource.value,
+   })
    // Do NOT close edge-detail — it persists as context.
 
   // Atomically start payment with pre-filled FROM to avoid an intermediate
@@ -1344,6 +1400,7 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
           :available="emptyToNull(wmEdgeDetailEffectiveLink?.available)"
           :status="emptyToNullString(wmEdgeDetailEffectiveLink?.status)"
           :busy="wmEdgeDetailEffectiveBusy"
+          :figures-source="wmEdgeDetailFiguresSource"
           :force-hidden="false"
           :close="() => uiCloseEdgeDetailWindow('action')"
           @change-limit="onEdgeDetailChangeLimit"
@@ -1403,6 +1460,7 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
           :used="emptyToNull(interactSelectedLink?.used)"
           :current-limit="emptyToNull(interactSelectedLink?.trust_limit)"
           :available="emptyToNull(interactSelectedLink?.available)"
+          :figures-source="interactSelectedLinkFiguresSource"
           :participants="interact.mode.participants.value"
           :trustlines="interact.mode.trustlines.value"
           :busy="interact.mode.busy.value"

@@ -441,8 +441,8 @@ export const RU: Record<string, string> = {
   'incidents.title': 'Инциденты',
   'incidents.loadFailed': 'Не удалось загрузить инциденты',
   'incidents.none': 'Инцидентов нет',
-  'incidents.slaTooltip': 'Инциденты, у которых Age больше SLA\n(на этой странице).',
-  'incidents.slaBreaches': 'Нарушений SLA: {n}',
+  'incidents.slaTooltip': 'Каждый платёж в этом списке уже за пределами своего SLA —\nсервер возвращает только застрявшие. Второй половины у списка нет.',
+  'incidents.allPastSla': 'застряло: {n}, все за пределами SLA',
   'incidents.readOnlyAbortDisabled': 'Роль только чтение: abort отключён',
   'incidents.abort.title': 'Принудительно прервать транзакцию',
   'incidents.abort.reasonRequired': 'Причина abort (обязательно)',
@@ -628,8 +628,18 @@ export const RU: Record<string, string> = {
   'graph.analytics.activity.paymentsCommittedTooltip': 'Количество committed PAYMENT транзакций с участием этого участника (sender/receiver) по окнам updated_at.',
   'graph.analytics.activity.clearingCommitted': 'Clearing committed',
   'graph.analytics.activity.clearingCommittedTooltip': 'Количество committed CLEARING транзакций, где участник есть в цикле (или initiator), по окнам updated_at.',
-  'graph.analytics.activity.transactionsUnavailableTitle': 'Активность по транзакциям недоступна в fixtures',
-  'graph.analytics.activity.transactionsUnavailableDescription': 'Нет datasets/transactions.json в текущем seed. В real mode это должно приходить из API.',
+  // F-013-1 / T1302. Замена одному уведомлению «недоступно в fixtures», неверному дважды: оно
+  // винило seed в том, что на деле было незаданным запросом клиента, и стояло рядом с напечатанным
+  // нулём, которому не противоречило. Теперь три уведомления — по одному на состояние ответа.
+  'graph.analytics.activity.transactionsNotIncludedTitle': 'Активность по транзакциям не запрашивалась',
+  'graph.analytics.activity.transactionsNotIncludedDescription': 'Этот снапшот не несёт коллекцию транзакций, поэтому счётчики платежей и клирингов посчитать не из чего. Отсутствие — не ноль.',
+  'graph.analytics.activity.transactionsUnattributableTitle': 'Часть активности по транзакциям не сопоставима с участником',
+  'graph.analytics.activity.transactionsUnattributableDescription': 'Снапшот несёт committed-транзакции, и в части строк нет контрагентов, поэтому нельзя сказать, касаются ли они этого участника. Скрыты только те ячейки, куда такая строка могла бы попасть, — остальные числа посчитаны без неё.',
+  'graph.analytics.activity.transactionsTruncatedTitle': 'Счётчики транзакций — нижняя оценка',
+  'graph.analytics.activity.transactionsTruncatedDescription': 'Сервер вернул только последние транзакции и обрезал остальные, поэтому показанные числа — «не меньше чем», а не итоги.',
+  // F-013-R2. См. комментарий в en.ts.
+  'graph.analytics.activity.snapshotCollectionsNotIncludedTitle': 'Счётчики инцидентов и операций с участником не запрашивались',
+  'graph.analytics.activity.snapshotCollectionsNotIncludedDescription': 'Этот снимок не содержит коллекций incidents и audit_log, поэтому эти счётчики здесь не вычисляются. Они заполняются из эндпоинта метрик участника, когда тот отвечает. «Нет данных» — это не «ноль».',
 
   'graph.analytics.summary.pickEquivalentTitle': 'Выберите эквивалент (не ALL), чтобы включить карточки аналитики',
   'graph.analytics.summary.widgetsTitle': 'Виджеты сводки',
@@ -702,6 +712,7 @@ export const RU: Record<string, string> = {
   'app.status.unknownDetail': 'ответа о здоровье ещё не было - это не утверждение, что всё хорошо',
   'app.status.degraded': 'схема отстаёт от head',
   'app.status.migrationsBehindDetail': 'схема БД на {current}, head - {head}',
+  'app.status.serviceDegradedDetail': 'сервис сообщает о себе статус «{status}»',
   'app.status.apiSource': 'Источник API: {label}',
   'app.status.scenario': 'сценарий: {scenario}',
   'app.apiMode.mock': 'MOCK DATA',

@@ -149,10 +149,13 @@ async function loadIncidents() {
   incidentsError.value = null
   try {
     const page = assertSuccess(await api.listIncidents({ page: 1, per_page: 200 }))
-    const all = page.items as Incident[]
-    const over = all.filter((i) => i.age_seconds > i.sla_seconds)
-    over.sort((a, b) => b.age_seconds - a.age_seconds)
-    incidentsOverSla.value = over.slice(0, 10)
+    // Второй экземпляр того же тавтологического предиката, снят вместе с первым (`F-013-5`).
+    // `.filter(age > sla)` не убирал ни одной строки: маршрут возвращает только просроченные
+    // (`app/api/v1/admin.py:1011,1019`), что запинено `tests/unit/test_admin_incidents_list.py:84-85`.
+    // Поведение не меняется — меняется то, что код перестаёт утверждать несуществующее деление.
+    const stuck = (page.items as Incident[]).slice()
+    stuck.sort((a, b) => b.age_seconds - a.age_seconds)
+    incidentsOverSla.value = stuck.slice(0, 10)
   } catch (e: unknown) {
     if (e instanceof ApiException) {
       incidentsError.value = `${e.message} (${e.status} ${e.code})`

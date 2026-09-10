@@ -256,7 +256,7 @@
           :label="t('graph.analytics.activity.incidentsInitiator')"
           :tooltip-text="t('graph.analytics.activity.incidentsInitiatorTooltip')"
         />
-        <span class="metricRow__value">{{ selectedActivity.incidentCount[7] }} / {{ selectedActivity.incidentCount[30] }} / {{ selectedActivity.incidentCount[90] }}</span>
+        <span class="metricRow__value">{{ activityCounts(selectedActivity.incidentCount, selectedActivity.windows, selectedActivity.incidents) }}</span>
       </div>
       <div class="metricRow">
         <TooltipLabel
@@ -264,7 +264,7 @@
           :label="t('graph.analytics.activity.participantOps')"
           :tooltip-text="t('graph.analytics.activity.participantOpsTooltip')"
         />
-        <span class="metricRow__value">{{ selectedActivity.participantOps[7] }} / {{ selectedActivity.participantOps[30] }} / {{ selectedActivity.participantOps[90] }}</span>
+        <span class="metricRow__value">{{ activityCounts(selectedActivity.participantOps, selectedActivity.windows, selectedActivity.auditLog) }}</span>
       </div>
       <div class="metricRow">
         <TooltipLabel
@@ -272,7 +272,7 @@
           :label="t('graph.analytics.activity.paymentsCommitted')"
           :tooltip-text="t('graph.analytics.activity.paymentsCommittedTooltip')"
         />
-        <span class="metricRow__value">{{ selectedActivity.paymentCommitted[7] }} / {{ selectedActivity.paymentCommitted[30] }} / {{ selectedActivity.paymentCommitted[90] }}</span>
+        <span class="metricRow__value">{{ activityCounts(selectedActivity.paymentCommitted, selectedActivity.windows, selectedActivity.payments) }}</span>
       </div>
       <div class="metricRow">
         <TooltipLabel
@@ -280,16 +280,63 @@
           :label="t('graph.analytics.activity.clearingCommitted')"
           :tooltip-text="t('graph.analytics.activity.clearingCommittedTooltip')"
         />
-        <span class="metricRow__value">{{ selectedActivity.clearingCommitted[7] }} / {{ selectedActivity.clearingCommitted[30] }} / {{ selectedActivity.clearingCommitted[90] }}</span>
+        <span class="metricRow__value">{{ activityCounts(selectedActivity.clearingCommitted, selectedActivity.windows, selectedActivity.clearings) }}</span>
       </div>
     </div>
 
+    <!--
+      F-013-1 / T1302. Three mutually exclusive statements about the same collection, and
+      the order matters: "we were told nothing" outranks "we were told something we cannot
+      use", which outranks "what we were told is a lower bound". Only the last of them
+      leaves a printed number standing.
+    
+      `payments` and `clearings` describe the same collection, so either answers the first
+      and third questions and `payments` is read for both. The middle one is asked of BOTH,
+      because since the external review of 013 the two counters carry their doubts
+      separately: the notice is about the collection, but it must appear whenever either
+      cell had to withhold a window - and, unlike before, it no longer withholds the other
+      cell's windows along with it.
+    -->
     <el-alert
-      v-if="!selectedActivity.hasTransactions"
+      v-if="!selectedActivity.payments.known"
       type="warning"
       show-icon
-      :title="t('graph.analytics.activity.transactionsUnavailableTitle')"
-      :description="t('graph.analytics.activity.transactionsUnavailableDescription')"
+      :title="t('graph.analytics.activity.transactionsNotIncludedTitle')"
+      :description="t('graph.analytics.activity.transactionsNotIncludedDescription')"
+      class="mb"
+      style="margin-top: 10px"
+    />
+    <el-alert
+      v-else-if="selectedActivity.payments.incompleteWindows.length || selectedActivity.clearings.incompleteWindows.length"
+      type="warning"
+      show-icon
+      :title="t('graph.analytics.activity.transactionsUnattributableTitle')"
+      :description="t('graph.analytics.activity.transactionsUnattributableDescription')"
+      class="mb"
+      style="margin-top: 10px"
+    />
+    <el-alert
+      v-else-if="selectedActivity.payments.lowerBound"
+      type="info"
+      show-icon
+      :title="t('graph.analytics.activity.transactionsTruncatedTitle')"
+      :description="t('graph.analytics.activity.transactionsTruncatedDescription')"
+      class="mb"
+      style="margin-top: 10px"
+    />
+    <!--
+      F-013-R2. `incidents` and `audit_log` are governed by the same `include` and this client asks
+      for neither, so the two counters above them are silent in real mode. Silence with no
+      explanation is its own trap - the row goes blank and the operator is left to guess whether
+      that is a fault - so it is said out loud, independently of the transactions notice because
+      the two collections fail independently.
+    -->
+    <el-alert
+      v-if="!selectedActivity.incidents.known || !selectedActivity.auditLog.known"
+      type="warning"
+      show-icon
+      :title="t('graph.analytics.activity.snapshotCollectionsNotIncludedTitle')"
+      :description="t('graph.analytics.activity.snapshotCollectionsNotIncludedDescription')"
       class="mb"
       style="margin-top: 10px"
     />
@@ -301,6 +348,7 @@ import GraphAnalyticsTogglesCard from '../../../ui/GraphAnalyticsTogglesCard.vue
 import type { ToggleKey } from '../../../ui/GraphAnalyticsTogglesCard.vue'
 import TooltipLabel from '../../../ui/TooltipLabel.vue'
 import { t } from '../../../i18n'
+import { activityCounts, type CountConfidence } from '../graphPageHelpers'
 
 type AnalyticsModel = Record<ToggleKey, boolean>
 
@@ -332,13 +380,37 @@ type SelectedCapacity = {
 }
 
 type SelectedActivity = {
+  windows: number[]
   trustlineCreated: Record<number, number>
   trustlineClosed: Record<number, number>
   incidentCount: Record<number, number>
   participantOps: Record<number, number>
   paymentCommitted: Record<number, number>
   clearingCommitted: Record<number, number>
-  hasTransactions: boolean
+  // F-013-1 / T1302, reshaped by F-013-R1/R2 and narrowed by the EXTERNAL review of 013. One
+  // confidence per COUNTER, sitting beside the counter it governs, because the flat flags it
+  // replaces were a single vocabulary shared by two branches that mean different things by it -
+  // and the branches got merged.
+  //
+  //   payments   -> paymentCommitted
+  //   clearings  -> clearingCommitted
+  //   incidents  -> incidentCount
+  //   auditLog   -> participantOps
+  //
+  // `payments` and `clearings` are two views of ONE collection (`transactions`): they agree about
+  // what the response carried and whether it was cut, and differ about which windows hold a row
+  // that could not be placed against this participant. They were a single `transactions` object
+  // until an unattributable payment was found erasing a clearing zero the client had counted
+  // exactly - hence the split, and hence the per-window list rather than a flag.
+  //
+  // `snapshotIncidents` is deliberately separate from `incidents`: the incident RATIO row is fed by
+  // the graph snapshot's incident collection on every branch, while the incident COUNTER can come
+  // from the metrics endpoint, which measures it server-side and owes the snapshot nothing.
+  payments: CountConfidence
+  clearings: CountConfidence
+  incidents: CountConfidence
+  auditLog: CountConfidence
+  snapshotIncidents: CountConfidence
 }
 
 defineProps<{

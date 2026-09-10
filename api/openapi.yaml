@@ -4400,6 +4400,13 @@ components:
     AdminGraphTransactionItem:
       # Built as a plain dict by _graph_fetch_transactions and placed in a list[Any] field, so no
       # response model shapes it.
+      #
+      # F-013-1 / T1302, 2026-09-10: `from`, `to` and `edges` added. They are what makes a row
+      # ATTRIBUTABLE to a participant - `initiator_pid` answers a different question, and a consumer
+      # counting "payments this participant was party to" was left reporting zero for everyone who
+      # was paid rather than paying. Present per type: `from`/`to` on PAYMENT, `edges` on CLEARING,
+      # and absent when the internal payload does not carry them, which is why none of them is
+      # required. The full payload is NOT published - it is internal and versionless.
       type: object
       required: [tx_id, type, state, initiator_pid, created_at, updated_at]
       properties:
@@ -4429,6 +4436,23 @@ components:
             - REJECTED
         initiator_pid:
           type: string
+        from:
+          # PAYMENT only: the paying participant's pid.
+          type: string
+        to:
+          # PAYMENT only: the paid participant's pid.
+          type: string
+        edges:
+          # CLEARING only: the cycle reduced to who owed whom. Amounts and debt ids stay internal.
+          type: array
+          items:
+            type: object
+            required: [debtor, creditor]
+            properties:
+              debtor:
+                type: string
+              creditor:
+                type: string
         created_at:
           # Deliberately NOT `format: date-time` - see `F-011-9`. These values are copied raw from
           # the column into a list[Any] field, so the UTC-attaching validator never runs, and
@@ -4508,6 +4532,25 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AdminGraphTransactionItem'
+        # F-013-1 / T1302, 2026-09-10. The three lists above are empty in two unrelated cases -
+        # "not requested" and "requested, and there are none" - and the comment above documents
+        # that ambiguity without removing it. These two fields remove it, for all three
+        # collections rather than for transactions alone: the include mechanism governs three and
+        # the defect is identical in each.
+        included:
+          # Which optional collections this response actually carries. A consumer may draw a
+          # conclusion about a collection only if it is named here.
+          type: array
+          items:
+            type: string
+            enum: [incidents, audit_log, transactions]
+        truncated:
+          # Which of the included collections hit their include limit. A count computed over a
+          # truncated list is a lower bound, and must not be presented as a total.
+          type: array
+          items:
+            type: string
+            enum: [incidents, audit_log, transactions]
 
     AdminGraphEgoResponse:
       # The ego read returns the snapshot body plus the root; the subclass appends its field, so

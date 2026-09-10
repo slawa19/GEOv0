@@ -3,7 +3,7 @@ import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
 import { api } from '../api'
 import { assertSuccess } from '../api/envelope'
 import { t } from '../i18n'
-import { makeMetricsKey } from '../pages/graph/graphPageHelpers'
+import { COUNT_MEASURED, collectionConfidence, makeMetricsKey } from '../pages/graph/graphPageHelpers'
 import { isRatioBelowThreshold, isUnitIntervalDecimalString } from '../utils/decimal'
 import type { ParticipantMetrics } from '../types/domain'
 import type {
@@ -117,6 +117,11 @@ export function useGraphAnalytics(opts: {
   incidents: Ref<Incident[] | null>
   auditLog: Ref<AuditLogEntry[] | null>
   transactions: Ref<Transaction[] | null>
+  // F-013-1 / T1302. What the snapshot said it actually carried, and which of those it cut at the
+  // include limit. `transactions.value.length === 0` cannot answer either question: it is produced
+  // both by "the page never asked" and by "the page asked and the period is genuinely empty".
+  included: Ref<string[] | null>
+  truncated: Ref<string[] | null>
   clearingCycles: Ref<ClearingCycles | null>
 
   selected: Ref<SelectedInfo | null>
@@ -545,6 +550,32 @@ export function useGraphAnalytics(opts: {
     }
   })
 
+  // F-013-1 / T1302. The three states the Activity card must be able to tell apart, derived from
+  // the completeness metadata rather than from an array length.
+  //
+  //   not asked      -> included does not name the collection. We know NOTHING; a count would be
+  //                     an invention and the card must show absence, not zero.
+  //   asked, empty   -> included names it, truncated does not, the array is empty. Zero is a real
+  //                     measurement and may be shown as a number.
+  //   asked, cut     -> included and truncated both name it. Every count over the rows we hold is a
+  //                     LOWER BOUND, because the server returned a prefix of a longer list.
+  //
+  // F-013-R2. All THREE optional collections, not just `transactions`. `incidentCount` is derived
+  // from `incidents` and `participantOps` from `audit_log`; the client asks for neither, so on this
+  // branch both are structurally empty in real mode and used to print a bare `0 / 0 / 0` beside
+  // counters that had just learnt to say the dash. A confidence per collection, carried next to the
+  // counters it governs, is what stops one collection's answer from being told about another's.
+  //
+  // `transactions` has no computed of its own here: its two counters (payments, clearings) carry
+  // DIFFERENT doubts about the same collection, so each is built where its doubt is measured -
+  // inside the counting loop below.
+  const snapshotIncidents = computed(() =>
+    collectionConfidence('incidents', opts.included.value, opts.truncated.value),
+  )
+  const snapshotAuditLog = computed(() =>
+    collectionConfidence('audit_log', opts.included.value, opts.truncated.value),
+  )
+
   const selectedActivity = computed(() => {
     const m = selectedMetrics.value
     if (m?.activity) {
@@ -556,7 +587,41 @@ export function useGraphAnalytics(opts: {
         participantOps: m.activity.participant_ops,
         paymentCommitted: m.activity.payment_committed,
         clearingCommitted: m.activity.clearing_committed,
-        hasTransactions: Boolean(m.activity.has_transactions),
+        // F-013-R1. THIS BRANCH MEASURED. `/metrics` computes every counter above server-side over
+        // the whole table for this participant: it does not paginate, does not depend on the
+        // snapshot's `include`, and answers 0 by counting to 0. So no count here is a prefix of a
+        // longer list and none of them is silence: `known`, and never `lowerBound`.
+        //
+        // WHAT THAT DOES NOT SAY (external review of 013). "Server-side and untruncated" is not
+        // "exactly attributed". `app/core/admin/metrics.py:693` decides whether a PAYMENT involves
+        // this participant from `payload["from"]` / `payload["to"]` alone - no fallback to
+        // `initiator_id` such as the CLEARING branch one line below has, and no signal on the wire
+        // for a row it could not place. A payment whose stored payload lacks those keys therefore
+        // arrives inside a confident number instead of beside a doubt, and nothing on THIS branch
+        // can recover it: the counter comes over as a finished integer. The limitation is recorded
+        // in `specs/BACKLOG.md` and handed to programme 016, whose `F-016-8` owns that range of
+        // `metrics.py`. It is deliberately not compensated for here - inventing a doubt over a
+        // number we cannot inspect would be this programme's own defect class in the other
+        // direction, and `app/core/admin/metrics.py` is outside 013's owner surface.
+        //
+        // What used to stand here was `hasTransactions: Boolean(m.activity.has_transactions)`, and
+        // it is the reason this comment exists. The server's `has_transactions` is a MEASUREMENT -
+        // `len(tx_rows) > 0` over committed PAYMENT/CLEARING in a 90-day window
+        // (app/core/admin/metrics.py) - while the client-side flag it was fed to means "the
+        // response named this collection at all". Merging the two made a quiet real system, which
+        // the server had actually measured as empty, report "Transaction activity was not
+        // requested" and print three dashes over counters it was holding. Nothing on this branch
+        // reads `has_transactions` any more: the counters already say everything it said, and they
+        // say it without claiming an ignorance we do not have.
+        payments: COUNT_MEASURED,
+        clearings: COUNT_MEASURED,
+        incidents: COUNT_MEASURED,
+        auditLog: COUNT_MEASURED,
+        // ... but NOT the incident RATIO. `/metrics` publishes no ratio; the drawer's row is fed by
+        // the snapshot's `incidents` collection on every branch, so its confidence is the
+        // snapshot's on every branch too. A metrics answer must not make an uncarried collection
+        // look carried.
+        snapshotIncidents: snapshotIncidents.value,
       }
     }
 
@@ -631,39 +696,121 @@ export function useGraphAnalytics(opts: {
       }
     }
 
+    // F-013-1 / T1302, narrowed by the EXTERNAL review of 013. These record the rows this loop
+    // could not place: a skipped row is a committed transaction that exists and is not in the
+    // count, so a total computed while one is outstanding is an undercount presented as a total -
+    // the same defect one level down from the one this task removes.
+    //
+    // WHY TWO SETS OF WINDOWS AND NOT ONE COUNTER. What stood here was a single `unattributable`
+    // tally for the whole collection, and both cells read the flag it produced. So an
+    // unattributable PAYMENT blanked the CLEARING cell - a count reached without ever consulting
+    // the doubtful row, and therefore known exactly - and blanked it in all three windows,
+    // including windows the doubtful row is far too old to belong to. A doubt is now admitted only
+    // where the row that raises it could have landed: its own type, its own windows.
+    const unattributablePaymentWindows = new Set<number>()
+    const unattributableClearingWindows = new Set<number>()
+
     for (const tx of opts.transactions.value || []) {
       const type = String(tx.type || '')
       if (type !== 'PAYMENT' && type !== 'CLEARING') continue
       if (String(tx.state || '') !== 'COMMITTED') continue
 
+      // The producer lifts the equivalent to the TOP level of the row and does not publish
+      // `payload` at all (`_graph_fetch_transactions`). This used to read `tx.payload.equivalent`,
+      // which is undefined on every real row, so the equivalent filter below never fired and the
+      // reader was consulting a key the wire does not have. The `payload` fallback is kept only
+      // for the mock fixture, which still ships one.
       const payload = (tx.payload || {}) as Record<string, unknown>
-      const payloadEq = typeof payload.equivalent === 'string' ? payload.equivalent : null
-      if (eqCode && payloadEq && normEq(payloadEq) !== eqCode) continue
+      const rowEqRaw =
+        typeof tx.equivalent === 'string'
+          ? tx.equivalent
+          : typeof payload.equivalent === 'string'
+            ? payload.equivalent
+            : null
+      if (eqCode && rowEqRaw && normEq(rowEqRaw) !== eqCode) continue
 
+      // Participant attribution. The projection now publishes `from`/`to` on a payment and
+      // `edges` on a clearing (`app/api/v1/admin.py::_graph_fetch_transactions`, 2026-09-10), so
+      // most rows can be answered outright. `payload` is read only as a fallback, for the mock,
+      // whose fixtures still carry it; where NEITHER source names the participant the honest
+      // answer stays "we cannot tell", not "not involved" - which is what `attributable` records.
       let involved = false
+      let attributable = false
       if (type === 'PAYMENT') {
-        const from = typeof payload.from === 'string' ? payload.from : ''
-        const to = typeof payload.to === 'string' ? payload.to : ''
-        involved = from === pid || to === pid
-      } else {
-        const edges = Array.isArray(payload.edges) ? (payload.edges as unknown[]) : []
-        involved = edges.some((edge) => {
-          if (!edge || typeof edge !== 'object') return false
-          const e = edge as Record<string, unknown>
-          return e.debtor === pid || e.creditor === pid
-        })
-        if (!involved) involved = String(tx.initiator_pid || '') === pid
-      }
-      if (!involved) continue
-
-      const ms = parseIsoMillis(tx.updated_at || tx.created_at)
-      if (ms === null) continue
-      const ageDays = (now - ms) / dayMs
-      for (const w of windows) {
-        if (ageDays <= w) {
-          if (type === 'PAYMENT') paymentCommitted[w] = (paymentCommitted[w] ?? 0) + 1
-          if (type === 'CLEARING') clearingCommitted[w] = (clearingCommitted[w] ?? 0) + 1
+        const txRow = tx as unknown as Record<string, unknown>
+        const from =
+          typeof txRow.from === 'string' ? txRow.from : typeof payload.from === 'string' ? payload.from : ''
+        const to =
+          typeof txRow.to === 'string' ? txRow.to : typeof payload.to === 'string' ? payload.to : ''
+        if (from === pid || to === pid) {
+          // A naming settles the positive case outright, whichever half of the pair carries it.
+          attributable = true
+          involved = true
+        } else if (from && to) {
+          // BOTH counterparties named, neither of them ours: a real "not this participant's".
+          //
+          // F-013-R3. This used to be `if (from || to)`, which reached the same conclusion from ONE
+          // half of the pair - so a payment carrying `from` and no `to` (the producer emits each key
+          // only when the internal payload has a non-empty value for it) was recorded as not ours
+          // on the strength of a field nobody sent. The zero that produced is the same false zero
+          // this programme exists to remove, one level further down.
+          attributable = true
+          involved = false
+        } else if (String(tx.initiator_pid || '') === pid) {
+          // The initiator is definitely a party to its own payment. The converse does not hold -
+          // being someone else's initiator says nothing about whether `pid` was the counterparty -
+          // so this settles the positive case only.
+          attributable = true
+          involved = true
         }
+      } else {
+        const txRow = tx as unknown as Record<string, unknown>
+        const edges = Array.isArray(txRow.edges)
+          ? (txRow.edges as unknown[])
+          : Array.isArray(payload.edges)
+            ? (payload.edges as unknown[])
+            : []
+        if (edges.length) {
+          attributable = true
+          involved = edges.some((edge) => {
+            if (!edge || typeof edge !== 'object') return false
+            const e = edge as Record<string, unknown>
+            return e.debtor === pid || e.creditor === pid
+          })
+          // Kept from the original: a participant who initiated the clearing counts even if the
+          // published edges do not name them. Only the shape of the guard changed, not this rule.
+          if (!involved) involved = String(tx.initiator_pid || '') === pid
+        } else if (String(tx.initiator_pid || '') === pid) {
+          attributable = true
+          involved = true
+        }
+      }
+
+      // Window attribution, computed BEFORE the verdict is used, because a doubt has to be filed
+      // against the windows it actually reaches. A row whose timestamp cannot be read could be in
+      // any of them, so it reaches all; a row 60 days old reaches only the 90-day one.
+      const ms = parseIsoMillis(tx.updated_at || tx.created_at)
+      const ageDays = ms === null ? null : (now - ms) / dayMs
+      const rowWindows = ageDays === null ? windows : windows.filter((w) => ageDays <= w)
+      const clouded = type === 'PAYMENT' ? unattributablePaymentWindows : unattributableClearingWindows
+
+      if (!attributable) {
+        for (const w of rowWindows) clouded.add(w)
+        continue
+      }
+      // Attributable and NOT this participant's: nothing is clouded, whatever its timestamp says.
+      // A row that is not ours cannot be missing from our counts.
+      if (!involved) continue
+      if (ageDays === null) {
+        // Ours, and unplaceable in time: it joins no window's count, so every window is short by
+        // it. Skipping it silently, as this loop used to, is the same defect in miniature.
+        for (const w of rowWindows) clouded.add(w)
+        continue
+      }
+
+      for (const w of rowWindows) {
+        if (type === 'PAYMENT') paymentCommitted[w] = (paymentCommitted[w] ?? 0) + 1
+        else clearingCommitted[w] = (clearingCommitted[w] ?? 0) + 1
       }
     }
 
@@ -675,7 +822,34 @@ export function useGraphAnalytics(opts: {
       participantOps,
       paymentCommitted,
       clearingCommitted,
-      hasTransactions: (opts.transactions.value || []).length > 0,
+      // NOT `transactions.length > 0`. Length answers "did any row arrive", which is a different
+      // question from "were we told anything about this collection at all", and conflating the two
+      // is the whole of F-013-1: a page that never sent `include=transactions` reported a
+      // confident zero for a period it had never enquired about.
+      //
+      // Every counter above this line was computed HERE, out of the snapshot's own arrays, so each
+      // one inherits the confidence of the collection it was counted from - and `incidents` and
+      // `audit_log` are not requested by this client at all, which is why theirs is silence.
+      //
+      // Two confidences over ONE collection. They share `known` and `lowerBound` - what the
+      // response said it carried, and whether it cut it, is a property of the collection - and
+      // differ only in the doubt, because a doubt is raised by a particular row, of a particular
+      // type, falling in particular windows.
+      payments: collectionConfidence(
+        'transactions',
+        opts.included.value,
+        opts.truncated.value,
+        windows.filter((w) => unattributablePaymentWindows.has(w)),
+      ),
+      clearings: collectionConfidence(
+        'transactions',
+        opts.included.value,
+        opts.truncated.value,
+        windows.filter((w) => unattributableClearingWindows.has(w)),
+      ),
+      incidents: snapshotIncidents.value,
+      auditLog: snapshotAuditLog.value,
+      snapshotIncidents: snapshotIncidents.value,
     }
   })
 

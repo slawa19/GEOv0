@@ -176,6 +176,67 @@ def _parse_include_csv(value: str | None) -> set[str]:
     return out
 
 
+async def _graph_optional_collections(
+    db: AsyncSession, include: str | None
+) -> tuple[list[Any], list[Any], list[Any], list[str], list[str]]:
+    """The optional collections of a graph read, plus what the wire must say about them.
+
+    F-013-1 / T1302, 2026-09-10. Two things are returned beyond the data, and both exist because
+    an empty list is ambiguous:
+
+      * ``included`` - which collections this response actually carries. Without it, "you did not
+        ask" and "you asked and there are none" are byte-identical, and the consumer counting
+        payments reported zero for a period it was never told about.
+      * ``truncated`` - which of them hit the include limit. A count over a cut list is a lower
+        bound presented as a total, and nothing on the wire admitted the cut.
+
+    Truncation is detected by asking for one row more than the limit and trimming: the fetch
+    helpers order deterministically, so the extra row is proof of "there is more" and never
+    reaches the client.
+
+    THIS FUNCTION EXISTS BECAUSE THE BLOCK IT REPLACES WAS WRITTEN TWICE - once in the snapshot
+    route and once in the ego route, which share the mechanism and shared the defect. Fixing one
+    would have left the other, and the identical bug in a second copy is exactly what this
+    programme keeps finding.
+    """
+
+    include_set = _parse_include_csv(include)
+    incidents: list[Any] = []
+    audit_log: list[Any] = []
+    transactions: list[Any] = []
+    included: list[str] = []
+    truncated: list[str] = []
+
+    async def _take(name: str, fetch, limit: int) -> list[Any]:
+        rows = await fetch(db, limit=limit + 1)
+        included.append(name)
+        if len(rows) > limit:
+            truncated.append(name)
+            return list(rows[:limit])
+        return list(rows)
+
+    if "incidents" in include_set:
+        incidents = await _take(
+            "incidents",
+            _graph_fetch_incidents,
+            int(getattr(settings, "ADMIN_GRAPH_INCLUDE_MAX_INCIDENTS", 50) or 50),
+        )
+    if "audit_log" in include_set:
+        audit_log = await _take(
+            "audit_log",
+            _graph_fetch_audit_log,
+            int(getattr(settings, "ADMIN_GRAPH_INCLUDE_MAX_AUDIT_EVENTS", 50) or 50),
+        )
+    if "transactions" in include_set:
+        transactions = await _take(
+            "transactions",
+            _graph_fetch_transactions,
+            int(getattr(settings, "ADMIN_GRAPH_INCLUDE_MAX_TRANSACTIONS", 50) or 50),
+        )
+
+    return incidents, audit_log, transactions, included, truncated
+
+
 async def _graph_fetch_incidents(db: AsyncSession, *, limit: int) -> list[dict[str, Any]]:
     limit = max(0, int(limit))
     if limit <= 0:
@@ -243,18 +304,50 @@ async def _graph_fetch_transactions(db: AsyncSession, *, limit: int) -> list[dic
     out: list[dict[str, Any]] = []
     for tx, initiator_pid in rows:
         payload = tx.payload or {}
-        out.append(
-            {
-                "tx_id": tx.tx_id,
-                "type": tx.type,
-                "state": tx.state,
-                "initiator_pid": str(initiator_pid),
-                "created_at": tx.created_at,
-                "updated_at": tx.updated_at,
-                "equivalent": payload.get("equivalent"),
-                "error": tx.error,
-            }
-        )
+        item: dict[str, Any] = {
+            "tx_id": tx.tx_id,
+            "type": tx.type,
+            "state": tx.state,
+            "initiator_pid": str(initiator_pid),
+            "created_at": tx.created_at,
+            "updated_at": tx.updated_at,
+            "equivalent": payload.get("equivalent"),
+            "error": tx.error,
+        }
+
+        # WHO THIS TRANSACTION IS ABOUT (F-013-1 / T1302, 2026-09-10).
+        #
+        # `initiator_pid` alone cannot answer it. A consumer asking "was this participant party to
+        # this payment" gets "the initiator was someone else", which is not an answer, and a screen
+        # that turns that into a count reports zero for people who were paid. The spec prescribes
+        # exactly this projection: `from`/`to` for a payment, minimal `edges` for a clearing.
+        #
+        # THE FULL `payload` IS DELIBERATELY NOT PUBLISHED. It is internal and versionless
+        # (`Transaction.payload`), so only the named keys cross the wire, and the clearing edges are
+        # cut down to the two pids - no amounts, no `debt_id`, which belong to the audit surface and
+        # not to a graph read.
+        if tx.type == "PAYMENT":
+            sender = payload.get("from")
+            recipient = payload.get("to")
+            if isinstance(sender, str) and sender:
+                item["from"] = sender
+            if isinstance(recipient, str) and recipient:
+                item["to"] = recipient
+        elif tx.type == "CLEARING":
+            raw_edges = payload.get("edges")
+            if isinstance(raw_edges, list):
+                edges: list[dict[str, str]] = []
+                for edge in raw_edges:
+                    if not isinstance(edge, dict):
+                        continue
+                    debtor = edge.get("debtor")
+                    creditor = edge.get("creditor")
+                    if isinstance(debtor, str) and isinstance(creditor, str) and debtor and creditor:
+                        edges.append({"debtor": debtor, "creditor": creditor})
+                if edges:
+                    item["edges"] = edges
+
+        out.append(item)
     return out
 
 
@@ -1725,26 +1818,9 @@ async def admin_graph_snapshot(
         for eq, debtor, creditor, amount in debt_rows
     ]
 
-    include_set = _parse_include_csv(include)
-    incidents: list[Any] = []
-    audit_log: list[Any] = []
-    transactions: list[Any] = []
-    if include_set:
-        if "incidents" in include_set:
-            incidents = await _graph_fetch_incidents(
-                db,
-                limit=int(getattr(settings, "ADMIN_GRAPH_INCLUDE_MAX_INCIDENTS", 50) or 50),
-            )
-        if "audit_log" in include_set:
-            audit_log = await _graph_fetch_audit_log(
-                db,
-                limit=int(getattr(settings, "ADMIN_GRAPH_INCLUDE_MAX_AUDIT_EVENTS", 50) or 50),
-            )
-        if "transactions" in include_set:
-            transactions = await _graph_fetch_transactions(
-                db,
-                limit=int(getattr(settings, "ADMIN_GRAPH_INCLUDE_MAX_TRANSACTIONS", 50) or 50),
-            )
+    incidents, audit_log, transactions, included, truncated = await _graph_optional_collections(
+        db, include
+    )
 
     return AdminGraphSnapshotResponse(
         participants=participants,
@@ -1754,6 +1830,8 @@ async def admin_graph_snapshot(
         debts=debts,
         audit_log=audit_log,
         transactions=transactions,
+        included=included,
+        truncated=truncated,
     )
 
 
@@ -2111,26 +2189,9 @@ async def admin_graph_ego(
         for eq, debtor, creditor, amount in debt_rows
     ]
 
-    include_set = _parse_include_csv(include)
-    incidents: list[Any] = []
-    audit_log: list[Any] = []
-    transactions: list[Any] = []
-    if include_set:
-        if "incidents" in include_set:
-            incidents = await _graph_fetch_incidents(
-                db,
-                limit=int(getattr(settings, "ADMIN_GRAPH_INCLUDE_MAX_INCIDENTS", 50) or 50),
-            )
-        if "audit_log" in include_set:
-            audit_log = await _graph_fetch_audit_log(
-                db,
-                limit=int(getattr(settings, "ADMIN_GRAPH_INCLUDE_MAX_AUDIT_EVENTS", 50) or 50),
-            )
-        if "transactions" in include_set:
-            transactions = await _graph_fetch_transactions(
-                db,
-                limit=int(getattr(settings, "ADMIN_GRAPH_INCLUDE_MAX_TRANSACTIONS", 50) or 50),
-            )
+    incidents, audit_log, transactions, included, truncated = await _graph_optional_collections(
+        db, include
+    )
 
     return AdminGraphEgoResponse(
         root_pid=root_pid,
@@ -2141,6 +2202,8 @@ async def admin_graph_ego(
         incidents=incidents,
         audit_log=audit_log,
         transactions=transactions,
+        included=included,
+        truncated=truncated,
     )
 
 

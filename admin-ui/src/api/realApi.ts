@@ -171,19 +171,43 @@ const AuditLogEntrySchema = z
   })
   .passthrough()
 
+// F-013-1 / T1302. The shape below is AdminGraphTransactionItem (api/openapi.yaml) and what the
+// projection `_graph_fetch_transactions` actually emits - nothing more.
+//
+// It used to require `payload`, which neither the canon declares nor the producer sends. That was
+// invisible only because the client never asked for `include=transactions`, so the array was always
+// empty and no row was ever validated. The first response that carried a transaction would have been
+// rejected whole as INVALID_RESPONSE and blanked the graph page - which is why the include, the
+// schema and the consumer had to land as one change and not as a series with a broken middle.
+//
+// Required here is exactly what the canon marks required. `equivalent` and `error` are nullable and
+// absence-tolerant because the canon says so: `equivalent` is payload.get("equivalent") and is null
+// on a row whose payload has no such key, `error` is null on every row that did not abort.
+// `.passthrough()` keeps the tail open - the mock fixture still carries `payload`/`signatures` -
+// while the schema stays strict about every key it does declare.
 const TransactionSchema = z
   .object({
-    id: z.string().optional(),
     tx_id: z.string(),
-    idempotency_key: z.string().nullable().optional(),
     type: z.string(),
-    initiator_pid: z.string(),
-    payload: z.record(z.string(), z.unknown()),
-    signatures: z.array(z.unknown()).nullable().optional(),
     state: z.string(),
-    error: z.record(z.string(), z.unknown()).nullable().optional(),
+    initiator_pid: z.string(),
     created_at: z.string(),
     updated_at: z.string(),
+    equivalent: z.string().nullable().optional(),
+    error: z.record(z.string(), z.unknown()).nullable().optional(),
+    // ATTRIBUTION FIELDS, declared 2026-09-10 after the internal adversarial review pointed out
+    // that the canon gained them and this schema did not - so they reached the consumer only
+    // through `.passthrough()`, and the consumer had to launder every row through a cast. The rule
+    // written above this schema ("strict about every key it does declare") had been applied to the
+    // key removed and not to the three added.
+    //
+    // Present per type and never both: `from`/`to` on a PAYMENT, `edges` on a CLEARING, and absent
+    // when the internal payload does not carry them - which is why none of them is required.
+    from: z.string().optional(),
+    to: z.string().optional(),
+    edges: z
+      .array(z.object({ debtor: z.string(), creditor: z.string() }).passthrough())
+      .optional(),
   })
   .passthrough()
 
@@ -196,6 +220,18 @@ const GraphSnapshotSchema = z
     debts: z.array(DebtSchema),
     audit_log: z.array(AuditLogEntrySchema),
     transactions: z.array(TransactionSchema),
+    // F-013-1 / T1302. Which optional collections the body actually carries, and which of them hit
+    // the include limit. Optional here on purpose: the canon does not list them under `required`,
+    // and demanding a field the canon does not declare is the exact defect this task removes from
+    // TransactionSchema above. Absent means "this server says nothing about them", which the
+    // consumer must treat as "not asked" - never as "asked, and there are none".
+    // The three names are a CLOSED set, and the canon says so (`api/openapi.yaml`,
+    // `AdminGraphSnapshotResponse.included`). Declared as an enum after external review found the
+    // canon narrower than both implementations: `z.string()` here and `list[str]` on the server
+    // would have accepted a fourth name silently, on a field whose entire purpose is to be trusted
+    // when a consumer decides whether it may draw a conclusion.
+    included: z.array(z.enum(['incidents', 'audit_log', 'transactions'])).optional(),
+    truncated: z.array(z.enum(['incidents', 'audit_log', 'transactions'])).optional(),
   })
   .passthrough()
 
@@ -556,6 +592,16 @@ export async function requestJson<T>(
   }
 }
 
+// F-013-1 / T1302. `include` is a comma-separated list on the wire (`_parse_include_csv`), not a
+// repeated query parameter - buildQuery would emit `include=a&include=b` for an array and the server
+// would read only the last one. Joining here keeps that detail in one place.
+export function normalizeGraphInclude(include?: string[]): string {
+  return (include || [])
+    .map((x) => String(x || '').trim().toLowerCase())
+    .filter(Boolean)
+    .join(',')
+}
+
 export function buildQuery(pathname: string, params: Record<string, unknown>): string {
   const rawBase = baseUrl()
 
@@ -902,9 +948,13 @@ export const realApi = {
     )
   },
 
-  graphSnapshot(params?: { equivalent?: string }): Promise<ApiEnvelope<GraphSnapshot>> {
+  graphSnapshot(params?: { equivalent?: string; include?: string[] }): Promise<ApiEnvelope<GraphSnapshot>> {
     const equivalent = String(params?.equivalent || '').trim().toUpperCase()
-    const url = buildQuery('/api/v1/admin/graph/snapshot', { equivalent: equivalent || undefined })
+    const include = normalizeGraphInclude(params?.include)
+    const url = buildQuery('/api/v1/admin/graph/snapshot', {
+      equivalent: equivalent || undefined,
+      include: include || undefined,
+    })
     return requestJson<GraphSnapshot>(url, { admin: true, schema: GraphSnapshotSchema }).then((r) => {
       const s = assertSuccess(r)
       const participants = (s.participants || []).map((p) => ({
@@ -915,12 +965,13 @@ export const realApi = {
     })
   },
 
-  graphEgo(params: { pid: string; depth?: 1 | 2; equivalent?: string; status?: string[] }): Promise<ApiEnvelope<GraphSnapshot>> {
+  graphEgo(params: { pid: string; depth?: 1 | 2; equivalent?: string; status?: string[]; include?: string[] }): Promise<ApiEnvelope<GraphSnapshot>> {
     const pid = String(params?.pid || '').trim()
     const depth = params?.depth ?? 1
     const equivalent = String(params?.equivalent || '').trim()
     const status = (params?.status || []).map((s) => String(s || '').trim()).filter(Boolean)
-    return requestJson<GraphSnapshot>(buildQuery('/api/v1/admin/graph/ego', { pid, depth, equivalent, status }), {
+    const include = normalizeGraphInclude(params?.include)
+    return requestJson<GraphSnapshot>(buildQuery('/api/v1/admin/graph/ego', { pid, depth, equivalent, status, include: include || undefined }), {
       admin: true,
       schema: GraphSnapshotSchema,
     }).then((r) => {

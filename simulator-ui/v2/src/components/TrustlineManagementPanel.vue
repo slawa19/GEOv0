@@ -9,6 +9,12 @@ import { parseAmountNumber, parseAmountStringOrNull } from '../utils/numberForma
 import { participantLabel } from '../utils/participants'
 import { isActiveStatus } from '../utils/status'
 import { renderOrDash } from '../utils/valueFormat'
+import {
+  canActOnTrustlineFigures,
+  trustlineFiguresNotice,
+  trustlineNoRowNotice,
+  type TrustlineFiguresSource,
+} from '../composables/interact/trustlinesSourceState'
 import OverlaySelect from './common/OverlaySelect.vue'
 
 type Props = {
@@ -19,6 +25,22 @@ type Props = {
   used?: string | number | null
   currentLimit?: string | number | null
   available?: string | number | null
+
+  /**
+   * `F-013-7`: чем обоснованы `used`/`currentLimit`/`available`. Родитель берёт их из
+   * `interactSelectedLink`, а тот при пустом ответе молча берёт числа из SSE-снапшота.
+   * Читать устаревшее число терпимо; ПРАВИТЬ или ЗАКРЫВАТЬ линию по нему — нет.
+   *
+   * ОБЯЗАТЕЛЬНЫЙ ПРОП, и это главное в нём. Раньше здесь были два НЕОБЯЗАТЕЛЬНЫХ
+   * флага со значением по умолчанию «всё хорошо»: fail-open умолчание на fail-closed гарде —
+   * вызывающий, забывший их передать, молча получал разрешённую мутацию. Отсутствие
+   * основания теперь читается как «оснований нет» и в типах, и в рантайме.
+   *
+   * Считает его родитель: только там виден НЕСЛИТЫЙ ответ источника. В пропе `trustlines`
+   * ниже строка из снапшота неотличима от строки из ответа бэкенда, и считать по ней
+   * основание значило бы воспроизвести ту же находку этажом ниже.
+   */
+  figuresSource: TrustlineFiguresSource
 
   /** Optional dropdown data (prefer backend-driven list from Interact Actions API). */
   participants?: ParticipantInfo[]
@@ -50,7 +72,36 @@ const selectedTl = computed(() => {
   return items.find((tl) => tl.from_pid === from && tl.to_pid === to) ?? null
 })
 
+/**
+ * `F-013-7`: есть ли СУЩЕСТВУЮЩАЯ ЛИНИЯ, по числам которой позволено действовать.
+ *
+ * Что это СПЕЦИАЛЬНО НЕ блокирует, и случай судится тестом: обновление в полёте, пока прежний
+ * ответ ещё на руках, — это устаревание, и гасить панель на каждый опрос нельзя.
+ *
+ * ЧТО ИЗМЕНИЛОСЬ 2026-09-10 (внешнее ревью 013, находка P2). Раньше сюда входил и `no-row`, то
+ * есть ответ «линии у этой пары нет» разрешал Update и Close — над снапшотными числами, которые
+ * этот же ответ опроверг. Теперь `no-row` сюда не входит: обновлять и закрывать нечего. СОЗДАНИЕ
+ * при этом не затронуто — `createValid` ниже этой величины не читает, и это судит корневой тест
+ * RT-013-7d2.
+ */
+const noExistingLineFigures = computed(() => !canActOnTrustlineFigures(props.figuresSource))
+
+/** Источник не ответил вовсе — про это своё сообщение (`no-row` сюда НЕ попадает). */
+const sourceUnavailableText = computed<string | null>(() => trustlineFiguresNotice(props.figuresSource))
+
+/**
+ * Источник ответил, и линии у пары нет — про это ОТДЕЛЬНОЕ сообщение (`tl-no-trustline` в шаблоне),
+ * а не ветка предыдущего: «бэкенд не ответил» и «бэкенд ответил, что линии нет» — разные факты с
+ * разными последствиями, и одно сообщение на оба вернуло бы находку `F-013-7` в текст после того,
+ * как её убрали из кнопок.
+ */
+const noTrustlineText = computed<string | null>(() => trustlineNoRowNotice(props.figuresSource))
+
 const effectiveData = computed(() => {
+  // Fail closed: show nothing rather than presenting the snapshot's numbers as this trustline's.
+  if (noExistingLineFigures.value) {
+    return { used: null, reverseUsed: null, limit: null, available: null }
+  }
   return {
     used: selectedTl.value?.used ?? props.used,
     reverseUsed: selectedTl.value?.reverse_used,
@@ -145,6 +196,9 @@ const createValid = computed(() => {
 })
 
 const updateValid = computed(() => {
+  // `F-013-7`: `usedNum` below is 0 whenever the source is unavailable, so without this guard the
+  // "new limit >= used" check would wave through any non-negative number.
+  if (noExistingLineFigures.value) return false
   if (updateLimitNormalized.value == null) return false
   if (!Number.isFinite(newLimitNum.value)) return false
   return newLimitNum.value >= 0 && newLimitNum.value >= usedNum.value
@@ -166,6 +220,9 @@ async function onUpdate() {
 
 async function onClose() {
   if (props.busy) return
+  // `F-013-7`: `closeBlocked` is computed from `effectiveUsed`, which is null while the source is
+  // unavailable -- i.e. it reads as "no outstanding debt" precisely when we do not know.
+  if (noExistingLineFigures.value) return
   if (closeBlocked.value) return
 
   void confirmCloseOrArm(async () => {
@@ -181,6 +238,8 @@ const { armed: closeArmed, disarm: disarmClose, confirmOrArm: confirmCloseOrArm 
     { source: () => `${props.state.fromPid ?? ''}→${props.state.toPid ?? ''}` },
     // If Close becomes blocked (used > 0), cancel the confirmation state.
     { source: () => closeBlocked.value, when: (b) => !!b },
+    // `F-013-7`: if the ground for the mutation goes away, an armed close must not survive it.
+    { source: () => noExistingLineFigures.value, when: (b) => !!b },
     // When the UI becomes busy, cancel the confirmation state.
     { source: () => props.busy, when: (b) => !!b },
   ],
@@ -428,6 +487,24 @@ defineExpose({
         New limit must be ≥ used ({{ renderOrDash(effectiveUsed) }} {{ unit }}).
       </div>
 
+      <div
+        v-if="sourceUnavailableText"
+        class="ds-alert ds-alert--warn ds-mono"
+        data-testid="tl-source-unavailable"
+        role="status"
+      >
+        {{ sourceUnavailableText }}
+      </div>
+
+      <div
+        v-if="noTrustlineText"
+        class="ds-alert ds-alert--warn ds-mono"
+        data-testid="tl-no-trustline"
+        role="status"
+      >
+        {{ noTrustlineText }}
+      </div>
+
       <div v-if="state.error" class="ds-alert ds-alert--err ds-mono" data-testid="trustline-error">{{ state.error }}</div>
 
       <div v-if="isEdit && closeBlocked" class="ds-alert ds-alert--warn ds-mono" data-testid="tl-close-blocked">
@@ -445,7 +522,7 @@ defineExpose({
           <button
             class="ds-btn"
             type="button"
-            :disabled="busy || closeBlocked"
+            :disabled="busy || closeBlocked || noExistingLineFigures"
             data-testid="trustline-close-btn"
             @click="onClose"
           >

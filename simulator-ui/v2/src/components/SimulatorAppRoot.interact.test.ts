@@ -13,6 +13,7 @@ import type { LayoutLinkLike, LayoutNode } from '../types/layout'
 import { useAppViewWiring } from '../composables/useAppViewWiring'
 import { useOverlayState } from '../composables/useOverlayState'
 import { keyEdge } from '../utils/edgeKey'
+import type { TrustlinesFetchState } from '../composables/interact/trustlinesSourceState'
 import { resolveOverlayDockStyle } from '../ui-kit/overlaySurfaceCatalog'
 
 /**
@@ -104,10 +105,20 @@ type GeoTestGlobals = {
   __GEO_TEST_INTERACT_SET_TRUSTLINE_FROM_PID?: ReturnType<typeof vi.fn>
   __GEO_TEST_INTERACT_SET_TRUSTLINE_TO_PID?: ReturnType<typeof vi.fn>
   __GEO_TEST_INTERACT_CONFIRM_TRUSTLINE_CLOSE?: ReturnType<typeof vi.fn>
+  __GEO_TEST_INTERACT_CONFIRM_TRUSTLINE_CREATE?: ReturnType<typeof vi.fn>
   __GEO_TEST_INTERACT_SUCCESS_MESSAGE?: Ref<string | null>
   __GEO_TEST_INTERACT_HISTORY?: Array<Record<string, unknown>>
   __GEO_TEST_INTERACT_BUSY_REF?: Ref<boolean>
   __GEO_TEST_TRUSTLINES_LOADING_REF?: Ref<boolean>
+  __GEO_TEST_TRUSTLINES_LAST_ERROR_REF?: Ref<string | null>
+  __GEO_TEST_TRUSTLINES_REF?: Ref<TrustlineInfo[]>
+  /**
+   * `F-013-7`: чем именно источник trustlines ответил, КАК СОСТОЯНИЕ. Пока мок умел только
+   * `loading` + `lastError`, он не мог выразить «не спрашивали» и «ответил пусто» — то есть не мог
+   * выразить ровно ту пару, которую находка называет неразличимой. `null` — состояние выводится
+   * из `loading`/`lastError` (см. мок ниже), чтобы соседние тесты не переписывались.
+   */
+  __GEO_TEST_TRUSTLINES_FETCH_STATE_REF?: Ref<TrustlinesFetchState | null>
   __GEO_TEST_PAYMENT_TARGETS_LOADING_REF?: Ref<boolean>
   __GEO_TEST_PAYMENT_TARGETS_LAST_ERROR_REF?: Ref<string | null>
   __GEO_TEST_PAYMENT_TO_TARGET_IDS_REF?: Ref<Set<string> | undefined>
@@ -374,11 +385,48 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
        const confirmTrustlineClose = vi.fn(async () => undefined)
        setGeoTestGlobal('__GEO_TEST_INTERACT_CONFIRM_TRUSTLINE_CLOSE', confirmTrustlineClose)
 
+       // `F-013-7` / внешнее ревью 013: создание линии — единственное действие, которое ответ
+       // «линии у этой пары нет» РАЗРЕШАЕТ. Чтобы это судилось по вызову, а не только по виду
+       // кнопки, мок отдаёт его наружу так же, как закрытие.
+       const confirmTrustlineCreate = vi.fn(async () => undefined)
+       setGeoTestGlobal('__GEO_TEST_INTERACT_CONFIRM_TRUSTLINE_CREATE', confirmTrustlineCreate)
+
        const successMessage = ref<string | null>(null)
        setGeoTestGlobal('__GEO_TEST_INTERACT_SUCCESS_MESSAGE', successMessage)
 
       const trustlinesLoading = ref(false)
       setGeoTestGlobal('__GEO_TEST_TRUSTLINES_LOADING_REF', trustlinesLoading)
+
+      // `F-013-7`: the REST trustlines cache has three states, not two.  The root reads the error
+      // through `interact.mode.trustlinesLastError?.value`, so without this ref the mock could
+      // only ever express "settled and empty" -- the exact conflation the finding is about.
+      const trustlinesLastError = ref<string | null>(null)
+      setGeoTestGlobal('__GEO_TEST_TRUSTLINES_LAST_ERROR_REF', trustlinesLastError)
+
+      const trustlines = ref<TrustlineInfo[]>([])
+      setGeoTestGlobal('__GEO_TEST_TRUSTLINES_REF', trustlines)
+
+      // `F-013-7`. `trustlines` выше — СЛИТЫЙ список: в проде это `fetched ?? снапшот`, и по нему
+      // нельзя узнать, кто именно его наполнил. Состояние источника — отдельная величина; тест,
+      // которому нужно «не спрашивали» или «ответил пусто», выставляет её явно, а по умолчанию она
+      // выводится из тех же двух флагов, что и раньше, чтобы поведение остальных тестов не менялось.
+      const trustlinesFetchStateOverride = ref<TrustlinesFetchState | null>(null)
+      setGeoTestGlobal('__GEO_TEST_TRUSTLINES_FETCH_STATE_REF', trustlinesFetchStateOverride)
+      const trustlinesFetchState = computed<TrustlinesFetchState>(() => {
+        const override = trustlinesFetchStateOverride.value
+        if (override) return override
+        if (trustlinesLoading.value) return { kind: 'loading' }
+        const err = trustlinesLastError.value
+        if (err) return { kind: 'failed', message: err }
+        return { kind: 'answered' }
+      })
+      // Когда источник ответил, слитый список И ЕСТЬ его ответ; когда не ответил — ответа нет
+      // вовсе, и найденная в списке строка приехала из снапшота.
+      const findAnsweredTrustline = (from: string | null, to: string | null): TrustlineInfo | null => {
+        if (trustlinesFetchState.value.kind !== 'answered') return null
+        if (!from || !to) return null
+        return trustlines.value.find((tl) => tl.from_pid === from && tl.to_pid === to) ?? null
+      }
 
       const paymentTargetsLoading = ref(false)
       setGeoTestGlobal('__GEO_TEST_PAYMENT_TARGETS_LOADING_REF', paymentTargetsLoading)
@@ -543,6 +591,9 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
                phase,
                busy: interactBusy,
                trustlinesLoading,
+               trustlinesLastError,
+               trustlinesFetchState,
+               findAnsweredTrustline,
                paymentTargetsLoading,
                paymentTargetsLastError,
                state: interactState,
@@ -552,7 +603,7 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
              availableCapacity: ref('0'),
               paymentToTargetIds,
               participants: ref<ParticipantInfo[]>([]),
-              trustlines: ref<TrustlineInfo[]>([]),
+              trustlines,
               canSendPayment: ref(true),
 
             setPaymentFromPid,
@@ -579,7 +630,7 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
               }),
               startClearingFlow: startClearingFlow,
              confirmPayment: vi.fn(async () => undefined),
-             confirmTrustlineCreate: vi.fn(async () => undefined),
+             confirmTrustlineCreate,
              confirmTrustlineUpdate: vi.fn(async () => undefined),
              confirmTrustlineClose,
               confirmClearing: vi.fn(async () => {
@@ -2203,6 +2254,9 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     document.body.append(host)
     const app = mountSimulatorAppRoot(host)
     try {
+      // Закрывать можно СУЩЕСТВУЮЩУЮ линию: без этого основание — `no-row`, и кнопка выключена
+      // по существу дела, а не по тому, что судит этот тест (внешнее ревью 013, P2).
+      answerWithTrustlineForSelectedPair()
       await nextTick()
       await nextTick()
 
@@ -2244,6 +2298,8 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     document.body.append(host, otherOwner)
     const app = mountSimulatorAppRoot(host)
     try {
+      // См. соседний тест: закрывать можно только подтверждённую бэкендом линию.
+      answerWithTrustlineForSelectedPair()
       await nextTick()
       await nextTick()
 
@@ -3402,6 +3458,30 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
+  /**
+   * ЛИНИЯ, КОТОРУЮ БЭКЕНД ПОДТВЕРДИЛ (внешнее ревью 013, находка P2).
+   *
+   * По умолчанию мок отдаёт пустой список при состоянии «источник ответил» — то есть основание
+   * `no-row`: «линии у этой пары нет». Закрывать и обновлять в этом состоянии нечего, и панель
+   * теперь честно этого не предлагает. Поэтому тест, который судит ЗАКРЫТИЕ СУЩЕСТВУЮЩЕЙ линии,
+   * обязан начинаться с линии — иначе он судит закрытие того, чего нет.
+   */
+  function answerWithTrustlineForSelectedPair(): void {
+    getRequiredGeoTestGlobal('__GEO_TEST_TRUSTLINES_REF').value = [
+      {
+        from_pid: 'alice',
+        from_name: 'Alice',
+        to_pid: 'bob',
+        to_name: 'Bob',
+        equivalent: 'UAH',
+        limit: '100',
+        used: '0',
+        available: '100',
+        status: 'active',
+      } as TrustlineInfo,
+    ]
+  }
+
   it('canvas shows crosshair cursor in interact picking phases', async () => {
     setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'picking-payment-from')
     setUrl('/?mode=real&ui=interact')
@@ -3438,9 +3518,13 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     tlBtn?.click()
     await nextTick()
 
+    // Судится подтверждение закрытия СУЩЕСТВУЮЩЕЙ линии, поэтому она должна существовать.
+    answerWithTrustlineForSelectedPair()
+
     // Advance to editing-trustline (simulates FSM progression)
     const phaseRef = getPhaseRef()
     phaseRef.value = 'editing-trustline'
+    await nextTick()
     await nextTick()
 
     const confirmClose = getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_CONFIRM_TRUSTLINE_CLOSE')
@@ -3502,6 +3586,684 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       '__GEO_TEST_INTERACT_CANCEL',
       '__GEO_TEST_INTERACT_CONFIRM_TRUSTLINE_CLOSE',
     )
+  })
+
+  // -------------------------------------------------------------------------
+  // RT-013-7 -- `F-013-7`: empty and absent are indistinguishable for a mutating control.
+  //
+  // `interactSelectedLink` (`SimulatorAppRoot.vue:627`) prefers the REST trustlines cache only
+  // when the array is non-empty and otherwise silently falls back to the SSE snapshot link.  A
+  // failed fetch and a still-in-flight fetch therefore look exactly like an authoritative
+  // "this pair has no trustline", and the numbers the snapshot happens to carry are handed to
+  // `TrustlineManagementPanel` as `used` / `current-limit` / `available` (`:1403-1405`) -- the
+  // panel whose buttons UPDATE and CLOSE a trustline.  Viewing on snapshot grounds is allowed by
+  // the spec; permitting a mutation on them is not.
+  //
+  // WHAT THESE TWO TESTS CAN AND CANNOT TELL APART
+  //  - CAN distinguish: the pre-fix behaviour (snapshot numbers shown, both mutations enabled);
+  //    a fix that hides the numbers but still permits the mutation; a fix that disables the
+  //    buttons but keeps presenting the snapshot numbers as the trustline's; a fix that goes
+  //    quiet instead of naming the state (an explicit notice is required); and the degenerate
+  //    fix that disables the panel unconditionally -- the settled-and-authoritative control in
+  //    the same test requires Update and Close to work.
+  //  - CANNOT distinguish: whether the ROOT or the PANEL owns the decision, only that the pair
+  //    root+panel behaves; nor anything about `EdgeDetailPopup`, which carries its own Close TL
+  //    button off the same `interactSelectedLink` and is left as found.
+  // -------------------------------------------------------------------------
+  async function openFullTrustlineEditor(host: HTMLElement, beforeEditing?: () => void) {
+    const app = mountSimulatorAppRoot(host)
+    await nextTick()
+
+    // Entering through the ActionBar is what sets `useFullTrustlineEditor = true`, i.e. what makes
+    // the mutating panel (rather than the read-only EdgeDetailPopup) the visible surface.
+    const tlBtn = host.querySelector('[data-testid="actionbar-trustline"]') as HTMLButtonElement | null
+    expect(tlBtn).toBeTruthy()
+    tlBtn?.click()
+    await nextTick()
+
+    // The refs the mocked interact composable exposes only exist after mount, so a test that needs
+    // the source to be unsettled BEFORE the edit phase opens sets it here.
+    beforeEditing?.()
+    await nextTick()
+
+    getPhaseRef().value = 'editing-trustline'
+    await nextTick()
+    await nextTick()
+    return app
+  }
+
+  function typeNewLimit(panel: HTMLElement, value: string) {
+    const input = panel.querySelector('#tl-new-limit') as HTMLInputElement | null
+    expect(input).toBeTruthy()
+    input!.value = value
+    input!.dispatchEvent(new Event('input'))
+    return input!
+  }
+
+  function trustlineStatsText(host: HTMLElement): string {
+    const stats = host.querySelector('[data-testid="trustline-panel"] [aria-label="Trustline stats"]') as HTMLElement | null
+    expect(stats).toBeTruthy()
+    return (stats?.textContent ?? '').replace(/\s+/g, ' ').trim()
+  }
+
+  function trustlineMutationButtons(host: HTMLElement) {
+    const panel = host.querySelector('[data-testid="trustline-panel"]') as HTMLElement | null
+    expect(panel).toBeTruthy()
+    const update = Array.from(panel?.querySelectorAll('button') ?? []).find(
+      (b) => (b.textContent ?? '').trim() === 'Update',
+    ) as HTMLButtonElement | undefined
+    const closeBtn = panel?.querySelector('[data-testid="trustline-close-btn"]') as HTMLButtonElement | null
+    return { panel: panel as HTMLElement, update, closeBtn }
+  }
+
+  // A snapshot link with `used: '0'` so that BOTH mutating controls are reachable on snapshot
+  // grounds: Update is enabled (new limit >= used) and Close is not blocked by outstanding debt.
+  const RT_013_7_SNAPSHOT = {
+    equivalent: 'UAH',
+    generated_at: '2026-09-10T00:00:00Z',
+    nodes: [makeSelectedNode('alice', 'Alice'), makeSelectedNode('bob', 'Bob')],
+    links: [{ source: 'alice', target: 'bob', trust_limit: '100', used: '0', available: '100' }],
+  } as unknown as GraphSnapshot
+
+  const RT_013_7_TRUSTLINE = (limit: string): TrustlineInfo => ({
+    from_pid: 'alice',
+    from_name: 'Alice',
+    to_pid: 'bob',
+    to_name: 'Bob',
+    equivalent: 'UAH',
+    limit,
+    used: '0',
+    available: limit,
+    status: 'active',
+  })
+
+  it('RT-013-7a: a FAILED trustlines fetch must not let the snapshot stand in as the trustline, nor permit the mutation', async () => {
+    setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'idle')
+    setGeoTestGlobal('__GEO_TEST_SNAPSHOT', RT_013_7_SNAPSHOT)
+    setUrl('/?mode=real&ui=interact')
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    // The REST trustlines fetch failed before the operator opened the editor.  The snapshot still
+    // carries a link alice->bob with limit 100 / used 0, so the fallback has something to show --
+    // and that is exactly the situation in which it must not.
+    const app = await openFullTrustlineEditor(host, () => {
+      getRequiredGeoTestGlobal('__GEO_TEST_TRUSTLINES_REF').value = []
+      getRequiredGeoTestGlobal('__GEO_TEST_TRUSTLINES_LAST_ERROR_REF').value = 'GET /runs/r1/trustlines failed: 503'
+    })
+    try {
+      const { panel, update, closeBtn } = trustlineMutationButtons(host)
+
+      // 1. The snapshot's numbers must not be presented as this trustline's numbers.
+      const stats = trustlineStatsText(host)
+      expect(stats).not.toContain('100')
+      expect(stats).toContain('\u2014')
+
+      // 2. The panel must SAY what happened rather than going quiet.
+      const notice = panel.querySelector('[data-testid="tl-source-unavailable"]') as HTMLElement | null
+      expect(notice).toBeTruthy()
+      expect(notice?.textContent ?? '').toContain('GET /runs/r1/trustlines failed: 503')
+
+      // 3. The edit field must not be pre-filled with a number nobody vouched for.
+      const newLimit = panel.querySelector('#tl-new-limit') as HTMLInputElement | null
+      expect(newLimit?.value ?? '').toBe('')
+
+      // 4. Neither mutation may be offered on that basis.
+      expect(update?.disabled).toBe(true)
+      expect(closeBtn?.disabled).toBe(true)
+
+      // 5. Nor may the operator type their way past it: 50 cannot be checked against a `used` that
+      //    nobody reported, so Update stays refused.  This is what separates a real fail-closed
+      //    source from a fix that merely stopped pre-filling the field.
+      typeNewLimit(panel, '50')
+      await nextTick()
+      expect(trustlineMutationButtons(host).update?.disabled).toBe(true)
+
+      // 6. Recovery: an authoritative answer arrives and the panel becomes usable again, with the
+      //    backend's numbers -- not the snapshot's.
+      getRequiredGeoTestGlobal('__GEO_TEST_TRUSTLINES_REF').value = [RT_013_7_TRUSTLINE('42')]
+      getRequiredGeoTestGlobal('__GEO_TEST_TRUSTLINES_LAST_ERROR_REF').value = null
+      await nextTick()
+      await nextTick()
+
+      expect(trustlineStatsText(host)).toContain('42')
+      expect(panel.querySelector('[data-testid="tl-source-unavailable"]')).toBeFalsy()
+      {
+        const settled = trustlineMutationButtons(host)
+        expect(settled.update?.disabled).toBe(false)
+        expect(settled.closeBtn?.disabled).toBe(false)
+      }
+    } finally {
+      app.unmount()
+      host.remove()
+      clearGeoTestGlobals(
+        '__GEO_TEST_INTERACT_PHASE',
+        '__GEO_TEST_INTERACT_CANCEL',
+        '__GEO_TEST_SNAPSHOT',
+        '__GEO_TEST_TRUSTLINES_REF',
+        '__GEO_TEST_TRUSTLINES_LAST_ERROR_REF',
+      )
+    }
+  })
+
+  it('RT-013-7b: a trustlines fetch STILL IN FLIGHT must not permit the mutation either', async () => {
+    setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'idle')
+    setGeoTestGlobal('__GEO_TEST_SNAPSHOT', RT_013_7_SNAPSHOT)
+    setUrl('/?mode=real&ui=interact')
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = await openFullTrustlineEditor(host)
+    try {
+      const trustlinesLoading = getRequiredGeoTestGlobal('__GEO_TEST_TRUSTLINES_LOADING_REF')
+      trustlinesLoading.value = true
+      await nextTick()
+      await nextTick()
+
+      const { panel, update, closeBtn } = trustlineMutationButtons(host)
+
+      const stats = trustlineStatsText(host)
+      expect(stats).not.toContain('100')
+      expect(stats).toContain('\u2014')
+
+      const notice = panel.querySelector('[data-testid="tl-source-unavailable"]') as HTMLElement | null
+      expect(notice).toBeTruthy()
+      expect((notice?.textContent ?? '').toLowerCase()).toContain('loading')
+
+      expect(update?.disabled).toBe(true)
+      expect(closeBtn?.disabled).toBe(true)
+
+      // And once the fetch settles with an authoritative answer, the panel is usable again.
+      const trustlines = getRequiredGeoTestGlobal('__GEO_TEST_TRUSTLINES_REF')
+      trustlines.value = [RT_013_7_TRUSTLINE('7')]
+      trustlinesLoading.value = false
+      await nextTick()
+      await nextTick()
+
+      expect(trustlineStatsText(host)).toContain('7')
+      expect(panel.querySelector('[data-testid="tl-source-unavailable"]')).toBeFalsy()
+      typeNewLimit(panel, '9')
+      await nextTick()
+      {
+        const settled = trustlineMutationButtons(host)
+        expect(settled.update?.disabled).toBe(false)
+        expect(settled.closeBtn?.disabled).toBe(false)
+      }
+    } finally {
+      app.unmount()
+      host.remove()
+      clearGeoTestGlobals(
+        '__GEO_TEST_INTERACT_PHASE',
+        '__GEO_TEST_INTERACT_CANCEL',
+        '__GEO_TEST_SNAPSHOT',
+        '__GEO_TEST_TRUSTLINES_REF',
+        '__GEO_TEST_TRUSTLINES_LOADING_REF',
+      )
+    }
+  })
+
+  /**
+   * RT-013-7c — СОСТОЯНИЕ «НЕ СПРАШИВАЛИ», начальное состояние `useInteractDataCache`
+   * (`trustlinesLoading=false`, `trustlinesLastError=null`, `trustlines=[]`). Ровно в нём панель
+   * находится до первого запроса — и старый гард `(loading || error) && нет строки` его не видел:
+   * `unsettled` ложно, фоллбэк на снапшот молчалив, обе мутации доступны.
+   *
+   * ЧЕМ ЭТОТ ТЕСТ ОТЛИЧАЕТСЯ ОТ RT-013-7d НИЖЕ: данными — ничем. Тот же снапшот, тот же пустой
+   * список, те же числа на экране. Различается ТОЛЬКО состояние источника, и в этом вся находка.
+   */
+  it('RT-013-7c: a source that was NEVER ASKED must not let the snapshot stand in as the trustline, nor permit the mutation', async () => {
+    setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'idle')
+    setGeoTestGlobal('__GEO_TEST_SNAPSHOT', RT_013_7_SNAPSHOT)
+    setUrl('/?mode=real&ui=interact')
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = await openFullTrustlineEditor(host, () => {
+      getRequiredGeoTestGlobal('__GEO_TEST_TRUSTLINES_REF').value = []
+      getRequiredGeoTestGlobal('__GEO_TEST_TRUSTLINES_FETCH_STATE_REF').value = { kind: 'never-asked' }
+    })
+    try {
+      const { panel, update, closeBtn } = trustlineMutationButtons(host)
+
+      // 1. Числа снапшота не выдаются за числа этой линии.
+      const stats = trustlineStatsText(host)
+      expect(stats).not.toContain('100')
+      expect(stats).toContain('\u2014')
+
+      // 2. Состояние названо: «не спрашивали» — это не «нет линии».
+      const notice = panel.querySelector('[data-testid="tl-source-unavailable"]') as HTMLElement | null
+      expect(notice).toBeTruthy()
+      expect((notice?.textContent ?? '').toLowerCase()).toContain('has not been requested')
+
+      // 3. Поле правки не подставляет число, за которое никто не ручался.
+      expect((panel.querySelector('#tl-new-limit') as HTMLInputElement | null)?.value ?? '').toBe('')
+
+      // 4. Ни одна из мутаций не предлагается на этом основании.
+      expect(update?.disabled).toBe(true)
+      expect(closeBtn?.disabled).toBe(true)
+
+      // 5. И вручную мимо гарда не пройти: 50 не с чем сверить.
+      typeNewLimit(panel, '50')
+      await nextTick()
+      expect(trustlineMutationButtons(host).update?.disabled).toBe(true)
+
+      // 6. Ответ приходит — панель снова рабочая, и с числами бэкенда, а не снапшота.
+      getRequiredGeoTestGlobal('__GEO_TEST_TRUSTLINES_REF').value = [RT_013_7_TRUSTLINE('42')]
+      getRequiredGeoTestGlobal('__GEO_TEST_TRUSTLINES_FETCH_STATE_REF').value = { kind: 'answered' }
+      await nextTick()
+      await nextTick()
+
+      expect(trustlineStatsText(host)).toContain('42')
+      expect(panel.querySelector('[data-testid="tl-source-unavailable"]')).toBeFalsy()
+      {
+        const settled = trustlineMutationButtons(host)
+        expect(settled.update?.disabled).toBe(false)
+        expect(settled.closeBtn?.disabled).toBe(false)
+      }
+    } finally {
+      app.unmount()
+      host.remove()
+      clearGeoTestGlobals(
+        '__GEO_TEST_INTERACT_PHASE',
+        '__GEO_TEST_INTERACT_CANCEL',
+        '__GEO_TEST_SNAPSHOT',
+        '__GEO_TEST_TRUSTLINES_REF',
+        '__GEO_TEST_TRUSTLINES_FETCH_STATE_REF',
+      )
+    }
+  })
+
+  /**
+   * RT-013-7d — ВТОРАЯ ПОЛОВИНА ТОЙ ЖЕ ГРАНИЦЫ.
+   *
+   * ЧТО ЗДЕСЬ ИЗМЕНИЛОСЬ 2026-09-10 И ПОЧЕМУ (внешнее ревью программы 013, находка P2).
+   * Прежняя редакция этого теста требовала после АВТОРИТЕТНОГО ПУСТОГО ответа: (1) чтобы на
+   * экране осталось снапшотное `limit 100`, и (2) чтобы Update и Close были доступны. Обоснование
+   * над ней говорило про право оператора СОЗДАТЬ линию — и это верно; вывод про Update/Close из
+   * него не следует. «Источник ответил, и линии у этой пары нет» разрешает СОЗДАНИЕ; обновлять и
+   * закрывать в этом состоянии нечего, а числа, которые в нём показывала панель, приехали из
+   * снапшота — то есть ровно из того источника, который авторитетный ответ только что опроверг.
+   * Выдавать их за состояние существующей линии — та же ложь, ради устранения которой заведена
+   * вся эта программа, только на одно состояние в сторону.
+   *
+   * ЧТО ИЗ ПРЕЖНЕЙ РЕДАКЦИИ СОХРАНЕНО ДОСЛОВНО: пустой ответ НЕ ДОЛЖЕН ГАСИТЬ СОЗДАНИЕ. Это
+   * судит RT-013-7d2 ниже, и именно оно краснеет на неверной починке «на `no-row` запретить всё».
+   *
+   * НЕ «ВОССТАНАВЛИВАТЬ» ПРЕЖНИЙ ВИД. Если следующий читатель увидит здесь запрет на Update/Close
+   * и решит, что починка выродилась в «запретить всё», — соседний RT-013-7d2 показывает, что не
+   * выродилась: при том же самом `no-row` панель создаёт линию.
+   */
+  it('RT-013-7d: a source that ANSWERED with no row for this pair authorises CREATING one, not updating or closing one', async () => {
+    setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'idle')
+    setGeoTestGlobal('__GEO_TEST_SNAPSHOT', RT_013_7_SNAPSHOT)
+    setUrl('/?mode=real&ui=interact')
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = await openFullTrustlineEditor(host, () => {
+      getRequiredGeoTestGlobal('__GEO_TEST_TRUSTLINES_REF').value = []
+      getRequiredGeoTestGlobal('__GEO_TEST_TRUSTLINES_FETCH_STATE_REF').value = { kind: 'answered' }
+    })
+    try {
+      const { panel } = trustlineMutationButtons(host)
+
+      // 1. Числа снапшота не выдаются за числа существующей линии: авторитетный ответ сказал,
+      //    что линии нет, а `100` на экране в этот момент — снапшотное.
+      const stats = trustlineStatsText(host)
+      expect(
+        stats,
+        'после ответа «линии у этой пары нет» панель всё ещё показывает снапшотный лимит как ' +
+          'состояние существующей линии — при том что ответ бэкенда его прямо опроверг',
+      ).not.toContain('100')
+      expect(stats).toContain('\u2014')
+
+      // 2. Состояние НАЗВАНО, и названо именно как ответ, а не как отсутствие ответа.
+      const noRow = panel.querySelector('[data-testid="tl-no-trustline"]') as HTMLElement | null
+      expect(noRow, 'ответ «линии у этой пары нет» не назван оператору вовсе').toBeTruthy()
+      expect((noRow?.textContent ?? '').toLowerCase()).toContain('no trustline')
+      expect(
+        panel.querySelector('[data-testid="tl-source-unavailable"]'),
+        'ответ источника объявлен его отсутствием: бэкенд ответил, и это разные вещи',
+      ).toBeFalsy()
+
+      // 3. Мутации существующей линии не предлагаются: обновлять и закрывать нечего.
+      typeNewLimit(panel, '50')
+      await nextTick()
+      const settled = trustlineMutationButtons(host)
+      expect(
+        settled.update?.disabled,
+        'Update доступен, хотя обновлять нечего: линии у пары нет, а `50` сверялось бы со ' +
+          'снапшотным `used`, который этот же ответ опроверг',
+      ).toBe(true)
+      expect(
+        settled.closeBtn?.disabled,
+        'Close доступен, хотя закрывать нечего: `closeBlocked` («есть долг») на отсутствующих ' +
+          'числах ложно — то есть каскад разрешает мутацию именно там, где предмета мутации нет',
+      ).toBe(true)
+    } finally {
+      app.unmount()
+      host.remove()
+      clearGeoTestGlobals(
+        '__GEO_TEST_INTERACT_PHASE',
+        '__GEO_TEST_INTERACT_CANCEL',
+        '__GEO_TEST_SNAPSHOT',
+        '__GEO_TEST_TRUSTLINES_REF',
+        '__GEO_TEST_TRUSTLINES_FETCH_STATE_REF',
+      )
+    }
+  })
+
+  /**
+   * RT-013-7d2 — ТО ВЕРНОЕ, ЧТО БЫЛО В ПРЕЖНЕЙ РЕДАКЦИИ RT-013-7d, вынесено сюда целиком.
+   *
+   * Пустой АВТОРИТЕТНЫЙ ответ — это ответ, и он разрешает создать линию. Ровно этот тест краснеет
+   * на неверной починке «на `no-row` запретить всё»: там, где предмета мутации нет, нет и повода
+   * мешать оператору его завести.
+   */
+  it('RT-013-7d2: a source that ANSWERED with no row must NOT block creating the line', async () => {
+    setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'idle')
+    setGeoTestGlobal('__GEO_TEST_SNAPSHOT', RT_013_7_SNAPSHOT)
+    setUrl('/?mode=real&ui=interact')
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = mountSimulatorAppRoot(host)
+    try {
+      await nextTick()
+      const tlBtn = host.querySelector('[data-testid="actionbar-trustline"]') as HTMLButtonElement | null
+      expect(tlBtn).toBeTruthy()
+      tlBtn?.click()
+      await nextTick()
+
+      getRequiredGeoTestGlobal('__GEO_TEST_TRUSTLINES_REF').value = []
+      getRequiredGeoTestGlobal('__GEO_TEST_TRUSTLINES_FETCH_STATE_REF').value = { kind: 'answered' }
+      await nextTick()
+
+      getPhaseRef().value = 'confirm-trustline-create'
+      await nextTick()
+      await nextTick()
+
+      const panel = host.querySelector('[data-testid="trustline-panel"]') as HTMLElement | null
+      expect(panel).toBeTruthy()
+
+      const input = panel?.querySelector('#tl-limit') as HTMLInputElement | null
+      expect(input).toBeTruthy()
+      input!.value = '25'
+      input!.dispatchEvent(new Event('input'))
+      await nextTick()
+
+      const createBtn = Array.from(panel?.querySelectorAll('button') ?? []).find(
+        (b) => (b.textContent ?? '').trim() === 'Create',
+      ) as HTMLButtonElement | undefined
+      expect(createBtn).toBeTruthy()
+      expect(
+        createBtn?.disabled,
+        'починка выродилась в «на `no-row` запретить всё»: пустой ОТВЕТ источника — это ответ, и ' +
+          'единственное, что он разрешает, — создать линию',
+      ).toBe(false)
+
+      createBtn?.click()
+      await nextTick()
+      expect(
+        getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_CONFIRM_TRUSTLINE_CREATE'),
+      ).toHaveBeenCalledWith('25')
+    } finally {
+      app.unmount()
+      host.remove()
+      clearGeoTestGlobals(
+        '__GEO_TEST_INTERACT_PHASE',
+        '__GEO_TEST_INTERACT_CANCEL',
+        '__GEO_TEST_INTERACT_CONFIRM_TRUSTLINE_CREATE',
+        '__GEO_TEST_SNAPSHOT',
+        '__GEO_TEST_TRUSTLINES_REF',
+        '__GEO_TEST_TRUSTLINES_FETCH_STATE_REF',
+      )
+    }
+  })
+
+  /**
+   * RT-013-7e — НАЙДЕННАЯ СТРОКА ЕЩЁ НЕ ЗНАЧИТ ОТВЕТ. Про это брифинг не говорил, а дефект есть:
+   * гард ищет «авторитетную строку» в `interact.mode.trustlines`, а этот список в
+   * `useInteractDataCache` равен `fetched ?? строки из снапшота`. Пока ответа нет, он ПОЛОН
+   * снапшотных строк — то есть в проде (в отличие от прежних тестов, где список был пуст)
+   * `authoritative` находилась всегда, и гард не срабатывал даже в тех двух состояниях, которые
+   * он якобы покрывал.
+   */
+  it('RT-013-7e: a row that came from the snapshot fallback is not an authoritative answer', async () => {
+    setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'idle')
+    setGeoTestGlobal('__GEO_TEST_SNAPSHOT', RT_013_7_SNAPSHOT)
+    setUrl('/?mode=real&ui=interact')
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = await openFullTrustlineEditor(host, () => {
+      // Ровно то, что делает кэш до первого ответа: список НЕПУСТ и собран из снапшота.
+      getRequiredGeoTestGlobal('__GEO_TEST_TRUSTLINES_REF').value = [RT_013_7_TRUSTLINE('100')]
+      getRequiredGeoTestGlobal('__GEO_TEST_TRUSTLINES_LOADING_REF').value = true
+    })
+    try {
+      const { panel, update, closeBtn } = trustlineMutationButtons(host)
+
+      const notice = panel.querySelector('[data-testid="tl-source-unavailable"]') as HTMLElement | null
+      expect(
+        notice,
+        'строка, поднятая из снапшотного фоллбэка, зачтена за ответ источника: гард ищет её в ' +
+          'слитом списке, а тот до ответа состоит из снапшота целиком',
+      ).toBeTruthy()
+      expect(update?.disabled).toBe(true)
+      expect(closeBtn?.disabled).toBe(true)
+    } finally {
+      app.unmount()
+      host.remove()
+      clearGeoTestGlobals(
+        '__GEO_TEST_INTERACT_PHASE',
+        '__GEO_TEST_INTERACT_CANCEL',
+        '__GEO_TEST_SNAPSHOT',
+        '__GEO_TEST_TRUSTLINES_REF',
+        '__GEO_TEST_TRUSTLINES_LOADING_REF',
+      )
+    }
+  })
+
+  /**
+   * RT-013-7f — та же проводка, но до ТРЕТЬЕГО мутирующего контрола: кнопки «Close line» в
+   * edge-detail. Компонентный тест (`EdgeDetailPopup.sourceUnavailable.test.ts`) судит попап при
+   * заданном основании; здесь судится то, что корень это основание ему действительно передаёт, и
+   * что мимо выключенной кнопки не проходит сам вызов действия.
+   */
+  it('RT-013-7f: edge-detail Close line is refused when the source was never asked', async () => {
+    setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'editing-trustline')
+    setGeoTestGlobal('__GEO_TEST_SNAPSHOT', RT_013_7_SNAPSHOT)
+    setUrl('/?mode=real&ui=interact')
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = mountSimulatorAppRoot(host)
+    try {
+      await nextTick()
+      getRequiredGeoTestGlobal('__GEO_TEST_TRUSTLINES_REF').value = []
+      getRequiredGeoTestGlobal('__GEO_TEST_TRUSTLINES_FETCH_STATE_REF').value = { kind: 'never-asked' }
+      await nextTick()
+      await nextTick()
+
+      const btn = host.querySelector('[data-testid="edge-close-line-btn"]') as HTMLButtonElement | null
+      expect(btn).toBeTruthy()
+      expect(btn?.disabled).toBe(true)
+      expect(host.querySelector('[data-testid="edge-source-unavailable"]')).toBeTruthy()
+
+      btn?.click()
+      await nextTick()
+      const confirmClose = getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_CONFIRM_TRUSTLINE_CLOSE')
+      expect(confirmClose).not.toHaveBeenCalled()
+    } finally {
+      app.unmount()
+      host.remove()
+      clearGeoTestGlobals(
+        '__GEO_TEST_INTERACT_PHASE',
+        '__GEO_TEST_INTERACT_CANCEL',
+        '__GEO_TEST_INTERACT_CONFIRM_TRUSTLINE_CLOSE',
+        '__GEO_TEST_SNAPSHOT',
+        '__GEO_TEST_TRUSTLINES_REF',
+        '__GEO_TEST_TRUSTLINES_FETCH_STATE_REF',
+      )
+    }
+  })
+
+  /**
+   * RT-013-7g — `keepAlive` НЕ ДОЛЖЕН ПОПАСТЬ ПОД ГАРД, КОГДА ЗАМОРОЖЕН НАСТОЯЩИЙ ОТВЕТ.
+   *
+   * ЧТО ЗДЕСЬ ИЗМЕНИЛОСЬ 2026-09-10 И ПОЧЕМУ (внешнее ревью программы 013, находка P3).
+   * Прежняя редакция конструировала состояние `never-asked`, замораживала его нажатием
+   * «Send Payment» и требовала, чтобы предупреждение о недоступном источнике ИСЧЕЗЛО. Тем самым
+   * она требовала, чтобы заморозка ПОВЫШАЛА происхождение чисел: ответа не приходило, а окно
+   * начинало молчать так, будто пришёл. Заморозка — это снимок; она сохраняет то, что было, и
+   * не превращает молчание в ответ.
+   *
+   * ЧТО ИЗ ПРЕЖНЕЙ РЕДАКЦИИ ВЕРНО И СОХРАНЕНО: если заморожен НАСТОЯЩИЙ ответ, объявлять его
+   * отсутствием источника нельзя — это вопрос устаревания, а не отсутствия. Поэтому здесь то же
+   * самое сравнение «до заморозки / после заморозки», но на состоянии `row`; а состояние
+   * `never-asked` перенесено в RT-013-7g2, где предупреждение обязано ОСТАТЬСЯ.
+   *
+   * ПОЧЕМУ СРАВНЕНИЕ ИМЕННО ЧЕРЕЗ СООБЩЕНИЕ. Кнопки в `keepAlive` и так выключены через
+   * `wmEdgeDetailEffectiveBusy`, поэтому единственное наблюдаемое следствие происхождения чисел
+   * в этом режиме — то, что окно о них говорит.
+   */
+  it('RT-013-7g: a keepAlive edge-detail that froze a REAL answer must not be reported as an absent source', async () => {
+    setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'editing-trustline')
+    setGeoTestGlobal('__GEO_TEST_SNAPSHOT', RT_013_7_SNAPSHOT)
+    setUrl('/?mode=real&ui=interact')
+
+    stubMissingResizeObserver()
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = mountSimulatorAppRoot(host)
+    try {
+      await nextTick()
+      getRequiredGeoTestGlobal('__GEO_TEST_TRUSTLINES_REF').value = [RT_013_7_TRUSTLINE('42')]
+      getRequiredGeoTestGlobal('__GEO_TEST_TRUSTLINES_FETCH_STATE_REF').value = { kind: 'answered' }
+      await nextTick()
+      await nextTick()
+
+      // База для сравнения: живое окно на отвечающем источнике молчит — и про заморозку тоже.
+      expect(host.querySelector('[data-testid="edge-source-unavailable"]')).toBeFalsy()
+      expect(host.querySelector('[data-testid="edge-frozen-figures"]')).toBeFalsy()
+
+      // Send Payment замораживает текущую линию и оставляет окно как контекст.
+      const sendBtn = host.querySelector('[data-testid="edge-send-payment"]') as HTMLButtonElement | null
+      expect(sendBtn).toBeTruthy()
+      sendBtn?.click()
+      await nextTick()
+      await nextTick()
+
+      const popup = host.querySelector('[data-testid="edge-detail-popup"]') as HTMLElement | null
+      expect(popup).toBeTruthy()
+      expect((popup?.querySelector('.popup__subtitle')?.textContent ?? '').trim()).toBe('alice \u2192 bob')
+      expect(
+        popup?.querySelector('[data-testid="edge-source-unavailable"]'),
+        'замороженный ОТВЕТ объявлен отсутствием источника: это устаревание, а не молчание, и ' +
+          'окно здесь вообще показывает не ту пару, что в живом interact-состоянии',
+      ).toBeFalsy()
+      expect(popup?.querySelector('[data-testid="edge-no-trustline"]')).toBeFalsy()
+
+      // ...но и живым этот ответ больше не является, и об этом окно говорит. Без этого ассерта
+      // `frozen` и `row` наблюдаемо неразличимы, то есть заморозка основания ничем не судится:
+      // реализация, которая просто проносит прежнее основание насквозь, оставалась зелёной.
+      const frozen = popup?.querySelector('[data-testid="edge-frozen-figures"]') as HTMLElement | null
+      expect(
+        frozen,
+        'замороженная копия выдана за живой ответ: она не обновляется и относится к паре, ' +
+          'выбранной ДО начала платёжного потока',
+      ).toBeTruthy()
+      expect((frozen?.textContent ?? '').toLowerCase()).toContain('frozen copy')
+    } finally {
+      app.unmount()
+      host.remove()
+      clearGeoTestGlobals(
+        '__GEO_TEST_INTERACT_PHASE',
+        '__GEO_TEST_INTERACT_CANCEL',
+        '__GEO_TEST_SNAPSHOT',
+        '__GEO_TEST_TRUSTLINES_REF',
+        '__GEO_TEST_TRUSTLINES_FETCH_STATE_REF',
+      )
+      vi.unstubAllGlobals()
+    }
+  })
+
+  /**
+   * RT-013-7g2 — ЗАМОРОЗКА НЕ ПОВЫШАЕТ ПРОИСХОЖДЕНИЕ ЧИСЕЛ (внешнее ревью 013, находка P3).
+   *
+   * Состояние: у источника НИЧЕГО НЕ СПРАШИВАЛИ, окно показывает снапшотный фоллбэк и честно об
+   * этом говорит. Оператор нажимает «Send Payment» — попап замораживается как контекст платежа.
+   * Ответа за это время не приходило; значит, замораживается МОЛЧАНИЕ, и говорить о нём окно
+   * обязано ровно теми же словами, что и секунду назад.
+   *
+   * ЧТО ЭТОТ ТЕСТ ЛОВИТ, А RT-013-7g — НЕТ: `keepAlive` как БЕЗУСЛОВНОЕ основание («заморожена
+   * линия ⇒ основание `frozen`»). При такой реализации RT-013-7g остаётся зелёным (там и правда
+   * был ответ), а здесь предупреждение исчезает — при том что бэкенд так и не сказал ни слова.
+   */
+  it('RT-013-7g2: freezing a NEVER-ASKED source keeps saying so; the freeze does not turn silence into an answer', async () => {
+    setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'editing-trustline')
+    setGeoTestGlobal('__GEO_TEST_SNAPSHOT', RT_013_7_SNAPSHOT)
+    setUrl('/?mode=real&ui=interact')
+
+    stubMissingResizeObserver()
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const app = mountSimulatorAppRoot(host)
+    try {
+      await nextTick()
+      getRequiredGeoTestGlobal('__GEO_TEST_TRUSTLINES_REF').value = []
+      getRequiredGeoTestGlobal('__GEO_TEST_TRUSTLINES_FETCH_STATE_REF').value = { kind: 'never-asked' }
+      await nextTick()
+      await nextTick()
+
+      // База для сравнения: живое окно при неспрошенном источнике говорит об этом.
+      const before = host.querySelector('[data-testid="edge-source-unavailable"]') as HTMLElement | null
+      expect(before).toBeTruthy()
+      const beforeText = (before?.textContent ?? '').toLowerCase()
+      expect(beforeText).toContain('has not been requested')
+
+      const sendBtn = host.querySelector('[data-testid="edge-send-payment"]') as HTMLButtonElement | null
+      expect(sendBtn).toBeTruthy()
+      sendBtn?.click()
+      await nextTick()
+      await nextTick()
+
+      const popup = host.querySelector('[data-testid="edge-detail-popup"]') as HTMLElement | null
+      expect(popup).toBeTruthy()
+
+      // И «замороженным ответом» это молчание тоже не объявлено: замораживать было нечего.
+      expect(popup?.querySelector('[data-testid="edge-frozen-figures"]')).toBeFalsy()
+
+      const after = popup?.querySelector('[data-testid="edge-source-unavailable"]') as HTMLElement | null
+      expect(
+        after,
+        'заморозка сняла предупреждение, хотя ответа так и не было: снимок молчания выдан за ' +
+          'снимок ответа — происхождение чисел повышено самим фактом заморозки',
+      ).toBeTruthy()
+      expect((after?.textContent ?? '').toLowerCase()).toContain('has not been requested')
+    } finally {
+      app.unmount()
+      host.remove()
+      clearGeoTestGlobals(
+        '__GEO_TEST_INTERACT_PHASE',
+        '__GEO_TEST_INTERACT_CANCEL',
+        '__GEO_TEST_SNAPSHOT',
+        '__GEO_TEST_TRUSTLINES_REF',
+        '__GEO_TEST_TRUSTLINES_FETCH_STATE_REF',
+      )
+      vi.unstubAllGlobals()
+    }
   })
 
   it('AC-ED-3: EdgeDetailPopup "Send Payment" activates Manual Payment and pre-fills pids (trustline to→from)', async () => {

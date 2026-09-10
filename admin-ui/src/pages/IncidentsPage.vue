@@ -77,10 +77,6 @@ async function load() {
   }
 }
 
-function isOverSla(row: Incident): boolean {
-  return row.age_seconds > row.sla_seconds
-}
-
 async function forceAbort(row: Incident) {
   if (authStore.isReadOnly) {
     ElMessage.error(t('incidents.readOnlyAbortDisabled'))
@@ -146,7 +142,18 @@ onBeforeUnmount(() => {
   pageActive = false
 })
 
-const overSlaCount = computed(() => items.value.filter(isOverSla).length)
+// `overSlaCount` жил здесь и был тавтологией (`F-013-5`, решение владельца **B**, 2026-09-10):
+// `GET /admin/incidents` отдаёт ТОЛЬКО просроченные (`app/api/v1/admin.py:1011,1019` — cutoff и
+// `updated_at < cutoff`), поэтому фильтр по `age > sla` не убирал ни одной строки, а счётчик
+// всегда равнялся длине списка. Оператор читал его как подмножество. Убрано вместе с предикатом:
+// правда про это множество одна и относится ко ВСЕМУ списку, поэтому её и печатаем один раз.
+// СЧЁТ ПО ВСЕЙ ВЫДАЧЕ, А НЕ ПО СТРАНИЦЕ. Первая редакция считала `items.value.length`, то есть
+// строки текущей страницы, а подпись при этом утратила оговорку «на этой странице», которая была у
+// снятого счётчика. Получилось число страницы, читаемое как итог: 20 при 57 застрявших. Нашёл
+// внутренний adversarial 2026-09-10. `total` — то, что вернул сервер по всему набору (`:64`), и
+// утверждение «все за пределами SLA» относится именно к набору, а не к странице: маршрут иных
+// строк не возвращает вовсе.
+const stuckCount = computed(() => total.value)
 </script>
 
 <template>
@@ -169,7 +176,7 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
             </span>
           </template>
           <el-tag type="warning">
-            {{ t('incidents.slaBreaches', { n: overSlaCount }) }}
+            {{ t('incidents.allPastSla', { n: stuckCount }) }}
           </el-tag>
         </el-tooltip>
       </div>
@@ -306,7 +313,11 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
             />
           </template>
           <template #default="scope">
-            <span :class="{ bad: isOverSla(scope.row) }">{{ fmtAge(scope.row.age_seconds) }}</span>
+            <!-- Класс `bad` вешался по тому же тавтологическому предикату и потому доставался
+                 КАЖДОЙ строке: сервер отдаёт только просроченные. Подсветка, которая всегда
+                 включена, различает не строки, а ничего. Снято вместе с предикатом
+                 (`F-013-5`, 2026-09-10); что весь список просрочен, сказано один раз в шапке. -->
+            <span class="bad">{{ fmtAge(scope.row.age_seconds) }}</span>
           </template>
         </el-table-column>
         <el-table-column
@@ -408,11 +419,12 @@ const overSlaCount = computed(() => items.value.filter(isOverSla).length)
           </el-link>
         </el-descriptions-item>
         <el-descriptions-item :label="t('incidents.columns.age')">
-          <span :class="{ bad: isOverSla(selected) }">{{ fmtAge(selected.age_seconds) }}</span>
-          <span
-            v-if="isOverSla(selected)"
-            class="sla-warn"
-          > {{ t('incidents.overSla') }}</span>
+          <!-- Третий и последний вызов снятого предиката (`F-013-5`, 2026-09-10). Здесь он был
+               ещё нагляднее: пометка «over SLA» показывалась под условием, истинным для КАЖДОГО
+               инцидента, который вообще может попасть в этот drawer. Условие снято, пометка
+               осталась — она верна безусловно, и в этом весь смысл правки. -->
+          <span class="bad">{{ fmtAge(selected.age_seconds) }}</span>
+          <span class="sla-warn"> {{ t('incidents.overSla') }}</span>
         </el-descriptions-item>
         <el-descriptions-item :label="t('incidents.columns.sla')">
           {{ fmtAge(selected.sla_seconds) }}
