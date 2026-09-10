@@ -3,6 +3,10 @@ import { effectScope, nextTick, ref } from 'vue'
 
 import type { GraphSnapshot } from '../../types'
 import { parseAmountStringOrNull } from '../../utils/numberFormat'
+import {
+  resolveTrustlineFiguresSource,
+  trustlineFiguresNotice,
+} from './trustlinesSourceState'
 import { useInteractDataCache } from './useInteractDataCache'
 
 type CacheActions = Parameters<typeof useInteractDataCache>[0]['actions']
@@ -249,6 +253,53 @@ describe('useInteractDataCache: trustlines source state (`F-013-7`)', () => {
     expect(cache.trustlinesFetchState.value).toEqual({ kind: 'answered' })
     expect(cache.findAnsweredTrustline('alice', 'bob')?.limit).toBe('42')
     expect(cache.findAnsweredTrustline('bob', 'alice')).toBeNull()
+
+    scope.stop()
+  })
+
+  /**
+   * ЗАПРОС В ПОЛЁТЕ. Соседние случаи этого блока ждут УЖЕ УРЕГУЛИРОВАННЫЙ промис (`async () => []`,
+   * `async () => { throw }`), то есть к первому же `await` состояние источника успевает стать
+   * конечным. Поэтому ветка `loading` не судилась ни одним из них: удаление
+   * `if (trustlinesLoadingRef.value) return { kind: 'loading' }` из `useInteractDataCache`
+   * оставляло весь блок зелёным, хотя источник в этот момент объявлялся «не спрашивали».
+   *
+   * Здесь ответ ОТЛОЖЕН, и состояние проверяется, пока запрос ещё висит. Разница наблюдаема не
+   * только по `kind`: оператору в этот момент показывают РАЗНЫЕ вещи — «данные ещё грузятся» и
+   * «у источника ничего не спрашивали», — поэтому судится и текст сообщения.
+   */
+  it('пока запрос ВИСИТ, состояние — loading, а не never-asked', async () => {
+    let release: ((items: TrustlinesResult) => void) | null = null
+    const deferred = new Promise<TrustlinesResult>((resolve) => {
+      release = resolve
+    })
+    const { cache, scope } = mk(SNAPSHOT, async () => deferred)
+
+    await nextTick()
+    await Promise.resolve()
+
+    // Запрос отправлен и ответа ещё нет.
+    expect(
+      cache.trustlinesFetchState.value,
+      'висящий запрос неотличим от «не спрашивали»: между молчанием источника и ожиданием ответа ' +
+        'разница ровно та же, что вся эта находка',
+    ).toEqual({ kind: 'loading' })
+
+    // То же самое как наблюдаемое следствие: что именно прочитает оператор над этими числами.
+    const pendingNotice = trustlineFiguresNotice(
+      resolveTrustlineFiguresSource(cache.trustlinesFetchState.value, cache.findAnsweredTrustline('alice', 'bob') != null),
+    )
+    expect(pendingNotice ?? '').toContain('still loading')
+    expect(pendingNotice ?? '').not.toContain('has not been requested')
+
+    // Ответ приходит — и только теперь состояние конечное.
+    release!([] as unknown as TrustlinesResult)
+    await deferred
+    await nextTick()
+    await Promise.resolve()
+    await nextTick()
+
+    expect(cache.trustlinesFetchState.value).toEqual({ kind: 'answered' })
 
     scope.stop()
   })

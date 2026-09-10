@@ -21,6 +21,13 @@
  * payment carrying `from` alone was recorded as "not this participant's" on the strength of a
  * field nobody sent.
  *
+ * F-013-R4 (EXTERNAL review). The flag F-013-R3 introduced - "some row in this collection could not
+ * be attributed" - was one boolean for the whole `transactions` collection, read by the payment cell
+ * and the clearing cell alike and by all three windows of each. So one committed payment with no
+ * published recipient erased a clearing count of zero that had been reached without ever consulting
+ * it, in windows that payment was far too old to belong to. The doubt is now recorded where it is
+ * displayed: per counter, and per window.
+ *
  * WHY THE RENDERED STRING AND NOT THE FLAGS. Every assertion below states what the operator reads.
  * The two adapters (`renderCounts`, `renderRatio`) are the only place a field name appears; each is
  * the production call site copied verbatim, so an assertion cannot drift into describing the
@@ -32,6 +39,8 @@
  * `useGraphAnalytics*.test.ts`, and the behaviour under test is produced by `useGraphAnalytics`
  * and rendered by two one-line helpers in `graphPageHelpers`.
  */
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { computed, ref } from 'vue'
 
@@ -74,9 +83,10 @@ type Activity = NonNullable<Analytics['selectedActivity']['value']>
 
 /**
  * The Activity card's counter cell, verbatim from GraphAnalyticsDrawer.vue / RiskTab.vue.
- * `which` names which of the three collections the counter is derived from.
+ * `which` names the confidence the counter is displayed at - one per COUNTER since F-013-R4, so
+ * naming the wrong one here is a test that describes a different cell than it claims to.
  */
-function renderCounts(a: Activity, counts: Record<number, number>, which: 'transactions' | 'incidents' | 'auditLog'): string {
+function renderCounts(a: Activity, counts: Record<number, number>, which: 'payments' | 'clearings' | 'incidents' | 'auditLog'): string {
   return activityCounts(counts, a.windows, a[which])
 }
 
@@ -200,12 +210,12 @@ describe('F-013-R1: the metrics branch measures, so its zeros are zeros', () => 
     const g = analyticsFor({ included: [], truncated: [] })
     const a = await withMetrics(g, QUIET_SYSTEM)
 
-    expect(renderCounts(a, a.paymentCommitted, 'transactions')).toBe('0 / 0 / 0')
-    expect(renderCounts(a, a.clearingCommitted, 'transactions')).toBe('0 / 0 / 0')
+    expect(renderCounts(a, a.paymentCommitted, 'payments')).toBe('0 / 0 / 0')
+    expect(renderCounts(a, a.clearingCommitted, 'clearings')).toBe('0 / 0 / 0')
 
     // And the card must not raise "Transaction activity was not requested" over a measurement.
-    expect(a.transactions.known).toBe(true)
-    expect(a.transactions.incomplete).toBe(false)
+    expect(a.payments.known).toBe(true)
+    expect(a.payments.incompleteWindows).toEqual([])
   })
 
   it('a busy real system prints the measured numbers, never as lower bounds', async () => {
@@ -215,9 +225,9 @@ describe('F-013-R1: the metrics branch measures, so its zeros are zeros', () => 
     const g = analyticsFor({ included: ['transactions'], truncated: ['transactions'] })
     const a = await withMetrics(g, BUSY_SYSTEM)
 
-    expect(renderCounts(a, a.paymentCommitted, 'transactions')).toBe('1 / 3 / 5')
-    expect(renderCounts(a, a.clearingCommitted, 'transactions')).toBe('0 / 2 / 4')
-    expect(a.transactions.lowerBound).toBe(false)
+    expect(renderCounts(a, a.paymentCommitted, 'payments')).toBe('1 / 3 / 5')
+    expect(renderCounts(a, a.clearingCommitted, 'clearings')).toBe('0 / 2 / 4')
+    expect(a.payments.lowerBound).toBe(false)
   })
 
   it('the snapshot-derived branch still says "we were not told" when nothing was included', () => {
@@ -226,8 +236,8 @@ describe('F-013-R1: the metrics branch measures, so its zeros are zeros', () => 
     const g = analyticsFor({ included: [], truncated: [] })
     const a = g.selectedActivity.value as Activity
 
-    expect(a.transactions.known).toBe(false)
-    expect(renderCounts(a, a.paymentCommitted, 'transactions')).toBe('— / — / —')
+    expect(a.payments.known).toBe(false)
+    expect(renderCounts(a, a.paymentCommitted, 'payments')).toBe('— / — / —')
   })
 })
 
@@ -267,7 +277,7 @@ describe('F-013-R2: unasked collections must not print bare zeros', () => {
     expect(renderCounts(a, a.participantOps, 'auditLog')).toBe('— / — / —')
     // ... while the collection that WAS carried still prints numbers. A blanket "everything is
     // unknown" fix would pass the two lines above and fail this one.
-    expect(renderCounts(a, a.paymentCommitted, 'transactions')).toBe('0 / 0 / 0')
+    expect(renderCounts(a, a.paymentCommitted, 'payments')).toBe('0 / 0 / 0')
   })
 
   it('a snapshot that names all three prints the counts it actually measured', () => {
@@ -301,6 +311,26 @@ describe('F-013-R2: unasked collections must not print bare zeros', () => {
     expect(renderCounts(a, a.incidentCount, 'incidents')).toBe('≥1 / ≥2 / ≥3')
     // The cut is per collection: audit_log was included and NOT cut, so its counters stay exact.
     expect(renderCounts(a, a.participantOps, 'auditLog')).toBe('1 / 1 / 2')
+  })
+
+  it('and the same with the roles REVERSED: a cut audit log, an intact incident list', () => {
+    // THE SAME PAIR, THE OTHER WAY ROUND (external review of 013, finding 2). Until this case
+    // existed, `snapshotAuditLog` could be written `collectionConfidence('audit_log', included, [])`
+    // - its `truncated` argument thrown away - and all 21 confidence assertions still passed,
+    // because every fixture in the file truncated INCIDENTS and left audit_log whole. A collection
+    // whose cut is never exercised is a collection whose cut is not tested, however many assertions
+    // stand around it.
+    const g = analyticsFor({
+      trustlines: anchor,
+      incidents,
+      auditLog,
+      included: ['incidents', 'audit_log'],
+      truncated: ['audit_log'],
+    })
+    const a = g.selectedActivity.value as Activity
+
+    expect(renderCounts(a, a.participantOps, 'auditLog')).toBe('≥1 / ≥1 / ≥2')
+    expect(renderCounts(a, a.incidentCount, 'incidents')).toBe('1 / 2 / 3')
   })
 
   it('the metrics branch measures these two as well, whatever the snapshot carried', async () => {
@@ -379,8 +409,8 @@ describe('F-013-R3: the attribution fields the producer publishes are actually r
     const a = g.selectedActivity.value as Activity
 
     expect(a.paymentCommitted[7]).toBe(1)
-    expect(renderCounts(a, a.paymentCommitted, 'transactions')).toBe('1 / 1 / 1')
-    expect(a.transactions.incomplete).toBe(false)
+    expect(renderCounts(a, a.paymentCommitted, 'payments')).toBe('1 / 1 / 1')
+    expect(a.payments.incompleteWindows).toEqual([])
   })
 
   it('counts a clearing this participant is only an EDGE of, which only `edges` can reveal', () => {
@@ -407,10 +437,10 @@ describe('F-013-R3: the attribution fields the producer publishes are actually r
     const a = g.selectedActivity.value as Activity
 
     expect(a.clearingCommitted[7]).toBe(1)
-    expect(renderCounts(a, a.clearingCommitted, 'transactions')).toBe('1 / 1 / 1')
+    expect(renderCounts(a, a.clearingCommitted, 'clearings')).toBe('1 / 1 / 1')
     // The second clearing names its full cycle and PID_A is not in it: that is a real "no", so
     // nothing about this pair is unknown.
-    expect(a.transactions.incomplete).toBe(false)
+    expect(a.clearings.incompleteWindows).toEqual([])
   })
 
   it('a payment carrying `from` alone cannot be ruled out, and is not silently counted as absent', () => {
@@ -424,8 +454,8 @@ describe('F-013-R3: the attribution fields the producer publishes are actually r
     const a = g.selectedActivity.value as Activity
 
     expect(a.paymentCommitted[7]).toBe(0)
-    expect(a.transactions.incomplete).toBe(true)
-    expect(renderCounts(a, a.paymentCommitted, 'transactions')).toBe('— / — / —')
+    expect(a.payments.incompleteWindows).toEqual([7, 30, 90])
+    expect(renderCounts(a, a.paymentCommitted, 'payments')).toBe('— / — / —')
   })
 
   it('but `from` alone still settles the POSITIVE case, so the fix is not "require both"', () => {
@@ -439,8 +469,8 @@ describe('F-013-R3: the attribution fields the producer publishes are actually r
     const a = g.selectedActivity.value as Activity
 
     expect(a.paymentCommitted[7]).toBe(1)
-    expect(a.transactions.incomplete).toBe(false)
-    expect(renderCounts(a, a.paymentCommitted, 'transactions')).toBe('1 / 1 / 1')
+    expect(a.payments.incompleteWindows).toEqual([])
+    expect(renderCounts(a, a.paymentCommitted, 'payments')).toBe('1 / 1 / 1')
   })
 
   it('`to` alone settles the positive case too', () => {
@@ -451,7 +481,7 @@ describe('F-013-R3: the attribution fields the producer publishes are actually r
     const a = g.selectedActivity.value as Activity
 
     expect(a.paymentCommitted[7]).toBe(1)
-    expect(a.transactions.incomplete).toBe(false)
+    expect(a.payments.incompleteWindows).toEqual([])
   })
 
   it('a payment naming both counterparties, neither of them ours, is a real zero', () => {
@@ -462,8 +492,8 @@ describe('F-013-R3: the attribution fields the producer publishes are actually r
     const a = g.selectedActivity.value as Activity
 
     expect(a.paymentCommitted[7]).toBe(0)
-    expect(a.transactions.incomplete).toBe(false)
-    expect(renderCounts(a, a.paymentCommitted, 'transactions')).toBe('0 / 0 / 0')
+    expect(a.payments.incompleteWindows).toEqual([])
+    expect(renderCounts(a, a.paymentCommitted, 'payments')).toBe('0 / 0 / 0')
   })
 
   it('a clearing publishing no edges, initiated by someone else, stays unknown', () => {
@@ -474,7 +504,175 @@ describe('F-013-R3: the attribution fields the producer publishes are actually r
     const a = g.selectedActivity.value as Activity
 
     expect(a.clearingCommitted[7]).toBe(0)
-    expect(a.transactions.incomplete).toBe(true)
+    expect(a.clearings.incompleteWindows).toEqual([7, 30, 90])
+    // ... and the PAYMENT cells, which this clearing says nothing whatever about, keep the zeros
+    // they were counted to. Before F-013-R4 this row blanked them too.
+    expect(renderCounts(a, a.paymentCommitted, 'payments')).toBe('0 / 0 / 0')
+  })
+})
+
+// =================================================================================================
+// F-013-R4 (EXTERNAL review of programme 013). A doubt at the granularity of the cell that shows it.
+//
+// The flag F-013-R3 added was one boolean over the whole `transactions` collection. Both the payment
+// cell and the clearing cell read it, and each read it for all three windows at once. So a single
+// committed PAYMENT with no published recipient - a legitimate doubt about payment attribution -
+// erased a CLEARING count of zero that had been reached without ever consulting that row, and erased
+// it in windows the row was 60 days too old to belong to.
+//
+// Both wrong fixes have to fail here, and each has its own cases:
+//   * too COARSE (one flag for the collection, or one for all windows): the "left standing" cases go
+//     red, because a cell that owes nothing to the doubtful row would print "—".
+//   * too FINE (a doubt that reaches no cell at all): the "still fires" cases go red, because a
+//     payment nobody can attribute would print a confident number.
+// =================================================================================================
+describe('F-013-R4: a doubt clouds its own counter, in its own windows, and nothing else', () => {
+  const included = ['transactions']
+
+  /** The drawer's "cannot be attributed" notice, verbatim from GraphAnalyticsDrawer.vue. */
+  function showsUnattributableNotice(a: Activity): boolean {
+    return Boolean(a.payments.incompleteWindows.length || a.clearings.incompleteWindows.length)
+  }
+
+  it('THE REPRODUCER: an unattributable payment leaves the KNOWN clearing zero standing', () => {
+    // The reviewer's input, verbatim: included=[transactions], truncated=[], one COMMITTED PAYMENT
+    // in EUR, initiated by B, `from` B, no `to`. The complete collection holds no clearings at all,
+    // and that count was taken without reference to this payment's missing recipient.
+    const g = analyticsFor({
+      transactions: [producerRow({ tx_id: 'half', from: OTHER, initiator_pid: OTHER })],
+      included,
+      truncated: [],
+    })
+    const a = g.selectedActivity.value as Activity
+
+    expect(renderCounts(a, a.paymentCommitted, 'payments')).toBe('— / — / —')
+    expect(renderCounts(a, a.clearingCommitted, 'clearings')).toBe('0 / 0 / 0')
+    // STILL FIRES: the payment cells are blank and the operator is told why. A fix that narrowed
+    // the doubt until it reached nothing would pass line two and fail these.
+    expect(showsUnattributableNotice(a)).toBe(true)
+  })
+
+  it('the doubt reaches only the windows the doubtful row could have landed in', () => {
+    // One payment we can see is ours, one day old; one payment we cannot place, 59 days old. The
+    // second cannot be in the 7- or 30-day count whoever it belongs to, so those two cells are
+    // still exact - and the 90-day cell is not, even though it holds a real count of 1.
+    const g = analyticsFor({
+      transactions: [
+        producerRow({ tx_id: 'mine', from: PID, to: THIRD, initiator_pid: PID, created_at: daysBefore(1), updated_at: daysBefore(1) }),
+        producerRow({ tx_id: 'stale-half', from: THIRD, initiator_pid: THIRD, created_at: daysBefore(60), updated_at: daysBefore(60) }),
+      ],
+      included,
+      truncated: [],
+    })
+    const a = g.selectedActivity.value as Activity
+
+    expect(renderCounts(a, a.paymentCommitted, 'payments')).toBe('1 / 1 / —')
+    expect(a.payments.incompleteWindows).toEqual([90])
+    // The clearing cells are untouched by a payment's doubt, in every window.
+    expect(renderCounts(a, a.clearingCommitted, 'clearings')).toBe('0 / 0 / 0')
+    expect(showsUnattributableNotice(a)).toBe(true)
+  })
+
+  it('a cut collection still stamps ≥ on the windows the doubt does not reach', () => {
+    // The two states are independent and both have to survive: "at least this many" for the windows
+    // we can count, silence for the one we cannot. A fix that let one swallow the other passes
+    // neither half of this line.
+    const g = analyticsFor({
+      transactions: [
+        producerRow({ tx_id: 'mine', from: PID, to: THIRD, initiator_pid: PID, created_at: daysBefore(1), updated_at: daysBefore(1) }),
+        producerRow({ tx_id: 'stale-half', from: THIRD, initiator_pid: THIRD, created_at: daysBefore(60), updated_at: daysBefore(60) }),
+      ],
+      included,
+      truncated: ['transactions'],
+    })
+    const a = g.selectedActivity.value as Activity
+
+    expect(renderCounts(a, a.paymentCommitted, 'payments')).toBe('≥1 / ≥1 / —')
+    expect(renderCounts(a, a.clearingCommitted, 'clearings')).toBe('≥0 / ≥0 / ≥0')
+  })
+
+  it('THE MIRROR: an unattributable clearing leaves the payment counters standing', () => {
+    // The same finding with the roles exchanged, because a fix that hard-wires the doubt to the
+    // payment cell would pass the reproducer above and fail this.
+    const g = analyticsFor({
+      transactions: [
+        producerRow({ tx_id: 'cl-bare', type: 'CLEARING', initiator_pid: THIRD, created_at: daysBefore(60), updated_at: daysBefore(60) }),
+        producerRow({ tx_id: 'paid', from: PID, to: THIRD, initiator_pid: PID, created_at: daysBefore(1), updated_at: daysBefore(1) }),
+      ],
+      included,
+      truncated: [],
+    })
+    const a = g.selectedActivity.value as Activity
+
+    expect(renderCounts(a, a.paymentCommitted, 'payments')).toBe('1 / 1 / 1')
+    expect(renderCounts(a, a.clearingCommitted, 'clearings')).toBe('0 / 0 / —')
+    expect(showsUnattributableNotice(a)).toBe(true)
+  })
+
+  it('a collection whose every row can be placed raises no doubt and no notice', () => {
+    // The other side of "still fires": the notice must not become permanent furniture. One payment
+    // we sent, one clearing that names its whole cycle without us.
+    const g = analyticsFor({
+      transactions: [
+        producerRow({ tx_id: 'paid', from: PID, to: THIRD, initiator_pid: PID }),
+        producerRow({ tx_id: 'cl-theirs', type: 'CLEARING', initiator_pid: THIRD, edges: [{ debtor: OTHER, creditor: THIRD }] }),
+      ],
+      included,
+      truncated: [],
+    })
+    const a = g.selectedActivity.value as Activity
+
+    expect(renderCounts(a, a.paymentCommitted, 'payments')).toBe('1 / 1 / 1')
+    expect(renderCounts(a, a.clearingCommitted, 'clearings')).toBe('0 / 0 / 0')
+    expect(showsUnattributableNotice(a)).toBe(false)
+  })
+
+  it('a row that cannot be placed in TIME clouds every window of its own counter', () => {
+    // The window half of the same question. This payment is demonstrably ours - `from` names us -
+    // but neither timestamp parses, so it joins no window's count and every payment cell is short
+    // by it. The loop used to `continue` past this row in silence, which is the finding's own shape
+    // one level in.
+    const g = analyticsFor({
+      transactions: [producerRow({ tx_id: 'mine-undated', from: PID, to: THIRD, initiator_pid: PID, created_at: '', updated_at: '' })],
+      included,
+      truncated: [],
+    })
+    const a = g.selectedActivity.value as Activity
+
+    expect(renderCounts(a, a.paymentCommitted, 'payments')).toBe('— / — / —')
+    expect(renderCounts(a, a.clearingCommitted, 'clearings')).toBe('0 / 0 / 0')
+  })
+
+  it('... but a row that is not ours clouds nothing, whatever its timestamp says', () => {
+    // Both counterparties named, neither of them ours: a row we are NOT missing from our counts, so
+    // its unreadable timestamp is not our problem. A fix that clouded on any unparseable date would
+    // blank this cell for a payment between two other people.
+    const g = analyticsFor({
+      transactions: [producerRow({ tx_id: 'theirs-undated', from: THIRD, to: OTHER, initiator_pid: THIRD, created_at: '', updated_at: '' })],
+      included,
+      truncated: [],
+    })
+    const a = g.selectedActivity.value as Activity
+
+    expect(renderCounts(a, a.paymentCommitted, 'payments')).toBe('0 / 0 / 0')
+    expect(showsUnattributableNotice(a)).toBe(false)
+  })
+
+  it('a collection that was never carried says nothing, and the doubt does not contradict it', () => {
+    // Ordering, as the drawer states it: "we were not told" outranks "we were told something we
+    // cannot use". An unattributable row inside a collection nobody asked for must not turn silence
+    // into a narrower, more confident-looking silence.
+    const g = analyticsFor({
+      transactions: [producerRow({ tx_id: 'half', from: OTHER, initiator_pid: OTHER })],
+      included: [],
+      truncated: [],
+    })
+    const a = g.selectedActivity.value as Activity
+
+    expect(a.payments.known).toBe(false)
+    expect(a.payments.incompleteWindows).toEqual([])
+    expect(renderCounts(a, a.paymentCommitted, 'payments')).toBe('— / — / —')
+    expect(showsUnattributableNotice(a)).toBe(false)
   })
 })
 
@@ -482,23 +680,31 @@ describe('F-013-R3: the attribution fields the producer publishes are actually r
 // The rendering helpers, as units. Every branch of the three-state contract, stated once.
 // =================================================================================================
 describe('the display contract: not told / told and zero / told a lower bound', () => {
-  const known: CountConfidence = { known: true, lowerBound: false, incomplete: false }
+  const known: CountConfidence = { known: true, lowerBound: false, incompleteWindows: [] }
 
   it('collectionConfidence reads one collection at a time', () => {
     const included = ['transactions', 'incidents']
     const truncated = ['incidents', 'audit_log']
 
-    expect(collectionConfidence('transactions', included, truncated)).toEqual({ known: true, lowerBound: false, incomplete: false })
-    expect(collectionConfidence('incidents', included, truncated)).toEqual({ known: true, lowerBound: true, incomplete: false })
+    expect(collectionConfidence('transactions', included, truncated)).toEqual({ known: true, lowerBound: false, incompleteWindows: [] })
+    expect(collectionConfidence('incidents', included, truncated)).toEqual({ known: true, lowerBound: true, incompleteWindows: [] })
     // Cut but never carried: a cut we were not told we received tells us nothing.
-    expect(collectionConfidence('audit_log', included, truncated)).toEqual({ known: false, lowerBound: false, incomplete: false })
+    expect(collectionConfidence('audit_log', included, truncated)).toEqual({ known: false, lowerBound: false, incompleteWindows: [] })
+    // A doubt about a collection we were never told about is not a narrower silence: it is the same
+    // silence, and the windows are dropped rather than printed as a more specific ignorance.
+    expect(collectionConfidence('audit_log', included, truncated, [7, 30])).toEqual({ known: false, lowerBound: false, incompleteWindows: [] })
+    expect(collectionConfidence('incidents', included, truncated, [30])).toEqual({ known: true, lowerBound: true, incompleteWindows: [30] })
   })
 
   it('activityCounts prints per window, and 0 is a number when it was measured', () => {
     expect(activityCounts({ 7: 0, 30: 2, 90: 9 }, [7, 30, 90], known)).toBe('0 / 2 / 9')
     expect(activityCounts({ 7: 0, 30: 2, 90: 9 }, [7, 30, 90], { ...known, lowerBound: true })).toBe('≥0 / ≥2 / ≥9')
     expect(activityCounts({ 7: 0, 30: 2, 90: 9 }, [7, 30, 90], { ...known, known: false })).toBe('— / — / —')
-    expect(activityCounts({ 7: 0, 30: 2, 90: 9 }, [7, 30, 90], { ...known, incomplete: true })).toBe('— / — / —')
+    // Per window, and ONLY the listed windows. Both of the wrong shapes are stated here as units:
+    // a doubt over one window must not blank the other two, and a doubt over all three must.
+    expect(activityCounts({ 7: 0, 30: 2, 90: 9 }, [7, 30, 90], { ...known, incompleteWindows: [90] })).toBe('0 / 2 / —')
+    expect(activityCounts({ 7: 0, 30: 2, 90: 9 }, [7, 30, 90], { ...known, incompleteWindows: [7, 30, 90] })).toBe('— / — / —')
+    expect(activityCounts({ 7: 0, 30: 2, 90: 9 }, [7, 30, 90], { ...known, lowerBound: true, incompleteWindows: [7] })).toBe('— / ≥2 / ≥9')
   })
 
   it('incidentRatioDisplay keeps a missing participant apart from a missing collection', () => {
@@ -509,5 +715,59 @@ describe('the display contract: not told / told and zero / told a lower bound', 
     expect(incidentRatioDisplay(0.5, { ...known, lowerBound: true })).toBe('≥0.50')
     // Absent from a list we know was cut: silence, not zero.
     expect(incidentRatioDisplay(undefined, { ...known, lowerBound: true })).toBe('—')
+    // The ratio is not windowed - it is one number over the whole collection - so ANY unplaceable
+    // row in it is enough to withhold it. This is the one display where the doubt is not per window.
+    expect(incidentRatioDisplay(0.5, { ...known, incompleteWindows: [7] })).toBe('—')
+  })
+
+  /**
+   * ЧАСОВОЙ НА ТО, ЧЕГО ВЫБОРКА ЭТОГО ФАЙЛА НЕ ВИДИТ, и это признал сам её автор.
+   *
+   * Все тесты выше судят через `renderCounts` — адаптер, ПОВТОРЯЮЩИЙ пары «счётчик ↔ уверенность»
+   * из шаблона. То есть пар в дереве две реализации: восемь мест в `GraphAnalyticsDrawer.vue` и
+   * одна здесь. Если в шаблоне поменять местами `payments` и `clearings`, платёжные ячейки начнут
+   * гаситься сомнением о клирингах и наоборот — ровно тот дефект, ради которого вводилась
+   * гранулярность, — а ни один тест этого файла не покраснеет.
+   *
+   * «Выборкой бывают не значения, а РЕАЛИЗАЦИИ» — записанный урок этого репозитория, и здесь он в
+   * чистом виде. Правильная починка — свести пары к одному источнику; она инвазивна для шаблона и
+   * не делается в фикс-раунде внешнего ревью. Пока пар две, их согласие утверждается тестом, а не
+   * подразумевается: он читает исходник дровера и требует, чтобы каждая пара стояла как надо.
+   *
+   * Это утверждение о ТЕКСТЕ, а не о поведении, и потому слабее остальных: оно не переживёт
+   * переписывания шаблона на другую форму вызова. Это осознанная цена, и когда пары станут одной
+   * реализацией, тест надо удалить вместе с ними.
+   */
+  it('sentinel: the drawer pairs each counter with its OWN confidence', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/pages/graph/GraphAnalyticsDrawer.vue'), 'utf8')
+
+    const PAIRS: Array<[string, string]> = [
+      ['paymentCommitted', 'payments'],
+      ['clearingCommitted', 'clearings'],
+      ['incidentCount', 'incidents'],
+      ['participantOps', 'auditLog'],
+    ]
+
+    for (const [counts, confidence] of PAIRS) {
+      const call = `activityCounts(selectedActivity.${counts}, selectedActivity.windows, selectedActivity.${confidence})`
+      expect(
+        source.includes(call),
+        `дровер не вызывает \`${call}\`: счётчик ${counts} либо не отрисован, либо спарен с чужой ` +
+          'уверенностью — тогда его ячейки гасятся сомнением о другой коллекции, а тесты этого файла ' +
+          'судят копию пар, а не сам шаблон',
+      ).toBe(true)
+    }
+
+    // И ни одной перекрёстной пары: наличие правильной не исключает наличия неправильной рядом.
+    const CROSSED: Array<[string, string]> = [
+      ['paymentCommitted', 'clearings'],
+      ['clearingCommitted', 'payments'],
+      ['incidentCount', 'auditLog'],
+      ['participantOps', 'incidents'],
+    ]
+    for (const [counts, confidence] of CROSSED) {
+      const call = `activityCounts(selectedActivity.${counts}, selectedActivity.windows, selectedActivity.${confidence})`
+      expect(source.includes(call), `дровер спарил ${counts} с чужой уверенностью ${confidence}`).toBe(false)
+    }
   })
 })

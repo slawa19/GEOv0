@@ -7,6 +7,8 @@ import { useDestructiveConfirmation } from '../composables/useDestructiveConfirm
 import {
   canActOnTrustlineFigures,
   trustlineFiguresNotice,
+  trustlineFrozenNotice,
+  trustlineNoRowNotice,
   type TrustlineFiguresSource,
 } from '../composables/interact/trustlinesSourceState'
 
@@ -50,9 +52,26 @@ const props = withDefaults(defineProps<Props>(), {
 /**
  * `F-013-7`. Отсутствие основания = оснований нет (`canActOnTrustlineFigures(undefined) === false`):
  * типы ловят забывшего вызывающего на сборке, эта ветка — в рантайме.
+ *
+ * 2026-09-10 (внешнее ревью 013, находка P2): сюда же попал `no-row`. Закрывать линию, которой по
+ * ответу бэкенда не существует, нечего, а `used`/`limit` в этот момент показаны из снапшота —
+ * то есть из источника, который тот же ответ опроверг.
  */
-const sourceUnavailable = computed(() => !canActOnTrustlineFigures(props.figuresSource))
+const noExistingLine = computed(() => !canActOnTrustlineFigures(props.figuresSource))
+/** Источник не ответил вовсе. */
 const sourceUnavailableText = computed<string | null>(() => trustlineFiguresNotice(props.figuresSource))
+/** Источник ответил, и линии у пары нет — другой факт, другие последствия, своё сообщение. */
+const noTrustlineText = computed<string | null>(() => trustlineNoRowNotice(props.figuresSource))
+/**
+ * Показана ЗАМОРОЖЕННАЯ копия прежнего ответа (`keepAlive`). Действовать по ней позволено — это
+ * устаревание, а не отсутствие, — но выдавать её за живое состояние нельзя: окно в этот момент
+ * может показывать вообще не ту пару, что живое interact-состояние.
+ *
+ * Сообщение живёт только здесь, а не в `TrustlineManagementPanel`: `frozen` возникает
+ * исключительно в режиме `keepAlive` окна edge-detail (`SimulatorAppRoot.wmEdgeDetailFiguresSource`),
+ * и панель этого основания не получает никогда.
+ */
+const frozenText = computed<string | null>(() => trustlineFrozenNotice(props.figuresSource))
 
 const emit = defineEmits<{
   (e: 'changeLimit'): void
@@ -159,7 +178,7 @@ const { armed: closeArmed, disarm: disarmClose, confirmOrArm: confirmCloseOrArm 
     // ED-1: when Close is blocked (used > 0), disarm any destructive confirmation.
     { source: closeBlocked, when: (b) => !!b },
     // `F-013-7`: если основание для действия пропало, взведённое закрытие не должно его пережить.
-    { source: sourceUnavailable, when: (b) => !!b },
+    { source: noExistingLine, when: (b) => !!b },
   ],
 })
 
@@ -168,7 +187,7 @@ function onCloseLine() {
   // ОТДЕЛЬНАЯ ПРОВЕРКА, а не расчёт на `closeBlocked`, и это не перестраховка (`F-013-7`).
   // `closeBlocked` означает «есть долг», и вычисляется из чисел; когда чисел нет, оно ложно —
   // то есть каскад разрешил бы закрытие ровно в тот момент, когда мы не знаем, есть ли долг.
-  if (sourceUnavailable.value) return
+  if (noExistingLine.value) return
   if (closeBlocked.value) return
   void confirmCloseOrArm(() => emit('closeLine'))
 }
@@ -220,6 +239,20 @@ function onCloseLine() {
       >
         {{ sourceUnavailableText }} Closing the line is disabled until then.
       </div>
+      <div
+        v-if="noTrustlineText"
+        class="popup__inline-warn ds-label ds-mono"
+        data-testid="edge-no-trustline"
+      >
+        {{ noTrustlineText }}
+      </div>
+      <div
+        v-if="frozenText"
+        class="popup__inline-warn ds-label ds-mono"
+        data-testid="edge-frozen-figures"
+      >
+        {{ frozenText }}
+      </div>
       <div v-if="closeBlocked" class="popup__inline-warn ds-label ds-mono" data-testid="edge-close-blocked">
         Cannot close: trustline has outstanding debt ({{ closeDebtDisplay }}). Reduce debt to 0 first.
       </div>
@@ -239,7 +272,7 @@ function onCloseLine() {
       <button
         class="ds-btn ds-btn--danger ds-btn--sm"
         type="button"
-        :disabled="!!busy || closeBlocked || sourceUnavailable"
+        :disabled="!!busy || closeBlocked || noExistingLine"
         data-testid="edge-close-line-btn"
         @click="onCloseLine"
       >

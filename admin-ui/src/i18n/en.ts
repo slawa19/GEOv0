@@ -633,8 +633,8 @@ export const EN: Record<string, string> = {
   // printed 0 that it did not contradict. Three notices now, one per state the response can be in.
   'graph.analytics.activity.transactionsNotIncludedTitle': 'Transaction activity was not requested',
   'graph.analytics.activity.transactionsNotIncludedDescription': 'This snapshot does not carry the transactions collection, so payment and clearing counters cannot be computed. Absent is not the same as zero.',
-  'graph.analytics.activity.transactionsUnattributableTitle': 'Transaction activity cannot be attributed to this participant',
-  'graph.analytics.activity.transactionsUnattributableDescription': 'The snapshot carries committed transactions, but the rows publish no counterparties, so we cannot tell which of them involve this participant. Any count would be an undercount.',
+  'graph.analytics.activity.transactionsUnattributableTitle': 'Some transaction activity cannot be attributed to this participant',
+  'graph.analytics.activity.transactionsUnattributableDescription': 'The snapshot carries committed transactions, and some of them publish no counterparties, so we cannot tell whether they involve this participant. Only the cells such a row could belong to are withheld and shown as —; the counters still showing a number were reached without it.',
   'graph.analytics.activity.transactionsTruncatedTitle': 'Transaction counters are lower bounds',
   'graph.analytics.activity.transactionsTruncatedDescription': 'The server returned only the most recent transactions and cut the rest, so the numbers shown are at least this many, not totals.',
   // F-013-R2. The counters derived from `incidents` and `audit_log`. This client requests neither

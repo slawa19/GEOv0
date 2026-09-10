@@ -2,6 +2,7 @@ import { ref, type Ref } from 'vue'
 
 import type { GraphLink } from '../types'
 import { keyEdge } from '../utils/edgeKey'
+import type { TrustlineFiguresSource } from './interact/trustlinesSourceState'
 
 import type { WindowAnchor } from './windowManager/types'
 
@@ -57,6 +58,15 @@ export function useWmEdgeDetail(): {
   state: Ref<EdgeDetailState>
   frozenLink: Ref<GraphLink | null>
 
+  /**
+   * ЧЕМ БЫЛА ОБОСНОВАНА замороженная линия в момент заморозки (внешнее ревью 013, находка P3).
+   *
+   * Замораживать одни только ЧИСЛА недостаточно: происхождение — часть того, что показано, и без
+   * него окно вынуждено ЛИБО молчать (то есть выдавать снимок молчания за снимок ответа), ЛИБО
+   * говорить про живое состояние, которое к замороженной паре уже не относится.
+   */
+  frozenFiguresSource: Ref<TrustlineFiguresSource | null>
+
   /** Feed the current auto (Interact FSM) desire to show EdgeDetail quick-info. */
   syncAuto: (req: EdgeDetailOpenRequest | null) => void
 
@@ -73,7 +83,10 @@ export function useWmEdgeDetail(): {
   suppress: (reason?: string) => void
 
   /** KeepAlive: keep the window open as frozen context while Interact flow changes phase. */
-  allowKeepAlive: (o?: { frozenLink?: GraphLink | null }) => void
+  allowKeepAlive: (o?: {
+    frozenLink?: GraphLink | null
+    frozenFiguresSource?: TrustlineFiguresSource | null
+  }) => void
   releaseKeepAlive: () => void
 
   /** Apply the desired open/close to WindowManager (idempotent). */
@@ -97,6 +110,7 @@ export function useWmEdgeDetail(): {
   const keepAlive = ref(false)
   const frozenReq = ref<EdgeDetailOpenRequest | null>(null)
   const frozenLink = ref<GraphLink | null>(null)
+  const frozenFiguresSource = ref<TrustlineFiguresSource | null>(null)
 
   // WM bookkeeping (singleton window id + last applied open signature).
   const winId = ref<number | null>(null)
@@ -181,6 +195,7 @@ export function useWmEdgeDetail(): {
     keepAlive.value = false
     frozenReq.value = null
     frozenLink.value = null
+    frozenFiguresSource.value = null
 
     if (state.value === 'keepAlive') {
       state.value = 'closed'
@@ -190,7 +205,10 @@ export function useWmEdgeDetail(): {
     }
   }
 
-  function allowKeepAlive(o?: { frozenLink?: GraphLink | null }): void {
+  function allowKeepAlive(o?: {
+    frozenLink?: GraphLink | null
+    frozenFiguresSource?: TrustlineFiguresSource | null
+  }): void {
     // Only meaningful while the window is live.
     const req = desiredOpenReq()
     if (!req) return
@@ -198,6 +216,9 @@ export function useWmEdgeDetail(): {
     keepAlive.value = true
     frozenReq.value = { ...req }
     frozenLink.value = o?.frozenLink ?? null
+    // Основание замораживается ВМЕСТЕ с числами: иначе заморозка молча повысила бы их
+    // происхождение (внешнее ревью 013, находка P3).
+    frozenFiguresSource.value = o?.frozenFiguresSource ?? null
     state.value = 'keepAlive'
   }
 
@@ -257,6 +278,7 @@ export function useWmEdgeDetail(): {
   return {
     state,
     frozenLink,
+    frozenFiguresSource,
     syncAuto,
     open,
     close,

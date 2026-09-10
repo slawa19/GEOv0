@@ -107,7 +107,10 @@ describe('shared compact overlay form rails', () => {
             { pid: 'alice', name: 'Alice' },
             { pid: 'bob', name: 'Bob with a very long trustline label for compact rail checks' },
           ],
-          figuresSource: { kind: 'no-row' } as const,
+          // Внешнее ревью 013 (P2): панель здесь в фазе правки существующей линии и показывает её
+          // числа, значит основание — `row`. При `no-row` числа честно погашены, и тест про
+          // раскладку судил бы уже не ту раскладку.
+          figuresSource: { kind: 'row' } as const,
           trustlines: [],
           busy: false,
           confirmTrustlineCreate: vi.fn(),

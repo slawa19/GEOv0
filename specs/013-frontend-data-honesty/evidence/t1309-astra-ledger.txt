@@ -1,0 +1,71 @@
+T1309 — independent external review of programme 013
+====================================================
+
+Direction        Claude Code (orchestrator) -> Codex (external reviewer), per AGENTS.md §15 and
+                 docs/external-review-runbook.md §3.
+CLI              codex-cli 0.154.0
+Binary           C:\Users\admin\tools\node-v22.12.0-win-x64\codex.cmd
+Model requested  gpt-6-astra   (requested value recorded; the CLI does not report a resolved
+                                per-run model id, so this is NOT a confirmed resolution)
+Reasoning        slice 1 medium, slice 2 high (-c model_reasoning_effort=...; both echoed back by
+                 the CLI header in the progress logs)
+Sandbox          --sandbox read-only
+Working root     frozen standalone clone (`git clone --no-hardlinks`), not a worktree
+Reviewed SHA     95f5efe
+Base             c80f600, exposed as the named branch `review-base`
+                 (the whole programme: 7 commits, 52 files, +5175 / -209)
+Prompt freeze    written in full before launch and not edited after; the tree was frozen at the
+                 same moment. Both freezes declared before starting.
+Credential-free  the clone carries only tracked files. STANDING MACHINE RISK, unchanged and
+                 accepted 2026-08-14 in specs/BACKLOG.md: the git credential store lives in the
+                 home directory and is reachable on this machine, so "credential-free" describes
+                 the transferred set and not the filesystem.
+
+Slice 1 - diff review (built-in review mode; the target is fixed mechanically)
+  codex exec --sandbox read-only -C <clone> review --base review-base \
+        -m gpt-6-astra -c model_reasoning_effort="medium" -o final_range.md
+  exit 0, non-empty -o file -> t1309-astra-final-range.md
+  Result: no actionable regressions.
+
+Slice 2 - six questions (generic exec, prompt on stdin, Q1-Q6)
+  Get-Content prompt_013.txt -Raw | codex exec --sandbox read-only -C <clone> \
+        -m gpt-6-astra -c model_reasoning_effort="high" -o final_questions.md -
+  exit 0, non-empty -o file -> t1309-astra-final-questions.md
+
+Markers returned
+  VERDICT-013 .............. FINDINGS
+  VERDICT-MECHANISMS ....... BROKEN
+  VERDICT-NEW-DEFECT ....... FOUND
+  VERDICT-SAMPLE-BIAS ...... FOUND
+  VERDICT-CONTRACT ......... DIVERGENT
+  VERDICT-READY-TO-CLOSE ... NO
+
+LIMITS OF THIS EVIDENCE, stated because a report with no regressions otherwise reads as a passed
+gate:
+  * NEITHER SLICE RAN THE GATES. Slice 1 says so in its own words - the UI dependencies and the
+    repository virtual environment were absent and the checkout was read-only. Slice 2 used
+    in-memory probes and a small assertion harness against the reviewed source, explicitly NOT
+    vitest and not the canonical runner. So every gate number in the closure record is the
+    orchestrator's own local run and is not externally reproduced.
+  * Slice 2's own qualification on its sample findings: they establish weaknesses in the samples
+    it probed, not that the full repository suite would accept the replacements.
+  * The requested model is recorded; it is not a confirmed resolved model id.
+
+Findings and disposition - the detail is in the spec, section `T1309`
+  P2  `no-row` authorises editing figures the backend contradicts, and the new
+      test encodes that inference ................................................ see spec
+  P2  one `incomplete` flag for the whole transactions collection erases a known
+      clearing zero ............................................................. see spec
+  P3  freezing an unconfirmed link upgrades its provenance ....................... see spec
+  P3  two samples do not discriminate: audit-log truncation with roles reversed,
+      and a cache request inspected while still pending ......................... see spec
+  P3  the canon restricts `included`/`truncated` to three names while the response
+      model and the client accepted any string .................................. CLOSED
+  P3  the include-cost measurement existed only in the narrative; the "separate
+      task" carrying it did not exist ........................................... CLOSED
+
+  One premise of the orchestrator's own prompt was corrected by the reviewer and the correction
+  is accepted: the contract ratchet DOES compare canonical against generated - it records their
+  differences and hashes them, so updating the digest ACCEPTS the difference rather than proving
+  alignment. The comment claiming "no entry got worse" was therefore unsupported as written, and
+  is corrected in tests/contract/test_openapi_contract.py.

@@ -98,8 +98,10 @@ describe('TrustlineManagementPanel', () => {
           currentLimit: '20',
           available: '10',
           participants: [],
-          // `F-013-7`: основание для чисел — обязательный проп; здесь источник ответил.
-          figuresSource: { kind: 'no-row' } as const,
+          // Внешнее ревью 013 (P2): панель ПРАВИТ существующую линию, значит основание для её
+          // чисел — `row` (источник ответил, и строка для пары есть). Прежнее `no-row` описывало
+          // здесь состояние «линии у этой пары нет» — то есть тест правил несуществующую линию.
+          figuresSource: { kind: 'row' } as const,
           trustlines: [],
           busy: false,
           confirmTrustlineCreate: vi.fn(),
@@ -147,8 +149,10 @@ describe('TrustlineManagementPanel', () => {
           currentLimit: '10',
           available: '9',
           participants: [],
-          // `F-013-7`: основание для чисел — обязательный проп; здесь источник ответил.
-          figuresSource: { kind: 'no-row' } as const,
+          // Внешнее ревью 013 (P2): панель ПРАВИТ существующую линию, значит основание для её
+          // чисел — `row` (источник ответил, и строка для пары есть). Прежнее `no-row` описывало
+          // здесь состояние «линии у этой пары нет» — то есть тест правил несуществующую линию.
+          figuresSource: { kind: 'row' } as const,
           trustlines: [],
           busy: false,
           confirmTrustlineCreate: vi.fn(),
@@ -242,6 +246,10 @@ describe('TrustlineManagementPanel', () => {
     const ui = reactive({
       phase: 'confirm-trustline-create' as 'confirm-trustline-create' | 'editing-trustline',
       used: '0',
+      // Внешнее ревью 013 (P2): основание МЕНЯЕТСЯ вместе с фазой, как оно меняется и в приложении.
+      // Пока линии нет — `no-row`, и это ровно то состояние, в котором создание разрешено. После
+      // создания линия существует, источник отвечает строкой — `row`, и только тогда её правят.
+      figuresSource: { kind: 'no-row' } as { kind: 'no-row' } | { kind: 'row' },
     })
 
     const app = createApp({
@@ -257,8 +265,7 @@ describe('TrustlineManagementPanel', () => {
             { pid: 'alice', name: 'Alice' },
             { pid: 'bob', name: 'Bob' },
           ],
-          // `F-013-7`: основание для чисел — обязательный проп; здесь источник ответил.
-          figuresSource: { kind: 'no-row' } as const,
+          figuresSource: ui.figuresSource,
           trustlines: [],
           busy: false,
           confirmTrustlineCreate,
@@ -285,9 +292,10 @@ describe('TrustlineManagementPanel', () => {
       expect(confirmTrustlineCreate).toHaveBeenCalledWith('1.5')
     }
 
-    // Switch to edit
+    // Switch to edit: линия создана, и теперь источник отвечает по ней строкой.
     ui.phase = 'editing-trustline'
     ui.used = '0'
+    ui.figuresSource = { kind: 'row' }
     await nextTick()
     await nextTick()
 
@@ -436,8 +444,10 @@ describe('TrustlineManagementPanel', () => {
           currentLimit: '10',
           available: '10',
           participants: [],
-          // `F-013-7`: основание для чисел — обязательный проп; здесь источник ответил.
-          figuresSource: { kind: 'no-row' } as const,
+          // Внешнее ревью 013 (P2): панель ПРАВИТ существующую линию, значит основание для её
+          // чисел — `row` (источник ответил, и строка для пары есть). Прежнее `no-row` описывало
+          // здесь состояние «линии у этой пары нет» — то есть тест правил несуществующую линию.
+          figuresSource: { kind: 'row' } as const,
           trustlines: [],
           busy: false,
           confirmTrustlineCreate: vi.fn(),

@@ -225,8 +225,13 @@ const GraphSnapshotSchema = z
     // and demanding a field the canon does not declare is the exact defect this task removes from
     // TransactionSchema above. Absent means "this server says nothing about them", which the
     // consumer must treat as "not asked" - never as "asked, and there are none".
-    included: z.array(z.string()).optional(),
-    truncated: z.array(z.string()).optional(),
+    // The three names are a CLOSED set, and the canon says so (`api/openapi.yaml`,
+    // `AdminGraphSnapshotResponse.included`). Declared as an enum after external review found the
+    // canon narrower than both implementations: `z.string()` here and `list[str]` on the server
+    // would have accepted a fourth name silently, on a field whose entire purpose is to be trusted
+    // when a consumer decides whether it may draw a conclusion.
+    included: z.array(z.enum(['incidents', 'audit_log', 'transactions'])).optional(),
+    truncated: z.array(z.enum(['incidents', 'audit_log', 'transactions'])).optional(),
   })
   .passthrough()
 

@@ -565,9 +565,10 @@ export function useGraphAnalytics(opts: {
   // branch both are structurally empty in real mode and used to print a bare `0 / 0 / 0` beside
   // counters that had just learnt to say the dash. A confidence per collection, carried next to the
   // counters it governs, is what stops one collection's answer from being told about another's.
-  const snapshotTransactions = computed(() =>
-    collectionConfidence('transactions', opts.included.value, opts.truncated.value),
-  )
+  //
+  // `transactions` has no computed of its own here: its two counters (payments, clearings) carry
+  // DIFFERENT doubts about the same collection, so each is built where its doubt is measured -
+  // inside the counting loop below.
   const snapshotIncidents = computed(() =>
     collectionConfidence('incidents', opts.included.value, opts.truncated.value),
   )
@@ -588,8 +589,20 @@ export function useGraphAnalytics(opts: {
         clearingCommitted: m.activity.clearing_committed,
         // F-013-R1. THIS BRANCH MEASURED. `/metrics` computes every counter above server-side over
         // the whole table for this participant: it does not paginate, does not depend on the
-        // snapshot's `include`, and answers 0 by counting to 0. So all three counters are known,
-        // exact and complete, and a zero here is a fact about the system.
+        // snapshot's `include`, and answers 0 by counting to 0. So no count here is a prefix of a
+        // longer list and none of them is silence: `known`, and never `lowerBound`.
+        //
+        // WHAT THAT DOES NOT SAY (external review of 013). "Server-side and untruncated" is not
+        // "exactly attributed". `app/core/admin/metrics.py:693` decides whether a PAYMENT involves
+        // this participant from `payload["from"]` / `payload["to"]` alone - no fallback to
+        // `initiator_id` such as the CLEARING branch one line below has, and no signal on the wire
+        // for a row it could not place. A payment whose stored payload lacks those keys therefore
+        // arrives inside a confident number instead of beside a doubt, and nothing on THIS branch
+        // can recover it: the counter comes over as a finished integer. The limitation is recorded
+        // in `specs/BACKLOG.md` and handed to programme 016, whose `F-016-8` owns that range of
+        // `metrics.py`. It is deliberately not compensated for here - inventing a doubt over a
+        // number we cannot inspect would be this programme's own defect class in the other
+        // direction, and `app/core/admin/metrics.py` is outside 013's owner surface.
         //
         // What used to stand here was `hasTransactions: Boolean(m.activity.has_transactions)`, and
         // it is the reason this comment exists. The server's `has_transactions` is a MEASUREMENT -
@@ -600,7 +613,8 @@ export function useGraphAnalytics(opts: {
         // requested" and print three dashes over counters it was holding. Nothing on this branch
         // reads `has_transactions` any more: the counters already say everything it said, and they
         // say it without claiming an ignorance we do not have.
-        transactions: COUNT_MEASURED,
+        payments: COUNT_MEASURED,
+        clearings: COUNT_MEASURED,
         incidents: COUNT_MEASURED,
         auditLog: COUNT_MEASURED,
         // ... but NOT the incident RATIO. `/metrics` publishes no ratio; the drawer's row is fed by
@@ -682,12 +696,19 @@ export function useGraphAnalytics(opts: {
       }
     }
 
-    // F-013-1 / T1302. `unattributable` counts rows this loop had to skip because the response
-    // carries no field that could place the participant in the transaction. It is not a tidiness
-    // metric: a skipped row is a committed payment that exists and is not in the count, so a total
-    // computed while this is non-zero is an undercount presented as a total - the same defect one
-    // level down from the one this task removes.
-    let unattributable = 0
+    // F-013-1 / T1302, narrowed by the EXTERNAL review of 013. These record the rows this loop
+    // could not place: a skipped row is a committed transaction that exists and is not in the
+    // count, so a total computed while one is outstanding is an undercount presented as a total -
+    // the same defect one level down from the one this task removes.
+    //
+    // WHY TWO SETS OF WINDOWS AND NOT ONE COUNTER. What stood here was a single `unattributable`
+    // tally for the whole collection, and both cells read the flag it produced. So an
+    // unattributable PAYMENT blanked the CLEARING cell - a count reached without ever consulting
+    // the doubtful row, and therefore known exactly - and blanked it in all three windows,
+    // including windows the doubtful row is far too old to belong to. A doubt is now admitted only
+    // where the row that raises it could have landed: its own type, its own windows.
+    const unattributablePaymentWindows = new Set<number>()
+    const unattributableClearingWindows = new Set<number>()
 
     for (const tx of opts.transactions.value || []) {
       const type = String(tx.type || '')
@@ -765,20 +786,31 @@ export function useGraphAnalytics(opts: {
         }
       }
 
+      // Window attribution, computed BEFORE the verdict is used, because a doubt has to be filed
+      // against the windows it actually reaches. A row whose timestamp cannot be read could be in
+      // any of them, so it reaches all; a row 60 days old reaches only the 90-day one.
+      const ms = parseIsoMillis(tx.updated_at || tx.created_at)
+      const ageDays = ms === null ? null : (now - ms) / dayMs
+      const rowWindows = ageDays === null ? windows : windows.filter((w) => ageDays <= w)
+      const clouded = type === 'PAYMENT' ? unattributablePaymentWindows : unattributableClearingWindows
+
       if (!attributable) {
-        unattributable += 1
+        for (const w of rowWindows) clouded.add(w)
         continue
       }
+      // Attributable and NOT this participant's: nothing is clouded, whatever its timestamp says.
+      // A row that is not ours cannot be missing from our counts.
       if (!involved) continue
+      if (ageDays === null) {
+        // Ours, and unplaceable in time: it joins no window's count, so every window is short by
+        // it. Skipping it silently, as this loop used to, is the same defect in miniature.
+        for (const w of rowWindows) clouded.add(w)
+        continue
+      }
 
-      const ms = parseIsoMillis(tx.updated_at || tx.created_at)
-      if (ms === null) continue
-      const ageDays = (now - ms) / dayMs
-      for (const w of windows) {
-        if (ageDays <= w) {
-          if (type === 'PAYMENT') paymentCommitted[w] = (paymentCommitted[w] ?? 0) + 1
-          if (type === 'CLEARING') clearingCommitted[w] = (clearingCommitted[w] ?? 0) + 1
-        }
+      for (const w of rowWindows) {
+        if (type === 'PAYMENT') paymentCommitted[w] = (paymentCommitted[w] ?? 0) + 1
+        else clearingCommitted[w] = (clearingCommitted[w] ?? 0) + 1
       }
     }
 
@@ -798,10 +830,23 @@ export function useGraphAnalytics(opts: {
       // Every counter above this line was computed HERE, out of the snapshot's own arrays, so each
       // one inherits the confidence of the collection it was counted from - and `incidents` and
       // `audit_log` are not requested by this client at all, which is why theirs is silence.
-      transactions: {
-        ...snapshotTransactions.value,
-        incomplete: snapshotTransactions.value.known && unattributable > 0,
-      },
+      //
+      // Two confidences over ONE collection. They share `known` and `lowerBound` - what the
+      // response said it carried, and whether it cut it, is a property of the collection - and
+      // differ only in the doubt, because a doubt is raised by a particular row, of a particular
+      // type, falling in particular windows.
+      payments: collectionConfidence(
+        'transactions',
+        opts.included.value,
+        opts.truncated.value,
+        windows.filter((w) => unattributablePaymentWindows.has(w)),
+      ),
+      clearings: collectionConfidence(
+        'transactions',
+        opts.included.value,
+        opts.truncated.value,
+        windows.filter((w) => unattributableClearingWindows.has(w)),
+      ),
       incidents: snapshotIncidents.value,
       auditLog: snapshotAuditLog.value,
       snapshotIncidents: snapshotIncidents.value,

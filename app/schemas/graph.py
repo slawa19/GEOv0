@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -27,6 +27,19 @@ class AdminGraphDebt(BaseModel):
     debtor: str
     creditor: str
     amount: Decimal
+
+
+#: The optional collections a graph read can carry, as a CLOSED set.
+#:
+#: Declared as a literal after external review pointed out that the canon restricted these names to
+#: three (`api/openapi.yaml`, `AdminGraphSnapshotResponse.included`) while this model accepted
+#: `list[str]` and admin-ui accepted arbitrary strings - so the contract was narrower than either
+#: implementation, and nothing would have caught a fourth name appearing on the wire.
+#:
+#: The set really is closed here: `_graph_optional_collections` appends a name only inside the
+#: branch that fetched that collection, so a token from `_parse_include_csv` that matches nothing
+#: never reaches the response. The type now says what the code already guarantees.
+GraphOptionalCollection = Literal["incidents", "audit_log", "transactions"]
 
 
 class AdminGraphSnapshotResponse(BaseModel):
@@ -56,8 +69,8 @@ class AdminGraphSnapshotResponse(BaseModel):
     # three carry the identical defect in the identical response. Six flat booleans say the same
     # thing worse, and naming only transactions would have closed one third of a defect while
     # standing next to the other two. Recorded in the spec rather than decided silently.
-    included: list[str] = Field(default_factory=list)
-    truncated: list[str] = Field(default_factory=list)
+    included: list[GraphOptionalCollection] = Field(default_factory=list)
+    truncated: list[GraphOptionalCollection] = Field(default_factory=list)
 
 
 class AdminClearingCycleEdge(BaseModel):

@@ -25,6 +25,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
  import type { InteractPhase } from '../composables/useInteractMode'
 import {
   canActOnTrustlineFigures,
+  freezeTrustlineFiguresSource,
   resolveTrustlineFiguresSource,
   type TrustlineFiguresSource,
 } from '../composables/interact/trustlinesSourceState'
@@ -687,12 +688,18 @@ const interactSelectedLinkFiguresSource = computed<TrustlineFiguresSource>(() =>
 
 /**
  * То же для окна edge-detail, с одной поправкой: в режиме `keepAlive` попап показывает
- * ЗАМОРОЖЕННУЮ линию — снимок ответа, снятый до того, как interact-состояние очистили (и
- * ушло на ДРУГУЮ пару). Это вопрос устаревания, а не отсутствия, поэтому блокировать там нечего.
+ * ЗАМОРОЖЕННУЮ линию — снимок, снятый до того, как interact-состояние очистили (и ушло на ДРУГУЮ
+ * пару), поэтому спрашивать про неё живое состояние источника бессмысленно: оно уже про другое.
+ *
+ * ЧТО ИЗМЕНИЛОСЬ 2026-09-10 (внешнее ревью 013, находка P3). Раньше здесь возвращалось `frozen`
+ * по одному лишь ФАКТУ наличия замороженной линии. Тогда «Send Payment», нажатый при неспрошенном
+ * или упавшем источнике, снимал предупреждение: жест пользователя превращал молчание бэкенда в
+ * его ответ. Теперь замораживается ОСНОВАНИЕ ВМЕСТЕ С ЧИСЛАМИ, и `frozen` получается только из
+ * того, что действительно БЫЛО ответом (`freezeTrustlineFiguresSource`).
  */
 const wmEdgeDetailFiguresSource = computed<TrustlineFiguresSource>(() => {
   if (wmEdgeDetail.state.value === 'keepAlive' && wmEdgeDetail.frozenLink.value != null) {
-    return { kind: 'frozen' }
+    return freezeTrustlineFiguresSource(wmEdgeDetail.frozenFiguresSource.value)
   }
   return interactSelectedLinkFiguresSource.value
 })
@@ -1122,7 +1129,12 @@ function onEdgeDetailCloseLine() {
    // Spec: "инспектор остаётся открыт как «база контекста», а Interact-панель
    // открывается поверх для выполнения действия (Send Payment)."
    // Freeze the current link data before cancel() clears interact state.
-   wmEdgeDetail.allowKeepAlive({ frozenLink: interactSelectedLink.value })
+   // Основание замораживается ВМЕСТЕ с числами: снимок молчания обязан остаться снимком
+   // молчания (внешнее ревью 013, находка P3).
+   wmEdgeDetail.allowKeepAlive({
+     frozenLink: interactSelectedLink.value,
+     frozenFiguresSource: interactSelectedLinkFiguresSource.value,
+   })
    // Do NOT close edge-detail — it persists as context.
 
   // Atomically start payment with pre-filled FROM to avoid an intermediate

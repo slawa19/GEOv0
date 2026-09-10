@@ -112,11 +112,11 @@ describe('F-013-1 / T1302: transactions - "not asked" is not "zero"', () => {
     const a = g.selectedActivity.value
     expect(a).toBeTruthy()
 
-    expect(a!.transactions.known).toBe(false)
-    expect(a!.transactions.lowerBound).toBe(false)
+    expect(a!.payments.known).toBe(false)
+    expect(a!.payments.lowerBound).toBe(false)
 
     // The display side must not print a zero it cannot justify.
-    expect(activityCounts(a!.paymentCommitted, a!.windows, a!.transactions)).toBe('— / — / —')
+    expect(activityCounts(a!.paymentCommitted, a!.windows, a!.payments)).toBe('— / — / —')
   })
 
   it('ASKED AND EMPTY: the same empty array, but named in `included`, is a real measurement of zero', () => {
@@ -125,11 +125,11 @@ describe('F-013-1 / T1302: transactions - "not asked" is not "zero"', () => {
 
     // Byte-identical `transactions: []` to the case above, opposite conclusion. This is the pair
     // the old `transactions.length > 0` could not distinguish, and the whole of the finding.
-    expect(a!.transactions.known).toBe(true)
-    expect(a!.transactions.lowerBound).toBe(false)
-    expect(a!.transactions.incomplete).toBe(false)
+    expect(a!.payments.known).toBe(true)
+    expect(a!.payments.lowerBound).toBe(false)
+    expect(a!.payments.incompleteWindows).toEqual([])
     expect(a!.paymentCommitted[7]).toBe(0)
-    expect(activityCounts(a!.paymentCommitted, a!.windows, a!.transactions)).toBe('0 / 0 / 0')
+    expect(activityCounts(a!.paymentCommitted, a!.windows, a!.payments)).toBe('0 / 0 / 0')
   })
 
   it('ASKED AND TRUNCATED: counts over a cut list are lower bounds and are printed as such', () => {
@@ -143,20 +143,20 @@ describe('F-013-1 / T1302: transactions - "not asked" is not "zero"', () => {
     })
     const a = g.selectedActivity.value
 
-    expect(a!.transactions.known).toBe(true)
-    expect(a!.transactions.lowerBound).toBe(true)
+    expect(a!.payments.known).toBe(true)
+    expect(a!.payments.lowerBound).toBe(true)
     expect(a!.paymentCommitted[7]).toBe(2)
 
     // The server returned a prefix of a longer list, so 2 is "at least 2" and must not read as a
     // total. Without this the card presents a lower bound in the typography of a fact.
-    expect(activityCounts(a!.paymentCommitted, a!.windows, a!.transactions)).toBe('≥2 / ≥2 / ≥2')
+    expect(activityCounts(a!.paymentCommitted, a!.windows, a!.payments)).toBe('≥2 / ≥2 / ≥2')
   })
 
   it('`truncated` without `included` is ignored: a cut we were never told we received says nothing', () => {
     const g = analyticsFor({ transactions: [], included: [], truncated: ['transactions'] })
     const a = g.selectedActivity.value
-    expect(a!.transactions.known).toBe(false)
-    expect(a!.transactions.lowerBound).toBe(false)
+    expect(a!.payments.known).toBe(false)
+    expect(a!.payments.lowerBound).toBe(false)
   })
 
   // ---------------------------------------------------------------------------------------------
@@ -201,8 +201,11 @@ describe('F-013-1 / T1302: transactions - "not asked" is not "zero"', () => {
     // THIS file comes from a `producerRow()` that never sets those three fields, which is exactly
     // why both reads could once be reverted with the whole suite green.
     expect(a!.paymentCommitted[7]).toBe(0)
-    expect(a!.transactions.incomplete).toBe(true)
-    expect(activityCounts(a!.paymentCommitted, a!.windows, a!.transactions)).toBe('— / — / —')
+    expect(a!.payments.incompleteWindows).toEqual([7, 30, 90])
+    expect(activityCounts(a!.paymentCommitted, a!.windows, a!.payments)).toBe('— / — / —')
+    // ... and the clearing cell, which this payment's missing recipient says nothing about, keeps
+    // the zero the same complete collection was counted to (external review of 013).
+    expect(activityCounts(a!.clearingCommitted, a!.windows, a!.clearings)).toBe('0 / 0 / 0')
   })
 
   // ---------------------------------------------------------------------------------------------
@@ -267,6 +270,6 @@ describe('F-013-1 / T1302: transactions - "not asked" is not "zero"', () => {
     expect(env.data.included).toBeUndefined()
 
     const g = analyticsFor({ transactions: [], included: [], truncated: [] })
-    expect(g.selectedActivity.value!.transactions.known).toBe(false)
+    expect(g.selectedActivity.value!.payments.known).toBe(false)
   })
 })

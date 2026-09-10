@@ -96,18 +96,27 @@ type SelectedActivity = {
   participantOps: Record<number, number>
   paymentCommitted: Record<number, number>
   clearingCommitted: Record<number, number>
-  // F-013-1 / T1302, reshaped by F-013-R1/R2. One confidence per COLLECTION, sitting beside the
-  // counters derived from it, because the flat flags it replaces were a single vocabulary shared
-  // by two branches that mean different things by it - and the branches got merged.
+  // F-013-1 / T1302, reshaped by F-013-R1/R2 and narrowed by the EXTERNAL review of 013. One
+  // confidence per COUNTER, sitting beside the counter it governs, because the flat flags it
+  // replaces were a single vocabulary shared by two branches that mean different things by it -
+  // and the branches got merged.
   //
-  //   transactions -> paymentCommitted, clearingCommitted
-  //   incidents    -> incidentCount
-  //   auditLog     -> participantOps
+  //   payments   -> paymentCommitted
+  //   clearings  -> clearingCommitted
+  //   incidents  -> incidentCount
+  //   auditLog   -> participantOps
+  //
+  // `payments` and `clearings` are two views of ONE collection (`transactions`): they agree about
+  // what the response carried and whether it was cut, and differ about which windows hold a row
+  // that could not be placed against this participant. They were a single `transactions` object
+  // until an unattributable payment was found erasing a clearing zero the client had counted
+  // exactly - hence the split, and hence the per-window list rather than a flag.
   //
   // `snapshotIncidents` is deliberately separate from `incidents`: the incident RATIO row is fed by
   // the graph snapshot's incident collection on every branch, while the incident COUNTER can come
   // from the metrics endpoint, which measures it server-side and owes the snapshot nothing.
-  transactions: CountConfidence
+  payments: CountConfidence
+  clearings: CountConfidence
   incidents: CountConfidence
   auditLog: CountConfidence
   snapshotIncidents: CountConfidence
@@ -1356,7 +1365,7 @@ const adviceItems = computed(() => {
                     :label="t('graph.analytics.activity.paymentsCommitted')"
                     :tooltip-text="t('graph.analytics.activity.paymentsCommittedTooltip')"
                   />
-                  <span class="metricRow__value">{{ activityCounts(selectedActivity.paymentCommitted, selectedActivity.windows, selectedActivity.transactions) }}</span>
+                  <span class="metricRow__value">{{ activityCounts(selectedActivity.paymentCommitted, selectedActivity.windows, selectedActivity.payments) }}</span>
                 </div>
                 <div class="metricRow">
                   <TooltipLabel
@@ -1364,7 +1373,7 @@ const adviceItems = computed(() => {
                     :label="t('graph.analytics.activity.clearingCommitted')"
                     :tooltip-text="t('graph.analytics.activity.clearingCommittedTooltip')"
                   />
-                  <span class="metricRow__value">{{ activityCounts(selectedActivity.clearingCommitted, selectedActivity.windows, selectedActivity.transactions) }}</span>
+                  <span class="metricRow__value">{{ activityCounts(selectedActivity.clearingCommitted, selectedActivity.windows, selectedActivity.clearings) }}</span>
                 </div>
               </div>
               <!--
@@ -1372,9 +1381,16 @@ const adviceItems = computed(() => {
                 the order matters: "we were told nothing" outranks "we were told something we cannot
                 use", which outranks "what we were told is a lower bound". Only the last of them
                 leaves a printed number standing.
+              
+                `payments` and `clearings` describe the same collection, so either answers the first
+                and third questions and `payments` is read for both. The middle one is asked of BOTH,
+                because since the external review of 013 the two counters carry their doubts
+                separately: the notice is about the collection, but it must appear whenever either
+                cell had to withhold a window - and, unlike before, it no longer withholds the other
+                cell's windows along with it.
               -->
               <el-alert
-                v-if="!selectedActivity.transactions.known"
+                v-if="!selectedActivity.payments.known"
                 type="warning"
                 show-icon
                 :title="t('graph.analytics.activity.transactionsNotIncludedTitle')"
@@ -1383,7 +1399,7 @@ const adviceItems = computed(() => {
                 style="margin-top: 10px"
               />
               <el-alert
-                v-else-if="selectedActivity.transactions.incomplete"
+                v-else-if="selectedActivity.payments.incompleteWindows.length || selectedActivity.clearings.incompleteWindows.length"
                 type="warning"
                 show-icon
                 :title="t('graph.analytics.activity.transactionsUnattributableTitle')"
@@ -1392,7 +1408,7 @@ const adviceItems = computed(() => {
                 style="margin-top: 10px"
               />
               <el-alert
-                v-else-if="selectedActivity.transactions.lowerBound"
+                v-else-if="selectedActivity.payments.lowerBound"
                 type="info"
                 show-icon
                 :title="t('graph.analytics.activity.transactionsTruncatedTitle')"

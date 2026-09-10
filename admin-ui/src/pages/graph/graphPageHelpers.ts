@@ -247,9 +247,17 @@ export function buildFocusModeQuery(input: {
 //   * we were told a PREFIX of a longer list -> a leading "≥", because every count over a cut list
 //     is a lower bound.
 //
-// `incomplete` is the fourth case and collapses into the first: the rows arrived but some of them
-// carry nothing that can place this participant in them, so the count would be an undercount
-// wearing the typography of a total.
+// `incompleteWindows` is the fourth case and it collapses into the first - but only for the cells
+// it actually reaches. Rows arrived that carry nothing able to place this participant in them, so a
+// count taken without them is an undercount wearing the typography of a total.
+//
+// WHY A LIST OF WINDOWS AND NOT A BOOLEAN (external review of 013). The flag that stood here was
+// one boolean for the whole `transactions` collection, and both the payment cell and the clearing
+// cell read it. So a single committed payment with an unpublished recipient blanked a clearing zero
+// that had been counted to zero independently of it - and blanked it in all three windows, one of
+// which the doubtful row was too old to belong to. That is ignorance the system does not have,
+// manufactured by a fix against ignorance. A doubt is now recorded at the granularity the operator
+// reads it at: which counter, and which windows of it.
 //
 // WHY A PER-COLLECTION OBJECT AND NOT FLAGS ON THE ACTIVITY OBJECT. The defect this replaces was a
 // single name, `hasTransactions`, that meant "the array is non-empty" to one branch and "the
@@ -263,12 +271,17 @@ export type CountConfidence = {
   known: boolean
   /** What we hold is a prefix of a longer list, so every count over it is "at least". */
   lowerBound: boolean
-  /** Rows arrived that could not be placed against this participant; counts would undercount. */
-  incomplete: boolean
+  /**
+   * The windows (in days) of THIS counter in which a row arrived that could not be placed against
+   * this participant. A window listed here would print an undercount and prints nothing instead; a
+   * window NOT listed here is unaffected and keeps its number, because the row that raised the
+   * doubt could not have joined its count anyway.
+   */
+  incompleteWindows: readonly number[]
 }
 
-export const COUNT_UNKNOWN: CountConfidence = { known: false, lowerBound: false, incomplete: false }
-export const COUNT_MEASURED: CountConfidence = { known: true, lowerBound: false, incomplete: false }
+export const COUNT_UNKNOWN: CountConfidence = { known: false, lowerBound: false, incompleteWindows: [] }
+export const COUNT_MEASURED: CountConfidence = { known: true, lowerBound: false, incompleteWindows: [] }
 
 /**
  * Read one collection's completeness out of a response's `included` / `truncated`.
@@ -280,14 +293,16 @@ export function collectionConfidence(
   name: string,
   included: string[] | null | undefined,
   truncated: string[] | null | undefined,
-  incomplete = false,
+  incompleteWindows: readonly number[] = [],
 ): CountConfidence {
   const isIncluded = (included || []).includes(name)
+  // A collection we were never told about cannot have per-window doubts either: there is no count
+  // to undercount. "We were not told" already says everything, and says it for every window.
   if (!isIncluded) return COUNT_UNKNOWN
   return {
     known: true,
     lowerBound: (truncated || []).includes(name),
-    incomplete,
+    incompleteWindows,
   }
 }
 
@@ -298,11 +313,16 @@ export function activityCounts(
   confidence: CountConfidence | null | undefined,
 ): string {
   const ws = (windows || []).slice()
-  if (!confidence || !confidence.known || confidence.incomplete) {
+  if (!confidence || !confidence.known) {
     return ws.map(() => UNKNOWN_ACTIVITY_COUNT).join(' / ')
   }
+  // Per window, because that is per cell. A doubtful row clouds the windows it could be in and
+  // leaves the others reading the number they were counted to.
+  const clouded = new Set(confidence.incompleteWindows || [])
   const prefix = confidence.lowerBound ? '≥' : ''
-  return ws.map((w) => `${prefix}${(counts || {})[w] ?? 0}`).join(' / ')
+  return ws
+    .map((w) => (clouded.has(w) ? UNKNOWN_ACTIVITY_COUNT : `${prefix}${(counts || {})[w] ?? 0}`))
+    .join(' / ')
 }
 
 /**
@@ -318,7 +338,11 @@ export function incidentRatioDisplay(
   ratio: number | null | undefined,
   confidence: CountConfidence | null | undefined,
 ): string {
-  if (!confidence || !confidence.known || confidence.incomplete) return UNKNOWN_ACTIVITY_COUNT
+  // Not a windowed figure: it is one number over the whole collection, so ANY unplaceable row in it
+  // is enough to make the ratio a lower bound of unknown size.
+  if (!confidence || !confidence.known || (confidence.incompleteWindows || []).length > 0) {
+    return UNKNOWN_ACTIVITY_COUNT
+  }
   if (!Number.isFinite(Number(ratio))) {
     return confidence.lowerBound ? UNKNOWN_ACTIVITY_COUNT : (0).toFixed(2)
   }

@@ -252,8 +252,18 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # `edges` - the projection the spec prescribes and the first edition of the fix shipped short,
 # without which a payment could not be attributed to anyone but its initiator and every other
 # participant's count stayed zero. Count still 63.
+#
+# THIRD MOVE, AND A CORRECTION TO WHAT THE TWO ABOVE CLAIM. External review of 013 pointed out
+# that "no entry got worse" is not something this ratchet can establish: it RECORDS the canon /
+# generated differences and hashes them, so updating the digest ACCEPTS whatever difference is
+# there rather than proving alignment. For the two moves above the claim happened to be true and
+# was checked by reading the diff - but it was written as if the gate had shown it, and it had
+# not. This move exists because that review also found a real divergence hiding in exactly that
+# gap: the canon restricted `included`/`truncated` to three names while the response model
+# accepted `list[str]` and admin-ui accepted `z.string()`. Both are now the closed set the canon
+# declares, which is what moves the digest here. Count still 63.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "b99407fae6991b1411efb60a62ee41d148056d9bec498c1f40bddfd3afff6b36"
+    "31ccdb73e40138d831491cdf7684c189da37c7335bc7c5cee98d2d8b6bb871d0"
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 63
 # 2026-08-11 / T501: public DB health no longer declares exception details;
