@@ -15,8 +15,12 @@ the three did not agree:
 
 So an administrator could create ``precision: 12``, the door and the canon accepted it, and the
 DECLARED precision was then wider than the precision anything in the system can actually keep.
-That is the class the whole 012 programme is about: a number the system promises and does not
-hold.
+WHAT THAT IS AND IS NOT (corrected 2026-09-10, external review).  It is NOT a live money path
+admitting unstorable money: the door refuses such a value before signing and before writing
+(``is_storable_money``, ``F-012-1``), and the rounding below is reached through raw SQL, around
+that door.  It IS two things the door cannot answer for - the code contradicted the normative
+protocol, and an equivalent could declare a quantum its own door refuses, i.e. a unit of account
+that cannot be paid.
 
 MEASURED 2026-08-25, PostgreSQL 16.9, database ``geov0_test_prec8``, schema at alembic head
 ``019_trust_lines_partial_unique_live``:
@@ -28,15 +32,17 @@ MEASURED 2026-08-25, PostgreSQL 16.9, database ``geov0_test_prec8``, schema at a
     error, no warning: PostgreSQL **rounds**, in both directions
     (``0.123456789 -> 0.12345679``), and a value below the column's quantum disappears entirely
     (``0.000000000123 -> 0.00000000``);
-  * ``to_money_str(Decimal("1.23456789"), 12)`` renders ``"1.234567890000"``, i.e. the system
-    then shows twelve digits of a number it holds to eight - four digits of invented certainty,
-    at exactly the precision the equivalent declares;
+  * ``to_money_str(Decimal("1.23456789"), 12)`` renders ``"1.234567890000"`` - padding to the
+    declared precision.  (The first edition of this line called those digits "invented
+    certainty"; external review refuted that and it is withdrawn: padding an exact value with
+    zeros invents no value, and the rule is the same at every precision.);
   * and the money door itself refuses the declaration's own quantum:
     ``parse_money_amount("1.234567890123")`` raises ``BadRequestException`` / 400 ``E009``,
     because ``is_storable_money`` is False for it.  At ``precision: 12`` the equivalent's own
     unit of account is unpayable.
 
-THE DECISION THIS GUARDS (012 / S1, owner's decision).  ``Equivalent.precision`` is narrowed to
+THE DECISION THIS GUARDS (012 / S1; recorded 2026-09-10 as the orchestrator's, under the owner's
+delegation, after an external review that argued for keeping 18).  ``Equivalent.precision`` is narrowed to
 ``0..8``, matching the protocol and the column.  Real usage never needed more: across every
 shipped equivalent dataset (``seeds/equivalents.json``, ``admin-fixtures/**/equivalents.json``,
 ``admin-ui/public/admin-fixtures/...``) the only declared precisions are ``2`` (14

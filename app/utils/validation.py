@@ -17,7 +17,7 @@ def validate_equivalent_code(code: str) -> None:
 def validate_equivalent_precision(precision: int) -> int:
     """`Equivalent.precision` is 0..8, because 8 is what the ledger can keep.
 
-    NARROWED FROM 18 (012 / S1, owner's decision, 2026-08-25).  Three places in this system
+    NARROWED FROM 18 (012 / S1, 2026-08-25; decision recorded 2026-09-10 - see below).  Three places in this system
     wrote down the same quantity and said three different things: the protocol declared 0-8
     (`docs/ru/02-protocol-spec.md:143` and `:155`), the storage said 8 in its column type
     (`Numeric(20, 8)`), and this function plus the canon said 0-18.  An admin could therefore
@@ -25,9 +25,22 @@ def validate_equivalent_precision(precision: int) -> int:
     (measured: `1.234567890123` -> `1.23456789`, `0.000000000123` -> `0`), while `to_money_str`
     padded the rounded value back out to twelve digits - four digits of invented certainty -
     and `parse_money_amount` refused the declaration's own quantum as unstorable.  The
-    declared precision was wider than the storable one; that is the 012 class exactly.  The
-    fork was recorded as open in spec 015 and is now closed in favour of the protocol and the
-    column.  Nothing shipped needed more than 2 (measured across every shipped dataset).
+    declared precision was wider than the storable one.
+
+    WHAT THIS DOES AND DOES NOT FIX, corrected 2026-09-10 after external review.  It does NOT fix
+    the storage rounding: the money door already refuses an unstorable value before signing and
+    before writing (`is_storable_money`, `F-012-1`), and the measurement that showed PostgreSQL
+    rounding reaches the column through raw SQL, i.e. around that door.  What it fixes is two
+    things that do not depend on the door: the code contradicted the normative protocol, which
+    declares 0-8 (`docs/ru/02-protocol-spec.md:143,155`) and is the supported tree; and an
+    equivalent could declare a quantum ITS OWN money door refuses - at `precision: 12`,
+    `parse_money_amount("1.234567890123")` is a 400, so the unit of account was unpayable.
+
+    PROVENANCE.  The first edition of this docstring attributed the narrowing to the owner.  That
+    attribution could not be confirmed and is withdrawn; the decision stands as the orchestrator's,
+    taken 2026-09-10 under the owner's explicit delegation, after an external review that argued
+    the other way (`VERDICT-DECISION: KEEP-18`) and whose objection is accepted in the part quoted
+    above.  Nothing shipped needed more than 2 (measured across every shipped dataset).
 
     `tests/integration/test_p012_t1212_declared_precision_exceeds_storage_scale_postgres.py`
     holds the decision and the measurement it rests on.
