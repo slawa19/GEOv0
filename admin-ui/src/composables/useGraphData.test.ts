@@ -696,7 +696,12 @@ describe('useGraphData', () => {
 
     await expect(g.refreshSnapshotForEq()).resolves.toBe(true)
 
-    expect(apiMock.graphSnapshot.mock.calls).toEqual([[{ equivalent: undefined }], [{ equivalent: 'EUR' }]])
+    // F-013-1 / T1302: `include` is part of the query now. This assertion used to pin the shape
+    // that omitted it, which is how a client that never asked for transactions stayed green.
+    expect(apiMock.graphSnapshot.mock.calls).toEqual([
+      [{ equivalent: undefined, include: ['transactions'] }],
+      [{ equivalent: 'EUR', include: ['transactions'] }],
+    ])
     expect(g.participants.value.map((participant) => participant.pid)).toEqual(['PRIMARY_EQ'])
     expect(g.clearingCycles.value).toBeNull()
     expect(g.error.value).toBe('clearing cycles unavailable')
@@ -923,7 +928,7 @@ describe('useGraphData', () => {
       focusMode.value = false
       const exitFocus = g.refreshForFocusMode()
 
-      expect(apiMock.graphSnapshot).toHaveBeenCalledWith({ equivalent: 'EUR' })
+      expect(apiMock.graphSnapshot).toHaveBeenCalledWith({ equivalent: 'EUR', include: ['transactions'] })
       expect(apiMock.graphSnapshot).toHaveBeenCalledTimes(1)
       expect(apiMock.clearingCycles).toHaveBeenCalledTimes(2)
       expect(g.participants.value).toEqual([])
@@ -996,6 +1001,7 @@ describe('useGraphData', () => {
       depth: 1,
       equivalent: 'EUR',
       status: ['active'],
+      include: ['transactions'],
     })
     expect(apiMock.graphSnapshot).not.toHaveBeenCalled()
     expect(g.participants.value.map((participant) => participant.pid)).toEqual(['FOCUS'])
@@ -1003,7 +1009,7 @@ describe('useGraphData', () => {
     focusMode.value = false
     await expect(g.reloadCurrentView()).resolves.toBe(true)
 
-    expect(apiMock.graphSnapshot).toHaveBeenCalledWith({ equivalent: 'EUR' })
+    expect(apiMock.graphSnapshot).toHaveBeenCalledWith({ equivalent: 'EUR', include: ['transactions'] })
     expect(g.participants.value.map((participant) => participant.pid)).toEqual(['GLOBAL'])
   })
 
@@ -1043,12 +1049,14 @@ describe('useGraphData', () => {
       depth: 1,
       equivalent: 'EUR',
       status: ['active'],
+      include: ['transactions'],
     })
     expect(apiMock.graphEgo).toHaveBeenNthCalledWith(2, {
       pid: 'PID_A',
       depth: 1,
       equivalent: 'USD',
       status: ['closed'],
+      include: ['transactions'],
     })
     expect(g.participants.value.map((participant) => participant.pid)).toEqual(['LATEST'])
     expect(g.clearingCycles.value).toEqual(cyclesEnvelope('LATEST').data)

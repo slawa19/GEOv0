@@ -22,6 +22,13 @@ type Props = {
   /** Disable action buttons while interact-mode is busy. */
   busy?: boolean
 
+  /**
+   * `F-013-7`: авторитетный источник линии не ответил (грузится или упал), и показанные числа
+   * приехали из снапшота через молчаливый фоллбэк. Для просмотра это допустимо; закрывать линию
+   * по таким числам — нет.
+   */
+  sourceUnavailable?: boolean
+
   /** When true, the popup is forced hidden (parent shows TrustlineManagementPanel instead). */
   forceHidden?: boolean
 
@@ -30,6 +37,7 @@ type Props = {
 
 const props = withDefaults(defineProps<Props>(), {
   forceHidden: false,
+  sourceUnavailable: false,
 })
 
 const emit = defineEmits<{
@@ -141,6 +149,10 @@ const { armed: closeArmed, disarm: disarmClose, confirmOrArm: confirmCloseOrArm 
 
 function onCloseLine() {
   if (props.busy) return
+  // ОТДЕЛЬНАЯ ПРОВЕРКА, а не расчёт на `closeBlocked`, и это не перестраховка (`F-013-7`).
+  // `closeBlocked` означает «есть долг», и вычисляется из чисел; когда чисел нет, оно ложно —
+  // то есть каскад разрешил бы закрытие ровно в тот момент, когда мы не знаем, есть ли долг.
+  if (props.sourceUnavailable) return
   if (closeBlocked.value) return
   void confirmCloseOrArm(() => emit('closeLine'))
 }
@@ -185,6 +197,14 @@ function onCloseLine() {
     </div>
 
     <div class="popup__actions">
+      <div
+        v-if="sourceUnavailable"
+        class="popup__inline-warn ds-label ds-mono"
+        data-testid="edge-source-unavailable"
+      >
+        Trustline data is not available right now; the figures shown come from the graph snapshot
+        and may be out of date. Closing the line is disabled until the backend answers.
+      </div>
       <div v-if="closeBlocked" class="popup__inline-warn ds-label ds-mono" data-testid="edge-close-blocked">
         Cannot close: trustline has outstanding debt ({{ closeDebtDisplay }}). Reduce debt to 0 first.
       </div>
@@ -204,7 +224,7 @@ function onCloseLine() {
       <button
         class="ds-btn ds-btn--danger ds-btn--sm"
         type="button"
-        :disabled="!!busy || closeBlocked"
+        :disabled="!!busy || closeBlocked || sourceUnavailable"
         data-testid="edge-close-line-btn"
         @click="onCloseLine"
       >

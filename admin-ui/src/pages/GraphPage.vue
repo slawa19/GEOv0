@@ -177,6 +177,8 @@ const {
   clearingCycles,
   auditLog,
   transactions,
+  included,
+  truncated,
   availableEquivalents,
   filteredTrustlines,
   precisionByEq,
@@ -220,6 +222,11 @@ const graphAnalytics = useGraphAnalytics({
   incidents,
   auditLog,
   transactions,
+  // F-013-1 / T1302. Completeness metadata travels with the collections it describes; the drawer
+  // must not be able to see the transactions array without also seeing whether it was ever asked
+  // for.
+  included,
+  truncated,
   clearingCycles,
 
   selected,

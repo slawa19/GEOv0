@@ -6,6 +6,7 @@ import CopyIconButton from '../../ui/CopyIconButton.vue'
 import GraphAnalyticsTogglesCard from '../../ui/GraphAnalyticsTogglesCard.vue'
 import OperatorAdvicePanel from '../../ui/OperatorAdvicePanel.vue'
 import { t } from '../../i18n'
+import { activityTransactionCounts } from './graphPageHelpers'
 import { labelTrustlineStatus } from '../../i18n/labels'
 import { buildGraphDrawerAdvice } from '../../advice/operatorAdvice'
 import { PRECISION_UNAVAILABLE, precisionForEquivalent } from '../../composables/useEquivalentPrecision'
@@ -95,7 +96,14 @@ type SelectedActivity = {
   participantOps: Record<number, number>
   paymentCommitted: Record<number, number>
   clearingCommitted: Record<number, number>
+  // F-013-1 / T1302. `hasTransactions` no longer means "the array is non-empty"; it means the
+  // response named this collection in `included`, i.e. we are entitled to say anything about it
+  // at all. The other two qualify what we may say: `transactionsTruncated` turns every count into
+  // a lower bound, and `transactionsAttributable` is false when rows arrived carrying no field
+  // able to place this participant in them, so the counts would be undercounts.
   hasTransactions: boolean
+  transactionsTruncated: boolean
+  transactionsAttributable: boolean
 }
 
 type ConnectionRow = {
@@ -1333,7 +1341,7 @@ const adviceItems = computed(() => {
                     :label="t('graph.analytics.activity.paymentsCommitted')"
                     :tooltip-text="t('graph.analytics.activity.paymentsCommittedTooltip')"
                   />
-                  <span class="metricRow__value">{{ selectedActivity.paymentCommitted[7] }} / {{ selectedActivity.paymentCommitted[30] }} / {{ selectedActivity.paymentCommitted[90] }}</span>
+                  <span class="metricRow__value">{{ activityTransactionCounts(selectedActivity.paymentCommitted, selectedActivity.windows, selectedActivity) }}</span>
                 </div>
                 <div class="metricRow">
                   <TooltipLabel
@@ -1341,15 +1349,39 @@ const adviceItems = computed(() => {
                     :label="t('graph.analytics.activity.clearingCommitted')"
                     :tooltip-text="t('graph.analytics.activity.clearingCommittedTooltip')"
                   />
-                  <span class="metricRow__value">{{ selectedActivity.clearingCommitted[7] }} / {{ selectedActivity.clearingCommitted[30] }} / {{ selectedActivity.clearingCommitted[90] }}</span>
+                  <span class="metricRow__value">{{ activityTransactionCounts(selectedActivity.clearingCommitted, selectedActivity.windows, selectedActivity) }}</span>
                 </div>
               </div>
+              <!--
+                F-013-1 / T1302. Three mutually exclusive statements about the same collection, and
+                the order matters: "we were told nothing" outranks "we were told something we cannot
+                use", which outranks "what we were told is a lower bound". Only the last of them
+                leaves a printed number standing.
+              -->
               <el-alert
                 v-if="!selectedActivity.hasTransactions"
                 type="warning"
                 show-icon
-                :title="t('graph.analytics.activity.transactionsUnavailableTitle')"
-                :description="t('graph.analytics.activity.transactionsUnavailableDescription')"
+                :title="t('graph.analytics.activity.transactionsNotIncludedTitle')"
+                :description="t('graph.analytics.activity.transactionsNotIncludedDescription')"
+                class="mb"
+                style="margin-top: 10px"
+              />
+              <el-alert
+                v-else-if="!selectedActivity.transactionsAttributable"
+                type="warning"
+                show-icon
+                :title="t('graph.analytics.activity.transactionsUnattributableTitle')"
+                :description="t('graph.analytics.activity.transactionsUnattributableDescription')"
+                class="mb"
+                style="margin-top: 10px"
+              />
+              <el-alert
+                v-else-if="selectedActivity.transactionsTruncated"
+                type="info"
+                show-icon
+                :title="t('graph.analytics.activity.transactionsTruncatedTitle')"
+                :description="t('graph.analytics.activity.transactionsTruncatedDescription')"
                 class="mb"
                 style="margin-top: 10px"
               />

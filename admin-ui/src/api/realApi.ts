@@ -171,19 +171,30 @@ const AuditLogEntrySchema = z
   })
   .passthrough()
 
+// F-013-1 / T1302. The shape below is AdminGraphTransactionItem (api/openapi.yaml) and what the
+// projection `_graph_fetch_transactions` actually emits - nothing more.
+//
+// It used to require `payload`, which neither the canon declares nor the producer sends. That was
+// invisible only because the client never asked for `include=transactions`, so the array was always
+// empty and no row was ever validated. The first response that carried a transaction would have been
+// rejected whole as INVALID_RESPONSE and blanked the graph page - which is why the include, the
+// schema and the consumer had to land as one change and not as a series with a broken middle.
+//
+// Required here is exactly what the canon marks required. `equivalent` and `error` are nullable and
+// absence-tolerant because the canon says so: `equivalent` is payload.get("equivalent") and is null
+// on a row whose payload has no such key, `error` is null on every row that did not abort.
+// `.passthrough()` keeps the tail open - the mock fixture still carries `payload`/`signatures` -
+// while the schema stays strict about every key it does declare.
 const TransactionSchema = z
   .object({
-    id: z.string().optional(),
     tx_id: z.string(),
-    idempotency_key: z.string().nullable().optional(),
     type: z.string(),
-    initiator_pid: z.string(),
-    payload: z.record(z.string(), z.unknown()),
-    signatures: z.array(z.unknown()).nullable().optional(),
     state: z.string(),
-    error: z.record(z.string(), z.unknown()).nullable().optional(),
+    initiator_pid: z.string(),
     created_at: z.string(),
     updated_at: z.string(),
+    equivalent: z.string().nullable().optional(),
+    error: z.record(z.string(), z.unknown()).nullable().optional(),
   })
   .passthrough()
 
@@ -196,6 +207,13 @@ const GraphSnapshotSchema = z
     debts: z.array(DebtSchema),
     audit_log: z.array(AuditLogEntrySchema),
     transactions: z.array(TransactionSchema),
+    // F-013-1 / T1302. Which optional collections the body actually carries, and which of them hit
+    // the include limit. Optional here on purpose: the canon does not list them under `required`,
+    // and demanding a field the canon does not declare is the exact defect this task removes from
+    // TransactionSchema above. Absent means "this server says nothing about them", which the
+    // consumer must treat as "not asked" - never as "asked, and there are none".
+    included: z.array(z.string()).optional(),
+    truncated: z.array(z.string()).optional(),
   })
   .passthrough()
 
@@ -556,6 +574,16 @@ export async function requestJson<T>(
   }
 }
 
+// F-013-1 / T1302. `include` is a comma-separated list on the wire (`_parse_include_csv`), not a
+// repeated query parameter - buildQuery would emit `include=a&include=b` for an array and the server
+// would read only the last one. Joining here keeps that detail in one place.
+export function normalizeGraphInclude(include?: string[]): string {
+  return (include || [])
+    .map((x) => String(x || '').trim().toLowerCase())
+    .filter(Boolean)
+    .join(',')
+}
+
 export function buildQuery(pathname: string, params: Record<string, unknown>): string {
   const rawBase = baseUrl()
 
@@ -902,9 +930,13 @@ export const realApi = {
     )
   },
 
-  graphSnapshot(params?: { equivalent?: string }): Promise<ApiEnvelope<GraphSnapshot>> {
+  graphSnapshot(params?: { equivalent?: string; include?: string[] }): Promise<ApiEnvelope<GraphSnapshot>> {
     const equivalent = String(params?.equivalent || '').trim().toUpperCase()
-    const url = buildQuery('/api/v1/admin/graph/snapshot', { equivalent: equivalent || undefined })
+    const include = normalizeGraphInclude(params?.include)
+    const url = buildQuery('/api/v1/admin/graph/snapshot', {
+      equivalent: equivalent || undefined,
+      include: include || undefined,
+    })
     return requestJson<GraphSnapshot>(url, { admin: true, schema: GraphSnapshotSchema }).then((r) => {
       const s = assertSuccess(r)
       const participants = (s.participants || []).map((p) => ({
@@ -915,12 +947,13 @@ export const realApi = {
     })
   },
 
-  graphEgo(params: { pid: string; depth?: 1 | 2; equivalent?: string; status?: string[] }): Promise<ApiEnvelope<GraphSnapshot>> {
+  graphEgo(params: { pid: string; depth?: 1 | 2; equivalent?: string; status?: string[]; include?: string[] }): Promise<ApiEnvelope<GraphSnapshot>> {
     const pid = String(params?.pid || '').trim()
     const depth = params?.depth ?? 1
     const equivalent = String(params?.equivalent || '').trim()
     const status = (params?.status || []).map((s) => String(s || '').trim()).filter(Boolean)
-    return requestJson<GraphSnapshot>(buildQuery('/api/v1/admin/graph/ego', { pid, depth, equivalent, status }), {
+    const include = normalizeGraphInclude(params?.include)
+    return requestJson<GraphSnapshot>(buildQuery('/api/v1/admin/graph/ego', { pid, depth, equivalent, status, include: include || undefined }), {
       admin: true,
       schema: GraphSnapshotSchema,
     }).then((r) => {

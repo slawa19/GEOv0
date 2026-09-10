@@ -656,6 +656,42 @@ const interactSelectedLink = computed<GraphLink | null>(() => {
   return null
 })
 
+/**
+ * Пришла ли выбранная линия из АВТОРИТЕТНОГО источника, или из молчаливого фоллбэка на снапшот
+ * (`F-013-7`, третья копия, 2026-09-10).
+ *
+ * `interactSelectedLink` выше предпочитает REST-результат только когда массив непустой, иначе
+ * молча берёт снапшот. Для ПРОСМОТРА это допустимо и так и задумано; для МУТИРУЮЩЕГО контрола —
+ * нет: «источник ответил пусто» и «источник не ответил» на этом месте неразличимы, а решение
+ * «разрешить закрыть линию» принимается по числам из второго случая.
+ *
+ * Условие ровно то же, что в `TrustlineManagementPanel`: источник не устоялся (грузится или
+ * упал) И авторитетной строки для этой пары у нас нет. Если строка есть — она настоящий ответ,
+ * пусть и полученный раньше; это вопрос устаревания, а не отсутствия, и он здесь не решается.
+ */
+const interactLinkSourceUnavailable = computed<boolean>(() => {
+  const unsettled = trustlinesLoading.value || !!trustlinesLastError.value
+  if (!unsettled) return false
+  const from = interact.mode.state.fromPid
+  const to = interact.mode.state.toPid
+  if (!from || !to) return false
+  const tls = interact.mode.trustlines.value
+  const authoritative = Array.isArray(tls)
+    ? (tls.find((t) => t.from_pid === from && t.to_pid === to) ?? null)
+    : null
+  return authoritative == null
+})
+
+/**
+ * То же для окна edge-detail, с одной поправкой: в режиме `keepAlive` попап показывает
+ * ЗАМОРОЖЕННУЮ линию — снимок настоящего ответа, снятый до того, как interact-состояние
+ * очистили. Это тоже вопрос устаревания, а не отсутствия, поэтому блокировать там нечего.
+ */
+const wmEdgeDetailSourceUnavailable = computed<boolean>(() => {
+  if (wmEdgeDetail.state.value === 'keepAlive' && wmEdgeDetail.frozenLink.value != null) return false
+  return interactLinkSourceUnavailable.value
+})
+
 function formatDemoActionError(e: unknown): string {
   const msg = extractErrorMessage(e)
   // Structured API errors may carry a `bodyText` field with the raw response body.
@@ -1344,6 +1380,7 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
           :available="emptyToNull(wmEdgeDetailEffectiveLink?.available)"
           :status="emptyToNullString(wmEdgeDetailEffectiveLink?.status)"
           :busy="wmEdgeDetailEffectiveBusy"
+          :source-unavailable="wmEdgeDetailSourceUnavailable"
           :force-hidden="false"
           :close="() => uiCloseEdgeDetailWindow('action')"
           @change-limit="onEdgeDetailChangeLimit"
@@ -1403,6 +1440,8 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
           :used="emptyToNull(interactSelectedLink?.used)"
           :current-limit="emptyToNull(interactSelectedLink?.trust_limit)"
           :available="emptyToNull(interactSelectedLink?.available)"
+          :trustlines-loading="trustlinesLoading"
+          :trustlines-last-error="trustlinesLastError"
           :participants="interact.mode.participants.value"
           :trustlines="interact.mode.trustlines.value"
           :busy="interact.mode.busy.value"

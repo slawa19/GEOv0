@@ -628,8 +628,15 @@ export const RU: Record<string, string> = {
   'graph.analytics.activity.paymentsCommittedTooltip': 'Количество committed PAYMENT транзакций с участием этого участника (sender/receiver) по окнам updated_at.',
   'graph.analytics.activity.clearingCommitted': 'Clearing committed',
   'graph.analytics.activity.clearingCommittedTooltip': 'Количество committed CLEARING транзакций, где участник есть в цикле (или initiator), по окнам updated_at.',
-  'graph.analytics.activity.transactionsUnavailableTitle': 'Активность по транзакциям недоступна в fixtures',
-  'graph.analytics.activity.transactionsUnavailableDescription': 'Нет datasets/transactions.json в текущем seed. В real mode это должно приходить из API.',
+  // F-013-1 / T1302. Замена одному уведомлению «недоступно в fixtures», неверному дважды: оно
+  // винило seed в том, что на деле было незаданным запросом клиента, и стояло рядом с напечатанным
+  // нулём, которому не противоречило. Теперь три уведомления — по одному на состояние ответа.
+  'graph.analytics.activity.transactionsNotIncludedTitle': 'Активность по транзакциям не запрашивалась',
+  'graph.analytics.activity.transactionsNotIncludedDescription': 'Этот снапшот не несёт коллекцию транзакций, поэтому счётчики платежей и клирингов посчитать не из чего. Отсутствие — не ноль.',
+  'graph.analytics.activity.transactionsUnattributableTitle': 'Активность по транзакциям не сопоставима с участником',
+  'graph.analytics.activity.transactionsUnattributableDescription': 'Снапшот несёт committed-транзакции, но в строках нет контрагентов, поэтому нельзя сказать, какие из них касаются этого участника. Любой счётчик был бы занижен.',
+  'graph.analytics.activity.transactionsTruncatedTitle': 'Счётчики транзакций — нижняя оценка',
+  'graph.analytics.activity.transactionsTruncatedDescription': 'Сервер вернул только последние транзакции и обрезал остальные, поэтому показанные числа — «не меньше чем», а не итоги.',
 
   'graph.analytics.summary.pickEquivalentTitle': 'Выберите эквивалент (не ALL), чтобы включить карточки аналитики',
   'graph.analytics.summary.widgetsTitle': 'Виджеты сводки',

@@ -108,6 +108,8 @@ type GeoTestGlobals = {
   __GEO_TEST_INTERACT_HISTORY?: Array<Record<string, unknown>>
   __GEO_TEST_INTERACT_BUSY_REF?: Ref<boolean>
   __GEO_TEST_TRUSTLINES_LOADING_REF?: Ref<boolean>
+  __GEO_TEST_TRUSTLINES_LAST_ERROR_REF?: Ref<string | null>
+  __GEO_TEST_TRUSTLINES_REF?: Ref<TrustlineInfo[]>
   __GEO_TEST_PAYMENT_TARGETS_LOADING_REF?: Ref<boolean>
   __GEO_TEST_PAYMENT_TARGETS_LAST_ERROR_REF?: Ref<string | null>
   __GEO_TEST_PAYMENT_TO_TARGET_IDS_REF?: Ref<Set<string> | undefined>
@@ -380,6 +382,15 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
       const trustlinesLoading = ref(false)
       setGeoTestGlobal('__GEO_TEST_TRUSTLINES_LOADING_REF', trustlinesLoading)
 
+      // `F-013-7`: the REST trustlines cache has three states, not two.  The root reads the error
+      // through `interact.mode.trustlinesLastError?.value`, so without this ref the mock could
+      // only ever express "settled and empty" -- the exact conflation the finding is about.
+      const trustlinesLastError = ref<string | null>(null)
+      setGeoTestGlobal('__GEO_TEST_TRUSTLINES_LAST_ERROR_REF', trustlinesLastError)
+
+      const trustlines = ref<TrustlineInfo[]>([])
+      setGeoTestGlobal('__GEO_TEST_TRUSTLINES_REF', trustlines)
+
       const paymentTargetsLoading = ref(false)
       setGeoTestGlobal('__GEO_TEST_PAYMENT_TARGETS_LOADING_REF', paymentTargetsLoading)
 
@@ -543,6 +554,7 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
                phase,
                busy: interactBusy,
                trustlinesLoading,
+               trustlinesLastError,
                paymentTargetsLoading,
                paymentTargetsLastError,
                state: interactState,
@@ -552,7 +564,7 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
              availableCapacity: ref('0'),
               paymentToTargetIds,
               participants: ref<ParticipantInfo[]>([]),
-              trustlines: ref<TrustlineInfo[]>([]),
+              trustlines,
               canSendPayment: ref(true),
 
             setPaymentFromPid,
@@ -3502,6 +3514,221 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       '__GEO_TEST_INTERACT_CANCEL',
       '__GEO_TEST_INTERACT_CONFIRM_TRUSTLINE_CLOSE',
     )
+  })
+
+  // -------------------------------------------------------------------------
+  // RT-013-7 -- `F-013-7`: empty and absent are indistinguishable for a mutating control.
+  //
+  // `interactSelectedLink` (`SimulatorAppRoot.vue:627`) prefers the REST trustlines cache only
+  // when the array is non-empty and otherwise silently falls back to the SSE snapshot link.  A
+  // failed fetch and a still-in-flight fetch therefore look exactly like an authoritative
+  // "this pair has no trustline", and the numbers the snapshot happens to carry are handed to
+  // `TrustlineManagementPanel` as `used` / `current-limit` / `available` (`:1403-1405`) -- the
+  // panel whose buttons UPDATE and CLOSE a trustline.  Viewing on snapshot grounds is allowed by
+  // the spec; permitting a mutation on them is not.
+  //
+  // WHAT THESE TWO TESTS CAN AND CANNOT TELL APART
+  //  - CAN distinguish: the pre-fix behaviour (snapshot numbers shown, both mutations enabled);
+  //    a fix that hides the numbers but still permits the mutation; a fix that disables the
+  //    buttons but keeps presenting the snapshot numbers as the trustline's; a fix that goes
+  //    quiet instead of naming the state (an explicit notice is required); and the degenerate
+  //    fix that disables the panel unconditionally -- the settled-and-authoritative control in
+  //    the same test requires Update and Close to work.
+  //  - CANNOT distinguish: whether the ROOT or the PANEL owns the decision, only that the pair
+  //    root+panel behaves; nor anything about `EdgeDetailPopup`, which carries its own Close TL
+  //    button off the same `interactSelectedLink` and is left as found.
+  // -------------------------------------------------------------------------
+  async function openFullTrustlineEditor(host: HTMLElement, beforeEditing?: () => void) {
+    const app = mountSimulatorAppRoot(host)
+    await nextTick()
+
+    // Entering through the ActionBar is what sets `useFullTrustlineEditor = true`, i.e. what makes
+    // the mutating panel (rather than the read-only EdgeDetailPopup) the visible surface.
+    const tlBtn = host.querySelector('[data-testid="actionbar-trustline"]') as HTMLButtonElement | null
+    expect(tlBtn).toBeTruthy()
+    tlBtn?.click()
+    await nextTick()
+
+    // The refs the mocked interact composable exposes only exist after mount, so a test that needs
+    // the source to be unsettled BEFORE the edit phase opens sets it here.
+    beforeEditing?.()
+    await nextTick()
+
+    getPhaseRef().value = 'editing-trustline'
+    await nextTick()
+    await nextTick()
+    return app
+  }
+
+  function typeNewLimit(panel: HTMLElement, value: string) {
+    const input = panel.querySelector('#tl-new-limit') as HTMLInputElement | null
+    expect(input).toBeTruthy()
+    input!.value = value
+    input!.dispatchEvent(new Event('input'))
+    return input!
+  }
+
+  function trustlineStatsText(host: HTMLElement): string {
+    const stats = host.querySelector('[data-testid="trustline-panel"] [aria-label="Trustline stats"]') as HTMLElement | null
+    expect(stats).toBeTruthy()
+    return (stats?.textContent ?? '').replace(/\s+/g, ' ').trim()
+  }
+
+  function trustlineMutationButtons(host: HTMLElement) {
+    const panel = host.querySelector('[data-testid="trustline-panel"]') as HTMLElement | null
+    expect(panel).toBeTruthy()
+    const update = Array.from(panel?.querySelectorAll('button') ?? []).find(
+      (b) => (b.textContent ?? '').trim() === 'Update',
+    ) as HTMLButtonElement | undefined
+    const closeBtn = panel?.querySelector('[data-testid="trustline-close-btn"]') as HTMLButtonElement | null
+    return { panel: panel as HTMLElement, update, closeBtn }
+  }
+
+  // A snapshot link with `used: '0'` so that BOTH mutating controls are reachable on snapshot
+  // grounds: Update is enabled (new limit >= used) and Close is not blocked by outstanding debt.
+  const RT_013_7_SNAPSHOT = {
+    equivalent: 'UAH',
+    generated_at: '2026-09-10T00:00:00Z',
+    nodes: [makeSelectedNode('alice', 'Alice'), makeSelectedNode('bob', 'Bob')],
+    links: [{ source: 'alice', target: 'bob', trust_limit: '100', used: '0', available: '100' }],
+  } as unknown as GraphSnapshot
+
+  const RT_013_7_TRUSTLINE = (limit: string): TrustlineInfo => ({
+    from_pid: 'alice',
+    from_name: 'Alice',
+    to_pid: 'bob',
+    to_name: 'Bob',
+    equivalent: 'UAH',
+    limit,
+    used: '0',
+    available: limit,
+    status: 'active',
+  })
+
+  it('RT-013-7a: a FAILED trustlines fetch must not let the snapshot stand in as the trustline, nor permit the mutation', async () => {
+    setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'idle')
+    setGeoTestGlobal('__GEO_TEST_SNAPSHOT', RT_013_7_SNAPSHOT)
+    setUrl('/?mode=real&ui=interact')
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    // The REST trustlines fetch failed before the operator opened the editor.  The snapshot still
+    // carries a link alice->bob with limit 100 / used 0, so the fallback has something to show --
+    // and that is exactly the situation in which it must not.
+    const app = await openFullTrustlineEditor(host, () => {
+      getRequiredGeoTestGlobal('__GEO_TEST_TRUSTLINES_REF').value = []
+      getRequiredGeoTestGlobal('__GEO_TEST_TRUSTLINES_LAST_ERROR_REF').value = 'GET /runs/r1/trustlines failed: 503'
+    })
+    try {
+      const { panel, update, closeBtn } = trustlineMutationButtons(host)
+
+      // 1. The snapshot's numbers must not be presented as this trustline's numbers.
+      const stats = trustlineStatsText(host)
+      expect(stats).not.toContain('100')
+      expect(stats).toContain('\u2014')
+
+      // 2. The panel must SAY what happened rather than going quiet.
+      const notice = panel.querySelector('[data-testid="tl-source-unavailable"]') as HTMLElement | null
+      expect(notice).toBeTruthy()
+      expect(notice?.textContent ?? '').toContain('GET /runs/r1/trustlines failed: 503')
+
+      // 3. The edit field must not be pre-filled with a number nobody vouched for.
+      const newLimit = panel.querySelector('#tl-new-limit') as HTMLInputElement | null
+      expect(newLimit?.value ?? '').toBe('')
+
+      // 4. Neither mutation may be offered on that basis.
+      expect(update?.disabled).toBe(true)
+      expect(closeBtn?.disabled).toBe(true)
+
+      // 5. Nor may the operator type their way past it: 50 cannot be checked against a `used` that
+      //    nobody reported, so Update stays refused.  This is what separates a real fail-closed
+      //    source from a fix that merely stopped pre-filling the field.
+      typeNewLimit(panel, '50')
+      await nextTick()
+      expect(trustlineMutationButtons(host).update?.disabled).toBe(true)
+
+      // 6. Recovery: an authoritative answer arrives and the panel becomes usable again, with the
+      //    backend's numbers -- not the snapshot's.
+      getRequiredGeoTestGlobal('__GEO_TEST_TRUSTLINES_REF').value = [RT_013_7_TRUSTLINE('42')]
+      getRequiredGeoTestGlobal('__GEO_TEST_TRUSTLINES_LAST_ERROR_REF').value = null
+      await nextTick()
+      await nextTick()
+
+      expect(trustlineStatsText(host)).toContain('42')
+      expect(panel.querySelector('[data-testid="tl-source-unavailable"]')).toBeFalsy()
+      {
+        const settled = trustlineMutationButtons(host)
+        expect(settled.update?.disabled).toBe(false)
+        expect(settled.closeBtn?.disabled).toBe(false)
+      }
+    } finally {
+      app.unmount()
+      host.remove()
+      clearGeoTestGlobals(
+        '__GEO_TEST_INTERACT_PHASE',
+        '__GEO_TEST_INTERACT_CANCEL',
+        '__GEO_TEST_SNAPSHOT',
+        '__GEO_TEST_TRUSTLINES_REF',
+        '__GEO_TEST_TRUSTLINES_LAST_ERROR_REF',
+      )
+    }
+  })
+
+  it('RT-013-7b: a trustlines fetch STILL IN FLIGHT must not permit the mutation either', async () => {
+    setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'idle')
+    setGeoTestGlobal('__GEO_TEST_SNAPSHOT', RT_013_7_SNAPSHOT)
+    setUrl('/?mode=real&ui=interact')
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = await openFullTrustlineEditor(host)
+    try {
+      const trustlinesLoading = getRequiredGeoTestGlobal('__GEO_TEST_TRUSTLINES_LOADING_REF')
+      trustlinesLoading.value = true
+      await nextTick()
+      await nextTick()
+
+      const { panel, update, closeBtn } = trustlineMutationButtons(host)
+
+      const stats = trustlineStatsText(host)
+      expect(stats).not.toContain('100')
+      expect(stats).toContain('\u2014')
+
+      const notice = panel.querySelector('[data-testid="tl-source-unavailable"]') as HTMLElement | null
+      expect(notice).toBeTruthy()
+      expect((notice?.textContent ?? '').toLowerCase()).toContain('loading')
+
+      expect(update?.disabled).toBe(true)
+      expect(closeBtn?.disabled).toBe(true)
+
+      // And once the fetch settles with an authoritative answer, the panel is usable again.
+      const trustlines = getRequiredGeoTestGlobal('__GEO_TEST_TRUSTLINES_REF')
+      trustlines.value = [RT_013_7_TRUSTLINE('7')]
+      trustlinesLoading.value = false
+      await nextTick()
+      await nextTick()
+
+      expect(trustlineStatsText(host)).toContain('7')
+      expect(panel.querySelector('[data-testid="tl-source-unavailable"]')).toBeFalsy()
+      typeNewLimit(panel, '9')
+      await nextTick()
+      {
+        const settled = trustlineMutationButtons(host)
+        expect(settled.update?.disabled).toBe(false)
+        expect(settled.closeBtn?.disabled).toBe(false)
+      }
+    } finally {
+      app.unmount()
+      host.remove()
+      clearGeoTestGlobals(
+        '__GEO_TEST_INTERACT_PHASE',
+        '__GEO_TEST_INTERACT_CANCEL',
+        '__GEO_TEST_SNAPSHOT',
+        '__GEO_TEST_TRUSTLINES_REF',
+        '__GEO_TEST_TRUSTLINES_LOADING_REF',
+      )
+    }
   })
 
   it('AC-ED-3: EdgeDetailPopup "Send Payment" activates Manual Payment and pre-fills pids (trustline to→from)', async () => {

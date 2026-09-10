@@ -87,6 +87,8 @@ describe('useGraphAnalytics (fixtures-first)', () => {
       incidents: ref<Incident[]>([]),
       auditLog: ref<AuditLogEntry[]>([]),
       transactions: ref<Transaction[]>([]),
+      included: ref<string[]>([]),
+      truncated: ref<string[]>([]),
       clearingCycles: ref<ClearingCycles | null>(null),
 
       selected,
@@ -147,6 +149,8 @@ describe('useGraphAnalytics (fixtures-first)', () => {
       incidents: ref<Incident[]>([]),
       auditLog: ref<AuditLogEntry[]>([]),
       transactions: ref<Transaction[]>([]),
+      included: ref<string[]>([]),
+      truncated: ref<string[]>([]),
       clearingCycles: ref<ClearingCycles | null>(null),
 
       selected,
@@ -204,6 +208,8 @@ describe('useGraphAnalytics (fixtures-first)', () => {
       incidents: ref<Incident[]>([]),
       auditLog: ref<AuditLogEntry[]>([]),
       transactions: ref<Transaction[]>([]),
+      included: ref<string[]>([]),
+      truncated: ref<string[]>([]),
       clearingCycles: ref<ClearingCycles | null>(null),
 
       selected,
@@ -241,6 +247,8 @@ describe('useGraphAnalytics (fixtures-first)', () => {
         object_id: 'PID_A',
       }]),
       transactions: ref<Transaction[]>([]),
+      included: ref<string[]>([]),
+      truncated: ref<string[]>([]),
       clearingCycles: ref<ClearingCycles | null>(null),
       selected,
     })
@@ -268,6 +276,8 @@ describe('useGraphAnalytics (fixtures-first)', () => {
       incidents: ref<Incident[]>([]),
       auditLog: ref<AuditLogEntry[]>([]),
       transactions: ref<Transaction[]>([]),
+      included: ref<string[]>([]),
+      truncated: ref<string[]>([]),
       clearingCycles: ref<ClearingCycles | null>(null),
       selected,
     })
@@ -303,6 +313,8 @@ describe('useGraphAnalytics (fixtures-first)', () => {
       incidents: ref<Incident[]>([]),
       auditLog: ref<AuditLogEntry[]>([]),
       transactions: ref<Transaction[]>([]),
+      included: ref<string[]>([]),
+      truncated: ref<string[]>([]),
       clearingCycles: ref<ClearingCycles | null>(null),
       selected: ref<SelectedInfo | null>({ kind: 'node', pid: 'PID_A', degree: 0, inDegree: 0, outDegree: 0 }),
     })
@@ -340,6 +352,8 @@ describe('useGraphAnalytics (fixtures-first)', () => {
       incidents: ref<Incident[]>([]),
       auditLog: ref<AuditLogEntry[]>([]),
       transactions: ref<Transaction[]>([]),
+      included: ref<string[]>([]),
+      truncated: ref<string[]>([]),
       clearingCycles: ref<ClearingCycles | null>(null),
       selected: ref<SelectedInfo | null>({ kind: 'node', pid: 'PID_A', degree: 0, inDegree: 0, outDegree: 0 }),
     }))
@@ -372,6 +386,8 @@ describe('useGraphAnalytics (fixtures-first)', () => {
       incidents: ref<Incident[]>([]),
       auditLog: ref<AuditLogEntry[]>([]),
       transactions: ref<Transaction[]>([]),
+      included: ref<string[]>([]),
+      truncated: ref<string[]>([]),
       clearingCycles: ref<ClearingCycles | null>(null),
       selected: ref<SelectedInfo | null>({ kind: 'node', pid: 'PID_A', degree: 0, inDegree: 0, outDegree: 0 }),
     })
@@ -402,6 +418,8 @@ describe('useGraphAnalytics (fixtures-first)', () => {
       incidents: ref<Incident[]>([]),
       auditLog: ref<AuditLogEntry[]>([]),
       transactions: ref<Transaction[]>([]),
+      included: ref<string[]>([]),
+      truncated: ref<string[]>([]),
       clearingCycles: ref<ClearingCycles | null>(null),
       selected: ref<SelectedInfo | null>({ kind: 'node', pid: 'PID_A', degree: 0, inDegree: 0, outDegree: 0 }),
     })

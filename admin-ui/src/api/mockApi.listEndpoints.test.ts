@@ -104,7 +104,11 @@ describe('mockApi list endpoints', () => {
       })
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
 
-    const env = await mockApi.listTrustlines({ equivalent: 'usd', creditor: 'p', debtor: 'p2', status: 'active', page: 1, per_page: 1 })
+    // `F-013-6`: this call used to read `equivalent: 'usd', creditor: 'p'` -- a lower-cased code
+    // and a one-letter pid fragment.  Both only ever matched because the mock filtered by
+    // substring; production resolves `Equivalent.code == 'usd'` and `Participant.pid == 'p'` to
+    // nothing and answers with an empty page.  The sample is now one production would accept.
+    const env = await mockApi.listTrustlines({ equivalent: 'USD', debtor: 'p2', status: 'active', page: 1, per_page: 1 })
     expect(env.success).toBe(true)
     if (!env.success) return
 

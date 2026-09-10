@@ -117,6 +117,11 @@ export function useGraphAnalytics(opts: {
   incidents: Ref<Incident[] | null>
   auditLog: Ref<AuditLogEntry[] | null>
   transactions: Ref<Transaction[] | null>
+  // F-013-1 / T1302. What the snapshot said it actually carried, and which of those it cut at the
+  // include limit. `transactions.value.length === 0` cannot answer either question: it is produced
+  // both by "the page never asked" and by "the page asked and the period is genuinely empty".
+  included: Ref<string[] | null>
+  truncated: Ref<string[] | null>
   clearingCycles: Ref<ClearingCycles | null>
 
   selected: Ref<SelectedInfo | null>
@@ -545,6 +550,20 @@ export function useGraphAnalytics(opts: {
     }
   })
 
+  // F-013-1 / T1302. The three states the Activity card must be able to tell apart, derived from
+  // the completeness metadata rather than from an array length.
+  //
+  //   not asked      -> included does not name the collection. We know NOTHING; a count would be
+  //                     an invention and the card must show absence, not zero.
+  //   asked, empty   -> included names it, truncated does not, the array is empty. Zero is a real
+  //                     measurement and may be shown as a number.
+  //   asked, cut     -> included and truncated both name it. Every count over the rows we hold is a
+  //                     LOWER BOUND, because the server returned a prefix of a longer list.
+  const transactionsIncluded = computed(() => (opts.included.value || []).includes('transactions'))
+  const transactionsTruncated = computed(
+    () => transactionsIncluded.value && (opts.truncated.value || []).includes('transactions'),
+  )
+
   const selectedActivity = computed(() => {
     const m = selectedMetrics.value
     if (m?.activity) {
@@ -557,6 +576,11 @@ export function useGraphAnalytics(opts: {
         paymentCommitted: m.activity.payment_committed,
         clearingCommitted: m.activity.clearing_committed,
         hasTransactions: Boolean(m.activity.has_transactions),
+        // The per-participant metrics endpoint computes its own counters server-side over the whole
+        // table; it neither truncates nor depends on the snapshot's include, so on this branch the
+        // counts are totals and every row was attributable.
+        transactionsTruncated: false,
+        transactionsAttributable: true,
       }
     }
 
@@ -631,28 +655,81 @@ export function useGraphAnalytics(opts: {
       }
     }
 
+    // F-013-1 / T1302. `unattributable` counts rows this loop had to skip because the response
+    // carries no field that could place the participant in the transaction. It is not a tidiness
+    // metric: a skipped row is a committed payment that exists and is not in the count, so a total
+    // computed while this is non-zero is an undercount presented as a total - the same defect one
+    // level down from the one this task removes.
+    let unattributable = 0
+
     for (const tx of opts.transactions.value || []) {
       const type = String(tx.type || '')
       if (type !== 'PAYMENT' && type !== 'CLEARING') continue
       if (String(tx.state || '') !== 'COMMITTED') continue
 
+      // The producer lifts the equivalent to the TOP level of the row and does not publish
+      // `payload` at all (`_graph_fetch_transactions`). This used to read `tx.payload.equivalent`,
+      // which is undefined on every real row, so the equivalent filter below never fired and the
+      // reader was consulting a key the wire does not have. The `payload` fallback is kept only
+      // for the mock fixture, which still ships one.
       const payload = (tx.payload || {}) as Record<string, unknown>
-      const payloadEq = typeof payload.equivalent === 'string' ? payload.equivalent : null
-      if (eqCode && payloadEq && normEq(payloadEq) !== eqCode) continue
+      const rowEqRaw =
+        typeof tx.equivalent === 'string'
+          ? tx.equivalent
+          : typeof payload.equivalent === 'string'
+            ? payload.equivalent
+            : null
+      if (eqCode && rowEqRaw && normEq(rowEqRaw) !== eqCode) continue
 
+      // Participant attribution. The projection now publishes `from`/`to` on a payment and
+      // `edges` on a clearing (`app/api/v1/admin.py::_graph_fetch_transactions`, 2026-09-10), so
+      // most rows can be answered outright. `payload` is read only as a fallback, for the mock,
+      // whose fixtures still carry it; where NEITHER source names the participant the honest
+      // answer stays "we cannot tell", not "not involved" - which is what `attributable` records.
       let involved = false
+      let attributable = false
       if (type === 'PAYMENT') {
-        const from = typeof payload.from === 'string' ? payload.from : ''
-        const to = typeof payload.to === 'string' ? payload.to : ''
-        involved = from === pid || to === pid
+        const txRow = tx as unknown as Record<string, unknown>
+        const from =
+          typeof txRow.from === 'string' ? txRow.from : typeof payload.from === 'string' ? payload.from : ''
+        const to =
+          typeof txRow.to === 'string' ? txRow.to : typeof payload.to === 'string' ? payload.to : ''
+        if (from || to) {
+          attributable = true
+          involved = from === pid || to === pid
+        } else if (String(tx.initiator_pid || '') === pid) {
+          // The initiator is definitely a party to its own payment. The converse does not hold -
+          // being someone else's initiator says nothing about whether `pid` was the counterparty -
+          // so this settles the positive case only.
+          attributable = true
+          involved = true
+        }
       } else {
-        const edges = Array.isArray(payload.edges) ? (payload.edges as unknown[]) : []
-        involved = edges.some((edge) => {
-          if (!edge || typeof edge !== 'object') return false
-          const e = edge as Record<string, unknown>
-          return e.debtor === pid || e.creditor === pid
-        })
-        if (!involved) involved = String(tx.initiator_pid || '') === pid
+        const txRow = tx as unknown as Record<string, unknown>
+        const edges = Array.isArray(txRow.edges)
+          ? (txRow.edges as unknown[])
+          : Array.isArray(payload.edges)
+            ? (payload.edges as unknown[])
+            : []
+        if (edges.length) {
+          attributable = true
+          involved = edges.some((edge) => {
+            if (!edge || typeof edge !== 'object') return false
+            const e = edge as Record<string, unknown>
+            return e.debtor === pid || e.creditor === pid
+          })
+          // Kept from the original: a participant who initiated the clearing counts even if the
+          // published edges do not name them. Only the shape of the guard changed, not this rule.
+          if (!involved) involved = String(tx.initiator_pid || '') === pid
+        } else if (String(tx.initiator_pid || '') === pid) {
+          attributable = true
+          involved = true
+        }
+      }
+
+      if (!attributable) {
+        unattributable += 1
+        continue
       }
       if (!involved) continue
 
@@ -675,7 +752,13 @@ export function useGraphAnalytics(opts: {
       participantOps,
       paymentCommitted,
       clearingCommitted,
-      hasTransactions: (opts.transactions.value || []).length > 0,
+      // NOT `transactions.length > 0`. Length answers "did any row arrive", which is a different
+      // question from "were we told anything about this collection at all", and conflating the two
+      // is the whole of F-013-1: a page that never sent `include=transactions` reported a
+      // confident zero for a period it had never enquired about.
+      hasTransactions: transactionsIncluded.value,
+      transactionsTruncated: transactionsTruncated.value,
+      transactionsAttributable: unattributable === 0,
     }
   })
 

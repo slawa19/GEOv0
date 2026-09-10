@@ -234,3 +234,37 @@ export function buildFocusModeQuery(input: {
     participant_pid: pid,
   }
 }
+
+// F-013-1 / T1302. How a transaction-derived counter is allowed to be printed.
+//
+// The Activity card used to print `0 / 0 / 0` whether the page had counted zero payments or had
+// never asked the server for any. Two different facts, one glyph. This function keeps the three
+// cases apart at the only place where they become pixels:
+//
+//   * the collection was never carried  -> "-" per window. We have no measurement; a zero here is
+//     an assertion the client is not entitled to make.
+//   * some rows could not be attributed -> "-" per window, for the same reason: the rows exist and
+//     are missing from the count, so the number would be an undercount labelled as a total.
+//   * the collection was truncated      -> the counts are lower bounds over a prefix of a longer
+//     list, so each is printed with a leading "≥".
+//   * otherwise                         -> the plain number, which is now a real measurement.
+export const UNKNOWN_ACTIVITY_COUNT = '—'
+
+export type ActivityCountConfidence = {
+  hasTransactions: boolean
+  transactionsTruncated: boolean
+  transactionsAttributable: boolean
+}
+
+export function activityTransactionCounts(
+  counts: Record<number, number> | null | undefined,
+  windows: number[] | null | undefined,
+  confidence: ActivityCountConfidence,
+): string {
+  const ws = (windows || []).slice()
+  if (!confidence.hasTransactions || !confidence.transactionsAttributable) {
+    return ws.map(() => UNKNOWN_ACTIVITY_COUNT).join(' / ')
+  }
+  const prefix = confidence.transactionsTruncated ? '≥' : ''
+  return ws.map((w) => `${prefix}${(counts || {})[w] ?? 0}`).join(' / ')
+}

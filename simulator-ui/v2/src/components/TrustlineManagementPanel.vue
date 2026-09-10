@@ -20,6 +20,18 @@ type Props = {
   currentLimit?: string | number | null
   available?: string | number | null
 
+  /**
+   * `F-013-7`: state of the REST trustlines source that `used`/`currentLimit`/`available` are
+   * meant to come from.  The parent derives those three from `interactSelectedLink`, which
+   * silently falls back to the SSE snapshot whenever the trustlines array is empty -- so without
+   * these two flags this panel cannot tell "the backend says there is no such trustline" from
+   * "the backend has not answered".  Reading a stale number is tolerable; UPDATING or CLOSING a
+   * trustline on one is not, so the mutating controls below fail closed while the source is
+   * unsettled.  Optional so that fixture-only callers keep working; absent means "settled".
+   */
+  trustlinesLoading?: boolean
+  trustlinesLastError?: string | null
+
   /** Optional dropdown data (prefer backend-driven list from Interact Actions API). */
   participants?: ParticipantInfo[]
   trustlines?: TrustlineInfo[]
@@ -50,7 +62,32 @@ const selectedTl = computed(() => {
   return items.find((tl) => tl.from_pid === from && tl.to_pid === to) ?? null
 })
 
+/**
+ * `F-013-7`: true when this panel has NO authoritative row for the selected pair AND the source
+ * that would produce one has not settled.  `selectedTl` non-null is an answer from the REST
+ * trustlines cache; `selectedTl` null while loading or after an error is silence, and the
+ * `used`/`currentLimit`/`available` props then carry snapshot numbers instead.
+ *
+ * Note what this deliberately does NOT block: a refresh in flight while the previously fetched
+ * row is still held.  That row is a real answer, only possibly stale, and blocking on it would
+ * make the panel unusable during every poll.
+ */
+const trustlineSourceUnsettled = computed(() => Boolean(props.trustlinesLoading) || Boolean(props.trustlinesLastError))
+const trustlineSourceUnavailable = computed(() => trustlineSourceUnsettled.value && selectedTl.value == null)
+
+const sourceUnavailableText = computed<string | null>(() => {
+  if (!trustlineSourceUnavailable.value) return null
+  // Stated as a fact about the data, not as a policy about buttons: this panel is also open in
+  // the create and pick phases, where Create stays enabled because it does not read these figures.
+  if (props.trustlinesLoading) return 'Trustline data is still loading from the backend; the figures for this pair are not available yet.'
+  return `Trustline data could not be loaded: ${props.trustlinesLastError}. The figures for this pair are not available, and what the graph shows may be out of date.`
+})
+
 const effectiveData = computed(() => {
+  // Fail closed: show nothing rather than presenting the snapshot's numbers as this trustline's.
+  if (trustlineSourceUnavailable.value) {
+    return { used: null, reverseUsed: null, limit: null, available: null }
+  }
   return {
     used: selectedTl.value?.used ?? props.used,
     reverseUsed: selectedTl.value?.reverse_used,
@@ -145,6 +182,9 @@ const createValid = computed(() => {
 })
 
 const updateValid = computed(() => {
+  // `F-013-7`: `usedNum` below is 0 whenever the source is unavailable, so without this guard the
+  // "new limit >= used" check would wave through any non-negative number.
+  if (trustlineSourceUnavailable.value) return false
   if (updateLimitNormalized.value == null) return false
   if (!Number.isFinite(newLimitNum.value)) return false
   return newLimitNum.value >= 0 && newLimitNum.value >= usedNum.value
@@ -166,6 +206,9 @@ async function onUpdate() {
 
 async function onClose() {
   if (props.busy) return
+  // `F-013-7`: `closeBlocked` is computed from `effectiveUsed`, which is null while the source is
+  // unavailable -- i.e. it reads as "no outstanding debt" precisely when we do not know.
+  if (trustlineSourceUnavailable.value) return
   if (closeBlocked.value) return
 
   void confirmCloseOrArm(async () => {
@@ -181,6 +224,8 @@ const { armed: closeArmed, disarm: disarmClose, confirmOrArm: confirmCloseOrArm 
     { source: () => `${props.state.fromPid ?? ''}→${props.state.toPid ?? ''}` },
     // If Close becomes blocked (used > 0), cancel the confirmation state.
     { source: () => closeBlocked.value, when: (b) => !!b },
+    // `F-013-7`: if the authoritative source goes away, an armed close must not survive it.
+    { source: () => trustlineSourceUnavailable.value, when: (b) => !!b },
     // When the UI becomes busy, cancel the confirmation state.
     { source: () => props.busy, when: (b) => !!b },
   ],
@@ -428,6 +473,15 @@ defineExpose({
         New limit must be ≥ used ({{ renderOrDash(effectiveUsed) }} {{ unit }}).
       </div>
 
+      <div
+        v-if="sourceUnavailableText"
+        class="ds-alert ds-alert--warn ds-mono"
+        data-testid="tl-source-unavailable"
+        role="status"
+      >
+        {{ sourceUnavailableText }}
+      </div>
+
       <div v-if="state.error" class="ds-alert ds-alert--err ds-mono" data-testid="trustline-error">{{ state.error }}</div>
 
       <div v-if="isEdit && closeBlocked" class="ds-alert ds-alert--warn ds-mono" data-testid="tl-close-blocked">
@@ -445,7 +499,7 @@ defineExpose({
           <button
             class="ds-btn"
             type="button"
-            :disabled="busy || closeBlocked"
+            :disabled="busy || closeBlocked || trustlineSourceUnavailable"
             data-testid="trustline-close-btn"
             @click="onClose"
           >

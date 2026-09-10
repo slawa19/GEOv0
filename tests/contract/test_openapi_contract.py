@@ -241,8 +241,19 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # returns one records the bound in its snapshot. Canon and generated moved together; the entries
 # keep exactly the differences they had before (int `8` vs pydantic's float `8.0`, the same shape
 # as the previous `18` vs `18.0`). Nothing entered or left the dictionary.
+# 2026-09-10 / 013 T1302 (F-013-1): count HOLDS at 63, digest moves. `GET /admin/graph/snapshot`
+# and `GET /admin/graph/ego` gained two response fields - `included` and `truncated` - which say
+# which optional collections the body carries and which of them were cut at the include limit.
+# Without them an empty `transactions` meant both "not requested" and "requested, none exist", and
+# the admin activity panel reported zero for a period it had never asked about. Both operations
+# were ALREADY in this dictionary and stay in it, for the differences they already had; canon and
+# generated moved together, nothing entered or left, and no entry got worse.
+# Same day, second move of this digest: `AdminGraphTransactionItem` gained `from`, `to` and
+# `edges` - the projection the spec prescribes and the first edition of the fix shipped short,
+# without which a payment could not be attributed to anyone but its initiator and every other
+# participant's count stayed zero. Count still 63.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "d90ee8c84ffbb1bc07d1cd1c2938cd232d32a6c373af3f2eef45dcc4e84a7630"
+    "b99407fae6991b1411efb60a62ee41d148056d9bec498c1f40bddfd3afff6b36"
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 63
 # 2026-08-11 / T501: public DB health no longer declares exception details;
