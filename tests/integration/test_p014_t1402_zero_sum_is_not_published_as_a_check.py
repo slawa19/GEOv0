@@ -21,6 +21,7 @@ endpoints, `{"passed": True}` in the checkpoint) must redden them.
 from __future__ import annotations
 
 import ast
+import json
 import uuid
 from decimal import Decimal
 from pathlib import Path
@@ -161,3 +162,97 @@ def test_no_production_path_calls_check_zero_sum() -> None:
                 offenders.append(f"{path.relative_to(_ROOT)}:{node.lineno}")
 
     assert offenders == [], offenders
+
+
+# ---------------------------------------------------------------------------
+# Both of the following exist because the external review of this slice found them missing.
+# The first fix closed one of six sources and one of two schema shapes; these hold the other
+# halves to the code rather than to a commit message.
+# ---------------------------------------------------------------------------
+
+
+def test_no_checked_in_fixture_publishes_a_zero_sum_verdict() -> None:
+    """Every `integrity-status.json` in the tree, not just the one the mock happens to read.
+
+    The first edition of this slice edited `admin-ui/public/admin-fixtures/...`, which is a
+    DERIVED copy: `npm run dev` and `npm run build` both run `sync:fixtures`, which force-copies
+    over it from `admin-fixtures/v1`. Reproduced - one `npm run sync:fixtures` put the green
+    `passed: true` straight back, which would have reddened the fixture contract test on the next
+    build. Five sources were behind it: the canonical dataset, two scenario packs and two
+    generators. This walks the tree so a sixth cannot appear quietly.
+    """
+    found: list[str] = []
+    offenders: list[str] = []
+    for path in _ROOT.rglob("integrity-status.json"):
+        rel = path.relative_to(_ROOT)
+        if any(part in {"node_modules", "dist", ".local-run", ".git"} for part in rel.parts):
+            continue
+        found.append(str(rel))
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        for code, entry in (payload.get("equivalents") or {}).items():
+            zero_sum = (entry.get("invariants") or {}).get("zero_sum")
+            if zero_sum != _WITHDRAWN:
+                offenders.append(f"{rel}::{code} -> {zero_sum}")
+
+    assert found, "no fixture was scanned - an empty search is not a clean one"
+    assert offenders == [], offenders
+
+
+def test_a_checkpoint_stored_before_the_withdrawal_still_conforms_to_the_canon() -> None:
+    """`GET /integrity/checksum/{eq}` hands back a STORED `invariants_status` verbatim.
+
+    Rows written before T1402 carry `zero_sum: {"passed": true}` and can carry
+    `alerts: ["zero_sum"]`. They are evidence of what the system claimed at the time and are not
+    rewritten. The first edition of the canon admitted only the new shape, which declared a
+    reachable response impossible - the mirror of the defect programme 011 exists to fix, and
+    exactly the half of the finding that the audit-log schema had already been given.
+    """
+    from openapi_schema_validator import OAS30Validator
+
+    from tests.contract.openapi_response_conformance import load_canon, registry_for
+
+    canon = load_canon()
+    validator = OAS30Validator(
+        {"$ref": "urn:canon#/components/schemas/IntegrityInvariantsStatus"},
+        registry=registry_for(canon),
+    )
+
+    legacy = {
+        "computed_at": "2026-08-01T00:00:00+00:00",
+        "debts_count": 2,
+        "trustlines_count": 1,
+        "debts_non_negative": True,
+        "debts_negative_count": 0,
+        "status": "critical",
+        "checks": {
+            "zero_sum": {"passed": False, "details": {
+                "invariant": "ZERO_SUM_VIOLATION",
+                "violations": {"11111111-1111-1111-1111-111111111111": "0.00000001"},
+            }},
+            "trust_limits": {"passed": True, "violations": 0},
+            "debt_symmetry": {"passed": True, "violations": 0},
+        },
+        "alerts": ["zero_sum"],
+        "passed": False,
+    }
+    assert list(validator.iter_errors(legacy)) == [
+    ], [e.message for e in validator.iter_errors(legacy)]
+
+    legacy_pass = json.loads(json.dumps(legacy))
+    legacy_pass["checks"]["zero_sum"] = {"passed": True}
+    legacy_pass["alerts"] = []
+    legacy_pass["status"] = "healthy"
+    legacy_pass["passed"] = True
+    assert list(validator.iter_errors(legacy_pass)) == [
+    ], [e.message for e in validator.iter_errors(legacy_pass)]
+
+    current = json.loads(json.dumps(legacy_pass))
+    current["checks"]["zero_sum"] = dict(_WITHDRAWN)
+    current["unverified"] = ["zero_sum"]
+    assert list(validator.iter_errors(current)) == [
+    ], [e.message for e in validator.iter_errors(current)]
+
+    # And the thing the withdrawal must never allow: a verdict wearing the withdrawal's clothes.
+    fused = json.loads(json.dumps(current))
+    fused["checks"]["zero_sum"] = {**_WITHDRAWN, "passed": True}
+    assert list(validator.iter_errors(fused)), "a fused entry must not validate"

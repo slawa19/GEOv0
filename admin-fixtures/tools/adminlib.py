@@ -84,7 +84,12 @@ def generate_integrity_status(*, base_ts: datetime) -> dict[str, Any]:
     for code in ["UAH", "EUR", "HOUR"]:
         eq_status = "healthy"
         invariants: dict[str, Any] = {
-            "zero_sum": {"passed": True, "value": "0"},
+            # zero-sum carries no verdict since T1402 of programme 014: `check_zero_sum`
+            # telescopes to zero for any set of debt rows and cannot fail on corruption, so
+            # publishing `passed: True` was a claim the backend could not support. The generated
+            # mock must say what the service says, or mock mode shows a green tag the real
+            # service no longer claims.
+            "zero_sum": {"status": "not_verified", "reason": "check_withdrawn"},
             "trust_limits": {"passed": True, "violations": 0},
             "debt_symmetry": {"passed": True, "violations": 0},
         }
@@ -104,6 +109,11 @@ def generate_integrity_status(*, base_ts: datetime) -> dict[str, Any]:
             "checksum": "",
             "last_verified": _iso(base_ts - timedelta(minutes=10)),
             "invariants": invariants,
+            # Names in `invariants` that carry no verdict, derived rather than hard-coded so it
+            # empties itself when a real zero-sum check returns (programme 015).
+            "unverified": sorted(
+                k for k, v in invariants.items() if v.get("status") == "not_verified"
+            ),
         }
 
     overall_status = "healthy"

@@ -5864,19 +5864,53 @@ components:
       additionalProperties: true
       properties:
         zero_sum:
-          # Withdrawn, not failed and not passed. `passed` is FORBIDDEN here rather than merely
-          # absent: an optional boolean would let a future writer reintroduce the claim without
-          # the canon noticing, which is the defect this slice removes.
-          type: object
-          required: [status, reason]
-          additionalProperties: false
-          properties:
-            status:
-              type: string
-              enum: [not_verified]
-            reason:
-              type: string
-              enum: [check_withdrawn]
+          # TWO SHAPES, and the second one is not a concession - it is a stored fact.
+          #
+          # `GET /integrity/checksum/{equivalent}` hands back the `invariants_status` column of the
+          # latest checkpoint VERBATIM (app/api/v1/integrity.py, `_latest_checkpoint`). Rows written
+          # before the T1402 withdrawal carry `{"passed": true}`, they are evidence of what the
+          # system claimed at the time, and they are not rewritten. A contract that admitted only
+          # the new shape would declare a reachable response impossible - the mirror of the defect
+          # programme 011 exists to fix.
+          #
+          # So: WITHDRAWN is what every new row carries, and `passed` is FORBIDDEN inside that
+          # variant rather than merely absent - an optional boolean would let a future writer
+          # reintroduce the claim without the canon noticing. LEGACY is what pre-withdrawal rows
+          # carry and nothing writes any more.
+          oneOf:
+            - title: withdrawn
+              type: object
+              required: [status, reason]
+              additionalProperties: false
+              properties:
+                status:
+                  type: string
+                  enum: [not_verified]
+                reason:
+                  type: string
+                  enum: [check_withdrawn]
+            - title: legacy verdict, stored before the T1402 withdrawal
+              type: object
+              required: [passed]
+              additionalProperties: true
+              # `status` is FORBIDDEN on this branch, and that is not tidiness. Without it a
+              # producer could emit `{status: not_verified, reason: check_withdrawn, passed: true}`
+              # and the canon would accept it here as "a legacy verdict with extra keys" - the
+              # withdrawal reintroduced through the door opened to describe stored rows. Caught by
+              # the fused-entry assertion in
+              # tests/integration/test_p014_t1402_zero_sum_is_not_published_as_a_check.py, which
+              # is why that assertion exists.
+              not:
+                required: [status]
+              properties:
+                passed:
+                  type: boolean
+                details:
+                  # Absent or an object - never null. The old pass path wrote `{"passed": true}`
+                  # with no `details` at all; the old failure path wrote `exc.details`, which every
+                  # raise in app/core/invariants.py supplies as a dict.
+                  oneOf:
+                    - $ref: '#/components/schemas/InvariantViolationDetails'
         trust_limits:
           type: object
           required: [passed, violations]
@@ -5957,14 +5991,15 @@ components:
           # Bare check names, one per failed check - a different vocabulary from the
           # sentence-style alerts on IntegrityStatusResponse.
           #
-          # `zero_sum` was removed from this enum by T1402 of programme 014: a withdrawn check is
-          # never evaluated, so it can never be a DETECTED failure. This is the failure
-          # vocabulary for NEW results; rows already stored may carry it and are described by
-          # IntegrityAuditLogCheckResult below.
+          # `zero_sum` STAYS in this enum although nothing writes it any more. T1402 of programme
+          # 014 withdrew the check, so a new result can never name it - a check that is never
+          # evaluated can never be a detected failure. But this object is also handed back
+          # verbatim from stored checkpoints, and a row written before the withdrawal can carry
+          # `alerts: ["zero_sum"]`. Narrowing the enum here declared that stored row impossible.
           type: array
           items:
             type: string
-            enum: [trust_limits, debt_symmetry]
+            enum: [zero_sum, trust_limits, debt_symmetry]
         passed:
           # Scoped to the checks that were actually evaluated - see `unverified` below.
           type: boolean

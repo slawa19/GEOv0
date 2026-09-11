@@ -279,8 +279,19 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # the working tree: 63 operations before, 63 after, `after - before` empty and `before - after`
 # empty. No operation entered this dictionary and none left it; what changed is the content of
 # three entries that were already in it.
+#
+# Same day, second move: external review of this slice found that the first edition described
+# only the NEW zero_sum shape, while `GET /integrity/checksum/{equivalent}` hands back a STORED
+# `invariants_status` verbatim - so a checkpoint written before the withdrawal, carrying
+# `{"passed": true}` and possibly `alerts: ["zero_sum"]`, became a reachable response the
+# canonical contract said could not happen. The legacy variant is now described beside the
+# withdrawal, `zero_sum` is back in the checkpoint `alerts` enum for stored rows only, and the
+# legacy branch FORBIDS `status` - without that the withdrawal could be reintroduced as "a legacy
+# verdict with extra keys", which the fused-entry assertion in the T1402 module caught. Same
+# measurement as above and the same narrow claim: 63 drifting operations before this second edit
+# and 63 after, computed on both trees, nothing entering or leaving.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "18effc2faa71bea2ad570c391bb21015c5a5c1fb1f6c362a32a56c3687fcca2d"
+    "be0ed3947fd950a9303ce7c5a6d3d312f45ba161e042be58c0c7922e155e187c"
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 63
 # 2026-08-11 / T501: public DB health no longer declares exception details;
