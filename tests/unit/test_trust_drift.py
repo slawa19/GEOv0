@@ -374,7 +374,11 @@ class TestApplyTrustGrowth:
             t for t in s_tls
             if t["from"] == "alice" and t["to"] == "bob"
         )
-        assert ab_tl["limit"] == expected_limit
+        # T1514: compare the VALUE, not the representation. The scenario used to carry the
+        # limit as `float(...)`, and these assertions pinned that - `1050.0 == 1050.0`. Money
+        # that is written back to `trust_lines.limit` must not pass through binary floating
+        # point, so the entry is a string now; the number it denotes is unchanged.
+        assert Decimal(str(ab_tl["limit"])) == Decimal(str(expected_limit))
         assert observed_limit_at_commit == [1000.0]
         assert "UAH" not in PaymentRouter._graph_cache
 
@@ -439,7 +443,11 @@ class TestApplyTrustGrowth:
         with pytest.raises(asyncio.CancelledError, match="growth cancelled"):
             await task
 
-        assert scenario["trustlines"][0]["limit"] == 1050.0
+        # T1514: compare the VALUE, not the representation. The scenario used to carry the
+        # limit as `float(...)`, and these assertions pinned that - `1050.0 == 1050.0`. Money
+        # that is written back to `trust_lines.limit` must not pass through binary floating
+        # point, so the entry is a string now; the number it denotes is unchanged.
+        assert Decimal(str(scenario["trustlines"][0]["limit"])) == Decimal("1050")
         assert "UAH" not in PaymentRouter._graph_cache
 
     async def test_growth_capped_by_max_growth(self) -> None:
@@ -473,7 +481,11 @@ class TestApplyTrustGrowth:
             t for t in s_tls
             if t["from"] == "alice" and t["to"] == "bob"
         )
-        assert ab_tl["limit"] == round(float(cap), 2)
+        # T1514: compare the VALUE, not the representation. The scenario used to carry the
+        # limit as `float(...)`, and these assertions pinned that - `1050.0 == 1050.0`. Money
+        # that is written back to `trust_lines.limit` must not pass through binary floating
+        # point, so the entry is a string now; the number it denotes is unchanged.
+        assert Decimal(str(ab_tl["limit"])) == Decimal(cap).quantize(Decimal("1E-8"))
 
     async def test_growth_updates_clearing_history(self) -> None:
         """After growth: clearing_count += 1, last_clearing_tick updated, cleared_volume accumulated."""
@@ -580,7 +592,11 @@ class TestApplyTrustDecay:
             t for t in scenario["trustlines"]
             if t["from"] == "alice" and t["to"] == "bob"
         )
-        assert ab_tl["limit"] == expected
+        # T1514: compare the VALUE, not the representation. The scenario used to carry the
+        # limit as `float(...)`, and these assertions pinned that - `1050.0 == 1050.0`. Money
+        # that is written back to `trust_lines.limit` must not pass through binary floating
+        # point, so the entry is a string now; the number it denotes is unchanged.
+        assert Decimal(str(ab_tl["limit"])) == Decimal(str(expected))
 
     async def test_decay_floored_by_min_limit_ratio(self) -> None:
         """Repeated decay doesn't drop below original_limit × min_limit_ratio."""
@@ -635,7 +651,11 @@ class TestApplyTrustDecay:
         )
         # new_limit = max(350 * (1 - 0.5), 1000 * 0.3) = max(175, 300) = 300.0
         ab_tl = scenario["trustlines"][0]
-        assert ab_tl["limit"] == 300.0
+        # T1514: compare the VALUE, not the representation. The scenario used to carry the
+        # limit as `float(...)`, and these assertions pinned that - `1050.0 == 1050.0`. Money
+        # that is written back to `trust_lines.limit` must not pass through binary floating
+        # point, so the entry is a string now; the number it denotes is unchanged.
+        assert Decimal(str(ab_tl["limit"])) == Decimal("300")
 
     async def test_decay_skips_underloaded_edges(self) -> None:
         """debt/limit < 0.8 → limit unchanged."""

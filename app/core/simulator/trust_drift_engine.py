@@ -9,6 +9,20 @@ from sqlalchemy import select, update
 
 from app.core.payments.router import PaymentRouter
 from app.core.simulator.commit_resolution import resolve_commit_under_cancellation
+from app.utils.validation import MONEY_MAX_SCALE
+
+# The grain of the ledger, not of a currency's display. `trust_lines.limit` and `debts.amount` are
+# `Numeric(20, 8)`, and since 012/T1201 the money door refuses anything the column cannot hold
+# unchanged - so eight fraction digits are legitimate content that the production core writes.
+#
+# This engine used to quantise to `Decimal("0.01")` on both the read and the write of a stored
+# limit, so a limit the column held exactly was flattened to cents on the first drift tick and
+# every later tick started from the flattened number: the limit walked away from what was agreed.
+# `Equivalent.precision` is deliberately NOT used as the quantum here - it is a DISPLAY minimum
+# (`app/utils/money.py`), not the ledger's grain, and rounding stored money to it would be the same
+# defect wearing a different constant.
+_LEDGER_QUANTUM = Decimal(1).scaleb(-MONEY_MAX_SCALE)
+
 from app.core.simulator.models import (
     EdgeClearingHistory,
     RunRecord,
@@ -126,7 +140,14 @@ class TrustDriftEngine:
                     .upper()
                     == update_item.equivalent
                 ):
-                    trustline["limit"] = float(update_item.new_limit)
+                    # T1514: NOT `float`. This entry is what the decay path reads on the next
+                    # tick and turns into a DB write, so a limit the column holds exactly was
+                    # being round-tripped through binary floating point between the two halves of
+                    # one feature. A string is what every reader of this dict already expects -
+                    # they all do `Decimal(str(...))` - and it is the money form 012/`T1207`
+                    # settled on. `SimulatorGraphLink.trust_limit` is `NumberOrString`, so the
+                    # snapshot accepts it unchanged.
+                    trustline["limit"] = str(update_item.new_limit)
                     break
 
         for equivalent in result.touched_equivalents:
@@ -264,9 +285,10 @@ class TrustDriftEngine:
                 continue
 
             try:
-                current_limit = Decimal(str(tl_limit_row)).quantize(
-                    Decimal("0.01"), rounding=ROUND_DOWN
-                )
+                # T1514: read the stored limit AS STORED. Truncating it to cents here was the
+                # first half of the walk - the multiplication below then started from a number
+                # the database never held.
+                current_limit = Decimal(str(tl_limit_row))
             except Exception:
                 continue
 
@@ -274,10 +296,14 @@ class TrustDriftEngine:
                 Decimal("0.0000001")
             )
             max_growth = Decimal(str(cfg.max_growth))
+            # T1514: quantise to the LEDGER's grain, not to cents. The multiplication can
+            # produce more digits than the column holds, so a quantum is required here - it is
+            # the size of it that was wrong. `ROUND_DOWN` is kept: it keeps the result under both
+            # bounds of the `min`, which is the direction a ceiling must round.
             new_limit = min(
                 (current_limit * rate_mult),
                 (original_limit * max_growth),
-            ).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+            ).quantize(_LEDGER_QUANTUM, rounding=ROUND_DOWN)
 
             if new_limit != current_limit:
                 await clearing_session.execute(
@@ -382,11 +408,14 @@ class TrustDriftEngine:
             if hist.last_clearing_tick == tick_index:
                 continue
 
-            # Get current limit from scenario (in-memory, kept in sync by growth)
+            # Get current limit from scenario (in-memory, kept in sync by growth).
+            #
+            # T1514: no re-quantisation. This entry is the DB limit round-tripped through
+            # `apply_committed_effects`, so truncating it here is the same rewrite as on the
+            # growth side, one hop removed - and the value computed from it IS written back to
+            # `trust_lines.limit` below.
             try:
-                current_limit = Decimal(str(tl.get("limit", 0))).quantize(
-                    Decimal("0.01"), rounding=ROUND_DOWN
-                )
+                current_limit = Decimal(str(tl.get("limit", 0)))
             except Exception:
                 continue
             if current_limit <= 0:
@@ -413,16 +442,24 @@ class TrustDriftEngine:
             # Guardrail: trust drift must never shrink limit below already-used debt,
             # otherwise we can create a TRUST_LIMIT_VIOLATION without any new payment.
             try:
+                # T1514: the floor is DB money - `sum(debts.amount)` - and it can WIN the `max`
+                # below, in which case it becomes the written limit. At the ledger's own grain
+                # this rounding is an identity on a stored value; `ROUND_UP` is kept because a
+                # floor must never be understated, and it is the one place in this file where
+                # rounding up is the safe direction (see `F-015-16` on the rounding-mode split).
                 debt_floor = Decimal(str(debt_amount)).quantize(
-                    Decimal("0.01"), rounding=ROUND_UP
+                    _LEDGER_QUANTUM, rounding=ROUND_UP
                 )
             except Exception:
                 debt_floor = Decimal("0")
+            # T1514: the ledger's grain, as on the growth side. `ROUND_DOWN` is kept, and it
+            # is safe against the floor: `debt_floor` is already at this grain, so rounding the
+            # `max` down cannot take the result below it.
             new_limit = max(
                 (current_limit * decay_mult),
                 (original_limit * min_ratio),
                 debt_floor,
-            ).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+            ).quantize(_LEDGER_QUANTUM, rounding=ROUND_DOWN)
 
             if new_limit == current_limit:
                 continue

@@ -131,8 +131,26 @@ async def test_trust_drift_decay_never_shrinks_below_used_debt(db_session):
         )
     ).scalar_one()
 
-    # The clamp rounds the debt floor up to 0.01.
-    assert Decimal(str(db_limit)) >= Decimal("99.01")
+    # T1514: the floor is the USED DEBT, exactly, and no longer a cent above it.
+    #
+    # This asserted `>= 99.01` and its own comment said why: "the clamp rounds the debt floor up to
+    # 0.01". That is the rounding artefact, not the rule. The rule this test is named for is that
+    # decay must never take the limit BELOW the debt already drawn against it, and a cent of
+    # headroom on top of that is trust the creditor never extended - invented by a quantum, every
+    # tick, on a ledger that stores eight digits.
+    #
+    # The invariant is asserted against the debt itself, and the authoritative check two lines
+    # below - `check_trust_limits`, which is production code and not this test's arithmetic - is
+    # what actually decides it. That check passed before this change and passes after it.
+    used_debt = Decimal("99.00000001")
+    assert Decimal(str(db_limit)) >= used_debt
+
+    # And EXACTLY the debt, because here the floor is what wins the `max`. The `>=` above holds
+    # under either rounding and therefore pins nothing: a mutation putting the cent-grained
+    # `ROUND_UP` floor back survived it, which is how this line came to exist. The difference it
+    # pins is a cent of headroom above the debt - trust the creditor never extended, invented by a
+    # quantum on every decay tick.
+    assert Decimal(str(db_limit)) == used_debt
 
     checker = InvariantChecker(db_session)
     assert await checker.check_trust_limits(equivalent_id=eq.id) == []

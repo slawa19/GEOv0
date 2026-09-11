@@ -378,9 +378,20 @@ class InjectExecutor:
                     )
                 )
             else:
-                new_amt = (Decimal(str(existing.amount)) + amount).quantize(
-                    Decimal("0.01"), rounding=ROUND_DOWN
-                )
+                # NO RE-QUANTISATION OF WHAT IS ALREADY STORED. T1514 of programme 015.
+                #
+                # This read the row back, added its own amount and rounded the SUM down to cents
+                # before writing it back. `debts` is shared with the production core, which stores
+                # at the column's own scale - `Numeric(20, 8)` - and since 012/T1201 the money door
+                # refuses anything the column cannot hold unchanged, so eight fraction digits are
+                # legitimate ledger content. A debt of 5.12345678 became 6.12 after an injected
+                # 1.00: 0.00345678 destroyed by a rounding nobody asked for, in a table the
+                # simulator does not own, and the result feeds the next operation.
+                #
+                # `amount` is already normalised to the simulator's own input scale above, so the
+                # sum is storable as it stands. Normalising the INPUT is the simulator's business;
+                # rewriting a stored value is not.
+                new_amt = Decimal(str(existing.amount)) + amount
                 if new_amt > tl_limit_amt:
                     skipped += 1
                     return False
