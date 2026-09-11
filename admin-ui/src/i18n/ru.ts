@@ -435,6 +435,7 @@ export const RU: Record<string, string> = {
   'integrity.help.equivalents': 'Статус инвариантов по каждому эквиваленту. Сначала смотрите failed и число violations.',
   'integrity.section.rawPayload': 'Сырые данные',
   'integrity.columns.debtSymmetry': 'Симметрия долгов',
+  'integrity.notVerified': 'не проверяется',
   'integrity.columns.zeroSum': 'Нулевой баланс',
   'integrity.columns.trustLimits': 'Лимиты доверия',
 

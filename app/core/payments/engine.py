@@ -1239,7 +1239,15 @@ class PaymentEngine:
 
                 await self.session.flush()
 
-            # 2a. Invariants: trust limits + zero-sum smoke-check
+            # 2a. Invariants: trust limits + debt symmetry.
+            #
+            # The zero-sum call that stood here was removed by T1402 of programme 014. It scanned
+            # the whole equivalent on every payment and could not fail: `_compute_imbalance` sums
+            # the same `Debt` rows grouped by creditor and by debtor and returns the difference,
+            # which telescopes to zero for any row set. Aborting a payment on it was therefore
+            # impossible, and 008 required the call removed from this path
+            # (`008/tasks.md:305,311-321`). Nothing replaces it here: the replacement invariant is
+            # programme 015, and this path must not pretend to a check it is not making.
             from app.core.invariants import InvariantChecker
             from app.utils.exceptions import IntegrityViolationException
 
@@ -1249,7 +1257,6 @@ class PaymentEngine:
                     await checker.check_trust_limits(
                         equivalent_id=eq_id, participant_pairs=list(pairs)
                     )
-                    await checker.check_zero_sum(equivalent_id=eq_id)
                     await checker.check_debt_symmetry(
                         equivalent_id=eq_id, participant_pairs=list(pairs)
                     )

@@ -52,7 +52,12 @@ async def test_create_fails_closed_when_actual_invariant_checker_is_unavailable(
     async def _checker_unavailable(*_args, **_kwargs):
         raise RuntimeError("invariant checker unavailable")
 
-    monkeypatch.setattr(InvariantChecker, "check_zero_sum", _checker_unavailable)
+    # Patches `check_trust_limits`, not `check_zero_sum`. The checkpoint this service computes
+    # for its audit trail used to call zero-sum first, so patching zero-sum was enough to make
+    # the checker unavailable; T1402 withdrew that call, and the probe would have stopped firing
+    # while this test kept passing on nothing. The subject - trustline creation must fail closed
+    # rather than commit without a checkpoint - is unchanged.
+    monkeypatch.setattr(InvariantChecker, "check_trust_limits", _checker_unavailable)
     commit = AsyncMock()
     monkeypatch.setattr(db_session, "commit", commit)
 

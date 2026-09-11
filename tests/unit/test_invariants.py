@@ -20,7 +20,7 @@ from app.utils.exceptions import IntegrityViolationException
 
 
 @pytest.mark.asyncio
-async def test_zero_sum_passes_for_simple_debt(db_session):
+async def test_edge_model_attributes_a_debt_directionally(db_session):
     nonce = uuid.uuid4().hex[:10]
     eq = Equivalent(code=("T" + nonce[:15]).upper(), symbol="T", description=None, precision=2, metadata_={}, is_active=True)
     a = Participant(pid="A" + nonce, display_name="A", public_key="pkA-" + nonce, type="person", status="active", profile={})
@@ -32,7 +32,35 @@ async def test_zero_sum_passes_for_simple_debt(db_session):
     await db_session.flush()
 
     checker = InvariantChecker(db_session)
-    assert await checker.check_zero_sum(equivalent_id=eq.id) == {}
+
+    # WAS `assert await checker.check_zero_sum(equivalent_id=eq.id) == {}` - true for any data
+    # whatsoever, and therefore not a test of anything this fixture set up (F-014-2, T1403).
+    # `_compute_imbalance` sums the SAME `Debt` rows grouped by creditor and grouped by debtor and
+    # returns the difference, so it telescopes to zero for every input; `{}` was the only
+    # reachable return. Deleting it outright would shrink coverage along with the false
+    # confidence, so it is REPLACED by the falsifiable claim this fixture actually supports.
+    #
+    # The claim: the edge model attributes a debt DIRECTIONALLY. That is exactly what the old
+    # assertion was blind to - swapping `Debt.creditor_id` for `Debt.debtor_id` in either
+    # aggregate of `_compute_imbalance` leaves its total at zero, and left `== {}` green.
+    assert await checker._calculate_net_position(a.id, eq.id) == Decimal("-100")
+    assert await checker._calculate_net_position(b.id, eq.id) == Decimal("100")
+
+    # And the documented rule that a missing trustline is a limit of zero: this fixture creates
+    # no trustline at all, so a debt of 100 must violate. An inner join in place of the outer one
+    # at app/core/invariants.py, or a different coalesce default, reddens this.
+    with pytest.raises(IntegrityViolationException) as exc_info:
+        await checker.check_trust_limits(equivalent_id=eq.id)
+    violations = exc_info.value.details["violations"]
+    assert len(violations) == 1
+    from decimal import Decimal as _D
+
+    assert _D(violations[0]["trust_limit"]) == _D("0")
+    assert _D(violations[0]["debt_amount"]) == _D("100")
+
+    # Zero-sum itself is no longer published as a check at all (T1402). What the wire now says is
+    # asserted where it is produced - tests/integration/test_integrity_endpoints.py and
+    # tests/unit/test_integrity_checkpoints.py - not here.
 
 
 @pytest.mark.asyncio

@@ -18,6 +18,8 @@ from app.db.models.integrity_checkpoint import IntegrityCheckpoint
 from app.db.models.trustline import TrustLine
 from app.schemas.integrity import (
     EquivalentIntegrityStatus,
+    InvariantOutcome,
+    InvariantWithdrawn,
     IntegrityAuditLogItem,
     IntegrityAuditLogResponse,
     IntegrityChecksumResponse,
@@ -33,6 +35,14 @@ from app.utils.request_id import request_id_var
 from app.utils.validation import validate_equivalent_code
 
 router = APIRouter()
+
+
+def _unverified_names(invariants: dict[str, InvariantOutcome]) -> list[str]:
+    """Names carrying no verdict, derived from the values rather than hard-coded.
+
+    Hard-coding `["zero_sum"]` would keep saying "not verified" after 015 restores a real check.
+    """
+    return sorted(k for k, v in invariants.items() if isinstance(v, InvariantWithdrawn))
 
 
 def _now() -> datetime:
@@ -95,20 +105,18 @@ async def get_integrity_status(
 
     for eq in equivalents:
         status = "healthy"
-        invariants: dict[str, InvariantResult] = {}
+        invariants: dict[str, InvariantOutcome] = {}
 
         checkpoint = await _latest_checkpoint(db, equivalent_id=eq.id)
         checksum = checkpoint.checksum if checkpoint else ""
         last_verified = checkpoint.created_at if checkpoint else None
 
-        try:
-            await checker.check_zero_sum(equivalent_id=eq.id)
-            invariants["zero_sum"] = InvariantResult(passed=True, value="0")
-        except IntegrityViolationException as exc:
-            invariants["zero_sum"] = InvariantResult(passed=False, details=exc.details)
-            status = "critical"
-            overall_status = "critical"
-            alerts.append(f"Zero-sum violation in {eq.code}")
+        # zero-sum: WITHDRAWN by T1402 of programme 014. Not called, no verdict published.
+        # `check_zero_sum` telescopes to zero for any set of `Debt` rows, so it could not fail on
+        # corruption; `passed=True, value="0"` was a measurement of nothing. The key stays so the
+        # response keeps naming every protocol invariant, and `unverified` below keeps the gap
+        # visible in the summary rather than implied by a missing key.
+        invariants["zero_sum"] = InvariantWithdrawn()
 
         try:
             await checker.check_trust_limits(equivalent_id=eq.id)
@@ -145,6 +153,7 @@ async def get_integrity_status(
             checksum=checksum,
             last_verified=last_verified,
             invariants=invariants,
+            unverified=_unverified_names(invariants),
         )
 
     return IntegrityStatusResponse(
@@ -204,16 +213,14 @@ async def verify_integrity(
 
     for eq in equivalents:
         status = "healthy"
-        invariants: dict[str, InvariantResult] = {}
+        invariants: dict[str, InvariantOutcome] = {}
 
-        try:
-            await checker.check_zero_sum(equivalent_id=eq.id)
-            invariants["zero_sum"] = InvariantResult(passed=True, value="0")
-        except IntegrityViolationException as exc:
-            invariants["zero_sum"] = InvariantResult(passed=False, details=exc.details)
-            status = "critical"
-            overall_status = "critical"
-            alerts.append(f"Zero-sum violation in {eq.code}")
+        # zero-sum: WITHDRAWN by T1402 of programme 014. Not called, no verdict published.
+        # `check_zero_sum` telescopes to zero for any set of `Debt` rows, so it could not fail on
+        # corruption; `passed=True, value="0"` was a measurement of nothing. The key stays so the
+        # response keeps naming every protocol invariant, and `unverified` below keeps the gap
+        # visible in the summary rather than implied by a missing key.
+        invariants["zero_sum"] = InvariantWithdrawn()
 
         try:
             await checker.check_trust_limits(equivalent_id=eq.id)
@@ -251,6 +258,7 @@ async def verify_integrity(
             checksum=checkpoint.checksum if checkpoint else "",
             last_verified=checkpoint.created_at if checkpoint else None,
             invariants=invariants,
+            unverified=_unverified_names(invariants),
         )
 
         # FIX-014: integrity audit trail entry (verify operation).

@@ -64,6 +64,9 @@ const detectedIssues = computed<IssueKey[]>(() => {
 
     if (debt?.passed === false) found.add('debt_symmetry')
     if (trust?.passed === false) found.add('trust_limits')
+    // A withdrawn check has no `passed` at all, so it can never be a DETECTED issue. Since T1402
+    // of programme 014 the server sends `{status: 'not_verified'}` for zero_sum; the branch stays
+    // because an older server, and every stored historical row, still carries a boolean.
     if (zero?.passed === false) found.add('zero_sum')
   }
 
@@ -81,6 +84,22 @@ function tagTypeForPassed(passed: unknown): 'success' | 'danger' | 'info' {
   if (passed === true) return 'success'
   if (passed === false) return 'danger'
   return 'info'
+}
+
+// A check the server declares it does not evaluate. Rendered as its own neutral state, never as
+// passed and never as failed: those two are verdicts and there is no verdict here.
+function isWithdrawn(entry: unknown): boolean {
+  return asRecord(entry)?.status === 'not_verified'
+}
+
+function outcomeTagType(entry: unknown): 'success' | 'danger' | 'info' {
+  if (isWithdrawn(entry)) return 'info'
+  return tagTypeForPassed(asRecord(entry)?.passed)
+}
+
+function outcomeLabel(entry: unknown): string {
+  if (isWithdrawn(entry)) return t('integrity.notVerified')
+  return asRecord(entry)?.passed ? t('common.passed') : t('common.failed')
 }
 
 async function load() {
@@ -460,10 +479,10 @@ onMounted(() => void load())
         >
           <template #default="scope">
             <el-tag
-              :type="tagTypeForPassed(scope.row[1]?.invariants?.zero_sum?.passed)"
+              :type="outcomeTagType(scope.row[1]?.invariants?.zero_sum)"
               effect="plain"
             >
-              {{ scope.row[1]?.invariants?.zero_sum?.passed ? t('common.passed') : t('common.failed') }}
+              {{ outcomeLabel(scope.row[1]?.invariants?.zero_sum) }}
             </el-tag>
           </template>
         </el-table-column>

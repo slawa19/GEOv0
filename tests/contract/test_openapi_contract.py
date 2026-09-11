@@ -262,8 +262,25 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # gap: the canon restricted `included`/`truncated` to three names while the response model
 # accepted `list[str]` and admin-ui accepted `z.string()`. Both are now the closed set the canon
 # declares, which is what moves the digest here. Count still 63.
+#
+# 2026-09-11 / 014 T1402 (`F-014-1`): count HOLDS at 63, digest moves. zero-sum stopped being
+# published as a passed check. `GET /integrity/status`, `POST /integrity/verify` and
+# `GET /integrity/checksum/{equivalent}` now describe the `zero_sum` entry as
+# `{status: not_verified, reason: check_withdrawn}` with `passed` FORBIDDEN, and
+# `EquivalentIntegrityStatus` gained a required `unverified` list so the aggregate `status`
+# cannot read as "all three were checked". All three operations were ALREADY in this dictionary
+# and stay in it.
+#
+# THE REVIEW THIS RATCHET ASKS FOR, done the way the correction above says it must be. Updating
+# the digest ACCEPTS whatever difference is there; it does not show alignment. So the claim is
+# not "no entry got worse" - it is the narrower thing that was actually measured: the SET of
+# drifting operations is unchanged. Computed on both trees by running the same
+# `_operation_pairs` / `_normalized_responses` pair over HEAD in a detached worktree and over
+# the working tree: 63 operations before, 63 after, `after - before` empty and `before - after`
+# empty. No operation entered this dictionary and none left it; what changed is the content of
+# three entries that were already in it.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "31ccdb73e40138d831491cdf7684c189da37c7335bc7c5cee98d2d8b6bb871d0"
+    "18effc2faa71bea2ad570c391bb21015c5a5c1fb1f6c362a32a56c3687fcca2d"
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 63
 # 2026-08-11 / T501: public DB health no longer declares exception details;

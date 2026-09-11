@@ -435,6 +435,7 @@ export const EN: Record<string, string> = {
   'integrity.help.equivalents': 'Integrity status grouped by equivalent. Focus on failed invariants and violations counts.',
   'integrity.section.rawPayload': 'Raw Payload',
   'integrity.columns.debtSymmetry': 'Debt symmetry',
+  'integrity.notVerified': 'not verified',
   'integrity.columns.zeroSum': 'Zero-sum',
   'integrity.columns.trustLimits': 'Trust limits',
 

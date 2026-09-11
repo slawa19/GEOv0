@@ -5849,32 +5849,34 @@ components:
                 type: string
 
     IntegrityInvariantChecks:
-      # All three checks always run and always record an outcome, so all three keys are present
-      # whenever `checks` is (app/core/integrity.py:79-114). The value shapes deliberately are not
-      # one shared schema: zero_sum has no violation count to report and never writes a
-      # `violations` key - not on the pass path and not on the failure path either.
+      # All three keys are present whenever `checks` is, but they no longer all carry a verdict.
+      # zero_sum is WITHDRAWN by T1402 of programme 014: `check_zero_sum` sums the same `Debt`
+      # rows grouped by creditor and grouped by debtor and returns the difference, so it
+      # telescopes to zero for any row set and cannot fail on corruption. It is no longer called,
+      # and its entry carries no `passed`. The key is kept so the object still names every
+      # protocol invariant - an absent key would read as "this deployment has no such check".
+      #
+      # The value shapes deliberately are not one shared schema, and now for two reasons: the two
+      # live checks differ from each other in whether they report a violation count, and zero_sum
+      # differs from both in having no verdict at all.
       type: object
       required: [zero_sum, trust_limits, debt_symmetry]
       additionalProperties: true
       properties:
         zero_sum:
+          # Withdrawn, not failed and not passed. `passed` is FORBIDDEN here rather than merely
+          # absent: an optional boolean would let a future writer reintroduce the claim without
+          # the canon noticing, which is the defect this slice removes.
           type: object
-          required: [passed]
-          additionalProperties: true
+          required: [status, reason]
+          additionalProperties: false
           properties:
-            passed:
-              type: boolean
-            details:
-              # Absent or an object - never null, unlike the `details` on InvariantResult below.
-              # This node is a plain dict literal, not a pydantic model, so an unset key is simply
-              # missing: the pass path writes `{"passed": true}` / `{"passed": true,
-              # "violations": 0}` and no `details` at all, and the failure path writes
-              # `exc.details`, which every raise in app/core/invariants.py supplies as a dict
-              # (app/core/integrity.py:79-114). The `nullable: true` that stood here was untrue,
-              # and inert besides - in OpenAPI 3.0.3 `nullable` modifies a sibling `type` and
-              # nothing else, so beside a bare `oneOf` it stated nothing (`F-011-10`).
-              oneOf:
-                - $ref: '#/components/schemas/InvariantViolationDetails'
+            status:
+              type: string
+              enum: [not_verified]
+            reason:
+              type: string
+              enum: [check_withdrawn]
         trust_limits:
           type: object
           required: [passed, violations]
@@ -5954,12 +5956,24 @@ components:
         alerts:
           # Bare check names, one per failed check - a different vocabulary from the
           # sentence-style alerts on IntegrityStatusResponse.
+          #
+          # `zero_sum` was removed from this enum by T1402 of programme 014: a withdrawn check is
+          # never evaluated, so it can never be a DETECTED failure. This is the failure
+          # vocabulary for NEW results; rows already stored may carry it and are described by
+          # IntegrityAuditLogCheckResult below.
           type: array
           items:
             type: string
-            enum: [zero_sum, trust_limits, debt_symmetry]
+            enum: [trust_limits, debt_symmetry]
         passed:
+          # Scoped to the checks that were actually evaluated - see `unverified` below.
           type: boolean
+        unverified:
+          # The names in `checks` that carry no verdict, sorted. Written since T1402 of programme
+          # 014; rows stored before it do not have the key, which is why it is not required here.
+          type: array
+          items:
+            type: string
 
     IntegrityAuditLogAfterState:
       # Not a stored blob: the handler builds this dict field by field from an
@@ -6108,7 +6122,30 @@ components:
               additionalProperties: false
         additionalProperties: false
 
+    InvariantWithdrawn:
+      # An invariant that is NOT evaluated. T1402 of programme 014.
+      #
+      # Deliberately not `InvariantResult` with an optional `passed`: widening `passed` would
+      # weaken the two checks that do work, and would leave "not verified" expressible as a pass.
+      # This variant cannot carry `passed`, a `value`, `violations` or `details`, so no reader can
+      # turn it into a verdict. Producers: app/api/v1/integrity.py (both endpoints) and
+      # app/core/integrity.py (the checkpoint).
+      #
+      # Building the replacement check is programme 015. This says the gap; it does not fill it.
+      type: object
+      required: [status, reason]
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum: [not_verified]
+        reason:
+          type: string
+          enum: [check_withdrawn]
+
     InvariantResult:
+      # An invariant that WAS evaluated. `passed` stays required: this schema describes a verdict,
+      # and a verdict that may be absent is not a verdict.
       type: object
       required: [passed]
       properties:
@@ -6149,7 +6186,7 @@ components:
 
     EquivalentIntegrityStatus:
       type: object
-      required: [status, checksum, invariants]
+      required: [status, checksum, invariants, unverified]
       properties:
         status:
           type: string
@@ -6161,9 +6198,23 @@ components:
           format: date-time
           nullable: true
         invariants:
+          # Each entry is either a verdict or an explicit withdrawal. The two are disjoint by
+          # construction - InvariantResult requires `passed`, InvariantWithdrawn forbids it - so
+          # `oneOf` here is exclusive and not merely a union of conveniences.
           type: object
           additionalProperties:
-            $ref: '#/components/schemas/InvariantResult'
+            oneOf:
+              - $ref: '#/components/schemas/InvariantWithdrawn'
+              - $ref: '#/components/schemas/InvariantResult'
+        unverified:
+          # The names in `invariants` that carry no verdict, sorted. Without it the sibling
+          # `status` above would read as "everything was checked and the result is healthy" while
+          # one of the three named invariants is not being evaluated at all: the false assurance
+          # would move from the entry to the summary rather than being removed. Derived from the
+          # values, so it empties itself when 015 restores a real zero-sum check.
+          type: array
+          items:
+            type: string
       additionalProperties: false
 
     IntegrityStatusResponse:
@@ -8119,18 +8170,36 @@ components:
       #   (app/api/v1/integrity.py:273), and a plain model_dump of InvariantResult has no
       #   exclude_none, so ALL FOUR keys are present with explicit nulls.
       #
-      # Only `passed` is common to both, so only `passed` is required. This is deliberately not
-      # a `$ref` to InvariantResult nor to IntegrityInvariantChecks: the checkpoint entries would
-      # fail InvariantResult's shape expectations and the verify dump is a different producer.
+      # `passed` was common to both and was the only required key. Since T1402 of programme 014
+      # it is no longer common: a zero_sum entry written from today carries `{status, reason}` and
+      # no `passed` at all.
+      #
+      # THIS SCHEMA DESCRIBES STORED ROWS, INCLUDING OLD ONES. Rows written before the withdrawal
+      # carry `zero_sum: {"passed": true}`, and they are evidence of what the system said at the
+      # time - they are not rewritten, and that historical `passed: true` must not be read as
+      # current verification. So nothing is required here any more, and the two shapes are
+      # described side by side rather than one replacing the other.
+      #
+      # This is deliberately not a `$ref` to InvariantResult nor to IntegrityInvariantChecks: the
+      # checkpoint entries would fail InvariantResult's shape expectations and the verify dump is
+      # a different producer.
       type: object
-      required: [passed]
       additionalProperties: true
       properties:
+        status:
+          # Withdrawal shape, new rows only: zero_sum since T1402.
+          type: string
+          enum: [not_verified]
+        reason:
+          type: string
+          enum: [check_withdrawn]
         passed:
+          # Verdict shape. Present on every trust_limits and debt_symmetry entry, and on
+          # zero_sum entries stored BEFORE the T1402 withdrawal.
           type: boolean
         value:
-          # INTEGRITY_VERIFY only. The string "0" on the zero_sum pass path
-          # (app/api/v1/integrity.py:211), null everywhere else - including on every
+          # INTEGRITY_VERIFY only, and only on rows stored before the withdrawal: the string "0"
+          # on the old zero_sum pass path, null everywhere else - including on every
           # trust_limits and debt_symmetry entry.
           type: string
           nullable: true
