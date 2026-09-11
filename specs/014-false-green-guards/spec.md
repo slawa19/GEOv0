@@ -625,6 +625,17 @@ passed: true}` проходила по ней как «legacy-вердикт с 
 `tests/contract` — `125 passed`; Admin UI продакшен-сборка — собралась, и публичная фикстура после
 неё осталась снятой.
 
+**Круг по fix-delta израсходован и чист.** Замороженный клон на `8b18ed3` против базы `3abf479`,
+тот же ревьюер и та же конфигурация, exit `0`:
+
+> No actionable regressions were identified in the fix-delta. The fixture sources consistently
+> publish the withdrawn check, and the schema accommodates historical checkpoints while rejecting
+> fused legacy/withdrawn entries. Tests and canonical gates were not run in this read-only review.
+
+Оговорку про гейты воспроизвожу дословно: **ревью не запускало ни одного гейта ни в одном из двух
+кругов**, все приведённые цифры — локальные. Единственный разрешённый §15 круг по fix-delta
+(`AGENTS.md:597`) на этом израсходован; дальнейшие правки этого среза внешне проверены не будут.
+
 ## Current / Intended / Optimal
 
 **Current.** Ядро целостности публикует как пройденную проверку утверждение, истинное при любых
