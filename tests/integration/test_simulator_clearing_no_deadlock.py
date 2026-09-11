@@ -38,14 +38,21 @@ from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.core.simulator.models import RunRecord
 from app.core.simulator.real_runner import RealRunner
+from tests.scratch_db import scratch_db_path, scratch_db_url
 
 
 # ---------------------------------------------------------------------------
 # Isolated SQLite DB for this test (avoids interfering with other tests)
 # ---------------------------------------------------------------------------
 
-_TEST_DB_PATH = ".pytest_deadlock_test.db"
-_TEST_DB_URL = f"sqlite+aiosqlite:///{_TEST_DB_PATH}"
+# T1406: this module used to build its engine from a RELATIVE path, so the database landed
+# in the repository root - against AGENTS.md §7/§12, and unnoticed because the test-database
+# guard validates a URL and never looks at the filesystem. `tests/scratch_db` gives it a
+# directory of its own under `.local-run/test-runs/`, which also keeps concurrent sessions in
+# the shared working tree from colliding.
+_TEST_DB_SLUG = "simulator-clearing-no-deadlock"
+_TEST_DB_PATH = str(scratch_db_path(_TEST_DB_SLUG))
+_TEST_DB_URL = scratch_db_url(_TEST_DB_SLUG)
 
 
 @pytest_asyncio.fixture

@@ -31,6 +31,7 @@ from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.core.simulator.models import RunRecord
 from app.core.simulator.real_runner import RealRunner
+from tests.scratch_db import scratch_db_path, scratch_db_url
 
 
 # ---------------------------------------------------------------------------
@@ -55,8 +56,9 @@ _MAX_CLEARING_DEPTH = 6
 @pytest_asyncio.fixture
 async def ab_db():
     """Create a fresh SQLite engine + schema for A/B test."""
-    db_path = ".pytest_ab_benchmark.db"
-    url = f"sqlite+aiosqlite:///{db_path}"
+    # T1406: was a relative path, so the database landed in the repository root.
+    db_path = str(scratch_db_path("simulator-adaptive-clearing-ab"))
+    url = scratch_db_url("simulator-adaptive-clearing-ab")
 
     for suffix in ("", "-journal", "-wal", "-shm"):
         try:
