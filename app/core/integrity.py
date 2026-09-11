@@ -11,6 +11,7 @@ from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.integrity_checkpoint import IntegrityCheckpoint
 from app.db.models.trustline import TrustLine
+from app.schemas.integrity import ZERO_SUM_WITHDRAWN
 
 logger = logging.getLogger(__name__)
 
@@ -75,14 +76,18 @@ async def compute_integrity_checkpoint_for_equivalent(
 
     overall_status = "healthy"
 
-    # zero-sum (critical)
-    try:
-        await checker.check_zero_sum(equivalent_id=equivalent_id)
-        checks["zero_sum"] = {"passed": True}
-    except IntegrityViolationException as exc:
-        checks["zero_sum"] = {"passed": False, "details": exc.details}
-        overall_status = "critical"
-        alerts.append("zero_sum")
+    # zero-sum: WITHDRAWN by T1402 of programme 014, not evaluated.
+    #
+    # `check_zero_sum` sums the same `Debt` rows twice - grouped by creditor and grouped by
+    # debtor - and returns the difference, so it telescopes to zero for any row set. It cannot
+    # fail on data corruption, and the `passed: True` written here was a claim about integrity
+    # that the call could not support. It is no longer called, and no longer contributes to
+    # `overall_status`, to `alerts` or to `passed`: an unverified check must not be able to make
+    # the summary healthier, and must not be able to make it worse either.
+    #
+    # Building a real zero-sum check is programme 015. The key stays, and says what it is.
+    checks["zero_sum"] = dict(ZERO_SUM_WITHDRAWN)
+    unverified = ["zero_sum"]
 
     # trust limits (critical)
     try:
@@ -116,7 +121,10 @@ async def compute_integrity_checkpoint_for_equivalent(
     invariants_status["status"] = overall_status
     invariants_status["checks"] = checks
     invariants_status["alerts"] = alerts
+    # Scoped to the checks that were actually evaluated. `unverified` is what keeps that scoping
+    # visible to a reader instead of implied by absence.
     invariants_status["passed"] = overall_status == "healthy"
+    invariants_status["unverified"] = list(unverified)
 
     return IntegrityCheckpoint(
         equivalent_id=equivalent_id,

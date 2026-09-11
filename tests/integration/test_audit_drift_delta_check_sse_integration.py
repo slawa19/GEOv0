@@ -21,10 +21,17 @@ from app.db.base import Base
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.utils.exceptions import IntegrityViolationException
+from tests.scratch_db import scratch_db_path, scratch_db_url
 
 
-_TEST_DB_PATH = ".pytest_audit_drift_delta_check_sse.db"
-_TEST_DB_URL = f"sqlite+aiosqlite:///{_TEST_DB_PATH}"
+# T1406: this module used to build its engine from a RELATIVE path, so the database landed
+# in the repository root - against AGENTS.md §7/§12, and unnoticed because the test-database
+# guard validates a URL and never looks at the filesystem. `tests/scratch_db` gives it a
+# directory of its own under `.local-run/test-runs/`, which also keeps concurrent sessions in
+# the shared working tree from colliding.
+_TEST_DB_SLUG = "audit-drift-delta-check-sse"
+_TEST_DB_PATH = str(scratch_db_path(_TEST_DB_SLUG))
+_TEST_DB_URL = scratch_db_url(_TEST_DB_SLUG)
 
 
 def _utc_now() -> datetime:

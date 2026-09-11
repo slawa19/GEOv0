@@ -262,8 +262,36 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # gap: the canon restricted `included`/`truncated` to three names while the response model
 # accepted `list[str]` and admin-ui accepted `z.string()`. Both are now the closed set the canon
 # declares, which is what moves the digest here. Count still 63.
+#
+# 2026-09-11 / 014 T1402 (`F-014-1`): count HOLDS at 63, digest moves. zero-sum stopped being
+# published as a passed check. `GET /integrity/status`, `POST /integrity/verify` and
+# `GET /integrity/checksum/{equivalent}` now describe the `zero_sum` entry as
+# `{status: not_verified, reason: check_withdrawn}` with `passed` FORBIDDEN, and
+# `EquivalentIntegrityStatus` gained a required `unverified` list so the aggregate `status`
+# cannot read as "all three were checked". All three operations were ALREADY in this dictionary
+# and stay in it.
+#
+# THE REVIEW THIS RATCHET ASKS FOR, done the way the correction above says it must be. Updating
+# the digest ACCEPTS whatever difference is there; it does not show alignment. So the claim is
+# not "no entry got worse" - it is the narrower thing that was actually measured: the SET of
+# drifting operations is unchanged. Computed on both trees by running the same
+# `_operation_pairs` / `_normalized_responses` pair over HEAD in a detached worktree and over
+# the working tree: 63 operations before, 63 after, `after - before` empty and `before - after`
+# empty. No operation entered this dictionary and none left it; what changed is the content of
+# three entries that were already in it.
+#
+# Same day, second move: external review of this slice found that the first edition described
+# only the NEW zero_sum shape, while `GET /integrity/checksum/{equivalent}` hands back a STORED
+# `invariants_status` verbatim - so a checkpoint written before the withdrawal, carrying
+# `{"passed": true}` and possibly `alerts: ["zero_sum"]`, became a reachable response the
+# canonical contract said could not happen. The legacy variant is now described beside the
+# withdrawal, `zero_sum` is back in the checkpoint `alerts` enum for stored rows only, and the
+# legacy branch FORBIDS `status` - without that the withdrawal could be reintroduced as "a legacy
+# verdict with extra keys", which the fused-entry assertion in the T1402 module caught. Same
+# measurement as above and the same narrow claim: 63 drifting operations before this second edit
+# and 63 after, computed on both trees, nothing entering or leaving.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "31ccdb73e40138d831491cdf7684c189da37c7335bc7c5cee98d2d8b6bb871d0"
+    "be0ed3947fd950a9303ce7c5a6d3d312f45ba161e042be58c0c7922e155e187c"
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 63
 # 2026-08-11 / T501: public DB health no longer declares exception details;
@@ -360,8 +388,18 @@ SUCCESS_SCHEMA_DRIFT_COUNT = 63
 # carry both, and NOTHING carries a third cause. The
 # previous version of this note claimed two causes and no others while POST /payments 401 was a
 # third; external review caught the claim, and closing the 401 body made it true.
+#
+# 2026-09-11 / F-015-6 containment: count HOLDS at 53, digest moves. Both integrity repair
+# operations now declare `409`, because both are closed by default until `T1511` and answer
+# `409`/`E008` - and a reachable status the canon does not name is the defect programme 011
+# exists to remove. The cause is the FIRST of the two named above and not a new third one: the
+# refusal is raised in the handler, the routes carry no `responses=`, so FastAPI cannot know
+# about it. Both operations were ALREADY in this dictionary for their canon-only 403 and 429.
+# Measured the same way as the success digest and claimed as narrowly: 53 operations drifting on
+# error responses before this edit and 53 after, computed on both trees, nothing entering or
+# leaving.
 ERROR_RESPONSE_DRIFT_SHA256 = (
-    "17f0f6722b9b7ab900ebdde7a9e6ea25c58b282c01938cccfe69364cf7b68992"
+    "c3d5d097269a3182a011af56a55e77650b151aae1cafc82e3598063789be0371"
 )
 ERROR_RESPONSE_DRIFT_COUNT = 53
 # 2026-08-23 / p011_t1101: 59 -> 67, see the note above TRANSPORT_HEADER_DRIFT_SHA256.

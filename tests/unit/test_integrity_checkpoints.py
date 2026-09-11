@@ -22,7 +22,11 @@ async def test_integrity_checkpoint_propagates_unavailable_invariant_checker(
     async def _checker_unavailable(*_args, **_kwargs):
         raise RuntimeError("invariant checker unavailable")
 
-    monkeypatch.setattr(InvariantChecker, "check_zero_sum", _checker_unavailable)
+    # Patches `check_trust_limits`, not `check_zero_sum`. Until T1402 this patched zero-sum,
+    # which the checkpoint no longer calls at all - so the probe stopped firing and this test
+    # would have passed with the propagation it exists to prove removed entirely. The subject is
+    # unchanged: a checker that raises must not be swallowed into a healthy checkpoint.
+    monkeypatch.setattr(InvariantChecker, "check_trust_limits", _checker_unavailable)
 
     with pytest.raises(RuntimeError, match="invariant checker unavailable"):
         await compute_integrity_checkpoint_for_equivalent(
@@ -50,7 +54,11 @@ async def test_checkpoint_batch_fails_and_rolls_back_when_checker_is_unavailable
     async def _checker_unavailable(*_args, **_kwargs):
         raise RuntimeError("batch checker unavailable")
 
-    monkeypatch.setattr(InvariantChecker, "check_zero_sum", _checker_unavailable)
+    # Patches `check_trust_limits`, not `check_zero_sum`. Until T1402 this patched zero-sum,
+    # which the checkpoint no longer calls at all - so the probe stopped firing and this test
+    # would have passed with the propagation it exists to prove removed entirely. The subject is
+    # unchanged: a checker that raises must not be swallowed into a healthy checkpoint.
+    monkeypatch.setattr(InvariantChecker, "check_trust_limits", _checker_unavailable)
 
     with pytest.raises(RuntimeError, match="batch checker unavailable"):
         await compute_and_store_integrity_checkpoints(db_session)
@@ -67,7 +75,8 @@ async def test_integrity_checkpoint_records_invariant_checks_when_healthy(db_ses
     db_session.add_all([eq, a, b])
     await db_session.flush()
 
-    db_session.add(Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("5")))
+    debt = Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("5"))
+    db_session.add(debt)
     db_session.add(
         TrustLine(
             from_participant_id=b.id,
@@ -87,9 +96,44 @@ async def test_integrity_checkpoint_records_invariant_checks_when_healthy(db_ses
     assert status["passed"] is True
     assert status.get("alerts") == []
     assert set(status.get("checks", {}).keys()) == {"zero_sum", "trust_limits", "debt_symmetry"}
-    assert status["checks"]["zero_sum"]["passed"] is True
+
+    # zero_sum carries NO verdict since T1402. `passed` must be absent, not false: an absent
+    # verdict and a failed one are different statements, and the whole point of the withdrawal is
+    # that this check makes neither.
+    assert status["checks"]["zero_sum"] == {"status": "not_verified", "reason": "check_withdrawn"}
+    assert "passed" not in status["checks"]["zero_sum"]
+    assert status.get("unverified") == ["zero_sum"]
+
     assert status["checks"]["trust_limits"]["passed"] is True
     assert status["checks"]["debt_symmetry"]["passed"] is True
+
+    # WAS the whole assertion set. `zero_sum.passed is True` compared a literal written two lines
+    # away in app/core/integrity.py to a literal here, one indirection deep, because the `except`
+    # branch beside it was unreachable (F-014-2 / `C-A4-4-003`, T1403). What follows are
+    # properties of THIS fixture that a production defect can actually break.
+
+    # The counts are data-derived and were asserted by nothing.
+    assert status["debts_count"] == 1
+    assert status["trustlines_count"] == 1
+    assert status["debts_non_negative"] is True
+    assert status["debts_negative_count"] == 0
+
+    # The checksum is deterministic - the ordering tie-breakers in
+    # compute_integrity_checkpoint_for_equivalent exist precisely for this and were untested.
+    cp_again = await compute_integrity_checkpoint_for_equivalent(db_session, equivalent_id=eq.id)
+    assert cp_again.checksum == cp.checksum
+
+    # And it is sensitive to the exact corruption the withdrawn check could not see. This pairs
+    # the two facts in one place: the CHECKSUM notices a one-cent inflation, the zero_sum entry
+    # still carries no verdict, and neither statement can be mistaken for the other.
+    debt.amount += Decimal("0.01")
+    await db_session.flush()
+    cp_after = await compute_integrity_checkpoint_for_equivalent(db_session, equivalent_id=eq.id)
+    assert cp_after.checksum != cp.checksum
+    assert cp_after.invariants_status["checks"]["zero_sum"] == {
+        "status": "not_verified",
+        "reason": "check_withdrawn",
+    }
 
 
 @pytest.mark.asyncio

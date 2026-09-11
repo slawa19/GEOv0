@@ -160,12 +160,33 @@ const InvariantResultSchema = z
   })
   .strict()
 
+// An invariant the server does NOT evaluate. Added with T1402 of programme 014, which withdrew
+// zero-sum from publication: it could not fail on corruption, so `passed: true` was a claim the
+// backend could not support.
+//
+// This schema had to change in the same slice, and that is worth naming: `InvariantResultSchema`
+// is `.strict()`, so the new `{status, reason}` entry would have been REJECTED by the decoder and
+// the whole Integrity page would have failed to load against a healthy server. That is exactly
+// the unowned P3 programme 013 recorded in `specs/BACKLOG.md` - a strict decoder turning an
+// additive server change into a page failure - meeting a real additive change for the first time.
+const InvariantWithdrawnSchema = z
+  .object({
+    status: z.literal('not_verified'),
+    reason: z.literal('check_withdrawn'),
+  })
+  .strict()
+
+const InvariantOutcomeSchema = z.union([InvariantWithdrawnSchema, InvariantResultSchema])
+
 const EquivalentIntegrityStatusSchema = z
   .object({
     status: IntegrityStatusValueSchema,
     checksum: z.string(),
     last_verified: DateTimeSchema.nullable().optional(),
-    invariants: z.record(z.string(), InvariantResultSchema),
+    invariants: z.record(z.string(), InvariantOutcomeSchema),
+    // Names in `invariants` carrying no verdict. Optional on the client so an older server, or a
+    // replayed fixture, still decodes.
+    unverified: z.array(z.string()).optional(),
   })
   .strict()
 

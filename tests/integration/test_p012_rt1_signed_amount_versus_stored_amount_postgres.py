@@ -77,6 +77,7 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.utils import validation
+import app.core.payments.engine as engine_module
 from app.utils.exceptions import BadRequestException
 from app.utils.validation import MONEY_MAX_SCALE, parse_money_amount
 from tests.integration.p012_pg_http import make_pg_client_fixture
@@ -425,11 +426,43 @@ async def test_rt_012_1_counter_check_widening_the_door_reproduces_the_finding_e
         f"the door at all."
     )
 
+    # A SECOND GUARD now stands behind the door, and the counter-check meets it here.
+    #
+    # Until 2026-09-11 widening the door was enough: the payment committed and the ledger quietly
+    # held more than was signed. `T1522` of programme 015 tightened the payment delta barrier from
+    # `abs(drift) > 1e-8` to exact zero, and that barrier now SEES the 1e-9 discrepancy this
+    # widened door produces - the service answers 409 `PAYMENT_DELTA_DRIFT` with
+    # `total_drift: 1E-9` instead of committing.
+    #
+    # That is worth stating plainly, because it is the strongest evidence the tightening does real
+    # work: 012 recorded this exact drift as something "the check that exists to notice this cannot
+    # notice" (`012/spec.md:147-148`). It notices now, end to end, over HTTP, on PostgreSQL.
+    #
+    # So the counter-check asserts the refusal FIRST - that is new behaviour and it must not be
+    # lost - and only then widens the barrier as well, to reach the ledger state `F-012-1` is
+    # about. Two independent guards now stand where one did, and reproducing the finding requires
+    # disabling both.
+    status_code, body = await _submit_signed_payment(pg_client, scenario, amount)
+    assert status_code == 409, (
+        f"with the door widened but the delta barrier intact, the payment of {amount!r} must be "
+        f"REFUSED: storage rounds it to scale 8 and the barrier compares against exact zero. Got "
+        f"{status_code} {body!r}. If it committed, the barrier has been loosened again and "
+        f"`T1522` is undone."
+    )
+    error = (body or {}).get("error") or {}
+    details = error.get("details") or {}
+    assert details.get("invariant") == "PAYMENT_DELTA_DRIFT", body
+    assert Decimal(str(details.get("total_drift"))) == Decimal("1E-9"), body
+
+    # Now widen the barrier too, and the finding returns exactly as it was before T1522.
+    monkeypatch.setattr(engine_module, "_DELTA_DRIFT_TOLERANCE", Decimal("0.00000001"))
+
     status_code, body = await _submit_signed_payment(pg_client, scenario, amount)
     assert status_code == 200 and body.get("status") == "COMMITTED", (
-        f"with the door widened, the signed payment of {amount!r} should be accepted exactly as "
-        f"it was before T1201; got {status_code} {body!r}. If it is refused for some other "
-        f"reason, the flip demonstrated here is not the flip the reproducer above depends on."
+        f"with the door AND the delta barrier widened, the signed payment of {amount!r} should be "
+        f"accepted exactly as it was before T1201; got {status_code} {body!r}. If it is refused "
+        f"for some other reason, the flip demonstrated here is not the flip the reproducer above "
+        f"depends on."
     )
 
     rows = await _ledger_rows(scenario["equivalent_id"])

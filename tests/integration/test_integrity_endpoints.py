@@ -1,4 +1,6 @@
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
+import uuid
 from unittest.mock import AsyncMock
 
 import pytest
@@ -8,7 +10,9 @@ from sqlalchemy import func, select
 import app.api.v1.integrity as integrity_api
 from app.db.models.audit_log import IntegrityAuditLog
 from app.core.integrity import compute_and_store_integrity_checkpoints
+from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
+from app.db.models.participant import Participant
 from app.schemas.integrity import (
     EquivalentIntegrityStatus,
     IntegrityAuditLogItem,
@@ -55,8 +59,22 @@ async def test_integrity_status_and_verify_and_audit_log(client: AsyncClient, db
 
 @pytest.mark.asyncio
 async def test_integrity_checksum_returns_404_until_checkpoint_exists(client: AsyncClient, db_session):
-    await _seed_equivalent(db_session, "USD")
+    eq = await _seed_equivalent(db_session, "USD")
     user = await register_and_login(client, "IntegrityUser2")
+
+    # A debt with no trustline behind it. WITHOUT IT this test computed every invariant over an
+    # EMPTY graph, so all three passed vacuously and no production defect in any of them could
+    # redden the assertions below (F-014-2 / `C-A4-2-001`, T1403). With it, trust_limits has
+    # something to find, and the checksum has something to cover.
+    nonce = uuid.uuid4().hex[:10]
+    a = Participant(pid="EA" + nonce, display_name="EA", public_key="pkEA-" + nonce)
+    b = Participant(pid="EB" + nonce, display_name="EB", public_key="pkEB-" + nonce)
+    db_session.add_all([a, b])
+    await db_session.flush()
+    db_session.add(
+        Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("7"))
+    )
+    await db_session.commit()
 
     resp = await client.get("/api/v1/integrity/checksum/USD", headers=user["headers"])
     assert resp.status_code == 404
@@ -76,9 +94,21 @@ async def test_integrity_checksum_returns_404_until_checkpoint_exists(client: As
     checks = invariants_status.get("checks")
     assert isinstance(checks, dict)
     assert set(checks.keys()) == {"zero_sum", "trust_limits", "debt_symmetry"}
-    assert checks["zero_sum"]["passed"] is True
-    assert checks["trust_limits"]["passed"] is True
+
+    # Withdrawn: no verdict, and `passed` forbidden rather than merely absent (T1402).
+    assert checks["zero_sum"] == {"status": "not_verified", "reason": "check_withdrawn"}
+    assert invariants_status.get("unverified") == ["zero_sum"]
+
+    # trust_limits now has a real finding: a debt of 7 against a missing trustline, which the
+    # invariant treats as a limit of 0. This is the assertion the empty graph made impossible.
+    assert checks["trust_limits"]["passed"] is False
+    assert checks["trust_limits"]["violations"] == 1
     assert checks["debt_symmetry"]["passed"] is True
+
+    # The aggregate is scoped to the checks that ran, and says so.
+    assert invariants_status["status"] == "critical"
+    assert invariants_status["passed"] is False
+    assert invariants_status["debts_count"] == 1
 
 
 def _assert_datetime_has_offset(value: str) -> None:
