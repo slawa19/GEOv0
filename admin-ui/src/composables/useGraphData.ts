@@ -28,8 +28,15 @@ import type {
 // against the snapshot in flight, and a visible flip of the completeness signal from "not asked" to
 // "asked" while the user is reading it. The cost of asking unconditionally is bounded and measured:
 // the server caps this collection at ADMIN_GRAPH_INCLUDE_MAX_TRANSACTIONS (50) rows of eight scalar
-// fields, which is ~11.6 KB serialised against a ~192 KB snapshot body for the reference seed pack
-// (admin-fixtures/v1) - about 6%. There is no snapshot poll: the graph loads on mount, on an
+// fields. MEASURED TWICE, and the two numbers differ for a reason worth keeping: against the
+// reference seed pack (admin-fixtures/v1) the rows cost ~14.8 KB of a ~206 KB snapshot body - about
+// ~25.6 KB against a ~197 KB snapshot body - about 13% - sized from the shipped fixture's first 50
+// rows. That is an UPPER BOUND, not the expected cost: a fixture row still carries `payload` and
+// `signatures`, which the server projection does not publish, so the wire row is lighter. Two earlier
+// editions of this comment are withdrawn - one quoted "~11.6 KB ... about 6%" from an undocumented
+// measurement, the next a projection-aware figure that no command in the tree reproduces. The
+// reproducible measurement and its method are in `specs/013-frontend-data-honesty/spec.md`;
+// re-derive it rather than believing this comment. There is no snapshot poll: the graph loads on mount, on an
 // equivalent change, on entering/leaving focus mode and on an explicit retry, so this is not a
 // per-second cost. Incidents and audit_log are NOT requested here - see the note on
 // readCompleteness below.
@@ -43,9 +50,17 @@ const GRAPH_INCLUDE = ['transactions']
 // conclusion about" - never a guess that everything we asked for arrived.
 //
 // NOTE FOR WHOEVER TOUCHES `incidents` OR `audit_log` NEXT: this client asks for neither, so both
-// arrive empty in real mode for the same reason transactions did, and `incidentCount` /
-// `participantOps` in the Activity card are structurally zero there. That is the same defect in two
-// more collections; it is out of F-013-1's scope and is reported rather than silently half-fixed.
+// arrive empty in real mode for the same reason transactions did.
+//
+// CORRECTED 2026-09-11, because the sentence that stood here was wrong in the direction that
+// matters. It said `incidentCount` / `participantOps` are "structurally zero" in real mode. They are
+// not: in real mode the ACTIVITY CARD takes the metrics branch, where both counters are computed
+// server-side over the whole table (`app/core/admin/metrics.py`), and the snapshot's empty
+// collections never reach them. The claim holds only on the fallback branch - mock mode, a request
+// in flight, or `/metrics` having failed. What IS unavailable in real mode on every branch is the
+// per-participant incident RATIO, which is snapshot-only by construction. The same defect in two
+// more collections is therefore narrower than this note first claimed; it is out of F-013-1's scope
+// and is reported rather than silently half-fixed.
 export function readCompleteness(src: { included?: unknown; truncated?: unknown }): {
   included: string[]
   truncated: string[]

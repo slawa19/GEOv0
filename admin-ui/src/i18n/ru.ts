@@ -633,8 +633,8 @@ export const RU: Record<string, string> = {
   // нулём, которому не противоречило. Теперь три уведомления — по одному на состояние ответа.
   'graph.analytics.activity.transactionsNotIncludedTitle': 'Активность по транзакциям не запрашивалась',
   'graph.analytics.activity.transactionsNotIncludedDescription': 'Этот снапшот не несёт коллекцию транзакций, поэтому счётчики платежей и клирингов посчитать не из чего. Отсутствие — не ноль.',
-  'graph.analytics.activity.transactionsUnattributableTitle': 'Часть активности по транзакциям не сопоставима с участником',
-  'graph.analytics.activity.transactionsUnattributableDescription': 'Снапшот несёт committed-транзакции, и в части строк нет контрагентов, поэтому нельзя сказать, касаются ли они этого участника. Скрыты только те ячейки, куда такая строка могла бы попасть, — остальные числа посчитаны без неё.',
+  'graph.analytics.activity.transactionsUnattributableTitle': 'Часть транзакций не удаётся отнести к этим счётчикам',
+  'graph.analytics.activity.transactionsUnattributableDescription': 'Снапшот несёт committed-транзакции, которые некуда поместить. В части строк нет контрагентов — нельзя сказать, касаются ли они этого участника; в части нет эквивалента — нельзя сказать, относятся ли они к выбранному. Скрыты только те ячейки, куда такая строка могла бы попасть, — остальные числа посчитаны без неё.',
   'graph.analytics.activity.transactionsTruncatedTitle': 'Счётчики транзакций — нижняя оценка',
   'graph.analytics.activity.transactionsTruncatedDescription': 'Сервер вернул только последние транзакции и обрезал остальные, поэтому показанные числа — «не меньше чем», а не итоги.',
   // F-013-R2. См. комментарий в en.ts.

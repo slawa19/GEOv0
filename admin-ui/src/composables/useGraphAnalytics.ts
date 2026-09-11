@@ -727,7 +727,30 @@ export function useGraphAnalytics(opts: {
           : typeof payload.equivalent === 'string'
             ? payload.equivalent
             : null
-      if (eqCode && rowEqRaw && normEq(rowEqRaw) !== eqCode) continue
+      const rowEq = rowEqRaw ? normEq(rowEqRaw) : ''
+
+      // F-013-R6 (EXTERNAL review of 013). The filter used to be
+      //   `if (eqCode && rowEqRaw && normEq(rowEqRaw) !== eqCode) continue`
+      // and a row whose equivalent could not be read walked straight past it - the producer emits
+      // `"equivalent": payload.get("equivalent")` (`app/api/v1/admin.py`), i.e. `null` whenever the
+      // stored payload has no such key. Such a row was then counted into WHICHEVER equivalent the
+      // operator had selected, with full confidence: the same payment showing up as a confident 1
+      // under EUR and as a confident 1 under UAH, two totals in two units over one row.
+      //
+      // THE DECISION. It is neither counted nor silently dropped: it CLOUDS the windows it could
+      // have landed in, exactly as a row we cannot attribute to the participant does. Dropping it
+      // would assert "this row is not in the selected equivalent", which is the same invention with
+      // the opposite sign and yields an undercount wearing the typography of a total; counting it
+      // asserts the converse. "We cannot place this row" is the only true statement available, and
+      // `incompleteWindows` is how this card says it.
+      //
+      // Two conditions narrow it, and both are about not manufacturing a doubt we do not have:
+      //   * with no equivalent selected the counters span every equivalent, so a row that names
+      //     none is excluded from nothing and raises nothing;
+      //   * the doubt is filed BELOW, after attribution, so a row that is demonstrably not this
+      //     participant's clouds nothing - it was never going to join our count in any unit.
+      const eqUnreadable = Boolean(eqCode) && !rowEq
+      if (eqCode && rowEq && rowEq !== eqCode) continue
 
       // Participant attribution. The projection now publishes `from`/`to` on a payment and
       // `edges` on a clearing (`app/api/v1/admin.py::_graph_fetch_transactions`, 2026-09-10), so
@@ -798,9 +821,16 @@ export function useGraphAnalytics(opts: {
         for (const w of rowWindows) clouded.add(w)
         continue
       }
-      // Attributable and NOT this participant's: nothing is clouded, whatever its timestamp says.
-      // A row that is not ours cannot be missing from our counts.
+      // Attributable and NOT this participant's: nothing is clouded, whatever its timestamp says
+      // and whatever unit it is in. A row that is not ours cannot be missing from our counts.
       if (!involved) continue
+      if (eqUnreadable) {
+        // Ours, and we cannot tell which equivalent it is in (F-013-R6). It belongs in this
+        // counter's windows or in another equivalent's; either way the number we would print for
+        // them is not a measurement.
+        for (const w of rowWindows) clouded.add(w)
+        continue
+      }
       if (ageDays === null) {
         // Ours, and unplaceable in time: it joins no window's count, so every window is short by
         // it. Skipping it silently, as this loop used to, is the same defect in miniature.

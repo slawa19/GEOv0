@@ -6,7 +6,7 @@ import CopyIconButton from '../../ui/CopyIconButton.vue'
 import GraphAnalyticsTogglesCard from '../../ui/GraphAnalyticsTogglesCard.vue'
 import OperatorAdvicePanel from '../../ui/OperatorAdvicePanel.vue'
 import { t } from '../../i18n'
-import { activityCounts, incidentRatioDisplay, type CountConfidence } from './graphPageHelpers'
+import { activityCounts, activityNotices, incidentRatioDisplay, type CountConfidence } from './graphPageHelpers'
 import { labelTrustlineStatus } from '../../i18n/labels'
 import { buildGraphDrawerAdvice } from '../../advice/operatorAdvice'
 import { PRECISION_UNAVAILABLE, precisionForEquivalent } from '../../composables/useEquivalentPrecision'
@@ -1377,58 +1377,22 @@ const adviceItems = computed(() => {
                 </div>
               </div>
               <!--
-                F-013-1 / T1302. Three mutually exclusive statements about the same collection, and
-                the order matters: "we were told nothing" outranks "we were told something we cannot
-                use", which outranks "what we were told is a lower bound". Only the last of them
-                leaves a printed number standing.
-              
-                `payments` and `clearings` describe the same collection, so either answers the first
-                and third questions and `payments` is read for both. The middle one is asked of BOTH,
-                because since the external review of 013 the two counters carry their doubts
-                separately: the notice is about the collection, but it must appear whenever either
-                cell had to withhold a window - and, unlike before, it no longer withholds the other
-                cell's windows along with it.
+                F-013-1 / T1302, corrected by the CROSS review (F-013-R5). What used to stand here
+                was a v-if / v-else-if / v-else-if chain of three notices, written out once here and
+                once in tabs/RiskTab.vue. It read as three mutually exclusive statements, which was
+                only ever true while a doubt blanked every cell of the collection; once the doubt
+                became per window, a cut collection with one clouded window printed "≥" in the
+                surviving cells while the middle branch swallowed the sentence explaining "≥".
+                The decision of which sentences apply now lives in `activityNotices`, where it can
+                be tested, and both cards render whatever it returns.
               -->
               <el-alert
-                v-if="!selectedActivity.payments.known"
-                type="warning"
+                v-for="notice in activityNotices(selectedActivity)"
+                :key="notice.kind"
+                :type="notice.type"
                 show-icon
-                :title="t('graph.analytics.activity.transactionsNotIncludedTitle')"
-                :description="t('graph.analytics.activity.transactionsNotIncludedDescription')"
-                class="mb"
-                style="margin-top: 10px"
-              />
-              <el-alert
-                v-else-if="selectedActivity.payments.incompleteWindows.length || selectedActivity.clearings.incompleteWindows.length"
-                type="warning"
-                show-icon
-                :title="t('graph.analytics.activity.transactionsUnattributableTitle')"
-                :description="t('graph.analytics.activity.transactionsUnattributableDescription')"
-                class="mb"
-                style="margin-top: 10px"
-              />
-              <el-alert
-                v-else-if="selectedActivity.payments.lowerBound"
-                type="info"
-                show-icon
-                :title="t('graph.analytics.activity.transactionsTruncatedTitle')"
-                :description="t('graph.analytics.activity.transactionsTruncatedDescription')"
-                class="mb"
-                style="margin-top: 10px"
-              />
-              <!--
-                F-013-R2. `incidents` and `audit_log` are governed by the same `include` and this
-                client asks for neither, so the two counters above them are silent in real mode.
-                Silence with no explanation is its own trap - the row goes blank and the operator is
-                left to guess whether that is a fault - so it is said out loud, independently of the
-                transactions notice because the two collections fail independently.
-              -->
-              <el-alert
-                v-if="!selectedActivity.incidents.known || !selectedActivity.auditLog.known"
-                type="warning"
-                show-icon
-                :title="t('graph.analytics.activity.snapshotCollectionsNotIncludedTitle')"
-                :description="t('graph.analytics.activity.snapshotCollectionsNotIncludedDescription')"
+                :title="t(notice.titleKey)"
+                :description="t(notice.descriptionKey)"
                 class="mb"
                 style="margin-top: 10px"
               />

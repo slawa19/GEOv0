@@ -58,6 +58,38 @@ const props = withDefaults(defineProps<Props>(), {
  * то есть из источника, который тот же ответ опроверг.
  */
 const noExistingLine = computed(() => !canActOnTrustlineFigures(props.figuresSource))
+
+/**
+ * ЧТО ПОКАЗЫВАТЬ, КОГДА СУЩЕСТВУЮЩЕЙ ЛИНИИ НЕТ (кросс-ревью, P2 — презентационная половина
+ * `F-013-7`).
+ *
+ * Мутирующая половина находки была закрыта здесь раньше, презентационная — только в
+ * `TrustlineManagementPanel` (`effectiveData`), и попап остался ТРЕТЬЕЙ копией гарда, закрытой
+ * наполовину. На `no-row` он печатал числа снапшота (`Used 12 / Limit 100 / Available 88 /
+ * Status active`), полосу утилизации `12%` и фразу «Cannot close: trustline has outstanding debt
+ * (used: 12 UAH)» — ПОЛОЖИТЕЛЬНОЕ УТВЕРЖДЕНИЕ о долге линии, про которую бэкенд в том же окне,
+ * двумя элементами выше, сообщал, что её не существует. Выключенная кнопка этого не исправляет:
+ * предмет программы — не «разрешено ли действие», а «правда ли то, что написано».
+ *
+ * ПОЧЕМУ ТОТ ЖЕ ПРЕДИКАТ, ЧТО У КНОПКИ, А НЕ `trustlineSourceAnswered`: гасится утверждение
+ * о СУЩЕСТВУЮЩЕЙ ЛИНИИ, а это вопрос Б. На `frozen` числа остаются — замороженный ответ описывает
+ * линию, которая есть, и окно висит контекстом именно ради них.
+ *
+ * `null` вместо чисел, а не скрытая сетка: `renderOrDash` печатает «—», и «не знаем» остаётся
+ * видимым состоянием экрана, как в панели.
+ */
+const figures = computed(() => {
+  if (noExistingLine.value) {
+    return { used: null, reverseUsed: null, limit: null, available: null, status: null }
+  }
+  return {
+    used: props.used ?? null,
+    reverseUsed: props.reverseUsed ?? null,
+    limit: props.limit ?? null,
+    available: props.available ?? null,
+    status: props.status ?? null,
+  }
+})
 /** Источник не ответил вовсе. */
 const sourceUnavailableText = computed<string | null>(() => trustlineFiguresNotice(props.figuresSource))
 /** Источник ответил, и линии у пары нет — другой факт, другие последствия, своё сообщение. */
@@ -117,28 +149,29 @@ const sendPaymentFromLabel = computed(() => {
 })
 
 const closeBlocked = computed(() => {
-  const u = parseAmountNumber(props.used)
-  const ru = parseAmountNumber(props.reverseUsed)
+  const u = parseAmountNumber(figures.value.used)
+  const ru = parseAmountNumber(figures.value.reverseUsed)
   const usedDebt = Number.isFinite(u) && u > 0
   const reverseDebt = Number.isFinite(ru) && ru > 0
   return usedDebt || reverseDebt
 })
 
 const closeDebtDisplay = computed(() => {
-  const u = parseAmountNumber(props.used)
-  const ru = parseAmountNumber(props.reverseUsed)
+  const u = parseAmountNumber(figures.value.used)
+  const ru = parseAmountNumber(figures.value.reverseUsed)
   const usedDebt = Number.isFinite(u) && u > 0
   const reverseDebt = Number.isFinite(ru) && ru > 0
 
-  if (usedDebt && reverseDebt) return `used: ${renderOrDash(props.used)} ${props.unit}, reverse: ${renderOrDash(props.reverseUsed)} ${props.unit}`
-  if (usedDebt) return `used: ${renderOrDash(props.used)} ${props.unit}`
-  if (reverseDebt) return `reverse: ${renderOrDash(props.reverseUsed)} ${props.unit}`
-  return `used: ${renderOrDash(props.used)} ${props.unit}`
+  if (usedDebt && reverseDebt) return `used: ${renderOrDash(figures.value.used)} ${props.unit}, reverse: ${renderOrDash(figures.value.reverseUsed)} ${props.unit}`
+  if (usedDebt) return `used: ${renderOrDash(figures.value.used)} ${props.unit}`
+  if (reverseDebt) return `reverse: ${renderOrDash(figures.value.reverseUsed)} ${props.unit}`
+  return `used: ${renderOrDash(figures.value.used)} ${props.unit}`
 })
 
 const utilizationPct = computed<number | null>(() => {
-  const u = parseAmountNumber(props.used)
-  const l = parseAmountNumber(props.limit)
+  // Полоса — то же утверждение в графическом виде: «занято 12 из 100» у линии, которой нет.
+  const u = parseAmountNumber(figures.value.used)
+  const l = parseAmountNumber(figures.value.limit)
   if (!Number.isFinite(u) || !Number.isFinite(l)) return null
   if (l <= 0) return null
   const raw = Math.round((u / l) * 100)
@@ -206,13 +239,13 @@ function onCloseLine() {
 
     <div class="popup__grid">
       <div class="ds-label">Used</div>
-      <div class="ds-value ds-mono">{{ renderOrDash(used) }} {{ unit }}</div>
+      <div class="ds-value ds-mono">{{ renderOrDash(figures.used) }} {{ unit }}</div>
       <div class="ds-label">Limit</div>
-      <div class="ds-value ds-mono">{{ renderOrDash(limit) }} {{ unit }}</div>
+      <div class="ds-value ds-mono">{{ renderOrDash(figures.limit) }} {{ unit }}</div>
       <div class="ds-label">Available</div>
-      <div class="ds-value ds-mono">{{ renderOrDash(available) }} {{ unit }}</div>
+      <div class="ds-value ds-mono">{{ renderOrDash(figures.available) }} {{ unit }}</div>
       <div class="ds-label">Status</div>
-      <div class="ds-value ds-mono">{{ renderOrDash(status) }}</div>
+      <div class="ds-value ds-mono">{{ renderOrDash(figures.status) }}</div>
     </div>
 
     <!-- ED-2: capacity utilization bar (used/limit), shown under the stats grid. -->

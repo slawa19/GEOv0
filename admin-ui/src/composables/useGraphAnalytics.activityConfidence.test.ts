@@ -53,10 +53,13 @@ vi.mock('../api', () => ({ api: apiMock }))
 import { useGraphAnalytics } from './useGraphAnalytics'
 import {
   activityCounts,
+  activityNotices,
   collectionConfidence,
   incidentRatioDisplay,
   type CountConfidence,
 } from '../pages/graph/graphPageHelpers'
+import { EN } from '../i18n/en'
+import { RU } from '../i18n/ru'
 import type { SelectedInfo } from './useGraphVisualization'
 import type {
   AuditLogEntry,
@@ -103,14 +106,21 @@ function analyticsFor(input: {
   included?: string[]
   truncated?: string[]
   realMode?: boolean
+  /**
+   * The equivalent the operator has selected. Defaults to EUR, as every test above assumes; the
+   * F-013-R6 block below needs the other two settings of this control - a DIFFERENT equivalent,
+   * and none at all - because the row-level doubt it is about exists only while one is selected.
+   */
+  eq?: string | null
 }) {
+  const eq = input.eq === undefined ? 'EUR' : input.eq
   return useGraphAnalytics({
     isRealMode: computed(() => input.realMode ?? true),
     threshold: ref('0.10'),
-    analyticsEq: computed(() => 'EUR'),
+    analyticsEq: computed(() => eq),
 
-    precisionByEq: computed(() => new Map([['EUR', 2]])),
-    availableEquivalents: computed(() => ['EUR']),
+    precisionByEq: computed(() => new Map([['EUR', 2], ['UAH', 2]])),
+    availableEquivalents: computed(() => ['EUR', 'UAH']),
     participantByPid: computed(() => new Map<string, Participant>()),
 
     participants: ref<Participant[]>([{ pid: PID, display_name: 'Alice' }]),
@@ -769,5 +779,331 @@ describe('the display contract: not told / told and zero / told a lower bound', 
       const call = `activityCounts(selectedActivity.${counts}, selectedActivity.windows, selectedActivity.${confidence})`
       expect(source.includes(call), `дровер спарил ${counts} с чужой уверенностью ${confidence}`).toBe(false)
     }
+  })
+})
+
+// =================================================================================================
+// F-013-R5 (CROSS review). Every caveat on screen must have the sentence that explains it.
+//
+// The three notices under the Activity card were written as a v-if / v-else-if / v-else-if chain,
+// i.e. as three MUTUALLY EXCLUSIVE statements. That was sound only while `incompleteWindows`
+// blanked every cell of the collection: a suppressed truncation notice explained nothing, because
+// no "at least" could be on screen at the same time. F-013-R4 made the doubt per window, so the two
+// caveats became simultaneously true - a cut collection with one clouded window prints its
+// surviving cells as "≥N" while the middle branch swallows the sentence that says what "≥" means.
+//
+// WHY THE NOTICES ARE JUDGED THROUGH `activityNotices` AND NOT THROUGH CONDITIONS COPIED FROM THE
+// TEMPLATE. The finding was reachable in the first place because the chain existed twice in the
+// tree - GraphAnalyticsDrawer.vue and tabs/RiskTab.vue, one copy each - and nowhere as a value a
+// test could hold. It is now one function called from both templates; the sentinel at the end of
+// this block is what keeps that true.
+// =================================================================================================
+describe('F-013-R5: a notice for every caveat on screen, and none without one', () => {
+  // All three optional collections carried, so the `incidents` / `audit_log` notice is not standing
+  // in every assertion below: this block is about the transactions chain, and states it exactly.
+  const included = ['transactions', 'incidents', 'audit_log']
+
+  /** What the operator actually reads under the Activity card, in order. */
+  function noticesOf(a: Activity): string[] {
+    return activityNotices(a).map((n) => n.kind)
+  }
+
+  it('THE REPRODUCER: a cut collection with one clouded window prints ≥ AND explains it', () => {
+    // The reviewer's input, verbatim: included=[transactions], truncated=[transactions], one
+    // payment we own at 1 day, one payment we cannot place at 59 days.
+    const g = analyticsFor({
+      transactions: [
+        producerRow({ tx_id: 'mine', from: PID, to: THIRD, initiator_pid: PID, created_at: daysBefore(1), updated_at: daysBefore(1) }),
+        producerRow({ tx_id: 'stale-half', from: THIRD, initiator_pid: THIRD, created_at: daysBefore(59), updated_at: daysBefore(59) }),
+      ],
+      included,
+      truncated: ['transactions'],
+    })
+    const a = g.selectedActivity.value as Activity
+
+    // Two caveats, both true at once, and the cells carry both: "at least" in the two windows the
+    // doubt does not reach, silence in the one it does. Both must be spelled out below the card.
+    expect(renderCounts(a, a.paymentCommitted, 'payments')).toBe('≥1 / ≥1 / —')
+    expect(noticesOf(a)).toEqual(['transactionsUnattributable', 'transactionsTruncated'])
+  })
+
+  it('a cut collection with nothing in doubt explains the cut and nothing else', () => {
+    const g = analyticsFor({
+      transactions: [producerRow({ tx_id: 'mine', from: PID, to: THIRD, initiator_pid: PID })],
+      included,
+      truncated: ['transactions'],
+    })
+    const a = g.selectedActivity.value as Activity
+
+    expect(renderCounts(a, a.paymentCommitted, 'payments')).toBe('≥1 / ≥1 / ≥1')
+    expect(noticesOf(a)).toEqual(['transactionsTruncated'])
+  })
+
+  it('a whole collection with a row in doubt explains the doubt and nothing else', () => {
+    const g = analyticsFor({
+      transactions: [producerRow({ tx_id: 'half', from: OTHER, initiator_pid: OTHER })],
+      included,
+      truncated: [],
+    })
+    const a = g.selectedActivity.value as Activity
+
+    expect(renderCounts(a, a.paymentCommitted, 'payments')).toBe('— / — / —')
+    expect(noticesOf(a)).toEqual(['transactionsUnattributable'])
+  })
+
+  it('a doubt raised by the CLEARING counter alone still gets its sentence', () => {
+    // The notice is about the collection, but the doubt is per counter since F-013-R4, so it must
+    // be asked of BOTH. A condition that reads `payments.incompleteWindows` only would leave this
+    // card with three blanked clearing cells and nothing saying why.
+    const g = analyticsFor({
+      transactions: [
+        producerRow({ tx_id: 'cl-bare', type: 'CLEARING', initiator_pid: THIRD, created_at: daysBefore(60), updated_at: daysBefore(60) }),
+        producerRow({ tx_id: 'mine', from: PID, to: THIRD, initiator_pid: PID, created_at: daysBefore(1), updated_at: daysBefore(1) }),
+      ],
+      included,
+      truncated: [],
+    })
+    const a = g.selectedActivity.value as Activity
+
+    expect(renderCounts(a, a.clearingCommitted, 'clearings')).toBe('0 / 0 / —')
+    expect(renderCounts(a, a.paymentCommitted, 'payments')).toBe('1 / 1 / 1')
+    expect(noticesOf(a)).toEqual(['transactionsUnattributable'])
+  })
+
+  it('a whole collection with every row placed says nothing at all about transactions', () => {
+    // The anti-over-fix line. "Show all three notices unconditionally" satisfies the reproducer and
+    // dies here, on a snapshot that carries a complete, fully attributable collection.
+    const g = analyticsFor({
+      transactions: [producerRow({ tx_id: 'mine', from: PID, to: THIRD, initiator_pid: PID })],
+      included,
+      truncated: [],
+    })
+    const a = g.selectedActivity.value as Activity
+
+    expect(renderCounts(a, a.paymentCommitted, 'payments')).toBe('1 / 1 / 1')
+    expect(noticesOf(a)).toEqual([])
+  })
+
+  it('a collection nobody asked for says only that, however doubtful the rows inside it', () => {
+    // The ordering survives the change: "we were not told" is not joined by two caveats about a
+    // collection we do not have. It cannot be - `collectionConfidence` drops both for an uncarried
+    // collection - and that is asserted here at the level the operator reads it.
+    const g = analyticsFor({
+      transactions: [producerRow({ tx_id: 'half', from: OTHER, initiator_pid: OTHER })],
+      included: ['incidents', 'audit_log'],
+      truncated: ['transactions'],
+    })
+    const a = g.selectedActivity.value as Activity
+
+    expect(renderCounts(a, a.paymentCommitted, 'payments')).toBe('— / — / —')
+    expect(noticesOf(a)).toEqual(['transactionsNotIncluded'])
+  })
+
+  it('the two snapshot collections keep their own notice, beside the transactions ones', () => {
+    // `incidents` and `audit_log` fail independently of `transactions`, so their sentence is not
+    // part of the transactions chain: it appears next to it, never instead of it.
+    const g = analyticsFor({
+      transactions: [producerRow({ tx_id: 'mine', from: PID, to: THIRD, initiator_pid: PID })],
+      included: ['transactions'],
+      truncated: ['transactions'],
+    })
+    const a = g.selectedActivity.value as Activity
+
+    expect(noticesOf(a)).toEqual(['transactionsTruncated', 'snapshotCollectionsNotIncluded'])
+  })
+
+  it('every notice names a title and a description that both locales define', () => {
+    // The notices now carry their own keys instead of having them spelled out at each call site, so
+    // a key that exists in one locale only - or a renamed one - would otherwise surface as raw
+    // `graph.analytics.…` text in the UI and in no test.
+    const g = analyticsFor({
+      transactions: [
+        producerRow({ tx_id: 'mine', from: PID, to: THIRD, initiator_pid: PID }),
+        producerRow({ tx_id: 'half', from: OTHER, initiator_pid: OTHER }),
+      ],
+      included: ['transactions'],
+      truncated: ['transactions'],
+    })
+    const a = g.selectedActivity.value as Activity
+    const all = activityNotices(a)
+    expect(all.map((n) => n.kind)).toEqual([
+      'transactionsUnattributable',
+      'transactionsTruncated',
+      'snapshotCollectionsNotIncluded',
+    ])
+
+    for (const notice of all) {
+      for (const [name, dict] of [['en', EN], ['ru', RU]] as const) {
+        for (const key of [notice.titleKey, notice.descriptionKey]) {
+          expect(Object.prototype.hasOwnProperty.call(dict, key), `${name} не определяет ${key}`).toBe(true)
+        }
+      }
+    }
+  })
+
+  /**
+   * ЧАСОВОЙ: обе карточки рисуют блок предупреждений из ОДНОГО источника.
+   *
+   * Находка кросс-ревью стала возможной потому, что цепочка `v-if` жила в дереве дважды и ни разу —
+   * как значение, которое можно предъявить тесту. Теперь это одна функция; пока в шаблонах нет
+   * собственных условий про `payments.known` / `incompleteWindows` / `lowerBound`, разойтись
+   * реализациям негде.
+   *
+   * Это утверждение о ТЕКСТЕ шаблонов, как и соседний часовой выше, и потому слабее остальных: оно
+   * не переживёт переписывания блока на другую форму вызова. Осознанная цена — до тех пор, пока
+   * шаблон нельзя проверить поведением, не заводя рендер-тест на две карточки сразу.
+   */
+  it('sentinel: both cards render the notices from the one helper, with no conditions of their own', () => {
+    const FILES = ['src/pages/graph/GraphAnalyticsDrawer.vue', 'src/pages/graph/tabs/RiskTab.vue']
+    for (const file of FILES) {
+      const source = readFileSync(resolve(process.cwd(), file), 'utf8')
+      expect(
+        source.includes('v-for="notice in activityNotices(selectedActivity)"'),
+        `${file} не рисует блок уведомлений через activityNotices — значит, условия снова в шаблоне`,
+      ).toBe(true)
+      for (const own of ['payments.known', 'payments.lowerBound', 'incompleteWindows.length', 'auditLog.known']) {
+        expect(
+          source.includes(own),
+          `${file} снова решает сам, какое уведомление показать (${own}): комплектов условий опять два`,
+        ).toBe(false)
+      }
+    }
+  })
+})
+
+// =================================================================================================
+// F-013-R6 (CROSS review). A row whose equivalent the producer could not name was counted into
+// WHICHEVER equivalent the operator had selected, at full confidence.
+//
+// `"equivalent": payload.get("equivalent")` (app/api/v1/admin.py) is `null` whenever the stored
+// payload lacks the key, and the filter here read `if (eqCode && rowEqRaw && normEq(rowEqRaw) !==
+// eqCode) continue` - a row with no equivalent slipped past it and joined the count of every
+// equivalent in turn. Same family as the attribution finding, one field over: "we cannot place this
+// row" reported as a number.
+//
+// THE DECISION, stated where it is tested: such a row CLOUDS the windows it could have landed in,
+// exactly as an unattributable one does. Excluding it instead would assert "this row is not in the
+// selected equivalent" - the same invention with the opposite sign, and it would produce an
+// undercount wearing the typography of a total.
+// =================================================================================================
+describe('F-013-R6: a row whose equivalent cannot be read is not counted as the selected one', () => {
+  const included = ['transactions']
+
+  it('THE REPRODUCER: an unnamed equivalent on a row of ours clouds its windows', () => {
+    // The reviewer's input: one committed payment we own, `equivalent: null` exactly as the
+    // producer emits it when the stored payload has no such key.
+    const g = analyticsFor({
+      transactions: [producerRow({ tx_id: 'no-eq', from: PID, to: THIRD, initiator_pid: PID, equivalent: null })],
+      included,
+      truncated: [],
+    })
+    const a = g.selectedActivity.value as Activity
+
+    expect(renderCounts(a, a.paymentCommitted, 'payments')).toBe('— / — / —')
+    expect(a.payments.incompleteWindows).toEqual([7, 30, 90])
+    expect(activityNotices(a).map((n) => n.kind)).toContain('transactionsUnattributable')
+  })
+
+  it('THE CONTROL: and the same row is no more EUR than it is UAH', () => {
+    // The reviewer's control. Before the fix this one row was counted once as EUR and once as UAH -
+    // one payment, two confident totals, in two different units.
+    const g = analyticsFor({
+      eq: 'UAH',
+      transactions: [producerRow({ tx_id: 'no-eq', from: PID, to: THIRD, initiator_pid: PID, equivalent: null })],
+      included,
+      truncated: [],
+    })
+    const a = g.selectedActivity.value as Activity
+
+    expect(renderCounts(a, a.paymentCommitted, 'payments')).toBe('— / — / —')
+  })
+
+  it('an empty equivalent is as unreadable as a missing one', () => {
+    const g = analyticsFor({
+      transactions: [producerRow({ tx_id: 'blank-eq', from: PID, to: THIRD, initiator_pid: PID, equivalent: '' })],
+      included,
+      truncated: [],
+    })
+    const a = g.selectedActivity.value as Activity
+
+    expect(renderCounts(a, a.paymentCommitted, 'payments')).toBe('— / — / —')
+  })
+
+  it('a row that NAMES a different equivalent is still a plain, silent exclusion', () => {
+    // The anti-over-fix line. "Cloud whenever the row is not counted" passes the reproducer and
+    // dies here: a UAH payment is not missing from the EUR count, it does not belong in it.
+    const g = analyticsFor({
+      transactions: [producerRow({ tx_id: 'uah', from: PID, to: THIRD, initiator_pid: PID, equivalent: 'UAH' })],
+      included,
+      truncated: [],
+    })
+    const a = g.selectedActivity.value as Activity
+
+    expect(renderCounts(a, a.paymentCommitted, 'payments')).toBe('0 / 0 / 0')
+    expect(a.payments.incompleteWindows).toEqual([])
+    expect(activityNotices(a).map((n) => n.kind)).not.toContain('transactionsUnattributable')
+  })
+
+  it('with NO equivalent selected there is nothing to place the row against, and no doubt', () => {
+    // The counters then count every equivalent, so a row that names none is not excluded from
+    // anything and joins the count exactly as it did. A fix that clouded on a missing `equivalent`
+    // whatever the control says would blank a correct number here.
+    const g = analyticsFor({
+      eq: null,
+      transactions: [producerRow({ tx_id: 'no-eq', from: PID, to: THIRD, initiator_pid: PID, equivalent: null })],
+      included,
+      truncated: [],
+    })
+    const a = g.selectedActivity.value as Activity
+
+    expect(renderCounts(a, a.paymentCommitted, 'payments')).toBe('1 / 1 / 1')
+    expect(a.payments.incompleteWindows).toEqual([])
+  })
+
+  it('an unreadable equivalent on a row that is NOT ours clouds nothing', () => {
+    // Both counterparties named, neither of them us: whatever unit it is in, it was never going to
+    // join our count. A doubt is admitted only where it could have changed a number of ours.
+    const g = analyticsFor({
+      transactions: [producerRow({ tx_id: 'theirs-no-eq', from: THIRD, to: OTHER, initiator_pid: THIRD, equivalent: null })],
+      included,
+      truncated: [],
+    })
+    const a = g.selectedActivity.value as Activity
+
+    expect(renderCounts(a, a.paymentCommitted, 'payments')).toBe('0 / 0 / 0')
+    expect(a.payments.incompleteWindows).toEqual([])
+  })
+
+  it('the doubt reaches only the windows that row could have landed in', () => {
+    // One EUR payment of ours at 1 day, one unreadable-equivalent payment of ours at 59 days. The
+    // second cannot be in the 7- or 30-day count in any unit, so those two cells keep their number.
+    const g = analyticsFor({
+      transactions: [
+        producerRow({ tx_id: 'mine-eur', from: PID, to: THIRD, initiator_pid: PID, created_at: daysBefore(1), updated_at: daysBefore(1) }),
+        producerRow({ tx_id: 'stale-no-eq', from: PID, to: THIRD, initiator_pid: PID, equivalent: null, created_at: daysBefore(59), updated_at: daysBefore(59) }),
+      ],
+      included,
+      truncated: [],
+    })
+    const a = g.selectedActivity.value as Activity
+
+    expect(renderCounts(a, a.paymentCommitted, 'payments')).toBe('1 / 1 / —')
+    expect(a.payments.incompleteWindows).toEqual([90])
+  })
+
+  it('THE MIRROR: an unreadable equivalent on a CLEARING clouds clearings only', () => {
+    // A fix wired into the payment branch would pass every line above and fail this one.
+    const g = analyticsFor({
+      transactions: [
+        producerRow({ tx_id: 'cl-no-eq', type: 'CLEARING', initiator_pid: PID, equivalent: null }),
+        producerRow({ tx_id: 'mine-eur', from: PID, to: THIRD, initiator_pid: PID }),
+      ],
+      included,
+      truncated: [],
+    })
+    const a = g.selectedActivity.value as Activity
+
+    expect(renderCounts(a, a.clearingCommitted, 'clearings')).toBe('— / — / —')
+    expect(renderCounts(a, a.paymentCommitted, 'payments')).toBe('1 / 1 / 1')
   })
 })
