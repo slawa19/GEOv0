@@ -67,6 +67,7 @@ from app.core.clearing.service import ClearingService
 from app.core.admin.metrics import compute_participant_metrics, is_ratio_below_threshold
 from app.core.trustlines.service import TrustLineService
 from app.core.payments.engine import PaymentEngine
+from sqlalchemy.exc import IntegrityError
 from app.utils.exceptions import (
     BadRequestException,
     ConflictException,
@@ -1420,6 +1421,12 @@ async def admin_delete_equivalent(
     if eq is None:
         raise NotFoundException(f"Equivalent {normalized} not found")
 
+    # T1524: take the equivalent's owner lock BEFORE the authoritative checks and hold it through the
+    # delete. Payments and clearing hold the same lock for their whole commit, so neither can create
+    # a debt between the usage count below and the commit. On SQLite this is a no-op; the RESTRICT
+    # foreign key is the guarantee there and everywhere, and the lock only narrows the window.
+    await PaymentEngine(db).acquire_staged_equivalent_owner_locks([eq.id])
+
     if eq.is_active:
         raise ConflictException("Deactivate equivalent before delete")
 
@@ -1449,6 +1456,16 @@ async def admin_delete_equivalent(
             after_state=None,
         )
         await db.commit()
+    except IntegrityError as exc:
+        # T1524: `debts.equivalent_id` is RESTRICT. If a debt exists that the count above did not see
+        # - it appeared after the count, or a writer does not hold the owner lock - the database
+        # refuses the delete instead of cascading the obligation away. Reported as the same 409 an
+        # equivalent in use already gets, because that is exactly what it is.
+        await db.rollback()
+        raise ConflictException(
+            "Equivalent is in use",
+            details={"reason": "referenced_by_existing_rows"},
+        ) from exc
     except BaseException:
         await db.rollback()
         raise
