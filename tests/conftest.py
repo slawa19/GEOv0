@@ -105,6 +105,32 @@ engine = create_async_engine(
     poolclass=NullPool,
     connect_args={"timeout": 30} if _is_sqlite else {},
 )
+# FOREIGN KEYS ARE ENFORCED ON THE SQLITE TIER, as they are in the application.
+#
+# The application engine sets `PRAGMA foreign_keys=ON` (app/db/session.py:48). Until 2026-09-11
+# this test engine did not, so the whole default tier ran with every foreign key unenforced while
+# the application it tests enforces them - a stand unable to see any referential effect, CASCADE,
+# RESTRICT or a dangling reference alike. Measured when it was switched on: 20 tests in four files
+# failed with `FOREIGN KEY constraint failed`. Half built a Transaction or PrepareLock referencing a
+# Participant that did not exist; the other half wrote a PrepareLock before its Transaction in the
+# same flush, because `PrepareLock.tx_id` is a bare ForeignKey with no ORM relationship and so
+# carries no insert ordering. Both are states the application cannot produce. Fixed in the tests,
+# not by leaving the pragma off; `tests/unit/test_sqlite_test_engine_enforces_foreign_keys.py` holds
+# the switch in place.
+#
+# It matters beyond those 20: programme 015's journal, operation envelopes and the RESTRICT that
+# replaces the Debt -> Equivalent cascade are all referential, and the default tier must be able to
+# see them fail.
+if _is_sqlite:
+    @event.listens_for(engine.sync_engine, "connect")
+    def _sqlite_enforce_foreign_keys(dbapi_connection, _connection_record):
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("PRAGMA foreign_keys=ON")
+        finally:
+            cursor.close()
+
+
 TestingSessionLocal = async_sessionmaker(
     bind=engine,
     class_=AsyncSession,

@@ -11,8 +11,18 @@ from app.core.recovery import (
     cleanup_expired_prepare_locks,
     run_recovery_once,
 )
+from app.db.models.participant import Participant
 from app.db.models.prepare_lock import PrepareLock
 from app.db.models.transaction import Transaction
+
+
+def _participant(label: str) -> Participant:
+    return Participant(
+        id=uuid.uuid4(),
+        pid=f"RECOVERY_{label}",
+        display_name=f"Recovery {label}",
+        public_key=f"recovery-{label}",
+    )
 
 
 @pytest.mark.asyncio
@@ -53,12 +63,14 @@ async def test_recovery_stops_before_stale_phase_when_session_cannot_rollback(
 @pytest.mark.asyncio
 async def test_cleanup_expired_prepare_locks_aborts_related_tx_and_deletes_locks(db_session):
     tx_id = str(uuid.uuid4())
+    participant = _participant("EXPIRED_CLEANUP")
+    db_session.add(participant)
 
     tx = Transaction(
         id=uuid.uuid4(),
         tx_id=tx_id,
         type="PAYMENT",
-        initiator_id=uuid.uuid4(),
+        initiator_id=participant.id,
         payload={
             "from": "A",
             "to": "B",
@@ -70,10 +82,13 @@ async def test_cleanup_expired_prepare_locks_aborts_related_tx_and_deletes_locks
         error=None,
     )
     db_session.add(tx)
+    # prepare_locks.tx_id references transactions.tx_id with no ORM relationship, so the
+    # flush does not order the two inserts; write the transaction first.
+    await db_session.flush()
 
     lock = PrepareLock(
         tx_id=tx_id,
-        participant_id=uuid.uuid4(),
+        participant_id=participant.id,
         effects={
             "flows": [
                 {
@@ -112,11 +127,13 @@ async def test_abort_stale_payment_transactions_aborts_old_active_tx(db_session)
     tx_id = str(uuid.uuid4())
 
     stale_updated_at = datetime.now(timezone.utc) - timedelta(seconds=3600)
+    participant = _participant("STALE_ABORT")
+    db_session.add(participant)
     tx = Transaction(
         id=uuid.uuid4(),
         tx_id=tx_id,
         type="PAYMENT",
-        initiator_id=uuid.uuid4(),
+        initiator_id=participant.id,
         payload={
             "from": "A",
             "to": "B",
@@ -129,10 +146,11 @@ async def test_abort_stale_payment_transactions_aborts_old_active_tx(db_session)
         updated_at=stale_updated_at,
     )
     db_session.add(tx)
+    await db_session.flush()
 
     lock = PrepareLock(
         tx_id=tx_id,
-        participant_id=uuid.uuid4(),
+        participant_id=participant.id,
         effects={},
         expires_at=datetime.now(timezone.utc) + timedelta(seconds=3600),
     )
@@ -155,13 +173,13 @@ async def test_abort_stale_payment_transactions_aborts_old_active_tx(db_session)
 
 
 def _payment_transaction(
-    tx_id: str, *, updated_at: datetime | None = None
+    tx_id: str, *, initiator_id: uuid.UUID, updated_at: datetime | None = None
 ) -> Transaction:
     values = {
         "id": uuid.uuid4(),
         "tx_id": tx_id,
         "type": "PAYMENT",
-        "initiator_id": uuid.uuid4(),
+        "initiator_id": initiator_id,
         "payload": {
             "from": "A",
             "to": "B",
@@ -177,10 +195,12 @@ def _payment_transaction(
     return Transaction(**values)
 
 
-def _prepare_lock(tx_id: str, *, expires_at: datetime) -> PrepareLock:
+def _prepare_lock(
+    tx_id: str, *, participant_id: uuid.UUID, expires_at: datetime
+) -> PrepareLock:
     return PrepareLock(
         tx_id=tx_id,
-        participant_id=uuid.uuid4(),
+        participant_id=participant_id,
         effects={},
         expires_at=expires_at,
     )
@@ -194,15 +214,26 @@ async def test_recovery_iteration_preserves_expired_lock_progress_when_one_abort
 ):
     successful_tx_id = "TX_EXPIRED_SUCCESS"
     failed_tx_id = "TX_EXPIRED_FAILURE"
-    successful_tx = _payment_transaction(successful_tx_id)
-    failed_tx = _payment_transaction(failed_tx_id)
+    participant = _participant("EXPIRED_PROGRESS")
+    successful_tx = _payment_transaction(
+        successful_tx_id, initiator_id=participant.id
+    )
+    failed_tx = _payment_transaction(failed_tx_id, initiator_id=participant.id)
     expired_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    db_session.add_all([participant, successful_tx, failed_tx])
+    await db_session.flush()
     db_session.add_all(
         [
-            successful_tx,
-            failed_tx,
-            _prepare_lock(successful_tx_id, expires_at=expired_at),
-            _prepare_lock(failed_tx_id, expires_at=expired_at),
+            _prepare_lock(
+                successful_tx_id,
+                participant_id=participant.id,
+                expires_at=expired_at,
+            ),
+            _prepare_lock(
+                failed_tx_id,
+                participant_id=participant.id,
+                expires_at=expired_at,
+            ),
         ]
     )
     await db_session.commit()
@@ -251,21 +282,33 @@ async def test_recovery_iteration_preserves_stale_abort_progress_when_one_abort_
 ):
     failed_tx_id = "TX_STALE_FAILURE"
     successful_tx_id = "TX_STALE_SUCCESS"
+    participant = _participant("STALE_PROGRESS")
+    participant_id = participant.id
     failed_tx = _payment_transaction(
         failed_tx_id,
+        initiator_id=participant_id,
         updated_at=datetime.now(timezone.utc) - timedelta(hours=2),
     )
     successful_tx = _payment_transaction(
         successful_tx_id,
+        initiator_id=participant_id,
         updated_at=datetime.now(timezone.utc) - timedelta(hours=1),
     )
     unexpired_at = datetime.now(timezone.utc) + timedelta(hours=1)
+    db_session.add_all([participant, successful_tx, failed_tx])
+    await db_session.flush()
     db_session.add_all(
         [
-            successful_tx,
-            failed_tx,
-            _prepare_lock(successful_tx_id, expires_at=unexpired_at),
-            _prepare_lock(failed_tx_id, expires_at=unexpired_at),
+            _prepare_lock(
+                successful_tx_id,
+                participant_id=participant_id,
+                expires_at=unexpired_at,
+            ),
+            _prepare_lock(
+                failed_tx_id,
+                participant_id=participant_id,
+                expires_at=unexpired_at,
+            ),
         ]
     )
     await db_session.commit()
@@ -282,7 +325,11 @@ async def test_recovery_iteration_preserves_stale_abort_progress_when_one_abort_
 
     async def abort_with_one_failure(self, tx_id, *args, **kwargs):
         if tx_id == failed_tx_id:
-            self.session.add(_payment_transaction(failed_tx_id))
+            # The duplicate tx_id is the intended failure; a valid initiator keeps it the
+            # only one.
+            self.session.add(
+                _payment_transaction(failed_tx_id, initiator_id=participant_id)
+            )
             await self.session.flush()
         return await original_abort(self, tx_id, *args, **kwargs)
 
@@ -325,10 +372,16 @@ async def test_stale_recovery_counts_only_new_abort_outcomes(db_session, monkeyp
     first_tx_id = "TX_STALE_OUTCOME_SUCCESS"
     terminal_tx_id = "TX_STALE_OUTCOME_TERMINAL"
     stale_at = datetime.now(timezone.utc) - timedelta(hours=1)
+    participant = _participant("STALE_OUTCOMES")
     db_session.add_all(
         [
-            _payment_transaction(first_tx_id, updated_at=stale_at),
-            _payment_transaction(terminal_tx_id, updated_at=stale_at),
+            participant,
+            _payment_transaction(
+                first_tx_id, initiator_id=participant.id, updated_at=stale_at
+            ),
+            _payment_transaction(
+                terminal_tx_id, initiator_id=participant.id, updated_at=stale_at
+            ),
         ]
     )
     await db_session.commit()
@@ -358,12 +411,27 @@ async def test_expired_lock_cleanup_counts_observed_resolved_ids_for_terminal_ou
     success_tx_id = "TX_EXPIRED_OUTCOME_SUCCESS"
     terminal_tx_id = "TX_EXPIRED_OUTCOME_TERMINAL"
     expired_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    participant = _participant("EXPIRED_OUTCOMES")
     db_session.add_all(
         [
-            _payment_transaction(success_tx_id),
-            _payment_transaction(terminal_tx_id),
-            _prepare_lock(success_tx_id, expires_at=expired_at),
-            _prepare_lock(terminal_tx_id, expires_at=expired_at),
+            participant,
+            _payment_transaction(success_tx_id, initiator_id=participant.id),
+            _payment_transaction(terminal_tx_id, initiator_id=participant.id),
+        ]
+    )
+    await db_session.flush()
+    db_session.add_all(
+        [
+            _prepare_lock(
+                success_tx_id,
+                participant_id=participant.id,
+                expires_at=expired_at,
+            ),
+            _prepare_lock(
+                terminal_tx_id,
+                participant_id=participant.id,
+                expires_at=expired_at,
+            ),
         ]
     )
     await db_session.commit()
@@ -412,9 +480,12 @@ async def test_recovery_item_rollback_failure_escalates_the_batch(
     monkeypatch,
 ):
     tx_id = "TX_STALE_ROLLBACK_FAILURE"
+    participant = _participant("ROLLBACK_FAILURE")
+    db_session.add(participant)
     db_session.add(
         _payment_transaction(
             tx_id,
+            initiator_id=participant.id,
             updated_at=datetime.now(timezone.utc) - timedelta(hours=1),
         )
     )

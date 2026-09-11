@@ -10,7 +10,11 @@ class Debt(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     debtor_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey('participants.id', ondelete='CASCADE'), nullable=False, index=True)
     creditor_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey('participants.id', ondelete='CASCADE'), nullable=False, index=True)
-    equivalent_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey('equivalents.id', ondelete='CASCADE'), nullable=False, index=True)
+    # RESTRICT, not CASCADE - T1524 of programme 015. Deleting an equivalent must never delete
+    # the obligations denominated in it. Under CASCADE the database removed them itself, with no
+    # Debt row ever loaded, so no application code, audit or journal hook could see a single
+    # obligation disappear. Migration 020 makes the same change on existing databases.
+    equivalent_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey('equivalents.id', ondelete='RESTRICT'), nullable=False, index=True)
     amount: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

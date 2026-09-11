@@ -133,6 +133,9 @@ async def test_payment_commit_aborts_on_trust_limit_violation(
             state="PREPARED",
         )
     )
+    # prepare_locks.tx_id references transactions.tx_id with no ORM relationship, so the
+    # flush does not order the two inserts; write the transaction first.
+    await db_session.flush()
     db_session.add(
         PrepareLock(
             tx_id=tx_id,
@@ -464,6 +467,7 @@ async def test_payment_commit_writes_integrity_audit_log_on_success(
             state="PREPARED",
         )
     )
+    await db_session.flush()
     db_session.add(
         PrepareLock(
             tx_id=tx_id,
