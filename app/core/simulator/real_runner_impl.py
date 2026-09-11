@@ -7,7 +7,7 @@ import uuid
 from decimal import Decimal
 from typing import Any, Callable
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 
 from app.core.payments.engine import PaymentEngine
@@ -19,6 +19,7 @@ from app.core.simulator.inject_executor import (
     InjectOwnerLockSetTooNarrow,
     StagedInjectEvent,
     inject_event_equivalent_codes,
+    inject_event_freeze_participant_pids,
     invalidate_caches_after_inject as _inject_invalidate_caches_after_inject,
 )
 from app.core.simulator.models import RunRecord, TrustDriftResult
@@ -45,6 +46,8 @@ from app.core.simulator.runtime_utils import (
 from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter
 from app.core.simulator.trust_drift_engine import TrustDriftEngine
 from app.db.models.equivalent import Equivalent
+from app.db.models.participant import Participant
+from app.db.models.trustline import TrustLine
 
 # 40001 serialization_failure, 40P01 deadlock_detected: PostgreSQL has rolled the transaction back
 # and the whole unit of work may run again.
@@ -310,7 +313,8 @@ class RealRunnerImpl:
           `RuntimeError` is raised before anything happens. An open transaction is ended by the
           first boundary this method draws (committed, like any read it finds open).
         - Every due inject event is ONE unit of work: resolve the owner lock set (the run's
-          equivalents and those the event names) in a short read that is committed; acquire
+          equivalents, those the event names and those of the active trustlines of every
+          participant it freezes) in a short read that is committed; acquire
           those owner locks as the opening of a fresh transaction; stage; mark the event fired;
           commit; then publish (caches, SSE, note) and end publish's read transaction.
         - Staging that reaches an equivalent outside the set rolls back and restarts once with
@@ -460,6 +464,11 @@ class RealRunnerImpl:
     ) -> set[uuid.UUID]:
         """The run's equivalents and the event's own, as ids, in one read that is then committed.
 
+        "The event's own" includes the equivalents of the active trustlines incident to every
+        participant the event freezes: the event does not name them, and staging discovers them
+        one at a time, so leaving them to the bounded expansion made a multi-participant freeze
+        impossible to complete (external review of step 3).
+
         The read is ended before the owner locks are taken, so the locks open the unit of work's
         transaction instead of joining a snapshot taken without them.
         """
@@ -476,6 +485,28 @@ class RealRunnerImpl:
                 (
                     await session.execute(
                         select(Equivalent.id).where(Equivalent.code.in_(sorted(codes)))
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        freeze_pids = inject_event_freeze_participant_pids(event=event)
+        if freeze_pids:
+            lock_ids |= set(
+                (
+                    await session.execute(
+                        select(TrustLine.equivalent_id)
+                        .join(
+                            Participant,
+                            or_(
+                                TrustLine.from_participant_id == Participant.id,
+                                TrustLine.to_participant_id == Participant.id,
+                            ),
+                        )
+                        .where(
+                            Participant.pid.in_(sorted(freeze_pids)),
+                            TrustLine.status == "active",
+                        )
                     )
                 )
                 .scalars()

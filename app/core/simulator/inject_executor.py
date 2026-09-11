@@ -114,6 +114,38 @@ def inject_event_equivalent_codes(
     return codes
 
 
+def inject_event_freeze_participant_pids(*, event: Mapping[str, Any] | None) -> set[str]:
+    """Participants whose incident trustlines a `freeze_participant` effect of the event will freeze.
+
+    Programme 015, phase B step 3, external review of the step. The equivalents of those trustlines
+    are not named by the event, so the owner reads them before locking. Without this read, staging
+    stopped at the FIRST equivalent it lacked: an event freezing two participants whose trustlines
+    live in two equivalents outside the run needed two expansions, exhausted the one allowed, and -
+    since every tick starts again from the run's set - never completed on a topology nobody was
+    changing. The bounded expansion is left as what it is meant to be: a backstop for a trustline
+    created between the owner's read and the staging.
+
+    Mirrors staging's own parsing: an empty pid is skipped there, and `freeze_trustlines=False`
+    freezes no trustline, so neither needs a lock.
+    """
+
+    pids: set[str] = set()
+    effects = (event or {}).get("effects")
+    if not isinstance(effects, list):
+        return pids
+    for eff in effects[:_MAX_INJECT_EFFECTS]:
+        if not isinstance(eff, dict):
+            continue
+        if str(eff.get("op") or "").strip() != "freeze_participant":
+            continue
+        if not bool(eff.get("freeze_trustlines", True)):
+            continue
+        pid = str(eff.get("participant_id") or "").strip()
+        if pid:
+            pids.add(pid)
+    return pids
+
+
 def invalidate_caches_after_inject(
     *,
     logger: logging.Logger,
