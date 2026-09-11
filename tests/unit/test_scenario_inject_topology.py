@@ -151,6 +151,14 @@ class _MockSession:
     def __init__(self) -> None:
         self.added: list[Any] = []
         self.committed = False
+        # The due-events phase owns its transactions (programme 015, phase B step 3): it refuses
+        # a session with unflushed changes and ends any transaction it finds open.
+        self.new: set[Any] = set()
+        self.dirty: set[Any] = set()
+        self.deleted: set[Any] = set()
+
+    def in_transaction(self) -> bool:
+        return False
 
     def add(self, obj: Any) -> None:
         self.added.append(obj)

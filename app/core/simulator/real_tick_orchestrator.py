@@ -272,25 +272,33 @@ class RealTickOrchestrator:
                     if len(participants) < 2 or not equivalents:
                         return
 
+                    # Initialize trust drift (once per run)
+                    if run._trust_drift_config is None:
+                        rr._trust_drift_engine.init_trust_drift(run, scenario)
+
+                    # Apply due scenario timeline events (note/stress/inject).
+                    # IMPORTANT: inject modifies DB state and must happen before payments.
+                    #
+                    # BEFORE the owner locks below, not after. Programme 015, phase B step 3: the
+                    # due-events phase owns its own transactions - each inject event is a unit of
+                    # work that takes the owner locks it needs and commits them away - and it
+                    # returns with no transaction open. Run after the lock block, its first commit
+                    # released the locks taken here and the payments phase planned against a debt
+                    # snapshot read without them.
+                    await rr._apply_due_scenario_events(
+                        session, run_id=run_id, run=run, scenario=scenario
+                    )
+
                     owner_service = PaymentService(session)
                     if owner_service.engine._is_postgres():
                         # Close initialization reads before the monetary outer UoW.
                         # The owner set is its first statement; a SERIALIZABLE waiter
                         # can still receive 40001 and must restart at this outer owner.
+                        # Nothing may commit between here and the payments phase's snapshot.
                         await session.commit()
                         await owner_service.acquire_staged_equivalent_owner_locks(
                             equivalents
                         )
-
-                    # Initialize trust drift (once per run)
-                    if run._trust_drift_config is None:
-                        rr._trust_drift_engine.init_trust_drift(run, scenario)
-
-                    # Apply due scenario timeline events (note/stress/inject). Best-effort.
-                    # IMPORTANT: inject modifies DB state and must happen before payments.
-                    await rr._apply_due_scenario_events(
-                        session, run_id=run_id, run=run, scenario=scenario
-                    )
 
                     payments_phase, should_stop = await rr._real_tick_payments_coordinator.run_payments_phase(
                         session=session,
