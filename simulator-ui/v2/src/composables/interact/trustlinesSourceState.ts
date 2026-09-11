@@ -30,9 +30,14 @@ export type TrustlinesFetchState =
  * ЗДЕСЬ ДВА РАЗНЫХ ВОПРОСА, И ИХ НЕЛЬЗЯ СВОДИТЬ К ОДНОМУ (внешнее ревью 013, находка P2).
  *
  *   А. ОТВЕТИЛ ЛИ ИСТОЧНИК про эту пару — `trustlineSourceAnswered`. Отрицательный ответ значит,
- *      что подтвердить числа на экране нечем, и об этом надо сказать оператору.
+ *      что подтвердить числа на экране нечем, и об этом надо сказать оператору. Потребители:
+ *      все три уведомления ниже. ЭТО НЕ УКРАШЕНИЕ, И ОДНАЖДЫ БЫЛО ИМ: до 2026-09-11 у функции
+ *      не было ни одного вызывающего — каждое уведомление переписывало её набор видов у себя, —
+ *      и подмена её тела на `return false` не роняла ни одного из 1024 тестов. Набор видов,
+ *      названный в двух местах, это два правила, которые ещё не разошлись.
  *   Б. ЕСТЬ ЛИ СУЩЕСТВУЮЩАЯ ЛИНИЯ, числа которой мы показываем и мутируем —
- *      `canActOnTrustlineFigures`.
+ *      `canActOnTrustlineFigures`. Потребители: оба компонента (гард мутации И гашение чисел)
+ *      и `freezeTrustlineFiguresSource`.
  *
  * Они расходятся ровно в одном состоянии, `no-row`, и именно на нём прежняя редакция ошиблась:
  * источник ОТВЕТИЛ (А истинно), но линии у пары НЕТ (Б ложно). Из этого ответа следует право
@@ -50,14 +55,30 @@ export type TrustlinesFetchState =
  * - `never-asked` — источник не спрашивали; всё, что на экране, приехало из снапшота;
  * - `loading`     — ответа ещё нет;
  * - `failed`      — ответа не будет, запрос упал.
+ *
+ * ТРЕТИЙ ВОПРОС, ОРТОГОНАЛЬНЫЙ ПЕРВЫМ ДВУМ: ЖИВОЕ ЛИ ЭТО ОСНОВАНИЕ ИЛИ ЗАМОРОЖЕННАЯ КОПИЯ —
+ * признак `frozen` (кросс-ревью, P3). Он ортогонален потому, что заморозка не меняет ни А, ни Б:
+ * замороженный `no-row` — всё ещё ответ, по которому нечего обновлять; замороженный `loading` —
+ * всё ещё отсутствие ответа. Виду `frozen` он не нужен: тот САМ означает «заморожен ответ со
+ * строкой» и существует отдельным видом потому, что у него другое Б (действовать позволено).
+ * Спрашивать про заморозку надо `trustlineSourceFrozen`, а не `kind === 'frozen'`.
  */
 export type TrustlineFiguresSource =
   | { kind: 'row' }
-  | { kind: 'no-row' }
+  | { kind: 'no-row'; frozen?: true }
   | { kind: 'frozen' }
-  | { kind: 'never-asked' }
-  | { kind: 'loading' }
-  | { kind: 'failed'; message: string }
+  | { kind: 'never-asked'; frozen?: true }
+  | { kind: 'loading'; frozen?: true }
+  | { kind: 'failed'; message: string; frozen?: true }
+
+/** Виды, которые означают ОТВЕТ источника (вопрос А). Набор назван ровно один раз — здесь. */
+export type AnsweredTrustlineFiguresSource = Extract<
+  TrustlineFiguresSource,
+  { kind: 'row' | 'no-row' | 'frozen' }
+>
+
+/** Виды, у которых есть СУЩЕСТВУЮЩАЯ ЛИНИЯ (вопрос Б). Набор назван ровно один раз — здесь. */
+export type ActionableTrustlineFiguresSource = Extract<TrustlineFiguresSource, { kind: 'row' | 'frozen' }>
 
 /**
  * Свести состояние источника и наличие АВТОРИТЕТНОЙ строки к основанию для одной пары.
@@ -87,7 +108,9 @@ export function resolveTrustlineFiguresSource(
  * словами (`trustlineFiguresNotice`). НЕ путать с вопросом Б: `no-row` — это ответ, и говорить о
  * нём надо иначе, чем о молчании.
  */
-export function trustlineSourceAnswered(source: TrustlineFiguresSource | null | undefined): boolean {
+export function trustlineSourceAnswered(
+  source: TrustlineFiguresSource | null | undefined,
+): source is AnsweredTrustlineFiguresSource {
   if (source == null) return false
   return source.kind === 'row' || source.kind === 'no-row' || source.kind === 'frozen'
 }
@@ -101,7 +124,9 @@ export function trustlineSourceAnswered(source: TrustlineFiguresSource | null | 
  * Право СОЗДАТЬ линию из него следует и здесь не гасится: создание не читает эти числа
  * (`TrustlineManagementPanel.createValid`), поэтому через этот предикат оно не проходит вовсе.
  */
-export function canActOnTrustlineFigures(source: TrustlineFiguresSource | null | undefined): boolean {
+export function canActOnTrustlineFigures(
+  source: TrustlineFiguresSource | null | undefined,
+): source is ActionableTrustlineFiguresSource {
   if (source == null) return false
   return source.kind === 'row' || source.kind === 'frozen'
 }
@@ -121,10 +146,36 @@ export function canActOnTrustlineFigures(source: TrustlineFiguresSource | null |
 export function freezeTrustlineFiguresSource(
   frozen: TrustlineFiguresSource | null | undefined,
 ): TrustlineFiguresSource {
-  // Fail closed: заморозили неизвестно что — значит, основания нет.
-  if (frozen == null) return { kind: 'never-asked' }
-  if (frozen.kind === 'row' || frozen.kind === 'frozen') return { kind: 'frozen' }
-  return frozen
+  // Fail closed: заморозили неизвестно что — значит, основания нет. Заморожено оно всё равно.
+  if (frozen == null) return { kind: 'never-asked', frozen: true }
+  // Набор «row | frozen» не переписывается здесь заново: это ровно вопрос Б.
+  if (canActOnTrustlineFigures(frozen)) return { kind: 'frozen' }
+  switch (frozen.kind) {
+    case 'no-row':
+      return { kind: 'no-row', frozen: true }
+    case 'never-asked':
+      return { kind: 'never-asked', frozen: true }
+    case 'loading':
+      return { kind: 'loading', frozen: true }
+    case 'failed':
+      return { kind: 'failed', message: frozen.message, frozen: true }
+  }
+}
+
+/**
+ * ЗАМОРОЖЕНО ЛИ ТО, ЧТО ПОКАЗАНО, — один факт, названный в одном месте (кросс-ревью, P3).
+ *
+ * `kind: 'frozen'` описывает заморозку ОТВЕТА СО СТРОКОЙ и потому занимает целый вид: у него
+ * другое поведение и в вопросе Б (действовать позволено), и в тексте. Заморозка всех остальных
+ * оснований вида не меняет — иначе она повышала бы происхождение, — и держится отдельным
+ * признаком. Спрашивать «заморожено ли» надо через эту функцию, а не через `kind`: проверка
+ * `kind === 'frozen'` отвечает на вопрос про ОДИН из способов быть замороженным, и именно
+ * поэтому замороженные `no-row` и `never-asked` были неотличимы от живых.
+ */
+export function trustlineSourceFrozen(source: TrustlineFiguresSource | null | undefined): boolean {
+  if (source == null) return false
+  if (source.kind === 'frozen') return true
+  return 'frozen' in source && source.frozen === true
 }
 
 /**
@@ -138,15 +189,20 @@ export function freezeTrustlineFiguresSource(
  */
 export function trustlineFiguresNotice(source: TrustlineFiguresSource | null | undefined): string | null {
   const resolved: TrustlineFiguresSource = source ?? { kind: 'never-asked' }
+  // ВОПРОС А ЗАДАЁТСЯ ОДИН РАЗ И ЗДЕСЬ. Раньше на этом месте стоял собственный список видов
+  // (`row | no-row | frozen`) — вторая копия того же правила, из-за которой `trustlineSourceAnswered`
+  // не имел ни одного потребителя и был неотличим от `return false`.
+  if (trustlineSourceAnswered(resolved)) return null
   switch (resolved.kind) {
-    case 'row':
-    case 'no-row':
-    case 'frozen':
-      return null
     case 'never-asked':
       return 'Trustline data for this pair has not been requested from the backend; the figures on the graph come from the snapshot and nothing has confirmed them for this pair.'
     case 'loading':
-      return 'Trustline data is still loading from the backend; the figures for this pair are not available yet.'
+      // ЗАМОРОЖЕННАЯ ЗАГРУЗКА — НЕ ЗАГРУЗКА (кросс-ревью, P3). Запрос, который был в полёте в
+      // момент заморозки, обновит ЖИВОЕ состояние, а не этот снимок; обещать «ещё грузится»
+      // значит утверждать про окно то, чего с ним никогда не случится.
+      return resolved.frozen === true
+        ? 'Trustline data for this pair was still being requested when this window was frozen; that request will not update these figures, and nothing has confirmed them for this pair.'
+        : 'Trustline data is still loading from the backend; the figures for this pair are not available yet.'
     case 'failed':
       return `Trustline data could not be loaded: ${resolved.message}. The figures for this pair are not available, and what the graph shows may be out of date.`
   }
@@ -165,11 +221,23 @@ export function trustlineFiguresNotice(source: TrustlineFiguresSource | null | u
  * `null` — во всех остальных состояниях.
  */
 export function trustlineFrozenNotice(source: TrustlineFiguresSource | null | undefined): string | null {
-  if (source?.kind !== 'frozen') return null
+  // ЧТО ИЗМЕНИЛОСЬ (кросс-ревью, P3). Здесь стояло `source?.kind !== 'frozen'`, то есть
+  // уведомление о заморозке доставалось ОДНОМУ из способов быть замороженным — заморозке ответа
+  // со строкой. Замороженные `no-row`, `never-asked`, `loading` и `failed` оставались наблюдаемо
+  // НЕОТЛИЧИМЫ от живых — ровно та неразличимость, против которой это уведомление и заведено.
+  if (!trustlineSourceFrozen(source)) return null
+  if (source?.kind === 'frozen') {
+    return (
+      'These figures are a frozen copy of an earlier backend answer, kept as context for the ' +
+      'action in progress; they are not being refreshed and may describe a different pair than the ' +
+      'one now selected.'
+    )
+  }
+  // Про ОТВЕТ здесь не говорится ни слова: его в этих основаниях нет (либо он есть, но
+  // означает «линии нет»), и что именно было основанием — говорят соседние уведомления.
   return (
-    'These figures are a frozen copy of an earlier backend answer, kept as context for the ' +
-    'action in progress; they are not being refreshed and may describe a different pair than the ' +
-    'one now selected.'
+    'The figures in this window are a frozen copy kept as context for the action in progress; ' +
+    'they are not being refreshed and may describe a different pair than the one now selected.'
   )
 }
 
@@ -184,7 +252,10 @@ export function trustlineFrozenNotice(source: TrustlineFiguresSource | null | un
  * `null` — во всех остальных состояниях.
  */
 export function trustlineNoRowNotice(source: TrustlineFiguresSource | null | undefined): string | null {
-  if (source?.kind !== 'no-row') return null
+  // Сначала вопрос А тем же предикатом: рассказывать СОДЕРЖАНИЕ ответа можно только там, где
+  // ответ был. Это не перестраховка, а отказ от третьей копии набора видов.
+  if (!trustlineSourceAnswered(source)) return null
+  if (source.kind !== 'no-row') return null
   return (
     'The backend answered for this pair: there is no trustline. ' +
     'The figures on the graph come from the snapshot and do not describe an existing line — ' +

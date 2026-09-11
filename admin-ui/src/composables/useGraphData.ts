@@ -30,12 +30,13 @@ import type {
 // the server caps this collection at ADMIN_GRAPH_INCLUDE_MAX_TRANSACTIONS (50) rows of eight scalar
 // fields. MEASURED TWICE, and the two numbers differ for a reason worth keeping: against the
 // reference seed pack (admin-fixtures/v1) the rows cost ~14.8 KB of a ~206 KB snapshot body - about
-// 7.2% - when sized as the SERVER PROJECTION actually sends them, and ~25.6 KB of ~197 KB (13%) if
-// sized from the raw fixture rows, which still carry `payload` and `signatures` that the projection
-// does not publish. The first is the real wire cost; the second is the upper bound. An earlier
-// edition of this comment said "~11.6 KB ... about 6%" from a third, undocumented measurement and is
-// corrected here - see the table in `specs/013-frontend-data-honesty/spec.md`, which carries the
-// method so the numbers can be re-derived rather than believed. There is no snapshot poll: the graph loads on mount, on an
+// ~25.6 KB against a ~197 KB snapshot body - about 13% - sized from the shipped fixture's first 50
+// rows. That is an UPPER BOUND, not the expected cost: a fixture row still carries `payload` and
+// `signatures`, which the server projection does not publish, so the wire row is lighter. Two earlier
+// editions of this comment are withdrawn - one quoted "~11.6 KB ... about 6%" from an undocumented
+// measurement, the next a projection-aware figure that no command in the tree reproduces. The
+// reproducible measurement and its method are in `specs/013-frontend-data-honesty/spec.md`;
+// re-derive it rather than believing this comment. There is no snapshot poll: the graph loads on mount, on an
 // equivalent change, on entering/leaving focus mode and on an explicit retry, so this is not a
 // per-second cost. Incidents and audit_log are NOT requested here - see the note on
 // readCompleteness below.

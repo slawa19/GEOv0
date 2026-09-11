@@ -349,3 +349,107 @@ export function incidentRatioDisplay(
   const prefix = confidence.lowerBound ? '≥' : ''
   return `${prefix}${Number(ratio).toFixed(2)}`
 }
+
+/**
+ * The notices printed under the Activity card, in the order the operator reads them.
+ *
+ * F-013-R5 (CROSS review of 013). These used to be a `v-if` / `v-else-if` / `v-else-if` chain,
+ * written twice - once in GraphAnalyticsDrawer.vue, once in tabs/RiskTab.vue - i.e. as three
+ * statements only one of which could ever be on screen. That held exactly as long as a doubt
+ * blanked the WHOLE collection: while `incompleteWindows` emptied every cell, a suppressed
+ * truncation notice explained nothing, because no "≥" could be showing at the same time.
+ *
+ * F-013-R4 made the doubt per window, and the premise died with it. A cut collection that also
+ * carries one unplaceable row now prints "≥1 / ≥1 / —": two caveats, both true, one of them mute.
+ * The operator was left reading a "≥" with nothing on the card saying what it meant.
+ *
+ * So the two caveats are now INDEPENDENT, and both are printed when both hold. What remains
+ * ordered is only what is genuinely exclusive:
+ *
+ *   * "we were not told about this collection" cannot coexist with either of the other two, and
+ *     not because this function says so: `collectionConfidence` returns COUNT_UNKNOWN for an
+ *     uncarried collection, so `lowerBound` is false and `incompleteWindows` is empty by
+ *     construction. The `else` below states that rather than establishing it.
+ *   * `incidents` / `audit_log` fail independently of `transactions`, so their sentence is not part
+ *     of the transactions group at all: it is appended, never substituted.
+ *
+ * WHAT IS DELIBERATELY *NOT* DONE HERE. The truncation notice is not narrowed to "a ≥ is actually
+ * visible" - i.e. it still appears when the cut collection's every window happens to be clouded and
+ * so every cell reads "—". Suppressing a true statement about the snapshot because the rendering
+ * made it momentarily redundant is the very move this finding is about; a redundant sentence is
+ * noise, a missing one is a number the operator cannot read correctly.
+ *
+ * WHY IT RETURNS THE KEYS INSTEAD OF THE CARDS RENDERING THEM. Two templates showed the same block
+ * and nothing in the tree could be handed to a test - which is how a chain went wrong in both
+ * copies at once and stayed green. One list, two `v-for`s, and the tests judge this function.
+ */
+export type ActivityNoticeKind =
+  | 'transactionsNotIncluded'
+  | 'transactionsUnattributable'
+  | 'transactionsTruncated'
+  | 'snapshotCollectionsNotIncluded'
+
+export type ActivityNotice = {
+  kind: ActivityNoticeKind
+  /** el-alert severity. Only the truncation notice is informational: the count still stands. */
+  type: 'warning' | 'info'
+  titleKey: string
+  descriptionKey: string
+}
+
+type ActivityConfidences = {
+  payments: CountConfidence
+  clearings: CountConfidence
+  incidents: CountConfidence
+  auditLog: CountConfidence
+}
+
+const NOTICES: Record<ActivityNoticeKind, ActivityNotice> = {
+  transactionsNotIncluded: {
+    kind: 'transactionsNotIncluded',
+    type: 'warning',
+    titleKey: 'graph.analytics.activity.transactionsNotIncludedTitle',
+    descriptionKey: 'graph.analytics.activity.transactionsNotIncludedDescription',
+  },
+  transactionsUnattributable: {
+    kind: 'transactionsUnattributable',
+    type: 'warning',
+    titleKey: 'graph.analytics.activity.transactionsUnattributableTitle',
+    descriptionKey: 'graph.analytics.activity.transactionsUnattributableDescription',
+  },
+  transactionsTruncated: {
+    kind: 'transactionsTruncated',
+    type: 'info',
+    titleKey: 'graph.analytics.activity.transactionsTruncatedTitle',
+    descriptionKey: 'graph.analytics.activity.transactionsTruncatedDescription',
+  },
+  snapshotCollectionsNotIncluded: {
+    kind: 'snapshotCollectionsNotIncluded',
+    type: 'warning',
+    titleKey: 'graph.analytics.activity.snapshotCollectionsNotIncludedTitle',
+    descriptionKey: 'graph.analytics.activity.snapshotCollectionsNotIncludedDescription',
+  },
+}
+
+export function activityNotices(activity: ActivityConfidences | null | undefined): ActivityNotice[] {
+  if (!activity) return []
+  const out: ActivityNotice[] = []
+
+  if (!activity.payments.known) {
+    // Nothing else can be true of a collection we were never told about - see above.
+    out.push(NOTICES.transactionsNotIncluded)
+  } else {
+    // Both of these, whenever both hold. `payments` and `clearings` describe one collection, so
+    // either answers "was it cut"; the doubt is per counter since F-013-R4, so it is asked of both.
+    if (activity.payments.incompleteWindows.length || activity.clearings.incompleteWindows.length) {
+      out.push(NOTICES.transactionsUnattributable)
+    }
+    if (activity.payments.lowerBound) out.push(NOTICES.transactionsTruncated)
+  }
+
+  if (!activity.incidents.known || !activity.auditLog.known) {
+    out.push(NOTICES.snapshotCollectionsNotIncluded)
+  }
+
+  return out
+}
