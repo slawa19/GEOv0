@@ -28,8 +28,11 @@ import type {
 // against the snapshot in flight, and a visible flip of the completeness signal from "not asked" to
 // "asked" while the user is reading it. The cost of asking unconditionally is bounded and measured:
 // the server caps this collection at ADMIN_GRAPH_INCLUDE_MAX_TRANSACTIONS (50) rows of eight scalar
-// fields, which is 25,569 B against a 196,738 B snapshot body - 13.0% - measured over the first 50
-// rows of the shipped fixtures in `admin-ui/public/admin-fixtures/v1/datasets/`.
+// fields, which is 25,569 B against a 196,738 B SERIALIZED FOUR-KEY FIXTURE BASE - 13.0% - measured
+// over the first 50 rows of the shipped fixtures in `admin-ui/public/admin-fixtures/v1/datasets/`.
+// "Four-key base" is the exact object the recorded method serializes (participants, trustlines,
+// debts, equivalents); calling it a "snapshot body" was loose, because the real response carries
+// more keys and the number would not reproduce against it.
 //
 // THAT IS AN UPPER BOUND, NOT THE EXPECTED COST, and no second figure is given: a fixture row still
 // carries `payload` and `signatures`, which the server projection does not publish, so the wire row

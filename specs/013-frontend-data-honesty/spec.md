@@ -849,16 +849,19 @@ Update и Close. Расходятся они ровно на `no-row`, и у э�
 `./scripts/verify_local.ps1 -TaskSlug ci-required` **без** `-BackendOnly`
 (`.github/workflows/quality.yml`), то есть полный гейт с обеими сборками, на runner'е с `pwsh`.
 
-**CI на финальном дереве:** `7a808eb`, run `34582063237`, conclusion **success**. Зелены:
+**CI на финальном по поведению дереве:** `7a808eb`, run `34582063237`, conclusion **success**. Зелены:
 `Required local-equivalent gates`, `Python static diagnostics (Ruff blocking, Black non-blocking)`,
 `Active UI Chromium smoke`, `Development image content policy`. Пропущены как `scheduled/manual`:
 `PostgreSQL integration`, `Production-like container and schema smoke`, `Admin UI E2E`,
 `Simulator visual E2E on baseline platform`, `Simulator super-smoke` — то есть **Postgres-тир в CI
 не исполнялся**, и по нему evidence остаётся локальным. **Про Playwright сказать «локальное
 evidence» нельзя вовсе:** ни одной локальной команды `run e2e` / `run test:e2e` в записях нет,
-то есть оба полных набора **не проверены ничем**. CI при этом прогнал две smoke-джобы
-(`Active UI Chromium smoke`, и внутри канонического гейта — сборки обоих UI), и это другое
-утверждение, более слабое.
+то есть оба полных набора **не проверены ничем**. CI при этом прогнал **одну** smoke-джобу — `Active UI Chromium smoke`, и
+внутри неё **две** Playwright-команды `test:e2e:smoke`, по одной на каждый UI
+(`.github/workflows/quality.yml`, job `ui-smoke`). Сборки обоих UI к ней отношения не имеют: они
+исполняются в отдельной джобе `Required local-equivalent gates`, внутри канонического
+`verify_local.ps1`. Прежняя редакция называла это «двумя smoke-джобами» и относила сборки к ним —
+неверно в обеих половинах.
 
 **И его потомок, сохраняющий поведение:** `0dd37f6` (слияние реконсиляции записей), run
 `34584202612`, conclusion **success**, тот же набор из четырёх зелёных и пяти пропущенных джоб.
