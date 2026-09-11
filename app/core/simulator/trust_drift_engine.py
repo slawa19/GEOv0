@@ -11,18 +11,6 @@ from app.core.payments.router import PaymentRouter
 from app.core.simulator.commit_resolution import resolve_commit_under_cancellation
 from app.utils.validation import MONEY_MAX_SCALE
 
-# The grain of the ledger, not of a currency's display. `trust_lines.limit` and `debts.amount` are
-# `Numeric(20, 8)`, and since 012/T1201 the money door refuses anything the column cannot hold
-# unchanged - so eight fraction digits are legitimate content that the production core writes.
-#
-# This engine used to quantise to `Decimal("0.01")` on both the read and the write of a stored
-# limit, so a limit the column held exactly was flattened to cents on the first drift tick and
-# every later tick started from the flattened number: the limit walked away from what was agreed.
-# `Equivalent.precision` is deliberately NOT used as the quantum here - it is a DISPLAY minimum
-# (`app/utils/money.py`), not the ledger's grain, and rounding stored money to it would be the same
-# defect wearing a different constant.
-_LEDGER_QUANTUM = Decimal(1).scaleb(-MONEY_MAX_SCALE)
-
 from app.core.simulator.models import (
     EdgeClearingHistory,
     RunRecord,
@@ -35,6 +23,18 @@ from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter
 from app.db.models.equivalent import Equivalent
 from app.db.models.trustline import TrustLine
 from app.schemas.simulator import TopologyChangedPayload
+
+# The grain of the ledger, not of a currency's display. `trust_lines.limit` and `debts.amount` are
+# `Numeric(20, 8)`, and since 012/T1201 the money door refuses anything the column cannot hold
+# unchanged - so eight fraction digits are legitimate content that the production core writes.
+#
+# This engine used to quantise to `Decimal("0.01")` on both the read and the write of a stored
+# limit, so a limit the column held exactly was flattened to cents on the first drift tick and
+# every later tick started from the flattened number: the limit walked away from what was agreed.
+# `Equivalent.precision` is deliberately NOT used as the quantum here - it is a DISPLAY minimum
+# (`app/utils/money.py`), not the ledger's grain, and rounding stored money to it would be the same
+# defect wearing a different constant.
+_LEDGER_QUANTUM = Decimal(1).scaleb(-MONEY_MAX_SCALE)
 
 
 def broadcast_trust_drift_changed(

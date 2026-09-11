@@ -1,16 +1,24 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import uuid
 from decimal import Decimal
 from typing import Any, Callable
 
+from sqlalchemy import select
+from sqlalchemy.exc import DBAPIError, SQLAlchemyError
+
+from app.core.payments.engine import PaymentEngine
 from app.core.simulator.adaptive_clearing_policy import AdaptiveClearingPolicyConfig
 from app.core.simulator.artifacts import ArtifactsManager
 from app.core.simulator.edge_patch_builder import EdgePatchBuilder
 from app.core.simulator.inject_executor import (
     InjectExecutor,
+    InjectOwnerLockSetTooNarrow,
+    StagedInjectEvent,
+    inject_event_equivalent_codes,
     invalidate_caches_after_inject as _inject_invalidate_caches_after_inject,
 )
 from app.core.simulator.models import RunRecord, TrustDriftResult
@@ -36,6 +44,27 @@ from app.core.simulator.runtime_utils import (
 )
 from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter
 from app.core.simulator.trust_drift_engine import TrustDriftEngine
+from app.db.models.equivalent import Equivalent
+
+# 40001 serialization_failure, 40P01 deadlock_detected: PostgreSQL has rolled the transaction back
+# and the whole unit of work may run again.
+#
+# 55P03 lock_not_available: the owner lock was not obtained within its deadline. Nothing of the unit
+# of work has been written - the locks open it - so this is a known rollback too. Treating it as an
+# ordinary database error would record "inject failed" and mark the event fired, i.e. DROP the
+# inject whenever another writer held the equivalent a little too long. The tick orchestrator's own
+# lock timeout fails the tick without firing anything; the inject owner now does the same once its
+# single retry is spent. Nothing else is retried.
+_INJECT_TRANSIENT_SQLSTATES = frozenset({"40001", "40P01", "55P03"})
+
+
+def _is_transient_inject_db_error(exc: BaseException) -> bool:
+    if not isinstance(exc, DBAPIError):
+        return False
+    orig = getattr(exc, "orig", None)
+    # asyncpg's adapted error carries `sqlstate`, psycopg's `pgcode`.
+    sqlstate = getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)
+    return sqlstate in _INJECT_TRANSIENT_SQLSTATES
 
 
 class RealRunnerImpl:
@@ -269,10 +298,75 @@ class RealRunnerImpl:
     async def _apply_due_scenario_events(
         self, session, *, run_id: str, run: RunRecord, scenario: dict[str, Any]
     ) -> None:
-        events = scenario.get("events")
-        if not isinstance(events, list) or not events:
-            return
+        """Apply the due scenario events, owning every transaction boundary on `session`.
 
+        Programme 015, phase B step 3. The equivalent owner lock is transactional, and the inject
+        executor used to commit the transaction the tick orchestrator had locked, which released
+        the lock: a second inject event of the same tick wrote `debts` unlocked. From here on the
+        due-events phase is the owner of the session's transactions while it runs.
+
+        Contract with the caller:
+        - `session` must carry no unflushed ORM changes (`new`, `dirty`, `deleted`); otherwise
+          `RuntimeError` is raised before anything happens. An open transaction is ended by the
+          first boundary this method draws (committed, like any read it finds open).
+        - Every due inject event is ONE unit of work: resolve the owner lock set (the run's
+          equivalents and those the event names) in a short read that is committed; acquire
+          those owner locks as the opening of a fresh transaction; stage; mark the event fired;
+          commit; then publish (caches, SSE, note) and end publish's read transaction.
+        - Staging that reaches an equivalent outside the set rolls back and restarts once with
+          the missing equivalents added. A 40001/40P01/55P03 before or at commit rolls back and
+          restarts once; a second one propagates, the event stays pending and nothing after it
+          runs. Any other database error before commit - including one raised by flushing the
+          staged writes, which happens explicitly before the commit - is recorded as "inject
+          failed (db error)" and the event is fired. A non-transient failure OF the commit
+          statement leaves the outcome unknown: the event stays fired ("inject outcome unknown
+          (commit error)") and is not retried - at most once until durable operation keys exist
+          (phase B step 4).
+        - Cancellation before the commit rolls back and leaves the event pending; cancellation
+          during the commit leaves it fired. Both propagate.
+        - Returns with no open transaction.
+        """
+
+        self._require_no_unflushed_changes(session)
+
+        events = scenario.get("events")
+        if isinstance(events, list) and events:
+            await self._apply_due_events_in_order(
+                session, run_id=run_id, run=run, scenario=scenario, events=events
+            )
+
+        await self._end_open_transaction(session)
+
+    @staticmethod
+    def _require_no_unflushed_changes(session) -> None:
+        if session.new or session.dirty or session.deleted:
+            raise RuntimeError(
+                "the due-events phase owns its transactions and was handed a session with "
+                "unflushed changes; flush and end them before calling it"
+            )
+
+    async def _end_open_transaction(self, session) -> None:
+        """End whatever transaction is open with a commit; roll back if the commit fails."""
+
+        if not session.in_transaction():
+            return
+        try:
+            await session.commit()
+        except Exception:
+            self._logger.warning(
+                "simulator.real.inject.end_transaction_commit_failed", exc_info=True
+            )
+            await session.rollback()
+
+    async def _apply_due_events_in_order(
+        self,
+        session,
+        *,
+        run_id: str,
+        run: RunRecord,
+        scenario: dict[str, Any],
+        events: list[Any],
+    ) -> None:
         # Build pid->id map once.
         pid_to_participant_id: dict[str, uuid.UUID] = {}
         if run._real_participants:
@@ -313,7 +407,7 @@ class RealRunnerImpl:
                 continue
 
             if evt_type == "inject":
-                await self._inject_executor.apply_inject_event(
+                await self._apply_inject_unit_of_work(
                     session,
                     run_id=run_id,
                     run=run,
@@ -322,9 +416,6 @@ class RealRunnerImpl:
                     event_time_ms=t0,
                     event=evt,
                     pid_to_participant_id=pid_to_participant_id,
-                    inject_enabled=bool(self._real_enable_inject),
-                    build_edge_patch_for_equivalent=self._build_edge_patch_for_equivalent,
-                    broadcast_topology_edge_patch=self._broadcast_topology_edge_patch,
                 )
                 continue
 
@@ -343,7 +434,11 @@ class RealRunnerImpl:
         event: dict[str, Any] | None,
         pid_to_participant_id: dict[str, uuid.UUID],
     ) -> None:
-        await self._inject_executor.apply_inject_event(
+        # No caller in the tree (T1519 lists it as dead code). Until it is deleted it goes through
+        # the same owner as the due-events phase, so it cannot be a way around the owner lock
+        # (programme 015, phase B step 3).
+        self._require_no_unflushed_changes(session)
+        await self._apply_inject_unit_of_work(
             session,
             run_id=run_id,
             run=run,
@@ -352,10 +447,222 @@ class RealRunnerImpl:
             event_time_ms=event_time_ms,
             event=event,
             pid_to_participant_id=pid_to_participant_id,
-            inject_enabled=bool(self._real_enable_inject),
-            build_edge_patch_for_equivalent=self._build_edge_patch_for_equivalent,
-            broadcast_topology_edge_patch=self._broadcast_topology_edge_patch,
         )
+        await self._end_open_transaction(session)
+
+    async def _resolve_inject_owner_lock_ids(
+        self,
+        session,
+        *,
+        run: RunRecord,
+        scenario: dict[str, Any],
+        event: dict[str, Any] | None,
+    ) -> set[uuid.UUID]:
+        """The run's equivalents and the event's own, as ids, in one read that is then committed.
+
+        The read is ended before the owner locks are taken, so the locks open the unit of work's
+        transaction instead of joining a snapshot taken without them.
+        """
+
+        codes = {
+            str(code).strip().upper()
+            for code in (run._real_equivalents or [])
+            if str(code).strip()
+        }
+        codes |= inject_event_equivalent_codes(scenario=scenario, event=event)
+        lock_ids: set[uuid.UUID] = set()
+        if codes:
+            lock_ids = set(
+                (
+                    await session.execute(
+                        select(Equivalent.id).where(Equivalent.code.in_(sorted(codes)))
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        if session.in_transaction():
+            await session.commit()
+        return lock_ids
+
+    async def _apply_inject_unit_of_work(
+        self,
+        session,
+        *,
+        run_id: str,
+        run: RunRecord,
+        scenario: dict[str, Any],
+        event_index: int,
+        event_time_ms: int,
+        event: dict[str, Any] | None,
+        pid_to_participant_id: dict[str, uuid.UUID],
+    ) -> None:
+        """One inject event as one locked unit of work. See `_apply_due_scenario_events`."""
+
+        executor = self._inject_executor
+        fired = run._real_fired_scenario_event_indexes
+
+        if not self._real_enable_inject:
+            executor.enqueue_inject_note(
+                run_id,
+                run=run,
+                event_index=event_index,
+                event_time_ms=event_time_ms,
+                description="inject skipped (SIMULATOR_REAL_ENABLE_INJECT=0)",
+            )
+            fired.add(event_index)
+            return
+
+        effects = (event or {}).get("effects")
+        if not isinstance(effects, list) or not effects:
+            fired.add(event_index)
+            return
+
+        lock_ids: set[uuid.UUID] | None = None
+        lock_set_expansions_left = 1
+        transient_retries_left = 1
+        staged: StagedInjectEvent | None = None
+
+        while True:
+            try:
+                if lock_ids is None:
+                    lock_ids = await self._resolve_inject_owner_lock_ids(
+                        session, run=run, scenario=scenario, event=event
+                    )
+                # The owner locks open the transaction the event is staged and committed in. A
+                # fresh engine per attempt: its advisory-lock deadline is per unit of work.
+                await PaymentEngine(session).acquire_staged_equivalent_owner_locks(lock_ids)
+                staged = await executor.stage_inject_event(
+                    session,
+                    scenario=scenario,
+                    event=event,
+                    pid_to_participant_id=pid_to_participant_id,
+                    locked_equivalent_ids=frozenset(lock_ids),
+                )
+                # Flush HERE, not inside `commit()`. A flush error (a constraint, a 40001 on the
+                # write itself) is a known rollback: nothing landed. Left to the commit, it would be
+                # indistinguishable from a failure of the commit statement, whose outcome is unknown,
+                # and the inject would be recorded as "outcome unknown" instead of "failed".
+                await session.flush()
+            except asyncio.CancelledError:
+                fired.discard(event_index)
+                try:
+                    await session.rollback()
+                except Exception:
+                    self._logger.warning(
+                        "simulator.real.inject.rollback_after_cancel_failed event_index=%s",
+                        event_index,
+                        exc_info=True,
+                    )
+                raise
+            except InjectOwnerLockSetTooNarrow as exc:
+                fired.discard(event_index)
+                await session.rollback()
+                if lock_set_expansions_left <= 0:
+                    # A second expansion means the incident set moved between two attempts.
+                    # Leave the event pending rather than stage it under a set already proven
+                    # stale twice.
+                    raise
+                lock_set_expansions_left -= 1
+                lock_ids = set(lock_ids or ()) | set(exc.missing_equivalent_ids)
+                self._logger.info(
+                    "simulator.real.inject.owner_lock_set_expanded event_index=%s added=%d",
+                    event_index,
+                    len(exc.missing_equivalent_ids),
+                )
+                continue
+            except Exception as exc:
+                fired.discard(event_index)
+                await session.rollback()
+                if _is_transient_inject_db_error(exc):
+                    if transient_retries_left <= 0:
+                        raise
+                    transient_retries_left -= 1
+                    # No sleep: the retry opens with the owner locks, so it waits behind any
+                    # lock-holding writer it conflicted with instead of racing it again.
+                    self._logger.warning(
+                        "simulator.real.inject.transient_retry event_index=%s stage=staging",
+                        event_index,
+                    )
+                    continue
+                if isinstance(exc, SQLAlchemyError):
+                    self._logger.warning(
+                        "simulator.real.inject.db_error event_index=%s",
+                        event_index,
+                        exc_info=True,
+                    )
+                    executor.enqueue_inject_note(
+                        run_id,
+                        run=run,
+                        event_index=event_index,
+                        event_time_ms=event_time_ms,
+                        description="inject failed (db error)",
+                    )
+                    fired.add(event_index)
+                    return
+                raise
+
+            # AT MOST ONCE until durable operation keys exist (programme 015, phase B step 4).
+            # Marked immediately before the commit: if the commit's outcome cannot be known, the
+            # event must not be applied a second time on the next tick.
+            fired.add(event_index)
+            try:
+                await session.commit()
+            except asyncio.CancelledError:
+                # The commit may have landed. The mark stays.
+                raise
+            except Exception as exc:
+                await session.rollback()
+                if _is_transient_inject_db_error(exc):
+                    # PostgreSQL reports 40001/40P01 for a transaction it rolled back: nothing of
+                    # this attempt landed, so it may run again.
+                    fired.discard(event_index)
+                    if transient_retries_left <= 0:
+                        raise
+                    transient_retries_left -= 1
+                    self._logger.warning(
+                        "simulator.real.inject.transient_retry event_index=%s stage=commit",
+                        event_index,
+                    )
+                    continue
+                self._logger.warning(
+                    "simulator.real.inject.commit_outcome_unknown event_index=%s",
+                    event_index,
+                    exc_info=True,
+                )
+                executor.enqueue_inject_note(
+                    run_id,
+                    run=run,
+                    event_index=event_index,
+                    event_time_ms=event_time_ms,
+                    description="inject outcome unknown (commit error)",
+                )
+                return
+            break
+
+        # Committed. Only now do the ids staging learned exist for the next event.
+        pid_to_participant_id.update(staged.pid_additions)
+        try:
+            await executor.publish_committed_inject(
+                session,
+                run_id=run_id,
+                run=run,
+                scenario=scenario,
+                event_index=event_index,
+                event_time_ms=event_time_ms,
+                staged=staged,
+                build_edge_patch_for_equivalent=self._build_edge_patch_for_equivalent,
+                broadcast_topology_edge_patch=self._broadcast_topology_edge_patch,
+            )
+        except Exception:
+            # Post-delivery: the inject is committed and fired. A failed publication is logged,
+            # never undone, retried or re-staged (AGENTS.md section 12).
+            self._logger.warning(
+                "simulator.real.inject.publish_failed event_index=%s",
+                event_index,
+                exc_info=True,
+            )
+        await self._end_open_transaction(session)
 
     def _invalidate_caches_after_inject(
         self,
