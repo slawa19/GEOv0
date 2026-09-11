@@ -30,13 +30,15 @@ import type {
 // the server caps this collection at ADMIN_GRAPH_INCLUDE_MAX_TRANSACTIONS (50) rows of eight scalar
 // fields. MEASURED TWICE, and the two numbers differ for a reason worth keeping: against the
 // reference seed pack (admin-fixtures/v1) the rows cost ~14.8 KB of a ~206 KB snapshot body - about
-// ~25.6 KB against a ~197 KB snapshot body - about 13% - sized from the shipped fixture's first 50
-// rows. That is an UPPER BOUND, not the expected cost: a fixture row still carries `payload` and
-// `signatures`, which the server projection does not publish, so the wire row is lighter. Two earlier
-// editions of this comment are withdrawn - one quoted "~11.6 KB ... about 6%" from an undocumented
-// measurement, the next a projection-aware figure that no command in the tree reproduces. The
-// reproducible measurement and its method are in `specs/013-frontend-data-honesty/spec.md`;
-// re-derive it rather than believing this comment. There is no snapshot poll: the graph loads on mount, on an
+// 25,569 B against a 196,738 B snapshot body - 13.0% - sized from the shipped fixture's first 50
+// rows (`admin-ui/public/admin-fixtures/v1/datasets/`). That is an UPPER BOUND rather than the
+// expected cost, because a fixture row still carries `payload` and `signatures` which the server
+// projection does not publish; how much lighter the wire row is has NOT been measured by anything
+// reproducible, so no second number is given here. Two earlier editions of this comment are
+// withdrawn: one quoted "~11.6 KB ... about 6%" from an undocumented measurement, the next a
+// projection-aware figure that no command in the tree reproduces. The method behind the figure that
+// remains is in `specs/013-frontend-data-honesty/spec.md` - re-derive it rather than believing this
+// comment. There is no snapshot poll: the graph loads on mount, on an
 // equivalent change, on entering/leaving focus mode and on an explicit retry, so this is not a
 // per-second cost. Incidents and audit_log are NOT requested here - see the note on
 // readCompleteness below.
