@@ -79,6 +79,9 @@ async def _seed_capacity_policy_case(
             _payment_transaction(tx_id=reservation_tx_id, initiator_id=sender_id),
         ]
     )
+    # prepare_locks.tx_id references transactions.tx_id with no ORM relationship, so the
+    # flush does not order the two inserts; write the transaction first.
+    await db_session.flush()
     db_session.add(
         PrepareLock(
             tx_id=reservation_tx_id,

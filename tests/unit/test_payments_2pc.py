@@ -17,20 +17,32 @@ from app.utils.exceptions import GeoException
 
 @pytest.mark.asyncio
 async def test_commit_rejects_expired_locks(db_session):
+    initiator_id = uuid.uuid4()
+    db_session.add(
+        Participant(
+            id=initiator_id,
+            pid="EXPIRED_LOCK_A",
+            display_name="Expired lock initiator",
+            public_key="expired-lock-initiator",
+        )
+    )
     tx_id = str(uuid.uuid4())
     tx = Transaction(
         id=uuid.uuid4(),
         tx_id=tx_id,
         type="PAYMENT",
-        initiator_id=uuid.uuid4(),
+        initiator_id=initiator_id,
         payload={"from": "A", "to": "B", "amount": "1", "equivalent": "USD", "path": ["A", "B"]},
         state="PREPARED",
     )
     db_session.add(tx)
+    # prepare_locks.tx_id references transactions.tx_id with no ORM relationship, so the
+    # flush does not order the two inserts; write the transaction first.
+    await db_session.flush()
 
     lock = PrepareLock(
         tx_id=tx_id,
-        participant_id=uuid.uuid4(),
+        participant_id=initiator_id,
         effects={
             "flows": [
                 {
@@ -56,12 +68,21 @@ async def test_commit_rejects_expired_locks(db_session):
 
 @pytest.mark.asyncio
 async def test_commit_is_idempotent_when_already_committed(db_session):
+    initiator_id = uuid.uuid4()
+    db_session.add(
+        Participant(
+            id=initiator_id,
+            pid="IDEMPOTENT_COMMIT_A",
+            display_name="Idempotent commit initiator",
+            public_key="idempotent-commit-initiator",
+        )
+    )
     tx_id = str(uuid.uuid4())
     tx = Transaction(
         id=uuid.uuid4(),
         tx_id=tx_id,
         type="PAYMENT",
-        initiator_id=uuid.uuid4(),
+        initiator_id=initiator_id,
         payload={"from": "A", "to": "B", "amount": "1", "equivalent": "USD", "path": ["A", "B"]},
         state="COMMITTED",
     )
@@ -74,20 +95,30 @@ async def test_commit_is_idempotent_when_already_committed(db_session):
 
 @pytest.mark.asyncio
 async def test_abort_is_noop_when_already_committed(db_session):
+    initiator_id = uuid.uuid4()
+    db_session.add(
+        Participant(
+            id=initiator_id,
+            pid="NOOP_ABORT_A",
+            display_name="No-op abort initiator",
+            public_key="noop-abort-initiator",
+        )
+    )
     tx_id = str(uuid.uuid4())
     tx = Transaction(
         id=uuid.uuid4(),
         tx_id=tx_id,
         type="PAYMENT",
-        initiator_id=uuid.uuid4(),
+        initiator_id=initiator_id,
         payload={"from": "A", "to": "B", "amount": "1", "equivalent": "USD", "path": ["A", "B"]},
         state="COMMITTED",
     )
     db_session.add(tx)
+    await db_session.flush()
     db_session.add(
         PrepareLock(
             tx_id=tx_id,
-            participant_id=uuid.uuid4(),
+            participant_id=initiator_id,
             effects={},
             expires_at=datetime.now(timezone.utc) + timedelta(seconds=30),
         )
@@ -166,6 +197,7 @@ async def test_commit_updates_transaction_updated_at(db_session):
         updated_at=updated_at_before,
     )
     db_session.add(tx)
+    await db_session.flush()
 
     lock = PrepareLock(
         tx_id=tx_id,
@@ -250,6 +282,8 @@ async def test_commit_fails_closed_and_abort_recovers_invalid_persisted_flows(
         payload={},
         state="PREPARED",
     )
+    db_session.add(tx)
+    await db_session.flush()
     valid_flow = {
         "from": str(sender_id),
         "to": str(receiver_id),
@@ -272,7 +306,7 @@ async def test_commit_fails_closed_and_abort_recovers_invalid_persisted_flows(
         },
         expires_at=datetime.now(timezone.utc) + timedelta(seconds=60),
     )
-    db_session.add_all([tx, lock])
+    db_session.add(lock)
     await db_session.commit()
 
     with pytest.raises(GeoException) as raised:
@@ -344,6 +378,8 @@ async def test_commit_fails_closed_when_validated_flows_change_during_lock_wait(
         payload={},
         state="PREPARED",
     )
+    db_session.add(tx)
+    await db_session.flush()
     lock = PrepareLock(
         tx_id=tx_id,
         participant_id=sender_id,
@@ -359,7 +395,7 @@ async def test_commit_fails_closed_when_validated_flows_change_during_lock_wait(
         },
         expires_at=datetime.now(timezone.utc) + timedelta(seconds=60),
     )
-    db_session.add_all([tx, lock])
+    db_session.add(lock)
     await db_session.commit()
     engine = PaymentEngine(db_session)
 
