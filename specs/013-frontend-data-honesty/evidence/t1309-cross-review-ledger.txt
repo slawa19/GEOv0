@@ -1,0 +1,62 @@
+Cross review of the final fix delta — programme 013
+===================================================
+
+WHAT THIS IS, AND WHAT IT IS NOT. Internal fallback evidence, NOT §15 independence. `AGENTS.md`
+§15 allows exactly one external review circle on a fix-delta. For 013 that circle was spent by
+`T1309`, which returned `READY-TO-CLOSE: NO` with six findings — so the round that CLOSED those
+six is externally unverifiable by construction. The rule for that position is a cross review by
+someone who did not author the fix. This is it, and it is recorded at that weight.
+
+WHY IT EXISTS AT ALL. A delegated external holder (Codex `gpt-5.6-sol` high, frozen clone at
+`6ee8b3e`) was asked to accept the closure risk and REFUSED, naming this exact gap:
+  VERDICT-013-CLOSURE-RISK: REFUSE
+  VERDICT-BLOCKER: missing final-delta cross-review and canonical closure evidence
+It explicitly did NOT consider "the external slices ran no gates" to be the blocker — §15 permits
+local runs to remain the only gate evidence when the reviewer's environment is read-only.
+
+Reviewer        a fresh subagent of this session, with no part in authoring the delta
+Target          `95f5efe..a531b49`
+Method          isolated clone in %TEMP%, node_modules copied in, own TEST_DATABASE_URL; the
+                shared working tree was never written
+Instruction     hunt enumerated defect forms - a test that encodes the defect, a sample that
+                cannot fail, a guard bypassed in the case it guards, a new false zero/green/
+                unknown, missed call sites - and run every wrong implementation rather than
+                reasoning about it
+
+Verdicts        VERDICT-013-CROSS-REVIEW: FINDINGS
+                VERDICT-SAMPLE-BIAS: FOUND
+
+It independently reproduced the delta's own gate numbers before judging anything: simulator-ui
+1024 passed, admin-ui 366 passed, backend 1870 passed / 1 failed (the F-014-11 console-width
+artefact), contract suite 24 passed, both typechecks exit 0.
+
+FINDINGS AND DISPOSITION
+  P2  the include-cost table closed with a FABRICATED CELL - `incidents @50 = 9551 B` is the
+      three-row fixture multiplied to fifty, landing exactly on the prose's pre-existing "+4.6%".
+      Actual shipped cost 574 B; honest combined price 11.2%, not "about 15%". The unreproducible
+      second column withdrawn. .................................................... CLOSED
+  P2  the `no-row` presentation half left open in EdgeDetailPopup - the third copy of the guard -
+      where it asserted "this trustline has outstanding debt, 12 UAH" two elements below its own
+      notice that the line does not exist ......................................... CLOSED
+  P3  `trustlineSourceAnswered` had zero consumers; replacing it with `return false` left all
+      1024 tests green. Wired rather than deleted; the same mutation now reddens 13 tests in five
+      files, nine of them outside the module's own unit file ...................... CLOSED
+  P3  frozen-ness conflated with one ground, so a frozen non-answer was observably identical to a
+      live window ................................................................ CLOSED
+  P3  `≥` printed while the notice explaining it was suppressed; fixing it surfaced that the
+      notice chain existed twice and that the tests judged it through a copy ...... CLOSED
+  P3  a row with an unreadable equivalent counted into whichever equivalent was selected, with
+      full confidence - one row yielding a confident total in two units ........... CLOSED
+  P3  tightening the client decoder to the canon's closed enum makes a fourth collection name
+      discard the WHOLE snapshot, because a schema miss is fatal for the entire response.
+      Deliberately NOT fixed here - it is the client's decoding policy, not this field .. RECORDED
+
+NEGATIVE RESULTS, recorded because they cost the same to obtain: no test encoding the defect
+(every changed assertion re-read); no new false zero in the counters (both over- and under-firing
+mutations redden); no missed call sites (zero residual `.incomplete`; all four predicate
+consumers checked); the contract-ratchet correction verified accurate. Eight of nine probe
+mutations were caught; the ninth is the sample-bias finding above.
+
+NOT VERIFIED BY THE REVIEWER, and named rather than assumed: the postgres tier, `admin-ui lint`,
+and the "server projection" column of the include-cost table - for which no reproducing command
+exists in the tree, which is why that column was withdrawn rather than defended.
