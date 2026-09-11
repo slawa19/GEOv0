@@ -28,16 +28,17 @@ import type {
 // against the snapshot in flight, and a visible flip of the completeness signal from "not asked" to
 // "asked" while the user is reading it. The cost of asking unconditionally is bounded and measured:
 // the server caps this collection at ADMIN_GRAPH_INCLUDE_MAX_TRANSACTIONS (50) rows of eight scalar
-// fields. MEASURED TWICE, and the two numbers differ for a reason worth keeping: against the
-// reference seed pack (admin-fixtures/v1) the rows cost ~14.8 KB of a ~206 KB snapshot body - about
-// 25,569 B against a 196,738 B snapshot body - 13.0% - sized from the shipped fixture's first 50
-// rows (`admin-ui/public/admin-fixtures/v1/datasets/`). That is an UPPER BOUND rather than the
-// expected cost, because a fixture row still carries `payload` and `signatures` which the server
-// projection does not publish; how much lighter the wire row is has NOT been measured by anything
-// reproducible, so no second number is given here. Two earlier editions of this comment are
-// withdrawn: one quoted "~11.6 KB ... about 6%" from an undocumented measurement, the next a
-// projection-aware figure that no command in the tree reproduces. The method behind the figure that
-// remains is in `specs/013-frontend-data-honesty/spec.md` - re-derive it rather than believing this
+// fields, which is 25,569 B against a 196,738 B snapshot body - 13.0% - measured over the first 50
+// rows of the shipped fixtures in `admin-ui/public/admin-fixtures/v1/datasets/`.
+//
+// THAT IS AN UPPER BOUND, NOT THE EXPECTED COST, and no second figure is given: a fixture row still
+// carries `payload` and `signatures`, which the server projection does not publish, so the wire row
+// is lighter by an amount NOTHING IN THIS TREE MEASURES. Two earlier editions of this comment are
+// withdrawn - one quoted "~11.6 KB ... about 6%" from an undocumented measurement, the next a
+// projection-aware figure no command reproduces - and a third edition claimed to withdraw the second
+// while still quoting it, because the edit that removed it began one line below the sentence that
+// carried it. The method behind the figure that remains, with the command, is in
+// `specs/013-frontend-data-honesty/spec.md`; re-derive it rather than believing this comment.
 // comment. There is no snapshot poll: the graph loads on mount, on an
 // equivalent change, on entering/leaving focus mode and on an explicit retry, so this is not a
 // per-second cost. Incidents and audit_log are NOT requested here - see the note on
