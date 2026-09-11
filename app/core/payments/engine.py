@@ -41,6 +41,27 @@ _T = TypeVar("_T")
 class _EquivalentOwnerPreflightChanged(Exception):
     """Persisted payment flows changed before the tx lock was acquired."""
 
+# EXACT ZERO, and the constant is the subject of T1522 of programme 015.
+#
+# The payment delta barrier compared `abs(drift) > Decimal("0.00000001")` - one whole quantum of
+# `Numeric(20, 8)`, strict. Storage is scale 8 and, since 012/T1201, the money door refuses any
+# amount the column cannot hold unchanged, so every net position and every flow is a scale-8 value
+# and every possible drift is a MULTIPLE of one quantum. There is no sub-quantum drift left for a
+# tolerance to absorb - that was the 012-era phenomenon, when the door took scale 18 and the column
+# rounded underneath it. What the old constant admitted was therefore the SMALLEST corruption that
+# can exist: the ledger moving one atom more, or less, than the payment declared, unreported.
+#
+# Nor was it a concurrency mitigation, though it looks like one: `commit` holds an advisory lock
+# over the WHOLE equivalent for its unit of work, and this check is scoped to one equivalent, so no
+# foreign write lands between the two snapshots. And a race would produce a drift the size of the
+# other payment, not one atom - a mitigation shaped like this absorbs the smallest case and nothing
+# larger, which is a threshold, not a safeguard.
+#
+# It is a module constant rather than a local so that it can be named in a test: the 012
+# counter-check widens it deliberately, to reach the ledger state `F-012-1` is about now that this
+# barrier catches the 1e-9 drift a widened door produces.
+_DELTA_DRIFT_TOLERANCE = Decimal("0")
+
 # PostgreSQL's two-int advisory-lock key space is disjoint from the one-BIGINT
 # key space used by segment locks. The first int is a stable domain tag.
 _TX_ADVISORY_LOCK_NAMESPACE = 0x475458
@@ -1549,7 +1570,7 @@ class PaymentEngine:
             participant_ids=set(expected_delta.keys()),
         )
 
-        tolerance = Decimal("0.00000001")
+        tolerance = _DELTA_DRIFT_TOLERANCE
         drifts_raw: list[tuple[UUID, Decimal, Decimal, Decimal]] = []
 
         for pid, expected in expected_delta.items():
