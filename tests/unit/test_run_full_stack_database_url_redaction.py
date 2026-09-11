@@ -1,11 +1,39 @@
 from __future__ import annotations
 
+import ast
 import os
 from pathlib import Path
 import shutil
 import subprocess
 
 import pytest
+
+
+# PowerShell's HOST formatter word-wraps everything it renders - warnings, error
+# records, verbose and debug - at the console width, inserting a line break INSIDE
+# the message. A substring assertion on such output therefore measures the console,
+# not the launcher. Output written with `[Console]::Out.Write` bypasses the
+# formatter and is never wrapped; exposure is decided by the EMISSION CHANNEL, not
+# by the length of the phrase being asserted.
+#
+# Two axes move the break, and neither is under the test's control:
+#   - WIDTH, and NOT MONOTONICALLY. The live failure of `test_fail_on_conflict_...`
+#     was at width 120; at 100 and at 80 the same message passes, because the break
+#     lands elsewhere. A pin "an artificially narrow console stays green" would have
+#     passed on the defect it was meant to catch.
+#   - LOCALE. The Windows PowerShell warning prefix is `WARNING: ` (9) in en-US and
+#     `ПРЕДУПРЕЖДЕНИЕ: ` (16) in ru-RU. Those seven columns are what pushed the
+#     122-character line past 120: the same commit was red on a Russian host and
+#     green on an English one at identical width. GitHub Actions runs en-US without
+#     a console (width fixed at the 120 fallback), so CI did not observe this
+#     instance - which is not the same as CI being unable to observe the class.
+#
+# `_console_text` removes the layout before comparison. It is for DIAGNOSTIC
+# CONTENT only: exact-serialization, redaction and structural assertions keep the
+# raw stream, because for those the whitespace is part of the contract.
+def _console_text(raw: str) -> str:
+    """Collapse host line-wrapping so a diagnostic can be matched by its words."""
+    return " ".join(raw.split())
 
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -488,12 +516,46 @@ function New-TestMetadata {
 @pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
 @pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
 @pytest.mark.parametrize(
-    ("saved_pid", "listener_pid", "saved_fingerprint", "current_fingerprint"),
     (
-        (None, 202, None, None),
-        (101, 202, "start-a", "start-a"),
-        (101, None, "start-a", "start-a"),
-        (101, 101, "start-a", "start-b"),
+        "saved_pid",
+        "listener_pid",
+        "saved_fingerprint",
+        "current_fingerprint",
+        "expected_warning",
+    ),
+    (
+        (
+            None,
+            202,
+            None,
+            None,
+            "Backend: port 18000 is listening on PID 202 but no ownership metadata"
+            " exists. The listener was not stopped.",
+        ),
+        (
+            101,
+            202,
+            "start-a",
+            "start-a",
+            "Backend: port 18000 is listening on PID 202 but owned PID 101 was"
+            " expected. The listener was not stopped.",
+        ),
+        (
+            101,
+            None,
+            "start-a",
+            "start-a",
+            "Backend: owned PID 101 is alive but is not listening on port 18000."
+            " The listener was not stopped.",
+        ),
+        (
+            101,
+            101,
+            "start-a",
+            "start-b",
+            "Backend: port 18000 is listening on PID 101 but the saved process"
+            " fingerprint does not match. The listener was not stopped.",
+        ),
     ),
     ids=(
         "foreign",
@@ -508,6 +570,7 @@ def test_unproven_service_ownership_never_stops_a_process(
     listener_pid: int | None,
     saved_fingerprint: str | None,
     current_fingerprint: str | None,
+    expected_warning: str,
 ) -> None:
     body = r"""
 $service = New-TestService -Name 'Backend' -Port 18000 -PidFile 'backend.pid'
@@ -538,7 +601,12 @@ if ($script:StoppedPids.Count -ne 0) { throw 'An unowned process was stopped' }
     )
 
     assert "unowned-safe" in result.stdout
-    assert "not stopped" in result.stdout or "not proven" in result.stdout
+    # Was `"not stopped" in ... or "not proven" in ...`, which is satisfied by the
+    # SUMMARY warning alone and therefore never asserted the per-service reason at
+    # all: all four cases would have passed with the reason text deleted. Each case
+    # now names its own full diagnostic, and the summary is asserted separately.
+    assert expected_warning in _console_text(result.stdout)
+    assert _STOP_SUMMARY_WARNING in _console_text(result.stdout)
 
 
 @pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
@@ -609,7 +677,10 @@ if ($script:StoppedPids.Count -ne 0) { throw 'Owned process stopped before confl
     result = _run_powershell(powershell, _ownership_command(body))
 
     assert "preflight-before-stop-ok" in result.stdout
-    assert "not stopped" in result.stdout
+    assert (
+        "Admin UI: port 5173 is listening on PID 202 but no ownership metadata"
+        " exists. The listener was not stopped."
+    ) in _console_text(result.stdout)
 
 
 @pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
@@ -656,7 +727,10 @@ if ($script:RemovedPidFiles.Count -ne 0) { throw 'Unreadable ownership metadata 
     result = _run_powershell(powershell, _ownership_command(body))
 
     assert "unreadable-identity-fail-closed" in result.stdout
-    assert "identity is unreadable" in result.stdout
+    assert (
+        "Backend: owned PID 101 identity is unreadable; metadata was retained."
+        " The listener was not stopped."
+    ) in _console_text(result.stdout)
 
 
 @pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
@@ -745,7 +819,9 @@ if ($script:StoppedPids.Count -ne 0) { throw 'A service stopped before collectiv
     result = _run_powershell(powershell, _ownership_command(body))
 
     assert "late-conflict-preflight-safe" in result.stdout
-    assert "final preflight" in result.stdout
+    assert (
+        "Service ownership changed during final preflight. No process was stopped."
+    ) in _console_text(result.stdout)
 
 
 @pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
@@ -1132,9 +1208,24 @@ function New-FullStackMetadata {
 @pytest.mark.parametrize(
     ("identity_status", "listener_pid", "expected_reason"),
     (
-        ("Exact", "101", "full-stack owns exact PID 101"),
-        ("Exact", "", "is alive but not its expected listener"),
-        ("Unreadable", "", "process identity is unreadable"),
+        (
+            "Exact",
+            "101",
+            "Backend: full-stack owns exact PID 101 on port 18000."
+            " run_local did not stop or adopt it.",
+        ),
+        (
+            "Exact",
+            "",
+            "Backend: full-stack exact PID 101 is alive but not its expected"
+            " listener. run_local did not stop or adopt it.",
+        ),
+        (
+            "Unreadable",
+            "",
+            "Backend: full-stack process identity is unreadable; metadata was"
+            " retained. run_local did not stop or adopt it.",
+        ),
     ),
     ids=("active-listener", "exact-non-listener", "unreadable"),
 )
@@ -1168,7 +1259,7 @@ try {
     )
 
     assert "run-local-full-stack-conflict-ok" in result.stdout
-    assert expected_reason in result.stdout
+    assert expected_reason in _console_text(result.stdout)
 
 
 @pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
@@ -1198,7 +1289,10 @@ if ($script:RemovedOwnershipFiles.Count -ne 1 -or
     )
 
     assert "run-local-stale-full-stack-disproved" in result.stdout
-    assert "proven stale" in result.stdout
+    assert (
+        "Backend: removed full-stack metadata only after its process identity was"
+        " proven stale."
+    ) in _console_text(result.stdout)
 
 
 def test_launcher_ownership_namespaces_are_disjoint_and_actions_are_guarded() -> None:
@@ -1235,7 +1329,10 @@ if ($script:StoppedPids.Count -ne 0) { throw 'run_local listener was stopped by 
     result = _run_powershell(powershell, _ownership_command(body))
 
     assert "full-stack-run-local-conflict-ok" in result.stdout
-    assert "no ownership metadata exists" in result.stdout
+    assert (
+        "Backend: port 18000 is listening on PID 303 but no ownership metadata"
+        " exists. The listener was not stopped."
+    ) in _console_text(result.stdout)
 
 
 @pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
@@ -2025,3 +2122,310 @@ if (($script:RollbackCalls -join ',') -ne 'ui,compose') { throw 'Rollback order 
         extra_env={"PHASE7_SCRIPT_PATH": str(_RUN_REAL_SIMULATOR)},
     )
     assert result.stdout == "run-real-rollback-ok"
+
+
+# ---------------------------------------------------------------------------
+# F-014-11 / T1412: the pin.
+#
+# The finding was recorded as "the verdict of eight assertions is a function of
+# the console width of whoever runs them", with a prescribed pin - "a run with an
+# artificially narrow console must stay green". Measurement before the fix
+# corrected three parts of that:
+#
+#   - the inventory is 12 exposed assertions over 9 distinct diagnostics, not 8,
+#     and it is decided by EMISSION CHANNEL. The finding's headline example,
+#     `owned PID 101 is alive but is not listening on port 18000` at the test
+#     below, is written with `[Console]::Out.Write` and cannot be wrapped at any
+#     width. Length was the wrong measure;
+#   - the failure is NOT monotonic in width. The live red was at 120; the same
+#     message passes at 100 and at 80. The prescribed narrow-console pin would
+#     have been green on the defect it was written to catch;
+#   - width was not even the axis that fired. The run had no console at all
+#     (fixed 120 fallback); the Russian warning prefix is seven columns longer
+#     than the English one, and those seven columns are the whole difference.
+#
+# So the pin is not a width. It is an invariance: for every diagnostic this file
+# asserts, and for every place the host could break the line, the assertion must
+# still hold. That is deterministic, needs no console, no locale and no
+# PowerShell, and therefore runs everywhere - including in CI, which is en-US and
+# consoleless and never saw this instance.
+# ---------------------------------------------------------------------------
+
+# Both Windows PowerShell warning prefixes. The width at which each line breaks
+# is a function of the prefix, so the sweep carries both.
+_WARNING_PREFIXES: tuple[str, ...] = (
+    "WARNING: ",
+    "\u041f\u0420\u0415\u0414\u0423\u041f\u0420\u0415\u0416\u0414\u0415\u041d\u0418\u0415: ",
+)
+
+# Every diagnostic this file asserts against host-formatted output. Each is the
+# full sentence the launcher emits, not a fragment of it: a fragment can be
+# reconstructed across two unrelated records once whitespace is collapsed, and
+# `test_collapsing_whitespace_joins_across_line_boundaries` below demonstrates
+# exactly that, on the fragment this file used to assert.
+_WRAP_EXPOSED_DIAGNOSTICS: tuple[str, ...] = (
+    "Backend: port 18000 is listening on PID 202 but no ownership metadata"
+    " exists. The listener was not stopped.",
+    "Backend: port 18000 is listening on PID 202 but owned PID 101 was"
+    " expected. The listener was not stopped.",
+    "Backend: owned PID 101 is alive but is not listening on port 18000."
+    " The listener was not stopped.",
+    "Backend: port 18000 is listening on PID 101 but the saved process"
+    " fingerprint does not match. The listener was not stopped.",
+    "Admin UI: port 5173 is listening on PID 202 but no ownership metadata"
+    " exists. The listener was not stopped.",
+    "Backend: port 18000 is listening on PID 303 but no ownership metadata"
+    " exists. The listener was not stopped.",
+    "Backend: owned PID 101 identity is unreadable; metadata was retained."
+    " The listener was not stopped.",
+    "Service ownership changed during final preflight. No process was stopped.",
+    "One or more services were not stopped because ownership was not proven.",
+    "Backend: full-stack owns exact PID 101 on port 18000."
+    " run_local did not stop or adopt it.",
+    "Backend: full-stack exact PID 101 is alive but not its expected"
+    " listener. run_local did not stop or adopt it.",
+    "Backend: full-stack process identity is unreadable; metadata was"
+    " retained. run_local did not stop or adopt it.",
+    "Backend: removed full-stack metadata only after its process identity was"
+    " proven stale.",
+)
+
+_STOP_SUMMARY_WARNING = (
+    "One or more services were not stopped because ownership was not proven."
+)
+
+# Asserted with `in` against raw process output on purpose. Each of these is
+# emitted by `[Console]::Out.Write`, which bypasses the host formatter, so it is
+# never wrapped and must not be normalized away. Adding a line here is a claim
+# about the EMISSION CHANNEL and has to be checked against the launcher.
+_RAW_OUTPUT_ASSERTIONS_BY_DESIGN: frozenset[str] = frozenset(
+    {
+        # test_repository_lifecycle_lock_rejects_interleaving_and_is_crash_released
+        # emits it with `[Console]::Out.Write($_.Exception.Message)`.
+        "Launcher lifecycle is busy",
+        # test_exact_live_non_listener_has_an_actionable_conflict_reason emits it
+        # with `[Console]::Out.Write($state.Reason)`. This is the phrase F-014-11
+        # named as "the most exposed of the eight, held green only by the current
+        # width". It is the longest of them, and it is immune: the reason never
+        # reaches the host formatter. Length was the wrong measure.
+        "owned PID 101 is alive but is not listening on port 18000",
+        # test_status_reason_distinguishes_unreadable_identity_with_listener emits
+        # it with `[Console]::Out.Write($state.Reason)` too. The same words DO reach
+        # the formatter in test_unreadable_process_identity_is_a_conflict_..., whose
+        # assertion is normalized - one phrase, two channels, two dispositions.
+        "identity is unreadable",
+    }
+)
+
+
+def _host_wrapped_variants(line: str) -> tuple[str, ...]:
+    """Every way the PowerShell host could break `line`, plus the pathological ones.
+
+    The host breaks at the last space that fits, keeps that space at the end of
+    the line and writes CRLF. `subprocess` with ``text=True`` turns that into LF,
+    so both forms are generated; so are a line broken at every space at once, and
+    a form with continuation indentation, which some hosts add.
+    """
+    positions = [index for index, char in enumerate(line) if char == " "]
+    variants: list[str] = []
+    for index in positions:
+        head, tail = line[: index + 1], line[index + 1 :]
+        variants.append(head + "\r\n" + tail)
+        variants.append(head + "\n" + tail)
+        variants.append(head + "\r\n    " + tail)
+    # every break at once, and the same with CRLF
+    variants.append("\n".join(part + " " for part in line.split(" "))[:-1])
+    variants.append("\r\n".join(part + " " for part in line.split(" "))[:-1])
+    return tuple(variants)
+
+
+@pytest.mark.parametrize("prefix", _WARNING_PREFIXES, ids=("en", "ru"))
+@pytest.mark.parametrize(
+    "diagnostic", _WRAP_EXPOSED_DIAGNOSTICS, ids=range(len(_WRAP_EXPOSED_DIAGNOSTICS))
+)
+def test_console_text_survives_every_host_wrap_position(
+    prefix: str, diagnostic: str
+) -> None:
+    """No break position, in either locale, may hide a diagnostic from its assertion."""
+    line = prefix + diagnostic
+    variants = _host_wrapped_variants(line)
+    assert variants
+    for variant in variants:
+        assert diagnostic in _console_text(variant), variant
+
+
+@pytest.mark.parametrize(
+    "diagnostic", _WRAP_EXPOSED_DIAGNOSTICS, ids=range(len(_WRAP_EXPOSED_DIAGNOSTICS))
+)
+def test_the_wrap_sweep_is_not_vacuous(diagnostic: str) -> None:
+    """The counter-proof: the sweep must break the line at EVERY position it claims.
+
+    Without it the test above would pass on a `_console_text` that does nothing -
+    the defect this task exists to remove, not to reproduce. The first version of
+    this counter-proof only asked that SOME variant break the raw match, and a
+    mutation that deleted the whole per-position sweep survived it: the two
+    break-everywhere variants alone kept it green. So the assertion is positional.
+    """
+    prefix = _WARNING_PREFIXES[0]
+    line = prefix + diagnostic
+    variants = _host_wrapped_variants(line)
+
+    for index, char in enumerate(diagnostic):
+        if char != " ":
+            continue
+        cut = len(prefix) + index
+        assert any(
+            variant.startswith(line[: cut + 1])
+            and variant[cut + 1 : cut + 2] in {"\r", "\n"}
+            for variant in variants
+        ), f"no variant breaks at offset {index}"
+
+    assert any(diagnostic not in variant for variant in variants), diagnostic
+
+
+@pytest.mark.parametrize(
+    "diagnostic", _WRAP_EXPOSED_DIAGNOSTICS, ids=range(len(_WRAP_EXPOSED_DIAGNOSTICS))
+)
+def test_normalization_does_not_rescue_a_changed_diagnostic(diagnostic: str) -> None:
+    """Negative control: dropping ANY single word must still fail the assertion.
+
+    Whitespace normalization must not become a second false green by matching
+    output the launcher never produced.
+    """
+    words = diagnostic.split(" ")
+    for index in range(len(words)):
+        mutated = " ".join(words[:index] + words[index + 1 :])
+        assert diagnostic not in _console_text(
+            _WARNING_PREFIXES[0] + mutated
+        ), words[index]
+
+
+def test_collapsing_whitespace_joins_across_line_boundaries() -> None:
+    """The named cost of normalization, and why fragments became whole sentences.
+
+    Collapsing whitespace cannot tell a wrapped record from two unrelated lines:
+    either way it joins the last word of one to the first word of the next. A
+    two-word fragment can therefore be reassembled out of output in which nothing
+    said it - a false green introduced by the fix itself. The boundary is real
+    here and not hypothetical: these launchers print unprefixed lines beside
+    warnings (the `Write-Host` banner, and the `[Console]::Out.Write` sentinels
+    these tests rely on).
+
+    A whole diagnostic sentence is not reconstructible that way. That is the
+    reason every assertion above was widened from a fragment to the full sentence,
+    and this test holds that reasoning to the code instead of to a comment.
+    """
+    two_lines = (
+        "Ownership could not be proven and nothing was not\n"
+        "stopped, which begins an unrelated line.\n"
+    )
+    assert "not stopped" in _console_text(two_lines)
+    assert (
+        "Backend: port 18000 is listening on PID 202 but no ownership metadata"
+        " exists. The listener was not stopped."
+    ) not in _console_text(two_lines)
+
+
+def test_pinned_diagnostics_are_still_the_text_the_launchers_emit() -> None:
+    """A reword in a launcher must redden the pin rather than silently orphan it."""
+    full_stack = _RUN_FULL_STACK.read_text(encoding="utf-8-sig")
+    run_local = _RUN_LOCAL.read_text(encoding="utf-8-sig")
+
+    assert (
+        'Write-Warning "$($state.Service.Name): $($state.Reason). '
+        'The listener was not stopped."' in full_stack
+    )
+    assert (
+        "Write-Warning 'Service ownership changed during final preflight."
+        " No process was stopped.'" in full_stack
+    )
+    assert (
+        "Write-Warning 'One or more services were not stopped because ownership"
+        " was not proven.'" in full_stack
+    )
+    assert (
+        'Write-Warning "$($state.Service.Name): $($state.Reason). '
+        'run_local did not stop or adopt it."' in run_local
+    )
+    assert (
+        'Write-Warning "$($state.Service.Name): removed full-stack metadata only'
+        ' after its process identity was proven stale."' in run_local
+    )
+
+
+def _unnormalized_output_assertions(source: str) -> tuple[str, ...]:
+    """Report `in`/`not in` assertions on process output that skip `_console_text`.
+
+    The guard exists because fixing the twelve known sites closes the instances
+    and not the class: the next assertion written against launcher output would
+    reintroduce it. `test_the_guard_detects_an_unnormalized_assertion` proves this
+    function can actually see one.
+    """
+    findings: list[str] = []
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Assert):
+            continue
+        for compare in ast.walk(node.test):
+            if not isinstance(compare, ast.Compare) or len(compare.ops) != 1:
+                continue
+            operator = compare.ops[0]
+            if not isinstance(operator, (ast.In, ast.NotIn)):
+                continue
+            haystack = compare.comparators[0]
+            reads_output = any(
+                (isinstance(inner, ast.Attribute) and inner.attr in {"stdout", "stderr"})
+                or (isinstance(inner, ast.Name) and inner.id == "combined_output")
+                for inner in ast.walk(haystack)
+            )
+            if not reads_output:
+                continue
+            normalized = any(
+                isinstance(inner, ast.Call)
+                and isinstance(inner.func, ast.Name)
+                and inner.func.id == "_console_text"
+                for inner in ast.walk(haystack)
+            )
+            if normalized:
+                continue
+            needle = compare.left
+            if isinstance(needle, ast.Constant) and isinstance(needle.value, str):
+                if " " not in needle.value:
+                    continue
+                if needle.value in _RAW_OUTPUT_ASSERTIONS_BY_DESIGN:
+                    continue
+                findings.append(f"line {compare.lineno}: {needle.value!r}")
+            elif isinstance(operator, ast.In):
+                # A non-literal needle cannot be inspected for spaces, so it is
+                # treated as exposed. `not in` redaction checks are exempt: their
+                # needles are URLs and tokens, and hiding one behind a wrap would
+                # need a space the secrets do not contain.
+                findings.append(f"line {compare.lineno}: non-literal needle")
+    return tuple(findings)
+
+
+def test_no_launcher_output_assertion_skips_console_normalization() -> None:
+    findings = _unnormalized_output_assertions(
+        Path(__file__).read_text(encoding="utf-8")
+    )
+    assert findings == (), findings
+
+
+def test_the_guard_detects_an_unnormalized_assertion() -> None:
+    """Counter-test: a guard that cannot fail is the subject of programme 014."""
+    offending = (
+        "def t(result):\n"
+        "    assert 'not stopped' in result.stdout\n"
+    )
+    assert _unnormalized_output_assertions(offending)
+
+    accepted = (
+        "def t(result):\n"
+        "    assert 'not stopped' in _console_text(result.stdout)\n"
+    )
+    assert _unnormalized_output_assertions(accepted) == ()
+
+    no_space = (
+        "def t(result):\n"
+        "    assert 'unowned-safe' in result.stdout\n"
+    )
+    assert _unnormalized_output_assertions(no_space) == ()
