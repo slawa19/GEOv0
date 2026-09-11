@@ -726,10 +726,36 @@ Update и Close. Расходятся они ровно на `no-row`, и у э�
 
 ### Гейты после последней правки
 
-После фикс-раунда `T1309`, 2026-09-10: `pytest -m "not slow and not postgres"` — **1870 passed,
-1 failed** (`F-014-11`, предмет 014); `pytest -m postgres tests/integration` — **133 passed**;
-`admin-ui test` — **366 passed**; `simulator-ui/v2 test:unit` — **1024 passed**; `admin-ui build` —
-зелёная (включает проверку типов); `admin-ui lint` — 0 errors; `simulator-ui/v2 typecheck` — чисто.
+**Канонический гейт на `a7263c7`, 2026-09-11, с командами и exit-кодами** — по требованию §16.5 и
+держателя процессного решения, который отказал в закрытии в том числе из-за их отсутствия:
+
+| Команда | exit | Результат |
+|---|---|---|
+| `.\scripts\verify_local.ps1 -TaskSlug gate013 -BackendOnly` | **0** | `1871 passed, 2 skipped, 137 deselected` |
+| `npm --prefix admin-ui run test` | **0** | `366 passed` |
+| `npm --prefix simulator-ui/v2 run test:unit` | **0** | `1024 passed` |
+| `npm --prefix admin-ui run build` | **0** | сборка с проверкой типов |
+| `npm --prefix simulator-ui/v2 run typecheck` | **0** | чисто |
+| `npm --prefix admin-ui run lint` | **0** | 0 errors |
+
+`pytest -m postgres tests/integration` — **133 passed** (отдельная БД, `GEO_TEST_ALLOW_DB_RESET=1`).
+
+**CI после push:** `f61a450` (слияние реализации 013), run `34528941006`, conclusion **success**;
+зелены `Required local-equivalent gates`, `Python static diagnostics`, `Active UI Chromium smoke`,
+`Development image content policy`. Пять джоб пропущены как `scheduled/manual`, включая
+`PostgreSQL integration` — то есть Postgres-тир в CI не исполнялся, и по нему evidence остаётся
+локальным.
+
+**И поправка к тому, как эти гейты описывались всю волну.** В коммитах и записях 013 стояло
+«1870 passed, **1 failed** — известный baseline `F-014-11`». Под каноническим раннером падения
+**нет вовсе**: `verify_local.ps1` возвращает exit `0` и `1871 passed`. Тот же коммит, то же дерево;
+под голым `pytest` в этой оболочке тот же тест падает, под `verify_local.ps1` — проходит.
+
+Это не мелочь учёта, а **измерение предмета программы 014**: `F-014-11` утверждает, что вердикт
+восьми ассертов есть функция ширины консоли, и здесь он продемонстрирован целиком — вердикт
+поменялся от смены раннера, а не кода. Записано здесь, потому что цифры гейтов 013 без этой оговорки
+читаются как «в дереве есть красное», а его нет. Передано в 014 как измерение, а не как пересказ.
+
 Все цифры — локальный прогон оркестратора: внешние срезы гейтов не запускали (см. `T1309`).
 
 ## Changelog
