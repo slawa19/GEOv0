@@ -30,7 +30,12 @@ from app.schemas.integrity import (
     IntegrityVerifyResponse,
     InvariantResult,
 )
-from app.utils.exceptions import IntegrityViolationException, NotFoundException
+from app.config import settings
+from app.utils.exceptions import (
+    ConflictException,
+    IntegrityViolationException,
+    NotFoundException,
+)
 from app.utils.request_id import request_id_var
 from app.utils.validation import validate_equivalent_code
 
@@ -314,7 +319,21 @@ async def repair_net_mutual_debts(
     """Repair mutual debts by netting A→B and B→A into a single directed debt.
 
     Admin-only because it mutates persisted debt state.
+
+    CLOSED BY DEFAULT since 2026-09-11 alongside the cap repair - see `INTEGRITY_REPAIRS_ENABLED`
+    in `app/config.py`. This one does not delete on a frozen line, but it shares the other half of
+    `F-015-6`: a global `select(Debt)` with no advisory lock, no `FOR UPDATE` and no filter on
+    active `PrepareLock`, so it can land between a payment's PREPARE and COMMIT.
     """
+
+    if not bool(getattr(settings, "INTEGRITY_REPAIRS_ENABLED", False)):
+        # Refuse BEFORE reading anything: a repair that is closed must not even report what it
+        # would have changed, because that report would be read as a plan someone can approve.
+        raise ConflictException(
+            "Integrity repairs are closed pending F-015-6 / T1511: the cap repair deletes debt "
+            "on a frozen trustline, and neither repair takes a lock against in-flight payments.",
+            details={"finding": "F-015-6", "task": "T1511", "setting": "INTEGRITY_REPAIRS_ENABLED"},
+        )
 
     debts = (await db.execute(select(Debt))).scalars().all()
     equivalent_codes = dict(
@@ -407,7 +426,21 @@ async def repair_cap_debts_to_trust_limits(
 
     If a debt has no active trustline (limit treated as 0), the debt is removed.
     Admin-only because it mutates persisted debt state.
+
+    CLOSED BY DEFAULT since 2026-09-11 - see `INTEGRITY_REPAIRS_ENABLED` in `app/config.py`. The
+    sentence above describes behaviour that destroys real obligations: a FROZEN trustline is not
+    active, and freezing a line over its limit without settling the debt is what the protocol
+    prescribes. `T1511` of programme 015 owns the fix.
     """
+
+    if not bool(getattr(settings, "INTEGRITY_REPAIRS_ENABLED", False)):
+        # Refuse BEFORE reading anything: a repair that is closed must not even report what it
+        # would have changed, because that report would be read as a plan someone can approve.
+        raise ConflictException(
+            "Integrity repairs are closed pending F-015-6 / T1511: the cap repair deletes debt "
+            "on a frozen trustline, and neither repair takes a lock against in-flight payments.",
+            details={"finding": "F-015-6", "task": "T1511", "setting": "INTEGRITY_REPAIRS_ENABLED"},
+        )
 
     # Map active trust limits for (equivalent, debtor, creditor).
     tls = (

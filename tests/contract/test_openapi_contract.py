@@ -388,8 +388,18 @@ SUCCESS_SCHEMA_DRIFT_COUNT = 63
 # carry both, and NOTHING carries a third cause. The
 # previous version of this note claimed two causes and no others while POST /payments 401 was a
 # third; external review caught the claim, and closing the 401 body made it true.
+#
+# 2026-09-11 / F-015-6 containment: count HOLDS at 53, digest moves. Both integrity repair
+# operations now declare `409`, because both are closed by default until `T1511` and answer
+# `409`/`E008` - and a reachable status the canon does not name is the defect programme 011
+# exists to remove. The cause is the FIRST of the two named above and not a new third one: the
+# refusal is raised in the handler, the routes carry no `responses=`, so FastAPI cannot know
+# about it. Both operations were ALREADY in this dictionary for their canon-only 403 and 429.
+# Measured the same way as the success digest and claimed as narrowly: 53 operations drifting on
+# error responses before this edit and 53 after, computed on both trees, nothing entering or
+# leaving.
 ERROR_RESPONSE_DRIFT_SHA256 = (
-    "17f0f6722b9b7ab900ebdde7a9e6ea25c58b282c01938cccfe69364cf7b68992"
+    "c3d5d097269a3182a011af56a55e77650b151aae1cafc82e3598063789be0371"
 )
 ERROR_RESPONSE_DRIFT_COUNT = 53
 # 2026-08-23 / p011_t1101: 59 -> 67, see the note above TRANSPORT_HEADER_DRIFT_SHA256.

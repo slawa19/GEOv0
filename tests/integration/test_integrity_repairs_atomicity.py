@@ -57,8 +57,28 @@ async def _admin_audit(db_session, *, action: str):
     ).scalar_one_or_none()
 
 
+@pytest.fixture
+def repairs_opened(monkeypatch):
+    """Open the repair door for one test, and say why that is not a contradiction.
+
+    `INTEGRITY_REPAIRS_ENABLED` is false by default since 2026-09-11: the cap repair deletes debt
+    whose trustline is FROZEN, and neither repair locks against a payment between PREPARE and
+    COMMIT (`F-015-6`, P1, fixed by `T1511` of programme 015).
+
+    The tests below are NOT about whether the repairs should run. They are about the mechanics -
+    atomicity, audit, cache invalidation, rollback - and that evidence has to stay alive and
+    passing, because `T1511` will reopen these endpoints and will need it. Deleting or skipping
+    these tests to get green while the door is shut would remove the only executable description
+    of how the repairs behave. So the door is opened HERE, explicitly, per test.
+    """
+    monkeypatch.setattr(settings, "INTEGRITY_REPAIRS_ENABLED", True, raising=False)
+    yield
+
+
+
 @pytest.mark.asyncio
 async def test_net_mutual_debts_commits_admin_audit_without_cache_invalidation(
+    repairs_opened,
     client,
     db_session,
 ) -> None:
@@ -142,6 +162,7 @@ async def test_net_mutual_debts_commits_admin_audit_without_cache_invalidation(
 
 @pytest.mark.asyncio
 async def test_cap_debts_commits_admin_audit_and_invalidates_only_affected_codes(
+    repairs_opened,
     client,
     db_session,
 ) -> None:
@@ -234,6 +255,7 @@ async def test_cap_debts_commits_admin_audit_and_invalidates_only_affected_codes
     ],
 )
 async def test_repair_rolls_back_debts_and_audit_on_precommit_failure_or_cancellation(
+    repairs_opened,
     client,
     db_session,
     operation: str,

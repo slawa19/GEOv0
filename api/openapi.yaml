@@ -3094,6 +3094,15 @@ paths:
         # status the service does not return, which is this programme's defect facing the
         # other way, and the reachability guard is one-directional by design so nothing
         # caught it.
+        # 015/F-015-6 containment, 2026-09-11: this operation is CLOSED BY DEFAULT and answers
+        # 409 with `E008`. The cap repair deletes debt whose trustline is FROZEN rather than
+        # absent - a state the protocol itself prescribes - and neither repair takes a lock
+        # against a payment between PREPARE and COMMIT. The switch is
+        # `INTEGRITY_REPAIRS_ENABLED` (`app/config.py`), default false; `T1511` of programme 015
+        # owns the fix that reopens it. The 409 is declared here rather than left undeclared,
+        # because an undeclared reachable status is the defect programme 011 exists to remove.
+        '409':
+          $ref: '#/components/responses/Conflict'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '403':
@@ -3116,6 +3125,15 @@ paths:
         # status the service does not return, which is this programme's defect facing the
         # other way, and the reachability guard is one-directional by design so nothing
         # caught it.
+        # 015/F-015-6 containment, 2026-09-11: this operation is CLOSED BY DEFAULT and answers
+        # 409 with `E008`. The cap repair deletes debt whose trustline is FROZEN rather than
+        # absent - a state the protocol itself prescribes - and neither repair takes a lock
+        # against a payment between PREPARE and COMMIT. The switch is
+        # `INTEGRITY_REPAIRS_ENABLED` (`app/config.py`), default false; `T1511` of programme 015
+        # owns the fix that reopens it. The 409 is declared here rather than left undeclared,
+        # because an undeclared reachable status is the defect programme 011 exists to remove.
+        '409':
+          $ref: '#/components/responses/Conflict'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '403':

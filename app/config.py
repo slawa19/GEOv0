@@ -180,6 +180,28 @@ class Settings(BaseSettings):
 
     # Integrity checkpoints
     INTEGRITY_CHECKPOINT_ENABLED: bool = True
+
+    # CLOSED BY DEFAULT since 2026-09-11, and the default is the point.
+    #
+    # `POST /integrity/repair/cap-debts-to-trust-limits` and
+    # `POST /integrity/repair/net-mutual-debts` mutate persisted debt, and `F-015-6` (P1,
+    # CONFIRMED) established four ways that is unsafe today. The sharpest: the cap repair builds
+    # its limit map from `TrustLine.status == "active"` only, treats a missing edge as a limit of
+    # zero, and DELETES the debt. A frozen line is not active - and freezing a line over its limit
+    # WITHOUT SETTLING THE DEBT is prescribed by the protocol itself
+    # (`docs/ru/02-protocol-spec.md:2040-2044`) and performed by the simulator
+    # (`app/core/simulator/inject_executor.py:732-745`). So one admin click can destroy an
+    # obligation that the system put into that state deliberately, and the audit row keeps only
+    # `scanned/updated/deleted` counters - the amount destroyed is not recoverable.
+    #
+    # Both repairs also read `select(Debt)` with no advisory lock, no `FOR UPDATE` and no filter
+    # on active `PrepareLock`, so a repair can land between a payment's PREPARE and COMMIT. That
+    # is why BOTH are closed, not only the one that deletes.
+    #
+    # `require_admin` lowers the frequency; it does not make irreversible destruction of money
+    # acceptable. The fix is `T1511` of programme 015; until it lands the endpoints refuse.
+    # Tests that exercise the repair mechanics turn this on explicitly and say why.
+    INTEGRITY_REPAIRS_ENABLED: bool = False
     INTEGRITY_CHECKPOINT_INTERVAL_SECONDS: int = 300
     # Optional: used to serialize integrity checkpoint runs across replicas (Redis lock TTL).
     # 0 = auto (defaults to max(30, INTEGRITY_CHECKPOINT_INTERVAL_SECONDS)).
