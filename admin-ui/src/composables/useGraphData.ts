@@ -42,10 +42,10 @@ import type {
 // while still quoting it, because the edit that removed it began one line below the sentence that
 // carried it. The method behind the figure that remains, with the command, is in
 // `specs/013-frontend-data-honesty/spec.md`; re-derive it rather than believing this comment.
-// comment. There is no snapshot poll: the graph loads on mount, on an
-// equivalent change, on entering/leaving focus mode and on an explicit retry, so this is not a
-// per-second cost. Incidents and audit_log are NOT requested here - see the note on
-// readCompleteness below.
+//
+// There is no snapshot poll: the graph loads on mount, on an equivalent change, on entering/leaving
+// focus mode and on an explicit retry, so this is not a per-second cost. Incidents and audit_log
+// are NOT requested here - see the note on readCompleteness below.
 const GRAPH_INCLUDE = ['transactions']
 
 // F-013-1 / T1302. Build the completeness metadata out of a response, tolerating its absence.
