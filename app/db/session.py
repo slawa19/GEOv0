@@ -6,6 +6,7 @@ from sqlalchemy.pool import NullPool
 from sqlalchemy.engine.url import make_url
 
 from app.config import settings
+from app.db.sqlite_transaction_control import install_sqlite_transaction_control
 
 
 def _ensure_default_sqlite_parent(url: str) -> None:
@@ -41,6 +42,8 @@ def _create_engine():
         sqlite_db = make_url(url).database
         enable_wal = sqlite_db not in {None, "", ":memory:"}
 
+        # Pragmas first, on connect: `journal_mode` cannot change and `foreign_keys` is a no-op
+        # inside a transaction, and from the next statement on every transaction is a real one.
         @event.listens_for(engine.sync_engine, "connect")
         def _sqlite_set_pragmas(dbapi_connection, _connection_record):
             cursor = dbapi_connection.cursor()
@@ -52,6 +55,10 @@ def _create_engine():
                     cursor.execute("PRAGMA synchronous=NORMAL")
             finally:
                 cursor.close()
+
+        # T1525: without this a savepoint opened before the first write is its own transaction
+        # and a root rollback does not undo it - an ABORTED payment kept its debt. See the module.
+        install_sqlite_transaction_control(engine.sync_engine)
 
         return engine
 

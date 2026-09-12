@@ -16,6 +16,7 @@ from app.config import settings
 from app.db.models.transaction import Transaction
 from app.db.models.participant import Participant
 from app.db.models.equivalent import Equivalent
+from app.db.sqlite_transaction_control import sqlite_busy_error_name
 from app.schemas.payment import (
     PaymentConstraints,
     PaymentCreateRequest,
@@ -90,6 +91,13 @@ def _classify_payment_db_error(exc: BaseException) -> GeoException:
         if not isinstance(current, DBAPIError):
             continue
         if _payment_db_sqlstate(current) in _RETRYABLE_PAYMENT_SQLSTATES:
+            return RetryablePaymentConflictException()
+        # T1525: the SQLite twin of 40001. A staged payment runs inside the caller's transaction,
+        # so the engine cannot take a fresh snapshot itself and propagates the busy error; the
+        # caller (the simulator tick) owns the restart, and only a retryable conflict makes it
+        # replay instead of recording a terminal internal error. The code carries the dialect -
+        # only sqlite3 errors have `sqlite_errorcode` - so this needs no bind of its own.
+        if sqlite_busy_error_name(current) is not None:
             return RetryablePaymentConflictException()
     return GeoException()
 

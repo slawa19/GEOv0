@@ -21,6 +21,7 @@ from app.config import settings  # noqa: E402
 from app.core.auth.canonical import canonical_json  # noqa: E402
 from app.core.auth.crypto import generate_keypair  # noqa: E402
 from app.db.base import Base  # noqa: E402
+from app.db.sqlite_transaction_control import install_sqlite_transaction_control  # noqa: E402
 from app.main import app  # noqa: E402
 from scripts.validate_test_database_url import assert_safe_test_database_url  # noqa: E402
 
@@ -121,14 +122,33 @@ engine = create_async_engine(
 # It matters beyond those 20: programme 015's journal, operation envelopes and the RESTRICT that
 # replaces the Debt -> Equivalent cascade are all referential, and the default tier must be able to
 # see them fail.
+#
+# THE CONNECTION PRAGMAS LIVE HERE, ON CONNECT, AND NOT IN THE PER-TEST RESET (T1525, 2026-09-12).
+# `busy_timeout` and `journal_mode = WAL` used to be executed inside `engine.begin()` in `db_session`,
+# under a `try/except: pass`. That only worked because the driver sent no `BEGIN` there. With the
+# transaction control below a `BEGIN` is sent, and SQLite refuses to change the journal mode inside a
+# transaction - the swallow would have hidden it, and a fresh database would silently stay in the
+# rollback journal. `foreign_keys` has the same property (it is a no-op inside a transaction), which
+# is why it was already here. `tests/unit/test_p015_t1525_sqlite_transaction_control_is_in_effect.py`
+# holds this in place on a fresh database file.
+def _sqlite_connection_pragmas(dbapi_connection, _connection_record):
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.execute("PRAGMA busy_timeout=30000")
+        if _validated_test_database_url.database not in {None, "", ":memory:"}:
+            cursor.execute("PRAGMA journal_mode=WAL")
+    finally:
+        cursor.close()
+
+
 if _is_sqlite:
-    @event.listens_for(engine.sync_engine, "connect")
-    def _sqlite_enforce_foreign_keys(dbapi_connection, _connection_record):
-        cursor = dbapi_connection.cursor()
-        try:
-            cursor.execute("PRAGMA foreign_keys=ON")
-        finally:
-            cursor.close()
+    event.listen(engine.sync_engine, "connect", _sqlite_connection_pragmas)
+    # T1525: without this a savepoint opened before the first write is its own transaction on
+    # SQLite and a root rollback does not undo it - see `app/db/sqlite_transaction_control.py`. The
+    # default tier is the tier that is supposed to prove atomicity, so it runs with the same control
+    # as the application engine.
+    install_sqlite_transaction_control(engine.sync_engine)
 
 
 TestingSessionLocal = async_sessionmaker(
@@ -240,18 +260,12 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
             pass
 
         # SQLite can intermittently raise "database is locked" if some background task
-        # is still releasing a connection/transaction. Use a busy timeout + a small
-        # retry loop to de-flake test teardown/setup on Windows.
+        # is still releasing a connection/transaction. The busy timeout is set on connect
+        # (`_sqlite_connection_pragmas`); a small retry loop de-flakes test teardown/setup
+        # on Windows.
         for attempt in range(6):
             try:
                 async with engine.begin() as conn:
-                    try:
-                        await conn.execute(text("PRAGMA busy_timeout = 30000"))
-                        await conn.execute(text("PRAGMA journal_mode = WAL"))
-                    except Exception:
-                        # Best-effort pragmas.
-                        pass
-
                     for table in reversed(Base.metadata.sorted_tables):
                         await conn.execute(table.delete())
                 break

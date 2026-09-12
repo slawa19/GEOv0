@@ -48,6 +48,7 @@ from app.core.simulator.trust_drift_engine import TrustDriftEngine
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
+from app.db.sqlite_transaction_control import sqlite_busy_error_name
 
 # 40001 serialization_failure, 40P01 deadlock_detected: PostgreSQL has rolled the transaction back
 # and the whole unit of work may run again.
@@ -57,13 +58,23 @@ from app.db.models.trustline import TrustLine
 # ordinary database error would record "inject failed" and mark the event fired, i.e. DROP the
 # inject whenever another writer held the equivalent a little too long. The tick orchestrator's own
 # lock timeout fails the tick without firing anything; the inject owner now does the same once its
-# single retry is spent. Nothing else is retried.
+# single retry is spent. The SQLite busy family joins them for the same reason - see the predicate
+# below - and nothing else is retried.
 _INJECT_TRANSIENT_SQLSTATES = frozenset({"40001", "40P01", "55P03"})
 
 
 def _is_transient_inject_db_error(exc: BaseException) -> bool:
     if not isinstance(exc, DBAPIError):
         return False
+    # T1525: on SQLite this unit of work reads its owner-lock set and then writes, so a commit by
+    # another connection in between leaves it on a stale snapshot and the write is refused with
+    # SQLITE_BUSY_SNAPSHOT. Nothing of the unit of work has landed - the explicit flush is what
+    # fails - so it is the same "known rollback" as 40001, and treating it as an ordinary database
+    # error reopens the exact loss mode 55P03 was added for: the owner records "inject failed (db
+    # error)", marks the event fired, and the inject is DROPPED. Matched on sqlite3's error code
+    # through the predicate the payment engine uses, so there is one rule, not two.
+    if sqlite_busy_error_name(exc) is not None:
+        return True
     orig = getattr(exc, "orig", None)
     # asyncpg's adapted error carries `sqlstate`, psycopg's `pgcode`.
     sqlstate = getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)

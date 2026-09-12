@@ -1,0 +1,723 @@
+"""Programme 015, T1525: on SQLite a SAVEPOINT opened before the first write is its own transaction.
+
+WHAT IS WRONG TODAY. SQLAlchemy 2.0 drives pysqlite/aiosqlite in the driver's legacy transaction
+mode: `Connection.begin()` sends nothing, and the driver itself emits `BEGIN` only in front of
+INSERT/UPDATE/DELETE. A transaction that has only read therefore has no transaction in the database
+at all. When such a transaction opens a savepoint, SQLite starts a transaction WITH that `SAVEPOINT`
+statement, and the matching `RELEASE` commits it. The later root `rollback()` finds nothing open in
+the database and undoes nothing. Measured with the installed SQLAlchemy 2.0.25, aiosqlite 0.20.0 and
+SQLite 3.45.1: `sqlite3.Connection.in_transaction` is False right before the `SAVEPOINT` and before
+the release, and the row is still there after the root rollback.
+
+WHY IT MATTERS FOR MONEY. The application reaches exactly this shape on its money paths:
+
+* `PaymentEngine.commit` (`app/core/payments/engine.py`) only reads before the first flow on
+  SQLite - every owner/tx/segment lock helper returns early on a non-PostgreSQL bind - and applies
+  each flow inside `_apply_flow`'s `begin_nested()`. When an invariant check after the flows fails,
+  the engine rolls back and aborts: the transaction ends ABORTED and its debt stays applied.
+* The simulator tick's payments phase starts with the debt snapshot read and executes each staged
+  payment inside `RealPaymentsExecutor`'s per-action `begin_nested()`. Every payment is durable the
+  moment its savepoint is released, so the tick's rollback leaves committed payments and moved debt
+  behind while the tick reports them as rolled back (no `tx.updated` is published).
+
+It also matters for evidence: the default test tier runs on SQLite, so any test there that "proves"
+atomicity through a savepoint and a root rollback is proving it on a stand where it does not exist.
+
+HOW THE STAND SEES IT. Every scenario ends by reading the database through a NEW session on a new
+connection - never the session that did the work, whose identity map would answer from memory.
+Each scenario also asserts its own mechanism before the verdict (the flow was really applied, the
+payment was really committed, the rollback branch really ran), so a green result cannot come from
+a path that never wrote. The `db_session` fixture is requested only for what it does on SQLite -
+initialise the schema and truncate the tables; its session is never used, so no fixture transaction
+wraps the work under test.
+
+These tests are RED on the current code, for the reason stated above, and must turn green only with
+the T1525 fix. The same scenarios on PostgreSQL, where a savepoint is always inside a real
+transaction, are the control: `tests/integration/test_p015_t1525_control_postgres.py`.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import logging
+import threading
+import uuid
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from decimal import Decimal
+from typing import Any
+
+import pytest
+from sqlalchemy import delete, func, insert, select
+
+from app.core.payments.engine import PaymentEngine
+from app.core.payments.router import PaymentRouter
+from app.core.payments.service import PaymentService
+from app.core.simulator.commit_resolution import resolve_rollback_under_cancellation
+from app.core.simulator.edge_patch_builder import EdgePatchBuilder
+from app.core.simulator.models import RunRecord
+from app.core.simulator.real_debt_snapshot_loader import RealDebtSnapshotLoader
+from app.core.simulator.real_payments_executor import RealPaymentsExecutor
+from app.core.simulator.real_runner import RealRunner
+from app.core.simulator.real_tick_payments_coordinator import RealTickPaymentsCoordinator
+from app.db.models.audit_log import IntegrityAuditLog
+from app.db.models.debt import Debt
+from app.db.models.equivalent import Equivalent
+from app.db.models.participant import Participant
+from app.db.models.prepare_lock import PrepareLock
+from app.db.models.transaction import Transaction
+from app.db.models.trustline import TrustLine
+from app.utils.exceptions import IntegrityViolationException
+
+_PAYMENT = Decimal("7.00")
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+# --------------------------------------------------------------------------------------------
+# World: two participants, one equivalent, one trust line allowing sender -> receiver payments.
+# --------------------------------------------------------------------------------------------
+
+
+@dataclass
+class _World:
+    equivalent: Equivalent
+    sender: Participant
+    receiver: Participant
+    tx_ids: set[str] = field(default_factory=set)
+
+
+async def _seed_world(factory) -> _World:
+    n = uuid.uuid4().hex[:8].upper()
+    async with factory() as s:
+        eq = Equivalent(code=f"T1525{n}", precision=2, is_active=True, metadata_={})
+        sender = Participant(
+            pid=f"T1525_S_{n}", display_name="Sender", public_key=f"pk_t1525_s_{n}",
+            type="person", status="active", profile={},
+        )
+        receiver = Participant(
+            pid=f"T1525_R_{n}", display_name="Receiver", public_key=f"pk_t1525_r_{n}",
+            type="person", status="active", profile={},
+        )
+        s.add_all([eq, sender, receiver])
+        await s.flush()
+        # Trust line direction is creditor -> debtor: the receiver extends credit to the sender,
+        # which is what lets the sender pay the receiver.
+        s.add(
+            TrustLine(
+                from_participant_id=receiver.id,
+                to_participant_id=sender.id,
+                equivalent_id=eq.id,
+                limit=Decimal("1000.00"),
+                status="active",
+            )
+        )
+        await s.commit()
+    return _World(eq, sender, receiver)
+
+
+async def _cleanup(factory, world: _World) -> None:
+    ids = [world.sender.id, world.receiver.id]
+    async with factory() as s:
+        tx_ids = set(world.tx_ids) | set(
+            (
+                await s.execute(select(Transaction.tx_id).where(Transaction.initiator_id.in_(ids)))
+            ).scalars()
+        )
+        if tx_ids:
+            await s.execute(delete(IntegrityAuditLog).where(IntegrityAuditLog.tx_id.in_(tx_ids)))
+            await s.execute(delete(PrepareLock).where(PrepareLock.tx_id.in_(tx_ids)))
+            await s.execute(delete(Transaction).where(Transaction.tx_id.in_(tx_ids)))
+        await s.execute(delete(Debt).where(Debt.equivalent_id == world.equivalent.id))
+        await s.execute(delete(TrustLine).where(TrustLine.equivalent_id == world.equivalent.id))
+        await s.execute(delete(Participant).where(Participant.id.in_(ids)))
+        await s.execute(delete(Equivalent).where(Equivalent.id == world.equivalent.id))
+        await s.commit()
+    PaymentRouter.invalidate_cache(world.equivalent.code)
+
+
+async def _stored_debts(factory, world: _World) -> dict[tuple[str, str], Decimal]:
+    """Debts of the world's equivalent as the database holds them, read on a fresh connection."""
+    pid_by_id = {world.sender.id: world.sender.pid, world.receiver.id: world.receiver.pid}
+    async with factory() as fresh:
+        rows = (
+            await fresh.execute(
+                select(Debt.debtor_id, Debt.creditor_id, Debt.amount).where(
+                    Debt.equivalent_id == world.equivalent.id
+                )
+            )
+        ).all()
+    return {
+        (pid_by_id.get(d, str(d)), pid_by_id.get(c, str(c))): Decimal(str(a)) for d, c, a in rows
+    }
+
+
+async def _stored_transactions(factory, world: _World) -> dict[str, str]:
+    """tx_id -> state of every transaction the world's participants initiated, read fresh."""
+    async with factory() as fresh:
+        rows = (
+            await fresh.execute(
+                select(Transaction.tx_id, Transaction.state).where(
+                    Transaction.initiator_id.in_([world.sender.id, world.receiver.id])
+                )
+            )
+        ).all()
+    return {tx_id: state for tx_id, state in rows}
+
+
+def _patch_delta_check_to_report_drift(monkeypatch, world: _World) -> list[Decimal | None]:
+    """Make the engine's own delta barrier fail, and record what the flows had written by then.
+
+    A real drift cannot be produced without a real bug, so the barrier is replaced - but with the
+    engine's own exception and its own details shape, raised from the engine's own call site, which
+    runs after every `_apply_flow` of the payment. The replacement first reads, in the committing
+    session, the debt the flow should have written: that is the stand's proof that the violation
+    comes AFTER the money moved, not before.
+    """
+
+    observed: list[Decimal | None] = []
+
+    async def _delta_check_reports_drift(self, *, equivalent_id, flows, net_positions_before):
+        debt = await self._get_debt(world.sender.id, world.receiver.id, equivalent_id)
+        observed.append(None if debt is None else Decimal(str(debt.amount)))
+        raise IntegrityViolationException(
+            "Per-participant delta check failed",
+            details={
+                "invariant": "PAYMENT_DELTA_DRIFT",
+                "source": "delta_check",
+                "equivalent": world.equivalent.code,
+                "equivalent_id": str(equivalent_id),
+                "total_drift": "0.01",
+                "drifts": [],
+            },
+        )
+
+    monkeypatch.setattr(PaymentEngine, "check_payment_delta", _delta_check_reports_drift)
+    return observed
+
+
+# --------------------------------------------------------------------------------------------
+# (a) The mechanism itself, with nothing of the application in between.
+# --------------------------------------------------------------------------------------------
+
+
+async def _minimal_orm(factory, *, write_before_savepoint: bool) -> int:
+    """ORM shape: read, [write], savepoint, insert, release, root rollback. Returns stored rows."""
+    marker = f"T1525M{uuid.uuid4().hex[:8].upper()}"
+    async with factory() as s:
+        await s.execute(select(func.count()).select_from(Equivalent))  # a read opens nothing
+        if write_before_savepoint:
+            s.add(Equivalent(code=f"{marker}A", precision=2, is_active=True, metadata_={}))
+            await s.flush()
+        async with s.begin_nested():
+            s.add(Equivalent(code=f"{marker}B", precision=2, is_active=True, metadata_={}))
+            await s.flush()
+        await s.rollback()
+    async with factory() as fresh:
+        return int(
+            await fresh.scalar(
+                select(func.count()).select_from(Equivalent).where(Equivalent.code.like(f"{marker}%"))
+            )
+        )
+
+
+async def _minimal_core(engine, *, write_before_savepoint: bool) -> int:
+    """Core shape of the same sequence, on one `Connection`. Returns stored rows."""
+    marker = f"T1525C{uuid.uuid4().hex[:8].upper()}"
+    table = Equivalent.__table__
+    async with engine.connect() as conn:
+        root = await conn.begin()
+        await conn.execute(select(func.count()).select_from(table))
+        if write_before_savepoint:
+            await conn.execute(insert(table).values(code=f"{marker}A", precision=2, is_active=True))
+        nested = await conn.begin_nested()
+        await conn.execute(insert(table).values(code=f"{marker}B", precision=2, is_active=True))
+        await nested.commit()  # RELEASE SAVEPOINT
+        await root.rollback()
+    async with engine.connect() as fresh:
+        return int(
+            (
+                await fresh.execute(
+                    select(func.count()).select_from(table).where(table.c.code.like(f"{marker}%"))
+                )
+            ).scalar_one()
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("layer", ["orm", "core"])
+async def test_a_root_rollback_undoes_a_savepoint_opened_before_any_write(db_session, layer) -> None:
+    """RED today: the savepoint opened after only a read is committed by its own RELEASE.
+
+    Wrong: nothing in the database was open when `SAVEPOINT` ran, so SQLite made the savepoint the
+    transaction and `RELEASE` committed it; the root rollback had nothing to undo.
+    Why it matters for money: it is the exact shape of `PaymentEngine.commit` and of the simulator
+    tick on SQLite (see the module docstring). Must turn green only with the T1525 fix.
+    """
+    from tests.conftest import TestingSessionLocal, engine
+
+    if layer == "orm":
+        stored = await _minimal_orm(TestingSessionLocal, write_before_savepoint=False)
+    else:
+        stored = await _minimal_core(engine, write_before_savepoint=False)
+    assert stored == 0, (
+        f"[{layer}] a row written inside a released savepoint survived the root rollback "
+        f"(stored rows: {stored}, expected 0): the savepoint was its own transaction"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("layer", ["orm", "core"])
+async def test_control_a_write_before_the_savepoint_lets_the_root_rollback_undo_both(
+    db_session, layer
+) -> None:
+    """Positive control, GREEN today: the stand does see a rollback when there is something to undo.
+
+    A write before the savepoint makes the driver emit `BEGIN`, the savepoint nests inside a real
+    transaction, and the root rollback removes both rows. Without this control a red verdict above
+    could be a stand that never sees any rollback at all.
+    """
+    from tests.conftest import TestingSessionLocal, engine
+
+    if layer == "orm":
+        stored = await _minimal_orm(TestingSessionLocal, write_before_savepoint=True)
+    else:
+        stored = await _minimal_core(engine, write_before_savepoint=True)
+    assert stored == 0, f"[{layer}] the root rollback left {stored} row(s) behind"
+
+
+# --------------------------------------------------------------------------------------------
+# (b) PaymentEngine.commit with an invariant violation after the flows.
+# --------------------------------------------------------------------------------------------
+
+
+@dataclass
+class _CommitOutcome:
+    raised: BaseException | None
+    observed_in_commit: list[Decimal | None]
+    debts_before: dict[tuple[str, str], Decimal]
+    debts_after: dict[tuple[str, str], Decimal]
+    transactions: dict[str, str]
+    prepare_locks_left: int
+
+
+async def _scenario_service_payment_violates_after_flows(factory, world, monkeypatch) -> _CommitOutcome:
+    """The public payment path: `PaymentService` creates, prepares and commits in one session."""
+    debts_before = await _stored_debts(factory, world)
+    observed = _patch_delta_check_to_report_drift(monkeypatch, world)
+    tx_id = f"t1525-svc-{uuid.uuid4().hex[:12]}"
+    world.tx_ids.add(tx_id)
+    raised: BaseException | None = None
+    async with factory() as s:
+        try:
+            await PaymentService(s).create_payment_internal(
+                world.sender.id,
+                to_pid=world.receiver.pid,
+                equivalent=world.equivalent.code,
+                amount=str(_PAYMENT),
+                idempotency_key=tx_id,
+            )
+        except IntegrityViolationException as exc:
+            raised = exc
+    return await _commit_outcome(factory, world, raised, observed, debts_before, tx_id)
+
+
+async def _scenario_engine_commit_violates_after_flows(factory, world, monkeypatch) -> _CommitOutcome:
+    """`PaymentEngine.commit` called on a fresh session for a payment the engine itself prepared.
+
+    The NEW transaction row is built exactly as `PaymentService._create_payment_impl` builds it
+    (step 3) and `PaymentEngine.prepare` writes the locks and the PREPARED state, so the commit sees
+    state the application produces. The commit runs on its own session, as a separate request does.
+    """
+    debts_before = await _stored_debts(factory, world)
+    tx_id = f"t1525-eng-{uuid.uuid4().hex[:12]}"
+    world.tx_ids.add(tx_id)
+    async with factory() as s:
+        s.add(
+            Transaction(
+                id=uuid.uuid4(),
+                tx_id=tx_id,
+                idempotency_key=None,
+                type="PAYMENT",
+                initiator_id=world.sender.id,
+                payload={
+                    "from": world.sender.pid,
+                    "to": world.receiver.pid,
+                    "amount": str(_PAYMENT),
+                    "equivalent": world.equivalent.code,
+                    "routes": [
+                        {"path": [world.sender.pid, world.receiver.pid], "amount": str(_PAYMENT)}
+                    ],
+                    "idempotency": {"key": tx_id, "fingerprint": "t1525"},
+                },
+                state="NEW",
+            )
+        )
+        await s.commit()
+        await PaymentEngine(s).prepare(
+            tx_id, [world.sender.pid, world.receiver.pid], _PAYMENT, world.equivalent.id
+        )
+    async with factory() as s:
+        prepared = await s.scalar(select(Transaction.state).where(Transaction.tx_id == tx_id))
+        assert prepared == "PREPARED", f"stand: the engine did not prepare the payment ({prepared})"
+
+    observed = _patch_delta_check_to_report_drift(monkeypatch, world)
+    raised: BaseException | None = None
+    async with factory() as s:
+        try:
+            await PaymentEngine(s).commit(tx_id)
+        except IntegrityViolationException as exc:
+            raised = exc
+    return await _commit_outcome(factory, world, raised, observed, debts_before, tx_id)
+
+
+async def _commit_outcome(factory, world, raised, observed, debts_before, tx_id) -> _CommitOutcome:
+    async with factory() as fresh:
+        locks_left = int(
+            await fresh.scalar(
+                select(func.count()).select_from(PrepareLock).where(PrepareLock.tx_id == tx_id)
+            )
+        )
+    return _CommitOutcome(
+        raised=raised,
+        observed_in_commit=observed,
+        debts_before=debts_before,
+        debts_after=await _stored_debts(factory, world),
+        transactions=await _stored_transactions(factory, world),
+        prepare_locks_left=locks_left,
+    )
+
+
+def _assert_aborted_payment_left_no_debt(outcome: _CommitOutcome, world: _World) -> None:
+    # Mechanism first: the barrier really failed, and it failed after the flow had written.
+    assert isinstance(outcome.raised, IntegrityViolationException), outcome.raised
+    assert outcome.observed_in_commit == [_PAYMENT], (
+        "stand: the violation must be raised after `_apply_flow` wrote the debt, observed in the "
+        f"committing session: {outcome.observed_in_commit}"
+    )
+    assert list(outcome.transactions.values()) == ["ABORTED"], outcome.transactions
+    assert outcome.prepare_locks_left == 0
+    # Verdict: an ABORTED payment must not have moved money.
+    assert outcome.debts_after == outcome.debts_before, (
+        f"the payment is ABORTED but its debt is stored: before={outcome.debts_before} "
+        f"after={outcome.debts_after} - the flow's savepoint was committed by its own RELEASE"
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_aborted_payment_commit_leaves_debts_unchanged(db_session, monkeypatch) -> None:
+    """RED today: `PaymentEngine.commit` aborts the payment and its debt stays applied.
+
+    Wrong: on SQLite `commit`'s unit of work only reads before the first flow, so `_apply_flow`'s
+    savepoint is the database transaction and is committed on release; the rollback in the
+    invariant handler undoes nothing, and `abort` then records ABORTED over moved money.
+    Why it matters for money: a user-visible ABORTED payment whose debt is on the books - value
+    created or destroyed with no record that says so. Must turn green only with the T1525 fix.
+    """
+    from tests.conftest import TestingSessionLocal
+
+    world = await _seed_world(TestingSessionLocal)
+    try:
+        outcome = await _scenario_engine_commit_violates_after_flows(
+            TestingSessionLocal, world, monkeypatch
+        )
+        _assert_aborted_payment_left_no_debt(outcome, world)
+    finally:
+        await _cleanup(TestingSessionLocal, world)
+
+
+@pytest.mark.asyncio
+async def test_an_aborted_service_payment_leaves_debts_unchanged(db_session, monkeypatch) -> None:
+    """RED today: the same defect reached from `PaymentService`, the path HTTP payments take.
+
+    Wrong and why it matters: as above; this one shows the ABORTED-with-debt state is reachable from
+    the public payment entry point, not only from a direct engine call. Must turn green only with
+    the T1525 fix.
+    """
+    from tests.conftest import TestingSessionLocal
+
+    world = await _seed_world(TestingSessionLocal)
+    try:
+        outcome = await _scenario_service_payment_violates_after_flows(
+            TestingSessionLocal, world, monkeypatch
+        )
+        _assert_aborted_payment_left_no_debt(outcome, world)
+    finally:
+        await _cleanup(TestingSessionLocal, world)
+
+
+# --------------------------------------------------------------------------------------------
+# (c) The simulator tick: staged payments in per-action savepoints, then the tick's rollback.
+# --------------------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _PlannedAction:
+    seq: int
+    equivalent: str
+    sender_pid: str
+    receiver_pid: str
+    amount: str
+
+
+class _Sse:
+    def __init__(self) -> None:
+        self.events: list[dict[str, Any]] = []
+
+    def next_event_id(self, run: RunRecord) -> str:
+        run._event_seq += 1
+        return f"e{run._event_seq}"
+
+    def broadcast(self, _run_id: str, payload: dict[str, Any]) -> None:
+        if isinstance(payload, dict):
+            self.events.append(payload)
+
+
+class _Artifacts:
+    def write_real_tick_artifact(self, *a, **kw) -> None:
+        return None
+
+    def enqueue_event_artifact(self, *a, **kw) -> None:
+        return None
+
+
+def _run_for(world: _World, run_id: str) -> RunRecord:
+    run = RunRecord(run_id=run_id, scenario_id="p015-t1525", mode="real", state="running")
+    run.seed = 7
+    run.tick_index = 1  # not a clearing tick
+    run.sim_time_ms = 1_000
+    run.intensity_percent = 100
+    run._real_seeded = True
+    run._real_participants = [(world.sender.id, world.sender.pid), (world.receiver.id, world.receiver.pid)]
+    run._real_equivalents = [world.equivalent.code]
+    run._real_viz_by_eq = {}
+    return run
+
+
+def _record_staged_payments(monkeypatch, world: _World) -> list[tuple[str, str]]:
+    """Record (tx_id, status) of every staged payment the real executor makes. Pass-through."""
+    staged: list[tuple[str, str]] = []
+    original = PaymentService.create_payment_internal_staged
+
+    async def _recording(self, *args, **kwargs):
+        result = await original(self, *args, **kwargs)
+        staged.append((str(result.result.tx_id), str(result.result.status)))
+        world.tx_ids.add(str(result.result.tx_id))
+        return result
+
+    monkeypatch.setattr(PaymentService, "create_payment_internal_staged", _recording)
+    return staged
+
+
+@dataclass
+class _TickOutcome:
+    staged: list[tuple[str, str]]
+    rollback_resolution: str | None
+    published_types: list[str]
+    last_error: dict[str, Any] | None
+    debts_before: dict[tuple[str, str], Decimal]
+    debts_after: dict[tuple[str, str], Decimal]
+    transactions: dict[str, str]
+
+
+async def _scenario_executor_then_tick_rollback(factory, world, monkeypatch) -> _TickOutcome:
+    """The narrowest real shape: the tick's reads, the real executor, the tick's rollback call.
+
+    The session only reads before the executor, as the payments phase does on SQLite (the debt
+    snapshot; the owner-lock call returns early). The rollback is the orchestrator's own resolver
+    with the phase's own observation callbacks, as at the tick's `except` branch.
+    """
+    debts_before = await _stored_debts(factory, world)
+    staged = _record_staged_payments(monkeypatch, world)
+    run = _run_for(world, f"t1525-exec-{uuid.uuid4().hex[:8]}")
+    sse = _Sse()
+    logger = logging.getLogger("tests.p015.t1525")
+    executor = RealPaymentsExecutor(
+        lock=threading.RLock(),
+        sse=sse,  # type: ignore[arg-type]
+        utc_now=_utc_now,
+        logger=logger,
+        edge_patch_builder=EdgePatchBuilder(logger=logger),
+        should_warn_this_tick=lambda _run, key=None: False,
+        sim_idempotency_key=lambda **kw: "t1525-sim-"
+        + hashlib.sha256("|".join(f"{k}={v}" for k, v in sorted(kw.items())).encode()).hexdigest()[:40],
+    )
+    async with factory() as tick_session:
+        await RealDebtSnapshotLoader().load_debt_snapshot_by_pid(
+            session=tick_session,
+            participants=run._real_participants,
+            equivalents=[world.equivalent.code],
+        )
+        result = await asyncio.wait_for(
+            executor.execute_planned_payments(
+                session=tick_session,
+                run_id=run.run_id,
+                run=run,
+                planned=[
+                    _PlannedAction(0, world.equivalent.code, world.sender.pid, world.receiver.pid, str(_PAYMENT)),
+                ],
+                equivalents=[world.equivalent.code],
+                sender_id_by_pid={world.sender.pid: world.sender.id},
+                max_in_flight=1,
+                max_timeouts_per_tick=0,
+                fail_run=lambda *_a, **_kw: None,
+            ),
+            timeout=20.0,
+        )
+        assert result.deferred_effects is not None
+        await resolve_rollback_under_cancellation(
+            rollback=tick_session.rollback,
+            on_rollback=result.deferred_effects.apply_after_rollback,
+            on_unknown=result.deferred_effects.apply_after_unknown_transaction_outcome,
+        )
+        resolution = result.deferred_effects._resolution
+    return _TickOutcome(
+        staged=staged,
+        rollback_resolution=resolution,
+        published_types=[str(e.get("type")) for e in sse.events],
+        last_error=None,
+        debts_before=debts_before,
+        debts_after=await _stored_debts(factory, world),
+        transactions=await _stored_transactions(factory, world),
+    )
+
+
+_INJECTED_TICK_FAILURE = "T1525 stand: a failure right after the payments phase"
+
+
+async def _scenario_real_tick_fails_after_payments(factory, world, monkeypatch) -> _TickOutcome:
+    """The whole real tick of `RealRunner`, failing right after its payments phase.
+
+    Nothing is stubbed on the money path: seeding is skipped because the world is already in the
+    database, the planner plans, the coordinator reads the snapshot and runs the real executor. The
+    failure is raised by the next step of the orchestrator (clearing), so the tick's own `except`
+    branch performs the rollback under test.
+    """
+    import app.db.session as app_db_session
+
+    debts_before = await _stored_debts(factory, world)
+    staged = _record_staged_payments(monkeypatch, world)
+    monkeypatch.setattr(app_db_session, "AsyncSessionLocal", factory)
+
+    scenario = {
+        "equivalents": [world.equivalent.code],
+        "participants": [{"id": world.sender.pid}, {"id": world.receiver.pid}],
+        "trustlines": [
+            {
+                "from": world.receiver.pid,
+                "to": world.sender.pid,
+                "equivalent": world.equivalent.code,
+                "limit": "1000.00",
+                "status": "active",
+            }
+        ],
+        "behaviorProfiles": [],
+    }
+    run = _run_for(world, f"t1525-tick-{uuid.uuid4().hex[:8]}")
+    sse = _Sse()
+    runner = RealRunner(
+        lock=threading.RLock(),
+        get_run=lambda _rid: run,
+        get_scenario_raw=lambda _sid: scenario,
+        sse=sse,
+        artifacts=_Artifacts(),
+        utc_now=_utc_now,
+        publish_run_status=lambda _rid: None,
+        db_enabled=lambda: True,
+        actions_per_tick_max=3,
+        clearing_every_n_ticks=10_000,
+        real_max_consec_tick_failures_default=3,
+        real_max_timeouts_per_tick_default=10,
+        real_max_errors_total_default=50,
+        logger=logging.getLogger("tests.p015.t1525.tick"),
+    )
+
+    phases: list[Any] = []
+    original_phase = RealTickPaymentsCoordinator.run_payments_phase
+
+    async def _capture_phase(self, **kwargs):
+        res, should_stop = await original_phase(self, **kwargs)
+        phases.append(res)
+        return res, should_stop
+
+    monkeypatch.setattr(RealTickPaymentsCoordinator, "run_payments_phase", _capture_phase)
+
+    async def _fail_after_payments(**_kwargs):
+        raise RuntimeError(_INJECTED_TICK_FAILURE)
+
+    monkeypatch.setattr(runner._real_tick_clearing_coordinator, "maybe_run_clearing", _fail_after_payments)
+
+    await asyncio.wait_for(runner.tick_real_mode(run.run_id), timeout=30.0)
+
+    assert len(phases) == 1, "stand: the payments phase did not run"
+    deferred = phases[0].deferred_effects
+    return _TickOutcome(
+        staged=staged,
+        rollback_resolution=None if deferred is None else deferred._resolution,
+        published_types=[str(e.get("type")) for e in sse.events],
+        last_error=run.last_error,
+        debts_before=debts_before,
+        debts_after=await _stored_debts(factory, world),
+        transactions=await _stored_transactions(factory, world),
+    )
+
+
+def _assert_rolled_back_tick_left_no_payment(outcome: _TickOutcome, *, via_tick: bool) -> None:
+    # Mechanism first: payments were really committed inside the tick, and the tick really rolled
+    # back and told its observers so.
+    committed = [tx_id for tx_id, status in outcome.staged if status == "COMMITTED"]
+    assert committed, f"stand: no staged payment was committed, nothing to roll back: {outcome.staged}"
+    if via_tick:
+        assert outcome.last_error is not None
+        assert outcome.last_error.get("code") == "REAL_MODE_TICK_FAILED", outcome.last_error
+        assert _INJECTED_TICK_FAILURE in str(outcome.last_error.get("message")), outcome.last_error
+    assert outcome.rollback_resolution == "rollback", outcome.rollback_resolution
+    assert "tx.updated" not in outcome.published_types, outcome.published_types
+    # Verdict: what the tick reported as rolled back must not be in the database.
+    assert (outcome.transactions, outcome.debts_after) == ({}, outcome.debts_before), (
+        f"the tick rolled back but its payments are stored: transactions={outcome.transactions} "
+        f"debts before={outcome.debts_before} after={outcome.debts_after} - each payment's "
+        f"savepoint was committed by its own RELEASE"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_rolled_back_tick_leaves_no_payment_from_the_executor(db_session, monkeypatch) -> None:
+    """RED today: a staged payment survives the tick session's rollback.
+
+    Wrong: the session has only read when `RealPaymentsExecutor` opens the per-action savepoint, so
+    that savepoint is the database transaction and its release commits the whole payment -
+    transaction row, COMMITTED state and debt. The rollback afterwards removes nothing, while the
+    deferred observations are resolved as "rolled back" and no `tx.updated` is published.
+    Why it matters for money: the simulator's ledger holds payments the simulator itself reports as
+    never having happened. Must turn green only with the T1525 fix.
+    """
+    from tests.conftest import TestingSessionLocal
+
+    world = await _seed_world(TestingSessionLocal)
+    try:
+        outcome = await _scenario_executor_then_tick_rollback(TestingSessionLocal, world, monkeypatch)
+        _assert_rolled_back_tick_left_no_payment(outcome, via_tick=False)
+    finally:
+        await _cleanup(TestingSessionLocal, world)
+
+
+@pytest.mark.asyncio
+async def test_a_real_tick_failing_after_payments_leaves_no_payment(db_session, monkeypatch) -> None:
+    """RED today: the whole real tick, failing after its payments phase, keeps every payment.
+
+    Wrong and why it matters: as above, through `RealRunner.tick_real_mode` and the orchestrator's
+    own rollback in its `except` branch - the path a running simulation takes when any step after
+    payments fails. Must turn green only with the T1525 fix.
+    """
+    from tests.conftest import TestingSessionLocal
+
+    world = await _seed_world(TestingSessionLocal)
+    try:
+        outcome = await _scenario_real_tick_fails_after_payments(TestingSessionLocal, world, monkeypatch)
+        _assert_rolled_back_tick_left_no_payment(outcome, via_tick=True)
+    finally:
+        await _cleanup(TestingSessionLocal, world)

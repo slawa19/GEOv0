@@ -26,6 +26,8 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine, text
 
+from app.db.sqlite_transaction_control import install_sqlite_transaction_control
+
 from scripts.init_sqlite_db import (
     LIVE_TRUSTLINE_INDEX,
     OLD_TRUSTLINE_UNIQUE_CONSTRAINT,
@@ -66,6 +68,9 @@ _PRE_019_INDEXES = (
 
 def _stale_db(tmp_path: Path):
     engine = create_engine(f"sqlite:///{tmp_path / 'stale.db'}")
+    # T1525: the same SQLite transaction control as the application engine, so the repair runs
+    # under the transaction semantics `scripts/init_sqlite_db.py` really gets from it.
+    install_sqlite_transaction_control(engine)
     with engine.begin() as conn:
         conn.exec_driver_sql(_PRE_019_DDL)
         for stmt in _PRE_019_INDEXES:
