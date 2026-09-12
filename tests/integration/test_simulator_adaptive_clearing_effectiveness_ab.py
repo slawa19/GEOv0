@@ -186,8 +186,13 @@ async def _run_benchmark(
     eq_code: str,
     pids: list[str],
     scenario: dict,
+    ticks: int = _TOTAL_TICKS,
 ) -> dict:
-    """Run TOTAL_TICKS ticks and collect summary metrics."""
+    """Run `ticks` ticks and collect summary metrics.
+
+    `ticks` exists so the error-budget control below can run ONE tick instead of the full
+    benchmark: the control needs a failed tick, not a measurement.
+    """
     import app.db.session as app_db_session
     import app.core.simulator.storage as simulator_storage
 
@@ -271,12 +276,13 @@ async def _run_benchmark(
         "no_capacity_count": 0,
         "no_capacity_after_warmup": 0,
         "errors_total": 0,
+        "escaped_exceptions": 0,
         "clearing_count": 0,
         "clearing_after_warmup": 0,
         "clearing_override_calls": clearing_override_calls,
     }
 
-    for tick in range(_TOTAL_TICKS):
+    for tick in range(int(ticks)):
         run.tick_index = tick
         run.sim_time_ms = tick * 1000
         try:
@@ -284,7 +290,27 @@ async def _run_benchmark(
         except asyncio.TimeoutError:
             pytest.fail(f"Deadlock at tick {tick} (policy={policy})")
         except Exception:
-            metrics["errors_total"] += 1
+            metrics["escaped_exceptions"] += 1
+
+    # THE ERROR BUDGET IS `run.errors_total`, NOT WHAT ESCAPED (T1525, 2026-09-12). This benchmark
+    # used to count only exceptions leaving `tick_real_mode`, and the orchestrator catches every
+    # tick failure internally: it rolls the tick session back, records `REAL_MODE_TICK_FAILED` and
+    # increments `run.errors_total` WITHOUT re-raising
+    # (`app/core/simulator/real_tick_orchestrator.py:666-707`). So `errors_total == 0` was
+    # structurally unable to fail, and every internal tick failure - including the snapshot
+    # conflicts T1525 made reachable - passed through it silently. Held by
+    # `test_the_error_budget_assertion_can_see_a_failed_tick` below.
+    #
+    # Transient money conflicts are deliberately NOT errors (programme 015 / P1): the money
+    # boundary replays the phase and, when the budget runs out, records a tick that made no
+    # progress. They are reported separately rather than asserted, so contention is visible
+    # without being counted as breakage.
+    metrics["errors_total"] = int(run.errors_total or 0) + int(metrics["escaped_exceptions"])
+    metrics["money_conflicts_total"] = int(getattr(run, "_real_money_conflicts_total", 0) or 0)
+    metrics["money_replays_total"] = int(getattr(run, "_real_money_replays_total", 0) or 0)
+    metrics["money_no_progress_ticks"] = int(
+        getattr(run, "_real_consec_money_no_progress_ticks", 0) or 0
+    )
 
     for evt in sse.events:
         if not isinstance(evt, dict):
@@ -452,3 +478,75 @@ async def test_adaptive_does_not_degrade_vs_static(ab_db, monkeypatch):
         print(f"Adaptive committed_rate (after warmup): {adaptive_committed_rate:.3f}")
         print(f"Static no_cap_rate (after warmup):     {static_no_cap_rate:.3f}")
         print(f"Adaptive no_cap_rate (after warmup):   {adaptive_no_cap_rate:.3f}")
+
+
+@pytest.mark.asyncio
+async def test_the_error_budget_assertion_can_see_a_failed_tick(ab_db, monkeypatch) -> None:
+    """Control for `errors_total == 0`: a deliberately failed tick MUST turn it red.
+
+    RED BEFORE 2026-09-12. This benchmark counted only exceptions that ESCAPED
+    `runner.tick_real_mode(...)`, and the orchestrator catches every tick failure internally: it
+    rolls the tick session back, records `REAL_MODE_TICK_FAILED`, increments `run.errors_total`
+    and returns normally (`app/core/simulator/real_tick_orchestrator.py:666-707`). So the A/B's
+    error-budget assertion was structurally unable to fail for an internal tick failure - including
+    the snapshot conflicts T1525 made reachable - and this control is what notices.
+
+    Deliberately NOT `@pytest.mark.slow`: it runs ONE tick, not the benchmark.
+
+    THE MUTATION that must turn this red again: compute `metrics["errors_total"]` in
+    `_run_benchmark` from `escaped_exceptions` alone, dropping `run.errors_total`.
+    """
+    from app.core.simulator.real_tick_trust_drift_coordinator import (
+        RealTickTrustDriftCoordinator,
+    )
+
+    _engine, factory, _db_path = ab_db
+    async with factory() as session:
+        eq_code, pids = await _seed_network(session)
+
+    scenario = {
+        "equivalents": [eq_code],
+        "participants": [{"id": pid} for pid in pids],
+        "trustlines": [
+            {
+                "from": pids[i],
+                "to": pids[(i + 1) % len(pids)],
+                "equivalent": eq_code,
+                "limit": "500",
+                "status": "active",
+            }
+            for i in range(len(pids))
+        ],
+        "behaviorProfiles": [],
+    }
+
+    async def _fail_the_tick(*_args, **_kwargs):
+        raise RuntimeError("deliberate programmatic tick failure (control)")
+
+    # Called unconditionally by every tick, AFTER the money phase has committed
+    # (`real_tick_orchestrator.py:472`). So this is a PROGRAMMATIC failure, not a transient money
+    # conflict, and it must therefore reach the error budget rather than the no-progress counter.
+    monkeypatch.setattr(
+        RealTickTrustDriftCoordinator,
+        "apply_trust_decay_and_broadcast",
+        _fail_the_tick,
+    )
+
+    metrics = await _run_benchmark(
+        factory,
+        monkeypatch,
+        policy="static",
+        eq_code=eq_code,
+        pids=pids,
+        scenario=scenario,
+        ticks=1,
+    )
+
+    assert metrics["escaped_exceptions"] == 0, (
+        "non-vacuity: the orchestrator is supposed to SWALLOW the tick failure, which is exactly "
+        "why counting escaped exceptions could never see one"
+    )
+    assert metrics["errors_total"] >= 1, (
+        "a deliberately failed tick did not move the metric this benchmark asserts on, so "
+        f"`errors_total == 0` proves nothing about internal tick failures: {metrics}"
+    )

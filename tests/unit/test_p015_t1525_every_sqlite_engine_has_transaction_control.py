@@ -26,20 +26,35 @@ bypasses. Each is now a counter-test at the bottom of this module:
 * an installer in a branch a constant test makes DEAD (`if False:`) is not counted;
 * a postgres-marked module is no longer excused merely for lacking a literal sqlite URL.
 
+THREE MORE BYPASSES, found by round 2 of the same review (2026-09-12) and each now a counter-test:
+
+* the early-return exemption ignored the condition's POLARITY, so `if not url.startswith("sqlite"):
+  return None` - a SQLite-ONLY helper - excused everything after it;
+* the postgres refusal was computed for the whole MODULE and applied to every construction in it,
+  so one `assert ... == "postgresql"` freed every engine in the file, including a deliberate SQLite
+  reference engine;
+* the `TEST_DATABASE_URL` exemption matched the argument's NAME and knew nothing about its value,
+  so any local variable of that name was excused.
+
 EXEMPTIONS, each of which must be a refusal that exists in the code:
 
 * a file listed in `_POSTGRESQL_ONLY` together with the refusal that makes it PostgreSQL-only. The
   refusal is part of the entry: if it disappears from the file, the exemption is red.
-* a construction that a `sqlite` EARLY RETURN has already excluded - the shape of
+* a construction that a POSITIVE `sqlite` EARLY RETURN has already excluded - the shape of
   `app/db/session.py`, where `if url.startswith("sqlite"): ... return engine` precedes the
-  PostgreSQL construction, so the later one is unreachable for a SQLite URL.
-* a postgres-marked test module, but ONLY through a refusal: either the module refuses a
-  non-PostgreSQL backend in code (`if "postgresql" not in url: pytest.skip(...)`, or an
-  `assert ... == "postgresql"`), or the construction's URL is `TEST_DATABASE_URL`, which
-  `tests/conftest.py`'s `pytest_collection_finish` fails closed on for any postgres-marked
-  selection. A postgres-marked module that builds an engine from some OTHER url - a helper, a
-  literal, an interpolation - is NOT exempt, because the marker constrains the session's backend
-  and says nothing about an engine the module builds for itself.
+  PostgreSQL construction, so the later one is unreachable for a SQLite URL. An inverted test does
+  not exempt anything, and a test whose polarity cannot be read fails closed.
+* a postgres-marked test module, but ONLY through a refusal that `skip`s or `raise`s under a test
+  naming postgres (`if "postgresql" not in url: pytest.skip(...)`). An `assert ... == "postgresql"`
+  is NOT a refusal: it constrains the SESSION's bind, not an engine the module builds for itself.
+* or the construction's URL is conftest's `TEST_DATABASE_URL` - IMPORTED from `tests.conftest` and
+  never rebound in the module - which `pytest_collection_finish` fails closed on for any
+  postgres-marked selection. The name alone is not the guarantee; the conftest object is.
+
+In every postgres case the exemption is additionally refused when the construction's OWN url names
+SQLite, so a module refusal can never free a deliberate SQLite engine. The refusal itself stays
+module-wide on purpose: the refusing `pytest.skip` usually lives in a `_url()` helper while the
+construction sits in a fixture that calls it, and a per-scope rule would redden those real modules.
 
 WHAT IT STILL DOES NOT SEE, stated so the promise is not larger than the check:
 
@@ -50,6 +65,13 @@ WHAT IT STILL DOES NOT SEE, stated so the promise is not larger than the check:
   (`engines["a"] = create_engine(...)`), are not tracked;
 * reachability is only constant-folding of `if`/`while` tests. An installer made dead by a runtime
   condition (`if self.enabled:`) still counts as installed;
+* polarity is read syntactically. `if _is_sqlite(url): return engine` mentions no sqlite STRING at
+  all, so it is not an early-return exemption in the first place, and a test that reaches the same
+  meaning through a helper or a variable is not understood either - it fails closed, never open;
+* the URL test is syntactic too: it sees a sqlite URL written as a literal in the call, not one
+  assembled at runtime or returned by a helper. A module refusal still excuses those;
+* `_is_rebound` refuses the conftest exemption on ANY assignment to that name anywhere in the
+  module, including one that never executes. That is deliberately blunt in the safe direction;
 * it proves an installer CALL is present, never that it ran. `tests/unit/test_p015_t1525_sqlite_transaction_control_is_in_effect.py`
   checks the live test engine at runtime for that reason, and
   `sqlite_transaction_control_is_installed` itself reports only listener registration.
@@ -206,7 +228,25 @@ def _mentions_postgres(node: ast.AST) -> bool:
 
 
 def _refuses_non_postgres(tree: ast.Module) -> bool:
-    """A refusal in code: skip/raise under a postgres test, or an assert naming postgresql."""
+    """A refusal in code: `skip` or `raise` under a test that names postgres.
+
+    WHY AN `assert` NO LONGER COUNTS (2026-09-12, external review of T1525). This also accepted any
+    `assert ... postgresql ...` anywhere in the module. An assertion of that shape is about the
+    SESSION's bind - `assert db_session.bind.dialect.name == "postgresql"` constrains the fixture
+    the test was handed and says nothing about an engine the module builds for itself. The reviewer
+    used exactly one such assert to free a deliberate SQLite reference engine in the same file.
+    Every postgres-marked module here that builds an engine refuses with `pytest.skip`, so no real
+    exemption depended on the assert arm.
+
+    WHY THIS STAYS MODULE-WIDE rather than per-construction. The refusing `pytest.skip` normally
+    lives in a `_url()` helper while the construction sits in a fixture that calls it
+    (`tests/integration/test_p1_clearing_run_perimeter_postgres.py:44` and `:52`; also
+    `test_p1_failed_rollback_state_postgres.py`, `test_p1_reconcile_after_failed_rollback_postgres.py`
+    and `test_simulator_metrics_migration_018_postgres.py`, whose nested `_reset_schema` builds an
+    engine from the enclosing scope's refused `url`). A per-scope rule would redden all of them.
+    What binds the exemption to reality instead is `_url_names_sqlite` at the call site: a
+    construction whose OWN url names SQLite is never excused, however the module refuses.
+    """
     for node in ast.walk(tree):
         if isinstance(node, ast.If) and _mentions_postgres(node.test):
             for statement in node.body:
@@ -219,16 +259,91 @@ def _refuses_non_postgres(tree: ast.Module) -> bool:
                         and inner.func.attr == "skip"
                     ):
                         return True
-        if isinstance(node, ast.Assert) and _mentions_postgres(node.test):
-            return True
     return False
 
 
-def _url_is_session_guaranteed_postgres(call: ast.Call) -> bool:
-    """The engine is built from `TEST_DATABASE_URL`, which the collection guard fails closed on."""
+def _url_names_sqlite(call: ast.Call) -> bool:
+    """This construction's own URL argument names SQLite, whatever the module says elsewhere."""
     if not call.args:
         return False
-    return _base_name(call.args[0]) in _POSTGRES_GUARANTEED_URL_NAMES
+    return _mentions_sqlite(call.args[0])
+
+
+def _imports_from_conftest(tree: ast.Module, name: str) -> bool:
+    """`from tests.conftest import <name>`, at module level or inside a function."""
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        if (node.module or "") not in {"tests.conftest", "conftest"}:
+            continue
+        for imported in node.names:
+            if imported.name == name and (imported.asname or imported.name) == name:
+                return True
+    return False
+
+
+def _is_rebound(tree: ast.Module, name: str) -> bool:
+    """The name is assigned somewhere in this module, so it is not necessarily conftest's object."""
+    for node in ast.walk(tree):
+        targets: list[ast.AST] = []
+        if isinstance(node, ast.Assign):
+            targets = list(node.targets)
+        elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+            targets = [node.target]
+        elif isinstance(node, (ast.For, ast.AsyncFor)):
+            targets = [node.target]
+        elif isinstance(node, (ast.With, ast.AsyncWith)):
+            targets = [item.optional_vars for item in node.items if item.optional_vars]
+        for target in targets:
+            for inner in ast.walk(target):
+                if isinstance(inner, ast.Name) and inner.id == name:
+                    return True
+    return False
+
+
+def _url_is_session_guaranteed_postgres(tree: ast.Module, call: ast.Call) -> bool:
+    """Built from CONFTEST's `TEST_DATABASE_URL`, which collection fails closed on.
+
+    THE NAME ALONE IS NOT THE GUARANTEE (2026-09-12, external review of T1525). The guarantee is
+    `tests/conftest.py::pytest_collection_finish`, which raises `pytest.UsageError` when any
+    postgres-marked test is selected while CONFTEST's `TEST_DATABASE_URL` is not PostgreSQL. That
+    covers the conftest object, not a local variable sharing its spelling: the reviewer freed an
+    engine by writing `TEST_DATABASE_URL = "sqlite:///:memory:"` beside it (spelled with
+    `:memory:` deliberately - `tests/unit/test_p014_t1406_...` scans test modules for sqlite URLs
+    and cannot tell a quoted illustration from a real one). So the name must be imported
+    from conftest and never rebound in the module - which is exactly how the four real users spell
+    it (`test_clearing_payment_prepare_interlock_postgres.py:593`,
+    `test_p015_inject_holds_the_owner_lock_postgres.py:124`,
+    `test_p015_p1_money_replay_postgres.py:99`, `test_p015_t1525_control_postgres.py:46`).
+    """
+    if not call.args:
+        return False
+    name = _base_name(call.args[0])
+    if name not in _POSTGRES_GUARANTEED_URL_NAMES:
+        return False
+    return _imports_from_conftest(tree, name) and not _is_rebound(tree, name)
+
+
+def _is_positive_sqlite_test(test: ast.AST) -> bool:
+    """True only for a test that is TRUE when the url IS SQLite.
+
+    POLARITY WAS IGNORED (2026-09-12, external review of T1525). The exemption matched any `if`
+    whose test merely MENTIONED sqlite and whose body returned, so the inverted shape
+    `if not url.startswith("sqlite"): return None` - a SQLite-ONLY helper, whose remaining body is
+    the SQLite case - excused every construction after it. Fails closed: a test whose polarity
+    cannot be read is not an exemption.
+    """
+    if not _mentions_sqlite(test):
+        return False
+    for inner in ast.walk(test):
+        if isinstance(inner, ast.UnaryOp) and isinstance(inner.op, ast.Not):
+            if _mentions_sqlite(inner.operand):
+                return False
+        if isinstance(inner, ast.Compare) and _mentions_sqlite(inner):
+            for op in inner.ops:
+                if isinstance(op, (ast.NotEq, ast.NotIn, ast.IsNot)):
+                    return False
+    return True
 
 
 def _excluded_by_a_sqlite_early_return(scope: ast.AST, call: ast.Call) -> bool:
@@ -237,7 +352,7 @@ def _excluded_by_a_sqlite_early_return(scope: ast.AST, call: ast.Call) -> bool:
     if not isinstance(body, list):
         return False
     for statement in body:
-        if not isinstance(statement, ast.If) or not _mentions_sqlite(statement.test):
+        if not isinstance(statement, ast.If) or not _is_positive_sqlite_test(statement.test):
             continue
         returns = any(
             isinstance(inner, ast.Return) for item in statement.body for inner in ast.walk(item)
@@ -317,8 +432,13 @@ def _unguarded_constructions(source: str, relative: str) -> tuple[list[str], int
         for call in constructions:
             if _excluded_by_a_sqlite_early_return(scope, call):
                 continue
-            if postgres_marked and (module_refuses or _url_is_session_guaranteed_postgres(call)):
-                continue
+            # A module-wide refusal never excuses a construction whose OWN url names SQLite. That
+            # is the deliberate reference-engine shape the external review freed with a single
+            # `assert ... == "postgresql"`, and it is the check that makes the module-wide refusal
+            # safe to keep (see `_refuses_non_postgres` for why it is not per-scope).
+            if postgres_marked and not _url_names_sqlite(call):
+                if module_refuses or _url_is_session_guaranteed_postgres(tree, call):
+                    continue
 
             guarded_needed += 1
             name = assigned_name.get(id(call))
@@ -478,7 +598,7 @@ def test_every_postgresql_only_exemption_still_carries_its_refusal() -> None:
             "tests/integration/planted_postgres.py",
             1,
         ),
-        # ... and the two shapes that legitimately stay exempt, so the fix is not a blanket ban.
+        # ... and the shapes that legitimately stay exempt, so the fix is not a blanket ban.
         (
             "import pytest\npytestmark = pytest.mark.postgres\n"
             "def f():\n    url = os.environ.get('TEST_DATABASE_URL', '')\n"
@@ -487,8 +607,10 @@ def test_every_postgresql_only_exemption_still_carries_its_refusal() -> None:
             "tests/integration/planted_postgres.py",
             0,
         ),
+        # The conftest URL, spelled the way all four real users spell it: IMPORTED, not just named.
         (
             "import pytest\npytestmark = pytest.mark.postgres\n"
+            "from tests.conftest import TEST_DATABASE_URL\n"
             "def f():\n    eng = create_async_engine(TEST_DATABASE_URL, pool_size=2)\n",
             "tests/integration/planted_postgres.py",
             0,
@@ -503,6 +625,44 @@ def test_every_postgresql_only_exemption_still_carries_its_refusal() -> None:
             "app/planted.py",
             0,
         ),
+        # --- BYPASS 5 (round 2): the early-return exemption ignored the condition's POLARITY, so
+        # the INVERTED shape - a SQLite-ONLY helper - excused the construction that followed it.
+        (
+            "def helper(url):\n"
+            "    if not url.startswith('sqlite'):\n        return None\n"
+            "    return create_async_engine(url)\n",
+            "app/planted.py",
+            1,
+        ),
+        (
+            "def helper(url):\n"
+            "    if not url.startswith('sqlite'):\n        return None\n"
+            "    eng = create_async_engine(url)\n"
+            "    install_sqlite_transaction_control(eng.sync_engine)\n"
+            "    return eng\n",
+            "app/planted.py",
+            0,
+        ),
+        # --- BYPASS 6 (round 2): ONE postgres assert freed EVERY construction in the module,
+        # including a deliberate SQLite reference engine built in another function.
+        (
+            "import pytest\npytestmark = pytest.mark.postgres\n"
+            "async def test_pg(db_session):\n"
+            "    assert db_session.bind.dialect.name == 'postgresql'\n"
+            "def reference():\n"
+            "    return create_engine('sqlite:///:memory:')\n",
+            "tests/integration/planted_postgres.py",
+            1,
+        ),
+        # --- BYPASS 7 (round 2): the TEST_DATABASE_URL exemption matched the argument's NAME only
+        # and knew nothing about its value, so a local variable of that name was excused.
+        (
+            "import pytest\npytestmark = pytest.mark.postgres\n"
+            "def f():\n    TEST_DATABASE_URL = 'sqlite+aiosqlite:///:memory:'\n"
+            "    eng = create_async_engine(TEST_DATABASE_URL)\n",
+            "tests/integration/planted_postgres.py",
+            1,
+        ),
     ),
     ids=(
         "planted-unguarded", "guarded", "installed-elsewhere", "module-level-guarded",
@@ -513,6 +673,9 @@ def test_every_postgresql_only_exemption_still_carries_its_refusal() -> None:
         "bypass4-postgres-marked-sqlite-from-helper",
         "postgres-marked-with-refusal", "postgres-marked-test-database-url",
         "sqlite-early-return-then-postgres",
+        "bypass5-inverted-sqlite-early-return", "bypass5-inverted-early-return-guarded",
+        "bypass6-postgres-assert-frees-sqlite-reference-engine",
+        "bypass7-local-variable-named-test-database-url",
     ),
 )
 def test_the_guard_goes_red_on_a_planted_unguarded_construction(source, relative, expected) -> None:

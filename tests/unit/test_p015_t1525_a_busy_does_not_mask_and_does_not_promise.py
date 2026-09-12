@@ -193,6 +193,18 @@ def test_a_busy_at_commit_does_not_mean_the_transaction_rolled_back(tmp_path) ->
     again". With a statement still in progress, `commit()` fails with SQLITE_BUSY and the
     transaction survives - so a retry that did not roll back first would run on top of its own
     uncommitted rows.
+
+    AND THE SECOND HALF, added 2026-09-12 after an external review: the rollback is checked for its
+    PHYSICAL RESULT. Until then this test proved only the first half - that the busy left the
+    transaction open with its own row visible - and then rolled back in `finally` without asserting
+    anything, while the entire retry-safety argument rests on the other half ("retrying is safe
+    because the retry site rolls back first"). An unverified rollback is exactly the shape the
+    argument cannot afford, so the rows are now counted again through a FRESH connection, which
+    sees only what is durable.
+
+    THE MUTATION that must turn this red again: replace the `connection.rollback()` below with
+    `connection.commit()` (the cursor is closed by then, so it succeeds) - the transaction's own
+    rows become durable and the two counts below stop being zero.
     """
     path = tmp_path / "commit.db"
     connection = sqlite3.connect(str(path), isolation_level=None)
@@ -224,6 +236,32 @@ def test_a_busy_at_commit_does_not_mean_the_transaction_rolled_back(tmp_path) ->
             connection.rollback()
         finally:
             connection.close()
+
+    # A FRESH connection sees only what is DURABLE, so this is the physical result of the
+    # rollback rather than a second look through the transaction that wrote the rows.
+    verifier = sqlite3.connect(str(path))
+    try:
+        own_rows = verifier.execute(
+            "SELECT count(*) FROM t WHERE v = 'own-row'"
+        ).fetchone()[0]
+        returning_rows = verifier.execute(
+            "SELECT count(*) FROM t WHERE id IN (11, 12)"
+        ).fetchone()[0]
+        seed_rows = verifier.execute("SELECT count(*) FROM t WHERE v = 'seed'").fetchone()[0]
+    finally:
+        verifier.close()
+
+    assert own_rows == 0, (
+        "the rolled-back transaction's own row is STILL STORED. The retry sites justify re-running "
+        "a busy unit of work by rolling back first; if that rollback does not remove what the busy "
+        "left open, the next attempt builds on its own uncommitted rows"
+    )
+    assert returning_rows == 0, (
+        "the rows of the INSERT ... RETURNING that held a statement open across the commit are "
+        f"still stored ({returning_rows} of them)"
+    )
+    # Non-vacuity: the rollback undid this transaction, it did not empty the table.
+    assert seed_rows == 3, seed_rows
 
 
 # ---------------------------------------------------------------------------
@@ -323,6 +361,74 @@ async def test_a_failed_rollback_stops_the_retry_instead_of_re_running(busy_fact
         f"the failed rollback should be attached as the cause, got {cause!r}"
     )
     assert "no active connection" in str(cause).lower() or "closed" in str(cause).lower(), cause
+
+
+async def _a_real_terminal_raised_inside_a_real_busy_handler(
+    factory,
+) -> tuple[DBAPIError, DBAPIError]:
+    """(a genuine BUSY_SNAPSHOT, a genuine PK violation raised INSIDE its handler).
+
+    Both arrive as SQLAlchemy `DBAPIError`s through aiosqlite, which is what the payment service's
+    classifier actually receives. The raw-`sqlite3` pairs at the top of this module prove the
+    PREDICATE; this one proves the CALLER, which had a chain walk of its own.
+    """
+    async with factory() as reader, factory() as writer, factory() as third:
+        await reader.execute(text("SELECT count(*) FROM probe"))
+        await writer.execute(text("SELECT count(*) FROM probe"))
+        await writer.execute(text("INSERT INTO probe (id, v) VALUES (1, 'writer')"))
+        await writer.commit()
+
+        try:
+            await reader.execute(text("INSERT INTO probe (id, v) VALUES (2, 'reader')"))
+        except DBAPIError as busy:
+            assert getattr(busy.orig, "sqlite_errorcode", None) == 517, busy
+            # INSIDE the handler, so the interpreter sets `__context__` on what is raised next.
+            try:
+                await third.execute(text("INSERT INTO probe (id, v) VALUES (1, 'duplicate')"))
+            except DBAPIError as terminal:
+                for session in (reader, third):
+                    try:
+                        await session.rollback()
+                    except Exception:
+                        pass
+                return busy, terminal
+            raise AssertionError("the duplicate primary key did not fail")
+        raise AssertionError("the reader's write was not refused with a busy")
+
+
+async def test_the_service_classifier_does_not_read_a_busy_out_of___context__(
+    busy_factory,
+) -> None:
+    """The masking defect one layer up: the SERVICE walked `__context__` and re-masked the error.
+
+    `sqlite_busy_error_name` was narrowed first, but `_classify_payment_db_error` had its OWN
+    traversal that included `__context__` and applied the fixed predicate to nodes that unfixed
+    traversal handed it. So a terminal SQLITE_CONSTRAINT_PRIMARYKEY raised inside a busy handler
+    still became a `RetryablePaymentConflictException` - and retrying it cannot succeed.
+
+    THE MUTATION that must turn this red again: add `current.__context__` back to the `following`
+    step of `_iter_exception_chain` in `app/core/payments/service.py`.
+    """
+    from app.core.payments.service import _classify_payment_db_error
+    from app.utils.exceptions import RetryablePaymentConflictException
+
+    busy, terminal = await _a_real_terminal_raised_inside_a_real_busy_handler(busy_factory)
+
+    # Non-vacuity: the real busy IS in `__context__`, so the old walk really would have found it.
+    assert terminal.__context__ is busy, terminal.__context__
+    assert getattr(terminal.orig, "sqlite_errorcode", None) == 1555, terminal
+    assert sqlite_busy_error_name(terminal) is None
+
+    assert not isinstance(
+        _classify_payment_db_error(terminal), RetryablePaymentConflictException
+    ), (
+        "a terminal primary-key violation was classified as a retryable conflict because a busy "
+        "sat in its __context__; the payment would be retried and the retry cannot succeed"
+    )
+    # The positive control: narrowing the walk must not lose the genuine busy.
+    assert isinstance(
+        _classify_payment_db_error(busy), RetryablePaymentConflictException
+    ), "a real SQLITE_BUSY_SNAPSHOT must still classify as a retryable conflict"
 
 
 async def test_the_same_conflict_is_retried_when_the_rollback_succeeds(busy_factory) -> None:
