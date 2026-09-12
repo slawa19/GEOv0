@@ -117,14 +117,29 @@ try {
                 '-o', "cache_dir=$pytestCache",
                 '-q'
             )
+            # `b4_counterexample` is excluded from EVERY tier, including an explicitly requested
+            # one, because those tests are red by design until programme 015 phase B step 4 exists
+            # (see the comment above the marker list in pytest.ini). Excluding them keeps a shared
+            # working tree's gate a signal; it does not make them optional.
+            #
+            # The exclusion is appended, not substituted, so `-BackendMarker postgres` still means
+            # "the postgres tier" - just without the counterexamples. To run them deliberately,
+            # NAME them: `-BackendMarker b4_counterexample`, or
+            # `-BackendMarker "postgres and b4_counterexample"`. Any expression that mentions the
+            # marker is taken as deliberate and left exactly as written.
             if ($BackendMarker) {
-                $pytestArgs += @('-m', $BackendMarker)
+                if ($BackendMarker -like '*b4_counterexample*') {
+                    $pytestArgs += @('-m', $BackendMarker)
+                }
+                else {
+                    $pytestArgs += @('-m', "$BackendMarker and not b4_counterexample")
+                }
             }
             elseif ($IncludeExpensive) {
-                $pytestArgs += @('-m', 'not postgres')
+                $pytestArgs += @('-m', 'not postgres and not b4_counterexample')
             }
             else {
-                $pytestArgs += @('-m', 'not slow and not postgres')
+                $pytestArgs += @('-m', 'not slow and not postgres and not b4_counterexample')
             }
             if ($BackendSelector.Count -gt 0) {
                 $pytestArgs += '--'
