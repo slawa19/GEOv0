@@ -190,8 +190,10 @@ legacy mode that causes T1525. After 3b the gate's own `t1525-baseline/test.db` 
 
 Tree: HEAD `1530878` (unchanged) plus the T1525 working-tree changes; nothing committed. Fix =
 `app/db/sqlite_transaction_control.py` (`isolation_level = None` on connect + `BEGIN` on SQLAlchemy's
-`begin`), installed on every SQLite engine; the conftest WAL / busy_timeout / foreign_keys pragmas
-moved from the per-test reset into the connect listener. Same machine, same commands, one run at a
+`begin`), installed on every SQLite engine; the conftest WAL / busy_timeout pragmas moved from the
+per-test reset into the connect listener. **Корректировка 2026-09-12:** `foreign_keys` в этот
+перечень попал ошибочно — на базовом коммите он **уже** был connect-слушателем, как и прагмы движка
+приложения; из транзакции переехали только WAL и `busy_timeout`. Same machine, same commands, one run at a
 time.
 
 ## Side by side
@@ -336,8 +338,11 @@ and the difference is named each time. Tree: HEAD `1530878`, nothing committed.
   propagates a busy error in savepoint mode, the SQLite twin of the existing 40001/40P01 branch; the
   retry log line now carries `sqlite_error=`.
 * `app/core/payments/service.py` - `_classify_payment_db_error` maps a SQLite busy error to
-  `RetryablePaymentConflictException`, so a staged payment makes the tick replay instead of recording
-  a terminal internal error.
+  `RetryablePaymentConflictException`. **Корректировка 2026-09-12:** здесь стояло «so a staged
+  payment makes the tick replay instead of recording a terminal internal error» — **ложно и снято**,
+  это четвёртое выжившее обещание повтора. Владельца повтора не существует; типизированный конфликт
+  лишь удерживает транзиентный сбой от записи как внутренней ошибки. Повтор проектируется отдельной
+  задачей `P1` (решение — коммит `b4cc08f`).
 * `tests/unit/test_p015_t1525_sqlite_stale_snapshot_is_retried.py` (new, 3 tests).
 * `tests/unit/test_debt_optimistic_lock.py` - rewritten: the invariant on both tiers, the mechanism
   named per backend.
