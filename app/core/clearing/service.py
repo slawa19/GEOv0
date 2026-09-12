@@ -254,9 +254,19 @@ class ClearingService:
         # PostgreSQL SQLSTATEs only, and that is a decision rather than an omission (T1525,
         # 2026-09-12). Since SQLite transactions take a real read snapshot, a clearing execution
         # that reads and then writes can be refused with SQLITE_BUSY_SNAPSHOT, which this predicate
-        # does NOT call retryable: that execution ends there. Accepted, because clearing is
-        # best-effort and the simulator attempts it again on a later tick, so the outcome is a
-        # postponed clearing rather than lost money - unlike the inject, whose owner would mark the
+        # does NOT call retryable: that execution ends there.
+        #
+        # ACCEPTED, BUT ONLY THE SIMULATOR GETS THE "LATER TICK" - corrected 2026-09-12, this
+        # comment used to justify the decision with "the simulator attempts it again on a later
+        # tick" full stop, which is true of one caller and false of the other:
+        #   * simulator: a postponed clearing rather than lost money, because there IS a next tick.
+        #     The cost is that the failure feeds `run.errors_total`, which can stop a run once
+        #     `SIMULATOR_REAL_MAX_ERRORS_TOTAL` is reached.
+        #   * HTTP `POST /api/v1/clearing/auto`: there is NO next tick. The busy becomes E010 and
+        #     the caller gets HTTP 500. Cycles already cleared in that call stay committed, so the
+        #     remainder is refused rather than lost, but the caller is told "internal error" for
+        #     what is a transient lock conflict.
+        # Neither loses money - unlike the inject, whose owner would mark the
         # event fired and drop it (`real_runner_impl._is_transient_inject_db_error`). It appeared in
         # no measurement of T1525: two 180 s multi-session simulator runs, four full default tiers
         # and five multi-session modules ten times each, all with zero busy errors from clearing. If

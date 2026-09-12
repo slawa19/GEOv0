@@ -422,12 +422,21 @@ class PaymentEngine:
 
         if not self._is_postgres():
             # T1525: on SQLite a unit of work that has read holds a snapshot, and a write on a
-            # stale one fails at once with SQLITE_BUSY_SNAPSHOT. Nothing of the unit of work is
-            # written, and the retry wrapper rolls back before re-running, so the second attempt
-            # reads the concurrent value - the same contract 40001 has on PostgreSQL. Before the
-            # transaction control existed this could not happen (reads were autocommitted) and the
-            # ORM raised StaleDataError instead, which `_apply_flow` retried; without this branch
-            # that retry is silently lost. See `app/db/sqlite_transaction_control.py`.
+            # stale one fails at once with SQLITE_BUSY_SNAPSHOT.
+            #
+            # A BUSY DOES NOT BY ITSELF MEAN THE TRANSACTION ROLLED BACK - corrected 2026-09-12,
+            # this comment used to claim "nothing of the unit of work is written". Measured: a
+            # `commit()` with a statement still in progress fails with SQLITE_BUSY and leaves the
+            # transaction OPEN with its own rows still visible inside it. What makes retrying safe
+            # here is not the error, it is the retry wrapper: `_run_uow_with_retry` rolls back
+            # before re-running and refuses to retry at all if that rollback fails, so the second
+            # attempt can never run on top of this attempt's uncommitted rows. It then reads the
+            # concurrent value - the same contract 40001 has on PostgreSQL.
+            #
+            # Before the transaction control existed this could not happen (reads were
+            # autocommitted) and the ORM raised StaleDataError instead, which `_apply_flow`
+            # retried; without this branch that retry is silently lost. See
+            # `app/db/sqlite_transaction_control.py`.
             return self._is_sqlite() and sqlite_busy_error_name(exc) is not None
 
         orig = getattr(exc, "orig", None)
@@ -577,10 +586,26 @@ class PaymentEngine:
                         raise
 
                     if not use_savepoint:
+                        # T1525: THE ROLLBACK IS WHAT MAKES THE RETRY SAFE, so a rollback that
+                        # fails must stop the retry instead of being swallowed (it was, until
+                        # 2026-09-12). A SQLite busy does not imply the transaction rolled back -
+                        # a busy raised by `commit()` with a statement still in progress leaves it
+                        # OPEN, with this attempt's own rows visible inside it. Re-running `fn()`
+                        # on a session whose rollback failed would therefore build the second
+                        # attempt on top of the first attempt's uncommitted writes. Surface the
+                        # original database error, with the rollback failure as its cause.
                         try:
                             await self.session.rollback()
-                        except Exception:
-                            pass
+                        except Exception as rollback_error:
+                            logger.error(
+                                "event=payment.uow_retry_rollback_failed op=%s attempt=%s "
+                                "error_type=%s rollback_error_type=%s",
+                                op,
+                                attempt,
+                                type(exc).__name__,
+                                type(rollback_error).__name__,
+                            )
+                            raise exc from rollback_error
 
                     base = max(0.0, self._retry_base_delay_s)
                     cap = max(base, self._retry_max_delay_s)

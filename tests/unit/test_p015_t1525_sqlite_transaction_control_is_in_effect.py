@@ -18,15 +18,16 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from sqlalchemy import event, func, select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
 
 from app.db.models.equivalent import Equivalent
 from app.db.sqlite_transaction_control import (
-    has_sqlite_transaction_control,
     install_sqlite_transaction_control,
+    sqlite_transaction_control_is_installed,
 )
+from tests.scratch_db import install_test_sqlite_pragmas
 
 
 async def _driver_in_transaction(session) -> bool:
@@ -43,7 +44,9 @@ async def test_a_read_after_begin_is_inside_a_database_transaction(db_session) -
     assert engine.dialect.name == "sqlite", (
         f"this module checks the default SQLite tier; the test engine is {engine.dialect.name}"
     )
-    assert has_sqlite_transaction_control(engine.sync_engine)
+    # Registration only - see the function's docstring and the limit test at the bottom of this
+    # module. What proves the control is in EFFECT is the `in_transaction` assertion below.
+    assert sqlite_transaction_control_is_installed(engine.sync_engine)
 
     async with TestingSessionLocal() as session:
         await session.begin()
@@ -105,14 +108,13 @@ async def test_a_fresh_database_gets_wal_from_the_conftest_connect_listener(tmp_
     """
     import tests.conftest as conftest
 
-    assert event.contains(conftest.engine.sync_engine, "connect", conftest._sqlite_connection_pragmas), (
+    assert getattr(conftest.engine.sync_engine, "_geo_test_sqlite_pragmas_installed", False), (
         "the test engine no longer sets its connection pragmas on connect"
     )
 
-    fresh = create_async_engine(
-        f"sqlite+aiosqlite:///{(tmp_path / 'fresh.db').as_posix()}", poolclass=NullPool
-    )
-    event.listen(fresh.sync_engine, "connect", conftest._sqlite_connection_pragmas)
+    fresh_url = f"sqlite+aiosqlite:///{(tmp_path / 'fresh.db').as_posix()}"
+    fresh = create_async_engine(fresh_url, poolclass=NullPool)
+    install_test_sqlite_pragmas(fresh.sync_engine, url=fresh_url)
     install_sqlite_transaction_control(fresh.sync_engine)
     try:
         async with fresh.begin() as conn:
@@ -123,4 +125,55 @@ async def test_a_fresh_database_gets_wal_from_the_conftest_connect_listener(tmp_
         await fresh.dispose()
     assert str(mode).lower() == "wal", (
         f"a fresh database opened by the test engine's connect listener is in {mode!r}, not WAL"
+    )
+
+
+@pytest.mark.asyncio
+async def test_installing_the_control_late_does_not_repair_a_connection_that_already_read(
+    tmp_path: Path,
+) -> None:
+    """`sqlite_transaction_control_is_installed` reports REGISTRATION, never live state.
+
+    The function was called `has_sqlite_transaction_control`, which read as a promise about the
+    engine's behaviour. It is not one, and this is the counter-proof: install the control AFTER a
+    connection has already read - so the driver is in legacy mode and no `BEGIN` was ever sent -
+    and the savepoint opened next is still its own transaction. The root rollback leaves the row
+    behind, exactly the T1525 defect, while the function returns True throughout.
+
+    The listeners are not retroactive: `connect` fires only on the NEXT connection and `begin` only
+    on the next SQLAlchemy `begin`. This is why the module's other tests read
+    `sqlite3.Connection.in_transaction` on the live connection instead of trusting this function.
+    """
+    url = f"sqlite+aiosqlite:///{(tmp_path / 'late.db').as_posix()}"
+    late = create_async_engine(url, poolclass=NullPool)
+    install_test_sqlite_pragmas(late.sync_engine, url=url)
+    try:
+        async with late.begin() as conn:
+            await conn.execute(text("CREATE TABLE probe (x INTEGER)"))
+
+        connection = await late.connect()
+        try:
+            # This read opens SQLAlchemy's transaction while the control is NOT yet installed, so
+            # the driver stays in legacy mode and sends no BEGIN.
+            await connection.execute(text("SELECT count(*) FROM probe"))
+
+            install_sqlite_transaction_control(late.sync_engine)
+            installed_now = sqlite_transaction_control_is_installed(late.sync_engine)
+
+            await connection.exec_driver_sql("SAVEPOINT late_sp")
+            await connection.exec_driver_sql("INSERT INTO probe VALUES (1)")
+            await connection.exec_driver_sql("RELEASE late_sp")
+            await connection.rollback()
+        finally:
+            await connection.close()
+
+        async with late.connect() as check:
+            survived = (await check.execute(text("SELECT count(*) FROM probe"))).scalar_one()
+    finally:
+        await late.dispose()
+
+    assert installed_now is True, "the control was installed; the point of the test is that it is"
+    assert survived == 1, (
+        "the row did NOT survive the root rollback, so this stand no longer reproduces the "
+        "retroactivity limit; if the control became retroactive, say so at the function instead"
     )

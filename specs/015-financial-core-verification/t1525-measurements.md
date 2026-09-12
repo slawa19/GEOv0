@@ -12,14 +12,23 @@ One measurement at a time; no python process of another session was running at t
 
 Command (canonical selection of `scripts/verify_local.ps1` default branch, plus the plugin):
 
+The detector is `scripts/t1525_savepoint_detector.py` (moved into the repository on 2026-09-12 - it
+had lived in a scratch directory, so this measurement could not be re-derived from a clone). `scripts`
+is importable from the repository root, so the plugin is loaded by module path with no PYTHONPATH:
+
 ```
-PYTHONPATH=<scratchpad>/t1525_detector T1525_DETECTOR_OUT=<scratchpad>/t1525_detector_full.json \
+T1525_DETECTOR_OUT=.local-run/test-runs/t1525-baseline/detector/detector.json \
 GEO_TEST_ARTIFACT_ROOT=.local-run/test-runs/t1525-baseline/detector/artifacts \
 TEST_DATABASE_URL=sqlite+aiosqlite:///./.local-run/test-runs/t1525-baseline/test.db \
-.venv/Scripts/python.exe -m pytest -p t1525_savepoint_detector \
+.venv/Scripts/python.exe -m pytest -p scripts.t1525_savepoint_detector \
   --basetemp .local-run/test-runs/t1525-baseline/detector/pytest \
   -o cache_dir=.local-run/test-runs/t1525-baseline/detector/cache -q -m "not slow and not postgres"
 ```
+
+(The command as ORIGINALLY RUN used `PYTHONPATH=<scratchpad>/t1525_detector` and
+`-p t1525_savepoint_detector`, with the JSON written into the scratchpad. Only the plugin's location
+changed; the plugin's logic, the selection and the environment are the same, which is why the numbers
+below are reported unchanged rather than re-measured.)
 
 (The test DB has to be `.local-run/test-runs/<task>/test.db` exactly - the conftest URL guard rejects a
 deeper path; the file was deleted before 3a and again before 3b.)
@@ -107,7 +116,11 @@ tests/unit/test_payments_2pc.py::test_commit_updates_transaction_updated_at (1)
 tests/unit/test_simulator_metrics_bottlenecks_real_mode.py::test_missing_measurement_stays_null_end_to_end (2), ::test_writer_and_reader_agree_on_the_key_set_end_to_end (1)
 tests/unit/test_simulator_write_tick_metrics_upsert.py::test_no_money_measurement_means_no_precision_warning (1), ::test_sqlite_money_metrics_are_lossy_and_say_so_once_per_run (3), ::test_write_tick_metrics_bulk_upsert_updates_without_duplicates (2)
 
-Full per-node JSON: `<scratchpad>/t1525_detector_full.json`; run log `<scratchpad>/t1525_3a_pytest.log`.
+Full per-node JSON and the run log were scratch artifacts of the original run and are not preserved
+in the repository. To regenerate the JSON on any tree, run the command above - it writes
+`nodes_with_independent_savepoints`, `nodes_with_released_then_rollback` and the per-node breakdown
+to `$T1525_DETECTOR_OUT`. On a tree BEFORE the fix (`git worktree add` at `1530878`) it reproduces
+the counters in this section; on a tree after it, the zeros of part 2.
 
 What the detector does not see: a rollback that bypasses SQLAlchemy's `Connection` (raw DBAPI, pool reset
 after the SQLAlchemy transaction ended); non-SQLite backends; work of background tasks is attributed to
@@ -144,14 +157,24 @@ expression `not postgres`.
 | test_simulator_adaptive_clearing_integration | default | P P P P P P P P P P | 6 | 8.69-10.33 s | 0 |
 | test_simulator_clearing_no_deadlock | default | P P P P P P P P P P | 1 | 2.03-2.37 s | 0 |
 
-50/50 repetitions passed, exit 0 each. Same `-q` visibility limit as 3b. Per-rep logs `<scratchpad>/t1525_3c/`.
+50/50 repetitions passed, exit 0 each. Same `-q` visibility limit as 3b. The per-rep logs were scratch
+artifacts and are not preserved; the loop is ten repetitions of each module under the canonical
+runner with its own `-TaskSlug`.
+
 These five modules build their own engines (`create_async_engine(..., connect_args={"timeout": 5|10})`)
-with no journal-mode pragma, so they run in SQLite's default rollback-journal mode, not WAL (read from
-code, not measured).
+with no journal-mode pragma, so at the time of this measurement they ran in SQLite's default
+rollback-journal mode, not WAL (read from code, not measured).
+
+**Superseded 2026-09-12.** All five now receive the application's connect-time pragmas through
+`tests/scratch_db.install_test_sqlite_pragmas` (WAL, `foreign_keys=ON`, `busy_timeout`), and each
+module carries a test asserting its own engine reports `journal_mode=wal` and `foreign_keys=1`. The
+50/50 result above was therefore measured under the rollback journal and does NOT transfer to the
+WAL behaviour these modules now run in - it is kept as the record of that run, not as evidence about
+the current tree.
 
 ## 3d. PRAGMA journal_mode on the default test DB during a test
 
-Probe plugin `<scratchpad>/t1525_journal/t1525_journal_probe.py` (autouse fixture after `db_session`),
+Probe plugin (a scratch autouse fixture after `db_session`, not preserved in the repository),
 fresh DB file (absent at session start), 8 tests of `tests/unit/test_payment_delta_check.py` and
 `tests/unit/test_payments_2pc.py`: in every test `journal_mode = wal` through the fixture session, through a
 fresh `TestingSessionLocal()` session and through a raw `sqlite3` connection; the `-wal` file exists.
@@ -201,7 +224,7 @@ Commands, exactly as run:
   The "before" side ran in a detached `git worktree` at `1530878` (its own `.local-run`), so the two
   sides differ only by the fix;
 * five modules x 10: the same loop as 3c;
-* simulator: `scratchpad/t1525_sim_run.py --duration 180`, the real in-process runtime
+* simulator: a scratch driver script (not preserved in the repository) exercising the real in-process runtime
   (`runtime.create_run(mode="real", intensity 100)`, heartbeat ticks, background clearing every 5
   ticks, `storage.upsert_run`, plus a UI-like reader polling metrics and bottlenecks twice a second)
   against a scratch database under `.local-run/test-runs/t1525-simrun-<label>/`. The "before" pair ran
@@ -212,7 +235,8 @@ Commands, exactly as run:
 
 ## Detector after the fix
 
-`<scratchpad>/t1525_detector_full_after.json`: `nodes_with_independent_savepoints: []` and
+The detector JSON of that run (regenerate with the 3a command on a fixed tree):
+`nodes_with_independent_savepoints: []` and
 `nodes_with_released_then_rollback: []`. Every one of the 201 savepoints ran inside a database
 transaction. The scan is not empty: 43 394 SQLite statements, and the same 76 tests that opened
 savepoints before still open them.
@@ -566,3 +590,19 @@ multi-session modules ten times each. It names the shared predicate for whoever 
   (8 reproducers and controls, 4 runtime checks, 10 source-guard items, 3 retry tests) plus 2 from
   the new inject tests (that file went 24 -> 26). The optimistic-lock test was rewritten, not added.
   The PostgreSQL tier went 139 -> 143: the 4 control tests.
+
+## Как читать `independent_savepoints: 0` — число зависит от выборки
+
+Записано 2026-09-12, после того как это всплыло при проверке детектора как плагина.
+
+Заголовочное `113 -> 0` относится к **каноническому дефолтному тиру целиком**. На других выборках
+ноль не обязателен, и это не регрессия: `tests/unit/test_p015_t1525_sqlite_transaction_control_is_in_effect.py`
+содержит тест `test_installing_the_control_late_does_not_repair_a_connection_that_already_read`,
+который **намеренно** воспроизводит legacy-режим — соединение уже читало, контроль ставится позже, и
+savepoint открывает транзакцию сам. Прогон, включающий этот тест, покажет
+`independent_savepoints: 1`, и это ожидаемо.
+
+Поэтому при перепроверке числа сверяйте **ту же выборку**, что в замере, и помните правило непустоты
+из самого детектора: чистое дерево — это `independent_savepoints: 0` при **ненулевых**
+`savepoints_total` и `sqlite_statements`; прогон, не наблюдавший ничего, читается одинаково с
+прогоном, не нашедшим ничего плохого.

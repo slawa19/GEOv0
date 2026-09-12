@@ -93,10 +93,19 @@ def _classify_payment_db_error(exc: BaseException) -> GeoException:
         if _payment_db_sqlstate(current) in _RETRYABLE_PAYMENT_SQLSTATES:
             return RetryablePaymentConflictException()
         # T1525: the SQLite twin of 40001. A staged payment runs inside the caller's transaction,
-        # so the engine cannot take a fresh snapshot itself and propagates the busy error; the
-        # caller (the simulator tick) owns the restart, and only a retryable conflict makes it
-        # replay instead of recording a terminal internal error. The code carries the dialect -
+        # so the engine cannot take a fresh snapshot itself and propagates the busy error as a
+        # typed conflict rather than a terminal internal error. The code carries the dialect -
         # only sqlite3 errors have `sqlite_errorcode` - so this needs no bind of its own.
+        #
+        # WHAT THE CALLER ACTUALLY DOES WITH IT, corrected 2026-09-12: this comment used to say
+        # the simulator tick "owns the restart" and replays the unit of work. It does not. The
+        # conflict propagates out of the tick's payments phase, the orchestrator rolls the tick
+        # session back, counts one error and records `REAL_MODE_TICK_FAILED`
+        # (`real_tick_orchestrator.py`); the next heartbeat starts a NEW tick with a higher
+        # `tick_index` (`runtime_impl.py`), it does not re-run the failed one. On the HTTP path
+        # the conflict becomes 409 E008 with `retryable: true` and the client owns the retry.
+        # The typed conflict is therefore worth raising - it keeps a transient conflict from
+        # being recorded as an internal error - but no tick-level replay owner exists today.
         if sqlite_busy_error_name(current) is not None:
             return RetryablePaymentConflictException()
     return GeoException()
@@ -860,9 +869,18 @@ class PaymentService:
                                 type(rollback_error).__name__,
                             )
                             raise GeoException() from rollback_error
-                    # In staged mode the caller owns the outer transaction. A
-                    # serialization failure invalidates that scope, so propagate
-                    # the typed conflict and let the tick rollback/replay it.
+                    # In staged mode the caller owns the outer transaction, and a serialization
+                    # failure or a stale snapshot invalidates that whole scope, so the typed
+                    # conflict has to propagate rather than be handled here.
+                    #
+                    # WHAT THE CALLER ACTUALLY DOES WITH IT, corrected 2026-09-12: this comment
+                    # used to say "let the tick rollback/replay it". The tick rolls back; it does
+                    # NOT replay. The conflict ends the tick's payments phase, the orchestrator
+                    # records REAL_MODE_TICK_FAILED and counts an error against the run's budget,
+                    # and the next heartbeat starts a NEW tick rather than re-running this one.
+                    # A bounded replay owned by the orchestrator is specified for programme 015
+                    # (P1-REPLAY, OPTION-A) but is not implemented yet. The gap predates T1525 -
+                    # the promise came from 21753fd - so this is not T1525 behaviour.
                     raise public_error from exc
                 # 4. Engine Prepare
                 try:

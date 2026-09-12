@@ -24,6 +24,7 @@ from app.db.base import Base  # noqa: E402
 from app.db.sqlite_transaction_control import install_sqlite_transaction_control  # noqa: E402
 from app.main import app  # noqa: E402
 from scripts.validate_test_database_url import assert_safe_test_database_url  # noqa: E402
+from tests.scratch_db import install_test_sqlite_pragmas  # noqa: E402
 
 # --- Database Fixtures ---
 
@@ -131,19 +132,13 @@ engine = create_async_engine(
 # rollback journal. `foreign_keys` has the same property (it is a no-op inside a transaction), which
 # is why it was already here. `tests/unit/test_p015_t1525_sqlite_transaction_control_is_in_effect.py`
 # holds this in place on a fresh database file.
-def _sqlite_connection_pragmas(dbapi_connection, _connection_record):
-    cursor = dbapi_connection.cursor()
-    try:
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.execute("PRAGMA busy_timeout=30000")
-        if _validated_test_database_url.database not in {None, "", ":memory:"}:
-            cursor.execute("PRAGMA journal_mode=WAL")
-    finally:
-        cursor.close()
-
-
 if _is_sqlite:
-    event.listen(engine.sync_engine, "connect", _sqlite_connection_pragmas)
+    # ONE definition of these pragmas, in `tests/scratch_db.py`, shared with the five integration
+    # modules that build SQLite engines of their own (T1525, 2026-09-12). Those five used to carry
+    # the transaction control WITHOUT the pragmas, so they ran in the rollback journal with foreign
+    # keys unenforced while this tier ran in WAL with them on - and a concurrency result measured
+    # under one does not transfer to the other.
+    install_test_sqlite_pragmas(engine.sync_engine, url=_validated_test_database_url)
     # T1525: without this a savepoint opened before the first write is its own transaction on
     # SQLite and a root rollback does not undo it - see `app/db/sqlite_transaction_control.py`. The
     # default tier is the tier that is supposed to prove atomicity, so it runs with the same control
