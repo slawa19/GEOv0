@@ -52,13 +52,22 @@ class DeferredRealPaymentEffects:
     run_id: str
     run: RunRecord
     items: list[_PaymentObservation] = field(default_factory=list)
-    _resolution: Literal["commit", "rollback", "unknown"] | None = field(
+    _resolution: Literal["commit", "rollback", "unknown", "discarded"] | None = field(
         default=None,
         init=False,
         repr=False,
     )
 
     def apply_once(self) -> bool:
+        """Resolve this buffer as committed, once.
+
+        PROGRAMME 015 / P1: THIS GUARD PROTECTS ONE BUFFER INSTANCE AND NOTHING MORE. The tick's
+        money phase is now replayed on a transient conflict, and every attempt builds a NEW
+        `DeferredRealPaymentEffects`, so "publish exactly once per tick" is not something this
+        guard can deliver on its own. What delivers it is `discard()` below: a superseded attempt's
+        buffer is destroyed before the next attempt is allowed to start, so only the buffer of the
+        attempt that actually committed can ever publish. See `app/core/simulator/money_replay.py`.
+        """
         return self.apply_after_commit()
 
     def apply_after_commit(self) -> bool:
@@ -69,6 +78,25 @@ class DeferredRealPaymentEffects:
 
     def apply_after_unknown_transaction_outcome(self) -> bool:
         return self._resolve("unknown")
+
+    def discard(self) -> bool:
+        """Destroy this attempt's observations WITHOUT publishing any of them.
+
+        Programme 015 / P1. Used only when the money phase is about to be replayed: the attempt
+        was rolled back, nothing of it is durable, and the replay will re-plan the load from a
+        fresh debt snapshot. Publishing here would emit terminal SSE (`tx.updated` / `tx.failed`)
+        and move business counters for payments that never happened and are about to be planned
+        again under a possibly different amount and `seq`.
+
+        The items are dropped as well as the resolution being marked, so a later caller cannot
+        reach them. Every `apply_after_*` on this buffer returns False from here on, which is what
+        makes the rule "publish exactly once, after the commit" hold across attempts.
+        """
+        if self._resolution is not None:
+            return False
+        self._resolution = "discarded"
+        self.items = []
+        return True
 
     def _resolve(
         self,
@@ -238,6 +266,10 @@ class RealPaymentsResult:
     rejection_codes_by_eq: dict[str, dict[str, int]] = field(default_factory=dict)
     deferred_effects: DeferredRealPaymentEffects | None = None
     stop_requested: bool = False
+    # Programme 015 / P1: the `tx_id` of every payment this call actually staged. These are the
+    # ORIGINAL identifiers the replay reads when a commit's outcome is unknown, to establish
+    # whether the attempt landed before it is allowed to decide anything.
+    staged_tx_ids: frozenset[str] = frozenset()
 
 
 class RealPaymentsExecutor:
@@ -302,6 +334,11 @@ class RealPaymentsExecutor:
 
         sem = asyncio.Semaphore(max(1, int(max_in_flight)))
         action_db_lock = asyncio.Lock()
+
+        # Programme 015 / P1: recorded as each payment is staged, not at the end, because the
+        # conflict this exists for propagates out of this function and the prefix that was already
+        # staged is exactly what has to be identifiable afterwards.
+        staged_tx_ids: set[str] = set()
 
         per_eq: dict[str, dict[str, int]] = {
             str(eq): {"committed": 0, "rejected": 0, "errors": 0, "timeouts": 0}
@@ -391,6 +428,9 @@ class RealPaymentsExecutor:
                                 allowed_participant_pids=run_perimeter_pids(run),
                                 idempotency_key=idem,
                             )
+                            tx_id = str(getattr(staged.result, "tx_id", "") or "")
+                            if tx_id:
+                                staged_tx_ids.add(tx_id)
 
                     res = staged.result
 
@@ -431,16 +471,17 @@ class RealPaymentsExecutor:
                     # to the tick's transaction, not to the savepoint. Do not count a transient
                     # conflict as a terminal payment rejection - propagate it.
                     #
-                    # WHAT PROPAGATING LEADS TO TODAY, corrected 2026-09-12: this comment used to
-                    # say "the tick-level rollback/replay policy owns it". There is no replay
-                    # policy. The conflict leaves the payments phase, the tick orchestrator rolls
-                    # the session back and resolves this tick's observations as rolled back, then
-                    # logs `simulator.real.tick_failed`, increments `run.errors_total` and sets
-                    # `run.last_error = REAL_MODE_TICK_FAILED`; enough consecutive failures end the
-                    # run with `REAL_MODE_TICK_FAILED_REPEATED`. The next heartbeat increments
-                    # `tick_index` and starts a NEW tick - the failed tick's staged payments are
-                    # not replayed. So propagating costs this tick, which is still strictly better
-                    # than recording a transient conflict as a terminal INTERNAL_ERROR per action.
+                    # WHO OWNS IT NOW, programme 015 / P1, 2026-09-12. This comment promised a
+                    # "tick-level rollback/replay policy" that did not exist, and then described
+                    # the loss that followed from its absence. The policy now exists and is
+                    # `app/core/simulator/money_replay.py`: this conflict leaves the payments
+                    # phase and reaches the money boundary, which discards the whole attempt
+                    # WITHOUT publishing any of its observations, opens a fresh session and
+                    # transaction, takes a fresh debt snapshot, RE-PLANS the load and runs the
+                    # phase again, up to a bounded number of attempts. So propagating no longer
+                    # costs the tick - it costs one attempt of it. If the budget is exhausted the
+                    # conflict still leaves the tick, but it is recorded as a tick that made no
+                    # progress rather than as an error, and it does not spend the error budget.
                     raise
                 except Exception as e:
                     code = "INTERNAL_ERROR"
@@ -842,4 +883,5 @@ class RealPaymentsExecutor:
             rejection_codes_by_eq=rejection_codes_by_eq,
             deferred_effects=deferred_effects,
             stop_requested=stop_requested,
+            staged_tx_ids=frozenset(staged_tx_ids),
         )

@@ -153,6 +153,17 @@ class RealRunnerImpl:
             int(_safe_int_env("SIMULATOR_REAL_ENABLE_INJECT", 0)) >= 1
         )
 
+        # Programme 015 / P1: the bounded replay of the tick's money phase.
+        # `..._MONEY_REPLAY_ATTEMPTS` counts ATTEMPTS, not retries, so 1 disables the replay.
+        # `..._MAX_CONSEC_MONEY_NO_PROGRESS` is the explicit no-progress criterion that may stop a
+        # run under permanent contention - the replacement for stopping a run on a SQLSTATE.
+        self._real_money_replay_attempts_limit = _safe_int_env(
+            "SIMULATOR_REAL_MONEY_REPLAY_ATTEMPTS", 3
+        )
+        self._real_max_consec_money_no_progress_limit = _safe_int_env(
+            "SIMULATOR_REAL_MAX_CONSEC_MONEY_NO_PROGRESS", 10
+        )
+
         # Cache env-derived throttling knobs (avoid getenv on every tick).
         self._real_db_metrics_every_n_ticks = _safe_int_env(
             "SIMULATOR_REAL_DB_METRICS_EVERY_N_TICKS", 5

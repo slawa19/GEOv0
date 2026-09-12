@@ -36,6 +36,15 @@ class RealTickPaymentsPhaseResult:
     # Contract: always a dict (never None).
     rejection_codes_by_eq: dict[str, dict[str, int]]
     deferred_effects: DeferredRealPaymentEffects | None = None
+    # Programme 015 / P1: the identifiers of the payments this attempt staged, for resolving an
+    # unknown commit outcome. See `app/core/simulator/money_replay.py`.
+    staged_tx_ids: frozenset[str] = frozenset()
+
+    def discard_observations(self) -> bool:
+        """Destroy this attempt's observations without publishing them (a superseded attempt)."""
+        if self.deferred_effects is None:
+            return False
+        return self.deferred_effects.discard()
 
     def apply_deferred_effects(self) -> bool:
         if self.deferred_effects is None:
@@ -141,6 +150,15 @@ class RealTickPaymentsCoordinator:
             )
 
         should_stop = bool(payments_res.stop_requested)
+        # THE ERROR BUDGET NO LONGER SEES TRANSIENT CONFLICTS (programme 015 / P1, 2026-09-12).
+        # `errors` counts terminal per-action outcomes only. A transient database conflict is not
+        # one of them: it propagates as an exception out of `execute_planned_payments`, so it never
+        # reaches this arithmetic and never reaches `run.errors_total` either - the money boundary
+        # catches it above this function and either replays the phase or records a tick that made
+        # no progress (`app/core/simulator/money_replay.py`). Before that boundary existed, the
+        # conflict became a tick failure and DID increment `run.errors_total` and
+        # `run._real_consec_tick_failures`, so contention alone could end a run through
+        # `REAL_MODE_TOO_MANY_ERRORS` or `REAL_MODE_TICK_FAILED_REPEATED`.
         projected_errors_total = int(run.errors_total) + int(errors)
         if (
             int(max_errors_total) > 0
@@ -168,6 +186,7 @@ class RealTickPaymentsCoordinator:
             stall_ticks=stall_ticks,
             rejection_codes_by_eq=dict(getattr(payments_res, "rejection_codes_by_eq", {}) or {}),
             deferred_effects=payments_res.deferred_effects,
+            staged_tx_ids=frozenset(getattr(payments_res, "staged_tx_ids", ()) or ()),
         )
 
         if should_stop:

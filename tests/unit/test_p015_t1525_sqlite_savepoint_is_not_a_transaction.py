@@ -50,6 +50,7 @@ from typing import Any
 
 import pytest
 from sqlalchemy import delete, func, insert, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.payments.engine import PaymentEngine
 from app.core.payments.router import PaymentRouter
@@ -589,12 +590,14 @@ _INJECTED_TICK_FAILURE = "T1525 stand: a failure right after the payments phase"
 
 
 async def _scenario_real_tick_fails_after_payments(factory, world, monkeypatch) -> _TickOutcome:
-    """The whole real tick of `RealRunner`, failing right after its payments phase.
+    """The whole real tick of `RealRunner`, failing right after its payments have been staged.
 
     Nothing is stubbed on the money path: seeding is skipped because the world is already in the
-    database, the planner plans, the coordinator reads the snapshot and runs the real executor. The
-    failure is raised by the next step of the orchestrator (clearing), so the tick's own `except`
-    branch performs the rollback under test.
+    database, the planner plans, the coordinator reads the snapshot and runs the real executor.
+    The failure is raised by the money boundary's own commit, once the payments have been staged,
+    so the rollback under test is the one that discards the transaction those payments were staged
+    in (programme 015 / P1 owns that boundary; see the comment at the injection point below for
+    why the failure is no longer raised from clearing).
     """
     import app.db.session as app_db_session
 
@@ -645,14 +648,41 @@ async def _scenario_real_tick_fails_after_payments(factory, world, monkeypatch) 
 
     monkeypatch.setattr(RealTickPaymentsCoordinator, "run_payments_phase", _capture_phase)
 
-    async def _fail_after_payments(**_kwargs):
-        raise RuntimeError(_INJECTED_TICK_FAILURE)
+    # WHERE THIS FAILURE IS INJECTED MOVED WITH PROGRAMME 015 / P1, 2026-09-12. It used to be
+    # raised from `maybe_run_clearing`, that is, from the tick's TAIL. The tail now runs after the
+    # money boundary's explicit commit, so a failure there can no longer roll payments back - that
+    # is P1's hard right edge, and a test that still expected a rollback there would be asserting
+    # the opposite of the money contract.
+    #
+    # The property this module owns is the T1525 one and it lives INSIDE the boundary: a payment
+    # staged in a per-action savepoint must not survive the rollback of the transaction it was
+    # staged in. The MONEY COMMIT is the last moment at which the tick can still roll them back,
+    # so that is where the failure goes. Identifying it needs no knowledge of the boundary's
+    # internals: the first commit that happens once a payment has been staged IS the money commit.
+    #
+    # Injecting it one step earlier - by raising from `run_payments_phase` itself - does not work,
+    # and the reason is worth recording: the phase result never reaches the boundary, so there is
+    # no observation buffer for it to resolve, and `rollback_resolution` stays None. The payments
+    # are still rolled back correctly, but the half of this test that checks the tick REPORTED
+    # them as rolled back would silently stop testing anything.
+    failed_commits: list[int] = []
+    original_commit = AsyncSession.commit
 
-    monkeypatch.setattr(runner._real_tick_clearing_coordinator, "maybe_run_clearing", _fail_after_payments)
+    async def _fail_the_money_commit(self):
+        if staged and not failed_commits:
+            failed_commits.append(1)
+            raise RuntimeError(_INJECTED_TICK_FAILURE)
+        return await original_commit(self)
+
+    monkeypatch.setattr(AsyncSession, "commit", _fail_the_money_commit)
 
     await asyncio.wait_for(runner.tick_real_mode(run.run_id), timeout=30.0)
 
     assert len(phases) == 1, "stand: the payments phase did not run"
+    assert failed_commits == [1], (
+        "stand: the money commit was never reached, so no failure was injected and this proves "
+        "nothing"
+    )
     deferred = phases[0].deferred_effects
     return _TickOutcome(
         staged=staged,
@@ -707,11 +737,15 @@ async def test_a_rolled_back_tick_leaves_no_payment_from_the_executor(db_session
 
 @pytest.mark.asyncio
 async def test_a_real_tick_failing_after_payments_leaves_no_payment(db_session, monkeypatch) -> None:
-    """RED today: the whole real tick, failing after its payments phase, keeps every payment.
+    """RED today: the whole real tick, failing after its payments are staged, keeps every payment.
 
-    Wrong and why it matters: as above, through `RealRunner.tick_real_mode` and the orchestrator's
-    own rollback in its `except` branch - the path a running simulation takes when any step after
-    payments fails. Must turn green only with the T1525 fix.
+    Wrong and why it matters: as above, through `RealRunner.tick_real_mode` and the rollback of the
+    transaction the payments were staged in - the path a running simulation takes when a step
+    inside the money phase fails. Must turn green only with the T1525 fix.
+
+    Programme 015 / P1 note: a failure in the tick's TAIL no longer reaches this rollback, because
+    the money commits at its own boundary first. A tail failure is covered where it now belongs,
+    as the right edge, in `tests/unit/test_real_tick_orchestrator_rollback_resolution.py`.
     """
     from tests.conftest import TestingSessionLocal
 

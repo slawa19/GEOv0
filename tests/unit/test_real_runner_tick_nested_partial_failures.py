@@ -231,10 +231,20 @@ async def test_real_runner_tick_real_mode_uses_nested_tx_and_survives_one_action
     # Act
     await runner.tick_real_mode("r1")
 
-    # Assert: we used SAVEPOINT per action and committed once for the whole tick.
+    # Assert: we used SAVEPOINT per action, and the tick commits per PHASE rather than per action
+    # - two actions, two savepoints, and fewer commits than actions.
     assert session.nested_begins == 2
     assert session.nested_ends == 2
-    assert session.commits == 1
+    # TWO COMMITS SINCE PROGRAMME 015 / P1, 2026-09-12, and which is which is the point:
+    #   1. the money boundary's own explicit commit, which ends the money phase, makes the
+    #      payments durable and is what publishes them - exactly once;
+    #   2. the persistence tail's commit, which has always been here and now carries only the
+    #      tail's own writes.
+    # It used to be ONE because the payments phase left its transaction open and rode along with
+    # whichever tail step happened to commit first, so the money's durability point depended on
+    # the tail. Separating them is the boundary P1 exists to draw, not a regression: after commit
+    # 1 the money is durable and no tail failure can roll it back or replay it.
+    assert session.commits == 2
     assert "tx.failed" in sse.types
     assert sse.types.count("tx.updated") == 1
     assert run.committed_total == 1

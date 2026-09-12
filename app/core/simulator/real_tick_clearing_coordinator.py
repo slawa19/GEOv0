@@ -472,7 +472,21 @@ class RealTickClearingCoordinator:
         }
         tick_index = int(run.tick_index)
 
-        # Commit payments BEFORE clearing to release the DB write lock.
+        # End the transaction BEFORE clearing to release the DB write lock.
+        #
+        # THIS IS NO LONGER THE MONEY COMMIT, corrected 2026-09-12 by programme 015 / P1. It used
+        # to be: the payments phase left its transaction open and this was the first commit after
+        # it, which made the money's durability point depend on whether clearing was due this
+        # tick. The money now commits at its own boundary, before anything in the tail runs
+        # (`app/core/simulator/money_replay.py`), and by the time execution reaches this line the
+        # payments are already durable. What is committed here is whatever the tail has read or
+        # written since, and the call is kept for the reason its first line gives: clearing runs
+        # in a session of its own and must not queue behind this one's write lock.
+        #
+        # The observation callbacks are kept too, and they are no-ops after a successful money
+        # commit: the buffer resolves once (`DeferredRealPaymentEffects._resolve`). That is what
+        # makes the right edge hard - a failure anywhere in the tail cannot un-publish a committed
+        # payment and cannot replay it.
         commit_t0 = time.monotonic()
         await self._commit_and_resolve(session, payments_result)
         commit_ms = (time.monotonic() - commit_t0) * 1000.0
