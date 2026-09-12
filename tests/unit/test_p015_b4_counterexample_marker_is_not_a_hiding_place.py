@@ -44,6 +44,11 @@ _ALLOWED = {
     "tests/unit/test_p015_b4_transaction_contract.py",
     "tests/unit/test_p015_b4_write_guard.py",
     "tests/integration/test_p015_b4_transaction_contract_postgres.py",
+    # Step 2, second slice (C4, C5, C6, C8, C12-C19, §10.1 and binding condition 4).
+    "tests/unit/test_p015_b4_entries_and_money.py",
+    "tests/unit/test_p015_b4_wrong_writer_is_recorded_faithfully.py",
+    "tests/integration/test_p015_b4_entries_and_money_postgres.py",
+    "tests/integration/test_p015_b4_wrong_writer_is_recorded_faithfully_postgres.py",
 }
 
 
