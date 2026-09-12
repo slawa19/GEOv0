@@ -80,6 +80,8 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 
+from tests.debt_setup import debt_fixture_setup
+
 _LOG = logging.getLogger("test.p012.t1207")
 
 # `Equivalent.precision` is declared `ge=0, le=8` (app/schemas/equivalents.py).  The set below
@@ -140,24 +142,25 @@ async def _fixture(session: AsyncSession, *, precision: int, limit: str, used: s
     session.add_all([eq, creditor, debtor])
     await session.commit()
 
-    session.add_all(
-        [
-            TrustLine(
-                from_participant_id=creditor.id,
-                to_participant_id=debtor.id,
-                equivalent_id=eq.id,
-                limit=Decimal(limit),
-                status="active",
-                policy={"auto_clearing": True},
-            ),
-            Debt(
-                debtor_id=debtor.id,
-                creditor_id=creditor.id,
-                equivalent_id=eq.id,
-                amount=Decimal(used),
-            ),
-        ]
-    )
+    async with debt_fixture_setup(session, label="setup"):
+        session.add_all(
+            [
+                TrustLine(
+                    from_participant_id=creditor.id,
+                    to_participant_id=debtor.id,
+                    equivalent_id=eq.id,
+                    limit=Decimal(limit),
+                    status="active",
+                    policy={"auto_clearing": True},
+                ),
+                Debt(
+                    debtor_id=debtor.id,
+                    creditor_id=creditor.id,
+                    equivalent_id=eq.id,
+                    amount=Decimal(used),
+                ),
+            ]
+        )
     await session.commit()
     return eq, creditor, debtor
 
@@ -222,24 +225,25 @@ async def _legacy_fixture(session: AsyncSession, *, precision: int, limit: str, 
     session.add_all([creditor, debtor])
     await session.commit()
 
-    session.add_all(
-        [
-            TrustLine(
-                from_participant_id=creditor.id,
-                to_participant_id=debtor.id,
-                equivalent_id=eq.id,
-                limit=Decimal(limit),
-                status="active",
-                policy={"auto_clearing": True},
-            ),
-            Debt(
-                debtor_id=debtor.id,
-                creditor_id=creditor.id,
-                equivalent_id=eq.id,
-                amount=Decimal(used),
-            ),
-        ]
-    )
+    async with debt_fixture_setup(session, label="setup"):
+        session.add_all(
+            [
+                TrustLine(
+                    from_participant_id=creditor.id,
+                    to_participant_id=debtor.id,
+                    equivalent_id=eq.id,
+                    limit=Decimal(limit),
+                    status="active",
+                    policy={"auto_clearing": True},
+                ),
+                Debt(
+                    debtor_id=debtor.id,
+                    creditor_id=creditor.id,
+                    equivalent_id=eq.id,
+                    amount=Decimal(used),
+                ),
+            ]
+        )
     await session.commit()
     return eq, creditor, debtor
 

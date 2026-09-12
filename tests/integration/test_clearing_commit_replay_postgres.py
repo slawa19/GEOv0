@@ -11,6 +11,8 @@ import pytest
 from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker
 
+from tests.debt_setup import debt_fixture_setup
+
 
 pytestmark = pytest.mark.postgres
 
@@ -129,22 +131,23 @@ async def test_concurrent_same_cycle_serializable_resolves_one_durable_occurrenc
                     )
                 ]
             )
-            setup.add_all(
-                [
-                    Debt(
-                        id=debt_id,
-                        debtor_id=debtor_id,
-                        creditor_id=creditor_id,
-                        equivalent_id=equivalent_id,
-                        amount=Decimal(amount),
-                    )
-                    for debt_id, debtor_id, creditor_id, amount in (
-                        (debt_ids[0], a_id, b_id, "100.00"),
-                        (debt_ids[1], b_id, c_id, "30.00"),
-                        (debt_ids[2], c_id, a_id, "40.00"),
-                    )
-                ]
-            )
+            async with debt_fixture_setup(setup, label="setup"):
+                setup.add_all(
+                    [
+                        Debt(
+                            id=debt_id,
+                            debtor_id=debtor_id,
+                            creditor_id=creditor_id,
+                            equivalent_id=equivalent_id,
+                            amount=Decimal(amount),
+                        )
+                        for debt_id, debtor_id, creditor_id, amount in (
+                            (debt_ids[0], a_id, b_id, "100.00"),
+                            (debt_ids[1], b_id, c_id, "30.00"),
+                            (debt_ids[2], c_id, a_id, "40.00"),
+                        )
+                    ]
+                )
             await setup.commit()
 
         first_owner_acquired = asyncio.Event()
@@ -393,22 +396,23 @@ async def test_serializable_conflict_without_committed_occurrence_stays_failure_
                     )
                 ]
             )
-            setup.add_all(
-                [
-                    Debt(
-                        id=debt_id,
-                        debtor_id=debtor_id,
-                        creditor_id=creditor_id,
-                        equivalent_id=equivalent_id,
-                        amount=Decimal(amount),
-                    )
-                    for debt_id, debtor_id, creditor_id, amount in (
-                        (debt_ids[0], a_id, b_id, "100.00"),
-                        (debt_ids[1], b_id, c_id, "30.00"),
-                        (debt_ids[2], c_id, a_id, "40.00"),
-                    )
-                ]
-            )
+            async with debt_fixture_setup(setup, label="setup"):
+                setup.add_all(
+                    [
+                        Debt(
+                            id=debt_id,
+                            debtor_id=debtor_id,
+                            creditor_id=creditor_id,
+                            equivalent_id=equivalent_id,
+                            amount=Decimal(amount),
+                        )
+                        for debt_id, debtor_id, creditor_id, amount in (
+                            (debt_ids[0], a_id, b_id, "100.00"),
+                            (debt_ids[1], b_id, c_id, "30.00"),
+                            (debt_ids[2], c_id, a_id, "40.00"),
+                        )
+                    ]
+                )
             await setup.commit()
 
         class _ObservedClearingService(ClearingService):
@@ -673,22 +677,23 @@ async def test_post_commit_boundary_reconciles_and_new_cycle_still_executes_post
                     )
                 ]
             )
-            setup.add_all(
-                [
-                    Debt(
-                        id=debt_id,
-                        debtor_id=debtor_id,
-                        creditor_id=creditor_id,
-                        equivalent_id=equivalent_id,
-                        amount=Decimal(amount),
-                    )
-                    for debt_id, debtor_id, creditor_id, amount in (
-                        (debt_ids[0], a_id, b_id, "100.00"),
-                        (debt_ids[1], b_id, c_id, "30.00"),
-                        (debt_ids[2], c_id, a_id, "40.00"),
-                    )
-                ]
-            )
+            async with debt_fixture_setup(setup, label="setup-1"):
+                setup.add_all(
+                    [
+                        Debt(
+                            id=debt_id,
+                            debtor_id=debtor_id,
+                            creditor_id=creditor_id,
+                            equivalent_id=equivalent_id,
+                            amount=Decimal(amount),
+                        )
+                        for debt_id, debtor_id, creditor_id, amount in (
+                            (debt_ids[0], a_id, b_id, "100.00"),
+                            (debt_ids[1], b_id, c_id, "30.00"),
+                            (debt_ids[2], c_id, a_id, "40.00"),
+                        )
+                    ]
+                )
             await setup.commit()
 
         service_session = TestingSessionLocal()
@@ -776,15 +781,16 @@ async def test_post_commit_boundary_reconciles_and_new_cycle_still_executes_post
         # Anti-vacuum: a genuinely new occurrence has a new Debt-ID set and must
         # not be mistaken for replay of the committed cycle.
         async with TestingSessionLocal() as add_replacement:
-            add_replacement.add(
-                Debt(
-                    id=replacement_debt_id,
-                    debtor_id=b_id,
-                    creditor_id=c_id,
-                    equivalent_id=equivalent_id,
-                    amount=Decimal("5.00"),
+            async with debt_fixture_setup(add_replacement, label="setup-2"):
+                add_replacement.add(
+                    Debt(
+                        id=replacement_debt_id,
+                        debtor_id=b_id,
+                        creditor_id=c_id,
+                        equivalent_id=equivalent_id,
+                        amount=Decimal("5.00"),
+                    )
                 )
-            )
             await add_replacement.commit()
 
         replacement_session = TestingSessionLocal()

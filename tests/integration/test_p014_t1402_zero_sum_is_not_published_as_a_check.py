@@ -37,6 +37,8 @@ from app.db.models.participant import Participant
 from app.schemas.integrity import InvariantWithdrawn
 from tests.integration.test_scenarios import register_and_login
 
+from tests.debt_setup import debt_fixture_setup
+
 _ROOT = Path(__file__).resolve().parents[2]
 _WITHDRAWN = {"status": "not_verified", "reason": "check_withdrawn"}
 
@@ -55,9 +57,10 @@ async def _seed(db_session) -> Equivalent:
     b = Participant(pid="WB" + nonce, display_name="WB", public_key="pkWB-" + nonce)
     db_session.add_all([eq, a, b])
     await db_session.flush()
-    db_session.add(
-        Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("10"))
-    )
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add(
+            Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("10"))
+        )
     await db_session.commit()
     return eq
 

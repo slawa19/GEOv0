@@ -28,6 +28,8 @@ from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 
+from tests.debt_setup import debt_fixture_setup
+
 
 async def _seed(db_session, *, with_debt: bool):
     nonce = uuid.uuid4().hex[:8]
@@ -38,13 +40,14 @@ async def _seed(db_session, *, with_debt: bool):
     await db_session.flush()
     debt = None
     if with_debt:
-        debt = Debt(
-            debtor_id=debtor.id,
-            creditor_id=creditor.id,
-            equivalent_id=eq.id,
-            amount=Decimal("42.00000000"),
-        )
-        db_session.add(debt)
+        async with debt_fixture_setup(db_session, label="setup"):
+            debt = Debt(
+                debtor_id=debtor.id,
+                creditor_id=creditor.id,
+                equivalent_id=eq.id,
+                amount=Decimal("42.00000000"),
+            )
+            db_session.add(debt)
     await db_session.commit()
     return eq, debt
 

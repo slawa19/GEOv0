@@ -16,6 +16,8 @@ from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 from app.utils.exceptions import GeoException
 
+from tests.debt_setup import debt_fixture_setup
+
 
 def _mk_eq(code_prefix: str) -> Equivalent:
     nonce = uuid.uuid4().hex[:10]
@@ -88,7 +90,8 @@ async def _setup_committed_triangle(
         )
         for debtor, creditor in [(a, b), (b, c), (c, a)]
     ]
-    db_session.add_all(debts)
+    async with debt_fixture_setup(db_session, label="triangle"):
+        db_session.add_all(debts)
     await _add_controlling_trustlines(
         db_session,
         eq_id=eq.id,
@@ -114,23 +117,25 @@ async def test_all_cycles_blocked_by_policy_returns_empty(db_session):
 
     # Triangle: A->B->C->A
     tri_edges = [(a, b), (b, c), (c, a)]
-    db_session.add_all(
-        [
-            Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("10")),
-            Debt(debtor_id=b.id, creditor_id=c.id, equivalent_id=eq.id, amount=Decimal("10")),
-            Debt(debtor_id=c.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("10")),
-        ]
-    )
+    async with debt_fixture_setup(db_session, label="triangle"):
+        db_session.add_all(
+            [
+                Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("10")),
+                Debt(debtor_id=b.id, creditor_id=c.id, equivalent_id=eq.id, amount=Decimal("10")),
+                Debt(debtor_id=c.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("10")),
+            ]
+        )
 
     # Quadrangle: A->B->D->E->A
     quad_edges = [(a, b), (b, d), (d, e), (e, a)]
-    db_session.add_all(
-        [
-            Debt(debtor_id=b.id, creditor_id=d.id, equivalent_id=eq.id, amount=Decimal("10")),
-            Debt(debtor_id=d.id, creditor_id=e.id, equivalent_id=eq.id, amount=Decimal("10")),
-            Debt(debtor_id=e.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("10")),
-        ]
-    )
+    async with debt_fixture_setup(db_session, label="quadrangle"):
+        db_session.add_all(
+            [
+                Debt(debtor_id=b.id, creditor_id=d.id, equivalent_id=eq.id, amount=Decimal("10")),
+                Debt(debtor_id=d.id, creditor_id=e.id, equivalent_id=eq.id, amount=Decimal("10")),
+                Debt(debtor_id=e.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("10")),
+            ]
+        )
 
     # Block all controlling trustlines.
     await _add_controlling_trustlines(
@@ -161,15 +166,16 @@ async def test_partially_blocked_returns_allowed_cycle(db_session):
     # Two triangles share edge A->B.
     # T1: A->B->C->A (blocked by policy on controlling TL C->B)
     # T2: A->B->D->A (allowed)
-    db_session.add_all(
-        [
-            Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("10")),
-            Debt(debtor_id=b.id, creditor_id=c.id, equivalent_id=eq.id, amount=Decimal("10")),
-            Debt(debtor_id=c.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("10")),
-            Debt(debtor_id=b.id, creditor_id=d.id, equivalent_id=eq.id, amount=Decimal("10")),
-            Debt(debtor_id=d.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("10")),
-        ]
-    )
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add_all(
+            [
+                Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("10")),
+                Debt(debtor_id=b.id, creditor_id=c.id, equivalent_id=eq.id, amount=Decimal("10")),
+                Debt(debtor_id=c.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("10")),
+                Debt(debtor_id=b.id, creditor_id=d.id, equivalent_id=eq.id, amount=Decimal("10")),
+                Debt(debtor_id=d.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("10")),
+            ]
+        )
 
     # Controlling TLs (creditor->debtor). Block only the controlling TL for edge B->C (i.e. C->B).
     await _add_controlling_trustlines(
@@ -211,13 +217,14 @@ async def test_cycles_scoped_to_equivalent(db_session):
     await db_session.flush()
 
     # Triangle in eq1: A->B->C->A
-    db_session.add_all(
-        [
-            Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq1.id, amount=Decimal("10")),
-            Debt(debtor_id=b.id, creditor_id=c.id, equivalent_id=eq1.id, amount=Decimal("10")),
-            Debt(debtor_id=c.id, creditor_id=a.id, equivalent_id=eq1.id, amount=Decimal("10")),
-        ]
-    )
+    async with debt_fixture_setup(db_session, label="eq1-triangle"):
+        db_session.add_all(
+            [
+                Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq1.id, amount=Decimal("10")),
+                Debt(debtor_id=b.id, creditor_id=c.id, equivalent_id=eq1.id, amount=Decimal("10")),
+                Debt(debtor_id=c.id, creditor_id=a.id, equivalent_id=eq1.id, amount=Decimal("10")),
+            ]
+        )
     await _add_controlling_trustlines(
         db_session,
         eq_id=eq1.id,
@@ -226,13 +233,14 @@ async def test_cycles_scoped_to_equivalent(db_session):
     )
 
     # Triangle in eq2: X->Y->Z->X
-    db_session.add_all(
-        [
-            Debt(debtor_id=x.id, creditor_id=y.id, equivalent_id=eq2.id, amount=Decimal("10")),
-            Debt(debtor_id=y.id, creditor_id=z.id, equivalent_id=eq2.id, amount=Decimal("10")),
-            Debt(debtor_id=z.id, creditor_id=x.id, equivalent_id=eq2.id, amount=Decimal("10")),
-        ]
-    )
+    async with debt_fixture_setup(db_session, label="eq2-triangle"):
+        db_session.add_all(
+            [
+                Debt(debtor_id=x.id, creditor_id=y.id, equivalent_id=eq2.id, amount=Decimal("10")),
+                Debt(debtor_id=y.id, creditor_id=z.id, equivalent_id=eq2.id, amount=Decimal("10")),
+                Debt(debtor_id=z.id, creditor_id=x.id, equivalent_id=eq2.id, amount=Decimal("10")),
+            ]
+        )
     await _add_controlling_trustlines(
         db_session,
         eq_id=eq2.id,
@@ -260,13 +268,14 @@ async def test_no_trustline_means_no_consent(db_session):
     db_session.add_all([eq, a, b, c])
     await db_session.flush()
 
-    db_session.add_all(
-        [
-            Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("10")),
-            Debt(debtor_id=b.id, creditor_id=c.id, equivalent_id=eq.id, amount=Decimal("10")),
-            Debt(debtor_id=c.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("10")),
-        ]
-    )
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add_all(
+            [
+                Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("10")),
+                Debt(debtor_id=b.id, creditor_id=c.id, equivalent_id=eq.id, amount=Decimal("10")),
+                Debt(debtor_id=c.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("10")),
+            ]
+        )
     await db_session.commit()
 
     service = ClearingService(db_session)
@@ -281,13 +290,14 @@ async def test_frozen_trustline_blocks_clearing(db_session):
     db_session.add_all([eq, a, b, c])
     await db_session.flush()
 
-    db_session.add_all(
-        [
-            Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("10")),
-            Debt(debtor_id=b.id, creditor_id=c.id, equivalent_id=eq.id, amount=Decimal("10")),
-            Debt(debtor_id=c.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("10")),
-        ]
-    )
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add_all(
+            [
+                Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("10")),
+                Debt(debtor_id=b.id, creditor_id=c.id, equivalent_id=eq.id, amount=Decimal("10")),
+                Debt(debtor_id=c.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("10")),
+            ]
+        )
 
     # Two active TLs + one frozen controlling TL should block the cycle.
     await _add_controlling_trustlines(
@@ -323,7 +333,8 @@ async def test_sql_and_dfs_produce_same_cycles(db_session, monkeypatch):
         Debt(debtor_id=b.id, creditor_id=c.id, equivalent_id=eq.id, amount=Decimal("10")),
         Debt(debtor_id=c.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("10")),
     ]
-    db_session.add_all(debts)
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add_all(debts)
 
     await _add_controlling_trustlines(
         db_session,
@@ -371,14 +382,15 @@ async def test_self_loop_not_allowed(db_session):
     db_session.add_all([eq, a])
     await db_session.flush()
 
-    db_session.add(
-        Debt(
-            debtor_id=a.id,
-            creditor_id=a.id,
-            equivalent_id=eq.id,
-            amount=Decimal("1"),
+    async with debt_fixture_setup(db_session, label="self-loop"):
+        db_session.add(
+            Debt(
+                debtor_id=a.id,
+                creditor_id=a.id,
+                equivalent_id=eq.id,
+                amount=Decimal("1"),
+            )
         )
-    )
 
     with pytest.raises(IntegrityError):
         await db_session.commit()
@@ -401,13 +413,14 @@ async def test_auto_clear_clears_multiple_independent_cycles(db_session):
     await db_session.flush()
 
     # Cycle1: A->B->C->A
-    db_session.add_all(
-        [
-            Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("5")),
-            Debt(debtor_id=b.id, creditor_id=c.id, equivalent_id=eq.id, amount=Decimal("5")),
-            Debt(debtor_id=c.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("5")),
-        ]
-    )
+    async with debt_fixture_setup(db_session, label="cycle1"):
+        db_session.add_all(
+            [
+                Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("5")),
+                Debt(debtor_id=b.id, creditor_id=c.id, equivalent_id=eq.id, amount=Decimal("5")),
+                Debt(debtor_id=c.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("5")),
+            ]
+        )
     await _add_controlling_trustlines(
         db_session,
         eq_id=eq.id,
@@ -416,13 +429,14 @@ async def test_auto_clear_clears_multiple_independent_cycles(db_session):
     )
 
     # Cycle2: X->Y->Z->X
-    db_session.add_all(
-        [
-            Debt(debtor_id=x.id, creditor_id=y.id, equivalent_id=eq.id, amount=Decimal("7")),
-            Debt(debtor_id=y.id, creditor_id=z.id, equivalent_id=eq.id, amount=Decimal("7")),
-            Debt(debtor_id=z.id, creditor_id=x.id, equivalent_id=eq.id, amount=Decimal("7")),
-        ]
-    )
+    async with debt_fixture_setup(db_session, label="cycle2"):
+        db_session.add_all(
+            [
+                Debt(debtor_id=x.id, creditor_id=y.id, equivalent_id=eq.id, amount=Decimal("7")),
+                Debt(debtor_id=y.id, creditor_id=z.id, equivalent_id=eq.id, amount=Decimal("7")),
+                Debt(debtor_id=z.id, creditor_id=x.id, equivalent_id=eq.id, amount=Decimal("7")),
+            ]
+        )
     await _add_controlling_trustlines(
         db_session,
         eq_id=eq.id,
@@ -532,7 +546,8 @@ async def test_execute_clearing_unexpected_failure_rolls_back_and_surfaces_sanit
             amount=Decimal("10"),
         ),
     ]
-    db_session.add_all(debts)
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add_all(debts)
     await _add_controlling_trustlines(
         db_session,
         eq_id=eq.id,
@@ -694,7 +709,8 @@ async def test_execute_clearing_policy_skip_remains_non_exceptional(db_session):
             amount=Decimal("4"),
         ),
     ]
-    db_session.add_all(debts)
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add_all(debts)
     await _add_controlling_trustlines(
         db_session,
         eq_id=eq.id,

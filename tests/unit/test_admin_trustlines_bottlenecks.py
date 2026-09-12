@@ -10,6 +10,8 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 
+from tests.debt_setup import debt_fixture_setup
+
 
 @pytest.mark.asyncio
 async def test_admin_trustlines_bottlenecks_requires_admin_token(client):
@@ -69,13 +71,14 @@ async def test_admin_trustlines_bottlenecks_filters_and_sorts(client, db_session
     db_session.add_all([tl1, tl2, tl_boundary, tl3])
     await db_session.flush()
 
-    db_session.add_all(
-        [
-            Debt(debtor_id=bob.id, creditor_id=alice.id, equivalent_id=uah.id, amount=Decimal("95.00")),
-            Debt(debtor_id=bob.id, creditor_id=charlie.id, equivalent_id=uah.id, amount=Decimal("98.00")),
-            Debt(debtor_id=alice.id, creditor_id=bob.id, equivalent_id=uah.id, amount=Decimal("90.00")),
-        ]
-    )
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add_all(
+            [
+                Debt(debtor_id=bob.id, creditor_id=alice.id, equivalent_id=uah.id, amount=Decimal("95.00")),
+                Debt(debtor_id=bob.id, creditor_id=charlie.id, equivalent_id=uah.id, amount=Decimal("98.00")),
+                Debt(debtor_id=alice.id, creditor_id=bob.id, equivalent_id=uah.id, amount=Decimal("90.00")),
+            ]
+        )
     await db_session.commit()
 
     headers = {"X-Admin-Token": settings.ADMIN_TOKEN}

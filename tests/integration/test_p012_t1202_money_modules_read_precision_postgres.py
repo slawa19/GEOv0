@@ -82,6 +82,8 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 
+from tests.debt_setup import debt_fixture_setup
+
 pytestmark = pytest.mark.postgres
 
 
@@ -176,14 +178,15 @@ async def _ring(
     debt_ids: list[uuid.UUID] = []
     for i, debtor in enumerate(people):
         creditor = people[(i + 1) % len(people)]
-        debt = Debt(
-            id=uuid.uuid4(),
-            debtor_id=debtor.id,
-            creditor_id=creditor.id,
-            equivalent_id=eq.id,
-            amount=amount,
-        )
-        session.add(debt)
+        async with debt_fixture_setup(session, label="setup"):
+            debt = Debt(
+                id=uuid.uuid4(),
+                debtor_id=debtor.id,
+                creditor_id=creditor.id,
+                equivalent_id=eq.id,
+                amount=amount,
+            )
+            session.add(debt)
         debt_ids.append(debt.id)
         # The controlling line for a debt debtor->creditor is creditor->debtor.
         session.add(
@@ -453,15 +456,16 @@ async def cancelling_pair(db_session: AsyncSession):
     bob = await _participant(db_session, "bob")
     await db_session.flush()
     for debtor, creditor in ((alice, bob), (bob, alice)):
-        db_session.add(
-            Debt(
-                id=uuid.uuid4(),
-                debtor_id=debtor.id,
-                creditor_id=creditor.id,
-                equivalent_id=eq.id,
-                amount=Decimal("5.00"),
+        async with debt_fixture_setup(db_session, label="setup"):
+            db_session.add(
+                Debt(
+                    id=uuid.uuid4(),
+                    debtor_id=debtor.id,
+                    creditor_id=creditor.id,
+                    equivalent_id=eq.id,
+                    amount=Decimal("5.00"),
+                )
             )
-        )
     # Only Bob extends trust, so Alice has spend capacity and no receive capacity. That is an
     # ordinary asymmetric relationship, and it is what makes `available_to_receive` keep the
     # untouched `Decimal('0')` seed while `net_balance` comes out of a subtraction - the two
@@ -562,15 +566,16 @@ async def test_balance_renders_the_number_of_digits_the_equivalent_declares(
     alice = await _participant(db_session, "alice")
     bob = await _participant(db_session, "bob")
     await db_session.flush()
-    db_session.add(
-        Debt(
-            id=uuid.uuid4(),
-            debtor_id=alice.id,
-            creditor_id=bob.id,
-            equivalent_id=eq.id,
-            amount=Decimal("7"),
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add(
+            Debt(
+                id=uuid.uuid4(),
+                debtor_id=alice.id,
+                creditor_id=bob.id,
+                equivalent_id=eq.id,
+                amount=Decimal("7"),
+            )
         )
-    )
     await db_session.flush()
 
     summary = await BalanceService(db_session).get_summary(alice.id)
@@ -605,15 +610,16 @@ async def test_precision_never_erases_an_amount_the_ledger_actually_holds(
     alice = await _participant(db_session, "alice")
     bob = await _participant(db_session, "bob")
     await db_session.flush()
-    db_session.add(
-        Debt(
-            id=uuid.uuid4(),
-            debtor_id=alice.id,
-            creditor_id=bob.id,
-            equivalent_id=eq.id,
-            amount=Decimal("0.05"),
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add(
+            Debt(
+                id=uuid.uuid4(),
+                debtor_id=alice.id,
+                creditor_id=bob.id,
+                equivalent_id=eq.id,
+                amount=Decimal("0.05"),
+            )
         )
-    )
     await db_session.flush()
 
     summary = await BalanceService(db_session).get_summary(alice.id)

@@ -50,6 +50,8 @@ from tests.unit.test_p015_t1525_sqlite_savepoint_is_not_a_transaction import (
     _stored_debts,
 )
 
+from tests.debt_setup import debt_fixture_setup
+
 _CONCURRENT = Decimal("3.25")
 
 
@@ -98,14 +100,15 @@ def _inject_concurrent_commit(monkeypatch, factory, world: _World, x, y, *, only
                 if debt is None:
                     # A pair of its own: `uq_debts_debtor_creditor_equivalent` allows one row per
                     # pair, so later attempts raise this one's amount instead of inserting again.
-                    other.add(
-                        Debt(
-                            debtor_id=x.id,
-                            creditor_id=y.id,
-                            equivalent_id=world.equivalent.id,
-                            amount=_CONCURRENT,
+                    async with debt_fixture_setup(other, label="setup"):
+                        other.add(
+                            Debt(
+                                debtor_id=x.id,
+                                creditor_id=y.id,
+                                equivalent_id=world.equivalent.id,
+                                amount=_CONCURRENT,
+                            )
                         )
-                    )
                 else:
                     debt.amount = Decimal(str(debt.amount)) + _CONCURRENT
                 await other.commit()
@@ -264,23 +267,25 @@ async def test_the_classifier_reads_the_error_code_and_refuses_everything_else(d
         async with TestingSessionLocal() as reader, TestingSessionLocal() as writer:
             await reader.execute(select(Debt.id).limit(1))
             await writer.execute(select(Debt.id).limit(1))
-            writer.add(
-                Debt(
-                    debtor_id=world.sender.id,
-                    creditor_id=world.receiver.id,
-                    equivalent_id=world.equivalent.id,
-                    amount=Decimal("1.00"),
+            async with debt_fixture_setup(writer, label="setup-1"):
+                writer.add(
+                    Debt(
+                        debtor_id=world.sender.id,
+                        creditor_id=world.receiver.id,
+                        equivalent_id=world.equivalent.id,
+                        amount=Decimal("1.00"),
+                    )
                 )
-            )
             await writer.commit()
-            reader.add(
-                Debt(
-                    debtor_id=world.receiver.id,
-                    creditor_id=world.sender.id,
-                    equivalent_id=world.equivalent.id,
-                    amount=Decimal("2.00"),
+            async with debt_fixture_setup(reader, label="setup-2"):
+                reader.add(
+                    Debt(
+                        debtor_id=world.receiver.id,
+                        creditor_id=world.sender.id,
+                        equivalent_id=world.equivalent.id,
+                        amount=Decimal("2.00"),
+                    )
                 )
-            )
             with pytest.raises(DBAPIError) as busy:
                 await reader.flush()
             engine_on_reader = PaymentEngine(reader)
@@ -293,14 +298,15 @@ async def test_the_classifier_reads_the_error_code_and_refuses_everything_else(d
 
         # 2. A real integrity error on the same backend must stay non-retryable.
         async with TestingSessionLocal() as session:
-            session.add(
-                Debt(
-                    debtor_id=uuid.uuid4(),  # no such participant
-                    creditor_id=world.receiver.id,
-                    equivalent_id=world.equivalent.id,
-                    amount=Decimal("1.00"),
+            async with debt_fixture_setup(session, label="setup-3"):
+                session.add(
+                    Debt(
+                        debtor_id=uuid.uuid4(),  # no such participant
+                        creditor_id=world.receiver.id,
+                        equivalent_id=world.equivalent.id,
+                        amount=Decimal("1.00"),
+                    )
                 )
-            )
             with pytest.raises(IntegrityError) as integrity:
                 await session.flush()
             engine_on_session = PaymentEngine(session)

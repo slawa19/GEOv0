@@ -5,6 +5,8 @@ from httpx import AsyncClient
 
 from tests.integration.test_scenarios import register_and_login
 
+from tests.debt_setup import debt_fixture_setup
+
 
 @pytest.mark.asyncio
 async def test_clearing_max_depth_blocks_and_allows_length_5_cycle(client: AsyncClient, db_session):
@@ -62,14 +64,15 @@ async def test_clearing_max_depth_blocks_and_allows_length_5_cycle(client: Async
     await db_session.commit()
 
     for debtor, creditor in edges:
-        db_session.add(
-            Debt(
-                debtor_id=id_by_pid[debtor],
-                creditor_id=id_by_pid[creditor],
-                equivalent_id=usd.id,
-                amount=Decimal("1.00"),
+        async with debt_fixture_setup(db_session, label="setup"):
+            db_session.add(
+                Debt(
+                    debtor_id=id_by_pid[debtor],
+                    creditor_id=id_by_pid[creditor],
+                    equivalent_id=usd.id,
+                    amount=Decimal("1.00"),
+                )
             )
-        )
     await db_session.commit()
 
     # With max_depth=4, the length-5 cycle should not be detected.

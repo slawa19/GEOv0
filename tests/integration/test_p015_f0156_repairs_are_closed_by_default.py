@@ -41,6 +41,8 @@ from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from tests.conftest import TestingSessionLocal
 
+from tests.debt_setup import debt_fixture_setup
+
 _REPAIRS = (
     "/api/v1/integrity/repair/cap-debts-to-trust-limits",
     "/api/v1/integrity/repair/net-mutual-debts",
@@ -71,13 +73,14 @@ async def _seed_debt_behind_a_frozen_line(db_session) -> tuple[Equivalent, Debt]
             status="frozen",
         )
     )
-    debt = Debt(
-        debtor_id=debtor.id,
-        creditor_id=creditor.id,
-        equivalent_id=eq.id,
-        amount=Decimal("42.00000000"),
-    )
-    db_session.add(debt)
+    async with debt_fixture_setup(db_session, label="setup"):
+        debt = Debt(
+            debtor_id=debtor.id,
+            creditor_id=creditor.id,
+            equivalent_id=eq.id,
+            amount=Decimal("42.00000000"),
+        )
+        db_session.add(debt)
     await db_session.commit()
     return eq, debt
 

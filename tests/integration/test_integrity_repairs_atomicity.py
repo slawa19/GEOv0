@@ -21,6 +21,8 @@ from app.db.models.trustline import TrustLine
 from app.utils.request_id import validate_request_id
 from tests.conftest import TestingSessionLocal
 
+from tests.debt_setup import debt_fixture_setup
+
 
 def _admin_headers() -> dict[str, str]:
     return {"X-Admin-Token": settings.ADMIN_TOKEN}
@@ -87,22 +89,23 @@ async def test_net_mutual_debts_commits_admin_audit_without_cache_invalidation(
         suffix="net",
         code="NET",
     )
-    db_session.add_all(
-        [
-            Debt(
-                debtor_id=debtor.id,
-                creditor_id=creditor.id,
-                equivalent_id=equivalent.id,
-                amount=Decimal("10"),
-            ),
-            Debt(
-                debtor_id=creditor.id,
-                creditor_id=debtor.id,
-                equivalent_id=equivalent.id,
-                amount=Decimal("3"),
-            ),
-        ]
-    )
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add_all(
+            [
+                Debt(
+                    debtor_id=debtor.id,
+                    creditor_id=creditor.id,
+                    equivalent_id=equivalent.id,
+                    amount=Decimal("10"),
+                ),
+                Debt(
+                    debtor_id=creditor.id,
+                    creditor_id=debtor.id,
+                    equivalent_id=equivalent.id,
+                    amount=Decimal("3"),
+                ),
+            ]
+        )
     await db_session.commit()
     equivalent_id = equivalent.id
     debtor_id = debtor.id
@@ -171,23 +174,24 @@ async def test_cap_debts_commits_admin_audit_and_invalidates_only_affected_codes
         suffix="cap",
         code="CAP",
     )
-    db_session.add_all(
-        [
-            TrustLine(
-                from_participant_id=creditor.id,
-                to_participant_id=debtor.id,
-                equivalent_id=equivalent.id,
-                limit=Decimal("50"),
-                status="active",
-            ),
-            Debt(
-                debtor_id=debtor.id,
-                creditor_id=creditor.id,
-                equivalent_id=equivalent.id,
-                amount=Decimal("80"),
-            ),
-        ]
-    )
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add_all(
+            [
+                TrustLine(
+                    from_participant_id=creditor.id,
+                    to_participant_id=debtor.id,
+                    equivalent_id=equivalent.id,
+                    limit=Decimal("50"),
+                    status="active",
+                ),
+                Debt(
+                    debtor_id=debtor.id,
+                    creditor_id=creditor.id,
+                    equivalent_id=equivalent.id,
+                    amount=Decimal("80"),
+                ),
+            ]
+        )
     await db_session.commit()
     equivalent_id = equivalent.id
 
@@ -269,40 +273,42 @@ async def test_repair_rolls_back_debts_and_audit_on_precommit_failure_or_cancell
         code=code,
     )
     if is_net:
-        db_session.add_all(
-            [
-                Debt(
-                    debtor_id=debtor.id,
-                    creditor_id=creditor.id,
-                    equivalent_id=equivalent.id,
-                    amount=Decimal("10"),
-                ),
-                Debt(
-                    debtor_id=creditor.id,
-                    creditor_id=debtor.id,
-                    equivalent_id=equivalent.id,
-                    amount=Decimal("3"),
-                ),
-            ]
-        )
+        async with debt_fixture_setup(db_session, label="setup-1"):
+            db_session.add_all(
+                [
+                    Debt(
+                        debtor_id=debtor.id,
+                        creditor_id=creditor.id,
+                        equivalent_id=equivalent.id,
+                        amount=Decimal("10"),
+                    ),
+                    Debt(
+                        debtor_id=creditor.id,
+                        creditor_id=debtor.id,
+                        equivalent_id=equivalent.id,
+                        amount=Decimal("3"),
+                    ),
+                ]
+            )
     else:
-        db_session.add_all(
-            [
-                TrustLine(
-                    from_participant_id=creditor.id,
-                    to_participant_id=debtor.id,
-                    equivalent_id=equivalent.id,
-                    limit=Decimal("50"),
-                    status="active",
-                ),
-                Debt(
-                    debtor_id=debtor.id,
-                    creditor_id=creditor.id,
-                    equivalent_id=equivalent.id,
-                    amount=Decimal("80"),
-                ),
-            ]
-        )
+        async with debt_fixture_setup(db_session, label="setup-2"):
+            db_session.add_all(
+                [
+                    TrustLine(
+                        from_participant_id=creditor.id,
+                        to_participant_id=debtor.id,
+                        equivalent_id=equivalent.id,
+                        limit=Decimal("50"),
+                        status="active",
+                    ),
+                    Debt(
+                        debtor_id=debtor.id,
+                        creditor_id=creditor.id,
+                        equivalent_id=equivalent.id,
+                        amount=Decimal("80"),
+                    ),
+                ]
+            )
     await db_session.commit()
     equivalent_id = equivalent.id
 

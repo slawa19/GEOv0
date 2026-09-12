@@ -12,6 +12,8 @@ from app.db.models.participant import Participant
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 
+from tests.debt_setup import debt_fixture_setup
+
 
 @pytest.mark.asyncio
 async def test_admin_liquidity_summary_requires_admin_token(client):
@@ -55,12 +57,13 @@ async def test_admin_liquidity_summary_smoke(client, db_session, monkeypatch):
     # Debts:
     # - bob owes alice 95 (bottleneck on tl1)
     # - alice owes carol 1 (small usage on tl2)
-    db_session.add_all(
-        [
-            Debt(debtor_id=bob.id, creditor_id=alice.id, equivalent_id=uah.id, amount=Decimal("95.00")),
-            Debt(debtor_id=alice.id, creditor_id=carol.id, equivalent_id=uah.id, amount=Decimal("1.00")),
-        ]
-    )
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add_all(
+            [
+                Debt(debtor_id=bob.id, creditor_id=alice.id, equivalent_id=uah.id, amount=Decimal("95.00")),
+                Debt(debtor_id=alice.id, creditor_id=carol.id, equivalent_id=uah.id, amount=Decimal("1.00")),
+            ]
+        )
 
     now = datetime.now(timezone.utc)
     old = now - timedelta(seconds=121)
@@ -158,14 +161,15 @@ async def test_admin_liquidity_summary_keeps_high_precision_threshold(client, db
             status="active",
         )
     )
-    db_session.add(
-        Debt(
-            debtor_id=bob.id,
-            creditor_id=alice.id,
-            equivalent_id=uah.id,
-            amount=Decimal("90.00"),
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add(
+            Debt(
+                debtor_id=bob.id,
+                creditor_id=alice.id,
+                equivalent_id=uah.id,
+                amount=Decimal("90.00"),
+            )
         )
-    )
     await db_session.commit()
 
     headers = {"X-Admin-Token": settings.ADMIN_TOKEN}

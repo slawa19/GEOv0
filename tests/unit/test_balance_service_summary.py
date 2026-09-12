@@ -9,6 +9,8 @@ from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.config import settings
 
+from tests.debt_setup import debt_fixture_setup
+
 
 @pytest.mark.asyncio
 async def test_balance_summary_capacity_semantics(db_session):
@@ -33,9 +35,10 @@ async def test_balance_summary_capacity_semantics(db_session):
     # Debts:
     # - A owes B 10
     # - B owes A 20
-    d_a_b = Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=usd.id, amount=Decimal("10"))
-    d_b_a = Debt(debtor_id=b.id, creditor_id=a.id, equivalent_id=usd.id, amount=Decimal("20"))
-    db_session.add_all([d_a_b, d_b_a])
+    async with debt_fixture_setup(db_session, label="setup"):
+        d_a_b = Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=usd.id, amount=Decimal("10"))
+        d_b_a = Debt(debtor_id=b.id, creditor_id=a.id, equivalent_id=usd.id, amount=Decimal("20"))
+        db_session.add_all([d_a_b, d_b_a])
 
     await db_session.commit()
 

@@ -30,6 +30,8 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 
+from tests.debt_setup import debt_fixture_setup
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -850,13 +852,14 @@ async def test_inject_debt_updates_existing_debt_row(db_session) -> None:
     db_session.add(tl)
     await db_session.flush()
 
-    existing = Debt(
-        debtor_id=debtor.id,
-        creditor_id=creditor.id,
-        equivalent_id=eq.id,
-        amount=Decimal("5.00"),
-    )
-    db_session.add(existing)
+    async with debt_fixture_setup(db_session, label="setup"):
+        existing = Debt(
+            debtor_id=debtor.id,
+            creditor_id=creditor.id,
+            equivalent_id=eq.id,
+            amount=Decimal("5.00"),
+        )
+        db_session.add(existing)
     await db_session.flush()
 
     run = _make_run(

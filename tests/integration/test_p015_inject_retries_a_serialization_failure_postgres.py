@@ -42,6 +42,8 @@ from tests.integration.test_p015_inject_holds_the_owner_lock_postgres import (  
     observed_factory,
 )
 
+from tests.debt_setup import debt_fixture_setup
+
 pytestmark = pytest.mark.postgres
 
 
@@ -58,14 +60,15 @@ async def test_a_real_serialization_failure_restarts_the_whole_inject_unit_of_wo
     eq = world.equivalents[0]
     try:
         async with observed_factory() as s:
-            s.add(
-                Debt(
-                    debtor_id=world.debtor.id,
-                    creditor_id=world.creditor.id,
-                    equivalent_id=eq.id,
-                    amount=_EXISTING,
+            async with debt_fixture_setup(s, label="setup"):
+                s.add(
+                    Debt(
+                        debtor_id=world.debtor.id,
+                        creditor_id=world.creditor.id,
+                        equivalent_id=eq.id,
+                        amount=_EXISTING,
+                    )
                 )
-            )
             await s.commit()
         _observations.clear()
 

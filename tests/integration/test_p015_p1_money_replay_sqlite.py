@@ -66,6 +66,8 @@ from tests.scratch_db import (
     scratch_db_url,
 )
 
+from tests.debt_setup import debt_fixture_setup
+
 _SLUG = "p1-money-replay-sqlite"
 
 #: The trust line's limit, and therefore the planner's cap on the first attempt.
@@ -316,14 +318,15 @@ def _competitor_after_snapshot(
                     )
                 ).scalar_one_or_none()
                 if existing is None:
-                    other.add(
-                        Debt(
-                            debtor_id=debtor.id,
-                            creditor_id=creditor.id,
-                            equivalent_id=equivalent.id,
-                            amount=amount,
+                    async with debt_fixture_setup(other, label="setup"):
+                        other.add(
+                            Debt(
+                                debtor_id=debtor.id,
+                                creditor_id=creditor.id,
+                                equivalent_id=equivalent.id,
+                                amount=amount,
+                            )
                         )
-                    )
                 else:
                     existing.amount = Decimal(str(existing.amount)) + amount
                 await other.commit()

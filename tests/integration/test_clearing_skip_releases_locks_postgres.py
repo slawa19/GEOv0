@@ -11,6 +11,8 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import delete, select, text
 
+from tests.debt_setup import debt_fixture_setup
+
 
 pytestmark = pytest.mark.postgres
 
@@ -93,22 +95,23 @@ async def test_skip_ends_service_owned_transaction_postgres(
             )
         ]
     )
-    session.add_all(
-        [
-            Debt(
-                id=debt_id,
-                debtor_id=debtor_id,
-                creditor_id=creditor_id,
-                equivalent_id=equivalent_id,
-                amount=Decimal(amount),
-            )
-            for debt_id, debtor_id, creditor_id, amount in (
-                (debt_ids[0], a_id, b_id, "100.00"),
-                (debt_ids[1], b_id, c_id, "30.00"),
-                (debt_ids[2], c_id, a_id, "40.00"),
-            )
-        ]
-    )
+    async with debt_fixture_setup(session, label="setup"):
+        session.add_all(
+            [
+                Debt(
+                    id=debt_id,
+                    debtor_id=debtor_id,
+                    creditor_id=creditor_id,
+                    equivalent_id=equivalent_id,
+                    amount=Decimal(amount),
+                )
+                for debt_id, debtor_id, creditor_id, amount in (
+                    (debt_ids[0], a_id, b_id, "100.00"),
+                    (debt_ids[1], b_id, c_id, "30.00"),
+                    (debt_ids[2], c_id, a_id, "40.00"),
+                )
+            ]
+        )
 
     if skip_branch == "locked":
         tx_id = str(uuid.uuid4())
@@ -331,31 +334,32 @@ async def test_policy_skip_releases_debt_rows_before_concurrent_payment_postgres
                     ),
                 ]
             )
-            setup.add_all(
-                [
-                    Debt(
-                        id=debt_ids[0],
-                        debtor_id=a_id,
-                        creditor_id=b_id,
-                        equivalent_id=equivalent_id,
-                        amount=Decimal("100.00"),
-                    ),
-                    Debt(
-                        id=debt_ids[1],
-                        debtor_id=b_id,
-                        creditor_id=c_id,
-                        equivalent_id=equivalent_id,
-                        amount=Decimal("30.00"),
-                    ),
-                    Debt(
-                        id=debt_ids[2],
-                        debtor_id=c_id,
-                        creditor_id=a_id,
-                        equivalent_id=equivalent_id,
-                        amount=Decimal("40.00"),
-                    ),
-                ]
-            )
+            async with debt_fixture_setup(setup, label="setup"):
+                setup.add_all(
+                    [
+                        Debt(
+                            id=debt_ids[0],
+                            debtor_id=a_id,
+                            creditor_id=b_id,
+                            equivalent_id=equivalent_id,
+                            amount=Decimal("100.00"),
+                        ),
+                        Debt(
+                            id=debt_ids[1],
+                            debtor_id=b_id,
+                            creditor_id=c_id,
+                            equivalent_id=equivalent_id,
+                            amount=Decimal("30.00"),
+                        ),
+                        Debt(
+                            id=debt_ids[2],
+                            debtor_id=c_id,
+                            creditor_id=a_id,
+                            equivalent_id=equivalent_id,
+                            amount=Decimal("40.00"),
+                        ),
+                    ]
+                )
             await setup.commit()
 
         clearing_session = TestingSessionLocal()

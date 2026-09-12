@@ -9,6 +9,8 @@ from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 
+from tests.debt_setup import debt_fixture_setup
+
 
 @pytest.mark.asyncio
 async def test_apply_flow_retries_on_stale_data(db_session):
@@ -56,7 +58,8 @@ async def test_apply_flow_retries_on_stale_data(db_session):
         equivalent_id=eq.id,
         amount=Decimal("100"),
     )
-    db_session.add(debt)
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add(debt)
     await db_session.commit()
 
     from tests.conftest import TestingSessionLocal
@@ -66,7 +69,8 @@ async def test_apply_flow_retries_on_stale_data(db_session):
         d2 = (
             await s_fresh.execute(select(Debt).where(Debt.id == debt.id))
         ).scalar_one()
-        d2.amount = Decimal("90")
+        async with debt_fixture_setup(s_fresh, label="version-bump"):
+            d2.amount = Decimal("90")
         await s_fresh.commit()
 
     # Load stale instance in db_session and attempt to apply flow.

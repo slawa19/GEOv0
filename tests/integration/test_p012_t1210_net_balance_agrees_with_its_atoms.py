@@ -93,6 +93,8 @@ from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 
+from tests.debt_setup import debt_fixture_setup
+
 # `Equivalent.precision` is declared `ge=0, le=8`; the same span `T1207` used.
 #
 # 18 LEFT THE LIST WITH THE DOMAIN (012 / S1, 2026-08-25), for the reason measured in `T1207`:
@@ -194,14 +196,15 @@ async def _fixture(session: AsyncSession, *, precision: int, amount: str):
     await session.commit()
 
     if Decimal(amount) != 0:
-        session.add(
-            Debt(
-                debtor_id=debtor.id,
-                creditor_id=creditor.id,
-                equivalent_id=eq.id,
-                amount=Decimal(amount),
+        async with debt_fixture_setup(session, label="setup"):
+            session.add(
+                Debt(
+                    debtor_id=debtor.id,
+                    creditor_id=creditor.id,
+                    equivalent_id=eq.id,
+                    amount=Decimal(amount),
+                )
             )
-        )
         await session.commit()
     return eq, creditor, debtor
 

@@ -75,6 +75,8 @@ from tests.integration.test_scenarios import (
     register_and_login,
 )
 
+from tests.debt_setup import debt_fixture_setup
+
 pytestmark = pytest.mark.postgres
 
 
@@ -436,14 +438,15 @@ async def test_rt_012_2_the_other_producer_in_the_same_file_puts_exponential_mon
             text('UPDATE trust_lines SET "limit" = :v WHERE equivalent_id = :eq'),
             {"v": Decimal("100.00000000"), "eq": built["equivalent_id"]},
         )
-        session.add(
-            Debt(
-                debtor_id=debtor_id,
-                creditor_id=creditor_id,
-                equivalent_id=built["equivalent_id"],
-                amount=Decimal("99.99999999"),
+        async with debt_fixture_setup(session, label="setup"):
+            session.add(
+                Debt(
+                    debtor_id=debtor_id,
+                    creditor_id=creditor_id,
+                    equivalent_id=built["equivalent_id"],
+                    amount=Decimal("99.99999999"),
+                )
             )
-        )
         await session.commit()
 
     async with TestingSessionLocal() as session:

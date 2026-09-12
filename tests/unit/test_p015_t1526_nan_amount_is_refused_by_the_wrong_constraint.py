@@ -48,6 +48,8 @@ from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 
+from tests.debt_setup import debt_fixture_setup
+
 
 async def _seed():
     """One equivalent, two participants and one ordinary debt, committed on their own session."""
@@ -66,14 +68,15 @@ async def _seed():
         )
         session.add_all([equivalent, debtor, creditor])
         await session.flush()
-        session.add(
-            Debt(
-                debtor_id=debtor.id,
-                creditor_id=creditor.id,
-                equivalent_id=equivalent.id,
-                amount=Decimal("5"),
+        async with debt_fixture_setup(session, label="setup"):
+            session.add(
+                Debt(
+                    debtor_id=debtor.id,
+                    creditor_id=creditor.id,
+                    equivalent_id=equivalent.id,
+                    amount=Decimal("5"),
+                )
             )
-        )
         await session.commit()
         return equivalent.id, debtor.id, creditor.id
 
@@ -108,14 +111,15 @@ async def test_a_the_refusal_of_a_nan_amount_must_name_the_money_rule(db_session
 
     refusal: BaseException | None = None
     async with TestingSessionLocal() as session:
-        session.add(
-            Debt(
-                debtor_id=creditor_id,
-                creditor_id=debtor_id,
-                equivalent_id=equivalent_id,
-                amount=Decimal("NaN"),
+        async with debt_fixture_setup(session, label="setup"):
+            session.add(
+                Debt(
+                    debtor_id=creditor_id,
+                    creditor_id=debtor_id,
+                    equivalent_id=equivalent_id,
+                    amount=Decimal("NaN"),
+                )
             )
-        )
         try:
             await session.commit()
         except (StatementError, IntegrityError, ValueError) as exc:

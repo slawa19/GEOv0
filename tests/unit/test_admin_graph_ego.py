@@ -10,6 +10,8 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 
+from tests.debt_setup import debt_fixture_setup
+
 
 @pytest.mark.asyncio
 async def test_admin_graph_ego_requires_admin_token(client, db_session):
@@ -75,13 +77,14 @@ async def test_admin_graph_ego_depth_1_and_2(client, db_session):
     )
 
     # Debts follow trustline direction: debtor=to, creditor=from
-    db_session.add_all(
-        [
-            Debt(debtor_id=bob.id, creditor_id=alice.id, equivalent_id=uah.id, amount=Decimal('5.00')),
-            Debt(debtor_id=carol.id, creditor_id=bob.id, equivalent_id=uah.id, amount=Decimal('2.00')),
-            Debt(debtor_id=dave.id, creditor_id=bob.id, equivalent_id=uah.id, amount=Decimal('1.00')),
-        ]
-    )
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add_all(
+            [
+                Debt(debtor_id=bob.id, creditor_id=alice.id, equivalent_id=uah.id, amount=Decimal('5.00')),
+                Debt(debtor_id=carol.id, creditor_id=bob.id, equivalent_id=uah.id, amount=Decimal('2.00')),
+                Debt(debtor_id=dave.id, creditor_id=bob.id, equivalent_id=uah.id, amount=Decimal('1.00')),
+            ]
+        )
 
     await db_session.commit()
 

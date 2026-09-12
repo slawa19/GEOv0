@@ -40,6 +40,8 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 
+from tests.debt_setup import debt_fixture_setup
+
 _EQ = "DUX"
 
 
@@ -94,14 +96,15 @@ async def _seed_graph(
                 status="active",
             )
         )
-        db_session.add(
-            Debt(
-                debtor_id=people[debtor].id,
-                creditor_id=people[creditor].id,
-                equivalent_id=eq.id,
-                amount=Decimal(amount),
+        async with debt_fixture_setup(db_session, label="setup"):
+            db_session.add(
+                Debt(
+                    debtor_id=people[debtor].id,
+                    creditor_id=people[creditor].id,
+                    equivalent_id=eq.id,
+                    amount=Decimal(amount),
+                )
             )
-        )
     await db_session.commit()
 
 

@@ -10,6 +10,8 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 
+from tests.debt_setup import debt_fixture_setup
+
 
 @pytest.mark.asyncio
 async def test_admin_graph_snapshot_requires_admin_token(client, db_session):
@@ -40,14 +42,15 @@ async def test_admin_graph_snapshot_hydrates_trustlines_and_debts(client, db_ses
     await db_session.flush()
 
     # Debt direction: debtor=bob (to), creditor=alice (from)
-    db_session.add(
-        Debt(
-            debtor_id=bob.id,
-            creditor_id=alice.id,
-            equivalent_id=uah.id,
-            amount=Decimal('7.25'),
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add(
+            Debt(
+                debtor_id=bob.id,
+                creditor_id=alice.id,
+                equivalent_id=uah.id,
+                amount=Decimal('7.25'),
+            )
         )
-    )
 
     await db_session.commit()
 
@@ -105,14 +108,15 @@ async def test_admin_graph_snapshot_equivalent_enables_net_viz(client, db_sessio
             status='active',
         )
     )
-    db_session.add(
-        Debt(
-            debtor_id=bob.id,
-            creditor_id=alice.id,
-            equivalent_id=uah.id,
-            amount=Decimal('7.25'),
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add(
+            Debt(
+                debtor_id=bob.id,
+                creditor_id=alice.id,
+                equivalent_id=uah.id,
+                amount=Decimal('7.25'),
+            )
         )
-    )
     await db_session.commit()
 
     headers = {'X-Admin-Token': settings.ADMIN_TOKEN}

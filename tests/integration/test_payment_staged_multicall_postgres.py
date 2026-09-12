@@ -16,6 +16,8 @@ from app.db.models.prepare_lock import PrepareLock
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 
+from tests.debt_setup import debt_fixture_setup
+
 
 pytestmark = pytest.mark.postgres
 
@@ -78,36 +80,37 @@ async def _seed_staged_batches() -> dict:
     async with TestingSessionLocal() as setup:
         setup.add_all([equivalent, participant_a, participant_b, participant_c])
         await setup.flush()
-        setup.add_all(
-            [
-                TrustLine(
-                    from_participant_id=participant_b.id,
-                    to_participant_id=participant_a.id,
-                    equivalent_id=equivalent.id,
-                    limit=Decimal("50.00"),
-                    status="active",
-                ),
-                TrustLine(
-                    from_participant_id=participant_c.id,
-                    to_participant_id=participant_b.id,
-                    equivalent_id=equivalent.id,
-                    limit=Decimal("50.00"),
-                    status="active",
-                ),
-                Debt(
-                    debtor_id=participant_a.id,
-                    creditor_id=participant_b.id,
-                    equivalent_id=equivalent.id,
-                    amount=Decimal("1.00"),
-                ),
-                Debt(
-                    debtor_id=participant_b.id,
-                    creditor_id=participant_c.id,
-                    equivalent_id=equivalent.id,
-                    amount=Decimal("1.00"),
-                ),
-            ]
-        )
+        async with debt_fixture_setup(setup, label="setup"):
+            setup.add_all(
+                [
+                    TrustLine(
+                        from_participant_id=participant_b.id,
+                        to_participant_id=participant_a.id,
+                        equivalent_id=equivalent.id,
+                        limit=Decimal("50.00"),
+                        status="active",
+                    ),
+                    TrustLine(
+                        from_participant_id=participant_c.id,
+                        to_participant_id=participant_b.id,
+                        equivalent_id=equivalent.id,
+                        limit=Decimal("50.00"),
+                        status="active",
+                    ),
+                    Debt(
+                        debtor_id=participant_a.id,
+                        creditor_id=participant_b.id,
+                        equivalent_id=equivalent.id,
+                        amount=Decimal("1.00"),
+                    ),
+                    Debt(
+                        debtor_id=participant_b.id,
+                        creditor_id=participant_c.id,
+                        equivalent_id=equivalent.id,
+                        amount=Decimal("1.00"),
+                    ),
+                ]
+            )
 
         transactions = {}
         for name, initiator in (

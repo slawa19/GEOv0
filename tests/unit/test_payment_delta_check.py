@@ -10,6 +10,8 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.utils.exceptions import IntegrityViolationException
 
+from tests.debt_setup import debt_fixture_setup
+
 
 @pytest.mark.asyncio
 async def test_payment_engine_delta_check_raises_on_drift(db_session: AsyncSession) -> None:
@@ -43,14 +45,15 @@ async def test_payment_engine_delta_check_raises_on_drift(db_session: AsyncSessi
     await db_session.flush()
 
     # Expected flow: 10. Actual DB state after commit: only 7.
-    db_session.add(
-        Debt(
-            debtor_id=sender.id,
-            creditor_id=receiver.id,
-            equivalent_id=eq.id,
-            amount=Decimal("7"),
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add(
+            Debt(
+                debtor_id=sender.id,
+                creditor_id=receiver.id,
+                equivalent_id=eq.id,
+                amount=Decimal("7"),
+            )
         )
-    )
     await db_session.commit()
 
     engine = PaymentEngine(db_session)

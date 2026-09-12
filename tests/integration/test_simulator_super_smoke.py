@@ -14,6 +14,8 @@ from httpx import AsyncClient
 
 from app.core.simulator.runtime import runtime
 
+from tests.debt_setup import debt_fixture_setup
+
 
 pytestmark = pytest.mark.slow
 
@@ -670,13 +672,14 @@ async def test_super_smoke_part2_real_logic_deterministic(
                     )
                 )
 
-            db_session.add_all(
-                [
-                    Debt(debtor_id=b.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("10")),
-                    Debt(debtor_id=c.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("10")),
-                    Debt(debtor_id=a.id, creditor_id=c.id, equivalent_id=eq.id, amount=Decimal("10")),
-                ]
-            )
+            async with debt_fixture_setup(db_session, label="setup"):
+                db_session.add_all(
+                    [
+                        Debt(debtor_id=b.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("10")),
+                        Debt(debtor_id=c.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("10")),
+                        Debt(debtor_id=a.id, creditor_id=c.id, equivalent_id=eq.id, amount=Decimal("10")),
+                    ]
+                )
             await db_session.commit()
 
             id_to_pid = {a.id: a.pid, b.id: b.pid, c.id: c.pid}

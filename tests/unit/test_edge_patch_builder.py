@@ -13,6 +13,8 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 
+from tests.debt_setup import debt_fixture_setup
+
 
 @pytest.mark.asyncio
 async def test_edge_patch_builder_equivalent_and_pairs_shapes(db_session: AsyncSession) -> None:
@@ -47,14 +49,15 @@ async def test_edge_patch_builder_equivalent_and_pairs_shapes(db_session: AsyncS
         status="active",
         policy={"auto_clearing": True},
     )
-    debt = Debt(
-        debtor_id=debtor.id,
-        creditor_id=creditor.id,
-        equivalent_id=eq.id,
-        amount=Decimal("30"),
-    )
+    async with debt_fixture_setup(db_session, label="setup"):
+        debt = Debt(
+            debtor_id=debtor.id,
+            creditor_id=creditor.id,
+            equivalent_id=eq.id,
+            amount=Decimal("30"),
+        )
 
-    db_session.add_all([tl, debt])
+        db_session.add_all([tl, debt])
     await db_session.commit()
 
     run = RunRecord(

@@ -41,6 +41,8 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 
+from tests.debt_setup import debt_fixture_setup
+
 _EQ = "RPX"
 
 
@@ -111,14 +113,15 @@ async def _seed_two_runs(db_session):
                 status="active",
             )
         )
-        db_session.add(
-            Debt(
-                debtor_id=people[debtor].id,
-                creditor_id=people[creditor].id,
-                equivalent_id=eq.id,
-                amount=Decimal("100"),
+        async with debt_fixture_setup(db_session, label="setup"):
+            db_session.add(
+                Debt(
+                    debtor_id=people[debtor].id,
+                    creditor_id=people[creditor].id,
+                    equivalent_id=eq.id,
+                    amount=Decimal("100"),
+                )
             )
-        )
     await db_session.commit()
     return eq, people
 
