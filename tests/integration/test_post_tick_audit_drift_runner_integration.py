@@ -20,6 +20,7 @@ from app.core.simulator.models import RunRecord
 from app.core.simulator.real_runner import RealRunner
 from app.core.simulator.real_tick_persistence import RealTickPersistence
 from app.db.base import Base
+from app.db.sqlite_transaction_control import install_sqlite_transaction_control
 from app.db.models.audit_log import IntegrityAuditLog
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
@@ -61,6 +62,8 @@ async def audit_engine():
         poolclass=NullPool,
         connect_args={"timeout": 10},
     )
+    # T1525: the same SQLite transaction control as the application engine.
+    install_sqlite_transaction_control(eng.sync_engine)
     async with eng.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 

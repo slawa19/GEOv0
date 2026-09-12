@@ -31,6 +31,7 @@ from app.utils.exceptions import (
 from app.utils.metrics import PAYMENT_EVENTS_TOTAL
 
 from app.core.integrity import compute_integrity_checkpoint_for_equivalent
+from app.db.sqlite_transaction_control import sqlite_busy_error_name
 
 logger = logging.getLogger(__name__)
 
@@ -104,10 +105,15 @@ class PaymentEngine:
         self._advisory_lock_timeout_enabled = True
         self._advisory_lock_deadline: float | None = None
 
-    def _is_postgres(self) -> bool:
+    def _dialect_name(self) -> str | None:
         bind = getattr(self.session, "bind", None)
-        dialect = getattr(getattr(bind, "dialect", None), "name", None)
-        return dialect in {"postgresql", "postgres"}
+        return getattr(getattr(bind, "dialect", None), "name", None)
+
+    def _is_postgres(self) -> bool:
+        return self._dialect_name() in {"postgresql", "postgres"}
+
+    def _is_sqlite(self) -> bool:
+        return self._dialect_name() == "sqlite"
 
     @staticmethod
     def _segment_lock_key(
@@ -415,7 +421,14 @@ class PaymentEngine:
             return False
 
         if not self._is_postgres():
-            return False
+            # T1525: on SQLite a unit of work that has read holds a snapshot, and a write on a
+            # stale one fails at once with SQLITE_BUSY_SNAPSHOT. Nothing of the unit of work is
+            # written, and the retry wrapper rolls back before re-running, so the second attempt
+            # reads the concurrent value - the same contract 40001 has on PostgreSQL. Before the
+            # transaction control existed this could not happen (reads were autocommitted) and the
+            # ORM raised StaleDataError instead, which `_apply_flow` retried; without this branch
+            # that retry is silently lost. See `app/db/sqlite_transaction_control.py`.
+            return self._is_sqlite() and sqlite_busy_error_name(exc) is not None
 
         orig = getattr(exc, "orig", None)
         # asyncpg uses `sqlstate`, psycopg2 uses `pgcode`.
@@ -531,10 +544,18 @@ class PaymentEngine:
                     continue
                 except DBAPIError as exc:
                     pgcode = self._get_pgcode(exc)
+                    sqlite_busy = (
+                        sqlite_busy_error_name(exc) if self._is_sqlite() else None
+                    )
                     if use_savepoint and pgcode in {"40P01", "40001"}:
                         # A transaction-level owner lock or SERIALIZABLE snapshot
                         # survives savepoint rollback. Retrying here recreates the
                         # same conflict; the outer owner must restart its whole UoW.
+                        raise
+                    if use_savepoint and sqlite_busy is not None:
+                        # T1525, the SQLite twin of the branch above: the stale snapshot belongs to
+                        # the caller's transaction, and rolling back to a savepoint keeps it. Only
+                        # the outer owner can take a fresh one, so this must propagate.
                         raise
                     attempt += 1
 
@@ -568,12 +589,14 @@ class PaymentEngine:
                     delay = delay * (1.0 + 0.25 * random.random())
 
                     logger.warning(
-                        "event=payment.uow_retry op=%s attempt=%s/%s delay_s=%.3f pgcode=%s",
+                        "event=payment.uow_retry op=%s attempt=%s/%s delay_s=%.3f pgcode=%s "
+                        "sqlite_error=%s",
                         op,
                         attempt,
                         self._retry_attempts,
                         delay,
                         pgcode,
+                        sqlite_busy,
                     )
                     await asyncio.sleep(delay)
         finally:

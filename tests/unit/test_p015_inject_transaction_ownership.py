@@ -34,7 +34,8 @@ from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
-from tests.conftest import TestingSessionLocal
+from app.db.sqlite_transaction_control import sqlite_busy_error_name
+from tests.conftest import TestingSessionLocal, engine as _test_engine
 from tests.unit.test_scenario_inject_topology import _make_run, _make_runner, _nonce
 
 
@@ -412,9 +413,105 @@ async def test_a_second_transient_failure_propagates_and_leaves_the_event_pendin
     assert not db_session.in_transaction()
 
 
+class _CommitFromAnotherSession:
+    """Commits from a SECOND session between the owner's staging reads and the owner's flush.
+
+    This is the real interleaving T1525 created, not a synthetic error. By the time staging returns,
+    the unit of work has READ (its lock set, the rows staging touches) and has not yet written, so a
+    commit by anyone else leaves it on a stale snapshot - and its next write, the explicit
+    `await session.flush()`, is refused outright with SQLITE_BUSY_SNAPSHOT. The driver raises it;
+    nothing here fabricates an error or its code.
+    """
+
+    def __init__(self, runner, *, on_calls: set[int]) -> None:
+        self._real = runner._inject_executor.stage_inject_event
+        self._on_calls = set(on_calls)
+        self.calls = 0
+        self.interleaved = 0
+        runner._inject_executor.stage_inject_event = self  # this runner only
+
+    async def __call__(self, session, **kwargs):
+        self.calls += 1
+        staged = await self._real(session, **kwargs)
+        if self.calls in self._on_calls:
+            n = _nonce()
+            async with TestingSessionLocal() as other:
+                other.add(
+                    Participant(
+                        pid=f"BUSY_{n}", display_name="Busy writer",
+                        public_key=f"pk_busy_{n}"[:64], type="person", status="active",
+                    )
+                )
+                await other.commit()
+            self.interleaved += 1
+        return staged
+
+
+@pytest.mark.asyncio
+async def test_a_stale_snapshot_is_transient_and_the_inject_lands_exactly_once(db_session) -> None:
+    """T1525: a SQLite stale snapshot must restart the unit of work, not drop the inject.
+
+    `_is_transient_inject_db_error` matched PostgreSQL SQLSTATEs only. On SQLite the owner reads its
+    lock set and then writes, so a concurrent commit makes the write fail with SQLITE_BUSY_SNAPSHOT
+    - and classified as an ordinary error it reopens exactly the loss mode 55P03 was added for: the
+    owner records "inject failed (db error)", marks the event FIRED, and the inject is dropped.
+    """
+    assert _test_engine.dialect.name == "sqlite", (
+        f"this stand forces a SQLite stale snapshot; the test engine is {_test_engine.dialect.name}"
+    )
+    world = await _seed_debt_world(db_session, existing=Decimal("5.12345678"))
+    runner, arts = _make_runner()
+    run = _debt_run(world)
+
+    spy = _CommitFromAnotherSession(runner, on_calls={1})
+
+    await runner._apply_due_scenario_events(
+        db_session, run_id="r1", run=run, scenario=_debt_scenario(world)
+    )
+
+    assert spy.interleaved == 1, "non-vacuity: the concurrent commit never happened"
+    assert spy.calls == 2, f"expected one retry of the whole unit of work, stage ran {spy.calls}x"
+    assert await _fresh_debt(world) == Decimal("15.12345678"), (
+        "the injected 10.00 must land exactly once on 5.12345678"
+    )
+    assert run._real_fired_scenario_event_indexes == {0}
+    assert _notes(arts) == ["inject applied"]
+    assert not db_session.in_transaction()
+
+
+@pytest.mark.asyncio
+async def test_a_stale_snapshot_on_both_attempts_leaves_the_event_pending(db_session) -> None:
+    """The budget is finite, and a spent budget must leave the event PENDING, never fired."""
+    assert _test_engine.dialect.name == "sqlite", _test_engine.dialect.name
+    world = await _seed_debt_world(db_session)
+    runner, arts = _make_runner()
+    run = _debt_run(world)
+    later = _debt_event(world, "1.00")
+
+    spy = _CommitFromAnotherSession(runner, on_calls={1, 2})
+
+    with pytest.raises(DBAPIError) as refusal:
+        await runner._apply_due_scenario_events(
+            db_session, run_id="r1", run=run, scenario=_debt_scenario(world, _debt_event(world), later)
+        )
+
+    # The error that propagated is the real one, by code - not something else that also fails.
+    assert sqlite_busy_error_name(refusal.value) == "SQLITE_BUSY_SNAPSHOT", refusal.value
+    assert spy.interleaved == 2, "non-vacuity: both attempts must have been beaten"
+    assert spy.calls == 2, "the later event must not run after the failure propagated"
+    assert run._real_fired_scenario_event_indexes == set()
+    assert await _fresh_debt(world) is None
+    assert _notes(arts, 0) == [] and _notes(arts, 1) == []
+    assert not db_session.in_transaction()
+
+
 @pytest.mark.asyncio
 async def test_a_non_transient_staging_error_is_recorded_not_retried(db_session) -> None:
-    """Anti-vacuum for the retry predicate: only 40001/40P01 restart the unit of work."""
+    """Anti-vacuum for the retry predicate: only the transient set restarts the unit of work.
+
+    That set is 40001/40P01/55P03 and, since T1525, the SQLite busy family. A driver error outside
+    it is recorded and the event fired, exactly as before.
+    """
     world = await _seed_debt_world(db_session)
     runner, arts = _make_runner()
     run = _debt_run(world)

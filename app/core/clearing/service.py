@@ -251,6 +251,17 @@ class ClearingService:
 
     @classmethod
     def _is_retryable_concurrency_error(cls, exc: BaseException) -> bool:
+        # PostgreSQL SQLSTATEs only, and that is a decision rather than an omission (T1525,
+        # 2026-09-12). Since SQLite transactions take a real read snapshot, a clearing execution
+        # that reads and then writes can be refused with SQLITE_BUSY_SNAPSHOT, which this predicate
+        # does NOT call retryable: that execution ends there. Accepted, because clearing is
+        # best-effort and the simulator attempts it again on a later tick, so the outcome is a
+        # postponed clearing rather than lost money - unlike the inject, whose owner would mark the
+        # event fired and drop it (`real_runner_impl._is_transient_inject_db_error`). It appeared in
+        # no measurement of T1525: two 180 s multi-session simulator runs, four full default tiers
+        # and five multi-session modules ten times each, all with zero busy errors from clearing. If
+        # it ever does, the shared predicate is
+        # `app.db.sqlite_transaction_control.sqlite_busy_error_name`.
         return bool(cls._postgres_error_codes(exc) & {"40001", "40P01"})
 
     async def _reconcile_committed_execution(

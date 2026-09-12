@@ -18,6 +18,7 @@ from app.core.simulator.edge_patch_builder import EdgePatchBuilder
 from app.core.simulator.models import RunRecord
 from app.core.simulator.real_payments_executor import RealPaymentsExecutor
 from app.db.base import Base
+from app.db.sqlite_transaction_control import install_sqlite_transaction_control
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.utils.exceptions import IntegrityViolationException
@@ -56,6 +57,8 @@ async def engine():
         poolclass=NullPool,
         connect_args={"timeout": 10},
     )
+    # T1525: the same SQLite transaction control as the application engine.
+    install_sqlite_transaction_control(eng.sync_engine)
     async with eng.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 

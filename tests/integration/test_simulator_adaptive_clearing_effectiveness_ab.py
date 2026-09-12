@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import NullPool
 
 from app.db.base import Base
+from app.db.sqlite_transaction_control import install_sqlite_transaction_control
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
@@ -67,6 +68,8 @@ async def ab_db():
             pass
 
     eng = create_async_engine(url, echo=False, poolclass=NullPool, connect_args={"timeout": 5})
+    # T1525: the same SQLite transaction control as the application engine.
+    install_sqlite_transaction_control(eng.sync_engine)
     async with eng.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(bind=eng, class_=AsyncSession, expire_on_commit=False, autoflush=False)

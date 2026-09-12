@@ -49,6 +49,8 @@ from decimal import Decimal
 from sqlalchemy import Column, MetaData, Numeric, Table, Uuid, insert, select, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from app.db.sqlite_transaction_control import install_sqlite_transaction_control
+
 _METADATA = MetaData()
 
 # Declared exactly as Debt.amount and TrustLine.limit are (app/db/models/debt.py:14,
@@ -74,6 +76,8 @@ async def test_sqlite_does_not_apply_the_declared_scale_so_the_default_tier_cann
     """The raw SQLite column keeps digits `NUMERIC(20,8)` on PostgreSQL discards."""
 
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    # T1525: the same SQLite transaction control as the application engine.
+    install_sqlite_transaction_control(engine.sync_engine)
     try:
         async with engine.begin() as conn:
             await conn.run_sync(_METADATA.create_all)
