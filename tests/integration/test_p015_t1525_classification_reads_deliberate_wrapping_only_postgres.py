@@ -27,6 +27,15 @@ the consumers need are still found. `_postgres_error_codes` is read for `55P03` 
 therefore produced for real here - the `55P03` by a genuine `lock_timeout` against a held row lock -
 and asserted to survive the narrowed walk. That is a measurement of the consumers' inputs, not an
 assertion about them.
+
+THE STAND CLEANS UP AFTER ITSELF, and did not until 2026-09-12. `_seed` commits a real equivalent,
+two real participants and a real debt - it has to, because the `40001` and the `23505` must be
+genuine - and nothing removed them, so every run of this module left three worlds behind in the
+shared `geov0_test_ci`. Measured: three `CTX*` debts after one PostgreSQL gate, one per test. The
+cleanup below follows the shape the other PostgreSQL stands in this programme already use
+(`test_p015_inject_holds_the_owner_lock_postgres.py`, `test_p015_p1_money_replay_postgres.py`): a
+`_cleanup` scoped to the ids `_seed` created, called from a `finally` in every test, plus a check
+after each test that those ids are really gone.
 """
 
 from __future__ import annotations
@@ -35,7 +44,7 @@ import uuid
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import select, text, update
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -77,6 +86,13 @@ class _World:
         self.debtor_pid = debtor_pid
 
 
+#: Every world this PROCESS seeded. The check after each test is scoped to these ids rather than to
+#: the `CTX` prefix, so a neighbouring session running the same module against the same database
+#: cannot redden it - `geov0_test_ci` is shared, and a check that read the prefix would be
+#: measuring someone else's rows.
+_SEEDED: list[_World] = []
+
+
 async def _seed(factory) -> _World:
     n = uuid.uuid4().hex[:8]
     async with factory() as session:
@@ -100,7 +116,72 @@ async def _seed(factory) -> _World:
             )
         )
         await session.commit()
-        return _World(equivalent.id, creditor.id, debtor.id, debtor.pid)
+        world = _World(equivalent.id, creditor.id, debtor.id, debtor.pid)
+        _SEEDED.append(world)
+        return world
+
+
+async def _cleanup(factory, world: _World) -> None:
+    """Remove exactly what `_seed` committed, by id. Never a blanket delete: the database is shared.
+
+    THE ORDER IS NOT ARBITRARY. `debts.equivalent_id` is RESTRICT since T1524, so the debt has to go
+    before the equivalent. `debts.debtor_id` and `debts.creditor_id` are still CASCADE, so deleting
+    the participants first WOULD take the debt with them - silently, with no Debt row ever loaded,
+    which is the exact removal T1524 exists to make impossible. The debt is therefore deleted
+    explicitly, and this teardown never leans on a cascade to do its work.
+    """
+    async with factory() as session:
+        await session.execute(delete(Debt).where(Debt.equivalent_id == world.equivalent_id))
+        await session.execute(delete(Equivalent).where(Equivalent.id == world.equivalent_id))
+        await session.execute(
+            delete(Participant).where(
+                Participant.id.in_([world.creditor_id, world.debtor_id])
+            )
+        )
+        await session.commit()
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def every_seeded_row_is_gone_when_the_test_ends():
+    """The CHECK, not the cleanup - the cleanup is each test's own `finally`.
+
+    It exists because the defect it closes was not a broken teardown but a MISSING one: three tests
+    seeded and none cleaned up, and nothing in the module could notice. A `finally` per test is only
+    as good as the next author remembering to write one, so this asserts the outcome instead of
+    trusting the habit - a fourth test that forgets its `finally` reddens here, naming the rows it
+    left behind.
+
+    It reads through `TestingSessionLocal` rather than the module's own SERIALIZABLE engine, because
+    that engine's fixture may already have been disposed by the time this teardown runs, and because
+    a plain read needs none of what it provides.
+    """
+    yield
+
+    if not _SEEDED:
+        return
+    from tests.conftest import TestingSessionLocal
+
+    equivalent_ids = [world.equivalent_id for world in _SEEDED]
+    participant_ids = [
+        participant_id
+        for world in _SEEDED
+        for participant_id in (world.creditor_id, world.debtor_id)
+    ]
+    async with TestingSessionLocal() as session:
+        debts = await session.scalar(
+            select(func.count()).select_from(Debt).where(Debt.equivalent_id.in_(equivalent_ids))
+        )
+        equivalents = await session.scalar(
+            select(func.count()).select_from(Equivalent).where(Equivalent.id.in_(equivalent_ids))
+        )
+        participants = await session.scalar(
+            select(func.count()).select_from(Participant).where(Participant.id.in_(participant_ids))
+        )
+    assert (debts, equivalents, participants) == (0, 0, 0), (
+        f"this module left rows behind in a SHARED database: {debts} debt(s), {equivalents} "
+        f"equivalent(s), {participants} participant(s) of the {len(_SEEDED)} world(s) it seeded. "
+        f"Every test that calls `_seed` must call `_cleanup` from a `finally`."
+    )
 
 
 async def _a_real_terminal_raised_inside_a_real_40001_handler(
@@ -201,38 +282,41 @@ async def test_a_terminal_error_inside_a_40001_handler_is_not_retryable(
 ) -> None:
     """Both classifiers must read the 23505 they were handed, not the 40001 behind it."""
     world = await _seed(serializable_factory)
-    conflict, terminal = await _a_real_terminal_raised_inside_a_real_40001_handler(
-        serializable_factory, world
-    )
+    try:
+        conflict, terminal = await _a_real_terminal_raised_inside_a_real_40001_handler(
+            serializable_factory, world
+        )
 
-    # NON-VACUITY, stated as the defect itself: the old traversal really would have found the
-    # 40001 from this terminal error and answered "retryable"...
-    assert _reachable_the_old_way(terminal, conflict), (
-        "the real 40001 is not reachable through __context__ from the terminal error, so this "
-        "stand does not reproduce the masking it exists to refute"
-    )
-    # ... and deliberate wrapping alone does not lead to it, which is what makes the fix a fix
-    # rather than a coincidence of this particular error.
-    assert not _reachable_by_deliberate_wrapping(terminal, conflict)
+        # NON-VACUITY, stated as the defect itself: the old traversal really would have found the
+        # 40001 from this terminal error and answered "retryable"...
+        assert _reachable_the_old_way(terminal, conflict), (
+            "the real 40001 is not reachable through __context__ from the terminal error, so this "
+            "stand does not reproduce the masking it exists to refute"
+        )
+        # ... and deliberate wrapping alone does not lead to it, which is what makes the fix a fix
+        # rather than a coincidence of this particular error.
+        assert not _reachable_by_deliberate_wrapping(terminal, conflict)
 
-    # Read through the real function: the asyncpg adapter splits `sqlstate` from the underlying
-    # error across links, so asserting it off one link would be brittle for the wrong reason.
-    codes = ClearingService._postgres_error_codes(terminal)
-    assert "23505" in codes, codes
-    assert "40001" not in codes, (
-        f"the terminal error still carries the conflict's SQLSTATE through __context__: {codes}"
-    )
+        # Read through the real function: the asyncpg adapter splits `sqlstate` from the underlying
+        # error across links, so asserting it off one link would be brittle for the wrong reason.
+        codes = ClearingService._postgres_error_codes(terminal)
+        assert "23505" in codes, codes
+        assert "40001" not in codes, (
+            f"the terminal error still carries the conflict's SQLSTATE through __context__: {codes}"
+        )
 
-    assert not isinstance(
-        _classify_payment_db_error(terminal), RetryablePaymentConflictException
-    ), (
-        "a terminal 23505 was classified as a retryable conflict because a 40001 sat in its "
-        "__context__; the payment would be retried and the retry cannot succeed"
-    )
-    assert ClearingService._is_retryable_concurrency_error(terminal) is False, (
-        "clearing would retry a terminal 23505 because a 40001 sat in its __context__ - and "
-        "clearing writes debt"
-    )
+        assert not isinstance(
+            _classify_payment_db_error(terminal), RetryablePaymentConflictException
+        ), (
+            "a terminal 23505 was classified as a retryable conflict because a 40001 sat in its "
+            "__context__; the payment would be retried and the retry cannot succeed"
+        )
+        assert ClearingService._is_retryable_concurrency_error(terminal) is False, (
+            "clearing would retry a terminal 23505 because a 40001 sat in its __context__ - and "
+            "clearing writes debt"
+        )
+    finally:
+        await _cleanup(serializable_factory, world)
 
 
 @pytest.mark.asyncio
@@ -241,16 +325,19 @@ async def test_a_genuine_40001_is_still_retryable_on_both_classifiers(
 ) -> None:
     """The positive control: narrowing the walk must not lose a real conflict."""
     world = await _seed(serializable_factory)
-    conflict, _terminal = await _a_real_terminal_raised_inside_a_real_40001_handler(
-        serializable_factory, world
-    )
+    try:
+        conflict, _terminal = await _a_real_terminal_raised_inside_a_real_40001_handler(
+            serializable_factory, world
+        )
 
-    assert isinstance(
-        _classify_payment_db_error(conflict), RetryablePaymentConflictException
-    ), "a real serialization failure must still be retryable through orig/__cause__"
-    assert ClearingService._is_retryable_concurrency_error(conflict) is True
-    # The consumers at clearing/service.py:1717, :1743 and :2121 read exactly this set.
-    assert "40001" in ClearingService._postgres_error_codes(conflict)
+        assert isinstance(
+            _classify_payment_db_error(conflict), RetryablePaymentConflictException
+        ), "a real serialization failure must still be retryable through orig/__cause__"
+        assert ClearingService._is_retryable_concurrency_error(conflict) is True
+        # The consumers at clearing/service.py:1717, :1743 and :2121 read exactly this set.
+        assert "40001" in ClearingService._postgres_error_codes(conflict)
+    finally:
+        await _cleanup(serializable_factory, world)
 
 
 @pytest.mark.asyncio
@@ -259,21 +346,23 @@ async def test_a_genuine_55p03_is_still_found_by_the_narrowed_walk(
 ) -> None:
     """The `55P03` consumer at clearing/service.py:1611, measured on a real lock timeout."""
     world = await _seed(serializable_factory)
-
-    async with serializable_factory() as holder, serializable_factory() as waiter:
-        await holder.execute(
-            select(Debt.id).where(Debt.debtor_id == world.debtor_id).with_for_update()
-        )
-        await waiter.execute(text("SET LOCAL lock_timeout = '150ms'"))
-        with pytest.raises(DBAPIError) as timed_out:
-            await waiter.execute(
+    try:
+        async with serializable_factory() as holder, serializable_factory() as waiter:
+            await holder.execute(
                 select(Debt.id).where(Debt.debtor_id == world.debtor_id).with_for_update()
             )
-        await _quiet_rollback(waiter)
-        await _quiet_rollback(holder)
+            await waiter.execute(text("SET LOCAL lock_timeout = '150ms'"))
+            with pytest.raises(DBAPIError) as timed_out:
+                await waiter.execute(
+                    select(Debt.id).where(Debt.debtor_id == world.debtor_id).with_for_update()
+                )
+            await _quiet_rollback(waiter)
+            await _quiet_rollback(holder)
 
-    assert getattr(timed_out.value.orig, "sqlstate", None) == "55P03", timed_out.value
-    assert "55P03" in ClearingService._postgres_error_codes(timed_out.value), (
-        "the narrowed walk must still find the interlock timeout code, or "
-        "clearing/service.py:1611 stops turning it into a TimeoutException"
-    )
+        assert getattr(timed_out.value.orig, "sqlstate", None) == "55P03", timed_out.value
+        assert "55P03" in ClearingService._postgres_error_codes(timed_out.value), (
+            "the narrowed walk must still find the interlock timeout code, or "
+            "clearing/service.py:1611 stops turning it into a TimeoutException"
+        )
+    finally:
+        await _cleanup(serializable_factory, world)
