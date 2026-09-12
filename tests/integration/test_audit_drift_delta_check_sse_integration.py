@@ -22,7 +22,7 @@ from app.db.sqlite_transaction_control import install_sqlite_transaction_control
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.utils.exceptions import IntegrityViolationException
-from tests.scratch_db import scratch_db_path, scratch_db_url
+from tests.scratch_db import install_test_sqlite_pragmas, scratch_db_path, scratch_db_url
 
 
 # T1406: this module used to build its engine from a RELATIVE path, so the database landed
@@ -57,7 +57,11 @@ async def engine():
         poolclass=NullPool,
         connect_args={"timeout": 10},
     )
-    # T1525: the same SQLite transaction control as the application engine.
+    # T1525: the same SQLite transaction control AND the same connection pragmas as the application
+    # engine - WAL, foreign keys, busy timeout. Without the pragmas this module ran in the rollback
+    # journal with foreign keys unenforced, so neither its concurrency nor its referential results
+    # transferred to the application. Held by the pragma test at the bottom of this module.
+    install_test_sqlite_pragmas(eng.sync_engine, url=_TEST_DB_URL)
     install_sqlite_transaction_control(eng.sync_engine)
     async with eng.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -80,6 +84,24 @@ async def session_factory(engine):
         expire_on_commit=False,
         autoflush=False,
     )
+
+
+async def test_this_modules_engine_has_the_application_sqlite_pragmas(engine) -> None:
+    """T1525: WAL and enforced foreign keys, or this module's results do not transfer.
+
+    This engine is built here rather than taken from `tests/conftest.py`, and until 2026-09-12 it
+    received only the transaction control. In the rollback journal a reader holds a SHARED lock and
+    blocks writers, where under WAL a reader that then writes is refused outright - opposite
+    failure modes - and with `foreign_keys` off this module could not see a referential violation
+    the application refuses.
+    """
+    from sqlalchemy import text
+
+    async with engine.connect() as conn:
+        journal_mode = (await conn.execute(text("PRAGMA journal_mode"))).scalar_one()
+        foreign_keys = (await conn.execute(text("PRAGMA foreign_keys"))).scalar_one()
+    assert str(journal_mode).lower() == "wal", journal_mode
+    assert int(foreign_keys) == 1, foreign_keys
 
 
 @dataclass(frozen=True)

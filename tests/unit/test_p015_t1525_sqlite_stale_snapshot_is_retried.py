@@ -13,6 +13,12 @@ locked"). The retry wrapper rolls back before re-running (`_run_uow_with_retry`,
 `if not use_savepoint` branch), which is the only thing that can cure a stale snapshot: the second
 attempt starts a new transaction and therefore a new snapshot.
 
+THE ROLLBACK IS THE RETRY'S PRECONDITION, NOT A COURTESY (corrected 2026-09-12). A SQLite busy does
+not by itself mean the transaction rolled back - a busy raised by `commit()` with a statement still
+in progress leaves it open with its own rows visible - so the wrapper's rollback is what keeps the
+second attempt off the first attempt's uncommitted writes, and a rollback that FAILS now stops the
+retry instead of being swallowed.
+
 These tests assert the EFFECT of that: a payment whose commit loses the snapshot race is retried and
 succeeds, with the concurrent write visible; a non-retryable SQLite error is still not retried; and
 the budget is finite, so a permanently losing payment ends in a refusal rather than a loop.

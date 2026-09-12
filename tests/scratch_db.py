@@ -24,6 +24,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from sqlalchemy import event
+from sqlalchemy.engine import Engine, make_url
+
 _ROOT = Path(__file__).resolve().parents[1]
 
 #: The one directory tree a test may write a mutable database into.
@@ -51,6 +54,55 @@ def scratch_db_path(slug: str) -> Path:
 def scratch_db_url(slug: str) -> str:
     """The aiosqlite URL for `slug`, as a POSIX path so the URL is well-formed on Windows."""
     return f"sqlite+aiosqlite:///{scratch_db_path(slug).as_posix()}"
+
+
+def _sqlite_connection_pragmas_for(database: str | None):
+    """The connect listener for one database, so `journal_mode` can depend on it."""
+
+    enable_wal = database not in {None, "", ":memory:"}
+
+    def _listener(dbapi_connection, _connection_record) -> None:
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.execute("PRAGMA busy_timeout=30000")
+            if enable_wal:
+                cursor.execute("PRAGMA journal_mode=WAL")
+        finally:
+            cursor.close()
+
+    return _listener
+
+
+def install_test_sqlite_pragmas(sync_engine: Engine, *, url) -> None:
+    """Give a test engine the connection pragmas the application engine has. ONE definition.
+
+    T1525, 2026-09-12. `app/db/session.py` sets `foreign_keys`, `busy_timeout` and (for a
+    file-backed database) `journal_mode=WAL` on connect. Five integration modules build their own
+    SQLite engines and had received only the transaction control, so they ran with foreign keys
+    UNENFORCED and in the rollback journal rather than WAL. That makes their results untransferable
+    in the two ways that matter most for what they test: a concurrency result measured under the
+    rollback journal (where a reader holds a SHARED lock and blocks writers) says nothing about the
+    application's WAL behaviour, and a referential effect the application would refuse cannot be
+    seen at all.
+
+    WHY THESE PRAGMAS MUST BE SET ON CONNECT and not per test: `journal_mode` cannot change inside a
+    transaction and `foreign_keys` is a silent no-op inside one. With the T1525 transaction control
+    a `BEGIN` is sent before the first statement of any `engine.begin()` block, so a pragma placed
+    there would be ignored - previously without a sound, because the call was wrapped in a bare
+    `except: pass`.
+
+    `synchronous=NORMAL` is deliberately NOT set here: the application sets it for durability/speed
+    on a real deployment, and a test database gains nothing from it. Idempotent; safe to call twice.
+    """
+    database = make_url(url).database
+    listener = _sqlite_connection_pragmas_for(database)
+    # `event.contains` compares function identity, and a closure is a new object each call, so the
+    # marker below is what makes this idempotent.
+    if getattr(sync_engine, "_geo_test_sqlite_pragmas_installed", False):
+        return
+    event.listen(sync_engine, "connect", listener)
+    sync_engine._geo_test_sqlite_pragmas_installed = True
 
 
 def remove_scratch_db(slug: str) -> None:

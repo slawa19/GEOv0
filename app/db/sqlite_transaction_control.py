@@ -91,21 +91,65 @@ def install_sqlite_transaction_control(sync_engine: Engine) -> None:
         event.listen(sync_engine, "begin", _emit_begin)
 
 
-def has_sqlite_transaction_control(sync_engine: Engine) -> bool:
-    """True when both halves of the control are installed on this engine."""
+def sqlite_transaction_control_is_installed(sync_engine: Engine) -> bool:
+    """True when both listeners of the control are REGISTERED on this engine. Nothing more.
+
+    WHAT THIS DOES NOT TELL YOU, because the name `has_sqlite_transaction_control` implied it and
+    that was wrong. This reports listener registration on the engine; it says nothing about the
+    state of any transaction that is already open, and nothing about connections checked out
+    before the listeners were added. Registration is retroactive to neither.
+
+    Measured 2026-09-12 by `tests/unit/test_p015_t1525_sqlite_transaction_control_is_in_effect.py`:
+    on a connection that had already read (so the driver was in legacy mode and no `BEGIN` had been
+    sent), installing the control and then running `SAVEPOINT` / `INSERT` / `RELEASE` still left the
+    row in place after the root `rollback()` - while this function returned True the whole time. The
+    `connect` listener only fires on the NEXT connection, and the `begin` listener only on the next
+    SQLAlchemy `begin`.
+
+    So this answers "is this engine configured?", which is what an assertion at engine-construction
+    time wants. To answer "is a real transaction open right now?", read
+    `sqlite3.Connection.in_transaction` on the live connection instead.
+    """
     return event.contains(sync_engine, "connect", _driver_transaction_control_off) and event.contains(
         sync_engine, "begin", _emit_begin
     )
 
 
 def sqlite_busy_error_name(exc: BaseException) -> str | None:
-    """The SQLITE_BUSY-family error name behind `exc`, or None if it is another failure.
+    """The SQLITE_BUSY-family error name THIS failure carries, or None if it is another failure.
 
     This is the retryable half of the cost documented above, and it exists because the control
     created it: a transaction that has read holds a snapshot, and a write on a stale snapshot fails
-    at once with SQLITE_BUSY_SNAPSHOT ("database is locked"). The cure is to end the transaction and
-    run the unit of work again from a fresh snapshot - exactly what a retry does - not to wait, which
-    is why `busy_timeout` does not help here.
+    at once with SQLITE_BUSY_SNAPSHOT ("database is locked"). Waiting cannot cure a stale snapshot,
+    which is why `busy_timeout` does not help; only running the unit of work again from a fresh
+    snapshot can.
+
+    A BUSY DOES NOT BY ITSELF MEAN THE TRANSACTION ROLLED BACK, and this function does not claim it.
+    Measured 2026-09-12 on SQLite 3.45.1: with a statement still in progress (an `INSERT ...
+    RETURNING` whose cursor was not exhausted), `commit()` fails with SQLITE_BUSY - "cannot commit
+    transaction - SQL statements in progress" - and leaves `in_transaction` True with the
+    transaction's own rows still visible inside it. So a caller that retries on this name MUST roll
+    back first; a retry without one would run on top of its own uncommitted rows. Every retry site
+    in this repository does roll back first - see `PaymentEngine._run_uow_with_retry` and
+    `RealRunnerImpl`'s inject loop - and that is a property of those sites, not of the error.
+
+    WHICH EXCEPTION IN THE CHAIN DECIDES. The exception under inspection decides if it carries its
+    own `sqlite_errorcode`: that code is its own identity, and a walk that looked past it could
+    return a busy for a failure that is not one. That was a real defect (reproduced 2026-09-12): a
+    UNIQUE/PK violation raised inside a busy `except` block carries SQLITE_CONSTRAINT_PRIMARYKEY
+    (1555) itself while the handled SQLITE_BUSY sits in its `__context__`, and this function
+    returned SQLITE_BUSY - so a terminal constraint violation was retried as transient.
+
+    Only when the current exception carries NO code of its own does the walk continue, and then
+    into `orig` / `__cause__` ONLY:
+
+    * `orig` and `__cause__` are DELIBERATE wrapping. SQLAlchemy raises `DBAPIError` from the driver
+      error, so the wrapper has no `sqlite_errorcode` of its own and `orig is __cause__` is the
+      driver's error. Following them re-surfaces the SAME failure, which is the whole point.
+    * `__context__` is INCIDENTAL: Python sets it to whatever was being handled when this exception
+      was raised, which may be an unrelated earlier failure. It is never followed. Where a cause is
+      genuine, `__cause__` carries it too (SQLAlchemy always uses `raise ... from`), so nothing that
+      matters is lost - only the masking is.
 
     Matched on the error CODE, not on the message: CPython 3.11's `sqlite3` carries
     `sqlite_errorcode` / `sqlite_errorname` on every error it raises, aiosqlite re-raises that
@@ -117,25 +161,22 @@ def sqlite_busy_error_name(exc: BaseException) -> str | None:
     present on a real error, rather than quietly match text.
 
     The whole SQLITE_BUSY family is included, not only _SNAPSHOT: a plain busy (a writer that held
-    the lock past `busy_timeout`) and a rollback-journal deadlock are equally "nothing was written,
-    run it again".
+    the lock past `busy_timeout`) and a rollback-journal deadlock are equally "a conflict, not a
+    verdict on this unit of work's data".
     """
-    pending: list[BaseException] = [exc]
+    current: BaseException | None = exc
     seen: set[int] = set()
-    while pending:
-        current = pending.pop()
-        if id(current) in seen:
-            continue
+    while current is not None and id(current) not in seen:
         seen.add(id(current))
         code = getattr(current, "sqlite_errorcode", None)
-        if isinstance(code, int) and (code & 0xFF) == _SQLITE_BUSY_PRIMARY_ERRORCODE:
-            name = getattr(current, "sqlite_errorname", None)
-            return str(name) if name else f"sqlite_errorcode {code}"
-        for related in (
-            getattr(current, "orig", None),
-            current.__cause__,
-            current.__context__,
-        ):
-            if isinstance(related, BaseException):
-                pending.append(related)
+        if isinstance(code, int):
+            # This exception carries its OWN code. It decides; the walk stops here either way.
+            if (code & 0xFF) == _SQLITE_BUSY_PRIMARY_ERRORCODE:
+                name = getattr(current, "sqlite_errorname", None)
+                return str(name) if name else f"sqlite_errorcode {code}"
+            return None
+        following = getattr(current, "orig", None)
+        if not isinstance(following, BaseException):
+            following = current.__cause__
+        current = following if isinstance(following, BaseException) else None
     return None

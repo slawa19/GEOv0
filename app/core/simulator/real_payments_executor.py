@@ -426,9 +426,21 @@ class RealPaymentsExecutor:
                         staged.post_commit_effects,
                     )
                 except RetryablePaymentConflictException:
-                    # The outer tick transaction is no longer safe to use. Do not
-                    # count a transient conflict as a terminal payment rejection;
-                    # propagate so the tick-level rollback/replay policy owns it.
+                    # The outer tick transaction is no longer safe to use: this payment ran inside
+                    # the tick's savepoint, and a stale snapshot or serialization failure belongs
+                    # to the tick's transaction, not to the savepoint. Do not count a transient
+                    # conflict as a terminal payment rejection - propagate it.
+                    #
+                    # WHAT PROPAGATING LEADS TO TODAY, corrected 2026-09-12: this comment used to
+                    # say "the tick-level rollback/replay policy owns it". There is no replay
+                    # policy. The conflict leaves the payments phase, the tick orchestrator rolls
+                    # the session back and resolves this tick's observations as rolled back, then
+                    # logs `simulator.real.tick_failed`, increments `run.errors_total` and sets
+                    # `run.last_error = REAL_MODE_TICK_FAILED`; enough consecutive failures end the
+                    # run with `REAL_MODE_TICK_FAILED_REPEATED`. The next heartbeat increments
+                    # `tick_index` and starts a NEW tick - the failed tick's staged payments are
+                    # not replayed. So propagating costs this tick, which is still strictly better
+                    # than recording a transient conflict as a terminal INTERNAL_ERROR per action.
                     raise
                 except Exception as e:
                     code = "INTERNAL_ERROR"

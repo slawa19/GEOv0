@@ -39,7 +39,7 @@ from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.core.simulator.models import RunRecord
 from app.core.simulator.real_runner import RealRunner
-from tests.scratch_db import scratch_db_path, scratch_db_url
+from tests.scratch_db import install_test_sqlite_pragmas, scratch_db_path, scratch_db_url
 
 
 # ---------------------------------------------------------------------------
@@ -72,7 +72,11 @@ async def deadlock_engine():
         poolclass=NullPool,
         connect_args={"timeout": 5},  # short timeout to detect deadlock fast
     )
-    # T1525: the same SQLite transaction control as the application engine.
+    # T1525: the same SQLite transaction control AND the same connection pragmas as the application
+    # engine - WAL, foreign keys, busy timeout. This module measures DEADLOCK behaviour, and the
+    # rollback journal it used to run in has different locking from the application's WAL, so
+    # without the pragmas its result did not transfer at all. Held by the pragma test below.
+    install_test_sqlite_pragmas(eng.sync_engine, url=_TEST_DB_URL)
     install_sqlite_transaction_control(eng.sync_engine)
 
     async with eng.begin() as conn:
@@ -86,6 +90,24 @@ async def deadlock_engine():
             Path(_TEST_DB_PATH + suffix).unlink(missing_ok=True)
         except Exception:
             pass
+
+
+async def test_this_modules_engine_has_the_application_sqlite_pragmas(deadlock_engine) -> None:
+    """T1525: WAL and enforced foreign keys, or this module's deadlock result does not transfer.
+
+    This module is the sharpest case of the five: it MEASURES locking behaviour. Until 2026-09-12
+    its engine carried only the transaction control, so it ran in the rollback journal - where a
+    reader holds a SHARED lock and blocks writers - while the application runs in WAL, where a
+    reader that then writes is refused outright instead. A "no deadlock" result under one says
+    nothing about the other.
+    """
+    from sqlalchemy import text
+
+    async with deadlock_engine.connect() as conn:
+        journal_mode = (await conn.execute(text("PRAGMA journal_mode"))).scalar_one()
+        foreign_keys = (await conn.execute(text("PRAGMA foreign_keys"))).scalar_one()
+    assert str(journal_mode).lower() == "wal", journal_mode
+    assert int(foreign_keys) == 1, foreign_keys
 
 
 @pytest_asyncio.fixture
