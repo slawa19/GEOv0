@@ -1,8 +1,12 @@
 import uuid
 from decimal import Decimal
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, JSON, Numeric, String, Uuid, func, text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, JSON, String, Uuid, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
+from app.db.types import MoneyNumeric, finite_money_clauses
+
+#: `limit` is a reserved word in PostgreSQL, so every SQL text that names the column quotes it.
+_LIMIT_SQL = '"limit"'
 
 class TrustLine(Base):
     __tablename__ = "trust_lines"
@@ -11,7 +15,9 @@ class TrustLine(Base):
     from_participant_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey('participants.id', ondelete='CASCADE'), nullable=False, index=True)
     to_participant_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey('participants.id', ondelete='CASCADE'), nullable=False, index=True)
     equivalent_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey('equivalents.id', ondelete='CASCADE'), nullable=False, index=True)
-    limit: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    # `MoneyNumeric` - T1526, the same hole as `debts.amount`: `"limit" >= 0` is TRUE for `NaN`
+    # on PostgreSQL, and a `NaN` limit makes every capacity computed from it `NaN`.
+    limit: Mapped[Decimal] = mapped_column(MoneyNumeric(20, 8), nullable=False)
     policy: Mapped[dict | None] = mapped_column(JSON, default=lambda: {
         'auto_clearing': True,
         'can_be_intermediate': True,
@@ -43,6 +49,13 @@ class TrustLine(Base):
             postgresql_where=text("status <> 'closed'"),
         ),
         CheckConstraint("status IN ('active', 'frozen', 'closed')", name='chk_trust_line_status'),
-        CheckConstraint('"limit" >= 0', name='chk_trust_line_limit_positive'),
+        # T1526, the same three jobs as `chk_debt_amount_positive` (see the comment there and
+        # `app/db/types.py::finite_money_clauses`): SIGN, MAGNITUDE, NOT A NUMBER. Only the sign
+        # clause differs - zero stays legal, because a limit of zero is a real trust line with no
+        # headroom, and `>= 0` alone is TRUE for NaN on PostgreSQL exactly as `> 0` is.
+        CheckConstraint(
+            f'{_LIMIT_SQL} >= 0 AND {finite_money_clauses(_LIMIT_SQL)}',
+            name='chk_trust_line_limit_positive',
+        ),
         Index('ix_trust_lines_from_status', 'from_participant_id', 'status'),
     )
