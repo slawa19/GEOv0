@@ -10,6 +10,10 @@ import app.core.simulator.storage as simulator_storage
 from app.config import settings
 from app.core.payments.service import PaymentService
 from app.core.simulator.commit_resolution import resolve_rollback_under_cancellation
+from app.core.simulator.money_replay import (
+    money_conflict_name,
+    run_money_phase_with_bounded_replay,
+)
 from app.core.simulator.post_tick_audit import audit_tick_balance
 from app.core.simulator.models import RunRecord
 from app.core.simulator.runtime_utils import safe_int_env as _safe_int_env
@@ -54,6 +58,8 @@ class _RealRunnerPort(Protocol):
     _real_max_timeouts_per_tick_limit: int
     _real_max_errors_total_limit: int
     _real_max_consec_tick_failures_limit: int
+    _real_money_replay_attempts_limit: int
+    _real_max_consec_money_no_progress_limit: int
 
     async def fail_run(self, run_id: str, *, code: str, message: str) -> None: ...
     async def tick_real_mode_clearing(self, session, run_id: str, run: RunRecord, equivalents: list[str], *, time_budget_ms_override: int | None = None, max_depth_override: int | None = None) -> dict[str, float]: ...
@@ -210,6 +216,179 @@ class RealTickOrchestrator:
             except Exception:
                 pass
 
+    async def _open_money_phase(self, *, run_id: str, run: RunRecord, scenario: dict):
+        """Run everything before the tick's money boundary, then the boundary itself.
+
+        Programme 015 / P1. Returns None when the tick has nothing to do, otherwise the outcome of
+        the bounded replay - which owns the session the tail is allowed to use.
+
+        THE BOUNDARY IS DRAWN HERE, and where it is drawn is the whole point: after the due
+        injects have completed, and BEFORE the first read and before the owner locks. Everything
+        before it runs on a session of its own which is closed before the boundary opens, so the
+        money phase always begins with a fresh session, a fresh transaction and therefore a fresh
+        snapshot - on the first attempt exactly as on a replayed one.
+        """
+        rr = self._runner
+
+        async with db_session.AsyncSessionLocal() as setup_session:
+            if not run._real_seeded:
+                with rr._lock:
+                    if run._real_seeding_lock is None:
+                        run._real_seeding_lock = asyncio.Lock()
+                    seeding_lock = run._real_seeding_lock
+
+                async with seeding_lock:
+                    if not run._real_seeded:
+                        await rr._seed_scenario_into_db(setup_session, scenario)
+                        await setup_session.commit()
+                        run._real_seeded = True
+
+            if run._real_participants is None or run._real_equivalents is None:
+                run._real_participants = await rr._load_real_participants(
+                    setup_session, scenario
+                )
+                eq_set: set[str] = set(
+                    str(x).strip().upper()
+                    for x in (scenario.get("equivalents") or [])
+                )
+                eq_set.discard("")
+
+                default_eq = scenario_default_equivalent(scenario)
+                if default_eq:
+                    eq_set.add(default_eq)
+
+                for tl in (scenario.get("trustlines") or []):
+                    eq = effective_equivalent(scenario, tl)
+                    if eq:
+                        eq_set.add(str(eq).strip().upper())
+
+                run._real_equivalents = sorted(eq_set)
+
+            participants = run._real_participants or []
+            equivalents = run._real_equivalents or []
+            if len(participants) < 2 or not equivalents:
+                return None
+
+            # Initialize trust drift (once per run)
+            if run._trust_drift_config is None:
+                rr._trust_drift_engine.init_trust_drift(run, scenario)
+
+            # Apply due scenario timeline events (note/stress/inject).
+            # IMPORTANT: inject modifies DB state and must happen before payments.
+            #
+            # BEFORE the owner locks below, not after. Programme 015, phase B step 3: the
+            # due-events phase owns its own transactions - each inject event is a unit of
+            # work that takes the owner locks it needs and commits them away - and it
+            # returns with no transaction open. Run after the lock block, its first commit
+            # released the locks taken here and the payments phase planned against a debt
+            # snapshot read without them.
+            await rr._apply_due_scenario_events(
+                setup_session, run_id=run_id, run=run, scenario=scenario
+            )
+
+        async def _money_attempt(session):
+            """The inside of the boundary: owner locks, snapshot, planning, staged payments.
+
+            Everything in here is RECREATED per attempt. Notably the plan: `plan_payments` is
+            called again from the snapshot this attempt read, and is never carried over from a
+            previous one, because the planner sizes amounts against already-used debt and a
+            competitor's commit is exactly what invalidates that picture.
+            """
+            owner_service = PaymentService(session)
+            if owner_service.engine._is_postgres():
+                # No `commit()` first, unlike the code this replaced: that commit existed to close
+                # initialization reads before the monetary unit of work, and this session is new,
+                # so it has none. The owner set is this transaction's first statement. A
+                # SERIALIZABLE waiter can still receive 40001 here - and now there is something
+                # that restarts at this outer owner, which is what the old comment promised and
+                # nothing delivered: `app/core/simulator/money_replay.py`.
+                await owner_service.acquire_staged_equivalent_owner_locks(equivalents)
+
+            return await rr._real_tick_payments_coordinator.run_payments_phase(
+                session=session,
+                run_id=run_id,
+                run=run,
+                scenario=scenario,
+                participants=participants,
+                equivalents=equivalents,
+                load_debt_snapshot_by_pid=rr._load_debt_snapshot_by_pid,
+                plan_payments=lambda _run, _scenario, _debt_snapshot: rr._plan_real_payments(
+                    _run, _scenario, debt_snapshot=_debt_snapshot
+                ),
+                payments_executor=rr._real_payments_executor,
+                max_in_flight=int(run._real_max_in_flight),
+                max_timeouts_per_tick=int(rr._real_max_timeouts_per_tick_limit),
+                max_errors_total=int(rr._real_max_errors_total_limit),
+                fail_run=lambda _run_id, code, message: rr.fail_run(
+                    _run_id, code=code, message=message
+                ),
+            )
+
+        return await run_money_phase_with_bounded_replay(
+            run_id=run_id,
+            run=run,
+            lock=rr._lock,
+            logger=rr._logger,
+            max_attempts=int(rr._real_money_replay_attempts_limit),
+            open_session=db_session.AsyncSessionLocal,
+            run_money_attempt=_money_attempt,
+        )
+
+    async def _record_money_conflict_tick(
+        self,
+        run_id: str,
+        *,
+        run: RunRecord,
+        conflict: str,
+        error: BaseException,
+    ) -> None:
+        """A tick whose money phase lost to contention: no progress, but not an error.
+
+        Programme 015 / P1. A transient conflict is not a programmatic failure, so it does not
+        touch `run.errors_total`, `run._error_timestamps` or `run._real_consec_tick_failures`, and
+        cannot by itself reach `REAL_MODE_TOO_MANY_ERRORS` or `REAL_MODE_TICK_FAILED_REPEATED`.
+
+        What can still stop the run is the absence of PROGRESS, which is stated as its own
+        criterion and counted separately: a bounded replay promises nothing under permanent
+        contention, and a run that has not committed a money phase for
+        `SIMULATOR_REAL_MAX_CONSEC_MONEY_NO_PROGRESS` ticks in a row is not working. That is a
+        statement about the run, not about a SQLSTATE.
+
+        `last_error` is still set, with a code of its own, so the tick is diagnosable from the
+        interface (AGENTS.md §12) without spending the budget.
+        """
+        rr = self._runner
+        with rr._lock:
+            run._real_consec_money_no_progress_ticks += 1
+            no_progress = int(run._real_consec_money_no_progress_ticks)
+            run.last_error = {
+                "code": "REAL_MODE_MONEY_CONFLICT_UNRESOLVED",
+                "message": (
+                    f"The tick's money phase did not commit: {conflict} ({type(error).__name__}). "
+                    f"Consecutive ticks without money progress: {no_progress}."
+                ),
+                "at": rr._utc_now().isoformat(),
+            }
+
+        rr._logger.warning(
+            "simulator.real.money_phase_no_progress run_id=%s tick=%s conflict=%s consec=%s",
+            str(run.run_id),
+            int(run.tick_index or 0),
+            conflict,
+            no_progress,
+        )
+
+        limit = int(rr._real_max_consec_money_no_progress_limit)
+        if limit > 0 and no_progress >= limit:
+            await rr.fail_run(
+                run_id,
+                code="REAL_MODE_MONEY_NO_PROGRESS",
+                message=(
+                    f"The money phase made no progress for {no_progress} consecutive ticks "
+                    f"under database contention"
+                ),
+            )
+
     async def tick_real_mode(self, run_id: str) -> None:
         rr = self._runner
 
@@ -231,95 +410,28 @@ class RealTickOrchestrator:
         await self._await_pending_clearing(run_id, run=run)
 
         try:
-            async with db_session.AsyncSessionLocal() as session:
-                payments_phase = None
+            money = await self._open_money_phase(
+                run_id=run_id, run=run, scenario=scenario
+            )
+            if money is None:
+                return
+
+            # The money phase has committed, or the run is stopping. `money.stack` owns the
+            # session that committed it, and the tail below runs on that session - AFTER the
+            # boundary, never inside it.
+            #
+            # From here on the payments are DURABLE and their observations have already resolved
+            # exactly once, so nothing in this tail can un-publish a committed payment and nothing
+            # in it can replay money. That is the hard right edge (programme 015 / P1): a tail
+            # error costs the tail, never the money.
+            async with money.stack:
+                session = money.session
+                payments_phase = money.phase
+                # The same list the boundary planned and locked against: `_open_money_phase`
+                # resolves it once per run and stores it on the record.
+                equivalents = run._real_equivalents or []
                 try:
-                    if not run._real_seeded:
-                        with rr._lock:
-                            if run._real_seeding_lock is None:
-                                run._real_seeding_lock = asyncio.Lock()
-                            seeding_lock = run._real_seeding_lock
-
-                        async with seeding_lock:
-                            if not run._real_seeded:
-                                await rr._seed_scenario_into_db(session, scenario)
-                                await session.commit()
-                                run._real_seeded = True
-
-                    if run._real_participants is None or run._real_equivalents is None:
-                        run._real_participants = await rr._load_real_participants(
-                            session, scenario
-                        )
-                        eq_set: set[str] = set(
-                            str(x).strip().upper()
-                            for x in (scenario.get("equivalents") or [])
-                        )
-                        eq_set.discard("")
-
-                        default_eq = scenario_default_equivalent(scenario)
-                        if default_eq:
-                            eq_set.add(default_eq)
-
-                        for tl in (scenario.get("trustlines") or []):
-                            eq = effective_equivalent(scenario, tl)
-                            if eq:
-                                eq_set.add(str(eq).strip().upper())
-
-                        run._real_equivalents = sorted(eq_set)
-
-                    participants = run._real_participants or []
-                    equivalents = run._real_equivalents or []
-                    if len(participants) < 2 or not equivalents:
-                        return
-
-                    # Initialize trust drift (once per run)
-                    if run._trust_drift_config is None:
-                        rr._trust_drift_engine.init_trust_drift(run, scenario)
-
-                    # Apply due scenario timeline events (note/stress/inject).
-                    # IMPORTANT: inject modifies DB state and must happen before payments.
-                    #
-                    # BEFORE the owner locks below, not after. Programme 015, phase B step 3: the
-                    # due-events phase owns its own transactions - each inject event is a unit of
-                    # work that takes the owner locks it needs and commits them away - and it
-                    # returns with no transaction open. Run after the lock block, its first commit
-                    # released the locks taken here and the payments phase planned against a debt
-                    # snapshot read without them.
-                    await rr._apply_due_scenario_events(
-                        session, run_id=run_id, run=run, scenario=scenario
-                    )
-
-                    owner_service = PaymentService(session)
-                    if owner_service.engine._is_postgres():
-                        # Close initialization reads before the monetary outer UoW.
-                        # The owner set is its first statement; a SERIALIZABLE waiter
-                        # can still receive 40001 and must restart at this outer owner.
-                        # Nothing may commit between here and the payments phase's snapshot.
-                        await session.commit()
-                        await owner_service.acquire_staged_equivalent_owner_locks(
-                            equivalents
-                        )
-
-                    payments_phase, should_stop = await rr._real_tick_payments_coordinator.run_payments_phase(
-                        session=session,
-                        run_id=run_id,
-                        run=run,
-                        scenario=scenario,
-                        participants=participants,
-                        equivalents=equivalents,
-                        load_debt_snapshot_by_pid=rr._load_debt_snapshot_by_pid,
-                        plan_payments=lambda _run, _scenario, _debt_snapshot: rr._plan_real_payments(
-                            _run, _scenario, debt_snapshot=_debt_snapshot
-                        ),
-                        payments_executor=rr._real_payments_executor,
-                        max_in_flight=int(run._real_max_in_flight),
-                        max_timeouts_per_tick=int(rr._real_max_timeouts_per_tick_limit),
-                        max_errors_total=int(rr._real_max_errors_total_limit),
-                        fail_run=lambda _run_id, code, message: rr.fail_run(
-                            _run_id, code=code, message=message
-                        ),
-                    )
-                    if should_stop:
+                    if money.should_stop:
                         return
 
                     debt_snapshot = payments_phase.debt_snapshot
@@ -552,12 +664,27 @@ class RealTickOrchestrator:
                         pass
                     raise
         except Exception as e:
+            conflict = money_conflict_name(e)
             rr._logger.warning(
-                "simulator.real.tick_failed run_id=%s tick=%s",
+                "simulator.real.tick_failed run_id=%s tick=%s money_conflict=%s",
                 str(run.run_id),
                 int(run.tick_index or 0),
+                conflict or "none",
                 exc_info=True,
             )
+
+            if conflict is not None:
+                # A TRANSIENT CONFLICT IS NOT A PROGRAMMATIC FAILURE (programme 015 / P1). The
+                # money boundary has already replayed the phase up to its budget and rolled the
+                # last attempt back; nothing of it is durable. Spending the error budget here is
+                # what let contention alone stop a run, and it is what the separate no-progress
+                # criterion replaces. A control PROGRAMMATIC failure still takes the branch below
+                # and still stops the run exactly as before.
+                await self._record_money_conflict_tick(
+                    run_id, run=run, conflict=conflict, error=e
+                )
+                return
+
             with rr._lock:
                 run.errors_total += 1
                 run._error_timestamps.append(time.time())

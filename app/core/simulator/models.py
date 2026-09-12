@@ -210,6 +210,23 @@ class RunRecord:
     # Consecutive ticks where all planned payments were rejected (capacity stall).
     _real_consec_all_rejected_ticks: int = 0
 
+    # Programme 015 / P1: diagnostics of the tick money phase's bounded replay.
+    #
+    # INTERNAL ON PURPOSE. These are absent from `run_to_status` (`runtime_utils.py`) and from the
+    # `run_status` SSE payload, which is a protected wire contract (AGENTS.md §8); the replay is a
+    # resilience mechanism, not a product surface. They exist so a run that is losing to
+    # contention can be told apart from a run that is failing - which is the distinction the error
+    # budget could not make before, because a transient conflict was counted as an error.
+    _real_money_conflicts_total: int = 0
+    _real_money_replays_total: int = 0
+    _real_money_replay_exhausted_total: int = 0
+    _real_money_attempts_total: int = 0
+    # Achieved load: the money phases that actually committed, and the payments they carried.
+    _real_money_committed_ticks_total: int = 0
+    _real_money_committed_payments_total: int = 0
+    # The no-progress criterion that may stop a run, in place of any SQLSTATE.
+    _real_consec_money_no_progress_ticks: int = 0
+
     # Real-mode best-effort persistence flush (in-memory only).
     _real_last_tick_storage_payload: dict[str, Any] | None = None
     _real_last_tick_storage_flushed_tick: int = -1
