@@ -37,6 +37,8 @@ from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.utils.exceptions import GeoException
 
+from tests.debt_setup import debt_fixture_setup
+
 pytestmark = pytest.mark.postgres
 
 
@@ -95,14 +97,15 @@ async def _seed(sessionmaker) -> tuple[str, uuid.UUID, dict[str, uuid.UUID]]:
                     status="active",
                 )
             )
-            s.add(
-                Debt(
-                    debtor_id=ids[debtor],
-                    creditor_id=ids[creditor],
-                    equivalent_id=eq_id,
-                    amount=Decimal("100"),
+            async with debt_fixture_setup(s, label="setup"):
+                s.add(
+                    Debt(
+                        debtor_id=ids[debtor],
+                        creditor_id=ids[creditor],
+                        equivalent_id=eq_id,
+                        amount=Decimal("100"),
+                    )
                 )
-            )
         await s.commit()
 
     return eq_code, eq_id, ids

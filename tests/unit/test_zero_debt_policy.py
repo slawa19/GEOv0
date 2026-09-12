@@ -12,6 +12,8 @@ from app.db.models.participant import Participant
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 
+from tests.debt_setup import debt_fixture_setup
+
 
 @pytest.mark.asyncio
 async def test_clearing_deletes_zero_debts(db_session):
@@ -24,19 +26,20 @@ async def test_clearing_deletes_zero_debts(db_session):
     await db_session.flush()
 
     # Debts: A->B->C->A
-    d_ab = Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("10"))
-    d_bc = Debt(debtor_id=b.id, creditor_id=c.id, equivalent_id=eq.id, amount=Decimal("10"))
-    d_ca = Debt(debtor_id=c.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("10"))
-    db_session.add_all([d_ab, d_bc, d_ca])
+    async with debt_fixture_setup(db_session, label="setup"):
+        d_ab = Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("10"))
+        d_bc = Debt(debtor_id=b.id, creditor_id=c.id, equivalent_id=eq.id, amount=Decimal("10"))
+        d_ca = Debt(debtor_id=c.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("10"))
+        db_session.add_all([d_ab, d_bc, d_ca])
 
-    # Auto-clearing consent is controlled by creditor->debtor trustline for each debt.
-    db_session.add_all(
-        [
-            TrustLine(from_participant_id=b.id, to_participant_id=a.id, equivalent_id=eq.id, limit=Decimal("100"), status="active", policy={"auto_clearing": True}),
-            TrustLine(from_participant_id=c.id, to_participant_id=b.id, equivalent_id=eq.id, limit=Decimal("100"), status="active", policy={"auto_clearing": True}),
-            TrustLine(from_participant_id=a.id, to_participant_id=c.id, equivalent_id=eq.id, limit=Decimal("100"), status="active", policy={"auto_clearing": True}),
-        ]
-    )
+        # Auto-clearing consent is controlled by creditor->debtor trustline for each debt.
+        db_session.add_all(
+            [
+                TrustLine(from_participant_id=b.id, to_participant_id=a.id, equivalent_id=eq.id, limit=Decimal("100"), status="active", policy={"auto_clearing": True}),
+                TrustLine(from_participant_id=c.id, to_participant_id=b.id, equivalent_id=eq.id, limit=Decimal("100"), status="active", policy={"auto_clearing": True}),
+                TrustLine(from_participant_id=a.id, to_participant_id=c.id, equivalent_id=eq.id, limit=Decimal("100"), status="active", policy={"auto_clearing": True}),
+            ]
+        )
 
     await db_session.commit()
 

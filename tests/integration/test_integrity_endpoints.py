@@ -21,6 +21,8 @@ from app.schemas.integrity import (
 )
 from tests.integration.test_scenarios import register_and_login
 
+from tests.debt_setup import debt_fixture_setup
+
 
 async def _seed_equivalent(db_session, code: str):
     result = await db_session.execute(select(Equivalent).where(Equivalent.code == code))
@@ -71,9 +73,10 @@ async def test_integrity_checksum_returns_404_until_checkpoint_exists(client: As
     b = Participant(pid="EB" + nonce, display_name="EB", public_key="pkEB-" + nonce)
     db_session.add_all([a, b])
     await db_session.flush()
-    db_session.add(
-        Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("7"))
-    )
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add(
+            Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("7"))
+        )
     await db_session.commit()
 
     resp = await client.get("/api/v1/integrity/checksum/USD", headers=user["headers"])

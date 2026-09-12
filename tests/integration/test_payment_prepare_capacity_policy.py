@@ -15,6 +15,8 @@ from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 from app.utils.exceptions import RoutingException
 
+from tests.debt_setup import debt_fixture_setup
+
 
 def _payment_transaction(*, tx_id: str, initiator_id: uuid.UUID) -> Transaction:
     return Transaction(
@@ -62,23 +64,31 @@ async def _seed_capacity_policy_case(
             status="active",
         )
     )
-    db_session.add_all(
-        [
-            Debt(
-                debtor_id=sender_id,
-                creditor_id=receiver_id,
-                equivalent_id=equivalent_id,
-                amount=Decimal("30"),
-            ),
-            Debt(
-                debtor_id=receiver_id,
-                creditor_id=sender_id,
-                equivalent_id=equivalent_id,
-                amount=Decimal("10"),
-            ),
-            _payment_transaction(tx_id=reservation_tx_id, initiator_id=sender_id),
-        ]
+    # Built here rather than inline below: `fixture_block_violations` allows only constructors and
+    # session calls inside a fixture block, and a local factory is indistinguishable in the AST
+    # from a helper that drives a writer. The object, the list and the single `add_all` are
+    # unchanged, so the flush sees exactly what it saw before.
+    reservation_transaction = _payment_transaction(
+        tx_id=reservation_tx_id, initiator_id=sender_id
     )
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add_all(
+            [
+                Debt(
+                    debtor_id=sender_id,
+                    creditor_id=receiver_id,
+                    equivalent_id=equivalent_id,
+                    amount=Decimal("30"),
+                ),
+                Debt(
+                    debtor_id=receiver_id,
+                    creditor_id=sender_id,
+                    equivalent_id=equivalent_id,
+                    amount=Decimal("10"),
+                ),
+                reservation_transaction,
+            ]
+        )
     # prepare_locks.tx_id references transactions.tx_id with no ORM relationship, so the
     # flush does not order the two inserts; write the transaction first.
     await db_session.flush()

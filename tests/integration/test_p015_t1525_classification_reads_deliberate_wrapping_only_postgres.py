@@ -55,6 +55,8 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.utils.exceptions import RetryablePaymentConflictException
 
+from tests.debt_setup import debt_fixture_setup
+
 pytestmark = pytest.mark.postgres
 
 
@@ -107,14 +109,15 @@ async def _seed(factory) -> _World:
         )
         session.add_all([equivalent, creditor, debtor])
         await session.flush()
-        session.add(
-            Debt(
-                debtor_id=debtor.id,
-                creditor_id=creditor.id,
-                equivalent_id=equivalent.id,
-                amount=5,
+        async with debt_fixture_setup(session, label="setup"):
+            session.add(
+                Debt(
+                    debtor_id=debtor.id,
+                    creditor_id=creditor.id,
+                    equivalent_id=equivalent.id,
+                    amount=5,
+                )
             )
-        )
         await session.commit()
         world = _World(equivalent.id, creditor.id, debtor.id, debtor.pid)
         _SEEDED.append(world)

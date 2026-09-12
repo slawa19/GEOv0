@@ -77,6 +77,8 @@ from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 from app.utils.exceptions import RetryablePaymentConflictException
 
+from tests.debt_setup import debt_fixture_setup
+
 pytestmark = pytest.mark.postgres
 
 _LIMIT = Decimal("1000.00")
@@ -150,14 +152,15 @@ async def _seed(session_factory) -> _World:
                 status="active",
             )
         )
-        s.add(
-            Debt(
-                debtor_id=sender.id,
-                creditor_id=receiver.id,
-                equivalent_id=eq.id,
-                amount=_OPENING,
+        async with debt_fixture_setup(s, label="setup"):
+            s.add(
+                Debt(
+                    debtor_id=sender.id,
+                    creditor_id=receiver.id,
+                    equivalent_id=eq.id,
+                    amount=_OPENING,
+                )
             )
-        )
         await s.commit()
     PaymentRouter.invalidate_cache(eq.code)
     return _World(eq, sender, receiver, outsider_a, outsider_b)
@@ -395,14 +398,15 @@ def _write_skew_competitor(
                     )
                 ).scalar_one_or_none()
                 if existing is None:
-                    other.add(
-                        Debt(
-                            debtor_id=world.outsider_a.id,
-                            creditor_id=world.outsider_b.id,
-                            equivalent_id=world.equivalent.id,
-                            amount=_SKEW,
+                    async with debt_fixture_setup(other, label="setup"):
+                        other.add(
+                            Debt(
+                                debtor_id=world.outsider_a.id,
+                                creditor_id=world.outsider_b.id,
+                                equivalent_id=world.equivalent.id,
+                                amount=_SKEW,
+                            )
                         )
-                    )
                 else:
                     existing.amount = Decimal(str(existing.amount)) + _SKEW
                 await other.commit()

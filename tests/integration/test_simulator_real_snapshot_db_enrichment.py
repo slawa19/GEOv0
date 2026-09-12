@@ -11,6 +11,8 @@ from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from tests.conftest import TestingSessionLocal
 
+from tests.debt_setup import debt_fixture_setup
+
 
 @pytest_asyncio.fixture
 async def stopped_runs(client, auth_headers):
@@ -113,14 +115,15 @@ async def test_real_mode_graph_snapshot_enriches_used_and_net_sign(
                 Debt.debtor_id == debtor_id,
             )
         )
-        setup.add(
-            Debt(
-                equivalent_id=eq_id,
-                creditor_id=creditor_id,
-                debtor_id=debtor_id,
-                amount=amount,
+        async with debt_fixture_setup(setup, label="setup"):
+            setup.add(
+                Debt(
+                    equivalent_id=eq_id,
+                    creditor_id=creditor_id,
+                    debtor_id=debtor_id,
+                    amount=amount,
+                )
             )
-        )
         await setup.commit()
 
     # The snapshot request below reads through THIS session - the `client` fixture overrides

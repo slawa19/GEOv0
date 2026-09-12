@@ -13,6 +13,8 @@ from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.db.models.transaction import Transaction
 
+from tests.debt_setup import debt_fixture_setup
+
 
 @pytest.mark.asyncio
 async def test_admin_participant_metrics_requires_admin_token(client, db_session):
@@ -45,13 +47,14 @@ async def test_admin_participant_metrics_balance_and_counterparties_and_capacity
     # Debts: debtor owes creditor
     # Bob owes Alice 90 => used on trustline Alice->Bob is 90
     # Alice owes Bob 10 => used on trustline Bob->Alice is 10
-    db_session.add_all(
-        [
-            Debt(debtor_id=bob.id, creditor_id=alice.id, equivalent_id=usd.id, amount=Decimal("90")),
-            Debt(debtor_id=alice.id, creditor_id=bob.id, equivalent_id=usd.id, amount=Decimal("10")),
-            Debt(debtor_id=carol.id, creditor_id=alice.id, equivalent_id=usd.id, amount=Decimal("5")),
-        ]
-    )
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add_all(
+            [
+                Debt(debtor_id=bob.id, creditor_id=alice.id, equivalent_id=usd.id, amount=Decimal("90")),
+                Debt(debtor_id=alice.id, creditor_id=bob.id, equivalent_id=usd.id, amount=Decimal("10")),
+                Debt(debtor_id=carol.id, creditor_id=alice.id, equivalent_id=usd.id, amount=Decimal("5")),
+            ]
+        )
     await db_session.commit()
 
     headers = {"X-Admin-Token": settings.ADMIN_TOKEN}

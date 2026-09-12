@@ -106,6 +106,8 @@ from app.db.models.participant import Participant
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 
+from tests.debt_setup import debt_fixture_setup
+
 pytestmark = pytest.mark.postgres
 
 
@@ -189,14 +191,15 @@ async def _ring(
     debt_ids: list[str] = []
     for i, debtor in enumerate(people):
         creditor = people[(i + 1) % len(people)]
-        debt = Debt(
-            id=uuid.uuid4(),
-            debtor_id=debtor.id,
-            creditor_id=creditor.id,
-            equivalent_id=eq.id,
-            amount=amount,
-        )
-        session.add(debt)
+        async with debt_fixture_setup(session, label="setup"):
+            debt = Debt(
+                id=uuid.uuid4(),
+                debtor_id=debtor.id,
+                creditor_id=creditor.id,
+                equivalent_id=eq.id,
+                amount=amount,
+            )
+            session.add(debt)
         debt_ids.append(str(debt.id))
         # The controlling line for a debt debtor->creditor is creditor->debtor.
         session.add(
@@ -262,15 +265,16 @@ async def test_get_debts_renders_plain_decimals_at_the_declared_precision(
     peer = await _participant(db_session, "peer")
     await db_session.flush()
     debtor, creditor = (me, peer) if direction == "outgoing" else (peer, me)
-    db_session.add(
-        Debt(
-            id=uuid.uuid4(),
-            debtor_id=debtor.id,
-            creditor_id=creditor.id,
-            equivalent_id=eq.id,
-            amount=stored,
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add(
+            Debt(
+                id=uuid.uuid4(),
+                debtor_id=debtor.id,
+                creditor_id=creditor.id,
+                equivalent_id=eq.id,
+                amount=stored,
+            )
         )
-    )
     await db_session.flush()
 
     details = await BalanceService(db_session).get_debts(me.id, "UAH", direction)
@@ -691,18 +695,19 @@ async def test_the_persisted_clearing_payload_is_plain_decimal_and_still_replays
                     for _, debtor, creditor in ring
                 ]
             )
-            setup.add_all(
-                [
-                    Debt(
-                        id=debt_id,
-                        debtor_id=debtor,
-                        creditor_id=creditor,
-                        equivalent_id=equivalent_id,
-                        amount=_SMALLEST_STORABLE,
-                    )
-                    for debt_id, debtor, creditor in ring
-                ]
-            )
+            async with debt_fixture_setup(setup, label="setup"):
+                setup.add_all(
+                    [
+                        Debt(
+                            id=debt_id,
+                            debtor_id=debtor,
+                            creditor_id=creditor,
+                            equivalent_id=equivalent_id,
+                            amount=_SMALLEST_STORABLE,
+                        )
+                        for debt_id, debtor, creditor in ring
+                    ]
+                )
             await setup.commit()
 
         async with TestingSessionLocal() as worker:

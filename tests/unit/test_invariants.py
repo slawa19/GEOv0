@@ -18,6 +18,8 @@ from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 from app.utils.exceptions import IntegrityViolationException
 
+from tests.debt_setup import debt_fixture_setup
+
 
 @pytest.mark.asyncio
 async def test_edge_model_attributes_a_debt_directionally(db_session):
@@ -28,7 +30,8 @@ async def test_edge_model_attributes_a_debt_directionally(db_session):
     db_session.add_all([eq, a, b])
     await db_session.flush()
 
-    db_session.add(Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("100")))
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add(Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("100")))
     await db_session.flush()
 
     checker = InvariantChecker(db_session)
@@ -82,7 +85,8 @@ async def test_trust_limit_violation_detected(db_session):
             status="active",
         )
     )
-    db_session.add(Debt(debtor_id=b.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("150")))
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add(Debt(debtor_id=b.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("150")))
     await db_session.flush()
 
     checker = InvariantChecker(db_session)
@@ -221,10 +225,11 @@ async def test_clearing_neutrality_passes_for_cycle_clearing(db_session):
     await db_session.flush()
 
     # A -> B -> C -> A cycle
-    d_ab = Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("10"))
-    d_bc = Debt(debtor_id=b.id, creditor_id=c.id, equivalent_id=eq.id, amount=Decimal("10"))
-    d_ca = Debt(debtor_id=c.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("10"))
-    db_session.add_all([d_ab, d_bc, d_ca])
+    async with debt_fixture_setup(db_session, label="setup"):
+        d_ab = Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("10"))
+        d_bc = Debt(debtor_id=b.id, creditor_id=c.id, equivalent_id=eq.id, amount=Decimal("10"))
+        d_ca = Debt(debtor_id=c.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("10"))
+        db_session.add_all([d_ab, d_bc, d_ca])
     await db_session.flush()
 
     checker = InvariantChecker(db_session)
@@ -257,10 +262,11 @@ async def test_clearing_neutrality_violation_detected(db_session):
     db_session.add_all([eq, a, b, c])
     await db_session.flush()
 
-    d_ab = Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("10"))
-    d_bc = Debt(debtor_id=b.id, creditor_id=c.id, equivalent_id=eq.id, amount=Decimal("10"))
-    d_ca = Debt(debtor_id=c.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("10"))
-    db_session.add_all([d_ab, d_bc, d_ca])
+    async with debt_fixture_setup(db_session, label="setup"):
+        d_ab = Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("10"))
+        d_bc = Debt(debtor_id=b.id, creditor_id=c.id, equivalent_id=eq.id, amount=Decimal("10"))
+        d_ca = Debt(debtor_id=c.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("10"))
+        db_session.add_all([d_ab, d_bc, d_ca])
     await db_session.flush()
 
     checker = InvariantChecker(db_session)
@@ -321,14 +327,15 @@ async def test_integrity_checkpoint_status_critical_for_trust_limits(db_session)
             status="active",
         )
     )
-    db_session.add(
-        Debt(
-            debtor_id=b.id,
-            creditor_id=a.id,
-            equivalent_id=eq.id,
-            amount=Decimal("150"),
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add(
+            Debt(
+                debtor_id=b.id,
+                creditor_id=a.id,
+                equivalent_id=eq.id,
+                amount=Decimal("150"),
+            )
         )
-    )
     await db_session.flush()
 
     cp = await compute_integrity_checkpoint_for_equivalent(db_session, equivalent_id=eq.id)
@@ -390,12 +397,13 @@ async def test_integrity_checkpoint_status_warning_for_debt_symmetry(db_session)
     )
 
     # Mutual debts create a symmetry warning in checkpoints.
-    db_session.add_all(
-        [
-            Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("1")),
-            Debt(debtor_id=b.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("2")),
-        ]
-    )
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add_all(
+            [
+                Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("1")),
+                Debt(debtor_id=b.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("2")),
+            ]
+        )
     await db_session.flush()
 
     cp = await compute_integrity_checkpoint_for_equivalent(db_session, equivalent_id=eq.id)
@@ -584,10 +592,11 @@ async def test_clearing_writes_integrity_audit_log_on_success(db_session):
         ]
     )
 
-    d_ab = Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("10"))
-    d_bc = Debt(debtor_id=b.id, creditor_id=c.id, equivalent_id=eq.id, amount=Decimal("10"))
-    d_ca = Debt(debtor_id=c.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("10"))
-    db_session.add_all([d_ab, d_bc, d_ca])
+    async with debt_fixture_setup(db_session, label="setup"):
+        d_ab = Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("10"))
+        d_bc = Debt(debtor_id=b.id, creditor_id=c.id, equivalent_id=eq.id, amount=Decimal("10"))
+        d_ca = Debt(debtor_id=c.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("10"))
+        db_session.add_all([d_ab, d_bc, d_ca])
     await db_session.commit()
 
     svc = ClearingService(db_session)

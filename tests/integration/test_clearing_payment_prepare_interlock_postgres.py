@@ -16,6 +16,8 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from tests.debt_setup import debt_fixture_setup
+
 
 pytestmark = pytest.mark.postgres
 
@@ -166,38 +168,39 @@ async def _seed_interlock_case():
                 )
             ]
         )
-        setup.add_all(
-            [
-                Debt(
-                    id=debt_id,
-                    debtor_id=debtor_id,
-                    creditor_id=creditor_id,
-                    equivalent_id=equivalent_id,
-                    amount=Decimal(amount),
-                )
-                for debt_id, debtor_id, creditor_id, amount in (
-                    (debt_ids[0], a_id, b_id, "100.00"),
-                    (debt_ids[1], b_id, c_id, "30.00"),
-                    (debt_ids[2], c_id, a_id, "40.00"),
-                )
-            ]
-        )
-        setup.add(
-            Transaction(
-                id=uuid.UUID(payment_tx_id),
-                tx_id=payment_tx_id,
-                idempotency_key=payment_tx_id,
-                type="PAYMENT",
-                initiator_id=a_id,
-                payload={
-                    "from": a_pid,
-                    "to": b_pid,
-                    "amount": "5.00",
-                    "equivalent": equivalent_code,
-                },
-                state="NEW",
+        async with debt_fixture_setup(setup, label="setup"):
+            setup.add_all(
+                [
+                    Debt(
+                        id=debt_id,
+                        debtor_id=debtor_id,
+                        creditor_id=creditor_id,
+                        equivalent_id=equivalent_id,
+                        amount=Decimal(amount),
+                    )
+                    for debt_id, debtor_id, creditor_id, amount in (
+                        (debt_ids[0], a_id, b_id, "100.00"),
+                        (debt_ids[1], b_id, c_id, "30.00"),
+                        (debt_ids[2], c_id, a_id, "40.00"),
+                    )
+                ]
             )
-        )
+            setup.add(
+                Transaction(
+                    id=uuid.UUID(payment_tx_id),
+                    tx_id=payment_tx_id,
+                    idempotency_key=payment_tx_id,
+                    type="PAYMENT",
+                    initiator_id=a_id,
+                    payload={
+                        "from": a_pid,
+                        "to": b_pid,
+                        "amount": "5.00",
+                        "equivalent": equivalent_code,
+                    },
+                    state="NEW",
+                )
+            )
         await setup.commit()
 
     return {

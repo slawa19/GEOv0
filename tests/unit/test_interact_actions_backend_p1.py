@@ -30,6 +30,8 @@ from app.utils.exceptions import (
     RoutingException,
 )
 
+from tests.debt_setup import debt_fixture_setup
+
 
 @pytest.fixture
 def interact_actions_enabled(monkeypatch):
@@ -352,14 +354,15 @@ async def test_action_trustline_update_happy_and_used_exceeds_new_limit(
     assert p1["new_limit"] == "150"
 
     # Arrange used debt (used amount is debt from `to` -> `from`)
-    db_session.add(
-        Debt(
-            debtor_id=bob.id,
-            creditor_id=alice.id,
-            equivalent_id=uah.id,
-            amount=Decimal("50"),
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add(
+            Debt(
+                debtor_id=bob.id,
+                creditor_id=alice.id,
+                equivalent_id=uah.id,
+                amount=Decimal("50"),
+            )
         )
-    )
     await db_session.commit()
 
     # Act 2: error update (new_limit < used)
@@ -433,14 +436,15 @@ async def test_action_trustline_close_happy_and_has_debt(client, db_session, int
     assert rc_again.status_code == 200, rc_again.text
 
     # Arrange debt on the same triple the recreated line covers.
-    db_session.add(
-        Debt(
-            debtor_id=bob.id,
-            creditor_id=alice.id,
-            equivalent_id=uah.id,
-            amount=Decimal("1"),
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add(
+            Debt(
+                debtor_id=bob.id,
+                creditor_id=alice.id,
+                equivalent_id=uah.id,
+                amount=Decimal("1"),
+            )
         )
-    )
     await db_session.commit()
 
     # Act 2: error close (used>0)
@@ -524,14 +528,15 @@ async def test_action_trustlines_list_is_run_scoped_and_filters_by_participant_p
 
     # Arrange reverse debt: debtor = from_pid, creditor = to_pid.
     # This must surface as `reverse_used` for trustline alice -> bob.
-    db_session.add(
-        Debt(
-            debtor_id=alice.id,
-            creditor_id=bob.id,
-            equivalent_id=uah.id,
-            amount=Decimal("2"),
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add(
+            Debt(
+                debtor_id=alice.id,
+                creditor_id=bob.id,
+                equivalent_id=uah.id,
+                amount=Decimal("2"),
+            )
         )
-    )
     await db_session.commit()
 
     # Add a "foreign" trustline in DB that must NOT leak into the list (snapshot-scoped).
@@ -1152,28 +1157,29 @@ async def test_action_clearing_real_total_cleared_amount_is_actual_not_precalc(
     await db_session.commit()
 
     # Debts: alice->bob=5, bob->carol=10, carol->alice=7 => actual clear amount is 5.
-    db_session.add_all(
-        [
-            Debt(
-                debtor_id=alice.id,
-                creditor_id=bob.id,
-                equivalent_id=uah.id,
-                amount=Decimal("5"),
-            ),
-            Debt(
-                debtor_id=bob.id,
-                creditor_id=carol.id,
-                equivalent_id=uah.id,
-                amount=Decimal("10"),
-            ),
-            Debt(
-                debtor_id=carol.id,
-                creditor_id=alice.id,
-                equivalent_id=uah.id,
-                amount=Decimal("7"),
-            ),
-        ]
-    )
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add_all(
+            [
+                Debt(
+                    debtor_id=alice.id,
+                    creditor_id=bob.id,
+                    equivalent_id=uah.id,
+                    amount=Decimal("5"),
+                ),
+                Debt(
+                    debtor_id=bob.id,
+                    creditor_id=carol.id,
+                    equivalent_id=uah.id,
+                    amount=Decimal("10"),
+                ),
+                Debt(
+                    debtor_id=carol.id,
+                    creditor_id=alice.id,
+                    equivalent_id=uah.id,
+                    amount=Decimal("7"),
+                ),
+            ]
+        )
     await db_session.commit()
 
     # 2026-08-22 / p010: the cycle runs alice -> bob -> carol -> alice, so the run has to

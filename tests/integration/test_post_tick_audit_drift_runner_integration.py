@@ -29,6 +29,8 @@ from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 from tests.scratch_db import install_test_sqlite_pragmas, scratch_db_path, scratch_db_url
 
+from tests.debt_setup import debt_fixture_setup
+
 
 # T1406: this module used to build its engine from a RELATIVE path, so the database landed
 # in the repository root - against AGENTS.md §7/§12, and unnoticed because the test-database
@@ -278,14 +280,15 @@ async def test_post_tick_audit_drift_emits_sse_and_persists_integrity_log(
             )
         ).scalar_one_or_none()
         if debt is None:
-            session.add(
-                Debt(
-                    debtor_id=from_id,
-                    creditor_id=to_id,
-                    equivalent_id=eq_id,
-                    amount=drift_amt,
+            async with debt_fixture_setup(session, label="setup"):
+                session.add(
+                    Debt(
+                        debtor_id=from_id,
+                        creditor_id=to_id,
+                        equivalent_id=eq_id,
+                        amount=drift_amt,
+                    )
                 )
-            )
         else:
             current = Decimal(str(debt.amount or 0))
             new_amount = current - drift_amt

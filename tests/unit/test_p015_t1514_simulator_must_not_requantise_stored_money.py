@@ -39,6 +39,8 @@ from app.core.simulator.trust_drift_engine import TrustDriftEngine
 from app.db.models.trustline import TrustLine
 from tests.unit.test_scenario_inject_topology import _make_run, _make_runner, _nonce
 
+from tests.debt_setup import debt_fixture_setup
+
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
@@ -81,14 +83,15 @@ async def _seed(db_session, *, existing_amount: Decimal, limit: Decimal):
             status="active",
         )
     )
-    db_session.add(
-        Debt(
-            debtor_id=debtor.id,
-            creditor_id=creditor.id,
-            equivalent_id=eq.id,
-            amount=existing_amount,
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add(
+            Debt(
+                debtor_id=debtor.id,
+                creditor_id=creditor.id,
+                equivalent_id=eq.id,
+                amount=existing_amount,
+            )
         )
-    )
     await db_session.flush()
     return eq, creditor, debtor
 

@@ -12,6 +12,8 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 
+from tests.debt_setup import debt_fixture_setup
+
 
 @pytest.mark.asyncio
 async def test_trust_drift_decay_never_shrinks_below_used_debt(db_session):
@@ -55,14 +57,15 @@ async def test_trust_drift_decay_never_shrinks_below_used_debt(db_session):
             status="active",
         )
     )
-    db_session.add(
-        Debt(
-            debtor_id=debtor.id,
-            creditor_id=creditor.id,
-            equivalent_id=eq.id,
-            amount=Decimal("99.00000001"),
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add(
+            Debt(
+                debtor_id=debtor.id,
+                creditor_id=creditor.id,
+                equivalent_id=eq.id,
+                amount=Decimal("99.00000001"),
+            )
         )
-    )
     await db_session.commit()
 
     run = RunRecord(

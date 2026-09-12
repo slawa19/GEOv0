@@ -10,6 +10,8 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import delete, select, text
 
+from tests.debt_setup import debt_fixture_setup
+
 
 pytestmark = pytest.mark.postgres
 
@@ -168,7 +170,8 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
                     ),
                 ]
             )
-            setup.add_all(debts)
+            async with debt_fixture_setup(setup, label="setup"):
+                setup.add_all(debts)
             await setup.commit()
 
         clearing_session = TestingSessionLocal()

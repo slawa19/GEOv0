@@ -25,6 +25,8 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.sqlite_transaction_control import sqlite_busy_error_name
 
+from tests.debt_setup import debt_fixture_setup
+
 
 @pytest.mark.asyncio
 async def test_a_stale_writer_cannot_overwrite_the_committed_debt_amount(db_session):
@@ -56,8 +58,9 @@ async def test_a_stale_writer_cannot_overwrite_the_committed_debt_amount(db_sess
     db_session.add_all([eq, a, b])
     await db_session.flush()
 
-    d = Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("100"))
-    db_session.add(d)
+    async with debt_fixture_setup(db_session, label="setup"):
+        d = Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("100"))
+        db_session.add(d)
     await db_session.commit()
 
     # Two separate sessions, so the second one holds a genuinely stale view of the row.

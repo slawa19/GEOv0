@@ -11,6 +11,8 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.utils.exceptions import IntegrityViolationException
 
+from tests.debt_setup import debt_fixture_setup
+
 
 @pytest.mark.asyncio
 async def test_debt_symmetry_violation_detected(db_session):
@@ -21,12 +23,13 @@ async def test_debt_symmetry_violation_detected(db_session):
     db_session.add_all([eq, a, b])
     await db_session.flush()
 
-    db_session.add_all(
-        [
-            Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("10")),
-            Debt(debtor_id=b.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("7")),
-        ]
-    )
+    async with debt_fixture_setup(db_session, label="asymmetric-debts"):
+        db_session.add_all(
+            [
+                Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("10")),
+                Debt(debtor_id=b.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("7")),
+            ]
+        )
     await db_session.flush()
 
     checker = InvariantChecker(db_session)
@@ -47,12 +50,13 @@ async def test_apply_flow_nets_mutual_debts(db_session):
     await db_session.flush()
 
     # Create mutual debts
-    db_session.add_all(
-        [
-            Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("10")),
-            Debt(debtor_id=b.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("7")),
-        ]
-    )
+    async with debt_fixture_setup(db_session, label="mutual-debts"):
+        db_session.add_all(
+            [
+                Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("10")),
+                Debt(debtor_id=b.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("7")),
+            ]
+        )
     await db_session.flush()
 
     engine = PaymentEngine(db_session)

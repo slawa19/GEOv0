@@ -13,6 +13,8 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 
+from tests.debt_setup import debt_fixture_setup
+
 
 @pytest.mark.asyncio
 async def test_integrity_checkpoint_propagates_unavailable_invariant_checker(
@@ -75,18 +77,19 @@ async def test_integrity_checkpoint_records_invariant_checks_when_healthy(db_ses
     db_session.add_all([eq, a, b])
     await db_session.flush()
 
-    debt = Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("5"))
-    db_session.add(debt)
-    db_session.add(
-        TrustLine(
-            from_participant_id=b.id,
-            to_participant_id=a.id,
-            equivalent_id=eq.id,
-            limit=Decimal("100"),
-            status="active",
-            policy={"auto_clearing": True},
+    async with debt_fixture_setup(db_session, label="setup"):
+        debt = Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("5"))
+        db_session.add(debt)
+        db_session.add(
+            TrustLine(
+                from_participant_id=b.id,
+                to_participant_id=a.id,
+                equivalent_id=eq.id,
+                limit=Decimal("100"),
+                status="active",
+                policy={"auto_clearing": True},
+            )
         )
-    )
     await db_session.commit()
 
     cp = await compute_integrity_checkpoint_for_equivalent(db_session, equivalent_id=eq.id)
@@ -145,17 +148,18 @@ async def test_integrity_checkpoint_marks_trust_limit_violation_as_critical(db_s
     db_session.add_all([eq, a, b])
     await db_session.flush()
 
-    db_session.add(Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("10")))
-    db_session.add(
-        TrustLine(
-            from_participant_id=b.id,
-            to_participant_id=a.id,
-            equivalent_id=eq.id,
-            limit=Decimal("5"),
-            status="active",
-            policy={"auto_clearing": True},
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add(Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("10")))
+        db_session.add(
+            TrustLine(
+                from_participant_id=b.id,
+                to_participant_id=a.id,
+                equivalent_id=eq.id,
+                limit=Decimal("5"),
+                status="active",
+                policy={"auto_clearing": True},
+            )
         )
-    )
     await db_session.commit()
 
     cp = await compute_integrity_checkpoint_for_equivalent(db_session, equivalent_id=eq.id)
@@ -177,32 +181,33 @@ async def test_integrity_checkpoint_marks_debt_symmetry_violation_as_warning(db_
     db_session.add_all([eq, a, b])
     await db_session.flush()
 
-    db_session.add_all(
-        [
-            Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("5")),
-            Debt(debtor_id=b.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("3")),
-        ]
-    )
-    db_session.add_all(
-        [
-            TrustLine(
-                from_participant_id=b.id,
-                to_participant_id=a.id,
-                equivalent_id=eq.id,
-                limit=Decimal("100"),
-                status="active",
-                policy={"auto_clearing": True},
-            ),
-            TrustLine(
-                from_participant_id=a.id,
-                to_participant_id=b.id,
-                equivalent_id=eq.id,
-                limit=Decimal("100"),
-                status="active",
-                policy={"auto_clearing": True},
-            ),
-        ]
-    )
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add_all(
+            [
+                Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("5")),
+                Debt(debtor_id=b.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("3")),
+            ]
+        )
+        db_session.add_all(
+            [
+                TrustLine(
+                    from_participant_id=b.id,
+                    to_participant_id=a.id,
+                    equivalent_id=eq.id,
+                    limit=Decimal("100"),
+                    status="active",
+                    policy={"auto_clearing": True},
+                ),
+                TrustLine(
+                    from_participant_id=a.id,
+                    to_participant_id=b.id,
+                    equivalent_id=eq.id,
+                    limit=Decimal("100"),
+                    status="active",
+                    policy={"auto_clearing": True},
+                ),
+            ]
+        )
     await db_session.commit()
 
     cp = await compute_integrity_checkpoint_for_equivalent(db_session, equivalent_id=eq.id)

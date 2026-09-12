@@ -11,6 +11,8 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.transaction import Transaction
 
+from tests.debt_setup import debt_fixture_setup
+
 
 def _sim_idempotency_key(
     *,
@@ -93,13 +95,14 @@ async def test_post_tick_audit_detects_drift(db_session: AsyncSession) -> None:
     db_session.add(tx)
 
     # Corrupt post-tick debt state: only 20 instead of 50.
-    debt = Debt(
-        debtor_id=sender.id,
-        creditor_id=receiver.id,
-        equivalent_id=eq.id,
-        amount=Decimal("20"),
-    )
-    db_session.add(debt)
+    async with debt_fixture_setup(db_session, label="setup"):
+        debt = Debt(
+            debtor_id=sender.id,
+            creditor_id=receiver.id,
+            equivalent_id=eq.id,
+            amount=Decimal("20"),
+        )
+        db_session.add(debt)
     await db_session.commit()
 
     payments_result = SimpleNamespace(planned=[planned_action], debt_snapshot={})

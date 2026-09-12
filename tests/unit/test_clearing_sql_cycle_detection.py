@@ -10,6 +10,8 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 
+from tests.debt_setup import debt_fixture_setup
+
 
 @pytest.mark.asyncio
 async def test_find_cycles_uses_sql_triangles(db_session):
@@ -22,22 +24,23 @@ async def test_find_cycles_uses_sql_triangles(db_session):
     await db_session.flush()
 
     # A -> B -> C -> A
-    db_session.add_all(
-        [
-            Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("10")),
-            Debt(debtor_id=b.id, creditor_id=c.id, equivalent_id=eq.id, amount=Decimal("10")),
-            Debt(debtor_id=c.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("10")),
-        ]
-    )
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add_all(
+            [
+                Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("10")),
+                Debt(debtor_id=b.id, creditor_id=c.id, equivalent_id=eq.id, amount=Decimal("10")),
+                Debt(debtor_id=c.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("10")),
+            ]
+        )
 
-    # Controlling trustlines (creditor -> debtor) must exist for auto-clearing consent.
-    db_session.add_all(
-        [
-            TrustLine(from_participant_id=b.id, to_participant_id=a.id, equivalent_id=eq.id, limit=Decimal("100")),
-            TrustLine(from_participant_id=c.id, to_participant_id=b.id, equivalent_id=eq.id, limit=Decimal("100")),
-            TrustLine(from_participant_id=a.id, to_participant_id=c.id, equivalent_id=eq.id, limit=Decimal("100")),
-        ]
-    )
+        # Controlling trustlines (creditor -> debtor) must exist for auto-clearing consent.
+        db_session.add_all(
+            [
+                TrustLine(from_participant_id=b.id, to_participant_id=a.id, equivalent_id=eq.id, limit=Decimal("100")),
+                TrustLine(from_participant_id=c.id, to_participant_id=b.id, equivalent_id=eq.id, limit=Decimal("100")),
+                TrustLine(from_participant_id=a.id, to_participant_id=c.id, equivalent_id=eq.id, limit=Decimal("100")),
+            ]
+        )
     await db_session.commit()
 
     service = ClearingService(db_session)
@@ -61,23 +64,24 @@ async def test_find_cycles_uses_sql_quadrangles(db_session):
     await db_session.flush()
 
     # A -> B -> C -> D -> A
-    db_session.add_all(
-        [
-            Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("10")),
-            Debt(debtor_id=b.id, creditor_id=c.id, equivalent_id=eq.id, amount=Decimal("10")),
-            Debt(debtor_id=c.id, creditor_id=d.id, equivalent_id=eq.id, amount=Decimal("10")),
-            Debt(debtor_id=d.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("10")),
-        ]
-    )
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add_all(
+            [
+                Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("10")),
+                Debt(debtor_id=b.id, creditor_id=c.id, equivalent_id=eq.id, amount=Decimal("10")),
+                Debt(debtor_id=c.id, creditor_id=d.id, equivalent_id=eq.id, amount=Decimal("10")),
+                Debt(debtor_id=d.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("10")),
+            ]
+        )
 
-    db_session.add_all(
-        [
-            TrustLine(from_participant_id=b.id, to_participant_id=a.id, equivalent_id=eq.id, limit=Decimal("100")),
-            TrustLine(from_participant_id=c.id, to_participant_id=b.id, equivalent_id=eq.id, limit=Decimal("100")),
-            TrustLine(from_participant_id=d.id, to_participant_id=c.id, equivalent_id=eq.id, limit=Decimal("100")),
-            TrustLine(from_participant_id=a.id, to_participant_id=d.id, equivalent_id=eq.id, limit=Decimal("100")),
-        ]
-    )
+        db_session.add_all(
+            [
+                TrustLine(from_participant_id=b.id, to_participant_id=a.id, equivalent_id=eq.id, limit=Decimal("100")),
+                TrustLine(from_participant_id=c.id, to_participant_id=b.id, equivalent_id=eq.id, limit=Decimal("100")),
+                TrustLine(from_participant_id=d.id, to_participant_id=c.id, equivalent_id=eq.id, limit=Decimal("100")),
+                TrustLine(from_participant_id=a.id, to_participant_id=d.id, equivalent_id=eq.id, limit=Decimal("100")),
+            ]
+        )
     await db_session.commit()
 
     service = ClearingService(db_session)
@@ -111,28 +115,29 @@ async def test_find_cycles_filters_auto_clearing_policy_and_falls_back_to_quadra
 
     # Triangle (A->B, B->C, C->A) exists, but we will block it via one controlling trustline.
     # Quadrangle (A->B, B->D, D->E, E->A) exists and is fully consenting.
-    db_session.add_all(
-        [
-            Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("10")),
-            Debt(debtor_id=b.id, creditor_id=c.id, equivalent_id=eq.id, amount=Decimal("10")),
-            Debt(debtor_id=c.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("10")),
-            Debt(debtor_id=b.id, creditor_id=d.id, equivalent_id=eq.id, amount=Decimal("10")),
-            Debt(debtor_id=d.id, creditor_id=e.id, equivalent_id=eq.id, amount=Decimal("10")),
-            Debt(debtor_id=e.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("10")),
-        ]
-    )
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add_all(
+            [
+                Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("10")),
+                Debt(debtor_id=b.id, creditor_id=c.id, equivalent_id=eq.id, amount=Decimal("10")),
+                Debt(debtor_id=c.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("10")),
+                Debt(debtor_id=b.id, creditor_id=d.id, equivalent_id=eq.id, amount=Decimal("10")),
+                Debt(debtor_id=d.id, creditor_id=e.id, equivalent_id=eq.id, amount=Decimal("10")),
+                Debt(debtor_id=e.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("10")),
+            ]
+        )
 
-    # Controlling trustlines are creditor->debtor for each debt edge.
-    db_session.add_all(
-        [
-            TrustLine(from_participant_id=b.id, to_participant_id=a.id, equivalent_id=eq.id, limit=Decimal("100"), policy={"auto_clearing": True}),
-            TrustLine(from_participant_id=c.id, to_participant_id=b.id, equivalent_id=eq.id, limit=Decimal("100"), policy={"auto_clearing": False}),
-            TrustLine(from_participant_id=a.id, to_participant_id=c.id, equivalent_id=eq.id, limit=Decimal("100"), policy={"auto_clearing": True}),
-            TrustLine(from_participant_id=d.id, to_participant_id=b.id, equivalent_id=eq.id, limit=Decimal("100"), policy={"auto_clearing": True}),
-            TrustLine(from_participant_id=e.id, to_participant_id=d.id, equivalent_id=eq.id, limit=Decimal("100"), policy={"auto_clearing": True}),
-            TrustLine(from_participant_id=a.id, to_participant_id=e.id, equivalent_id=eq.id, limit=Decimal("100"), policy={"auto_clearing": True}),
-        ]
-    )
+        # Controlling trustlines are creditor->debtor for each debt edge.
+        db_session.add_all(
+            [
+                TrustLine(from_participant_id=b.id, to_participant_id=a.id, equivalent_id=eq.id, limit=Decimal("100"), policy={"auto_clearing": True}),
+                TrustLine(from_participant_id=c.id, to_participant_id=b.id, equivalent_id=eq.id, limit=Decimal("100"), policy={"auto_clearing": False}),
+                TrustLine(from_participant_id=a.id, to_participant_id=c.id, equivalent_id=eq.id, limit=Decimal("100"), policy={"auto_clearing": True}),
+                TrustLine(from_participant_id=d.id, to_participant_id=b.id, equivalent_id=eq.id, limit=Decimal("100"), policy={"auto_clearing": True}),
+                TrustLine(from_participant_id=e.id, to_participant_id=d.id, equivalent_id=eq.id, limit=Decimal("100"), policy={"auto_clearing": True}),
+                TrustLine(from_participant_id=a.id, to_participant_id=e.id, equivalent_id=eq.id, limit=Decimal("100"), policy={"auto_clearing": True}),
+            ]
+        )
     await db_session.commit()
 
     # Sanity: ensure our policy was actually persisted as False on the controlling edge.
@@ -187,14 +192,15 @@ async def test_find_quadrangles_sql_rejects_repeated_vertex_b_equals_d(db_sessio
     await db_session.flush()
 
     # Pattern: A -> B -> C -> B -> A (B repeats as the 4th vertex).
-    db_session.add_all(
-        [
-            Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("10")),
-            Debt(debtor_id=b.id, creditor_id=c.id, equivalent_id=eq.id, amount=Decimal("10")),
-            Debt(debtor_id=c.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("10")),
-            Debt(debtor_id=b.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("10")),
-        ]
-    )
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add_all(
+            [
+                Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("10")),
+                Debt(debtor_id=b.id, creditor_id=c.id, equivalent_id=eq.id, amount=Decimal("10")),
+                Debt(debtor_id=c.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("10")),
+                Debt(debtor_id=b.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("10")),
+            ]
+        )
     await db_session.commit()
 
     service = ClearingService(db_session)

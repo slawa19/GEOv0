@@ -41,6 +41,8 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.utils.exceptions import IntegrityViolationException
 
+from tests.debt_setup import debt_fixture_setup
+
 _QUANTUM = Decimal("0.00000001")
 
 
@@ -64,14 +66,15 @@ async def _seed(db_session: AsyncSession, stored_amount: Decimal):
     )
     db_session.add_all([eq, sender, receiver])
     await db_session.flush()
-    db_session.add(
-        Debt(
-            debtor_id=sender.id,
-            creditor_id=receiver.id,
-            equivalent_id=eq.id,
-            amount=stored_amount,
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add(
+            Debt(
+                debtor_id=sender.id,
+                creditor_id=receiver.id,
+                equivalent_id=eq.id,
+                amount=stored_amount,
+            )
         )
-    )
     await db_session.commit()
     return eq, sender, receiver
 

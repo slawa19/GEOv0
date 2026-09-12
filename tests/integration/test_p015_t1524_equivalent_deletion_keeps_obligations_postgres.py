@@ -37,6 +37,8 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from tests.integration.p012_pg_http import make_pg_client_fixture
 
+from tests.debt_setup import debt_fixture_setup
+
 pytestmark = pytest.mark.postgres
 
 pg_client = make_pg_client_fixture()
@@ -62,13 +64,14 @@ async def _seed(*, with_debt: bool):
         await s.flush()
         debt_id = None
         if with_debt:
-            debt = Debt(
-                debtor_id=debtor.id,
-                creditor_id=creditor.id,
-                equivalent_id=eq.id,
-                amount=Decimal("42.00000000"),
-            )
-            s.add(debt)
+            async with debt_fixture_setup(s, label="setup"):
+                debt = Debt(
+                    debtor_id=debtor.id,
+                    creditor_id=creditor.id,
+                    equivalent_id=eq.id,
+                    amount=Decimal("42.00000000"),
+                )
+                s.add(debt)
             await s.flush()
             debt_id = debt.id
         await s.commit()

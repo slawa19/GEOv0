@@ -34,6 +34,8 @@ from app.core.simulator.models import RunRecord
 from app.core.simulator.real_runner import RealRunner
 from tests.scratch_db import install_test_sqlite_pragmas, scratch_db_path, scratch_db_url
 
+from tests.debt_setup import debt_fixture_setup
+
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -146,10 +148,11 @@ async def _seed_network(session: AsyncSession) -> tuple[str, list[str]]:
             equivalent_id=eq.id, limit=Decimal("500.00"), status="active",
             policy={"auto_clearing": True, "can_be_intermediate": True},
         ))
-        session.add(Debt(
-            debtor_id=parts[i].id, creditor_id=parts[j].id,
-            equivalent_id=eq.id, amount=Decimal("30.00"),
-        ))
+        async with debt_fixture_setup(session, label="setup"):
+            session.add(Debt(
+                debtor_id=parts[i].id, creditor_id=parts[j].id,
+                equivalent_id=eq.id, amount=Decimal("30.00"),
+            ))
 
     await session.commit()
     return "UAH", [p.pid for p in parts]

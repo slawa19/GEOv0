@@ -35,6 +35,8 @@ from app.core.simulator.models import RunRecord
 from app.core.simulator.real_runner import RealRunner
 from tests.scratch_db import install_test_sqlite_pragmas, scratch_db_path, scratch_db_url
 
+from tests.debt_setup import debt_fixture_setup
+
 
 # ---------------------------------------------------------------------------
 # Isolated SQLite DB
@@ -159,14 +161,15 @@ async def _seed_triangle(session: AsyncSession) -> tuple[str, list[str]]:
         )
 
     for i, j in pairs:
-        session.add(
-            Debt(
-                debtor_id=parts[i].id,
-                creditor_id=parts[j].id,
-                equivalent_id=eq.id,
-                amount=Decimal("50.00"),
+        async with debt_fixture_setup(session, label="setup"):
+            session.add(
+                Debt(
+                    debtor_id=parts[i].id,
+                    creditor_id=parts[j].id,
+                    equivalent_id=eq.id,
+                    amount=Decimal("50.00"),
+                )
             )
-        )
 
     await session.commit()
     return "UAH", [p.pid for p in parts]

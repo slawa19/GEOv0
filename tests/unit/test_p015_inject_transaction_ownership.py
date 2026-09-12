@@ -38,6 +38,8 @@ from app.db.sqlite_transaction_control import sqlite_busy_error_name
 from tests.conftest import TestingSessionLocal, engine as _test_engine
 from tests.unit.test_scenario_inject_topology import _make_run, _make_runner, _nonce
 
+from tests.debt_setup import debt_fixture_setup
+
 
 # ---------------------------------------------------------------------------
 # Stand
@@ -90,14 +92,15 @@ async def _seed_debt_world(db_session, *, existing: Decimal | None = None) -> _W
         )
     )
     if existing is not None:
-        db_session.add(
-            Debt(
-                debtor_id=debtor.id,
-                creditor_id=creditor.id,
-                equivalent_id=eq.id,
-                amount=existing,
+        async with debt_fixture_setup(db_session, label="existing-debt"):
+            db_session.add(
+                Debt(
+                    debtor_id=debtor.id,
+                    creditor_id=creditor.id,
+                    equivalent_id=eq.id,
+                    amount=existing,
+                )
             )
-        )
     await db_session.commit()
     return _World(eq.id, eq.code, creditor.id, creditor.pid, debtor.id, debtor.pid)
 
