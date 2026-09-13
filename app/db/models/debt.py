@@ -9,8 +9,19 @@ class Debt(Base):
     __tablename__ = "debts"
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    debtor_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey('participants.id', ondelete='CASCADE'), nullable=False, index=True)
-    creditor_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey('participants.id', ondelete='CASCADE'), nullable=False, index=True)
+    # RESTRICT, not CASCADE - T1533 of programme 015, the participant half of the same defect
+    # T1524 closed for the equivalent below. Deleting a participant removed every obligation they
+    # owed or were owed INSIDE THE DATABASE: no Debt instance loaded, no grant, no `_RowState`, no
+    # journal entry - so the debt journal cannot observe it by construction and neither can anything
+    # else in the application. Measured on the migrated schema at head 024 before this change:
+    # `DELETE FROM participants` returned `DELETE 1` with no error and `SUM(amount)` over the
+    # equivalent went 925.31000000 -> 0.
+    # The protocol never asks for the row to go: `docs/en/02-protocol-spec.md` §3.1 gives a
+    # participant a `status` of `active | suspended | left | deleted`, and `deleted` is that status,
+    # not a missing row. There is no participant hard-delete endpoint in `app/`.
+    # Migration 025 makes the same change on existing databases.
+    debtor_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey('participants.id', ondelete='RESTRICT'), nullable=False, index=True)
+    creditor_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey('participants.id', ondelete='RESTRICT'), nullable=False, index=True)
     # RESTRICT, not CASCADE - T1524 of programme 015. Deleting an equivalent must never delete
     # the obligations denominated in it. Under CASCADE the database removed them itself, with no
     # Debt row ever loaded, so no application code, audit or journal hook could see a single
