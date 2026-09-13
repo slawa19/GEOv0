@@ -134,6 +134,25 @@ the two closing statements observed is a refusal (`_lost_savepoint_closes`). The
 is inverted in the same spirit - the SQL is the primary fact, an unrecorded rollback of a bound
 savepoint poisons - but the inversion alone does not reach the scenario above, because a prevented
 event prevents the statement, and that is said where it matters rather than only here.
+
+AND THE OPERATION BOUNDARY NOW HAS A STATE MODEL INSTEAD OF A FIFTH ONE-WAY SUBTRACTION (T1538,
+2026-09-13). Four checks in this module in a row proved a local membership relation and called it a
+correspondence, and the external direction assessment read that as one missing model rather than as
+four slips. The completion check was the clearest case: `Counter(stored) - computed` passes on an
+EMPTY stored set, so an envelope could complete with `effect_count = 0` and a digest over nothing
+while the debt movement it was opened to record committed. Its own docstring defended the asymmetry
+and the defence was TRUE - a `StaleDataError` retry in `PaymentEngine._apply_flow` rolls its flush
+back to a savepoint and takes that flush's entries with it - but the consequence was that the
+missing-entry direction was switched off for every operation, always.
+
+What was missing was not a check, it was the fact a check needs: WHICH ATTEMPTS ARE STILL IN THE
+TRANSACTION. The savepoint account T1532 built from the SQL stream now distinguishes its two
+closings - a `RELEASE` keeps the work, a `ROLLBACK TO` undoes it and everything nested inside it -
+each flush records the savepoint tokens it ran inside, and completion compares STORED ENTRIES with
+SURVIVING EFFECTS as an exact multiset, in both directions. A rolled-back attempt is subtracted by
+name rather than tolerated by omission, so the legitimate retry still passes and an entry that is
+simply not there no longer does. This is DETECTION of accidental divergence - a writer's defect or
+this module's - and not a barrier against in-process code, which can edit the comparison itself.
 """
 
 from __future__ import annotations
@@ -230,6 +249,7 @@ class Reason:
     VERIFIED_WRITE_MISSING = "verified_write_missing"
     UNRECONCILED_DEBT_ROW = "unreconciled_debt_row"
     UNRECORDED_JOURNAL_ENTRY = "unrecorded_journal_entry"
+    LOST_JOURNAL_ENTRY = "lost_journal_entry"
     UNREADABLE_VERIFICATION = "unreadable_verification"
     LOST_SAVEPOINT_CLOSE = "lost_savepoint_close"
     UNRECORDED_SAVEPOINT_ROLLBACK = "unrecorded_savepoint_rollback"
@@ -344,6 +364,15 @@ class _OpRecord:
         self.state = self.OPENING
         self.flush_count = 0
         self.effects: list[_Effect] = []
+        #: flush ordinal -> the savepoint tokens that flush's SQL ran inside, outermost first.
+        #:
+        #: THE ATTEMPT ACCOUNT (T1538). An effect is a claim that money moved; whether that claim
+        #: is still TRUE at completion depends on whether the scope it was made in survived, and
+        #: this is where that scope is written down. Tokens and not names - see `_Savepoint` - and
+        #: keyed by the flush rather than held on `_Effect`, because a flush is the unit that is
+        #: undone: every effect of one flush shares its fate, and `_Effect` is the tuple the digest
+        #: and the stored-row comparison are built from, which must stay exactly the entry's shape.
+        self.attempts: dict[int, tuple[int, ...]] = {}
         self._root_ref = weakref.ref(root)
         self._session_ref = weakref.ref(session)
         self._boundary_ref = weakref.ref(session_boundary) if session_boundary is not None else None
@@ -374,6 +403,23 @@ class _OpRecord:
         return f"<_OpRecord {self.kind}/{self.identity} {self.state}>"
 
 
+@dataclass(frozen=True)
+class _Savepoint:
+    """One savepoint the SQL stream showed opening, and the identity the journal knows it by.
+
+    THE TOKEN AND NOT THE NAME IS THE IDENTITY (T1538). A savepoint name is SQLAlchemy's
+    (`sa_savepoint_<n>`, from a counter that lives on the `Connection` and is reset by
+    `Connection.__init__`), so it is unique inside one transaction on this tree and NOT unique by
+    construction - a future SQLAlchemy, a dialect that names its own savepoints, or a writer using
+    `begin_nested(name=...)` could reuse one. What the attempt account below has to answer is
+    "was the scope THIS flush ran in undone", and two different scopes that happen to share a name
+    must not answer as one. The token is handed out once per observed `SAVEPOINT` and never reused.
+    """
+
+    name: str
+    token: int
+
+
 @dataclass
 class _TxState:
     """The journal's state for ONE database transaction."""
@@ -390,7 +436,16 @@ class _TxState:
     #: module's - before even the per-connection registration T1528 added - and an exception there
     #: stops the journal from ever learning that a rollback was asked for. `after_cursor_execute`,
     #: on the other hand, can only be pre-empted by a listener that lets the statement run first.
-    savepoints_open: list[str] = field(default_factory=list)
+    savepoints_open: list[_Savepoint] = field(default_factory=list)
+    #: The next token to hand a savepoint. Monotonic for the life of this transaction's state.
+    next_savepoint_token: int = 0
+    #: Every savepoint token whose scope the SQL stream showed being UNDONE - `ROLLBACK TO
+    #: SAVEPOINT` observed for it, or for a savepoint outside it (T1538).
+    #:
+    #: A `RELEASE` does not land here, and that is the whole distinction this set exists to make:
+    #: released work stays in the transaction, rolled-back work does not, and until today the
+    #: journal kept no difference between the two once the savepoint was gone.
+    rolled_back_savepoints: set[int] = field(default_factory=set)
     generation: int = 0
 
 
@@ -1504,8 +1559,17 @@ def _savepoint_statement(statement: str) -> tuple[str, str] | None:
     return None
 
 
+def _open_index(state: _TxState, name: str) -> int | None:
+    """Where `name` sits in the open stack, or None when the stream never showed it open."""
+
+    for index, savepoint in enumerate(state.savepoints_open):
+        if savepoint.name == name:
+            return index
+    return None
+
+
 def _observe_savepoint(state: _TxState, kind: str, name: str) -> None:
-    """Keep `savepoints_open` as the SQL stream leaves it.
+    """Keep `savepoints_open` as the SQL stream leaves it, AND say which way each scope ended.
 
     A `RELEASE` and a `ROLLBACK TO` both end every savepoint established AFTER their own, which is
     SQL's rule and not a convenience: those savepoints get no statement of their own, so a stack that
@@ -1513,14 +1577,27 @@ def _observe_savepoint(state: _TxState, kind: str, name: str) -> None:
     TO` leaves its own savepoint usable in SQL but finished as far as SQLAlchemy is concerned - it
     issues no `RELEASE` afterwards - and this stack exists to be compared against SQLAlchemy's
     nesting, so it follows SQLAlchemy.
+
+    THE TWO CLOSINGS ARE NOT THE SAME EVENT, and treating them as one is what left the completion
+    boundary with nothing to reason about (T1538). Both take a savepoint off the stack; only one of
+    them takes the rows with it. `_surviving_effects` needs exactly that difference, so the rollback
+    branch records every token it undid - its own and every one nested inside it, because
+    `ROLLBACK TO SAVEPOINT x` undoes everything after `x` and not merely `x`'s own statements.
     """
 
     if kind == "open":
-        if name not in state.savepoints_open:
-            state.savepoints_open.append(name)
+        if _open_index(state, name) is None:
+            state.savepoints_open.append(_Savepoint(name, state.next_savepoint_token))
+            state.next_savepoint_token += 1
         return
-    if name in state.savepoints_open:
-        del state.savepoints_open[state.savepoints_open.index(name) :]
+    index = _open_index(state, name)
+    if index is None:
+        return
+    if kind == "rollback":
+        state.rolled_back_savepoints.update(
+            savepoint.token for savepoint in state.savepoints_open[index:]
+        )
+    del state.savepoints_open[index:]
 
 
 def _lost_savepoint_closes(conn: Connection, state: _TxState, ops: list[_OpRecord]) -> list[str]:
@@ -1545,7 +1622,11 @@ def _lost_savepoint_closes(conn: Connection, state: _TxState, ops: list[_OpRecor
     if not bound:
         return []
     live = set(_core_chain(conn))
-    return [name for name in state.savepoints_open if name in bound and name not in live]
+    return [
+        savepoint.name
+        for savepoint in state.savepoints_open
+        if savepoint.name in bound and savepoint.name not in live
+    ]
 
 
 def _on_after_cursor_execute(
@@ -2008,6 +2089,13 @@ def _before_flush(session: Session, flush_context: Any, instances: Any) -> None:
 
     op.flush_count = ordinal
     op.effects.extend(effects)
+    # WHICH SCOPE THIS FLUSH IS ABOUT TO RUN IN, read from the SQL stream's own account rather than
+    # from SQLAlchemy's nesting (T1538). Taken HERE, before a single statement of the flush is sent:
+    # the savepoints that will cover this flush's writes are exactly the ones already open, and a
+    # savepoint opened later cannot cover what was written before it existed. `_after_flush` is too
+    # late to ask - it runs after the debt SQL, and a scope entered in between would be recorded as
+    # covering rows it does not cover.
+    op.attempts[ordinal] = tuple(savepoint.token for savepoint in state.savepoints_open)
     _GRANTS[conn] = _Grant(session_id=id(session), expected=expected)
     session.info["geo.journal.flush"] = (op, effects, states)
 
@@ -2356,13 +2444,19 @@ def _verify_entries(conn: Connection, op: _OpRecord, ordinal: int, effects: list
     which is why this runs before the operation can complete and not as a later audit.
 
     WHICH HALF IS LOAD-BEARING HERE, MEASURED AND NOT ASSUMED (2026-09-13). The `stored - recorded`
-    half overlaps with `_complete`'s membership check: removing it alone changes no verdict, because
-    an invented or altered row is refused one step later, at the digest. The `recorded - stored` half
-    does NOT overlap with anything - a MISSING entry is legitimate at completion time (a savepoint
-    rollback takes a flush's entries with it, migration 023), so this readback is the only place in
-    the mechanism that can see one. Both halves are kept: the overlapping one refuses earlier and
-    names the flush, and a check that is only correct because another check exists is the
-    downstream-compensation reasoning `AGENTS.md` §9 forbids.
+    half overlaps with `_complete`'s check: removing it alone changes no verdict, because an invented
+    or altered row is refused one step later, at the digest. The `recorded - stored` half did NOT
+    overlap with anything WHEN THIS WAS WRITTEN - a MISSING entry was legitimate at completion time
+    under every circumstance (a savepoint rollback takes a flush's entries with it, migration 023),
+    so this readback was then the only place in the mechanism that could see one.
+
+    THAT LAST SENTENCE STOPPED BEING TRUE ON THE SAME DAY, and it is corrected rather than deleted
+    because it records WHY this half exists (T1538). The completion boundary now subtracts
+    rolled-back attempts by name instead of tolerating every absence, so it sees a missing entry too.
+    What is left to this one is what the other cannot do: it refuses EARLIER - before the next flush
+    can build on a record that is already wrong - and it names the flush. Both halves are kept, and a
+    check that is only correct because another check exists is the downstream-compensation reasoning
+    `AGENTS.md` §9 forbids.
 
     THROUGH `exec_driver_sql` (T1531): this read must not be rewritable by the same neighbour that
     rewrote the INSERT it is checking.
@@ -2388,20 +2482,78 @@ def _verify_entries(conn: Connection, op: _OpRecord, ordinal: int, effects: list
     )
 
 
-def _verify_completed_entries(record: _OpRecord, stored: list[tuple[Any, ...]]) -> None:
-    """Every entry stored for this operation must be one the operation COMPUTED (T1530).
+def _rolled_back_flush(record: _OpRecord, state: _TxState, ordinal: int) -> bool:
+    """Whether flush `ordinal`'s writes were undone by a savepoint rollback the SQL stream showed.
 
-    `_verify_entries` held each flush's entries to that flush's effects; this holds the whole set at
-    the moment the completion digest is taken, which is the only way the digest describes verified
-    rows rather than whatever the table happens to contain by then. The window between the two is
-    real and not theoretical: `exec_driver_sql` dispatches no `before_execute`, so a neighbour can
-    alter a stored entry after the flush that wrote it was verified.
+    A flush no attempt was recorded for answers False, and that is fail-closed rather than lenient:
+    an unrecorded attempt means the journal cannot say the scope was undone, and an effect it cannot
+    say was undone is one it must still find an entry for. The only flush without a recorded attempt
+    is one whose `_before_flush` never ran, and such a flush has no effects either.
+    """
 
-    MEMBERSHIP AND NOT EQUALITY, and the asymmetry is measured rather than convenient: entries CAN
-    legitimately be missing, because a `StaleDataError` retry in `PaymentEngine._apply_flow` rolls its
-    flush back to a savepoint and takes that flush's entries with it (migration 023). Nothing, though,
-    can legitimately ADD or ALTER a row - so the one-way check is the strongest one that is true here,
-    and saying so is the point.
+    attempt = record.attempts.get(ordinal)
+    if not attempt:
+        return False
+    return any(token in state.rolled_back_savepoints for token in attempt)
+
+
+def _surviving_effects(record: _OpRecord, state: _TxState) -> list[_Effect]:
+    """The effects of this operation that are still in the transaction at completion.
+
+    `record.effects` is everything the hook ever computed, ATTEMPTS INCLUDED. A flush whose savepoint
+    was rolled back wrote rows that are no longer there, and its effects describe money that no
+    longer moved; counting them as outstanding would refuse the main payment path's own retry.
+    Counting them as gone when their savepoint was RELEASED would do the opposite. The difference is
+    exactly what `_observe_savepoint` now records, and nothing else here is allowed to guess it.
+    """
+
+    return [
+        effect
+        for effect in record.effects
+        if not _rolled_back_flush(record, state, effect.flush_ordinal)
+    ]
+
+
+def _verify_completed_entries(
+    record: _OpRecord, state: _TxState, stored: list[tuple[Any, ...]]
+) -> None:
+    """The surviving effects and the stored entries are the SAME SET - in both directions (T1538).
+
+    WHAT THIS REPLACED, AND WHY THE REPLACEMENT IS A STATE MODEL RATHER THAN A FIFTH SUBTRACTION.
+    Until today this was `Counter(stored) - computed`, a membership test in one direction, and its
+    docstring defended the asymmetry: entries CAN legitimately be missing, because a `StaleDataError`
+    retry in `PaymentEngine._apply_flow` rolls its flush back to a savepoint and takes that flush's
+    entries with it (migration 023). The defence was true and the consequence was that the other
+    direction was switched off for EVERY operation, always - an EMPTY stored set passed, so an
+    envelope could complete with `effect_count = 0` and a digest taken over nothing while the debt
+    movement it was opened to record committed. A guard that cannot fail on the class it is aimed at
+    is the vacuum `AGENTS.md` §9 forbids, and it was the fourth one-directional check in this module
+    in a row - which the direction assessment of 2026-09-13 read, correctly, as a MISSING STATE MODEL
+    rather than as four separate slips.
+
+    THE STATE THAT WAS MISSING is "which attempts are still in the transaction". It could not be
+    written before T1532, because before T1532 the journal learned about savepoints from events that
+    a neighbour can pre-empt; the account is now kept from the SQL stream, where `SAVEPOINT`,
+    `RELEASE SAVEPOINT` and `ROLLBACK TO SAVEPOINT` are statements that either ran or did not. With
+    that account, "the entries legitimately went back with their savepoint" and "the entries are not
+    there" stop being the same observation: the first names a rolled-back attempt, the second does
+    not, and only the second is a record disagreeing with what happened.
+
+    SO THE CHECK IS EQUALITY, as a multiset, and it says what the operation boundary is for:
+
+        surviving computed effects  ==  entries stored for this operation
+
+    Each side refuses its own failure. A stored row that is not a surviving effect is a record of a
+    movement this operation did not make (`UNRECORDED_JOURNAL_ENTRY`, which is what the old check
+    caught). A surviving effect with no stored row is a movement with no record
+    (`LOST_JOURNAL_ENTRY`), and until now nothing in this module could see one at completion.
+
+    WHAT IT DOES NOT REACH, stated rather than left to be discovered. The comparison is between the
+    journal's own effect list and the journal's own table. The effect list was held to `debts` by
+    `_reconcile` at each flush, so "surviving committed debt effects" is represented here rather than
+    re-read; a debt row changed AFTER its flush reconciled is outside this boundary and is T1536,
+    which is parked. This is DETECTION of accidental divergence - a writer's defect, or this
+    module's - and not a barrier against in-process code, which can edit the check itself.
 
     A FUNCTION AND NOT AN INLINE BLOCK, because a guard that cannot be addressed cannot be stood down
     in the one place that has to stand every guard down in turn - the counter-check in
@@ -2409,15 +2561,26 @@ def _verify_completed_entries(record: _OpRecord, stored: list[tuple[Any, ...]]) 
     `F-012-1` by disabling each guard that stands in front of it and asserting each refusal on the way.
     """
 
-    computed = Counter(_effect_code(effect) for effect in record.effects)
-    unaccounted = Counter(stored) - computed
-    if not unaccounted:
+    surviving = Counter(_effect_code(effect) for effect in _surviving_effects(record, state))
+    held = Counter(stored)
+    if held == surviving:
         return
+    unaccounted = held - surviving
+    lost = surviving - held
+    reason = Reason.UNRECORDED_JOURNAL_ENTRY if unaccounted else Reason.LOST_JOURNAL_ENTRY
+    parts = []
+    if unaccounted:
+        parts.append(
+            f"stored and not computed by any surviving attempt: {sorted(unaccounted.elements())}"
+        )
+    if lost:
+        parts.append(f"computed by a surviving attempt and not stored: {sorted(lost.elements())}")
     raise DebtJournalError(
-        Reason.UNRECORDED_JOURNAL_ENTRY,
-        f"entries stored for {record.kind}/{record.identity} describe movements this operation never "
-        f"computed: {sorted(unaccounted.elements())}. The completion digest will not be taken over "
-        f"rows the journal cannot account for.",
+        reason,
+        f"the entries stored for {record.kind}/{record.identity} are not the movements this "
+        f"operation still claims: " + "; ".join(parts) + ". Rolled-back attempts are already "
+        f"accounted for, so what is left is a record that disagrees with what happened. The "
+        f"completion digest will not be taken over it.",
         operation_id=str(record.id),
     )
 
@@ -2935,7 +3098,7 @@ async def _complete(session: Any, conn: Connection, state: _TxState, record: _Op
             rows = (await async_conn.exec_driver_sql(sql, params)).fetchall()
         encoded_rows = [_stored_entry_code(row, dialect) for row in rows]
 
-        _verify_completed_entries(record, encoded_rows)
+        _verify_completed_entries(record, state, encoded_rows)
 
         encoded = sorted(encoded_rows, key=lambda code: (code[0], code[1], code[2], code[3]))
         ordered = [

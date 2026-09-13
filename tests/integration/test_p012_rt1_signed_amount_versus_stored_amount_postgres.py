@@ -515,7 +515,12 @@ async def test_rt_012_1_counter_check_widening_the_door_reproduces_the_finding_e
     # completion check that holds every stored entry to the effects the operation computed before the
     # digest is taken. Standing only the first down leaves the second refusing the same row, which is
     # how this staircase found it.
-    monkeypatch.setattr(journal, "_verify_completed_entries", lambda record, stored: None)
+    # The third argument arrived with T1538, which turned this check from a one-way membership test
+    # into an exact correspondence and had to be handed the transaction's savepoint account to do it.
+    # A stand-down whose shape has drifted from the guard's raises `TypeError` INSIDE the payment and
+    # is reported as `500 E010` - the same answer a real refusal gives - so this staircase would go on
+    # reading as "the guard still speaks" while measuring nothing (measured 2026-09-13).
+    monkeypatch.setattr(journal, "_verify_completed_entries", lambda record, state, stored: None)
 
     status_code, body = await _submit_signed_payment(pg_client, scenario, amount)
     assert status_code == 409, (
