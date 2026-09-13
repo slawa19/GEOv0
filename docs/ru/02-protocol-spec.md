@@ -1830,7 +1830,8 @@ LEFT JOIN trust_lines tl ON
     tl.from_participant_id = d.creditor_id 
     AND tl.to_participant_id = d.debtor_id
     AND tl.equivalent_id = d.equivalent_id
-    AND tl.status = 'active'
+    -- frozen сверяется с сохранённым лимитом (§3.3, §11.5.2); closed или отсутствующая линия — лимит 0
+    AND tl.status IN ('active', 'frozen')
 WHERE d.amount > COALESCE(tl.limit, 0);
 ```
 

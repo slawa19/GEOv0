@@ -93,7 +93,7 @@ class InvariantChecker:
         """Check trust limit invariant.
 
         Invariant: debt[debtor→creditor, E] ≤ trustline[creditor→debtor, E].limit
-        (active trustline only; missing trustline treated as limit 0).
+        (active or frozen trustline at its stored limit; closed or missing treated as limit 0).
         """
 
         tl = TrustLine
@@ -113,7 +113,7 @@ class InvariantChecker:
                     tl.from_participant_id == Debt.creditor_id,
                     tl.to_participant_id == Debt.debtor_id,
                     tl.equivalent_id == Debt.equivalent_id,
-                    tl.status == "active",
+                    tl.status.in_(("active", "frozen")),
                 ),
             )
             .where(Debt.amount > func.coalesce(tl.limit, Decimal("0")))
