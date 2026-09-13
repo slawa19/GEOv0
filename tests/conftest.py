@@ -24,6 +24,11 @@ from app.db.base import Base  # noqa: E402
 from app.db.sqlite_transaction_control import install_sqlite_transaction_control  # noqa: E402
 from app.main import app  # noqa: E402
 from scripts.validate_test_database_url import assert_safe_test_database_url  # noqa: E402
+from tests.migrated_schema import (  # noqa: E402
+    ALEMBIC_VERSION_BOOTSTRAP,
+    repository_head,
+    run_alembic_upgrade_head,
+)
 from tests.scratch_db import install_test_sqlite_pragmas  # noqa: E402
 
 # --- Database Fixtures ---
@@ -158,6 +163,82 @@ _schema_ready = False
 _schema_lock = asyncio.Lock()
 
 
+async def _build_migrated_schema() -> None:
+    """Build this run's schema WITH THE MIGRATIONS, and refuse if that did not happen (T1534).
+
+    WHAT THIS REPLACED AND WHY IT WAS NOT ENOUGH TO REPAIR IT IN PLACE. Until 2026-09-13 the whole
+    body of the `GEO_TEST_USE_MIGRATED_SCHEMA=1` branch was `SELECT version_num FROM alembic_version`:
+    it built no schema at all - neither migrations nor `create_all` - so the database stayed whatever
+    it had once been and went stale by an unknown amount while the flag reported that all was well.
+    Measured that day on `geov0_test_ci`: stamped `022_debt_journal` with the tree at `024`, missing
+    `chk_debt_journal_entries_delta_arithmetic`, and the PostgreSQL gate went red only because new
+    tests happened to need that constraint. Without them it would have been GREEN ON A SCHEMA MISSING
+    A MONEY CONSTRAINT.
+
+    WHY IT BUILDS INSTEAD OF CHECKING, which is the whole design decision. Comparing the stamp with
+    the repository head is the cheap repair and it is not sufficient here, measured rather than
+    argued: `alembic_version` is not part of `Base.metadata`, so ONE ordinary flag-OFF run of this
+    same conftest replaces every application table via `drop_all` + `create_all` AND LEAVES THE STAMP
+    AT HEAD. Reproduced on `geov0_test_t1534` on 2026-09-13 - stamp `024_debt_journal_delta`,
+    `debt_operations` carrying SQLAlchemy's `debt_operations_pkey` instead of migration 022's
+    `pk_debt_operations`, 87 constraints against 90 and 82 indexes against 93, and
+    `chk_equivalents_code_format` gone. A stamp comparison accepts that database. Reaching provenance
+    by CHECKING needs a migrated database to compare the catalogue against, and building one costs an
+    entire `alembic upgrade head`; building THIS one costs the same and leaves nothing to infer.
+
+    THE PRICE, measured on this machine: 5.6 s once per session, against a ~175 s PostgreSQL gate.
+
+    The tables are dropped first on purpose. `alembic upgrade head` against a database that already
+    holds a `create_all` schema and a head stamp is a no-op, and a no-op would preserve exactly the
+    state this exists to destroy.
+    """
+
+    head = repository_head()
+
+    async with engine.begin() as conn:
+        # DROP, including `alembic_version`, so what stands afterwards can only be the migrations'.
+        # The names come from the catalogue, so nothing here is interpolated from data.
+        existing = (
+            await conn.execute(
+                text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
+            )
+        ).scalars().all()
+        for table_name in existing:
+            await conn.exec_driver_sql(f'DROP TABLE IF EXISTS public."{table_name}" CASCADE')
+        for statement in ALEMBIC_VERSION_BOOTSTRAP:
+            await conn.exec_driver_sql(statement)
+
+    # Blocking, inside the loop, on purpose: nothing else in this session may proceed until the
+    # schema exists, and `migrations/env.py` ends in `asyncio.run(...)` so it cannot be awaited.
+    run_alembic_upgrade_head(TEST_DATABASE_URL)
+
+    async with engine.connect() as conn:
+        stamps = (
+            await conn.execute(text("SELECT version_num FROM alembic_version"))
+        ).scalars().all()
+        built = (
+            await conn.execute(
+                text("SELECT count(*) FROM pg_tables WHERE schemaname = 'public'")
+            )
+        ).scalar_one()
+
+    if stamps != [head]:
+        raise RuntimeError(
+            f"GEO_TEST_USE_MIGRATED_SCHEMA=1: the migrations were run and the database is stamped "
+            f"{stamps!r} instead of the repository head [{head!r}]. Refusing rather than testing "
+            f"against a schema whose provenance is unknown."
+        )
+    # NON-VACUITY: a run that dropped everything and then built nothing would also end stamped at
+    # head if `alembic_version` alone survived, and that is indistinguishable from success by the
+    # check above. `tests/integration/test_p015_t1534_the_migrated_schema_flag_is_true_postgres.py`
+    # is what asserts the shape of what was built.
+    if built < 2:
+        raise RuntimeError(
+            f"GEO_TEST_USE_MIGRATED_SCHEMA=1: `alembic upgrade head` reported success and the "
+            f"`public` schema holds {built} table(s). Nothing was built."
+        )
+
+
 async def _ensure_schema_initialized() -> None:
     global _schema_ready
     if _schema_ready:
@@ -168,8 +249,7 @@ async def _ensure_schema_initialized() -> None:
             return
 
         if _use_migrated_schema:
-            async with engine.connect() as conn:
-                await conn.execute(text("SELECT version_num FROM alembic_version"))
+            await _build_migrated_schema()
             _schema_ready = True
             return
 
