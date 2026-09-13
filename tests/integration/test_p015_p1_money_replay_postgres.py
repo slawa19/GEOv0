@@ -78,6 +78,7 @@ from app.db.models.trustline import TrustLine
 from app.utils.exceptions import RetryablePaymentConflictException
 
 from tests.debt_setup import debt_fixture_setup
+from tests.debt_setup import purge_test_ledger
 
 pytestmark = pytest.mark.postgres
 
@@ -169,6 +170,11 @@ async def _seed(session_factory) -> _World:
 async def _cleanup(session_factory, world: _World) -> None:
     ids = [world.sender.id, world.receiver.id, world.outsider_a.id, world.outsider_b.id]
     async with session_factory() as s:
+        # The debts AND the journal rows that describe them, through the driver and BEFORE the
+        # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
+        # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
+        # envelope still standing would block the transaction delete above it.
+        await purge_test_ledger(s, equivalent_ids=[world.equivalent.id])
         tx_ids = list(
             (
                 await s.execute(
@@ -179,7 +185,6 @@ async def _cleanup(session_factory, world: _World) -> None:
         if tx_ids:
             await s.execute(delete(PrepareLock).where(PrepareLock.tx_id.in_(tx_ids)))
             await s.execute(delete(Transaction).where(Transaction.tx_id.in_(tx_ids)))
-        await s.execute(delete(Debt).where(Debt.equivalent_id == world.equivalent.id))
         await s.execute(delete(TrustLine).where(TrustLine.equivalent_id == world.equivalent.id))
         await s.execute(delete(Participant).where(Participant.id.in_(ids)))
         await s.execute(delete(Equivalent).where(Equivalent.id == world.equivalent.id))
@@ -329,7 +334,11 @@ def _competitor_after_snapshot(
                         )
                     )
                 ).scalar_one()
-                debt.amount = Decimal(str(debt.amount)) + amount
+                # Declared, because it IS a movement of money: the journal asks every writer to
+                # name the operation that moved it, a competitor's included.
+                raised = Decimal(str(debt.amount)) + amount
+                async with debt_fixture_setup(other, label="the-competitor"):
+                    debt.amount = raised
                 await other.commit()
         return snapshot
 

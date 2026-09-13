@@ -56,6 +56,7 @@ from app.db.models.participant import Participant
 from app.utils.exceptions import RetryablePaymentConflictException
 
 from tests.debt_setup import debt_fixture_setup
+from tests.debt_setup import purge_test_ledger
 
 pytestmark = pytest.mark.postgres
 
@@ -134,7 +135,11 @@ async def _cleanup(factory, world: _World) -> None:
     explicitly, and this teardown never leans on a cascade to do its work.
     """
     async with factory() as session:
-        await session.execute(delete(Debt).where(Debt.equivalent_id == world.equivalent_id))
+        # The debts AND the journal rows that describe them, through the driver and BEFORE the
+        # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
+        # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
+        # envelope still standing would block the transaction delete above it.
+        await purge_test_ledger(session, equivalent_ids=[world.equivalent_id])
         await session.execute(delete(Equivalent).where(Equivalent.id == world.equivalent_id))
         await session.execute(
             delete(Participant).where(
@@ -197,15 +202,24 @@ async def _a_real_terminal_raised_inside_a_real_40001_handler(
         await loser.execute(select(Debt.amount).where(Debt.debtor_id == world.debtor_id))
         await winner.execute(select(Debt.amount).where(Debt.debtor_id == world.debtor_id))
 
-        await winner.execute(
-            update(Debt).where(Debt.debtor_id == world.debtor_id).values(amount=7)
-        )
+        # BOTH WRITES GO THROUGH THE ORM, INSIDE A DECLARED OPERATION. They used to be Core
+        # `update(Debt)`, which the journal's write guard refuses outright (`C2`) whether or not an
+        # operation is open, because a Core statement is not in the flush plan the hook verified.
+        # The serialization failure this helper produces is unchanged: two SERIALIZABLE transactions
+        # read the same row and then write it.
+        winning = (
+            await winner.execute(select(Debt).where(Debt.debtor_id == world.debtor_id))
+        ).scalar_one()
+        async with debt_fixture_setup(winner, label="the-winner"):
+            winning.amount = 7
         await winner.commit()
 
         try:
-            await loser.execute(
-                update(Debt).where(Debt.debtor_id == world.debtor_id).values(amount=9)
-            )
+            losing = (
+                await loser.execute(select(Debt).where(Debt.debtor_id == world.debtor_id))
+            ).scalar_one()
+            async with debt_fixture_setup(loser, label="the-loser"):
+                losing.amount = 9
             await loser.flush()
         except DBAPIError as conflict:
             assert getattr(conflict.orig, "sqlstate", None) == "40001", conflict

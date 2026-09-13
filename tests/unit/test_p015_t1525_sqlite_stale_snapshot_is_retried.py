@@ -50,7 +50,7 @@ from tests.unit.test_p015_t1525_sqlite_savepoint_is_not_a_transaction import (
     _stored_debts,
 )
 
-from tests.debt_setup import debt_fixture_setup
+from tests.debt_setup import debt_fixture_setup, purge_test_ledger
 
 _CONCURRENT = Decimal("3.25")
 
@@ -75,16 +75,39 @@ async def _make_outsiders(factory, world: _World) -> tuple[Participant, Particip
 def _inject_concurrent_commit(monkeypatch, factory, world: _World, x, y, *, only_first: bool):
     """Commit a debt from ANOTHER session in the middle of the payment's commit unit of work.
 
-    The hook is `_snapshot_net_positions`: by then the committing transaction has done its reads and
-    holds a snapshot, and its first write (`_apply_flow`) is still ahead. `only_first=True` lets the
-    second attempt succeed; `only_first=False` keeps every attempt losing the race.
-    """
-    # Counts INJECTIONS, not calls: `_snapshot_net_positions` runs twice per successful unit of work
-    # (once before the flows, once inside `check_payment_delta`), so calls are not attempts.
-    injections: list[int] = []
-    original = PaymentEngine._snapshot_net_positions
+    THE HOOK IS `_load_prepare_locks`, AND IT USED TO BE `_snapshot_net_positions`. The requirement
+    on the hook has not changed - it must fire after the committing transaction has read and before
+    its FIRST WRITE - but that first write moved. Until the debt journal was armed (step 4 slice C)
+    the first write was `_apply_flow`, well after the net-position snapshot; the journal now opens
+    the payment's operation at the top of the unit of work and INSERTs its envelope there, so the
+    transaction takes SQLite's write lock before the snapshot is taken.
 
-    async def _let_someone_else_commit_first(self, **kwargs):
+    Injecting after the envelope therefore produced a different scenario entirely (measured
+    2026-09-12): the second session could not commit at all, `database is locked` propagated out of
+    this hook, and the payment retried on `SQLITE_BUSY` - a collision over the write lock instead of
+    a stale snapshot. `_load_prepare_locks` runs before the operation opens, so the window this test
+    is about is where it always was.
+
+    `only_first=True` lets the second attempt succeed; `only_first=False` keeps every attempt losing
+    the race.
+    """
+    # ONE INJECTION PER ATTEMPT, keyed on the `SessionTransaction` itself. `_load_prepare_locks`
+    # runs more than once per unit of work (`engine.py:1129`, `:1206`, and again inside `abort`), so
+    # counting calls does not count attempts - and the budget assertion in the second test counts
+    # attempts. Each retry rolls back and begins a new `SessionTransaction`, so its identity is what
+    # separates one attempt from the next.
+    # INJECTIONS ARE NOT ATTEMPTS, and the tests below count attempts from the retry log rather
+    # than from this list. `_load_prepare_locks` runs more than once per unit of work
+    # (`engine.py:1129`, `:1206`, and again inside `abort`), so every call is beaten and the count
+    # here is "how many times a competitor got in", not "how many attempts there were". Two earlier
+    # attempts to make it one-per-attempt are recorded as failures of the stand, not of the code:
+    # counting calls modulo two assumed a call count this path does not keep, and keying on the
+    # `SessionTransaction` was subtly wrong because `get_transaction()` does not return the same
+    # object across a unit of work.
+    injections: list[int] = []
+    original = PaymentEngine._load_prepare_locks
+
+    async def _let_someone_else_commit_first(self, *args, **kwargs):
         if not (only_first and injections):
             injections.append(1)
             async with factory() as other:
@@ -110,11 +133,17 @@ def _inject_concurrent_commit(monkeypatch, factory, world: _World, x, y, *, only
                             )
                         )
                 else:
-                    debt.amount = Decimal(str(debt.amount)) + _CONCURRENT
+                    # Declared like the insert above it. Slice B migrated the `if` branch and not
+                    # this one, which was invisible while the journal was inert: raising an existing
+                    # debt is as much a movement of money as creating one, and the journal refuses
+                    # an undeclared UPDATE exactly as it refuses an undeclared INSERT.
+                    raised = Decimal(str(debt.amount)) + _CONCURRENT
+                    async with debt_fixture_setup(other, label="raise-concurrent"):
+                        debt.amount = raised
                 await other.commit()
-        return await original(self, **kwargs)
+        return await original(self, *args, **kwargs)
 
-    monkeypatch.setattr(PaymentEngine, "_snapshot_net_positions", _let_someone_else_commit_first)
+    monkeypatch.setattr(PaymentEngine, "_load_prepare_locks", _let_someone_else_commit_first)
     return injections
 
 
@@ -189,9 +218,17 @@ async def test_a_payment_that_loses_the_snapshot_race_is_retried_and_commits(
         assert state == "COMMITTED"
     finally:
         async with TestingSessionLocal() as s:
+            # Through the driver: a Core DELETE against `debts` is what the journal's write guard
+            # refuses (that is `C2`), and a teardown is not a money write (design v2 §8 R6). The
+            # ids come from `uuid.UUID` objects, so nothing here is interpolated from data.
+            # The journal's foreign keys to `participants` are RESTRICT (`C17`: history outlives
+            # the debts, so it must outlive their referents), so the history these two wrote goes
+            # before they do.
+            await purge_test_ledger(s, equivalent_ids=[world.equivalent.id])
+            connection = await s.connection()
             for participant in (x, y):
-                await s.execute(
-                    Debt.__table__.delete().where(Debt.debtor_id == participant.id)
+                await connection.exec_driver_sql(
+                    "DELETE FROM debts WHERE debtor_id = ?", (participant.id.hex,)
                 )
             await s.execute(
                 Participant.__table__.delete().where(Participant.id.in_([x.id, y.id]))
@@ -202,7 +239,7 @@ async def test_a_payment_that_loses_the_snapshot_race_is_retried_and_commits(
 
 @pytest.mark.asyncio
 async def test_a_payment_that_keeps_losing_the_race_is_refused_after_a_finite_budget(
-    db_session, monkeypatch
+    db_session, monkeypatch, caplog
 ) -> None:
     """Counter-proof for the retry budget: a permanently losing payment refuses, it does not loop.
 
@@ -219,17 +256,31 @@ async def test_a_payment_that_keeps_losing_the_race_is_refused_after_a_finite_bu
     tx_id = f"t1525-budget-{uuid.uuid4().hex[:12]}"
     world.tx_ids.add(tx_id)
     try:
-        with pytest.raises(RetryablePaymentConflictException):
-            async with TestingSessionLocal() as session:
-                await PaymentService(session).create_payment_internal(
-                    world.sender.id,
-                    to_pid=world.receiver.pid,
-                    equivalent=world.equivalent.code,
-                    amount=str(_PAYMENT),
-                    idempotency_key=tx_id,
-                )
-        # Every attempt was beaten, and there were exactly as many attempts as the budget allows.
-        assert len(injections) == int(settings.COMMIT_RETRY_ATTEMPTS), injections
+        with caplog.at_level("WARNING", logger="app.core.payments.engine"):
+            with pytest.raises(RetryablePaymentConflictException):
+                async with TestingSessionLocal() as session:
+                    await PaymentService(session).create_payment_internal(
+                        world.sender.id,
+                        to_pid=world.receiver.pid,
+                        equivalent=world.equivalent.code,
+                        amount=str(_PAYMENT),
+                        idempotency_key=tx_id,
+                    )
+        # Every attempt was beaten...
+        assert injections, "stand: no competitor ever got in, so nothing was beaten"
+        # ... and there were exactly as many attempts as the budget allows, counted where the
+        # wrapper says so: one retry line per re-run, so the budget is spent when there are
+        # `COMMIT_RETRY_ATTEMPTS - 1` of them. See the note above `injections`.
+        # `op=commit` ONLY. The hook is `_load_prepare_locks`, which `abort` calls as well, so the
+        # abort that follows the spent budget is beaten too and logs retries of its own. Those are
+        # real and are not the subject: this test is about the COMMIT unit of work's budget.
+        retries = [
+            record.getMessage()
+            for record in caplog.records
+            if "event=payment.uow_retry op=commit" in record.getMessage()
+        ]
+        assert len(retries) == int(settings.COMMIT_RETRY_ATTEMPTS) - 1, retries
+        assert all("SQLITE_BUSY_SNAPSHOT" in line for line in retries), retries
         debts = await _stored_debts(TestingSessionLocal, world)
         assert (world.sender.pid, world.receiver.pid) not in debts, debts
         async with TestingSessionLocal() as fresh:
@@ -239,9 +290,17 @@ async def test_a_payment_that_keeps_losing_the_race_is_refused_after_a_finite_bu
         assert state != "COMMITTED", state
     finally:
         async with TestingSessionLocal() as s:
+            # Through the driver: a Core DELETE against `debts` is what the journal's write guard
+            # refuses (that is `C2`), and a teardown is not a money write (design v2 §8 R6). The
+            # ids come from `uuid.UUID` objects, so nothing here is interpolated from data.
+            # The journal's foreign keys to `participants` are RESTRICT (`C17`: history outlives
+            # the debts, so it must outlive their referents), so the history these two wrote goes
+            # before they do.
+            await purge_test_ledger(s, equivalent_ids=[world.equivalent.id])
+            connection = await s.connection()
             for participant in (x, y):
-                await s.execute(
-                    Debt.__table__.delete().where(Debt.debtor_id == participant.id)
+                await connection.exec_driver_sql(
+                    "DELETE FROM debts WHERE debtor_id = ?", (participant.id.hex,)
                 )
             await s.execute(
                 Participant.__table__.delete().where(Participant.id.in_([x.id, y.id]))
@@ -277,16 +336,21 @@ async def test_the_classifier_reads_the_error_code_and_refuses_everything_else(d
                     )
                 )
             await writer.commit()
-            async with debt_fixture_setup(reader, label="setup-2"):
-                reader.add(
-                    Debt(
-                        debtor_id=world.receiver.id,
-                        creditor_id=world.sender.id,
-                        equivalent_id=world.equivalent.id,
-                        amount=Decimal("2.00"),
-                    )
-                )
+            # THE EXPECTATION IS UNCHANGED - this write is refused - and only its BRACKET moved.
+            # Since the debt journal was armed (step 4 slice C) the fixture context completes by
+            # flushing, so the refusal arrives at the end of the block; a `pytest.raises` opened
+            # after the block would let it escape. The block does no flush of its own, so the
+            # statement that raises is the same one as before.
             with pytest.raises(DBAPIError) as busy:
+                async with debt_fixture_setup(reader, label="setup-2"):
+                    reader.add(
+                        Debt(
+                            debtor_id=world.receiver.id,
+                            creditor_id=world.sender.id,
+                            equivalent_id=world.equivalent.id,
+                            amount=Decimal("2.00"),
+                        )
+                    )
                 await reader.flush()
             engine_on_reader = PaymentEngine(reader)
             await reader.rollback()
@@ -298,16 +362,17 @@ async def test_the_classifier_reads_the_error_code_and_refuses_everything_else(d
 
         # 2. A real integrity error on the same backend must stay non-retryable.
         async with TestingSessionLocal() as session:
-            async with debt_fixture_setup(session, label="setup-3"):
-                session.add(
-                    Debt(
-                        debtor_id=uuid.uuid4(),  # no such participant
-                        creditor_id=world.receiver.id,
-                        equivalent_id=world.equivalent.id,
-                        amount=Decimal("1.00"),
-                    )
-                )
+            # Same bracket move as above, same reason.
             with pytest.raises(IntegrityError) as integrity:
+                async with debt_fixture_setup(session, label="setup-3"):
+                    session.add(
+                        Debt(
+                            debtor_id=uuid.uuid4(),  # no such participant
+                            creditor_id=world.receiver.id,
+                            equivalent_id=world.equivalent.id,
+                            amount=Decimal("1.00"),
+                        )
+                    )
                 await session.flush()
             engine_on_session = PaymentEngine(session)
             await session.rollback()

@@ -38,6 +38,7 @@ from app.db.models.trustline import TrustLine
 from app.utils.exceptions import GeoException
 
 from tests.debt_setup import debt_fixture_setup
+from tests.debt_setup import purge_test_ledger
 
 pytestmark = pytest.mark.postgres
 
@@ -122,7 +123,11 @@ async def _amounts(sessionmaker, eq_id) -> list[Decimal]:
 async def _cleanup(sessionmaker, eq_id, ids) -> None:
     participant_ids = [v for k, v in ids.items() if not k.startswith("pid:")]
     async with sessionmaker() as s:
-        await s.execute(delete(Debt).where(Debt.equivalent_id == eq_id))
+        # The debts AND the journal rows that describe them, through the driver and BEFORE the
+        # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
+        # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
+        # envelope still standing would block the transaction delete above it.
+        await purge_test_ledger(s, equivalent_ids=[eq_id])
         await s.execute(delete(TrustLine).where(TrustLine.equivalent_id == eq_id))
         # A successful clearing writes a CLEARING transaction whose initiator is one of
         # these participants, and the FK is ondelete=RESTRICT.

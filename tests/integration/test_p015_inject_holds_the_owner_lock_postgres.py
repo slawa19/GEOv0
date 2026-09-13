@@ -55,6 +55,7 @@ from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
+from tests.debt_setup import purge_test_ledger
 
 pytestmark = pytest.mark.postgres
 
@@ -187,7 +188,11 @@ async def _seed(factory) -> _World:
 async def _cleanup(factory, world: _World) -> None:
     eq_ids = [eq.id for eq in world.equivalents]
     async with factory() as s:
-        await s.execute(delete(Debt).where(Debt.equivalent_id.in_(eq_ids)))
+        # The debts AND the journal rows that describe them, through the driver and BEFORE the
+        # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
+        # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
+        # envelope still standing would block the transaction delete above it.
+        await purge_test_ledger(s, equivalent_ids=eq_ids)
         await s.execute(delete(TrustLine).where(TrustLine.equivalent_id.in_(eq_ids)))
         await s.execute(delete(Equivalent).where(Equivalent.id.in_(eq_ids)))
         await s.execute(

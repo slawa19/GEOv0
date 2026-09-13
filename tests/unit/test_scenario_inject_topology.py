@@ -1399,10 +1399,23 @@ async def test_inject_skipped_when_env_disabled() -> None:
 
 
 @pytest.mark.asyncio
-async def test_malformed_inject_effect_skipped() -> None:
-    """Malformed payload (missing fields) → skip + no crash."""
+async def test_malformed_inject_effect_skipped(db_session) -> None:
+    """Malformed payload (missing fields) → skip + no crash.
+
+    A REAL SESSION, and it stopped being optional. `_MockSession` carried this test until the debt
+    journal was armed (step 4 slice C): the inject unit of work now opens a debt operation before it
+    stages anything, and an operation needs a database connection, a transaction and a dialect - so
+    a double that answers `add`, `flush` and `commit` no longer reaches the code under test at all.
+    The subject is unchanged: every effect here is malformed, none of them is applied, and nothing
+    raises.
+    """
+    from sqlalchemy import select as _select
+
+    from app.db.models.participant import Participant as _Participant
+    from app.db.models.trustline import TrustLine as _TrustLine
+
     run = _make_run()
-    session = _MockSession()
+    session = db_session
 
     scenario: dict[str, Any] = {
         "participants": [],
@@ -1438,5 +1451,8 @@ async def test_malformed_inject_effect_skipped() -> None:
     # Event marked as fired.
     assert 0 in run._real_fired_scenario_event_indexes
 
-    # No participant/trustline added to the mock session.
-    assert len(session.added) == 0
+    # Nothing was created, read back from the database rather than from a list the double kept.
+    assert (
+        await session.execute(_select(_Participant.id).where(_Participant.pid == "PID_NEW"))
+    ).scalars().all() == []
+    assert (await session.execute(_select(_TrustLine.id))).scalars().all() == []

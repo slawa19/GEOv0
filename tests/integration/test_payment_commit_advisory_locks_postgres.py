@@ -14,6 +14,7 @@ from app.db.models.prepare_lock import PrepareLock
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 from app.utils.exceptions import RoutingException
+from tests.debt_setup import purge_test_ledger
 
 
 pytestmark = pytest.mark.postgres
@@ -158,15 +159,17 @@ async def _cleanup_seed(seed: dict) -> None:
         tx_ids.append(seed["waiter_tx_id"])
 
     async with TestingSessionLocal() as cleanup:
+        # The debts AND the journal rows that describe them, through the driver and BEFORE the
+        # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
+        # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
+        # envelope still standing would block the transaction delete above it.
+        await purge_test_ledger(cleanup, equivalent_ids=[seed["equivalent_id"]])
         await cleanup.execute(
             delete(IntegrityAuditLog).where(IntegrityAuditLog.tx_id.in_(tx_ids))
         )
         await cleanup.execute(delete(PrepareLock).where(PrepareLock.tx_id.in_(tx_ids)))
         await cleanup.execute(
             delete(Transaction).where(Transaction.tx_id.in_(tx_ids))
-        )
-        await cleanup.execute(
-            delete(Debt).where(Debt.equivalent_id == seed["equivalent_id"])
         )
         await cleanup.execute(
             delete(TrustLine).where(
@@ -456,7 +459,10 @@ async def test_concurrent_same_transaction_commit_applies_effects_once_postgres(
             retry_op, retry_code, retry_statement = observed_retry_errors[0]
             assert retry_op == "commit"
             assert retry_code in {"40001", "23505"}
-            assert "INSERT INTO debts" in retry_statement
+            # See the note in `test_payment_engine_uow_retry_postgres.py`: the envelope INSERT is
+            # the unit of work's first write since step 4 slice C, so it is the statement that
+            # meets the conflict.
+            assert "INSERT INTO debt_operations" in retry_statement, retry_statement
             exercise_completed = True
         finally:
             release_holder.set()

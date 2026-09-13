@@ -9,7 +9,7 @@ from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 
-from tests.debt_setup import debt_fixture_setup
+from tests.debt_setup import debt_fixture_setup, writer_operation
 
 
 @pytest.mark.asyncio
@@ -79,7 +79,14 @@ async def test_apply_flow_retries_on_stale_data(db_session):
     ).scalar_one()
 
     engine = PaymentEngine(db_session)
-    await engine._apply_flow(sender.id, receiver.id, Decimal("10"), eq.id)
+    # THE WRITER'S OWN OPERATION, not a fixture context (design v2 §8 R5/F7). `_apply_flow` is
+    # production code that moves money; called directly it opens no operation, and the journal
+    # refuses its flush. Declaring `TEST_FIXTURE` here would journal a payment's effects under the
+    # kind reserved for scaffolding, so the real kind is declared instead.
+    async with writer_operation(
+        db_session, kind="PAYMENT", equivalent_ids=[eq.id], initiator_id=sender.id
+    ):
+        await engine._apply_flow(sender.id, receiver.id, Decimal("10"), eq.id)
 
     updated = (
         await db_session.execute(select(Debt).where(Debt.id == debt.id))

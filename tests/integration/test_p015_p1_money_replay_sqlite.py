@@ -328,7 +328,13 @@ def _competitor_after_snapshot(
                             )
                         )
                 else:
-                    existing.amount = Decimal(str(existing.amount)) + amount
+                    # Declared like the insert above it. Slice B migrated the `if` branch and not
+                    # this one, which was invisible while the journal was inert: raising an existing
+                    # debt is as much a movement of money as creating one, and the journal refuses
+                    # an undeclared UPDATE exactly as it refuses an undeclared INSERT.
+                    raised = Decimal(str(existing.amount)) + amount
+                    async with debt_fixture_setup(other, label="raise-competitor"):
+                        existing.amount = raised
                 await other.commit()
         return snapshot
 

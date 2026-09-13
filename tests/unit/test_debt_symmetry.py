@@ -11,7 +11,7 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.utils.exceptions import IntegrityViolationException
 
-from tests.debt_setup import debt_fixture_setup
+from tests.debt_setup import debt_fixture_setup, writer_operation
 
 
 @pytest.mark.asyncio
@@ -60,9 +60,16 @@ async def test_apply_flow_nets_mutual_debts(db_session):
     await db_session.flush()
 
     engine = PaymentEngine(db_session)
+    # THE WRITER'S OWN OPERATION, not a fixture context (design v2 §8 R5/F7). `_apply_flow` is
+    # production code that moves money; called directly it opens no operation, and the journal
+    # refuses its flush. Declaring `TEST_FIXTURE` here would journal a payment's effects under the
+    # kind reserved for scaffolding, so the real kind is declared instead.
     # Apply a flow A->B that would normally add debt A->B, but engine should net mutual.
-    await engine._apply_flow(a.id, b.id, Decimal("0"), eq.id)
-    await db_session.flush()
+    async with writer_operation(
+        db_session, kind="PAYMENT", equivalent_ids=[eq.id], initiator_id=a.id
+    ):
+        await engine._apply_flow(a.id, b.id, Decimal("0"), eq.id)
+        await db_session.flush()
 
     debts = (
         await db_session.execute(

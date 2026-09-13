@@ -262,7 +262,15 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
             try:
                 async with engine.begin() as conn:
                     for table in reversed(Base.metadata.sorted_tables):
-                        await conn.execute(table.delete())
+                        # `exec_driver_sql` and NOT `conn.execute(table.delete())`, since the debt
+                        # journal was armed (programme 015 step 4 slice C): a Core DELETE against
+                        # `debts` or against the three journal tables is refused by the write guard,
+                        # and rightly - it is exactly the shape of an unrecorded money write. A test
+                        # reset is not a money write, it is the disposal of a whole test database,
+                        # so it goes round the guard the way design v2 §8 R6 says it may: through
+                        # the driver, which fires no `before_execute` at all. The table names come
+                        # from `Base.metadata`, so nothing here is interpolated from data.
+                        await conn.exec_driver_sql(f'DELETE FROM "{table.name}"')
                 break
             except OperationalError as e:
                 msg = str(e).lower()

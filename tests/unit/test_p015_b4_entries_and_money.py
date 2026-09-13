@@ -30,10 +30,10 @@ the counterexample is precisely a value outside it. Those tests do not go throug
 first, and say so in the failure text, so that "the dialect changed this number" can never be
 confused with "this test used a number the tier cannot hold".
 
-MARKER. This module carries `b4_counterexample` and is deselected from the canonical gate. It is
-red on purpose until step 4 exists, and STEP 4 REMOVES THE MARKER, NOT THE ASSERTIONS - the full
-contract is in the comment above the marker list in `pytest.ini`, and
-`tests/unit/test_p015_b4_counterexample_marker_is_not_a_hiding_place.py` holds it in place.
+MARKER, HISTORICAL. This module carried `b4_counterexample` and was deselected from the canonical
+gate while the debt journal did not exist. Step 4 slice C built it and REMOVED THE MARKER, not the
+assertions: every test below still asserts exactly what it asserted while it was red, and each one
+names in its docstring the mutation that must turn it red again.
 """
 
 from __future__ import annotations
@@ -46,13 +46,14 @@ import uuid
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import event, select, text
+from sqlalchemy import Uuid as SaUuid, bindparam, event, select, text
 from sqlalchemy.exc import DatabaseError, StatementError
 from sqlalchemy.orm.exc import StaleDataError
 
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
+from tests.debt_setup import debt_fixture_setup
 from tests.p015_b4_support import (
     ENTRIES_TABLE,
     JOURNAL_MODULE,
@@ -70,8 +71,6 @@ from tests.p015_b4_support import (
     stored_operations,
     stored_rows,
 )
-
-pytestmark = pytest.mark.b4_counterexample
 
 
 def _identity(name: str) -> str:
@@ -182,29 +181,43 @@ async def _round_trip_through_the_real_database(factory, world: World, value: De
     counterexamples stand on - never an analytical claim about floats, always what this database on
     this dialect actually kept (`AGENTS.md` §1, "никаких гипотез из памяти сессии").
     """
+    from app.core.ledger import journal
+    from tests.conftest import engine
+
     row_id = uuid.uuid4()
+    # THE JOURNAL STANDS DOWN FOR THIS MEASUREMENT, and it must. What is being measured here is what
+    # THE DIALECT does with a value - the ground truth every money counterexample above stands on -
+    # and a journal that refused the write would replace that measurement with its own opinion: the
+    # non-vacuity assertion "this database really would change this number" would then be proven by
+    # the very rule it is supposed to justify. So the write guard is lifted on this engine for the
+    # round trip and re-armed immediately afterwards. Nothing else in the process is affected: the
+    # stand-down is per engine (`app/core/ledger/journal.py`, `uninstall_write_guard`).
+    journal.uninstall_write_guard(engine)
     try:
-        async with factory() as session:
-            session.add(
-                Debt(
-                    id=row_id,
-                    debtor_id=world.debtor.id,
-                    creditor_id=world.creditor.id,
-                    equivalent_id=world.equivalent.id,
-                    amount=value,
-                    version=0,
+        try:
+            async with factory() as session:
+                session.add(
+                    Debt(
+                        id=row_id,
+                        debtor_id=world.debtor.id,
+                        creditor_id=world.creditor.id,
+                        equivalent_id=world.equivalent.id,
+                        amount=value,
+                        version=0,
+                    )
                 )
-            )
-            await session.commit()
-    except (DatabaseError, StatementError) as exc:
-        return None, exc
-    async with factory() as fresh:
-        stored = (
-            await fresh.execute(select(Debt.amount).where(Debt.id == row_id))
-        ).scalar_one_or_none()
-    async with factory() as cleanup:
-        await cleanup.execute(Debt.__table__.delete().where(Debt.id == row_id))
-        await cleanup.commit()
+                await session.commit()
+        except (DatabaseError, StatementError) as exc:
+            return None, exc
+        async with factory() as fresh:
+            stored = (
+                await fresh.execute(select(Debt.amount).where(Debt.id == row_id))
+            ).scalar_one_or_none()
+        async with factory() as cleanup:
+            await cleanup.execute(Debt.__table__.delete().where(Debt.id == row_id))
+            await cleanup.commit()
+    finally:
+        journal.install_write_guard(engine)
     return (None if stored is None else Decimal(str(stored))), None
 
 
@@ -312,8 +325,13 @@ async def test_c4_an_amount_change_and_a_delete_in_one_flush_are_one_effect(db_s
     world = await seed_world(factory)
     identity = _identity("zero-then-delete")
     try:
+        starting_edge = world.debt("10.00")
         async with factory() as setup:
-            setup.add(world.debt("10.00"))
+            # Built before the block: `fixture_block_violations` allows only constructors and session
+            # calls inside one, and `world.debt(...)` is indistinguishable in the AST from a helper that
+            # drives a writer. Same object, same single `add`, same flush.
+            async with debt_fixture_setup(setup, label="starting-edge"):
+                setup.add(starting_edge)
             await setup.commit()
 
         async with factory() as session:
@@ -419,8 +437,13 @@ async def test_c4_a_deleted_edge_that_comes_back_is_an_insert_and_not_an_update(
     world = await seed_world(factory)
     identity = _identity("reinsert")
     try:
+        starting_edge = world.debt("10.00")
         async with factory() as setup:
-            setup.add(world.debt("10.00"))
+            # Built before the block: `fixture_block_violations` allows only constructors and session
+            # calls inside one, and `world.debt(...)` is indistinguishable in the AST from a helper that
+            # drives a writer. Same object, same single `add`, same flush.
+            async with debt_fixture_setup(setup, label="starting-edge"):
+                setup.add(starting_edge)
             await setup.commit()
 
         async with factory() as session:
@@ -534,10 +557,15 @@ async def test_c12_a_value_this_dialect_cannot_hold_is_refused_before_any_debt_s
                     refusal = await _refusal_or_database_error(api, session.flush())
                 if refusal is None:
                     refusal = await _refusal_or_database_error(api, session.commit())
-        except (DatabaseError, StatementError) as exc:
+        except (DatabaseError, StatementError, *api.refusals) as exc:
             # The database's own complaint is not the journal's refusal, and the `sent` assertion
             # below is what says so. Recorded here only so the scenario finishes.
-            refusal = exc
+            #
+            # A journal refusal can arrive here as well, from the operation's own completion: the
+            # hook refused the flush and poisoned the root, the Debt is still pending, and closing
+            # the block flushes it again. The FIRST refusal is the one that names the money
+            # predicate, so it is the one kept.
+            refusal = refusal if refusal is not None else exc
         finally:
             event.remove(engine.sync_engine, "before_execute", recorder)
 
@@ -641,19 +669,26 @@ async def test_condition4_a_delta_this_dialect_cannot_hold_is_refused_though_bot
         )
 
         async with factory() as setup:
-            setup.add(
-                Debt(
-                    id=uuid.uuid4(),
-                    debtor_id=world.debtor.id,
-                    creditor_id=world.creditor.id,
-                    equivalent_id=world.equivalent.id,
-                    amount=start,
-                    version=0,
+            async with debt_fixture_setup(setup, label="delta-start"):
+                setup.add(
+                    Debt(
+                        id=uuid.uuid4(),
+                        debtor_id=world.debtor.id,
+                        creditor_id=world.creditor.id,
+                        equivalent_id=world.equivalent.id,
+                        amount=start,
+                        version=0,
+                    )
                 )
-            )
             await setup.commit()
 
         recorder = _watch_debt_statements(engine)
+        refusal = None
+        # THE BLOCK EXIT REFUSES TOO, and that is the journal working. The hook refused this
+        # flush and poisoned the root; the operation context then tries to complete, flushes the
+        # Debt that is still pending, and is refused again for the poison. The FIRST refusal - the
+        # one that names the money predicate - is the one this test is about, so it is kept and the
+        # second is only allowed to end the scenario.
         try:
             async with factory() as session:
                 async with await _open(api, session, world, "delta-storability"):
@@ -666,6 +701,8 @@ async def test_condition4_a_delta_this_dialect_cannot_hold_is_refused_though_bot
                     refusal = await refusal_of(api, session.flush())
                 if refusal is None:
                     await refusal_of(api, session.commit())
+        except api.refusals as exc:  # noqa: B902 - the refusal contract is the subject under test
+            refusal = refusal if refusal is not None else exc
         finally:
             event.remove(engine.sync_engine, "before_execute", recorder)
 
@@ -937,13 +974,19 @@ async def test_c17_a_row_the_journal_history_names_cannot_be_deleted(db_session,
             f"journal's: {debts_now}"
         )
 
+        # THE ID IS BOUND AS A UUID, not as its dashed string: `Uuid(as_uuid=True)` stores the
+        # 32-character hex on SQLite, so `WHERE id = '<dashed>'` matched no row at all, deleted
+        # nothing, raised nothing - and "the database allowed it" below was reporting a DELETE that
+        # never happened. Measured 2026-09-12 while arming the journal. `text()` is still what is
+        # executed, so this remains the raw-SQL path the case is about.
+        uuid_bind = bindparam("id", type_=SaUuid(as_uuid=True))
         if target == "equivalent":
-            statement = text("DELETE FROM equivalents WHERE id = :id")
-            params = {"id": str(world.equivalent.id)}
+            statement = text("DELETE FROM equivalents WHERE id = :id").bindparams(uuid_bind)
+            params = {"id": world.equivalent.id}
             survivors = select(Equivalent.id).where(Equivalent.id == world.equivalent.id)
         else:
-            statement = text("DELETE FROM participants WHERE id = :id")
-            params = {"id": str(world.debtor.id)}
+            statement = text("DELETE FROM participants WHERE id = :id").bindparams(uuid_bind)
+            params = {"id": world.debtor.id}
             survivors = select(Participant.id).where(Participant.id == world.debtor.id)
 
         error = None
@@ -992,13 +1035,17 @@ async def test_c18_entries_come_from_the_attempt_that_succeeded_and_not_the_stal
     captured `amount_before` when the attribute was first loaded would record a continuity that
     never existed, and step 6 would reconstruct the edge from a number no database ever held.
 
-    TWO SESSIONS, ONE CONNECTION, and that is not a compromise. Since T1525 this tier takes real
-    snapshots, so two independent SQLite writers cannot coexist - the second fails with
-    `database is locked`, which is a fact about the stand and not about the journal. Sharing one
-    `Connection` is also the HARDER case for the design under test: one Core root transaction, two
-    `Session` identities, which is the shape of clearing's `work_session`
-    (`app/core/clearing/service.py:1573`) and exactly where a registry that keyed operations by the
-    transaction alone would accept a foreign session's write. The two-backend form is on PostgreSQL.
+    THE COMPETITOR IS A RAW DRIVER UPDATE, and the reason is a measurement, not a preference.
+    Since T1525 this tier takes real snapshots, so two independent SQLite writers cannot coexist -
+    the second fails with `database is locked`, which is a fact about the stand. This test therefore
+    used to bump the version from a SECOND `Session` on the SAME `Connection`; once the journal was
+    armed (step 4 slice C) that stopped being possible, and correctly: two sessions on one
+    connection are one Core root transaction, an operation is bound to the session that opened it,
+    and a foreign session's Debt write is refused - which is `C9`'s property, asserted there. The
+    competitor is not what this counterexample is about, so it moved to `exec_driver_sql`, the
+    documented unintercepted path (design v2 §6, §8 R6). What it produces is unchanged: the row's
+    `version` is bumped underneath a session that has already loaded it, which is what makes the
+    flush below raise `StaleDataError`. The two-backend, two-writer form is on PostgreSQL.
 
     RED TODAY BECAUSE: `debt_journal_entries` does not exist.
     MUTATION once step 4 exists: capture `amount_before` in `before_flush` from
@@ -1013,25 +1060,31 @@ async def test_c18_entries_come_from_the_attempt_that_succeeded_and_not_the_stal
     identity = _identity("stale-retry")
     stale_errors: list[StaleDataError] = []
     try:
+        starting_edge = world.debt("10.00")
         async with factory() as setup:
-            setup.add(world.debt("10.00"))
+            # Built before the block: `fixture_block_violations` allows only constructors and session
+            # calls inside one, and `world.debt(...)` is indistinguishable in the AST from a helper that
+            # drives a writer. Same object, same single `add`, same flush.
+            async with debt_fixture_setup(setup, label="starting-edge"):
+                setup.add(starting_edge)
             await setup.commit()
 
         mine_debt = select(Debt).where(Debt.equivalent_id == world.equivalent.id)
         async with engine.connect() as connection:
             await connection.begin()
-            async with AsyncSession(bind=connection, expire_on_commit=False) as mine, AsyncSession(
-                bind=connection, expire_on_commit=False
-            ) as theirs:
+            async with AsyncSession(bind=connection, expire_on_commit=False) as mine:
                 async with await _open(api, mine, world, "stale-retry", identity=identity):
                     debt = (await mine.execute(mine_debt)).scalar_one()
 
                     # The competitor bumps `version` AFTER this session loaded the row and BEFORE
                     # it flushes - outside the savepoint below, so the rollback of the losing
-                    # attempt cannot undo the competitor's work as well.
-                    other = (await theirs.execute(mine_debt)).scalar_one()
-                    other.amount = exact_money("31.00")
-                    await theirs.flush()
+                    # attempt cannot undo the competitor's work as well. Through the driver: see
+                    # the docstring.
+                    await connection.exec_driver_sql(
+                        "UPDATE debts SET amount = 31.00000000, version = version + 1 "
+                        "WHERE id = ?",
+                        (debt.id.hex,),
+                    )
 
                     # The shape of `_apply_flow` (`app/core/payments/engine.py:1474-1553`): each
                     # attempt inside its own savepoint, `expire_all()` between them.
@@ -1214,7 +1267,7 @@ async def test_c19_a_shape_valid_lie_is_accepted_and_is_therefore_step_6_s_job(d
 def _envelope_row(operation_id: uuid.UUID, overrides: dict) -> dict:
     """A well-formed OPEN envelope, then `overrides` on top. Completion columns are NULL."""
     row = {
-        "id": str(operation_id),
+        "id": operation_id,
         "kind": "TEST_FIXTURE",
         "identity": _identity("forgery"),
         "tx_id": None,
@@ -1254,12 +1307,12 @@ def _envelope_row(operation_id: uuid.UUID, overrides: dict) -> dict:
 
 def _entry_row(operation_id: uuid.UUID, world: World, overrides: dict) -> dict:
     row = {
-        "id": str(uuid.uuid4()),
-        "operation_id": str(operation_id),
+        "id": uuid.uuid4(),
+        "operation_id": operation_id,
         "flush_ordinal": 1,
-        "equivalent_id": str(world.equivalent.id),
-        "debtor_id": str(world.debtor.id),
-        "creditor_id": str(world.creditor.id),
+        "equivalent_id": world.equivalent.id,
+        "debtor_id": world.debtor.id,
+        "creditor_id": world.creditor.id,
         "effect": "U",
         "amount_before": "5.00000000",
         "amount_after": "6.00000000",
@@ -1269,12 +1322,32 @@ def _entry_row(operation_id: uuid.UUID, world: World, overrides: dict) -> dict:
     return row
 
 
-def _insert(table: str, row: dict) -> str:
+#: Columns of the journal tables whose values are UUIDs.
+_UUID_COLUMNS = frozenset({"id", "operation_id", "equivalent_id", "debtor_id", "creditor_id"})
+
+
+def _insert(table: str, row: dict):
+    """The forged INSERT, with every UUID bound as a UUID and not as a string.
+
+    THE TYPE ON THE BIND IS LOAD-BEARING, measured 2026-09-12 when the journal was armed.
+    `sqlalchemy.Uuid(as_uuid=True)` stores the 32-character hex WITHOUT dashes on SQLite and a
+    native `uuid` on PostgreSQL. A forgery that bound `str(world.debtor.id)` therefore referenced a
+    participant that does not exist on the default tier, and the database refused it with
+    `FOREIGN KEY constraint failed` - an error, so `assert error is not None` passed, and the CHECK
+    constraint the case is named after was never reached. Every entry forgery was a false green.
+    """
+
     columns = list(row)
-    return (
+    statement = text(
         f"INSERT INTO {table} "  # noqa: S608
         f"({', '.join(columns)}) VALUES ({', '.join(':' + name for name in columns)})"
     )
+    binds = [
+        bindparam(name, type_=SaUuid(as_uuid=True))
+        for name in columns
+        if name in _UUID_COLUMNS
+    ]
+    return statement.bindparams(*binds) if binds else statement
 
 
 async def _forge(factory, world: World, table: str, overrides: dict):
@@ -1290,10 +1363,10 @@ async def _forge(factory, world: World, table: str, overrides: dict):
     async with factory() as session:
         try:
             envelope = _envelope_row(operation_id, overrides if table == "operation" else {})
-            await session.execute(text(_insert(OPERATIONS_TABLE, envelope)), envelope)
+            await session.execute(_insert(OPERATIONS_TABLE, envelope), envelope)
             if table == "entry":
                 entry = _entry_row(operation_id, world, overrides)
-                await session.execute(text(_insert(ENTRIES_TABLE, entry)), entry)
+                await session.execute(_insert(ENTRIES_TABLE, entry), entry)
             await session.commit()
         except DatabaseError as exc:
             await session.rollback()

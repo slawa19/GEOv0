@@ -38,7 +38,7 @@ from app.db.sqlite_transaction_control import sqlite_busy_error_name
 from tests.conftest import TestingSessionLocal, engine as _test_engine
 from tests.unit.test_scenario_inject_topology import _make_run, _make_runner, _nonce
 
-from tests.debt_setup import debt_fixture_setup
+from tests.debt_setup import debt_fixture_setup, writer_operation
 
 
 # ---------------------------------------------------------------------------
@@ -250,13 +250,21 @@ async def _stage_debt_with_a_caller_row(db_session, runner, world: _World) -> st
     )
     await db_session.flush()  # the caller's transaction is really open, with a write in it
 
-    staged = await runner._inject_executor.stage_inject_event(
-        db_session,
-        scenario=_debt_scenario(world),
-        event=_debt_event(world, "10.00"),
-        pid_to_participant_id={world.creditor_pid: world.creditor_id, world.debtor_pid: world.debtor_id},
-        locked_equivalent_ids={world.eq_id},
-    )
+    # THE WRITER'S OWN OPERATION, not a fixture context (design v2 §8 R5/F7). `stage_inject_event`
+    # is production code that writes debts; called directly it opens no operation and the journal
+    # refuses its flush. `INJECT` is the kind the real caller declares
+    # (`app/core/simulator/real_runner_impl.py`), and it carries no `tx_id`.
+    async with writer_operation(db_session, kind="INJECT", equivalent_ids=[world.eq_id]):
+        staged = await runner._inject_executor.stage_inject_event(
+            db_session,
+            scenario=_debt_scenario(world),
+            event=_debt_event(world, "10.00"),
+            pid_to_participant_id={
+                world.creditor_pid: world.creditor_id,
+                world.debtor_pid: world.debtor_id,
+            },
+            locked_equivalent_ids={world.eq_id},
+        )
     assert staged.applied == 1, staged
     return caller_pid
 
@@ -417,20 +425,35 @@ async def test_a_second_transient_failure_propagates_and_leaves_the_event_pendin
 
 
 class _CommitFromAnotherSession:
-    """Commits from a SECOND session between the owner's staging reads and the owner's flush.
+    """Tries to commit from a SECOND session while the owner's unit of work is in flight.
 
-    This is the real interleaving T1525 created, not a synthetic error. By the time staging returns,
-    the unit of work has READ (its lock set, the rows staging touches) and has not yet written, so a
-    commit by anyone else leaves it on a stale snapshot - and its next write, the explicit
-    `await session.flush()`, is refused outright with SQLITE_BUSY_SNAPSHOT. The driver raises it;
-    nothing here fabricates an error or its code.
+    WHAT THIS USED TO PRODUCE, AND WHAT IT PRODUCES NOW - the change is the journal's, and it is
+    measured (2026-09-12, step 4 slice C). Before the debt journal was armed, the owner's unit of
+    work had only READ by the time staging returned, so a commit by anyone else left it on a stale
+    snapshot and its next write was refused with `SQLITE_BUSY_SNAPSHOT`. That was the real
+    interleaving `T1525` created.
+
+    The journal opens the inject's operation BEFORE staging and writes its envelope there, so the
+    unit of work now holds SQLite's write lock from its first statement. The second session
+    therefore cannot commit at all: it waits and is refused with `database is locked`
+    (`SQLITE_BUSY`). A write-first transaction has no stale snapshot to be caught on - the window
+    the old error described does not exist on this path any more.
+
+    BOTH OUTCOMES ARE THE SAME CLASS to the code under test, which is why these tests still measure
+    what they were written for: a transient database refusal must restart the whole unit of work,
+    and must never let the inject be recorded as applied or silently dropped. The classification of
+    `SQLITE_BUSY_SNAPSHOT` itself is still proven directly, on a stand that builds the stale
+    snapshot by hand, in `tests/unit/test_p015_t1525_sqlite_stale_snapshot_is_retried.py`.
+
+    Nothing here fabricates an error or its code: the driver raises whichever one the database
+    produces, and the tests read it back by name.
     """
 
     def __init__(self, runner, *, on_calls: set[int]) -> None:
         self._real = runner._inject_executor.stage_inject_event
         self._on_calls = set(on_calls)
         self.calls = 0
-        self.interleaved = 0
+        self.blocked = 0
         runner._inject_executor.stage_inject_event = self  # this runner only
 
     async def __call__(self, session, **kwargs):
@@ -439,25 +462,39 @@ class _CommitFromAnotherSession:
         if self.calls in self._on_calls:
             n = _nonce()
             async with TestingSessionLocal() as other:
+                # A short wait, set on THIS connection only. The suite's `busy_timeout` is 30s
+                # (`tests/conftest.py`), and since the owner now holds the write lock for its whole
+                # unit of work the second session would sit out all thirty of them before being
+                # refused - twice per test.
+                await (await other.connection()).exec_driver_sql("PRAGMA busy_timeout = 250")
                 other.add(
                     Participant(
                         pid=f"BUSY_{n}", display_name="Busy writer",
                         public_key=f"pk_busy_{n}"[:64], type="person", status="active",
                     )
                 )
-                await other.commit()
-            self.interleaved += 1
+                try:
+                    await other.commit()
+                except DBAPIError:
+                    self.blocked += 1
+                    raise
         return staged
 
 
 @pytest.mark.asyncio
 async def test_a_stale_snapshot_is_transient_and_the_inject_lands_exactly_once(db_session) -> None:
-    """T1525: a SQLite stale snapshot must restart the unit of work, not drop the inject.
+    """T1525: a transient SQLite refusal must restart the unit of work, not drop the inject.
 
-    `_is_transient_inject_db_error` matched PostgreSQL SQLSTATEs only. On SQLite the owner reads its
-    lock set and then writes, so a concurrent commit makes the write fail with SQLITE_BUSY_SNAPSHOT
-    - and classified as an ordinary error it reopens exactly the loss mode 55P03 was added for: the
-    owner records "inject failed (db error)", marks the event FIRED, and the inject is dropped.
+    `_is_transient_inject_db_error` matched PostgreSQL SQLSTATEs only, and classified as an ordinary
+    error a transient SQLite refusal reopens exactly the loss mode 55P03 was added for: the owner
+    records "inject failed (db error)", marks the event FIRED, and the inject is dropped.
+
+    WHICH REFUSAL THE STAND PRODUCES CHANGED WITH THE JOURNAL (2026-09-12, step 4 slice C), and the
+    spy's docstring carries the measurement. It used to be `SQLITE_BUSY_SNAPSHOT` - the owner read
+    before it wrote, and a concurrent commit left it on a stale snapshot. The journal's envelope is
+    now the unit of work's FIRST statement, so it holds the write lock throughout and the concurrent
+    writer is the one refused, with `database is locked`. The property asserted below is unchanged:
+    the unit of work restarts, the inject lands exactly once, and the event is fired once.
     """
     assert _test_engine.dialect.name == "sqlite", (
         f"this stand forces a SQLite stale snapshot; the test engine is {_test_engine.dialect.name}"
@@ -472,7 +509,8 @@ async def test_a_stale_snapshot_is_transient_and_the_inject_lands_exactly_once(d
         db_session, run_id="r1", run=run, scenario=_debt_scenario(world)
     )
 
-    assert spy.interleaved == 1, "non-vacuity: the concurrent commit never happened"
+    # NON-VACUITY: the second writer really tried, and really collided with this unit of work.
+    assert spy.blocked == 1, "non-vacuity: the concurrent writer was never refused"
     assert spy.calls == 2, f"expected one retry of the whole unit of work, stage ran {spy.calls}x"
     assert await _fresh_debt(world) == Decimal("15.12345678"), (
         "the injected 10.00 must land exactly once on 5.12345678"
@@ -499,8 +537,13 @@ async def test_a_stale_snapshot_on_both_attempts_leaves_the_event_pending(db_ses
         )
 
     # The error that propagated is the real one, by code - not something else that also fails.
-    assert sqlite_busy_error_name(refusal.value) == "SQLITE_BUSY_SNAPSHOT", refusal.value
-    assert spy.interleaved == 2, "non-vacuity: both attempts must have been beaten"
+    # `SQLITE_BUSY` and no longer `SQLITE_BUSY_SNAPSHOT`: the journal's envelope makes this unit of
+    # work write-first, so the collision is over the write lock rather than over a stale snapshot
+    # (see `_CommitFromAnotherSession`). Both are `sqlite_busy_error_name` codes and both are
+    # transient; which one the database produces is the database's to decide, and this reads it back
+    # rather than asserting a class.
+    assert sqlite_busy_error_name(refusal.value) == "SQLITE_BUSY", refusal.value
+    assert spy.blocked == 2, "non-vacuity: both attempts must have collided"
     assert spy.calls == 2, "the later event must not run after the failure propagated"
     assert run._real_fired_scenario_event_indexes == set()
     assert await _fresh_debt(world) is None
@@ -987,13 +1030,18 @@ async def test_staging_does_not_touch_the_shared_pid_map(db_session) -> None:
     shared = {world.creditor_pid: world.creditor_id}
     before = dict(shared)
 
-    staged = await runner._inject_executor.stage_inject_event(
-        db_session,
-        scenario={"participants": [], "trustlines": []},
-        event=_add_participant_event(world.creditor_pid, new_pid, world.eq_code),
-        pid_to_participant_id=shared,
-        locked_equivalent_ids={world.eq_id},
-    )
+    # THE WRITER'S OWN OPERATION, not a fixture context (design v2 §8 R5/F7). `stage_inject_event`
+    # is production code that writes debts; called directly it opens no operation and the journal
+    # refuses its flush. `INJECT` is the kind the real caller declares
+    # (`app/core/simulator/real_runner_impl.py`), and it carries no `tx_id`.
+    async with writer_operation(db_session, kind="INJECT", equivalent_ids=[world.eq_id]):
+        staged = await runner._inject_executor.stage_inject_event(
+            db_session,
+            scenario={"participants": [], "trustlines": []},
+            event=_add_participant_event(world.creditor_pid, new_pid, world.eq_code),
+            pid_to_participant_id=shared,
+            locked_equivalent_ids={world.eq_id},
+        )
     assert new_pid in staged.pid_additions
     assert shared == before, "staging wrote a participant id that does not exist yet into the shared map"
 

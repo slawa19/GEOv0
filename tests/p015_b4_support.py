@@ -49,6 +49,8 @@ from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 
+from tests.debt_setup import purge_test_ledger
+
 #: Largest absolute scale-8 money value SQLite is proven to round-trip exactly (design v2 §4).
 EXACT_DOMAIN_LIMIT = Decimal(2**26)
 
@@ -113,6 +115,28 @@ async def operation(api: JournalApi, session, **kwargs: Any) -> AsyncIterator[An
         return
     async with api.module.debt_operation(session, **kwargs) as op:
         yield op
+
+
+def scenario_end_refusals(api: JournalApi) -> tuple[type[BaseException], ...]:
+    """What the REST of a scenario raises once a refusal has been deliberately swallowed.
+
+    A counterexample that catches the journal's refusal and keeps going does not get a quiet
+    session afterwards, and it must not: the root is poisoned, the refused work is still pending,
+    and the next thing to touch the session says so. Two shapes arrive:
+
+    * the journal's own refusal again - from the operation context's completion, which flushes the
+      Debt that is still pending and is refused for the poison;
+    * `sqlalchemy.exc.InvalidRequestError` (`PendingRollbackError`), when the refusal happened
+      inside the flush's own SQL and SQLAlchemy has already marked the transaction for rollback.
+
+    Both are the refusal continuing to hold, which is the property under test - so a scenario that
+    swallows one catches these to REACH its assertions, and keeps the FIRST refusal as its verdict.
+    Catching them is not tolerating them: every such test then asserts that nothing became durable.
+    """
+
+    from sqlalchemy.exc import InvalidRequestError
+
+    return (*api.refusals, InvalidRequestError)
 
 
 async def refusal_of(api: JournalApi, awaitable: Awaitable[Any]) -> BaseException | None:
@@ -206,8 +230,18 @@ async def seed_world(factory, *, extra_participants: int = 0) -> World:
 
 
 async def drop_world(factory, world: World) -> None:
+    """Dispose of this world's rows, the journal's record of them included.
+
+    THE DEBTS AND THE JOURNAL GO THROUGH THE DRIVER, not through `session.execute(delete(Debt))`.
+    Once the journal is armed that is Core DML against `debts` outside a verified flush and is
+    refused, correctly: it is indistinguishable from a writer moving money with no record. A
+    teardown is not a money write, so it takes the documented way round (design v2 §8 R6). The
+    journal rows have to go as well - its foreign keys are RESTRICT on purpose (`C17`), so an entry
+    naming this world's equivalent would keep the `DELETE FROM equivalents` below from succeeding.
+    """
+
     async with factory() as session:
-        await session.execute(delete(Debt).where(Debt.equivalent_id.in_(world.equivalent_ids)))
+        await purge_test_ledger(session, equivalent_ids=world.equivalent_ids)
         await session.execute(delete(Participant).where(Participant.id.in_(world.participant_ids)))
         await session.execute(delete(Equivalent).where(Equivalent.id.in_(world.equivalent_ids)))
         await session.commit()

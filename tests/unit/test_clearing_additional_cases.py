@@ -382,17 +382,20 @@ async def test_self_loop_not_allowed(db_session):
     db_session.add_all([eq, a])
     await db_session.flush()
 
-    async with debt_fixture_setup(db_session, label="self-loop"):
-        db_session.add(
-            Debt(
-                debtor_id=a.id,
-                creditor_id=a.id,
-                equivalent_id=eq.id,
-                amount=Decimal("1"),
-            )
-        )
-
+    # THE EXPECTATION IS UNCHANGED - this write is refused - and only its BRACKET moved. Since the
+    # debt journal was armed (step 4 slice C) the fixture context completes by flushing, so the
+    # refusal now arrives at the end of the block rather than at the `commit()` below; a
+    # `pytest.raises` that started after the block would let it escape.
     with pytest.raises(IntegrityError):
+        async with debt_fixture_setup(db_session, label="self-loop"):
+            db_session.add(
+                Debt(
+                    debtor_id=a.id,
+                    creditor_id=a.id,
+                    equivalent_id=eq.id,
+                    amount=Decimal("1"),
+                )
+            )
         await db_session.commit()
 
     await db_session.rollback()

@@ -10,7 +10,8 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import delete, select, text
 
-from tests.debt_setup import debt_fixture_setup
+from app.config import settings
+from tests.debt_setup import debt_fixture_setup, purge_test_ledger
 
 
 pytestmark = pytest.mark.postgres
@@ -185,6 +186,27 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
                 await session.execute(text("SHOW transaction_isolation"))
             ).scalar_one()
             assert str(isolation).lower() == "read committed"
+        # THE PAYMENT'S OWN TIMEOUTS ARE WIDENED, and the reason is a measurement rather than a
+        # convenience. This test deliberately parks the clearing inside its owner lock and asserts
+        # that the payment WAITS and then succeeds, so the payment's budget has to cover the whole
+        # hold plus the whole clearing. THE ONE THAT ACTUALLY FIRED IS `PREPARE_TIMEOUT_SECONDS`,
+        # measured by widening the others first and watching it fail unchanged: the payment's PREPARE
+        # is what waits on the clearing's owner lock, and its budget is 3 seconds
+        # (`app/config.py`). The clearing's locked section grew when the debt journal was armed
+        # (step 4 slice C) - an envelope at open, per-edge entries at each flush, and a
+        # per-equivalent completion row, all inside it - and three seconds stopped covering it. The
+        # commit and total budgets are widened alongside so that the next thing to go over is a real
+        # result and not the next constant in the same line; they are read per call, while
+        # `PaymentEngine.__init__` reads its advisory-lock budget ONCE, which is why all of this
+        # sits above the services.
+        #
+        # That the locked section is now longer is a real consequence and is recorded as one; what it
+        # is NOT is the subject of this test, which is that neither writer loses the other's effects.
+        # Timing out here would have measured the budget instead.
+        monkeypatch.setattr(settings, "PREPARE_TIMEOUT_SECONDS", 60, raising=False)
+        monkeypatch.setattr(settings, "COMMIT_TIMEOUT_SECONDS", 60, raising=False)
+        monkeypatch.setattr(settings, "PAYMENT_TOTAL_TIMEOUT_SECONDS", 120, raising=False)
+
         clearing_service = ClearingService(clearing_session)
         payment_service = PaymentService(payment_session)
         original_locked_pairs = clearing_service._locked_pairs_for_equivalent
@@ -252,9 +274,16 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
         assert not payment_task.done()
 
         release_clearing.set()
+        # THE BUDGET, not the behaviour. Fifteen seconds stopped being enough when the debt journal
+        # was armed (step 4 slice C): the payment waits on the clearing's owner lock for the whole
+        # clearing, and both units of work now carry an envelope of their own. The payment's own
+        # timeouts (`COMMIT_TIMEOUT_SECONDS`, `PAYMENT_TOTAL_TIMEOUT_SECONDS`) are what this test
+        # leaves in place to decide the outcome; this number only has to be larger than them, or the
+        # harness decides it instead and reports a `TimeoutError` for a payment that was going to
+        # succeed.
         cleared_amount, payment_result = await asyncio.wait_for(
             asyncio.gather(clearing_task, payment_task),
-            timeout=15.0,
+            timeout=60.0,
         )
         assert cleared_amount == Decimal("30.00000000")
         assert payment_result.status == "COMMITTED"
@@ -363,6 +392,11 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
                         await session.rollback()
                         await session.close()
                 async with TestingSessionLocal() as cleanup:
+                    # The debts AND the journal rows that describe them, through the driver and BEFORE the
+                    # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
+                    # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
+                    # envelope still standing would block the transaction delete above it.
+                    await purge_test_ledger(cleanup, equivalent_ids=[equivalent_id])
                     await cleanup.execute(
                         delete(IntegrityAuditLog).where(
                             IntegrityAuditLog.equivalent_code == equivalent_code
@@ -377,9 +411,6 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
                         delete(Transaction).where(
                             Transaction.initiator_id.in_(participant_ids)
                         )
-                    )
-                    await cleanup.execute(
-                        delete(Debt).where(Debt.equivalent_id == equivalent_id)
                     )
                     await cleanup.execute(
                         delete(TrustLine).where(

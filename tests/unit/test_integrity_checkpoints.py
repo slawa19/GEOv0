@@ -129,7 +129,10 @@ async def test_integrity_checkpoint_records_invariant_checks_when_healthy(db_ses
     # And it is sensitive to the exact corruption the withdrawn check could not see. This pairs
     # the two facts in one place: the CHECKSUM notices a one-cent inflation, the zero_sum entry
     # still carries no verdict, and neither statement can be mistaken for the other.
-    debt.amount += Decimal("0.01")
+    # DECLARED, because it IS a movement of money: raising a stored debt by a cent is exactly what
+    # the journal asks a writer to name, and this test's subject is the checksum noticing it.
+    async with debt_fixture_setup(db_session, label="one-cent-inflation"):
+        debt.amount += Decimal("0.01")
     await db_session.flush()
     cp_after = await compute_integrity_checkpoint_for_equivalent(db_session, equivalent_id=eq.id)
     assert cp_after.checksum != cp.checksum

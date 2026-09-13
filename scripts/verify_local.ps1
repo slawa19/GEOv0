@@ -117,29 +117,21 @@ try {
                 '-o', "cache_dir=$pytestCache",
                 '-q'
             )
-            # `b4_counterexample` is excluded from EVERY tier, including an explicitly requested
-            # one, because those tests are red by design until programme 015 phase B step 4 exists
-            # (see the comment above the marker list in pytest.ini). Excluding them keeps a shared
-            # working tree's gate a signal; it does not make them optional.
-            #
-            # The exclusion is appended, not substituted, so `-BackendMarker postgres` still means
-            # "the postgres tier" - just without the counterexamples. To run them deliberately,
-            # NAME them: `-BackendMarker b4_counterexample`, or
-            # `-BackendMarker "postgres and b4_counterexample"`. Any expression that mentions the
-            # marker is taken as deliberate and left exactly as written.
+            # NOTHING IS EXCLUDED FROM A TIER BEYOND `slow` AND `postgres`, and that is a deletion
+            # worth naming: until 2026-09-12 every branch below also appended
+            # `and not b4_counterexample`, which took the 107 programme-015 step-2 counterexamples
+            # out of the default tier, out of -IncludeExpensive and out of an explicitly requested
+            # marker alike. They were red on purpose while the debt journal did not exist. Step 4
+            # slice C built it; the counterexamples went green through the journal, with their
+            # assertions untouched, and the exclusion left with the marker (see pytest.ini).
             if ($BackendMarker) {
-                if ($BackendMarker -like '*b4_counterexample*') {
-                    $pytestArgs += @('-m', $BackendMarker)
-                }
-                else {
-                    $pytestArgs += @('-m', "$BackendMarker and not b4_counterexample")
-                }
+                $pytestArgs += @('-m', $BackendMarker)
             }
             elseif ($IncludeExpensive) {
-                $pytestArgs += @('-m', 'not postgres and not b4_counterexample')
+                $pytestArgs += @('-m', 'not postgres')
             }
             else {
-                $pytestArgs += @('-m', 'not slow and not postgres and not b4_counterexample')
+                $pytestArgs += @('-m', 'not slow and not postgres')
             }
             if ($BackendSelector.Count -gt 0) {
                 $pytestArgs += '--'

@@ -18,7 +18,7 @@ from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 from app.utils.exceptions import IntegrityViolationException
 
-from tests.debt_setup import debt_fixture_setup
+from tests.debt_setup import debt_fixture_setup, writer_operation
 
 
 @pytest.mark.asyncio
@@ -236,18 +236,26 @@ async def test_clearing_neutrality_passes_for_cycle_clearing(db_session):
     participants = [a.id, b.id, c.id]
     positions_before = {pid: await checker._calculate_net_position(pid, eq.id) for pid in participants}
 
-    # Clearing by full min amount reduces all edges equally.
-    d_ab.amount -= Decimal("10")
-    d_bc.amount -= Decimal("10")
-    d_ca.amount -= Decimal("10")
+    # A CLEARING'S OWN OPERATION. These statements are the movement a clearing makes, written by
+    # hand so the invariant checker can be pointed at the result; the journal asks every movement of
+    # money to name the operation that made it, and `CLEARING` is what the real writer declares
+    # (`app/core/clearing/service.py`). Not `debt_fixture_setup`: this is not setup, it is the thing
+    # under test.
+    async with writer_operation(
+        db_session, kind="CLEARING", equivalent_ids=[eq.id], initiator_id=a.id
+    ):
+        # Clearing by full min amount reduces all edges equally.
+        d_ab.amount -= Decimal("10")
+        d_bc.amount -= Decimal("10")
+        d_ca.amount -= Decimal("10")
 
-    if d_ab.amount == 0:
-        await db_session.delete(d_ab)
-    if d_bc.amount == 0:
-        await db_session.delete(d_bc)
-    if d_ca.amount == 0:
-        await db_session.delete(d_ca)
-    await db_session.flush()
+        if d_ab.amount == 0:
+            await db_session.delete(d_ab)
+        if d_bc.amount == 0:
+            await db_session.delete(d_bc)
+        if d_ca.amount == 0:
+            await db_session.delete(d_ca)
+        await db_session.flush()
 
     assert await checker.verify_clearing_neutrality(participants, eq.id, positions_before) is True
 
@@ -273,12 +281,20 @@ async def test_clearing_neutrality_violation_detected(db_session):
     participants = [a.id, b.id, c.id]
     positions_before = {pid: await checker._calculate_net_position(pid, eq.id) for pid in participants}
 
-    # Break neutrality: modify only one edge.
-    d_ab.amount -= Decimal("10")
+    # A CLEARING'S OWN OPERATION. These statements are the movement a clearing makes, written by
+    # hand so the invariant checker can be pointed at the result; the journal asks every movement of
+    # money to name the operation that made it, and `CLEARING` is what the real writer declares
+    # (`app/core/clearing/service.py`). Not `debt_fixture_setup`: this is not setup, it is the thing
+    # under test.
+    async with writer_operation(
+        db_session, kind="CLEARING", equivalent_ids=[eq.id], initiator_id=a.id
+    ):
+        # Break neutrality: modify only one edge.
+        d_ab.amount -= Decimal("10")
 
-    if d_ab.amount == 0:
-        await db_session.delete(d_ab)
-    await db_session.flush()
+        if d_ab.amount == 0:
+            await db_session.delete(d_ab)
+        await db_session.flush()
 
     with pytest.raises(IntegrityViolationException) as exc_info:
         await checker.verify_clearing_neutrality(participants, eq.id, positions_before)

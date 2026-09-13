@@ -106,7 +106,7 @@ from app.db.models.participant import Participant
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 
-from tests.debt_setup import debt_fixture_setup
+from tests.debt_setup import debt_fixture_setup, purge_test_ledger
 
 pytestmark = pytest.mark.postgres
 
@@ -762,6 +762,11 @@ async def test_the_persisted_clearing_payload_is_plain_decimal_and_still_replays
         primary_error = sys.exc_info()[1]
         try:
             async with TestingSessionLocal() as cleanup:
+                # The debts AND the journal rows that describe them, through the driver and BEFORE the
+                # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
+                # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
+                # envelope still standing would block the transaction delete above it.
+                await purge_test_ledger(cleanup, equivalent_ids=[equivalent_id])
                 await cleanup.execute(
                     delete(IntegrityAuditLog).where(
                         IntegrityAuditLog.equivalent_code == code
@@ -771,9 +776,6 @@ async def test_the_persisted_clearing_payload_is_plain_decimal_and_still_replays
                     delete(Transaction).where(
                         Transaction.initiator_id.in_(participant_ids)
                     )
-                )
-                await cleanup.execute(
-                    delete(Debt).where(Debt.equivalent_id == equivalent_id)
                 )
                 await cleanup.execute(
                     delete(TrustLine).where(TrustLine.equivalent_id == equivalent_id)

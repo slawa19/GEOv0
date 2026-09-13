@@ -38,8 +38,11 @@ counterexamples are about. `geov0_test_ci` is SHARED with other sessions, so eve
 in a `finally` scoped to the ids it created, and an autouse fixture asserts afterwards that they
 are gone.
 
-MARKER. `b4_counterexample` alongside `postgres`; deselected from the canonical gate. STEP 4
-REMOVES THE MARKER, NOT THE ASSERTIONS.
+MARKER, HISTORICAL. This module carried `b4_counterexample` alongside `postgres` and was deselected
+from every tier while the debt journal did not exist. Step 4 slice C built it and REMOVED THE
+MARKER, not the assertions: every test below still asserts exactly what it asserted while it was
+red, and each one names in its docstring the mutation that must turn it red again. `postgres`
+stays - this tier is about PostgreSQL semantics, not about the journal's absence.
 """
 
 from __future__ import annotations
@@ -61,9 +64,10 @@ from app.db.models.participant import Participant
 from app.db.models.prepare_lock import PrepareLock
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
+from tests.debt_setup import debt_fixture_setup, purge_test_ledger
 from tests.p015_b4_support import ENTRIES_TABLE, OPERATIONS_TABLE, missing_journal_tables, stored_rows
 
-pytestmark = [pytest.mark.postgres, pytest.mark.b4_counterexample]
+pytestmark = pytest.mark.postgres
 
 #: One scale-8 atom. The clearing half of `C6` is wrong by exactly this much on every edge.
 ATOM = Decimal("0.00000001")
@@ -189,6 +193,13 @@ async def _drop_triangle(factory, triangle: _Triangle) -> None:
                 )
             ).scalars().all()
         )
+        # The debts and the journal go through the driver, and BEFORE the transactions: once the
+        # journal is armed, `session.execute(delete(Debt))` is Core DML the write guard refuses, and
+        # `debt_operations.tx_id` is a RESTRICT reference to `transactions.tx_id`, so an envelope
+        # still standing would block the delete above it. See `tests/debt_setup.purge_test_ledger`.
+        await purge_test_ledger(
+            session, equivalent_ids=[triangle.equivalent_id], tx_ids=tx_ids
+        )
         if tx_ids:
             await session.execute(delete(PrepareLock).where(PrepareLock.tx_id.in_(tx_ids)))
             await session.execute(
@@ -200,7 +211,6 @@ async def _drop_triangle(factory, triangle: _Triangle) -> None:
                 IntegrityAuditLog.equivalent_code == triangle.equivalent_code
             )
         )
-        await session.execute(delete(Debt).where(Debt.equivalent_id == triangle.equivalent_id))
         await session.execute(
             delete(TrustLine).where(TrustLine.equivalent_id == triangle.equivalent_id)
         )
@@ -560,14 +570,15 @@ async def test_c5_p_the_journal_of_an_honest_payment_is_exact_at_full_money_size
     payment = forward - ATOM
     try:
         async with serializable_factory() as session:
-            session.add_all(
-                [
-                    Debt(id=uuid.uuid4(), debtor_id=triangle.a.id, creditor_id=triangle.b.id,
-                         equivalent_id=triangle.equivalent_id, amount=forward, version=0),
-                    Debt(id=uuid.uuid4(), debtor_id=triangle.b.id, creditor_id=triangle.a.id,
-                         equivalent_id=triangle.equivalent_id, amount=reverse, version=0),
-                ]
-            )
+            async with debt_fixture_setup(session, label="mutual-edges"):
+                session.add_all(
+                    [
+                        Debt(id=uuid.uuid4(), debtor_id=triangle.a.id, creditor_id=triangle.b.id,
+                             equivalent_id=triangle.equivalent_id, amount=forward, version=0),
+                        Debt(id=uuid.uuid4(), debtor_id=triangle.b.id, creditor_id=triangle.a.id,
+                             equivalent_id=triangle.equivalent_id, amount=reverse, version=0),
+                    ]
+                )
             await session.commit()
 
         before = await _edges(serializable_factory, triangle)
@@ -823,18 +834,23 @@ async def test_c6_p_a_clearing_cycle_that_leaves_one_atom_on_every_edge_is_still
     cycle_edges = [("a", "b"), ("b", "c"), ("c", "a")]
     try:
         debt_ids: list[str] = []
+        # Built outside the fixture block, added inside it: a loop is not fixture setup as far as
+        # `fixture_block_violations` is concerned, and the rows and the single flush are unchanged.
+        cycle_debts = [
+            Debt(
+                id=uuid.uuid4(),
+                debtor_id=getattr(triangle, debtor).id,
+                creditor_id=getattr(triangle, creditor).id,
+                equivalent_id=triangle.equivalent_id,
+                amount=FULL_SIZE,
+                version=0,
+            )
+            for debtor, creditor in cycle_edges
+        ]
+        debt_ids.extend(str(debt.id) for debt in cycle_debts)
         async with serializable_factory() as session:
-            for debtor, creditor in cycle_edges:
-                debt = Debt(
-                    id=uuid.uuid4(),
-                    debtor_id=getattr(triangle, debtor).id,
-                    creditor_id=getattr(triangle, creditor).id,
-                    equivalent_id=triangle.equivalent_id,
-                    amount=FULL_SIZE,
-                    version=0,
-                )
-                session.add(debt)
-                debt_ids.append(str(debt.id))
+            async with debt_fixture_setup(session, label="cycle"):
+                session.add_all(cycle_debts)
             await session.commit()
 
         before = await _edges(serializable_factory, triangle)
@@ -932,18 +948,23 @@ async def test_c6_p_control_the_same_cycle_without_the_listener_satisfies_criter
     cycle_edges = [("a", "b"), ("b", "c"), ("c", "a")]
     try:
         debt_ids: list[str] = []
+        # Built outside the fixture block, added inside it: a loop is not fixture setup as far as
+        # `fixture_block_violations` is concerned, and the rows and the single flush are unchanged.
+        cycle_debts = [
+            Debt(
+                id=uuid.uuid4(),
+                debtor_id=getattr(triangle, debtor).id,
+                creditor_id=getattr(triangle, creditor).id,
+                equivalent_id=triangle.equivalent_id,
+                amount=FULL_SIZE,
+                version=0,
+            )
+            for debtor, creditor in cycle_edges
+        ]
+        debt_ids.extend(str(debt.id) for debt in cycle_debts)
         async with serializable_factory() as session:
-            for debtor, creditor in cycle_edges:
-                debt = Debt(
-                    id=uuid.uuid4(),
-                    debtor_id=getattr(triangle, debtor).id,
-                    creditor_id=getattr(triangle, creditor).id,
-                    equivalent_id=triangle.equivalent_id,
-                    amount=FULL_SIZE,
-                    version=0,
-                )
-                session.add(debt)
-                debt_ids.append(str(debt.id))
+            async with debt_fixture_setup(session, label="cycle"):
+                session.add_all(cycle_debts)
             await session.commit()
 
         before = await _edges(serializable_factory, triangle)

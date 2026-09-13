@@ -75,7 +75,7 @@ from tests.integration.test_scenarios import (
     register_and_login,
 )
 
-from tests.debt_setup import debt_fixture_setup
+from tests.debt_setup import debt_fixture_setup, purge_test_ledger
 
 pytestmark = pytest.mark.postgres
 
@@ -188,9 +188,12 @@ async def scenario_factory(pg_client: AsyncClient):
         async with TestingSessionLocal() as cleanup:
             for built in created:
                 ids = [pid for pid, _ in built["participants"]]
-                await cleanup.execute(
-                    delete(Debt).where(Debt.equivalent_id == built["equivalent_id"])
-                )
+                # The debts AND the journal rows that describe them, through the driver and BEFORE
+                # the deletes below: `session.execute(delete(Debt))` is Core DML the write guard
+                # refuses (that is `C2`), and `debt_operations.tx_id` RESTRICTs
+                # `transactions.tx_id`, so an envelope still standing would block the transaction
+                # delete further down.
+                await purge_test_ledger(cleanup, equivalent_ids=[built["equivalent_id"]])
                 await cleanup.execute(
                     delete(TrustLine).where(TrustLine.equivalent_id == built["equivalent_id"])
                 )

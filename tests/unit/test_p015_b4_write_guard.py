@@ -24,10 +24,10 @@ rest of this slice's PostgreSQL work in
 PostgreSQL-marked module carries its own SERIALIZABLE engine and pool, and two of them would mean
 two pools for six tests.
 
-MARKER. This module carries `b4_counterexample` and is deselected from the canonical gate. It is
-red on purpose until step 4 exists, and STEP 4 REMOVES THE MARKER, NOT THE ASSERTIONS - the full
-contract is in the comment above the marker list in `pytest.ini`, and
-`tests/unit/test_p015_b4_counterexample_marker_is_not_a_hiding_place.py` holds it in place.
+MARKER, HISTORICAL. This module carried `b4_counterexample` and was deselected from the canonical
+gate while the debt journal did not exist. Step 4 slice C built it and REMOVED THE MARKER, not the
+assertions: every test below still asserts exactly what it asserted while it was red, and each one
+names in its docstring the mutation that must turn it red again.
 """
 
 from __future__ import annotations
@@ -40,6 +40,7 @@ import pytest
 from sqlalchemy import delete, event, insert, select, update
 
 from app.db.models.debt import Debt
+from tests.debt_setup import debt_fixture_setup
 from tests.p015_b4_support import (
     ENTRIES_TABLE,
     JOURNAL_MODULE,
@@ -53,12 +54,11 @@ from tests.p015_b4_support import (
     missing_journal_tables,
     operation,
     refusal_of,
+    scenario_end_refusals,
     seed_world,
     stored_debts,
     stored_rows,
 )
-
-pytestmark = pytest.mark.b4_counterexample
 
 
 def _identity(name: str) -> str:
@@ -81,7 +81,8 @@ async def _existing_debt(factory, world: World, amount: str) -> tuple[uuid.UUID,
     """One committed debt of the world, plus its version - the subject of the U and D forms."""
     async with factory() as setup:
         debt = world.debt(amount)
-        setup.add(debt)
+        async with debt_fixture_setup(setup, label="subject-edge"):
+            setup.add(debt)
         await setup.commit()
     async with factory() as fresh:
         row = (
@@ -405,6 +406,8 @@ async def test_c3_a_pending_debt_keyed_only_through_relationships_is_refused(db_
     MUTATION once step 4 exists: read the key columns in `before_flush` without falling back to the
     relationship, and drop the refusal; this row then journals onto a null edge.
     """
+    from sqlalchemy.orm import Session
+
     from tests.conftest import TestingSessionLocal as factory
     from app.db.models.equivalent import Equivalent
     from app.db.models.participant import Participant
@@ -415,30 +418,54 @@ async def test_c3_a_pending_debt_keyed_only_through_relationships_is_refused(db_
     try:
         async with factory() as session:
 
-            @event.listens_for(session.sync_session, "before_flush")
             def _what_a_hook_would_see(sync_session, _flush_context, _instances) -> None:
+                # The FIRST flush only. The refusal leaves the Debt pending, so the operation's
+                # completion flushes it again and the probe would otherwise record the same row
+                # twice - a list that says nothing more than a list of one.
+                if seen_by_a_before_flush_hook:
+                    return
                 for obj in sync_session.new:
                     if isinstance(obj, Debt):
                         seen_by_a_before_flush_hook.append(
                             (obj.debtor_id, obj.creditor_id, obj.equivalent_id)
                         )
 
+            # ON THE `Session` CLASS, WITH `insert=True`, and both halves are forced rather than
+            # chosen. The journal's hook is registered on the class (step 4 slice C arms it there,
+            # so that importing the models is enough - see `C15`), and SQLAlchemy runs EVERY
+            # class-level listener before ANY instance-level one: an instance listener, even with
+            # `insert=True`, could never observe the row before the journal refused it, and the
+            # non-vacuity assertion below would be measuring listener order instead of the pending
+            # Debt's key columns. Removed in `finally`, because a class-level listener outlives the
+            # test that added it.
+            event.listen(Session, "before_flush", _what_a_hook_would_see, insert=True)
+
             debtor = await session.get(Participant, world.debtor.id)
             creditor = await session.get(Participant, world.creditor.id)
             equivalent = await session.get(Equivalent, world.equivalent.id)
-            session.add(
-                Debt(
-                    id=uuid.uuid4(),
-                    debtor=debtor,
-                    creditor=creditor,
-                    equivalent=equivalent,
-                    amount=exact_money("27.00"),
-                    version=0,
-                )
-            )
-            refusal = await refusal_of(api, session.flush())
-            if refusal is None:
-                await session.commit()
+            refusal = None
+            try:
+                # INSIDE AN OPERATION, and that is what separates this from `C1`. With no operation
+                # open the refusal would be `no_operation` and would say nothing about key columns,
+                # so the verdict would pass while the property went unmeasured.
+                async with await _open(api, session, world, "keyless"):
+                    session.add(
+                        Debt(
+                            id=uuid.uuid4(),
+                            debtor=debtor,
+                            creditor=creditor,
+                            equivalent=equivalent,
+                            amount=exact_money("27.00"),
+                            version=0,
+                        )
+                    )
+                    refusal = await refusal_of(api, session.flush())
+                if refusal is None:
+                    await session.commit()
+            except scenario_end_refusals(api) as exc:  # noqa: B902 - the refusal is the subject
+                refusal = refusal if refusal is not None else exc
+            finally:
+                event.remove(Session, "before_flush", _what_a_hook_would_see)
 
         after = await stored_debts(factory, world)
 
@@ -513,11 +540,17 @@ async def test_condition3_dml_from_another_listeners_after_flush_is_refused(db_s
                     .values(amount=exact_money("99.00"))
                 )
 
-            async with await _open(api, session, world, "granted"):
-                session.add(world.debt(str(covered)))
-                refusal = await refusal_of(api, session.flush())
-            if refusal is None:
-                await refusal_of(api, session.commit())
+            refusal = None
+            try:
+                async with await _open(api, session, world, "granted"):
+                    session.add(world.debt(str(covered)))
+                    refusal = await refusal_of(api, session.flush())
+                if refusal is None:
+                    await refusal_of(api, session.commit())
+            except scenario_end_refusals(api) as exc:  # noqa: B902 - the refusal is the subject
+                # A swallowed refusal keeps holding: see `scenario_end_refusals`. The FIRST
+                # one is the verdict; this only lets the scenario reach its assertions.
+                refusal = refusal if refusal is not None else exc
 
         after = await stored_debts(factory, world)
 
@@ -571,11 +604,17 @@ async def test_condition3_a_late_before_flush_listener_mutating_a_debt_is_refuse
                         obj.amount = tampered
                         tampered_rows.append(str(obj.id))
 
-            async with await _open(api, session, world, "late-mutation"):
-                session.add(world.debt(str(written_by_the_caller)))
-                refusal = await refusal_of(api, session.flush())
-            if refusal is None:
-                await refusal_of(api, session.commit())
+            refusal = None
+            try:
+                async with await _open(api, session, world, "late-mutation"):
+                    session.add(world.debt(str(written_by_the_caller)))
+                    refusal = await refusal_of(api, session.flush())
+                if refusal is None:
+                    await refusal_of(api, session.commit())
+            except scenario_end_refusals(api) as exc:  # noqa: B902 - the refusal is the subject
+                # A swallowed refusal keeps holding: see `scenario_end_refusals`. The FIRST
+                # one is the verdict; this only lets the scenario reach its assertions.
+                refusal = refusal if refusal is not None else exc
 
         after = await stored_debts(factory, world)
 
@@ -676,16 +715,25 @@ async def test_c20_an_effect_outside_the_declared_scope_is_refused_and_poisons_t
     api = journal_api()
     world = await seed_world(factory)
     try:
+        refusal = None
+        commit_refusal = None
         async with factory() as session:
-            async with await _open(
-                api, session, world, "scope", scope_equivalent_ids=frozenset({world.equivalent.id})
-            ):
-                session.add(world.debt("35.00"))
-                await session.flush()
-                # The other equivalent was never declared and never locked.
-                session.add(world.debt("36.00", equivalent=world.other_equivalent))
-                refusal = await refusal_of(api, session.flush())
-            commit_refusal = await refusal_of(api, session.commit())
+            try:
+                async with await _open(
+                    api, session, world, "scope",
+                    scope_equivalent_ids=frozenset({world.equivalent.id}),
+                ):
+                    session.add(world.debt("35.00"))
+                    await session.flush()
+                    # The other equivalent was never declared and never locked.
+                    session.add(world.debt("36.00", equivalent=world.other_equivalent))
+                    refusal = await refusal_of(api, session.flush())
+                commit_refusal = await refusal_of(api, session.commit())
+            except scenario_end_refusals(api) as exc:  # noqa: B902 - the refusal is the subject
+                # The poison the scope violation left refuses the operation's own completion, so
+                # the commit below is never reached. That refusal IS the "the root may not commit"
+                # statement `commit_refusal` asserts, and it is kept as such.
+                commit_refusal = commit_refusal if commit_refusal is not None else exc
 
         after = await stored_debts(factory, world)
 
@@ -760,8 +808,12 @@ async def test_c20_an_intent_equivalent_that_was_never_touched_is_recorded_with_
 
         # VERDICT.
         assert rows is not None, missing_journal_tables(rows, OPERATION_EQUIVALENTS_TABLE)
-        by_equivalent = {str(row["equivalent_id"]): row for row in rows}
-        untouched = by_equivalent.get(str(world.other_equivalent.id))
+        # Keyed through `uuid.UUID`, because these rows come back from raw SQL with no type on
+        # them: `Uuid(as_uuid=True)` stores 32 hex characters on SQLite and a native uuid on
+        # PostgreSQL, so `str(row[...])` and `str(world...id)` are different strings on the default
+        # tier and the lookup silently found nothing.
+        by_equivalent = {uuid.UUID(str(row["equivalent_id"])): row for row in rows}
+        untouched = by_equivalent.get(world.other_equivalent.id)
         assert untouched is not None, (
             f"the equivalent named in the intent and never touched has no completion row: {rows}. "
             f"Silence must not stand for 'intended, no effect'."

@@ -15,6 +15,7 @@ from sqlalchemy import select
 # Добавляем корень проекта в путь поиска
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from app.core.ledger.journal import debt_operation
 from app.db.session import get_db_session
 from app.db.models import AuditLog, Debt, Equivalent, Participant, Transaction, TrustLine
 from app.utils.validation import (
@@ -60,6 +61,30 @@ def _default_equivalent_metadata(code: str) -> dict[str, Any]:
         # Good enough heuristic for demo data.
         return {"type": "fiat", "iso_code": c}
     return {"type": "custom"}
+
+
+def _sha256_of_dataset_files(paths: Iterable[str]) -> str:
+    """One digest over the dataset files, hashed as BYTES and before anything parses them.
+
+    Design v2 §7 asks for the manifest of what was seeded, and "what was seeded" is the artefact on
+    disk: a digest taken after `json.load` would describe this script's reading of the pack - key
+    order dropped, numbers coerced - and two packs that parse alike would get one identity. Missing
+    files are hashed as absent rather than skipped, so a pack that loses a file does not keep the
+    digest of the pack that had it.
+    """
+
+    digest = hashlib.sha256()
+    for path in sorted(paths):
+        digest.update(os.path.basename(path).encode("utf-8"))
+        digest.update(b"\0")
+        if os.path.exists(path):
+            with open(path, "rb") as handle:
+                for chunk in iter(lambda: handle.read(1 << 20), b""):
+                    digest.update(chunk)
+        else:
+            digest.update(b"<absent>")
+        digest.update(b"\0")
+    return digest.hexdigest()
 
 
 def _load_json(path: str) -> Any:
@@ -253,6 +278,20 @@ async def _seed_from_admin_fixtures_datasets(
     if not os.path.isdir(datasets_dir):
         raise RuntimeError(f"Fixtures datasets dir not found: {datasets_dir}")
 
+    dataset_paths = [
+        os.path.join(datasets_dir, name)
+        for name in (
+            "equivalents.json",
+            "participants.json",
+            "trustlines.json",
+            "debts.json",
+            "transactions.json",
+            "audit-log.json",
+        )
+    ]
+    # Hashed BEFORE the parse below, which is the point (see the helper's docstring).
+    manifest_sha256 = _sha256_of_dataset_files(dataset_paths)
+
     equivalents_data = _load_json(os.path.join(datasets_dir, "equivalents.json"))
     participants_data = _load_json(os.path.join(datasets_dir, "participants.json"))
     trustlines_data = _load_json(os.path.join(datasets_dir, "trustlines.json"))
@@ -387,46 +426,66 @@ async def _seed_from_admin_fixtures_datasets(
             session.add_all(tl_models)
             await session.flush()
 
-            # --- Debts ---
-            existing_debts = set(
-                (
-                    await session.execute(
-                        select(Debt.debtor_id, Debt.creditor_id, Debt.equivalent_id)
-                    )
-                ).all()
-            )
-            debt_models: list[Debt] = []
-            for item in debts_data or []:
-                debtor_pid = str(item.get("debtor") or "").strip()
-                creditor_pid = str(item.get("creditor") or "").strip()
-                eq_code = str(item.get("equivalent") or "").strip().upper()
-                if not (debtor_pid and creditor_pid and eq_code):
-                    continue
-
-                debtor = p_by_pid.get(debtor_pid)
-                creditor = p_by_pid.get(creditor_pid)
-                eq = eq_by_code.get(eq_code)
-                if not (debtor and creditor and eq):
-                    continue
-
-                amt = Decimal(str(item.get("amount") or "0"))
-                if amt <= 0:
-                    continue
-
-                key = (debtor.id, creditor.id, eq.id)
-                if key in existing_debts:
-                    continue
-
-                debt_models.append(
-                    Debt(
-                        debtor_id=debtor.id,
-                        creditor_id=creditor.id,
-                        equivalent_id=eq.id,
-                        amount=amt,
-                    )
+            # THE OPERATION ENVELOPE (programme 015, phase B step 4). The seed is a debt writer
+            # like any other, and the one whose rows every later reconciliation starts from - a
+            # book whose opening balances have no record is a book that cannot be checked at all.
+            #
+            # THE IDENTITY is `label:manifest:batch`. `label` says which pack, `manifest` is the
+            # sha256 of the dataset FILE BYTES (hashed before they were parsed, so it is the
+            # artefact on disk and not this script's reading of it), and `batch` is fresh per run -
+            # seeding the same pack twice is two operations, not a duplicate of one.
+            async with debt_operation(
+                session,
+                kind="SEED",
+                identity=f"{label}:{manifest_sha256}:{uuid.uuid4()}",
+                intent={
+                    "label": label,
+                    "datasets_dir": os.path.basename(datasets_dir),
+                    "manifest_sha256": manifest_sha256,
+                    "debts_declared": len(debts_data or []),
+                },
+                scope_equivalent_ids=None,
+            ):
+                # --- Debts ---
+                existing_debts = set(
+                    (
+                        await session.execute(
+                            select(Debt.debtor_id, Debt.creditor_id, Debt.equivalent_id)
+                        )
+                    ).all()
                 )
-            session.add_all(debt_models)
-            await session.flush()
+                debt_models: list[Debt] = []
+                for item in debts_data or []:
+                    debtor_pid = str(item.get("debtor") or "").strip()
+                    creditor_pid = str(item.get("creditor") or "").strip()
+                    eq_code = str(item.get("equivalent") or "").strip().upper()
+                    if not (debtor_pid and creditor_pid and eq_code):
+                        continue
+
+                    debtor = p_by_pid.get(debtor_pid)
+                    creditor = p_by_pid.get(creditor_pid)
+                    eq = eq_by_code.get(eq_code)
+                    if not (debtor and creditor and eq):
+                        continue
+
+                    amt = Decimal(str(item.get("amount") or "0"))
+                    if amt <= 0:
+                        continue
+
+                    key = (debtor.id, creditor.id, eq.id)
+                    if key in existing_debts:
+                        continue
+
+                    debt_models.append(
+                        Debt(
+                            debtor_id=debtor.id,
+                            creditor_id=creditor.id,
+                            equivalent_id=eq.id,
+                            amount=amt,
+                        )
+                    )
+                session.add_all(debt_models)
+                await session.flush()
 
             # --- Transactions (subset, plus a few "stuck" ones for Incidents dashboard) ---
             existing_tx_ids = set((await session.execute(select(Transaction.id))).scalars().all())

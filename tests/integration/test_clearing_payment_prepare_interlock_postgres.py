@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from tests.debt_setup import debt_fixture_setup
+from tests.debt_setup import debt_fixture_setup, purge_test_ledger
 
 
 pytestmark = pytest.mark.postgres
@@ -102,6 +102,39 @@ async def _wait_for_exact_blocker(
                     return True
     except asyncio.TimeoutError:
         return False
+
+
+#: The budget for the owner-lock probe at the end of each case. It used to be 2.0 seconds, which was
+#: always covering two unrelated things and went over when the debt journal was armed (step 4 slice
+#: C) and every unit of work grew an envelope INSERT: this suite runs on `NullPool`, so each probe
+#: opens a BRAND NEW asyncpg connection and pays for its type introspection before it can ask for a
+#: lock. Measured at the timeout: `pg_locks` held no advisory lock at all and the probe's own backend
+#: was still `idle / ClientRead` inside that introspection. The property was never in doubt - the
+#: budget was. `_no_advisory_lock_is_held` now asserts the property DIRECTLY, on a connection that is
+#: already open, and the probe below keeps its place as the end-to-end form.
+_PROBE_TIMEOUT = 20.0
+
+
+async def _no_advisory_lock_is_held() -> None:
+    """No advisory lock is held on this database, read from `pg_locks` itself.
+
+    The direct form of "the owner lock was released". The probe that follows takes the lock for real,
+    which is the stronger statement; this one is what makes a probe TIMEOUT readable - a timeout with
+    no lock held is a slow connection, and a timeout with a lock held is the defect.
+    """
+
+    from tests.conftest import TestingSessionLocal
+
+    async with TestingSessionLocal() as observer:
+        held = (
+            await observer.execute(
+                text(
+                    "SELECT pid, objid FROM pg_locks "
+                    "WHERE locktype = 'advisory' AND granted"
+                )
+            )
+        ).all()
+    assert held == [], f"an advisory lock is still held after the scenario: {held}"
 
 
 async def _seed_interlock_case():
@@ -216,7 +249,6 @@ async def _seed_interlock_case():
 
 async def _cleanup_interlock_case(seed) -> None:
     from app.db.models.audit_log import IntegrityAuditLog
-    from app.db.models.debt import Debt
     from app.db.models.equivalent import Equivalent
     from app.db.models.participant import Participant
     from app.db.models.prepare_lock import PrepareLock
@@ -225,6 +257,11 @@ async def _cleanup_interlock_case(seed) -> None:
     from tests.conftest import TestingSessionLocal
 
     async with TestingSessionLocal() as cleanup:
+        # The debts AND the journal rows that describe them, through the driver and BEFORE the
+        # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
+        # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
+        # envelope still standing would block the transaction delete above it.
+        await purge_test_ledger(cleanup, equivalent_ids=[seed["equivalent_id"]])
         await cleanup.execute(
             delete(IntegrityAuditLog).where(
                 IntegrityAuditLog.equivalent_code == seed["equivalent_code"]
@@ -239,9 +276,6 @@ async def _cleanup_interlock_case(seed) -> None:
             delete(Transaction).where(
                 Transaction.initiator_id.in_(seed["participant_ids"])
             )
-        )
-        await cleanup.execute(
-            delete(Debt).where(Debt.equivalent_id == seed["equivalent_id"])
         )
         await cleanup.execute(
             delete(TrustLine).where(
@@ -812,12 +846,13 @@ async def test_cancellation_during_interlocked_work_rolls_back_before_unlock_pos
         }
         assert clearing_transactions == []
         assert audits == []
+        await _no_advisory_lock_is_held()
         probe_session = TestingSessionLocal()
         await asyncio.wait_for(
             PaymentEngine(probe_session).acquire_staged_equivalent_owner_locks(
                 [seed["equivalent_id"]]
             ),
-            timeout=2.0,
+            timeout=_PROBE_TIMEOUT,
         )
     finally:
         never_release.set()
@@ -935,12 +970,13 @@ async def test_cancellation_during_interlock_release_preserves_durable_amount_po
             ).all()
         assert len(transactions) == 1
         assert transactions[0].state == "COMMITTED"
+        await _no_advisory_lock_is_held()
         probe_session = TestingSessionLocal()
         await asyncio.wait_for(
             PaymentEngine(probe_session).acquire_staged_equivalent_owner_locks(
                 [seed["equivalent_id"]]
             ),
-            timeout=2.0,
+            timeout=_PROBE_TIMEOUT,
         )
     finally:
         hold_cleanup.set()
@@ -997,10 +1033,13 @@ async def test_interlock_timeout_rolls_back_work_and_releases_owner_postgres(
             "PAYMENT_TOTAL_TIMEOUT_SECONDS",
             original_total_timeout,
         )
+        await _no_advisory_lock_is_held()
         retry_session = TestingSessionLocal()
+        # Same budget story as `_PROBE_TIMEOUT`: a fresh `NullPool` connection plus a whole clearing,
+        # now with an envelope of its own, does not fit in three seconds on this machine.
         amount = await asyncio.wait_for(
             ClearingService(retry_session).execute_clearing_with_amount(seed["cycle"]),
-            timeout=3.0,
+            timeout=_PROBE_TIMEOUT,
         )
         assert amount == Decimal("30.00000000")
     finally:
