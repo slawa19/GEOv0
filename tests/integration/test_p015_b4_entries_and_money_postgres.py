@@ -52,6 +52,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -71,6 +72,13 @@ from app.db.models.prepare_lock import PrepareLock
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 from tests.debt_setup import debt_fixture_setup, purge_test_ledger
+
+# The proven inject stand, imported rather than rebuilt: `observed_factory` is its own SERIALIZABLE
+# engine with the session class whose debt flushes are observed, and `C8`'s inject half drives the
+# real owner through it. A second stand for the same conflict would be a second thing to keep right.
+from tests.integration.test_p015_inject_holds_the_owner_lock_postgres import (  # noqa: F401
+    observed_factory,
+)
 from tests.p015_b4_support import (
     ENTRIES_TABLE,
     JOURNAL_MODULE,
@@ -608,9 +616,13 @@ async def test_c8_a_real_40001_leaves_one_envelope_and_only_the_successful_attem
     `prepare_locks` and all three journal tables are checked, because a retry that duplicated its
     effects would show up in whichever of them the implementation happened to write first.
 
-    WHAT THIS DOES NOT COVER. The retry loop here is written out rather than driven through
-    `PaymentEngine`, so it proves nothing about `_is_retryable_db_error`'s predicate. `C14` below
-    drives the real owner; this one isolates the journal's obligation under a real conflict.
+    WHAT THIS DOES NOT COVER, and where it is covered now. The retry loop here is written out rather
+    than driven through `PaymentEngine`, so it proves nothing about `_is_retryable_db_error`'s
+    predicate. Design v2 §9 asks for the real `40001` "on Debt write for INJECT and PAYMENT COMMIT",
+    which is the two owners' own loops - `_run_uow_with_retry` and `_apply_inject_event`'s
+    `while True:`. Those are the two tests that follow this one (added 2026-09-13 after the external
+    review named the gap); this one isolates the journal's obligation under a real conflict with no
+    owner in the way, which is why it is kept rather than replaced.
 
     RED TODAY BECAUSE: `debt_journal_entries` does not exist, so the non-vacuity assertion placed
     FIRST fails naming the missing table.
@@ -736,6 +748,389 @@ async def test_c8_a_real_40001_leaves_one_envelope_and_only_the_successful_attem
         )
     finally:
         await _cleanup(serializable_factory, seeded)
+
+
+
+
+# ----------------------------------------------------------------------------------------------
+# C8, through the PRODUCTION OWNERS. Design v2 §9: "real 40001 on Debt write for inject and
+# payment commit". The test above isolates the journal's obligation under a hand-written retry;
+# these two drive the loops the application really has.
+# ----------------------------------------------------------------------------------------------
+
+
+def _a_competitor_commits_before_the_first_flow(factory, seeded: _Seeded, amount: Decimal):
+    """Make one independent transaction commit a change to the payment's edge, once.
+
+    WHAT IS REAL AND WHAT IS ONLY SEQUENCED. The `40001` is produced by PostgreSQL, not injected:
+    two SERIALIZABLE transactions, the payment's snapshot already taken, a committed change to a row
+    the payment then writes. What this helper does is decide WHEN the competitor commits - after the
+    payment's snapshot and before its first `_apply_flow` - because a conflict that depends on
+    scheduling would make the counterexample flaky rather than absent. Nothing here raises anything,
+    and `_is_retryable_db_error` is the predicate under test rather than a thing being bypassed.
+
+    THE COMPETITOR WRITES THROUGH THE ORM, inside a declared fixture operation. A Core
+    `update(Debt)` would be refused by the write guard (`C2`), correctly - and a competitor that had
+    to stand the journal down would be a competitor whose own write the journal never saw, which is
+    not the scenario.
+    """
+
+    from app.core.payments.engine import PaymentEngine
+
+    world = seeded.world
+    real_apply_flow = PaymentEngine._apply_flow
+    calls: list[tuple] = []
+    sqlstates: list[str | None] = []
+
+    async def _competitor() -> None:
+        async with factory() as other:
+            debt = (
+                await other.execute(select(Debt).where(Debt.equivalent_id == world.equivalent.id))
+            ).scalar_one()
+            async with debt_fixture_setup(other, label="the-competitor"):
+                debt.amount = amount
+            await other.commit()
+
+    async def _wrapper(self, *args, **kwargs):
+        # The signature is not restated: `_apply_flow(self, from_id, to_id, amount, equivalent_id)`
+        # is the engine's, and a wrapper that spelled it out would have to be edited the day it
+        # changes - silently passing the wrong argument in the meantime.
+        calls.append((args, tuple(sorted(kwargs))))
+        if len(calls) == 1:
+            await _competitor()
+        try:
+            return await real_apply_flow(self, *args, **kwargs)
+        except DBAPIError as exc:
+            sqlstates.append(
+                getattr(exc.orig, "sqlstate", None) or getattr(exc.orig, "pgcode", None)
+            )
+            raise
+
+    return _wrapper, calls, sqlstates
+
+
+@pytest.mark.asyncio
+async def test_c8_the_payment_owners_own_retry_leaves_one_envelope_and_the_winning_entries(
+    serializable_factory, monkeypatch
+):
+    """C8, payment owner, API-SHAPED. `PaymentEngine.commit`'s OWN retry loop, on a real `40001`.
+
+    WHY THIS EXISTS SEPARATELY FROM THE TEST ABOVE (external review, 2026-09-13). That one writes
+    its retry out by hand - "read, open, write, commit; on 40001 rollback and do it all again" - and
+    its own docstring admits it proves nothing about `_is_retryable_db_error`. Design v2 §9 asks for
+    the `40001` "on Debt write for inject and PAYMENT COMMIT", which is `_run_uow_with_retry`
+    (`app/core/payments/engine.py:513-581`): it decides whether the error is retryable, rolls the
+    session back, and re-runs the WHOLE unit of work - including `debt_operation`'s open. A journal
+    that only survived a retry the test wrote itself would be worth nothing.
+
+    WHAT MUST HOLD, and every number is read on a session that is not the writer's:
+    * exactly ONE `40001`, raised by PostgreSQL at the payment's own `_apply_flow` write;
+    * the whole unit of work ran twice - `_apply_flow` is called once per attempt;
+    * exactly ONE COMPLETED envelope for this `tx_id`. `UNIQUE(tx_id)` is what would have made a
+      second envelope an IntegrityError instead of a duplicate record, so the envelope of the losing
+      attempt has to have gone back with its rollback;
+    * the entries describe only the attempt that reached the database: one `U`, whose
+      `amount_before` is the COMPETITOR's value and not the one this session had loaded;
+    * `prepare_locks` are gone, the transaction is COMMITTED, and the equivalents row is written once.
+
+    RED BEFORE STEP 4 BECAUSE: `debt_journal_entries` does not exist, so the non-vacuity assertion
+    placed FIRST fails naming the missing table.
+    MUTATION: write journal entries in `before_flush` instead of `after_flush`, so the attempt that
+    got the `40001` leaves one behind; or complete the envelope without the `state = 'OPEN'`
+    predicate, so the retry's completion updates the losing attempt's row.
+    """
+    from app.core.payments.engine import PaymentEngine
+
+    competitor_amount = Decimal("31.00000000")
+    starting = Decimal("10.00000000")
+    paid = Decimal("8.00")
+
+    seeded = await _seed(serializable_factory)
+    world = seeded.world
+    try:
+        # Built BEFORE the block: `fixture_block_violations` allows only constructors and session
+        # calls inside one, and `_debt_row(...)` is indistinguishable in the AST from a helper that
+        # drives a writer. Same object, same single `add`, same flush.
+        starting_edge = _debt_row(world, starting)
+        async with serializable_factory() as setup:
+            async with debt_fixture_setup(setup, label="c8-owner-starting-edge"):
+                setup.add(starting_edge)
+            await setup.commit()
+
+        tx_id = await _seed_payment(serializable_factory, seeded, amount=str(paid))
+
+        wrapper, calls, sqlstates = _a_competitor_commits_before_the_first_flow(
+            serializable_factory, seeded, competitor_amount
+        )
+        monkeypatch.setattr(PaymentEngine, "_apply_flow", wrapper)
+        async with serializable_factory() as commit_session:
+            await PaymentEngine(commit_session).commit(tx_id)
+
+        entries = await stored_entries(serializable_factory, tx_id)
+        envelopes = await _envelopes_with_intent(serializable_factory, tx_id=tx_id)
+        after = await stored_debts(serializable_factory, world)
+        tx_state = await stored_rows(
+            serializable_factory,
+            "SELECT state FROM transactions WHERE tx_id = :tx_id",
+            {"tx_id": tx_id},
+        )
+        surviving_locks = await stored_rows(
+            serializable_factory,
+            "SELECT id FROM prepare_locks WHERE tx_id = :tx_id",
+            {"tx_id": tx_id},
+        )
+
+        # NON-VACUITY, FIRST.
+        assert envelopes is not None, missing_journal_tables(envelopes, OPERATIONS_TABLE)
+
+        # NON-VACUITY: the conflict was real, it was a serialization failure, and the OWNER retried.
+        # A stand that produced a lock wait, or that never conflicted at all, would measure an
+        # ordinary payment and say nothing about C8.
+        assert sqlstates == ["40001"], (
+            f"stand: the payment's own write was not refused with exactly one genuine serialization "
+            f"failure (observed {sqlstates}). Without a real 40001 at `_apply_flow` this test "
+            f"observes an ordinary commit."
+        )
+        assert len(calls) == 2, (
+            f"stand: `_apply_flow` ran {len(calls)} time(s), so `_run_uow_with_retry` did not re-run "
+            f"the whole unit of work and this is not the owner's retry"
+        )
+        assert after == {
+            ("debtor", "creditor", "eq"): competitor_amount + paid
+        }, (
+            f"stand: the retry did not apply the payment on top of the competitor's value: {after}. "
+            f"An amount of {starting + paid} would mean the retry replayed its own stale snapshot "
+            f"and silently discarded the concurrent write."
+        )
+        assert [row["state"] for row in tx_state or []] == ["COMMITTED"], tx_state
+        assert surviving_locks == [], (
+            f"stand: the prepare locks outlived the committed payment: {surviving_locks}"
+        )
+
+        # VERDICT.
+        assert len(envelopes) == 1, (
+            f"a payment that was refused with a 40001 and retried by its OWN loop left "
+            f"{envelopes}. Exactly one envelope per tx_id is what makes a retried writer "
+            f"recognisable instead of counted twice; the losing attempt's envelope must have gone "
+            f"back with its rollback."
+        )
+        assert envelopes[0]["kind"] == "PAYMENT" and envelopes[0]["state"] == "COMPLETED", envelopes
+        assert entries is not None and len(entries) == 1 and entries[0]["effect"] == "U", (
+            f"the attempt that was refused with a 40001 left a trace in the journal: {entries}. "
+            f"Only the flush that reached the database may produce an entry."
+        )
+        assert _atom_column(entries, "amount_before") == [_atoms(competitor_amount)], (
+            f"the retry's entry does not record the value the database actually held when it ran "
+            f"({entries}); `amount_before` must be the competitor's {competitor_amount}, not the "
+            f"{starting} this session had loaded before losing the race"
+        )
+        assert _atom_column(entries, "delta") == [_atoms(paid)], entries
+        equivalents = await stored_rows(
+            serializable_factory,
+            f"SELECT equivalent_id, effect_count FROM {OPERATION_EQUIVALENTS_TABLE} "  # noqa: S608
+            f"WHERE operation_id = :id",
+            {"id": envelopes[0]["id"]},
+        )
+        assert equivalents is not None and len(equivalents) == 1, (
+            f"the completion did not write exactly one `{OPERATION_EQUIVALENTS_TABLE}` row for the "
+            f"one equivalent the payment touched: {equivalents}"
+        )
+    finally:
+        await _cleanup(serializable_factory, seeded)
+
+
+@pytest.mark.asyncio
+async def test_c8_the_inject_owners_own_retry_leaves_one_envelope_and_the_winning_entries(
+    observed_factory,  # noqa: F811 - the proven inject stand, imported rather than rebuilt
+):
+    """C8, inject owner, API-SHAPED. The other writer design v2 §9 names, on a real `40001`.
+
+    THE STAND IS NOT NEW AND THAT IS DELIBERATE. `tests/integration/
+    test_p015_inject_retries_a_serialization_failure_postgres.py` already produces this exact
+    conflict against the real inject owner - `_apply_due_scenario_events` ->
+    `_apply_inject_event`'s `while True:` loop - and asserts that the unit of work ran again and
+    that the stored amount is the concurrent value plus the injected one exactly once. Its helpers
+    are imported here rather than rewritten: a second stand for the same conflict would be a second
+    thing to keep correct, and the part C8 adds is about the JOURNAL, not about the retry.
+
+    WHAT THIS ADDS. The inject owner opens its envelope INSIDE the retry loop, once per attempt
+    (`app/core/simulator/real_runner_impl.py:653`), under an identity that is the same string on
+    every attempt (`run_id:event_index`). Both halves of that are load-bearing and neither is
+    covered by the retry test: if the rolled-back attempt's envelope survived, the second attempt
+    would collide on `UNIQUE(kind, identity)`; if the envelope were opened OUTSIDE the loop, the
+    second attempt would be refused for nesting inside the first. Exactly one COMPLETED envelope
+    with exactly the winning attempt's entries is the only outcome consistent with both.
+
+    RED BEFORE STEP 4 BECAUSE: `debt_operations` does not exist, and the non-vacuity assertion
+    placed FIRST says so.
+    MUTATION: open the inject's operation outside the `while True:` loop, or leave the rolled-back
+    attempt's envelope in place (complete it without the `state = 'OPEN'` predicate). Both produce
+    either two envelopes or a refusal, and this test names which.
+    """
+    from sqlalchemy import update as sa_update
+
+    from app.core.ledger import journal
+    from tests.integration.test_p015_inject_holds_the_owner_lock_postgres import (
+        _Artifacts,
+        _cleanup as _cleanup_inject_world,
+        _run,
+        _runner,
+        _seed as _seed_inject_world,
+        _stored as _stored_inject,
+    )
+
+    existing = Decimal("5.00")
+    concurrent = Decimal("7.12345678")
+    injected = Decimal("3.00")
+
+    world = await _seed_inject_world(observed_factory)
+    equivalent = world.equivalents[0]
+    run_id = f"p015-b4-c8-inject-{uuid.uuid4().hex[:8]}"
+    identity = f"{run_id}:0"
+    try:
+        async with observed_factory() as setup:
+            async with debt_fixture_setup(setup, label="c8-inject-starting-edge"):
+                setup.add(
+                    Debt(
+                        debtor_id=world.debtor.id,
+                        creditor_id=world.creditor.id,
+                        equivalent_id=equivalent.id,
+                        amount=existing,
+                    )
+                )
+            await setup.commit()
+
+        creditor, debtor = world.creditor.pid, world.debtor.pid
+        scenario = {
+            "equivalents": [eq.code for eq in world.equivalents],
+            "participants": [{"id": creditor}, {"id": debtor}],
+            "trustlines": [
+                {
+                    "from": creditor,
+                    "to": debtor,
+                    "equivalent": equivalent.code,
+                    "limit": "100.00",
+                    "status": "active",
+                }
+            ],
+            "behaviorProfiles": [],
+            "events": [
+                {
+                    "type": "inject",
+                    "time": 0,
+                    "effects": [
+                        {
+                            "op": "inject_debt",
+                            "from": creditor,
+                            "to": debtor,
+                            "equivalent": equivalent.code,
+                            "amount": str(injected),
+                        }
+                    ],
+                }
+            ],
+        }
+        run = _run(world, run_id)
+        artifacts = _Artifacts()
+        runner = _runner(run, scenario, artifacts)
+
+        real_stage = runner._inject_executor.stage_inject_event
+        stage_calls = 0
+
+        async def _stage_then_a_competitor_commits(session, **kwargs):
+            nonlocal stage_calls
+            stage_calls += 1
+            staged = await real_stage(session, **kwargs)  # has read the debt at 5.00
+            if stage_calls == 1:
+                # THE COMPETITOR, exactly as the step-3 retry stand builds it: a Core `update(Debt)`
+                # with the journal stood down on this engine only. It has to stay a Core statement -
+                # routing it through the ORM would add a third debt flush to `_observations`, which
+                # the sibling stand counts - and standing the journal down is what lets a Core
+                # statement through at all (`C2`). What it stands for is "somebody else committed
+                # the row", and the `40001` that follows is PostgreSQL's, not this helper's.
+                engine = observed_factory.kw.get("bind")
+                journal.uninstall_write_guard(engine)
+                try:
+                    async with observed_factory() as other:
+                        await other.execute(
+                            sa_update(Debt)
+                            .where(
+                                Debt.debtor_id == world.debtor.id,
+                                Debt.creditor_id == world.creditor.id,
+                                Debt.equivalent_id == equivalent.id,
+                            )
+                            .values(amount=concurrent)
+                        )
+                        await other.commit()
+                finally:
+                    journal.install_write_guard(engine)
+            return staged
+
+        runner._inject_executor.stage_inject_event = _stage_then_a_competitor_commits
+
+        sqlstates: list[str | None] = []
+
+        async with observed_factory() as session:
+            real_flush = session.flush
+
+            async def _flush(*args, **kwargs):
+                try:
+                    return await real_flush(*args, **kwargs)
+                except DBAPIError as exc:
+                    sqlstates.append(
+                        getattr(exc.orig, "sqlstate", None) or getattr(exc.orig, "pgcode", None)
+                    )
+                    raise
+
+            session.flush = _flush  # type: ignore[method-assign]
+            await runner._apply_due_scenario_events(
+                session, run_id=run.run_id, run=run, scenario=scenario
+            )
+
+        envelopes = await stored_operations(observed_factory, identity)
+        entries = await stored_entries(observed_factory, identity)
+        stored = await _stored_inject(observed_factory, world)
+
+        # NON-VACUITY, FIRST.
+        assert envelopes is not None, missing_journal_tables(envelopes, OPERATIONS_TABLE)
+
+        # NON-VACUITY: the conflict was real, at the owner's explicit flush of the staged writes,
+        # and the owner re-ran the WHOLE unit of work rather than only the commit.
+        assert sqlstates == ["40001"], (
+            f"stand: the inject's staged write was not refused with exactly one genuine "
+            f"serialization failure at the owner's flush (observed {sqlstates})"
+        )
+        assert stage_calls == 2, (
+            f"stand: the unit of work was staged {stage_calls} time(s), so the owner did not re-run "
+            f"it and this is not the inject owner's retry"
+        )
+        assert stored == {equivalent.id: concurrent + injected}, (
+            f"stand: expected the concurrent {concurrent} plus the injected {injected} exactly once, "
+            f"stored {stored}"
+        )
+
+        # VERDICT.
+        assert len(envelopes) == 1, (
+            f"an inject that was refused with a 40001 and retried by its own loop left {envelopes} "
+            f"for identity {identity}. The envelope is opened per ATTEMPT under an identity that is "
+            f"per EVENT, so the rolled-back attempt's envelope must be gone - otherwise the retry "
+            f"collides on UNIQUE(kind, identity) instead of recording the work it did."
+        )
+        assert envelopes[0]["kind"] == "INJECT" and envelopes[0]["state"] == "COMPLETED", envelopes
+        assert envelopes[0]["tx_id"] is None, (
+            f"an INJECT envelope carries no tx_id (design v2 §5): {envelopes}"
+        )
+        assert entries is not None and len(entries) == 1 and entries[0]["effect"] == "U", (
+            f"the attempt that was refused with a 40001 left a trace in the journal: {entries}"
+        )
+        assert _atom_column(entries, "amount_before") == [_atoms(concurrent)], (
+            f"the retry's entry does not record the value the database held when it ran ({entries}); "
+            f"`amount_before` must be the competitor's {concurrent}, not the {existing} the first "
+            f"attempt had read"
+        )
+        assert _atom_column(entries, "delta") == [_atoms(injected)], entries
+    finally:
+        await _cleanup_inject_world(observed_factory, world)
 
 
 # ==============================================================================================
@@ -1978,18 +2373,36 @@ _SHAPE_INVALID_FORGERIES = [
         "an insert that claims a previous amount",
         "entry",
         {"effect": "I", "amount_before": "5.00000000"},
+        "check:chk_debt_journal_entries_shape",
         "an I has no before; a forged one would let a reconstruction start from an invented state",
     ),
     (
-        "an update that changes nothing",
+        "an update whose endpoints are equal",
         "entry",
+        # `delta` stays legal (non-zero), so the only thing wrong with this row is its shape. Until
+        # 2026-09-13 this case set `delta = 0` as well and violated BOTH CHECKs while the test
+        # asserted only `error is not None` - so dropping either one left it green and the mutation
+        # the docstring names could not be run. Split, exactly as on the SQLite tier.
         {
             "effect": "U",
             "amount_before": "5.00000000",
             "amount_after": "5.00000000",
+            "delta": "1.00000000",
+        },
+        "check:chk_debt_journal_entries_shape",
+        "a U whose endpoints are equal recorded a movement that did not happen",
+    ),
+    (
+        "an entry whose delta is zero",
+        "entry",
+        {
+            "effect": "U",
+            "amount_before": "5.00000000",
+            "amount_after": "6.00000000",
             "delta": "0.00000000",
         },
-        "a U whose endpoints are equal is a zero-delta entry, and `delta <> 0` forbids it",
+        "check:chk_debt_journal_entries_delta",
+        "`delta <> 0`: an entry that moved nothing is not an effect and must not be counted as one",
     ),
     (
         "an amount past the magnitude ceiling",
@@ -2012,6 +2425,13 @@ _SHAPE_INVALID_FORGERIES = [
             "amount_after": "1000000000000.00000000",
             "delta": "999999999995.00000000",
         },
+        # NOT A CHECK NAME, and that is the measured truth rather than a convenience: thirteen
+        # integer digits do not fit `NUMERIC(20, 8)`, so the COLUMN TYPE refuses the row with
+        # SQLSTATE 22003 before any CHECK is consulted. Writing `chk_debt_journal_entries_after`
+        # here would assert a mechanism that never speaks on this tier - which is the same class of
+        # false green this whole correction is about. The magnitude CHECK is the only line on SQLite,
+        # where the column type is not enforced at all.
+        "sqlstate:22003",
         "`amount_after < 1e12` - and this is the case ONLY this tier can pose, because the value is "
         "four orders of magnitude outside the domain the SQLite tier is allowed to write",
     ),
@@ -2019,31 +2439,59 @@ _SHAPE_INVALID_FORGERIES = [
         "a completed envelope with no digest",
         "operation",
         {"state": "COMPLETED", "effect_digest": None},
+        "check:chk_debt_operations_completion",
         "COMPLETED implies every completion column is present (design v2 §5)",
     ),
     (
         "a completed envelope with a negative effect count",
         "operation",
         {"state": "COMPLETED", "effect_count": -1},
-        "`effect_count >= 0`",
+        "check:chk_debt_operations_completion",
+        "`effect_count >= 0`, which design v2 §5 puts inside the completion CHECK rather than in a "
+        "clause of its own",
     ),
     (
         "an envelope written by a schema this build does not know",
         "operation",
         {"schema_version": 2},
+        "check:chk_debt_operations_schema_version",
         "`schema_version IN (1)` - a row from a future encoding must not be read as if it were this one",
     ),
 ]
 
 
+#: What a refused forgery must be refused BY, as a string a test can compare. Two kinds, because two
+#: mechanisms really speak here: a named CHECK, and the column type itself. PostgreSQL spells the
+#: first `violates check constraint "<name>"` and reports the second as an SQLSTATE.
+_CHECK_IN_ERROR = re.compile(r'violates check constraint "([A-Za-z0-9_]+)"')
+
+
+def _refused_by(error: BaseException | None) -> str | None:
+    """`check:<name>`, `sqlstate:<code>`, or None when the error names neither.
+
+    None is a distinct answer from "the wrong rule": an error that names no constraint and carries no
+    SQLSTATE is not a refusal by the schema at all, and the assertion that reads this quotes the
+    whole error so a red run shows what really spoke.
+    """
+
+    if error is None:
+        return None
+    found = _CHECK_IN_ERROR.search(str(error))
+    if found:
+        return f"check:{found.group(1)}"
+    orig = getattr(error, "orig", None)
+    sqlstate = getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)
+    return f"sqlstate:{sqlstate}" if sqlstate else None
+
+
 @pytest.mark.parametrize(
-    "label,table,overrides,why",
+    "label,table,overrides,refused_by,why",
     _SHAPE_INVALID_FORGERIES,
     ids=[row[0] for row in _SHAPE_INVALID_FORGERIES],
 )
 @pytest.mark.asyncio
-async def test_c19_p_a_shape_invalid_forged_row_is_refused_by_the_database(
-    serializable_factory, label, table, overrides, why
+async def test_c19_p_a_shape_invalid_forged_row_is_refused_by_the_named_rule(
+    serializable_factory, label, table, overrides, refused_by, why
 ):
     """C19-P, API-SHAPED. The write guard is not the last line; the CHECK constraints are.
 
@@ -2059,11 +2507,19 @@ async def test_c19_p_a_shape_invalid_forged_row_is_refused_by_the_database(
     anything the SQLite tier may write, so on that tier the `|amount| < 1e12` CHECK has no forgery
     that reaches it.
 
-    RED TODAY BECAUSE: the journal tables do not exist, so the forged INSERT fails with "relation
-    does not exist" - which is NOT a CHECK refusal and must not be allowed to read as one. The
-    non-vacuity assertion is therefore placed first and demands the table.
-    MUTATION once step 4 exists: drop the named CHECK from migration 021; this case must go red
-    while the others stay green.
+    AND EACH CASE NAMES THE RULE THAT MAY REFUSE IT (corrected 2026-09-13, external review). `error
+    is not None` is satisfied by any error at all - a foreign key, a NOT NULL, the other CHECK on the
+    same table - and on this tier that has already happened once: every entry forgery passed on a
+    `FOREIGN KEY constraint failed` until the UUID binding was fixed in slice C. So each row above
+    differs from a legal one in exactly one way and says what must speak, as `check:<name>` or as
+    `sqlstate:<code>` where the COLUMN TYPE is the thing that refuses.
+
+    RED BEFORE STEP 4 BECAUSE: the journal tables do not exist, so the forged INSERT fails with
+    "relation does not exist" - which is NOT a CHECK refusal and must not be allowed to read as one.
+    The non-vacuity assertion is therefore placed first and demands the table.
+    MUTATION: drop `refused_by`'s CHECK from migration 021 and from `app/db/journal_tables.py`. Only
+    the cases naming it go red; the rest stay green, and a case that had been caught by a
+    neighbouring rule now fails on the NAME instead of passing on the error.
     """
     target = OPERATIONS_TABLE if table == "operation" else ENTRIES_TABLE
     probe = await stored_rows(serializable_factory, f"SELECT 1 FROM {target} LIMIT 1")  # noqa: S608
@@ -2081,6 +2537,11 @@ async def test_c19_p_a_shape_invalid_forged_row_is_refused_by_the_database(
             f"past the `before_execute` guard (design v2 §6 does not intercept `text()` or "
             f"`exec_driver_sql`, and says so) must still be stopped by the CHECK constraints of "
             f"migration 021; otherwise the guard's documented hole is a hole in the money history."
+        )
+        assert _refused_by(error) == refused_by, (
+            f"the forgery `{label}` was refused by {_refused_by(error)!r}, not by `{refused_by}`: "
+            f"{error}. {why}. A case caught by a neighbouring rule says nothing about the rule it is "
+            f"named after, and the mutation `drop {refused_by}` would leave it green."
         )
     finally:
         await _cleanup(serializable_factory, seeded)

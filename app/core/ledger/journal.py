@@ -172,6 +172,7 @@ class Reason:
     ENGINE_NOT_INSTRUMENTED = "engine_not_instrumented"
     BAD_ARGUMENT = "bad_argument"
     ENVELOPE_LOST = "envelope_lost"
+    STALE_DB_TRANSACTION = "stale_db_transaction"
 
 
 class DebtJournalError(RuntimeError):
@@ -486,6 +487,79 @@ def _intent_digest(intent: Any) -> tuple[Any, str]:
 # =================================================================================================
 
 
+#: A verified write, in full: effect kind, the debt's primary key, the DIRECTED EDGE the hook
+#: recorded it on - `equivalent_id`, `debtor_id`, `creditor_id` - and the exact amount.
+#:
+#: THE EDGE IS PART OF THE IDENTITY, and leaving it out was a defect measured 2026-09-13 (T1527).
+#: With a signature of `(kind, id, amount)` the grant could not tell one edge from another, so a
+#: row whose edge differed from the one the journal had just recorded still matched it: the entry
+#: said `(A, B, eq1)` while `debts` stored `(A, C, eq2)`, and the write was allowed. That is the
+#: single failure this mechanism exists to prevent - criterion (a), the journal's per-edge deltas
+#: equalling the edge's final minus initial, is false from that moment on, with nothing refusing at
+#: write time. Two routes reached it on this tree and neither needed a patched SQLAlchemy: see
+#: `_row_edge` below for the one that needs no listener at all.
+_Signature = tuple[str, str, str, str, str, str]
+
+#: Stands in a row's edge for a key column whose parameter value is not a UUID at all. It is a
+#: value no signature component can equal - every component is a canonical dashed UUID string - so
+#: an unreadable key column matches NOTHING rather than reading as "not named by this statement".
+_UNREADABLE_KEY = "?"
+
+#: The amount component of a write that moves NO money: an UPDATE the hook saw as dirty for
+#: something other than the amount (a version bump). `_money_text` only ever produces digits or the
+#: empty string, so this is a value no real amount can collide with.
+#:
+#: IT IS A STATE OF ITS OWN, and conflating it with "the amount is unchanged" was a defect measured
+#: 2026-09-13 (T1527, review item 3). The hook already granted such a write - the `U` branch below
+#: says so in as many words - but it granted it under the amount the row was NOT changing, and a
+#: metadata-only UPDATE carries no amount parameter at all (`SET version=?` with the primary key in
+#: the WHERE clause). So the grant could never be consumed: `debt.version += 1` inside a perfectly
+#: ordinary operation was refused as `unverified_debt_write`, and had it not been, `after_flush`
+#: would have refused the same flush again for a verified write that never reached the connection.
+#: A guard that refuses legitimate writes is a defect in the same mechanism as one that admits
+#: illegitimate ones, so this state is named on both sides: the hook writes it, and a row carrying
+#: no amount is matched against it and against nothing else.
+_NO_MONEY_MOVED = "-"
+
+#: The parameter names an ORM persistence statement keys this table's primary key under. Derived
+#: from the mapped table rather than spelled out, but the SHAPE is SQLAlchemy's and is pinned with
+#: the other private couplings in this module (2.0.25): `_key_getters_for_crud_column` names a
+#: WHERE-clause primary key `"%s_%s" % (table.name, col.key)`, while an INSERT's values and a
+#: DELETE's own parameters use the column key itself. Measured on this tree: INSERT `id`, UPDATE
+#: `debts_id`, DELETE `id`.
+#:
+#: WHY IDENTITY IS ESTABLISHED AND NOT INFERRED (T1527, review item 2). `_matches_any` used to try
+#: every UUID in the row as the primary key, so the identity it matched on could itself diverge from
+#: the row's: a late substitution of `Debt.id` that left the old id behind in another UUID column
+#: still found its expectation. Asking the row which parameter IS the primary key removes the guess.
+_PK_PARAM_NAMES = tuple(
+    name
+    for column in (tuple(Debt.__table__.primary_key.columns)[0],)
+    for name in (column.key, f"{DEBT_TABLE_NAME}_{column.key}")
+)
+
+
+def _key_text(value: Any) -> str | None:
+    """One UUID in its canonical dashed spelling, whatever spelling it arrived in.
+
+    THE SPELLING TRAP THIS PROGRAMME ALREADY HIT. `Uuid(as_uuid=True)` is 32 hex characters on
+    SQLite and a native `uuid` object on PostgreSQL, so a comparison written against one tier can
+    silently match nothing on the other. `before_execute` sees the parameters BEFORE any bind
+    processor, so in practice both tiers hand this function `uuid.UUID` objects - but "in practice"
+    is what the trap is made of, so every spelling is normalised through `uuid.UUID` and anything
+    that is not a UUID at all answers `None` instead of comparing as a string.
+    """
+
+    if isinstance(value, uuid.UUID):
+        return str(value)
+    if isinstance(value, (str, bytes)):
+        try:
+            return str(uuid.UUID(value.decode() if isinstance(value, bytes) else value))
+        except (ValueError, UnicodeDecodeError):
+            return None
+    return None
+
+
 @dataclass
 class _Grant:
     """The writes one flush verified, and nothing else.
@@ -496,10 +570,10 @@ class _Grant:
     """
 
     session_id: int
-    expected: dict[tuple[str, str, str], int]
+    expected: dict[_Signature, int]
     matched: int = 0
 
-    def take(self, signature: tuple[str, str, str]) -> bool:
+    def take(self, signature: _Signature) -> bool:
         remaining = self.expected.get(signature, 0)
         if remaining <= 0:
             return False
@@ -509,6 +583,44 @@ class _Grant:
             self.expected[signature] = remaining - 1
         self.matched += 1
         return True
+
+    def take_row(
+        self,
+        effect: str,
+        identifiers: set[str],
+        amounts: set[str],
+        edge: dict[str, str | None],
+    ) -> bool:
+        """Consume one expectation this row could be, edge included.
+
+        A scan rather than a dict lookup, because an UPDATE or a DELETE does not necessarily name
+        its edge at all, and an amount can arrive as more than one spelling of the same number. The
+        candidates are therefore offered to the grant and the grant decides.
+
+        `edge[column] is None` means THIS STATEMENT DOES NOT WRITE THAT COLUMN, so the database
+        keeps whatever it already held for the row and the hook read its value from that same
+        stored row. A value that is present must equal the recorded one; `_UNREADABLE_KEY` equals
+        nothing. For an INSERT every key column is always named - all three are `NOT NULL` with no
+        default, and the hook refuses a Debt that reaches the flush without them - so `_matches_any`
+        refuses an INSERT with an unnamed key column outright rather than letting it through here.
+        """
+
+        for signature in list(self.expected):
+            kind, debt_id, equivalent_id, debtor_id, creditor_id, amount = signature
+            if kind != effect or debt_id not in identifiers or amount not in amounts:
+                continue
+            recorded = {
+                "equivalent_id": equivalent_id,
+                "debtor_id": debtor_id,
+                "creditor_id": creditor_id,
+            }
+            if any(
+                written is not None and written != recorded[column]
+                for column, written in edge.items()
+            ):
+                continue
+            return self.take(signature)
+        return False
 
 
 #: connection -> the grant its current flush installed.
@@ -588,11 +700,66 @@ def _rows_of(multiparams: Any, params: Any) -> list[dict]:
     return rows
 
 
-def _matches_any(effect: str, row: dict, grant: _Grant) -> bool:
-    """Consume one expectation for this row, trying every UUID it carries as the primary key.
+def _row_edge(row: dict) -> dict[str, str | None]:
+    """The directed edge this statement writes, as far as its own parameters name it.
 
-    An INSERT row carries four UUIDs (the debt and its three references) and only one of them is
-    the key, so the key is found by asking the grant rather than by guessing the column.
+    READ BY COLUMN NAME, and here that is sound where it was not sound for the primary key: a key
+    column appears in the parameters under its own name (`debtor_id`) whether the statement is an
+    INSERT or an UPDATE, while the primary key is `id` in one and `debts_id` in the other.
+
+    WHY THIS IS READ AT ALL (measured 2026-09-13, T1527). The journal entry's edge comes from the
+    ORM column attributes at `before_flush`. The row's edge comes from the same attributes read
+    LATER - and SQLAlchemy's many-to-one dependency processor writes those attributes in between,
+    after `before_flush` and before the statement is built. So `Debt(debtor_id=X, ..., creditor=q)`
+    - plain, legal ORM with no listener anywhere - is journalled on the edge its columns named and
+    stored on the edge its relationship named; the same construction on a stored Debt
+    (`row.creditor = q`) puts `creditor_id` into the UPDATE's SET clause and moves the obligation to
+    other participants, which is exactly what `C3` forbids and what `C3`'s own column-history check
+    cannot see, because at `before_flush` the column has no history yet.
+
+    A column this statement does not write is `None`: the database keeps what it already held, and
+    the hook read its value from that same stored row. A column present but not a readable UUID is
+    `_UNREADABLE_KEY`, which matches nothing.
+    """
+
+    edge: dict[str, str | None] = {}
+    for column in _KEY_COLUMNS:
+        if column not in row:
+            edge[column] = None
+            continue
+        text = _key_text(row[column])
+        edge[column] = text if text is not None else _UNREADABLE_KEY
+    return edge
+
+
+def _row_identity(row: dict) -> str | None:
+    """WHICH ROW this statement is about, read from the parameter that says so.
+
+    `None` when no parameter names the primary key, and `_UNREADABLE_KEY` when two of them name it
+    and disagree - an UPDATE that puts a NEW `id` in its SET clause while the WHERE clause still
+    finds the old one. Both are refusals rather than a guess: see `_PK_PARAM_NAMES`.
+    """
+
+    found = {
+        text if (text := _key_text(row[name])) is not None else _UNREADABLE_KEY
+        for name in _PK_PARAM_NAMES
+        if name in row
+    }
+    if not found:
+        return None
+    if len(found) > 1:
+        return _UNREADABLE_KEY
+    return found.pop()
+
+
+def _matches_any(effect: str, row: dict, grant: _Grant) -> bool:
+    """Consume one expectation for this row: its identity, its edge and its amount, all by name.
+
+    NOTHING HERE IS INFERRED FROM A VALUE'S TYPE any more. An INSERT row carries four UUIDs and a
+    Decimal, and reading "the primary key" as "some UUID" and "the amount" as "some Decimal" was
+    what let a tampered row find an expectation that was not about it (T1527, review item 2). The
+    primary key comes from `_row_identity`, the edge from `_row_edge`, and both are refusals when
+    the row does not say.
     """
 
     amounts = [value for value in row.values() if isinstance(value, Decimal)]
@@ -608,15 +775,36 @@ def _matches_any(effect: str, row: dict, grant: _Grant) -> bool:
     named = _as_decimal(row["amount"]) if isinstance(row.get("amount"), (int, float, str)) else None
     if named is not None and named not in amounts:
         amounts.append(named)
-    for identifier in (value for value in row.values() if isinstance(value, uuid.UUID)):
-        if effect == "D":
-            if grant.take((effect, str(identifier), "")):
-                return True
-            continue
-        for amount in amounts:
-            if grant.take((effect, str(identifier), _money_text(amount))):
-                return True
-    return False
+
+    edge = _row_edge(row)
+    if effect == "I" and any(written is None for written in edge.values()):
+        # FAIL-CLOSED, and not a hole that was tidied away. An ORM INSERT always names all three:
+        # they are `NOT NULL` with no default, and `_effects_of_flush` refuses a Debt that reaches
+        # the flush without them. A row that nevertheless arrives without one cannot be compared
+        # with the edge the hook recorded, and a write that cannot be compared is not a verified
+        # write (`AGENTS.md` §9).
+        return False
+
+    identity = _row_identity(row)
+    if identity is None:
+        # A statement against `debts` whose parameters do not say which row it is about cannot be
+        # matched against a verified write. Fail-closed, per `AGENTS.md` §9.
+        return False
+
+    if effect == "D":
+        texts = {""}
+    elif amounts:
+        texts = {_money_text(amount) for amount in amounts}
+    elif effect == "U":
+        # No amount parameter at all: `SET version=?` and the primary key in the WHERE clause. This
+        # is the metadata-only UPDATE, and it matches the expectation the hook wrote for exactly
+        # that - `_NO_MONEY_MOVED` - and no other.
+        texts = {_NO_MONEY_MOVED}
+    else:
+        # An INSERT with no readable amount. `amount` is `NOT NULL` with no default, so this cannot
+        # be an ORM insert of a Debt; whatever it is, it is not a write the hook verified.
+        return False
+    return grant.take_row(effect, {identity}, texts, edge)
 
 
 # =================================================================================================
@@ -742,12 +930,103 @@ def _on_release_savepoint(conn: Connection, name: str, context: Any) -> None:
     )
 
 
+def _driver_transaction_is_live(conn: Connection) -> bool | None:
+    """Does the DRIVER have a transaction open right now? `None` when it will not say.
+
+    PUBLIC DRIVER API ON BOTH TIERS, deliberately, and the two do not share a spelling:
+    `asyncpg.Connection.is_in_transaction()` is a method, `sqlite3.Connection.in_transaction` an
+    attribute. Neither is SQLAlchemy's opinion, which is the point - this is asked precisely where
+    SQLAlchemy's bookkeeping and the database have been measured to disagree.
+
+    `None` is NOT `False` (`AGENTS.md` §1): a driver that does not answer leaves the question
+    unmeasured, and the caller treats only a positive `True` as a finding. A probe that raises is
+    also `None` - it is a diagnostic, and it may not be the thing that breaks a transaction.
+    """
+
+    driver = getattr(getattr(conn, "connection", None), "driver_connection", None)
+    probe = getattr(driver, "is_in_transaction", None)
+    if callable(probe):
+        try:
+            return bool(probe())
+        except BaseException:  # noqa: BLE001 - an unanswerable probe is "unmeasured", not "clean"
+            return None
+    flag = getattr(driver, "in_transaction", None)
+    if isinstance(flag, bool):
+        return flag
+    return None
+
+
+def _on_begin(conn: Connection) -> None:
+    """A new root may not be born on top of a database transaction that is already open.
+
+    SLICE A'S FINDING 23 WAS WRONG, and this is what replaces it. That finding concluded that no
+    root-rollback handler was needed because "a rolled-back root is never reused, so the state dies
+    with its weak key". Measured on PostgreSQL 2026-09-13 (T1527, review item 4), it is reused:
+
+    * `RootTransaction._do_rollback` -> `_close_impl` dispatches `rollback` BEFORE the SQL
+      (`sqlalchemy/engine/base.py:1105-1107`, `:2702-2717`) and detaches the root in a `finally`
+      either way, so an exception out of a neighbour's `rollback` listener leaves the root detached
+      with `do_rollback` never called.
+    * On asyncpg the adapter's transaction is still open then (its `rollback()` is guarded by
+      `_started`, `dialects/postgresql/asyncpg.py:860`) and `do_begin` does nothing, so
+      `Connection.begin()` builds a NEW `RootTransaction` over the SAME database transaction.
+    * The new root has no entry in `_REGISTRY`, so `_on_commit` finds no state and refuses nothing.
+      Measured: an abandoned operation's debt of 71.00000000 and its envelope still in state `OPEN`
+      were both made durable by the second root's commit.
+
+    AND THE OBVIOUS FIX DOES NOT WORK, which is why the guard is here and not in a `rollback`
+    handler. A `rollback` listener of this module's own was written first and measured to never run
+    at all: `_JoinedListener` puts a CONNECTION-level listener's functions in `parent_listeners` and
+    the ENGINE's in `listeners` (`sqlalchemy/event/attr.py:607-636`, `:492-498`), so every
+    connection-level listener runs before every engine-level one, and `insert=True` can only order
+    this module among ENGINE-level listeners. The neighbour that prevents the rollback wins that
+    race by construction. (Same exposure applies to `_on_rollback_savepoint` below; it is not
+    closed here and is reported as such.)
+
+    `begin` IS safe ground, and not because nobody can pre-empt it: a neighbour who pre-empts this
+    by raising has aborted the `begin` itself, and `RootTransaction.__init__` assigns
+    `connection._transaction` only AFTER `_connection_begin_impl()` returns
+    (`sqlalchemy/engine/base.py:2667-2674`), so a refused begin leaves the connection with NO
+    transaction object - `Connection.commit()` is then a no-op and the stale database transaction
+    is rolled back when the connection is returned to the pool. Either way the commit does not
+    happen, which is the requirement.
+
+    NOT RESTRICTED TO CONNECTIONS THIS MODULE HAS STATE ON, and that is deliberate. The state that
+    would say "this module had business here" is keyed by the root that just died; asking for it is
+    exactly what is impossible at this point. The invariant stated positively - SQLAlchemy's `begin`
+    must really begin a transaction - needs no such state, and is the same family of defect as
+    T1525's SQLite transaction control.
+    """
+
+    if _stood_down(conn.engine):
+        return
+    if conn.closed or conn.invalidated:
+        return
+    if _driver_transaction_is_live(conn) is not True:
+        return
+    raise DebtJournalError(
+        Reason.STALE_DB_TRANSACTION,
+        "a new database transaction is being opened on a connection whose driver still has one "
+        "open. Whatever that transaction holds was never committed and never rolled back, and a "
+        "commit on the new transaction would make it durable under a record that does not "
+        "describe it.",
+    )
+
+
 def _on_rollback_savepoint(conn: Connection, name: str, context: Any) -> None:
     """Record that a savepoint rollback was REQUESTED. Nothing is dropped here (condition 1).
 
-    Registered with `insert=True` so it runs before any listener a caller adds later: a neighbour
-    that raises first would otherwise stop this from ever learning that a rollback was asked for,
-    and the request is precisely what has to be remembered.
+    Registered with `insert=True` so it runs before any listener a caller adds later - but read the
+    next paragraph for how far that reaches, because the sentence that used to stand here was wrong.
+
+    `insert=True` ORDERS THIS MODULE AMONG ENGINE-LEVEL LISTENERS ONLY, measured 2026-09-13 (T1527).
+    `_JoinedListener` puts a CONNECTION-level listener's functions in `parent_listeners` and the
+    ENGINE's in `listeners` (`sqlalchemy/event/attr.py:607-636`, `:492-498`), and
+    `_CompoundListener.__call__` runs `parent_listeners` first. So a neighbour who registers on the
+    `Connection` runs before this handler whatever `insert` says, and CAN stop it from ever learning
+    that a rollback was asked for. That exposure is open, it is not specific to savepoints - it is
+    true of every listener in this module - and it is recorded rather than claimed away. The same
+    measurement is why the root's guard is at `begin` and not in a `rollback` handler (`_on_begin`).
     """
 
     state = _state_for(conn)
@@ -925,16 +1204,41 @@ def _session_nesting(session: Session) -> list[Any]:
     return chain
 
 
+def _signature_of(
+    kind: str,
+    debt_id: uuid.UUID,
+    edge: tuple[uuid.UUID, uuid.UUID, uuid.UUID],
+    amount_text: str,
+) -> _Signature:
+    """One verified write, named completely: effect, row, EDGE, amount.
+
+    Built from the same `edge` triple the journal entry is built from, so the grant and the record
+    can never describe different edges - the guard's identity is exactly as wide as the thing it
+    guards. `amount_text` is `_money_text(after)` for money that moved, `""` for a delete (which has
+    no amount after it) and `_NO_MONEY_MOVED` for an update that changes no money at all.
+    """
+
+    equivalent_id, debtor_id, creditor_id = edge
+    return (
+        kind,
+        str(debt_id),
+        _key_text(equivalent_id) or str(equivalent_id),
+        _key_text(debtor_id) or str(debtor_id),
+        _key_text(creditor_id) or str(creditor_id),
+        amount_text,
+    )
+
+
 def _effects_of_flush(
     session: Session,
     op: _OpRecord,
     dialect: Any,
     ordinal: int,
-) -> tuple[list[_Effect], dict[tuple[str, str, str], int]]:
+) -> tuple[list[_Effect], dict[_Signature, int]]:
     """Read this flush's Debt movements out of the unit of work, before any SQL is sent."""
 
     effects: list[_Effect] = []
-    expected: dict[tuple[str, str, str], int] = {}
+    expected: dict[_Signature, int] = {}
     seen_edges: set[tuple[uuid.UUID, uuid.UUID, uuid.UUID]] = set()
 
     plan: list[tuple[Debt, str]] = []
@@ -989,6 +1293,29 @@ def _effects_of_flush(
                     f"insert, and each has to be recorded as one.",
                     debt_id=str(debt_id),
                 )
+            if kind != "I" and history.added:
+                # THE ASSIGNMENT WITH NO PREVIOUS VALUE, and the check above cannot see it (measured
+                # 2026-09-13, T1527, review item 1). `get_history` reports `deleted` only when the
+                # attribute's committed value is LOADED; after `session.expire(debt,
+                # ["creditor_id"])` - or after any commit on an `expire_on_commit` session - an
+                # assignment leaves `added=[new]`, `deleted=()` and `unchanged=()`. The check above
+                # then passed and the hook recorded the effect on the NEW edge with the OLD edge's
+                # amounts: the old edge silently lost its balance with no entry at all, and the new
+                # edge was recorded as moving 10 -> 11 when it had in fact moved 0 -> 11. Criterion
+                # (a) is then false on BOTH edges, and widening the grant cannot repair it - the
+                # entry and the row agree, because the hook had already written a false history.
+                #
+                # This is the same fail-closed rule the amount already follows a few lines below
+                # ("the previous value is not in the session's history, so the entry would have to
+                # invent one"), applied to the column that decides WHOSE money it is.
+                raise DebtJournalError(
+                    Reason.KEY_FIELD_CHANGED,
+                    f"a stored Debt's {column} was assigned ({value}) and its previous value is "
+                    f"not in the session's history - typically because the attribute had been "
+                    f"expired. The journal cannot tell whether the edge moved, and an edge that "
+                    f"may have moved cannot be recorded as one that did not.",
+                    debt_id=str(debt_id),
+                )
             key_values[column] = value
 
         edge = (
@@ -1034,9 +1361,8 @@ def _effects_of_flush(
                 # The row is dirty for something that is not money (a version bump, a timestamp).
                 # No money moved, so there is no entry - but the WRITE still has to be granted, or
                 # the guard would refuse a statement the hook itself approved.
-                expected[("U", str(debt_id), _money_text(current))] = (
-                    expected.get(("U", str(debt_id), _money_text(current)), 0) + 1
-                )
+                unchanged = _signature_of("U", debt_id, edge, _NO_MONEY_MOVED)
+                expected[unchanged] = expected.get(unchanged, 0) + 1
                 seen_edges.add(edge)
                 continue
             if amount_history.deleted:
@@ -1078,7 +1404,9 @@ def _effects_of_flush(
                 delta=delta,
             )
         )
-        signature = (kind, str(debt_id), "" if kind == "D" else _money_text(after))
+        signature = _signature_of(
+            kind, debt_id, edge, "" if kind == "D" else _money_text(after)
+        )
         expected[signature] = expected.get(signature, 0) + 1
 
     return effects, expected
@@ -1200,6 +1528,7 @@ def _drop_grant(session: Session) -> None:
 
 _CONNECTION_LISTENERS = (
     ("commit", _on_commit),
+    ("begin", _on_begin),
     ("release_savepoint", _on_release_savepoint),
     ("rollback_savepoint", _on_rollback_savepoint),
     ("after_cursor_execute", _on_after_cursor_execute),
@@ -1291,9 +1620,10 @@ def install_write_guard(engine: Any) -> None:
         return
     for name, handler in _CONNECTION_LISTENERS:
         if not event.contains(sync_engine, name, handler):
-            # `insert=True`: the journal's listeners run before anything registered afterwards. A
-            # neighbour that raises out of `rollback_savepoint` must not be able to prevent this
-            # module from recording that a rollback was requested (binding condition 1).
+            # `insert=True`: the journal's listeners run before anything registered on this ENGINE
+            # afterwards, so a neighbour that raises out of `rollback_savepoint` cannot prevent this
+            # module from recording that a rollback was requested (binding condition 1). A neighbour
+            # on the CONNECTION still can - see `_on_rollback_savepoint` for the measurement.
             event.listen(sync_engine, name, handler, insert=True)
 
 

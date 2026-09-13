@@ -57,6 +57,7 @@ from tests.p015_b4_support import (
     scenario_end_refusals,
     seed_world,
     stored_debts,
+    stored_entries,
     stored_rows,
 )
 
@@ -684,6 +685,511 @@ async def test_condition3_control_a_multi_row_granted_flush_still_passes(db_sess
         )
     finally:
         event.remove(engine.sync_engine, "before_execute", _count)
+        await drop_world(factory, world)
+
+
+# ==============================================================================================
+# T1527 - the grant has to name the EDGE, not just the row and the amount
+# ==============================================================================================
+#
+# THE DEFECT THESE WERE WRITTEN AGAINST (found by external review 2026-09-13, measured here).
+# `_effects_of_flush` built the grant's signature as `(kind, str(debt_id), amount)`. The directed
+# edge - `equivalent_id`, `debtor_id`, `creditor_id` - was not in it, so a row whose edge differed
+# from the one the journal had just recorded matched the grant all the same, provided the primary
+# key and the amount agreed. `debt_journal_entries` then said the money moved on edge (A, B, eq1)
+# while `debts` stored it on (A, C, eq2), with nothing refusing at write time: criterion (a) - the
+# journal's per-edge deltas equal the edge's final minus initial - is false from that moment, and
+# the journal is lying in exactly the way it exists to detect.
+#
+# WHAT MAKES THE ROW'S EDGE DIFFER FROM THE HOOK'S. Both come from the same ORM column attributes,
+# read at two different moments, and SQLAlchemy writes those attributes in between: the many-to-one
+# dependency processor synchronises a relationship into its foreign key column during the flush,
+# after `before_flush` and before the statement is built. That needs no listener and no patched
+# library - `Debt(debtor_id=..., creditor_id=..., creditor=q)` is ordinary ORM - which is why the
+# listener route the reviewer hypothesised is only one of the two below.
+
+
+def _entry_edges(rows):
+    """The edges `debt_journal_entries` claims, as readable names, or None when there is no table."""
+    if rows is None:
+        return None
+    return [(row["debtor_id"], row["creditor_id"], row["equivalent_id"]) for row in rows]
+
+
+async def _journalled_edges(factory, identity: str, names: dict):
+    rows = await stored_rows(
+        factory,
+        f"SELECT e.effect, e.debtor_id, e.creditor_id, e.equivalent_id, e.amount_after "  # noqa: S608
+        f"FROM {ENTRIES_TABLE} e JOIN {OPERATIONS_TABLE} o ON o.id = e.operation_id "
+        f"WHERE o.identity = :identity",
+        {"identity": identity},
+    )
+    if rows is None:
+        return None
+    return [
+        (
+            row["effect"],
+            names.get(str(uuid.UUID(str(row["debtor_id"]))), str(row["debtor_id"])),
+            names.get(str(uuid.UUID(str(row["creditor_id"]))), str(row["creditor_id"])),
+        )
+        for row in rows
+    ]
+
+
+@pytest.mark.parametrize(
+    "route",
+    ["a relationship that contradicts the column", "a before_flush listener registered later"],
+)
+@pytest.mark.asyncio
+async def test_t1527_an_insert_on_another_edge_than_the_hook_recorded_is_refused(
+    db_session, route
+) -> None:
+    """T1527, DEFECT-SHAPED. The grant must identify the EDGE, not only the row and the amount.
+
+    BOTH ROUTES END IN THE SAME PLACE: at `before_flush` the Debt's columns name edge
+    `debtor -> creditor`, and the INSERT that reaches the connection names `debtor -> extra0`. The
+    journal entry is written from the first, the row from the second.
+
+    * `a relationship that contradicts the column` needs NOBODY's listener. The Debt is constructed
+      with all three key columns set AND with `creditor=` pointing at a different participant;
+      SQLAlchemy's many-to-one dependency processor overwrites `creditor_id` from the relationship
+      during the flush, which is after the hook has read it.
+    * `a before_flush listener registered later` is the reviewer's own hypothesis, and is the
+      sibling of `test_condition3_a_late_before_flush_listener_mutating_a_debt_is_refused` above:
+      that one tampers with the AMOUNT, which the grant did catch; this one tampers with the EDGE,
+      which it did not.
+
+    RED BEFORE THE FIX BECAUSE: the row commits. `debts` holds `debtor -> extra0` and
+    `debt_journal_entries` claims `debtor -> creditor`, for the same debt id and the same amount.
+    MUTATION that must redden this again: build the signature in `_effects_of_flush` as
+    `(kind, str(debt_id), "" if kind == "D" else _money_text(after))` - the edge left out.
+    """
+    from sqlalchemy.orm import Session
+
+    from tests.conftest import TestingSessionLocal as factory
+    from app.db.models.participant import Participant
+
+    api = journal_api()
+    world = await seed_world(factory, extra_participants=1)
+    elsewhere = world.extra_participants[0]
+    identity = _identity("t1527-insert")
+    names = {
+        str(world.debtor.id): "debtor",
+        str(world.creditor.id): "creditor",
+        str(elsewhere.id): "extra0",
+    }
+    hook_saw: list[uuid.UUID] = []
+    row_will_carry: list[uuid.UUID] = []
+    try:
+        amount = exact_money("43.00")
+        async with factory() as session:
+
+            def _what_the_hook_reads(sync_session, _flush_context, _instances) -> None:
+                # ON THE `Session` CLASS WITH `insert=True`, for the reason spelled out in the
+                # keyless `C3` test above: the journal's own hook is class-level, and only a
+                # class-level listener inserted before it is guaranteed to read the columns in the
+                # state the journal reads them in. For the listener route this also fixes the order
+                # - the tampering listener below is instance-level, and SQLAlchemy runs every
+                # class-level listener before any instance-level one.
+                for obj in sync_session.new:
+                    if isinstance(obj, Debt) and not hook_saw:
+                        hook_saw.append(obj.creditor_id)
+
+            def _what_the_row_will_carry(_mapper, _connection, target) -> None:
+                # The LAST ORM point before the statement is built: `before_insert` fires after the
+                # dependency processors have synchronised relationships into columns. The guard's
+                # own refusal happens later still, at `before_execute`, so this observes the row's
+                # edge whether the write is eventually refused or not.
+                row_will_carry.append(target.creditor_id)
+
+            event.listen(Session, "before_flush", _what_the_hook_reads, insert=True)
+            event.listen(Debt, "before_insert", _what_the_row_will_carry)
+            if route == "a before_flush listener registered later":
+
+                @event.listens_for(session.sync_session, "before_flush")
+                def _a_late_listener(sync_session, _flush_context, _instances) -> None:
+                    for obj in list(sync_session.new):
+                        if isinstance(obj, Debt) and obj.creditor_id != elsewhere.id:
+                            obj.creditor_id = elsewhere.id
+
+            refusal = None
+            try:
+                if route == "a relationship that contradicts the column":
+                    other = await session.get(Participant, elsewhere.id)
+                    subject = Debt(
+                        id=uuid.uuid4(),
+                        debtor_id=world.debtor.id,
+                        creditor_id=world.creditor.id,
+                        equivalent_id=world.equivalent.id,
+                        creditor=other,
+                        amount=amount,
+                        version=0,
+                    )
+                else:
+                    subject = world.debt(str(amount))
+                async with await _open(api, session, world, "t1527-insert", identity=identity):
+                    session.add(subject)
+                    refusal = await refusal_of(api, session.flush())
+                if refusal is None:
+                    await refusal_of(api, session.commit())
+            except scenario_end_refusals(api) as exc:  # noqa: B902 - the refusal is the subject
+                refusal = refusal if refusal is not None else exc
+            finally:
+                event.remove(Session, "before_flush", _what_the_hook_reads)
+                event.remove(Debt, "before_insert", _what_the_row_will_carry)
+
+        after = await stored_debts(factory, world)
+        journalled = await _journalled_edges(factory, identity, names)
+
+        # NON-VACUITY, BOTH HALVES. The hook read one edge and the row carried another: without
+        # this the verdict could be about an ordinary, self-consistent INSERT.
+        assert hook_saw == [world.creditor.id], (
+            f"stand: the hook did not read `creditor` as this Debt's creditor ({hook_saw}), so the "
+            f"two sources were never made to disagree"
+        )
+        assert row_will_carry == [elsewhere.id], (
+            f"stand: `{route}` did not move the row's creditor to `extra0` before the statement "
+            f"was built ({row_will_carry}); the edge the row carries is the hook's own"
+        )
+
+        # VERDICT.
+        assert refusal is not None, (
+            f"an INSERT naming edge debtor->extra0 was accepted under a grant the hook issued for "
+            f"debtor->creditor, through {route}: `debts` now holds {after} while "
+            f"`{ENTRIES_TABLE}` claims {journalled}. The grant must name the edge it verified."
+        )
+        assert after == {}, f"the row on the wrong edge is durable: {after}"
+        assert not journalled, (
+            f"an entry describing an edge no row was written on is durable: {journalled}"
+        )
+    finally:
+        await drop_world(factory, world)
+
+
+@pytest.mark.asyncio
+async def test_t1527_an_update_that_moves_a_stored_debt_through_a_relationship_is_refused(
+    db_session,
+) -> None:
+    """T1527, DEFECT-SHAPED. `C3` again, by the door `C3`'s own check cannot see.
+
+    `test_c3_moving_a_stored_debt_to_another_edge_is_refused` above assigns the KEY COLUMNS of a
+    loaded Debt, and `_effects_of_flush` refuses it on `get_history(obj, column).deleted`. Assigning
+    the RELATIONSHIP instead produces no column history at `before_flush` at all - the dependency
+    processor writes the column later - so the hook records the old edge, the UPDATE's SET clause
+    carries `creditor_id` for the new one, and the obligation moves to a different pair of
+    participants with the journal's blessing.
+
+    AND THE AMOUNT MOVES WITH IT, deliberately: an entry is written, so the divergence this asserts
+    is the literal one - `{entries}` says the money moved on one edge and `debts` holds it on
+    another, for the same row.
+
+    RED BEFORE THE FIX BECAUSE: the UPDATE commits. `debts` holds debtor->extra0 at 51.00 and the
+    entry claims debtor->creditor, 50.00 -> 51.00.
+    MUTATION that must redden this again: drop `equivalent_id`/`debtor_id`/`creditor_id` from the
+    signature `_signature_of` builds.
+    """
+    from tests.conftest import TestingSessionLocal as factory
+    from app.db.models.participant import Participant
+
+    api = journal_api()
+    world = await seed_world(factory, extra_participants=1)
+    elsewhere = world.extra_participants[0]
+    identity = _identity("t1527-update")
+    names = {
+        str(world.debtor.id): "debtor",
+        str(world.creditor.id): "creditor",
+        str(elsewhere.id): "extra0",
+    }
+    debt_id, _version = await _existing_debt(factory, world, "50.00")
+    row_will_carry: list[uuid.UUID] = []
+    try:
+        async with factory() as session:
+
+            def _what_the_row_will_carry(_mapper, _connection, target) -> None:
+                row_will_carry.append(target.creditor_id)
+
+            event.listen(Debt, "before_update", _what_the_row_will_carry)
+            refusal = None
+            try:
+                other = await session.get(Participant, elsewhere.id)
+                async with await _open(api, session, world, "t1527-update", identity=identity):
+                    subject = await session.get(Debt, debt_id)
+                    subject.creditor = other
+                    subject.amount = exact_money("51.00")
+                    refusal = await refusal_of(api, session.flush())
+                if refusal is None:
+                    await refusal_of(api, session.commit())
+            except scenario_end_refusals(api) as exc:  # noqa: B902 - the refusal is the subject
+                refusal = refusal if refusal is not None else exc
+            finally:
+                event.remove(Debt, "before_update", _what_the_row_will_carry)
+
+        after = await stored_debts(factory, world)
+        journalled = await _journalled_edges(factory, identity, names)
+
+        # NON-VACUITY: the UPDATE really carried the other participant, written by SQLAlchemy and
+        # not by this test. Without it the verdict could be about an ordinary amount change.
+        assert row_will_carry == [elsewhere.id], (
+            f"stand: the relationship was never synchronised into `creditor_id` before the UPDATE "
+            f"was built ({row_will_carry}), so no edge move was attempted"
+        )
+
+        # VERDICT.
+        assert refusal is not None, (
+            f"a stored Debt was moved from debtor->creditor to debtor->extra0 through its "
+            f"relationship and nothing refused it: `debts` holds {after} while `{ENTRIES_TABLE}` "
+            f"claims {journalled}. An edge is an identity, whichever attribute names it."
+        )
+        assert after == {("debtor", "creditor", "eq"): Decimal("50.00000000")}, (
+            f"the refused edge move is durable, or the amount moved without it: {after}"
+        )
+        assert not journalled, f"an entry for a movement that never happened is durable: {journalled}"
+    finally:
+        await drop_world(factory, world)
+
+
+@pytest.mark.asyncio
+async def test_t1527_an_expired_key_attribute_cannot_hide_an_edge_move(db_session) -> None:
+    """T1527, DEFECT-SHAPED. The edge move the hook's own history check cannot see.
+
+    THE GAP. `_effects_of_flush` decided "this key column changed" from `get_history(obj,
+    column).deleted`, and `deleted` is populated only when the attribute's COMMITTED value is
+    loaded. After `session.expire(debt, ["creditor_id"])` - or after any commit on an
+    `expire_on_commit` session - an assignment leaves `added=[new]`, `deleted=()` and
+    `unchanged=()`. The check saw no change, and the hook recorded the effect on the NEW edge with
+    the OLD edge's amounts.
+
+    WHY THIS IS THE WORSE HALF of T1527. Widening the write grant cannot repair it. The grant
+    compares the row against what the hook recorded, and here the row and the record AGREE - both
+    name the new edge. The lie is in the history itself: the old edge lost its whole balance with no
+    entry at all, and the new edge was recorded as moving 10 -> 11 when it had in fact moved
+    0 -> 11. Criterion (a) - the journal's per-edge deltas equal the edge's final minus initial - is
+    then false on BOTH edges, and every later verifier agrees with the journal.
+
+    RED BEFORE THE FIX BECAUSE: the flush commits. `debts` holds debtor->extra0 at 11.00, the
+    journal holds one `U` entry on debtor->extra0 reading 10 -> 11, and debtor->creditor has
+    vanished from both.
+    MUTATION that must redden this again: drop the `history.added` branch from the key-column loop
+    in `_effects_of_flush` and keep only `history.deleted`.
+    """
+    from sqlalchemy.orm import Session
+    from sqlalchemy.orm.attributes import get_history
+
+    from tests.conftest import TestingSessionLocal as factory
+
+    api = journal_api()
+    world = await seed_world(factory, extra_participants=1)
+    elsewhere = world.extra_participants[0]
+    identity = _identity("t1527-expired")
+    names = {
+        str(world.debtor.id): "debtor",
+        str(world.creditor.id): "creditor",
+        str(elsewhere.id): "extra0",
+    }
+    debt_id, _version = await _existing_debt(factory, world, "10.00")
+    hook_history: list[tuple] = []
+    try:
+        async with factory() as session:
+
+            def _what_the_hook_reads(sync_session, _flush_context, _instances) -> None:
+                if hook_history:
+                    return
+                for obj in sync_session.dirty:
+                    if isinstance(obj, Debt):
+                        history = get_history(obj, "creditor_id")
+                        hook_history.append(
+                            (tuple(history.added), tuple(history.unchanged), tuple(history.deleted))
+                        )
+
+            event.listen(Session, "before_flush", _what_the_hook_reads, insert=True)
+            refusal = None
+            try:
+                async with await _open(api, session, world, "t1527-expired", identity=identity):
+                    subject = await session.get(Debt, debt_id)
+                    session.expire(subject, ["creditor_id"])
+                    subject.creditor_id = elsewhere.id
+                    subject.amount = exact_money("11.00")
+                    refusal = await refusal_of(api, session.flush())
+                if refusal is None:
+                    await refusal_of(api, session.commit())
+            except scenario_end_refusals(api) as exc:  # noqa: B902 - the refusal is the subject
+                refusal = refusal if refusal is not None else exc
+            finally:
+                event.remove(Session, "before_flush", _what_the_hook_reads)
+
+        after = await stored_debts(factory, world)
+        journalled = await _journalled_edges(factory, identity, names)
+
+        # NON-VACUITY: the history the hook reads really had no previous value in it. Without this
+        # the verdict could be about an ordinary, fully-loaded key change, which `C3` already covers.
+        assert hook_history and hook_history[0][0] and not hook_history[0][2], (
+            f"stand: `creditor_id` still carried its committed value in `deleted` "
+            f"({hook_history}), so this is the loaded case `C3` already refuses and not the "
+            f"expired one"
+        )
+
+        # VERDICT.
+        assert refusal is not None, (
+            f"a stored Debt's edge was moved behind an expired attribute and nothing refused it: "
+            f"`debts` holds {after} while `{ENTRIES_TABLE}` claims {journalled}. The old edge lost "
+            f"its balance with no entry, and the new edge's entry reports the old edge's numbers."
+        )
+        assert after == {("debtor", "creditor", "eq"): Decimal("10.00000000")}, (
+            f"the hidden edge move is durable: {after}"
+        )
+        assert not journalled, f"an entry with an invented history is durable: {journalled}"
+    finally:
+        await drop_world(factory, world)
+
+
+@pytest.mark.asyncio
+async def test_t1527_a_substituted_primary_key_cannot_borrow_another_columns_identity(
+    db_session,
+) -> None:
+    """T1527, DEFECT-SHAPED. The identity the guard matched on was inferred, not established.
+
+    `_matches_any` read "the primary key" as "some UUID somewhere in this row" and "the amount" as
+    "some Decimal somewhere in this row", because an INSERT carries four UUIDs and only one of them
+    is the key. A row could therefore satisfy an expectation that was not about it: substitute
+    `Debt.id` after the hook has read it and leave the OLD id behind in `debtor_id`, and the scan
+    found the old id, matched, and the row was stored under a primary key the journal never recorded.
+
+    NOW BOTH ARE READ BY NAME. `_row_identity` takes the parameter that IS the primary key - `id`
+    for an INSERT or a DELETE, `debts_id` for an UPDATE, derived from the mapped table - and refuses
+    a statement that names none, or two that disagree.
+
+    THE NARROWING HAS NO COUNTEREXAMPLE OF ITS OWN ON THIS TREE, and this test does not pretend
+    otherwise. Once the grant carries the full edge, the three non-key UUIDs in an INSERT are pinned
+    to the recorded edge, so borrowing an identity from one of them requires a participant or
+    equivalent whose id equals a debt id. This test is therefore a GUARD OVER THE RULE for the
+    identity half and a REPRODUCTION for the edge half - one scenario, red at the signature, and
+    honest about which half each assertion belongs to (`AGENTS.md` §11).
+
+    RED BEFORE THE FIX BECAUSE: the row commits under the substituted primary key.
+    MUTATION that must redden this again: drop the key columns from the signature `_signature_of`
+    builds. (Restoring the UUID-type scan in `_matches_any` alone does NOT redden it - the edge
+    check catches this row as well - which is exactly why the identity half is labelled a guard.)
+    """
+    from tests.conftest import TestingSessionLocal as factory
+
+    api = journal_api()
+    world = await seed_world(factory)
+    identity = _identity("t1527-pk")
+    substituted: list[tuple[uuid.UUID, uuid.UUID]] = []
+    try:
+        async with factory() as session:
+
+            @event.listens_for(session.sync_session, "before_flush")
+            def _a_late_listener(sync_session, _flush_context, _instances) -> None:
+                for obj in list(sync_session.new):
+                    if isinstance(obj, Debt) and not substituted:
+                        recorded = obj.id
+                        obj.id = uuid.uuid4()
+                        # The old id stays in the row, under another column's name: this is what
+                        # the type-based scan used to find.
+                        obj.debtor_id = recorded
+                        substituted.append((recorded, obj.id))
+
+            refusal = None
+            try:
+                async with await _open(api, session, world, "t1527-pk", identity=identity):
+                    session.add(world.debt("45.00"))
+                    refusal = await refusal_of(api, session.flush())
+                if refusal is None:
+                    await refusal_of(api, session.commit())
+            except scenario_end_refusals(api) as exc:  # noqa: B902 - the refusal is the subject
+                refusal = refusal if refusal is not None else exc
+
+        after = await stored_debts(factory, world)
+        stored_ids = await stored_rows(factory, "SELECT id FROM debts")
+
+        # NON-VACUITY: the primary key really was substituted after the hook had read it.
+        assert substituted and substituted[0][0] != substituted[0][1], (
+            f"stand: the late listener did not substitute the primary key ({substituted})"
+        )
+
+        # VERDICT.
+        assert refusal is not None, (
+            f"a row was stored under a primary key the hook never recorded, with the recorded id "
+            f"left behind in `debtor_id`: {after} / {stored_ids}. The identity a grant is matched "
+            f"on has to be the row's own."
+        )
+        assert after == {}, f"the row under the substituted key is durable: {after}"
+    finally:
+        await drop_world(factory, world)
+
+
+@pytest.mark.asyncio
+async def test_t1527_an_update_that_moves_no_money_is_allowed_and_journals_nothing(
+    db_session,
+) -> None:
+    """T1527, THE INVERSE DEFECT. A guard that refuses a legitimate write is the same failure.
+
+    `_effects_of_flush` has a branch for a Debt that is dirty for something other than its amount -
+    "the row is dirty for something that is not money (a version bump, a timestamp). No money
+    moved, so there is no entry - but the WRITE still has to be granted". It granted that write
+    under the amount the row was NOT changing, and a metadata-only UPDATE carries no amount
+    parameter at all: `SET version=?` with the primary key in the WHERE clause. So the expectation
+    could never be consumed, and `debt.version += 1` inside an ordinary operation was refused as
+    `unverified_debt_write` - and had the guard let it pass, `after_flush` would have refused the
+    same flush for a verified write that never reached the connection.
+
+    "MOVES NO MONEY" IS NOW A STATE OF THE SIGNATURE (`_NO_MONEY_MOVED`) rather than an amount, and
+    the row side matches a row with no amount parameter against it and against nothing else. Both
+    directions stay closed: a metadata-only row that DOES carry an amount matches nothing, and a
+    money row matches no metadata-only expectation.
+
+    RED BEFORE THE FIX BECAUSE: the flush was refused with `unverified_debt_write` and the version
+    bump never reached the database.
+    MUTATION that must redden this again: build the metadata-only expectation with
+    `_money_text(current)` instead of `_NO_MONEY_MOVED`.
+    """
+    from tests.conftest import TestingSessionLocal as factory
+
+    api = journal_api()
+    world = await seed_world(factory)
+    identity = _identity("t1527-metadata")
+    debt_id, version_before = await _existing_debt(factory, world, "46.00")
+    try:
+        async with factory() as session:
+            refusal = None
+            try:
+                async with await _open(api, session, world, "t1527-metadata", identity=identity):
+                    subject = await session.get(Debt, debt_id)
+                    subject.version = subject.version + 1
+                    refusal = await refusal_of(api, session.flush())
+                if refusal is None:
+                    await refusal_of(api, session.commit())
+            except scenario_end_refusals(api) as exc:  # noqa: B902 - the refusal is the subject
+                refusal = refusal if refusal is not None else exc
+
+        after = await stored_debts(factory, world)
+        async with factory() as fresh:
+            stored = (
+                await fresh.execute(select(Debt.version).where(Debt.id == debt_id))
+            ).scalar_one_or_none()
+        entries = await stored_entries(factory, identity)
+
+        # VERDICT: the legitimate write was not refused.
+        assert refusal is None, (
+            f"a Debt that was dirty for its version and for nothing else was refused inside an "
+            f"ordinary operation: {refusal!r}. No money moved, so there is no entry to write - but "
+            f"the write itself is one the hook verified."
+        )
+
+        # NON-VACUITY: the UPDATE really reached the database. Without this the test would pass if
+        # SQLAlchemy had emitted no statement at all, and would be measuring nothing.
+        assert stored is not None and stored > version_before, (
+            f"stand: the version bump never reached `debts` (was {version_before}, now {stored}), "
+            f"so no metadata-only UPDATE was granted"
+        )
+
+        # AND THE MONEY DID NOT MOVE, in the table or in the record.
+        assert after == {("debtor", "creditor", "eq"): Decimal("46.00000000")}, after
+        assert entries == [], (
+            f"a write that moved no money produced a journal entry: {entries}"
+        )
+    finally:
         await drop_world(factory, world)
 
 

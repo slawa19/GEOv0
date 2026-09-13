@@ -40,13 +40,15 @@ names in its docstring the mutation that must turn it red again.
 
 from __future__ import annotations
 
+import asyncio
 import gc
 import uuid
 import weakref
+from contextlib import AsyncExitStack
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import event, select
+from sqlalchemy import event, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models.debt import Debt
@@ -61,7 +63,6 @@ from tests.p015_b4_support import (
     missing_journal_tables,
     operation,
     refusal_of,
-    scenario_end_refusals,
     seed_world,
     stored_debts,
     stored_entries,
@@ -119,6 +120,51 @@ def _driver_transaction_state(driver) -> str:
         return "open" if driver.in_transaction else "none"
     except ValueError:
         return "closed"
+
+
+
+async def _envelope_states_in_transaction(connection, identity: str) -> list[str]:
+    """The envelope states for one identity, read ON the connection that is inside the transaction.
+
+    A read on a NEW session cannot see an uncommitted envelope at all, so for a scenario whose
+    verdict is "the commit was REFUSED" the fresh-session read answers the empty list whether the
+    scenario ran or not. This is the only read in this module that deliberately goes through the
+    connection under test, and it is used for NON-VACUITY only - never for a verdict, which is
+    always taken from `stored_debts` on a new session.
+    """
+
+    rows = (
+        await connection.execute(
+            text(f"SELECT state FROM {OPERATIONS_TABLE} WHERE identity = :identity"),  # noqa: S608
+            {"identity": identity},
+        )
+    ).all()
+    return [row[0] for row in rows]
+
+
+async def _debt_amounts_in_transaction(connection, world: World) -> list[Decimal]:
+    """This world's debt amounts as the open transaction sees them. Non-vacuity only; see above."""
+
+    rows = (
+        await connection.execute(
+            text("SELECT amount FROM debts WHERE equivalent_id = :equivalent_id"),
+            {"equivalent_id": _uuid_as_stored(connection, world.equivalent.id)},
+        )
+    ).all()
+    return sorted(Decimal(str(row[0])) for row in rows)
+
+
+def _uuid_as_stored(connection, value: uuid.UUID):
+    """`value` spelled the way THIS dialect stores a `Uuid(as_uuid=True)` column.
+
+    The trap this programme has been bitten by twice: SQLite keeps the 32 hex characters WITHOUT
+    dashes and PostgreSQL keeps a native `uuid`, so a `text()` comparison written with the canonical
+    dashed form matches nothing at all on the default tier - and a non-vacuity assertion that
+    matches nothing is a non-vacuity assertion that is always satisfiable by doing nothing. Same
+    rule as `tests/debt_setup.py::_uuid_literals`.
+    """
+
+    return value.hex if connection.dialect.name == "sqlite" else value
 
 
 # ==============================================================================================
@@ -736,60 +782,166 @@ async def test_c9_an_operation_on_one_session_does_not_cover_a_write_on_another(
 
 
 @pytest.mark.asyncio
-async def test_c9_an_orphaned_operation_does_not_let_a_second_session_commit(db_session) -> None:
+async def test_c9_an_operation_orphaned_by_session_close_makes_the_external_commit_refuse(
+    db_session,
+) -> None:
     """C9, DEFECT-SHAPED. The `rollback_only` shape of design v2 §1.1(b), on real debts.
 
     THE SHAPE. A session joined to an EXTERNAL `Connection` can end its own root without any
     database rollback (`sqlalchemy/orm/session.py:1361`, `:1377`): `session.close()` ends the
     session while the database transaction lives on. Anything that lived in `session.info` dies with
     it, and the external owner's `commit()` then persists whatever was written. That is why the
-    design keys the registry by the Core root transaction rather than by the session.
+    design keys the registry by the Core root transaction rather than by the session, and it is
+    prototype 3 of design v2 §1.3: "rollback_only close then outer.commit REFUSED []".
 
-    RED TODAY BECAUSE: the external commit stores both writes, the abandoned one included.
-    MUTATION once step 4 exists: hold the operation record in `session.info` (v1's design) instead
-    of in a registry keyed by the Core root, and the abandoned operation disappears with the closed
-    session while its debt commits.
+    THERE IS NO SECOND SESSION HERE, AND ITS REMOVAL IS THE POINT. The earlier shape of this test
+    had a session B flush an undeclared Debt into the same external transaction and then asserted
+    "something refused". Measured 2026-09-13: the orphaned operation was not refused at all -
+    exiting its block after the `close()` re-acquires a connection and COMPLETES the envelope
+    (`AFTER_CLOSE [('COMPLETED',)]`, `effect_count=1`) - and both refusals that test caught came
+    from session B's own undeclared write (`no_operation`, then `root_poisoned` on the commit). The
+    property C9 names was therefore carried entirely by a write the design never mentions. It is
+    asserted here with nothing else in the transaction, so only the orphan can refuse it.
+
+    WHICH MEANS THE BLOCK MUST NOT EXIT. `async with` completes the operation, and a COMPLETED
+    operation is one the commit is ALLOWED to carry - correctly, as the control below measures. The
+    state the design describes is an operation that is still OPEN when its session dies, so the
+    context is entered through an `AsyncExitStack` and abandoned: that is what "A closes with an
+    OPEN op" is, and no public call produces it while the `with` block is still running.
+
+    RED BEFORE STEP 4 BECAUSE: the external commit stores the abandoned operation's debt.
+    MUTATION, MEASURED 2026-09-13: drop the `is_settled` arm of `_blocking_problem`, so a root commit
+    stops asking whether the operations registered in it finished. This test then goes red quoting
+    `{('debtor', 'creditor', 'eq'): Decimal('6.00000000')}` as durable, and the control below stays
+    green. The design-level mutation is the same thing one layer up - hold the record in
+    `session.info` (v1's design) instead of in a registry keyed by the Core root, and the record dies
+    with the closed session so there is nothing left for that arm to find.
     """
     from tests.conftest import TestingSessionLocal, engine
 
     api = journal_api()
-    world = await seed_world(TestingSessionLocal, extra_participants=1)
+    world = await seed_world(TestingSessionLocal)
+    identity = _identity("orphan")
     try:
+        record = None
+        envelope_inside = None
+        debts_inside = None
+        commit_refusal: BaseException | None = None
         async with engine.connect() as connection:
             external = await connection.begin()
             abandoned_factory = async_sessionmaker(
                 bind=connection, class_=AsyncSession, expire_on_commit=False, autoflush=False
             )
             session_a = abandoned_factory()
-            async with await _open(api, session_a, world, "orphan"):
+            stack = AsyncExitStack()
+            try:
+                record = await stack.enter_async_context(
+                    await _open(api, session_a, world, "orphan", identity=identity)
+                )
                 session_a.add(world.debt("6.00"))
                 await session_a.flush()
                 # The session is closed while its operation is still open and while the database
-                # transaction it wrote in is still alive.
+                # transaction it wrote in is still alive. The block is never left.
                 await session_a.close()
 
-            async with abandoned_factory() as session_b:
-                session_b.add(
-                    world.debt("37.00", creditor_id=world.extra_participants[0].id)
-                )
-                flush_refusal = await refusal_of(api, session_b.flush())
+                # NON-VACUITY, READ ON THE CONNECTION THAT IS STILL INSIDE THE TRANSACTION. Read
+                # after the commit it would say nothing: the refusal rolls the transaction back, so
+                # "no envelope, no debt" is the expected answer either way and a scenario that never
+                # ran would be indistinguishable from one that was refused.
+                envelope_inside = await _envelope_states_in_transaction(connection, identity)
+                debts_inside = await _debt_amounts_in_transaction(connection, world)
 
+                commit_refusal = await refusal_of(api, external.commit())
+            finally:
+                # Tidy-up AFTER the verdict, and it asserts nothing: abandoning the context IS the
+                # scenario, so unwinding it raises whatever a completion on a rolled-back, poisoned
+                # root raises. Swallowed here so the test reports its own verdict rather than the
+                # exception of its own cleanup.
+                try:
+                    await stack.aclose()
+                except BaseException:  # noqa: BLE001 - see above
+                    pass
+
+        after = await stored_debts(TestingSessionLocal, world)
+
+        # NON-VACUITY: the operation really opened and really wrote, inside the external
+        # transaction, and it was still OPEN when the session died.
+        assert record is not None and api.available, api.missing(
+            "an operation has to exist before it can be orphaned"
+        )
+        assert envelope_inside == ["OPEN"], (
+            f"stand: the envelope this operation opened was {envelope_inside} inside the external "
+            f"transaction, not ['OPEN'], so what the commit below meets is not an orphan"
+        )
+        assert debts_inside == [Decimal("6.00000000")], (
+            f"stand: the abandoned operation's debt never reached the external transaction "
+            f"({debts_inside}), so the commit below had nothing of it to persist"
+        )
+
+        # VERDICT.
+        assert commit_refusal is not None, (
+            f"a session was closed while its operation was still OPEN, and the external "
+            f"transaction committed that operation's debt anyway: {after}. The record lives with "
+            f"the Core root transaction, not with the session, so a commit that would cover an "
+            f"unfinished operation must refuse."
+        )
+        assert after == {}, f"the orphaned root committed anyway: {after}"
+    finally:
+        await drop_world(TestingSessionLocal, world)
+
+
+@pytest.mark.asyncio
+async def test_c9_control_a_completed_operation_survives_the_same_session_close(db_session) -> None:
+    """C9, anti-vacuum control. GREEN, and it is what makes the refusal above mean something.
+
+    SAME SCENARIO, ONE DIFFERENCE: the operation is COMPLETED before the session is closed. The
+    external commit must then be ALLOWED and the money durable. Without this the refusal above
+    would be satisfied by a journal that refused every commit on a connection whose session had
+    closed - a rule that would stop the rollback_only shape working at all - and the counterexample
+    could not tell "the orphan was caught" from "a close poisons everything".
+
+    MUTATION, MEASURED 2026-09-13: refuse the commit whenever an operation's session has ended,
+    whatever state the operation is in (`_blocking_problem` gaining an arm on
+    `op.session.get_transaction() is None`). This control goes red and the test above stays green,
+    which is the pair showing the two halves are distinguishable by the stand and not only by prose.
+    """
+    from tests.conftest import TestingSessionLocal, engine
+
+    api = journal_api()
+    world = await seed_world(TestingSessionLocal)
+    identity = _identity("orphan-control")
+    try:
+        async with engine.connect() as connection:
+            external = await connection.begin()
+            factory = async_sessionmaker(
+                bind=connection, class_=AsyncSession, expire_on_commit=False, autoflush=False
+            )
+            session_a = factory()
+            async with await _open(api, session_a, world, "orphan-control", identity=identity):
+                session_a.add(world.debt("6.00"))
+                await session_a.flush()
+            envelope_inside = await _envelope_states_in_transaction(connection, identity)
+            # The same `close()` as the test above, with the operation already finished.
+            await session_a.close()
             commit_refusal = await refusal_of(api, external.commit())
 
         after = await stored_debts(TestingSessionLocal, world)
 
-        # NON-VACUITY: both writes really reached the shared database transaction.
-        assert after or (flush_refusal, commit_refusal) != (None, None), (
-            "stand: nothing was written and nothing was refused, so the scenario never ran"
+        # NON-VACUITY: the operation really finished before the close.
+        assert envelope_inside == ["COMPLETED"], (
+            f"stand: the operation was {envelope_inside} when the session closed, so this is not "
+            f"the completed half of the pair"
         )
 
         # VERDICT.
-        assert (flush_refusal, commit_refusal) != (None, None), (
-            f"a session was closed with an operation still open, a second session wrote a Debt in "
-            f"the same external transaction, and the external commit stored everything: {after}. "
-            f"An orphaned operation must make any commit or release on that root refuse."
+        assert commit_refusal is None, (
+            f"a COMPLETED operation's external commit was refused because its session had closed: "
+            f"{commit_refusal!r}. The rollback_only shape is legitimate; what C9 forbids is an "
+            f"UNFINISHED operation surviving its session, not a finished one."
         )
-        assert after == {}, f"the orphaned root committed anyway: {after}"
+        assert after == {("debtor", "creditor", "eq"): Decimal("6.00000000")}, (
+            f"the completed operation's money is not durable: {after}"
+        )
     finally:
         await drop_world(TestingSessionLocal, world)
 
@@ -959,8 +1111,25 @@ async def test_c10_a_refused_release_leaves_the_root_open_and_poisoned(db_sessio
 # ==============================================================================================
 
 
+#: The three machinery failures design v2 §9 `C11` names, as `(label, when, raises)`. `when` is the
+#: statement against `debt_operations` the injection fires on: `insert` is the envelope write in
+#: `__aenter__`, `update` is the completion write at exit. Until 2026-09-13 only the first existed,
+#: while the test's own docstring claimed "the envelope INSERT in `__aenter__`, the entries and
+#: completion UPDATE at exit" - two thirds of the claim had no case.
+_MACHINERY_FAILURES = [
+    ("the envelope INSERT at open", "insert", RuntimeError),
+    ("the completion UPDATE at exit", "update", RuntimeError),
+    ("a cancellation during the completion UPDATE", "update", asyncio.CancelledError),
+]
+
+
+@pytest.mark.parametrize(
+    "label,when,raises", _MACHINERY_FAILURES, ids=[row[0] for row in _MACHINERY_FAILURES]
+)
 @pytest.mark.asyncio
-async def test_c11_a_failure_in_the_operations_own_io_poisons_the_root(db_session) -> None:
+async def test_c11_a_failure_in_the_operations_own_io_poisons_the_root(
+    db_session, label, when, raises
+) -> None:
     """C11, machinery half, API-SHAPED. A journal I/O failure is not a business failure.
 
     A failure or cancellation while the operation writes its OWN rows - the envelope INSERT in
@@ -968,28 +1137,47 @@ async def test_c11_a_failure_in_the_operations_own_io_poisons_the_root(db_sessio
     happened. Design v2 §1.5 makes that a ROOT poison: no commit and no release may go through
     until a real database rollback. Only a failure in the caller's block is discardable.
 
-    THE INJECTION names no private symbol: a `before_execute` listener refuses the first statement
-    that writes the envelope table, which is the operation's own I/O by definition.
+    ALL THREE OF THE DESIGN'S CASES, which is what changed on 2026-09-13. Design v2 §9 names
+    "injected exception in envelope INSERT in `__aenter__`, in completion I/O, CancelledError during
+    completion"; only the first was written. The completion cases are not a restatement of the open
+    case: at open nothing of the caller's work has been journalled yet, while at completion the
+    entries are already written and the envelope is still `OPEN` - so a mechanism that poisoned on
+    the way in and merely logged on the way out would have passed the single case and left every
+    half-recorded operation committable.
 
-    RED TODAY BECAUSE: no envelope INSERT is ever attempted, so the injection never fires - checked
-    first, below, so this cannot pass by injecting nothing.
-    MUTATION once step 4 exists: treat an exception from the journal's own I/O like a body exception
-    (discard the operation record and let the root commit).
+    THE INJECTION names no private symbol: a `before_execute` listener refuses the statement that
+    writes the envelope table, which is the operation's own I/O by definition.
+
+    RED BEFORE STEP 4 BECAUSE: no envelope statement is ever attempted, so the injection never fires
+    - checked first, below, so this cannot pass by injecting nothing.
+    MUTATION, and it is the one that was MEASURED rather than the one that reads well. Make a failed
+    completion mark the envelope COMPLETED and clear the root poison (`_complete`'s
+    `except BaseException`, keeping the `raise`): the two completion cases then go red quoting the
+    stored debt, and the open case stays green because `_complete` never runs there. Measured
+    2026-09-13.
+
+    AND THE OBVIOUS MUTATION IS NOT ONE, which is worth writing down because it reads like it is:
+    dropping the `_poison(state, "operation completion failed")` line alone changes nothing here. The
+    record is left `POISONED`, `_blocking_problem` refuses any root commit that carries an operation
+    which `is_settled` is false for, and the refusal simply arrives under
+    `operation_not_completed` instead of `root_poisoned`. The poison is what survives a SAVEPOINT
+    rollback; it is not what refuses this commit.
     """
     from tests.conftest import TestingSessionLocal as factory, engine
 
     api = journal_api()
     world = await seed_world(factory)
     injected: list[str] = []
-    message = "p015-b4: the operation's own envelope INSERT failed"
+    message = f"p015-b4: the operation's own {when} against {OPERATIONS_TABLE} failed"
 
-    def _fail_the_envelope_write(_conn, clauseelement, _multiparams, _params, _options) -> None:
-        rendered = str(getattr(clauseelement, "table", "")) or str(clauseelement)
-        if OPERATIONS_TABLE in rendered and "insert" in type(clauseelement).__name__.lower():
-            injected.append(rendered)
-            raise RuntimeError(message)
+    def _fail_the_envelope_statement(_conn, clauseelement, _multiparams, _params, _options) -> None:
+        table = getattr(getattr(clauseelement, "table", None), "name", None)
+        if table != OPERATIONS_TABLE or not getattr(clauseelement, f"is_{when}", False):
+            return
+        injected.append(f"{when} {table}")
+        raise raises(message)
 
-    event.listen(engine.sync_engine, "before_execute", _fail_the_envelope_write)
+    event.listen(engine.sync_engine, "before_execute", _fail_the_envelope_statement)
     try:
         machinery_failure: BaseException | None = None
         commit_refusal: BaseException | None = None
@@ -998,52 +1186,78 @@ async def test_c11_a_failure_in_the_operations_own_io_poisons_the_root(db_sessio
                 async with await _open(api, session, world, "io-failure"):
                     session.add(world.debt("9.00"))
                     await session.flush()
-            except Exception as exc:  # recorded, asserted below
+            except BaseException as exc:  # noqa: BLE001 - CancelledError is one of the cases
                 machinery_failure = exc
             commit_refusal = await refusal_of(api, session.commit())
 
         after = await stored_debts(factory, world)
 
-        # NON-VACUITY: the operation really tried to write its envelope, and the injection really
-        # fired. Without this the verdict would be about a scenario that never happened.
-        assert injected, (
-            f"no INSERT into `{OPERATIONS_TABLE}` was ever attempted, so no failure could be "
-            f"injected into the operation's own I/O. {JOURNAL_MODULE} does not exist yet; this is "
-            f"the step-2 red state, not a passing test."
+        # NON-VACUITY: the operation really reached the statement the injection is attached to, and
+        # the injection really fired. Without this the verdict would be about a scenario that never
+        # happened - and for the completion cases it is also what proves the envelope INSERT
+        # SUCCEEDED, so the failure really is at completion and not a relabelled open failure.
+        assert injected == [f"{when} {OPERATIONS_TABLE}"], (
+            f"the operation never reached its own {when} against `{OPERATIONS_TABLE}` (fired: "
+            f"{injected}), so no failure could be injected into its I/O. {JOURNAL_MODULE} may not "
+            f"exist yet; this is the step-2 red state, not a passing test."
         )
-        assert machinery_failure is not None and message in str(machinery_failure), (
-            f"stand: the injected failure did not reach the caller: {machinery_failure!r}"
+        assert isinstance(machinery_failure, raises) and message in str(machinery_failure), (
+            f"stand: the injected {raises.__name__} did not reach the caller: {machinery_failure!r}"
         )
 
         # VERDICT.
         assert commit_refusal is not None, (
-            f"the operation's own I/O failed and the root committed anyway: {after}. A machinery "
-            f"failure must poison the root until a real database rollback."
+            f"the operation's own I/O failed at {label} and the root committed anyway: {after}. A "
+            f"machinery failure must poison the root until a real database rollback."
         )
         assert after == {}, f"a root poisoned by a journal I/O failure still stored a debt: {after}"
     finally:
-        event.remove(engine.sync_engine, "before_execute", _fail_the_envelope_write)
+        event.remove(engine.sync_engine, "before_execute", _fail_the_envelope_statement)
         await drop_world(factory, world)
 
 
+#: The two ways design v2 §9 `C11` says a caller's BLOCK can end badly: "business exception/
+#: cancellation in body of staged payment inside action savepoint". The cancellation case did not
+#: exist until 2026-09-13, and it is not the same case: `CancelledError` is a `BaseException`, so an
+#: implementation whose discard path was written as `except Exception` would pass the first and poison
+#: the whole tick on the second.
+_BODY_FAILURES = [
+    ("a business rejection", _BusinessFailure),
+    ("a cancellation", asyncio.CancelledError),
+]
+
+
+@pytest.mark.parametrize(
+    "label,raises", _BODY_FAILURES, ids=[row[0] for row in _BODY_FAILURES]
+)
 @pytest.mark.asyncio
-async def test_c11_a_business_failure_in_one_block_leaves_its_sibling_committable(
-    db_session,
+async def test_c11_a_body_failure_in_one_block_leaves_its_sibling_committable(
+    db_session, label, raises
 ) -> None:
     """C11, body half, API-SHAPED. Over-refusal is a defect too, and this is its counterexample.
 
     The staged-payment shape (`app/core/simulator/real_payments_executor.py:384`): each payment runs
-    in its own action savepoint on the tick's session. A payment REJECTED for business reasons must
-    discard only its own operation; its siblings, and the tick, must still commit. A root poisoned
-    by a neighbour's rejection would fail the whole tick - the mirror-image defect of C1, and just
-    as expensive.
+    in its own action savepoint on the tick's session. A payment REJECTED for business reasons, or
+    CANCELLED, must discard only its own operation; its siblings, and the tick, must still commit. A
+    root poisoned by a neighbour's rejection would fail the whole tick - the mirror-image defect of
+    C1, and just as expensive.
 
-    RED TODAY BECAUSE: the surviving sibling's envelope cannot be counted - there is no envelope
-    table. The money half of this scenario is already correct on today's tree (T1525), and this test
-    says so; what it cannot yet see is that exactly one operation was recorded.
-    MUTATION once step 4 exists: poison the root on a body exception (rather than marking only that
-    operation POISONED and discarding it with its own savepoint); the sibling's commit must then be
-    refused.
+    RED BEFORE STEP 4 BECAUSE: the surviving sibling's envelope cannot be counted - there is no
+    envelope table. The money half of this scenario is already correct on today's tree (T1525), and
+    this test says so; what it could not see is that exactly one operation was recorded.
+    MUTATION: poison the root on a body exception, rather than marking only that operation POISONED
+    and letting its own savepoint discard it. Both cases then go red quoting the refusal the sibling's
+    commit got. Measured 2026-09-13.
+
+    THE TWO CASES ARE NOT SEPARABLE BY A MUTATION HERE, and saying so is the honest version. It is
+    tempting to write "narrowing `debt_operation`'s body handler from `except BaseException` to
+    `except Exception` reddens the cancellation case on its own" - it does not. Both siblings run
+    inside their own action savepoint, and the savepoint's rollback drops the record from the
+    registry whether or not the handler marked it POISONED first, so the sibling's commit is allowed
+    either way and this test stays green. What the cancellation case is here for is the design's own
+    list (§9: "business exception/cancellation in body of staged payment inside action savepoint"):
+    it records that a `BaseException` reaches the discard path at all. An operation NOT bound to a
+    savepoint is where the handler's width becomes observable, and that is `C10`'s subject.
     """
     from tests.conftest import TestingSessionLocal as factory
 
@@ -1052,7 +1266,7 @@ async def test_c11_a_business_failure_in_one_block_leaves_its_sibling_committabl
     kept_identity = _identity("sibling-kept")
     rejected_identity = _identity("sibling-rejected")
     try:
-        business_failure: BaseException | None = None
+        body_failure: BaseException | None = None
         commit_refusal: BaseException | None = None
 
         async with factory() as session:
@@ -1062,7 +1276,7 @@ async def test_c11_a_business_failure_in_one_block_leaves_its_sibling_committabl
                     session.add(world.debt("12.00"))
                     await session.flush()
 
-            # Sibling 2: a payment rejected on business grounds, in its own action savepoint.
+            # Sibling 2: a payment that ends badly in its own action savepoint.
             try:
                 async with session.begin_nested():
                     async with await _open(
@@ -1072,9 +1286,9 @@ async def test_c11_a_business_failure_in_one_block_leaves_its_sibling_committabl
                             world.debt("28.00", creditor_id=world.extra_participants[0].id)
                         )
                         await session.flush()
-                        raise _BusinessFailure("p015-b4: this payment is rejected, not broken")
-            except _BusinessFailure as exc:
-                business_failure = exc
+                        raise raises("p015-b4: this payment ended in the body, not in the journal")
+            except raises as exc:  # noqa: B902 - the parametrised body failure is the subject
+                body_failure = exc
 
             commit_refusal = await refusal_of(api, session.commit())
 
@@ -1082,11 +1296,14 @@ async def test_c11_a_business_failure_in_one_block_leaves_its_sibling_committabl
         kept = await stored_operations(factory, kept_identity)
         rejected = await stored_operations(factory, rejected_identity)
 
-        # NON-VACUITY: the rejection really happened and the sibling really committed its money.
-        assert business_failure is not None, "stand: the business failure never reached the caller"
+        # NON-VACUITY: the failure really happened and the sibling really committed its money.
+        assert isinstance(body_failure, raises), (
+            f"stand: the {label} never reached the caller: {body_failure!r}"
+        )
         assert commit_refusal is None, (
-            f"the tick's commit was refused because a SIBLING payment was rejected: "
-            f"{commit_refusal!r}. A business failure must discard only its own operation."
+            f"the tick's commit was refused because a SIBLING payment ended with {label}: "
+            f"{commit_refusal!r}. A failure in the caller's block must discard only its own "
+            f"operation."
         )
         assert after == {("debtor", "creditor", "eq"): Decimal("12.00000000")}, (
             f"stand: the surviving sibling's money is not exactly what committed: {after}"
@@ -1098,7 +1315,7 @@ async def test_c11_a_business_failure_in_one_block_leaves_its_sibling_committabl
             f"the sibling that committed has no completed envelope: {kept}"
         )
         assert rejected == [], (
-            f"the rejected payment left an operation envelope behind: {rejected}"
+            f"the payment that ended with {label} left an operation envelope behind: {rejected}"
         )
     finally:
         await drop_world(factory, world)

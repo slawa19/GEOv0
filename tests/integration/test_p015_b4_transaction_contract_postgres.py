@@ -46,12 +46,14 @@ from decimal import Decimal
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import delete, insert, literal, select, text
+from sqlalchemy import delete, event, insert, literal, select, text
+from sqlalchemy.exc import InvalidRequestError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.db.models.debt import Debt
 from app.db.models.participant import Participant
 from tests.p015_b4_support import (
+    ENTRIES_TABLE,
     JOURNAL_MODULE,
     OPERATIONS_TABLE,
     World,
@@ -208,6 +210,363 @@ async def test_c2_p_a_debt_write_hidden_inside_a_cte_is_refused(serializable_fac
             f"statement's own kind ({JOURNAL_MODULE}, design v2 §6)."
         )
         assert after == before, f"`{form}` was refused but its rows are durable: {after}"
+    finally:
+        await drop_world(serializable_factory, world)
+
+
+# ==============================================================================================
+# T1527 on PostgreSQL - the edge in the grant, in THIS tier's UUID spelling
+# ==============================================================================================
+
+
+@pytest.mark.asyncio
+async def test_t1527_p_the_grant_names_the_edge_and_matches_this_tiers_uuid_spelling(
+    serializable_factory,
+):
+    """T1527, PostgreSQL, DEFECT-SHAPED plus its own anti-vacuum control.
+
+    WHY THIS TIER AT ALL, when the mechanism is the ORM's and not the database's. Because the thing
+    being compared is a UUID, and `Uuid(as_uuid=True)` is 32 hex characters on SQLite and a native
+    `uuid` object on PostgreSQL. A comparison of the row's edge against the recorded edge that is
+    written against one spelling matches NOTHING on the other - and "matches nothing" fails in two
+    opposite directions that a single-tier run cannot tell apart: every legitimate write refused, or
+    every diverging write allowed. So both halves are measured here, on PostgreSQL:
+
+    * DEFECT HALF. `Debt(debtor_id=..., creditor_id=..., creditor=q)` - all three key columns set,
+      and a relationship naming a different creditor. SQLAlchemy's many-to-one dependency processor
+      overwrites `creditor_id` after `before_flush`, so the journal records one edge and the INSERT
+      carries another. It must be refused.
+    * CONTROL HALF. An ordinary write on an ordinary edge must still commit and still be journalled,
+      and the parameter the guard compares is asserted to be the spelling the guard normalises -
+      measured from the statement as it reached the connection, not assumed.
+
+    RED BEFORE THE FIX BECAUSE: the defect half commits, and `debts` then holds debtor->extra0 while
+    `debt_journal_entries` claims debtor->creditor for the same row and amount.
+    MUTATION that must redden this again: drop the three key columns from the signature
+    `_signature_of` builds, or compare the row's edge with `str()` of the raw parameter instead of
+    normalising it through `uuid.UUID`.
+    """
+    api = journal_api()
+    world = await seed_world(serializable_factory, extra_participants=1)
+    elsewhere = world.extra_participants[0]
+    diverging = _identity("t1527-p-diverging")
+    ordinary = _identity("t1527-p-control")
+    row_will_carry: list[uuid.UUID] = []
+    spellings: list[tuple[str, str | None]] = []
+    try:
+        assert api.available, missing_journal_tables(None, OPERATIONS_TABLE)
+
+        # ---------------------------------------------------------------- the defect half
+        async with serializable_factory() as session:
+
+            def _what_the_row_will_carry(_mapper, _connection, target) -> None:
+                row_will_carry.append(target.creditor_id)
+
+            event.listen(Debt, "before_insert", _what_the_row_will_carry)
+            refusal = None
+            try:
+                other = await session.get(Participant, elsewhere.id)
+                async with await _open(api, session, world, "t1527-p", identity=diverging):
+                    session.add(
+                        Debt(
+                            id=uuid.uuid4(),
+                            debtor_id=world.debtor.id,
+                            creditor_id=world.creditor.id,
+                            equivalent_id=world.equivalent.id,
+                            creditor=other,
+                            amount=Decimal("61.00000000"),
+                            version=0,
+                        )
+                    )
+                    refusal = await refusal_of(api, session.flush())
+                if refusal is None:
+                    await refusal_of(api, session.commit())
+            except (*api.refusals, InvalidRequestError) as exc:  # noqa: B902 - the refusal is the subject
+                refusal = refusal if refusal is not None else exc
+            finally:
+                event.remove(Debt, "before_insert", _what_the_row_will_carry)
+
+        after_defect = await stored_debts(serializable_factory, world)
+        claimed = await stored_rows(
+            serializable_factory,
+            f"SELECT e.debtor_id, e.creditor_id, e.equivalent_id FROM {ENTRIES_TABLE} e "  # noqa: S608
+            f"JOIN {OPERATIONS_TABLE} o ON o.id = e.operation_id WHERE o.identity = :identity",
+            {"identity": diverging},
+        )
+
+        # NON-VACUITY: the row really carried the other participant, written by SQLAlchemy itself.
+        assert row_will_carry == [elsewhere.id], (
+            f"stand: the relationship was never synchronised into `creditor_id` before the INSERT "
+            f"was built ({row_will_carry}), so the two sources never disagreed"
+        )
+
+        # VERDICT, defect half.
+        assert refusal is not None, (
+            f"an INSERT naming edge debtor->extra0 was accepted under a grant issued for "
+            f"debtor->creditor: `debts` holds {after_defect} while `{ENTRIES_TABLE}` claims "
+            f"{claimed}."
+        )
+        assert after_defect == {}, f"the row on the wrong edge is durable: {after_defect}"
+        assert not claimed, f"an entry for an edge no row was written on is durable: {claimed}"
+
+        # ---------------------------------------------------------------- the control half
+        engine = serializable_factory.kw["bind"]
+
+        def _spelling(_conn, clause, multiparams, params, _options) -> None:
+            # Registered on the engine INSTANCE, so it runs after the journal's own class-level
+            # `before_execute`: a statement this sees is a statement the guard has just matched
+            # against the grant, which is what makes the spelling below the load-bearing one.
+            if getattr(getattr(clause, "table", None), "name", None) != "debts":
+                return
+            for row in multiparams or ([params] if isinstance(params, dict) else []):
+                if isinstance(row, dict) and "debtor_id" in row:
+                    value = row["debtor_id"]
+                    spellings.append((type(value).__name__, api.module._key_text(value)))
+
+        event.listen(engine.sync_engine, "before_execute", _spelling)
+        try:
+            async with serializable_factory() as session:
+                async with await _open(api, session, world, "t1527-p", identity=ordinary):
+                    session.add(
+                        Debt(
+                            id=uuid.uuid4(),
+                            debtor_id=world.debtor.id,
+                            creditor_id=elsewhere.id,
+                            equivalent_id=world.equivalent.id,
+                            amount=Decimal("62.00000000"),
+                            version=0,
+                        )
+                    )
+                    control_refusal = await refusal_of(api, session.flush())
+                if control_refusal is None:
+                    await session.commit()
+        finally:
+            event.remove(engine.sync_engine, "before_execute", _spelling)
+
+        after_control = await stored_debts(serializable_factory, world)
+        control_entries = await stored_entries(serializable_factory, ordinary)
+
+        # ANTI-VACUUM. If the edge comparison matched nothing on this tier - the spelling trap's
+        # other direction - this write would be refused too, and the defect half above would look
+        # like a working guard while the journal had stopped accepting any money at all.
+        assert control_refusal is None, (
+            f"an ordinary write on an ordinary edge was refused on PostgreSQL: {control_refusal!r}. "
+            f"The edge comparison matches nothing in this tier's UUID spelling."
+        )
+        assert after_control == {("debtor", "extra0", "eq"): Decimal("62.00000000")}, after_control
+        assert control_entries, f"the accepted write was not journalled: {control_entries}"
+
+        # AND THE SPELLING ITSELF, from the statement as it reached the connection. Both tiers must
+        # arrive at the same canonical text, or a guard proven on one proves nothing on the other.
+        assert spellings and all(
+            text_form == str(world.debtor.id) for _type_name, text_form in spellings
+        ), (
+            f"the `debtor_id` parameter the guard compares did not normalise to "
+            f"{world.debtor.id} on PostgreSQL: {spellings}"
+        )
+    finally:
+        await drop_world(serializable_factory, world)
+
+
+# ==============================================================================================
+# T1527 - a prevented ROOT rollback, and the next root that would commit its transaction
+# ==============================================================================================
+
+
+class _AbandonTheOperation(BaseException):
+    """A business failure inside the operation block. `BaseException`, so nothing catches it by
+    accident and turns this scenario into a completed operation."""
+
+
+class _PreventedTheRollback(BaseException):
+    """What a neighbouring `rollback` listener raises. Stands for any listener that fails there."""
+
+
+@pytest.mark.asyncio
+async def test_t1527_p_a_prevented_root_rollback_cannot_be_committed_by_the_next_root(
+    serializable_factory,
+):
+    """T1527, PostgreSQL, DEFECT-SHAPED. Slice A's finding 23, refuted by measurement.
+
+    FINDING 23 SAID a root `rollback` handler was unnecessary, because "a rolled-back root is never
+    reused, so the state dies with its weak key". Every step of that is true except the conclusion:
+
+    1. `RootTransaction._do_rollback` -> `_close_impl` dispatches `rollback` BEFORE the SQL and
+       detaches the root in a `finally` either way, so a listener that raises there leaves the root
+       detached with `do_rollback` NEVER CALLED.
+    2. On asyncpg the adapter's transaction is still open at that point and `do_begin` does nothing,
+       so the next `Connection.begin()` builds a NEW root over the SAME database transaction.
+    3. The new root has no entry in the journal's registry, so the commit event finds no state, and
+       refuses nothing.
+
+    MEASURED BEFORE THE FIX: the abandoned operation's debt and its envelope - still in state
+    `OPEN` - were both made durable by the second root's commit. The whole mechanism bypassed by one
+    neighbour's exception.
+
+    WHY THE GUARD IS AT `begin` AND NOT IN A `rollback` HANDLER. A `rollback` handler was written
+    first and measured never to run: SQLAlchemy's `_JoinedListener` runs every CONNECTION-level
+    listener before every ENGINE-level one, so the neighbour below - registered on the connection -
+    always pre-empts a journal listener registered on the `Engine` class, whatever `insert=True`
+    says. The guard therefore asks, at every `begin`, whether the DRIVER already has a transaction
+    open, through `asyncpg.Connection.is_in_transaction()`.
+
+    THE STAND IS ASSERTED TO BE ABLE TO SEE THE OUTCOME IT IS BUILT FOR (`AGENTS.md` §15, the
+    programme 010 lesson): the non-vacuity block below checks that the rollback really was
+    prevented, that SQLAlchemy really detached the root, and that the driver really still holds the
+    transaction. Without the third, this test would hold even if there were no defect to find.
+
+    MUTATION that must redden this again: remove `("begin", _on_begin)` from
+    `_CONNECTION_LISTENERS`, or make `_driver_transaction_is_live` return `None` instead of `True`.
+    """
+    api = journal_api()
+    engine = serializable_factory.kw["bind"]
+    world = await seed_world(serializable_factory)
+    identity = _identity("t1527-p-prevented-rollback")
+    prevented = None
+    root_after = "<unread>"
+    driver_still_in_transaction = None
+    begin_refusal = None
+    commit_refusal = None
+    try:
+        assert api.available, missing_journal_tables(None, OPERATIONS_TABLE)
+        async with engine.connect() as aconn:
+            trans = await aconn.begin()
+            session = AsyncSession(bind=aconn, expire_on_commit=False, autoflush=False)
+            try:
+                async with api.module.debt_operation(
+                    session,
+                    kind="TEST_FIXTURE",
+                    identity=identity,
+                    intent={"source": "p015-b4-counterexample", "name": "t1527-p"},
+                    scope_equivalent_ids=frozenset({world.equivalent.id}),
+                ):
+                    session.add(world.debt("71.00"))
+                    await session.flush()
+                    raise _AbandonTheOperation()
+            except _AbandonTheOperation:
+                pass
+
+            sync_conn = aconn.sync_connection
+
+            def _a_neighbour_that_raises_in_rollback(_conn) -> None:
+                raise _PreventedTheRollback("a neighbour prevented the root rollback")
+
+            event.listen(sync_conn, "rollback", _a_neighbour_that_raises_in_rollback)
+            try:
+                await trans.rollback()
+            except BaseException as exc:  # noqa: BLE001 - the prevented rollback is the premise
+                prevented = exc
+            finally:
+                event.remove(sync_conn, "rollback", _a_neighbour_that_raises_in_rollback)
+
+            root_after = sync_conn.get_transaction()
+            driver_still_in_transaction = (
+                sync_conn.connection.driver_connection.is_in_transaction()
+            )
+
+            try:
+                second = await aconn.begin()
+            except (*api.refusals, InvalidRequestError) as exc:  # noqa: B902 - the refusal is the subject
+                begin_refusal = exc
+            else:
+                commit_refusal = await refusal_of(api, second.commit())
+
+        durable_debts = await stored_debts(serializable_factory, world)
+        durable_envelopes = await stored_operations(serializable_factory, identity)
+
+        # NON-VACUITY, THREE HALVES - the premise of the whole scenario.
+        assert isinstance(prevented, _PreventedTheRollback), (
+            f"stand: the neighbour did not prevent the root rollback ({prevented!r}); there was "
+            f"nothing for the next root to inherit"
+        )
+        assert root_after is None, (
+            f"stand: SQLAlchemy did not detach the root after the prevented rollback "
+            f"({root_after!r}), so no second root could be born over its transaction"
+        )
+        assert driver_still_in_transaction is True, (
+            "stand: the driver had no transaction open after the prevented rollback, so the "
+            "database transaction this test is about did not survive and the assertions below "
+            "would hold with no mechanism at all"
+        )
+
+        # VERDICT.
+        assert begin_refusal is not None or commit_refusal is not None, (
+            f"a second root was opened over an un-rolled-back database transaction and committed "
+            f"it: `debts` holds {durable_debts} and `{OPERATIONS_TABLE}` holds "
+            f"{durable_envelopes}. An envelope in state OPEN is a record of money nobody finished "
+            f"moving."
+        )
+        assert durable_debts == {}, f"the abandoned operation's debt is durable: {durable_debts}"
+        assert durable_envelopes == [], (
+            f"the abandoned operation's envelope is durable: {durable_envelopes}"
+        )
+    finally:
+        await drop_world(serializable_factory, world)
+
+
+@pytest.mark.asyncio
+async def test_t1527_p_an_ordinary_rollback_leaves_the_connection_reusable(serializable_factory):
+    """T1527, PostgreSQL, ANTI-VACUUM CONTROL for the guard above. GREEN before and after.
+
+    `AGENTS.md` §9: a rule that refuses something must carry a counter-check showing that the real
+    cases still pass. The `begin` guard refuses a new root over a live driver transaction, and the
+    cheapest way for it to be wrong is to refuse EVERY second root - after which the test above
+    would pass for the wrong reason and every rollback-then-reuse in the application would break.
+
+    So: an ordinary operation, an ordinary rollback, and then a second root on the SAME connection
+    that writes money, completes its operation and commits. Everything the guard is not about.
+    """
+    api = journal_api()
+    engine = serializable_factory.kw["bind"]
+    world = await seed_world(serializable_factory, extra_participants=1)
+    rolled_back = _identity("t1527-p-control-rolled-back")
+    committed = _identity("t1527-p-control-committed")
+    try:
+        async with engine.connect() as aconn:
+            first = await aconn.begin()
+            session = AsyncSession(bind=aconn, expire_on_commit=False, autoflush=False)
+            async with api.module.debt_operation(
+                session,
+                kind="TEST_FIXTURE",
+                identity=rolled_back,
+                intent={"source": "p015-b4-counterexample", "name": "control-rolled-back"},
+                scope_equivalent_ids=frozenset({world.equivalent.id}),
+            ):
+                session.add(world.debt("73.00"))
+                await session.flush()
+            await session.close()
+            await first.rollback()
+
+            second = await aconn.begin()
+            session2 = AsyncSession(bind=aconn, expire_on_commit=False, autoflush=False)
+            async with api.module.debt_operation(
+                session2,
+                kind="TEST_FIXTURE",
+                identity=committed,
+                intent={"source": "p015-b4-counterexample", "name": "control-committed"},
+                scope_equivalent_ids=frozenset({world.equivalent.id}),
+            ):
+                session2.add(
+                    world.debt("74.00", creditor_id=world.extra_participants[0].id)
+                )
+                await session2.flush()
+            await session2.close()
+            await second.commit()
+
+        durable_debts = await stored_debts(serializable_factory, world)
+        rolled_back_envelopes = await stored_operations(serializable_factory, rolled_back)
+        committed_envelopes = await stored_operations(serializable_factory, committed)
+
+        # The guard did not stand in the way of the second root.
+        assert durable_debts == {("debtor", "extra0", "eq"): Decimal("74.00000000")}, (
+            f"the second root's money did not commit, or the first root's did: {durable_debts}"
+        )
+        assert rolled_back_envelopes == [], (
+            f"the rolled-back operation left an envelope behind: {rolled_back_envelopes}"
+        )
+        assert committed_envelopes and committed_envelopes[0]["state"] == "COMPLETED", (
+            f"the committed operation's envelope is not COMPLETED: {committed_envelopes}"
+        )
     finally:
         await drop_world(serializable_factory, world)
 

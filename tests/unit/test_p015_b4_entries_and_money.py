@@ -39,6 +39,7 @@ names in its docstring the mutation that must turn it red again.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import textwrap
@@ -1137,52 +1138,102 @@ async def test_c18_entries_come_from_the_attempt_that_succeeded_and_not_the_stal
 # ==============================================================================================
 
 
-#: Each row: `(label, table, column overrides, why the database must refuse it)`. The overrides are
-#: applied on top of a well-formed row, so each case differs from a legal one in exactly the way it
-#: names - a forgery that failed for two reasons at once would not show which CHECK caught it.
+#: Each row: `(label, table, column overrides, the CHECK that must refuse it, why)`. The overrides
+#: are applied on top of a well-formed row, and EVERY CASE VIOLATES EXACTLY ONE NAMED CONSTRAINT -
+#: which is the whole reason the constraint name is in the table and is asserted below.
+#:
+#: CORRECTED 2026-09-13, external review. The case "an update that changes nothing" set
+#: `amount_before == amount_after` AND `delta = 0`, so it violated
+#: `chk_debt_journal_entries_shape` and `chk_debt_journal_entries_delta` at once while the test
+#: asserted only `error is not None`. Dropping either constraint from migration 021 left it green,
+#: and the mutation its own docstring names - "drop the named CHECK; this case must go red" - could
+#: not be run at all. It is split into the two cases below, each differing from a legal row in one
+#: way, and the refusal is now matched BY NAME.
 _SHAPE_INVALID_FORGERIES = [
     (
         "an insert that claims a previous amount",
         "entry",
         {"effect": "I", "amount_before": "5.00000000"},
+        "chk_debt_journal_entries_shape",
         "an I has no before; a forged one would let a reconstruction start from an invented state",
     ),
     (
-        "an update that changes nothing",
+        "an update whose endpoints are equal",
         "entry",
+        # `delta` stays legal (non-zero), so `chk_debt_journal_entries_delta` is satisfied and the
+        # only thing wrong with this row is its shape.
         {"effect": "U", "amount_before": "5.00000000", "amount_after": "5.00000000",
+         "delta": "1.00000000"},
+        "chk_debt_journal_entries_shape",
+        "a U whose endpoints are equal recorded a movement that did not happen",
+    ),
+    (
+        "an entry whose delta is zero",
+        "entry",
+        # The shape stays legal - a U with two different endpoints - so the zero delta is the only
+        # lie in the row, and `chk_debt_journal_entries_delta` is the only rule that can catch it.
+        {"effect": "U", "amount_before": "5.00000000", "amount_after": "6.00000000",
          "delta": "0.00000000"},
-        "a U whose endpoints are equal is a zero-delta entry, and `delta <> 0` forbids it",
+        "chk_debt_journal_entries_delta",
+        "`delta <> 0`: an entry that moved nothing is not an effect and must not be counted as one",
     ),
     (
         "a completed envelope with no digest",
         "operation",
         {"state": "COMPLETED", "effect_digest": None},
+        "chk_debt_operations_completion",
         "COMPLETED implies every completion column is present (design v2 §5)",
     ),
     (
         "a completed envelope with a negative effect count",
         "operation",
         {"state": "COMPLETED", "effect_count": -1},
-        "`effect_count >= 0`",
+        "chk_debt_operations_completion",
+        "`effect_count >= 0`, which design v2 §5 puts inside the completion CHECK rather than in "
+        "a clause of its own",
     ),
     (
         "an envelope written by a schema this build does not know",
         "operation",
         {"schema_version": 2},
+        "chk_debt_operations_schema_version",
         "`schema_version IN (1)` - a row from a future encoding must not be read as if it were this one",
     ),
 ]
 
 
+#: SQLite says `CHECK constraint failed: <name>`; PostgreSQL says
+#: `violates check constraint "<name>"`. Both name the constraint, and the name is the only thing
+#: that distinguishes a refusal by the rule under test from a refusal by a neighbouring one - the
+#: other CHECK on the same table, a NOT NULL, or the foreign key the UUID-binding trap recorded on
+#: `_insert` used to hit.
+_CONSTRAINT_IN_ERROR = re.compile(
+    r'(?:CHECK constraint failed:\s*|violates check constraint\s*")([A-Za-z0-9_]+)'
+)
+
+
+def _refusing_constraint(error: BaseException | None) -> str | None:
+    """The name of the CHECK constraint that refused, or None when the error names none.
+
+    None is a different answer from "a different constraint": an error that names no constraint at
+    all is not a CHECK refusal, and the assertion that reads this quotes the whole error so a red
+    run shows which rule really spoke.
+    """
+
+    if error is None:
+        return None
+    found = _CONSTRAINT_IN_ERROR.search(str(error))
+    return found.group(1) if found else None
+
+
 @pytest.mark.parametrize(
-    "label,table,overrides,why",
+    "label,table,overrides,constraint,why",
     _SHAPE_INVALID_FORGERIES,
     ids=[row[0] for row in _SHAPE_INVALID_FORGERIES],
 )
 @pytest.mark.asyncio
-async def test_c19_a_shape_invalid_forged_row_is_refused_by_the_database(
-    db_session, label, table, overrides, why
+async def test_c19_a_shape_invalid_forged_row_is_refused_by_the_named_check(
+    db_session, label, table, overrides, constraint, why
 ) -> None:
     """C19, API-SHAPED. The write guard is not the last line; the CHECK constraints are.
 
@@ -1194,8 +1245,14 @@ async def test_c19_a_shape_invalid_forged_row_is_refused_by_the_database(
     RED TODAY BECAUSE: the journal tables do not exist, so the forged INSERT fails with "no such
     table" - which is NOT a CHECK refusal and must not be allowed to read as one. The non-vacuity
     assertion is therefore placed first and demands the table.
-    MUTATION once step 4 exists: drop the named CHECK from migration 021; this case must go red
-    while the others stay green.
+    AND THE REFUSAL IS MATCHED BY NAME, which is what makes that mutation runnable. `error is not
+    None` is satisfied by any error at all: a foreign key, a NOT NULL, or the OTHER CHECK on the same
+    table. Each case above therefore differs from a legal row in exactly one way and names the one
+    constraint that may speak.
+
+    MUTATION: drop `constraint` from migration 021 and from `app/db/journal_tables.py`. Only the
+    cases naming it go red; every other case stays green, and a case that was previously being caught
+    by a neighbouring rule would now fail on the NAME rather than pass on the error.
     """
     from tests.conftest import TestingSessionLocal as factory
 
@@ -1215,6 +1272,12 @@ async def test_c19_a_shape_invalid_forged_row_is_refused_by_the_database(
             f"past the `before_execute` guard (design v2 §6 does not intercept `text()` or "
             f"`exec_driver_sql`, and says so) must still be stopped by the CHECK constraints of "
             f"migration 021; otherwise the guard's documented hole is a hole in the money history."
+        )
+        assert _refusing_constraint(error) == constraint, (
+            f"the forgery `{label}` was refused by {_refusing_constraint(error)!r}, not by "
+            f"`{constraint}`: {error}. {why}. A case caught by a neighbouring rule says nothing "
+            f"about the rule it is named after, and the mutation `drop {constraint}` would leave it "
+            f"green."
         )
     finally:
         await drop_world(factory, world)
