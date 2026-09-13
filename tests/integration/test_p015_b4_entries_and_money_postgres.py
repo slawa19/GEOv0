@@ -2382,14 +2382,25 @@ _SHAPE_INVALID_FORGERIES = [
         # `delta` stays legal (non-zero), so the only thing wrong with this row is its shape. Until
         # 2026-09-13 this case set `delta = 0` as well and violated BOTH CHECKs while the test
         # asserted only `error is not None` - so dropping either one left it green and the mutation
-        # the docstring names could not be run. Split, exactly as on the SQLite tier.
+        # proved nothing.
         {
             "effect": "U",
             "amount_before": "5.00000000",
             "amount_after": "5.00000000",
             "delta": "1.00000000",
         },
-        "check:chk_debt_journal_entries_shape",
+        # AND ON THIS TIER IT IS NO LONGER THE SHAPE RULE THAT SPEAKS (T1530, 2026-09-13). With
+        # `chk_debt_journal_entries_delta_arithmetic` in place, `delta = after - before` plus
+        # `delta <> 0` together IMPLY `before <> after`, so a U with equal endpoints cannot be posed
+        # as a shape-only forgery on PostgreSQL at all: any non-zero delta contradicts the
+        # arithmetic, and a zero delta contradicts `chk_debt_journal_entries_delta`. The expectation
+        # therefore names the rule that actually refuses it HERE, and the SQLite copy of this
+        # inventory still names the shape rule, because that tier carries no arithmetic constraint
+        # (measured: the equality is floating point there and false for ordinary money - see
+        # `app/db/journal_tables.py`). The shape rule keeps its own naming cases above and below:
+        # an `I` carrying a before and a `D` carrying an after satisfy the arithmetic and violate
+        # only the NULL pattern.
+        "check:chk_debt_journal_entries_delta_arithmetic",
         "a U whose endpoints are equal recorded a movement that did not happen",
     ),
     (
@@ -2548,26 +2559,45 @@ async def test_c19_p_a_shape_invalid_forged_row_is_refused_by_the_named_rule(
 
 
 @pytest.mark.asyncio
-async def test_c19_p_a_shape_valid_lie_is_accepted_and_is_therefore_step_6_s_job(
+async def test_c19_p_the_boundary_with_step_6_moved_on_this_tier_and_here_is_where_it_is_now(
     serializable_factory,
 ):
-    """C19-P, API-SHAPED. A recorded LIMIT, not a requirement - and it is red for the same reason.
+    """C19-P, API-SHAPED. The boundary this test records MOVED on 2026-09-13, and by decision.
 
-    `after - before = delta` is not a CHECK. Design v2 §5 gives two reasons and they are different
-    reasons: a cross-row constraint is not portable at all, and on SQLite the money columns are REAL.
-    Only the first of those applies here - PostgreSQL's `NUMERIC(20,8)` would compute the arithmetic
-    perfectly - and the constraint is still absent, which is why this test belongs on BOTH tiers: if
-    it were SQLite-only, a reader could conclude the boundary exists because of SQLite and would be
-    wrong about where step 6's work begins.
+    WHAT THIS TEST USED TO SAY, and it was right when it was written: `after - before = delta` is not
+    a CHECK, so a forged entry whose three money columns are individually legal but do not agree with
+    each other WILL be accepted, and catching it is step 6's verifier's job. It asserted the
+    acceptance, and it said in as many words that a refusal here would be "a specification change,
+    not a passing test".
 
-    So a forged entry whose three money columns are individually legal but do not agree with each
-    other WILL be accepted. That is not a defect to fix in step 4; it is the precise boundary between
-    what the schema can promise and what step 6's verifier has to check, and writing it down as an
-    executable expectation is how the boundary stops being folklore.
+    IT IS NOW EXACTLY THAT SPECIFICATION CHANGE, and this test is how it was found. `T1530` added
+    `chk_debt_journal_entries_delta_arithmetic` (migration 024) after an external review measured a
+    journal entry reading `10 -> 11, delta 2` surviving every constraint the table had. The two
+    reasons design v2 §5 gave for leaving the arithmetic to step 6 were not equally true, and the
+    difference is the whole of what changed:
 
-    This test therefore asserts that the forgery IS accepted. It is red today because the table does
-    not exist - the non-vacuity assertion below says so - and once step 4 lands it becomes a green
-    guard whose failure would mean the boundary moved and step 6's acceptance list is out of date.
+    * "a cross-row constraint is not portable at all" - NOT APPLICABLE. This is not a cross-row
+      constraint: all three columns are in the same row, and PostgreSQL's `NUMERIC(20,8)` computes
+      the equality exactly.
+    * "on SQLite the money columns are REAL" - TRUE, and measured again for this change: on sqlite3
+      the legitimate movement `10.00000001 -> 10.00000002, delta 0.00000001` gives a left-hand side
+      of `9.99999905104687e-09`, so the constraint would refuse REAL money there. It is therefore
+      installed on PostgreSQL only (`ddl_if`), and the SQLite copy of this test still records the old
+      boundary, correctly, for that tier.
+
+    THE SPEC OWNS THE RECORD OF THIS, NOT THIS TEST. Design v2 §5 and step 6's acceptance list have
+    to be updated to say that on PostgreSQL the arithmetic is now the schema's promise and only the
+    CROSS-ROW lies remain step 6's - this file cannot make that change and does not pretend to.
+
+    WHAT IS STILL STEP 6'S JOB IS ASSERTED HERE, because deleting the boundary would have been the
+    easy way to make this green and would have lost the thing the test is for: a row whose three money
+    columns agree PERFECTLY and which is nevertheless a lie about the world - a `U` that claims the
+    edge went from 5 to 6 when the edge holds something else entirely. No single-row CHECK can see
+    that, on any dialect, and it is accepted.
+
+    MUTATION that must redden this: drop `chk_debt_journal_entries_delta_arithmetic` from migration
+    024 - the first half goes green-then-red on the refusal assertion. Making the second forgery
+    arithmetically false instead reddens the second half.
     """
     probe = await stored_rows(
         serializable_factory, f"SELECT 1 FROM {ENTRIES_TABLE} LIMIT 1"  # noqa: S608
@@ -2576,7 +2606,8 @@ async def test_c19_p_a_shape_valid_lie_is_accepted_and_is_therefore_step_6_s_job
 
     seeded = await _seed(serializable_factory)
     try:
-        error = await _forge(
+        # HALF ONE: the arithmetic lie is now the DATABASE's to refuse.
+        arithmetic_lie = await _forge(
             serializable_factory,
             seeded.world,
             "entry",
@@ -2584,15 +2615,41 @@ async def test_c19_p_a_shape_valid_lie_is_accepted_and_is_therefore_step_6_s_job
                 "effect": "U",
                 "amount_before": "5.00000000",
                 "amount_after": "6.00000000",
-                # Every column is legal on its own; together they are a lie.
+                # Every column is legal on its own; together they contradict each other.
                 "delta": "99.00000000",
             },
         )
-        assert error is None, (
-            f"the database refused a SHAPE-VALID forged entry: {error!r}. If migration 021 really "
-            f"can reject this on PostgreSQL, design v2 §5's decision to leave `after - before = "
-            f"delta` to the step-6 verifier is out of date and the step-6 acceptance list must be "
-            f"revised - this is a specification change, not a passing test."
+        assert arithmetic_lie is not None, (
+            "the database accepted an entry whose delta contradicts its own endpoints. T1530 added "
+            "`chk_debt_journal_entries_delta_arithmetic` for exactly this row, and without it a "
+            "journal entry can say `5 -> 6, delta 99` with nothing refusing."
+        )
+        assert _refused_by(arithmetic_lie) == "check:chk_debt_journal_entries_delta_arithmetic", (
+            f"the arithmetic lie was refused by {_refused_by(arithmetic_lie)!r} rather than by the "
+            f"constraint that names the arithmetic: {arithmetic_lie}. A row caught by a neighbouring "
+            f"rule says nothing about this one."
+        )
+
+        # HALF TWO: what NO single-row CHECK can see remains step 6's, and is still accepted.
+        cross_row_lie = await _forge(
+            serializable_factory,
+            seeded.world,
+            "entry",
+            {
+                "effect": "U",
+                # Internally consistent to the last digit, and a lie about the edge it names: the
+                # edge never stood at 5, so no reconstruction from these entries reaches the stored
+                # debt. That is a statement about OTHER rows, and it is step 6's to check.
+                "amount_before": "5.00000000",
+                "amount_after": "6.00000000",
+                "delta": "1.00000000",
+            },
+        )
+        assert cross_row_lie is None, (
+            f"the database refused an entry that is internally consistent and false only in relation "
+            f"to other rows: {cross_row_lie!r}. If a single-row CHECK can now reject this, the "
+            f"boundary has moved AGAIN and step 6's acceptance list is out of date - which is a "
+            f"specification change, not a passing test."
         )
     finally:
         await _cleanup(serializable_factory, seeded)

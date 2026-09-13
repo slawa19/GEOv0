@@ -233,6 +233,32 @@ debt_journal_entries = Table(
         "delta <> 0 AND abs(delta) <= " + MONEY_COLUMN_MAX + " AND delta <> 'NaN'",
         name="chk_debt_journal_entries_delta",
     ),
+    # AND `delta` IS THE ARITHMETIC IT CLAIMS TO BE (T1530, measured 2026-09-13). The predicate
+    # above bounds the magnitude and excludes zero and NaN; it says NOTHING about whether the number
+    # is `amount_after - amount_before`, so an entry reading `10 -> 11, delta 2` satisfied every
+    # constraint this table had. That entry is not a wrong amount - it is a row that contradicts
+    # itself, and criterion (a) of design v2 (the per-edge deltas equal the edge's final minus its
+    # initial) is false from the moment one exists. COALESCE because the shape differs per effect:
+    # an `I` has no before, a `D` has no after, and the missing end is the zero the delta is
+    # measured from.
+    #
+    # POSTGRESQL ONLY, AND THE ASYMMETRY IS MEASURED RATHER THAN CONVENIENT. On SQLite `Numeric`
+    # binds through `float` (`processors.to_float`, no native decimal), so this equality is floating
+    # point there and it is FALSE FOR ORDINARY MONEY: measured 2026-09-13 on sqlite3, a legitimate
+    # movement of `10.00000001 -> 10.00000002, delta 0.00000001` gives a left-hand side of
+    # `9.99999905104687e-09`, and `33554431.99999999 -> 33554432.00000001, delta 0.00000002` gives
+    # `1.862645149230957e-08`. Installing it on SQLite would refuse real writes, which is the same
+    # defect as admitting false ones. The SQLite tier's guarantee for this class is the in-process
+    # readback of the stored entries (`app/core/ledger/journal.py::_verify_entries`), which compares
+    # scale-8 `Decimal`s reconstructed by the column's own result processor rather than floats.
+    #
+    # `ddl_if` and not a dialect-conditional module: `Base.metadata.create_all` must produce the
+    # SAME constraint on PostgreSQL as `alembic upgrade head` does, and the two paths are compared
+    # by name in `tests/integration/test_p015_t1530_delta_arithmetic_postgres.py`.
+    CheckConstraint(
+        "delta = COALESCE(amount_after, 0) - COALESCE(amount_before, 0)",
+        name="chk_debt_journal_entries_delta_arithmetic",
+    ).ddl_if(dialect="postgresql"),
     UniqueConstraint(
         "operation_id",
         "flush_ordinal",

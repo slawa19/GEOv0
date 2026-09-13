@@ -79,7 +79,7 @@ import pytest
 from sqlalchemy import event, select
 from sqlalchemy.exc import IntegrityError
 
-from app.core.ledger.journal import JOURNAL_STATEMENT_OPTION
+from app.core.ledger.journal import journal_statement_is_own
 from app.db.journal_tables import DEBT_JOURNAL_TABLE_NAMES
 from app.db.models.debt import Debt
 from app.db.models.participant import Participant
@@ -144,11 +144,19 @@ class _Trace:
 
         def _after_cursor_execute(conn, cursor, statement, parameters, context, executemany):
             # `journal-sql` IS the journal's own statement, said by the journal rather than guessed
-            # from a table name (T1528). Its verification read is a SELECT against `debts`, so the
-            # table-name filter below cannot recognise it, and counting it as the writer's work would
-            # make "arming adds the journal's own statements and nothing else" false for a statement
-            # that is the journal's own. It stays visible in `verbatim`.
-            own = bool(context.execution_options.get(JOURNAL_STATEMENT_OPTION))
+            # from a table name (T1528). Its verification reads are SELECTs against `debts` and the
+            # entries table, so the table-name filter below cannot recognise the first of them, and
+            # counting it as the writer's work would make "arming adds the journal's own statements
+            # and nothing else" false for a statement that is the journal's own. It stays visible in
+            # `verbatim`.
+            #
+            # ASKED OF THE MECHANISM, NOT OF THE STATEMENT (T1531, 2026-09-13). This used to read an
+            # execution option the journal put on its own statement, and a mark a statement carries is
+            # a mark any statement can carry: a writer could set the same option and be filtered out
+            # of this trace as journal noise. `journal_statement_is_own` answers from the journal's own
+            # per-connection state, which a statement cannot assert.
+            #: `test_r4_a_writers_statement_cannot_claim_to_be_the_journals_own` is the anti-spoof.
+            own = journal_statement_is_own(conn)
             kind = "journal-sql" if own else "sql"
             self.events.append((kind, _normalised(statement), _parameters(parameters)))
 
@@ -175,9 +183,10 @@ class _Trace:
         """The trace with every statement OF THE JOURNAL'S OWN removed, ids renumbered.
 
         Two kinds of those, and the second was added by T1528: a statement against a journal table,
-        recognised by its tables, and the journal's verification read of `debts`, recognised by the
-        execution option the journal puts on it (`JOURNAL_STATEMENT_OPTION`). Recognising the second
-        by its SQL text would make this filter a copy of the journal's current statement.
+        recognised by its tables, and the journal's verification reads, recognised by ASKING THE
+        JOURNAL whether it is executing one (`journal_statement_is_own`, T1531). Recognising the
+        second by its SQL text would make this filter a copy of the journal's current statement, and
+        recognising it by a mark on the statement let a writer wear the same mark.
 
         THE RENUMBERING HAPPENS AFTER THE FILTER, and that order is load-bearing: the journal's own
         rows carry ids of their own, so numbering before the filter would give the two runs different
@@ -759,9 +768,15 @@ async def test_r4_arming_the_journal_adds_its_own_statements_and_nothing_else(
 
     # NON-VACUITY, FIRST: the journal really was armed for the second run, so the comparison is
     # between two different journal states and not between two identical ones.
+    #
+    # ASKED OF THE TABLE NAME AND NOT OF THE PROVENANCE FLAG, on purpose. Since T1531 the journal
+    # holds provenance for every statement of its own, reads included, so `row[0] == "journal-sql"`
+    # would be true for a run that issued nothing but the verification read - which is exactly the
+    # vacuous premise this assertion exists to exclude. A statement against a journal TABLE is a row
+    # the journal wrote, whoever says it is theirs.
     journal_statements = [
         row for row in armed.events
-        if row[0] == "sql" and (_words_in(row[1]) & DEBT_JOURNAL_TABLE_NAMES)
+        if row[0] in ("sql", "journal-sql") and (_words_in(row[1]) & DEBT_JOURNAL_TABLE_NAMES)
     ]
     assert journal_statements, (
         f"stand: the armed run issued no statement against any journal table, so it was not armed: "
@@ -769,7 +784,7 @@ async def test_r4_arming_the_journal_adds_its_own_statements_and_nothing_else(
     )
     assert not [
         row for row in stood_down.events
-        if row[0] == "sql" and (_words_in(row[1]) & DEBT_JOURNAL_TABLE_NAMES)
+        if row[0] in ("sql", "journal-sql") and (_words_in(row[1]) & DEBT_JOURNAL_TABLE_NAMES)
     ], f"stand: the stood-down run wrote journal rows anyway: {stood_down.events}"
 
     assert (
