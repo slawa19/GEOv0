@@ -254,3 +254,31 @@ def test_find_flow_routes_allows_blocked_participants_as_destination():
     assert router.find_flow_routes(
         "A", "C", Decimal("1"), max_hops=6, max_paths=3
     ) == [(["A", "B", "C"], Decimal("1"))]
+
+
+def test_calculate_max_flow_to_self_is_refused_instead_of_looping_forever(monkeypatch):
+    # T1545: from == to used to loop forever. The bound below turns a regression into a red test
+    # instead of a hung runner: no terminating run on this 2-edge graph appends 1000 paths.
+    import app.core.payments.router as router_mod
+    from app.utils.exceptions import BadRequestException
+
+    appended = 0
+    original = router_mod.MaxFlowPath
+
+    def bounded(*args, **kwargs):
+        nonlocal appended
+        appended += 1
+        if appended > 1000:
+            raise AssertionError("calculate_max_flow did not terminate")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(router_mod, "MaxFlowPath", bounded)
+
+    router = PaymentRouter(None)
+    router.graph = {"A": {"B": Decimal("5")}, "B": {"C": Decimal("5")}, "C": {}}
+
+    # The bound does not trip on a legitimate call.
+    assert router.calculate_max_flow("A", "C").max_amount == "5"
+
+    with pytest.raises(BadRequestException, match="^Cannot pay to yourself$"):
+        router.calculate_max_flow("A", "A")

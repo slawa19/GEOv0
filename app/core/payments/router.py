@@ -19,7 +19,7 @@ from app.schemas.payment import CapacityResponse, MaxFlowResponse, MaxFlowPath
 from app.config import settings
 from app.utils.metrics import ROUTING_FAILURES_TOTAL
 from app.utils.validation import validate_equivalent_code
-from app.utils.exceptions import TimeoutException
+from app.utils.exceptions import BadRequestException, TimeoutException
 
 logger = logging.getLogger(__name__)
 
@@ -569,6 +569,13 @@ class PaymentRouter:
         """
         Edmonds-Karp or similar to find max flow.
         """
+        # T1545, 2026-09-13: with from == to the BFS finds a zero-length path at once, the residual
+        # update does nothing, and `while True` finds it again forever - synchronously, inside an
+        # async route. Guarded here, not in the route, because the simulator also calls this.
+        # Same refusal as a payment to yourself (`PaymentService`, "Cannot pay to yourself").
+        if from_pid == to_pid:
+            raise BadRequestException("Cannot pay to yourself")
+
         # Create a working copy of the graph since we modify residuals
         residual_graph = {u: d.copy() for u, d in self.graph.items()}
         
