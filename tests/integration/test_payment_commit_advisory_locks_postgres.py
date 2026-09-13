@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import delete, func, select, text
 
 from app.core.payments.engine import PaymentEngine
+from app.db.journal_tables import debt_operations
 from app.db.models.audit_log import IntegrityAuditLog
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
@@ -187,6 +188,137 @@ async def _cleanup_seed(seed: dict) -> None:
         await cleanup.commit()
 
 
+#: The identity prefix of the finished operations `_give_the_journal_a_history` writes, and the only
+#: thing `_forget_the_journal_history` deletes by.
+_JOURNAL_HISTORY_IDENTITY = "t1529-history-"
+
+#: HOW MANY, AND WHY A NUMBER AT ALL (T1529, measured on PostgreSQL 16.9, 2026-09-13).
+#:
+#: A duplicate INSERT against an already-committed row is `23505` at READ COMMITTED, REPEATABLE READ
+#: and SERIALIZABLE alike - the isolation level does not convert it into `40001`, which is what this
+#: was first assumed to do. What converts it is SSI seeing the collision, and whether SSI sees it
+#: was measured in `pg_locks` rather than reasoned about. The holder's completion statement
+#: `UPDATE debt_operations SET state = 'COMPLETED' ... WHERE id = ... AND state = 'OPEN'` leaves
+#: exactly one `SIReadLock`, and which one depends on how that statement is PLANNED:
+#:
+#: * all but empty table -> `Seq Scan` -> `locktype = relation` on `debt_operations`. The waiter's
+#:   heap insert meets it before any index is touched, so it is cancelled as a pivot: `40001`, 20/20.
+#: * a thousand analysed rows -> `Index Scan` -> `locktype = page` on `ix_debt_operations_open`
+#:   only. The duplicate is then reported by `uq_debt_operations_kind_identity`, which is checked
+#:   earlier and which nobody holds a predicate lock on: `23505`, 20/20 at 1000, 50000 and 200000.
+#:
+#: Two thousand is that threshold with margin, and it is also the shape a deployed journal is
+#: permanently in - which is the point of this test: the `40001` rescue is the special case, not the
+#: normal one, and the property under test must not depend on it.
+_JOURNAL_HISTORY_ROWS = 2000
+
+#: How many times the duplicate-commit schedule is repeated while PostgreSQL keeps rescuing it.
+#:
+#: History makes the duplicate the normal outcome, not the certain one. Measured over 18 runs of the
+#: schedule with `_JOURNAL_HISTORY_ROWS` in place: `23505` fifteen times, `40001` three times. The
+#: residual variance is SSI predicate-lock granularity, which depends on the holder transaction's
+#: whole read set and is not a lever this stand has, so the schedule is simply repeated. At the
+#: measured 5/6 per attempt, six attempts leave about one chance in forty thousand of a premise
+#: failure - and none at all of a pass on an unexercised path, because the premise is asserted.
+_RACE_ATTEMPTS = 6
+
+
+async def _completion_update_plan() -> str:
+    """How PostgreSQL currently plans the holder's envelope completion UPDATE.
+
+    This is the precondition of the `23505` test below, and measuring it is the difference between
+    a test that says "the stand is not set up" and one that reports a mysterious `40001`. The id is
+    a fresh uuid that matches nothing, so the statement plans like the real one and touches no row.
+    """
+
+    from tests.conftest import TestingSessionLocal
+
+    async with TestingSessionLocal() as session:
+        rows = (
+            await session.execute(
+                text(
+                    "EXPLAIN UPDATE debt_operations SET state = 'COMPLETED' "
+                    "WHERE id = :probe AND state = 'OPEN'"
+                ),
+                {"probe": str(uuid.uuid4())},
+            )
+        ).scalars().all()
+    return "\n".join(str(row) for row in rows)
+
+
+async def _give_the_journal_a_history(rows: int = _JOURNAL_HISTORY_ROWS) -> int:
+    """Put finished operations in `debt_operations` and analyse it, as a live journal would be.
+
+    THROUGH THE DRIVER, like every other teardown and fixture in this suite since the journal was
+    armed: Core DML naming a journal table is refused by the write guard, correctly, because it is
+    indistinguishable from a writer recording work nobody verified (design v2 §8 R6). These rows are
+    not a record of work - they are the table's physical size - so they go round the guard the one
+    way that module documents, `exec_driver_sql`, which fires no `before_execute`.
+
+    `TEST_FIXTURE` and a NULL `tx_id`, because `chk_debt_operations_tx_id_iff_kind` allows a
+    transaction id exactly for `PAYMENT` and `CLEARING`; a filler row owns no transaction.
+
+    THE `ANALYZE` IS LOAD-BEARING. Without fresh statistics the planner works from a default
+    estimate for a table it believes has no pages, and the choice between a sequential and an index
+    scan - which is what decides the SQLSTATE - becomes whatever autovacuum last did. That is
+    exactly the intermittency this test exists to remove.
+    """
+
+    from tests.conftest import TestingSessionLocal
+
+    async with TestingSessionLocal() as session:
+        connection = await session.connection()
+        await connection.exec_driver_sql(
+            "INSERT INTO debt_operations "
+            "(id, kind, identity, tx_id, intent, intent_digest, schema_version, "
+            " money_encoding_version, intent_encoding_version, opened_at, state, "
+            " completed_at, flush_count, effect_count, effect_digest) "
+            "SELECT gen_random_uuid(), 'TEST_FIXTURE', "
+            f"'{_JOURNAL_HISTORY_IDENTITY}' || g, NULL, '{{}}', repeat('0', 64), 1, 1, 1, "
+            "now(), 'COMPLETED', now(), 1, 1, repeat('0', 64) "
+            f"FROM generate_series(1, {int(rows)}) AS g"
+        )
+        await connection.exec_driver_sql("ANALYZE debt_operations")
+        await session.commit()
+
+    async with TestingSessionLocal() as verify:
+        return int(
+            await verify.scalar(
+                select(func.count())
+                .select_from(debt_operations)
+                .where(debt_operations.c.identity.like(f"{_JOURNAL_HISTORY_IDENTITY}%"))
+            )
+        )
+
+
+async def _forget_the_journal_history() -> None:
+    """Remove the filler, and give the table its physical size back.
+
+    THE STATISTICS ARE SHARED STATE, and `DELETE` plus `ANALYZE` is not enough to restore them.
+    Measured 2026-09-13: after the rows are deleted `reltuples` drops to zero but `relpages` does
+    not - PostgreSQL does not give the pages back until a `VACUUM` truncates them - so the planner
+    is left looking at a nought-row, eighty-page table and keeps choosing the index scan. Every
+    later test in the run then measures the `23505` branch of this race whether it meant to or not,
+    and `test_concurrent_same_transaction_commit_applies_effects_once_postgres` silently stops
+    covering the `40001` one. `VACUUM` is the statement that undoes it, and it cannot run inside a
+    transaction block, hence the AUTOCOMMIT connection.
+    """
+
+    from tests.conftest import TestingSessionLocal, engine as test_engine
+
+    async with TestingSessionLocal() as session:
+        connection = await session.connection()
+        await connection.exec_driver_sql(
+            "DELETE FROM debt_operations WHERE kind = 'TEST_FIXTURE' AND identity LIKE "
+            f"'{_JOURNAL_HISTORY_IDENTITY}%'"
+        )
+        await session.commit()
+
+    async with test_engine.connect() as reclaim:
+        await reclaim.execution_options(isolation_level="AUTOCOMMIT")
+        await reclaim.exec_driver_sql("VACUUM (ANALYZE) debt_operations")
+
+
 @pytest.mark.asyncio
 async def test_prepare_reservation_blocks_concurrent_commit_on_same_segment_postgres(
     db_session,
@@ -355,7 +487,7 @@ async def test_concurrent_same_transaction_commit_applies_effects_once_postgres(
     release_holder = asyncio.Event()
     waiter_owner_attempted = asyncio.Event()
     waiter_owner_acquired = asyncio.Event()
-    observed_retry_errors: list[tuple[str, str | None, str]] = []
+    observed_retry_errors: list[tuple[str, str | None, str, str | None, bool]] = []
     waiter_preflight_calls = 0
     waiter_rollback_calls = 0
     holder_task = None
@@ -401,10 +533,23 @@ async def test_concurrent_same_transaction_commit_applies_effects_once_postgres(
             return await waiter_rollback()
 
         def _record_retryable(exc, *, op):
+            # THE VERDICT IS RECORDED, NOT ONLY THE ERROR (T1529, 2026-09-13). This wrapper runs
+            # for every DBAPIError the engine CONSIDERS, whatever it decides, so a recorded
+            # SQLSTATE on its own never meant the error was retried. The assertions below used to
+            # admit `{"40001", "23505"}` from this list while `23505` on the envelope's identity
+            # was classified fail-closed - an admitted code under which the test's own later
+            # assertions cannot hold, because the commit raises and never reaches them.
+            verdict = waiter_retryable(exc, op=op)
             observed_retry_errors.append(
-                (op, waiter_engine._get_pgcode(exc), str(exc.statement or ""))
+                (
+                    op,
+                    waiter_engine._get_pgcode(exc),
+                    str(exc.statement or ""),
+                    waiter_engine._get_db_constraint_name(exc),
+                    verdict,
+                )
             )
-            return waiter_retryable(exc, op=op)
+            return verdict
 
         monkeypatch.setattr(
             holder_engine,
@@ -447,18 +592,46 @@ async def test_concurrent_same_transaction_commit_applies_effects_once_postgres(
 
             release_holder.set()
             holder_result, waiter_result = await asyncio.wait_for(
-                asyncio.gather(holder_task, waiter_task),
+                # `return_exceptions=True` so that a waiter which RAISED is reported by the
+                # assertions below, with the SQLSTATE and constraint this stand recorded, instead
+                # of escaping from `gather` as a bare `IntegrityError` traceback (T1529).
+                asyncio.gather(holder_task, waiter_task, return_exceptions=True),
                 timeout=15.0,
             )
-            assert holder_result is True
-            assert waiter_result is True
+            assert holder_result is True, holder_result
+            assert waiter_result is True, (
+                f"the concurrent duplicate commit was not idempotent: {waiter_result!r}; "
+                f"the engine considered {observed_retry_errors}"
+            )
             assert waiter_owner_acquired.is_set()
             assert waiter_rollback_calls == 1
             assert waiter_preflight_calls == 2
             assert len(observed_retry_errors) == 1
-            retry_op, retry_code, retry_statement = observed_retry_errors[0]
+            (
+                retry_op,
+                retry_code,
+                retry_statement,
+                retry_constraint,
+                retry_retryable,
+            ) = observed_retry_errors[0]
             assert retry_op == "commit"
-            assert retry_code in {"40001", "23505"}
+            # WHICH CODE, AND WHY TWO ARE ADMITTED (T1529, measured 2026-09-13). PostgreSQL reports
+            # this collision as `40001` when SSI sees it and as `23505` when it does not, and which
+            # one it is depends on the PLAN of the holder's envelope completion UPDATE - see the
+            # measurement on `_JOURNAL_HISTORY_ROWS` above. WHICH ONE THIS STAND MEETS IS NOT ITS
+            # OWN BUSINESS: the planner works from statistics that any earlier test in the run can
+            # move, which is why the gate saw `23505` here once and a repeat of the same suite saw
+            # `40001`. So neither code is the subject - the IDEMPOTENT OUTCOME is - both are
+            # admitted, and the VERDICT is asserted, which is what the admitted set alone could not
+            # do: until T1529 this list could record `23505` while the engine was re-raising it, and
+            # the assertions below were never reached to notice. The `23505` branch is pinned
+            # deterministically by
+            # `test_concurrent_duplicate_commit_is_idempotent_with_journal_history_postgres` below.
+            assert retry_code in {"40001", "23505"}, retry_code
+            assert retry_retryable is True, (
+                f"the engine classified {retry_code} on {retry_constraint} as fail-closed, so the "
+                f"assertions above held only because PostgreSQL chose the other code this time"
+            )
             # See the note in `test_payment_engine_uow_retry_postgres.py`: the envelope INSERT is
             # the unit of work's first write since step 4 slice C, so it is the statement that
             # meets the conflict.
@@ -523,6 +696,310 @@ async def test_concurrent_same_transaction_commit_applies_effects_once_postgres(
             assert persisted_limit == Decimal("10.00000000")
     finally:
         await _cleanup_seed(seed)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_duplicate_commit_is_idempotent_with_journal_history_postgres(
+    db_session,
+    monkeypatch,
+):
+    """T1529: the same race as the test above, on a journal that already has history.
+
+    THE DEFECT. `debt_operation` INSERTs and flushes the operation envelope as the unit of work's
+    FIRST write, and `_uow`'s idempotency check reads `transactions` from the unit of work's own
+    snapshot. The application runs PostgreSQL at SERIALIZABLE (`DB_POSTGRES_ISOLATION_LEVEL`), so
+    the second commit of one tx_id resumes from the advisory wait on a snapshot taken before the
+    holder committed: it still reads `PREPARED`, walks past the `COMMITTED` short-circuit, and meets
+    the holder's committed envelope on the envelope's identity. That `23505` was classified
+    fail-closed, so a duplicate concurrent commit RAISED instead of returning idempotently.
+
+    WHY A SECOND TEST AND NOT A STRONGER ASSERTION IN THE FIRST. The test above is green on this
+    same code path because PostgreSQL can rescue the race with `40001`, and on an all but empty
+    `debt_operations` it always does - see the measurement on `_JOURNAL_HISTORY_ROWS`. An empty
+    journal is the state a reset test database is in and a deployed one never is, so this stand
+    gives the table history first.
+
+    WHY THE SCHEDULE IS RUN IN A LOOP, and this is the honest part. History makes the duplicate the
+    normal outcome but not the certain one: measured over 18 runs of this schedule with history in
+    place, PostgreSQL reported the duplicate 15 times and still rescued the race 3 times. The
+    remaining variance is SSI predicate-lock granularity, which depends on the whole holder
+    transaction's read set and is not a lever this stand has. So the schedule is repeated until the
+    duplicate happens, at most `_RACE_ATTEMPTS` times - which leaves a residual one-in-forty-thousand
+    chance of a premise failure and no chance at all of a vacuous pass.
+
+    THE PREMISE IS ASSERTED, so this cannot pass by not exercising the scenario: the waiter must have
+    parked on the segment advisory lock, the holder must have committed first, and the engine must
+    have met `23505` on an envelope identity constraint at the envelope INSERT. If every attempt was
+    rescued, this test FAILS and says so rather than reporting a green run on a path it never
+    reached.
+
+    MUTATION that must redden it: drop the `is_envelope_insert` branch from
+    `PaymentEngine._is_retryable_db_error` (the code as it stood at `7ba41d4`).
+    """
+
+    _require_postgres(db_session)
+
+    try:
+        history_rows = await _give_the_journal_a_history()
+        completion_plan = await _completion_update_plan()
+
+        assert history_rows == _JOURNAL_HISTORY_ROWS, (
+            f"the stand did not give the journal a history ({history_rows} rows), so the holder's "
+            f"completion UPDATE is still planned as a sequential scan and this test measures the "
+            f"`40001` path the test above already covers"
+        )
+        # THE PRECONDITION, MEASURED AND NOT ASSUMED. The `23505` branch is reachable only while the
+        # holder's completion UPDATE is planned as an index scan: a sequential scan takes a
+        # relation-wide `SIReadLock` on `debt_operations` (measured in `pg_locks`) and PostgreSQL
+        # then cancels the waiter as a pivot every single time. Reading the plan makes a stand that
+        # is not set up say so, instead of reporting a `40001` whose cause the next reader has to
+        # rediscover.
+        assert "Seq Scan on debt_operations" not in completion_plan, (
+            f"the holder's envelope completion UPDATE is still a sequential scan despite "
+            f"{history_rows} history rows, so this race cannot reach the duplicate at all:\n"
+            f"{completion_plan}"
+        )
+
+        codes: list[str | None] = []
+        race = None
+        for _ in range(_RACE_ATTEMPTS):
+            race = await _one_duplicate_commit_race(monkeypatch)
+            codes.append(race["code"])
+            if race["code"] == "23505":
+                break
+
+        assert race is not None
+        assert race["waiter_parked"], (
+            "the waiter never waited on the segment advisory lock, so it never resumed on a "
+            "snapshot older than the holder's commit"
+        )
+        assert race["holder_result"] is True, (
+            f"the holder did not commit first ({race['holder_result']!r}); without that there is "
+            f"no committed envelope for the waiter to collide with"
+        )
+        assert race["op"] == "commit", race["op"]
+        assert "INSERT INTO debt_operations" in race["statement"], race["statement"]
+        assert race["code"] == "23505", (
+            f"PostgreSQL rescued every one of {len(codes)} attempts with {codes} instead of "
+            f"reporting the duplicate, so the fail-closed path was NOT exercised. The rescue is SSI "
+            f"seeing the collision; it depends on the predicate-lock granularity of the holder's "
+            f"envelope completion UPDATE, whose plan this stand checked above. A green run here "
+            f"would mean nothing."
+        )
+        assert race["constraint"] in {
+            "uq_debt_operations_kind_identity",
+            "uq_debt_operations_tx_id",
+        }, (
+            f"the duplicate was not the envelope's identity but {race['constraint']}; this is a "
+            f"different collision and must not be retried"
+        )
+
+        # --- and only now the property: the duplicate commit is idempotent ----------------------
+        assert race["retryable"] is True, (
+            f"{race['code']} on {race['constraint']} is classified fail-closed, so a concurrent "
+            f"duplicate commit raises instead of returning idempotently"
+        )
+        assert race["waiter_result"] is True, (
+            f"the concurrent duplicate commit was not idempotent: {race['waiter_result']!r}"
+        )
+        assert race["waiter_rollback_calls"] == 1, race["waiter_rollback_calls"]
+        assert race["waiter_preflight_calls"] == 2, race["waiter_preflight_calls"]
+
+        durable = race["durable"]
+        assert durable["transaction_state"] == "COMMITTED", durable
+        assert durable["debt_amount"] == Decimal("8.00000000"), durable
+        assert durable["reverse_debt"] is None, durable
+        assert durable["remaining_locks"] == 0, durable
+        assert durable["audit_count"] == 1, durable
+        # ONE envelope, not two: the duplicate declaration must have gone back with the attempt that
+        # made it, and the retry must not have opened a second one.
+        assert durable["envelopes"] == ["COMPLETED"], durable
+    finally:
+        await _forget_the_journal_history()
+
+
+async def _one_duplicate_commit_race(monkeypatch) -> dict:
+    """Run the two-session duplicate commit once and report everything observed.
+
+    Returns rather than asserts, because the caller repeats this until PostgreSQL reports the
+    duplicate instead of rescuing the race, and a rescued attempt is not a failure - it is a draw.
+    Each attempt seeds and disposes of its own payment, so attempts cannot borrow each other's
+    state.
+    """
+
+    from tests.conftest import TestingSessionLocal
+
+    seed = await _seed_prepared_payment(include_waiter=False)
+    holder_at_segment = asyncio.Event()
+    release_holder = asyncio.Event()
+    waiter_owner_attempted = asyncio.Event()
+    observed: list[tuple[str, str | None, str, str | None, bool]] = []
+    waiter_preflight_calls = 0
+    waiter_rollback_calls = 0
+    holder_task = None
+    waiter_task = None
+    holder_result: object = None
+    waiter_result: object = None
+    waiter_parked = False
+
+    try:
+        async with TestingSessionLocal() as holder_session, TestingSessionLocal() as waiter_session:
+            await _use_serializable(holder_session)
+            await _use_serializable(waiter_session)
+            holder_engine = PaymentEngine(holder_session)
+            waiter_engine = PaymentEngine(waiter_session)
+            holder_engine._retry_base_delay_s = 0.0
+            holder_engine._retry_max_delay_s = 0.0
+            waiter_engine._retry_base_delay_s = 0.0
+            waiter_engine._retry_max_delay_s = 0.0
+            holder_segment_acquire = holder_engine._acquire_segment_advisory_lock_keys
+            waiter_preflight = waiter_engine._preacquire_equivalent_owner_locks_for_tx
+            waiter_retryable = waiter_engine._is_retryable_db_error
+            waiter_rollback = waiter_session.rollback
+            waiter_pid = int(
+                (await waiter_session.execute(text("SELECT pg_backend_pid()"))).scalar_one()
+            )
+
+            async def _hold_before_segment(keys):
+                holder_at_segment.set()
+                await release_holder.wait()
+                await holder_segment_acquire(keys)
+
+            async def _count_waiter_preflight(*args, **kwargs):
+                nonlocal waiter_preflight_calls
+                waiter_preflight_calls += 1
+                waiter_owner_attempted.set()
+                return await waiter_preflight(*args, **kwargs)
+
+            async def _count_waiter_rollback():
+                nonlocal waiter_rollback_calls
+                waiter_rollback_calls += 1
+                return await waiter_rollback()
+
+            def _record_retryable(exc, *, op):
+                verdict = waiter_retryable(exc, op=op)
+                observed.append(
+                    (
+                        op,
+                        waiter_engine._get_pgcode(exc),
+                        str(exc.statement or ""),
+                        waiter_engine._get_db_constraint_name(exc),
+                        verdict,
+                    )
+                )
+                return verdict
+
+            monkeypatch.setattr(
+                holder_engine, "_acquire_segment_advisory_lock_keys", _hold_before_segment
+            )
+            monkeypatch.setattr(
+                waiter_engine,
+                "_preacquire_equivalent_owner_locks_for_tx",
+                _count_waiter_preflight,
+            )
+            monkeypatch.setattr(waiter_engine, "_is_retryable_db_error", _record_retryable)
+            monkeypatch.setattr(waiter_session, "rollback", _count_waiter_rollback)
+
+            try:
+                holder_task = asyncio.create_task(holder_engine.commit(seed["holder_tx_id"]))
+                await asyncio.wait_for(holder_at_segment.wait(), timeout=5.0)
+
+                waiter_task = asyncio.create_task(waiter_engine.commit(seed["holder_tx_id"]))
+                await asyncio.wait_for(waiter_owner_attempted.wait(), timeout=5.0)
+                async with TestingSessionLocal() as observer:
+                    waiter_parked = await _wait_for_advisory_wait(
+                        observer, backend_pid=waiter_pid
+                    )
+
+                release_holder.set()
+                holder_result, waiter_result = await asyncio.wait_for(
+                    asyncio.gather(holder_task, waiter_task, return_exceptions=True),
+                    timeout=15.0,
+                )
+            finally:
+                release_holder.set()
+                tasks = [task for task in (holder_task, waiter_task) if task is not None]
+                if tasks:
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                # THE ORIGINAL `rollback`, NOT THE COUNTING WRAPPER. A clean-up rollback after a
+                # raising waiter would otherwise be counted as one the retry wrapper took, and the
+                # assertion that the retry rolled back EXACTLY once would be measuring this line.
+                if not isinstance(waiter_result, bool):
+                    await waiter_rollback()
+                if not isinstance(holder_result, bool):
+                    await holder_session.rollback()
+
+        async with TestingSessionLocal() as verify:
+            durable = {
+                "transaction_state": await verify.scalar(
+                    select(Transaction.state).where(
+                        Transaction.tx_id == seed["holder_tx_id"]
+                    )
+                ),
+                "debt_amount": await verify.scalar(
+                    select(Debt.amount).where(
+                        Debt.debtor_id == seed["sender_id"],
+                        Debt.creditor_id == seed["receiver_id"],
+                        Debt.equivalent_id == seed["equivalent_id"],
+                    )
+                ),
+                "reverse_debt": await verify.scalar(
+                    select(Debt.amount).where(
+                        Debt.debtor_id == seed["receiver_id"],
+                        Debt.creditor_id == seed["sender_id"],
+                        Debt.equivalent_id == seed["equivalent_id"],
+                    )
+                ),
+                "remaining_locks": int(
+                    await verify.scalar(
+                        select(func.count())
+                        .select_from(PrepareLock)
+                        .where(PrepareLock.tx_id == seed["holder_tx_id"])
+                    )
+                ),
+                "audit_count": int(
+                    await verify.scalar(
+                        select(func.count())
+                        .select_from(IntegrityAuditLog)
+                        .where(
+                            IntegrityAuditLog.tx_id == seed["holder_tx_id"],
+                            IntegrityAuditLog.operation_type == "PAYMENT",
+                        )
+                    )
+                ),
+                "envelopes": list(
+                    (
+                        await verify.execute(
+                            select(debt_operations.c.state).where(
+                                debt_operations.c.kind == "PAYMENT",
+                                debt_operations.c.identity == seed["holder_tx_id"],
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                ),
+            }
+    finally:
+        await _cleanup_seed(seed)
+
+    op, code, statement, constraint, retryable = (
+        observed[0] if len(observed) == 1 else (None, None, "", None, False)
+    )
+    return {
+        "op": op,
+        "code": code,
+        "statement": statement,
+        "constraint": constraint,
+        "retryable": retryable,
+        "observed": observed,
+        "holder_result": holder_result,
+        "waiter_result": waiter_result,
+        "waiter_parked": waiter_parked,
+        "waiter_preflight_calls": waiter_preflight_calls,
+        "waiter_rollback_calls": waiter_rollback_calls,
+        "durable": durable,
+    }
 
 
 @pytest.mark.asyncio

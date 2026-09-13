@@ -290,7 +290,7 @@ async def test_payment_engine_commit_retries_real_concurrent_debt_insert_postgre
     waiter_attempted = asyncio.Event()
     waiter_acquired = asyncio.Event()
     release_holder = asyncio.Event()
-    observed_retry_errors: list[tuple[str | None, str]] = []
+    observed_retry_errors: list[tuple[str | None, str, bool]] = []
     apply_calls = {"holder": 0, "waiter": 0}
     holder_task = None
     waiter_task = None
@@ -336,10 +336,14 @@ async def test_payment_engine_commit_retries_real_concurrent_debt_insert_postgre
             return await waiter_apply(*args, **kwargs)
 
         def _record_retryable(exc, *, op):
+            # THE VERDICT IS RECORDED, NOT ONLY THE ERROR (T1529, 2026-09-13). This wrapper runs for
+            # every DBAPIError the engine CONSIDERS, whatever it decides, so a recorded SQLSTATE on
+            # its own has never meant the error was retried.
+            verdict = waiter_retryable(exc, op=op)
             observed_retry_errors.append(
-                (waiter_engine._get_pgcode(exc), str(exc.statement or ""))
+                (waiter_engine._get_pgcode(exc), str(exc.statement or ""), verdict)
             )
-            return waiter_retryable(exc, op=op)
+            return verdict
 
         monkeypatch.setattr(
             holder_engine,
@@ -375,14 +379,27 @@ async def test_payment_engine_commit_retries_real_concurrent_debt_insert_postgre
             await waiter_session.rollback()
 
     assert len(observed_retry_errors) == 1
-    assert observed_retry_errors[0][0] in {"40001", "23505"}
+    # WHICH CODE, AND THE CORRECTION THAT GOES WITH IT (T1529, measured 2026-09-13). This assertion
+    # used to admit `{"40001", "23505"}`, and the reason recorded under it was wrong about this
+    # test's own fixture: it said "two concurrent commits of the SAME transaction collide on
+    # `debt_operations`'s UNIQUE(tx_id)". THE TWO COMMITS HERE ARE OF DIFFERENT TRANSACTIONS -
+    # `tx_ids[0]` and `tx_ids[1]` - so the two envelopes carry different identities and a duplicate
+    # is impossible at this statement. `23505` was therefore an admitted code that could not occur
+    # together with the statement assertion below: the set was wider than the scenario, which is how
+    # the same set next door hid a real defect until the gate met it (see
+    # `test_payment_commit_advisory_locks_postgres.py`, where the two commits ARE of one
+    # transaction and the duplicate is the subject).
+    assert observed_retry_errors[0][0] == "40001", observed_retry_errors
+    assert observed_retry_errors[0][2] is True, (
+        f"the engine classified {observed_retry_errors[0][0]} as fail-closed, so nothing was "
+        f"retried and the assertions below describe a run that did not happen"
+    )
     # THE STATEMENT THAT MEETS THE CONFLICT IS NOW THE ENVELOPE INSERT, and that is the journal, not
     # a change of subject. Since step 4 slice C the payment's unit of work opens a debt operation
-    # before it applies any flow, so `INSERT INTO debt_operations` is its first write - and
-    # `debt_operations` carries `UNIQUE(tx_id)`, so two concurrent commits of the SAME transaction
-    # now collide there (23505) or on the serializable snapshot (40001) before either reaches
-    # `debts`. The retry predicate is what this test is about and it is unchanged: the conflict is
-    # real, it is classified, and the unit of work runs again.
+    # before it applies any flow, so `INSERT INTO debt_operations` is its first write, and the
+    # waiter's SERIALIZABLE snapshot meets the holder there before either reaches `debts`. The retry
+    # predicate is what this test is about and it is unchanged: the conflict is real, it is
+    # classified, and the unit of work runs again.
     assert "INSERT INTO debt_operations" in observed_retry_errors[0][1], observed_retry_errors
     # THE WAITER APPLIES ITS FLOWS ONCE, NOT TWICE, and that follows from the line above: the
     # conflict is now met by the envelope INSERT, which happens BEFORE `_apply_flow` is reached at
