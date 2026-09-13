@@ -492,6 +492,31 @@ async def test_rt_012_1_counter_check_widening_the_door_reproduces_the_finding_e
     )
     monkeypatch.setattr(journal, "_reconcile", lambda conn, states: None)
 
+    # A FIFTH GUARD JOINED THEM ON 2026-09-13 (T1530), and it is the mirror of the fourth. `_reconcile`
+    # reads the DEBT row back; `_verify_entries` reads the journal's OWN entries back and requires them
+    # to be the effects the flush hook computed. With the money domain widened to 1E-9 and the debt
+    # readback stood down, this one still speaks, and for the same reason and from the other side:
+    # PostgreSQL rounds the ninth digit away when it stores the entry, so the stored entry reads
+    # `0.123456790` where the journal computed `0.123456789` (measured on this scenario, which is
+    # where the difference was found). It refuses as `unrecorded_journal_entry`.
+    #
+    # Asserted first because it is new behaviour and must not be lost, then stood down for the same
+    # reason the fourth was: a measurement against the database has no constant to move. FIVE
+    # independent guards now stand where one did, and reproducing `F-012-1` requires disabling all
+    # five - which is the point of this staircase, not an obstacle to it.
+    status_code, body = await _submit_signed_payment(pg_client, scenario, amount)
+    assert status_code == 500 and (body or {}).get("error", {}).get("code") == "E010", (
+        f"with the debt readback stood down the payment of {amount!r} must still be refused - by the "
+        f"entry readback, which holds the stored journal rows to the effects the hook computed. Got "
+        f"{status_code} {body!r}."
+    )
+    monkeypatch.setattr(journal, "_verify_entries", lambda conn, op, ordinal, effects: None)
+    # T1530 IS ONE GUARD IN TWO PLACES, and both have to go: the per-flush readback above, and the
+    # completion check that holds every stored entry to the effects the operation computed before the
+    # digest is taken. Standing only the first down leaves the second refusing the same row, which is
+    # how this staircase found it.
+    monkeypatch.setattr(journal, "_verify_completed_entries", lambda record, stored: None)
+
     status_code, body = await _submit_signed_payment(pg_client, scenario, amount)
     assert status_code == 409, (
         f"with the door widened but the delta barrier intact, the payment of {amount!r} must be "

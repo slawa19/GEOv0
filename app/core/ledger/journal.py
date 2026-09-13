@@ -92,7 +92,48 @@ gone, on the recorded edge, holding the recorded amount. That is a check on what
 than on what a statement appeared to say, and it holds whatever the parameters looked like, whoever
 changed them, and in whatever listener order - including a `before_execute` neighbour registered
 after this module's, which changed an INSERT from 11 to 12 after verification and was measured
-durable before this existed. One extra SELECT per flush that moves money is what it costs.
+durable before this existed. One extra SELECT per flush that touches a debt is what it costs - every
+flush, including a metadata-only one, because those add a `_RowState` too.
+
+AND THEN WE READ THE DEBT ROW BACK AND NEVER READ OUR OWN RECORD (T1530, 2026-09-13, third review
+circle of the T1528 delta). The entry INSERT went through the same pipeline as everything else, the
+write guard waved it through because `_INTERNAL` was set and compared nothing, `delta` was not
+required to be `amount_after - amount_before` by any constraint, and `_complete` digested the STORED
+rows. Measured: `debts` holding 11 under an entry saying `10 -> 12, delta 2`, and under an entry
+saying `10 -> 11, delta 2`, both with a completed envelope and a digest over the tampered row. The
+answer is the same discipline applied to the journal's own tables - `_verify_entries` reads each
+flush's entries back and requires them to be exactly the `_Effect` list, `_complete` requires every
+stored row to be one this operation computed before the digest is taken - plus a PostgreSQL CHECK
+constraint on the arithmetic that sits below every listener
+(`app/db/journal_tables.py`, migration 024; SQLite cannot carry it and the measurement that says so
+is with the constraint).
+
+THE VERIFICATION READS GO THROUGH `exec_driver_sql`, AND THE MODULE'S OLD CLAIM ABOUT `text()` WAS
+WRONG (T1531, 2026-09-13). `_reconcile`'s SELECT used to be a `select()` through `conn.execute`, which
+dispatches `before_execute` - so the boundary the contract rests on was rewritable by the very
+neighbour it was checking, measured with the amount projection replaced by a literal - and it carried
+an execution option that was an exact ORACLE for finding it, spoofable in the other direction too.
+Both are gone: the reads are hand-written SQL through `exec_driver_sql`, which dispatches no
+`before_execute` at all, and provenance is now held by the mechanism (`_OWN`,
+`journal_statement_is_own`) instead of asserted by the statement. VERIFIED on SQLAlchemy 2.0.25 in the
+same test that falsifies this module's former claim that `text()` fires no event: it DOES fire
+`before_execute`, as a `TextClause`. The conclusion that a `text()` write is unseen survives for a
+different reason - `_dml_tables` only recognises `UpdateBase` - and `exec_driver_sql` is the only
+entry point that dispatches no `before_execute`. WHAT IS NOT CLOSED: `before_cursor_execute` is still
+dispatched for `exec_driver_sql` and a `retval=True` neighbour there can still rewrite the SQL. That
+is measured OPEN by `tests/unit/test_p015_t1531_*` and is not claimed away.
+
+LISTENER ORDER IS NOT WINNABLE, SO THE SAVEPOINT ACCOUNT STOPPED DEPENDING ON IT (T1532, 2026-09-13).
+A `rollback_savepoint` listener on the `Connection` CLASS runs before every registration this module
+can make, including the per-connection one T1528 added, in both registration orders - measured. With
+the recorder pre-empted, the rollback statement was never issued, SQLAlchemy deactivated the nested
+transaction anyway, and a debt of 42 the writer had asked to undo was committed. So the account is
+kept from the SQL stream instead: `SAVEPOINT`, `RELEASE SAVEPOINT` and `ROLLBACK TO SAVEPOINT` are all
+statements, and a savepoint an operation is bound to that left SQLAlchemy's nesting with neither of
+the two closing statements observed is a refusal (`_lost_savepoint_closes`). The rollback confirmation
+is inverted in the same spirit - the SQL is the primary fact, an unrecorded rollback of a bound
+savepoint poisons - but the inversion alone does not reach the scenario above, because a prevented
+event prevents the statement, and that is said where it matters rather than only here.
 """
 
 from __future__ import annotations
@@ -101,13 +142,14 @@ import hashlib
 import json
 import uuid
 import weakref
+from collections import Counter
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, AsyncIterator, Iterable, Iterator
 
-from sqlalchemy import event, insert, select, update
+from sqlalchemy import event, insert, update
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.engine.base import RootTransaction, TwoPhaseTransaction
 from sqlalchemy.exc import InvalidRequestError
@@ -133,7 +175,6 @@ from app.db.sqlite_transaction_control import sqlite_transaction_control_is_inst
 
 __all__ = [
     "DEBT_TABLE_NAME",
-    "JOURNAL_STATEMENT_OPTION",
     "DebtJournalError",
     "DebtOperationIncomplete",
     "Reason",
@@ -141,6 +182,7 @@ __all__ = [
     "install_flush_hook",
     "install_journal",
     "install_write_guard",
+    "journal_statement_is_own",
     "mapped_journal_tables",
     "journal_is_installed",
     "uninstall_flush_hook",
@@ -149,13 +191,6 @@ __all__ = [
 ]
 
 DEBT_TABLE_NAME = Debt.__tablename__
-
-#: Execution option marking a statement as the JOURNAL'S OWN rather than a writer's. Only the
-#: verification read needs it: every other statement this module issues names a journal table and is
-#: recognisable by that. A test that compares the SQL of an armed run against a stood-down one has to
-#: be able to tell the mechanism's statements from the work's, and the statement's table name cannot
-#: do it for a read of `debts` (T1528).
-JOURNAL_STATEMENT_OPTION = "geo_journal_statement"
 
 #: Exactly the scale every money column in this repository carries.
 _MONEY_QUANTUM = Decimal("1E-8")
@@ -194,6 +229,10 @@ class Reason:
     UNVERIFIED_DEBT_WRITE = "unverified_debt_write"
     VERIFIED_WRITE_MISSING = "verified_write_missing"
     UNRECONCILED_DEBT_ROW = "unreconciled_debt_row"
+    UNRECORDED_JOURNAL_ENTRY = "unrecorded_journal_entry"
+    UNREADABLE_VERIFICATION = "unreadable_verification"
+    LOST_SAVEPOINT_CLOSE = "lost_savepoint_close"
+    UNRECORDED_SAVEPOINT_ROLLBACK = "unrecorded_savepoint_rollback"
     JOURNAL_TABLE_WRITE = "journal_table_write"
     AUTOCOMMIT_ROOT = "autocommit_root"
     TWO_PHASE_ROOT = "two_phase_root"
@@ -343,6 +382,15 @@ class _TxState:
     poison: str | None = None
     #: savepoint name -> True, set when a rollback was REQUESTED and cleared when the SQL ran.
     pending_savepoint_rollbacks: dict[str, bool] = field(default_factory=dict)
+    #: The savepoints the SQL STREAM shows as open, outermost first - `SAVEPOINT x` seen and no
+    #: `RELEASE SAVEPOINT x` or `ROLLBACK TO SAVEPOINT x` seen since (T1532).
+    #:
+    #: WHY THE SQL AND NOT THE EVENTS. The events are pre-emptable and the SQL is not: measured
+    #: 2026-09-13, a `rollback_savepoint` listener on the `Connection` CLASS runs before this
+    #: module's - before even the per-connection registration T1528 added - and an exception there
+    #: stops the journal from ever learning that a rollback was asked for. `after_cursor_execute`,
+    #: on the other hand, can only be pre-empted by a listener that lets the statement run first.
+    savepoints_open: list[str] = field(default_factory=list)
     generation: int = 0
 
 
@@ -695,25 +743,74 @@ _GRANTS: "weakref.WeakKeyDictionary[Connection, _Grant]" = weakref.WeakKeyDictio
 #: connection -> depth of this module's own writes to the journal tables.
 _INTERNAL: "weakref.WeakKeyDictionary[Connection, int]" = weakref.WeakKeyDictionary()
 
+#: connection -> depth of ANY statement this module is issuing, read or write.
+#:
+#: PROVENANCE THE MECHANISM OWNS, AND THAT IS THE WHOLE POINT (T1531, 2026-09-13). Until today the
+#: journal said "this statement is mine" by putting an execution option on the statement
+#: (`geo_journal_statement`), and a mark carried BY a statement is a mark anyone can carry: a writer
+#: could set the same option on its own statement and be filtered out by R4's tracer as journal
+#: noise, and - worse - the option was an exact ORACLE for recognising the verification read, which
+#: is precisely the statement a neighbour wants to find. There was no anti-spoof test. This counter
+#: is held by the journal for the duration of its own execution, so a statement cannot assert it and
+#: a reader asks the mechanism (`journal_statement_is_own`) instead of sniffing SQL or options.
+_OWN: "weakref.WeakKeyDictionary[Connection, int]" = weakref.WeakKeyDictionary()
+
+
+def _bump(registry: "weakref.WeakKeyDictionary[Connection, int]", conn: Connection, by: int) -> None:
+    depth = registry.get(conn, 0) + by
+    if depth <= 0:
+        registry.pop(conn, None)
+    else:
+        registry[conn] = depth
+
 
 @contextmanager
 def _journal_write(conn: Connection) -> Iterator[None]:
-    """Mark this connection as executing the journal's OWN statements.
+    """Mark this connection as executing the journal's OWN DML against the journal tables.
 
     Scoped to a connection rather than to the process: two units of work on two connections write
     their journals concurrently, and a process-wide flag would let one of them authorise the
     other's statement.
     """
 
-    _INTERNAL[conn] = _INTERNAL.get(conn, 0) + 1
+    _bump(_INTERNAL, conn, 1)
+    _bump(_OWN, conn, 1)
     try:
         yield
     finally:
-        depth = _INTERNAL.get(conn, 0) - 1
-        if depth <= 0:
-            _INTERNAL.pop(conn, None)
-        else:
-            _INTERNAL[conn] = depth
+        _bump(_INTERNAL, conn, -1)
+        _bump(_OWN, conn, -1)
+
+
+@contextmanager
+def _journal_read(conn: Connection) -> Iterator[None]:
+    """Mark this connection as executing one of the journal's own VERIFICATION READS.
+
+    Deliberately NOT `_journal_write`: a read needs no authority over the journal tables, and
+    widening `_INTERNAL` around it would authorise DML for the duration of a SELECT.
+    """
+
+    _bump(_OWN, conn, 1)
+    try:
+        yield
+    finally:
+        _bump(_OWN, conn, -1)
+
+
+def journal_statement_is_own(conn: Any) -> bool:
+    """Whether the statement this connection is executing right now is the JOURNAL'S OWN.
+
+    The question a tracer has to be able to ask: "arming adds the journal's own statements and
+    nothing else" is only checkable if the journal's statements can be told from the work's, and for
+    the verification read of `debts` the table name cannot do it. Ask the mechanism, not the
+    statement - see `_OWN` for why the execution option this replaces was the wrong answer.
+
+    Accepts an `AsyncConnection` as well as a `Connection`, because a caller holding the async face
+    of the same connection is asking about the same statement.
+    """
+
+    target = getattr(conn, "sync_connection", conn)
+    return bool(_OWN.get(target))
 
 
 def _dml_tables(clause: Any) -> set[str]:
@@ -1044,9 +1141,23 @@ def _release_refused_nested(conn: Connection, savepoint: str) -> None:
     nested._deactivate_from_connection(warn=False)
 
 
-def _blocking_problem(state: _TxState, *, ops: list[_OpRecord]) -> tuple[str, str] | None:
+def _blocking_problem(
+    state: _TxState, *, ops: list[_OpRecord], lost_savepoints: list[str] | None = None
+) -> tuple[str, str] | None:
     if state.poison is not None:
         return (Reason.ROOT_POISONED, f"this transaction was poisoned: {state.poison}")
+    if lost_savepoints:
+        # Binding condition 1, the half that needs no event at all (T1532). SQLAlchemy has stopped
+        # holding a nested transaction for these savepoints and the SQL stream never showed either of
+        # the two statements that can end one. Someone's close was lost, and what is still inside the
+        # transaction is then unknown - which is the state the reviewer's class-level listener
+        # produced, with a debt of 42 made durable by the commit that followed.
+        return (
+            Reason.LOST_SAVEPOINT_CLOSE,
+            f"savepoint(s) {sorted(lost_savepoints)} left SQLAlchemy's nesting without a RELEASE or "
+            f"a ROLLBACK TO reaching the database, so what an operation bound to them wrote is "
+            f"neither known to be kept nor known to be undone",
+        )
     if state.pending_savepoint_rollbacks:
         # Binding condition 1. SQLAlchemy ASKED for these savepoints to be rolled back and this
         # module never saw the SQL run - the reviewer's probe made exactly that happen by raising
@@ -1076,7 +1187,9 @@ def _on_commit(conn: Connection) -> None:
     state = _state_for(conn)
     if state is None:
         return
-    problem = _blocking_problem(state, ops=state.ops)
+    problem = _blocking_problem(
+        state, ops=state.ops, lost_savepoints=_lost_savepoint_closes(conn, state, state.ops)
+    )
     if problem is None:
         return
     reason, message = problem
@@ -1094,7 +1207,12 @@ def _on_release_savepoint(conn: Connection, name: str, context: Any) -> None:
     if state is None:
         return
     bound = [op for op in state.ops if name in op.chain]
-    problem = _blocking_problem(state, ops=bound)
+    # The savepoint being released is still in SQLAlchemy's live chain at this point - the event is
+    # dispatched before `do_release_savepoint` - so an ordinary release reports nothing lost. What
+    # this catches is a DEEPER savepoint of the same operation whose close never reached the database.
+    problem = _blocking_problem(
+        state, ops=bound, lost_savepoints=_lost_savepoint_closes(conn, state, bound)
+    )
     if problem is None:
         return
     reason, message = problem
@@ -1321,11 +1439,113 @@ def _on_engine_connect(conn: Connection) -> None:
 
 
 def _confirm_savepoint_rollback(state: _TxState, name: str) -> None:
+    """The SQL for a savepoint rollback has run. Drop what it undid - or refuse, if it was a surprise.
+
+    THE SQL IS THE PRIMARY FACT AND THE EVENT IS CORROBORATION, which is the inversion T1532 asks
+    for. Before it, a rollback observed with no pending record returned early: the journal had no
+    record of a request, so it silently did nothing, and a pre-empted recorder was indistinguishable
+    from a savepoint no operation cared about. Now an observed rollback of a savepoint an operation
+    is BOUND TO, with no request ever recorded, poisons the transaction.
+
+    IT POISONS RATHER THAN RAISING, and that is deliberate: this runs inside `after_cursor_execute`,
+    where the statement has already executed, so raising would only move the failure. The poison is
+    refused at the commit and at the release - the boundaries that can still stop something.
+
+    THE GATE IS `name in op.chain`, THE SAME GATE `_on_rollback_savepoint` RECORDS UNDER, and the
+    symmetry is what keeps this from refusing ordinary work. A savepoint no operation is bound to is
+    rolled back on the main payment path every time `PaymentEngine._apply_flow` answers a
+    `StaleDataError` (migration 023), and neither half of this pair looks at those.
+    """
+
+    bound_to_an_operation = any(name in op.chain for op in state.ops)
     if state.pending_savepoint_rollbacks.pop(name, None) is None:
+        if bound_to_an_operation:
+            _poison(state, Reason.UNRECORDED_SAVEPOINT_ROLLBACK)
         return
     # The root's poison is KEPT: a refusal that happened inside the savepoint was about this
     # transaction's right to write money, and undoing the savepoint does not undo that.
     state.ops = [op for op in state.ops if name not in op.chain]
+
+
+#: The three savepoint statements SQLAlchemy's dialects emit, and what each one does to the stack.
+#: Pinned to the spellings of `do_savepoint`, `do_release_savepoint` and `do_rollback_to_savepoint`
+#: (SQLAlchemy 2.0.25, `DefaultDialect`), measured rather than assumed by
+#: `tests/unit/test_p015_t1532_a_savepoint_is_accounted_for_in_sql.py`.
+_SAVEPOINT_PREFIXES = (
+    ("ROLLBACK TO SAVEPOINT ", "rollback"),
+    ("RELEASE SAVEPOINT ", "close"),
+    ("SAVEPOINT ", "open"),
+)
+
+#: What a savepoint name is stripped of. SQLAlchemy quotes a savepoint through the dialect's
+#: identifier preparer, so the name in the statement may be quoted on some dialect even though it is
+#: not on these two.
+_SAVEPOINT_QUOTES = "\"`[]"
+
+
+def _savepoint_statement(statement: str) -> tuple[str, str] | None:
+    """`(what it does, which savepoint)` for a savepoint statement, else None."""
+
+    # THE FIRST CHARACTER BEFORE ANY COPYING. This runs on EVERY statement the process sends, and
+    # `lstrip()` copies the whole string - which for a batched INSERT is not free. Only a statement
+    # that starts with whitespace pays for the copy, and only one starting with S or R goes further.
+    first = statement[:1]
+    if first.isspace():
+        head = statement.lstrip()
+        first = head[:1]
+    else:
+        head = statement
+    if first not in ("S", "R", "s", "r"):
+        return None
+    upper = head[:24].upper()
+    for prefix, kind in _SAVEPOINT_PREFIXES:
+        if upper.startswith(prefix):
+            return kind, head.strip().rsplit(None, 1)[-1].strip(_SAVEPOINT_QUOTES)
+    return None
+
+
+def _observe_savepoint(state: _TxState, kind: str, name: str) -> None:
+    """Keep `savepoints_open` as the SQL stream leaves it.
+
+    A `RELEASE` and a `ROLLBACK TO` both end every savepoint established AFTER their own, which is
+    SQL's rule and not a convenience: those savepoints get no statement of their own, so a stack that
+    kept them would report a lost close for every nested savepoint in an ordinary rollback. `ROLLBACK
+    TO` leaves its own savepoint usable in SQL but finished as far as SQLAlchemy is concerned - it
+    issues no `RELEASE` afterwards - and this stack exists to be compared against SQLAlchemy's
+    nesting, so it follows SQLAlchemy.
+    """
+
+    if kind == "open":
+        if name not in state.savepoints_open:
+            state.savepoints_open.append(name)
+        return
+    if name in state.savepoints_open:
+        del state.savepoints_open[state.savepoints_open.index(name) :]
+
+
+def _lost_savepoint_closes(conn: Connection, state: _TxState, ops: list[_OpRecord]) -> list[str]:
+    """Savepoints an operation is bound to that left SQLAlchemy's nesting with no statement.
+
+    THE EVENT-INDEPENDENT HALF OF T1532, and the one that reaches what the inversion above does not.
+    Measured 2026-09-13: a `rollback_savepoint` listener on the `Connection` CLASS that raises runs
+    before every registration this module can make, so `pending_savepoint_rollbacks` stayed empty AND
+    the `ROLLBACK TO SAVEPOINT` statement was never issued - there was no SQL to observe, the
+    inversion had nothing to invert, SQLAlchemy deactivated the nested transaction in its `finally`
+    anyway, and the root commit made a debt of 42 durable that the writer had asked to undo.
+
+    What is left observable in that state is exactly this: the SQL stream shows the savepoint OPEN, an
+    operation is bound to it, and SQLAlchemy no longer holds a nested transaction for it. No event is
+    consulted, so no listener can take it away; a neighbour can only reach it by stopping the
+    `SAVEPOINT` statement from being observed, which means stopping it from running.
+    """
+
+    if not state.savepoints_open:
+        return []
+    bound = {name for op in ops for name in op.chain}
+    if not bound:
+        return []
+    live = set(_core_chain(conn))
+    return [name for name in state.savepoints_open if name in bound and name not in live]
 
 
 def _on_after_cursor_execute(
@@ -1336,24 +1556,30 @@ def _on_after_cursor_execute(
     context: Any,
     executemany: bool,
 ) -> None:
-    """Confirm a savepoint rollback by watching the SQL run, not by trusting the event.
+    """Keep the savepoint account from the SQL, not from the events.
 
-    This is the other half of condition 1. `do_rollback_to_savepoint` issues its statement through
-    `exec_driver_sql`, which fires the cursor events (measured on pysqlite and aiosqlite), so a
-    rollback that actually ran is observable and one that was prevented is not.
+    This is the other half of condition 1. `do_savepoint`, `do_release_savepoint` and
+    `do_rollback_to_savepoint` all issue their statements through `exec_driver_sql`, which fires the
+    cursor events (measured on pysqlite and aiosqlite), so a savepoint statement that actually ran is
+    observable and one that was prevented is not - which is the whole asymmetry T1532 rests on.
     """
 
     # The cheapest possible test first: this listener sees EVERY statement, and all but a handful
-    # are not the one it is waiting for.
-    if statement[:8].upper() != "ROLLBACK":
+    # are not the ones it is waiting for.
+    observed = _savepoint_statement(statement)
+    if observed is None:
         return
-    if statement.lstrip()[:21].upper() != "ROLLBACK TO SAVEPOINT":
+    kind, name = observed
+    # `create=True`: a transaction that opens a savepoint before it opens an operation would
+    # otherwise have no state to record the `SAVEPOINT` in, and the account would start in the
+    # middle. An empty state refuses nothing - `_lost_savepoint_closes` needs an operation bound to
+    # the name - so creating it costs a weak dictionary entry and buys the beginning of the stack.
+    state = _state_for(conn, create=True)
+    if state is None:
         return
-    state = _state_for(conn)
-    if state is None or not state.pending_savepoint_rollbacks:
-        return
-    name = statement.strip().rsplit(None, 1)[-1].strip('"`[]')
-    _confirm_savepoint_rollback(state, name)
+    _observe_savepoint(state, kind, name)
+    if kind == "rollback":
+        _confirm_savepoint_rollback(state, name)
 
 
 def _on_before_execute(
@@ -1366,8 +1592,20 @@ def _on_before_execute(
     """Refuse every write into `debts` and the journal tables that was not verified.
 
     Runs on EVERY statement, including SELECTs, because a DML CTE hides inside one.
-    `exec_driver_sql` and `text()` are documented exceptions: they fire no `before_execute` at all
-    (`sqlalchemy/engine/base.py:1712-1778`), and this module does not claim to cover them.
+
+    TWO BLIND SPOTS, AND THEY ARE NOT THE SAME ONE - the sentence that used to stand here said they
+    were, and it was wrong about the mechanism (T1531, measured on SQLAlchemy 2.0.25):
+
+    * `exec_driver_sql` dispatches no `before_execute` at all, so a write issued that way is not seen
+      by this guard. That is the real exception, and it is the one the journal's own verification reads
+      now use deliberately.
+    * `text()` DOES dispatch `before_execute`, as a `TextClause`. A `text()` write is nevertheless
+      unseen here, because `_dml_tables` recognises only `UpdateBase` - the conclusion is the same and
+      the reason is different, which is exactly the kind of correct-conclusion-under-a-false-premise
+      this programme keeps finding in itself.
+
+    Neither is claimed to be covered. `tests/unit/test_p015_t1531_*` measures both halves, so the
+    sentence above cannot drift from the library again.
     """
 
     if _stood_down(conn.engine):
@@ -1774,6 +2012,116 @@ def _before_flush(session: Session, flush_context: Any, instances: Any) -> None:
     session.info["geo.journal.flush"] = (op, effects, states)
 
 
+# =================================================================================================
+# The journal's own verification reads: hand-written SQL through `exec_driver_sql` (T1531)
+# =================================================================================================
+
+
+#: How each DBAPI paramstyle spells its Nth placeholder, and whether the values travel as a sequence
+#: or as a mapping. MEASURED, not assumed (2026-09-13): aiosqlite is `qmark`, asyncpg is
+#: `numeric_dollar`. The other four are here because a dialect this module has never run on must
+#: either be spelled correctly or REFUSED - a verification read that silently binds nothing would be
+#: the vacuous guard `AGENTS.md` §9 forbids.
+_PARAMSTYLES = {
+    "qmark": ("?", False),
+    "format": ("%s", False),
+    "numeric_dollar": ("$%d", False),
+    "numeric": (":%d", False),
+    "named": (":p%d", True),
+    "pyformat": ("%%(p%d)s", True),
+}
+
+
+def _raw_params(dialect: Any, values: list[Any]) -> tuple[list[str], Any]:
+    """Placeholders for this dialect, and the parameters in the shape its DBAPI wants."""
+
+    spelling = _PARAMSTYLES.get(dialect.paramstyle)
+    if spelling is None:
+        raise DebtJournalError(
+            Reason.UNREADABLE_VERIFICATION,
+            f"paramstyle {dialect.paramstyle!r} is one this module cannot write a verification read "
+            f"for, so it cannot verify its own record on this dialect and will not pretend to.",
+            paramstyle=dialect.paramstyle,
+        )
+    template, by_name = spelling
+    if by_name:
+        return (
+            [template % index for index in range(len(values))],
+            {f"p{index}": value for index, value in enumerate(values)},
+        )
+    marks = [
+        template % (index + 1) if "%d" in template else template for index in range(len(values))
+    ]
+    return marks, tuple(values)
+
+
+def _bind_as(column: Any, value: Any, dialect: Any) -> Any:
+    """One value spelled the way this dialect's DBAPI expects it for THAT column.
+
+    THE SPELLING TRAP, AND WHY THE COLUMN'S OWN PROCESSOR ANSWERS IT. `Uuid(as_uuid=True)` is 32 hex
+    characters on SQLite and a native `uuid` on PostgreSQL, and this programme has already produced
+    two false greens from a comparison written against one tier (`_key_text`). `exec_driver_sql`
+    sends parameters to the DBAPI with NO bind processing of its own, so the processing has to happen
+    here - and it is taken from the column's own type rather than written out, so the statement binds
+    exactly what `conn.execute` would have bound.
+    """
+
+    impl = column.type.dialect_impl(dialect)
+    processor = impl.bind_processor(dialect)
+    return processor(value) if processor is not None else value
+
+
+def _money_out(value: Any, dialect: Any) -> Decimal | None:
+    """A money column's RAW DBAPI value as the `Decimal` `conn.execute` would have produced.
+
+    Built from the column type's own result processor for the same reason `_round_trip` is: on SQLite
+    `Numeric` comes back as a `float` and the scale-8 decimal processor is what makes it money again,
+    so reading the raw value and comparing it would compare floats. asyncpg's processor refuses to be
+    built without a result-set column type and returns `Decimal` untouched anyway, which is the
+    `None` branch here and is measured end to end on the PostgreSQL tier.
+    """
+
+    if value is None:
+        return None
+    impl = Numeric(20, 8).dialect_impl(dialect)
+    try:
+        processor = impl.result_processor(dialect, None)
+    except Exception:  # noqa: BLE001 - see the docstring: asyncpg is the dialect that raises
+        processor = None
+    return _as_decimal(processor(value) if processor is not None else value)
+
+
+def _own_select(
+    dialect: Any, table: Any, columns: tuple[Any, ...], *, where: str, binds: list[tuple[Any, Any]]
+) -> tuple[str, Any]:
+    """The SQL and parameters of one verification read. `where` spells placeholders as `{0}`, `{1}`...
+
+    WHY HAND-WRITTEN SQL AT ALL (T1531). A `select()` executed through `conn.execute` dispatches
+    `before_execute`, where a neighbour registered after this module's listener can replace the
+    statement outright - measured 2026-09-13: the projection of `debts.amount` was replaced by the
+    literal 11 while the row held 12, the journal recorded 11, and nothing refused. `exec_driver_sql`
+    dispatches NO `before_execute` at all (measured on SQLAlchemy 2.0.25, both the `Engine` and the
+    `Connection` class), so the statement that reaches the cursor is the one written here.
+
+    WHAT IT DOES NOT REACH, and this is the honest half. `exec_driver_sql` still dispatches
+    `before_cursor_execute`, which a neighbour may register with `retval=True` and use to replace the
+    SQL string and the parameters. That surface is NARROWER - it is raw SQL rather than a typed clause
+    object, and the oracle that used to point at this statement is gone (see `_OWN`) - but it is not
+    closed, and nothing here may be described as closing it. It is measured as still open by
+    `tests/unit/test_p015_t1531_the_verification_read_is_not_rewritable.py`.
+    """
+
+    preparer = dialect.identifier_preparer
+    values = [_bind_as(column, value, dialect) for column, value in binds]
+    marks, params = _raw_params(dialect, values)
+    projection = ", ".join(preparer.quote(column.name) for column in columns)
+    sql = (
+        f"SELECT {projection} FROM {preparer.format_table(table)} "
+        f"WHERE {where.format(*marks)}"
+    )
+    return sql, params
+
+
 def _same_money(written: Decimal | None, recorded: Decimal | None) -> bool:
     """Whether two money values are the same number, whatever spelling each arrived in.
 
@@ -1812,9 +2160,12 @@ def _reconcile(conn: Connection, states: list[_RowState]) -> None:
 
     WHAT IT DOES NOT CLAIM. It is not a second opinion on somebody else's rows: only the rows this
     flush recorded are read, so a write to a DIFFERENT row is the parameter-level guard's business
-    and stays so. And it runs at the END OF THIS FLUSH, so a change made after it - by a later
-    listener using `text()` or `exec_driver_sql`, which fire no `before_execute` and are this module's
-    one documented blind spot - is outside it. That exposure is reported, not claimed away.
+    and stays so - including the retargeting case registered as its own finding (an authorised
+    metadata-only UPDATE of debt A turned into a money UPDATE of debt B: A still satisfies its
+    `_RowState`, and B is not among the rows this flush recorded). And it runs at the END OF THIS
+    FLUSH, so a change made after it - by a later listener using `exec_driver_sql`, which dispatches no
+    `before_execute`, or by a `before_cursor_execute` neighbour rewriting this very read - is outside
+    it. Those exposures are reported, not claimed away.
 
     ONE STATEMENT, whatever the flush's size: a single `IN` read, not one per row.
     """
@@ -1837,21 +2188,31 @@ def _reconcile(conn: Connection, states: list[_RowState]) -> None:
             )
         by_id[key] = state
 
-    rows = conn.execute(
-        select(
-            table.c.id,
-            table.c.equivalent_id,
-            table.c.debtor_id,
-            table.c.creditor_id,
-            table.c.amount,
-        )
-        .where(table.c.id.in_([state.debt_id for state in states]))
-        # MARKED AS THE JOURNAL'S OWN STATEMENT. It is a read against `debts` rather than against a
-        # journal table, so a tracer that recognises the journal's noise by its table names cannot
-        # tell it from a writer's own read (`tests/unit/test_p015_b4_r4_*` does exactly that). The
-        # option is the only non-textual way to say "this statement is the mechanism, not the work".
-        .execution_options(**{JOURNAL_STATEMENT_OPTION: True})
-    ).all()
+    dialect = conn.engine.dialect
+    columns = (
+        table.c.id,
+        table.c.equivalent_id,
+        table.c.debtor_id,
+        table.c.creditor_id,
+        table.c.amount,
+    )
+    # THROUGH `exec_driver_sql`, WHICH DISPATCHES NO `before_execute` (T1531). The statement used to
+    # be a `select()` through `conn.execute`, where a neighbour could replace it - measured, with the
+    # amount projection swapped for a literal while the row held something else - and it used to
+    # carry an execution option that was an exact oracle for FINDING it. Neither is true now; what
+    # remains open is `before_cursor_execute`, and `_own_select` says so.
+    sql, params = _own_select(
+        dialect,
+        table,
+        columns,
+        where=table.c.id.name
+        + " IN ("
+        + ", ".join("{%d}" % index for index in range(len(states)))
+        + ")",
+        binds=[(table.c.id, state.debt_id) for state in states],
+    )
+    with _journal_read(conn):
+        rows = conn.exec_driver_sql(sql, params).fetchall()
     stored = {_key_text(row[0]) or str(row[0]): row for row in rows}
 
     problems: list[str] = []
@@ -1874,7 +2235,7 @@ def _reconcile(conn: Connection, states: list[_RowState]) -> None:
             problems.append(
                 f"{key} is stored on edge {written_edge} and was recorded on {recorded_edge}"
             )
-        if not _same_money(_as_decimal(row[4]), state.amount):
+        if not _same_money(_money_out(row[4], dialect), state.amount):
             problems.append(f"{key} holds {row[4]!r} and was recorded as {state.amount!r}")
     if not problems:
         return
@@ -1885,6 +2246,179 @@ def _reconcile(conn: Connection, states: list[_RowState]) -> None:
         + "; ".join(problems)
         + ". The journal will not write a record of a movement that did not happen as recorded.",
         problems=problems,
+    )
+
+
+def _money_key(value: Decimal | None) -> str:
+    """One money value as a comparison key. Tolerates what `_money_text` refuses to quantize.
+
+    `_money_text` is the digest's encoding and it quantizes, which RAISES on a value the database
+    can nevertheless be holding - a NaN from before T1526, a magnitude SQLite never refused. A
+    comparison that raises on the very row it is meant to catch would turn a refusal into a crash
+    under a different name, so a non-finite value compares by its text (the same split `_same_money`
+    makes, and for the same reason).
+    """
+
+    if value is None:
+        return ""
+    if not value.is_finite():
+        return str(value)
+    return _money_text(value)
+
+
+def _effect_code(effect: _Effect) -> tuple[Any, ...]:
+    """The entry the journal INTENDS to have stored for one effect, as a comparable tuple."""
+
+    return (
+        int(effect.flush_ordinal),
+        _key_text(effect.equivalent_id) or str(effect.equivalent_id),
+        _key_text(effect.debtor_id) or str(effect.debtor_id),
+        _key_text(effect.creditor_id) or str(effect.creditor_id),
+        str(effect.effect),
+        _money_key(effect.amount_before),
+        _money_key(effect.amount_after),
+        _money_key(effect.delta),
+    )
+
+
+#: The columns an entry is compared on, in the order `_stored_entry_code` reads them. Named once so
+#: the read and the encoding cannot drift apart.
+_ENTRY_COLUMNS = (
+    debt_journal_entries.c.flush_ordinal,
+    debt_journal_entries.c.equivalent_id,
+    debt_journal_entries.c.debtor_id,
+    debt_journal_entries.c.creditor_id,
+    debt_journal_entries.c.effect,
+    debt_journal_entries.c.amount_before,
+    debt_journal_entries.c.amount_after,
+    debt_journal_entries.c.delta,
+)
+
+
+def _stored_entry_code(row: Any, dialect: Any) -> tuple[Any, ...]:
+    """The same tuple, built from the row AS THE DATABASE HOLDS IT."""
+
+    return (
+        int(row[0]),
+        _key_text(row[1]) or str(row[1]),
+        _key_text(row[2]) or str(row[2]),
+        _key_text(row[3]) or str(row[3]),
+        str(row[4]),
+        _money_key(_money_out(row[5], dialect)),
+        _money_key(_money_out(row[6], dialect)),
+        _money_key(_money_out(row[7], dialect)),
+    )
+
+
+def _entry_read(dialect: Any, *, operation_id: uuid.UUID, ordinal: int | None) -> tuple[str, Any]:
+    """The verification read of one operation's entries, optionally narrowed to one flush."""
+
+    table = debt_journal_entries
+    where = f"{table.c.operation_id.name} = {{0}}"
+    binds: list[tuple[Any, Any]] = [(table.c.operation_id, operation_id)]
+    if ordinal is not None:
+        where += f" AND {table.c.flush_ordinal.name} = {{1}}"
+        binds.append((table.c.flush_ordinal, ordinal))
+    return _own_select(dialect, table, _ENTRY_COLUMNS, where=where, binds=binds)
+
+
+def _describe_entry_disagreement(
+    stored: "Counter[tuple[Any, ...]]", recorded: "Counter[tuple[Any, ...]]"
+) -> str:
+    extra = stored - recorded
+    missing = recorded - stored
+    parts = []
+    if extra:
+        parts.append(f"stored and not recorded: {sorted(extra.elements())}")
+    if missing:
+        parts.append(f"recorded and not stored: {sorted(missing.elements())}")
+    return "; ".join(parts)
+
+
+def _verify_entries(conn: Connection, op: _OpRecord, ordinal: int, effects: list[_Effect]) -> None:
+    """Read the entries this flush just wrote BACK OUT OF THE DATABASE and require them to be the
+    effects the hook computed.
+
+    THE OTHER HALF OF THE SAME DISCIPLINE AS `_reconcile`, AND IT WAS MISSING (T1530, found by the
+    third review circle of the T1528 delta, 2026-09-13). `_reconcile` read the DEBT row back and the
+    journal then inserted its entry and never read THAT back. The write guard passed the entry INSERT
+    because `_INTERNAL` was set and compared nothing; `delta` was bounded and non-zero and was not
+    required to be `after - before`; and `_complete` digested the STORED rows. So a `before_execute`
+    neighbour registered after this module's could rewrite the entry INSERT, and the measurement on
+    this tree was: `debts` held 11, the entry said `10 -> 12, delta 2`, the envelope completed with a
+    digest taken over the tampered row, and nothing refused. That is the mirror of the hole T1528
+    closed - there the table disagreed with the record, here the record disagrees with the table -
+    and one is no more acceptable than the other.
+
+    EXACT EQUALITY IN BOTH DIRECTIONS, as a multiset. A row stored that the hook never computed is a
+    record of a movement that did not happen; an effect the hook computed that is not stored is a
+    movement with no record. The digest must be taken over rows that have been held to the effects,
+    which is why this runs before the operation can complete and not as a later audit.
+
+    WHICH HALF IS LOAD-BEARING HERE, MEASURED AND NOT ASSUMED (2026-09-13). The `stored - recorded`
+    half overlaps with `_complete`'s membership check: removing it alone changes no verdict, because
+    an invented or altered row is refused one step later, at the digest. The `recorded - stored` half
+    does NOT overlap with anything - a MISSING entry is legitimate at completion time (a savepoint
+    rollback takes a flush's entries with it, migration 023), so this readback is the only place in
+    the mechanism that can see one. Both halves are kept: the overlapping one refuses earlier and
+    names the flush, and a check that is only correct because another check exists is the
+    downstream-compensation reasoning `AGENTS.md` §9 forbids.
+
+    THROUGH `exec_driver_sql` (T1531): this read must not be rewritable by the same neighbour that
+    rewrote the INSERT it is checking.
+    """
+
+    dialect = conn.engine.dialect
+    sql, params = _entry_read(dialect, operation_id=op.id, ordinal=ordinal)
+    with _journal_read(conn):
+        rows = conn.exec_driver_sql(sql, params).fetchall()
+    stored = Counter(_stored_entry_code(row, dialect) for row in rows)
+    recorded = Counter(_effect_code(effect) for effect in effects)
+    if stored == recorded:
+        return
+    _poison_connection(conn, Reason.UNRECORDED_JOURNAL_ENTRY)
+    raise DebtJournalError(
+        Reason.UNRECORDED_JOURNAL_ENTRY,
+        "the entries stored for this flush are not the effects the journal computed: "
+        + _describe_entry_disagreement(stored, recorded)
+        + ". A record that disagrees with the movement it describes is the one thing this "
+        "mechanism exists to prevent.",
+        operation_id=str(op.id),
+        flush_ordinal=ordinal,
+    )
+
+
+def _verify_completed_entries(record: _OpRecord, stored: list[tuple[Any, ...]]) -> None:
+    """Every entry stored for this operation must be one the operation COMPUTED (T1530).
+
+    `_verify_entries` held each flush's entries to that flush's effects; this holds the whole set at
+    the moment the completion digest is taken, which is the only way the digest describes verified
+    rows rather than whatever the table happens to contain by then. The window between the two is
+    real and not theoretical: `exec_driver_sql` dispatches no `before_execute`, so a neighbour can
+    alter a stored entry after the flush that wrote it was verified.
+
+    MEMBERSHIP AND NOT EQUALITY, and the asymmetry is measured rather than convenient: entries CAN
+    legitimately be missing, because a `StaleDataError` retry in `PaymentEngine._apply_flow` rolls its
+    flush back to a savepoint and takes that flush's entries with it (migration 023). Nothing, though,
+    can legitimately ADD or ALTER a row - so the one-way check is the strongest one that is true here,
+    and saying so is the point.
+
+    A FUNCTION AND NOT AN INLINE BLOCK, because a guard that cannot be addressed cannot be stood down
+    in the one place that has to stand every guard down in turn - the counter-check in
+    `tests/integration/test_p012_rt1_signed_amount_versus_stored_amount_postgres.py`, which reproduces
+    `F-012-1` by disabling each guard that stands in front of it and asserting each refusal on the way.
+    """
+
+    computed = Counter(_effect_code(effect) for effect in record.effects)
+    unaccounted = Counter(stored) - computed
+    if not unaccounted:
+        return
+    raise DebtJournalError(
+        Reason.UNRECORDED_JOURNAL_ENTRY,
+        f"entries stored for {record.kind}/{record.identity} describe movements this operation never "
+        f"computed: {sorted(unaccounted.elements())}. The completion digest will not be taken over "
+        f"rows the journal cannot account for.",
+        operation_id=str(record.id),
     )
 
 
@@ -1927,6 +2461,9 @@ def _after_flush(session: Session, flush_context: Any) -> None:
     ]
     with _journal_write(conn):
         conn.execute(insert(debt_journal_entries), rows)
+    # AND READ THEM BACK. The INSERT above went through the same `before_execute` pipeline as
+    # everything else, so what it stored is not known until it is read (T1530).
+    _verify_entries(conn, op, effects[0].flush_ordinal, effects)
 
 
 def _after_flush_postexec(session: Session, flush_context: Any) -> None:
@@ -2389,46 +2926,25 @@ async def _complete(session: Any, conn: Connection, state: _TxState, record: _Op
     record.state = _OpRecord.COMPLETING
     try:
         await session.flush()
-        rows = (
-            await async_conn.execute(
-                select(
-                    debt_journal_entries.c.flush_ordinal,
-                    debt_journal_entries.c.equivalent_id,
-                    debt_journal_entries.c.debtor_id,
-                    debt_journal_entries.c.creditor_id,
-                    debt_journal_entries.c.effect,
-                    debt_journal_entries.c.amount_before,
-                    debt_journal_entries.c.amount_after,
-                    debt_journal_entries.c.delta,
-                ).where(debt_journal_entries.c.operation_id == record.id)
-            )
-        ).all()
-        ordered = sorted(
-            rows,
-            key=lambda row: (
-                row[0],
-                uuid.UUID(str(row[1])).bytes,
-                uuid.UUID(str(row[2])).bytes,
-                uuid.UUID(str(row[3])).bytes,
-            ),
-        )
-        encoded = [
-            (
-                row[0],
-                str(row[1]),
-                str(row[2]),
-                str(row[3]),
-                row[4],
-                _money_text(_as_decimal(row[5])),
-                _money_text(_as_decimal(row[6])),
-                _money_text(_as_decimal(row[7])),
-            )
-            for row in ordered
+        # THE SAME READ AS `_verify_entries`, THROUGH THE SAME DOOR (T1531): `exec_driver_sql`,
+        # which dispatches no `before_execute`. The digest below is taken over what this returns, so
+        # a rewritable read here would mean a digest over whatever a neighbour chose to show.
+        dialect = live_conn.engine.dialect
+        sql, params = _entry_read(dialect, operation_id=record.id, ordinal=None)
+        with _journal_read(live_conn):
+            rows = (await async_conn.exec_driver_sql(sql, params)).fetchall()
+        encoded_rows = [_stored_entry_code(row, dialect) for row in rows]
+
+        _verify_completed_entries(record, encoded_rows)
+
+        encoded = sorted(encoded_rows, key=lambda code: (code[0], code[1], code[2], code[3]))
+        ordered = [
+            (code[0], uuid.UUID(code[1]), code[2], code[3]) for code in encoded
         ]
 
         per_equivalent: dict[uuid.UUID, list[tuple[Any, ...]]] = {}
         for row, code in zip(ordered, encoded):
-            per_equivalent.setdefault(uuid.UUID(str(row[1])), []).append(code)
+            per_equivalent.setdefault(row[1], []).append(code)
         for equivalent_id in record.intent_equivalent_ids:
             per_equivalent.setdefault(equivalent_id, [])
 
