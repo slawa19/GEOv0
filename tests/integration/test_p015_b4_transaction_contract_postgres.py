@@ -41,6 +41,7 @@ stays - this tier is about PostgreSQL semantics, not about the journal's absence
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from decimal import Decimal
 
@@ -825,6 +826,344 @@ async def test_c9_p_an_operation_does_not_cover_an_independent_transactions_writ
         )
         assert after.get(("debtor", "extra0", "eq")) is None, (
             f"session B's uncovered debt is durable: {after}"
+        )
+    finally:
+        await drop_world(serializable_factory, world)
+
+
+# ==============================================================================================
+# C11 on PostgreSQL - the durable half of the failure taxonomy
+# ==============================================================================================
+#
+# WHY THIS SECTION EXISTS AT ALL. Design v2 marks C11 `S+P` (`design-v2.md:125`) and lists it under
+# "PG mandatory: ... C11 durable". Until 2026-09-13 the whole of C11 was SQLite-only, so the round-3
+# review recorded it as a requirement with no test. What only this tier can answer: on SQLite a
+# "poisoned root committed nothing" is read back through the same file and the same process, and the
+# savepoint is a SQLite SAVEPOINT emulated over one write lock. Here the refusal is followed by a read
+# on an INDEPENDENT backend, and the savepoint is a real server-side SAVEPOINT with a real
+# `ROLLBACK TO SAVEPOINT`.
+
+
+class _PBusinessFailure(RuntimeError):
+    """A failure from the BLOCK of an operation - a rejected payment, not a journal malfunction."""
+
+
+#: The same three machinery failures as the SQLite tier (`_MACHINERY_FAILURES` in
+#: `tests/unit/test_p015_b4_transaction_contract.py`), kept in step deliberately: a divergence between
+#: the tiers in WHICH failures are injected would make the durable half evidence about a different
+#: scenario than the one the SQLite half proves the mechanism on.
+_P_MACHINERY_FAILURES = [
+    ("the envelope INSERT at open", "insert", RuntimeError),
+    ("the completion UPDATE at exit", "update", RuntimeError),
+    ("a cancellation during the completion UPDATE", "update", asyncio.CancelledError),
+]
+
+
+@pytest.mark.parametrize(
+    "label,when,raises", _P_MACHINERY_FAILURES, ids=[row[0] for row in _P_MACHINERY_FAILURES]
+)
+@pytest.mark.asyncio
+async def test_c11_p_a_failure_in_the_operations_own_io_leaves_nothing_durable(
+    serializable_factory, watcher, label, when, raises
+):
+    """C11, machinery half, PostgreSQL. The root poison, read from the server.
+
+    Design v2 §1.5 makes a failure in the operation's OWN I/O a root poison: no commit until a real
+    database rollback. On this tier three things are asserted that SQLite cannot show - the refused
+    commit made nothing durable as seen from ANOTHER backend, the journal tables carry neither
+    envelope nor entry for the failed identity, and the backend the refusal happened on is `idle`
+    rather than `idle in transaction`, so the refusal really ended the server-side transaction
+    instead of leaving it open for the pool to hand on.
+
+    THE INJECTION names no private symbol: a `before_execute` listener on this module's own engine
+    refuses the statement that writes the envelope table.
+
+    NON-VACUITY, FIRST: the injection fired exactly once on the statement it was aimed at, and the
+    injected exception reached the caller. For the two completion cases that is also what proves the
+    envelope INSERT SUCCEEDED, so the failure is at completion and not a relabelled open failure.
+
+    MUTATION, MEASURED 2026-09-13 on this tier: make a failed completion mark the envelope COMPLETED
+    and clear the root poison (`_complete`'s `except BaseException`, keeping the `raise`). The two
+    completion cases then go red quoting the durable debt read on the independent connection; the
+    open case stays green because `_complete` never runs there.
+    """
+    api = journal_api()
+    world = await seed_world(serializable_factory)
+    engine = serializable_factory.kw["bind"]
+    identity = _identity("p-io-failure")
+    injected: list[str] = []
+    message = f"p015-b4-p: the operation's own {when} against {OPERATIONS_TABLE} failed"
+
+    def _fail_the_envelope_statement(_conn, clauseelement, _multiparams, _params, _options) -> None:
+        table = getattr(getattr(clauseelement, "table", None), "name", None)
+        if table != OPERATIONS_TABLE or not getattr(clauseelement, f"is_{when}", False):
+            return
+        injected.append(f"{when} {table}")
+        raise raises(message)
+
+    event.listen(engine.sync_engine, "before_execute", _fail_the_envelope_statement)
+    try:
+        machinery_failure: BaseException | None = None
+        commit_refusal: BaseException | None = None
+        backend_pid: int | None = None
+        async with serializable_factory() as session:
+            try:
+                async with await _open(api, session, world, "p-io-failure", identity=identity):
+                    session.add(world.debt("9.00"))
+                    await session.flush()
+                    backend_pid = (
+                        await session.execute(text("SELECT pg_backend_pid()"))
+                    ).scalar_one()
+            except BaseException as exc:  # noqa: BLE001 - CancelledError is one of the cases
+                machinery_failure = exc
+            if backend_pid is None:
+                # The open case fails before the block runs, so the pid is taken afterwards - on the
+                # same session, therefore the same pooled backend.
+                backend_pid = (await session.execute(text("SELECT pg_backend_pid()"))).scalar_one()
+            commit_refusal = await refusal_of(api, session.commit())
+            state_after_refusal = await watcher(backend_pid)
+
+        after = await stored_debts(serializable_factory, world)
+        envelopes = await stored_operations(serializable_factory, identity)
+        entries = await stored_entries(serializable_factory, identity)
+
+        # NON-VACUITY, FIRST.
+        assert injected == [f"{when} {OPERATIONS_TABLE}"], (
+            f"the operation never reached its own {when} against `{OPERATIONS_TABLE}` (fired: "
+            f"{injected}), so no failure could be injected into its I/O. {JOURNAL_MODULE} may not "
+            f"exist yet; this is the step-2 red state, not a passing test."
+        )
+        assert isinstance(machinery_failure, raises) and message in str(machinery_failure), (
+            f"stand: the injected {raises.__name__} did not reach the caller: {machinery_failure!r}"
+        )
+
+        # VERDICT, read on connections that are not the one under test.
+        assert commit_refusal is not None, (
+            f"the operation's own I/O failed at {label} and the root committed anyway: {after}"
+        )
+        assert after == {}, f"a root poisoned by a journal I/O failure stored a debt: {after}"
+        assert envelopes == [], f"the failed operation left a durable envelope: {envelopes}"
+        assert entries == [], f"the failed operation left durable entries: {entries}"
+        assert state_after_refusal == "idle", (
+            f"after the refused commit the backend is `{state_after_refusal}`, not `idle`: the "
+            f"refusal left a server-side transaction open for the pool to hand to the next caller."
+        )
+    finally:
+        event.remove(engine.sync_engine, "before_execute", _fail_the_envelope_statement)
+        await drop_world(serializable_factory, world)
+
+
+@pytest.mark.asyncio
+async def test_c11_p_the_completion_poison_survives_a_real_rollback_to_savepoint(
+    serializable_factory,
+):
+    """C11, machinery half, PostgreSQL: the poison as the ONLY thing refusing the commit.
+
+    The SQLite twin is
+    `test_c11_the_completion_poison_survives_a_savepoint_rollback_that_removes_the_record`, and its
+    docstring carries the reasoning. The short version: `_confirm_savepoint_rollback`
+    (`app/core/ledger/journal.py:1038-1043`, at `c17fa26`) drops from `state.ops` every operation bound to the
+    savepoint that was rolled back and KEEPS `state.poison`, so after a SUCCESSFUL rollback the
+    half-recorded operation is no longer something `_blocking_problem` can catch - the poison is.
+
+    WHY IT IS ALSO HERE. On SQLite a SAVEPOINT is emulated inside one write lock on one file. Here
+    `ROLLBACK TO SAVEPOINT` is a real server-side statement, the root transaction survives it on the
+    backend, and the refusal's effect on durability is read on an independent connection. A poison
+    that happened to work on SQLite because the whole file was locked anyway would not be evidence
+    about the backend this system runs on.
+
+    NON-VACUITY, FIRST, IN THREE PARTS: the injection fired at the completion UPDATE; a real
+    `ROLLBACK TO SAVEPOINT` executed; and the refusal's reason is `root_poisoned` and NOT
+    `operation_not_completed` or `unconfirmed_rollback` - which is the observable proof that the
+    record the other mechanism would have caught is gone.
+
+    MUTATION, MEASURED 2026-09-13: delete `_poison(...)` from `_complete`'s `except BaseException`
+    (keeping the `raise`); the root then commits its own debt and this test goes red on the verdict,
+    while every other C11 case on both tiers stays green.
+    """
+    api = journal_api()
+    world = await seed_world(serializable_factory, extra_participants=1)
+    engine = serializable_factory.kw["bind"]
+    root_identity = _identity("p-poison-root")
+    savepoint_identity = _identity("p-poison-savepoint")
+    armed: list[bool] = []
+    injected: list[str] = []
+    rolled_back_savepoints: list[str] = []
+    message = f"p015-b4-p: the savepoint operation's completion UPDATE against {OPERATIONS_TABLE} failed"
+
+    def _fail_the_completion_update(_conn, clauseelement, _multiparams, _params, _options) -> None:
+        table = getattr(getattr(clauseelement, "table", None), "name", None)
+        if not armed or table != OPERATIONS_TABLE or not getattr(clauseelement, "is_update", False):
+            return
+        injected.append(f"update {table}")
+        raise RuntimeError(message)
+
+    def _watch_the_savepoint_rollback(
+        _conn, _cursor, statement, _parameters, _context, _executemany
+    ) -> None:
+        if statement.strip().upper().startswith("ROLLBACK TO SAVEPOINT"):
+            rolled_back_savepoints.append(statement.strip())
+
+    event.listen(engine.sync_engine, "before_execute", _fail_the_completion_update)
+    event.listen(engine.sync_engine, "after_cursor_execute", _watch_the_savepoint_rollback)
+    try:
+        machinery_failure: BaseException | None = None
+        commit_refusal: BaseException | None = None
+        async with serializable_factory() as session:
+            async with await _open(api, session, world, "p-poison-root", identity=root_identity):
+                session.add(world.debt("10.00"))
+                await session.flush()
+
+            nested = await session.begin_nested()
+            armed.append(True)
+            try:
+                async with await _open(
+                    api, session, world, "p-poison-savepoint", identity=savepoint_identity
+                ):
+                    session.add(world.debt("50.00", creditor_id=world.extra_participants[0].id))
+                    await session.flush()
+            except BaseException as exc:  # noqa: BLE001 - the injected machinery failure
+                machinery_failure = exc
+            armed.clear()
+            await nested.rollback()
+
+            commit_refusal = await refusal_of(api, session.commit())
+
+        after = await stored_debts(serializable_factory, world)
+        root_envelopes = await stored_operations(serializable_factory, root_identity)
+        savepoint_envelopes = await stored_operations(serializable_factory, savepoint_identity)
+
+        # NON-VACUITY, FIRST.
+        assert injected == [f"update {OPERATIONS_TABLE}"], (
+            f"the savepoint operation never reached its completion UPDATE against "
+            f"`{OPERATIONS_TABLE}` (fired: {injected}), so nothing was injected. {JOURNAL_MODULE} "
+            f"may not exist yet; this is the step-2 red state, not a pass."
+        )
+        assert isinstance(machinery_failure, BaseException) and message in str(machinery_failure), (
+            f"stand: the injected completion failure did not reach the caller: {machinery_failure!r}"
+        )
+        assert rolled_back_savepoints, (
+            "stand: no `ROLLBACK TO SAVEPOINT` statement was executed on the backend, so "
+            "`state.ops` still holds the half-recorded operation and this is not the scenario it is "
+            "named after"
+        )
+
+        # VERDICT.
+        assert commit_refusal is not None, (
+            f"the completion UPDATE failed inside a savepoint, the savepoint was rolled back on the "
+            f"backend, and the root committed anyway: {after}. After the rollback dropped the "
+            f"operation record the poison is the only thing left to refuse this commit."
+        )
+        assert getattr(commit_refusal, "reason", None) == "root_poisoned", (
+            f"the commit was refused as `{getattr(commit_refusal, 'reason', None)}`, not as "
+            f"`root_poisoned`: {commit_refusal!r}. Then the savepoint rollback did NOT remove the "
+            f"operation record and the poison is still untested on this tier."
+        )
+        assert after == {}, f"the poisoned root stored money anyway: {after}"
+        assert savepoint_envelopes == [], (
+            f"the rolled-back savepoint left its envelope behind: {savepoint_envelopes}"
+        )
+        assert root_envelopes == [], (
+            f"the poisoned root's own envelope became durable: {root_envelopes}"
+        )
+    finally:
+        event.remove(engine.sync_engine, "after_cursor_execute", _watch_the_savepoint_rollback)
+        event.remove(engine.sync_engine, "before_execute", _fail_the_completion_update)
+        await drop_world(serializable_factory, world)
+
+
+_P_BODY_FAILURES = [
+    ("a business rejection", _PBusinessFailure),
+    ("a cancellation", asyncio.CancelledError),
+]
+
+
+@pytest.mark.parametrize(
+    "label,raises", _P_BODY_FAILURES, ids=[row[0] for row in _P_BODY_FAILURES]
+)
+@pytest.mark.asyncio
+async def test_c11_p_a_body_failure_leaves_its_siblings_envelope_and_entries_durable(
+    serializable_factory, label, raises
+):
+    """C11, body half, PostgreSQL. Over-refusal is a defect too, and this is its durable form.
+
+    The staged-payment shape: each payment runs in its own action savepoint on the tick's session. A
+    payment rejected for business reasons, or cancelled, must discard only its own operation - and
+    what "discard" means here is read on the server: a real `ROLLBACK TO SAVEPOINT` ran, the tick
+    committed, and an independent connection finds the sibling's COMPLETED envelope WITH its entry
+    and nothing at all for the rejected identity.
+
+    THE REDNESS CONDITION the design fixed on 2026-09-12 (`design-v2.md:125`) is honoured here the
+    same way as on SQLite: sibling survival alone was already true before the journal existed, so the
+    assertion that makes this evidence is the absent envelope - and the non-vacuity assertion that
+    the sibling's envelope and entry EXIST comes first, so the test cannot pass having measured
+    nothing.
+
+    MUTATION, MEASURED 2026-09-13: poison the root on a body exception rather than marking only that
+    operation POISONED and letting its savepoint discard it. Both cases then go red quoting the
+    refusal the tick's commit got.
+    """
+    api = journal_api()
+    world = await seed_world(serializable_factory, extra_participants=1)
+    kept_identity = _identity("p-sibling-kept")
+    rejected_identity = _identity("p-sibling-rejected")
+    try:
+        body_failure: BaseException | None = None
+        commit_refusal: BaseException | None = None
+
+        async with serializable_factory() as session:
+            async with session.begin_nested():
+                async with await _open(api, session, world, "p-kept", identity=kept_identity):
+                    session.add(world.debt("12.00"))
+                    await session.flush()
+
+            try:
+                async with session.begin_nested():
+                    async with await _open(
+                        api, session, world, "p-rejected", identity=rejected_identity
+                    ):
+                        session.add(
+                            world.debt("28.00", creditor_id=world.extra_participants[0].id)
+                        )
+                        await session.flush()
+                        raise raises("p015-b4-p: this payment ended in the body, not the journal")
+            except raises as exc:  # noqa: B902 - the parametrised body failure is the subject
+                body_failure = exc
+
+            commit_refusal = await refusal_of(api, session.commit())
+
+        after = await stored_debts(serializable_factory, world)
+        kept = await stored_operations(serializable_factory, kept_identity)
+        kept_entries = await stored_entries(serializable_factory, kept_identity)
+        rejected = await stored_operations(serializable_factory, rejected_identity)
+        rejected_entries = await stored_entries(serializable_factory, rejected_identity)
+
+        # NON-VACUITY, FIRST.
+        assert isinstance(body_failure, raises), (
+            f"stand: the {label} never reached the caller: {body_failure!r}"
+        )
+        assert commit_refusal is None, (
+            f"the tick's commit was refused because a SIBLING payment ended with {label}: "
+            f"{commit_refusal!r}. A failure in the caller's block must discard only its own "
+            f"operation."
+        )
+        assert after == {("debtor", "creditor", "eq"): Decimal("12.00000000")}, (
+            f"stand: the surviving sibling's money is not exactly what committed: {after}"
+        )
+        assert kept is not None, missing_journal_tables(kept, OPERATIONS_TABLE)
+        assert [row["state"] for row in kept] == ["COMPLETED"], (
+            f"the sibling that committed has no durable COMPLETED envelope: {kept}"
+        )
+        assert kept_entries and len(kept_entries) == 1, (
+            f"the surviving sibling's entry is not durable: {kept_entries}"
+        )
+
+        # VERDICT.
+        assert rejected == [], (
+            f"the payment that ended with {label} left a durable envelope: {rejected}"
+        )
+        assert rejected_entries == [], (
+            f"the payment that ended with {label} left durable entries: {rejected_entries}"
         )
     finally:
         await drop_world(serializable_factory, world)

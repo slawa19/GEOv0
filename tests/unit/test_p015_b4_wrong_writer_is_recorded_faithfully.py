@@ -315,6 +315,16 @@ def _recorded_payment_flows(
     JSON and carries the dashed canonical form, while the same ids in the journal's own columns are
     32 hex characters on SQLite and native `uuid` on PostgreSQL. A comparison written against either
     spelling directly would match nothing on the other tier.
+
+    WHAT THIS DECODER PROJECTS AWAY, stated because round 3 asked what exactly the replay covers:
+    each flow's `equivalent` and `lock_id`, and the grouping of flows into locks
+    (`app/core/payments/engine.py:1319-1336` writes all four). What comes out is `(from, to, amount)`
+    per flow, summed across locks. Every scenario in this module runs inside ONE equivalent, so
+    dropping it loses nothing HERE - and that is exactly the limit: criterion (b) as this module
+    checks it is evidence about single-equivalent routing, not about the whole intent. A payment that
+    moved the right amounts between the right parties in the WRONG equivalent would pass this check.
+    Multi-equivalent intent is not in `C6`'s scope (design v2 §9) and no test in this module claims
+    it; a counterexample for it would have to be written, not inherited from this one.
     """
 
     found: list[tuple[str, str, Decimal]] = []
@@ -343,7 +353,15 @@ def _recorded_payment_flows(
 def _recorded_clearing_pre_amounts(
     triangle: _Triangle, intent
 ) -> dict[tuple[str, str], Decimal]:
-    """The cycle's PRE-AMOUNTS per named edge, as the stored clearing intent recorded them."""
+    """The cycle's PRE-AMOUNTS per named edge, as the stored clearing intent recorded them.
+
+    PROJECTS AWAY, like its payment counterpart: `debt_id`, `clear_amount` and `equivalent_id`
+    (`app/core/clearing/service.py:2032-2044` writes all of them). `clear_amount` is dropped on
+    purpose - replaying the documented rule rather than the writer's own number is what makes
+    criterion (b) independent - but `equivalent_id` and `debt_id` are dropped only because every
+    cycle here lives in one equivalent and the edge names identify it. So this is evidence about a
+    single-equivalent cycle, not about the whole intent.
+    """
 
     return {
         (
@@ -370,6 +388,27 @@ def _clearing_implied_by_recorded_cycle(
     for edge in state:
         state[edge] -= clear
     return {edge: value * ATOM for edge, value in state.items() if value != 0}
+
+
+async def _clearing_tx_id(factory, triangle: _Triangle) -> str:
+    """The tx id of the one CLEARING transaction this triangle produced.
+
+    Scoped to the triangle's participants for the same reason the counterexample above scopes its
+    own read: the `db_session` fixture truncates every table on SQLite, so an unscoped query works
+    today and would silently start reading someone else's rows the day this module moves.
+    """
+
+    async with factory() as fresh:
+        rows = (
+            await fresh.execute(
+                select(Transaction.tx_id).where(
+                    Transaction.type == "CLEARING",
+                    Transaction.initiator_id.in_([triangle.a.id, triangle.b.id, triangle.c.id]),
+                )
+            )
+        ).scalars().all()
+    assert len(rows) == 1, f"expected exactly one CLEARING transaction for this triangle: {rows}"
+    return str(rows[0])
 
 
 def _observed_change(
@@ -932,6 +971,23 @@ async def test_c6_control_the_same_payment_without_the_wrapper_satisfies_criteri
     criterion (b) could be failing for a reason that has nothing to do with the collapsed route -
     a wrong direction convention in this module's algebra, a missed netting rule - and the
     counterexample above would look conclusive while measuring a bug in its own measuring stick.
+
+    IT NOW RUNS THE MECHANISM IT IS A CONTROL FOR, which round 3 found it did not. Until 2026-09-13
+    this control replayed `_intent_flows` - a read of `PrepareLock.effects` the TEST takes before the
+    commit - while the counterexample above replays `_recorded_payment_flows` over the intent THE
+    ENVELOPE STORED. Those are different paths through different code: a positive control over the
+    snapshot path says nothing about whether the stored-intent path can recognise an honest payment,
+    so "the refutation is not an artefact of the replay" was being claimed from a measurement that
+    never touched the replay. Both paths are now asserted, and the envelope's intent is additionally
+    required to AGREE with the prepare-lock snapshot - which is the statement that ties the two.
+
+    WHAT IT COVERS AND WHAT IT DOES NOT: see `_recorded_payment_flows` - the decoder projects the
+    equivalent and the lock ids away, so this is evidence for a single-equivalent route.
+
+    MUTATION, MEASURED 2026-09-13: store the payment intent with `"flows": []`
+    (`app/core/payments/engine.py:1322`). The stored-intent half below goes red - the replay then
+    implies the pre-state instead of the committed one - while the `_intent_flows` half stays green,
+    which is precisely the gap that existed before this was added.
     """
     from tests.conftest import TestingSessionLocal as factory
 
@@ -948,15 +1004,52 @@ async def test_c6_control_the_same_payment_without_the_wrapper_satisfies_criteri
 
         after = await _edges(factory, triangle)
         assert await _tx_state(factory, tx_id) == "COMMITTED"
+
+        # NON-VACUITY, FIRST: the payment really committed the two-hop state, so a criterion that
+        # comes out satisfied below was compared against something.
+        assert after == {
+            ("a", "b"): Decimal("5.00000000"),
+            ("b", "c"): Decimal("5.00000000"),
+        }, after
+
+        # HALF ONE, the snapshot path: this module's algebra is the rule the engine implements.
         assert _payment_implied_by_intent(before, flows) == after, (
             f"criterion (b) fails on an honest A -> B -> C payment: intent implies "
             f"{_payment_implied_by_intent(before, flows)}, database holds {after}. The algebra in "
             f"this module is not the rule the engine implements, and C6's refutation is worthless."
         )
-        assert after == {
-            ("a", "b"): Decimal("5.00000000"),
-            ("b", "c"): Decimal("5.00000000"),
-        }, after
+
+        # HALF TWO, THE PATH C6 ACTUALLY REFUTES WITH: the envelope's own stored intent, decoded and
+        # replayed by the same two functions the counterexample uses.
+        envelopes = await _envelope_intents_for_tx(factory, tx_id)
+        assert envelopes is not None, (
+            "an honest A -> B -> C payment committed and left no envelope to read its intent out "
+            "of, so C6's refutation cannot be shown to work on an honest payment. "
+            + missing_journal_tables(envelopes, OPERATIONS_TABLE)
+        )
+        assert len(envelopes) == 1 and envelopes[0]["kind"] == "PAYMENT", (
+            f"the honest payment left {envelopes} instead of exactly one PAYMENT envelope"
+        )
+        assert envelopes[0]["state"] == "COMPLETED", (
+            f"the honest payment committed with its envelope {envelopes[0]['state']}: {envelopes}"
+        )
+        recorded = _recorded_payment_flows(triangle, envelopes[0]["intent"])
+        assert recorded, (
+            f"stand: the envelope's intent decoded to no flows at all, so the replay below would "
+            f"trivially return the pre-state: {envelopes[0]['intent']}"
+        )
+        assert recorded == sorted(flows), (
+            f"the envelope's stored intent {recorded} is not what the prepare locks authorised "
+            f"{sorted(flows)} on an HONEST payment. Then the two criteria are measured against two "
+            f"different declarations and C6's gap between them cannot be attributed to the writer."
+        )
+        assert _payment_implied_by_intent(before, recorded) == after, (
+            f"criterion (b) fails on an honest payment when it is replayed from the intent the "
+            f"ENVELOPE stored: implied {_payment_implied_by_intent(before, recorded)}, database "
+            f"holds {after}. C6's refutation of the collapsed route runs through exactly this path, "
+            f"so a failure here makes that refutation an artefact of the path rather than a finding "
+            f"about the writer."
+        )
     finally:
         await _drop_triangle(factory, triangle)
 
@@ -1186,6 +1279,23 @@ async def test_c6_control_the_same_cycle_without_the_listener_satisfies_criterio
 
     Without it, criterion (b) failing above could mean the clearing rule in this module's algebra is
     simply wrong - and the counterexample would be measuring its own arithmetic.
+
+    IT NOW RUNS THE MECHANISM IT IS A CONTROL FOR, which round 3 found it did not - the same defect
+    as in the payment control. It replayed `_clearing_implied_by_intent`, which takes the pre-state
+    from the TEST's own read of `debts`, while the counterexample replays
+    `_clearing_implied_by_recorded_cycle` over the pre-amounts THE ENVELOPE STORED. Both are now
+    asserted, and the stored pre-amounts are additionally required to equal the independently
+    measured pre-state - which is the assertion that makes the envelope's intent a declaration
+    rather than a copy of the outcome (design v2 §7, `C14`).
+
+    WHAT IT COVERS AND WHAT IT DOES NOT: see `_recorded_clearing_pre_amounts` - `debt_id`,
+    `clear_amount` and `equivalent_id` are projected away, so this is evidence for a
+    single-equivalent cycle.
+
+    MUTATION, MEASURED 2026-09-13: build the clearing intent's `cycle` amounts from the POST-state
+    (`app/core/clearing/service.py:2037`, `debt.amount` -> `debt.amount - clear_amount`). The
+    stored-intent half below goes red on the pre-amount comparison while the
+    `_clearing_implied_by_intent` half stays green.
     """
     from tests.conftest import TestingSessionLocal as factory
 
@@ -1221,10 +1331,45 @@ async def test_c6_control_the_same_cycle_without_the_listener_satisfies_criterio
             )
 
         after = await _edges(factory, triangle)
+
+        # NON-VACUITY, FIRST: there really was a 10/10/10 cycle to close, and it really closed.
         assert cleared == Decimal("10"), cleared
+        assert before == {
+            ("a", "b"): Decimal("10.00000000"),
+            ("b", "c"): Decimal("10.00000000"),
+            ("c", "a"): Decimal("10.00000000"),
+        }, f"stand: the cycle this control clears is not 10/10/10: {before}"
+
+        # HALF ONE, the test's own read of the pre-state.
         assert _clearing_implied_by_intent(before, cycle_edges) == after == {}, (
             f"criterion (b) fails on an honest clearing: implied "
             f"{_clearing_implied_by_intent(before, cycle_edges)}, database {after}"
+        )
+
+        # HALF TWO, THE PATH C6 ACTUALLY REFUTES WITH: the pre-amounts the envelope stored.
+        clearing_tx_id = await _clearing_tx_id(factory, triangle)
+        envelopes = await _envelope_intents_for_tx(factory, clearing_tx_id)
+        assert envelopes is not None, (
+            "an honest 10/10/10 cycle closed and left no envelope to read its pre-amounts out of, "
+            "so C6's refutation cannot be shown to work on an honest clearing. "
+            + missing_journal_tables(envelopes, OPERATIONS_TABLE)
+        )
+        assert len(envelopes) == 1 and envelopes[0]["kind"] == "CLEARING", (
+            f"the honest clearing left {envelopes} instead of exactly one CLEARING envelope"
+        )
+        assert envelopes[0]["state"] == "COMPLETED", (
+            f"the honest clearing committed with its envelope {envelopes[0]['state']}: {envelopes}"
+        )
+        recorded_pre = _recorded_clearing_pre_amounts(triangle, envelopes[0]["intent"])
+        assert recorded_pre == before, (
+            f"the envelope recorded pre-amounts {recorded_pre} while the cycle held {before} on an "
+            f"HONEST clearing. An intent taken from the outcome agrees with the outcome by "
+            f"construction, and C6 (ii) turns on it being able to disagree."
+        )
+        assert _clearing_implied_by_recorded_cycle(recorded_pre) == after == {}, (
+            f"criterion (b) fails on an honest clearing when it is replayed from the pre-amounts "
+            f"the ENVELOPE stored: implied {_clearing_implied_by_recorded_cycle(recorded_pre)}, "
+            f"database {after}. C6 (ii)'s refutation runs through exactly this path."
         )
     finally:
         await _drop_triangle(factory, triangle)

@@ -1216,6 +1216,152 @@ async def test_c11_a_failure_in_the_operations_own_io_poisons_the_root(
         await drop_world(factory, world)
 
 
+@pytest.mark.asyncio
+async def test_c11_the_completion_poison_survives_a_savepoint_rollback_that_removes_the_record(
+    db_session,
+) -> None:
+    """C11, machinery half: THE SCENARIO IN WHICH THE COMPLETION POISON IS THE ONLY THING LEFT.
+
+    WHY THIS EXISTS. The test above says in its own docstring that dropping
+    `_poison(state, "operation completion failed")` reddens nothing, and names the reason: the record
+    is left `POISONED`, `_blocking_problem` refuses the commit under `operation_not_completed`
+    (`app/core/ledger/journal.py:890-894`, at `c17fa26`), and the poison is never consulted. The round-3 reviewer
+    called that what it is - an admitted hole in the evidence - and named the shape that closes it: a
+    completion failure inside a savepoint THAT IS THEN ROLLED BACK SUCCESSFULLY.
+    `_confirm_savepoint_rollback` (`:1038-1043`) removes from `state.ops` every operation whose chain
+    contains that savepoint and KEEPS `state.poison`. After it runs, the half-recorded operation is no
+    longer in the list `_blocking_problem` walks - so the poison, and nothing else, is what stands
+    between the root and a commit.
+
+    THE STAND, and why each part of it is there:
+
+    * the ROOT opens and COMPLETES an operation of its own first, so `_blocking_problem` has no
+      unsettled operation to catch for an unrelated reason, and so the savepoint below is a real
+      savepoint rather than the transaction itself (T1525);
+    * the injection is armed only AFTER that, so it hits the completion `UPDATE` of the
+      savepoint-bound operation and not the root's;
+    * the savepoint rollback must really run as SQL - watched on `after_cursor_execute` - because a
+      rollback that only fired the event leaves `pending_savepoint_rollbacks` set, and THAT would
+      refuse the commit under `unconfirmed_rollback` instead, which is binding condition 1's property
+      and not this one.
+
+    NON-VACUITY, FIRST, IN THREE PARTS, because this test is about WHICH mechanism refuses: the
+    injection fired at the completion UPDATE; the `ROLLBACK TO SAVEPOINT` really executed; and the
+    refusal's reason is `root_poisoned` and NOT `operation_not_completed` or `unconfirmed_rollback`.
+    The third is the decisive one - it is the observable proof that the record `_blocking_problem`
+    would have caught is gone, which is the whole point of the scenario.
+
+    MUTATION, MEASURED 2026-09-13: delete the `_poison(...)` call from `_complete`'s
+    `except BaseException` (keeping the `raise`). The root then COMMITS - both its own debt and
+    nothing of the rolled-back one - and this test goes red on the verdict, while
+    `test_c11_a_failure_in_the_operations_own_io_poisons_the_root` stays green. That is the mutation
+    the module could not previously offer for the poison.
+    """
+    from tests.conftest import TestingSessionLocal as factory, engine
+
+    api = journal_api()
+    world = await seed_world(factory, extra_participants=1)
+    root_identity = _identity("poison-root-op")
+    savepoint_identity = _identity("poison-savepoint-op")
+    armed: list[bool] = []
+    injected: list[str] = []
+    rolled_back_savepoints: list[str] = []
+    message = f"p015-b4: the savepoint operation's completion UPDATE against {OPERATIONS_TABLE} failed"
+
+    def _fail_the_completion_update(_conn, clauseelement, _multiparams, _params, _options) -> None:
+        table = getattr(getattr(clauseelement, "table", None), "name", None)
+        if not armed or table != OPERATIONS_TABLE or not getattr(clauseelement, "is_update", False):
+            return
+        injected.append(f"update {table}")
+        raise RuntimeError(message)
+
+    def _watch_the_savepoint_rollback(
+        _conn, _cursor, statement, _parameters, _context, _executemany
+    ) -> None:
+        if statement.strip().upper().startswith("ROLLBACK TO SAVEPOINT"):
+            rolled_back_savepoints.append(statement.strip())
+
+    event.listen(engine.sync_engine, "before_execute", _fail_the_completion_update)
+    event.listen(engine.sync_engine, "after_cursor_execute", _watch_the_savepoint_rollback)
+    try:
+        machinery_failure: BaseException | None = None
+        commit_refusal: BaseException | None = None
+        async with factory() as session:
+            async with await _open(api, session, world, "poison-root-op", identity=root_identity):
+                session.add(world.debt("10.00"))
+                await session.flush()
+
+            nested = await session.begin_nested()
+            armed.append(True)
+            try:
+                async with await _open(
+                    api, session, world, "poison-savepoint-op", identity=savepoint_identity
+                ):
+                    session.add(
+                        world.debt("50.00", creditor_id=world.extra_participants[0].id)
+                    )
+                    await session.flush()
+            except BaseException as exc:  # noqa: BLE001 - the injected machinery failure
+                machinery_failure = exc
+            armed.clear()
+            await nested.rollback()
+
+            commit_refusal = await refusal_of(api, session.commit())
+
+        after = await stored_debts(factory, world)
+        root_envelopes = await stored_operations(factory, root_identity)
+        savepoint_envelopes = await stored_operations(factory, savepoint_identity)
+
+        # NON-VACUITY, FIRST. (1) The injection fired, exactly once, on the completion UPDATE - so
+        # the envelope INSERT succeeded and this is a completion failure, not a relabelled open one.
+        assert injected == [f"update {OPERATIONS_TABLE}"], (
+            f"the savepoint operation never reached its completion UPDATE against "
+            f"`{OPERATIONS_TABLE}` (fired: {injected}), so no completion failure was injected. "
+            f"{JOURNAL_MODULE} may not exist yet; this is the step-2 red state, not a pass."
+        )
+        assert isinstance(machinery_failure, BaseException) and message in str(machinery_failure), (
+            f"stand: the injected completion failure did not reach the caller: {machinery_failure!r}"
+        )
+
+        # (2) The savepoint rollback really ran as SQL. Without this the refusal below could be
+        # `unconfirmed_rollback` - binding condition 1's property, not the poison's.
+        assert rolled_back_savepoints, (
+            "stand: no `ROLLBACK TO SAVEPOINT` statement was executed, so `state.ops` still holds "
+            "the half-recorded operation and this scenario is not the one it is named after"
+        )
+
+        # VERDICT.
+        assert commit_refusal is not None, (
+            f"the completion UPDATE failed inside a savepoint, that savepoint was rolled back, and "
+            f"the root committed anyway: {after}. After the rollback dropped the operation record, "
+            f"the poison is the only thing that can refuse this commit - and it did not."
+        )
+
+        # (3) THE DECISIVE CONTROL: it is the POISON that refused, not the operation record. If the
+        # record were still in `state.ops` the reason would be `operation_not_completed` and this
+        # test would be a second copy of the one above.
+        assert getattr(commit_refusal, "reason", None) == "root_poisoned", (
+            f"the commit was refused as `{getattr(commit_refusal, 'reason', None)}`, not as "
+            f"`root_poisoned`: {commit_refusal!r}. Then the savepoint rollback did NOT remove the "
+            f"operation record, the poison is still untested, and this scenario has to be rebuilt "
+            f"rather than believed."
+        )
+        assert after == {}, (
+            f"a root poisoned by a completion failure inside a rolled-back savepoint still stored "
+            f"money: {after}"
+        )
+        assert savepoint_envelopes == [], (
+            f"the rolled-back savepoint left its envelope behind: {savepoint_envelopes}"
+        )
+        assert root_envelopes == [], (
+            f"the poisoned root's own envelope became durable: {root_envelopes}"
+        )
+    finally:
+        event.remove(engine.sync_engine, "after_cursor_execute", _watch_the_savepoint_rollback)
+        event.remove(engine.sync_engine, "before_execute", _fail_the_completion_update)
+        await drop_world(factory, world)
+
+
 #: The two ways design v2 §9 `C11` says a caller's BLOCK can end badly: "business exception/
 #: cancellation in body of staged payment inside action savepoint". The cancellation case did not
 #: exist until 2026-09-13, and it is not the same case: `CancelledError` is a `BaseException`, so an
