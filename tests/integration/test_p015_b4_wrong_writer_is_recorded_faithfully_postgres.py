@@ -47,6 +47,7 @@ stays - this tier is about PostgreSQL semantics, not about the journal's absence
 
 from __future__ import annotations
 
+import json
 import uuid
 from decimal import Decimal
 
@@ -331,6 +332,97 @@ def _clearing_implied_by_intent(before: dict, cycle: list[tuple[str, str]]) -> d
     state = dict(before)
     clear = min(state[edge] for edge in cycle)
     for edge in cycle:
+        state[edge] -= clear
+    return {edge: value for edge, value in state.items() if value != 0}
+
+
+# ==============================================================================================
+# The intent AS THE ENVELOPE STORED IT - what criterion (b) is computed from
+# ==============================================================================================
+#
+# SAME CORRECTION AS THE SQLITE SIBLING (external review, 2026-09-13), and it was needed here too.
+# Criterion (b) was computed from `_intent_flows` - this module's own read of `PrepareLock.effects` -
+# and from a literal list of cycle edges. Neither touches `debt_operations.intent`, so a journal that
+# stored the writer's own RESULT as the operation's intent left both halves of `C6-P` green. `C14` on
+# this tier does compare the stored intent against an independent capture, but `C6-P` is the test that
+# CLAIMS to refute a wrong writer from the record, and it has to read the record to do it.
+
+
+def _decoded_json(value):
+    """JSON as Python. Raw `text()` SQL carries no type information, so asyncpg may hand a `json`
+    column back as a string; a counterexample must not depend on which."""
+
+    return json.loads(value) if isinstance(value, (str, bytes)) else value
+
+
+async def _envelope_intents_for_tx(factory, tx_id: str):
+    """The envelopes owning `tx_id`, intent decoded. `None` when `debt_operations` is absent."""
+
+    rows = await stored_rows(
+        factory,
+        f"SELECT kind, identity, state, intent FROM {OPERATIONS_TABLE} "  # noqa: S608
+        f"WHERE tx_id = :tx_id",
+        {"tx_id": tx_id},
+    )
+    if rows is None:
+        return None
+    return [dict(row, intent=_decoded_json(row["intent"])) for row in rows]
+
+
+def _recorded_payment_flows(triangle: _Triangle, intent) -> list[tuple[str, str, int]]:
+    """Every `{from, to, amount}` flow inside a STORED payment intent, named, in atoms, sorted.
+
+    Design v2 §7 fixes the CONTENT and not the nesting, so this walks whatever shape step 4 chose.
+    The ids go through `uuid.UUID`: the intent is JSON and carries the dashed canonical form while
+    the journal's own columns carry a native `uuid` here and 32 hex characters on SQLite, and a
+    comparison written against either spelling directly matches nothing on the other tier.
+    """
+
+    found: list[tuple[str, str, int]] = []
+
+    def _walk(node) -> None:
+        if isinstance(node, dict):
+            if {"from", "to", "amount"} <= set(node):
+                found.append(
+                    (
+                        triangle.name(uuid.UUID(str(node["from"]))),
+                        triangle.name(uuid.UUID(str(node["to"]))),
+                        _atoms(node["amount"]),
+                    )
+                )
+                return
+            for value in node.values():
+                _walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                _walk(value)
+
+    _walk(intent)
+    return sorted(found)
+
+
+def _recorded_clearing_pre_amounts(triangle: _Triangle, intent) -> dict[tuple[str, str], int]:
+    """The cycle's PRE-AMOUNTS per named edge, in atoms, as the stored clearing intent recorded them."""
+
+    return {
+        (
+            triangle.name(uuid.UUID(str(edge["debtor_id"]))),
+            triangle.name(uuid.UUID(str(edge["creditor_id"]))),
+        ): _atoms(edge["amount"])
+        for edge in (intent or {}).get("cycle", [])
+    }
+
+
+def _clearing_implied_by_recorded_cycle(pre_amounts: dict[tuple[str, str], int]) -> dict:
+    """Criterion (b) replayed from the STORED pre-amounts: every edge drops by `min(amounts)`.
+
+    `clear_amount` is also in the intent and is deliberately NOT used - replaying the documented rule
+    rather than trusting the writer's own arithmetic is what makes (b) independent.
+    """
+
+    state = dict(pre_amounts)
+    clear = min(state.values())
+    for edge in state:
         state[edge] -= clear
     return {edge: value for edge, value in state.items() if value != 0}
 
@@ -712,23 +804,52 @@ async def test_c6_p_a_payment_that_writes_the_wrong_edge_passes_every_barrier_to
             f"real improvement, the barrier that caught it must be named and C6 rewritten around it."
         )
 
-        # CRITERION (b), computable today, asserted BEFORE (a) so this test can never pass having
-        # measured neither criterion.
-        implied = _payment_implied_by_intent(before, flows)
+        # THE STAND, and it needs no journal: what the payment DECLARED - captured from the prepare
+        # locks before the commit deleted them - disagrees with what it did. Asserted FIRST so this
+        # test can never pass having measured neither criterion.
+        declared = _payment_implied_by_intent(before, flows)
         assert flows == [
             ("a", "b", _atoms(FULL_SIZE)),
             ("b", "c", _atoms(FULL_SIZE)),
         ], flows
-        assert implied == {
+        assert declared == {
             ("a", "b"): _atoms(FULL_SIZE),
             ("b", "c"): _atoms(FULL_SIZE),
-        }, implied
-        assert implied != after, (
-            "criterion (b) did not refute the collapsed route, so this stand cannot tell a wrong "
+        }, declared
+        assert declared != after, (
+            "the declared route and the committed state agree, so this stand cannot tell a wrong "
             "writer from an honest one and nothing below it means anything"
         )
 
-        # CRITERION (a). RED TODAY, and this is the counterexample.
+        # CRITERION (b), REPLAYED FROM THE INTENT AS THE ENVELOPE STORED IT.
+        envelopes = await _envelope_intents_for_tx(serializable_factory, tx_id)
+        assert envelopes is not None, (
+            "a payment routed A -> B -> C committed a single A -> C obligation and was recorded as "
+            "verified, and there is no envelope to read its declared intent out of. "
+            + missing_journal_tables(envelopes, OPERATIONS_TABLE)
+        )
+        assert len(envelopes) == 1 and envelopes[0]["kind"] == "PAYMENT", (
+            f"the committed payment left {envelopes} instead of exactly one PAYMENT envelope"
+        )
+        assert envelopes[0]["state"] == "COMPLETED", envelopes
+        recorded = _recorded_payment_flows(triangle, envelopes[0]["intent"])
+        assert recorded == flows, (
+            f"the envelope's intent is not what the payment declared. Stored, in atoms: {recorded}. "
+            f"The prepare locks, immediately before the commit deleted them: {flows}. An intent that "
+            f"is the writer's own result cannot disagree with the result, and being able to disagree "
+            f"is the entire reason it is recorded (design v2 §7)."
+        )
+        implied = _payment_implied_by_intent(before, recorded)
+        assert implied == declared, (
+            f"replaying the STORED intent gives {implied} while the prepared flows give {declared}; "
+            f"criterion (b) is then not a check on the envelope at all"
+        )
+        assert implied != after, (
+            "criterion (b) did not refute the collapsed route: the intent the envelope recorded "
+            "implies exactly the state the wrong writer produced"
+        )
+
+        # CRITERION (a). This is the counterexample.
         entries = await _entries_for_tx(serializable_factory, tx_id)
         assert entries is not None, (
             f"on PostgreSQL, with the equivalent owner lock and both segment locks held under "
@@ -903,16 +1024,43 @@ async def test_c6_p_a_clearing_cycle_that_leaves_one_atom_on_every_edge_is_still
             f"writer that passes every barrier"
         )
 
-        # CRITERION (b), computable today: the intent implies an empty equivalent.
-        implied = _clearing_implied_by_intent(before, cycle_edges)
-        assert implied == {}, implied
-        assert implied != after, (
-            "criterion (b) did not refute the under-clearing, so this stand cannot tell a cycle "
-            "that closed from one that did not"
+        # THE STAND, and it needs no journal: the documented rule applied to the independently
+        # measured pre-state implies an empty equivalent, and the database is not empty.
+        assert _clearing_implied_by_intent(before, cycle_edges) == {}, (
+            f"stand: the documented clearing rule does not close this cycle in the module's own "
+            f"algebra: {_clearing_implied_by_intent(before, cycle_edges)}"
         )
 
-        # CRITERION (a). RED TODAY, and this is the counterexample.
         clearing_tx_id = clearing_tx[0].tx_id
+
+        # CRITERION (b), REPLAYED FROM THE INTENT AS THE ENVELOPE STORED IT.
+        envelopes = await _envelope_intents_for_tx(serializable_factory, clearing_tx_id)
+        assert envelopes is not None, (
+            f"a cycle was reported as cleared while leaving {after} behind, and there is no envelope "
+            f"to read the pre-amounts it acted on out of. "
+            + missing_journal_tables(envelopes, OPERATIONS_TABLE)
+        )
+        assert len(envelopes) == 1 and envelopes[0]["kind"] == "CLEARING", (
+            f"the clearing left {envelopes} instead of exactly one CLEARING envelope"
+        )
+        assert envelopes[0]["state"] == "COMPLETED", envelopes
+        recorded_pre = _recorded_clearing_pre_amounts(triangle, envelopes[0]["intent"])
+        assert recorded_pre == before, (
+            f"the envelope recorded pre-amounts {recorded_pre} (atoms), and the cycle this clearing "
+            f"acted on held {before}. The intent must be the state read under FOR UPDATE, not the "
+            f"state the writer left behind - an intent taken from the outcome can only ever agree "
+            f"with the outcome (design v2 §7, `C14`)."
+        )
+        implied = _clearing_implied_by_recorded_cycle(recorded_pre)
+        assert implied == {}, (
+            f"replaying the stored intent does not close the cycle: {implied}"
+        )
+        assert implied != after, (
+            "criterion (b) did not refute the under-clearing: the intent the envelope recorded "
+            "implies exactly the state the wrong writer left"
+        )
+
+        # CRITERION (a). This is the counterexample.
         entries = await _entries_for_tx(serializable_factory, clearing_tx_id)
         assert entries is not None, (
             f"on PostgreSQL, through the clearing interlock and with the cycle's debts held "
