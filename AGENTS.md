@@ -203,11 +203,13 @@ SQLite не доказывает advisory locks, concurrent writers, FK/isolatio
 
 ```powershell
 $taskSlug = "agent_payments_review"
-$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_$taskSlug"
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_$taskSlug"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
 .\scripts\verify_local.ps1 -TaskSlug $taskSlug -BackendOnly -BackendMarker postgres `
   -BackendSelector tests/integration/test_payment_engine_uow_retry_postgres.py
 ```
+
+**Хост — `127.0.0.1`, а не `localhost`** (исправлено 2026-09-13, `T1550`). Локальный PostgreSQL слушает только IPv4, а `localhost` сначала пробует `::1` и получает отказ примерно через 2 s — на **каждое** соединение: замерено 0.13–0.14 s против 2.16–2.19 s. Тесты открывают новое соединение на каждую сессию, поэтому гейт через `localhost` шёл около 30 минут вместо 3. Страж URL хост не проверяет, так что оба адреса ему равны; разница только во времени.
 
 Без `-BackendMarker postgres` тесты будут отсеяны маркером, а guard URL не потребует Postgres. Никогда не выставляйте `GEO_TEST_ALLOW_DB_RESET=1`, пока фактически не проверили, что URL указывает на отдельную тестовую DB. Не используйте developer/prod DB.
 

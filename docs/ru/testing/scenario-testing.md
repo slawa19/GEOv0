@@ -25,7 +25,7 @@
 ### 4) Запуск через CLI (полезно для полного traceback)
 
 ```powershell
-$env:TEST_DATABASE_URL='postgresql+asyncpg://geo:geo@localhost:5432/geov0_test'
+$env:TEST_DATABASE_URL='postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test'
 $env:GEO_TEST_ALLOW_DB_RESET='1'
 D:/www/Projects/2025/GEOv0-PROJECT/.venv/Scripts/python.exe -m pytest -q tests/integration/test_scenarios.py -vv
 ```

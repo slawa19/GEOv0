@@ -41,7 +41,7 @@ same query with ``ORDER BY``/``LIMIT`` stripped, where the two variants genuinel
 RUNNING IT (PowerShell, and read ``AGENTS.md`` "Postgres gate" first)::
 
     $slug = "planmeasure"
-    $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_$slug"
+    $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_$slug"
     $env:GEO_TEST_ALLOW_DB_RESET = "1"
     python scripts/measure_clearing_min_amount_plan.py > .local-run/plan.txt
 

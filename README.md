@@ -386,7 +386,7 @@ PostgreSQL database and verify its name before enabling schema reset:
 $taskSlug = "agent_contract_review"
 docker compose up -d db
 docker exec geov0-db createdb -U geo "geov0_test_$taskSlug" 2>$null
-$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_$taskSlug"
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_$taskSlug"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
 .\scripts\verify_local.ps1 -TaskSlug $taskSlug -BackendOnly -BackendMarker postgres -BackendSelector tests/integration/test_concurrent_prepare_routes_bottleneck_postgres.py
 ```

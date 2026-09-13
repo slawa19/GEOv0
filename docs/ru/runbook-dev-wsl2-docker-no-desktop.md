@@ -246,7 +246,7 @@ py -m venv .venv
 3) Указать переменные окружения тестов:
 
 ```powershell
-$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_runbook"
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_runbook"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
 ```
 
