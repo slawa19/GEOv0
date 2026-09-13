@@ -40,6 +40,16 @@ logger = logging.getLogger(__name__)
 #: Scale 8, the scale every money column in this repository carries.
 _MONEY_QUANTUM = Decimal("1E-8")
 
+#: The unique constraints that spell an operation envelope's IDENTITY - the declaration "this
+#: operation has already been opened", and nothing else about it (T1529). Written out rather than
+#: read off `debt_operations.constraints`, because a retry predicate that widens itself whenever
+#: somebody adds a unique constraint to that table is a policy change nobody decided;
+#: `tests/unit/test_p015_t1529_the_envelope_identity_is_a_retryable_race.py` reddens if the set and
+#: the schema ever disagree.
+_DEBT_OPERATION_IDENTITY_CONSTRAINTS = frozenset(
+    {"uq_debt_operations_kind_identity", "uq_debt_operations_tx_id"}
+)
+
 
 def _scale8_money(amount: Decimal) -> str:
     """A payment flow amount as the exact scale-8 string the operation intent records.
@@ -466,20 +476,66 @@ class PaymentEngine:
             or getattr(orig, "code", None)
         )
         # 40P01: deadlock_detected, 40001: serialization_failure. PostgreSQL may
-        # alternatively surface the known invisible concurrent Debt insert as
-        # 23505. Retry only that exact business-key constraint; every other
-        # unique violation must fail closed.
+        # alternatively surface an invisible concurrent insert as 23505. Retry only the two exact
+        # identity constraints below; every other unique violation must fail closed.
         statement = str(getattr(exc, "statement", None) or "").lstrip().upper()
-        is_debt_insert = statement == "INSERT INTO DEBTS" or statement.startswith(
-            ("INSERT INTO DEBTS ", "INSERT INTO DEBTS(")
-        )
+        is_debt_insert = self._statement_inserts_into(statement, "debts")
+        # T1529, measured 2026-09-13. THE SAME RACE ONE TABLE UP. `debt_operation` INSERTs and
+        # flushes the operation envelope as the unit of work's FIRST write (programme 015, phase B
+        # step 4 slice C), and `_uow`'s idempotency check above it reads `transactions` from the
+        # unit of work's own snapshot. The application runs PostgreSQL at SERIALIZABLE
+        # (`DB_POSTGRES_ISOLATION_LEVEL`, `app/db/session.py`), so a second commit of the same
+        # tx_id that was parked on the segment advisory lock resumes on the snapshot it took
+        # BEFORE the holder committed: it still sees `PREPARED`, walks past the `COMMITTED`
+        # short-circuit and meets the holder's committed envelope row on the envelope's identity.
+        #
+        # WHY THE RETRY IS SAFE HERE, and it is the same reason as for the Debt business key above
+        # rather than a new one: `_run_uow_with_retry` rolls back first, refuses to retry at all if
+        # that rollback fails, and the next attempt therefore takes a FRESH snapshot and re-reads
+        # the transaction. It does not assume the outcome - it measures it: `COMMITTED` returns
+        # idempotently, `ABORTED`/`REJECTED` raises `ConflictException`, and a `PREPARED` row whose
+        # envelope somehow exists cannot loop, because the attempt budget is bounded and the
+        # original 23505 is then re-raised. An envelope row only becomes visible in the same
+        # database transaction that sets `transactions.state = 'COMMITTED'`, so that last case is
+        # not reachable THROUGH THE CODE PATHS THAT EXIST TODAY - and that is a statement about
+        # `_uow`, not about the schema, which does not couple the two at all (corrected 2026-09-13
+        # after external review; the first wording here said "by construction", which claimed the
+        # schema's guarantee for a property only this function's callers provide). A completed
+        # envelope over a still-`PREPARED` transaction is mechanically possible, so it must fail
+        # closed rather than be asserted away here - and the bounded budget is what delivers that.
+        #
+        # BOTH identity constraints, not only the one the failing gate happened to report: a
+        # PAYMENT envelope's `identity` IS its `tx_id`, so a duplicate row violates
+        # `uq_debt_operations_kind_identity` and `uq_debt_operations_tx_id` at the same time and
+        # PostgreSQL reports whichever index it checked first. Keying on one of them would make
+        # this predicate depend on index creation order.
+        is_envelope_insert = self._statement_inserts_into(statement, "debt_operations")
         constraint_name = self._get_db_constraint_name(exc)
         return sqlstate in {"40P01", "40001"} or (
             sqlstate == "23505"
             and op == "commit"
-            and is_debt_insert
-            and constraint_name == "uq_debts_debtor_creditor_equivalent"
+            and (
+                (is_debt_insert and constraint_name == "uq_debts_debtor_creditor_equivalent")
+                or (
+                    is_envelope_insert
+                    and constraint_name in _DEBT_OPERATION_IDENTITY_CONSTRAINTS
+                )
+            )
         )
+
+    @staticmethod
+    def _statement_inserts_into(upper_statement: str, table: str) -> bool:
+        """Does this already-upper-cased statement insert into exactly `table`?
+
+        The table name must be followed by a space or `(` and nothing else, so a table named by
+        EXTENDING one of these - `debt_operations_archive`, say - cannot join a retry predicate by
+        being named well. No such neighbour exists today (`debt_operation_equivalents` is not a
+        prefix match: it is `operation_`, singular), which is why the boundary is in the rule and
+        the case is in the test rather than in the corpus.
+        """
+
+        head = f"INSERT INTO {table.upper()}"
+        return upper_statement == head or upper_statement.startswith((head + " ", head + "("))
 
     @staticmethod
     def _get_db_constraint_name(exc: BaseException) -> str | None:
@@ -520,8 +576,8 @@ class PaymentEngine:
         """Retry wrapper for SERIALIZABLE/deadlock errors.
 
         Policy:
-        - Catch Postgres 40001/40P01 and the exact known Debt business-key
-          23505 race after an invisible concurrent insert.
+        - Catch Postgres 40001/40P01 and the two exact 23505 races after an invisible concurrent
+          insert: the Debt business key, and the operation envelope's identity (T1529).
         - Rollback.
         - Exponential backoff with jitter, bounded.
         - Re-run the whole unit-of-work `fn()`.

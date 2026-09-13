@@ -71,10 +71,28 @@ THE GRANT NAMES WRITES, NOT A WINDOW (binding acceptance condition 3). A grant v
 session is flushing" is a window, and the reviewer walked through it twice: DML issued from another
 listener's `after_flush` passed it, and a `before_flush` listener registered after this one changed
 a debt after its effects had been read. The grant here is a MULTISET OF VERIFIED WRITES - for each
-effect, the primary key and the exact amount the hook recorded - and each statement's rows are
-matched against it and consumed. A row the hook never verified matches nothing; a row whose amount
-was changed after the hook read it matches nothing either. Batching is untouched, because matching
-is per row and not per statement.
+effect, the primary key, the directed edge and the exact amount the hook recorded - and each
+statement's rows are matched against it and consumed. A row the hook never verified matches nothing;
+a row whose amount was changed after the hook read it matches nothing either. Batching is untouched,
+because matching is per row and not per statement.
+
+AND A GRANT IS CHECKED BEFORE EXECUTION, SO IT CANNOT BE THE LAST WORD (T1528, 2026-09-13). Three
+holes were measured in the grant, and all three came from one decision: the guard read a statement's
+PARAMETER DICT and inferred meaning from the types in it and from the keys missing from it. A column
+written with a SQL expression is in neither - `debt.amount = Debt.amount + 1` compiles
+`SET amount=(debts.amount + :amount_1)` and carries no `amount` parameter at all - so the absence
+that means "this UPDATE does not touch the money" was produced by an UPDATE that moved it, and a
+debt went from 10 to 11 with an empty entry list. The same absence moved an edge; and "the amount" as
+"some Decimal in the row" let a row writing 12 consume a grant for 11.
+
+The parameter reading is FIXED (`_statement_values`, `_written`, and the amount by its own name), but
+the grant is no longer where this rests. After the flush's SQL has run, `_reconcile` reads every row
+the journal claims BACK OUT OF THE DATABASE and requires it to be what the entries say: present or
+gone, on the recorded edge, holding the recorded amount. That is a check on what was executed rather
+than on what a statement appeared to say, and it holds whatever the parameters looked like, whoever
+changed them, and in whatever listener order - including a `before_execute` neighbour registered
+after this module's, which changed an INSERT from 11 to 12 after verification and was measured
+durable before this existed. One extra SELECT per flush that moves money is what it costs.
 """
 
 from __future__ import annotations
@@ -92,9 +110,11 @@ from typing import Any, AsyncIterator, Iterable, Iterator
 from sqlalchemy import event, insert, select, update
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.engine.base import RootTransaction, TwoPhaseTransaction
+from sqlalchemy.exc import InvalidRequestError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import get_history
 from sqlalchemy.sql import visitors
+from sqlalchemy.sql.elements import BindParameter
 from sqlalchemy.sql.expression import UpdateBase
 from sqlalchemy.types import Numeric
 
@@ -113,6 +133,7 @@ from app.db.sqlite_transaction_control import sqlite_transaction_control_is_inst
 
 __all__ = [
     "DEBT_TABLE_NAME",
+    "JOURNAL_STATEMENT_OPTION",
     "DebtJournalError",
     "DebtOperationIncomplete",
     "Reason",
@@ -128,6 +149,13 @@ __all__ = [
 ]
 
 DEBT_TABLE_NAME = Debt.__tablename__
+
+#: Execution option marking a statement as the JOURNAL'S OWN rather than a writer's. Only the
+#: verification read needs it: every other statement this module issues names a journal table and is
+#: recognisable by that. A test that compares the SQL of an armed run against a stood-down one has to
+#: be able to tell the mechanism's statements from the work's, and the statement's table name cannot
+#: do it for a read of `debts` (T1528).
+JOURNAL_STATEMENT_OPTION = "geo_journal_statement"
 
 #: Exactly the scale every money column in this repository carries.
 _MONEY_QUANTUM = Decimal("1E-8")
@@ -165,6 +193,7 @@ class Reason:
     MONEY_ROUND_TRIP = "money_round_trip"
     UNVERIFIED_DEBT_WRITE = "unverified_debt_write"
     VERIFIED_WRITE_MISSING = "verified_write_missing"
+    UNRECONCILED_DEBT_ROW = "unreconciled_debt_row"
     JOURNAL_TABLE_WRITE = "journal_table_write"
     AUTOCOMMIT_ROOT = "autocommit_root"
     TWO_PHASE_ROOT = "two_phase_root"
@@ -173,6 +202,7 @@ class Reason:
     BAD_ARGUMENT = "bad_argument"
     ENVELOPE_LOST = "envelope_lost"
     STALE_DB_TRANSACTION = "stale_db_transaction"
+    UNMEASURED_DB_TRANSACTION = "unmeasured_db_transaction"
 
 
 class DebtJournalError(RuntimeError):
@@ -212,6 +242,25 @@ class _Effect:
     amount_before: Decimal | None
     amount_after: Decimal | None
     delta: Decimal
+
+
+@dataclass(frozen=True)
+class _RowState:
+    """What the DATABASE must hold for one row once this flush's SQL has run.
+
+    This is the journal's claim about a row, restated as something that can be LOOKED UP rather than
+    inferred: the edge the entry names, the amount the entry ends on, and whether the row is there at
+    all. `_reconcile` reads the row back and compares. See its docstring for why the comparison is
+    the boundary this mechanism needs and the parameter-level grant is not.
+    """
+
+    debt_id: uuid.UUID
+    equivalent_id: uuid.UUID
+    debtor_id: uuid.UUID
+    creditor_id: uuid.UUID
+    #: The amount the row must hold, or None when the row must be GONE.
+    amount: Decimal | None
+    present: bool
 
 
 class _OpRecord:
@@ -532,11 +581,21 @@ _NO_MONEY_MOVED = "-"
 #: every UUID in the row as the primary key, so the identity it matched on could itself diverge from
 #: the row's: a late substitution of `Debt.id` that left the old id behind in another UUID column
 #: still found its expectation. Asking the row which parameter IS the primary key removes the guess.
-_PK_PARAM_NAMES = tuple(
-    name
-    for column in (tuple(Debt.__table__.primary_key.columns)[0],)
-    for name in (column.key, f"{DEBT_TABLE_NAME}_{column.key}")
-)
+_PK_COLUMN = tuple(Debt.__table__.primary_key.columns)[0].key
+_PK_PARAM_NAMES = (_PK_COLUMN, f"{DEBT_TABLE_NAME}_{_PK_COLUMN}")
+
+#: The three columns that make an edge a directed edge. Defined here rather than with the flush hook
+#: because the write guard reads them out of a statement before the hook's half is reached.
+_KEY_COLUMNS = ("debtor_id", "creditor_id", "equivalent_id")
+
+#: Exactly the columns a grant speaks about: which row, which edge, how much.
+#:
+#: IT NARROWS WHAT IS READ AND NOTHING DEPENDS ON IT, which is stated because the opposite would be
+#: easy to assume: `_statement_values` is only ever consulted through `_written` for these same
+#: columns, so including `version` or `updated_at` would change no decision. It is here so that the
+#: set of columns the guard reasons about is written down in one place, and so that a declared value
+#: for a column nobody checks is not carried around.
+_GRANTED_COLUMNS = frozenset({_PK_COLUMN, "amount", *_KEY_COLUMNS})
 
 
 def _key_text(value: Any) -> str | None:
@@ -587,15 +646,22 @@ class _Grant:
     def take_row(
         self,
         effect: str,
-        identifiers: set[str],
-        amounts: set[str],
+        identity: str,
+        amount: str,
         edge: dict[str, str | None],
     ) -> bool:
-        """Consume one expectation this row could be, edge included.
+        """Consume the one expectation this row IS, edge included.
 
-        A scan rather than a dict lookup, because an UPDATE or a DELETE does not necessarily name
-        its edge at all, and an amount can arrive as more than one spelling of the same number. The
-        candidates are therefore offered to the grant and the grant decides.
+        ONE IDENTITY AND ONE AMOUNT, not a set of candidates (T1528, review item 3). This used to
+        take every value the row might have meant - every `Decimal` in the parameter dict as a
+        possible amount - and offered them all to the grant, so a row that wrote 12 matched a grant
+        for 11 because some other parameter carried an 11. What a statement writes is not a guess
+        about its values, so the caller now reads the amount from the `amount` bind BY NAME and
+        hands over exactly one.
+
+        Still a scan over the expectations rather than a dict lookup, and for one reason only: an
+        UPDATE or a DELETE need not name its edge at all, so the signature cannot be reconstructed
+        from the row to be looked up.
 
         `edge[column] is None` means THIS STATEMENT DOES NOT WRITE THAT COLUMN, so the database
         keeps whatever it already held for the row and the hook read its value from that same
@@ -606,8 +672,8 @@ class _Grant:
         """
 
         for signature in list(self.expected):
-            kind, debt_id, equivalent_id, debtor_id, creditor_id, amount = signature
-            if kind != effect or debt_id not in identifiers or amount not in amounts:
+            kind, debt_id, equivalent_id, debtor_id, creditor_id, expected_amount = signature
+            if kind != effect or debt_id != identity or expected_amount != amount:
                 continue
             recorded = {
                 "equivalent_id": equivalent_id,
@@ -700,8 +766,109 @@ def _rows_of(multiparams: Any, params: Any) -> list[dict]:
     return rows
 
 
-def _row_edge(row: dict) -> dict[str, str | None]:
-    """The directed edge this statement writes, as far as its own parameters name it.
+#: A value the statement writes that this module cannot read: a SQL expression, evaluated by the
+#: database and not by anything here. It is its OWN state, and the whole of T1528 review items 1 and
+#: 2 is that it used to be indistinguishable from a column the statement does not write at all.
+_OPAQUE = object()
+
+
+def _statement_values(clause: Any) -> dict[str, Any]:
+    """Columns this statement writes with a value of its OWN rather than from the caller's params.
+
+    WHY THIS EXISTS AT ALL (measured 2026-09-13, T1528 review items 1 and 2). An ORM flush does not
+    always put a column's new value in the parameter dict. `_collect_update_commands` separates
+    values that are SQL EXPRESSIONS into `value_params`, and `_emit_update_statements` then executes
+    `statement.values(value_params)` (`sqlalchemy/orm/persistence.py`), so the column is named by the
+    STATEMENT and never appears among the parameters. Measured on this tree:
+    `debt.amount = Debt.amount + 1` compiles `SET amount=(debts.amount + :amount_1)` with parameters
+    `{version, debts_version, debts_id}` - no `amount` key anywhere.
+
+    The guard read that absence as "this statement does not write the amount", which is the
+    metadata-only signature, and the grant for a write that moves no money was consumed by a write
+    that moved 1. The same absence let `debt.creditor_id = literal(other.id)` move the obligation to
+    another participant with the full-key check of T1527 comparing nothing.
+
+    WHAT IS READABLE HERE, and the rest is `_OPAQUE`. A `BindParameter` carrying a literal value -
+    what `literal(x)` and `.values(col=x)` produce - IS the value, and reading it lets the edge be
+    compared honestly instead of refused blindly. Anything else is a SQL expression whose result
+    only the database knows, so it is unreadable, and unreadable matches no verified write.
+
+    Only the columns the grant speaks about are returned - the primary key, the three key columns and
+    the amount. That is a narrowing of what is carried and not a rule: nothing consults a column
+    outside that set, so see `_GRANTED_COLUMNS` before reading it as a guard. (The `updated_at=now()`
+    of every ORM UPDATE of this table does not arrive here at all - the compiler applies an `onupdate`
+    itself, measured on this tree.)
+    """
+
+    declared: dict[str, Any] = {}
+    values = getattr(clause, "_values", None)
+    if not values:
+        return declared
+    for column, value in values.items():
+        name = getattr(column, "key", None)
+        if name not in _GRANTED_COLUMNS:
+            continue
+        if (
+            isinstance(value, BindParameter)
+            and not value.required
+            and getattr(value, "callable_", None) is None
+        ):
+            declared[name] = value.value
+        else:
+            declared[name] = _OPAQUE
+    return declared
+
+
+#: A column this statement does not write at all. The database keeps what it already held, and the
+#: hook read its value from that same stored row - which is a different fact from `_OPAQUE`.
+_ABSENT = object()
+
+
+def _written(row: dict, declared: dict[str, Any], column: str) -> Any:
+    """What this statement writes into `column`: a value, `_OPAQUE`, or `_ABSENT`.
+
+    The statement's own values win over the parameter dict, because that is the order the compiler
+    applies them in; a column named by both with different values is unreadable rather than guessed.
+    """
+
+    if column in declared:
+        value = declared[column]
+        if column in row and value is not _OPAQUE and row[column] != value:
+            return _OPAQUE
+        return value
+    if column in row:
+        return row[column]
+    return _ABSENT
+
+
+def _key_written(value: Any) -> str:
+    """One key column's written value as a canonical UUID string, or `_UNREADABLE_KEY`."""
+
+    if value is _OPAQUE:
+        return _UNREADABLE_KEY
+    text = _key_text(value)
+    return text if text is not None else _UNREADABLE_KEY
+
+
+def _amount_text_or_none(value: Any) -> str | None:
+    """A written amount as its exact scale-8 string, or None when it is not a storable number.
+
+    `_money_text` quantizes, which RAISES on a NaN or on a value too wide for scale 8. A row
+    carrying one of those is not a verified write, so it answers None and matches nothing - rather
+    than taking the whole `before_execute` listener down with an `InvalidOperation`.
+    """
+
+    amount = _as_decimal(value)
+    if amount is None or not amount.is_finite():
+        return None
+    try:
+        return _money_text(amount)
+    except InvalidOperation:
+        return None
+
+
+def _row_edge(row: dict, declared: dict[str, Any]) -> dict[str, str | None]:
+    """The directed edge this statement writes, as far as the statement and its parameters name it.
 
     READ BY COLUMN NAME, and here that is sound where it was not sound for the primary key: a key
     column appears in the parameters under its own name (`debtor_id`) whether the statement is an
@@ -717,33 +884,38 @@ def _row_edge(row: dict) -> dict[str, str | None]:
     other participants, which is exactly what `C3` forbids and what `C3`'s own column-history check
     cannot see, because at `before_flush` the column has no history yet.
 
+    AND THE STATEMENT'S OWN VALUES ARE READ TOO (T1528, review item 2). `debt.creditor_id =
+    literal(other.id)` names the column in the STATEMENT rather than in the parameters, so reading
+    the parameters alone answered "this statement does not write the creditor" about a statement
+    whose whole purpose was to write it. `_written` answers from both, statement first.
+
     A column this statement does not write is `None`: the database keeps what it already held, and
-    the hook read its value from that same stored row. A column present but not a readable UUID is
-    `_UNREADABLE_KEY`, which matches nothing.
+    the hook read its value from that same stored row. A column written with something this module
+    cannot read - a SQL expression, or a value that is not a UUID at all - is `_UNREADABLE_KEY`,
+    which matches nothing.
     """
 
     edge: dict[str, str | None] = {}
     for column in _KEY_COLUMNS:
-        if column not in row:
-            edge[column] = None
-            continue
-        text = _key_text(row[column])
-        edge[column] = text if text is not None else _UNREADABLE_KEY
+        value = _written(row, declared, column)
+        edge[column] = None if value is _ABSENT else _key_written(value)
     return edge
 
 
-def _row_identity(row: dict) -> str | None:
+def _row_identity(row: dict, declared: dict[str, Any]) -> str | None:
     """WHICH ROW this statement is about, read from the parameter that says so.
 
-    `None` when no parameter names the primary key, and `_UNREADABLE_KEY` when two of them name it
-    and disagree - an UPDATE that puts a NEW `id` in its SET clause while the WHERE clause still
-    finds the old one. Both are refusals rather than a guess: see `_PK_PARAM_NAMES`.
+    `None` when nothing names the primary key, and `_UNREADABLE_KEY` when two names disagree - an
+    UPDATE that puts a NEW `id` in its SET clause while the WHERE clause still finds the old one.
+    Both are refusals rather than a guess: see `_PK_PARAM_NAMES`. The SET clause's `id` is read from
+    the statement's own values as well, so substituting it with a SQL expression is unreadable
+    rather than invisible (T1528).
     """
 
     found = {
-        text if (text := _key_text(row[name])) is not None else _UNREADABLE_KEY
+        _key_written(value)
         for name in _PK_PARAM_NAMES
-        if name in row
+        if (value := _written(row, declared, name)) is not _ABSENT
     }
     if not found:
         return None
@@ -752,31 +924,26 @@ def _row_identity(row: dict) -> str | None:
     return found.pop()
 
 
-def _matches_any(effect: str, row: dict, grant: _Grant) -> bool:
-    """Consume one expectation for this row: its identity, its edge and its amount, all by name.
+def _matches_any(effect: str, row: dict, declared: dict[str, Any], grant: _Grant) -> bool:
+    """Consume the one expectation this row is: its identity, its edge and its amount, all by name.
 
-    NOTHING HERE IS INFERRED FROM A VALUE'S TYPE any more. An INSERT row carries four UUIDs and a
-    Decimal, and reading "the primary key" as "some UUID" and "the amount" as "some Decimal" was
-    what let a tampered row find an expectation that was not about it (T1527, review item 2). The
-    primary key comes from `_row_identity`, the edge from `_row_edge`, and both are refusals when
-    the row does not say.
+    NOTHING HERE IS INFERRED FROM A VALUE'S TYPE OR FROM A MISSING KEY any more, and those were two
+    separate defects in the same decision.
+
+    * BY TYPE (T1527 review item 2, and T1528 review item 3 for the amount). An INSERT row carries
+      four UUIDs and a Decimal. Reading "the primary key" as "some UUID" let a tampered row find an
+      expectation that was not about it; reading "the amount" as "some Decimal" let a row that wrote
+      12 consume a grant for 11 because an unused parameter happened to carry 11. Identity comes
+      from `_row_identity`, the amount from the `amount` bind alone.
+    * BY ABSENCE (T1528 review items 1 and 2). A column written with a SQL expression is not in the
+      parameter dict at all, and "not in the dict" used to mean "not written". It now means what the
+      statement says it means - see `_statement_values`.
+
+    Three states, not two, for every column: written and readable, written and UNREADABLE, not
+    written. Only the last one may be read as "the database keeps what it already held".
     """
 
-    amounts = [value for value in row.values() if isinstance(value, Decimal)]
-    # AND THE VALUE UNDER THE LITERAL `amount` KEY, WHATEVER TYPE IT ARRIVED AS. Measured
-    # 2026-09-12, arming the journal: a caller that writes `Debt(amount=5)` - an int, which the ORM
-    # is perfectly happy to accept and the column converts on the way out - produces a parameter
-    # dict whose amount is an `int`, so the `Decimal` scan above found NOTHING and the guard refused
-    # a write it had just verified itself. The hook's expectation is built from the attribute
-    # through `_as_decimal`, so `5` and `Decimal("5")` are the same expectation; this makes the row
-    # side agree. One extra candidate and only one: taking every numeric value in the row would
-    # make `version` an amount candidate, and a row whose amount was tampered to match some other
-    # column's number would then pass.
-    named = _as_decimal(row["amount"]) if isinstance(row.get("amount"), (int, float, str)) else None
-    if named is not None and named not in amounts:
-        amounts.append(named)
-
-    edge = _row_edge(row)
+    edge = _row_edge(row, declared)
     if effect == "I" and any(written is None for written in edge.values()):
         # FAIL-CLOSED, and not a hole that was tidied away. An ORM INSERT always names all three:
         # they are `NOT NULL` with no default, and `_effects_of_flush` refuses a Debt that reaches
@@ -785,26 +952,36 @@ def _matches_any(effect: str, row: dict, grant: _Grant) -> bool:
         # write (`AGENTS.md` §9).
         return False
 
-    identity = _row_identity(row)
+    identity = _row_identity(row, declared)
     if identity is None:
         # A statement against `debts` whose parameters do not say which row it is about cannot be
         # matched against a verified write. Fail-closed, per `AGENTS.md` §9.
         return False
 
+    written_amount = _written(row, declared, "amount")
     if effect == "D":
-        texts = {""}
-    elif amounts:
-        texts = {_money_text(amount) for amount in amounts}
-    elif effect == "U":
-        # No amount parameter at all: `SET version=?` and the primary key in the WHERE clause. This
-        # is the metadata-only UPDATE, and it matches the expectation the hook wrote for exactly
-        # that - `_NO_MONEY_MOVED` - and no other.
-        texts = {_NO_MONEY_MOVED}
+        # A DELETE has no SET clause: its parameters are the primary key and the version it expects.
+        # The expectation the hook wrote for it carries no amount either.
+        text: str | None = ""
+    elif written_amount is _ABSENT:
+        if effect != "U":
+            # An INSERT with no amount. `amount` is `NOT NULL` with no default, so this cannot be an
+            # ORM insert of a Debt; whatever it is, it is not a write the hook verified.
+            return False
+        # No amount anywhere: `SET version=?` with the primary key in the WHERE clause. This is the
+        # metadata-only UPDATE, and it matches the expectation the hook wrote for exactly that -
+        # `_NO_MONEY_MOVED` - and no other.
+        text = _NO_MONEY_MOVED
     else:
-        # An INSERT with no readable amount. `amount` is `NOT NULL` with no default, so this cannot
-        # be an ORM insert of a Debt; whatever it is, it is not a write the hook verified.
-        return False
-    return grant.take_row(effect, {identity}, texts, edge)
+        # THE AMOUNT UNDER THE `amount` NAME, WHATEVER TYPE IT ARRIVED AS, and nothing else. A caller
+        # that writes `Debt(amount=5)` - an int, which the ORM accepts and the column converts on the
+        # way out - produces a parameter dict whose amount is an `int`, and the hook's expectation is
+        # built from the attribute through `_as_decimal`, so `5` and `Decimal("5")` are one
+        # expectation. `None` here is an unreadable or non-finite amount, which matches nothing.
+        text = _amount_text_or_none(written_amount)
+        if text is None:
+            return False
+    return grant.take_row(effect, identity, text, edge)
 
 
 # =================================================================================================
@@ -930,30 +1107,57 @@ def _on_release_savepoint(conn: Connection, name: str, context: Any) -> None:
     )
 
 
-def _driver_transaction_is_live(conn: Connection) -> bool | None:
-    """Does the DRIVER have a transaction open right now? `None` when it will not say.
+def _driver_transaction_probe(conn: Connection) -> tuple[bool | None, str]:
+    """Does the DRIVER have a transaction open right now, and how do we know? `None` when it will not say.
 
     PUBLIC DRIVER API ON BOTH TIERS, deliberately, and the two do not share a spelling:
     `asyncpg.Connection.is_in_transaction()` is a method, `sqlite3.Connection.in_transaction` an
-    attribute. Neither is SQLAlchemy's opinion, which is the point - this is asked precisely where
-    SQLAlchemy's bookkeeping and the database have been measured to disagree.
+    attribute (aiosqlite forwards it). Neither is SQLAlchemy's opinion, which is the point - this is
+    asked precisely where SQLAlchemy's bookkeeping and the database have been measured to disagree.
 
-    `None` is NOT `False` (`AGENTS.md` §1): a driver that does not answer leaves the question
-    unmeasured, and the caller treats only a positive `True` as a finding. A probe that raises is
-    also `None` - it is a diagnostic, and it may not be the thing that breaks a transaction.
+    THREE ANSWERS AND NOT TWO, and collapsing them was the defect (T1528, review item 4). The old
+    body returned `bool(probe())`, which maps a probe answering `None` - or anything else that is not
+    a boolean - onto `False`, "no transaction is open". That is a measurement this module never made
+    being reported as a clean bill of health, and `AGENTS.md` §1 forbids exactly that: an absent
+    measurement may not read as a zero one. It was wrong in both directions - `bool(1)` reported a
+    POSITIVE finding just as confidently.
+
+    So only a real `bool` is an answer. Everything else - no probe at all, an answer of another type,
+    a probe that raises - is `None` with a reason, and the caller refuses rather than proceeds.
     """
 
-    driver = getattr(getattr(conn, "connection", None), "driver_connection", None)
+    try:
+        dbapi_connection = getattr(conn, "connection", None)
+    except BaseException:  # noqa: BLE001 - a connection that cannot hand over its driver is unmeasured
+        return None, "the connection would not hand over its DBAPI connection"
+    driver = getattr(dbapi_connection, "driver_connection", None)
+    if driver is None:
+        return None, "there is no driver connection to ask"
     probe = getattr(driver, "is_in_transaction", None)
     if callable(probe):
         try:
-            return bool(probe())
-        except BaseException:  # noqa: BLE001 - an unanswerable probe is "unmeasured", not "clean"
-            return None
-    flag = getattr(driver, "in_transaction", None)
+            answer = probe()
+        except BaseException as exc:  # noqa: BLE001 - a probe may not be the thing that breaks a transaction
+            return None, f"{type(driver).__name__}.is_in_transaction() raised {exc!r}"
+        if isinstance(answer, bool):
+            return answer, f"{type(driver).__name__}.is_in_transaction()"
+        return None, (
+            f"{type(driver).__name__}.is_in_transaction() answered {answer!r}, which is not a bool"
+        )
+    flag = getattr(driver, "in_transaction", _ABSENT)
     if isinstance(flag, bool):
-        return flag
-    return None
+        return flag, f"{type(driver).__name__}.in_transaction"
+    if flag is _ABSENT:
+        return None, (
+            f"{type(driver).__name__} exposes neither `is_in_transaction()` nor `in_transaction`"
+        )
+    return None, f"{type(driver).__name__}.in_transaction is {flag!r}, which is not a bool"
+
+
+def _driver_transaction_is_live(conn: Connection) -> bool | None:
+    """The probe's answer alone: True, False, or None when the driver would not say."""
+
+    return _driver_transaction_probe(conn)[0]
 
 
 def _on_begin(conn: Connection) -> None:
@@ -974,14 +1178,19 @@ def _on_begin(conn: Connection) -> None:
       Measured: an abandoned operation's debt of 71.00000000 and its envelope still in state `OPEN`
       were both made durable by the second root's commit.
 
-    AND THE OBVIOUS FIX DOES NOT WORK, which is why the guard is here and not in a `rollback`
-    handler. A `rollback` listener of this module's own was written first and measured to never run
-    at all: `_JoinedListener` puts a CONNECTION-level listener's functions in `parent_listeners` and
-    the ENGINE's in `listeners` (`sqlalchemy/event/attr.py:607-636`, `:492-498`), so every
-    connection-level listener runs before every engine-level one, and `insert=True` can only order
-    this module among ENGINE-level listeners. The neighbour that prevents the rollback wins that
-    race by construction. (Same exposure applies to `_on_rollback_savepoint` below; it is not
-    closed here and is reported as such.)
+    AND A `rollback` HANDLER DOES NOT SUBSTITUTE FOR IT, which is why the guard is here. Two reasons
+    were given for that in T1527 and only one of them has survived:
+
+    * ORDERING, WHICH IS NO LONGER THE REASON (T1528). A `rollback` listener of this module's own was
+      measured never to run at all, because `_JoinedListener` runs every CONNECTION-level listener
+      before every ENGINE-level one (`sqlalchemy/event/attr.py:607-636`, `:492-498`) and `insert=True`
+      could only order this module among engine-level ones. That is now removable: `_on_engine_connect`
+      registers per connection, at the level the neighbour occupies, and `_on_rollback_savepoint` is
+      registered that way.
+    * WHAT A ROLLBACK EVENT IS, WHICH STILL IS the reason. The event is dispatched BEFORE the SQL and
+      the transaction is deactivated either way, so a handler there cannot tell a rollback that
+      happened from one that was prevented - the module docstring's first condition. A guard built on
+      it would treat a FAILED rollback as a success, which is the defect, not the fix.
 
     `begin` IS safe ground, and not because nobody can pre-empt it: a neighbour who pre-empts this
     by raising has aborted the `begin` itself, and `RootTransaction.__init__` assigns
@@ -1002,7 +1211,24 @@ def _on_begin(conn: Connection) -> None:
         return
     if conn.closed or conn.invalidated:
         return
-    if _driver_transaction_is_live(conn) is not True:
+    live, how = _driver_transaction_probe(conn)
+    if live is None:
+        # UNMEASURED IS NOT CLEAN (T1528, review item 4). The carry-over this guard exists to stop is
+        # not excluded by a question that was never answered, and the answer is the only thing
+        # standing between an abandoned operation's debt and the next root's commit. Both drivers
+        # this repository runs on answer every time, which is measured per tier rather than assumed
+        # (`tests/unit/test_p015_t1528_*`, `tests/integration/test_p015_t1528_*_postgres.py`), so
+        # this refusal is unreachable on a supported engine - and on an unsupported one it is the
+        # honest outcome.
+        raise DebtJournalError(
+            Reason.UNMEASURED_DB_TRANSACTION,
+            f"a new database transaction is being opened and this driver will not say whether it "
+            f"already has one: {how}. A transaction that may have been carried over cannot be "
+            f"distinguished from one that was not, and committing the difference is how an "
+            f"abandoned operation's money became durable.",
+            probe=how,
+        )
+    if not live:
         return
     raise DebtJournalError(
         Reason.STALE_DB_TRANSACTION,
@@ -1010,6 +1236,7 @@ def _on_begin(conn: Connection) -> None:
         "open. Whatever that transaction holds was never committed and never rolled back, and a "
         "commit on the new transaction would make it durable under a record that does not "
         "describe it.",
+        probe=how,
     )
 
 
@@ -1023,16 +1250,74 @@ def _on_rollback_savepoint(conn: Connection, name: str, context: Any) -> None:
     `_JoinedListener` puts a CONNECTION-level listener's functions in `parent_listeners` and the
     ENGINE's in `listeners` (`sqlalchemy/event/attr.py:607-636`, `:492-498`), and
     `_CompoundListener.__call__` runs `parent_listeners` first. So a neighbour who registers on the
-    `Connection` runs before this handler whatever `insert` says, and CAN stop it from ever learning
-    that a rollback was asked for. That exposure is open, it is not specific to savepoints - it is
-    true of every listener in this module - and it is recorded rather than claimed away. The same
-    measurement is why the root's guard is at `begin` and not in a `rollback` handler (`_on_begin`).
+    `Connection` runs before an ENGINE-level handler whatever `insert` says, and CAN stop it from
+    ever learning that a rollback was asked for - measured, with a debt of 42 made durable by the
+    root commit that followed.
+
+    WHICH IS WHY THIS HANDLER IS ALSO REGISTERED PER CONNECTION (T1528). `_on_engine_connect` adds it
+    to every `Connection` as the connection is created, with `insert=True`, so it is first among that
+    connection's own listeners and a neighbour added later cannot pre-empt it. Read that function for
+    what is still open: a neighbour who registers its own `engine_connect` handler on the `Engine`
+    class ahead of the journal's. The handler runs twice per event as a result, and assigns one dict
+    key, so the second run is a no-op.
     """
 
     state = _state_for(conn)
     if state is None or not any(name in op.chain for op in state.ops):
         return
     state.pending_savepoint_rollbacks[name] = True
+
+
+def _on_engine_connect(conn: Connection) -> None:
+    """Put the savepoint recorder FIRST among this connection's OWN listeners, as it is created.
+
+    WHY THIS LISTENER EXISTS AND WHY IT IS THE ONE (T1528, review item 5). `_on_rollback_savepoint`
+    is the only listener in this module whose job is to RECORD something: every other one refuses, and
+    a refusal that is pre-empted by a neighbour's exception still ends in no commit. Being skipped
+    loses information, and the reviewer measured exactly that - a connection-level neighbour raising
+    in `rollback_savepoint`, `pending_savepoint_rollbacks` empty, the savepoint's rows never rolled
+    back in the database, and the root commit making a debt of 42 durable under a record that says the
+    savepoint was undone.
+
+    `insert=True` ON THE ENGINE CLASS COULD NOT FIX IT. SQLAlchemy's `_JoinedListener` runs every
+    CONNECTION-level listener before every ENGINE-level one (`sqlalchemy/event/attr.py:607-636`,
+    `:492-498`), so ordering among engine-level listeners is ordering inside the losing half. The
+    answer is to occupy the same level: `engine_connect` is dispatched as the `Connection` is built,
+    which is the earliest moment at which there is a connection to register on, so a listener added
+    here with `insert=True` precedes every listener a caller adds to that connection afterwards.
+    Measured on this tree - `tests/unit/test_p015_t1528_*` is that measurement.
+
+    WHAT IS STILL OPEN, and it is narrower rather than gone. The recorder is first among the
+    listeners of every connection only because it is registered as the connection is built, so anyone
+    whose own `engine_connect` handler runs BEFORE this one can register ahead of it on that
+    connection and pre-empt it again. Which class-level handler runs first is SQLAlchemy's order and
+    not something this module enforces: measured on this tree (2026-09-13), this handler ran first
+    even against a LATER `insert=True` class-level registration - it is registered when
+    `app.db.models` is imported, before any application code - but that is an observation, not a
+    guarantee this module can make.
+
+    DOUBLE REGISTRATION IS HARMLESS AND DELIBERATE. The handler stays on the `Engine` class as well,
+    so it runs twice per event; it assigns one key in a dict, so the second run is a no-op. Removing
+    the class-level one would narrow the journal to connections this listener saw being created.
+
+    AND NOT EVERY CONNECTION ACCEPTS A LISTENER AT ALL - see the `InvalidRequestError` branch, where
+    the skip is explained and, in the test, measured.
+    """
+
+    try:
+        if event.contains(conn, "rollback_savepoint", _on_rollback_savepoint):
+            return
+        event.listen(conn, "rollback_savepoint", _on_rollback_savepoint, insert=True)
+    except InvalidRequestError:
+        # A CONNECTION THAT TAKES NO LISTENER FROM ANYONE, which is why this is a skip and not a
+        # hole (measured 2026-09-13). A connection born from an `execution_options()` engine - an
+        # `OptionEngine`, which `tests/integration/test_clearing_commit_replay_postgres.py` builds
+        # for SERIALIZABLE - carries a doubly-joined dispatch that `Events._accept_with` does not
+        # recognise, so `event.listen(conn, <any ConnectionEvents event>, ...)` raises
+        # `InvalidRequestError` whoever calls it. The neighbour this registration exists to get ahead
+        # of therefore cannot register on such a connection either, and the class-level listener is
+        # the whole field there. The test asserts that symmetry rather than trusting it.
+        return
 
 
 def _confirm_savepoint_rollback(state: _TxState, name: str) -> None:
@@ -1117,8 +1402,9 @@ def _on_before_execute(
             f"it does not move.",
             statement=type(clauseelement).__name__,
         )
+    declared = _statement_values(clauseelement)
     for row in rows:
-        if not _matches_any(effect, row, grant):
+        if not _matches_any(effect, row, declared, grant):
             _poison_connection(conn, Reason.UNVERIFIED_DEBT_WRITE)
             raise DebtJournalError(
                 Reason.UNVERIFIED_DEBT_WRITE,
@@ -1146,9 +1432,6 @@ def _poison_connection(conn: Connection, reason: str) -> None:
 # =================================================================================================
 # Session-level listeners: the flush hook
 # =================================================================================================
-
-
-_KEY_COLUMNS = ("debtor_id", "creditor_id", "equivalent_id")
 
 
 def _history(obj: Any, attribute: str) -> Any:
@@ -1234,11 +1517,18 @@ def _effects_of_flush(
     op: _OpRecord,
     dialect: Any,
     ordinal: int,
-) -> tuple[list[_Effect], dict[_Signature, int]]:
-    """Read this flush's Debt movements out of the unit of work, before any SQL is sent."""
+) -> tuple[list[_Effect], dict[_Signature, int], list[_RowState]]:
+    """Read this flush's Debt movements out of the unit of work, before any SQL is sent.
+
+    Three things come out of one reading, and they must come out of ONE reading: the entries that go
+    into the journal, the grant that lets the statements through, and the row states `_reconcile`
+    will hold the database to. Building any of them separately would let the record, the permission
+    and the verification describe different things.
+    """
 
     effects: list[_Effect] = []
     expected: dict[_Signature, int] = {}
+    states: list[_RowState] = []
     seen_edges: set[tuple[uuid.UUID, uuid.UUID, uuid.UUID]] = set()
 
     plan: list[tuple[Debt, str]] = []
@@ -1364,6 +1654,19 @@ def _effects_of_flush(
                 unchanged = _signature_of("U", debt_id, edge, _NO_MONEY_MOVED)
                 expected[unchanged] = expected.get(unchanged, 0) + 1
                 seen_edges.add(edge)
+                # AND THE AMOUNT IS STILL CLAIMED, which is the whole of T1528 review item 1: "no
+                # money moved" is a statement about the row that the row can be held to. The amount
+                # the hook READ is what must still be there afterwards.
+                states.append(
+                    _RowState(
+                        debt_id=debt_id,
+                        equivalent_id=edge[0],
+                        debtor_id=edge[1],
+                        creditor_id=edge[2],
+                        amount=current,
+                        present=True,
+                    )
+                )
                 continue
             if amount_history.deleted:
                 before = _as_decimal(amount_history.deleted[0])
@@ -1408,8 +1711,18 @@ def _effects_of_flush(
             kind, debt_id, edge, "" if kind == "D" else _money_text(after)
         )
         expected[signature] = expected.get(signature, 0) + 1
+        states.append(
+            _RowState(
+                debt_id=debt_id,
+                equivalent_id=edge[0],
+                debtor_id=edge[1],
+                creditor_id=edge[2],
+                amount=after,
+                present=kind != "D",
+            )
+        )
 
-    return effects, expected
+    return effects, expected, states
 
 
 def _before_flush(session: Session, flush_context: Any, instances: Any) -> None:
@@ -1450,7 +1763,7 @@ def _before_flush(session: Session, flush_context: Any, instances: Any) -> None:
     try:
         op = _find_operation(session, conn, state)
         ordinal = op.flush_count + 1
-        effects, expected = _effects_of_flush(session, op, conn.engine.dialect, ordinal)
+        effects, expected, states = _effects_of_flush(session, op, conn.engine.dialect, ordinal)
     except DebtJournalError as exc:
         _poison(state, exc.reason)
         raise
@@ -1458,14 +1771,128 @@ def _before_flush(session: Session, flush_context: Any, instances: Any) -> None:
     op.flush_count = ordinal
     op.effects.extend(effects)
     _GRANTS[conn] = _Grant(session_id=id(session), expected=expected)
-    session.info["geo.journal.flush"] = (op, effects)
+    session.info["geo.journal.flush"] = (op, effects, states)
+
+
+def _same_money(written: Decimal | None, recorded: Decimal | None) -> bool:
+    """Whether two money values are the same number, whatever spelling each arrived in.
+
+    `Decimal("10.0") == Decimal("10.00000000")` is already True, so no quantization is needed - and
+    quantization must be AVOIDED here, because it raises on values the database can nevertheless be
+    holding (a NaN from before T1526, a magnitude SQLite never refused). Those compare by their text,
+    so they are comparable without being storable.
+    """
+
+    if written is None or recorded is None:
+        return written is None and recorded is None
+    if written.is_finite() and recorded.is_finite():
+        return written == recorded
+    return str(written) == str(recorded)
+
+
+def _reconcile(conn: Connection, states: list[_RowState]) -> None:
+    """Read the rows this flush claims to have recorded BACK OUT OF THE DATABASE, and compare.
+
+    THIS IS THE BOUNDARY THE CONTRACT NEEDED, and the three holes of T1528 are what proved that no
+    amount of parameter reading could be it. The write guard inspects a statement BEFORE it executes:
+    it sees the parameters it was handed, in the listener order it happens to occupy, and it has to
+    decide what they mean. Every one of those is a place to be wrong -
+
+    * a value that is a SQL expression is not in the parameters at all (review items 1, 2);
+    * a value's meaning read from its TYPE is a guess about which number is the amount (item 3);
+    * and a `before_execute` listener registered after this module's - an `Engine`-instance listener,
+      which SQLAlchemy runs after every class-level one - changes the parameters AFTER verification,
+      so the guard's answer was about a statement that no longer exists (item 5, write-guard half).
+
+    What this does instead asks the database. After the flush's SQL has run, every row the journal
+    claims is read back by primary key and required to be exactly what the entries say: present or
+    gone, on the edge the entry names, holding the amount the entry ends on. No inference, no
+    listener order, no statement shape. A row that differs means the record and the table disagree,
+    and a transaction whose record is false is refused before its entries are even written.
+
+    WHAT IT DOES NOT CLAIM. It is not a second opinion on somebody else's rows: only the rows this
+    flush recorded are read, so a write to a DIFFERENT row is the parameter-level guard's business
+    and stays so. And it runs at the END OF THIS FLUSH, so a change made after it - by a later
+    listener using `text()` or `exec_driver_sql`, which fire no `before_execute` and are this module's
+    one documented blind spot - is outside it. That exposure is reported, not claimed away.
+
+    ONE STATEMENT, whatever the flush's size: a single `IN` read, not one per row.
+    """
+
+    if not states:
+        return
+    table = Debt.__table__
+    by_id: dict[str, _RowState] = {}
+    for state in states:
+        key = str(state.debt_id)
+        if key in by_id:
+            # One flush naming the same primary key twice cannot be held to either claim, and
+            # nothing in the ORM produces it (the identity map admits one object per key). Refuse
+            # rather than pick.
+            raise DebtJournalError(
+                Reason.UNRECONCILED_DEBT_ROW,
+                f"this flush recorded two different states for debt {key}; neither can be verified "
+                f"against the stored row.",
+                debt_id=key,
+            )
+        by_id[key] = state
+
+    rows = conn.execute(
+        select(
+            table.c.id,
+            table.c.equivalent_id,
+            table.c.debtor_id,
+            table.c.creditor_id,
+            table.c.amount,
+        )
+        .where(table.c.id.in_([state.debt_id for state in states]))
+        # MARKED AS THE JOURNAL'S OWN STATEMENT. It is a read against `debts` rather than against a
+        # journal table, so a tracer that recognises the journal's noise by its table names cannot
+        # tell it from a writer's own read (`tests/unit/test_p015_b4_r4_*` does exactly that). The
+        # option is the only non-textual way to say "this statement is the mechanism, not the work".
+        .execution_options(**{JOURNAL_STATEMENT_OPTION: True})
+    ).all()
+    stored = {_key_text(row[0]) or str(row[0]): row for row in rows}
+
+    problems: list[str] = []
+    for key, state in by_id.items():
+        row = stored.get(key)
+        if not state.present:
+            if row is not None:
+                problems.append(f"{key} was recorded as deleted and is still in `debts`")
+            continue
+        if row is None:
+            problems.append(f"{key} was recorded as written and is not in `debts`")
+            continue
+        written_edge = (_key_written(row[1]), _key_written(row[2]), _key_written(row[3]))
+        recorded_edge = (
+            _key_written(state.equivalent_id),
+            _key_written(state.debtor_id),
+            _key_written(state.creditor_id),
+        )
+        if written_edge != recorded_edge:
+            problems.append(
+                f"{key} is stored on edge {written_edge} and was recorded on {recorded_edge}"
+            )
+        if not _same_money(_as_decimal(row[4]), state.amount):
+            problems.append(f"{key} holds {row[4]!r} and was recorded as {state.amount!r}")
+    if not problems:
+        return
+    _poison_connection(conn, Reason.UNRECONCILED_DEBT_ROW)
+    raise DebtJournalError(
+        Reason.UNRECONCILED_DEBT_ROW,
+        "the database does not hold what this flush recorded: "
+        + "; ".join(problems)
+        + ". The journal will not write a record of a movement that did not happen as recorded.",
+        problems=problems,
+    )
 
 
 def _after_flush(session: Session, flush_context: Any) -> None:
     pending = session.info.pop("geo.journal.flush", None)
     if pending is None:
         return
-    op, effects = pending
+    op, effects, states = pending
     conn = session.connection()
     grant = _GRANTS.pop(conn, None)
 
@@ -1476,6 +1903,10 @@ def _after_flush(session: Session, flush_context: Any) -> None:
             f"{sum(grant.expected.values())} write(s) the hook verified never reached the "
             f"connection. The record and the table would disagree.",
         )
+
+    # THE EXECUTION BOUNDARY, and it runs before the entries are written: an entry that describes a
+    # row the database does not hold may not exist even for the length of a transaction.
+    _reconcile(conn, states)
 
     if not effects:
         return
@@ -1529,6 +1960,7 @@ def _drop_grant(session: Session) -> None:
 _CONNECTION_LISTENERS = (
     ("commit", _on_commit),
     ("begin", _on_begin),
+    ("engine_connect", _on_engine_connect),
     ("release_savepoint", _on_release_savepoint),
     ("rollback_savepoint", _on_rollback_savepoint),
     ("after_cursor_execute", _on_after_cursor_execute),
@@ -1621,9 +2053,8 @@ def install_write_guard(engine: Any) -> None:
     for name, handler in _CONNECTION_LISTENERS:
         if not event.contains(sync_engine, name, handler):
             # `insert=True`: the journal's listeners run before anything registered on this ENGINE
-            # afterwards, so a neighbour that raises out of `rollback_savepoint` cannot prevent this
-            # module from recording that a rollback was requested (binding condition 1). A neighbour
-            # on the CONNECTION still can - see `_on_rollback_savepoint` for the measurement.
+            # afterwards. That is not what protects the recorder from a neighbour on the CONNECTION -
+            # `_on_engine_connect` is (T1528), and it is in this same list.
             event.listen(sync_engine, name, handler, insert=True)
 
 
@@ -1757,9 +2188,11 @@ def _refuse_unusable_transaction(conn: Connection, root: RootTransaction | None)
                 "opened before the first write is its own transaction and its RELEASE commits it "
                 "past any rollback. See app/db/sqlite_transaction_control.py.",
             )
-        driver = getattr(conn.connection, "driver_connection", None)
-        in_transaction = getattr(driver, "in_transaction", None)
-        if in_transaction is False:
+        # THE SAME PROBE AS THE `begin` GUARD, and not a second reading of the same attribute
+        # (T1528): two implementations of "does the driver have a transaction open" drift apart, and
+        # this one had already lost the distinction between False and unmeasured that the other one
+        # was being fixed for.
+        if _driver_transaction_is_live(conn) is False:
             raise DebtJournalError(
                 Reason.NO_TRANSACTION_CONTROL,
                 "this SQLite connection has no database transaction open even though SQLAlchemy "

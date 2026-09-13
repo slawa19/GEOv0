@@ -469,6 +469,29 @@ async def test_rt_012_1_counter_check_widening_the_door_reproduces_the_finding_e
     # on an engine with no write guard is refused as un-instrumented (`C15`). So the journal cannot
     # be absent from this path at all; only its money domain can be widened.
     monkeypatch.setattr(journal, "_MONEY_QUANTUM", Decimal("1E-9"))
+
+    # A FOURTH GUARD JOINED THEM ON 2026-09-13 (T1528), and widening a constant does not get past
+    # it, because it has no constant. The journal now reads every row it recorded BACK OUT OF THE
+    # DATABASE after the flush and refuses when the stored row differs from the record
+    # (`_reconcile`). This scenario is exactly such a difference and it is worth stating why: with
+    # the money domain widened to 1E-9 the journal's own round-trip predicate sees NOTHING wrong,
+    # because it asks `Numeric(20, 8)`'s processors and on asyncpg both are the identity - so it
+    # never learns that PostgreSQL itself rounds the ninth digit away. The readback learns it from
+    # the database: the entry would say `0.123456789` and `debts` holds `0.12345679`.
+    #
+    # So the refusal is asserted here first - it is new behaviour and it must not be lost - and only
+    # then is that mechanism stood down so the barrier below can be reached. Standing it down is
+    # "removing the guard" rather than "moving the constant that decides its verdict", which this
+    # module avoids everywhere else; it is done here because a measurement against the database has
+    # no constant to move, and it is the last of the four.
+    status_code, body = await _submit_signed_payment(pg_client, scenario, amount)
+    assert status_code == 500 and (body or {}).get("error", {}).get("code") == "E010", (
+        f"with the journal's money domain widened to 1E-9 the payment of {amount!r} must still be "
+        f"refused - by the readback, which compares the stored row with the record rather than with "
+        f"a predicate. Got {status_code} {body!r}."
+    )
+    monkeypatch.setattr(journal, "_reconcile", lambda conn, states: None)
+
     status_code, body = await _submit_signed_payment(pg_client, scenario, amount)
     assert status_code == 409, (
         f"with the door widened but the delta barrier intact, the payment of {amount!r} must be "
