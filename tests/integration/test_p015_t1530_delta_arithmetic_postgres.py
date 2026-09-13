@@ -1,19 +1,21 @@
 """Programme 015, T1530/T1531 on PostgreSQL: the constraint on BOTH construction paths, and asyncpg.
 
-WHY THIS MODULE BUILDS ITS OWN DATABASES INSTEAD OF TRUSTING THE GATE'S. `GEO_TEST_USE_MIGRATED_SCHEMA=1`
-does NOT verify a migrated schema - measured by the owner on 2026-09-13, it only checks that
-`alembic_version` is readable (`tests/conftest.py::_ensure_schema_initialized`), and `geov0_test_ci` was
-in fact built by `create_all` and stamped afterwards. A test that asserted "the constraint is there" on
-the gate's database would therefore be asserting it for whichever path happened to build that database,
-which is exactly the trap this programme has already recorded: a constraint that exists in one
-construction path and not the other. So this module creates two scratch databases of its own, builds one
-with `Base.metadata.create_all` and the other with `alembic -c migrations/alembic.ini upgrade head`, and
+WHY THIS MODULE BUILDS ITS OWN DATABASES INSTEAD OF TRUSTING THE GATE'S, and why that is still true
+after T1534. When this module was written, `GEO_TEST_USE_MIGRATED_SCHEMA=1` verified nothing at all -
+measured by the owner on 2026-09-13, it only checked that `alembic_version` was readable, and
+`geov0_test_ci` was in fact a `create_all` schema wearing a stamp. Since T1534 the flag BUILDS the
+gate's schema with the migrations, so the gate's database is now genuinely migrated. It still cannot
+answer this module's question: one database is one construction path, and the subject here is whether
+the TWO paths agree. So this module keeps creating two scratch databases, builds one with
+`Base.metadata.create_all` and the other with `alembic -c migrations/alembic.ini upgrade head`, and
 compares what PostgreSQL then holds.
 
 THE ALEMBIC PATH NEEDS A PREFLIGHT AND A SUBPROCESS, and both are facts about this tree rather than
 choices: `alembic upgrade head` on a fresh database dies unless `alembic_version.version_num` is widened
 to `VARCHAR(128)` first - `docker/docker-entrypoint.sh` does that and a bare command does not - and
 `migrations/env.py` ends in `asyncio.run(...)`, so it cannot be invoked from inside a running event loop.
+Both now live in `tests/migrated_schema.py`, shared with the conftest that builds the gate's own schema
+the same way: two copies of a preconditioning workaround would be two places for T1535 to fix.
 
 WHAT ELSE IS HERE, and it cannot be on the SQLite tier:
 
@@ -32,9 +34,6 @@ stand purges what it created.
 
 from __future__ import annotations
 
-import os
-import subprocess
-import sys
 import uuid
 from decimal import Decimal
 
@@ -50,6 +49,7 @@ from app.db.journal_tables import debt_journal_entries
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
+from tests.migrated_schema import ALEMBIC_VERSION_BOOTSTRAP, run_alembic_upgrade_head
 from tests.p015_b4a_stand import Stand, arm_stand, identity
 
 pytestmark = pytest.mark.postgres
@@ -282,28 +282,14 @@ async def test_t1530_p_the_constraint_exists_and_bites_on_both_construction_path
         engine = create_async_engine(migrated_url)
         try:
             async with engine.begin() as connection:
-                await connection.execute(
-                    text(
-                        "CREATE TABLE IF NOT EXISTS alembic_version "
-                        "(version_num VARCHAR(128) NOT NULL PRIMARY KEY)"
-                    )
-                )
+                for statement in ALEMBIC_VERSION_BOOTSTRAP:
+                    await connection.exec_driver_sql(statement)
         finally:
             await engine.dispose()
 
-        environment = dict(os.environ, DATABASE_URL=migrated_url)
-        completed = subprocess.run(  # noqa: S603 - fixed argv, no shell
-            [sys.executable, "-m", "alembic", "-c", "migrations/alembic.ini", "upgrade", "head"],
-            capture_output=True,
-            text=True,
-            env=environment,
-            cwd=os.getcwd(),
-            timeout=600,
-        )
-        assert completed.returncode == 0, (
-            f"`alembic upgrade head` failed on a fresh database, so the migrated path was never "
-            f"measured:\nstdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
-        )
+        # Raises `MigratedSchemaError` carrying stdout and stderr if the run does not reach head, so
+        # the migrated path can never be silently unmeasured.
+        run_alembic_upgrade_head(migrated_url)
 
         migrated = await _check_constraints(migrated_url, debt_journal_entries.name)
         from_metadata = await _check_constraints(metadata_url, debt_journal_entries.name)
