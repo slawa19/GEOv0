@@ -1776,8 +1776,8 @@ SELECT
     d.debtor_id,
     d.creditor_id,
     d.amount AS debt,
-    tl.limit AS trust_limit,
-    d.amount - tl.limit AS violation_amount
+    COALESCE(tl.limit, 0) AS trust_limit,
+    d.amount - COALESCE(tl.limit, 0) AS violation_amount
 FROM debts d
 LEFT JOIN trust_lines tl ON 
     tl.from_participant_id = d.creditor_id 

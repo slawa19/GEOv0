@@ -91,7 +91,7 @@ with `geov0_test_`, verify that it is absent first, and use only that database b
 3) Point tests at a dedicated test database and allow schema reset:
 
 ```powershell
-$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_docs_en"
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_docs_en"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
 
 # Run only TS-23 (Postgres-only)

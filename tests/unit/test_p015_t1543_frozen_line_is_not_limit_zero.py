@@ -294,9 +294,12 @@ async def test_a_frozen_line_over_its_limit_is_still_a_violation_against_that_li
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("status", ["closed", None], ids=["closed-line", "no-line"])
+@pytest.mark.parametrize("status", [None], ids=["no-line"])
 async def test_a_debt_without_a_live_line_is_a_violation_against_zero(db_session, status):
-    # A closed line is history, not authority: its stored limit of 100 must not permit the 42.
+    # No live line: the permitted debt is zero, so a debt of 42 is a violation against 0.
+    # The closed-line case was removed 2026-09-13 after review: no application path holds debt on a
+    # closed line (closing refuses non-zero debt), and a closed line produces the same outer-join
+    # miss as a missing one, so it exercised no separate branch of production code.
     eq, _creditor, _debtor = await _line_with_debt(
         db_session, status=status, limit="100", debt="42"
     )

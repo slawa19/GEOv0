@@ -115,12 +115,16 @@ async def _wait_for_exact_blocker(
 _PROBE_TIMEOUT = 20.0
 
 
-async def _no_advisory_lock_is_held() -> None:
+async def _no_advisory_lock_is_held(caplog) -> None:
     """No advisory lock is held on this database, read from `pg_locks` itself.
 
     The direct form of "the owner lock was released". The probe that follows takes the lock for real,
     which is the stronger statement; this one is what makes a probe TIMEOUT readable - a timeout with
     no lock held is a slow connection, and a timeout with a lock held is the defect.
+
+    `pg_locks` is the whole server, so the database filter is what makes "on this database" true: a
+    lock another run holds on another `geov0_test_*` database used to fail this (T1537). A real leak
+    would ALSO show as clearing's cleanup invalidating its connection, which nothing asserted before.
     """
 
     from tests.conftest import TestingSessionLocal
@@ -129,12 +133,59 @@ async def _no_advisory_lock_is_held() -> None:
         held = (
             await observer.execute(
                 text(
-                    "SELECT pid, objid FROM pg_locks "
-                    "WHERE locktype = 'advisory' AND granted"
+                    "SELECT pid, database, classid, objid, objsubid FROM pg_locks "
+                    "WHERE locktype = 'advisory' AND granted "
+                    "AND database = (SELECT oid FROM pg_database WHERE datname = current_database())"
                 )
             )
         ).all()
     assert held == [], f"an advisory lock is still held after the scenario: {held}"
+    invalidated = [
+        record.getMessage()
+        for record in caplog.records
+        if "interlock_unlock_unconfirmed" in record.getMessage()
+        or "interlock_cleanup_invalidated" in record.getMessage()
+    ]
+    assert invalidated == [], f"clearing's cleanup invalidated its connection: {invalidated}"
+
+
+@pytest.mark.asyncio
+async def test_no_advisory_lock_check_ignores_other_databases_postgres(db_session, caplog):
+    """T1537: `pg_locks` is the whole server; a lock held on another database is not this one's."""
+
+    _require_postgres(db_session)
+
+    from sqlalchemy.engine import make_url
+    from sqlalchemy.pool import NullPool
+    from tests.conftest import TEST_DATABASE_URL, TestingSessionLocal
+
+    # `postgres` exists on every server this gate runs against, and a transaction-scoped lock on it
+    # leaves nothing behind.
+    foreign_engine = create_async_engine(
+        make_url(TEST_DATABASE_URL).set(database="postgres"), poolclass=NullPool
+    )
+    try:
+        async with foreign_engine.connect() as foreign:
+            await foreign.execute(text("SELECT pg_advisory_xact_lock(1)"))
+            foreign_pid = await foreign.scalar(text("SELECT pg_backend_pid()"))
+            # PREMISE: the lock is visible from here and belongs to another database - otherwise
+            # the check below passes because there was nothing to see.
+            async with TestingSessionLocal() as observer:
+                seen = (
+                    await observer.execute(
+                        text(
+                            "SELECT database <> (SELECT oid FROM pg_database "
+                            "WHERE datname = current_database()) FROM pg_locks "
+                            "WHERE locktype = 'advisory' AND granted AND pid = :pid AND objid = 1"
+                        ),
+                        {"pid": foreign_pid},
+                    )
+                ).scalars().all()
+            assert seen == [True], f"premise: foreign advisory lock not observed as such: {seen}"
+            await _no_advisory_lock_is_held(caplog)
+            await foreign.rollback()
+    finally:
+        await foreign_engine.dispose()
 
 
 async def _seed_interlock_case():
@@ -774,6 +825,7 @@ async def test_cancellation_after_interlock_checkout_returns_connection_postgres
 async def test_cancellation_during_interlocked_work_rolls_back_before_unlock_postgres(
     db_session,
     monkeypatch,
+    caplog,
 ):
     _require_postgres(db_session)
 
@@ -846,7 +898,7 @@ async def test_cancellation_during_interlocked_work_rolls_back_before_unlock_pos
         }
         assert clearing_transactions == []
         assert audits == []
-        await _no_advisory_lock_is_held()
+        await _no_advisory_lock_is_held(caplog)
         probe_session = TestingSessionLocal()
         await asyncio.wait_for(
             PaymentEngine(probe_session).acquire_staged_equivalent_owner_locks(
@@ -913,6 +965,7 @@ async def test_cancellation_during_preflight_select_rolls_back_caller_postgres(
 async def test_cancellation_during_interlock_release_preserves_durable_amount_postgres(
     db_session,
     monkeypatch,
+    caplog,
 ):
     _require_postgres(db_session)
 
@@ -970,7 +1023,7 @@ async def test_cancellation_during_interlock_release_preserves_durable_amount_po
             ).all()
         assert len(transactions) == 1
         assert transactions[0].state == "COMMITTED"
-        await _no_advisory_lock_is_held()
+        await _no_advisory_lock_is_held(caplog)
         probe_session = TestingSessionLocal()
         await asyncio.wait_for(
             PaymentEngine(probe_session).acquire_staged_equivalent_owner_locks(
@@ -995,6 +1048,7 @@ async def test_cancellation_during_interlock_release_preserves_durable_amount_po
 async def test_interlock_timeout_rolls_back_work_and_releases_owner_postgres(
     db_session,
     monkeypatch,
+    caplog,
 ):
     _require_postgres(db_session)
 
@@ -1033,7 +1087,7 @@ async def test_interlock_timeout_rolls_back_work_and_releases_owner_postgres(
             "PAYMENT_TOTAL_TIMEOUT_SECONDS",
             original_total_timeout,
         )
-        await _no_advisory_lock_is_held()
+        await _no_advisory_lock_is_held(caplog)
         retry_session = TestingSessionLocal()
         # Same budget story as `_PROBE_TIMEOUT`: a fresh `NullPool` connection plus a whole clearing,
         # now with an envelope of its own, does not fit in three seconds on this machine.
