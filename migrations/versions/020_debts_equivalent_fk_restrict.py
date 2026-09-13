@@ -27,7 +27,11 @@ WHAT IT DOES NOT CHANGE, deliberately. `trust_lines.equivalent_id` and
 `integrity_checkpoints.equivalent_id` still cascade. Those are credit agreements and evidence rather
 than money obligations, both are covered by the same usage count, and changing them is outside T1524.
 The participant foreign keys on `debts` still cascade too; nothing in the application deletes a
-participant today.
+participant today. NO LONGER TRUE OF THE CASCADE, as of migration 025 (T1533), which closed that
+half: `fk_debts_debtor_id` and `fk_debts_creditor_id` are RESTRICT now. The second sentence still
+holds - there is no participant hard-delete path in `app/` - and it was never a reason to keep the
+cascade. This paragraph is corrected rather than deleted because it is the record of what T1524
+knowingly left open.
 
 THE CONSTRAINT NAME IS LOOKED UP, NOT ASSUMED - and the first edition of this migration assumed it.
 Migration 005 drops `debts_equivalent_id_fkey` and creates `fk_debts_equivalent_id`, so a database
