@@ -39,6 +39,18 @@ _CLEARING_REPLAY_NAMESPACE = uuid.UUID("7438b16f-c629-4aeb-8b97-4bf113704c93")
 # decide whether its early return can answer the question it was asked - see the comment there.
 _SQL_DETECTOR_MAX_CYCLE_LENGTH = 4
 
+# Trust-line statuses whose consent clearing reads (T1551, 2026-09-13, Codex review
+# `CLEARING-FROZEN: ALLOW-REDUCTION`).  `frozen` is admitted: protocol §7.2 searches cycles over
+# `debts` alone and §7.4 asks only for `policy.auto_clearing`, and clearing subtracts one amount
+# around a cycle, so it creates no new exposure.  Excluding frozen lines meant the over-limit debt
+# §11.5.2 freezes a line for could never be reduced by a cycle.  `closed` stays excluded.  ONE
+# tuple for the SQL detectors and for `_cycle_respects_auto_clearing` - which serves both the
+# find-time filter and execution-time revalidation - so discovery and execution cannot disagree.
+_CLEARABLE_TRUSTLINE_STATUSES = ("active", "frozen")
+_SQL_CLEARABLE_TRUSTLINE_STATUSES = (
+    "(" + ", ".join(f"'{status}'" for status in _CLEARABLE_TRUSTLINE_STATUSES) + ")"
+)
+
 
 class ClearingCommittedAfterCancellation(asyncio.CancelledError):
     """Cancellation raised only after the clearing commit became durable."""
@@ -660,17 +672,17 @@ class ClearingService:
                         JOIN trust_lines t1 ON t1.from_participant_id = d1.creditor_id
                                                             AND t1.to_participant_id = d1.debtor_id
                                                             AND t1.equivalent_id = d1.equivalent_id
-                                                            AND t1.status = 'active'
+                                                            AND t1.status IN {_SQL_CLEARABLE_TRUSTLINE_STATUSES}
                                                             AND {self._sql_auto_clearing_ok('t1')}
                         JOIN trust_lines t2 ON t2.from_participant_id = d2.creditor_id
                                                             AND t2.to_participant_id = d2.debtor_id
                                                             AND t2.equivalent_id = d2.equivalent_id
-                                                            AND t2.status = 'active'
+                                                            AND t2.status IN {_SQL_CLEARABLE_TRUSTLINE_STATUSES}
                                                             AND {self._sql_auto_clearing_ok('t2')}
                         JOIN trust_lines t3 ON t3.from_participant_id = d3.creditor_id
                                                             AND t3.to_participant_id = d3.debtor_id
                                                             AND t3.equivalent_id = d3.equivalent_id
-                                                            AND t3.status = 'active'
+                                                            AND t3.status IN {_SQL_CLEARABLE_TRUSTLINE_STATUSES}
                                                             AND {self._sql_auto_clearing_ok('t3')}
             WHERE d1.equivalent_id = :equivalent_id
               AND d1.amount > 0 AND d2.amount > 0 AND d3.amount > 0
@@ -784,22 +796,22 @@ class ClearingService:
                         JOIN trust_lines t1 ON t1.from_participant_id = d1.creditor_id
                                                             AND t1.to_participant_id = d1.debtor_id
                                                             AND t1.equivalent_id = d1.equivalent_id
-                                                            AND t1.status = 'active'
+                                                            AND t1.status IN {_SQL_CLEARABLE_TRUSTLINE_STATUSES}
                                                             AND {self._sql_auto_clearing_ok('t1')}
                         JOIN trust_lines t2 ON t2.from_participant_id = d2.creditor_id
                                                             AND t2.to_participant_id = d2.debtor_id
                                                             AND t2.equivalent_id = d2.equivalent_id
-                                                            AND t2.status = 'active'
+                                                            AND t2.status IN {_SQL_CLEARABLE_TRUSTLINE_STATUSES}
                                                             AND {self._sql_auto_clearing_ok('t2')}
                         JOIN trust_lines t3 ON t3.from_participant_id = d3.creditor_id
                                                             AND t3.to_participant_id = d3.debtor_id
                                                             AND t3.equivalent_id = d3.equivalent_id
-                                                            AND t3.status = 'active'
+                                                            AND t3.status IN {_SQL_CLEARABLE_TRUSTLINE_STATUSES}
                                                             AND {self._sql_auto_clearing_ok('t3')}
                         JOIN trust_lines t4 ON t4.from_participant_id = d4.creditor_id
                                                             AND t4.to_participant_id = d4.debtor_id
                                                             AND t4.equivalent_id = d4.equivalent_id
-                                                            AND t4.status = 'active'
+                                                            AND t4.status IN {_SQL_CLEARABLE_TRUSTLINE_STATUSES}
                                                             AND {self._sql_auto_clearing_ok('t4')}
             WHERE d1.equivalent_id = :equivalent_id
               AND d1.amount > 0 AND d2.amount > 0 AND d3.amount > 0 AND d4.amount > 0
@@ -877,7 +889,7 @@ class ClearingService:
                     select(TrustLine).where(
                         and_(
                             TrustLine.equivalent_id == equivalent_id,
-                            TrustLine.status == "active",
+                            TrustLine.status.in_(_CLEARABLE_TRUSTLINE_STATUSES),
                             TrustLine.from_participant_id.in_(list(from_ids)),
                             TrustLine.to_participant_id.in_(list(to_ids)),
                         )
