@@ -1,33 +1,40 @@
-"""The `b4_counterexample` marker deselects exactly three modules, and never a fourth.
+"""The `b4_counterexample` marker is gone, and nothing may bring it back.
 
-WHY THIS GUARD EXISTS. Programme 015 phase B step 2 put 46 counterexamples in the tree that are RED
-ON PURPOSE: they are the recorded acceptance of step 4, written before the debt journal, and each
-one fails because nothing in the tree has the property it names yet. They carry
-`b4_counterexample` and the canonical runner deselects that marker, so a shared working tree's gate
-stays a signal for the other sessions in it (`AGENTS.md` §7).
+WHAT THIS GUARD USED TO DO, because the change is the point. Programme 015 phase B step 2 put 107
+counterexamples in the tree that were RED ON PURPOSE: the recorded acceptance of step 4, written
+before the debt journal, each failing because nothing in the tree had the property it named. They
+carried `pytest.mark.b4_counterexample` and the canonical runner deselected that marker from every
+tier, so a shared working tree's gate stayed a signal for the other sessions in it (`AGENTS.md`
+§7). This file held the marker to a CLOSED allowlist, in both directions: it failed if the marker
+appeared on a module that was not a counterexample, and it failed if a counterexample lost it.
 
-A marker that removes tests from the gate is exactly the shape of `AGENTS.md` §9's anti-vacuum rule
-and §5's marker trap: the moment it can be applied to anything else, it stops being "the step-4
-acceptance is pending" and becomes "this failure is inconvenient". So the allowlist below is
-CLOSED. Adding a module to it is a deliberate, reviewable act, and it is the only way the marker
-can spread.
+WHAT IT DOES NOW. Step 4 slice C built `app/core/ledger/journal.py` into the four production
+writers and armed it, the counterexamples went green THROUGH THE JOURNAL with their assertions
+untouched, and the marker was removed from `pytest.ini`, from `scripts/verify_local.ps1` and from
+all seven modules. So the allowlist is empty, and an empty allowlist is not a guard - it is a
+sentence that cannot fail. The direction is therefore inverted: the marker must not exist. No
+module may carry it, `pytest.ini` may not register it, and the runner may not subtract it from any
+tier.
+
+WHY THAT IS WORTH A TEST AND NOT JUST A DELETION. The counterexamples now run in the two canonical
+gates. The cheapest way for a future session to make an inconvenient one stop failing is to put the
+marker back - it already has a documented history, a runner branch that once honoured it and a file
+full of prose explaining why those tests are allowed not to run. `AGENTS.md` §5 names exactly that
+shape as a source of false green, and §9's anti-vacuum rule says a mechanism that excludes things
+must carry a counter-check. This file is the counter-check, pointed the other way.
 
 WHAT THIS GUARD DOES NOT SEE, so its silence is not mistaken for more than it is:
 
-* it reads `pytest.mark.b4_counterexample` written literally in the source. A marker added through
+* it reads `pytest.mark.b4_counterexample` written literally in the source. A marker applied through
   `pytest_collection_modifyitems`, an `applymarker` call, a `parametrize` entry or an alias is
-  invisible to it;
-* it proves the runner's default expression EXCLUDES the marker by matching the string in
-  `scripts/verify_local.ps1`. It does not run the runner, so it cannot prove the expression reaches
-  pytest - the gate's own deselected count is what shows that;
+  invisible to it - as is a DIFFERENT marker name invented for the same purpose, which no textual
+  guard can recognise;
+* it matches strings in `scripts/verify_local.ps1`. It does not run the runner, so it cannot prove
+  the marker expression it reads is the one that reaches pytest - the gate's own selected and
+  deselected counts are what show that;
 * it says nothing about whether the counterexamples still assert what they were written to assert.
   Nothing can: that is what the per-test `MUTATION once step 4 exists` lines in their docstrings are
-  for, and they have to be run by hand when step 4 lands.
-
-THE CONTRACT THE MARKER ENCODES, repeated here because this is the file someone opens when they
-want to know why a test is not running: STEP 4 REMOVES THE MARKER. It does not touch the
-assertions. A counterexample made green by editing what it asserts has destroyed the only record of
-what the journal was required to do.
+  for, and they have to be run by hand.
 """
 
 from __future__ import annotations
@@ -37,19 +44,6 @@ from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[2]
 _MARKER = "b4_counterexample"
-
-#: The only modules allowed to carry the marker. Relative POSIX paths, so the failure message reads
-#: the same on every platform.
-_ALLOWED = {
-    "tests/unit/test_p015_b4_transaction_contract.py",
-    "tests/unit/test_p015_b4_write_guard.py",
-    "tests/integration/test_p015_b4_transaction_contract_postgres.py",
-    # Step 2, second slice (C4, C5, C6, C8, C12-C19, §10.1 and binding condition 4).
-    "tests/unit/test_p015_b4_entries_and_money.py",
-    "tests/unit/test_p015_b4_wrong_writer_is_recorded_faithfully.py",
-    "tests/integration/test_p015_b4_entries_and_money_postgres.py",
-    "tests/integration/test_p015_b4_wrong_writer_is_recorded_faithfully_postgres.py",
-}
 
 
 def _modules_carrying_the_marker() -> set[str]:
@@ -71,70 +65,88 @@ def _modules_carrying_the_marker() -> set[str]:
     return carrying
 
 
-def test_the_marker_is_carried_by_exactly_the_counterexample_modules() -> None:
-    """The allowlist is closed in both directions."""
-    carrying = _modules_carrying_the_marker()
+def test_no_module_carries_the_marker_any_more() -> None:
+    """The step-4 counterexamples run in the gate. Nothing may take them back out of it."""
 
-    # ANTI-VACUUM, and it comes first. If the scan stops finding the marker - a rename, an ast
-    # change, a module moved - `carrying` goes empty and the equality below would pass for a tree
-    # where the marker is applied everywhere. An empty result is a broken scanner, not a clean tree.
-    assert carrying, (
-        f"no module under tests/ carries `pytest.mark.{_MARKER}`, so this guard measured nothing. "
-        f"Either the counterexample modules lost their marker - in which case the canonical gate is "
-        f"about to go permanently red - or this scan no longer recognises how it is written."
+    # ANTI-VACUUM, FIRST, and it is not the same anti-vacuum this file used to carry. The old one
+    # checked that the scan still FOUND the marker; there is nothing left to find, so what has to
+    # be proven instead is that the scan still WORKS - that it recognises the shape it is looking
+    # for. A scanner that silently stopped recognising `pytest.mark.<name>` would report an empty
+    # result for a tree where the marker had been reapplied everywhere.
+    probe = ast.parse("import pytest\npytestmark = pytest.mark." + _MARKER + "\n")
+    found_in_probe = [
+        node
+        for node in ast.walk(probe)
+        if isinstance(node, ast.Attribute)
+        and node.attr == _MARKER
+        and isinstance(node.value, ast.Attribute)
+        and node.value.attr == "mark"
+        and isinstance(node.value.value, ast.Name)
+        and node.value.value.id == "pytest"
+    ]
+    assert found_in_probe, (
+        "this guard no longer recognises `pytest.mark.<marker>` in an AST, so its verdict below "
+        "measured nothing at all"
     )
 
-    spread = sorted(carrying - _ALLOWED)
-    assert not spread, (
-        f"`{_MARKER}` appears on modules it does not belong to: {spread}. That marker means "
-        f"'this test is the recorded acceptance of programme 015 phase B step 4 and is red until "
-        f"step 4 exists'. It is not a way to take an ordinary failure out of the gate. If one of "
-        f"these really is a step-2 counterexample, add it to `_ALLOWED` in this file deliberately."
-    )
-    missing = sorted(_ALLOWED - carrying)
-    assert not missing, (
-        f"these counterexample modules no longer carry `{_MARKER}`: {missing}. Either they were "
-        f"deleted - which throws away the acceptance of step 4 - or they are about to run in the "
-        f"canonical gate and redden it for every session sharing this tree."
-    )
-
-
-def test_the_marker_is_registered_so_strict_markers_can_see_it() -> None:
-    """`--strict-markers` is on (`pytest.ini` addopts), so an unregistered marker is an error."""
-    config = (_ROOT / "pytest.ini").read_text(encoding="utf-8")
-    assert f"\n    {_MARKER}:" in config, (
-        f"`{_MARKER}` is not registered in pytest.ini's `markers` list. With `--strict-markers` in "
-        f"addopts an unregistered marker fails collection outright."
-    )
-    assert "--strict-markers" in config, (
-        "pytest.ini no longer passes `--strict-markers`, so a typo in a marker name would silently "
-        "select nothing instead of failing"
+    carrying = sorted(_modules_carrying_the_marker())
+    assert not carrying, (
+        f"`{_MARKER}` is back, on {carrying}. That marker meant 'this test is the recorded "
+        f"acceptance of programme 015 phase B step 4 and is red until step 4 exists'. Step 4 "
+        f"exists: `app/core/ledger/journal.py` is armed and the counterexamples pass through it. "
+        f"Re-applying the marker can now only mean taking a REAL failure out of the gate, which is "
+        f"the false green `AGENTS.md` §5 names. Fix the failure, or - if a genuinely new red-first "
+        f"acceptance is being written - give it a marker of its own with its own contract and its "
+        f"own closed allowlist, so nobody inherits this one's permission."
     )
 
 
-def test_the_canonical_runner_excludes_the_marker_from_every_tier() -> None:
-    """Every branch of the runner's marker expression must exclude it.
+def test_pytest_no_longer_registers_the_marker() -> None:
+    """With `--strict-markers`, an unregistered marker fails collection outright.
 
-    Three branches, and all three matter: the default tier, `-IncludeExpensive`, and an explicitly
-    requested `-BackendMarker`. The last one is why the PostgreSQL tier is not permanently red
-    either. The escape hatch is naming the marker: an expression that mentions it is taken as
-    deliberate and passed through untouched.
+    That is the enforcement the assertion above leans on: as long as the marker is not in the
+    `markers` list, a module that applies it cannot even be collected, so the textual scan is a
+    second line rather than the only one.
     """
+
+    config = (_ROOT / "pytest.ini").read_text(encoding="utf-8")
+    assert "--strict-markers" in config, (
+        "pytest.ini no longer passes `--strict-markers`, so an unregistered marker would be a "
+        "silent no-op instead of a collection error - and the marker this file exists to keep out "
+        "could be reapplied without anything objecting"
+    )
+    assert f"\n    {_MARKER}:" not in config, (
+        f"`{_MARKER}` is registered in pytest.ini's `markers` list again. Registration is what "
+        f"makes the marker usable under `--strict-markers`; the marker was retired with step 4 "
+        f"and the counterexamples it covered now run in both canonical tiers."
+    )
+
+
+def test_the_canonical_runner_subtracts_the_marker_from_no_tier() -> None:
+    """No branch of the runner's marker expression may exclude it.
+
+    Three branches, and all three mattered: the default tier, `-IncludeExpensive`, and an explicitly
+    requested `-BackendMarker`. Each carried `and not b4_counterexample` and each has stopped. A
+    runner that put the exclusion back would take the counterexamples out of the gate without any
+    module in `tests/` changing, so the assertion above could not see it.
+    """
+
     runner = (_ROOT / "scripts" / "verify_local.ps1").read_text(encoding="utf-8")
 
-    assert f"'not slow and not postgres and not {_MARKER}'" in runner, (
-        "the runner's DEFAULT marker expression no longer excludes the counterexamples; the SQLite "
-        "tier is about to go permanently red"
+    assert "'not slow and not postgres'" in runner, (
+        "the runner's DEFAULT marker expression is not `not slow and not postgres` any more; if it "
+        "has grown another exclusion, say which tests it removes and why they may not run"
     )
-    assert f"'not postgres and not {_MARKER}'" in runner, (
-        "the runner's -IncludeExpensive expression no longer excludes the counterexamples"
+    assert "'not postgres'" in runner, (
+        "the runner's -IncludeExpensive expression is not `not postgres` any more"
     )
-    assert f'"$BackendMarker and not {_MARKER}"' in runner, (
-        "an explicitly requested -BackendMarker no longer excludes the counterexamples, so the "
-        "PostgreSQL tier goes permanently red"
-    )
-    assert f"'*{_MARKER}*'" in runner, (
-        f"the runner no longer lets an expression that NAMES `{_MARKER}` through unchanged, so "
-        f"there is no way to run the counterexamples deliberately and they have stopped being "
-        f"runnable acceptance at all"
+    offending = [
+        line.strip()
+        for line in runner.splitlines()
+        if _MARKER in line and not line.strip().startswith("#")
+    ]
+    assert not offending, (
+        f"the canonical runner subtracts `{_MARKER}` again: {offending}. Every tier - default, "
+        f"-IncludeExpensive and an explicitly requested -BackendMarker - must select the step-4 "
+        f"counterexamples like any other test."
     )

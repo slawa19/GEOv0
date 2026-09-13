@@ -6,6 +6,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import delete, select
 from sqlalchemy.exc import DBAPIError
+from tests.debt_setup import purge_test_ledger
 
 
 pytestmark = pytest.mark.postgres
@@ -183,9 +184,13 @@ async def test_payment_engine_commit_retries_whole_uow_on_serialization_failure_
 
     # Cleanup (best-effort) to keep shared Postgres test DB tidy.
     async with TestingSessionLocal() as cleanup:
+        # The debts AND the journal rows that describe them, through the driver and BEFORE the
+        # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
+        # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
+        # envelope still standing would block the transaction delete above it.
+        await purge_test_ledger(cleanup, equivalent_ids=[eq.id])
         await cleanup.execute(delete(PrepareLock).where(PrepareLock.tx_id == tx_id))
         await cleanup.execute(delete(Transaction).where(Transaction.tx_id == tx_id))
-        await cleanup.execute(delete(Debt).where(Debt.equivalent_id == eq.id))
         await cleanup.execute(delete(TrustLine).where(TrustLine.equivalent_id == eq.id))
         await cleanup.execute(delete(Participant).where(Participant.pid.in_([a.pid, b.pid])))
         await cleanup.execute(delete(Equivalent).where(Equivalent.code == eq_code))
@@ -371,8 +376,20 @@ async def test_payment_engine_commit_retries_real_concurrent_debt_insert_postgre
 
     assert len(observed_retry_errors) == 1
     assert observed_retry_errors[0][0] in {"40001", "23505"}
-    assert "INSERT INTO debts" in observed_retry_errors[0][1]
-    assert apply_calls == {"holder": 1, "waiter": 2}
+    # THE STATEMENT THAT MEETS THE CONFLICT IS NOW THE ENVELOPE INSERT, and that is the journal, not
+    # a change of subject. Since step 4 slice C the payment's unit of work opens a debt operation
+    # before it applies any flow, so `INSERT INTO debt_operations` is its first write - and
+    # `debt_operations` carries `UNIQUE(tx_id)`, so two concurrent commits of the SAME transaction
+    # now collide there (23505) or on the serializable snapshot (40001) before either reaches
+    # `debts`. The retry predicate is what this test is about and it is unchanged: the conflict is
+    # real, it is classified, and the unit of work runs again.
+    assert "INSERT INTO debt_operations" in observed_retry_errors[0][1], observed_retry_errors
+    # THE WAITER APPLIES ITS FLOWS ONCE, NOT TWICE, and that follows from the line above: the
+    # conflict is now met by the envelope INSERT, which happens BEFORE `_apply_flow` is reached at
+    # all. The first attempt therefore never applies anything and the retry is the only attempt that
+    # does. The property this counts is unchanged - the effects are applied exactly once - and it is
+    # now counted one attempt earlier.
+    assert apply_calls == {"holder": 1, "waiter": 1}, apply_calls
 
     try:
         async with TestingSessionLocal() as verify:
@@ -412,14 +429,18 @@ async def test_payment_engine_commit_retries_real_concurrent_debt_insert_postgre
             assert persisted_limit == Decimal("100.00000000")
     finally:
         async with TestingSessionLocal() as cleanup:
+            # The debts AND the journal rows that describe them, through the driver and BEFORE the
+            # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
+            # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
+            # envelope still standing blocks the transaction delete below it.
+            await purge_test_ledger(
+                cleanup, equivalent_ids=[equivalent.id], tx_ids=tx_ids
+            )
             await cleanup.execute(
                 delete(IntegrityAuditLog).where(IntegrityAuditLog.tx_id.in_(tx_ids))
             )
             await cleanup.execute(delete(PrepareLock).where(PrepareLock.tx_id.in_(tx_ids)))
             await cleanup.execute(delete(Transaction).where(Transaction.tx_id.in_(tx_ids)))
-            await cleanup.execute(
-                delete(Debt).where(Debt.equivalent_id == equivalent.id)
-            )
             await cleanup.execute(
                 delete(TrustLine).where(TrustLine.equivalent_id == equivalent.id)
             )

@@ -134,8 +134,15 @@ debt_operations = Table(
     ),
     # The completion columns move together or not at all. An envelope that says COMPLETED while
     # its counts are NULL is a half-written completion, and a reader cannot tell it from a
-    # finished one. `flush_count <= effect_count` and the all-or-nothing zero pair are the shape
-    # the completion writer actually produces.
+    # finished one.
+    #
+    # THE COUNTS ARE NOT BOUNDED BY EACH OTHER, and the clause that said they were was removed by
+    # migration 023 (measured when the journal was armed, 2026-09-12). `flush_count <= effect_count`
+    # and the all-or-nothing zero pair both assume every flush leaves an entry. A `StaleDataError`
+    # retry in `PaymentEngine._apply_flow` breaks that on the main payment path: the losing attempt
+    # flushed, so it was counted, and its entries went back with its savepoint. What is true is only
+    # the one-way implication - an entry needs a flush that wrote it - and that is what is written
+    # here now.
     CheckConstraint(
         "("
         " state = 'OPEN'"
@@ -147,9 +154,7 @@ debt_operations = Table(
         " AND effect_count IS NOT NULL AND effect_digest IS NOT NULL"
         " AND length(effect_digest) = 64"
         " AND flush_count >= 0 AND effect_count >= 0"
-        " AND flush_count <= effect_count"
-        " AND ((flush_count = 0 AND effect_count = 0)"
-        "      OR (flush_count > 0 AND effect_count > 0))"
+        " AND (flush_count > 0 OR effect_count = 0)"
         ")",
         name="chk_debt_operations_completion",
     ),

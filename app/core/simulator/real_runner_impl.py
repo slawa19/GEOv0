@@ -10,6 +10,7 @@ from typing import Any, Callable
 from sqlalchemy import or_, select
 from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 
+from app.core.ledger.journal import debt_operation
 from app.core.payments.engine import PaymentEngine
 from app.core.simulator.adaptive_clearing_policy import AdaptiveClearingPolicyConfig
 from app.core.simulator.artifacts import ArtifactsManager
@@ -37,6 +38,7 @@ from app.core.simulator.real_tick_persistence import RealTickPersistence
 from app.core.simulator.real_tick_trust_drift_coordinator import (
     RealTickTrustDriftCoordinator,
 )
+from app.core.simulator.scenario_equivalent import effective_equivalent
 from app.core.simulator.runtime_utils import (
     safe_float_env as _safe_float_env,
     safe_int_env as _safe_int_env,
@@ -483,6 +485,43 @@ class RealRunnerImpl:
         )
         await self._end_open_transaction(session)
 
+    async def _resolve_inject_debt_equivalent_ids(
+        self,
+        session,
+        *,
+        scenario: dict[str, Any],
+        event: dict[str, Any] | None,
+    ) -> set[uuid.UUID]:
+        """The equivalents this event's `inject_debt` effects NAME - its journal intent.
+
+        Narrower than the owner lock set on purpose (design v2 §2). The lock set also holds the
+        run's own equivalents and those of every trustline a `freeze_participant` effect will
+        touch; an intent built from it would declare "this operation is about that book" for books
+        the event never says a word about, and `debt_operation_equivalents.in_intent` would stop
+        meaning anything. Scope stays the lock set, which is the authoritative statement of what
+        the operation is ALLOWED to touch; intent is what it SAID it would.
+        """
+
+        codes = {
+            code
+            for eff in ((event or {}).get("effects") or [])
+            if isinstance(eff, dict)
+            and str(eff.get("op") or "").strip() == "inject_debt"
+            for code in (effective_equivalent(scenario=scenario, payload=eff),)
+            if code
+        }
+        if not codes:
+            return set()
+        return set(
+            (
+                await session.execute(
+                    select(Equivalent.id).where(Equivalent.code.in_(sorted(codes)))
+                )
+            )
+            .scalars()
+            .all()
+        )
+
     async def _resolve_inject_owner_lock_ids(
         self,
         session,
@@ -592,21 +631,53 @@ class RealRunnerImpl:
                 # The owner locks open the transaction the event is staged and committed in. A
                 # fresh engine per attempt: its advisory-lock deadline is per unit of work.
                 await PaymentEngine(session).acquire_staged_equivalent_owner_locks(lock_ids)
-                staged = await executor.stage_inject_event(
-                    session,
-                    scenario=scenario,
-                    event=event,
-                    pid_to_participant_id=pid_to_participant_id,
-                    locked_equivalent_ids=frozenset(lock_ids),
+                intent_equivalent_ids = await self._resolve_inject_debt_equivalent_ids(
+                    session, scenario=scenario, event=event
                 )
-                # Flush HERE, not inside `commit()`. A flush error (a constraint, a 40001 or a
-                # SQLite busy on the write itself) leaves nothing COMMITTED - the transaction may
-                # well still be open, which is why every handler below rolls back before it
-                # retries or returns. Left to the commit, the same error would be
-                # indistinguishable from a failure of the commit statement, whose outcome is
-                # genuinely unknown, and the inject would be recorded as "outcome unknown"
-                # instead of "failed".
-                await session.flush()
+                # THE OPERATION ENVELOPE (programme 015, phase B step 4). Staging and its flush
+                # are one declared operation: `stage_inject_event` is what writes the debts, and
+                # the flush below is what sends them.
+                #
+                # PER ATTEMPT, NOT PER EVENT. This region sits inside the `while True:` retry loop
+                # above, and every handler below rolls the session back before it continues - so
+                # each attempt opens its own envelope and each rollback takes that attempt's
+                # envelope with it. Opening once outside the loop would leave a record of an
+                # attempt the database no longer holds, and the second attempt would be refused for
+                # nesting inside the first.
+                #
+                # THE IDENTITY is the event, not the attempt: `run_id:event_index` is the same
+                # string on a retry, which is exactly what makes a genuinely duplicated apply
+                # collide on `UNIQUE(kind, identity)` rather than quietly write a second envelope.
+                # A retry after a rollback does not collide, because the rolled-back envelope is
+                # not there.
+                async with debt_operation(
+                    session,
+                    kind="INJECT",
+                    identity=f"{run_id}:{event_index}",
+                    intent={
+                        "run_id": run_id,
+                        "event_index": event_index,
+                        "event_time_ms": event_time_ms,
+                        "effects": effects,
+                    },
+                    scope_equivalent_ids=set(lock_ids or ()),
+                    intent_equivalent_ids=intent_equivalent_ids,
+                ):
+                    staged = await executor.stage_inject_event(
+                        session,
+                        scenario=scenario,
+                        event=event,
+                        pid_to_participant_id=pid_to_participant_id,
+                        locked_equivalent_ids=frozenset(lock_ids),
+                    )
+                    # Flush HERE, not inside `commit()`. A flush error (a constraint, a 40001 or a
+                    # SQLite busy on the write itself) leaves nothing COMMITTED - the transaction may
+                    # well still be open, which is why every handler below rolls back before it
+                    # retries or returns. Left to the commit, the same error would be
+                    # indistinguishable from a failure of the commit statement, whose outcome is
+                    # genuinely unknown, and the inject would be recorded as "outcome unknown"
+                    # instead of "failed".
+                    await session.flush()
             except asyncio.CancelledError:
                 fired.discard(event_index)
                 try:

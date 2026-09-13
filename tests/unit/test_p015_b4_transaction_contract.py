@@ -32,10 +32,10 @@ THE `db_session` FIXTURE IS REQUESTED FOR WHAT IT DOES BEFORE THE TEST, not for 
 SQLite it initialises the schema and truncates every table. Its session is never used, so no fixture
 transaction wraps the work under test and no commit boundary is hidden.
 
-MARKER. This module carries `b4_counterexample` and is deselected from the canonical gate. It is
-red on purpose until step 4 exists, and STEP 4 REMOVES THE MARKER, NOT THE ASSERTIONS - the full
-contract is in the comment above the marker list in `pytest.ini`, and
-`tests/unit/test_p015_b4_counterexample_marker_is_not_a_hiding_place.py` holds it in place.
+MARKER, HISTORICAL. This module carried `b4_counterexample` and was deselected from the canonical
+gate while the debt journal did not exist. Step 4 slice C built it and REMOVED THE MARKER, not the
+assertions: every test below still asserts exactly what it asserted while it was red, and each one
+names in its docstring the mutation that must turn it red again.
 """
 
 from __future__ import annotations
@@ -50,6 +50,7 @@ from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models.debt import Debt
+from tests.debt_setup import debt_fixture_setup
 from tests.p015_b4_support import (
     JOURNAL_MODULE,
     OPERATIONS_TABLE,
@@ -60,13 +61,12 @@ from tests.p015_b4_support import (
     missing_journal_tables,
     operation,
     refusal_of,
+    scenario_end_refusals,
     seed_world,
     stored_debts,
     stored_entries,
     stored_operations,
 )
-
-pytestmark = pytest.mark.b4_counterexample
 
 
 class _BusinessFailure(RuntimeError):
@@ -142,8 +142,13 @@ async def test_c1_a_debt_written_with_no_operation_is_refused(db_session, effect
     world = await seed_world(factory)
     try:
         if effect in ("update", "delete"):
+            starting_edge = world.debt("10.00")
             async with factory() as setup:
-                setup.add(world.debt("10.00"))
+                # Built before the block: `fixture_block_violations` allows only constructors and session
+                # calls inside one, and `world.debt(...)` is indistinguishable in the AST from a helper that
+                # drives a writer. Same object, same single `add`, same flush.
+                async with debt_fixture_setup(setup, label="starting-edge"):
+                    setup.add(starting_edge)
                 await setup.commit()
 
         async with factory() as session:
@@ -166,13 +171,52 @@ async def test_c1_a_debt_written_with_no_operation_is_refused(db_session, effect
         after = await stored_debts(factory, world)
         expected_amount = {"insert": Decimal("13.00000000"), "update": Decimal("17.00000000")}
 
-        # NON-VACUITY: the write really reached the database. Without this an unrelated failure
-        # (a rejected foreign key, an autoflush that never ran) would read as "the journal worked".
+        # NON-VACUITY, AND IT IS NOW A CONTROL. It used to read "the write really reached the
+        # database", which was the DEFECT and therefore could not survive the fix: once the journal
+        # refuses the bare write, nothing reaches the table and the old sentence became
+        # unsatisfiable. What it was FOR survives unchanged - excluding "the write failed for some
+        # unrelated reason (a rejected foreign key, an autoflush that never ran)" - and is proven
+        # the other way round: THE SAME EFFECT, INSIDE A DECLARED OPERATION, lands exactly as
+        # written. That is also the anti-vacuum `AGENTS.md` §9 asks of any rule that refuses
+        # something: a rule with no passing side would stop payments happening at all.
+        control = await seed_world(factory)
+        try:
+            if effect in ("update", "delete"):
+                control_edge = control.debt("10.00")
+                async with factory() as setup:
+                    async with debt_fixture_setup(setup, label="control-start"):
+                        setup.add(control_edge)
+                    await setup.commit()
+            async with factory() as session:
+                async with await _open(api, session, control, f"control-{effect}"):
+                    if effect == "insert":
+                        session.add(control.debt("13.00"))
+                    else:
+                        row = (
+                            await session.execute(
+                                select(Debt).where(Debt.equivalent_id == control.equivalent.id)
+                            )
+                        ).scalar_one()
+                        if effect == "update":
+                            row.amount = exact_money("17.00")
+                        else:
+                            await session.delete(row)
+                    await session.flush()
+                await session.commit()
+            controlled = await stored_debts(factory, control)
+        finally:
+            await drop_world(factory, control)
+
         if effect == "delete":
-            assert after == {}, f"stand: the DELETE did not reach the database: {after}"
+            assert controlled == {}, (
+                f"stand: the DELETE does not reach the database even inside a declared operation "
+                f"({controlled}), so the refusal below cannot be attributed to the journal"
+            )
         else:
-            assert after == {("debtor", "creditor", "eq"): expected_amount[effect]}, (
-                f"stand: the {effect.upper()} did not reach the database as written: {after}"
+            assert controlled == {("debtor", "creditor", "eq"): expected_amount[effect]}, (
+                f"stand: the {effect.upper()} does not reach the database as written even inside a "
+                f"declared operation ({controlled}), so the refusal below cannot be attributed to "
+                f"the journal"
             )
 
         # VERDICT.
@@ -212,6 +256,19 @@ async def test_c1_a_swallowed_refusal_does_not_let_the_commit_through(db_session
                 session.add(world.debt(str(earlier)))
                 await session.flush()
 
+            # NON-VACUITY, READ INSIDE THE TRANSACTION, and it has to be read here. It used to be
+            # `assert after` - "the earlier write really was committed" - which was the defect and
+            # is unsatisfiable once the poison holds: the whole point below is that NOTHING becomes
+            # durable, the earlier write included. What the assertion was for - "this transaction
+            # really wrote something, so the emptiness afterwards is the poison and not an empty
+            # unit of work" - is exactly what this reads, on the session that did the writing,
+            # while its transaction is still open.
+            written_inside = (
+                await session.execute(
+                    select(Debt.amount).where(Debt.equivalent_id == world.equivalent.id)
+                )
+            ).scalars().all()
+
             # Now an uninstrumented Debt write, and a caller that swallows whatever comes back.
             session.add(
                 world.debt("34.00", creditor_id=world.extra_participants[0].id)
@@ -221,10 +278,9 @@ async def test_c1_a_swallowed_refusal_does_not_let_the_commit_through(db_session
 
         after = await stored_debts(factory, world)
 
-        # NON-VACUITY: the earlier write really happened and really was committed, so "nothing is
-        # durable" below cannot come from a transaction that wrote nothing.
-        assert after, (
-            "stand: nothing at all was written, so this proves nothing about a swallowed refusal"
+        assert [Decimal(str(value)) for value in written_inside] == [earlier], (
+            f"stand: the earlier, covered write never reached the database inside the transaction "
+            f"({written_inside}), so this proves nothing about a swallowed refusal"
         )
 
         # VERDICT.
@@ -642,15 +698,28 @@ async def test_c9_an_operation_on_one_session_does_not_cover_a_write_on_another(
                         world.debt("31.00", creditor_id=world.extra_participants[0].id)
                     )
                     refusal = await refusal_of(api, session_b.flush())
-                await session_a.commit()
+
+                    # NON-VACUITY, READ INSIDE THE SHARED TRANSACTION. It used to be read after the
+                    # commit - "session A's own write really committed" - which cannot hold once
+                    # the journal works: B's refusal poisons the root A and B share, so A's commit
+                    # is refused too and nothing at all is durable. That is the design's own rule
+                    # (a hook refusal poisons the ROOT until a real rollback), not a surprise. What
+                    # the assertion was for - "the shared transaction really lived and B's flush
+                    # really ran inside it" - is read here, where it is still true.
+                    lived = (
+                        await session_a.execute(
+                            select(Debt.amount).where(
+                                Debt.equivalent_id == world.equivalent.id
+                            )
+                        )
+                    ).scalars().all()
+                await refusal_of(api, session_a.commit())
 
         after = await stored_debts(factory, world)
 
-        # NON-VACUITY: session A's own, covered write really committed, so the shared transaction
-        # really lived and B's flush really ran inside it.
-        assert after.get(("debtor", "creditor", "eq")) == Decimal("7.00000000"), (
-            f"stand: session A's own write did not commit, so the shared transaction never ran: "
-            f"{after}"
+        assert [Decimal(str(value)) for value in lived] == [Decimal("7.00000000")], (
+            f"stand: session A's own write never reached the shared transaction ({lived}), so "
+            f"session B never flushed inside a live one"
         )
 
         # VERDICT.
@@ -798,6 +867,11 @@ async def test_c10_a_refused_root_commit_leaves_no_open_database_transaction(db_
         await drop_world(factory, world)
 
 
+# The journal detaches the savepoint it rolled back (`_release_refused_nested`), so the tidy-up
+# rollback below finds it already gone and SQLAlchemy says so. Ignored rather than avoided: the
+# rollback is what puts the SESSION's own nesting back, and the warning is the Core half reporting
+# that the journal had already put the CONNECTION's back.
+@pytest.mark.filterwarnings("ignore:nested transaction already deassociated")
 @pytest.mark.asyncio
 async def test_c10_a_refused_release_leaves_the_root_open_and_poisoned(db_session) -> None:
     """C10, release half, DEFECT-SHAPED. A refused RELEASE is not a refused commit.
@@ -841,6 +915,17 @@ async def test_c10_a_refused_release_leaves_the_root_open_and_poisoned(db_sessio
             except api.refusals as exc:  # noqa: B902
                 release_refusal = exc
             in_transaction_after = _driver_transaction_state(driver)
+            # THE SAVEPOINT IS ROLLED BACK FIRST, so that what refuses the commit below is the
+            # JOURNAL and not SQLAlchemy. A `NestedTransaction` whose RELEASE raised is left
+            # deactivated-but-present, and the next `Session.commit()` on it raises
+            # `PendingRollbackError` ("Can't reconnect until invalid savepoint transaction is
+            # rolled back") before any Core commit event runs - a refusal by the ORM's own
+            # bookkeeping, which says nothing about the root poison this test is named after.
+            # Rolling the savepoint back clears that bookkeeping and, by design, KEEPS the root
+            # poison (`app/core/ledger/journal.py`, `_on_rollback_savepoint`: the ops bound to the
+            # savepoint are dropped, the poison is not). So the commit that follows reaches the
+            # journal's `commit` event, and `commit_refusal` is the journal's.
+            await nested.rollback()
             commit_refusal = await refusal_of(api, session.commit())
 
         after = await stored_debts(factory, world)

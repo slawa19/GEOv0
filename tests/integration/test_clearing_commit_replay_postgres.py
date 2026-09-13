@@ -11,7 +11,7 @@ import pytest
 from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker
 
-from tests.debt_setup import debt_fixture_setup
+from tests.debt_setup import debt_fixture_setup, purge_test_ledger
 
 
 pytestmark = pytest.mark.postgres
@@ -276,6 +276,11 @@ async def test_concurrent_same_cycle_serializable_resolves_one_durable_occurrenc
                     await observer.rollback()
                     await observer.close()
                 async with TestingSessionLocal() as cleanup:
+                    # The debts AND the journal rows that describe them, through the driver and BEFORE the
+                    # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
+                    # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
+                    # envelope still standing would block the transaction delete above it.
+                    await purge_test_ledger(cleanup, equivalent_ids=[equivalent_id])
                     await cleanup.execute(
                         delete(IntegrityAuditLog).where(
                             IntegrityAuditLog.equivalent_code == equivalent_code
@@ -290,9 +295,6 @@ async def test_concurrent_same_cycle_serializable_resolves_one_durable_occurrenc
                         delete(Transaction).where(
                             Transaction.initiator_id.in_(participant_ids)
                         )
-                    )
-                    await cleanup.execute(
-                        delete(Debt).where(Debt.equivalent_id == equivalent_id)
                     )
                     await cleanup.execute(
                         delete(TrustLine).where(
@@ -481,7 +483,10 @@ async def test_serializable_conflict_without_committed_occurrence_stays_failure_
         async with TestingSessionLocal() as writer:
             debt = await writer.get(Debt, debt_ids[0])
             assert debt is not None
-            debt.amount = Decimal("101.00")
+            # Declared: the journal asks every movement of money to name the operation that made
+            # it, and this writer is one - it is the whole point of the interleaving.
+            async with debt_fixture_setup(writer, label="the-concurrent-writer"):
+                debt.amount = Decimal("101.00")
             await writer.commit()
         release_writer.set()
 
@@ -539,6 +544,11 @@ async def test_serializable_conflict_without_committed_occurrence_stays_failure_
                 await owner_session.rollback()
                 await owner_session.close()
             async with TestingSessionLocal() as cleanup:
+                # The debts AND the journal rows that describe them, through the driver and BEFORE the
+                # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
+                # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
+                # envelope still standing would block the transaction delete above it.
+                await purge_test_ledger(cleanup, equivalent_ids=[equivalent_id])
                 await cleanup.execute(
                     delete(IntegrityAuditLog).where(
                         IntegrityAuditLog.equivalent_code == equivalent_code
@@ -553,9 +563,6 @@ async def test_serializable_conflict_without_committed_occurrence_stays_failure_
                     delete(Transaction).where(
                         Transaction.initiator_id.in_(participant_ids)
                     )
-                )
-                await cleanup.execute(
-                    delete(Debt).where(Debt.equivalent_id == equivalent_id)
                 )
                 await cleanup.execute(
                     delete(TrustLine).where(
@@ -857,6 +864,11 @@ async def test_post_commit_boundary_reconciles_and_new_cycle_still_executes_post
                         await session.close()
 
                 async with TestingSessionLocal() as cleanup:
+                    # The debts AND the journal rows that describe them, through the driver and BEFORE the
+                    # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
+                    # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
+                    # envelope still standing would block the transaction delete above it.
+                    await purge_test_ledger(cleanup, equivalent_ids=[equivalent_id])
                     await cleanup.execute(
                         delete(IntegrityAuditLog).where(
                             IntegrityAuditLog.equivalent_code == equivalent_code
@@ -871,9 +883,6 @@ async def test_post_commit_boundary_reconciles_and_new_cycle_still_executes_post
                         delete(Transaction).where(
                             Transaction.initiator_id.in_(participant_ids)
                         )
-                    )
-                    await cleanup.execute(
-                        delete(Debt).where(Debt.equivalent_id == equivalent_id)
                     )
                     await cleanup.execute(
                         delete(TrustLine).where(

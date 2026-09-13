@@ -99,7 +99,7 @@ async def test_a_the_refusal_of_a_nan_amount_must_name_the_money_rule(db_session
     `db_session` is requested for its schema setup and its per-test table reset only; every write
     below goes through its own session so that "committed" and "never written" cannot be confused.
     """
-    from tests.conftest import TestingSessionLocal
+    from tests.conftest import TestingSessionLocal, engine
 
     equivalent_id, debtor_id, creditor_id = await _seed()
 
@@ -109,22 +109,38 @@ async def test_a_the_refusal_of_a_nan_amount_must_name_the_money_rule(db_session
         f"cannot tell a refusal from a broken stand"
     )
 
+    # THE DEBT JOURNAL STANDS DOWN FOR THIS WRITE, and it must. Armed (step 4 slice C), the journal
+    # refuses a non-finite amount by its OWN finiteness predicate, before any SQL - so `MoneyNumeric`,
+    # the guard in `app/db/types.py` that this test exists to hold in place, would never be reached
+    # and its MUTATION ("remove `MoneyNumeric` from `Debt.amount`") would leave the test green. A
+    # test screened by a second guard is a test that has stopped measuring its subject.
+    #
+    # This is a real consequence of arming the journal and is recorded as such: on every path that
+    # goes through an operation, the journal's money predicates run first and the column's own
+    # refusal is the SECOND line, not the first. Both are wanted (`AGENTS.md` §9: every stage correct
+    # by itself); only one of them can be observed at a time, and this file observes the column's.
+    from app.core.ledger import journal
+
     refusal: BaseException | None = None
-    async with TestingSessionLocal() as session:
-        async with debt_fixture_setup(session, label="setup"):
-            session.add(
-                Debt(
-                    debtor_id=creditor_id,
-                    creditor_id=debtor_id,
-                    equivalent_id=equivalent_id,
-                    amount=Decimal("NaN"),
+    journal.uninstall_write_guard(engine)
+    try:
+        async with TestingSessionLocal() as session:
+            async with debt_fixture_setup(session, label="setup"):
+                session.add(
+                    Debt(
+                        debtor_id=creditor_id,
+                        creditor_id=debtor_id,
+                        equivalent_id=equivalent_id,
+                        amount=Decimal("NaN"),
+                    )
                 )
-            )
-        try:
-            await session.commit()
-        except (StatementError, IntegrityError, ValueError) as exc:
-            refusal = exc
-            await session.rollback()
+            try:
+                await session.commit()
+            except (StatementError, IntegrityError, ValueError) as exc:
+                refusal = exc
+                await session.rollback()
+    finally:
+        journal.install_write_guard(engine)
 
     stored = await _amounts(equivalent_id)
     assert stored == ["5.00000000"], (

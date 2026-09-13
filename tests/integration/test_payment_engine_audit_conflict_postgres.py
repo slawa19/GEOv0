@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import delete, select, update
 from sqlalchemy.exc import DBAPIError
+from tests.debt_setup import purge_test_ledger
 
 
 pytestmark = pytest.mark.postgres
@@ -181,9 +182,13 @@ async def test_audit_serialization_failure_retries_before_transaction_is_poisone
             assert checkpoint_calls >= 4
     finally:
         async with TestingSessionLocal() as cleanup:
+            # The debts AND the journal rows that describe them, through the driver and BEFORE the
+            # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
+            # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
+            # envelope still standing would block the transaction delete above it.
+            await purge_test_ledger(cleanup, equivalent_ids=[equivalent.id])
             await cleanup.execute(delete(PrepareLock).where(PrepareLock.tx_id == tx_id))
             await cleanup.execute(delete(Transaction).where(Transaction.tx_id == tx_id))
-            await cleanup.execute(delete(Debt).where(Debt.equivalent_id == equivalent.id))
             await cleanup.execute(
                 delete(TrustLine).where(TrustLine.equivalent_id == equivalent.id)
             )

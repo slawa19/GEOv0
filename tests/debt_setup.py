@@ -1,7 +1,7 @@
 """The test-local operation context, and the static guard that keeps its blocks honest.
 
-Programme 015, phase B step 4, slice B (design v2 §7 "Test-local context", §8 "Test migration and
-codemod safety", §9 C21).
+Programme 015, phase B step 4, slices B and C (design v2 §7 "Test-local context", §8 "Test
+migration and codemod safety", §9 C21).
 
 WHY THIS EXISTS. Slice A built the debt journal (`app/core/ledger/journal.py`): once its listeners
 are registered, a row in `debts` may only change inside a declared operation, and a bare
@@ -10,13 +10,15 @@ nothing. Slice C registers the listeners; if the suite reached that day unmigrat
 those places would fail at once and the activation could not be told apart from a defect in the
 journal. This module is the declaration those places migrate onto.
 
-WHY IT IS A NO-OP TODAY, AND WHY THAT IS THE POINT. The journal is NOT installed on any engine in
-this tree (slice A registers nothing globally, by design). While that is true, `debt_fixture_setup`
-does nothing at all: no SQL, no flush, no session state. That is what makes this slice's migration
-behaviour-neutral and lets the two canonical gates keep their exact baseline counts - which is, in
-turn, the evidence that wrapping the setup sites changed no test's meaning. The moment slice C
-installs the journal, the same call sites open and complete a real `TEST_FIXTURE` operation, with
-no further edit to any test.
+IT IS LIVE (slice C, 2026-09-12). While slice B was landing, the journal was installed on no engine
+at all and `debt_fixture_setup` did nothing: no SQL, no flush, no session state. That is what made
+the migration behaviour-neutral and let both canonical gates keep their exact baseline counts -
+the evidence that wrapping ~130 setup sites changed no test's meaning. Slice C armed the journal on
+the `Engine` and `Session` classes (`app/core/ledger/journal.py`, `arm_journal_globally`), and the
+same call sites now open and complete a real `TEST_FIXTURE` operation with no further edit to any
+test. The no-op path below remains, and is not dead: it is what an engine the journal has been
+stood down on still runs (`uninstall_write_guard`), and it is what makes `journal_is_active` an
+honest question rather than a constant.
 
 WHAT IT DELIBERATELY DOES NOT DO: it never flushes. Design v2 §8 R2 forbids inserting a flush where
 none existed, because a flush is SQL and SQL is behaviour. The block ends just before whatever
@@ -50,7 +52,9 @@ __all__ = [
     "add_debts",
     "debt_fixture_setup",
     "fixture_block_violations",
+    "writer_operation",
     "journal_is_active",
+    "purge_test_ledger",
 ]
 
 #: The operation kind reserved for fixture setup. `TEST_FIXTURE` and `SEED` are the only kinds the
@@ -142,6 +146,168 @@ async def debt_fixture_setup(session: Any, *, label: str) -> AsyncIterator[Any]:
         scope_equivalent_ids=None,
     ) as record:
         yield record
+
+
+@asynccontextmanager
+async def writer_operation(
+    session: Any,
+    *,
+    kind: str,
+    equivalent_ids: Iterable[Any],
+    initiator_id: Any = None,
+    label: str = "writer-internals",
+) -> AsyncIterator[Any]:
+    """The operation a WRITER would have opened, for a test that drives the writer's internals.
+
+    WHY IT IS NOT `debt_fixture_setup` (design v2 §8 R5/F7). A test that calls
+    `PaymentEngine._apply_flow` or `InjectExecutor.stage_inject_event` directly is exercising a
+    production writer, not setting up a fixture. Wrapping those calls in a `TEST_FIXTURE` context
+    would journal a payment's effects under the kind reserved for scaffolding, and `C21`'s runtime
+    half - the journal's refusal to nest operations - only catches application code that opens an
+    operation OF ITS OWN, which `_apply_flow` does not. So these tests declare the writer's REAL
+    kind, and the journal records what a payment or an inject actually did.
+
+    `PAYMENT` and `CLEARING` carry a `tx_id` that references `transactions.tx_id`, so this creates
+    the minimal `Transaction` row the reference needs when the caller has not. That row is an extra
+    write these tests did not make before; it is named here rather than hidden, and none of them
+    asserts anything about `transactions`.
+    """
+
+    if not journal_is_active(session):
+        yield None
+        return
+
+    from app.core.ledger.journal import debt_operation
+    from app.db.journal_tables import OPERATION_KINDS_WITH_TX
+
+    tx_id = None
+    if kind in OPERATION_KINDS_WITH_TX:
+        from app.db.models.transaction import Transaction
+
+        tx_id = f"WRITER-{uuid.uuid4()}"
+        session.add(
+            Transaction(
+                tx_id=tx_id,
+                type="PAYMENT" if kind == "PAYMENT" else "CLEARING",
+                initiator_id=initiator_id,
+                payload={},
+                state="NEW",
+            )
+        )
+        await session.flush()
+
+    async with debt_operation(
+        session,
+        kind=kind,
+        identity=f"{_node_id()}:{label}:{uuid.uuid4()}",
+        tx_id=tx_id,
+        intent={"node_id": _node_id(), "label": label, "driven_directly": True},
+        scope_equivalent_ids=set(equivalent_ids),
+        intent_equivalent_ids=set(equivalent_ids),
+    ) as record:
+        yield record
+
+
+def _uuid_literals(values: Iterable[Any], dialect: str) -> list[str]:
+    """The values as SQL literals of this dialect's UUID storage, or a loud failure.
+
+    EVERY VALUE GOES THROUGH `uuid.UUID` FIRST, which is what makes the interpolation below safe -
+    nothing that is not a UUID can reach the statement.
+
+    AND THE SPELLING IS PER DIALECT, which is not cosmetic. `sqlalchemy.Uuid(as_uuid=True)` stores
+    the 32-character hex WITHOUT dashes on SQLite and a native `uuid` on PostgreSQL, so a purge
+    written with the canonical dashed form matches nothing at all on the default tier - it deletes
+    no rows, raises nothing, and the next `DELETE FROM participants` fails on a foreign key whose
+    referent the teardown believed it had removed. Measured 2026-09-12 while activating the
+    journal, and it is exactly the shape of a cleanup that silently does nothing.
+    """
+
+    ids = [uuid.UUID(str(value)) for value in values]
+    return [value.hex if dialect == "sqlite" else str(value) for value in ids]
+
+
+def _sql_in(values: Sequence[str]) -> str:
+    return ", ".join(f"'{value}'" for value in values)
+
+
+async def purge_test_ledger(
+    session_or_connection: Any,
+    *,
+    equivalent_ids: Iterable[Any] = (),
+    tx_ids: Iterable[str] = (),
+) -> None:
+    """Delete a test's debts AND the journal rows that describe them, through the driver.
+
+    WHY IT EXISTS (design v2 §8 R6). Cleanups across this suite end with
+    `session.execute(delete(Debt).where(...))`. Once the journal is armed that is Core DML against
+    `debts` outside a verified flush, and the write guard refuses it - correctly, because it is
+    indistinguishable from a writer moving money with no record. A teardown is not a money write,
+    so it goes round the guard the only way this module documents as permitted: `exec_driver_sql`,
+    which fires no `before_execute`.
+
+    AND IT DELETES THE JOURNAL ROWS TOO, which the old one-liner had no reason to. The journal's
+    foreign keys are RESTRICT: an entry naming an equivalent keeps that equivalent alive, so a
+    teardown that removed only the debts would leave the next test's `DELETE FROM equivalents`
+    failing on a reference it cannot see. That RESTRICT is deliberate (`C17`) - history must outlive
+    the debts - which is exactly why the disposal has to name the history.
+
+    SCOPED, NEVER "EVERYTHING". Rows are removed by the ids the caller names and by nothing else,
+    and every id is put through `uuid.UUID` first, which is both the injection guard and the reason
+    the statements can interpolate rather than bind (paramstyle differs between pysqlite and
+    asyncpg, and a teardown helper that worked on one tier only would be worse than none).
+    """
+
+    transactions = [str(value) for value in tx_ids]
+    if not list(equivalent_ids) and not transactions:
+        return
+
+    connection = session_or_connection
+    if not hasattr(connection, "exec_driver_sql"):
+        connection = await connection.connection()
+    equivalents = _uuid_literals(equivalent_ids, connection.dialect.name)
+
+    conditions: list[str] = []
+    if equivalents:
+        conditions.append(
+            f"id IN (SELECT operation_id FROM debt_journal_entries "
+            f"WHERE equivalent_id IN ({_sql_in(equivalents)}))"
+        )
+        conditions.append(
+            f"id IN (SELECT operation_id FROM debt_operation_equivalents "
+            f"WHERE equivalent_id IN ({_sql_in(equivalents)}))"
+        )
+    if transactions:
+        quoted = ", ".join(f"'{value}'" for value in transactions if "'" not in value)
+        if quoted:
+            conditions.append(f"tx_id IN ({quoted})")
+
+    # THE OPERATION IDS ARE RESOLVED FIRST, INTO PYTHON, and that is not a style choice: the filter
+    # below finds an envelope through its entries and its per-equivalent rows, and the first two
+    # statements delete exactly those. A third statement that re-evaluated the same subquery would
+    # match nothing at all, leaving the envelope behind - and an envelope holds a RESTRICT reference
+    # to `transactions.tx_id`, so the caller's next `DELETE FROM transactions` failed on a row the
+    # teardown believed it had removed. Measured 2026-09-12, arming the journal.
+    operation_filter = " OR ".join(conditions)
+    operation_ids = [
+        row[0]
+        for row in (
+            await connection.exec_driver_sql(
+                f"SELECT id FROM debt_operations WHERE {operation_filter}"  # noqa: S608
+            )
+        ).all()
+    ]
+    if operation_ids:
+        targets = _sql_in(_uuid_literals(operation_ids, connection.dialect.name))
+        for statement in (
+            f"DELETE FROM debt_journal_entries WHERE operation_id IN ({targets})",
+            f"DELETE FROM debt_operation_equivalents WHERE operation_id IN ({targets})",
+            f"DELETE FROM debt_operations WHERE id IN ({targets})",
+        ):
+            await connection.exec_driver_sql(statement)
+    if equivalents:
+        await connection.exec_driver_sql(
+            f"DELETE FROM debts WHERE equivalent_id IN ({_sql_in(equivalents)})"
+        )
 
 
 async def add_debts(session: Any, debts: Iterable[Any], *, label: str = "setup") -> Sequence[Any]:

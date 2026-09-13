@@ -6,6 +6,7 @@ from decimal import Decimal
 import pytest
 
 from sqlalchemy import select
+from tests.debt_setup import purge_test_ledger
 
 
 pytestmark = pytest.mark.postgres
@@ -263,6 +264,11 @@ async def test_concurrent_payments_shared_bottleneck_commit_once_postgres(
                 )
             async with asyncio.timeout(5.0):
                 async with TestingSessionLocal() as cleanup:
+                    # The debts AND the journal rows that describe them, through the driver and BEFORE the
+                    # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
+                    # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
+                    # envelope still standing would block the transaction delete above it.
+                    await purge_test_ledger(cleanup, equivalent_ids=[eq.id])
                     await cleanup.execute(
                         delete(IntegrityAuditLog).where(
                             IntegrityAuditLog.tx_id.in_(tx_ids)
@@ -273,9 +279,6 @@ async def test_concurrent_payments_shared_bottleneck_commit_once_postgres(
                     )
                     await cleanup.execute(
                         delete(Transaction).where(Transaction.tx_id.in_(tx_ids))
-                    )
-                    await cleanup.execute(
-                        delete(Debt).where(Debt.equivalent_id == eq.id)
                     )
                     await cleanup.execute(
                         delete(TrustLine).where(TrustLine.equivalent_id == eq.id)

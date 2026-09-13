@@ -31,9 +31,28 @@ from app.utils.exceptions import (
 from app.utils.metrics import PAYMENT_EVENTS_TOTAL
 
 from app.core.integrity import compute_integrity_checkpoint_for_equivalent
+from app.core.ledger.journal import debt_operation
 from app.db.sqlite_transaction_control import sqlite_busy_error_name
 
 logger = logging.getLogger(__name__)
+
+
+#: Scale 8, the scale every money column in this repository carries.
+_MONEY_QUANTUM = Decimal("1E-8")
+
+
+def _scale8_money(amount: Decimal) -> str:
+    """A payment flow amount as the exact scale-8 string the operation intent records.
+
+    `"8.00"` and `"8.00000000"` are the same money, and an intent recording whichever spelling a
+    lock happened to hold would give two identical payments two different digests. The amounts
+    reaching here were validated by `_parse_persisted_prepare_locks` and carry scale 8 or less, so
+    `quantize` widens and never rounds; were one ever to carry more, the journal's own quantization
+    predicate refuses the debt write that follows, so the operation fails loudly instead of
+    recording a rounded intent for an exact payment.
+    """
+
+    return f"{amount.quantize(_MONEY_QUANTUM):f}"
 
 
 _T = TypeVar("_T")
@@ -1269,170 +1288,219 @@ class PaymentEngine:
                 )
                 raise ConflictException(f"Transaction {tx_id} expired before commit")
 
-            # 2. Process each lock (segment)
-            flows_by_equivalent: dict[UUID, list[tuple[UUID, UUID, Decimal]]] = {}
-            affected_pids_by_equivalent: dict[UUID, set[UUID]] = {}
-            flows_parsed_by_lock: list[list[tuple[UUID, UUID, Decimal, UUID]]] = []
-
-            for lock in validated_locks:
-                parsed = [
-                    (flow.from_id, flow.to_id, flow.amount, flow.equivalent_id)
-                    for flow in lock.flows
-                ]
-                for from_id, to_id, amount, equivalent_id in parsed:
-                    flows_by_equivalent.setdefault(equivalent_id, []).append(
-                        (from_id, to_id, amount)
-                    )
-                    affected = affected_pids_by_equivalent.setdefault(
-                        equivalent_id, set()
-                    )
-                    affected.add(from_id)
-                    affected.add(to_id)
-                flows_parsed_by_lock.append(parsed)
-
-            net_positions_before_by_equivalent: dict[UUID, dict[UUID, Decimal]] = {}
-            for eq_id, pids in affected_pids_by_equivalent.items():
-                net_positions_before_by_equivalent[eq_id] = await self._snapshot_net_positions(
-                    equivalent_id=eq_id,
-                    participant_ids=pids,
-                )
-
-            affected_pairs_by_equivalent: dict[UUID, set[tuple[UUID, UUID]]] = {}
-            for parsed in flows_parsed_by_lock:
-                for from_id, to_id, amount, equivalent_id in parsed:
-                    pairs = affected_pairs_by_equivalent.setdefault(equivalent_id, set())
-                    pairs.add((from_id, to_id))
-                    pairs.add((to_id, from_id))
-
-                    await self._apply_flow(from_id, to_id, amount, equivalent_id)
-
-                await self.session.flush()
-
-            # 2a. Invariants: trust limits + debt symmetry.
+            # THE OPERATION ENVELOPE (programme 015, phase B step 4). Everything from here to the
+            # deletion of the prepare locks is one declared debt operation: what this payment said
+            # it was about to do, recorded before it does it.
             #
-            # The zero-sum call that stood here was removed by T1402 of programme 014. It scanned
-            # the whole equivalent on every payment and could not fail: `_compute_imbalance` sums
-            # the same `Debt` rows grouped by creditor and by debtor and returns the difference,
-            # which telescopes to zero for any row set. Aborting a payment on it was therefore
-            # impossible, and 008 required the call removed from this path
-            # (`008/tasks.md:305,311-321`). Nothing replaces it here: the replacement invariant is
-            # programme 015, and this path must not pretend to a check it is not making.
-            from app.core.invariants import InvariantChecker
-            from app.utils.exceptions import IntegrityViolationException
+            # WHERE IT OPENS. After the TTL branch above, because an expired payment aborts and
+            # writes no debts at all, and an envelope for it would record an intent nothing ever
+            # carried out.
+            #
+            # WHERE IT CLOSES, and this is load-bearing rather than tidy: BEFORE
+            # `delete(PrepareLock)` below. `debt_operation` INSERTs and flushes the envelope at
+            # open, so the row is already on this connection when the locks are deleted. The
+            # prepare locks are the only authoritative statement of what this payment was allowed
+            # to do; once they are gone, an envelope not yet written could never be reconstructed,
+            # and a crash between the two statements would leave a payment whose authority is
+            # deleted and whose journal never began.
+            #
+            # THE INTENT is the validated flows per lock - the rows `_parse_persisted_prepare_locks`
+            # validated, as exact scale-8 strings - plus the tx id. Not the outcome: an intent read
+            # back from the result cannot disagree with it, and being able to disagree is the
+            # entire reason it is recorded.
+            _intent_equivalent_ids = self._equivalent_ids_from_validated_locks(
+                validated_locks
+            )
+            async with debt_operation(
+                self.session,
+                kind="PAYMENT",
+                identity=tx_id,
+                tx_id=tx_id,
+                intent={
+                    "tx_id": tx_id,
+                    "locks": [
+                        {
+                            "lock_id": str(lock.lock_id),
+                            "flows": [
+                                {
+                                    "from": str(flow.from_id),
+                                    "to": str(flow.to_id),
+                                    "amount": _scale8_money(flow.amount),
+                                    "equivalent": str(flow.equivalent_id),
+                                }
+                                for flow in lock.flows
+                            ],
+                        }
+                        for lock in validated_locks
+                    ],
+                },
+                scope_equivalent_ids=_intent_equivalent_ids,
+                intent_equivalent_ids=_intent_equivalent_ids,
+            ):
+                # 2. Process each lock (segment)
+                flows_by_equivalent: dict[UUID, list[tuple[UUID, UUID, Decimal]]] = {}
+                affected_pids_by_equivalent: dict[UUID, set[UUID]] = {}
+                flows_parsed_by_lock: list[list[tuple[UUID, UUID, Decimal, UUID]]] = []
 
-            checker = InvariantChecker(self.session)
-            try:
-                for eq_id, pairs in affected_pairs_by_equivalent.items():
-                    await checker.check_trust_limits(
-                        equivalent_id=eq_id, participant_pairs=list(pairs)
-                    )
-                    await checker.check_debt_symmetry(
-                        equivalent_id=eq_id, participant_pairs=list(pairs)
-                    )
-                    await self.check_payment_delta(
+                for lock in validated_locks:
+                    parsed = [
+                        (flow.from_id, flow.to_id, flow.amount, flow.equivalent_id)
+                        for flow in lock.flows
+                    ]
+                    for from_id, to_id, amount, equivalent_id in parsed:
+                        flows_by_equivalent.setdefault(equivalent_id, []).append(
+                            (from_id, to_id, amount)
+                        )
+                        affected = affected_pids_by_equivalent.setdefault(
+                            equivalent_id, set()
+                        )
+                        affected.add(from_id)
+                        affected.add(to_id)
+                    flows_parsed_by_lock.append(parsed)
+
+                net_positions_before_by_equivalent: dict[UUID, dict[UUID, Decimal]] = {}
+                for eq_id, pids in affected_pids_by_equivalent.items():
+                    net_positions_before_by_equivalent[eq_id] = await self._snapshot_net_positions(
                         equivalent_id=eq_id,
-                        flows=flows_by_equivalent.get(eq_id, []),
-                        net_positions_before=net_positions_before_by_equivalent.get(eq_id, {}),
+                        participant_ids=pids,
                     )
-            except IntegrityViolationException as exc:
-                # IMPORTANT:
-                # PaymentService may call engine methods with commit=False inside a
-                # surrounding (nested) transaction (e.g. simulator real-mode tick).
-                # Calling session.rollback() inside that context can close the
-                # transaction while the context manager is still active, leading to:
-                # "Can't operate on closed transaction inside context manager".
-                if commit:
-                    await self.session.rollback()
-                await self.abort(
-                    tx_id,
-                    reason=f"Invariant violation: {exc.code}",
-                    error_code=getattr(exc, "code", None),
-                    details=getattr(exc, "details", None),
-                    commit=commit,
-                    _tx_lock_already_held=not commit,
-                    _equivalent_owner_locks_already_held=not commit,
-                )
-                raise
 
-            # FIX-014: write integrity audit trail per equivalent (best-effort).
-            try:
-                payload = tx_payload
-                participant_pids: set[str] = set()
-                for key in ("from", "to"):
-                    value = payload.get(key)
-                    if isinstance(value, str) and value:
-                        participant_pids.add(value)
+                affected_pairs_by_equivalent: dict[UUID, set[tuple[UUID, UUID]]] = {}
+                for parsed in flows_parsed_by_lock:
+                    for from_id, to_id, amount, equivalent_id in parsed:
+                        pairs = affected_pairs_by_equivalent.setdefault(equivalent_id, set())
+                        pairs.add((from_id, to_id))
+                        pairs.add((to_id, from_id))
 
-                routes = payload.get("routes")
-                if isinstance(routes, list):
-                    for route in routes:
-                        if not isinstance(route, dict):
-                            continue
-                        path = route.get("path")
-                        if isinstance(path, list):
-                            for pid in path:
-                                if isinstance(pid, str) and pid:
-                                    participant_pids.add(pid)
+                        await self._apply_flow(from_id, to_id, amount, equivalent_id)
 
-                for eq_id in affected_pairs_by_equivalent.keys():
-                    try:
-                        eq_code = (
-                            await self.session.execute(
-                                select(Equivalent.code).where(Equivalent.id == eq_id)
-                            )
-                        ).scalar_one_or_none()
-                        eq_code_str = str(eq_code or eq_id)
+                    await self.session.flush()
 
-                        cp_before = checkpoints_before.get(eq_id)
-                        before_sum = getattr(cp_before, "checksum", "") or ""
+                # 2a. Invariants: trust limits + debt symmetry.
+                #
+                # The zero-sum call that stood here was removed by T1402 of programme 014. It scanned
+                # the whole equivalent on every payment and could not fail: `_compute_imbalance` sums
+                # the same `Debt` rows grouped by creditor and by debtor and returns the difference,
+                # which telescopes to zero for any row set. Aborting a payment on it was therefore
+                # impossible, and 008 required the call removed from this path
+                # (`008/tasks.md:305,311-321`). Nothing replaces it here: the replacement invariant is
+                # programme 015, and this path must not pretend to a check it is not making.
+                from app.core.invariants import InvariantChecker
+                from app.utils.exceptions import IntegrityViolationException
 
-                        cp_after = await compute_integrity_checkpoint_for_equivalent(
-                            self.session,
+                checker = InvariantChecker(self.session)
+                try:
+                    for eq_id, pairs in affected_pairs_by_equivalent.items():
+                        await checker.check_trust_limits(
+                            equivalent_id=eq_id, participant_pairs=list(pairs)
+                        )
+                        await checker.check_debt_symmetry(
+                            equivalent_id=eq_id, participant_pairs=list(pairs)
+                        )
+                        await self.check_payment_delta(
                             equivalent_id=eq_id,
+                            flows=flows_by_equivalent.get(eq_id, []),
+                            net_positions_before=net_positions_before_by_equivalent.get(eq_id, {}),
                         )
-                        after_sum = (
-                            getattr(cp_after, "checksum", before_sum) or before_sum
-                        )
-                        invariants_status = (
-                            getattr(cp_after, "invariants_status", {}) or {}
-                        )
-                        passed = bool(invariants_status.get("passed", False))
+                except IntegrityViolationException as exc:
+                    # IMPORTANT:
+                    # PaymentService may call engine methods with commit=False inside a
+                    # surrounding (nested) transaction (e.g. simulator real-mode tick).
+                    # Calling session.rollback() inside that context can close the
+                    # transaction while the context manager is still active, leading to:
+                    # "Can't operate on closed transaction inside context manager".
+                    if commit:
+                        await self.session.rollback()
+                    await self.abort(
+                        tx_id,
+                        reason=f"Invariant violation: {exc.code}",
+                        error_code=getattr(exc, "code", None),
+                        details=getattr(exc, "details", None),
+                        commit=commit,
+                        _tx_lock_already_held=not commit,
+                        _equivalent_owner_locks_already_held=not commit,
+                    )
+                    raise
 
-                        self.session.add(
-                            IntegrityAuditLog(
-                                operation_type="PAYMENT",
-                                tx_id=tx_id,
-                                equivalent_code=eq_code_str,
-                                state_checksum_before=before_sum,
-                                state_checksum_after=after_sum,
-                                affected_participants={
-                                    "participants": sorted(participant_pids)
-                                },
-                                invariants_checked=invariants_status.get("checks")
-                                or invariants_status,
-                                verification_passed=passed,
-                                error_details=None if passed else invariants_status,
+                # FIX-014: write integrity audit trail per equivalent (best-effort).
+                try:
+                    payload = tx_payload
+                    participant_pids: set[str] = set()
+                    for key in ("from", "to"):
+                        value = payload.get(key)
+                        if isinstance(value, str) and value:
+                            participant_pids.add(value)
+
+                    routes = payload.get("routes")
+                    if isinstance(routes, list):
+                        for route in routes:
+                            if not isinstance(route, dict):
+                                continue
+                            path = route.get("path")
+                            if isinstance(path, list):
+                                for pid in path:
+                                    if isinstance(pid, str) and pid:
+                                        participant_pids.add(pid)
+
+                    for eq_id in affected_pairs_by_equivalent.keys():
+                        try:
+                            eq_code = (
+                                await self.session.execute(
+                                    select(Equivalent.code).where(Equivalent.id == eq_id)
+                                )
+                            ).scalar_one_or_none()
+                            eq_code_str = str(eq_code or eq_id)
+
+                            cp_before = checkpoints_before.get(eq_id)
+                            before_sum = getattr(cp_before, "checksum", "") or ""
+
+                            cp_after = await compute_integrity_checkpoint_for_equivalent(
+                                self.session,
+                                equivalent_id=eq_id,
                             )
-                        )
-                    except DBAPIError:
-                        # A swallowed DB error poisons the live transaction. The
-                        # retry wrapper must receive the original SQLSTATE.
-                        raise
-                    except Exception as exc:
-                        logger.warning(
-                            "event=payment.audit_log_failed tx_id=%s error_type=%s",
-                            tx_id,
-                            type(exc).__name__,
-                        )
-                        continue
-            except DBAPIError:
-                raise
-            except Exception as exc:
-                logger.warning(
-                    "event=payment.audit_log_failed tx_id=%s error_type=%s",
-                    tx_id,
-                    type(exc).__name__,
-                )
+                            after_sum = (
+                                getattr(cp_after, "checksum", before_sum) or before_sum
+                            )
+                            invariants_status = (
+                                getattr(cp_after, "invariants_status", {}) or {}
+                            )
+                            passed = bool(invariants_status.get("passed", False))
+
+                            self.session.add(
+                                IntegrityAuditLog(
+                                    operation_type="PAYMENT",
+                                    tx_id=tx_id,
+                                    equivalent_code=eq_code_str,
+                                    state_checksum_before=before_sum,
+                                    state_checksum_after=after_sum,
+                                    affected_participants={
+                                        "participants": sorted(participant_pids)
+                                    },
+                                    invariants_checked=invariants_status.get("checks")
+                                    or invariants_status,
+                                    verification_passed=passed,
+                                    error_details=None if passed else invariants_status,
+                                )
+                            )
+                        except DBAPIError:
+                            # A swallowed DB error poisons the live transaction. The
+                            # retry wrapper must receive the original SQLSTATE.
+                            raise
+                        except Exception as exc:
+                            logger.warning(
+                                "event=payment.audit_log_failed tx_id=%s error_type=%s",
+                                tx_id,
+                                type(exc).__name__,
+                            )
+                            continue
+                except DBAPIError:
+                    raise
+                except Exception as exc:
+                    logger.warning(
+                        "event=payment.audit_log_failed tx_id=%s error_type=%s",
+                        tx_id,
+                        type(exc).__name__,
+                    )
 
             # 3. Delete Locks
             delete_stmt = delete(PrepareLock).where(PrepareLock.tx_id == tx_id)

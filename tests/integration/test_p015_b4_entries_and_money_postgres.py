@@ -41,11 +41,11 @@ against a name prefix would be measuring a neighbour's rows; see `_SEEDED` and
 
 READ `tests/p015_b4_support.py` for the import rule and the two kinds of red.
 
-MARKER. This module carries `b4_counterexample` alongside `postgres` and is deselected from the
-canonical gate, the PostgreSQL tier included. It is red on purpose until step 4 exists, and STEP 4
-REMOVES THE MARKER, NOT THE ASSERTIONS - the full contract is in the comment above the marker list
-in `pytest.ini`, and `tests/unit/test_p015_b4_counterexample_marker_is_not_a_hiding_place.py` holds
-it in place.
+MARKER, HISTORICAL. This module carried `b4_counterexample` alongside `postgres` and was deselected
+from every tier while the debt journal did not exist. Step 4 slice C built it and REMOVED THE
+MARKER, not the assertions: every test below still asserts exactly what it asserted while it was
+red, and each one names in its docstring the mutation that must turn it red again. `postgres`
+stays - this tier is about PostgreSQL semantics, not about the journal's absence.
 """
 
 from __future__ import annotations
@@ -70,6 +70,7 @@ from app.db.models.participant import Participant
 from app.db.models.prepare_lock import PrepareLock
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
+from tests.debt_setup import debt_fixture_setup, purge_test_ledger
 from tests.p015_b4_support import (
     ENTRIES_TABLE,
     JOURNAL_MODULE,
@@ -87,7 +88,7 @@ from tests.p015_b4_support import (
     stored_rows,
 )
 
-pytestmark = [pytest.mark.postgres, pytest.mark.b4_counterexample]
+pytestmark = pytest.mark.postgres
 
 
 # ==============================================================================================
@@ -260,6 +261,14 @@ async def _cleanup(factory, seeded: _Seeded) -> None:
     """
     world = seeded.world
     async with factory() as session:
+        # THE JOURNAL FIRST, and through the driver. `debt_operations.tx_id` is a RESTRICT reference
+        # to `transactions.tx_id`, so an envelope still standing refuses the transaction delete
+        # below it; and `session.execute(delete(Debt))` - which `drop_world` used to do at the end -
+        # is Core DML the write guard refuses (`C2`). `purge_test_ledger` does both, scoped to this
+        # world's ids. `drop_world` still runs at the end for the participants and equivalents.
+        await purge_test_ledger(
+            session, equivalent_ids=world.equivalent_ids, tx_ids=seeded.tx_ids
+        )
         await session.execute(
             delete(PrepareLock).where(PrepareLock.participant_id.in_(world.participant_ids))
         )
@@ -423,20 +432,33 @@ async def _round_trip(factory, world: World, value: Decimal):
     counterexample here stands on - never an analytical claim about NUMERIC, always what this
     database on this dialect actually kept (`AGENTS.md` §1, "никаких гипотез из памяти сессии").
     """
+    from app.core.ledger import journal
+
     row_id = uuid.uuid4()
+    engine = factory.kw.get("bind")
+    # THE JOURNAL STANDS DOWN FOR THIS MEASUREMENT, and it must. What is measured here is what THE
+    # DIALECT does with a value - the ground truth every money counterexample in this module stands
+    # on - and a journal that refused the write would replace that measurement with its own opinion:
+    # the non-vacuity assertions that say "this database really stores/changes this number" would
+    # then be proven by the very rule they exist to justify. Per engine, and re-armed immediately
+    # (`app/core/ledger/journal.py`, `uninstall_write_guard`).
+    journal.uninstall_write_guard(engine)
     try:
-        async with factory() as session:
-            session.add(_debt_row(world, value, id=row_id))
-            await session.commit()
-    except (DatabaseError, StatementError) as exc:
-        return None, exc
-    async with factory() as fresh:
-        stored = (
-            await fresh.execute(select(Debt.amount).where(Debt.id == row_id))
-        ).scalar_one_or_none()
-    async with factory() as cleanup:
-        await cleanup.execute(Debt.__table__.delete().where(Debt.id == row_id))
-        await cleanup.commit()
+        try:
+            async with factory() as session:
+                session.add(_debt_row(world, value, id=row_id))
+                await session.commit()
+        except (DatabaseError, StatementError) as exc:
+            return None, exc
+        async with factory() as fresh:
+            stored = (
+                await fresh.execute(select(Debt.amount).where(Debt.id == row_id))
+            ).scalar_one_or_none()
+        async with factory() as cleanup:
+            await cleanup.execute(Debt.__table__.delete().where(Debt.id == row_id))
+            await cleanup.commit()
+    finally:
+        journal.install_write_guard(engine)
     return (None if stored is None else Decimal(str(stored))), None
 
 
@@ -603,8 +625,10 @@ async def test_c8_a_real_40001_leaves_one_envelope_and_only_the_successful_attem
     conflict: DBAPIError | None = None
     sqlstate: str | None = None
     try:
+        starting_edge = _debt_row(world, Decimal("10.00000000"))
         async with serializable_factory() as setup:
-            setup.add(_debt_row(world, Decimal("10.00000000")))
+            async with debt_fixture_setup(setup, label="starting-edge"):
+                setup.add(starting_edge)
             await setup.commit()
 
         mine = select(Debt).where(Debt.equivalent_id == world.equivalent.id)
@@ -613,22 +637,22 @@ async def test_c8_a_real_40001_leaves_one_envelope_and_only_the_successful_attem
             # Both transactions READ the row first: that is what makes the later write a
             # serialization failure rather than a plain lock wait.
             await loser.execute(mine)
-            await winner.execute(mine)
 
-            await winner.execute(
-                Debt.__table__.update()
-                .where(Debt.equivalent_id == world.equivalent.id)
-                .values(amount=Decimal("31.00000000"), version=1)
-            )
+            # BOTH WRITES GO THROUGH THE ORM. They used to be Core `Debt.__table__.update()`,
+            # which the journal's write guard refuses outright - that is `C2`, and it is refused
+            # whether or not an operation is open, because a Core statement is not in the flush plan
+            # the hook verified. The serialization failure this case is about is produced by two
+            # SERIALIZABLE transactions that read the same row and then write it, which is exactly
+            # what these two ORM writes do.
+            winning = (await winner.execute(mine)).scalar_one()
+            async with debt_fixture_setup(winner, label="the-winner"):
+                winning.amount = Decimal("31.00000000")
             await winner.commit()
 
             try:
+                losing = (await loser.execute(mine)).scalar_one()
                 async with await _open(api, loser, world, "real-40001", identity=identity):
-                    await loser.execute(
-                        Debt.__table__.update()
-                        .where(Debt.equivalent_id == world.equivalent.id)
-                        .values(amount=Decimal("44.00000000"), version=2)
-                    )
+                    losing.amount = Decimal("44.00000000")
                     await loser.flush()
                 await loser.commit()
             except DBAPIError as exc:
@@ -830,10 +854,15 @@ async def test_c12_p_a_value_outside_the_money_domain_is_refused_before_any_debt
                     refusal = await _refusal_or_database_error(api, session.flush())
                 if refusal is None:
                     refusal = await _refusal_or_database_error(api, session.commit())
-        except (DatabaseError, StatementError) as exc:
+        except (DatabaseError, StatementError, *api.refusals) as exc:
             # The database's own complaint is not the journal's refusal, and the `seen` assertion
             # below is what says so. Recorded here only so the scenario finishes.
-            refusal = exc
+            #
+            # A journal refusal can arrive here as well, from the operation's own completion: the
+            # hook refused the flush and poisoned the root, the Debt is still pending, and closing
+            # the block flushes it again. The FIRST refusal is the one that names the money
+            # predicate, so it is the one kept.
+            refusal = refusal if refusal is not None else exc
         finally:
             event.remove(serializable_engine.sync_engine, "before_execute", recorder)
 
@@ -1287,6 +1316,23 @@ async def test_c14_the_clearing_envelope_records_the_pre_amounts_it_actually_cle
     a, b, c = world.debtor, world.creditor, world.extra_participants[0]
     debt_ids = [uuid.uuid4() for _ in range(3)]
     try:
+        # Built before the fixture block: `fixture_block_violations` allows only constructors and
+        # session calls inside one, and a comprehension is control flow.
+        cycle_debts = [
+            Debt(
+                id=debt_id,
+                debtor_id=debtor.id,
+                creditor_id=creditor.id,
+                equivalent_id=world.equivalent.id,
+                amount=Decimal(amount),
+                version=0,
+            )
+            for debt_id, debtor, creditor, amount in (
+                (debt_ids[0], a, b, "100.00000000"),
+                (debt_ids[1], b, c, "30.00000000"),
+                (debt_ids[2], c, a, "40.00000000"),
+            )
+        ]
         async with serializable_factory() as setup:
             setup.add_all(
                 [
@@ -1301,23 +1347,8 @@ async def test_c14_the_clearing_envelope_records_the_pre_amounts_it_actually_cle
                     for debtor, creditor in ((a, b), (b, c), (c, a))
                 ]
             )
-            setup.add_all(
-                [
-                    Debt(
-                        id=debt_id,
-                        debtor_id=debtor.id,
-                        creditor_id=creditor.id,
-                        equivalent_id=world.equivalent.id,
-                        amount=Decimal(amount),
-                        version=0,
-                    )
-                    for debt_id, debtor, creditor, amount in (
-                        (debt_ids[0], a, b, "100.00000000"),
-                        (debt_ids[1], b, c, "30.00000000"),
-                        (debt_ids[2], c, a, "40.00000000"),
-                    )
-                ]
-            )
+            async with debt_fixture_setup(setup, label="cycle"):
+                setup.add_all(cycle_debts)
             await setup.commit()
 
         # The pre-amounts, captured independently and BEFORE the clearing runs.
@@ -1864,8 +1895,10 @@ async def test_c18_p_entries_come_from_the_retry_and_carry_the_concurrent_value(
     identity = _identity("40001-version-bump")
     sqlstates: list[str | None] = []
     try:
+        starting_edge = _debt_row(world, Decimal("10.00000000"))
         async with serializable_factory() as setup:
-            setup.add(_debt_row(world, Decimal("10.00000000")))
+            async with debt_fixture_setup(setup, label="starting-edge"):
+                setup.add(starting_edge)
             await setup.commit()
 
         mine = select(Debt).where(Debt.equivalent_id == world.equivalent.id)
@@ -1874,8 +1907,11 @@ async def test_c18_p_entries_come_from_the_retry_and_carry_the_concurrent_value(
             losing = (await loser.execute(mine)).scalar_one()
             competing = (await winner.execute(mine)).scalar_one()
 
-            # The competitor bumps the row through the ORM, so `version` really moves.
-            competing.amount = Decimal("31.00000000")
+            # The competitor bumps the row through the ORM, so `version` really moves - and it
+            # declares itself, because the journal asks every movement of money to name the
+            # operation that made it, a competitor's included.
+            async with debt_fixture_setup(winner, label="the-competitor"):
+                competing.amount = Decimal("31.00000000")
             await winner.commit()
 
             try:
@@ -1961,8 +1997,20 @@ _SHAPE_INVALID_FORGERIES = [
         {
             "effect": "U",
             "amount_before": "5.00000000",
-            "amount_after": "999999999999.99999999",
-            "delta": "999999999994.99999999",
+            # PAST the ceiling, which the case is named for. It used to be
+            # `999999999999.99999999` - the largest value the domain CONTAINS, asserted as legal by
+            # `test_c12_p_control_this_dialect_stores_the_whole_domain_exactly` two hundred lines
+            # up. The case never measured a refusal: it passed only because the forged row's UUIDs
+            # were bound as dashed strings and the FOREIGN KEY refused it first (fixed 2026-09-12,
+            # step 4 slice C).
+            #
+            # ON POSTGRESQL THE REFUSAL COMES FROM `NUMERIC(20, 8)` ITSELF, and that is the honest
+            # description: thirteen integer digits do not fit the column, so the type stops the row
+            # before the CHECK is consulted. The magnitude CHECK is the only line on SQLite, where
+            # the column type is not enforced at all, and it is what excludes `NaN` here - see
+            # `app/db/journal_tables.py::_money`.
+            "amount_after": "1000000000000.00000000",
+            "delta": "999999999995.00000000",
         },
         "`amount_after < 1e12` - and this is the case ONLY this tier can pose, because the value is "
         "four orders of magnitude outside the domain the SQLite tier is allowed to write",
@@ -2166,7 +2214,11 @@ async def _forge(factory, world: World, table: str, overrides: dict):
                 entry = _entry_row(operation_id, world, overrides)
                 await session.execute(text(_insert(ENTRIES_TABLE, entry)), entry)
             await session.commit()
-        except DatabaseError as exc:
+        except DBAPIError as exc:
+            # `DBAPIError` and not `DatabaseError`: a value past `NUMERIC(20, 8)` reaches asyncpg as
+            # `NumericValueOutOfRangeError`, which SQLAlchemy wraps in the BASE class. Catching only
+            # `DatabaseError` let that one escape the helper entirely, so the case named for the
+            # magnitude ceiling reported an error instead of a refusal.
             await session.rollback()
             return exc
         finally:

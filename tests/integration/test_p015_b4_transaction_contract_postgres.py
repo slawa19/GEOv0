@@ -32,11 +32,11 @@ and backend state on a connection that is not the one under test.
 
 READ `tests/p015_b4_support.py` for the import rule and the two kinds of red.
 
-MARKER. This module carries `b4_counterexample` alongside `postgres` and is deselected from the
-canonical gate, the PostgreSQL tier included. It is red on purpose until step 4 exists, and STEP 4
-REMOVES THE MARKER, NOT THE ASSERTIONS - the full contract is in the comment above the marker list
-in `pytest.ini`, and `tests/unit/test_p015_b4_counterexample_marker_is_not_a_hiding_place.py` holds
-it in place.
+MARKER, HISTORICAL. This module carried `b4_counterexample` alongside `postgres` and was deselected
+from every tier while the debt journal did not exist. Step 4 slice C built it and REMOVED THE
+MARKER, not the assertions: every test below still asserts exactly what it asserted while it was
+red, and each one names in its docstring the mutation that must turn it red again. `postgres`
+stays - this tier is about PostgreSQL semantics, not about the journal's absence.
 """
 
 from __future__ import annotations
@@ -46,10 +46,11 @@ from decimal import Decimal
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import insert, literal, select, text
+from sqlalchemy import delete, insert, literal, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.db.models.debt import Debt
+from app.db.models.participant import Participant
 from tests.p015_b4_support import (
     JOURNAL_MODULE,
     OPERATIONS_TABLE,
@@ -66,7 +67,7 @@ from tests.p015_b4_support import (
     stored_rows,
 )
 
-pytestmark = [pytest.mark.postgres, pytest.mark.b4_counterexample]
+pytestmark = pytest.mark.postgres
 
 
 def _identity(name: str) -> str:
@@ -275,6 +276,9 @@ async def test_c10_p_a_refused_root_commit_leaves_the_backend_idle(serializable_
         await drop_world(serializable_factory, world)
 
 
+# The journal detaches the savepoint it rolled back (`_release_refused_nested`), so the tidy-up
+# rollback below finds it already gone and SQLAlchemy says so.
+@pytest.mark.filterwarnings("ignore:nested transaction already deassociated")
 @pytest.mark.asyncio
 async def test_c10_p_a_refused_release_leaves_the_backend_in_transaction(
     serializable_factory, watcher
@@ -316,6 +320,14 @@ async def test_c10_p_a_refused_release_leaves_the_backend_in_transaction(
             except api.refusals as exc:  # noqa: B902
                 release_refusal = exc
             state = await watcher(backend_pid)
+            # THE SAVEPOINT IS ROLLED BACK FIRST, so that what refuses the commit below is the
+            # JOURNAL and not SQLAlchemy. A `NestedTransaction` whose RELEASE raised is left
+            # deactivated, and the next `Session.commit()` on it raises before any Core commit event
+            # runs - a refusal by the ORM's bookkeeping, which says nothing about the root poison
+            # this test is named after. The rollback clears that bookkeeping and, by design, KEEPS
+            # the poison (`app/core/ledger/journal.py`, `_on_rollback_savepoint`). The backend state
+            # above was read BEFORE it, so the "still in transaction" observation is untouched.
+            await nested.rollback()
             commit_refusal = await refusal_of(api, session.commit())
 
         after = await stored_debts(serializable_factory, world)
@@ -526,9 +538,41 @@ async def test_condition2_p_an_autocommit_root_is_refused_before_the_operation_o
             f"an AUTOCOMMIT root"
         )
         # NON-VACUITY 2: AUTOCOMMIT is really in effect - a write that was rolled back stayed.
-        assert durable.get(("debtor", "creditor", "eq")) == Decimal("3.00000000"), (
-            f"stand: the write was not durable after a rollback, so this connection is not in "
-            f"AUTOCOMMIT after all: {durable}"
+        #
+        # IT IS PROVEN ON A ROW THE JOURNAL DOES NOT POLICE, and it has to be. This used to assert
+        # that the DEBT above survived its rollback, which was the defect itself: once the journal
+        # refuses the operation before it opens, no debt is ever flushed and the sentence became
+        # unsatisfiable. A `Participant` reaches the same connection through the same session and is
+        # nothing to do with money, so it measures the isolation level and only that.
+        probe_pid = f"AC_{uuid.uuid4().hex[:10]}"
+        async with autocommit_factory() as probe_session:
+            probe_session.add(
+                Participant(
+                    pid=probe_pid,
+                    display_name="Autocommit probe",
+                    public_key=f"pk_ac_{probe_pid}"[:64],
+                    type="person",
+                    status="active",
+                    profile={},
+                )
+            )
+            await probe_session.flush()
+            await probe_session.rollback()
+        async with serializable_factory() as reader:
+            survived = (
+                await reader.execute(select(Participant.id).where(Participant.pid == probe_pid))
+            ).scalars().all()
+        try:
+            assert len(survived) == 1, (
+                f"stand: a row written and then rolled back on this connection did not survive, so "
+                f"it is not in AUTOCOMMIT after all"
+            )
+        finally:
+            async with serializable_factory() as remover:
+                await remover.execute(delete(Participant).where(Participant.pid == probe_pid))
+                await remover.commit()
+        assert durable == {}, (
+            f"the operation was refused before it opened, yet a debt is durable: {durable}"
         )
 
         # VERDICT.

@@ -11,7 +11,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import delete, select, text
 
-from tests.debt_setup import debt_fixture_setup
+from tests.debt_setup import debt_fixture_setup, purge_test_ledger
 
 
 pytestmark = pytest.mark.postgres
@@ -200,6 +200,11 @@ async def test_skip_ends_service_owned_transaction_postgres(
         await session.rollback()
         await session.close()
         async with TestingSessionLocal() as cleanup:
+            # The debts AND the journal rows that describe them, through the driver and BEFORE the
+            # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
+            # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
+            # envelope still standing would block the transaction delete above it.
+            await purge_test_ledger(cleanup, equivalent_ids=[equivalent_id])
             await cleanup.execute(
                 delete(PrepareLock).where(
                     PrepareLock.participant_id.in_(participant_ids)
@@ -209,9 +214,6 @@ async def test_skip_ends_service_owned_transaction_postgres(
                 delete(Transaction).where(
                     Transaction.initiator_id.in_(participant_ids)
                 )
-            )
-            await cleanup.execute(
-                delete(Debt).where(Debt.equivalent_id == equivalent_id)
             )
             await cleanup.execute(
                 delete(TrustLine).where(TrustLine.equivalent_id == equivalent_id)
@@ -455,6 +457,11 @@ async def test_policy_skip_releases_debt_rows_before_concurrent_payment_postgres
                         await session.close()
 
                 async with TestingSessionLocal() as cleanup:
+                    # The debts AND the journal rows that describe them, through the driver and BEFORE the
+                    # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
+                    # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
+                    # envelope still standing would block the transaction delete above it.
+                    await purge_test_ledger(cleanup, equivalent_ids=[equivalent_id])
                     await cleanup.execute(
                         delete(IntegrityAuditLog).where(
                             IntegrityAuditLog.equivalent_code == equivalent_code
@@ -469,9 +476,6 @@ async def test_policy_skip_releases_debt_rows_before_concurrent_payment_postgres
                         delete(Transaction).where(
                             Transaction.initiator_id.in_(participant_ids)
                         )
-                    )
-                    await cleanup.execute(
-                        delete(Debt).where(Debt.equivalent_id == equivalent_id)
                     )
                     await cleanup.execute(
                         delete(TrustLine).where(

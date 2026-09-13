@@ -296,11 +296,23 @@ class _TxState:
     generation: int = 0
 
 
+def _stood_down(engine: Any) -> bool:
+    """Whether the journal has been stood down on this engine (see `uninstall_write_guard`).
+
+    Declared here, above every listener, because each of them has to ask: under global arming the
+    listeners are on the `Engine` class and a stood-down engine's statements still reach them.
+    """
+
+    return _sync_engine(engine) in _STOOD_DOWN
+
+
 #: transaction -> state. Weak keys: the state may never outlive the transaction it describes, and
 #: no value in it may point back at the key (condition 2).
 _REGISTRY: "weakref.WeakKeyDictionary[RootTransaction, _TxState]" = weakref.WeakKeyDictionary()
 
 def _state_for(conn: Connection, *, create: bool = False) -> _TxState | None:
+    if _stood_down(conn.engine):
+        return None
     root = conn.get_transaction()
     if root is None:
         return None
@@ -584,6 +596,18 @@ def _matches_any(effect: str, row: dict, grant: _Grant) -> bool:
     """
 
     amounts = [value for value in row.values() if isinstance(value, Decimal)]
+    # AND THE VALUE UNDER THE LITERAL `amount` KEY, WHATEVER TYPE IT ARRIVED AS. Measured
+    # 2026-09-12, arming the journal: a caller that writes `Debt(amount=5)` - an int, which the ORM
+    # is perfectly happy to accept and the column converts on the way out - produces a parameter
+    # dict whose amount is an `int`, so the `Decimal` scan above found NOTHING and the guard refused
+    # a write it had just verified itself. The hook's expectation is built from the attribute
+    # through `_as_decimal`, so `5` and `Decimal("5")` are the same expectation; this makes the row
+    # side agree. One extra candidate and only one: taking every numeric value in the row would
+    # make `version` an amount candidate, and a row whose amount was tampered to match some other
+    # column's number would then pass.
+    named = _as_decimal(row["amount"]) if isinstance(row.get("amount"), (int, float, str)) else None
+    if named is not None and named not in amounts:
+        amounts.append(named)
     for identifier in (value for value in row.values() if isinstance(value, uuid.UUID)):
         if effect == "D":
             if grant.take((effect, str(identifier), "")):
@@ -617,10 +641,42 @@ def _refuse_at_db_level(conn: Connection, *, savepoint: str | None) -> None:
             dialect.do_rollback(dbapi_connection)
         else:
             dialect.do_rollback_to_savepoint(conn, savepoint)
+            _release_refused_nested(conn, savepoint)
     except BaseException:
         # A connection whose refused scope could not be ended is a connection nobody can reason
         # about. Throwing it away is the only honest option left.
         conn.invalidate()
+
+
+def _release_refused_nested(conn: Connection, savepoint: str) -> None:
+    """Detach the savepoint SQLAlchemy was releasing, so the ROOT is left usable.
+
+    WHY THIS EXISTS (measured 2026-09-12, activating the journal). A refusal raised out of
+    `release_savepoint` leaves `NestedTransaction.is_active` False - `_do_commit` sets it in a
+    `finally` - while the connection still POINTS at it (`_deactivate_from_connection` runs only on
+    a successful release, `sqlalchemy/engine/base.py:2842-2853`). From then on
+    `Connection._invalid_transaction` raises `PendingRollbackError` for every further statement,
+    including the root commit.
+
+    That contradicts what a release refusal is FOR. Design v2 §1.2 splits the two recipes
+    deliberately: a root-commit refusal ends the whole transaction, a release refusal rolls back
+    ONLY to the savepoint and leaves the root open and poisoned, so that a sibling operation's work
+    is not destroyed by a neighbour's incomplete one. A root that cannot answer any statement is
+    not "open"; and the refusal of the root commit that must follow would come from SQLAlchemy's
+    bookkeeping rather than from the poison - a refusal by the wrong mechanism, which is the exact
+    class of false green this programme exists to remove (`C10`, release half).
+
+    The savepoint has already been rolled back in the DATABASE by the caller, so nothing here
+    changes what is durable: this only puts the connection's own bookkeeping back where the
+    rollback left it. Pinned to SQLAlchemy 2.0.25 along with the other private attributes
+    (`_core_chain`).
+    """
+
+    nested = conn.get_nested_transaction()
+    if nested is None or nested._savepoint != savepoint:
+        return
+    nested.is_active = False
+    nested._deactivate_from_connection(warn=False)
 
 
 def _blocking_problem(state: _TxState, *, ops: list[_OpRecord]) -> tuple[str, str] | None:
@@ -750,6 +806,9 @@ def _on_before_execute(
     (`sqlalchemy/engine/base.py:1712-1778`), and this module does not claim to cover them.
     """
 
+    if _stood_down(conn.engine):
+        return
+
     tables = _dml_tables(clauseelement)
     if not tables:
         return
@@ -823,7 +882,16 @@ def _find_operation(session: Session, conn: Connection, state: _TxState) -> _OpR
     candidates = [
         op
         for op in state.ops
-        if op.state == _OpRecord.OPEN
+        # COMPLETING BELONGS HERE, and leaving it out was a defect measured on activation
+        # (2026-09-12). `_complete` sets the record to COMPLETING and THEN flushes, and that flush
+        # is the one that carries the block's work whenever the block did not flush for itself -
+        # which is the normal shape, and the deliberate shape of `tests/debt_setup.py`, whose
+        # context adds rows and never flushes so that migrating a test adds no round trip. With
+        # only OPEN accepted, every such operation refused its own completion flush with
+        # `no_operation`: the effects it was opened to record were the ones it could not see.
+        # The window is narrow and single-occupant - a record is COMPLETING only inside `_complete`,
+        # between its own two statements - so nothing else can attach to it.
+        if op.state in (_OpRecord.OPEN, _OpRecord.COMPLETING)
         and not op.is_orphaned
         and op.session is session
         and chain[: len(op.chain)] == op.chain
@@ -880,6 +948,21 @@ def _effects_of_flush(
 
     for obj, kind in plan:
         debt_id = obj.id
+        if debt_id is None and kind == "I":
+            # THE PRIMARY KEY IS MATERIALISED HERE, and the alternative was to refuse (measured
+            # 2026-09-12, activating the journal). `Debt.id` carries a PYTHON-SIDE default
+            # (`default=uuid.uuid4`, app/db/models/debt.py:11), and a Python-side default is
+            # applied when the INSERT is built - which is AFTER this hook. So every writer that
+            # constructs `Debt(...)` without naming an id - `_apply_flow` at
+            # app/core/payments/engine.py:1566 among them - reaches `before_flush` with `obj.id`
+            # still `None`, and the refusal below would have fired on the most ordinary payment in
+            # the system.
+            #
+            # Assigning it is exactly what the ORM is about to do, a moment later and with the same
+            # function; `before_flush` is the documented place to modify the objects of a flush.
+            # Doing it here is what lets the journal entry and the `debts` row carry the SAME id,
+            # which is the whole point of recording the edge by its key.
+            obj.id = debt_id = uuid.uuid4()
         if debt_id is None:
             raise DebtJournalError(
                 Reason.INCOMPLETE_DEBT,
@@ -1009,6 +1092,8 @@ def _before_flush(session: Session, flush_context: Any, instances: Any) -> None:
         return
 
     conn = session.connection()
+    if _stood_down(conn.engine):
+        return
     # Created rather than looked up: a transaction with no operation in it is the one this hook
     # exists for, and its refusal has to be remembered somewhere.
     state = _state_for(conn, create=True)
@@ -1108,7 +1193,8 @@ def _drop_grant(session: Session) -> None:
 
 
 # =================================================================================================
-# Installation. Slice A calls this from tests only - nothing in `app/` installs it.
+# Installation. Slice C arms this on the `Engine` and `Session` CLASSES at the bottom of this
+# module; the per-target installers below remain for stands that arm or stand down one engine.
 # =================================================================================================
 
 
@@ -1132,10 +1218,77 @@ def _sync_engine(engine: Any) -> Engine:
     return getattr(engine, "sync_engine", engine)
 
 
-def install_write_guard(engine: Any) -> None:
-    """Arm the connection-level half - the write guard and the transaction events. Idempotent."""
+#: True once `arm_journal_globally()` has registered the listeners on the `Engine` and `Session`
+#: CLASSES. Slice C, the activation: before it, the journal only existed where a stand installed it.
+_ARMED_GLOBALLY = False
+
+#: Engines the journal has been stood down on, under global arming. Class-level listeners cannot be
+#: removed for one engine, so "this engine is not instrumented" - a state the mechanism is required
+#: to refuse an operation in, and therefore a state that has to stay REACHABLE - is carried here
+#: instead. Weak, because it may not keep a disposed engine alive.
+_STOOD_DOWN: "weakref.WeakSet[Engine]" = weakref.WeakSet()
+
+
+def arm_journal_globally() -> None:
+    """Register the journal on the `Engine` and `Session` classes, for this whole process.
+
+    THIS IS THE ACTIVATION. Everything else in this module was built and proven by slice A without
+    changing a single existing behaviour, because nothing called an installer. From here on, a row
+    in `debts` may only change inside a declared operation, on every engine this process creates.
+
+    CLASS LEVEL AND NOT PER ENGINE, for a reason measured in slice A (§1.3): class-level
+    `ConnectionEvents` on `Engine` apply to engines created BEFORE the registration as well as
+    after, sync and async alike. Per-engine arming would have to be repeated at every
+    `create_async_engine` in the tree - the application's, the test suite's, and every scratch
+    engine a test builds - and the one that was forgotten would be the one that wrote money with no
+    record.
+
+    Idempotent, and it must be: `app/db/session.py` imports at whatever moment the process first
+    touches the database, and more than one importer is normal.
+    """
+
+    global _ARMED_GLOBALLY
+    if _ARMED_GLOBALLY:
+        return
+    for name, handler in _CONNECTION_LISTENERS:
+        if not event.contains(Engine, name, handler):
+            event.listen(Engine, name, handler, insert=True)
+    for name, handler in _SESSION_LISTENERS:
+        if not event.contains(Session, name, handler):
+            event.listen(Session, name, handler)
+    _ARMED_GLOBALLY = True
+
+
+def journal_is_armed_globally() -> bool:
+    """Whether the class-level registration happened in this process."""
+
+    return _ARMED_GLOBALLY
+
+
+def _is_guarded(engine: Any) -> bool:
+    """Whether this engine's statements reach the journal right now."""
 
     sync_engine = _sync_engine(engine)
+    if sync_engine in _STOOD_DOWN:
+        return False
+    if _ARMED_GLOBALLY:
+        return True
+    return all(
+        event.contains(sync_engine, name, handler) for name, handler in _CONNECTION_LISTENERS
+    )
+
+
+def install_write_guard(engine: Any) -> None:
+    """Arm the connection-level half - the write guard and the transaction events. Idempotent.
+
+    Under global arming this only lifts a stand-down: registering the same handlers a second time,
+    on an instance whose class already carries them, would make every listener fire twice.
+    """
+
+    sync_engine = _sync_engine(engine)
+    _STOOD_DOWN.discard(sync_engine)
+    if _ARMED_GLOBALLY:
+        return
     for name, handler in _CONNECTION_LISTENERS:
         if not event.contains(sync_engine, name, handler):
             # `insert=True`: the journal's listeners run before anything registered afterwards. A
@@ -1145,10 +1298,21 @@ def install_write_guard(engine: Any) -> None:
 
 
 def uninstall_write_guard(engine: Any) -> None:
+    """Stand the journal down on ONE engine.
+
+    Under global arming the listeners live on the `Engine` class and cannot be removed for a single
+    instance, so the engine is recorded as stood down and every listener returns early for it. The
+    observable effect is the same one this function always had - `journal_is_installed` goes False
+    and an operation opened on this engine is refused as un-instrumented - which is what the tests
+    that stand the journal down are about.
+    """
+
     sync_engine = _sync_engine(engine)
     for name, handler in _CONNECTION_LISTENERS:
         if event.contains(sync_engine, name, handler):
             event.remove(sync_engine, name, handler)
+    if _ARMED_GLOBALLY:
+        _STOOD_DOWN.add(sync_engine)
 
 
 def install_flush_hook(session_target: Any) -> None:
@@ -1164,12 +1328,20 @@ def install_flush_hook(session_target: Any) -> None:
     `KeyError` - which is why `uninstall_flush_hook` tolerates that one exception and says so.
     """
 
+    if _ARMED_GLOBALLY:
+        # Already registered on the `Session` class itself, which every target here inherits from.
+        # A second registration on a subclass or a sessionmaker would double every flush hook.
+        return
     for name, handler in _SESSION_LISTENERS:
         if not event.contains(session_target, name, handler):
             event.listen(session_target, name, handler)
 
 
 def uninstall_flush_hook(session_target: Any) -> None:
+    if _ARMED_GLOBALLY:
+        # Nothing was registered on this target, and the class-level registration is not one
+        # target's to remove. Standing the journal down is per ENGINE (`uninstall_write_guard`).
+        return
     for name, handler in _SESSION_LISTENERS:
         if event.contains(session_target, name, handler):
             try:
@@ -1203,8 +1375,7 @@ def uninstall_journal(engine: Any, session_target: Any) -> None:
 def journal_is_installed(engine: Any) -> bool:
     """True when the connection-level half is armed on this engine. Registration, not effect."""
 
-    sync_engine = _sync_engine(engine)
-    return all(event.contains(sync_engine, name, handler) for name, handler in _CONNECTION_LISTENERS)
+    return _is_guarded(engine)
 
 
 # =================================================================================================
@@ -1558,3 +1729,22 @@ def mapped_journal_tables() -> set[str]:
             if table.name in DEBT_JOURNAL_TABLE_NAMES:
                 mapped.add(table.name)
     return mapped
+
+
+# =================================================================================================
+# Activation
+# =================================================================================================
+
+# THE JOURNAL ARMS ITSELF WHEN IT IS IMPORTED, and `app/db/models/__init__.py` imports it. That
+# pairing is the whole of C15: a `python -c`, a data-fix script or `scripts/seed_db.py` run by hand
+# imports the models and nothing else, and the protection has to arrive with the tables rather than
+# with an application entry point. Registering from `app/main.py`'s startup or from
+# `app/db/session.py` would leave every one of those writers unjournalled while every in-process
+# test still passed.
+#
+# It is a module-body call rather than something `app/db/models/__init__.py` invokes, because the
+# import is circular by construction - this module needs `Debt`, and the models package needs this
+# module - and in the direction "journal first" the models package would reach a half-initialised
+# module whose installer does not exist yet. A module arming itself at the end of its own body is
+# well-defined in both directions.
+arm_journal_globally()

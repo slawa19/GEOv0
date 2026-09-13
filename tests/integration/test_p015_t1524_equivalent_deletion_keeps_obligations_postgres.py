@@ -38,6 +38,7 @@ from app.db.models.participant import Participant
 from tests.integration.p012_pg_http import make_pg_client_fixture
 
 from tests.debt_setup import debt_fixture_setup
+from tests.debt_setup import purge_test_ledger
 
 pytestmark = pytest.mark.postgres
 
@@ -82,7 +83,11 @@ async def _cleanup(eq_id, participant_ids) -> None:
     from tests.conftest import TestingSessionLocal
 
     async with TestingSessionLocal() as s:
-        await s.execute(delete(Debt).where(Debt.equivalent_id == eq_id))
+        # The debts AND the journal rows that describe them, through the driver and BEFORE the
+        # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
+        # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
+        # envelope still standing would block the transaction delete above it.
+        await purge_test_ledger(s, equivalent_ids=[eq_id])
         await s.execute(delete(Equivalent).where(Equivalent.id == eq_id))
         await s.execute(delete(Participant).where(Participant.id.in_(participant_ids)))
         await s.commit()

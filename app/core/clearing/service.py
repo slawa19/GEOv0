@@ -27,6 +27,7 @@ from app.core.payments.engine import PaymentEngine
 from app.core.payments.router import PaymentRouter
 from app.core.invariants import InvariantChecker
 from app.core.integrity import compute_integrity_checkpoint_for_equivalent
+from app.core.ledger.journal import debt_operation
 
 logger = logging.getLogger(__name__)
 
@@ -2012,81 +2013,114 @@ class ClearingService:
             # Since we are in a transaction, we should select for update ideally.
             # For MVP, we just update.
 
-            for debt in debts:
-                if debt.amount < clear_amount:
-                    raise GeoException(f"Debt {debt.id} amount changed during clearing")
+            # THE OPERATION ENVELOPE (programme 015, phase B step 4). The clearing's declared
+            # intent, opened after the cycle has been read FOR UPDATE and before a single edge is
+            # reduced, and closed before `_commit_to_terminal` makes any of it durable.
+            #
+            # THE INTENT IS THE PRE-AMOUNTS, and it has to be: after the clearing runs they are
+            # gone - every edge is reduced by `clear_amount` and the minimum edge is deleted
+            # outright - so an intent built from anything later could only ever be compared against
+            # the answer. They come from the locked read at `:1754`, not from candidate detection:
+            # the cycle is unchanged whenever nothing else is writing, so an intent built from the
+            # detection amounts would look right in every single-threaded test and describe a state
+            # this clearing did not act on the first time it raced.
+            async with debt_operation(
+                self.session,
+                kind="CLEARING",
+                identity=tx_id_str,
+                tx_id=tx_id_str,
+                intent={
+                    "tx_id": tx_id_str,
+                    "clear_amount": f"{clear_amount.quantize(Decimal('1E-8')):f}",
+                    "equivalent_id": str(debts[0].equivalent_id),
+                    "cycle": [
+                        {
+                            "debt_id": str(debt.id),
+                            "amount": f"{debt.amount.quantize(Decimal('1E-8')):f}",
+                            "debtor_id": str(debt.debtor_id),
+                            "creditor_id": str(debt.creditor_id),
+                        }
+                        for debt in debts
+                    ],
+                },
+                scope_equivalent_ids={debts[0].equivalent_id},
+                intent_equivalent_ids={debts[0].equivalent_id},
+            ):
+                for debt in debts:
+                    if debt.amount < clear_amount:
+                        raise GeoException(f"Debt {debt.id} amount changed during clearing")
 
-                debt.amount -= clear_amount
-                if debt.amount == 0:
-                    await self.session.delete(debt)
-                else:
-                    self.session.add(debt)
+                    debt.amount -= clear_amount
+                    if debt.amount == 0:
+                        await self.session.delete(debt)
+                    else:
+                        self.session.add(debt)
 
-            await self.session.flush()
+                await self.session.flush()
 
-            checkpoint_after = None
-            try:
-                checkpoint_after = await compute_integrity_checkpoint_for_equivalent(
-                    self.session,
-                    equivalent_id=debts[0].equivalent_id,
-                )
-            except Exception:
-                logger.warning(
-                    "event=clearing.checkpoint_after_failed",
-                    exc_info=True,
-                )
                 checkpoint_after = None
-
-            try:
-                before_sum = checkpoint_before.checksum if checkpoint_before else ""
-                after_sum = (
-                    checkpoint_after.checksum if checkpoint_after else before_sum
-                )
-                invariants_status = (
-                    (checkpoint_after.invariants_status or {})
-                    if checkpoint_after
-                    else {}
-                )
-                passed = bool(invariants_status.get("passed", False))
-
-                self.session.add(
-                    IntegrityAuditLog(
-                        operation_type="CLEARING",
-                        tx_id=tx_id_str,
-                        equivalent_code=str(
-                            equivalent.code if equivalent else debts[0].equivalent_id
-                        ),
-                        state_checksum_before=before_sum,
-                        state_checksum_after=after_sum,
-                        affected_participants={
-                            "participants": [
-                                str(pid_by_id.get(p, p)) for p in participant_ids
-                            ],
-                            "edges": edges_payload,
-                        },
-                        invariants_checked=invariants_status.get("checks")
-                        or invariants_status,
-                        verification_passed=passed,
-                        error_details=None if passed else invariants_status,
+                try:
+                    checkpoint_after = await compute_integrity_checkpoint_for_equivalent(
+                        self.session,
+                        equivalent_id=debts[0].equivalent_id,
                     )
-                )
-            except Exception:
-                # Best-effort; clearing must not fail due to audit logging.
-                logger.warning(
-                    "event=clearing.audit_build_failed",
-                    exc_info=True,
+                except Exception:
+                    logger.warning(
+                        "event=clearing.checkpoint_after_failed",
+                        exc_info=True,
+                    )
+                    checkpoint_after = None
+
+                try:
+                    before_sum = checkpoint_before.checksum if checkpoint_before else ""
+                    after_sum = (
+                        checkpoint_after.checksum if checkpoint_after else before_sum
+                    )
+                    invariants_status = (
+                        (checkpoint_after.invariants_status or {})
+                        if checkpoint_after
+                        else {}
+                    )
+                    passed = bool(invariants_status.get("passed", False))
+
+                    self.session.add(
+                        IntegrityAuditLog(
+                            operation_type="CLEARING",
+                            tx_id=tx_id_str,
+                            equivalent_code=str(
+                                equivalent.code if equivalent else debts[0].equivalent_id
+                            ),
+                            state_checksum_before=before_sum,
+                            state_checksum_after=after_sum,
+                            affected_participants={
+                                "participants": [
+                                    str(pid_by_id.get(p, p)) for p in participant_ids
+                                ],
+                                "edges": edges_payload,
+                            },
+                            invariants_checked=invariants_status.get("checks")
+                            or invariants_status,
+                            verification_passed=passed,
+                            error_details=None if passed else invariants_status,
+                        )
+                    )
+                except Exception:
+                    # Best-effort; clearing must not fail due to audit logging.
+                    logger.warning(
+                        "event=clearing.audit_build_failed",
+                        exc_info=True,
+                    )
+
+                # Verify neutrality AFTER applying changes (must be within the same DB transaction).
+                await checker.verify_clearing_neutrality(
+                    list(participant_ids),
+                    debts[0].equivalent_id,
+                    positions_before,
                 )
 
-            # Verify neutrality AFTER applying changes (must be within the same DB transaction).
-            await checker.verify_clearing_neutrality(
-                list(participant_ids),
-                debts[0].equivalent_id,
-                positions_before,
-            )
-
-            # 4. Commit
-            new_tx.state = "COMMITTED"
-            self.session.add(new_tx)
+                # 4. Commit
+                new_tx.state = "COMMITTED"
+                self.session.add(new_tx)
             commit_cancellation, commit_error = await self._commit_to_terminal()
             if commit_error is not None:
                 if (

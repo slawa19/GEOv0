@@ -78,11 +78,17 @@ async def test_a_stale_writer_cannot_overwrite_the_committed_debt_amount(db_sess
             version_both_read = int(debt1.version)
             assert int(debt2.version) == version_both_read
 
-            debt1.amount = Decimal("70")
+            # EACH WRITER DECLARES ITS OWN OPERATION. Two sessions on two connections are two
+            # transactions, so the journal sees two units of work and each has to name itself; the
+            # race under test - the second writer's view of `version` is older than the first
+            # writer's commit - is untouched by the declaration.
+            async with debt_fixture_setup(s1, label="winner"):
+                debt1.amount = Decimal("70")
             await s1.commit()
 
-            debt2.amount = Decimal("130")
             with pytest.raises((StaleDataError, DBAPIError)) as refusal:
+                async with debt_fixture_setup(s2, label="loser"):
+                    debt2.amount = Decimal("130")
                 await s2.commit()
             await s2.rollback()
 

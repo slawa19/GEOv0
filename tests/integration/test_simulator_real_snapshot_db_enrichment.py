@@ -3,7 +3,7 @@ from decimal import Decimal, ROUND_DOWN
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import delete, select
+from sqlalchemy import select
 
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
@@ -108,12 +108,16 @@ async def test_real_mode_graph_snapshot_enriches_used_and_net_sign(
     # exactly the shape that fails under a concurrent writer (measured: it failed once in four full
     # tier runs even with the write moved to the last possible moment).
     async with TestingSessionLocal() as setup:
-        await setup.execute(
-            delete(Debt).where(
-                Debt.equivalent_id == eq_id,
-                Debt.creditor_id == creditor_id,
-                Debt.debtor_id == debtor_id,
-            )
+        # ONE EDGE, THROUGH THE DRIVER. `session.execute(delete(Debt))` is Core DML the journal's
+        # write guard refuses (that is `C2`), and the guard is right to: a Core DELETE against
+        # `debts` is indistinguishable from a writer removing money with no record. This is a test
+        # reset of one edge, so it takes the documented unintercepted path instead (design v2 §6,
+        # §8 R6). It stays narrow on purpose - `purge_test_ledger` would remove the whole
+        # equivalent's journal, and the comment above is about which edge this transaction opens
+        # with, not about the book.
+        await (await setup.connection()).exec_driver_sql(
+            "DELETE FROM debts WHERE equivalent_id = ? AND creditor_id = ? AND debtor_id = ?",
+            (eq_id.hex, creditor_id.hex, debtor_id.hex),
         )
         async with debt_fixture_setup(setup, label="setup"):
             setup.add(

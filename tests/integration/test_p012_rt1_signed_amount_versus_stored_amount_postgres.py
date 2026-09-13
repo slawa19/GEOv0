@@ -72,7 +72,6 @@ from httpx import AsyncClient
 from nacl.signing import SigningKey
 from sqlalchemy import delete, text
 
-from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
@@ -81,6 +80,7 @@ import app.core.payments.engine as engine_module
 from app.utils.exceptions import BadRequestException
 from app.utils.validation import MONEY_MAX_SCALE, parse_money_amount
 from tests.integration.p012_pg_http import make_pg_client_fixture
+from tests.debt_setup import purge_test_ledger
 from tests.integration.test_scenarios import (
     _sign_payment_request,
     _sign_trustline_create_request,
@@ -188,7 +188,11 @@ async def scenario(pg_client: AsyncClient) -> AsyncGenerator[_Scenario, None]:
         )
     finally:
         async with TestingSessionLocal() as cleanup:
-            await cleanup.execute(delete(Debt).where(Debt.equivalent_id == equivalent_id))
+            # The debts AND the journal rows that describe them, through the driver and BEFORE the
+            # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
+            # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
+            # envelope still standing would block the transaction delete above it.
+            await purge_test_ledger(cleanup, equivalent_ids=[equivalent_id])
             await cleanup.execute(
                 delete(TrustLine).where(TrustLine.equivalent_id == equivalent_id)
             )
@@ -440,8 +444,31 @@ async def test_rt_012_1_counter_check_widening_the_door_reproduces_the_finding_e
     #
     # So the counter-check asserts the refusal FIRST - that is new behaviour and it must not be
     # lost - and only then widens the barrier as well, to reach the ledger state `F-012-1` is
-    # about. Two independent guards now stand where one did, and reproducing the finding requires
-    # disabling both.
+    # about.
+    #
+    # A THIRD GUARD JOINED THEM on 2026-09-12, and it stands in FRONT of the other two: programme
+    # 015 step 4 armed the debt journal, whose quantization predicate refuses an amount that does
+    # not fit scale 8 BEFORE any debt SQL is sent (design v2 §4 rule 3). It answers `500`, not a
+    # domain code, because `DebtJournalError` is deliberately not a `GeoException` (design v2 §7):
+    # a journal refusal is not a business outcome, it says the process may not write money at all.
+    # That refusal is asserted here first, for the same reason the barrier's was - it is new
+    # behaviour and it must not be lost - and then the journal stands down so the barrier below can
+    # be reached. Three independent guards now stand where one did, and reproducing the finding
+    # requires disabling all three.
+    from app.core.ledger import journal
+
+    status_code, body = await _submit_signed_payment(pg_client, scenario, amount)
+    assert status_code == 500 and (body or {}).get("error", {}).get("code") == "E010", (
+        f"with every guard intact, a payment of {amount!r} must be refused by the debt journal "
+        f"before it reaches the ledger. Got {status_code} {body!r}."
+    )
+
+    # THE THIRD GUARD IS WIDENED THE SAME WAY THE DOOR WAS - by moving the constant that decides its
+    # verdict, not by removing the guard. Standing the journal down instead is not an option and the
+    # reason is worth recording: the payment engine OPENS an operation of its own, and an operation
+    # on an engine with no write guard is refused as un-instrumented (`C15`). So the journal cannot
+    # be absent from this path at all; only its money domain can be widened.
+    monkeypatch.setattr(journal, "_MONEY_QUANTUM", Decimal("1E-9"))
     status_code, body = await _submit_signed_payment(pg_client, scenario, amount)
     assert status_code == 409, (
         f"with the door widened but the delta barrier intact, the payment of {amount!r} must be "

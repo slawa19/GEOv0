@@ -71,6 +71,7 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 
 from tests.debt_setup import debt_fixture_setup
+from tests.debt_setup import purge_test_ledger
 
 pytestmark = pytest.mark.postgres
 
@@ -140,7 +141,11 @@ async def _seed(session_factory) -> _World:
 
 async def _cleanup(session_factory, world: _World) -> None:
     async with session_factory() as session:
-        await session.execute(delete(Debt).where(Debt.equivalent_id == world.equivalent_id))
+        # The debts AND the journal rows that describe them, through the driver and BEFORE the
+        # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
+        # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
+        # envelope still standing would block the transaction delete above it.
+        await purge_test_ledger(session, equivalent_ids=[world.equivalent_id])
         await session.execute(
             delete(Participant).where(
                 Participant.id.in_([world.debtor_id, world.creditor_id, world.third_id])
@@ -193,22 +198,33 @@ async def test_a_an_orm_write_of_nan_must_not_reach_the_money_column(factory):
 
         refusal: BaseException | None = None
         second = uuid.uuid4()
-        async with factory() as session:
-            async with debt_fixture_setup(session, label="setup"):
-                session.add(
-                    Debt(
-                        id=second,
-                        debtor_id=world.creditor_id,
-                        creditor_id=world.debtor_id,
-                        equivalent_id=world.equivalent_id,
-                        amount=Decimal("NaN"),
+        # THE DEBT JOURNAL STANDS DOWN FOR THIS WRITE, and it must. Armed (step 4 slice C), the
+        # journal refuses a non-finite amount by its OWN finiteness predicate, before any SQL - so
+        # `MoneyNumeric` and the column's CHECK, which this module exists to hold in place, would
+        # never be reached and its mutation would leave the test green. A test screened by a second
+        # guard has stopped measuring its subject. Per engine, re-armed immediately.
+        from app.core.ledger import journal
+
+        journal.uninstall_write_guard(factory.kw.get("bind"))
+        try:
+            async with factory() as session:
+                async with debt_fixture_setup(session, label="setup"):
+                    session.add(
+                        Debt(
+                            id=second,
+                            debtor_id=world.creditor_id,
+                            creditor_id=world.debtor_id,
+                            equivalent_id=world.equivalent_id,
+                            amount=Decimal("NaN"),
+                        )
                     )
-                )
-            try:
-                await session.commit()
-            except (StatementError, DBAPIError, ValueError) as exc:
-                refusal = exc
-                await session.rollback()
+                try:
+                    await session.commit()
+                except (StatementError, DBAPIError, ValueError) as exc:
+                    refusal = exc
+                    await session.rollback()
+        finally:
+            journal.install_write_guard(factory.kw.get("bind"))
 
         stored = await _amounts(factory, world)
         assert stored == ["5.00000000"], (
@@ -244,20 +260,27 @@ async def test_b_one_nan_debt_makes_the_sum_of_the_book_stop_being_a_number(fact
         # NON-VACUITY: the sum is a real number before the NaN attempt.
         assert str(before) == "5.00000000", f"the seeded book does not sum to 5: {before!r}"
 
-        async with factory() as session:
-            async with debt_fixture_setup(session, label="setup"):
-                session.add(
-                    Debt(
-                        debtor_id=world.creditor_id,
-                        creditor_id=world.debtor_id,
-                        equivalent_id=world.equivalent_id,
-                        amount=Decimal("NaN"),
+        # Same stand-down, same reason as `test_a`: the subject is the COLUMN, not the journal.
+        from app.core.ledger import journal
+
+        journal.uninstall_write_guard(factory.kw.get("bind"))
+        try:
+            async with factory() as session:
+                async with debt_fixture_setup(session, label="setup"):
+                    session.add(
+                        Debt(
+                            debtor_id=world.creditor_id,
+                            creditor_id=world.debtor_id,
+                            equivalent_id=world.equivalent_id,
+                            amount=Decimal("NaN"),
+                        )
                     )
-                )
-            try:
-                await session.commit()
-            except (StatementError, DBAPIError, ValueError):
-                await session.rollback()
+                try:
+                    await session.commit()
+                except (StatementError, DBAPIError, ValueError):
+                    await session.rollback()
+        finally:
+            journal.install_write_guard(factory.kw.get("bind"))
 
         async with factory() as fresh:
             after = (

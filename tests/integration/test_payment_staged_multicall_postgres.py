@@ -16,7 +16,7 @@ from app.db.models.prepare_lock import PrepareLock
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 
-from tests.debt_setup import debt_fixture_setup
+from tests.debt_setup import debt_fixture_setup, purge_test_ledger
 
 
 pytestmark = pytest.mark.postgres
@@ -184,14 +184,16 @@ async def _cleanup_seed(seed: dict) -> None:
 
     tx_ids = list(seed["tx_ids"].values())
     async with TestingSessionLocal() as cleanup:
+        # The debts AND the journal rows that describe them, through the driver and BEFORE the
+        # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
+        # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
+        # envelope still standing would block the transaction delete above it.
+        await purge_test_ledger(cleanup, equivalent_ids=[seed["equivalent_id"]])
         await cleanup.execute(
             delete(IntegrityAuditLog).where(IntegrityAuditLog.tx_id.in_(tx_ids))
         )
         await cleanup.execute(delete(PrepareLock).where(PrepareLock.tx_id.in_(tx_ids)))
         await cleanup.execute(delete(Transaction).where(Transaction.tx_id.in_(tx_ids)))
-        await cleanup.execute(
-            delete(Debt).where(Debt.equivalent_id == seed["equivalent_id"])
-        )
         await cleanup.execute(
             delete(TrustLine).where(
                 TrustLine.equivalent_id == seed["equivalent_id"]
