@@ -102,6 +102,32 @@ if _use_migrated_schema and _is_sqlite:
         "GEO_TEST_USE_MIGRATED_SCHEMA=1 is supported only for PostgreSQL tests."
     )
 
+
+def _test_engine_isolation_kwargs(backend_name: str) -> dict[str, str]:
+    """THE POSTGRESQL TEST ENGINE RUNS AT THE APPLICATION'S ISOLATION LEVEL (T1549, 2026-09-14).
+
+    The application engine passes `isolation_level=settings.DB_POSTGRES_ISOLATION_LEVEL` for
+    PostgreSQL (`app/db/session.py`), default SERIALIZABLE. Until T1549 this engine passed nothing, so
+    the whole PostgreSQL acceptance tier ran at the server default READ COMMITTED - an isolation level
+    the application never runs at. Step 5a paid for it once: a false FAILED that only the application's
+    configuration hid. The value is READ FROM THE SAME SETTING, never a literal, so the two cannot drift.
+
+    Measured when it was switched on: 4 of 274 PostgreSQL tests changed. Two leaned on READ COMMITTED
+    (the 5b meter inherited it; the inverse multi-segment test disabled the application's 40001 retry)
+    and were fixed in the tests; one found a real non-money defect (concurrent trustline create answers
+    500), kept visible as a strict xfail.
+
+    READ COMMITTED remains available only as an explicit, named diagnostic counter-probe that asks for it
+    on its own engine, connection or transaction. SQLite is unchanged: it has no such knob here.
+    `tests/integration/test_p015_t1549_test_engine_runs_at_the_application_isolation_postgres.py`
+    holds this in place.
+    """
+
+    if backend_name in {"postgresql", "postgres"}:
+        return {"isolation_level": settings.DB_POSTGRES_ISOLATION_LEVEL}
+    return {}
+
+
 # NOTE: For asyncpg on Windows, pooled connections can be bound to a previous
 # event loop between tests (pytest-asyncio uses per-test loops by default),
 # causing errors like "Event loop is closed" and "another operation is in progress".
@@ -111,6 +137,7 @@ engine = create_async_engine(
     echo=False,
     poolclass=NullPool,
     connect_args={"timeout": 30} if _is_sqlite else {},
+    **_test_engine_isolation_kwargs(_validated_test_database_url.get_backend_name()),
 )
 # FOREIGN KEYS ARE ENFORCED ON THE SQLITE TIER, as they are in the application.
 #

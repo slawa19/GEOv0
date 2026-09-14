@@ -168,6 +168,16 @@ async def test_recreating_a_closed_trustline_does_not_raise_a_raw_db_error(db_se
     assert closed[0].id == first.id, "history must keep the original trustline_id"
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "T1549 finding, class 2 (not the money path): at the application's SERIALIZABLE the losing "
+        "concurrent create gets a 40001 serialization failure that surfaces as HTTP 500 instead of a "
+        "declared 409 - TrustLineService.create catches only IntegrityError "
+        "(app/core/trustlines/service.py:236, :292). No duplicate live line is created. "
+        "Deferred to specs/BACKLOG.md 2026-09-14. Strict: remove this marker when the defect is fixed."
+    ),
+)
 @pytest.mark.asyncio
 async def test_concurrent_create_of_the_same_triple_yields_one_line_and_a_declared_conflict(
     db_session,

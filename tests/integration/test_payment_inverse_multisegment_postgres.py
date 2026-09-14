@@ -262,9 +262,12 @@ async def test_inverse_multisegment_commits_serialize_and_preserve_invariants_po
             )
             holder_engine = PaymentEngine(holder_session)
             waiter_engine = PaymentEngine(waiter_session)
-            # A whole-UoW retry could hide the unsafe schedule behind a green final state.
-            holder_engine._retry_attempts = 1
-            waiter_engine._retry_attempts = 1
+            # THE APPLICATION'S OWN 40001 RETRY STAYS ON (T1549, 2026-09-14). This test used to set
+            # `_retry_attempts = 1` on both engines. At the application's SERIALIZABLE the waiter's
+            # snapshot predates the holder's commit and its first attempt meets a genuine 40001 on the
+            # envelope insert - the application retries that; with the retry disabled the test failed on a
+            # schedule production handles. What the retry could hide - a waiter that bypassed the holder's
+            # pair locks - is asserted BEFORE the holder is released (`waiter_blocked`), so it cannot.
             holder_acquire = holder_engine._acquire_segment_advisory_lock_keys
             waiter_acquire = waiter_engine._acquire_segment_advisory_lock_keys
             waiter_owner_acquire = waiter_engine._acquire_equivalent_owner_locks
