@@ -672,6 +672,21 @@ class PaymentService:
                 allowed_participant_pids=allowed_participant_pids,
             )
 
+        # T1544: a deactivated equivalent takes no new payment. Best effort, on the row loaded above
+        # and AFTER the idempotency decision, so a replay of an already-accepted tx_id still answers
+        # with its stored result. It is not the binding check - that one is at commit, under the
+        # owner lock and `FOR SHARE` (`PaymentEngine.refuse_inactive_equivalents`) - and it
+        # deliberately does not lock: forbidding a new PREPARED state after the PATCH returns would
+        # be a stronger rule than this task's.
+        if not equivalent.is_active:
+            try:
+                from app.utils.metrics import PAYMENT_EVENTS_TOTAL
+
+                PAYMENT_EVENTS_TOTAL.labels(event="create", result="conflict").inc()
+            except Exception:
+                pass
+            raise PaymentEngine.inactive_equivalent_conflict([equivalent_code])
+
         # 2. Routing
         tx_uuid = uuid.uuid4()
         tx_may_be_persisted = False

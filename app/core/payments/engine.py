@@ -404,6 +404,56 @@ class PaymentEngine:
             for flow in lock.flows
         }
 
+    #: `details.reason` of the operator-stop refusal (T1544). A state conflict, and deliberately NOT
+    #: retryable: `details.retryable=true` belongs to the serialization-conflict variant of `E008`,
+    #: and repeating a request against a deactivated equivalent cannot succeed.
+    EQUIVALENT_INACTIVE_REASON = "equivalent_inactive"
+
+    @classmethod
+    def inactive_equivalent_conflict(cls, codes: list[str]) -> ConflictException:
+        return ConflictException(
+            f"Equivalent {', '.join(codes)} is not active",
+            details={"reason": cls.EQUIVALENT_INACTIVE_REASON, "equivalents": codes},
+        )
+
+    async def refuse_inactive_equivalents(
+        self,
+        equivalent_ids: set[UUID] | list[UUID] | tuple[UUID, ...],
+        *,
+        row_lock: bool,
+    ) -> None:
+        """T1544: money does not move in an equivalent the operator has deactivated.
+
+        The flag is read as columns, never through an `Equivalent` instance: the payment service
+        loads one before routing, and its cached `is_active` can still say True.
+
+        `row_lock=True` is for the payment COMMIT and renders `FOR SHARE` on PostgreSQL. It is what
+        binds the payment/PATCH race, and the advisory owner lock does not: the application runs at
+        SERIALIZABLE, a commit takes its snapshot before it waits on that lock, and a plain read
+        after the wait still returns the value from before the PATCH committed (measured
+        2026-09-13, `FOR KEY SHARE` equally stale). `FOR SHARE` instead waits for an uncommitted
+        PATCH and then fails with 40001, which the unit-of-work retry turns into a fresh snapshot
+        that sees the stop; and a PATCH arriving after this read waits for the payment's commit.
+        The caller must already hold the equivalent owner lock - owner lock first, row lock second,
+        the same order as the PATCH, or the two can deadlock.
+
+        `row_lock=False` is for clearing, whose read happens in a snapshot taken AFTER its owner
+        lock, and for the PATCH lock that makes that sufficient see `admin_update_equivalent`.
+
+        On SQLite `FOR SHARE` renders nothing and the owner lock is a no-op: the race guarantees
+        above belong to PostgreSQL; SQLite gets the plain refusal.
+        """
+        ids = sorted(set(equivalent_ids), key=str)
+        if not ids:
+            return
+        stmt = select(Equivalent.code, Equivalent.is_active).where(Equivalent.id.in_(ids))
+        if row_lock:
+            stmt = stmt.with_for_update(read=True)
+        rows = (await self.session.execute(stmt)).all()
+        inactive = sorted(str(code) for code, is_active in rows if not is_active)
+        if inactive:
+            raise self.inactive_equivalent_conflict(inactive)
+
     async def _load_prepare_locks(self, tx_id: str) -> list[PrepareLock]:
         return (
             (
@@ -1343,6 +1393,33 @@ class PaymentEngine:
                     _equivalent_owner_locks_already_held=True,
                 )
                 raise ConflictException(f"Transaction {tx_id} expired before commit")
+
+            # T1544: the operator's equivalent-level stop, IMMEDIATELY BEFORE THE ENVELOPE - after
+            # every lock this commit takes, every idempotent short-circuit, the audit checkpoint reads
+            # and the TTL branch above. Below the TTL branch on purpose: an expired payment is aborted
+            # as expired, whatever state its equivalent is in, and the equivalent row is not held
+            # through checkpoint work that does not need it. `FOR SHARE` holds through this
+            # transaction's commit (or through the caller's outer commit when `commit=False`), so a
+            # deactivating PATCH either waits for this payment or makes this read fail with 40001 and
+            # the retry refuse. Why a plain read is not enough is in `refuse_inactive_equivalents`.
+            try:
+                await self.refuse_inactive_equivalents(
+                    self._equivalent_ids_from_validated_locks(validated_locks),
+                    row_lock=True,
+                )
+            except ConflictException as refusal:
+                # Same shape as the expired-lock branch above: nothing has been written yet, so the
+                # payment is terminalised under the locks already held and the refusal surfaces.
+                await self.abort(
+                    tx_id,
+                    reason=refusal.message,
+                    error_code=refusal.code,
+                    details=refusal.details,
+                    commit=commit,
+                    _tx_lock_already_held=True,
+                    _equivalent_owner_locks_already_held=True,
+                )
+                raise
 
             # THE OPERATION ENVELOPE (programme 015, phase B step 4). Everything from here to the
             # deletion of the prepare locks is one declared debt operation: what this payment said

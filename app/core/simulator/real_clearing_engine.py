@@ -25,7 +25,8 @@ from app.core.simulator.models import RunRecord
 from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter
 from app.core.simulator.viz_patch_helper import VizPatchHelper
 from app.db.models.participant import Participant
-from app.utils.exceptions import GeoException
+from app.core.payments.engine import PaymentEngine
+from app.utils.exceptions import ConflictException, GeoException
 
 
 class RealClearingEngine:
@@ -722,7 +723,30 @@ class RealClearingEngine:
                             exc_info=True,
                         )
                 raise
-            except Exception:
+            except Exception as exc:
+                if (
+                    isinstance(exc, ConflictException)
+                    and (exc.details or {}).get("reason")
+                    == PaymentEngine.EQUIVALENT_INACTIVE_REASON
+                ):
+                    # T1544: the operator's stop refuses clearing in THIS equivalent; it is not a
+                    # failure of the run. It arrives here unwrapped - `ClearingService` re-raises the
+                    # refusal itself, and the loop above re-raises it (at once, or after a partial
+                    # `clearing.done`). Same rule as a refused payment: skip the equivalent without
+                    # touching `errors_total`, `_error_timestamps` or `last_error`, which would
+                    # otherwise be spent on every clearing tick until the run-level error limit.
+                    self._logger.info(
+                        "simulator.real.clearing_refused_equivalent_inactive run_id=%s tick=%s eq=%s "
+                        "exc=%s",
+                        str(run.run_id),
+                        int(run.tick_index),
+                        str(eq),
+                        type(exc).__name__,
+                    )
+                    # The phase was set to "clearing" above and the normal resets were skipped.
+                    with self._lock:
+                        run.current_phase = None
+                    continue
                 if self._should_warn_this_tick(run, f"clearing_failed:{eq}"):
                     self._logger.warning(
                         "simulator.real.clearing_failed run_id=%s tick=%s eq=%s",
@@ -742,6 +766,7 @@ class RealClearingEngine:
                         "message": GeoException().message,
                         "at": self._utc_now().isoformat(),
                     }
+                    run.current_phase = None
                 continue
 
         return cleared_amount_by_eq

@@ -2011,13 +2011,14 @@ async def test_c17_p_the_owner_lock_race_never_leaves_an_equivalent_gone_with_it
 
     So what this test asserts is the invariant §10.1 states universally and that IS reachable: the
     equivalent is never gone while debts or journal rows denominated in it remain - plus, for the
-    payment, exactly one COMPLETED envelope.
+    payment, what T1544 now requires: the operator-stop refusal, no debt and no envelope (see the
+    comment at the verdict; until T1544 this clause read "exactly one COMPLETED envelope").
 
-    RED TODAY BECAUSE: `debt_operations` does not exist; the non-vacuity assertion placed FIRST says
-    so.
-    MUTATION once step 4 exists: take the payment's journal envelope OUTSIDE the owner lock - open
-    the operation before `_preacquire_equivalent_owner_locks_for_tx` - so an envelope can be written
-    for an equivalent another transaction is about to delete.
+    MUTATION, measured 2026-09-14 (T1544): make the delete route skip its usage-count refusal
+    (`if any(v > 0 for v in counts.values())` never true). The route then deletes the equivalent in
+    both orders and the verdict block fails on `delete_outcome`. Moving the payment's envelope outside
+    the owner lock no longer reddens this test: the payment is refused and rolled back, so no envelope
+    survives either way.
     """
     from app.api.v1.admin import admin_delete_equivalent
     from app.core.payments.engine import (
@@ -2140,14 +2141,26 @@ async def test_c17_p_the_owner_lock_race_never_leaves_an_equivalent_gone_with_it
             f"debts={debts_now} and {len(entries or [])} journal entr(ies) denominated in it. That "
             f"is the state design v2 §10.1 forbids outright."
         )
-        assert not isinstance(payment_outcome, BaseException), (
-            f"the payment failed in the '{order}' order: {payment_outcome!r}"
+        # T1544, 2026-09-14: THE PAYMENT HALF OF THIS RACE IS CLOSED. The delete requires an INACTIVE
+        # equivalent (`admin_delete_equivalent`) and a payment requires an ACTIVE one
+        # (`PaymentEngine.refuse_inactive_equivalents`, read at commit under the owner lock), so the
+        # premise this stand used to force - a payment committing into an equivalent deactivated for
+        # deletion - is refused in BOTH orders. The invariant assertions above are unchanged; only the
+        # payment's expected outcome changed, from "commits 9.00 with one COMPLETED envelope" to the
+        # operator-stop refusal with no money and no envelope.
+        assert isinstance(payment_outcome, ConflictException) and payment_outcome.status_code == 409, (
+            f"the payment in the '{order}' order answered {payment_outcome!r}; a payment into an "
+            f"equivalent deactivated for deletion must be refused by the operator stop (T1544)"
         )
-        assert len(envelopes) == 1 and envelopes[0]["state"] == "COMPLETED", (
-            f"the committed payment left {envelopes} instead of exactly one COMPLETED envelope, in "
-            f"the '{order}' order"
+        assert payment_outcome.code == "E008", payment_outcome.code
+        assert (payment_outcome.details or {}).get(
+            "reason"
+        ) == PaymentEngine.EQUIVALENT_INACTIVE_REASON, payment_outcome.details
+        assert "retryable" not in (payment_outcome.details or {}), payment_outcome.details
+        assert envelopes == [], (
+            f"the refused payment left envelopes {envelopes} in the '{order}' order"
         )
-        assert debts_now == {("debtor", "creditor", "eq"): Decimal("9.00000000")}, debts_now
+        assert debts_now == {}, debts_now
     finally:
         await _cleanup(serializable_factory, seeded)
 

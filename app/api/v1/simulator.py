@@ -29,6 +29,7 @@ from app.core.clearing.service import (
     ClearingCommittedAfterCancellation,
     ClearingService,
 )
+from app.core.payments.engine import PaymentEngine
 from app.core.payments.router import PaymentRouter
 from app.core.payments.service import PaymentService
 from app.core.simulator.edge_patch_builder import EdgePatchBuilder
@@ -1967,6 +1968,19 @@ async def action_clearing_real(
                 }
             )
             await _emit_known_progress()
+        if (
+            isinstance(exc, ConflictException)
+            and not isinstance(exc, RetryablePaymentConflictException)
+            and (exc.details or {}).get("reason") == PaymentEngine.EQUIVALENT_INACTIVE_REASON
+        ):
+            # T1544: the operator's stop is a conflict with the equivalent's state, not a failed
+            # execution. This route already declares 409 for exactly that.
+            return _action_error(
+                status_code=409,
+                code="CONFLICT",
+                message=exc.message,
+                details=details or None,
+            )
         return _action_error(
             status_code=500,
             code="CLEARING_FAILED",

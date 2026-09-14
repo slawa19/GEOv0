@@ -12,6 +12,7 @@ from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 
 from app.core.ledger.journal import debt_operation
 from app.core.payments.engine import PaymentEngine
+from app.utils.exceptions import ConflictException
 from app.core.simulator.adaptive_clearing_policy import AdaptiveClearingPolicyConfig
 from app.core.simulator.artifacts import ArtifactsManager
 from app.core.simulator.edge_patch_builder import EdgePatchBuilder
@@ -634,6 +635,26 @@ class RealRunnerImpl:
                 intent_equivalent_ids = await self._resolve_inject_debt_equivalent_ids(
                     session, scenario=scenario, event=event
                 )
+                # T1544: no money in an equivalent the operator has deactivated (protocol §11.5.1
+                # blocks OPERATIONS in it, and `inject_debt` writes the shared `debts`). The order is
+                # owner lock -> `FOR SHARE` -> envelope -> debt write, so the check sits here, before
+                # `debt_operation` flushes the envelope, and not inside staging.
+                #
+                # WHY THE INTENT SET IS ENOUGH. It is built from exactly the `inject_debt` effects,
+                # through the same `effective_equivalent` the writer uses, and matched on stored
+                # (upper-case) codes; an effect whose code is not stored is skipped by the writer, so
+                # every debt this event can write is denominated in an equivalent named here. An
+                # event with no `inject_debt` effect has an empty intent and writes no debt, and the
+                # call is then a no-op.
+                #
+                # `FOR SHARE` for the same reason as the payment commit: this transaction's snapshot
+                # was taken before it waited on the owner lock. A 40001 from it is transient and
+                # retried below on a fresh snapshot; the refusal is a non-retryable
+                # `ConflictException`, which the handler below rolls back and re-raises, with no
+                # envelope ever opened.
+                await PaymentEngine(session).refuse_inactive_equivalents(
+                    intent_equivalent_ids, row_lock=True
+                )
                 # THE OPERATION ENVELOPE (programme 015, phase B step 4). Staging and its flush
                 # are one declared operation: `stage_inject_event` is what writes the debts, and
                 # the flush below is what sends them.
@@ -719,6 +740,31 @@ class RealRunnerImpl:
                         event_index,
                     )
                     continue
+                if (
+                    isinstance(exc, ConflictException)
+                    and (exc.details or {}).get("reason")
+                    == PaymentEngine.EQUIVALENT_INACTIVE_REASON
+                ):
+                    # T1544: the operator's stop refuses THIS inject; it is not an error of the run.
+                    # The same rule the payments phase already applies to a refused payment (a 4xx
+                    # becomes REJECTED and the tick continues): consumed with a visible note, no
+                    # debt and no envelope (the refusal came before `debt_operation`), and no retry
+                    # - re-raising here left the event pending, so every later tick failed on it
+                    # until the consecutive-failure limit stopped a run that is also serving other
+                    # equivalents. Any other `ConflictException` keeps the path below.
+                    self._logger.warning(
+                        "simulator.real.inject.refused_equivalent_inactive event_index=%s",
+                        event_index,
+                    )
+                    executor.enqueue_inject_note(
+                        run_id,
+                        run=run,
+                        event_index=event_index,
+                        event_time_ms=event_time_ms,
+                        description="inject refused (equivalent inactive)",
+                    )
+                    fired.add(event_index)
+                    return
                 if isinstance(exc, SQLAlchemyError):
                     self._logger.warning(
                         "simulator.real.inject.db_error event_index=%s",

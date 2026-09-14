@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -13,10 +15,14 @@ from tests.debt_setup import purge_test_ledger
 
 pytestmark = pytest.mark.postgres
 
+#: How long the competitor may wait for its row. A healthy run commits it in milliseconds; a wait
+#: this long means it is queued behind a lock the payment itself holds (T1544 retarget).
+_COMPETITOR_TIMEOUT_S = 10.0
+
 
 @pytest.mark.asyncio
 async def test_audit_serialization_failure_retries_before_transaction_is_poisoned(
-    db_session, monkeypatch
+    db_session, monkeypatch, caplog
 ):
     """A real 40001 inside the audit block must not degrade into 25P02."""
 
@@ -112,30 +118,55 @@ async def test_audit_serialization_failure_retries_before_transaction_is_poisone
         await setup.commit()
 
     checkpoint_calls = 0
+    competitor_timed_out = False
+    sender_id = sender.id
+
+    async def _competitor_updates_the_contended_row() -> None:
+        async with TestingSessionLocal() as competitor:
+            await competitor.execute(
+                update(Participant)
+                .where(Participant.id == sender_id)
+                .values(display_name="competitor")
+            )
+            await competitor.commit()
 
     async def conflicting_checkpoint(session, *, equivalent_id):
-        nonlocal checkpoint_calls
+        nonlocal checkpoint_calls, competitor_timed_out
         checkpoint_calls += 1
 
         # The first call captures the pre-payment checkpoint. On the second call,
         # establish the SERIALIZABLE snapshot, commit a concurrent row update, and
         # then update the same row from the payment transaction. PostgreSQL itself
         # raises 40001; no DBAPI exception is fabricated by the test.
+        #
+        # THE CONTENDED ROW IS THE SENDER'S PARTICIPANT ROW, not the equivalent - retargeted by
+        # T1544, 2026-09-14. The payment commit now holds `FOR SHARE` on the equivalent row
+        # (`PaymentEngine.refuse_inactive_equivalents`), so a competitor updating THAT row waits for
+        # the payment while the payment waits here for the competitor: the gate hung, it did not
+        # fail. The participant row is read and written by the payment transaction below and is not
+        # row-locked against a non-key update, so the conflict is the same genuine 40001 at the same
+        # point. The competitor's wait is BOUNDED: if a future change locks this row too, the test
+        # goes red on `competitor_timed_out` instead of hanging the gate.
         if checkpoint_calls == 2:
             await session.execute(
-                select(Equivalent.description).where(Equivalent.id == equivalent_id)
+                select(Participant.display_name).where(Participant.id == sender_id)
             )
-            async with TestingSessionLocal() as competitor:
-                await competitor.execute(
-                    update(Equivalent)
-                    .where(Equivalent.id == equivalent_id)
-                    .values(description="competitor")
-                )
-                await competitor.commit()
+            competitor_task = asyncio.create_task(_competitor_updates_the_contended_row())
+            done, _pending = await asyncio.wait(
+                {competitor_task}, timeout=_COMPETITOR_TIMEOUT_S
+            )
+            if not done:
+                # Raised into the payment's best-effort audit block, which swallows it; the flag is
+                # what the test asserts.
+                competitor_timed_out = True
+                competitor_task.cancel()
+                await asyncio.wait({competitor_task}, timeout=5.0)
+                raise AssertionError("the competitor waited on a lock the payment holds")
+            competitor_task.result()
             await session.execute(
-                update(Equivalent)
-                .where(Equivalent.id == equivalent_id)
-                .values(description="payment")
+                update(Participant)
+                .where(Participant.id == sender_id)
+                .values(display_name="payment")
             )
 
         # Countercheck: after the database retry, a non-database diagnostics
@@ -165,13 +196,26 @@ async def test_audit_serialization_failure_retries_before_transaction_is_poisone
             engine._retry_max_delay_s = 0.0
 
             try:
-                committed = await engine.commit(tx_id)
+                with caplog.at_level(logging.WARNING):
+                    committed = await engine.commit(tx_id)
             except DBAPIError as exc:
                 # Before T401, the audit block swallows the real 40001 and the
                 # following DELETE reports only the poisoned-session symptom.
                 assert engine._get_pgcode(exc) == "25P02"
                 raise
 
+            assert not competitor_timed_out, (
+                f"the competitor could not update its row within {_COMPETITOR_TIMEOUT_S} s: it is "
+                "queued behind a lock the payment commit holds, so no serialization failure was "
+                "produced and this test measured nothing"
+            )
+            # PREMISE: the retry was a genuine 40001, not a pass with no conflict at all.
+            retries = [
+                record.getMessage()
+                for record in caplog.records
+                if "event=payment.uow_retry op=commit" in record.getMessage()
+            ]
+            assert any("pgcode=40001" in message for message in retries), retries
             assert committed is True
             state = (
                 await session.execute(

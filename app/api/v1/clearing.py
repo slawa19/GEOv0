@@ -7,6 +7,7 @@ from app.api import deps
 from app.core.clearing.service import ClearingService
 from app.config import settings
 from app.schemas.clearing import ClearingAutoResponse, ClearingCyclesResponse
+from app.schemas.common import ErrorEnvelope
 from app.utils.distributed_lock import redis_distributed_lock
 from app.utils.exceptions import BadRequestException
 from app.utils.validation import validate_equivalent_code
@@ -27,7 +28,16 @@ async def list_cycles(
     return {"cycles": cycles}
 
 
-@router.post("/auto", response_model=ClearingAutoResponse)
+@router.post(
+    "/auto",
+    response_model=ClearingAutoResponse,
+    responses={
+        # T1544: clearing in an equivalent the operator has deactivated is refused with 409/E008.
+        # Declared here as well as in api/openapi.yaml so the generated schema states the same
+        # contract as the canon.
+        409: {"model": ErrorEnvelope, "description": "Equivalent is not active"},
+    },
+)
 async def auto_clear(
     equivalent: str = Query(..., description="Equivalent code"),
     max_depth: int = Query(6, ge=3, le=10),
