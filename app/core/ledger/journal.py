@@ -165,10 +165,12 @@ from app.db.journal_tables import (
     DEBT_JOURNAL_TABLE_NAMES,
     OPERATION_KINDS,
     OPERATION_KINDS_WITH_TX,
+    MONEY_ENCODING_VERSION,
     SCHEMA_VERSION,
     debt_journal_entries,
     debt_operation_equivalents,
     debt_operations,
+    intent_encoding_version_for,
 )
 from app.db.models.debt import Debt
 from app.db.reconciliation_tables import debt_reconciliation_baselines
@@ -2874,8 +2876,8 @@ async def debt_operation(
                     intent=stored_intent,
                     intent_digest=digest,
                     schema_version=SCHEMA_VERSION,
-                    money_encoding_version=SCHEMA_VERSION,
-                    intent_encoding_version=SCHEMA_VERSION,
+                    money_encoding_version=MONEY_ENCODING_VERSION,
+                    intent_encoding_version=intent_encoding_version_for(kind),
                     opened_at=datetime.now(timezone.utc),
                     state="OPEN",
                 )

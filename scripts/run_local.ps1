@@ -515,6 +515,19 @@ function Undo-RunLocalStartedServices {
     }
 }
 
+function Write-RunLocalBackendStartupFailure {
+    param([string]$ErrLogPath)
+    # Programme 015 step 5b: the backend refuses to start on a SQLite database created before migration
+    # 027 (or before the debt journal), and the reason and the reset-db instruction are written to its
+    # stderr log. Without this the launcher said only "launched process exited or changed".
+    # THE LOG IS NOT ECHOED: backend stderr is not redacted, and the launcher does not republish it. Only
+    # its path is printed. Wrapped so that nothing here can replace the startup exception the caller
+    # rethrows.
+    try {
+        Write-Host "     Backend did not start; its error output is in $ErrLogPath" -ForegroundColor Red
+    } catch { }
+}
+
 function Invoke-RunLocalStartupRollback {
     param([System.Exception]$PrimaryFailure, [object[]]$StartedServices)
     $rollbackFailure = $null
@@ -1079,7 +1092,12 @@ switch ($Action) {
         Write-Host "Restarting Backend on port $backendPortUsed..." -ForegroundColor Cyan
         $backendProc = Start-Process -FilePath $Python -ArgumentList $backendArgs -WorkingDirectory $RepoRoot -PassThru -WindowStyle $WindowStyle -RedirectStandardOutput $BackendOutLog -RedirectStandardError $BackendErrLog
         $backendService = @(Get-RunLocalProcessServices -BackendOnly -SelectedBackendPort $backendPortUsed)[0]
-            $backendOwnership = Wait-ForRunLocalServiceOwnership -Service $backendService -Process $backendProc
+            try {
+                $backendOwnership = Wait-ForRunLocalServiceOwnership -Service $backendService -Process $backendProc
+            } catch {
+                Write-RunLocalBackendStartupFailure -ErrLogPath $BackendErrLog
+                throw
+            }
             $StartedThisAttempt += [pscustomobject]@{
                 Service = $backendService
                 Pid = $backendOwnership.Pid
@@ -1157,7 +1175,12 @@ switch ($Action) {
         $backendProc = Start-Process -FilePath $Python -ArgumentList $backendArgs -WorkingDirectory $RepoRoot -PassThru -WindowStyle $WindowStyle -RedirectStandardOutput $BackendOutLog -RedirectStandardError $BackendErrLog
         Write-Host "     Waiting for uvicorn to start..." -ForegroundColor Gray
         $backendService = @(Get-RunLocalProcessServices -BackendOnly -SelectedBackendPort $backendPortUsed)[0]
-        $backendOwnership = Wait-ForRunLocalServiceOwnership -Service $backendService -Process $backendProc
+        try {
+            $backendOwnership = Wait-ForRunLocalServiceOwnership -Service $backendService -Process $backendProc
+        } catch {
+            Write-RunLocalBackendStartupFailure -ErrLogPath $BackendErrLog
+            throw
+        }
         $StartedThisAttempt += [pscustomobject]@{
             Service = $backendService
             Pid = $backendOwnership.Pid

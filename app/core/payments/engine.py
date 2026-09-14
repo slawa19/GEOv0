@@ -9,7 +9,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, List, Tuple, Awaitable, Callable, TypeVar
 from uuid import UUID
 
-from sqlalchemy import select, and_, delete, update, func, text
+from sqlalchemy import select, and_, or_, delete, update, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm.exc import StaleDataError
@@ -453,6 +453,80 @@ class PaymentEngine:
         inactive = sorted(str(code) for code, is_active in rows if not is_active)
         if inactive:
             raise self.inactive_equivalent_conflict(inactive)
+
+    async def _read_payment_prestate(
+        self,
+        validated_locks: tuple[_ValidatedPrepareLock, ...],
+    ) -> list[dict[str, str]]:
+        """Step 5b: the amounts on BOTH directions of every flow pair, before any flow ran, in ONE read.
+
+        WHAT IT IS FOR. `_apply_flow` first reduces the receiver's debt to the sender and nets a mutual
+        pair, so what a flow does to `debts` depends on both directions of its pair - and neither is in
+        the flows. Recorded in the payment envelope (intent encoding version 2), they let the scheduled
+        verifier recompute the netted deltas from the envelope alone
+        (`app/core/ledger/reconciliation.py`, criterion (b)).
+
+        WHERE IT RUNS (the commit calls it once, and the placement is tested by statement order):
+        after the owner, transaction and segment locks, the TTL branch and the operator-stop
+        `FOR SHARE`, and immediately before the envelope that records it. The owner lock keeps every
+        other application writer of these debts - payment, clearing, inject - out until this
+        transaction ends, and the read shares this transaction with `_apply_flow`. It is INSIDE the
+        retried unit of work, so a retry reads again instead of reusing a pre-state from a snapshot
+        that lost.
+
+        COST: one SELECT per commit, whatever the number of flows, pairs and equivalents.
+
+        Every direction is written, zero included: an absent entry and a zero amount must not be two
+        spellings of one fact a reader has to agree on.
+        """
+
+        edges = sorted(
+            {
+                (flow.equivalent_id, debtor_id, creditor_id)
+                for lock in validated_locks
+                for flow in lock.flows
+                for debtor_id, creditor_id in (
+                    (flow.from_id, flow.to_id),
+                    (flow.to_id, flow.from_id),
+                )
+            },
+            key=lambda edge: (str(edge[0]), str(edge[1]), str(edge[2])),
+        )
+        if not edges:
+            return []
+        rows = (
+            await self.session.execute(
+                select(
+                    Debt.equivalent_id, Debt.debtor_id, Debt.creditor_id, Debt.amount
+                ).where(
+                    or_(
+                        *(
+                            and_(
+                                Debt.equivalent_id == equivalent_id,
+                                Debt.debtor_id == debtor_id,
+                                Debt.creditor_id == creditor_id,
+                            )
+                            for equivalent_id, debtor_id, creditor_id in edges
+                        )
+                    )
+                )
+            )
+        ).all()
+        held = {
+            (equivalent_id, debtor_id, creditor_id): Decimal(str(amount))
+            for equivalent_id, debtor_id, creditor_id, amount in rows
+        }
+        return [
+            {
+                "equivalent": str(equivalent_id),
+                "debtor": str(debtor_id),
+                "creditor": str(creditor_id),
+                "amount": _scale8_money(
+                    held.get((equivalent_id, debtor_id, creditor_id), Decimal("0"))
+                ),
+            }
+            for equivalent_id, debtor_id, creditor_id in edges
+        ]
 
     async def _load_prepare_locks(self, tx_id: str) -> list[PrepareLock]:
         return (
@@ -1421,6 +1495,12 @@ class PaymentEngine:
                 )
                 raise
 
+            # STEP 5b: the pre-state of BOTH directions of every flow pair, in one read, here - after
+            # every lock this commit takes and the operator stop above, inside this retryable unit of
+            # work - and recorded in the envelope below. Why here and nothing earlier or later:
+            # `_read_payment_prestate`.
+            payment_prestate = await self._read_payment_prestate(validated_locks)
+
             # THE OPERATION ENVELOPE (programme 015, phase B step 4). Everything from here to the
             # deletion of the prepare locks is one declared debt operation: what this payment said
             # it was about to do, recorded before it does it.
@@ -1466,6 +1546,10 @@ class PaymentEngine:
                         }
                         for lock in validated_locks
                     ],
+                    # Intent encoding version 2 (step 5b): both directions of every flow pair, as
+                    # they stood before the first flow ran. Without it the netted deltas cannot be
+                    # recomputed from the envelope - `_apply_flow` reads the reverse debt.
+                    "prestate": payment_prestate,
                 },
                 scope_equivalent_ids=_intent_equivalent_ids,
                 intent_equivalent_ids=_intent_equivalent_ids,
