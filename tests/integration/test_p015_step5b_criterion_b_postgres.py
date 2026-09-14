@@ -339,24 +339,37 @@ async def test_step5b_p_at_serializable_a_writer_outside_the_owner_lock_cannot_m
 async def test_step5b_p_stand_control_at_read_committed_the_same_race_does_make_the_record_disagree(
     factory, monkeypatch
 ) -> None:
-    """THE METER. The same race on the READ COMMITTED test engine: no 40001, one read, the payment applies
-    to 4 while its record says 3 - and criterion (b) says so. Without this control the SERIALIZABLE test
-    above could be green because the race never reached the record at all.
+    """THE METER - A DIAGNOSTIC COUNTER-PROBE AT READ COMMITTED, which the application never runs at. The same
+    race with the payment on an engine that ASKS for READ COMMITTED itself: no 40001, one read, the payment
+    applies to 4 while its record says 3 - and criterion (b) says so. Without this control the SERIALIZABLE
+    test above could be green because the race never reached the record at all.
+
+    T1549, 2026-09-14: this used to inherit READ COMMITTED from the shared test engine. That engine now runs
+    at the application's isolation, and the inherited form went red (two reads, a retry) - so the level is
+    requested explicitly here and checked, never taken from a default.
 
     This is also a stated BOUNDARY, not a hidden one: the protection against a writer outside the owner lock
     is the transaction isolation. Every application writer of `debts` takes the owner lock (payment,
     clearing, inject); SEED and TEST_FIXTURE do not, and are refused after the baseline.
     """
 
-    seen = await _race_a_writer_into_the_prestate_window(factory, monkeypatch, factory)
+    engine = create_async_engine(_postgres_url(), isolation_level="READ COMMITTED", poolclass=NullPool)
+    read_committed = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
+    seen = None
     try:
+        async with read_committed() as probe:
+            level = (await probe.execute(text("SHOW transaction_isolation"))).scalar_one()
+        assert str(level).lower() == "read committed", f"stand: the counter-probe is not at READ COMMITTED: {level}"
+        seen = await _race_a_writer_into_the_prestate_window(factory, monkeypatch, read_committed)
         assert seen["error"] is None and seen["tx_state"] == "COMMITTED", seen
         assert len(seen["reads"]) == 1 and seen["reads"][0][("b", "a")] == "3.00000000", seen["reads"]
         assert seen["edges"] == {("a", "b"): Decimal("1.00000000")}, seen["edges"]
         kinds = unit._kinds(unit._b_findings(seen["outcome"]))
         assert ("b_prestate_mismatch", str(seen["triangle"].b.id), str(seen["triangle"].a.id)) in kinds, kinds
     finally:
-        await _drop_triangle(factory, seen["triangle"])
+        await engine.dispose()
+        if seen is not None:
+            await _drop_triangle(factory, seen["triangle"])
 
 
 @pytest.mark.asyncio

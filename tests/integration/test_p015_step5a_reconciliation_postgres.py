@@ -345,9 +345,16 @@ async def test_step5a_p_a_fixture_write_after_the_baseline_is_refused(factory) -
 async def test_step5a_p_a_payment_committed_between_the_verifiers_reads_is_still_passed(
     factory, monkeypatch
 ) -> None:
-    """The forced interleaving on PostgreSQL, through the test engine's own isolation level.
+    """The forced interleaving on PostgreSQL - A DIAGNOSTIC COUNTER-PROBE AT READ COMMITTED.
 
-    The verifier must not depend on the engine happening to be `SERIALIZABLE`: the test engine is not.
+    The verifier must not depend on the engine happening to be `SERIALIZABLE`, so the whole stand - seed,
+    payment and the scheduled verifier - runs on an engine that ASKS for READ COMMITTED, where every
+    statement would otherwise take a new snapshot. The verifier's own REPEATABLE READ READ ONLY is then the
+    only thing that can keep its reads in one snapshot.
+
+    T1549, 2026-09-14: this used to inherit READ COMMITTED from the shared test engine, which now runs at the
+    application's isolation. Inherited, it would have stayed green while silently no longer testing what it
+    says; the level is requested explicitly here and checked.
 
     MUTATION: commit the session between `_journal_sums` and `_current_debts` - red.
     """
@@ -357,11 +364,19 @@ async def test_step5a_p_a_payment_committed_between_the_verifiers_reads_is_still
         interleave_a_payment_between_the_verifiers_reads,
     )
 
-    seen = await interleave_a_payment_between_the_verifiers_reads(factory, monkeypatch)
+    engine = create_async_engine(_postgres_url(), isolation_level="READ COMMITTED", poolclass=NullPool)
+    read_committed = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
+    seen = None
     try:
+        async with read_committed() as probe:
+            level = (await probe.execute(text("SHOW transaction_isolation"))).scalar_one()
+        assert str(level).lower() == "read committed", f"stand: the counter-probe is not at READ COMMITTED: {level}"
+        seen = await interleave_a_payment_between_the_verifiers_reads(read_committed, monkeypatch)
         _assert_interleave(seen)
     finally:
-        await _drop_triangle(factory, seen["triangle"])
+        await engine.dispose()
+        if seen is not None:
+            await _drop_triangle(factory, seen["triangle"])
 
 
 def _sqlstates(exc: BaseException | None) -> set[str]:
