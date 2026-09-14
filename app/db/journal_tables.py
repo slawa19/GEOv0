@@ -54,12 +54,17 @@ from app.db.types import MONEY_COLUMN_MAX, MoneyNumeric, finite_money_clauses
 
 __all__ = [
     "DEBT_JOURNAL_TABLE_NAMES",
+    "INTENT_ENCODING_VERSION",
+    "MONEY_ENCODING_VERSION",
     "OPERATION_KINDS",
     "OPERATION_KINDS_WITH_TX",
+    "PAYMENT_INTENT_ENCODING_VERSION",
     "SCHEMA_VERSION",
+    "STORABLE_INTENT_ENCODING_VERSIONS",
     "debt_journal_entries",
     "debt_operation_equivalents",
     "debt_operations",
+    "intent_encoding_version_for",
 ]
 
 #: The kinds of writer that may own a debt operation. `INTEGRITY_REPAIR` is deliberately not here:
@@ -73,6 +78,23 @@ OPERATION_KINDS_WITH_TX = ("PAYMENT", "CLEARING")
 #: because a change to how money is encoded and a change to how intent is encoded are read back by
 #: different code and can move independently.
 SCHEMA_VERSION = 1
+MONEY_ENCODING_VERSION = 1
+INTENT_ENCODING_VERSION = 1
+
+#: Step 5b (spec 015, "Ключевое ревью шага 5"): a PAYMENT intent also records the pre-state of both
+#: directions of every flow pair, which is a change to how the intent is encoded and to nothing else.
+#: Only this one kind moved; every other kind still writes `INTENT_ENCODING_VERSION`. Version 1
+#: payments written before stay as they are and are read structurally (`reconciliation.py`).
+PAYMENT_INTENT_ENCODING_VERSION = 2
+
+#: Every intent encoding version the database admits (migration 027 widened the CHECK to these).
+STORABLE_INTENT_ENCODING_VERSIONS = (INTENT_ENCODING_VERSION, PAYMENT_INTENT_ENCODING_VERSION)
+
+
+def intent_encoding_version_for(kind: str) -> int:
+    """The intent encoding version an operation of `kind` writes today."""
+
+    return PAYMENT_INTENT_ENCODING_VERSION if kind == "PAYMENT" else INTENT_ENCODING_VERSION
 
 _KIND_LIST = ", ".join("'%s'" % kind for kind in OPERATION_KINDS)
 _TX_KIND_LIST = ", ".join("'%s'" % kind for kind in OPERATION_KINDS_WITH_TX)
@@ -110,8 +132,8 @@ debt_operations = Table(
     Column("intent", JSON, nullable=False),
     Column("intent_digest", String(64), nullable=False),
     Column("schema_version", SmallInteger, nullable=False, default=SCHEMA_VERSION),
-    Column("money_encoding_version", SmallInteger, nullable=False, default=SCHEMA_VERSION),
-    Column("intent_encoding_version", SmallInteger, nullable=False, default=SCHEMA_VERSION),
+    Column("money_encoding_version", SmallInteger, nullable=False, default=MONEY_ENCODING_VERSION),
+    Column("intent_encoding_version", SmallInteger, nullable=False, default=INTENT_ENCODING_VERSION),
     Column("opened_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     Column("state", String(16), nullable=False),
     Column("completed_at", DateTime(timezone=True), nullable=True),
@@ -123,7 +145,13 @@ debt_operations = Table(
     CheckConstraint("length(intent_digest) = 64", name="chk_debt_operations_intent_digest"),
     CheckConstraint("schema_version IN (1)", name="chk_debt_operations_schema_version"),
     CheckConstraint("money_encoding_version IN (1)", name="chk_debt_operations_money_version"),
-    CheckConstraint("intent_encoding_version IN (1)", name="chk_debt_operations_intent_version"),
+    # Widened by migration 027 (step 5b) for the version-2 PAYMENT intent; the other two stay `IN (1)`.
+    CheckConstraint(
+        "intent_encoding_version IN ("
+        + ", ".join(str(version) for version in STORABLE_INTENT_ENCODING_VERSIONS)
+        + ")",
+        name="chk_debt_operations_intent_version",
+    ),
     CheckConstraint("state IN ('OPEN', 'COMPLETED')", name="chk_debt_operations_state"),
     # A tx_id exactly when the kind owns one. Written as an equality of two truth values so that
     # neither direction can be forgotten: a PAYMENT without a tx_id and a SEED carrying one are

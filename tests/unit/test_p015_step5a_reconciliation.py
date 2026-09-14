@@ -258,8 +258,13 @@ def _assert_interleave(seen: dict) -> None:
 
 
 def _one_edge(outcome, kind: str) -> dict:
-    assert [finding["kind"] for finding in outcome.findings] == [kind], outcome.findings
-    return outcome.findings[0]
+    """The single CRITERION (a) finding. Since step 5b the same outcome also carries criterion (b)'s
+    findings (kinds `b_*`): a journal entry of a payment that disappeared or was duplicated also makes its
+    recorded change disagree with its recorded intent, and that is asserted where it applies."""
+
+    criterion_a = [finding for finding in outcome.findings if not str(finding["kind"]).startswith("b_")]
+    assert [finding["kind"] for finding in criterion_a] == [kind], outcome.findings
+    return criterion_a[0]
 
 
 # ==============================================================================================
@@ -934,11 +939,12 @@ async def test_step5a_c6_still_commits_verified_and_criterion_a_is_blind_to_it_u
 ) -> None:
     """`C6` (i) with a baseline: COMMITTED, `audit == [True]`, then the scheduled result.
 
-    WHAT THE RESULT IS, stated because the brief expected otherwise: criterion (a) is PASSED on the C6
-    state. C6's writer journals its wrong edge faithfully, so `debt - sum(delta)` still equals the
-    offset - criterion (a) cannot refute a faithful wrong writer, that is criterion (b) (step 5b), and
-    this is the "(a) passes, (b) fails" half the spec keeps as a counterprobe. The FAILED that follows
-    comes from a one-atom change around the application on the same C6 state.
+    WHAT THE RESULT IS: criterion (a) has NO finding on the C6 state. C6's writer journals its wrong edge
+    faithfully, so `debt - sum(delta)` still equals the offset - criterion (a) cannot refute a faithful
+    wrong writer. Since step 5b the same row carries criterion (b), which does refute it, so the stored
+    status is FAILED with (b) findings only: this is the "(a) passes, (b) fails" counterprobe the spec
+    keeps. A one-atom change around the application on the same C6 state then adds (a)'s residual as a
+    new transition.
 
     MUTATION: remove the `_run_debt_reconciliation_once` call from `app/main.py` - no result rows, red.
     """
@@ -959,8 +965,14 @@ async def test_step5a_c6_still_commits_verified_and_criterion_a_is_blind_to_it_u
         assert await _audit(factory, tx_id) == [True]
 
         await _scheduled_run(monkeypatch, factory)
-        assert [s for s, _ in await _results(factory, triangle.equivalent.id)] == [PASSED], (
-            "criterion (a) on the C6 state was expected PASSED: the wrong edge is journalled faithfully"
+        results = await _results(factory, triangle.equivalent.id)
+        # STEP 5b: the same row now carries criterion (b), and (b) refutes C6. What this test keeps is the
+        # "(a) passes, (b) fails" counterprobe - no criterion (a) finding, and (b) findings present.
+        assert [s for s, _ in results] == [FAILED], results
+        kinds = {f["kind"] for f in results[0][1]["findings"]}
+        assert kinds and all(kind.startswith("b_") for kind in kinds), (
+            "criterion (a) on the C6 state was expected silent - the wrong edge is journalled faithfully - "
+            f"and criterion (b) to refute it: {kinds}"
         )
 
         async with factory() as session:
@@ -978,7 +990,10 @@ async def test_step5a_c6_still_commits_verified_and_criterion_a_is_blind_to_it_u
             lambda d: f"UPDATE debts SET amount = '6' WHERE id = '{_literal(d, debt_id)}'",
         )
         await _scheduled_run(monkeypatch, factory)
-        assert sorted(s for s, _ in await _results(factory, triangle.equivalent.id)) == [FAILED, PASSED]
+        rows = await _results(factory, triangle.equivalent.id)
+        # Two FAILED rows since step 5b: the first carries only (b), the transition adds (a)'s residual.
+        assert sorted(s for s, _ in rows) == [FAILED, FAILED], rows
+        assert any(f["kind"] == "edge_residual" for _, detail in rows for f in detail["findings"]), rows
         assert await _audit(factory, tx_id) == [True], "the scheduled run touched the payment's audit row"
     finally:
         await _drop_triangle(factory, triangle)

@@ -291,6 +291,22 @@ from app.main import app
 _ENSURE_URL = "/api/v1/simulator/session/ensure"
 
 
+@pytest.fixture
+def lifespan_on_the_test_database(monkeypatch):
+    """`with TestClient(app)` runs the REAL lifespan, whose SQLite startup probes read `app.main.engine`.
+
+    That engine is bound to the application's default `DATABASE_URL` - the developer's local file - so
+    these tests used to pass or fail on whatever that file happened to be (programme 015 step 5b, review
+    round 3). Point the startup at the suite's own test database instead.
+    """
+    import app.main as main_module
+    from tests.conftest import TEST_DATABASE_URL, engine as test_engine
+
+    monkeypatch.setattr(main_module.settings, "DATABASE_URL", TEST_DATABASE_URL)
+    monkeypatch.setattr(main_module, "engine", test_engine)
+
+
+@pytest.mark.usefixtures("lifespan_on_the_test_database")
 def test_ensure_session_sets_cookie_and_returns_owner() -> None:
     """POST /session/ensure без cookie → 200, Set-Cookie с geo_sim_sid, owner_id='anon:…'."""
     with TestClient(app, raise_server_exceptions=True) as client:
@@ -310,6 +326,7 @@ def test_ensure_session_sets_cookie_and_returns_owner() -> None:
     )
 
 
+@pytest.mark.usefixtures("lifespan_on_the_test_database")
 def test_ensure_session_reuses_existing_valid_cookie() -> None:
     """Два запроса в одной сессии: второй возвращает тот же owner_id, новой cookie нет."""
     with TestClient(app, raise_server_exceptions=True) as client:
@@ -332,6 +349,7 @@ def test_ensure_session_reuses_existing_valid_cookie() -> None:
     )
 
 
+@pytest.mark.usefixtures("lifespan_on_the_test_database")
 def test_ensure_session_replaces_invalid_cookie() -> None:
     """POST /session/ensure с мусорной cookie → новая cookie установлена, owner_id='anon:…'."""
     with TestClient(app, raise_server_exceptions=True) as client:

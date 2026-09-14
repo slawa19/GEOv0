@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import logging
 import os
+import re
 import time
 from datetime import datetime, timezone
 
@@ -173,7 +174,8 @@ def _emit_integrity_metric(result: str) -> None:
 
 
 async def _run_debt_reconciliation_once(session_factory, *, reason: str) -> None:
-    """Programme 015 step 5a: criterion (a) - detection of change made around the application.
+    """Programme 015 steps 5a and 5b: debt reconciliation, criteria (a) and (b) - detection of change made
+    around the application, and of a recorded change that disagrees with its recorded intent.
 
     THE ONLY HOST. Not `POST /integrity/verify`, which participants can call, and not the payment or
     clearing checkpoints, which run inside the money transaction. It runs after the checkpoints have
@@ -364,6 +366,89 @@ async def _sqlite_ensure_debts_version_column() -> None:
         ) from exc
 
 
+#: The intent-version CHECK as SQLite stores it in `sqlite_master.sql`, e.g.
+#: `CONSTRAINT chk_debt_operations_intent_version CHECK (intent_encoding_version IN (1, 2))`.
+_SQLITE_INTENT_VERSION_CHECK = re.compile(
+    r"CONSTRAINT\s+[\"`\[]?chk_debt_operations_intent_version[\"`\]]?\s+CHECK\s*\(\s*"
+    r"intent_encoding_version\s+IN\s*\(\s*([0-9]+(?:\s*,\s*[0-9]+)*)\s*\)\s*\)",
+    re.IGNORECASE,
+)
+
+
+async def _sqlite_refuse_pre_027_debt_operations() -> None:
+    """Refuse to start on a SQLite database whose `debt_operations` cannot store a version-2 payment.
+
+    Programme 015 step 5b. A PAYMENT envelope now carries intent encoding version 2, and migration 027
+    widened the CHECK - on PostgreSQL. The local SQLite schema comes from `create_all`, which never
+    alters a table that already exists, so a database created before step 5b keeps
+    `CHECK (intent_encoding_version IN (1))` and would refuse every payment at commit (measured). That is
+    refused HERE, at startup, with the cause and the fix, rather than at the first payment.
+
+    NOT A REPAIR: `debt_operations` is referenced by journal entries and per-equivalent rows, and this is a
+    development database; it is recreated, not rebuilt. A CHECK this probe does not recognise refuses too.
+
+    A DATABASE FROM BEFORE THE DEBT JOURNAL REFUSES AS WELL (review round 3): `debts` present and no
+    `debt_operations` is an application database older than migration 022, which starts and then fails on
+    its first journalled money write. Only a genuinely empty database - no `debts` either - passes, as
+    `_sqlite_ensure_debts_version_column` passes an absent `debts`.
+    """
+
+    try:
+        dialect = make_url(settings.DATABASE_URL).get_backend_name()
+    except Exception:
+        return
+    if dialect != "sqlite":
+        return
+
+    from app.db.journal_tables import PAYMENT_INTENT_ENCODING_VERSION
+
+    fix = (
+        "Recreate the local database: .\\scripts\\run_local.ps1 reset-db "
+        "(for an explicit DATABASE_URL, point it at a fresh file)."
+    )
+    try:
+        async with engine.begin() as conn:
+            tables = {
+                str(name): sql
+                for name, sql in (
+                    await conn.execute(
+                        text(
+                            "SELECT name, sql FROM sqlite_master "
+                            "WHERE type='table' AND name IN ('debts', 'debt_operations')"
+                        )
+                    )
+                ).all()
+            }
+    except Exception as exc:
+        raise RuntimeError(
+            "Could not read the SQLite schema of debt_operations to check it against migration 027 "
+            f"(programme 015 step 5b). {fix}"
+        ) from exc
+    ddl = tables.get("debt_operations")
+    if ddl is None:
+        if "debts" not in tables:
+            return
+        raise RuntimeError(
+            "SQLite database created before the debt journal (migration 022, programme 015): it has a debts "
+            "table and no debt_operations table, so every journalled money write would fail. "
+            f"{fix}"
+        )
+
+    match = _SQLITE_INTENT_VERSION_CHECK.search(str(ddl))
+    if match is not None:
+        versions = {int(value) for value in match.group(1).split(",")}
+        if PAYMENT_INTENT_ENCODING_VERSION in versions:
+            return
+        detail = f"carries CHECK (intent_encoding_version IN ({match.group(1)}))"
+    else:
+        detail = "has an intent-version CHECK this startup probe does not recognise"
+    raise RuntimeError(
+        "SQLite database created before migration 027 (programme 015 step 5b): its debt_operations table "
+        f"{detail}, which refuses the version-2 payment envelope, so every payment would fail at commit. "
+        f"{fix}"
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.redis = None
@@ -372,6 +457,7 @@ async def lifespan(app: FastAPI):
     app.state.background_jobs = {}
 
     await _sqlite_ensure_debts_version_column()
+    await _sqlite_refuse_pre_027_debt_operations()
 
     # §12 Recovery reconciliation: mark simulator runs that were still active
     # before the previous server process died as 'error'.  Best-effort — any

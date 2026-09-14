@@ -14,6 +14,22 @@ from app.utils.security import create_access_token
 from app.utils.event_bus import event_bus
 
 
+@pytest.fixture
+def lifespan_on_the_test_database(monkeypatch):
+    """`with TestClient(app)` runs the REAL lifespan, whose SQLite startup probes read `app.main.engine`.
+
+    That engine is bound to the application's default `DATABASE_URL` - the developer's local file - so
+    these tests used to pass or fail on whatever that file happened to be (programme 015 step 5b, review
+    round 3). Point the startup at the suite's own test database instead.
+    """
+    import app.main as main_module
+    from tests.conftest import TEST_DATABASE_URL, engine as test_engine
+
+    monkeypatch.setattr(main_module.settings, "DATABASE_URL", TEST_DATABASE_URL)
+    monkeypatch.setattr(main_module, "engine", test_engine)
+
+
+@pytest.mark.usefixtures("lifespan_on_the_test_database")
 def test_ws_receives_payment_received_event_for_subscribed_pid():
     pid = "PID_WS_TEST"
     token = create_access_token(pid)
@@ -44,6 +60,7 @@ def test_ws_receives_payment_received_event_for_subscribed_pid():
             assert msg["payload"]["tx_id"] == "tx123"
 
 
+@pytest.mark.usefixtures("lifespan_on_the_test_database")
 def test_ws_rejects_legacy_query_string_token():
     token = create_access_token("PID_WS_LEGACY_QUERY")
 
