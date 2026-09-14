@@ -366,6 +366,55 @@ async def _sqlite_ensure_debts_version_column() -> None:
         ) from exc
 
 
+async def _sqlite_ensure_equivalents_integrity_hold_column() -> None:
+    """Programme 015 step 5c: add `equivalents.integrity_hold_result_id` to an existing SQLite dev file.
+
+    Additive and nullable, with no backfill: nothing is held until the scheduled reaction confirms a
+    `FAILED`. PostgreSQL gets the column from migration 028; a fresh SQLite file gets it from
+    `create_all`, which never alters a table that already exists - hence this, beside the `debts.version`
+    fix above and in the same shape.
+
+    WITHOUT THE FOREIGN KEY on purpose: the model's FK names `debt_reconciliation_results`, which a file
+    older than step 5a does not have, and with `foreign_keys=ON` SQLite refuses writes to a child table
+    whose parent is missing. The reference is still written by the only writer (the reaction), and a
+    database built by `create_all` carries the FK.
+    """
+
+    try:
+        dialect = make_url(settings.DATABASE_URL).get_backend_name()
+    except Exception:
+        return
+
+    if dialect != "sqlite":
+        return
+
+    try:
+        async with engine.begin() as conn:
+            table_exists = await conn.execute(
+                text("SELECT 1 FROM sqlite_master WHERE type='table' AND name='equivalents'")
+            )
+            if table_exists.scalar() is None:
+                return
+
+            cols = await conn.execute(text("PRAGMA table_info(equivalents)"))
+            if "integrity_hold_result_id" in {row[1] for row in cols.fetchall()}:
+                return
+
+            logger.warning(
+                "SQLite DB is missing equivalents.integrity_hold_result_id; applying compatibility "
+                "ALTER TABLE"
+            )
+            await conn.execute(
+                text("ALTER TABLE equivalents ADD COLUMN integrity_hold_result_id CHAR(32)")
+            )
+    except Exception as exc:
+        raise RuntimeError(
+            "SQLite DB schema appears outdated and adding equivalents.integrity_hold_result_id failed. "
+            "Recreate the local database: .\\scripts\\run_local.ps1 reset-db "
+            "(for an explicit DATABASE_URL, point it at a fresh file)."
+        ) from exc
+
+
 #: The intent-version CHECK as SQLite stores it in `sqlite_master.sql`, e.g.
 #: `CONSTRAINT chk_debt_operations_intent_version CHECK (intent_encoding_version IN (1, 2))`.
 _SQLITE_INTENT_VERSION_CHECK = re.compile(
@@ -458,6 +507,7 @@ async def lifespan(app: FastAPI):
 
     await _sqlite_ensure_debts_version_column()
     await _sqlite_refuse_pre_027_debt_operations()
+    await _sqlite_ensure_equivalents_integrity_hold_column()
 
     # §12 Recovery reconciliation: mark simulator runs that were still active
     # before the previous server process died as 'error'.  Best-effort — any

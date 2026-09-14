@@ -740,11 +740,12 @@ class RealRunnerImpl:
                         event_index,
                     )
                     continue
-                if (
-                    isinstance(exc, ConflictException)
-                    and (exc.details or {}).get("reason")
-                    == PaymentEngine.EQUIVALENT_INACTIVE_REASON
-                ):
+                refusal_reason = (
+                    (exc.details or {}).get("reason")
+                    if isinstance(exc, ConflictException)
+                    else None
+                )
+                if refusal_reason in PaymentEngine.MONEY_STOP_REASONS:
                     # T1544: the operator's stop refuses THIS inject; it is not an error of the run.
                     # The same rule the payments phase already applies to a refused payment (a 4xx
                     # becomes REJECTED and the tick continues): consumed with a visible note, no
@@ -752,8 +753,11 @@ class RealRunnerImpl:
                     # - re-raising here left the event pending, so every later tick failed on it
                     # until the consecutive-failure limit stopped a run that is also serving other
                     # equivalents. Any other `ConflictException` keeps the path below.
+                    # Step 5c: the integrity hold is classified identically, with its own reason in
+                    # the log marker and the note.
                     self._logger.warning(
-                        "simulator.real.inject.refused_equivalent_inactive event_index=%s",
+                        "simulator.real.inject.refused_%s event_index=%s",
+                        refusal_reason,
                         event_index,
                     )
                     executor.enqueue_inject_note(
@@ -761,7 +765,11 @@ class RealRunnerImpl:
                         run=run,
                         event_index=event_index,
                         event_time_ms=event_time_ms,
-                        description="inject refused (equivalent inactive)",
+                        description=(
+                            "inject refused (equivalent inactive)"
+                            if refusal_reason == PaymentEngine.EQUIVALENT_INACTIVE_REASON
+                            else "inject refused (equivalent integrity hold)"
+                        ),
                     )
                     fired.add(event_index)
                     return

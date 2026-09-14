@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Request
+from fastapi import Path as PathParam
 from pydantic import TypeAdapter, ValidationError, WithJsonSchema
 from sqlalchemy import case, String, cast, desc, func, select, and_, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,6 +34,7 @@ from app.schemas.admin import (
     AdminConfigResponse,
     AdminEquivalentCreateRequest,
     AdminEquivalentDeleteRequest,
+    AdminEquivalentIntegrityHoldClearRequest,
     AdminEquivalentUpdateRequest,
     AdminEquivalentUsageResponse,
     AdminDeleteResponse,
@@ -1395,6 +1397,119 @@ async def _equivalent_usage_counts(db: AsyncSession, *, equivalent_id) -> dict[s
         "debts": int(debts or 0),
         "integrity_checkpoints": int(integrity_checkpoints or 0),
     }
+
+
+@router.post(
+    "/equivalents/{code}/integrity-hold/clear",
+    response_model=EquivalentSchema,
+    responses={
+        404: {"model": ErrorEnvelope, "description": "Equivalent not found"},
+        409: {
+            "model": ErrorEnvelope,
+            "description": "Not held, or no PASSED reconciliation result later than the one it was held on",
+        },
+    },
+)
+async def admin_clear_equivalent_integrity_hold(
+    # The canon's `EquivalentCode`, stated on the generated side too, so this new operation enters no
+    # parameter-drift ledger. A malformed code is a 422 (declared), not a lookup.
+    code: Annotated[str, PathParam(pattern=r"^[A-Z0-9_]{1,16}$")],
+    body: AdminEquivalentIntegrityHoldClearRequest,
+    request: Request,
+    db: AsyncSession = Depends(deps.get_db),
+) -> EquivalentSchema:
+    """Programme 015 step 5c (`T1546`): lift an integrity hold, explicitly, with audit.
+
+    PREDICATE, NO CLOCKS: the equivalent is held AND its latest reconciliation result is `PASSED` AND that
+    result is not the one the hold points at. Result transitions give the causal order: the reaction makes
+    the FAILED row latest, and any later transition demotes it before inserting the new latest.
+
+    UNDER THE OWNER LOCK THROUGH COMMIT, like the deactivating PATCH, so a scheduled reaction confirming a
+    new FAILED is serialised with this clear. The two predicate reads take row locks (`FOR UPDATE` on the
+    equivalent, `FOR SHARE` on the latest result): under SERIALIZABLE this transaction's snapshot predates
+    its wait on the owner lock, and a row changed after that snapshot then fails with 40001 instead of
+    being read stale - the T1544 recipe. A no-op on SQLite.
+    """
+
+    from sqlalchemy import update as sql_update
+
+    from app.core.ledger.reconciliation import PASSED
+    from app.db.reconciliation_tables import debt_reconciliation_results
+
+    eq = (
+        await db.execute(select(EquivalentModel).where(EquivalentModel.code == code))
+    ).scalar_one_or_none()
+    if eq is None:
+        raise NotFoundException(f"Equivalent {code} not found")
+
+    await PaymentEngine(db).acquire_staged_equivalent_owner_locks([eq.id])
+
+    try:
+        hold_result_id = (
+            await db.execute(
+                select(EquivalentModel.integrity_hold_result_id)
+                .where(EquivalentModel.id == eq.id)
+                .with_for_update()
+            )
+        ).scalar_one()
+        if hold_result_id is None:
+            raise ConflictException(
+                f"Equivalent {eq.code} is not under an integrity hold",
+                details={"reason": "no_integrity_hold"},
+            )
+
+        results = debt_reconciliation_results.c
+        latest = (
+            await db.execute(
+                select(results.id, results.status)
+                .where(results.equivalent_id == eq.id, results.is_latest.is_(True))
+                .with_for_update(read=True)
+            )
+        ).first()
+        if latest is None or latest.status != PASSED or latest.id == hold_result_id:
+            raise ConflictException(
+                f"Equivalent {eq.code} can be cleared only after a later PASSED reconciliation result",
+                details={
+                    "reason": "no_later_passed_reconciliation_result",
+                    "latest_status": None if latest is None else str(latest.status),
+                },
+            )
+    except BaseException:
+        # A refusal leaves nothing behind: the owner lock and the row locks end HERE, not whenever the
+        # request's session is torn down after the response has been sent.
+        await db.rollback()
+        raise
+
+    try:
+        await db.execute(
+            sql_update(EquivalentModel)
+            .where(
+                EquivalentModel.id == eq.id,
+                EquivalentModel.integrity_hold_result_id == hold_result_id,
+            )
+            .values(integrity_hold_result_id=None)
+        )
+        await db.refresh(eq)
+        result = EquivalentSchema.model_validate(eq)
+        _add_audit_entry(
+            db,
+            request=request,
+            action="admin.equivalents.integrity_hold.clear",
+            object_type="equivalent",
+            object_id=eq.code,
+            reason=body.reason,
+            before_state={"integrity_hold_result_id": str(hold_result_id)},
+            after_state={
+                "integrity_hold_result_id": None,
+                "cleared_on_reconciliation_result_id": str(latest.id),
+            },
+        )
+        await db.commit()
+    except BaseException:
+        await db.rollback()
+        raise
+
+    return result
 
 
 @router.get("/equivalents/{code}/usage", response_model=AdminEquivalentUsageResponse)

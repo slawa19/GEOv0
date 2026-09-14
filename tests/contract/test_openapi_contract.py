@@ -58,10 +58,15 @@ PARAMETER_SCHEMA_DRIFT_COUNT = 22
 # demonstration that no old entry got worse and each new one reproduces a measured class.
 # Reconciling the shared envelopes globally would lower ERROR_RESPONSE, and is a separate slice:
 # it touches every operation and needs its own measurement.
+# 2026-09-14 / programme 015 step 5c: 67 -> 68, ONE entry enters and it is the new authorised operation
+# `POST /admin/equivalents/{code}/integrity-hold/clear`: canon `X-Admin-Token` `required: true`,
+# generated `required: false` - the class every admin operation already carries here. Measured by
+# collecting the ledger, removing that one key and hashing the rest: the remainder's digest equals the
+# previous `493a3f3d...502a2` and its count 67, so no old entry changed.
 TRANSPORT_HEADER_DRIFT_SHA256 = (
-    "493a3f3d4477b5914d93645788bb8987e460116e66e19a641fb69eff821502a2"
+    "a9f8d1302bf9be263546e4a6a2dcce189cab82910e69c0bdbb5976c673220083"
 )
-TRANSPORT_HEADER_DRIFT_COUNT = 67
+TRANSPORT_HEADER_DRIFT_COUNT = 68
 # 2026-08-23 / p011_t1102, slice 5: count unchanged at 13, digest moves. Describing
 # TrustLine.policy touches the create and update REQUEST bodies too - the same node is
 # declared on all three schemas, and leaving one of the three vague would have been a
@@ -290,10 +295,15 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # verdict with extra keys", which the fused-entry assertion in the T1402 module caught. Same
 # measurement as above and the same narrow claim: 63 drifting operations before this second edit
 # and 63 after, computed on both trees, nothing entering or leaving.
+# 2026-09-14 / programme 015 step 5c: 63 -> 64, ONE entry enters: the new authorised operation
+# `POST /admin/equivalents/{code}/integrity-hold/clear`, whose `200` reuses `components.schemas.Equivalent`
+# as the step 5c brief decides. Its canonical/generated difference is character for character the one
+# `PATCH /admin/equivalents/{code}` already carries (same response schema on both sides). Measured by
+# removing that one key and hashing the rest: digest equals the previous `be0ed394...187c`, count 63.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "be0ed3947fd950a9303ce7c5a6d3d312f45ba161e042be58c0c7922e155e187c"
+    "72d376f2f77c03d97f3c5a7a096b1f44801da5bc0352712336f1119b11bf6d2b"
 )
-SUCCESS_SCHEMA_DRIFT_COUNT = 63
+SUCCESS_SCHEMA_DRIFT_COUNT = 64
 # 2026-08-11 / T501: public DB health no longer declares exception details;
 # the new admin diagnostic operation matches generated responses, so count stays 84.
 # 2026-08-20 / p007_unblock_f0071: simulator metrics/bottlenecks declare 503 in the
@@ -405,10 +415,13 @@ ERROR_RESPONSE_DRIFT_COUNT = 53
 # 2026-08-23 / p011_t1101: 59 -> 67, see the note above TRANSPORT_HEADER_DRIFT_SHA256.
 # Missed by the first pass of this task: the error-response assert aborts before this one, so a
 # run that stops there says nothing about security drift. Measured directly instead.
+# 2026-09-14 / programme 015 step 5c: 67 -> 68, ONE entry enters: the new authorised operation
+# `POST /admin/equivalents/{code}/integrity-hold/clear`, with canon `security: []` like every admin
+# operation beside it. Remainder digest equals the previous `7b2c25ac...bb45`, count 67.
 SECURITY_DRIFT_SHA256 = (
-    "7b2c25ac469d081cae5e570eb5c82d1e25ed5731480d484669f4e50a1a32bb45"
+    "f4486f7c88a647eac8eed51091b31458382f6172be2f3e25fb1011f65ff58e2f"
 )
-SECURITY_DRIFT_COUNT = 67
+SECURITY_DRIFT_COUNT = 68
 
 
 def _repo_root() -> Path:

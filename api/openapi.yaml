@@ -752,6 +752,51 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /admin/equivalents/{code}/integrity-hold/clear:
+    post:
+      tags: [Admin]
+      summary: Clear an equivalent's integrity hold (admin)
+      description: |
+        Programme 015 step 5c. Lifts the integrity hold that the scheduled reconciliation set on a
+        confirmed FAILED result. Permitted only while the equivalent is held AND its latest
+        reconciliation result is PASSED and is not the result the hold was set on; otherwise 409.
+        Audited with the required reason. Never automatic.
+      security: []
+      parameters:
+        - in: header
+          name: X-Admin-Token
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: code
+          required: true
+          schema:
+            $ref: '#/components/schemas/EquivalentCode'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminEquivalentIntegrityHoldClearRequest'
+      responses:
+        '200':
+          description: Equivalent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Equivalent'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
   /admin/migrations:
     get:
       tags: [Admin]
@@ -4945,6 +4990,14 @@ components:
         reason:
           type: string
           nullable: true
+
+    AdminEquivalentIntegrityHoldClearRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
 
     AdminEquivalentUsageResponse:
       type: object

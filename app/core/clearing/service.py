@@ -101,8 +101,9 @@ class ClearingService:
             await PaymentEngine(self.session).refuse_inactive_equivalents(
                 equivalent_ids, row_lock=False
             )
-        except ConflictException:
-            logger.info("event=clearing.refused_equivalent_inactive")
+        except ConflictException as refusal:
+            # Step 5c: the same helper also refuses an integrity hold; the reason names which.
+            logger.info("event=clearing.refused_%s", (refusal.details or {}).get("reason"))
             await self._rollback_skipped_execution()
             raise
         except Exception as exc:
