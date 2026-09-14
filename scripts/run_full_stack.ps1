@@ -1055,6 +1055,9 @@ if ($ResetDb) {
     Invoke-PythonScript -PythonExe $Python -ScriptPath (Join-Path $RepoRoot 'scripts\init_sqlite_db.py') -Description "init_sqlite_db.py"
     $seedArgs = @('--source', 'fixtures', '--community', $FixturesCommunity, '--regenerate-fixtures')
     Invoke-PythonScript -PythonExe $Python -ScriptPath (Join-Path $RepoRoot 'scripts\seed_db.py') -Arguments $seedArgs -Description "seed_db.py"
+    # Programme 015 step 5a: reconciliation baseline right after seeding, before the backend starts.
+    # A failure throws and fails the reset.
+    Invoke-PythonScript -PythonExe $Python -ScriptPath (Join-Path $RepoRoot 'scripts\take_reconciliation_baseline.py') -Arguments @('--all') -Description "take_reconciliation_baseline.py --all"
     Write-Host "     DB initialized with $FixturesCommunity" -ForegroundColor Green
 } else {
     Write-Host "[2/8] Checking database..." -ForegroundColor Yellow
@@ -1065,6 +1068,8 @@ if ($ResetDb) {
         Invoke-PythonScript -PythonExe $Python -ScriptPath (Join-Path $RepoRoot 'scripts\init_sqlite_db.py') -Description "init_sqlite_db.py"
         $seedArgs = @('--source', 'fixtures', '--community', $FixturesCommunity, '--regenerate-fixtures')
         Invoke-PythonScript -PythonExe $Python -ScriptPath (Join-Path $RepoRoot 'scripts\seed_db.py') -Arguments $seedArgs -Description "seed_db.py"
+        # Step 5a: baseline right after seeding, before the backend starts; a failure aborts the launch.
+        Invoke-PythonScript -PythonExe $Python -ScriptPath (Join-Path $RepoRoot 'scripts\take_reconciliation_baseline.py') -Arguments @('--all') -Description "take_reconciliation_baseline.py --all"
         Write-Host "     DB initialized with $FixturesCommunity" -ForegroundColor Green
     } else {
         Write-Host "     DB exists: $LocalDatabasePath" -ForegroundColor Gray

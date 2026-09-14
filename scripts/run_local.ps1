@@ -997,6 +997,16 @@ switch ($Action) {
         if ($EffectiveDatabaseUrl -ne $DefaultDatabaseUrl) {
             throw 'reset-db is restricted to the default .local-run SQLite DB; legacy or custom DATABASE_URL values are never deleted.'
         }
+        # Programme 015 step 5a: reset-db deletes the database, seeds it and takes the reconciliation
+        # baseline. None of that may happen under a running local backend. The detection is the one
+        # `status` uses (ownership metadata, process identity, port listener); a conflict counts as
+        # running too, because it means a listener this script cannot prove is not the backend.
+        $resetBackendPlan = @(Get-RunLocalOwnershipPlan -Services (Get-RunLocalProcessServices -BackendOnly))
+        $runningBackend = @($resetBackendPlan | Where-Object { $_.Owned -or $_.ListenerPid -or $_.Conflict })
+        if ($runningBackend.Count -gt 0) {
+            $runningDetail = ($runningBackend | ForEach-Object { "$($_.Service.Name) on port $($_.EffectivePort) (listener PID $(Get-NullCoalesce $_.ListenerPid 'None'), owned=$($_.Owned))" }) -join '; '
+            throw "reset-db refused: the local backend is running: $runningDetail. Stop it first: .\scripts\run_local.ps1 stop"
+        }
         if (Test-Path $DefaultDatabasePath) {
             Remove-Item -Force $DefaultDatabasePath
             Write-Host "Deleted existing DB: $DefaultDatabasePath"
@@ -1006,6 +1016,9 @@ switch ($Action) {
         Invoke-PythonScript -PythonExe $Python -ScriptPath (Join-Path $RepoRoot 'scripts\init_sqlite_db.py') -Description "init_sqlite_db.py"
         $seedArgs = Get-SeedDbArgs -SeedSource $SeedSource -FixturesCommunity $FixturesCommunity -RegenerateFixtures:$RegenerateFixtures
         Invoke-PythonScript -PythonExe $Python -ScriptPath (Join-Path $RepoRoot 'scripts\seed_db.py') -Arguments $seedArgs -Description "seed_db.py"
+        # Programme 015 step 5a: a fresh database becomes checkable only with a reconciliation baseline,
+        # taken right after seeding and before any money moves. A failure throws and fails the reset.
+        Invoke-PythonScript -PythonExe $Python -ScriptPath (Join-Path $RepoRoot 'scripts\take_reconciliation_baseline.py') -Arguments @('--all') -Description "take_reconciliation_baseline.py --all"
         Write-Host "DB reset complete." -ForegroundColor Green
         exit 0
     }
@@ -1113,6 +1126,8 @@ switch ($Action) {
             Invoke-PythonScript -PythonExe $Python -ScriptPath (Join-Path $RepoRoot 'scripts\init_sqlite_db.py') -Description "init_sqlite_db.py"
             $seedArgs = Get-SeedDbArgs -SeedSource $SeedSource -FixturesCommunity $FixturesCommunity -RegenerateFixtures:$RegenerateFixtures
             Invoke-PythonScript -PythonExe $Python -ScriptPath (Join-Path $RepoRoot 'scripts\seed_db.py') -Arguments $seedArgs -Description "seed_db.py"
+            # Step 5a: baseline right after seeding, before the backend starts; a failure aborts start.
+            Invoke-PythonScript -PythonExe $Python -ScriptPath (Join-Path $RepoRoot 'scripts\take_reconciliation_baseline.py') -Arguments @('--all') -Description "take_reconciliation_baseline.py --all"
             Write-Host "     DB initialized with seed source: $SeedSource" -ForegroundColor Gray
         } else {
             Write-Host "     DB exists: $LocalDatabasePath" -ForegroundColor Gray

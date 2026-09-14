@@ -305,6 +305,14 @@ async def purge_test_ledger(
         ):
             await connection.exec_driver_sql(statement)
     if equivalents:
+        # The reconciliation baseline is RESTRICT on the equivalent (step 5a), so it has to be named by
+        # the disposal too; the result rows would cascade, and are removed here so a purge is complete.
+        for statement in (
+            "DELETE FROM debt_reconciliation_baseline_offsets WHERE equivalent_id IN ({ids})",
+            "DELETE FROM debt_reconciliation_baselines WHERE equivalent_id IN ({ids})",
+            "DELETE FROM debt_reconciliation_results WHERE equivalent_id IN ({ids})",
+        ):
+            await connection.exec_driver_sql(statement.format(ids=_sql_in(equivalents)))
         await connection.exec_driver_sql(
             f"DELETE FROM debts WHERE equivalent_id IN ({_sql_in(equivalents)})"
         )

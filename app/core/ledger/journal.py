@@ -171,6 +171,7 @@ from app.db.journal_tables import (
     debt_operations,
 )
 from app.db.models.debt import Debt
+from app.db.reconciliation_tables import debt_reconciliation_baselines
 from app.db.sqlite_transaction_control import sqlite_transaction_control_is_installed
 
 __all__ = [
@@ -242,6 +243,13 @@ class Reason:
     ENVELOPE_LOST = "envelope_lost"
     STALE_DB_TRANSACTION = "stale_db_transaction"
     UNMEASURED_DB_TRANSACTION = "unmeasured_db_transaction"
+    UNVERIFIABLE_WRITER_AFTER_BASELINE = "unverifiable_writer_after_baseline"
+
+
+#: Writers whose effects nothing can recompute (step 5 key review: `SEED/TEST_FIXTURE-PREBASELINE-ONLY`).
+#: Once an equivalent has a reconciliation baseline, an operation of one of these kinds that touched it
+#: is refused at completion rather than allowed to produce a `PASSED` over a change no rule explains.
+_PRE_BASELINE_ONLY_KINDS = frozenset({"SEED", "TEST_FIXTURE"})
 
 
 class DebtJournalError(RuntimeError):
@@ -2947,6 +2955,45 @@ async def _complete(session: Any, conn: Connection, state: _TxState, record: _Op
             per_equivalent.setdefault(row[1], []).append(code)
         for equivalent_id in record.intent_equivalent_ids:
             per_equivalent.setdefault(equivalent_id, [])
+
+        # STEP 5a: A SEED OR TEST_FIXTURE WRITE AFTER THE BASELINE IS REFUSED, never recorded. It is
+        # read from the STORED entries above, so it covers every flush of the operation. Raising here
+        # poisons the root through the `except` below, so the commit that would carry it is refused.
+        # Under PostgreSQL SERIALIZABLE a baseline taken concurrently with such an operation cannot
+        # commit alongside it: each transaction reads what the other writes, and one of the two gets
+        # `40001` (measured in `tests/integration/test_p015_step5a_reconciliation_postgres.py`).
+        if record.kind in _PRE_BASELINE_ONLY_KINDS:
+            touched = sorted(
+                (equivalent_id for equivalent_id, codes in per_equivalent.items() if codes),
+                key=lambda value: value.bytes,
+            )
+            if touched:
+                # THE JOURNAL'S OWN READ, through the same door as its other verification reads
+                # (`_own_select` + `exec_driver_sql` under `_journal_read`): no `before_execute`
+                # neighbour can rewrite it, and `journal_statement_is_own` answers for it, which is what
+                # keeps "arming adds the journal's own statements and nothing else" (R4) true.
+                # Found by the SQLite gate on 2026-09-14, when this was a plain `conn.execute(select)`.
+                column = debt_reconciliation_baselines.c.equivalent_id
+                sql, params = _own_select(
+                    dialect,
+                    debt_reconciliation_baselines,
+                    (column,),
+                    where=f"{column.name} IN ({', '.join('{%d}' % i for i in range(len(touched)))})",
+                    binds=[(column, equivalent_id) for equivalent_id in touched],
+                )
+                with _journal_read(live_conn):
+                    baselined = [
+                        row[0] for row in (await async_conn.exec_driver_sql(sql, params)).fetchall()
+                    ]
+                if baselined:
+                    raise DebtJournalError(
+                        Reason.UNVERIFIABLE_WRITER_AFTER_BASELINE,
+                        f"{record.kind} operation {record.identity} changed debts in "
+                        f"{len(baselined)} equivalent(s) that already have a reconciliation "
+                        f"baseline. Such a write can only precede the baseline: nothing can recompute "
+                        f"it, and nothing re-baselines.",
+                        equivalent_ids=sorted(str(value) for value in baselined),
+                    )
 
         equivalent_rows = [
             {
