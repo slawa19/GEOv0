@@ -282,6 +282,11 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml exec app alembic 
 # 4. Seed initial data (optional)
 docker compose -f docker-compose.yml -f docker-compose.dev.yml exec app python scripts/seed_db.py
 
+# 4b. Right after seeding, before any client traffic or simulator run: take the debt reconciliation
+#     baseline. The API container is already up here (seeding runs inside it); an idle API is not a
+#     writer. See "Debt reconciliation baseline" below.
+docker compose -f docker-compose.yml -f docker-compose.dev.yml exec app python scripts/take_reconciliation_baseline.py --all
+
 # 5. API is now available at:
 # - default: http://localhost:8000
 # - with GEO_API_PORT override: http://localhost:18000
@@ -299,9 +304,38 @@ python scripts/init_sqlite_db.py
 # 2) Seed demo data (from ./seeds/*.json)
 python scripts/seed_db.py
 
+# 2b) Right after seeding, before any payments: take the debt reconciliation baseline
+python scripts/take_reconciliation_baseline.py --all
+
 # 3) Run API
 python -m uvicorn app.main:app --reload --port 18000
 ```
+
+### Debt reconciliation baseline
+
+The scheduled integrity loop checks every equivalent's `debts` against the debt journal (programme 015,
+criterion (a): detection of changes made around the application). The check needs one **baseline** per
+equivalent; without it the stored result is `UNVERIFIABLE`.
+
+- **Fresh local database — automatic.** `scripts/run_local.ps1` (`start` on a missing database and
+  `reset-db`), `scripts/run_full_stack.ps1` (a missing database and `-ResetDb`) and
+  `scripts/verify_admin_phase4_real_contract.ps1` take it right after seeding, before the backend
+  starts, and fail if it fails. After a manual seed, run
+  `python scripts/take_reconciliation_baseline.py --all` yourself before any payments.
+- **Upgrading an existing database — explicit and manual (cutover).** Make the system quiet first: stop
+  client traffic and simulator runs, and stop anything that writes `debts` around the application
+  (maintenance SQL, a restore, a script that bypasses the debt journal). A running but idle API process
+  is not a writer and may stay up: a payment or clearing that does happen takes the equivalent's owner
+  lock, which the baseline takes too, and a seed operation racing the baseline is refused under the
+  application's `SERIALIZABLE` isolation (`40001`). Then run
+  `python scripts/take_reconciliation_baseline.py --all`, or `--equivalent CODE` (repeatable).
+  - `--all` takes a baseline for every equivalent that has none yet and skips the ones that already
+    have one. `--equivalent CODE` refuses an equivalent that already has a baseline (exit code 1).
+  - Each equivalent is one transaction under its owner lock.
+  - Whatever the journal cannot explain at that moment — for example debts written before the journal
+    existed — is recorded as a per-edge offset. **The baseline does not certify those debts**; it only
+    makes later changes checkable.
+  - **Nothing re-baselines.** There is exactly one baseline per equivalent.
 
 Health endpoints (also available as `/api/v1/*` aliases):
 
@@ -491,8 +525,9 @@ Manual (Docker):
 # 1) Start backend + DB
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 
-# Optional seed
+# Optional seed, then the reconciliation baseline right after it (see "Debt reconciliation baseline")
 docker compose -f docker-compose.yml -f docker-compose.dev.yml exec app python scripts/seed_db.py
+docker compose -f docker-compose.yml -f docker-compose.dev.yml exec app python scripts/take_reconciliation_baseline.py --all
 
 # 2) Run Admin UI
 npm --prefix admin-ui install
@@ -520,6 +555,9 @@ node scripts/validate-fixtures.mjs --only-pack --v1-dir ..\.local-run\fixture-pa
 
 # Legacy small seed set:
 # python scripts/seed_db.py --source seeds
+
+# Right after seeding, before any payments (see "Debt reconciliation baseline")
+python scripts/take_reconciliation_baseline.py --all
 
 python -m uvicorn app.main:app --reload --port 18000
 

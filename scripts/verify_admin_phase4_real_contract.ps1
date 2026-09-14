@@ -113,6 +113,11 @@ try {
 
         & $pythonExe scripts/seed_db.py --source fixtures
         if ($LASTEXITCODE -ne 0) { throw 'Fixture seed failed.' }
+
+        # Programme 015 step 5a: the fresh database becomes checkable only with a baseline, taken
+        # right after seeding and before the backend starts.
+        & $pythonExe scripts/take_reconciliation_baseline.py --all
+        if ($LASTEXITCODE -ne 0) { throw 'Reconciliation baseline failed.' }
     } finally {
         Pop-Location
     }

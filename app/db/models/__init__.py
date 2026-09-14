@@ -8,6 +8,8 @@ from app.db.base import Base
 # NOT re-exported below: nothing may treat it as a model, because being unreachable from the ORM
 # is the journal's enforcement (app/db/journal_tables.py).
 from app.db import journal_tables as _journal_tables  # noqa: F401
+# The reconciliation baseline and result (programme 015, step 5a), unmapped for the same reason.
+from app.db import reconciliation_tables as _reconciliation_tables  # noqa: F401
 from .equivalent import Equivalent
 from .participant import Participant
 from .trustline import TrustLine
