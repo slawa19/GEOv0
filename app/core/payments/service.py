@@ -686,6 +686,16 @@ class PaymentService:
             except Exception:
                 pass
             raise PaymentEngine.inactive_equivalent_conflict([equivalent_code])
+        # Step 5c (`T1546`): the integrity hold, on the same row, with the same best-effort standing -
+        # the binding read is the commit's. After the operator stop, so one reason per refusal.
+        if equivalent.integrity_hold_result_id is not None:
+            try:
+                from app.utils.metrics import PAYMENT_EVENTS_TOTAL
+
+                PAYMENT_EVENTS_TOTAL.labels(event="create", result="conflict").inc()
+            except Exception:
+                pass
+            raise PaymentEngine.integrity_hold_conflict([equivalent_code])
 
         # 2. Routing
         tx_uuid = uuid.uuid4()

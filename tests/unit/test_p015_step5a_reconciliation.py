@@ -619,7 +619,7 @@ async def test_step5a_a_failed_then_passed_transition_inserts_and_keeps_the_fail
 
 
 @pytest.mark.asyncio
-async def test_step5a_a_payment_on_an_already_failed_edge_keeps_the_fault_identity(db_session) -> None:
+async def test_step5a_a_payment_on_an_already_failed_edge_keeps_the_fault_identity(db_session, monkeypatch) -> None:
     """The fingerprint is the FAULT, not the amounts around it.
 
     A one-unit change around the application makes A -> B FAILED. A legitimate journalled payment on
@@ -627,9 +627,21 @@ async def test_step5a_a_payment_on_an_already_failed_edge_keeps_the_fault_identi
     one row, the same fingerprint, `last_checked_at` advanced, `detail` still showing the first
     observation. A DIFFERENT unexplained amount on the same edge is a new fault and inserts.
 
+    STEP 5c CHANGED THE STAND, NOT THE CLAIM (2026-09-14). A scheduled FAILED now holds the equivalent,
+    and a held equivalent refuses exactly the payment this test needs. The fault identity still matters
+    wherever such a payment is reachable - a hold whose transaction failed to commit, or a hold released
+    around the application - so ONLY the reaction is stubbed out here; nothing the fingerprint reads is.
+    The hold itself is tested in `tests/unit/test_p015_step5c_reaction_and_hold.py`.
+
     MUTATION: put `current_debt` back into the `edge_residual` identity - the payment inserts, red.
     """
+    from app.core.ledger import reconciliation
     from tests.conftest import TestingSessionLocal as factory
+
+    async def _no_reaction(session_factory, equivalent_id):
+        return reconciliation.HoldDecision(reconciliation.HOLD_NOT_CONFIRMED)
+
+    monkeypatch.setattr(reconciliation, "react_to_failed", _no_reaction)
 
     triangle = await _seed_triangle(factory, trustlines=[("b", "a", "100")])
     try:

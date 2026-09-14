@@ -240,6 +240,12 @@ class AdminEquivalentDeleteRequest(BaseModel):
     reason: str
 
 
+class AdminEquivalentIntegrityHoldClearRequest(BaseModel):
+    """Programme 015 step 5c: why the operator lifts an integrity hold. Required, and written to audit."""
+
+    reason: str = Field(min_length=1)
+
+
 class AdminEquivalentUsageResponse(BaseModel):
     code: str
     trustlines: int

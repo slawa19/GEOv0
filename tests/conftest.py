@@ -254,6 +254,17 @@ async def _ensure_schema_initialized() -> None:
             return
 
         async with engine.begin() as conn:
+            if _is_sqlite:
+                # STEP 5c: SQLite's `drop_all` over a file whose last test left a hold fails with
+                # `FOREIGN KEY constraint failed` - the hold's FK is RESTRICT and `use_alter` does not
+                # order SQLite's implicit DELETEs (measured 2026-09-14). Release holds first, if this
+                # file already has the column.
+                columns = await conn.exec_driver_sql("PRAGMA table_info(equivalents)")
+                if "integrity_hold_result_id" in {row[1] for row in columns.fetchall()}:
+                    await conn.exec_driver_sql(
+                        "UPDATE equivalents SET integrity_hold_result_id = NULL "
+                        "WHERE integrity_hold_result_id IS NOT NULL"
+                    )
             await conn.run_sync(Base.metadata.drop_all)
             await conn.run_sync(Base.metadata.create_all)
 
@@ -341,6 +352,12 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
         for attempt in range(6):
             try:
                 async with engine.begin() as conn:
+                    # STEP 5c: `equivalents.integrity_hold_result_id` is RESTRICT on the result row it
+                    # names, and results are deleted before equivalents below. Release holds first.
+                    await conn.exec_driver_sql(
+                        "UPDATE equivalents SET integrity_hold_result_id = NULL "
+                        "WHERE integrity_hold_result_id IS NOT NULL"
+                    )
                     for table in reversed(Base.metadata.sorted_tables):
                         # `exec_driver_sql` and NOT `conn.execute(table.delete())`, since the debt
                         # journal was armed (programme 015 step 4 slice C): a Core DELETE against

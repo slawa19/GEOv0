@@ -60,8 +60,12 @@ tables.
         restore; code that disables this verifier; incorrect opening balances (the baseline adopts, it
         does not certify); a v1 payment or an inject that wrote a wrong amount on a named edge.
 
-It is DETECTION, not tamper protection, and nothing downstream may call it more. It reacts to nothing:
-no hold, no notification, no repair (step 5c decides the reaction).
+It is DETECTION, not tamper protection, and nothing downstream may call it more.
+
+THE REACTION (step 5c, `T1516`/`T1546`, `react_to_failed`): a scheduled `FAILED`, confirmed by a full
+re-run under the equivalent's owner lock, sets the equivalent's integrity hold, which stops money at the
+T1544 boundary. Nothing else: no notification subsystem, no checkpoint search, no report, no repair, and
+never an automatic clear - an admin clears it after a later `PASSED`.
 
 THE RESULT IS THREE-VALUED. `FAILED` - the evidence exists and an exact predicate is false.
 `UNVERIFIABLE` - required evidence is absent (today: no baseline). `FAILED` dominates when at least one
@@ -109,6 +113,12 @@ __all__ = [
     "CRITERION_B",
     "FAILED",
     "FULL_RECOMPUTATION",
+    "HOLD_ALREADY_HELD",
+    "HOLD_EQUIVALENT_GONE",
+    "HOLD_METRIC_EVENT",
+    "HOLD_NOT_CONFIRMED",
+    "HOLD_SET",
+    "HoldDecision",
     "NOT_EXAMINED",
     "PASSED",
     "ReconciliationOutcome",
@@ -1023,6 +1033,167 @@ async def take_baseline(session: Any, equivalent_id: uuid.UUID) -> BaselineTaken
     )
 
 
+# ==================================================================================================
+# Step 5c: the reaction to a confirmed FAILED (`T1516`) - the integrity hold (`T1546`)
+# ==================================================================================================
+
+#: What one reaction did. `held` is the only decision that changed state.
+HOLD_SET = "set"
+HOLD_ALREADY_HELD = "already_held"
+HOLD_NOT_CONFIRMED = "not_confirmed"
+HOLD_EQUIVALENT_GONE = "equivalent_gone"
+
+#: `RECOVERY_EVENTS_TOTAL{event=...}` of the hold. An existing counter, not a new metric.
+HOLD_METRIC_EVENT = "debt_reconciliation_integrity_hold"
+
+
+@dataclass(frozen=True)
+class HoldDecision:
+    decision: str
+    result_id: uuid.UUID | None = None
+    outcome: ReconciliationOutcome | None = None
+
+
+async def _open_reaction_transaction(session: Any) -> None:
+    """Begin the reaction's ONE transaction: every verifier read in one snapshot, and the writes in it.
+
+    Unlike `open_verification_snapshot` this transaction writes (the evidence and the hold), so it is
+    not read-only. PostgreSQL: REPEATABLE READ asked for here rather than leaned on from configuration,
+    for the reason recorded on `open_verification_snapshot`; a concurrent update of the equivalent row
+    then fails this transaction with 40001, which is an error of this reaction and is retried by the next
+    scheduled run. SQLite: the transaction control's deferred `BEGIN`; without it there is no snapshot
+    and the reaction is refused as the verifier is.
+    """
+
+    bind = session.get_bind()
+    dialect = bind.dialect.name
+    if dialect == "postgresql":
+        await session.connection(execution_options={"isolation_level": "REPEATABLE READ"})
+    elif dialect == "sqlite":
+        if not sqlite_transaction_control_is_installed(bind):
+            raise ReconciliationSnapshotError(
+                "this SQLite engine has no explicit transaction control (T1525); refusing to hold an "
+                "equivalent on reads that do not share a snapshot"
+            )
+        await session.connection()
+    else:
+        raise ReconciliationSnapshotError(f"no reaction transaction recipe for dialect {dialect!r}")
+
+
+async def _set_integrity_hold(session: Any, equivalent_id: uuid.UUID, result_id: uuid.UUID) -> None:
+    """The hold itself: one UPDATE of the equivalent row, only while it is not held already."""
+
+    await session.execute(
+        update(Equivalent)
+        .where(Equivalent.id == equivalent_id, Equivalent.integrity_hold_result_id.is_(None))
+        .values(integrity_hold_result_id=result_id)
+    )
+
+
+async def _confirm_and_hold(session: Any, equivalent_id: uuid.UUID) -> HoldDecision:
+    """Inside the reaction's transaction, under the owner lock: re-verify, and hold only on FAILED."""
+
+    row = (
+        await session.execute(
+            select(Equivalent.integrity_hold_result_id).where(Equivalent.id == equivalent_id)
+        )
+    ).first()
+    if row is None:
+        return HoldDecision(HOLD_EQUIVALENT_GONE)
+    if row[0] is not None:
+        # IDEMPOTENT: an equivalent already held is not re-verified, re-pointed or re-announced.
+        return HoldDecision(HOLD_ALREADY_HELD, result_id=row[0])
+
+    # THE RE-RUN IS THE CONFIRMATION, not a formality: the verdict that triggered this reaction was
+    # computed without the owner lock and published in another transaction, and `record_outcome` leaves
+    # a stale publication open on the grounds that this re-run happens. Full criteria (a) and (b).
+    outcome = await verify_journal_equals_change(session, equivalent_id)
+    if outcome.status != FAILED:
+        return HoldDecision(HOLD_NOT_CONFIRMED, outcome=outcome)
+
+    await record_outcome(session, outcome)
+    results = debt_reconciliation_results.c
+    result_id = (
+        await session.execute(
+            select(results.id).where(
+                results.equivalent_id == equivalent_id, results.is_latest.is_(True)
+            )
+        )
+    ).scalar_one()
+    await _set_integrity_hold(session, equivalent_id, result_id)
+    return HoldDecision(HOLD_SET, result_id=result_id, outcome=outcome)
+
+
+def _announce_hold(equivalent_id: uuid.UUID, decision: HoldDecision) -> None:
+    """The structured log and the metric. Called ONLY after the hold's transaction has committed."""
+
+    outcome = decision.outcome
+    logger.error(
+        "debt_reconciliation.integrity_hold_set equivalent_id=%s result_id=%s findings_total=%d",
+        equivalent_id,
+        decision.result_id,
+        len(outcome.findings) if outcome is not None else 0,
+    )
+    try:
+        from app.utils.metrics import RECOVERY_EVENTS_TOTAL
+
+        RECOVERY_EVENTS_TOTAL.labels(event=HOLD_METRIC_EVENT, result=HOLD_SET).inc()
+    except Exception:  # noqa: BLE001 - a metric must not turn a committed hold into an error
+        logger.debug("debt_reconciliation.integrity_hold_metric_failed", exc_info=True)
+
+
+async def react_to_failed(session_factory: Callable[[], Any], equivalent_id: uuid.UUID) -> HoldDecision:
+    """React to ONE scheduled `FAILED`: confirm it under the owner lock and hold the equivalent.
+
+    Decisions: step 5c brief and spec.md "Ключевое ревью шага 5", reaction paragraph. The order is the
+    point, and each step is load-bearing:
+
+    1. A FRESH TRANSACTION FOR THIS EQUIVALENT ALONE, so a hold that fails to commit cannot roll back a
+       neighbour's.
+    2. THE OWNER LOCK BEFORE THE AUTHORITATIVE SNAPSHOT. It is taken on a session of its own and held
+       until the work transaction has committed, and the work transaction's first statement comes after
+       it is granted. Under SERIALIZABLE or REPEATABLE READ a snapshot is taken at a transaction's first
+       statement - before any wait on a lock in that transaction (T1544, measured) - so a lock taken in
+       the work transaction itself would verify a state from before whatever it waited for.
+    3. THE FULL VERIFIER RE-RUN inside it (`_confirm_and_hold`).
+    4. IF STILL FAILED: the evidence (`record_outcome`) and the hold, in that one transaction; COMMIT.
+    5. ONLY THEN the structured log and the metric. Emitted before the commit they would report a hold
+       that rolled back.
+
+    WHAT THE LOCK BINDS, on PostgreSQL (on SQLite the owner lock is a no-op and the refusal carries no
+    race guarantee, as for T1544): a payment commit reads the hold with `FOR SHARE` after its own owner
+    lock, so it either commits before this hold or meets 40001 and refuses on the retry; a clearing
+    reads it in its fresh post-lock snapshot, so it either commits before this hold or refuses.
+
+    Any exception propagates to the caller, which records it as an error of this reaction; nothing is
+    announced.
+
+    KNOWN EDGE, recorded and not built (step 5c review): a cancellation during the work `commit()` can
+    leave its outcome ambiguous - the hold may be durable while the log and metric are never emitted, and
+    later runs then return `already_held` without announcing it; no money moves and no false hold results.
+    """
+
+    from app.core.payments.engine import PaymentEngine
+
+    async with session_factory() as lock_session:
+        try:
+            await PaymentEngine(lock_session).acquire_staged_equivalent_owner_locks([equivalent_id])
+            async with session_factory() as work:
+                await _open_reaction_transaction(work)
+                decision = await _confirm_and_hold(work, equivalent_id)
+                if decision.decision == HOLD_SET:
+                    await work.commit()
+                else:
+                    await work.rollback()
+        finally:
+            # Releases the transaction-scoped owner lock - after the work transaction has ended.
+            await lock_session.rollback()
+
+    if decision.decision == HOLD_SET:
+        _announce_hold(equivalent_id, decision)
+    return decision
+
+
 async def run_scheduled_reconciliation(
     session_factory: Callable[[], Any],
     *,
@@ -1031,12 +1202,18 @@ async def run_scheduled_reconciliation(
     """Verify every equivalent in its own fresh session and transaction, persisting each result.
 
     Called only from the scheduled integrity loop, after the checkpoints have committed
-    (`app/main.py`). Inactive equivalents are verified too: reading is not moving money.
+    (`app/main.py`). Inactive equivalents are verified too: reading is not moving money, and a held
+    equivalent keeps being verified - a later `PASSED` is what permits an admin to clear it.
 
     A failure while verifying ONE equivalent is logged as an error and leaves NO result row for it -
     an error is not `UNVERIFIABLE` and nothing is substituted for it - and the next equivalent is still
     verified, because they share no state. Listing the equivalents is not caught: without the list
     there is nothing to verify, and the caller logs it.
+
+    STEP 5c: a `FAILED` - and only a `FAILED`; never `UNVERIFIABLE`, never an error - is followed by
+    `react_to_failed` for that equivalent, before the next equivalent is verified. A reaction that fails
+    is counted in `hold_errors` and logged; it does not change the recorded verdict and does not stop
+    the loop. The next scheduled run reacts again.
     """
 
     if equivalent_ids is None:
@@ -1052,6 +1229,11 @@ async def run_scheduled_reconciliation(
         "error": 0,
         "rows_inserted": 0,
         "rows_unchanged": 0,
+        f"hold_{HOLD_SET}": 0,
+        f"hold_{HOLD_ALREADY_HELD}": 0,
+        f"hold_{HOLD_NOT_CONFIRMED}": 0,
+        f"hold_{HOLD_EQUIVALENT_GONE}": 0,
+        "hold_errors": 0,
     }
     for equivalent_id in list(equivalent_ids):
         try:
@@ -1071,14 +1253,26 @@ async def run_scheduled_reconciliation(
         counts[outcome.status] += 1
         counts[f"rows_{stored}"] += 1
 
+        if outcome.status != FAILED:
+            continue
+        try:
+            decision = await react_to_failed(session_factory, equivalent_id)
+        except Exception:  # noqa: BLE001 - classified: an error of this reaction only; the loop goes on
+            counts["hold_errors"] += 1
+            logger.exception("debt_reconciliation.integrity_hold_error equivalent_id=%s", equivalent_id)
+            continue
+        counts[f"hold_{decision.decision}"] += 1
+
     logger.info(
         "debt_reconciliation.completed passed=%d failed=%d unverifiable=%d errors=%d "
-        "rows_inserted=%d rows_unchanged=%d",
+        "rows_inserted=%d rows_unchanged=%d holds_set=%d hold_errors=%d",
         counts[PASSED],
         counts[FAILED],
         counts[UNVERIFIABLE],
         counts["error"],
         counts["rows_inserted"],
         counts["rows_unchanged"],
+        counts[f"hold_{HOLD_SET}"],
+        counts["hold_errors"],
     )
     return counts

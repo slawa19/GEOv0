@@ -724,20 +724,22 @@ class RealClearingEngine:
                         )
                 raise
             except Exception as exc:
-                if (
-                    isinstance(exc, ConflictException)
-                    and (exc.details or {}).get("reason")
-                    == PaymentEngine.EQUIVALENT_INACTIVE_REASON
-                ):
+                refusal_reason = (
+                    (exc.details or {}).get("reason")
+                    if isinstance(exc, ConflictException)
+                    else None
+                )
+                if refusal_reason in PaymentEngine.MONEY_STOP_REASONS:
                     # T1544: the operator's stop refuses clearing in THIS equivalent; it is not a
                     # failure of the run. It arrives here unwrapped - `ClearingService` re-raises the
                     # refusal itself, and the loop above re-raises it (at once, or after a partial
                     # `clearing.done`). Same rule as a refused payment: skip the equivalent without
                     # touching `errors_total`, `_error_timestamps` or `last_error`, which would
                     # otherwise be spent on every clearing tick until the run-level error limit.
+                    # Step 5c: an integrity hold is skipped identically, its reason in the marker.
                     self._logger.info(
-                        "simulator.real.clearing_refused_equivalent_inactive run_id=%s tick=%s eq=%s "
-                        "exc=%s",
+                        "simulator.real.clearing_refused_%s run_id=%s tick=%s eq=%s exc=%s",
+                        refusal_reason,
                         str(run.run_id),
                         int(run.tick_index),
                         str(eq),

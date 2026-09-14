@@ -409,11 +409,27 @@ class PaymentEngine:
     #: and repeating a request against a deactivated equivalent cannot succeed.
     EQUIVALENT_INACTIVE_REASON = "equivalent_inactive"
 
+    #: `details.reason` of the integrity-hold refusal (programme 015 step 5c, `T1546`). Same status,
+    #: code and non-retryability as the operator stop, and a distinct reason: a hold is set by the
+    #: scheduled reaction to a confirmed reconciliation `FAILED` and lifted only by an admin.
+    EQUIVALENT_INTEGRITY_HOLD_REASON = "equivalent_integrity_hold"
+
+    #: Every reason this boundary refuses with. The simulator classifies each as a REJECTION of the
+    #: one operation, never as an error of the run, and matches on this set (step 5c brief).
+    MONEY_STOP_REASONS = frozenset({EQUIVALENT_INACTIVE_REASON, EQUIVALENT_INTEGRITY_HOLD_REASON})
+
     @classmethod
     def inactive_equivalent_conflict(cls, codes: list[str]) -> ConflictException:
         return ConflictException(
             f"Equivalent {', '.join(codes)} is not active",
             details={"reason": cls.EQUIVALENT_INACTIVE_REASON, "equivalents": codes},
+        )
+
+    @classmethod
+    def integrity_hold_conflict(cls, codes: list[str]) -> ConflictException:
+        return ConflictException(
+            f"Equivalent {', '.join(codes)} is under an integrity hold",
+            details={"reason": cls.EQUIVALENT_INTEGRITY_HOLD_REASON, "equivalents": codes},
         )
 
     async def refuse_inactive_equivalents(
@@ -422,7 +438,15 @@ class PaymentEngine:
         *,
         row_lock: bool,
     ) -> None:
-        """T1544: money does not move in an equivalent the operator has deactivated.
+        """T1544: money does not move in an equivalent the operator has deactivated - and, since
+        step 5c (`T1546`), in one under an integrity hold.
+
+        ONE STATEMENT READS BOTH: `is_active` and `integrity_hold_result_id` live on the same row, so the
+        hold inherits every guarantee described below unchanged - the same `FOR SHARE`, the same owner
+        lock order, the same fresh post-lock snapshot in clearing. The scheduled reaction that sets a
+        hold holds the owner lock through its commit, exactly like the deactivating PATCH. ONE REASON
+        PER REFUSAL: an equivalent that is both inactive and held is refused as `equivalent_inactive`.
+        Neither refusal is retryable.
 
         The flag is read as columns, never through an `Equivalent` instance: the payment service
         loads one before routing, and its cached `is_active` can still say True.
@@ -446,13 +470,18 @@ class PaymentEngine:
         ids = sorted(set(equivalent_ids), key=str)
         if not ids:
             return
-        stmt = select(Equivalent.code, Equivalent.is_active).where(Equivalent.id.in_(ids))
+        stmt = select(
+            Equivalent.code, Equivalent.is_active, Equivalent.integrity_hold_result_id
+        ).where(Equivalent.id.in_(ids))
         if row_lock:
             stmt = stmt.with_for_update(read=True)
         rows = (await self.session.execute(stmt)).all()
-        inactive = sorted(str(code) for code, is_active in rows if not is_active)
+        inactive = sorted(str(code) for code, is_active, _hold in rows if not is_active)
         if inactive:
             raise self.inactive_equivalent_conflict(inactive)
+        held = sorted(str(code) for code, _is_active, hold in rows if hold is not None)
+        if held:
+            raise self.integrity_hold_conflict(held)
 
     async def _read_payment_prestate(
         self,

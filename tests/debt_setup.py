@@ -307,6 +307,12 @@ async def purge_test_ledger(
     if equivalents:
         # The reconciliation baseline is RESTRICT on the equivalent (step 5a), so it has to be named by
         # the disposal too; the result rows would cascade, and are removed here so a purge is complete.
+        # STEP 5c: a hold's evidence row is RESTRICT while the hold points at it, so the teardown releases
+        # the hold first. A test-disposal statement, never an application path.
+        await connection.exec_driver_sql(
+            "UPDATE equivalents SET integrity_hold_result_id = NULL "
+            f"WHERE id IN ({_sql_in(equivalents)}) AND integrity_hold_result_id IS NOT NULL"
+        )
         for statement in (
             "DELETE FROM debt_reconciliation_baseline_offsets WHERE equivalent_id IN ({ids})",
             "DELETE FROM debt_reconciliation_baselines WHERE equivalent_id IN ({ids})",

@@ -930,6 +930,17 @@ async def test_step5b_a_b_finding_is_stored_in_the_same_row_and_fingerprint_and_
             await PaymentEngine(session).commit(tx_id)
         monkeypatch.undo()
 
+        # STEP 5c CHANGED THE STAND, NOT THE CLAIM (2026-09-14): the scheduled FAILED would now hold the
+        # equivalent, and the hold refuses the honest payment below. The (b) fault identity still matters
+        # wherever that payment is reachable (a hold that failed to commit, one released around the
+        # application), so only the reaction is stubbed - after `undo()`, which would remove it.
+        from app.core.ledger import reconciliation
+
+        async def _no_reaction(session_factory, equivalent_id):
+            return reconciliation.HoldDecision(reconciliation.HOLD_NOT_CONFIRMED)
+
+        monkeypatch.setattr(reconciliation, "react_to_failed", _no_reaction)
+
         await _scheduled_run(monkeypatch, factory)
         results = await _results(factory, triangle.equivalent.id)
         assert [status for status, _ in results] == [FAILED], results
