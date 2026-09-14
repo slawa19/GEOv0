@@ -20,7 +20,7 @@ from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.db.models.audit_log import IntegrityAuditLog
 from app.utils.error_codes import ErrorCode
-from app.utils.exceptions import GeoException, TimeoutException
+from app.utils.exceptions import ConflictException, GeoException, TimeoutException
 from app.utils.metrics import CLEARING_EVENTS_TOTAL
 from app.utils.money import to_money_str
 from app.core.payments.engine import PaymentEngine
@@ -85,6 +85,28 @@ class ClearingService:
         except Exception as exc:
             logger.exception("event=clearing.skip_rollback_failed")
             raise GeoException() from exc
+
+    async def _refuse_if_equivalent_inactive(self, equivalent_ids: Set[uuid.UUID]) -> None:
+        """T1544: clearing does not run in an equivalent the operator has deactivated.
+
+        A refusal, not a skip: `None` would let the caller finish with a successful zero result and
+        hide the stop. It ends the attempt first, like a skip, and surfaces `409/E008`.
+
+        A plain read is binding only where it is taken in a snapshot newer than the owner lock -
+        the PostgreSQL interlock path, which rolls back after acquiring it - because a deactivating
+        PATCH holds the same lock through its commit. On SQLite that lock is a no-op and the check is
+        a plain refusal without a race guarantee.
+        """
+        try:
+            await PaymentEngine(self.session).refuse_inactive_equivalents(
+                equivalent_ids, row_lock=False
+            )
+        except ConflictException:
+            logger.info("event=clearing.refused_equivalent_inactive")
+            await self._rollback_skipped_execution()
+            raise
+        except Exception as exc:
+            await self._raise_unexpected_execution(exc)
 
     @staticmethod
     async def _drain_task(task: asyncio.Task) -> asyncio.CancelledError | None:
@@ -1760,6 +1782,13 @@ class ClearingService:
             await self._rollback_skipped_execution()
             return replay_amount
 
+        if interlocked_equivalent_id is not None:
+            # T1544, the binding read: this session rolled back after taking the owner lock, so its
+            # snapshot is newer than any deactivating PATCH that held that lock. After the
+            # committed-execution shortcut above (an already-durable clearing stays reported), before
+            # the Debt rows are locked and before any new execution work.
+            await self._refuse_if_equivalent_inactive({interlocked_equivalent_id})
+
         try:
             debts = (
                 (
@@ -1805,6 +1834,11 @@ class ClearingService:
             await self._raise_unexpected_execution(
                 GeoException("Clearing cycle identity changed after interlock")
             )
+
+        if interlocked_equivalent_id is None and debts:
+            # T1544, the path without an interlock (SQLite, and PostgreSQL fallbacks that never took
+            # the owner lock): the equivalent is known only from the rows. Still before any mutation.
+            await self._refuse_if_equivalent_inactive({debt.equivalent_id for debt in debts})
 
         # 2026-08-22 / p010 (`F-010-3`).  The authoritative perimeter check, and the only
         # one: it stands on the rows just re-read under FOR UPDATE, so it cannot be fooled

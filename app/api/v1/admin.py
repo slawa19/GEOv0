@@ -1320,6 +1320,16 @@ async def admin_update_equivalent(
                 },
             )
 
+    if body.is_active is False:
+        # T1544: the operator's stop must have an observable cutoff. Clearing holds this owner lock
+        # from its fresh-snapshot read of `is_active` through its commit, so taking it here and
+        # holding it through the commit below leaves two outcomes only: the clearing commits before
+        # this PATCH returns, or this PATCH commits first and the clearing refuses. Payments are
+        # bound to the same cutoff by their commit-time `FOR SHARE` read instead (see
+        # `PaymentEngine.refuse_inactive_equivalents`). Same call as the delete path below. A no-op
+        # on SQLite: the guarantee is PostgreSQL's.
+        await PaymentEngine(db).acquire_staged_equivalent_owner_locks([eq.id])
+
     before = {
         "symbol": eq.symbol,
         "description": eq.description,
