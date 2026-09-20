@@ -237,6 +237,16 @@ $env:LOG_LEVEL = "DEBUG"
 .\.venv\Scripts\python.exe -m alembic -c migrations/alembic.ini history
 ```
 
+Эти команды работают **только против PostgreSQL**: `migrations/env.py` отказывает на SQLite с
+подсказкой `run: python scripts/init_sqlite_db.py`, и локальная dev-база по умолчанию как раз
+SQLite (`.local-run/geov0.db`). Для неё схема создаётся скриптом, а не Alembic.
+
+На **свежей** PostgreSQL-базе перед первым `upgrade head` нужно предусловие — колонка
+`alembic_version.version_num` шириной `VARCHAR(128)`, иначе переход 010 → 011 падает с
+`StringDataRightTruncationError`. Подробности и SQL — в
+[`05-deployment.md`](05-deployment.md#предусловие-на-свежей-базе-ширина-alembic_versionversion_num).
+В контейнерном и тестовом путях предусловие уже выполняется само.
+
 ---
 
 ## 4. Code Style

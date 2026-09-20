@@ -156,6 +156,32 @@ Alembic управляет схемой. Уже применённые migration
 test DB. `GEO_TEST_ALLOW_DB_RESET=1` запрещено использовать с developer или
 production DB.
 
+### Предусловие на свежей базе: ширина `alembic_version.version_num`
+
+Alembic создаёт `alembic_version.version_num` как `VARCHAR(32)`, а идентификаторы ревизий
+здесь длиннее — до 46 символов. Поэтому на **пустой PostgreSQL-базе** голая
+`alembic -c migrations/alembic.ini upgrade head` не доходит до головы: она падает на переходе
+010 → 011 с `StringDataRightTruncationError: value too long for type character varying(32)`
+(воспроизведено 2026-09-20).
+
+Колонку нужно создать заранее нужной ширины:
+
+```sql
+CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(128) NOT NULL PRIMARY KEY);
+ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(128);
+```
+
+После этого та же команда доходит до головы, а колонка остаётся `character varying(128)`.
+
+**В поддерживаемых путях запуска это уже сделано, и делать руками ничего не нужно:**
+`docker/docker-entrypoint.sh` выполняет обе инструкции до миграций, а тестовая схема — через
+`tests/migrated_schema.py`. Ручное предусловие нужно только тому, кто накатывает миграции на
+свежую PostgreSQL-базу в обход контейнера.
+
+Опции Alembic это не решает: ширину колонки версии он настраивать не умеет — параметры
+`EnvironmentContext.configure` ограничены `version_table`, `version_table_pk` и
+`version_table_schema`, а тип захардкожен.
+
 ## Проверка перед передачей
 
 Минимальный локальный milestone:

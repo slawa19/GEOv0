@@ -432,34 +432,57 @@ async def test_a_replay_whose_route_cannot_be_read_is_refused(db_session):
     participants, so nothing "escaped" and the result was returned to a scoped caller
     unchecked. The clearing replay guard refuses exactly this case; the payment one did not,
     which made the two halves of one rule disagree.
+
+    THE STAND CHANGED WITH T1548 (2026-09-14), AND THE REASON IS THE POINT. This test used to
+    store a hand-built row whose whole payload was `{"amount": "50"}` - no routes AND no
+    fingerprint. T1548 refuses a replay of a fingerprint-less row before the perimeter runs at
+    all, so that row would now be answered by the identity check and `pytest.raises(
+    GeoException)` would still be green while this guard was never reached: a test passing for
+    a reason it does not name. So the row is now written BY THE APPLICATION (real fingerprint,
+    real route) and only its `routes` are stripped afterwards, which is the shape this guard
+    actually owns; and the assertion names `RoutingException`, so the identity refusal - a
+    `ConflictException`, also a `GeoException` - cannot stand in for it.
     """
+
+    from sqlalchemy import update
 
     from app.core.payments.service import PaymentService
     from app.db.models.transaction import Transaction
-    from app.utils.exceptions import GeoException
+    from app.utils.exceptions import RoutingException
 
     _eq, people = await _seed(db_session)
     PaymentRouter.invalidate_cache()
 
-    db_session.add(
-        Transaction(
-            tx_id="legacy-without-routes",
-            idempotency_key="legacy-without-routes",
-            type="PAYMENT",
-            initiator_id=people["a1"].id,
-            payload={"amount": "50"},  # no `routes` at all
-            state="COMMITTED",
-        )
+    idem = "legacy-without-routes"
+    await PaymentService(db_session).create_payment_internal(
+        people["a1"].id,
+        to_pid="a2",
+        equivalent=_EQ,
+        amount="50",
+        idempotency_key=idem,
+        commit=True,
+    )
+
+    stored = await db_session.scalar(
+        select(Transaction.payload).where(Transaction.tx_id == idem)
+    )
+    assert (stored or {}).get("routes"), "the stand needs a stored route to strip"
+    assert ((stored or {}).get("idempotency") or {}).get("fingerprint"), (
+        "the stand needs a real fingerprint, or T1548 answers before this guard"
+    )
+    stripped = {k: v for k, v in dict(stored).items() if k != "routes"}
+    await db_session.execute(
+        update(Transaction).where(Transaction.tx_id == idem).values(payload=stripped)
     )
     await db_session.commit()
 
-    with pytest.raises(GeoException):
+    with pytest.raises(RoutingException):
         await PaymentService(db_session).create_payment_internal(
             people["a1"].id,
             to_pid="a2",
             equivalent=_EQ,
             amount="50",
-            idempotency_key="legacy-without-routes",
+            idempotency_key=idem,
             commit=True,
             allowed_participant_pids={"a1", "a2"},
         )
