@@ -44,6 +44,12 @@ logger = logging.getLogger(__name__)
 
 _RETRYABLE_PAYMENT_SQLSTATES = frozenset({"40001", "40P01"})
 
+#: `details.reason` of the 409 that refuses a `tx_id` replay whose stored PAYMENT row carries no
+#: fingerprint (T1548). It names WHY the request is refused rather than answered: the stored row's
+#: request identity cannot be verified, so "the same request" cannot be established. Not retryable -
+#: repeating the request cannot make the stored row grow a fingerprint.
+UNVERIFIABLE_LEGACY_IDENTITY_REASON = "unverifiable_legacy_identity"
+
 
 def _iter_exception_chain(exc: BaseException):
     """The chain a CLASSIFICATION may read: `orig` / `__cause__` only, never `__context__`.
@@ -244,8 +250,53 @@ class PaymentService:
             raise ConflictException("tx_id already used")
 
         existing_payload = existing_tx.payload or {}
-        existing_fp = (existing_payload.get("idempotency") or {}).get("fingerprint")
-        if existing_fp is not None and existing_fp != request_fingerprint:
+        existing_idempotency = existing_payload.get("idempotency")
+        existing_fp = (
+            existing_idempotency.get("fingerprint")
+            if isinstance(existing_idempotency, dict)
+            else None
+        )
+
+        # T1548, 2026-09-14 (step F2 of the 015 closure).  A STORED ROW WITH NO FINGERPRINT
+        # CANNOT BE SHOWN TO BE A REPLAY OF THIS REQUEST, so it is refused instead of
+        # answered.  Until here the comparison below ran only `if existing_fp is not None`:
+        # a row written before fingerprints existed, or by any path that records none, fell
+        # through to `idempotent_hit` and the caller was handed a stored result for a request
+        # nobody had established was the same one - equality of the canonical payload was
+        # GUESSED.  The refusal writes no money, reads no route and compares no payload; the
+        # stored result stays readable through `GET /payments/{tx_id}`, which is why refusing
+        # here loses nothing the caller could not still see.
+        #
+        # A fingerprint is "present" only when it is a non-empty string, because that is the
+        # only shape the comparison below can decide anything with.  Any other shape - a
+        # null, an `idempotency` that is not an object, an empty string - is an identity this
+        # code cannot verify, and the one before this one crashed on some of them.
+        #
+        # FIRST OF THE THREE CHECKS THAT FOLLOW, ahead of the perimeter and of the in-progress
+        # branch: those two answer "whose route is this" and "is it still running", and both
+        # questions presuppose that the row is this request at all.
+        if not isinstance(existing_fp, str) or not existing_fp:
+            logger.error(
+                "event=payment.replay_without_stored_fingerprint tx_id=%s state=%s",
+                str(existing_tx.tx_id),
+                str(existing_tx.state),
+            )
+            try:
+                from app.utils.metrics import PAYMENT_EVENTS_TOTAL
+
+                PAYMENT_EVENTS_TOTAL.labels(event="create", result="conflict").inc()
+            except Exception:
+                pass
+            raise ConflictException(
+                "tx_id already used by a stored payment whose request identity "
+                "cannot be verified",
+                details={
+                    "reason": UNVERIFIABLE_LEGACY_IDENTITY_REASON,
+                    "retryable": False,
+                },
+            )
+
+        if existing_fp != request_fingerprint:
             raise ConflictException("tx_id already used for a different request")
 
         # 2026-08-22 / p010.  This shortcut returns a stored result BEFORE the narrowing and
