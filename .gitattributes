@@ -1,4 +1,10 @@
-* text=auto
+# LF in the worktree for every text file, not just the extensions listed below.
+# `text=auto` alone leaves the decision to the checkout's core.autocrlf, so on Windows
+# an unlisted extension (.snap, .mjs, .toml, .txt) lands as CRLF while the tools that
+# rewrite it - vitest snapshots above all - write LF. The file then reads as modified
+# after every gate run, and AGENTS.md §6 measures debt on a clean tree. Windows-native
+# scripts keep CRLF through their own eol=crlf entries below.
+* text=auto eol=lf
 
 # Source code: keep LF to reduce diff noise across OSes.
 *.ts text eol=lf
