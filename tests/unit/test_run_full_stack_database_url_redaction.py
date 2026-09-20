@@ -93,6 +93,17 @@ def _run_powershell(
         check=False,
         capture_output=True,
         text=True,
+        # PowerShell writes UTF-8; `text=True` alone would decode it with the host's
+        # locale codepage. On a host whose PowerShell UI language is not English the
+        # localized `WARNING:` prefix is then undecodable (cp1252 has no 0x9D), the
+        # reader thread dies, and `stdout` arrives as None - every assertion below
+        # fails with TypeError instead of a diagnostic. Measured 2026-09-20 on a
+        # ru-RU pwsh 7.6.6: 13 failures that CI's en-US runner cannot reproduce.
+        # `errors="replace"` cannot manufacture a false green: every diagnostic these
+        # tests assert is ASCII, so replacement can only corrupt the localized noise
+        # around it, never the text being matched.
+        encoding="utf-8",
+        errors="replace",
     )
     if result.returncode != 0:
         raise AssertionError(
@@ -1371,6 +1382,11 @@ $null = [Console]::In.ReadLine()
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        # Same host-locale decoding trap as `_run_powershell` above: a localized
+        # PowerShell line on either pipe would kill the reader instead of failing
+        # the assertion that names it.
+        encoding="utf-8",
+        errors="replace",
     )
     try:
         assert holder.stdout is not None
