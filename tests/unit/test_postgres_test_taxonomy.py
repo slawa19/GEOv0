@@ -152,31 +152,41 @@ def test_postgres_module_suffix_is_the_marker_owned_taxonomy() -> None:
     )
 
 
+# THE JOB THESE TWO GUARDS WATCH WAS RENAMED, NOT WEAKENED (2026-09-21, T1701). They used to read
+# the scheduled `postgres` job; programme 017 stage 1 deleted it and moved both of its PostgreSQL
+# pytest sessions into `required-backend`, which runs on every pull request. The assertions below
+# are the same contract on the new owner, with one addition forced by the move: the required job
+# also runs the default tier, so "exactly one canonical command" became "exactly one command that
+# asks for the marker, and no raw pytest anywhere in the job".
+_POSTGRES_CI_JOB = "required-backend"
+
+
 def test_postgres_ci_job_selects_marker_tier_without_file_allowlist() -> None:
     workflow = (_ROOT / ".github" / "workflows" / "quality.yml").read_text(
         encoding="utf-8"
     )
-    postgres_jobs = _indented_blocks(workflow, key="postgres", indent=2)
+    postgres_jobs = _indented_blocks(workflow, key=_POSTGRES_CI_JOB, indent=2)
 
     assert len(postgres_jobs) == 1
     run_blocks = _indented_blocks(postgres_jobs[0], key="run", indent=8)
     commands = [_executable_command(block) for block in run_blocks]
-    canonical_commands = [
+    raw_pytest_commands = [
         command
         for command in commands
-        if re.match(
-            r"^(?:python(?:\.exe)? -m pytest|\./scripts/verify_local\.ps1)\b",
-            command,
-            flags=re.IGNORECASE,
-        )
+        if re.match(r"^python(?:\.exe)? -m pytest\b", command, flags=re.IGNORECASE)
+    ]
+    marker_tier_commands = [
+        command
+        for command in commands
+        if command.startswith("./scripts/verify_local.ps1 ")
+        and "-BackendMarker postgres" in command
     ]
 
-    assert len(canonical_commands) == 1
-    command = canonical_commands[0]
-    assert command.startswith("./scripts/verify_local.ps1 ")
+    assert raw_pytest_commands == []
+    assert len(marker_tier_commands) == 1
+    command = marker_tier_commands[0]
     assert "-TaskSlug ci-postgres" in command
     assert "-BackendOnly" in command
-    assert "-BackendMarker postgres" in command
     assert "-BackendSelector tests/integration" in command
     assert ".py" not in command
 
@@ -186,7 +196,7 @@ def test_postgres_ci_job_uses_production_migration_entrypoint() -> None:
     workflow = (_ROOT / ".github" / "workflows" / "quality.yml").read_text(
         encoding="utf-8"
     )
-    postgres_jobs = _indented_blocks(workflow, key="postgres", indent=2)
+    postgres_jobs = _indented_blocks(workflow, key=_POSTGRES_CI_JOB, indent=2)
 
     assert len(postgres_jobs) == 1
     run_blocks = _indented_blocks(postgres_jobs[0], key="run", indent=8)
