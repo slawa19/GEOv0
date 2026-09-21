@@ -58,7 +58,7 @@
 
 - `tests/unit/test_p017_no_second_dialect.py` — часть (а): константа `0`, сегодня факт `50` (см. §19.2 п. 5). Падает.
 - `tests/unit/test_p017_default_tier_can_see_the_lock.py` — на дефолтном `TEST_DATABASE_URL` из `verify_local.ps1` с **непустым** набором эквивалентов вызов `PaymentEngine._acquire_equivalent_owner_locks` обязан выполнить `pg_advisory_xact_lock` (`engine.py:194`); сегодня на дефолтном тире он возвращается на `engine.py:182`, не выполнив ничего (пустой набор не выполняет лока ни на одном движке — это оговорено в тесте). Это тест **на измеритель** (§15); он доказывает исполнение ветки, а не исключение, поэтому конкурентные расписания корзины B остаются рядом. После 019 тест переписывается под новый механизм, но не удаляется.
-- `tests/integration/test_p017_required_gate_runs_on_postgres.py` — гард формы на `quality.yml`: обязательный backend-job несёт сервис Postgres и `TEST_DATABASE_URL`; сегодня падает (стадия 1).
+- `tests/unit/test_p017_required_gate_runs_on_postgres.py` — гард формы на `quality.yml`: обязательный backend-job несёт сервис Postgres и `TEST_DATABASE_URL`; падал на трёх ассертах до среза стадии 1, зелен после. **Путь исправлен 2026-09-21 с `tests/integration/` на `tests/unit/`:** собственная таксономия репозитория (`tests/unit/test_postgres_test_taxonomy.py:123-152`) требует маркер `postgres` у каждого модуля с суффиксом `_postgres.py`, а маркер вынес бы гард из дефолтного тира — единственного, который обязан заметить исчезновение Postgres из гейта. Требовать `tests/integration/` значило требовать гард, который молчит ровно в том случае, ради которого написан.
 
 ### 2. Инварианты, обязанные выжить, и контрпроверка
 
@@ -118,7 +118,7 @@
 | `T1704` | `app/config.py`: `DATABASE_URL` обязателен и только `postgresql+asyncpg`; `app/db/session.py` без dialect-веток; `scripts/{run_local,run_full_stack,verify_local}.ps1`: URL обязателен, два URL со стороны хоста, подсказка на `docker compose up db`; `README.md` onboarding и судьба существующих `.local-run/*.db` | `[!]` |
 | `T1705` | Удаление тестов корзины D-SQLite и пяти pragma-тестов; перенос ⚑-ассертов (`test_an_aborted_payment_commit_leaves_debts_unchanged`, `test_a_stale_writer_cannot_overwrite_the_committed_debt_amount`, `test_a_real_busy_snapshot_replays_the_money_phase_and_commits_once`) в корзину A; ассерт `t1544_inject_refuses…` в Postgres-форме; решение по контракту `create_all` в `t1530` | `[!]` |
 | `T1706` | **До стадии 2:** per-file инвентарь keep / delete / transfer с режимом фикстуры A или B; **после стадии 2:** замер времени тира (холодный и тёплый локально, CI) и бюджет, установленный консультацией Codex по замеру (не подпись владельца), — условие входа в стадию 3 | `[!]` |
-| `T1707` | Гарды `test_p017_no_second_dialect.py` (AST-docstring, прямые обращения к диалекту, allow-list, положительные и отрицательные контрпроверки), `test_p017_default_tier_can_see_the_lock.py`, `test_p017_required_gate_runs_on_postgres.py` | `[!]` |
+| `T1707` | Гарды `test_p017_no_second_dialect.py` (AST-docstring, прямые обращения к диалекту, allow-list, положительные и отрицательные контрпроверки), `test_p017_default_tier_can_see_the_lock.py`, `tests/unit/test_p017_required_gate_runs_on_postgres.py` (последний сделан в срезе стадии 1) | `[!]` |
 | `T1708` | Внешнее ревью §15 на точном HEAD каждой стадии; evidence с командами и exit code | `[!]` |
 
 Легенда: `[x]` выполнено, `[ ]` в работе, `[!]` заблокировано или не авторизовано.
