@@ -4,7 +4,7 @@
 - **Программа:** [017 — PostgreSQL как единственный движок](spec.md), задача `T1706`
 - **Назначение:** условие входа в стадию 2. Спека требует публикации per-file инвентаря с назначенным режимом фикстуры **до** авторизации стадии 2: «счётчиков и трёх примеров для ревью недостаточно» (`spec.md`, Verification plan §2).
 - **Status authority:** метка описательная. Инвентарь — измерение, а не решение: вердикт по каждому файлу становится обязательством только когда стадия 2 авторизована, и до тех пор перепроверяем.
-- **Снято на:** `main`, HEAD `4310603`, дерево чистое. Вторая половина `T1706` (замер времени тира и бюджет на подпись владельца) в этом файле **не содержится** и остаётся открытой.
+- **Снято на:** `main`, HEAD `4310603`, дерево чистое. Вторая половина `T1706` — замер времени **Postgres**-тира и бюджет на подпись владельца — остаётся открытой: она идёт после стадии 2, потому что мерить нечего, пока тесты не поехали на Postgres. Половина «до» измерима сегодня и записана в разделе 8.
 
 ## Граница доказательства — прочесть до использования таблицы
 
@@ -513,3 +513,30 @@ and then, on both databases, that an entry saying «10 → 11, delta 2» is refu
 **The alternative and why I do not recommend it.** Dropping the contract means either accepting that model-vs-migration divergence is henceforth undetected, or replacing it with a startup/CI check that diffs `Base.metadata` against the migrated catalogue — which is a **new mechanism**, and by §19.1 that needs the six questions and a programme of its own. For a programme whose stated scope is «removes a dialect, changes no money rule», introducing a new schema-comparison mechanism is the wrong trade; keeping one 90-line test that already works is the cheap answer.
 
 **One consequence you should decide at the same time**, because it hangs off the same question: if the `create_all` path survives only inside this one module, then `tests/unit/test_p015_t1524_…` and `tests/unit/test_p015_t1533_…` lose the justification they state for existing (they are «the model half»), and their content should be folded into the PostgreSQL halves rather than migrated as separate files. If instead you decide the model path must keep functional coverage, those two stay as they are and move to mode A unchanged. I have marked both `transfer` pending that call — it is the one item in this inventory where my verdict is contingent on yours.
+
+---
+
+## 8. Baseline дефолтного тира на SQLite — половина «до» для бюджета
+
+Бюджет времени тира подписывает владелец, и он — условие входа в стадию 3. Подписывать «после» без «до» не по чему, а «до» измеримо сегодня и ни от чего не зависит. Замер снят 2026-09-21 на `main` `4310603`, дерево чистое.
+
+**Команда — дословно, оба раза одна и та же:**
+
+```powershell
+.\scripts\verify_local.ps1 -TaskSlug p017_baseline_cold -BackendOnly
+```
+
+**Условия.** Windows 11, локальный SQLite-файл `./.local-run/test-runs/p017_baseline_cold/test.db` (страж БД подтвердил `backend=sqlite` в обоих прогонах). Marker-выражение — дефолтное `not slow and not postgres` (`scripts/verify_local.ps1:133-135`), то есть ровно то, что идёт на обычном PR. UI-шаги выключены `-BackendOnly`. Второй прогон запущен тем же `-TaskSlug`, поэтому переиспользует `cache` и `basetemp` под `.local-run/test-runs/p017_baseline_cold/` — это и есть «тёплый». WSL не участвует: база — локальный файл.
+
+| Прогон | Собрано | Результат | pytest | Стена | exit |
+|---|---|---|---|---|---|
+| холодный | 2447 + 3 skipped, **283 deselected** | passed | **268.42 s** | 272.0 s | `0` |
+| тёплый | то же | passed | **268.54 s** | 271.5 s | `0` |
+
+**Два вывода, и оба нужны, чтобы числом не воспользовались неправильно.**
+
+1. **Прогрева нет: 268.42 против 268.54 — разница в пределах шума.** Тир упирается в вычисление, а не в построение схемы. Отсюда следует, что вилка 82 с против 669 с, записанная в 015 (`T1523`) и названная в спеке 017 необъяснённой, прогревом действительно **не объясняется** — на SQLite прогрева не существует вовсе. Она принадлежит Postgres и состоянию WSL, и стадия 3 не начинается, пока она не объяснена, как спека и требует.
+
+2. **283 deselected — baseline покрывает 2447 тестов из 2730.** Это тесты с маркерами `slow` и `postgres`. После стадии 2 маркер `postgres` исчезает и его тесты входят в обязательный тир. Поэтому **268 s и будущее число Postgres-тира несравнимы напрямую**: они меряют разные популяции. Честное сравнение требует либо замера Postgres-тира на той же популяции, либо замера SQLite-тира на расширенной — второе невозможно, потому что именно эти тесты на SQLite и не идут. Это ограничение надо назвать владельцу вместе с числом, иначе бюджет будет подписан против неверной базы.
+
+**Чего этот замер не доказывает.** Одна машина, один запуск каждого вида, без повторов и без разброса. Время CI (`windows-latest`) здесь не измерено и от локального отличается. Числа годятся как порядок величины для «до», а не как порог.
