@@ -9,6 +9,17 @@
    delta is not a review of 015. If it does, take the merge-base right after 012's closure instead and say so in the
    ledger. `<HEAD>` = the exact merged HEAD after `T1523`. Announce both freezes: no commits into the frozen tree and no
    edits to this prompt once the run starts.
+
+   **Resolved 2026-09-21 — the candidate is wrong, and the run-time check this item asks for is what found it.**
+   `42c2257` is an ancestor of `ebe3c9f` ("programme 012 closes, and the record says how", 2026-09-10), so it sits
+   *inside* 012's delta: it is where the 015 **spec** first appears, not where 015's code work starts. Between
+   `42c2257` and the start of 015 there are 12 first-parent merges on `main`, carrying the whole closure of 012 and
+   the whole of programme 013 — reviewing that range would be reviewing three programmes. Use
+   **`<BASE>` = `056e720`** ("programme 013 closed by dated risk acceptance", 2026-09-11), the first-parent parent of
+   `17383d3` ("014 suspended, **015 started on the financial core**"). Re-confirm with
+   `git log --first-parent --format='%h %ad %s' --date=short main` before freezing, and record in the ledger that the
+   015 spec commits predating `056e720` fall outside the reviewed range: `claude/012-money-s1` carried every
+   programme, so no range is perfectly clean and the gap should be named rather than implied.
 2. **Credential-free standalone clone**, not the main checkout and not a worktree (their shared `.git/config` may carry a
    credential): `git clone --no-hardlinks <local path> <scratch>/r1509` then `git -C <scratch>/r1509 checkout <HEAD>`,
    verify `git -C ... rev-parse HEAD`, verify no remote credential in its config. Output stored outside the repository.
@@ -16,6 +27,13 @@
    report `codex-cli 0.154.0`. Re-check `--version` at run time; list models with `codex debug models`; pass the model
    explicitly with `-m` and record it as **requested** (not resolved). The in-session reviews so far ran without `-m`, so
    they recorded no model — that is acceptable for working reviews, not for this closing one.
+
+   **Machine changed, 2026-09-21: there are two builds here and they differ** — exactly the case
+   `docs/external-review-runbook.md` §3 warns about. The npm install at `%APPDATA%\npm\codex.ps1` reports
+   `codex-cli 0.154.0`; `%LOCALAPPDATA%\OpenAI\Codex\bin\<hash>\codex.exe` reports `codex-cli 0.155.0-alpha.9.2`.
+   Choose by actual `--version`, never by path or file time, and record path and version together. The F2 round on
+   2026-09-20 used the 0.155 build with `-m gpt-6-astra`; `codex debug models --bundled` lists that slug alongside
+   `gpt-5.4`, `gpt-5.5`, the `gpt-5.6-*` family and `codex-auto-review`.
 4. **Command:** `codex exec --sandbox read-only -m <MODEL> -c model_reasoning_effort="high" -o <out>/t1509_final.md - <
    <prompt>` from inside the clone. Record the exact command, exit code, and that `-o` is non-empty and ends with the
    verdict markers.
@@ -61,7 +79,12 @@ What the programme claims to have delivered — attack these claims, do not re-d
    clear only after a later PASSED; evidence FK RESTRICT.
 5. T1549: PostgreSQL acceptance at the application's SERIALIZABLE.
 6. T1548: a tx_id replay without a stored fingerprint answers 409 and moves no money.
-7. T1535: a bare alembic upgrade head works on a fresh database.
+7. T1535: the documented install path matches what the code does. NOTE - do not review the superseded claim. The
+   original decision (one version_table_column_type line in migrations/env.py) was refuted on 2026-09-20: that
+   parameter exists in no version of Alembic, and the owner chose to fix the documentation instead. The claim to
+   attack is therefore this one: a reader following docs/ru/05-deployment.md and docs/ru/06-contributing.md is told
+   the precondition a fresh PostgreSQL needs, and no supported path promises a bare alembic upgrade head that dies at
+   010->011. docs/en and docs/pl are frozen translations (docs/README.md:26-28) and are out of scope.
 8. T1523: the bounded matrix (≤ 8 cells) and one real crash/restart proof.
 
 For each claim: is it true at <HEAD>? Can money or debt move in a way the claim says it cannot? Name the path:line and a
