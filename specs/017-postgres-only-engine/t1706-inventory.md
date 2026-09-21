@@ -104,7 +104,7 @@ Legend for the reason column: the codes above; `own engine` = the module calls `
 | test_auth_refresh.py | G | keep | A | `client` `:15`. |
 | test_auth_token_type_enforced.py | G | keep | A | `client` `:10`. |
 | test_clearing_commit_replay_postgres.py | B | keep | **B** | `gather` `:198` over `execute_clearing_with_amount` `:199` from `TestingSessionLocal()` `:91` `[CLR]`. |
-| test_clearing_max_depth_controls_long_cycles.py | A | keep | A | detection only — no `ClearingService` construction anywhere in the file; `db_session` `:12`. |
+| test_clearing_max_depth_controls_long_cycles.py | A | keep | **B** | `POST /api/v1/clearing/auto` `:96-103` asserting `cleared_cycles >= 1`, through `client` `[CLR]`. **Corrected 2026-09-21** — was `A` on the reasoning «no `ClearingService` anywhere in the file», which is literally true and beside the point: the token appears 0 times because the service is reached through the route. |
 | test_clearing_payment_prepare_interlock_postgres.py | B | keep | **B** | own engine `:164`, two writers `:398`, advisory `:28` `[LOCK]`. |
 | test_clearing_skip_releases_locks_postgres.py | B | keep | **B** | row-lock release under contention `:387` + clearing execution `:193` `[CLR]`. |
 | test_concurrent_clearing_payment_lost_update_postgres.py | B | keep | **B** | `gather` `:244` clearing vs payment `[LOCK]`. |
@@ -188,7 +188,7 @@ Legend for the reason column: the codes above; `own engine` = the module calls `
 | test_payments_multipath.py | A | keep | A | `db_session` `:16`. |
 | test_post_tick_audit_drift_runner_integration.py | F | **transfer** | **B** | own scratch engine `:61`/`:30` and `test_this_modules_engine_has_the_application_sqlite_pragmas` `:108-109`; the pragma test dies with `[STC]`. |
 | test_prepare_locks_tx_id_fk_postgres.py | A | keep | A | one FK refusal on `db_session` `:13`. |
-| test_scenarios.py | A | keep | A | register → trustline → direct and multihop payment, one session `:186`. |
+| test_scenarios.py | A | keep | **B** | `test_clearing` `:562` → `POST /api/v1/clearing/auto` `:709` asserting `cleared_cycles >= 1` `:711`, through `client` `[CLR]`. **Corrected 2026-09-21** — was `A` on an anchor at `:186`, above the clearing test. |
 | test_simulator_adaptive_clearing_effectiveness_ab.py | F | **transfer** | **B** | A/B benchmark on «an isolated SQLite DB» (`:1-6`), own engine `:72`, pragma test `:106-107`. |
 | test_simulator_adaptive_clearing_integration.py | F | **transfer** | **B** | own engine `:63`, pragma test `:108-109`, real tick `:35`. |
 | test_simulator_artifacts_events_ndjson.py | F | keep | A | artifact listing over `client` `:12`. |
@@ -204,7 +204,7 @@ Legend for the reason column: the codes above; `own engine` = the module calls `
 | test_simulator_sse_smoke.py | C | keep | A | fixtures-mode SSE `:12`. |
 | test_simulator_sse_trust_drift_decay_topology_patch.py | C | keep | **B** | real run `:22` `[VIS]`. |
 | test_simulator_sse_tx_failed_timeout.py | C | keep | **B** | real run `:61` `[VIS]`. |
-| test_simulator_super_smoke.py | F | keep | **B** | real run `:928`, real clearing action `:538`, `gather` `:811` `[CLR]` `[VIS]`. |
+| test_simulator_super_smoke.py | F | keep | **B** | real run `:928`, `RealClearingEngine` `:810` on its own sessionmaker, `gather` `:811` `[VIS]`. **Anchor corrected 2026-09-21** — `:538` was cited as «real clearing action»; it is `clearing-once`, an SSE emitter that takes no session (`app/api/v1/simulator.py:2861-2866`). The mode was right, the stated reason was not. |
 | test_static_clearing_hard_timeout_no_leak.py | F | keep | — | cancellation of a fake clearing task `:24`, no DB fixture at all. |
 | test_trustline_cache_invalidation.py | A | keep | A | cache eviction after commit/rollback on `db_session` `:37`. |
 | test_trustline_negative_constraints.py | A | keep | A | `db_session` `:20`. |
@@ -407,16 +407,16 @@ The largest divergences are D (40 vs 59) and F (52 vs 41): I put the journal *me
 
 **Verdicts:** keep **260**, transfer **26**, delete **13**.
 
-**Modes:** A **102**, B **88**, `—` **109**.
-Cross-tab: keep/A 96, keep/B 77, keep/— 87; transfer/A 6, transfer/B 11, transfer/— 9; delete/— 13.
+**Modes:** A **100**, B **90**, `—` **109**. *(Corrected 2026-09-21 from A 102 / B 88 — two files moved A → B, see «Correction» below.)*
+Cross-tab: keep/A 94, keep/B 79, keep/— 87; transfer/A 6, transfer/B 11, transfer/— 9; delete/— 13.
 
-**Marker cross-check — the key measurement.** `@pytest.mark.postgres` today: **53** files (`grep -rl "pytest.mark.postgres" tests/ --include=test_*.py | wc -l`). Files with `postgres` in the **name**: 55. My mode-B set: 88.
+**Marker cross-check — the key measurement.** `@pytest.mark.postgres` today: **53** files (`grep -rl "pytest.mark.postgres" tests/ --include=test_*.py | wc -l`). Files with `postgres` in the **name**: 55. My mode-B set: **90** (corrected).
 
-**43 files I assign mode B carry no `postgres` marker today — i.e. they run on SQLite right now and cannot see what they were written for:**
+**45 files I assign mode B carry no `postgres` marker today — i.e. they run on SQLite right now and cannot see what they were written for** (corrected 2026-09-21; the two added are `tests/integration/test_scenarios.py` and `tests/integration/test_clearing_max_depth_controls_long_cycles.py`)**:**
 
 `tests/contract/test_p011_responses_conform_to_the_canon.py`, `tests/integration/test_audit_drift_delta_check_sse_integration.py`, `test_integrity_repairs_atomicity.py`, `test_p012_t1207_one_money_form_across_producers.py`, `test_p015_f0156_repairs_are_closed_by_default.py`, `test_p015_step5c_hold_through_the_tick_sqlite.py`, `test_p015_t1544_operator_stop_refuses_money.py`, `test_p015_t1544_operator_stop_through_the_tick_sqlite.py`, `test_payment_prepare_error_taxonomy.py`, `test_post_tick_audit_drift_runner_integration.py`, `test_simulator_adaptive_clearing_effectiveness_ab.py`, `test_simulator_adaptive_clearing_integration.py`, `test_simulator_real_snapshot_db_enrichment.py`, `test_simulator_sse_real_smoke.py`, `test_simulator_sse_trust_drift_decay_topology_patch.py`, `test_simulator_sse_tx_failed_timeout.py`, `test_simulator_super_smoke.py`, `tests/unit/test_admin_config_patch_atomicity.py`, `test_apply_flow_retry_on_stale.py`, `test_clearing_additional_cases.py`, `test_debt_optimistic_lock.py`, `test_interact_actions_backend_p1.py`, `test_invariants.py`, `test_p012_t1210_detector_union_default_tier.py`, `test_p015_b4_entries_and_money.py`, `test_p015_b4_r4_fixture_migration_is_observably_equivalent.py`, `test_p015_b4_transaction_contract.py`, `test_p015_b4_write_guard.py`, `test_p015_b4_wrong_writer_is_recorded_faithfully.py`, `test_p015_b4a_journal_mechanism.py`, `test_p015_inject_transaction_ownership.py`, `test_p015_p1_money_conflict_predicate.py`, `test_p015_step5a_reconciliation.py`, `test_p015_step5b_criterion_b.py`, `test_p015_step5c_reaction_and_hold.py`, `test_p015_t1528_the_guard_reads_what_the_statement_writes.py`, `test_p015_t1530_the_journal_reads_its_own_record_back.py`, `test_p015_t1531_the_verification_read_is_not_rewritable.py`, `test_p015_t1532_a_savepoint_is_accounted_for_in_sql.py`, `test_p015_t1551_clearing_reduces_debt_on_a_frozen_line.py`, `test_p1_clearing_run_perimeter.py`, `test_websocket_payment_received_event.py`, `test_zero_debt_policy.py`.
 
-Among these, **11 execute real clearing on the default tier today** (`test_clearing_additional_cases`, `test_invariants`, `test_zero_debt_policy`, `test_p012_t1210_detector_union_default_tier`, `test_p015_t1551_…`, `test_p1_clearing_run_perimeter`, `test_interact_actions_backend_p1`, `test_p015_step5b_criterion_b`, `test_p015_b4_wrong_writer_…`, `test_p015_step5c_reaction_and_hold`, `test_p015_t1544_operator_stop_refuses_money`). On PostgreSQL every one of them hits `[CLR]` the moment it runs in mode A — **this is the single largest breakage stage 2 will meet, and it is not visible from the marker at all.**
+Among these, **13 execute real clearing on the default tier today** (corrected 2026-09-21 from 11) (`test_clearing_additional_cases`, `test_invariants`, `test_zero_debt_policy`, `test_p012_t1210_detector_union_default_tier`, `test_p015_t1551_…`, `test_p1_clearing_run_perimeter`, `test_interact_actions_backend_p1`, `test_p015_step5b_criterion_b`, `test_p015_b4_wrong_writer_…`, `test_p015_step5c_reaction_and_hold`, `test_p015_t1544_operator_stop_refuses_money`, **`test_scenarios`**, **`test_clearing_max_depth_controls_long_cycles`**). On PostgreSQL every one of them hits `[CLR]` the moment it runs in mode A — **this is the single largest breakage stage 2 will meet, and it is not visible from the marker at all.**
 
 **8 files carry the marker but do not need mode B** (mode A is sufficient — they read, they do not contend):
 `test_p012_t1202_money_modules_read_precision_postgres.py`, `test_p012_t1211_negative_zero_cannot_come_back_from_the_ledger_postgres.py`, `test_p012_t1211_shared_edge_order_postgres.py`, `test_p012_t1212_declared_precision_exceeds_storage_scale_postgres.py`, `test_p015_t1534_the_migrated_schema_flag_is_true_postgres.py`, `test_p1_tick_session_ownership_postgres.py`, `test_prepare_locks_tx_id_fk_postgres.py`, `test_p015_t1525_every_sqlite_engine_has_transaction_control.py` (the last one is a delete). Moving these to mode A is free time back.
@@ -540,3 +540,26 @@ and then, on both databases, that an entry saying «10 → 11, delta 2» is refu
 2. **283 deselected — baseline покрывает 2447 тестов из 2730.** Это тесты с маркерами `slow` и `postgres`. После стадии 2 маркер `postgres` исчезает и его тесты входят в обязательный тир. Поэтому **268 s и будущее число Postgres-тира несравнимы напрямую**: они меряют разные популяции. Честное сравнение требует либо замера Postgres-тира на той же популяции, либо замера SQLite-тира на расширенной — второе невозможно, потому что именно эти тесты на SQLite и не идут. Это ограничение надо назвать владельцу вместе с числом, иначе бюджет будет подписан против неверной базы.
 
 **Чего этот замер не доказывает.** Одна машина, один запуск каждого вида, без повторов и без разброса. Время CI (`windows-latest`) здесь не измерено и от локального отличается. Числа годятся как порядок величины для «до», а не как порог.
+
+---
+
+## 9. Correction 2026-09-21 — два файла, и механизм ошибки шире, чем один промах
+
+Первая версия этого инвентаря (`af82788`) назначила режим `A` двум файлам, которые исполняют настоящий клиринг на общей сессии. На Postgres в режиме A оба получают безусловный отказ `[CLR]`.
+
+| файл | было | стало | где исполняется |
+|---|---|---|---|
+| `tests/integration/test_scenarios.py` | A | **B** | `test_clearing` `:562` → `POST /api/v1/clearing/auto` `:709`, ассерт `cleared_cycles >= 1` `:711` |
+| `tests/integration/test_clearing_max_depth_controls_long_cycles.py` | A | **B** | `POST /api/v1/clearing/auto` с `max_depth=5` `:96-102`, ассерт `cleared_cycles >= 1` `:103` |
+
+Первую нашла соседняя сессия при вычитке; вторую — адверсарный скан, запущенный **потому, что найденная ошибка была формой, а не опечаткой**. Обе перепроверены по коду до публикации правки: цепочка `client` → `tests/conftest.py:436-437` (`yield db_session`) → `app/api/v1/clearing.py:51` (`ClearingService(db)`) открыта и прочитана целиком.
+
+**Механизм ошибки оказался шире заявленного.** Сперва он читался как «режим выведен по первому тесту с `db_session`, а клиринг лежал ниже по файлу» — так выглядел `test_scenarios.py`. Второй случай показал настоящую форму: в `test_clearing_max_depth_controls_long_cycles.py` токен `ClearingService` встречается **ноль раз**, и записанное обоснование — «no `ClearingService` construction anywhere in the file» — **буквально истинно**. Сервис достигается через HTTP-роут. То есть режим решался **поиском токена по тексту файла, а не по достижимому call-графу**, и верное обоснование прикрывало неверный вывод.
+
+Это ровно §15 AGENTS.md: «проверяйте обоснование, а не только вывод». Здесь оно сработало в обратную сторону — обоснование было истинным, а вывод из него не следовал.
+
+**Что даёт уверенность, что класс закрыт.** Скан строил популяцию независимо (точный grep по семи формам вызова → 58 файлов, широкий grep по слову `clearing` → 111, разница 53 разобрана поштучно, 7 потребовали открытия) и разбирал 65 кандидатов: 2 расхождения, 24 подтверждения, 39 исключений. Отдельно проверены и **названы безопасными** формы, которые легко принять за пропуск: клиринг реального тика (`app/core/simulator/real_clearing_engine.py:154` берёт `AsyncSessionLocal`, а фикстура подменяет его на `TestingSessionLocal`, привязанный к **engine**, `tests/conftest.py:181-182` — connection-bound сессия туда не попадает), `clearing-once` (SSE-эмиттер без сессии), обе детекции `GET /clearing/cycles` (отказ живёт за `execute_clearing_with_amount`), все 13 не-тестовых хелперов под `tests/` и все 25 перекрёстных импортов между тестовыми модулями (импортируются только сидеры и фикстуры).
+
+**Уточнение самого предиката, которое стоит дороже обеих находок.** Отказа мало достичь вызовом: `app/core/clearing/service.py:1523` уходит в ранний возврат при `or not cycle`. Значит «файл ходит в `/clearing/auto`» **не доказывает** режим B — нужен непустой цикл. В обеих находках ассерт `cleared_cycles >= 1` есть; в `tests/unit/test_interact_actions_backend_p1.py:1077` его нет, и там различие оказалось решающим. Третий потребитель этой же формы, `test_p015_t1544_operator_stop_refuses_money.py:337,345`, был помечен `B` верно с самого начала — то есть форма давала и правильные ответы, что и делало её незаметной.
+
+**Граница этой правки.** Скан проверял **только** предикат `[CLR]`. Режимы, выставленные по `[VIS]`, `[PROC]`, `[LOCK]` и «собственный engine», он не оспаривал и не подтверждал. Ни одно назначение, включая исправленные, не проверено исполнением — тесты по-прежнему не запускались.
