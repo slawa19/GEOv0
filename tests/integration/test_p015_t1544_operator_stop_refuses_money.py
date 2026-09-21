@@ -35,6 +35,7 @@ from sqlalchemy import func, select, update
 from app.config import settings
 from app.core.payments.engine import PaymentEngine
 from app.core.simulator.models import RunRecord
+from app.db.journal_tables import debt_journal_entries, debt_operations
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
@@ -120,6 +121,53 @@ async def _debt_totals(db_session, code: str) -> tuple[int, Decimal]:
     return int(count), Decimal(str(total))
 
 
+async def _replay_effects(db_session, code: str, tx_id: str) -> dict[str, object]:
+    """T1523 cell 1, the operator-stop parameter: debts, transaction rows, journal - all three.
+
+    Added 2026-09-21. The test below asserted the debt row and the replayed status; the journal was
+    the evidence the T1523 inventory found almost never checked on a replay, and an envelope opened
+    a second time is exactly what "the stored result was re-executed" would look like.
+    """
+
+    count, total = await _debt_totals(db_session, code)
+    transactions = sorted(
+        (str(state), repr(payload))
+        for state, payload in (
+            await db_session.execute(
+                select(Transaction.state, Transaction.payload).where(Transaction.tx_id == tx_id)
+            )
+        ).all()
+    )
+    envelopes = (
+        await db_session.execute(
+            select(debt_operations.c.id, debt_operations.c.state, debt_operations.c.effect_count)
+            .where(debt_operations.c.kind == "PAYMENT", debt_operations.c.identity == tx_id)
+        )
+    ).all()
+    entries: list[tuple[str, str, str, str]] = []
+    for operation_id, _state, _count in envelopes:
+        rows = (
+            await db_session.execute(
+                select(
+                    debt_journal_entries.c.amount_before,
+                    debt_journal_entries.c.amount_after,
+                    debt_journal_entries.c.delta,
+                ).where(debt_journal_entries.c.operation_id == operation_id)
+            )
+        ).all()
+        entries.extend(
+            (str(operation_id), str(before), str(after), str(delta))
+            for before, after, delta in rows
+        )
+    entries.sort()
+    return {
+        "debts": (count, total),
+        "transactions": transactions,
+        "envelopes": sorted((str(state), count) for _id, state, count in envelopes),
+        "entries": entries,
+    }
+
+
 def _assert_stop_refusal(resp, code: str) -> None:
     assert resp.status_code == 409, resp.text
     error = resp.json()["error"]
@@ -180,6 +228,14 @@ async def test_an_accepted_payment_still_replays_its_result_after_the_stop(clien
     first = await client.post("/api/v1/payments", json=body, headers=alice["headers"])
     assert first.status_code == 200 and first.json()["status"] == "COMMITTED", first.text
 
+    # T1523 cell 1 premise, before the stop: exactly one COMPLETED envelope whose effect_count
+    # matches its entry rows. Otherwise "nothing moved on replay" would also be true of a payment
+    # that had moved nothing in the first place.
+    before = await _replay_effects(db_session, code, body["tx_id"])
+    assert before["debts"] == (1, Decimal("10.00")), before["debts"]
+    assert before["envelopes"] == [("COMPLETED", len(before["entries"]))], before["envelopes"]
+    assert len(before["entries"]) > 0, before
+
     await _set_active(client, code, False)
     replay = await client.post("/api/v1/payments", json=body, headers=alice["headers"])
 
@@ -187,6 +243,18 @@ async def test_an_accepted_payment_still_replays_its_result_after_the_stop(clien
     assert replay.json()["tx_id"] == body["tx_id"]
     assert replay.json()["status"] == "COMMITTED"
     assert await _debt_totals(db_session, code) == (1, Decimal("10.00"))
+    assert await _replay_effects(db_session, code, body["tx_id"]) == before, (
+        "the replay after the stop moved debts, wrote a transaction row or touched the journal"
+    )
+
+    # The stand can see the outcome it was built for (AGENTS.md §15): the stop really is in force,
+    # so the 200 above came from the stored row and not from a stop that was never applied.
+    fresh = await client.post(
+        "/api/v1/payments",
+        json=_payment_body(alice, bob, code, "10.00"),
+        headers=alice["headers"],
+    )
+    _assert_stop_refusal(fresh, code)
 
 
 @pytest.mark.asyncio
