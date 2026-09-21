@@ -102,7 +102,9 @@ Stdout хранит result/JSON, stderr — progress и tracking URL; сохра
 $candidates = Get-ChildItem "$env:LOCALAPPDATA\OpenAI\Codex\bin" -Recurse -Filter codex.exe
 $resolved = foreach ($c in $candidates) {
     $v = (& $c.FullName --version 2>&1 | Select-Object -First 1)
-    if ($LASTEXITCODE -eq 0 -and $v -match '(\d+)\.(\d+)\.(\d+)') {
+    # Без проверки $LASTEXITCODE: после `& codex.exe --version` он бывает пустым (проверено 2026-09-21,
+    # `0.155.0-alpha.9.2`), и условие с `-eq 0` отбрасывало все кандидаты — «Codex binary not found» при живом бинарнике.
+    if ($v -match '(\d+)\.(\d+)\.(\d+)') {
         [pscustomobject]@{ Path = $c.FullName; Raw = $v
                            Sort = [version]("{0}.{1}.{2}" -f $Matches[1],$Matches[2],$Matches[3]) }
     }
