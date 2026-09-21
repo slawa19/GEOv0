@@ -138,6 +138,21 @@ jobs:
             admin-ui/package-lock.json
             simulator-ui/v2/package-lock.json
 
+      # The UI half needs Python even though it runs no backend test: the Simulator UI v2
+      # production build has a prebuild step (sync:demo-fixtures:strict) that runs
+      # admin-fixtures/tools/generate_simulator_demo_snapshots.py, which imports app.core.simulator
+      # and therefore pydantic. Measured 2026-09-21: without this the build dies on
+      # ModuleNotFoundError and -Strict turns the stale-fixture warning into a failure. The runner
+      # does not resolve Python for itself under -UiOnly; the generator picks it up from PATH.
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install backend dependencies for the fixture generator
+        shell: pwsh
+        run: python -m pip install -r requirements.txt
+
       - name: Install Admin UI dependencies
         shell: pwsh
         run: npm --prefix admin-ui ci

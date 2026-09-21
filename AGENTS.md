@@ -141,7 +141,7 @@ Canonical local entrypoint — `scripts/verify_local.ps1`. Он же испол�
 |---|---|
 | `-TaskSlug <slug>` | Изолирует basetemp, pytest cache, artifact root и default test DB под `.local-run/test-runs/<slug>/`. Обязателен при параллельной работе |
 | `-BackendOnly` | Только backend-тесты и проверка единственного Alembic head; UI-шаги пропускаются. **Head-check переехал сюда из UI-половины 2026-09-21** (017, `T1701`): он про backend, а разделение обязательного гейта на два job'а оставило бы его в UI-половине и потеряло |
-| `-UiOnly` | Только UI-шаги; backend-тесты и Python не нужны вовсе. Взаимно исключающ с `-BackendOnly` и с любым backend-параметром — сочетание отказывает, а не молчит |
+| `-UiOnly` | Только UI-шаги; backend-тесты не запускаются. Взаимно исключающ с `-BackendOnly` и с любым backend-параметром — сочетание отказывает, а не молчит. **Python всё равно нужен в окружении:** production build Simulator UI v2 имеет `prebuild`-шаг `sync:demo-fixtures:strict`, который зовёт генератор фикстур, импортирующий `app.core.simulator` (измерено 2026-09-21 первым прогоном разделённого гейта). Раннер Python для себя не разрешает — генератор берёт его из PATH |
 | `-BackendSelector <paths>` | Позиционные pytest-пути; проходят через `scripts/validate_pytest_selectors.py` |
 | `-BackendMarker <marker>` | **Заменяет** дефолтное marker-выражение и передаётся в pytest как есть. Для `postgres` дополнительно требует Postgres-URL в guard'е |
 | `-IncludeExpensive` | Marker-выражение становится `not postgres` (то есть slow включается) |
