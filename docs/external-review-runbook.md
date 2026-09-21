@@ -60,8 +60,7 @@ if (-not $claudeExe -or -not (Test-Path -LiteralPath $claudeExe -PathType Leaf))
 & $claudeExe --version
 if ($LASTEXITCODE -ne 0) { throw 'Claude Code --version failed' }
 $reviewId = [guid]::NewGuid().ToString('N')
-$reviewOutputRoot = Join-Path ([System.IO.Path]::GetTempPath()) `
-    "geov0-claude-review-$reviewId"
+$reviewOutputRoot = Join-Path (git rev-parse --show-toplevel) ".local-run/codex-review/claude-$reviewId"
 New-Item -ItemType Directory -Path $reviewOutputRoot -Force | Out-Null
 $progressLog = Join-Path $reviewOutputRoot 'progress.log'
 $resultJson = Join-Path $reviewOutputRoot 'review.json'
@@ -117,11 +116,11 @@ $codexInfo.Raw   # в evidence ledger вместе с $codex
 
 В ledger идут и путь, и строка версии: утверждения ниже про флаги верны для `0.147.x` и не переносятся на более старую сборку автоматически.
 
-**Прогон.** Оркестратор запускает Codex сам — так же, как Codex сам запускает Claude Code. Промпт подаётся на stdin, рабочий корень задаётся флагом, финальный ответ пишется **в отдельный файл**, прогресс — в лог. Каталог ревью живёт вне репозитория.
+**Прогон.** Оркестратор запускает Codex сам — так же, как Codex сам запускает Claude Code. Промпт подаётся на stdin, рабочий корень задаётся флагом, финальный ответ пишется **в отдельный файл**, прогресс — в лог. Каталог ревью живёт **внутри проекта**, в игнорируемом `.local-run/codex-review/<id>/` (решение владельца 2026-09-21: каталогов вне папки проекта не создаём); он не коммитится, а замороженный клон удаляется сразу после прогона.
 
 ```powershell
 $reviewId = [guid]::NewGuid().ToString('N')
-$reviewRoot = Join-Path ([System.IO.Path]::GetTempPath()) "geov0-codex-review-$reviewId"
+$reviewRoot = Join-Path (git rev-parse --show-toplevel) ".local-run/codex-review/$reviewId"
 New-Item -ItemType Directory -Path $reviewRoot -Force | Out-Null
 
 Get-Content "$reviewRoot\prompt_sliceA.txt" -Raw |
