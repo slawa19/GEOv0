@@ -128,7 +128,7 @@ Book.post(session, op: Operation, effects: Sequence[EdgeFlow]) -> Posted
 
 | ID | Задача | Статус |
 |---|---|---|
-| `T1800` | Решение владельца: журнал пишет база; снятие Phase B 1/2a/2d датой | `[!]` |
+| `T1800` | Решение по консультации Codex (протокол 2026-09-21): журнал пишет база; снятие Phase B 1/2a/2d датой. Ревьюеру ставятся три риска внутреннего круга: `ordinal` из триггера, `nullif`-предикат `SET LOCAL` на пуле, сброс контекста на выходе `Book.post` | `[!]` |
 | `T1801` | Контрпримеры **до кода**: три репродьюсера раздела 1 с контрпроверками пула и `COMPLETED`, красные на текущем дереве | `[!]` |
 | `T1802` | `app/core/ledger/book.py`: `Operation`, `EdgeFlow`, `Book.post` с `SET LOCAL`/сбросом; алгебра из `_apply_flow` без цикла `StaleDataError`, тест эквивалентности на матрице `T1523`; перенос `_DEBT_OPERATION_IDENTITY_CONSTRAINTS` | `[!]` |
 | `T1803` | Миграция: функция и триггер журнала на `debts` (`nullif`, проверка `OPEN`, отказ на смену ключа), `ordinal` + последовательность вместо `flush_ordinal`, удаление `flush_count`; `reconciliation.py` читает `ordinal` | `[!]` |
