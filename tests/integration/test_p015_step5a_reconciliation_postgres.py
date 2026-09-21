@@ -21,7 +21,7 @@ from decimal import Decimal
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import make_url, select, text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -33,7 +33,7 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.reconciliation_tables import BASELINE_COMMENT
 from tests.debt_setup import debt_fixture_setup
-from tests.migrated_schema import ALEMBIC_VERSION_BOOTSTRAP, run_alembic_upgrade_head
+from tests.migrated_schema import run_alembic_upgrade_head, scratch_databases
 from tests.unit.test_p015_b4_wrong_writer_is_recorded_faithfully import (
     _drop_triangle,
     _edges,
@@ -173,12 +173,6 @@ async def _bites(url: str) -> tuple[str | None, str | None]:
         await engine.dispose()
 
 
-def _scratch_url(url: str, suffix: str) -> tuple[str, str]:
-    parsed = make_url(url)
-    name = f"{parsed.database}_{suffix}"[:63]
-    return parsed.set(database=name).render_as_string(hide_password=False), name
-
-
 @pytest.mark.asyncio
 async def test_step5a_p_both_construction_paths_build_the_same_tables_and_both_bite() -> None:
     """`create_all` and `alembic upgrade head` agree on the three tables, and their constraints refuse.
@@ -187,25 +181,12 @@ async def test_step5a_p_both_construction_paths_build_the_same_tables_and_both_b
     `ondelete="CASCADE"` - the constraint definitions then differ between the two databases.
     """
 
-    import asyncpg
-
-    url = _postgres_url()
-    migrated_url, migrated_name = _scratch_url(url, "s5amig")
-    metadata_url, metadata_name = _scratch_url(url, "s5ameta")
-    parsed = make_url(url)
-    maintenance = await asyncpg.connect(
-        host=parsed.host, port=parsed.port or 5432, user=parsed.username,
-        password=parsed.password, database="postgres",
-    )
-    try:
-        for name in (migrated_name, metadata_name):
-            await maintenance.execute(f'DROP DATABASE IF EXISTS "{name}"')
-            await maintenance.execute(f'CREATE DATABASE "{name}"')
-    except Exception as exc:  # noqa: BLE001
-        await maintenance.close()
-        pytest.skip(f"CREATE DATABASE is not permitted here ({exc!r}): an ABSENT measurement, not a pass")
-
-    try:
+    # NOT a skip when the role cannot create databases (T1701): `scratch_databases` raises. Until
+    # 2026-09-21 this said "an ABSENT measurement, not a pass" and then reported a pass anyway.
+    async with scratch_databases(_postgres_url(), "s5amig", "s5ameta") as (
+        migrated_url,
+        metadata_url,
+    ):
         engine = create_async_engine(metadata_url, poolclass=NullPool)
         try:
             async with engine.begin() as connection:
@@ -213,13 +194,8 @@ async def test_step5a_p_both_construction_paths_build_the_same_tables_and_both_b
         finally:
             await engine.dispose()
 
-        engine = create_async_engine(migrated_url, poolclass=NullPool)
-        try:
-            async with engine.begin() as connection:
-                for statement in ALEMBIC_VERSION_BOOTSTRAP:
-                    await connection.exec_driver_sql(statement)
-        finally:
-            await engine.dispose()
+        # No preconditioning here: `migrations/env.py` owns the `alembic_version` widening and
+        # establishes it inside this run (T1701).
         run_alembic_upgrade_head(migrated_url)
 
         from_metadata = await _describe(metadata_url)
@@ -257,12 +233,6 @@ async def test_step5a_p_both_construction_paths_build_the_same_tables_and_both_b
                 f"{label}: a zero offset gave {zero!r} (expected CHECK 23514) and a second baseline gave "
                 f"{second!r} (expected unique 23505)"
             )
-    finally:
-        try:
-            for name in (migrated_name, metadata_name):
-                await maintenance.execute(f'DROP DATABASE IF EXISTS "{name}"')
-        finally:
-            await maintenance.close()
 
 
 # =================================================================================================

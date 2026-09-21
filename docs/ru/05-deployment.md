@@ -159,24 +159,25 @@ production DB.
 ### Предусловие на свежей базе: ширина `alembic_version.version_num`
 
 Alembic создаёт `alembic_version.version_num` как `VARCHAR(32)`, а идентификаторы ревизий
-здесь длиннее — до 46 символов. Поэтому на **пустой PostgreSQL-базе** голая
-`alembic -c migrations/alembic.ini upgrade head` не доходит до головы: она падает на переходе
-010 → 011 с `StringDataRightTruncationError: value too long for type character varying(32)`
-(воспроизведено 2026-09-20).
+здесь длиннее — до 46 символов.
 
-Колонку нужно создать заранее нужной ширины:
+**С 2026-09-21 (`T1701`) предусловие выполняет сам вход миграций.** `migrations/env.py` создаёт
+или расширяет колонку до `VARCHAR(128)` и коммитит это до прогона ревизий, поэтому голая
+`alembic -c migrations/alembic.ini upgrade head` на пустой PostgreSQL-базе доходит до головы, и
+делать руками ничего не нужно — ни в контейнере, ни вне его. Отказ предусловия прерывает прогон:
+миграции не начинаются, и сообщение называет инструкцию и ошибку драйвера.
+
+**История, а не текущее поведение.** До 2026-09-21 то же DDL стояло тремя копиями
+(`docker/docker-entrypoint.sh`, `tests/migrated_schema.py` и фикстура `container-smoke` в
+`.github/workflows/quality.yml`), а вход миграций его не имел — и голая команда падала на переходе
+010 → 011 с `StringDataRightTruncationError: value too long for type character varying(32)`
+(воспроизведено 2026-09-20). Если вы накатываете ревизии инструментом, который **обходит**
+`migrations/env.py`, предусловие придётся выполнить самому:
 
 ```sql
 CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(128) NOT NULL PRIMARY KEY);
 ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(128);
 ```
-
-После этого та же команда доходит до головы, а колонка остаётся `character varying(128)`.
-
-**В поддерживаемых путях запуска это уже сделано, и делать руками ничего не нужно:**
-`docker/docker-entrypoint.sh` выполняет обе инструкции до миграций, а тестовая схема — через
-`tests/migrated_schema.py`. Ручное предусловие нужно только тому, кто накатывает миграции на
-свежую PostgreSQL-базу в обход контейнера.
 
 Опции Alembic это не решает: ширину колонки версии он настраивать не умеет — параметры
 `EnvironmentContext.configure` ограничены `version_table`, `version_table_pk` и

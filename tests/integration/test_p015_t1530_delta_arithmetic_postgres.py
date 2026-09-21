@@ -10,12 +10,16 @@ the TWO paths agree. So this module keeps creating two scratch databases, builds
 `Base.metadata.create_all` and the other with `alembic -c migrations/alembic.ini upgrade head`, and
 compares what PostgreSQL then holds.
 
-THE ALEMBIC PATH NEEDS A PREFLIGHT AND A SUBPROCESS, and both are facts about this tree rather than
-choices: `alembic upgrade head` on a fresh database dies unless `alembic_version.version_num` is widened
-to `VARCHAR(128)` first - `docker/docker-entrypoint.sh` does that and a bare command does not - and
-`migrations/env.py` ends in `asyncio.run(...)`, so it cannot be invoked from inside a running event loop.
-Both now live in `tests/migrated_schema.py`, shared with the conftest that builds the gate's own schema
-the same way: two copies of a preconditioning workaround would be two places for T1535 to fix.
+THE ALEMBIC PATH NEEDS A SUBPROCESS, and that is a fact about this tree rather than a choice:
+`migrations/env.py` ends in `asyncio.run(...)`, so it cannot be invoked from inside a running event
+loop. `tests/migrated_schema.py::run_alembic_upgrade_head` is where that subprocess lives.
+
+IT ALSO NEEDED A PREFLIGHT, AND NO LONGER DOES HERE (T1701, 2026-09-21). `alembic upgrade head` on a
+fresh database dies at 010 -> 011 unless `alembic_version.version_num` is widened to `VARCHAR(128)`
+first. That used to be true of a bare command and false of `docker/docker-entrypoint.sh`, and three
+copies of the same DDL kept the difference alive. `migrations/env.py` now establishes the precondition
+itself, so every caller of the migration entry - this module included - gets it, and the sentence
+"a bare command does not" is no longer true of this tree.
 
 WHAT ELSE IS HERE, and it cannot be on the SQLite tier:
 
@@ -39,7 +43,7 @@ from decimal import Decimal
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import event, make_url, select, text
+from sqlalchemy import event, select, text
 from sqlalchemy.exc import DBAPIError, InvalidRequestError
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -49,7 +53,7 @@ from app.db.journal_tables import debt_journal_entries
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
-from tests.migrated_schema import ALEMBIC_VERSION_BOOTSTRAP, run_alembic_upgrade_head
+from tests.migrated_schema import run_alembic_upgrade_head, scratch_databases
 from tests.p015_b4a_stand import Stand, arm_stand, identity
 
 pytestmark = pytest.mark.postgres
@@ -105,38 +109,6 @@ async def _refusal_of(awaitable) -> BaseException | None:
 # =================================================================================================
 # The two construction paths
 # =================================================================================================
-
-
-async def _maintenance_connection(url: str):
-    """A raw asyncpg connection to `postgres` on the same server, for CREATE/DROP DATABASE.
-
-    asyncpg directly and not an engine: `CREATE DATABASE` cannot run inside a transaction, and a raw
-    connection is the shortest honest way to say so.
-    """
-
-    import asyncpg
-
-    parsed = make_url(url)
-    return await asyncpg.connect(
-        host=parsed.host,
-        port=parsed.port or 5432,
-        user=parsed.username,
-        password=parsed.password,
-        database="postgres",
-    )
-
-
-def _scratch_url(url: str, suffix: str) -> tuple[str, str]:
-    """A URL for a scratch database next to this one, and its name.
-
-    `render_as_string(hide_password=False)` and NOT `str(url)`: `URL.__str__` replaces the password
-    with `***`, and a URL rendered that way fails as "password authentication failed for user geo" -
-    a refusal that names the wrong problem, which cost a run here before it was measured.
-    """
-
-    parsed = make_url(url)
-    name = f"{parsed.database}_{suffix}"[:63]
-    return parsed.set(database=name).render_as_string(hide_password=False), name
 
 
 async def _check_constraints(url: str, table: str) -> dict[str, str]:
@@ -250,25 +222,14 @@ async def test_t1530_p_the_constraint_exists_and_bites_on_both_construction_path
     `tests/unit/test_p015_t1530_the_journal_reads_its_own_record_back.py`.
     """
 
-    url = _postgres_url()
-    migrated_url, migrated_name = _scratch_url(url, "t1530mig")
-    metadata_url, metadata_name = _scratch_url(url, "t1530meta")
-
-    maintenance = await _maintenance_connection(url)
-    try:
-        for name in (migrated_name, metadata_name):
-            await maintenance.execute(f'DROP DATABASE IF EXISTS "{name}"')
-            await maintenance.execute(f'CREATE DATABASE "{name}"')
-    except Exception as exc:  # noqa: BLE001
-        await maintenance.close()
-        pytest.skip(
-            f"this server will not let the test user create a scratch database ({exc!r}), so the "
-            f"two construction paths CANNOT be compared here. This is an ABSENT measurement, not a "
-            f"passing one: run it against a server where CREATE DATABASE is permitted before "
-            f"reporting the constraint verified on both paths."
-        )
-
-    try:
+    # NOT a skip when the role cannot create databases (T1701). This module used to say, at length,
+    # that a missing CREATE DATABASE right made the comparison "an ABSENT measurement, not a passing
+    # one" - and then report a pass. `scratch_databases` raises instead: since the PostgreSQL tier
+    # provisions its schema template by cloning a database, the right is a precondition of the tier.
+    async with scratch_databases(_postgres_url(), "t1530mig", "t1530meta") as (
+        migrated_url,
+        metadata_url,
+    ):
         # PATH 1: the metadata, which is what every SQLite tier and the gate's default path use.
         engine = create_async_engine(metadata_url)
         try:
@@ -277,16 +238,9 @@ async def test_t1530_p_the_constraint_exists_and_bites_on_both_construction_path
         finally:
             await engine.dispose()
 
-        # PATH 2: the migrations, with the preflight `docker/docker-entrypoint.sh` performs and a bare
-        # command does not.
-        engine = create_async_engine(migrated_url)
-        try:
-            async with engine.begin() as connection:
-                for statement in ALEMBIC_VERSION_BOOTSTRAP:
-                    await connection.exec_driver_sql(statement)
-        finally:
-            await engine.dispose()
-
+        # PATH 2: the migrations. The `alembic_version` preflight is no longer spelled here or in
+        # `docker/docker-entrypoint.sh`: since T1701 `migrations/env.py` owns it and establishes it
+        # inside this very run, so a bare command is no longer a different thing from this one.
         # Raises `MigratedSchemaError` carrying stdout and stderr if the run does not reach head, so
         # the migrated path can never be silently unmeasured.
         run_alembic_upgrade_head(migrated_url)
@@ -322,12 +276,6 @@ async def test_t1530_p_the_constraint_exists_and_bites_on_both_construction_path
                 f"The constraint exists in the catalogue and does not refuse, which is worse than "
                 f"its absence because the catalogue then lies."
             )
-    finally:
-        try:
-            for name in (migrated_name, metadata_name):
-                await maintenance.execute(f'DROP DATABASE IF EXISTS "{name}"')
-        finally:
-            await maintenance.close()
 
 
 # =================================================================================================
