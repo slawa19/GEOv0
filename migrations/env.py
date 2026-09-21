@@ -132,10 +132,16 @@ def run_migrations_offline() -> None:
     Calls to context.execute() here emit the given string to the
     script output.
 
-    The bootstrap is EMITTED rather than executed here, because offline mode has no connection. The
-    generated script therefore carries the precondition; what it cannot do is widen a column in a
-    database it never sees, so an existing `VARCHAR(32)` table must be widened by running the
-    statements in `ALEMBIC_VERSION_BOOTSTRAP` before applying the generated SQL.
+    OFFLINE MODE CANNOT ESTABLISH THE PRECONDITION, and that is measured rather than assumed
+    (2026-09-21, T1701). There is no connection to create or widen anything on, and emitting the DDL
+    into the script does not help: Alembic then emits its OWN
+    `CREATE TABLE alembic_version (version_num VARCHAR(32) ...)` - without `IF NOT EXISTS`, because
+    offline mode has no catalogue to check - and the generated script dies on the duplicate. Tried,
+    read, reverted. So this path is left exactly as it was: the generated SQL carries Alembic's
+    32-character column and stops at 010 -> 011 when applied to a fresh database. Whoever applies it
+    runs the statements in `ALEMBIC_VERSION_BOOTSTRAP` first, by hand - they are printed for that
+    purpose in `docs/ru/05-deployment.md`. Nothing in this repository generates offline SQL today;
+    the online path above is the one every caller uses.
     """
     url = settings.DATABASE_URL
     _require_postgresql_migration_url(url)
@@ -147,8 +153,6 @@ def run_migrations_offline() -> None:
     )
 
     with context.begin_transaction():
-        for statement in ALEMBIC_VERSION_BOOTSTRAP:
-            context.execute(statement)
         context.run_migrations()
 
 
