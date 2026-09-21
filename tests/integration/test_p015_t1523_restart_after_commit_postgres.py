@@ -122,7 +122,17 @@ async def _run_child(mode: str, *, database_url: str, body_path: Path, sender_id
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=180.0)
+    try:
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=180.0)
+    except (asyncio.TimeoutError, asyncio.CancelledError):
+        # `wait_for` cancels the READ, not the process. Without this the child - which writes
+        # payments against the same test database - keeps running while the test moves on to
+        # cleanup, free to hold locks or commit after the assertions it was supposed to feed.
+        # A timeout here already means something went wrong; the point of killing it is that
+        # the NEXT test still measures what it thinks it measures.
+        process.kill()
+        await process.wait()
+        raise
     return (
         process.returncode,
         process.pid,
