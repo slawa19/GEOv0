@@ -149,9 +149,13 @@ jobs:
         with:
           python-version: "3.11"
 
+      # Both files, as the undivided job installed them. requirements.txt alone is not enough:
+      # measured 2026-09-21, the generator then dies on aiosqlite, which lives in
+      # requirements-dev.txt:5 - the very line programme 017 stage 3 is going to delete. When that
+      # slice arrives it must answer for this consumer too, or the UI build loses its fixtures.
       - name: Install backend dependencies for the fixture generator
         shell: pwsh
-        run: python -m pip install -r requirements.txt
+        run: python -m pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Install Admin UI dependencies
         shell: pwsh
