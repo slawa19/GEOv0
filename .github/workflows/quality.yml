@@ -248,7 +248,7 @@ jobs:
   # concurrency matrix and the `-BackendMarker postgres -BackendSelector tests/integration` marker
   # tier - now run in `required-backend` above, on every pull request, with the same task slugs
   # (`ci-postgres-phase2`, `ci-postgres`) and the same migration preflight through the production
-  # entrypoint. Nothing of it was dropped; see `tests/integration/test_p017_required_gate_runs_on_postgres.py`,
+  # entrypoint. Nothing of it was dropped; see `tests/unit/test_p017_required_gate_runs_on_postgres.py`,
   # which fails if either session goes back to a schedule-only job.
   container-smoke:
     name: Production-like container and schema smoke (scheduled/manual)
