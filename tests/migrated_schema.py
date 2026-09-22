@@ -487,13 +487,24 @@ async def cloned_database(
         await connection.close()
         raise
 
+    # WHETHER THE BLOCK FAILED IS RECORDED ON THE WAY OUT OF IT, not read back from
+    # `sys.exc_info()` inside the handler (2026-09-22, Codex external review of
+    # `e2e1380..37fec08`). The first version asked `if sys.exc_info()[0] is None: raise` from inside
+    # `except MigratedSchemaError`, where `sys.exc_info()[0]` is the cleanup error being handled and
+    # is therefore NEVER `None` - the `raise` was unreachable, and a refused `DROP DATABASE` after a
+    # SUCCESSFUL body became a line on stderr and a passing test. Proved by execution, not by
+    # reading.
+    body_failed = True
     try:
         yield clone_url
+        body_failed = False
     finally:
         try:
             await drop_database(connection, clone_name)
         except MigratedSchemaError as cleanup_error:
-            if sys.exc_info()[0] is None:
+            if not body_failed:
+                # Nothing else is propagating, so the refused cleanup IS the result of this block
+                # and the run has to see it.
                 raise
             # Something in the block already failed; that is what the reader needs to see. The clone
             # is named, so it can be found, and the next run of this suffix drops it first.
@@ -528,14 +539,21 @@ async def scratch_databases(base_url: str, *suffixes: str) -> AsyncIterator[tupl
         await connection.close()
         raise
 
+    # Same correction as in `cloned_database` above, and this is the half that regressed something:
+    # the four schema-comparison modules that call this
+    # (`test_p015_step5a_reconciliation_postgres.py`, `test_p015_step5b_criterion_b_postgres.py`,
+    # `test_p015_step5c_hold_races_postgres.py`, `test_p015_t1530_delta_arithmetic_postgres.py`)
+    # propagated their failed drops before T1701 moved them onto this helper.
+    body_failed = True
     try:
         yield tuple(url for url, _ in prepared)
+        body_failed = False
     finally:
         try:
             for _, name in prepared:
                 await drop_database(connection, name)
         except MigratedSchemaError as cleanup_error:
-            if sys.exc_info()[0] is None:
+            if not body_failed:
                 raise
             print(
                 f"WARNING: a scratch database was left standing: {cleanup_error}",
