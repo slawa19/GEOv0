@@ -17,19 +17,25 @@ For `UAH` trustlines where at least one side is `person`:
 
 This keeps starting debts for households / producers / services in the “normal local economy” range.
 
-### 2) Clearing-first policy
+### 2) Clearing-first policy — **только в `UAH`**
 
-Trustline policy defaults:
-- `auto_clearing = true` (prefer reducing obligations as soon as cycles appear)
-- `can_be_intermediate = true` **only** for `business ↔ business` trustlines (people should not become routing intermediates).
+v2 переписала политику **исключительно на `UAH`‑линиях**. На них:
+- `auto_clearing = true` (сокращать обязательства, как только появляются циклы);
+- `can_be_intermediate = true`, если **кредитор** (`from`) — `business`.
+
+Две оговорки, без которых это правило читается неверно:
+
+- Это **не** «только `business ↔ business`». Посредником разрешено быть и на линии `business → person`: маршрутизатор применяет политику кредиторской линии (получатель → отправитель) к ребру потока платежа, поэтому платёж `person → business` маршрутизируется через бизнес‑кредитора именно благодаря этому.
+- Линии в `HOUR` и `EUR` v2 **не трогала вовсе**. Их политика осталась такой, какой её оставила базовая версия: `auto_clearing` — на чётных, `can_be_intermediate` — на всех, кроме кратных пяти. То есть среди них есть и `person → person` с разрешённым посредничеством.
+
+Фактическое распределение политик — в описании сообщества `seeds/communities/greenfield-village-100/community.json`, поле `policy` каждой линии; пересказывать его числом здесь нельзя, оно устареет.
 
 ## Equivalents
 
 - `UAH`, `EUR`, `HOUR`
 
-## Generator
+## Структура
 
-- Canonical fixtures pack (in-place): `admin-fixtures/tools/generate_fixtures.py --seed greenfield-village-100-v2`
-- Optional named pack: `admin-fixtures/tools/generate_fixtures.py --seed greenfield-village-100-v2 --pack --activate`
+Ростер и линии v2 живут в описании сообщества: [seeds/communities/greenfield-village-100/community.json](../../../seeds/communities/greenfield-village-100/community.json) — 100 участников и 523 линии против 439 у базовой версии. Разбивка по эквивалентам и сами эти числа закреплены константами в `tests/unit/test_p017_t1712_community_descriptions.py`, который краснеет и при расхождении, и при незаписанном изменении.
 
-Implementation: [admin-fixtures/tools/generate_seed_greenfield_village_100_v2.py](../../../admin-fixtures/tools/generate_seed_greenfield_village_100_v2.py)
+Реализация, из которой описание извлечено: [admin-fixtures/tools/generate_seed_greenfield_village_100_v2.py](../../../admin-fixtures/tools/generate_seed_greenfield_village_100_v2.py). Генератор ещё собирает исторический пакет фикстур Admin UI (`admin-fixtures/tools/generate_fixtures.py --seed greenfield-village-100-v2`, опционально `--pack --activate`); этот путь выводится из обращения — см. [README](README.md#исторический-путь-пакет-фикстур-admin-ui).

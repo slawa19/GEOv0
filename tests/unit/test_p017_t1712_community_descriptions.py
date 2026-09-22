@@ -194,6 +194,39 @@ def test_the_description_holds_no_invented_result(community_id: str, description
     assert "transactions" not in doc
 
 
+@pytest.mark.parametrize("community_id", COMMUNITY_IDS)
+def test_the_v2_routing_and_clearing_policy_is_what_the_seed_documents_claim(
+    community_id: str, descriptions
+) -> None:
+    """v2 rewrote policy on the UAH lines only, and the rule is about the creditor.
+
+    The v2 seed documents used to say `can_be_intermediate` was true "only for
+    business <-> business". It never was: the router applies the policy of the
+    creditor line to the payment-flow edge, so a `business -> person` line is
+    exactly what lets a `person -> business` payment route through that business.
+    This pins the rule the documents now state, in both halves - what v2 set and
+    what it deliberately did not touch.
+    """
+    doc = descriptions[community_id]
+    type_by_ref = {p["ref"]: p["type"] for p in doc["participants"]}
+
+    uah = [t for t in doc["trustlines"] if t["equivalent"] == "UAH"]
+    assert uah, "the UAH half of the rule needs UAH lines to be about"
+    for t in uah:
+        assert t["policy"]["auto_clearing"] is True, t
+        assert t["policy"]["can_be_intermediate"] is (type_by_ref[t["from"]] == "business"), t
+
+    # The other half: v2 left HOUR and EUR alone, so they are *not* clearing-first
+    # and they do carry person creditors allowed to be intermediates. If that ever
+    # stops being true it is a change in the carried-forward topology, not noise.
+    other = [t for t in doc["trustlines"] if t["equivalent"] != "UAH"]
+    assert other, "the untouched half needs non-UAH lines to be about"
+    assert any(t["policy"]["auto_clearing"] is False for t in other)
+    assert any(
+        t["policy"]["can_be_intermediate"] and type_by_ref[t["from"]] == "person" for t in other
+    )
+
+
 # --- The description still equals the v2 topology it was extracted from -------
 #
 # This is a bridge assertion and it dies with the generators it reads. Until

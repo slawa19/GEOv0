@@ -1,9 +1,10 @@
 """Schema of a community description (`seeds/communities/<id>/community.json`).
 
 A community description says *who is in the community and who trusts whom*.
-It is the single roster: the simulator scenario generator
-(`scripts/generate_simulator_seed_scenarios.py`) and the seed recipe read it,
-and nobody keeps a second copy of the same people by hand.
+It is the single roster. The simulator scenario generator
+(`scripts/generate_simulator_seed_scenarios.py`) reads it today, and the seed
+recipe of programme 017 (`T1711`, `T1713`, not yet built) is meant to read the
+same file, so that nobody keeps a second copy of the same people by hand.
 
 The format is small and owned by the seed tools. It is deliberately **not** the
 simulator scenario format: that one mixes structure with ticks, warm-up and
@@ -33,7 +34,8 @@ produced by running the recipe, not written by hand.
 ``pid`` is a fixture identity. It keys the committed simulator scenarios under
 ``fixtures/simulator/`` and the Admin UI prototype fixtures. It is not the PID a
 participant gets in a database: there ``PID = base58(sha256(public_key))`` of a
-key pair generated per run (`app/core/crypto.py`), and the recipe resolves
+key pair generated per run (`app/core/auth/crypto.py:37-50`), and the recipe
+resolves
 ``ref`` → real PID through its own table.
 
 This module is dependency-free on purpose: it is imported by scripts that must
