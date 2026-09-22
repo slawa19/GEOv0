@@ -8,11 +8,35 @@ param(
     [ValidatePattern('^[A-Za-z_][A-Za-z0-9_]*$')]
     [string]$BackendMarker,
     [switch]$IncludeExpensive,
-    [switch]$BackendOnly
+    [switch]$BackendOnly,
+    [switch]$UiOnly
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+
+# `-UiOnly` IS THE OTHER HALF OF `-BackendOnly`, ADDED 2026-09-21 (programme 017, T1701). The
+# required CI gate used to be one job running this script with neither switch; it now runs as two,
+# because GitHub Actions service containers - and therefore PostgreSQL - are not available to
+# Windows runners, and the backend half has to see PostgreSQL on every pull request. The UI half
+# keeps its Windows runner and passes `-UiOnly`.
+#
+# The two refusals below exist because a switch that silently does nothing is the false green this
+# repository keeps rediscovering (AGENTS.md §9): `-BackendOnly -UiOnly` together would run no gate
+# at all and still exit 0, and `-UiOnly -BackendSelector ...` would report success without having
+# collected the selected tests.
+if ($BackendOnly -and $UiOnly) {
+    throw 'Pass -BackendOnly or -UiOnly, not both: together they would run no gate at all and still exit 0. Pass neither to run both halves.'
+}
+if ($UiOnly) {
+    $ignoredBackendArguments = @()
+    if ($BackendSelector.Count -gt 0) { $ignoredBackendArguments += '-BackendSelector' }
+    if ($BackendMarker) { $ignoredBackendArguments += '-BackendMarker' }
+    if ($IncludeExpensive) { $ignoredBackendArguments += '-IncludeExpensive' }
+    if ($ignoredBackendArguments.Count -gt 0) {
+        throw "-UiOnly runs no backend step, so $($ignoredBackendArguments -join ', ') would be accepted and ignored. Drop the switch, or drop -UiOnly and let the backend half run."
+    }
+}
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 
@@ -73,7 +97,15 @@ function Invoke-DiagnosticStep {
     }
 }
 
-$pythonExe = Resolve-PythonExecutable
+# The runner resolves Python only for work it drives itself. That is NOT the same as "-UiOnly needs
+# no Python": the Simulator UI v2 production build has a prebuild step (sync:demo-fixtures:strict)
+# whose generator imports app.core.simulator, and it finds its own interpreter on PATH. Measured
+# 2026-09-21 by the first run of the split gate, which died on ModuleNotFoundError: pydantic. A UI
+# job that installs no Python dependencies will fail there, not here.
+$pythonExe = $null
+if ((-not $UiOnly) -or $StaticDiagnostics) {
+    $pythonExe = Resolve-PythonExecutable
+}
 if (-not $BackendOnly) {
     Assert-CommandAvailable -Name 'npm'
 }
@@ -97,52 +129,59 @@ try {
 
     Push-Location $repoRoot
     try {
-        if ($BackendSelector.Count -gt 0) {
-            Invoke-RequiredStep -Name 'Backend selector safety guard' -Command {
-                & $pythonExe scripts/validate_pytest_selectors.py --repo-root $repoRoot -- @BackendSelector
-            }
-        }
-        Invoke-RequiredStep -Name 'Test database safety guard' -Command {
-            $databaseGuardArgs = @()
-            if ($BackendMarker -eq 'postgres') {
-                $databaseGuardArgs += @('--require-backend', 'postgresql')
-            }
-            & $pythonExe scripts/validate_test_database_url.py @databaseGuardArgs
-        }
-        Invoke-RequiredStep -Name 'Backend tests (pytest)' -Command {
-            $pytestCache = Join-Path $taskRoot 'cache'
-            $pytestArgs = @(
-                '-m', 'pytest',
-                '--basetemp', $baseTemp,
-                '-o', "cache_dir=$pytestCache",
-                '-q'
-            )
-            # NOTHING IS EXCLUDED FROM A TIER BEYOND `slow` AND `postgres`, and that is a deletion
-            # worth naming: until 2026-09-12 every branch below also appended
-            # `and not b4_counterexample`, which took the 107 programme-015 step-2 counterexamples
-            # out of the default tier, out of -IncludeExpensive and out of an explicitly requested
-            # marker alike. They were red on purpose while the debt journal did not exist. Step 4
-            # slice C built it; the counterexamples went green through the journal, with their
-            # assertions untouched, and the exclusion left with the marker (see pytest.ini).
-            if ($BackendMarker) {
-                $pytestArgs += @('-m', $BackendMarker)
-            }
-            elseif ($IncludeExpensive) {
-                $pytestArgs += @('-m', 'not postgres')
-            }
-            else {
-                $pytestArgs += @('-m', 'not slow and not postgres')
-            }
+        if (-not $UiOnly) {
             if ($BackendSelector.Count -gt 0) {
-                $pytestArgs += '--'
-                $pytestArgs += $BackendSelector
+                Invoke-RequiredStep -Name 'Backend selector safety guard' -Command {
+                    & $pythonExe scripts/validate_pytest_selectors.py --repo-root $repoRoot -- @BackendSelector
+                }
             }
-            & $pythonExe @pytestArgs
-        }
-        if (-not $BackendOnly) {
+            Invoke-RequiredStep -Name 'Test database safety guard' -Command {
+                $databaseGuardArgs = @()
+                if ($BackendMarker -eq 'postgres') {
+                    $databaseGuardArgs += @('--require-backend', 'postgresql')
+                }
+                & $pythonExe scripts/validate_test_database_url.py @databaseGuardArgs
+            }
+            Invoke-RequiredStep -Name 'Backend tests (pytest)' -Command {
+                $pytestCache = Join-Path $taskRoot 'cache'
+                $pytestArgs = @(
+                    '-m', 'pytest',
+                    '--basetemp', $baseTemp,
+                    '-o', "cache_dir=$pytestCache",
+                    '-q'
+                )
+                # NOTHING IS EXCLUDED FROM A TIER BEYOND `slow` AND `postgres`, and that is a deletion
+                # worth naming: until 2026-09-12 every branch below also appended
+                # `and not b4_counterexample`, which took the 107 programme-015 step-2 counterexamples
+                # out of the default tier, out of -IncludeExpensive and out of an explicitly requested
+                # marker alike. They were red on purpose while the debt journal did not exist. Step 4
+                # slice C built it; the counterexamples went green through the journal, with their
+                # assertions untouched, and the exclusion left with the marker (see pytest.ini).
+                if ($BackendMarker) {
+                    $pytestArgs += @('-m', $BackendMarker)
+                }
+                elseif ($IncludeExpensive) {
+                    $pytestArgs += @('-m', 'not postgres')
+                }
+                else {
+                    $pytestArgs += @('-m', 'not slow and not postgres')
+                }
+                if ($BackendSelector.Count -gt 0) {
+                    $pytestArgs += '--'
+                    $pytestArgs += $BackendSelector
+                }
+                & $pythonExe @pytestArgs
+            }
+            # THIS CHECK IS BACKEND WORK AND IT USED TO RUN IN THE UI HALF (moved 2026-09-21,
+            # T1701). It asks whether `migrations/versions/` still has exactly one head; it needs
+            # no npm and says nothing about either UI. It sat inside the `-not $BackendOnly` block,
+            # so the day the required gate split into a backend job and a UI job it would have
+            # travelled with the UI half and left migrations unguarded on the job that owns them.
             Invoke-RequiredStep -Name 'Single Alembic migration head' -Command {
                 & $pythonExe scripts/check_alembic_heads.py
             }
+        }
+        if (-not $BackendOnly) {
             Invoke-RequiredStep -Name 'Admin UI lint' -Command {
                 & npm --prefix admin-ui run lint
             }
@@ -188,6 +227,9 @@ finally {
 
 if ($BackendOnly) {
     Write-Host "`nRequired backend validation passed." -ForegroundColor Green
+}
+elseif ($UiOnly) {
+    Write-Host "`nRequired UI validation passed. The backend half did not run here." -ForegroundColor Green
 }
 else {
     Write-Host "`nRequired local validation passed." -ForegroundColor Green

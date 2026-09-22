@@ -17,10 +17,31 @@ permissions:
   contents: read
 
 jobs:
-  required-quality:
-    name: Required local-equivalent gates
-    runs-on: windows-latest
+  # THE REQUIRED GATE IS TWO JOBS SINCE 2026-09-21 (programme 017, T1701), AND THE SPLIT IS ABOUT
+  # PostgreSQL. Until then `required-quality` was one Windows job running `verify_local.ps1` with
+  # neither switch, and PostgreSQL ran only in the weekly `postgres` job - so a pull request could
+  # be green while every advisory lock, `FOR UPDATE` and SERIALIZABLE retry in the money path went
+  # unobserved (017 `spec.md`, Problem, defect 1). Service containers are not available to Windows
+  # runners, so the backend half moved to ubuntu and took the PostgreSQL sessions of the deleted
+  # `postgres` job with it; the UI half kept the Windows runner it had.
+  required-backend:
+    name: Required backend gates (PostgreSQL)
+    runs-on: ubuntu-latest
     timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: geo
+          POSTGRES_PASSWORD: geo
+          POSTGRES_DB: geov0_test_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -p 5432 -U geo -d geov0_test_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - name: Check out repository
@@ -35,6 +56,79 @@ jobs:
             requirements.txt
             requirements-dev.txt
 
+      - name: Install backend dependencies
+        run: python -m pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Upgrade empty PostgreSQL database to the single migration head
+        env:
+          ENV: test
+          DATABASE_URL: postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_ci
+        run: |
+          python scripts/check_alembic_heads.py
+          bash docker/docker-entrypoint.sh true
+
+      - name: Run Phase 2 PostgreSQL concurrency matrix
+        shell: pwsh
+        env:
+          ENV: test
+          DATABASE_URL: postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_ci
+          TEST_DATABASE_URL: postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_ci
+          GEO_TEST_ALLOW_DB_RESET: "1"
+          GEO_TEST_USE_MIGRATED_SCHEMA: "1"
+        run: |
+          $selectors = @(
+            'tests/integration/test_concurrent_prepare_routes_bottleneck_postgres.py::test_concurrent_payments_shared_bottleneck_commit_once_postgres'
+            'tests/integration/test_concurrent_clearing_payment_lost_update_postgres.py::test_concurrent_payment_and_clearing_same_trustline_preserve_effects_postgres'
+            'tests/integration/test_payment_idempotency_postgres.py::test_concurrent_duplicate_payment_request_never_regresses_terminal_state_postgres'
+          )
+          ./scripts/verify_local.ps1 `
+            -Python ((Get-Command python).Source) `
+            -TaskSlug ci-postgres-phase2 `
+            -BackendOnly `
+            -BackendMarker postgres `
+            -BackendSelector $selectors
+
+      - name: Run PostgreSQL marker tier
+        shell: pwsh
+        env:
+          ENV: test
+          DATABASE_URL: postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_ci
+          TEST_DATABASE_URL: postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_ci
+          GEO_TEST_ALLOW_DB_RESET: "1"
+          GEO_TEST_USE_MIGRATED_SCHEMA: "1"
+        run: >-
+          ./scripts/verify_local.ps1
+          -Python ((Get-Command python).Source)
+          -TaskSlug ci-postgres
+          -BackendOnly
+          -BackendMarker postgres
+          -BackendSelector tests/integration
+
+      # LAST ON PURPOSE, AND NOT SET UP LIKE THE STEPS ABOVE. The default tier still builds its
+      # schema with `create_all` on SQLite - stage 2 of programme 017 is what moves it - so
+      # `TEST_DATABASE_URL` is set on the PostgreSQL steps only and never at job level: a job-level
+      # PostgreSQL URL would silently take this step with it, and `GEO_TEST_USE_MIGRATED_SCHEMA=1`
+      # would abort it outright (tests/conftest.py:99-103). It runs after the PostgreSQL sessions
+      # because this tier has never run on Linux in CI before - it lived on windows-latest until
+      # 2026-09-21 - and a first-run Linux failure here must not hide the PostgreSQL evidence this
+      # job was created to produce.
+      - name: Run the default backend tier and the single Alembic head check
+        shell: pwsh
+        run: >-
+          ./scripts/verify_local.ps1
+          -Python ((Get-Command python).Source)
+          -TaskSlug ci-required-backend
+          -BackendOnly
+
+  required-ui:
+    name: Required UI gates
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
       - name: Set up Node.js 22.12
         uses: actions/setup-node@v4
         with:
@@ -44,7 +138,22 @@ jobs:
             admin-ui/package-lock.json
             simulator-ui/v2/package-lock.json
 
-      - name: Install backend dependencies
+      # The UI half needs Python even though it runs no backend test: the Simulator UI v2
+      # production build has a prebuild step (sync:demo-fixtures:strict) that runs
+      # admin-fixtures/tools/generate_simulator_demo_snapshots.py, which imports app.core.simulator
+      # and therefore pydantic. Measured 2026-09-21: without this the build dies on
+      # ModuleNotFoundError and -Strict turns the stale-fixture warning into a failure. The runner
+      # does not resolve Python for itself under -UiOnly; the generator picks it up from PATH.
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Both files, as the undivided job installed them. requirements.txt alone is not enough:
+      # measured 2026-09-21, the generator then dies on aiosqlite, which lives in
+      # requirements-dev.txt:5 - the very line programme 017 stage 3 is going to delete. When that
+      # slice arrives it must answer for this consumer too, or the UI build loses its fixtures.
+      - name: Install backend dependencies for the fixture generator
         shell: pwsh
         run: python -m pip install -r requirements.txt -r requirements-dev.txt
 
@@ -56,12 +165,12 @@ jobs:
         shell: pwsh
         run: npm --prefix simulator-ui/v2 ci
 
-      - name: Run canonical required gates
+      - name: Run canonical required UI gates
         shell: pwsh
         run: >-
           ./scripts/verify_local.ps1
-          -Python ((Get-Command python).Source)
-          -TaskSlug ci-required
+          -TaskSlug ci-required-ui
+          -UiOnly
 
   static-diagnostics:
     name: Python static diagnostics (Ruff blocking, Black non-blocking)
@@ -153,78 +262,13 @@ jobs:
         shell: bash
         run: docker image rm --force "$DEV_CONTEXT_IMAGE" || true
 
-  postgres:
-    name: PostgreSQL integration (scheduled/manual)
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: geo
-          POSTGRES_PASSWORD: geo
-          POSTGRES_DB: geov0_test_ci
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -h 127.0.0.1 -p 5432 -U geo -d geov0_test_ci"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-    env:
-      ENV: test
-      DATABASE_URL: postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_ci
-      TEST_DATABASE_URL: postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_ci
-      GEO_TEST_ALLOW_DB_RESET: "1"
-      GEO_TEST_USE_MIGRATED_SCHEMA: "1"
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-          cache-dependency-path: |
-            requirements.txt
-            requirements-dev.txt
-
-      - name: Install backend dependencies
-        run: python -m pip install -r requirements.txt -r requirements-dev.txt
-
-      - name: Upgrade empty PostgreSQL database to the single migration head
-        run: |
-          python scripts/check_alembic_heads.py
-          bash docker/docker-entrypoint.sh true
-
-      - name: Run Phase 2 PostgreSQL concurrency matrix
-        shell: pwsh
-        run: |
-          $selectors = @(
-            'tests/integration/test_concurrent_prepare_routes_bottleneck_postgres.py::test_concurrent_payments_shared_bottleneck_commit_once_postgres'
-            'tests/integration/test_concurrent_clearing_payment_lost_update_postgres.py::test_concurrent_payment_and_clearing_same_trustline_preserve_effects_postgres'
-            'tests/integration/test_payment_idempotency_postgres.py::test_concurrent_duplicate_payment_request_never_regresses_terminal_state_postgres'
-          )
-          ./scripts/verify_local.ps1 `
-            -Python ((Get-Command python).Source) `
-            -TaskSlug ci-postgres-phase2 `
-            -BackendOnly `
-            -BackendMarker postgres `
-            -BackendSelector $selectors
-
-      - name: Run PostgreSQL marker tier
-        shell: pwsh
-        run: >-
-          ./scripts/verify_local.ps1
-          -Python ((Get-Command python).Source)
-          -TaskSlug ci-postgres
-          -BackendOnly
-          -BackendMarker postgres
-          -BackendSelector tests/integration
-
+  # The `postgres` job stood here until 2026-09-21. It ran on the weekly schedule and on manual
+  # dispatch only, and it owned both PostgreSQL pytest sessions. Both sessions - the three-selector
+  # concurrency matrix and the `-BackendMarker postgres -BackendSelector tests/integration` marker
+  # tier - now run in `required-backend` above, on every pull request, with the same task slugs
+  # (`ci-postgres-phase2`, `ci-postgres`) and the same migration preflight through the production
+  # entrypoint. Nothing of it was dropped; see `tests/unit/test_p017_required_gate_runs_on_postgres.py`,
+  # which fails if either session goes back to a schedule-only job.
   container-smoke:
     name: Production-like container and schema smoke (scheduled/manual)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
@@ -674,6 +718,21 @@ jobs:
           PW_E2E_PORT: "41732"
         run: npm --prefix simulator-ui/v2 run test:e2e:smoke
 
+  # STILL ON SQLite, AND THAT IS A MEASURED REFUSAL, NOT AN OVERSIGHT (2026-09-21, T1701).
+  # Programme 017 says this job gets a PostgreSQL service and URL in the same slice as the required
+  # gate, because stage 2 makes PostgreSQL mandatory for every DB test and would otherwise break it.
+  # Pointing it at PostgreSQL today produces a job that is red on arrival. Measured on
+  # PostgreSQL 16.15 (`geov0_test_p017s1b`, `-BackendSelector tests/integration/test_simulator_super_smoke.py
+  # -IncludeExpensive`): `2 failed, 1 passed in 5.18s`, for two causes that live outside this file:
+  #   * `simulator_runs.seed` is `sa.Integer` in the model and in migration 013, while the run seed
+  #     is the first four bytes of a SHA-256 (`app/core/simulator/run_lifecycle.py:168-169`), so
+  #     roughly half of all runs exceed int32: `invalid input for query argument $11: 3122177940
+  #     (value out of int32 range)`. SQLite's INTEGER is 64-bit, which is why this has never shown.
+  #   * the real-mode tick raises `SerializationError` ("Canceled on identification as a pivot")
+  #     with no retry on that path - the SERIALIZABLE behaviour programme 019 owns.
+  # Neither is a workflow defect and neither is in this slice's surface. The service and URL land
+  # here once they are fixed; until then this job runs the tier it can actually pass, and the
+  # reason is written down rather than discovered again.
   simulator-super-smoke:
     name: Simulator super-smoke (scheduled/manual)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'

@@ -92,7 +92,17 @@ def _raised_inside_a_real_busy_handler(tmp_path, terminal) -> BaseException:
 
 
 def _assert_terminal_and_masked_before(error: BaseException, expected_name: str) -> None:
-    assert getattr(error, "sqlite_errorname", None) == expected_name, error
+    # The name is matched as a family, not as a literal: SQLite hands out an EXTENDED code whose
+    # suffix depends on the platform, and the suffix is not what this test is about. Opening a
+    # directory answers SQLITE_CANTOPEN_ISDIR on Windows and plain SQLITE_CANTOPEN on Linux -
+    # measured 2026-09-21, when programme 017 moved the mandatory tier onto ubuntu and this
+    # assertion met a second operating system for the first time. Pinning one spelling would make
+    # the tier's platform, rather than the error, decide whether the test passes. What must hold is
+    # below: the error carries its own non-busy code, and the real busy is in __context__.
+    actual_name = getattr(error, "sqlite_errorname", None)
+    assert actual_name is not None and (
+        actual_name == expected_name or actual_name.startswith(f"{expected_name}_")
+    ), error
     assert (error.sqlite_errorcode & 0xFF) != 5, error  # type: ignore[attr-defined]
     # Non-vacuity: the busy really is in the context, so the OLD walk really would have found it
     # and answered "busy". Without this the test could pass on an unchained error.
@@ -152,7 +162,7 @@ def _cannot_open(tmp_path):
     (
         (_readonly, "SQLITE_READONLY"),
         (_not_a_database, "SQLITE_NOTADB"),
-        (_cannot_open, "SQLITE_CANTOPEN_ISDIR"),
+        (_cannot_open, "SQLITE_CANTOPEN"),
     ),
     ids=("readonly", "not-a-database", "cannot-open"),
 )
