@@ -1,0 +1,4025 @@
+{
+  "schema_version": "community/1",
+  "community_id": "riverside-town-50",
+  "title": "Riverside Town (50 участников)",
+  "summary": "Приречный городок с рыболовецким укладом: рыбаки поставляют улов на коптильню и рынок, рынок продаёт домохозяйствам, ремонт лодок и сетей идёт в HOUR. Меньший размер упрощает отладку и чтение циклов клиринга.",
+  "equivalents": [
+    {
+      "code": "UAH",
+      "precision": 2,
+      "description": "Ukrainian Hryvnia",
+      "is_active": true
+    },
+    {
+      "code": "EUR",
+      "precision": 2,
+      "description": "Euro",
+      "is_active": true
+    },
+    {
+      "code": "HOUR",
+      "precision": 2,
+      "description": "Community time credit (hours)",
+      "is_active": true
+    }
+  ],
+  "groups": [
+    {
+      "id": "anchors",
+      "label": "Anchors",
+      "description": "Кооператив, рыбный рынок с холодильником, портовые склады, общинный центр и марина — взаимная ликвидность городка."
+    },
+    {
+      "id": "producers",
+      "label": "Producers",
+      "description": "Рыбаки, коптильня, рыбоводство, лодочники: отдают улов и изделия с отсрочкой."
+    },
+    {
+      "id": "retail",
+      "label": "Retail",
+      "description": "Рыбный магазин, ресторан, кафе, бакалея, аптека, ларьки: продают домохозяйствам «на счёт»."
+    },
+    {
+      "id": "services",
+      "label": "Services",
+      "description": "Лодочный механик, ремонт сетей, лёд, кейтеринг, бухгалтер, медсестра: услуги в HOUR и UAH."
+    },
+    {
+      "id": "households",
+      "label": "Households",
+      "description": "Домохозяйства городка: покупают в розницу, иногда делают предоплату рыбакам (fish-share)."
+    },
+    {
+      "id": "agents",
+      "label": "Agents",
+      "description": "Координатор запуска и офицер доверия: точка входа новых участников."
+    }
+  ],
+  "participants": [
+    {
+      "ref": "riverside_fishing_co_operative",
+      "index": 1,
+      "pid": "PID_U0001_9e3779b1",
+      "name": "Riverside Fishing Co-operative",
+      "type": "business",
+      "group": "anchors",
+      "status": "active"
+    },
+    {
+      "ref": "fish_market_and_cold_storage",
+      "index": 2,
+      "pid": "PID_U0002_3c6ef362",
+      "name": "Fish Market & Cold Storage",
+      "type": "business",
+      "group": "anchors",
+      "status": "active"
+    },
+    {
+      "ref": "river_port_warehouses",
+      "index": 3,
+      "pid": "PID_U0003_daa66d13",
+      "name": "River Port Warehouses",
+      "type": "business",
+      "group": "anchors",
+      "status": "active"
+    },
+    {
+      "ref": "town_community_center",
+      "index": 4,
+      "pid": "PID_U0004_78dde6c4",
+      "name": "Town Community Center",
+      "type": "business",
+      "group": "anchors",
+      "status": "active"
+    },
+    {
+      "ref": "marina_and_boat_services",
+      "index": 5,
+      "pid": "PID_U0005_17156075",
+      "name": "Marina & Boat Services",
+      "type": "business",
+      "group": "anchors",
+      "status": "active"
+    },
+    {
+      "ref": "ivan_kozak",
+      "index": 6,
+      "pid": "PID_U0006_b54cda26",
+      "name": "Ivan Kozak (Fisherman)",
+      "type": "person",
+      "group": "producers",
+      "status": "active",
+      "role": "Fisherman"
+    },
+    {
+      "ref": "petro_rybka",
+      "index": 7,
+      "pid": "PID_U0007_538453d7",
+      "name": "Petro Rybka (Fisherman)",
+      "type": "person",
+      "group": "producers",
+      "status": "active",
+      "role": "Fisherman"
+    },
+    {
+      "ref": "nadia_morska",
+      "index": 8,
+      "pid": "PID_U0008_f1bbcd88",
+      "name": "Nadia Morska (Smoking House)",
+      "type": "person",
+      "group": "producers",
+      "status": "active",
+      "role": "Smoking House"
+    },
+    {
+      "ref": "vasyl_stavok",
+      "index": 9,
+      "pid": "PID_U0009_8ff34739",
+      "name": "Vasyl Stavok (Fish Farming)",
+      "type": "person",
+      "group": "producers",
+      "status": "active",
+      "role": "Fish Farming"
+    },
+    {
+      "ref": "olha_vodiana",
+      "index": 10,
+      "pid": "PID_U0010_2e2ac0ea",
+      "name": "Olha Vodiana (Water Plants)",
+      "type": "person",
+      "group": "producers",
+      "status": "active",
+      "role": "Water Plants"
+    },
+    {
+      "ref": "mykola_liman",
+      "index": 11,
+      "pid": "PID_U0011_cc623a9b",
+      "name": "Mykola Liman (Boat Building)",
+      "type": "person",
+      "group": "producers",
+      "status": "active",
+      "role": "Boat Building"
+    },
+    {
+      "ref": "hanna_berehova",
+      "index": 12,
+      "pid": "PID_U0012_6a99b44c",
+      "name": "Hanna Berehova (Nets & Repair)",
+      "type": "person",
+      "group": "producers",
+      "status": "active",
+      "role": "Nets & Repair"
+    },
+    {
+      "ref": "serhii_richkovyi",
+      "index": 13,
+      "pid": "PID_U0013_08d12dfd",
+      "name": "Serhii Richkovyi (River Guide)",
+      "type": "person",
+      "group": "producers",
+      "status": "active",
+      "role": "River Guide"
+    },
+    {
+      "ref": "liudmyla_ozerna",
+      "index": 14,
+      "pid": "PID_U0014_a708a7ae",
+      "name": "Liudmyla Ozerna (Mussels)",
+      "type": "person",
+      "group": "producers",
+      "status": "active",
+      "role": "Mussels"
+    },
+    {
+      "ref": "andriy_dnipro",
+      "index": 15,
+      "pid": "PID_U0015_4540215f",
+      "name": "Andriy Dnipro (Transport Boats)",
+      "type": "person",
+      "group": "producers",
+      "status": "active",
+      "role": "Transport Boats"
+    },
+    {
+      "ref": "fresh_catch_fish_shop",
+      "index": 16,
+      "pid": "PID_U0016_e3779b10",
+      "name": "Fresh Catch Fish Shop",
+      "type": "business",
+      "group": "retail",
+      "status": "active"
+    },
+    {
+      "ref": "river_view_restaurant",
+      "index": 17,
+      "pid": "PID_U0017_81af14c1",
+      "name": "River View Restaurant",
+      "type": "business",
+      "group": "retail",
+      "status": "active"
+    },
+    {
+      "ref": "marina_caf",
+      "index": 18,
+      "pid": "PID_U0018_1fe68e72",
+      "name": "Marina Café",
+      "type": "business",
+      "group": "retail",
+      "status": "active"
+    },
+    {
+      "ref": "town_grocery",
+      "index": 19,
+      "pid": "PID_U0019_be1e0823",
+      "name": "Town Grocery",
+      "type": "business",
+      "group": "retail",
+      "status": "active"
+    },
+    {
+      "ref": "fisherman_s_supply_store",
+      "index": 20,
+      "pid": "PID_U0020_5c5581d4",
+      "name": "Fisherman's Supply Store",
+      "type": "business",
+      "group": "retail",
+      "status": "active"
+    },
+    {
+      "ref": "riverside_pharmacy",
+      "index": 21,
+      "pid": "PID_U0021_fa8cfb85",
+      "name": "Riverside Pharmacy",
+      "type": "business",
+      "group": "retail",
+      "status": "frozen"
+    },
+    {
+      "ref": "weekend_fish_market_stall",
+      "index": 22,
+      "pid": "PID_U0022_98c47536",
+      "name": "Weekend Fish Market Stall",
+      "type": "business",
+      "group": "retail",
+      "status": "active"
+    },
+    {
+      "ref": "cooperative_fish_counter",
+      "index": 23,
+      "pid": "PID_U0023_36fbeee7",
+      "name": "Cooperative Fish Counter",
+      "type": "business",
+      "group": "retail",
+      "status": "active"
+    },
+    {
+      "ref": "viktor_veslo",
+      "index": 24,
+      "pid": "PID_U0024_d5336898",
+      "name": "Viktor Veslo (Boat Mechanic)",
+      "type": "person",
+      "group": "services",
+      "status": "active",
+      "role": "Boat Mechanic"
+    },
+    {
+      "ref": "natalia_seti",
+      "index": 25,
+      "pid": "PID_U0025_736ae249",
+      "name": "Natalia Seti (Net Repair)",
+      "type": "person",
+      "group": "services",
+      "status": "active",
+      "role": "Net Repair"
+    },
+    {
+      "ref": "roman_motornyi",
+      "index": 26,
+      "pid": "PID_U0026_11a25bfa",
+      "name": "Roman Motornyi (Engine Service)",
+      "type": "person",
+      "group": "services",
+      "status": "active",
+      "role": "Engine Service"
+    },
+    {
+      "ref": "olena_kuhnia",
+      "index": 27,
+      "pid": "PID_U0027_afd9d5ab",
+      "name": "Olena Kuhnia (Catering)",
+      "type": "person",
+      "group": "services",
+      "status": "active",
+      "role": "Catering"
+    },
+    {
+      "ref": "dmytro_kholodny",
+      "index": 28,
+      "pid": "PID_U0028_4e114f5c",
+      "name": "Dmytro Kholodny (Ice Supply)",
+      "type": "person",
+      "group": "services",
+      "status": "active",
+      "role": "Ice Supply"
+    },
+    {
+      "ref": "yana_rakhivna",
+      "index": 29,
+      "pid": "PID_U0029_ec48c90d",
+      "name": "Yana Rakhivna (Accountant)",
+      "type": "person",
+      "group": "services",
+      "status": "active",
+      "role": "Accountant"
+    },
+    {
+      "ref": "ihor_pravo",
+      "index": 30,
+      "pid": "PID_U0030_8a8042be",
+      "name": "Ihor Pravo (Legal Advisor)",
+      "type": "person",
+      "group": "services",
+      "status": "active",
+      "role": "Legal Advisor"
+    },
+    {
+      "ref": "svitlana_medyk",
+      "index": 31,
+      "pid": "PID_U0031_28b7bc6f",
+      "name": "Svitlana Medyk (Nurse)",
+      "type": "person",
+      "group": "services",
+      "status": "active",
+      "role": "Nurse"
+    },
+    {
+      "ref": "maksym_electro",
+      "index": 32,
+      "pid": "PID_U0032_c6ef3620",
+      "name": "Maksym Electro (Electrician)",
+      "type": "person",
+      "group": "services",
+      "status": "active",
+      "role": "Electrician"
+    },
+    {
+      "ref": "anna_turystka",
+      "index": 33,
+      "pid": "PID_U0033_6526afd1",
+      "name": "Anna Turystka (Tourism Guide)",
+      "type": "person",
+      "group": "services",
+      "status": "frozen",
+      "role": "Tourism Guide"
+    },
+    {
+      "ref": "the_rybchenko_family",
+      "index": 34,
+      "pid": "PID_U0034_035e2982",
+      "name": "The Rybchenko Family (Household)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Household"
+    },
+    {
+      "ref": "the_moriak_family",
+      "index": 35,
+      "pid": "PID_U0035_a195a333",
+      "name": "The Moriak Family (Household)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Household"
+    },
+    {
+      "ref": "the_berehovy_family",
+      "index": 36,
+      "pid": "PID_U0036_3fcd1ce4",
+      "name": "The Berehovy Family (Household)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Household"
+    },
+    {
+      "ref": "the_stavkovi_family",
+      "index": 37,
+      "pid": "PID_U0037_de049695",
+      "name": "The Stavkovi Family (Household)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Household"
+    },
+    {
+      "ref": "the_vodiani_family",
+      "index": 38,
+      "pid": "PID_U0038_7c3c1046",
+      "name": "The Vodiani Family (Household)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Household"
+    },
+    {
+      "ref": "the_richkovi_family",
+      "index": 39,
+      "pid": "PID_U0039_1a7389f7",
+      "name": "The Richkovi Family (Household)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Household"
+    },
+    {
+      "ref": "the_ozerni_family",
+      "index": 40,
+      "pid": "PID_U0040_b8ab03a8",
+      "name": "The Ozerni Family (Household)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Household"
+    },
+    {
+      "ref": "the_limany_family",
+      "index": 41,
+      "pid": "PID_U0041_56e27d59",
+      "name": "The Limany Family (Household)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Household"
+    },
+    {
+      "ref": "the_dnipro_family",
+      "index": 42,
+      "pid": "PID_U0042_f519f70a",
+      "name": "The Dnipro Family (Household)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Household"
+    },
+    {
+      "ref": "the_prystan_family",
+      "index": 43,
+      "pid": "PID_U0043_935170bb",
+      "name": "The Prystan Family (Household)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Household"
+    },
+    {
+      "ref": "the_zatoka_family",
+      "index": 44,
+      "pid": "PID_U0044_3188ea6c",
+      "name": "The Zatoka Family (Household)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Household"
+    },
+    {
+      "ref": "the_plyazh_family",
+      "index": 45,
+      "pid": "PID_U0045_cfc0641d",
+      "name": "The Plyazh Family (Household)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Household"
+    },
+    {
+      "ref": "the_khvylia_family",
+      "index": 46,
+      "pid": "PID_U0046_6df7ddce",
+      "name": "The Khvylia Family (Household)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Household"
+    },
+    {
+      "ref": "the_pryliv_family",
+      "index": 47,
+      "pid": "PID_U0047_0c2f577f",
+      "name": "The Pryliv Family (Household)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Household"
+    },
+    {
+      "ref": "the_ruslo_family",
+      "index": 48,
+      "pid": "PID_U0048_aa66d130",
+      "name": "The Ruslo Family (Household)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Household"
+    },
+    {
+      "ref": "marina_koordinator",
+      "index": 49,
+      "pid": "PID_U0049_489e4ae1",
+      "name": "Marina Koordinator (Launch Agent)",
+      "type": "person",
+      "group": "agents",
+      "status": "active",
+      "role": "Launch Agent"
+    },
+    {
+      "ref": "bohdan_dovira",
+      "index": 50,
+      "pid": "PID_U0050_e6d5c492",
+      "name": "Bohdan Dovira (Trustline Officer)",
+      "type": "person",
+      "group": "agents",
+      "status": "active",
+      "role": "Trustline Officer"
+    }
+  ],
+  "trustlines": [
+    {
+      "equivalent": "EUR",
+      "from": "riverside_fishing_co_operative",
+      "to": "anna_turystka",
+      "limit": "200.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "EUR",
+      "from": "anna_turystka",
+      "to": "riverside_fishing_co_operative",
+      "limit": "140.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "town_community_center",
+      "to": "the_rybchenko_family",
+      "limit": "7.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "town_community_center",
+      "to": "the_moriak_family",
+      "limit": "7.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "town_community_center",
+      "to": "the_berehovy_family",
+      "limit": "7.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "town_community_center",
+      "to": "the_stavkovi_family",
+      "limit": "7.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "town_community_center",
+      "to": "the_vodiani_family",
+      "limit": "7.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "town_community_center",
+      "to": "the_ozerni_family",
+      "limit": "7.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "town_community_center",
+      "to": "the_dnipro_family",
+      "limit": "7.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "town_community_center",
+      "to": "the_zatoka_family",
+      "limit": "7.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "town_community_center",
+      "to": "the_khvylia_family",
+      "limit": "7.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "town_community_center",
+      "to": "the_ruslo_family",
+      "limit": "7.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "viktor_veslo",
+      "to": "ivan_kozak",
+      "limit": "15.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "viktor_veslo",
+      "to": "petro_rybka",
+      "limit": "15.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "viktor_veslo",
+      "to": "vasyl_stavok",
+      "limit": "15.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "viktor_veslo",
+      "to": "mykola_liman",
+      "limit": "15.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "natalia_seti",
+      "to": "ivan_kozak",
+      "limit": "11.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "natalia_seti",
+      "to": "petro_rybka",
+      "limit": "11.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "natalia_seti",
+      "to": "vasyl_stavok",
+      "limit": "11.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "natalia_seti",
+      "to": "mykola_liman",
+      "limit": "11.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "roman_motornyi",
+      "to": "ivan_kozak",
+      "limit": "13.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "roman_motornyi",
+      "to": "petro_rybka",
+      "limit": "13.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "roman_motornyi",
+      "to": "vasyl_stavok",
+      "limit": "13.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "roman_motornyi",
+      "to": "mykola_liman",
+      "limit": "13.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "olena_kuhnia",
+      "to": "the_rybchenko_family",
+      "limit": "9.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "olena_kuhnia",
+      "to": "the_vodiani_family",
+      "limit": "9.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "olena_kuhnia",
+      "to": "the_richkovi_family",
+      "limit": "9.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "olena_kuhnia",
+      "to": "the_ozerni_family",
+      "limit": "9.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "olena_kuhnia",
+      "to": "the_limany_family",
+      "limit": "9.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "olena_kuhnia",
+      "to": "the_khvylia_family",
+      "limit": "9.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "olena_kuhnia",
+      "to": "the_pryliv_family",
+      "limit": "9.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "olena_kuhnia",
+      "to": "the_ruslo_family",
+      "limit": "9.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "dmytro_kholodny",
+      "to": "fish_market_and_cold_storage",
+      "limit": "9.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "dmytro_kholodny",
+      "to": "ivan_kozak",
+      "limit": "7.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "dmytro_kholodny",
+      "to": "petro_rybka",
+      "limit": "7.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "yana_rakhivna",
+      "to": "riverside_fishing_co_operative",
+      "limit": "9.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "yana_rakhivna",
+      "to": "river_view_restaurant",
+      "limit": "7.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "ihor_pravo",
+      "to": "riverside_fishing_co_operative",
+      "limit": "7.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "ihor_pravo",
+      "to": "river_port_warehouses",
+      "limit": "7.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "svitlana_medyk",
+      "to": "the_rybchenko_family",
+      "limit": "9.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "svitlana_medyk",
+      "to": "the_moriak_family",
+      "limit": "9.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "svitlana_medyk",
+      "to": "the_berehovy_family",
+      "limit": "9.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "svitlana_medyk",
+      "to": "the_stavkovi_family",
+      "limit": "9.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "svitlana_medyk",
+      "to": "the_vodiani_family",
+      "limit": "9.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "svitlana_medyk",
+      "to": "the_richkovi_family",
+      "limit": "9.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "svitlana_medyk",
+      "to": "the_ozerni_family",
+      "limit": "9.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "svitlana_medyk",
+      "to": "the_limany_family",
+      "limit": "9.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "svitlana_medyk",
+      "to": "the_dnipro_family",
+      "limit": "9.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "svitlana_medyk",
+      "to": "the_prystan_family",
+      "limit": "9.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "svitlana_medyk",
+      "to": "the_zatoka_family",
+      "limit": "9.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "svitlana_medyk",
+      "to": "the_plyazh_family",
+      "limit": "9.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "svitlana_medyk",
+      "to": "the_khvylia_family",
+      "limit": "9.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "svitlana_medyk",
+      "to": "the_pryliv_family",
+      "limit": "9.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "svitlana_medyk",
+      "to": "the_ruslo_family",
+      "limit": "9.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "maksym_electro",
+      "to": "marina_and_boat_services",
+      "limit": "11.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "maksym_electro",
+      "to": "the_rybchenko_family",
+      "limit": "7.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "maksym_electro",
+      "to": "the_berehovy_family",
+      "limit": "7.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "maksym_electro",
+      "to": "the_vodiani_family",
+      "limit": "7.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "maksym_electro",
+      "to": "the_ozerni_family",
+      "limit": "7.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "maksym_electro",
+      "to": "the_dnipro_family",
+      "limit": "7.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "maksym_electro",
+      "to": "the_zatoka_family",
+      "limit": "7.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_rybchenko_family",
+      "to": "town_community_center",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_rybchenko_family",
+      "to": "the_berehovy_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_moriak_family",
+      "to": "the_stavkovi_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_berehovy_family",
+      "to": "the_vodiani_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_stavkovi_family",
+      "to": "the_richkovi_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_vodiani_family",
+      "to": "the_ozerni_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_richkovi_family",
+      "to": "town_community_center",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_richkovi_family",
+      "to": "the_limany_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_ozerni_family",
+      "to": "the_dnipro_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_limany_family",
+      "to": "the_prystan_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_dnipro_family",
+      "to": "the_zatoka_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_prystan_family",
+      "to": "the_plyazh_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_zatoka_family",
+      "to": "town_community_center",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_zatoka_family",
+      "to": "the_khvylia_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_plyazh_family",
+      "to": "the_pryliv_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_khvylia_family",
+      "to": "the_ruslo_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_pryliv_family",
+      "to": "the_rybchenko_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_ruslo_family",
+      "to": "the_moriak_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "marina_koordinator",
+      "to": "the_rybchenko_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "marina_koordinator",
+      "to": "the_moriak_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "marina_koordinator",
+      "to": "the_berehovy_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "marina_koordinator",
+      "to": "the_stavkovi_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "marina_koordinator",
+      "to": "the_vodiani_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "marina_koordinator",
+      "to": "the_richkovi_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "marina_koordinator",
+      "to": "the_ozerni_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "marina_koordinator",
+      "to": "the_limany_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "marina_koordinator",
+      "to": "the_dnipro_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "marina_koordinator",
+      "to": "the_prystan_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "marina_koordinator",
+      "to": "the_zatoka_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "marina_koordinator",
+      "to": "the_plyazh_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "marina_koordinator",
+      "to": "the_khvylia_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "marina_koordinator",
+      "to": "the_pryliv_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "marina_koordinator",
+      "to": "the_ruslo_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "bohdan_dovira",
+      "to": "viktor_veslo",
+      "limit": "7.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "bohdan_dovira",
+      "to": "natalia_seti",
+      "limit": "7.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "bohdan_dovira",
+      "to": "svitlana_medyk",
+      "limit": "7.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "bohdan_dovira",
+      "to": "maksym_electro",
+      "limit": "7.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_fishing_co_operative",
+      "to": "fish_market_and_cold_storage",
+      "limit": "1685.83",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_fishing_co_operative",
+      "to": "river_port_warehouses",
+      "limit": "8397.55",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_fishing_co_operative",
+      "to": "marina_and_boat_services",
+      "limit": "9116.78",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_fishing_co_operative",
+      "to": "petro_rybka",
+      "limit": "3178.32",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_fishing_co_operative",
+      "to": "town_grocery",
+      "limit": "4367.18",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_fishing_co_operative",
+      "to": "riverside_pharmacy",
+      "limit": "5102.31",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "fish_market_and_cold_storage",
+      "to": "riverside_fishing_co_operative",
+      "limit": "10749.68",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "fish_market_and_cold_storage",
+      "to": "river_port_warehouses",
+      "limit": "8887.71",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "fish_market_and_cold_storage",
+      "to": "serhii_richkovyi",
+      "limit": "2058.92",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "fish_market_and_cold_storage",
+      "to": "fresh_catch_fish_shop",
+      "limit": "6625.80",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "fish_market_and_cold_storage",
+      "to": "river_view_restaurant",
+      "limit": "9762.44",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "fish_market_and_cold_storage",
+      "to": "marina_caf",
+      "limit": "11251.31",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "fish_market_and_cold_storage",
+      "to": "weekend_fish_market_stall",
+      "limit": "4732.41",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "fish_market_and_cold_storage",
+      "to": "cooperative_fish_counter",
+      "limit": "5494.28",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "fish_market_and_cold_storage",
+      "to": "yana_rakhivna",
+      "limit": "3318.75",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "river_port_warehouses",
+      "to": "riverside_fishing_co_operative",
+      "limit": "3014.08",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "river_port_warehouses",
+      "to": "fish_market_and_cold_storage",
+      "limit": "4517.56",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "river_port_warehouses",
+      "to": "marina_and_boat_services",
+      "limit": "1893.53",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "river_port_warehouses",
+      "to": "nadia_morska",
+      "limit": "3401.91",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "river_port_warehouses",
+      "to": "andriy_dnipro",
+      "limit": "3738.97",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "river_port_warehouses",
+      "to": "fisherman_s_supply_store",
+      "limit": "7349.55",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "town_community_center",
+      "to": "olena_kuhnia",
+      "limit": "4500.76",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "town_community_center",
+      "to": "dmytro_kholodny",
+      "limit": "1243.79",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "marina_and_boat_services",
+      "to": "riverside_fishing_co_operative",
+      "limit": "8487.33",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "marina_and_boat_services",
+      "to": "river_port_warehouses",
+      "limit": "7218.85",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "marina_and_boat_services",
+      "to": "serhii_richkovyi",
+      "limit": "2143.55",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "marina_and_boat_services",
+      "to": "dmytro_kholodny",
+      "limit": "3336.75",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "ivan_kozak",
+      "to": "fish_market_and_cold_storage",
+      "limit": "1495.10",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "ivan_kozak",
+      "to": "nadia_morska",
+      "limit": "727.27",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "ivan_kozak",
+      "to": "weekend_fish_market_stall",
+      "limit": "424.74",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "ivan_kozak",
+      "to": "olena_kuhnia",
+      "limit": "1124.16",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "ivan_kozak",
+      "to": "the_rybchenko_family",
+      "limit": "800.84",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "ivan_kozak",
+      "to": "the_moriak_family",
+      "limit": "510.21",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "ivan_kozak",
+      "to": "the_richkovi_family",
+      "limit": "861.87",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "ivan_kozak",
+      "to": "the_prystan_family",
+      "limit": "369.71",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "ivan_kozak",
+      "to": "the_khvylia_family",
+      "limit": "478.87",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "petro_rybka",
+      "to": "fish_market_and_cold_storage",
+      "limit": "1286.65",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "petro_rybka",
+      "to": "nadia_morska",
+      "limit": "694.53",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "petro_rybka",
+      "to": "cooperative_fish_counter",
+      "limit": "1920.79",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "petro_rybka",
+      "to": "viktor_veslo",
+      "limit": "859.74",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "petro_rybka",
+      "to": "the_moriak_family",
+      "limit": "353.63",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "petro_rybka",
+      "to": "the_stavkovi_family",
+      "limit": "1145.13",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "petro_rybka",
+      "to": "the_vodiani_family",
+      "limit": "774.35",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "petro_rybka",
+      "to": "the_prystan_family",
+      "limit": "742.60",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "petro_rybka",
+      "to": "the_pryliv_family",
+      "limit": "734.22",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "nadia_morska",
+      "to": "riverside_fishing_co_operative",
+      "limit": "1489.91",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "nadia_morska",
+      "to": "fish_market_and_cold_storage",
+      "limit": "2341.96",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "nadia_morska",
+      "to": "fresh_catch_fish_shop",
+      "limit": "1178.27",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "nadia_morska",
+      "to": "marina_caf",
+      "limit": "1148.01",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "nadia_morska",
+      "to": "riverside_pharmacy",
+      "limit": "1739.67",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "nadia_morska",
+      "to": "olena_kuhnia",
+      "limit": "930.67",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "nadia_morska",
+      "to": "the_berehovy_family",
+      "limit": "369.19",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "vasyl_stavok",
+      "to": "fish_market_and_cold_storage",
+      "limit": "2825.48",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "vasyl_stavok",
+      "to": "nadia_morska",
+      "limit": "653.13",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "vasyl_stavok",
+      "to": "town_grocery",
+      "limit": "1054.83",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "vasyl_stavok",
+      "to": "dmytro_kholodny",
+      "limit": "840.89",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "vasyl_stavok",
+      "to": "the_berehovy_family",
+      "limit": "161.29",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "vasyl_stavok",
+      "to": "the_richkovi_family",
+      "limit": "462.76",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "vasyl_stavok",
+      "to": "the_ozerni_family",
+      "limit": "1103.17",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "vasyl_stavok",
+      "to": "the_dnipro_family",
+      "limit": "432.56",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "olha_vodiana",
+      "to": "marina_caf",
+      "limit": "738.18",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "olha_vodiana",
+      "to": "dmytro_kholodny",
+      "limit": "675.13",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "olha_vodiana",
+      "to": "the_moriak_family",
+      "limit": "979.65",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "olha_vodiana",
+      "to": "the_zatoka_family",
+      "limit": "1070.74",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "mykola_liman",
+      "to": "marina_and_boat_services",
+      "limit": "1620.40",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "mykola_liman",
+      "to": "ivan_kozak",
+      "limit": "182.56",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "mykola_liman",
+      "to": "petro_rybka",
+      "limit": "867.34",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "mykola_liman",
+      "to": "fisherman_s_supply_store",
+      "limit": "1177.94",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "mykola_liman",
+      "to": "dmytro_kholodny",
+      "limit": "1329.39",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "mykola_liman",
+      "to": "the_limany_family",
+      "limit": "337.20",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "hanna_berehova",
+      "to": "vasyl_stavok",
+      "limit": "374.11",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "hanna_berehova",
+      "to": "town_grocery",
+      "limit": "1453.56",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "hanna_berehova",
+      "to": "cooperative_fish_counter",
+      "limit": "972.95",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "hanna_berehova",
+      "to": "viktor_veslo",
+      "limit": "854.98",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "hanna_berehova",
+      "to": "the_zatoka_family",
+      "limit": "693.30",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "hanna_berehova",
+      "to": "the_ruslo_family",
+      "limit": "528.09",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "serhii_richkovyi",
+      "to": "riverside_pharmacy",
+      "limit": "853.50",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "serhii_richkovyi",
+      "to": "viktor_veslo",
+      "limit": "1431.57",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "serhii_richkovyi",
+      "to": "the_stavkovi_family",
+      "limit": "521.61",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "liudmyla_ozerna",
+      "to": "town_grocery",
+      "limit": "1428.05",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "liudmyla_ozerna",
+      "to": "anna_turystka",
+      "limit": "1280.72",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "liudmyla_ozerna",
+      "to": "the_ozerni_family",
+      "limit": "682.95",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "andriy_dnipro",
+      "to": "riverside_fishing_co_operative",
+      "limit": "1811.16",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "andriy_dnipro",
+      "to": "river_port_warehouses",
+      "limit": "3674.90",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "andriy_dnipro",
+      "to": "riverside_pharmacy",
+      "limit": "1016.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "andriy_dnipro",
+      "to": "svitlana_medyk",
+      "limit": "920.84",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "andriy_dnipro",
+      "to": "the_prystan_family",
+      "limit": "720.80",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "fresh_catch_fish_shop",
+      "to": "hanna_berehova",
+      "limit": "3751.39",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "fresh_catch_fish_shop",
+      "to": "the_rybchenko_family",
+      "limit": "784.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "fresh_catch_fish_shop",
+      "to": "the_moriak_family",
+      "limit": "2658.67",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "fresh_catch_fish_shop",
+      "to": "the_berehovy_family",
+      "limit": "2666.68",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "fresh_catch_fish_shop",
+      "to": "the_stavkovi_family",
+      "limit": "1609.88",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "fresh_catch_fish_shop",
+      "to": "the_vodiani_family",
+      "limit": "2987.67",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "fresh_catch_fish_shop",
+      "to": "the_richkovi_family",
+      "limit": "2181.46",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "fresh_catch_fish_shop",
+      "to": "the_ozerni_family",
+      "limit": "2006.14",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "fresh_catch_fish_shop",
+      "to": "the_limany_family",
+      "limit": "2207.17",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "fresh_catch_fish_shop",
+      "to": "the_dnipro_family",
+      "limit": "1373.98",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "fresh_catch_fish_shop",
+      "to": "the_prystan_family",
+      "limit": "1288.98",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "fresh_catch_fish_shop",
+      "to": "the_zatoka_family",
+      "limit": "405.68",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "fresh_catch_fish_shop",
+      "to": "the_plyazh_family",
+      "limit": "3701.65",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "fresh_catch_fish_shop",
+      "to": "the_khvylia_family",
+      "limit": "1077.92",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "fresh_catch_fish_shop",
+      "to": "the_pryliv_family",
+      "limit": "1253.82",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "fresh_catch_fish_shop",
+      "to": "the_ruslo_family",
+      "limit": "2436.11",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "river_view_restaurant",
+      "to": "dmytro_kholodny",
+      "limit": "4137.89",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "river_view_restaurant",
+      "to": "the_rybchenko_family",
+      "limit": "2853.20",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "river_view_restaurant",
+      "to": "the_richkovi_family",
+      "limit": "1196.98",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "river_view_restaurant",
+      "to": "the_zatoka_family",
+      "limit": "1161.11",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "river_view_restaurant",
+      "to": "marina_koordinator",
+      "limit": "2929.09",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "marina_caf",
+      "to": "andriy_dnipro",
+      "limit": "1417.39",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "marina_caf",
+      "to": "the_rybchenko_family",
+      "limit": "2192.51",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "marina_caf",
+      "to": "the_moriak_family",
+      "limit": "506.14",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "marina_caf",
+      "to": "the_vodiani_family",
+      "limit": "2262.10",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "marina_caf",
+      "to": "the_richkovi_family",
+      "limit": "1546.63",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "marina_caf",
+      "to": "the_dnipro_family",
+      "limit": "1424.36",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "marina_caf",
+      "to": "the_prystan_family",
+      "limit": "1608.63",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "marina_caf",
+      "to": "the_khvylia_family",
+      "limit": "2922.17",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "marina_caf",
+      "to": "the_pryliv_family",
+      "limit": "2934.10",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "marina_caf",
+      "to": "marina_koordinator",
+      "limit": "2067.19",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "town_grocery",
+      "to": "ivan_kozak",
+      "limit": "2132.52",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "town_grocery",
+      "to": "the_rybchenko_family",
+      "limit": "1818.04",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "town_grocery",
+      "to": "the_moriak_family",
+      "limit": "2557.26",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "town_grocery",
+      "to": "the_berehovy_family",
+      "limit": "2628.02",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "town_grocery",
+      "to": "the_stavkovi_family",
+      "limit": "3534.07",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "town_grocery",
+      "to": "the_vodiani_family",
+      "limit": "2545.36",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "town_grocery",
+      "to": "the_richkovi_family",
+      "limit": "1093.70",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "town_grocery",
+      "to": "the_ozerni_family",
+      "limit": "1480.12",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "town_grocery",
+      "to": "the_limany_family",
+      "limit": "2311.42",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "town_grocery",
+      "to": "the_dnipro_family",
+      "limit": "1717.42",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "town_grocery",
+      "to": "the_zatoka_family",
+      "limit": "2244.62",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "town_grocery",
+      "to": "the_khvylia_family",
+      "limit": "2065.46",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "town_grocery",
+      "to": "the_ruslo_family",
+      "limit": "2966.64",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "fisherman_s_supply_store",
+      "to": "natalia_seti",
+      "limit": "4413.08",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_pharmacy",
+      "to": "liudmyla_ozerna",
+      "limit": "2460.32",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_pharmacy",
+      "to": "the_rybchenko_family",
+      "limit": "1328.20",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_pharmacy",
+      "to": "the_stavkovi_family",
+      "limit": "2413.78",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_pharmacy",
+      "to": "the_ozerni_family",
+      "limit": "1195.30",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_pharmacy",
+      "to": "the_prystan_family",
+      "limit": "2629.09",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_pharmacy",
+      "to": "the_khvylia_family",
+      "limit": "883.05",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "weekend_fish_market_stall",
+      "to": "petro_rybka",
+      "limit": "4222.92",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "weekend_fish_market_stall",
+      "to": "mykola_liman",
+      "limit": "2031.41",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "cooperative_fish_counter",
+      "to": "roman_motornyi",
+      "limit": "3393.75",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "viktor_veslo",
+      "to": "weekend_fish_market_stall",
+      "limit": "2030.32",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "viktor_veslo",
+      "to": "the_ozerni_family",
+      "limit": "1189.54",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "viktor_veslo",
+      "to": "the_dnipro_family",
+      "limit": "1965.36",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "natalia_seti",
+      "to": "fisherman_s_supply_store",
+      "limit": "3302.07",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "natalia_seti",
+      "to": "the_vodiani_family",
+      "limit": "1686.48",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "natalia_seti",
+      "to": "the_limany_family",
+      "limit": "1964.67",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "roman_motornyi",
+      "to": "river_view_restaurant",
+      "limit": "3648.12",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "roman_motornyi",
+      "to": "the_ozerni_family",
+      "limit": "2025.72",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "roman_motornyi",
+      "to": "the_dnipro_family",
+      "limit": "2046.02",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "roman_motornyi",
+      "to": "the_plyazh_family",
+      "limit": "1081.57",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "olena_kuhnia",
+      "to": "town_grocery",
+      "limit": "3866.30",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "olena_kuhnia",
+      "to": "the_richkovi_family",
+      "limit": "1337.03",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "dmytro_kholodny",
+      "to": "cooperative_fish_counter",
+      "limit": "2645.63",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "dmytro_kholodny",
+      "to": "the_zatoka_family",
+      "limit": "957.91",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "dmytro_kholodny",
+      "to": "the_pryliv_family",
+      "limit": "1365.30",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "yana_rakhivna",
+      "to": "town_grocery",
+      "limit": "3976.05",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "yana_rakhivna",
+      "to": "the_berehovy_family",
+      "limit": "1331.74",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "yana_rakhivna",
+      "to": "the_plyazh_family",
+      "limit": "2333.29",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "yana_rakhivna",
+      "to": "the_ruslo_family",
+      "limit": "2405.36",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "ihor_pravo",
+      "to": "marina_caf",
+      "limit": "2734.82",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "ihor_pravo",
+      "to": "the_zatoka_family",
+      "limit": "1169.99",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "ihor_pravo",
+      "to": "the_khvylia_family",
+      "limit": "2438.04",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "svitlana_medyk",
+      "to": "cooperative_fish_counter",
+      "limit": "3275.30",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "svitlana_medyk",
+      "to": "the_vodiani_family",
+      "limit": "2367.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "svitlana_medyk",
+      "to": "the_richkovi_family",
+      "limit": "2301.40",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "svitlana_medyk",
+      "to": "the_dnipro_family",
+      "limit": "743.65",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "maksym_electro",
+      "to": "weekend_fish_market_stall",
+      "limit": "2546.93",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "maksym_electro",
+      "to": "the_limany_family",
+      "limit": "1244.66",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "maksym_electro",
+      "to": "the_zatoka_family",
+      "limit": "1827.64",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "maksym_electro",
+      "to": "the_ruslo_family",
+      "limit": "1895.51",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "anna_turystka",
+      "to": "weekend_fish_market_stall",
+      "limit": "1906.70",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "anna_turystka",
+      "to": "the_stavkovi_family",
+      "limit": "769.72",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "anna_turystka",
+      "to": "the_richkovi_family",
+      "limit": "2142.98",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "anna_turystka",
+      "to": "the_plyazh_family",
+      "limit": "928.36",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_rybchenko_family",
+      "to": "ivan_kozak",
+      "limit": "484.52",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_rybchenko_family",
+      "to": "vasyl_stavok",
+      "limit": "887.52",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_rybchenko_family",
+      "to": "the_moriak_family",
+      "limit": "234.78",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_rybchenko_family",
+      "to": "the_vodiani_family",
+      "limit": "845.88",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_moriak_family",
+      "to": "the_berehovy_family",
+      "limit": "651.74",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_moriak_family",
+      "to": "the_richkovi_family",
+      "limit": "367.58",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_berehovy_family",
+      "to": "the_stavkovi_family",
+      "limit": "352.35",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_berehovy_family",
+      "to": "the_ozerni_family",
+      "limit": "291.38",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_stavkovi_family",
+      "to": "ivan_kozak",
+      "limit": "308.94",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_stavkovi_family",
+      "to": "petro_rybka",
+      "limit": "435.91",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_stavkovi_family",
+      "to": "the_vodiani_family",
+      "limit": "318.14",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_stavkovi_family",
+      "to": "the_limany_family",
+      "limit": "202.30",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_vodiani_family",
+      "to": "the_richkovi_family",
+      "limit": "317.67",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_vodiani_family",
+      "to": "the_dnipro_family",
+      "limit": "763.55",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_richkovi_family",
+      "to": "the_ozerni_family",
+      "limit": "569.56",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_richkovi_family",
+      "to": "the_prystan_family",
+      "limit": "714.26",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_ozerni_family",
+      "to": "vasyl_stavok",
+      "limit": "232.95",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_ozerni_family",
+      "to": "the_limany_family",
+      "limit": "235.72",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_ozerni_family",
+      "to": "the_zatoka_family",
+      "limit": "167.04",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_limany_family",
+      "to": "the_dnipro_family",
+      "limit": "462.87",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_limany_family",
+      "to": "the_plyazh_family",
+      "limit": "437.16",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_dnipro_family",
+      "to": "the_prystan_family",
+      "limit": "740.24",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_dnipro_family",
+      "to": "the_khvylia_family",
+      "limit": "705.56",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_prystan_family",
+      "to": "ivan_kozak",
+      "limit": "205.86",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_prystan_family",
+      "to": "the_zatoka_family",
+      "limit": "850.43",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_prystan_family",
+      "to": "the_pryliv_family",
+      "limit": "433.35",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_zatoka_family",
+      "to": "the_plyazh_family",
+      "limit": "455.67",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_zatoka_family",
+      "to": "the_ruslo_family",
+      "limit": "222.21",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_plyazh_family",
+      "to": "the_rybchenko_family",
+      "limit": "190.84",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_plyazh_family",
+      "to": "the_khvylia_family",
+      "limit": "420.22",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_khvylia_family",
+      "to": "petro_rybka",
+      "limit": "743.43",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_khvylia_family",
+      "to": "the_moriak_family",
+      "limit": "351.87",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_khvylia_family",
+      "to": "the_pryliv_family",
+      "limit": "478.17",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_pryliv_family",
+      "to": "the_berehovy_family",
+      "limit": "626.56",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_pryliv_family",
+      "to": "the_ruslo_family",
+      "limit": "232.83",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_ruslo_family",
+      "to": "the_rybchenko_family",
+      "limit": "416.62",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_ruslo_family",
+      "to": "the_stavkovi_family",
+      "limit": "708.70",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "marina_koordinator",
+      "to": "marina_caf",
+      "limit": "611.24",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "marina_koordinator",
+      "to": "svitlana_medyk",
+      "limit": "1336.10",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "marina_koordinator",
+      "to": "the_stavkovi_family",
+      "limit": "385.66",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "bohdan_dovira",
+      "to": "town_grocery",
+      "limit": "880.77",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "bohdan_dovira",
+      "to": "svitlana_medyk",
+      "limit": "419.35",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "bohdan_dovira",
+      "to": "the_stavkovi_family",
+      "limit": "1013.43",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    }
+  ]
+}

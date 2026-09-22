@@ -1,0 +1,6796 @@
+{
+  "schema_version": "community/1",
+  "community_id": "greenfield-village-100",
+  "title": "GreenField Village (100 участников)",
+  "summary": "Сельская кооперативная экономика: сильные хабы (кооператив, склад, закупка, рынок, пекарня, молочка), разнообразные производители, точки розницы, где домохозяйства тратят еженедельно, и службы, создающие заметную экономику HOUR.",
+  "equivalents": [
+    {
+      "code": "UAH",
+      "precision": 2,
+      "description": "Ukrainian Hryvnia",
+      "is_active": true
+    },
+    {
+      "code": "EUR",
+      "precision": 2,
+      "description": "Euro",
+      "is_active": true
+    },
+    {
+      "code": "HOUR",
+      "precision": 2,
+      "description": "Community time credit (hours)",
+      "is_active": true
+    }
+  ],
+  "groups": [
+    {
+      "id": "anchors",
+      "label": "Anchors",
+      "description": "Кооператив, склад, закупка, рынок, транспорт, пекарня, молочка, теплицы, мастерская, энергия и вода — узлы с высокой связностью, которые держат ликвидность."
+    },
+    {
+      "id": "producers",
+      "label": "Producers",
+      "description": "Фермеры, переработчики и ремесленники: отдают продукцию с отсрочкой, поэтому чаще кредиторы."
+    },
+    {
+      "id": "retail",
+      "label": "Retail",
+      "description": "Магазины, кафе, столовые: покупают у производителей и записывают покупки домохозяйств «на счёт»."
+    },
+    {
+      "id": "services",
+      "label": "Services",
+      "description": "Строители, ремонтники, няни, бухгалтеры: работают сейчас, рассчитываются потом — основная экономика HOUR."
+    },
+    {
+      "id": "households",
+      "label": "Households",
+      "description": "Домохозяйства и подработки: чаще должники, с небольшим соседским микрокредитом между собой."
+    },
+    {
+      "id": "agents",
+      "label": "Agents",
+      "description": "Координаторы запуска: связаны с кооперативом в HOUR и UAH, отвечают за доверие и операции."
+    }
+  ],
+  "participants": [
+    {
+      "ref": "greenfield_cooperative",
+      "index": 1,
+      "pid": "PID_U0001_9e3779b1",
+      "name": "GreenField Cooperative (Co-op)",
+      "type": "business",
+      "group": "anchors",
+      "status": "active",
+      "role": "Co-op"
+    },
+    {
+      "ref": "greenfield_warehouse",
+      "index": 2,
+      "pid": "PID_U0002_3c6ef362",
+      "name": "GreenField Warehouse",
+      "type": "business",
+      "group": "anchors",
+      "status": "active"
+    },
+    {
+      "ref": "greenfield_procurement_desk",
+      "index": 3,
+      "pid": "PID_U0003_daa66d13",
+      "name": "GreenField Procurement Desk",
+      "type": "business",
+      "group": "anchors",
+      "status": "active"
+    },
+    {
+      "ref": "riverside_market_hall",
+      "index": 4,
+      "pid": "PID_U0004_78dde6c4",
+      "name": "Riverside Market Hall",
+      "type": "business",
+      "group": "anchors",
+      "status": "active"
+    },
+    {
+      "ref": "village_transport_co_op",
+      "index": 5,
+      "pid": "PID_U0005_17156075",
+      "name": "Village Transport Co-op",
+      "type": "business",
+      "group": "anchors",
+      "status": "active"
+    },
+    {
+      "ref": "sunnyharvest_bakery",
+      "index": 6,
+      "pid": "PID_U0006_b54cda26",
+      "name": "SunnyHarvest Bakery",
+      "type": "business",
+      "group": "anchors",
+      "status": "active"
+    },
+    {
+      "ref": "meadowdairy_collective",
+      "index": 7,
+      "pid": "PID_U0007_538453d7",
+      "name": "MeadowDairy Collective",
+      "type": "business",
+      "group": "anchors",
+      "status": "active"
+    },
+    {
+      "ref": "hilltop_greenhouses",
+      "index": 8,
+      "pid": "PID_U0008_f1bbcd88",
+      "name": "Hilltop Greenhouses",
+      "type": "business",
+      "group": "anchors",
+      "status": "frozen"
+    },
+    {
+      "ref": "oak_and_iron_workshop",
+      "index": 9,
+      "pid": "PID_U0009_8ff34739",
+      "name": "Oak & Iron Workshop",
+      "type": "business",
+      "group": "anchors",
+      "status": "active"
+    },
+    {
+      "ref": "community_energy_and_water_team",
+      "index": 10,
+      "pid": "PID_U0010_2e2ac0ea",
+      "name": "Community Energy & Water Team",
+      "type": "business",
+      "group": "anchors",
+      "status": "active"
+    },
+    {
+      "ref": "anton_petrenko",
+      "index": 11,
+      "pid": "PID_U0011_cc623a9b",
+      "name": "Anton Petrenko (Grain Farmer)",
+      "type": "person",
+      "group": "producers",
+      "status": "active",
+      "role": "Grain Farmer"
+    },
+    {
+      "ref": "maria_shevchenko",
+      "index": 12,
+      "pid": "PID_U0012_6a99b44c",
+      "name": "Maria Shevchenko (Vegetable Farmer)",
+      "type": "person",
+      "group": "producers",
+      "status": "active",
+      "role": "Vegetable Farmer"
+    },
+    {
+      "ref": "oksana_hrytsenko",
+      "index": 13,
+      "pid": "PID_U0013_08d12dfd",
+      "name": "Oksana Hrytsenko (Berry Farm)",
+      "type": "person",
+      "group": "producers",
+      "status": "active",
+      "role": "Berry Farm"
+    },
+    {
+      "ref": "dmytro_kovalenko",
+      "index": 14,
+      "pid": "PID_U0014_a708a7ae",
+      "name": "Dmytro Kovalenko (Honey & Apiary)",
+      "type": "person",
+      "group": "producers",
+      "status": "active",
+      "role": "Honey & Apiary"
+    },
+    {
+      "ref": "iryna_bondar",
+      "index": 15,
+      "pid": "PID_U0015_4540215f",
+      "name": "Iryna Bondar (Eggs & Poultry)",
+      "type": "person",
+      "group": "producers",
+      "status": "active",
+      "role": "Eggs & Poultry"
+    },
+    {
+      "ref": "serhii_melnyk",
+      "index": 16,
+      "pid": "PID_U0016_e3779b10",
+      "name": "Serhii Melnyk (Goat Cheese)",
+      "type": "person",
+      "group": "producers",
+      "status": "active",
+      "role": "Goat Cheese"
+    },
+    {
+      "ref": "yulia_tkachenko",
+      "index": 17,
+      "pid": "PID_U0017_81af14c1",
+      "name": "Yulia Tkachenko (Herbal Tea)",
+      "type": "person",
+      "group": "producers",
+      "status": "active",
+      "role": "Herbal Tea"
+    },
+    {
+      "ref": "viktor_koval",
+      "index": 18,
+      "pid": "PID_U0018_1fe68e72",
+      "name": "Viktor Koval (Sunflower Oil Press)",
+      "type": "person",
+      "group": "producers",
+      "status": "active",
+      "role": "Sunflower Oil Press"
+    },
+    {
+      "ref": "kateryna_marchenko",
+      "index": 19,
+      "pid": "PID_U0019_be1e0823",
+      "name": "Kateryna Marchenko (Flour Milling)",
+      "type": "person",
+      "group": "producers",
+      "status": "active",
+      "role": "Flour Milling"
+    },
+    {
+      "ref": "oleh_savchenko",
+      "index": 20,
+      "pid": "PID_U0020_5c5581d4",
+      "name": "Oleh Savchenko (Meat Processing)",
+      "type": "person",
+      "group": "producers",
+      "status": "active",
+      "role": "Meat Processing"
+    },
+    {
+      "ref": "nina_romanenko",
+      "index": 21,
+      "pid": "PID_U0021_fa8cfb85",
+      "name": "Nina Romanenko (Canning & Pickles)",
+      "type": "person",
+      "group": "producers",
+      "status": "active",
+      "role": "Canning & Pickles"
+    },
+    {
+      "ref": "taras_klymenko",
+      "index": 22,
+      "pid": "PID_U0022_98c47536",
+      "name": "Taras Klymenko (Carpentry)",
+      "type": "person",
+      "group": "producers",
+      "status": "active",
+      "role": "Carpentry"
+    },
+    {
+      "ref": "alina_moroz",
+      "index": 23,
+      "pid": "PID_U0023_36fbeee7",
+      "name": "Alina Moroz (Sewing & Alterations)",
+      "type": "person",
+      "group": "producers",
+      "status": "active",
+      "role": "Sewing & Alterations"
+    },
+    {
+      "ref": "bohdan_kravets",
+      "index": 24,
+      "pid": "PID_U0024_d5336898",
+      "name": "Bohdan Kravets (Shoemaker)",
+      "type": "person",
+      "group": "producers",
+      "status": "active",
+      "role": "Shoemaker"
+    },
+    {
+      "ref": "svitlana_poliakova",
+      "index": 25,
+      "pid": "PID_U0025_736ae249",
+      "name": "Svitlana Poliakova (Pottery)",
+      "type": "person",
+      "group": "producers",
+      "status": "active",
+      "role": "Pottery"
+    },
+    {
+      "ref": "denys_lysenko",
+      "index": 26,
+      "pid": "PID_U0026_11a25bfa",
+      "name": "Denys Lysenko (Welding)",
+      "type": "person",
+      "group": "producers",
+      "status": "active",
+      "role": "Welding"
+    },
+    {
+      "ref": "hanna_sydorenko",
+      "index": 27,
+      "pid": "PID_U0027_afd9d5ab",
+      "name": "Hanna Sydorenko (Tailor Workshop)",
+      "type": "person",
+      "group": "producers",
+      "status": "active",
+      "role": "Tailor Workshop"
+    },
+    {
+      "ref": "roman_zadorozhnyi",
+      "index": 28,
+      "pid": "PID_U0028_4e114f5c",
+      "name": "Roman Zadorozhnyi (Firewood & Timber)",
+      "type": "person",
+      "group": "producers",
+      "status": "active",
+      "role": "Firewood & Timber"
+    },
+    {
+      "ref": "pavlo_rudenko",
+      "index": 29,
+      "pid": "PID_U0029_ec48c90d",
+      "name": "Pavlo Rudenko (Farm Equipment Rental)",
+      "type": "person",
+      "group": "producers",
+      "status": "active",
+      "role": "Farm Equipment Rental"
+    },
+    {
+      "ref": "olena_fedorova",
+      "index": 30,
+      "pid": "PID_U0030_8a8042be",
+      "name": "Olena Fedorova (Seedlings & Plants)",
+      "type": "person",
+      "group": "producers",
+      "status": "active",
+      "role": "Seedlings & Plants"
+    },
+    {
+      "ref": "maksym_horbach",
+      "index": 31,
+      "pid": "PID_U0031_28b7bc6f",
+      "name": "Maksym Horbach (Compost & Soil)",
+      "type": "person",
+      "group": "producers",
+      "status": "active",
+      "role": "Compost & Soil"
+    },
+    {
+      "ref": "tetiana_kovalchuk",
+      "index": 32,
+      "pid": "PID_U0032_c6ef3620",
+      "name": "Tetiana Kovalchuk (Bread Supplies)",
+      "type": "person",
+      "group": "producers",
+      "status": "active",
+      "role": "Bread Supplies"
+    },
+    {
+      "ref": "andrii_boiko",
+      "index": 33,
+      "pid": "PID_U0033_6526afd1",
+      "name": "Andrii Boiko (Fishing & Smoked Fish)",
+      "type": "person",
+      "group": "producers",
+      "status": "active",
+      "role": "Fishing & Smoked Fish"
+    },
+    {
+      "ref": "larysa_ivashchenko",
+      "index": 34,
+      "pid": "PID_U0034_035e2982",
+      "name": "Larysa Ivashchenko (Handmade Soap)",
+      "type": "person",
+      "group": "producers",
+      "status": "active",
+      "role": "Handmade Soap"
+    },
+    {
+      "ref": "ihor_chernenko",
+      "index": 35,
+      "pid": "PID_U0035_a195a333",
+      "name": "Ihor Chernenko (Metal Parts)",
+      "type": "person",
+      "group": "producers",
+      "status": "active",
+      "role": "Metal Parts"
+    },
+    {
+      "ref": "riverside_grocery",
+      "index": 36,
+      "pid": "PID_U0036_3fcd1ce4",
+      "name": "Riverside Grocery",
+      "type": "business",
+      "group": "retail",
+      "status": "active"
+    },
+    {
+      "ref": "village_butcher_shop",
+      "index": 37,
+      "pid": "PID_U0037_de049695",
+      "name": "Village Butcher Shop",
+      "type": "business",
+      "group": "retail",
+      "status": "active"
+    },
+    {
+      "ref": "morning_coffee_corner",
+      "index": 38,
+      "pid": "PID_U0038_7c3c1046",
+      "name": "Morning Coffee Corner",
+      "type": "business",
+      "group": "retail",
+      "status": "active"
+    },
+    {
+      "ref": "family_canteen",
+      "index": 39,
+      "pid": "PID_U0039_1a7389f7",
+      "name": "Family Canteen",
+      "type": "business",
+      "group": "retail",
+      "status": "active"
+    },
+    {
+      "ref": "farmers_corner_shop",
+      "index": 40,
+      "pid": "PID_U0040_b8ab03a8",
+      "name": "Farmers’ Corner Shop",
+      "type": "business",
+      "group": "retail",
+      "status": "active"
+    },
+    {
+      "ref": "homegoods_mini_mart",
+      "index": 41,
+      "pid": "PID_U0041_56e27d59",
+      "name": "HomeGoods Mini-Mart",
+      "type": "business",
+      "group": "retail",
+      "status": "active"
+    },
+    {
+      "ref": "pharmacy_and_health_kiosk",
+      "index": 42,
+      "pid": "PID_U0042_f519f70a",
+      "name": "Pharmacy & Health Kiosk",
+      "type": "business",
+      "group": "retail",
+      "status": "frozen"
+    },
+    {
+      "ref": "school_cafeteria",
+      "index": 43,
+      "pid": "PID_U0043_935170bb",
+      "name": "School Cafeteria",
+      "type": "business",
+      "group": "retail",
+      "status": "active"
+    },
+    {
+      "ref": "weekend_street_food_stall",
+      "index": 44,
+      "pid": "PID_U0044_3188ea6c",
+      "name": "Weekend Street Food Stall",
+      "type": "business",
+      "group": "retail",
+      "status": "active"
+    },
+    {
+      "ref": "cooperative_storefront",
+      "index": 45,
+      "pid": "PID_U0045_cfc0641d",
+      "name": "Cooperative Storefront",
+      "type": "business",
+      "group": "retail",
+      "status": "active"
+    },
+    {
+      "ref": "alex_turner",
+      "index": 46,
+      "pid": "PID_U0046_6df7ddce",
+      "name": "Alex Turner (General Builder)",
+      "type": "person",
+      "group": "services",
+      "status": "active",
+      "role": "General Builder"
+    },
+    {
+      "ref": "ethan_brooks",
+      "index": 47,
+      "pid": "PID_U0047_0c2f577f",
+      "name": "Ethan Brooks (Electrician)",
+      "type": "person",
+      "group": "services",
+      "status": "active",
+      "role": "Electrician"
+    },
+    {
+      "ref": "liam_carter",
+      "index": 48,
+      "pid": "PID_U0048_aa66d130",
+      "name": "Liam Carter (Plumber)",
+      "type": "person",
+      "group": "services",
+      "status": "active",
+      "role": "Plumber"
+    },
+    {
+      "ref": "noah_bennett",
+      "index": 49,
+      "pid": "PID_U0049_489e4ae1",
+      "name": "Noah Bennett (Mechanic)",
+      "type": "person",
+      "group": "services",
+      "status": "active",
+      "role": "Mechanic"
+    },
+    {
+      "ref": "chloe_evans",
+      "index": 50,
+      "pid": "PID_U0050_e6d5c492",
+      "name": "Chloe Evans (Bicycle Repair)",
+      "type": "person",
+      "group": "services",
+      "status": "active",
+      "role": "Bicycle Repair"
+    },
+    {
+      "ref": "grace_collins",
+      "index": 51,
+      "pid": "PID_U0051_850d3e43",
+      "name": "Grace Collins (Accountant)",
+      "type": "person",
+      "group": "services",
+      "status": "active",
+      "role": "Accountant"
+    },
+    {
+      "ref": "ava_reed",
+      "index": 52,
+      "pid": "PID_U0052_2344b7f4",
+      "name": "Ava Reed (Legal Advisor)",
+      "type": "person",
+      "group": "services",
+      "status": "active",
+      "role": "Legal Advisor"
+    },
+    {
+      "ref": "mason_wright",
+      "index": 53,
+      "pid": "PID_U0053_c17c31a5",
+      "name": "Mason Wright (IT Support)",
+      "type": "person",
+      "group": "services",
+      "status": "active",
+      "role": "IT Support"
+    },
+    {
+      "ref": "ella_morgan",
+      "index": 54,
+      "pid": "PID_U0054_5fb3ab56",
+      "name": "Ella Morgan (Nurse)",
+      "type": "person",
+      "group": "services",
+      "status": "active",
+      "role": "Nurse"
+    },
+    {
+      "ref": "lucas_hayes",
+      "index": 55,
+      "pid": "PID_U0055_fdeb2507",
+      "name": "Lucas Hayes (Tutor)",
+      "type": "person",
+      "group": "services",
+      "status": "frozen",
+      "role": "Tutor"
+    },
+    {
+      "ref": "mia_foster",
+      "index": 56,
+      "pid": "PID_U0056_9c229eb8",
+      "name": "Mia Foster (Childcare)",
+      "type": "person",
+      "group": "services",
+      "status": "active",
+      "role": "Childcare"
+    },
+    {
+      "ref": "jack_russell",
+      "index": 57,
+      "pid": "PID_U0057_3a5a1869",
+      "name": "Jack Russell (Courier)",
+      "type": "person",
+      "group": "services",
+      "status": "active",
+      "role": "Courier"
+    },
+    {
+      "ref": "amelia_scott",
+      "index": 58,
+      "pid": "PID_U0058_d891921a",
+      "name": "Amelia Scott (Hairdresser)",
+      "type": "person",
+      "group": "services",
+      "status": "active",
+      "role": "Hairdresser"
+    },
+    {
+      "ref": "henry_ward",
+      "index": 59,
+      "pid": "PID_U0059_76c90bcb",
+      "name": "Henry Ward (Photographer)",
+      "type": "person",
+      "group": "services",
+      "status": "active",
+      "role": "Photographer"
+    },
+    {
+      "ref": "sophia_kim",
+      "index": 60,
+      "pid": "PID_U0060_1500857c",
+      "name": "Sophia Kim (Translator)",
+      "type": "person",
+      "group": "services",
+      "status": "active",
+      "role": "Translator"
+    },
+    {
+      "ref": "the_adams_family",
+      "index": 61,
+      "pid": "PID_U0061_b337ff2d",
+      "name": "The Adams Family (Household)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Household"
+    },
+    {
+      "ref": "the_baker_family",
+      "index": 62,
+      "pid": "PID_U0062_516f78de",
+      "name": "The Baker Family (Household)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Household"
+    },
+    {
+      "ref": "the_carter_family",
+      "index": 63,
+      "pid": "PID_U0063_efa6f28f",
+      "name": "The Carter Family (Household)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Household"
+    },
+    {
+      "ref": "the_davis_family",
+      "index": 64,
+      "pid": "PID_U0064_8dde6c40",
+      "name": "The Davis Family (Household)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Household"
+    },
+    {
+      "ref": "the_edwards_family",
+      "index": 65,
+      "pid": "PID_U0065_2c15e5f1",
+      "name": "The Edwards Family (Household)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Household"
+    },
+    {
+      "ref": "the_foster_family",
+      "index": 66,
+      "pid": "PID_U0066_ca4d5fa2",
+      "name": "The Foster Family (Household)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Household"
+    },
+    {
+      "ref": "the_garcia_family",
+      "index": 67,
+      "pid": "PID_U0067_6884d953",
+      "name": "The Garcia Family (Household)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Household"
+    },
+    {
+      "ref": "the_harris_family",
+      "index": 68,
+      "pid": "PID_U0068_06bc5304",
+      "name": "The Harris Family (Household)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Household"
+    },
+    {
+      "ref": "the_ivanov_family",
+      "index": 69,
+      "pid": "PID_U0069_a4f3ccb5",
+      "name": "The Ivanov Family (Household)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Household"
+    },
+    {
+      "ref": "the_johnson_family",
+      "index": 70,
+      "pid": "PID_U0070_432b4666",
+      "name": "The Johnson Family (Household)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Household"
+    },
+    {
+      "ref": "the_king_family",
+      "index": 71,
+      "pid": "PID_U0071_e162c017",
+      "name": "The King Family (Household)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Household"
+    },
+    {
+      "ref": "the_lewis_family",
+      "index": 72,
+      "pid": "PID_U0072_7f9a39c8",
+      "name": "The Lewis Family (Household)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Household"
+    },
+    {
+      "ref": "the_miller_family",
+      "index": 73,
+      "pid": "PID_U0073_1dd1b379",
+      "name": "The Miller Family (Household)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Household"
+    },
+    {
+      "ref": "the_nelson_family",
+      "index": 74,
+      "pid": "PID_U0074_bc092d2a",
+      "name": "The Nelson Family (Household)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Household"
+    },
+    {
+      "ref": "the_owens_family",
+      "index": 75,
+      "pid": "PID_U0075_5a40a6db",
+      "name": "The Owens Family (Household)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Household"
+    },
+    {
+      "ref": "the_parker_family",
+      "index": 76,
+      "pid": "PID_U0076_f878208c",
+      "name": "The Parker Family (Household)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Household"
+    },
+    {
+      "ref": "the_quinn_family",
+      "index": 77,
+      "pid": "PID_U0077_96af9a3d",
+      "name": "The Quinn Family (Household)",
+      "type": "person",
+      "group": "households",
+      "status": "frozen",
+      "role": "Household"
+    },
+    {
+      "ref": "the_robinson_family",
+      "index": 78,
+      "pid": "PID_U0078_34e713ee",
+      "name": "The Robinson Family (Household)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Household"
+    },
+    {
+      "ref": "the_smith_family",
+      "index": 79,
+      "pid": "PID_U0079_d31e8d9f",
+      "name": "The Smith Family (Household)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Household"
+    },
+    {
+      "ref": "the_taylor_family",
+      "index": 80,
+      "pid": "PID_U0080_71560750",
+      "name": "The Taylor Family (Household)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Household"
+    },
+    {
+      "ref": "the_walker_family",
+      "index": 81,
+      "pid": "PID_U0081_0f8d8101",
+      "name": "The Walker Family (Household)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Household"
+    },
+    {
+      "ref": "the_young_family",
+      "index": 82,
+      "pid": "PID_U0082_adc4fab2",
+      "name": "The Young Family (Household)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Household"
+    },
+    {
+      "ref": "oliver_price",
+      "index": 83,
+      "pid": "PID_U0083_4bfc7463",
+      "name": "Oliver Price (Odd Jobs)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Odd Jobs"
+    },
+    {
+      "ref": "emily_price",
+      "index": 84,
+      "pid": "PID_U0084_ea33ee14",
+      "name": "Emily Price (Home Baking)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Home Baking"
+    },
+    {
+      "ref": "daniel_hughes",
+      "index": 85,
+      "pid": "PID_U0085_886b67c5",
+      "name": "Daniel Hughes (Garden Help)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Garden Help"
+    },
+    {
+      "ref": "lily_hughes",
+      "index": 86,
+      "pid": "PID_U0086_26a2e176",
+      "name": "Lily Hughes (Babysitting)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Babysitting"
+    },
+    {
+      "ref": "benjamin_lee",
+      "index": 87,
+      "pid": "PID_U0087_c4da5b27",
+      "name": "Benjamin Lee (Repairs)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Repairs"
+    },
+    {
+      "ref": "isabella_lee",
+      "index": 88,
+      "pid": "PID_U0088_6311d4d8",
+      "name": "Isabella Lee (Sewing Help)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Sewing Help"
+    },
+    {
+      "ref": "james_hill",
+      "index": 89,
+      "pid": "PID_U0089_01494e89",
+      "name": "James Hill (Driving Help)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Driving Help"
+    },
+    {
+      "ref": "charlotte_hill",
+      "index": 90,
+      "pid": "PID_U0090_9f80c83a",
+      "name": "Charlotte Hill (Cooking Help)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Cooking Help"
+    },
+    {
+      "ref": "william_green",
+      "index": 91,
+      "pid": "PID_U0091_3db841eb",
+      "name": "William Green (Harvest Help)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Harvest Help"
+    },
+    {
+      "ref": "harper_green",
+      "index": 92,
+      "pid": "PID_U0092_dbefbb9c",
+      "name": "Harper Green (Crafts)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Crafts"
+    },
+    {
+      "ref": "michael_wood",
+      "index": 93,
+      "pid": "PID_U0093_7a27354d",
+      "name": "Michael Wood (Handyman)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Handyman"
+    },
+    {
+      "ref": "evelyn_wood",
+      "index": 94,
+      "pid": "PID_U0094_185eaefe",
+      "name": "Evelyn Wood (Care Visits)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Care Visits"
+    },
+    {
+      "ref": "samuel_clark",
+      "index": 95,
+      "pid": "PID_U0095_b69628af",
+      "name": "Samuel Clark (Errands)",
+      "type": "person",
+      "group": "households",
+      "status": "active",
+      "role": "Errands"
+    },
+    {
+      "ref": "olivia_bennett",
+      "index": 96,
+      "pid": "PID_U0096_54cda260",
+      "name": "Olivia Bennett (Community Coordinator)",
+      "type": "person",
+      "group": "agents",
+      "status": "active",
+      "role": "Community Coordinator"
+    },
+    {
+      "ref": "daniel_stone",
+      "index": 97,
+      "pid": "PID_U0097_f3051c11",
+      "name": "Daniel Stone (Trustline Officer)",
+      "type": "person",
+      "group": "agents",
+      "status": "active",
+      "role": "Trustline Officer"
+    },
+    {
+      "ref": "emma_wright",
+      "index": 98,
+      "pid": "PID_U0098_913c95c2",
+      "name": "Emma Wright (Dispute Mediator)",
+      "type": "person",
+      "group": "agents",
+      "status": "active",
+      "role": "Dispute Mediator"
+    },
+    {
+      "ref": "ryan_cooper",
+      "index": 99,
+      "pid": "PID_U0099_2f740f73",
+      "name": "Ryan Cooper (Operations Lead)",
+      "type": "person",
+      "group": "agents",
+      "status": "frozen",
+      "role": "Operations Lead"
+    },
+    {
+      "ref": "sophia_turner",
+      "index": 100,
+      "pid": "PID_U0100_cdab8924",
+      "name": "Sophia Turner (Tech Steward)",
+      "type": "person",
+      "group": "agents",
+      "status": "active",
+      "role": "Tech Steward"
+    }
+  ],
+  "trustlines": [
+    {
+      "equivalent": "EUR",
+      "from": "greenfield_cooperative",
+      "to": "mason_wright",
+      "limit": "550.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "EUR",
+      "from": "greenfield_cooperative",
+      "to": "sophia_kim",
+      "limit": "550.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "EUR",
+      "from": "mason_wright",
+      "to": "greenfield_cooperative",
+      "limit": "700.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "EUR",
+      "from": "sophia_kim",
+      "to": "greenfield_cooperative",
+      "limit": "700.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "greenfield_cooperative",
+      "to": "olivia_bennett",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "greenfield_cooperative",
+      "to": "daniel_stone",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "greenfield_cooperative",
+      "to": "emma_wright",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "greenfield_cooperative",
+      "to": "ryan_cooper",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "greenfield_cooperative",
+      "to": "sophia_turner",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "alex_turner",
+      "to": "the_adams_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "alex_turner",
+      "to": "the_parker_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "alex_turner",
+      "to": "william_green",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "ethan_brooks",
+      "to": "the_baker_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "ethan_brooks",
+      "to": "the_quinn_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "ethan_brooks",
+      "to": "harper_green",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "liam_carter",
+      "to": "the_carter_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "liam_carter",
+      "to": "the_robinson_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "liam_carter",
+      "to": "michael_wood",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "noah_bennett",
+      "to": "the_davis_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "noah_bennett",
+      "to": "the_smith_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "noah_bennett",
+      "to": "evelyn_wood",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "chloe_evans",
+      "to": "the_edwards_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "chloe_evans",
+      "to": "the_taylor_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "chloe_evans",
+      "to": "samuel_clark",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "grace_collins",
+      "to": "the_foster_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "grace_collins",
+      "to": "the_walker_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "ava_reed",
+      "to": "the_garcia_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "ava_reed",
+      "to": "the_young_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "mason_wright",
+      "to": "the_harris_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "mason_wright",
+      "to": "oliver_price",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "ella_morgan",
+      "to": "the_ivanov_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "ella_morgan",
+      "to": "emily_price",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "lucas_hayes",
+      "to": "the_johnson_family",
+      "limit": "5.00",
+      "status": "frozen",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "lucas_hayes",
+      "to": "daniel_hughes",
+      "limit": "5.00",
+      "status": "frozen",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "mia_foster",
+      "to": "the_king_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "mia_foster",
+      "to": "lily_hughes",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "jack_russell",
+      "to": "the_lewis_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "jack_russell",
+      "to": "benjamin_lee",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "amelia_scott",
+      "to": "the_miller_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "amelia_scott",
+      "to": "isabella_lee",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "henry_ward",
+      "to": "the_nelson_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "henry_ward",
+      "to": "james_hill",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "sophia_kim",
+      "to": "the_owens_family",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "sophia_kim",
+      "to": "charlotte_hill",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_adams_family",
+      "to": "alex_turner",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_adams_family",
+      "to": "the_carter_family",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_baker_family",
+      "to": "the_davis_family",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_carter_family",
+      "to": "the_edwards_family",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_davis_family",
+      "to": "the_foster_family",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_edwards_family",
+      "to": "the_garcia_family",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_foster_family",
+      "to": "grace_collins",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_foster_family",
+      "to": "the_harris_family",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_garcia_family",
+      "to": "the_ivanov_family",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_harris_family",
+      "to": "the_johnson_family",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_ivanov_family",
+      "to": "the_king_family",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_johnson_family",
+      "to": "the_lewis_family",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_king_family",
+      "to": "mia_foster",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_king_family",
+      "to": "the_miller_family",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_lewis_family",
+      "to": "the_nelson_family",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_miller_family",
+      "to": "the_owens_family",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_nelson_family",
+      "to": "the_parker_family",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_owens_family",
+      "to": "the_quinn_family",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_parker_family",
+      "to": "alex_turner",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_parker_family",
+      "to": "the_robinson_family",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_quinn_family",
+      "to": "the_smith_family",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_robinson_family",
+      "to": "the_taylor_family",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_smith_family",
+      "to": "the_walker_family",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_taylor_family",
+      "to": "the_young_family",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_walker_family",
+      "to": "grace_collins",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_walker_family",
+      "to": "oliver_price",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "the_young_family",
+      "to": "emily_price",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "oliver_price",
+      "to": "daniel_hughes",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "emily_price",
+      "to": "lily_hughes",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "daniel_hughes",
+      "to": "benjamin_lee",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "lily_hughes",
+      "to": "mia_foster",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "lily_hughes",
+      "to": "isabella_lee",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "benjamin_lee",
+      "to": "james_hill",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "isabella_lee",
+      "to": "charlotte_hill",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "james_hill",
+      "to": "william_green",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "charlotte_hill",
+      "to": "harper_green",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "william_green",
+      "to": "alex_turner",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "william_green",
+      "to": "michael_wood",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "harper_green",
+      "to": "evelyn_wood",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "michael_wood",
+      "to": "samuel_clark",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "evelyn_wood",
+      "to": "the_adams_family",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "samuel_clark",
+      "to": "the_baker_family",
+      "limit": "4.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "olivia_bennett",
+      "to": "greenfield_cooperative",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "daniel_stone",
+      "to": "greenfield_cooperative",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "emma_wright",
+      "to": "greenfield_cooperative",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "ryan_cooper",
+      "to": "greenfield_cooperative",
+      "limit": "5.00",
+      "status": "frozen",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "HOUR",
+      "from": "sophia_turner",
+      "to": "greenfield_cooperative",
+      "limit": "5.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": false,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_cooperative",
+      "to": "greenfield_warehouse",
+      "limit": "1685.83",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_cooperative",
+      "to": "greenfield_procurement_desk",
+      "limit": "8397.55",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_cooperative",
+      "to": "riverside_market_hall",
+      "limit": "9017.15",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_cooperative",
+      "to": "village_transport_co_op",
+      "limit": "9116.78",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_cooperative",
+      "to": "sunnyharvest_bakery",
+      "limit": "10668.62",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_cooperative",
+      "to": "meadowdairy_collective",
+      "limit": "10298.82",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_cooperative",
+      "to": "oleh_savchenko",
+      "limit": "3349.66",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_cooperative",
+      "to": "riverside_grocery",
+      "limit": "11688.55",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_cooperative",
+      "to": "village_butcher_shop",
+      "limit": "7833.95",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_cooperative",
+      "to": "morning_coffee_corner",
+      "limit": "9505.78",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_cooperative",
+      "to": "family_canteen",
+      "limit": "9273.32",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_cooperative",
+      "to": "farmers_corner_shop",
+      "limit": "6023.92",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_cooperative",
+      "to": "homegoods_mini_mart",
+      "limit": "5900.66",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_cooperative",
+      "to": "pharmacy_and_health_kiosk",
+      "limit": "5036.01",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_cooperative",
+      "to": "school_cafeteria",
+      "limit": "4453.77",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_cooperative",
+      "to": "weekend_street_food_stall",
+      "limit": "9112.31",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_cooperative",
+      "to": "cooperative_storefront",
+      "limit": "10616.83",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_cooperative",
+      "to": "alex_turner",
+      "limit": "549.97",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_cooperative",
+      "to": "grace_collins",
+      "limit": "2177.81",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_cooperative",
+      "to": "mia_foster",
+      "limit": "575.89",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_warehouse",
+      "to": "greenfield_cooperative",
+      "limit": "10749.68",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_warehouse",
+      "to": "sunnyharvest_bakery",
+      "limit": "4981.53",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_warehouse",
+      "to": "meadowdairy_collective",
+      "limit": "11106.67",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_warehouse",
+      "to": "tetiana_kovalchuk",
+      "limit": "1405.98",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_warehouse",
+      "to": "riverside_grocery",
+      "limit": "6878.01",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_warehouse",
+      "to": "village_butcher_shop",
+      "limit": "6342.45",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_warehouse",
+      "to": "cooperative_storefront",
+      "limit": "1529.95",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_warehouse",
+      "to": "ethan_brooks",
+      "limit": "2268.28",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_warehouse",
+      "to": "ava_reed",
+      "limit": "1777.08",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_warehouse",
+      "to": "mia_foster",
+      "limit": "1272.88",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_warehouse",
+      "to": "jack_russell",
+      "limit": "459.32",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_procurement_desk",
+      "to": "greenfield_cooperative",
+      "limit": "3014.08",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_procurement_desk",
+      "to": "anton_petrenko",
+      "limit": "1599.33",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_procurement_desk",
+      "to": "dmytro_kovalenko",
+      "limit": "2930.40",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_procurement_desk",
+      "to": "yulia_tkachenko",
+      "limit": "2562.17",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_procurement_desk",
+      "to": "oleh_savchenko",
+      "limit": "1848.46",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_procurement_desk",
+      "to": "nina_romanenko",
+      "limit": "5019.93",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_procurement_desk",
+      "to": "alina_moroz",
+      "limit": "2324.62",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_procurement_desk",
+      "to": "denys_lysenko",
+      "limit": "1956.52",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_procurement_desk",
+      "to": "pavlo_rudenko",
+      "limit": "1112.27",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_procurement_desk",
+      "to": "tetiana_kovalchuk",
+      "limit": "1553.67",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_procurement_desk",
+      "to": "ihor_chernenko",
+      "limit": "2345.55",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "greenfield_procurement_desk",
+      "to": "riverside_grocery",
+      "limit": "5321.34",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_market_hall",
+      "to": "greenfield_cooperative",
+      "limit": "2743.68",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_market_hall",
+      "to": "ava_reed",
+      "limit": "3973.31",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_market_hall",
+      "to": "ella_morgan",
+      "limit": "3393.48",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_market_hall",
+      "to": "the_adams_family",
+      "limit": "2736.72",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_market_hall",
+      "to": "the_carter_family",
+      "limit": "1561.36",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_market_hall",
+      "to": "the_edwards_family",
+      "limit": "3635.16",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_market_hall",
+      "to": "the_garcia_family",
+      "limit": "2349.70",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_market_hall",
+      "to": "the_ivanov_family",
+      "limit": "2282.48",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_market_hall",
+      "to": "the_king_family",
+      "limit": "1349.13",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_market_hall",
+      "to": "the_miller_family",
+      "limit": "2563.06",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_market_hall",
+      "to": "the_owens_family",
+      "limit": "3062.68",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_market_hall",
+      "to": "the_quinn_family",
+      "limit": "1950.86",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_market_hall",
+      "to": "the_smith_family",
+      "limit": "2149.77",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_market_hall",
+      "to": "the_walker_family",
+      "limit": "2091.13",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_market_hall",
+      "to": "oliver_price",
+      "limit": "970.72",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_market_hall",
+      "to": "daniel_hughes",
+      "limit": "1093.78",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_market_hall",
+      "to": "benjamin_lee",
+      "limit": "2242.73",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_market_hall",
+      "to": "james_hill",
+      "limit": "2378.03",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_market_hall",
+      "to": "william_green",
+      "limit": "2669.90",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_market_hall",
+      "to": "michael_wood",
+      "limit": "1455.58",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_market_hall",
+      "to": "samuel_clark",
+      "limit": "1354.04",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "village_transport_co_op",
+      "to": "greenfield_cooperative",
+      "limit": "8487.33",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "village_transport_co_op",
+      "to": "riverside_market_hall",
+      "limit": "3736.39",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "village_transport_co_op",
+      "to": "maksym_horbach",
+      "limit": "4857.55",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "village_transport_co_op",
+      "to": "riverside_grocery",
+      "limit": "5079.38",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "village_transport_co_op",
+      "to": "chloe_evans",
+      "limit": "872.09",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "village_transport_co_op",
+      "to": "ella_morgan",
+      "limit": "1718.08",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "village_transport_co_op",
+      "to": "lucas_hayes",
+      "limit": "2849.01",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "village_transport_co_op",
+      "to": "sophia_kim",
+      "limit": "1981.67",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "sunnyharvest_bakery",
+      "to": "greenfield_cooperative",
+      "limit": "5155.63",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "sunnyharvest_bakery",
+      "to": "riverside_grocery",
+      "limit": "7478.39",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "sunnyharvest_bakery",
+      "to": "family_canteen",
+      "limit": "9119.72",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "sunnyharvest_bakery",
+      "to": "school_cafeteria",
+      "limit": "4575.98",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "sunnyharvest_bakery",
+      "to": "liam_carter",
+      "limit": "2937.17",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "sunnyharvest_bakery",
+      "to": "mason_wright",
+      "limit": "570.88",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "sunnyharvest_bakery",
+      "to": "amelia_scott",
+      "limit": "2916.13",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "sunnyharvest_bakery",
+      "to": "the_baker_family",
+      "limit": "509.78",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "sunnyharvest_bakery",
+      "to": "the_johnson_family",
+      "limit": "1516.07",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "sunnyharvest_bakery",
+      "to": "the_robinson_family",
+      "limit": "2006.57",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "sunnyharvest_bakery",
+      "to": "oliver_price",
+      "limit": "2455.71",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "sunnyharvest_bakery",
+      "to": "lily_hughes",
+      "limit": "436.35",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "sunnyharvest_bakery",
+      "to": "evelyn_wood",
+      "limit": "1846.09",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "meadowdairy_collective",
+      "to": "greenfield_cooperative",
+      "limit": "11472.39",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "meadowdairy_collective",
+      "to": "pavlo_rudenko",
+      "limit": "3720.07",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "meadowdairy_collective",
+      "to": "riverside_grocery",
+      "limit": "7696.29",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "meadowdairy_collective",
+      "to": "family_canteen",
+      "limit": "11421.58",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "meadowdairy_collective",
+      "to": "school_cafeteria",
+      "limit": "5434.39",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "meadowdairy_collective",
+      "to": "noah_bennett",
+      "limit": "1642.01",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "meadowdairy_collective",
+      "to": "chloe_evans",
+      "limit": "3976.24",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "meadowdairy_collective",
+      "to": "ella_morgan",
+      "limit": "2481.88",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "meadowdairy_collective",
+      "to": "henry_ward",
+      "limit": "2660.83",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "meadowdairy_collective",
+      "to": "the_carter_family",
+      "limit": "2766.21",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "meadowdairy_collective",
+      "to": "the_king_family",
+      "limit": "1732.54",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "meadowdairy_collective",
+      "to": "the_smith_family",
+      "limit": "1926.77",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "meadowdairy_collective",
+      "to": "benjamin_lee",
+      "limit": "663.46",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "meadowdairy_collective",
+      "to": "samuel_clark",
+      "limit": "1837.09",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "hilltop_greenhouses",
+      "to": "sophia_turner",
+      "limit": "2449.51",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "oak_and_iron_workshop",
+      "to": "serhii_melnyk",
+      "limit": "1083.48",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "oak_and_iron_workshop",
+      "to": "daniel_stone",
+      "limit": "1702.43",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "community_energy_and_water_team",
+      "to": "hanna_sydorenko",
+      "limit": "2460.54",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "community_energy_and_water_team",
+      "to": "liam_carter",
+      "limit": "4694.46",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "anton_petrenko",
+      "to": "greenfield_procurement_desk",
+      "limit": "1707.27",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "anton_petrenko",
+      "to": "riverside_market_hall",
+      "limit": "1343.39",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "anton_petrenko",
+      "to": "sunnyharvest_bakery",
+      "limit": "512.90",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "anton_petrenko",
+      "to": "meadowdairy_collective",
+      "limit": "2886.78",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "anton_petrenko",
+      "to": "riverside_grocery",
+      "limit": "1620.40",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "anton_petrenko",
+      "to": "the_adams_family",
+      "limit": "337.03",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "anton_petrenko",
+      "to": "the_walker_family",
+      "limit": "589.15",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "maria_shevchenko",
+      "to": "greenfield_procurement_desk",
+      "limit": "505.95",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "maria_shevchenko",
+      "to": "riverside_market_hall",
+      "limit": "972.95",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "maria_shevchenko",
+      "to": "riverside_grocery",
+      "limit": "809.09",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "oksana_hrytsenko",
+      "to": "greenfield_procurement_desk",
+      "limit": "3173.95",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "oksana_hrytsenko",
+      "to": "meadowdairy_collective",
+      "limit": "2462.82",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "oksana_hrytsenko",
+      "to": "cooperative_storefront",
+      "limit": "2877.84",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "dmytro_kovalenko",
+      "to": "greenfield_procurement_desk",
+      "limit": "579.07",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "dmytro_kovalenko",
+      "to": "riverside_market_hall",
+      "limit": "3196.53",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "dmytro_kovalenko",
+      "to": "sunnyharvest_bakery",
+      "limit": "1212.57",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "dmytro_kovalenko",
+      "to": "village_butcher_shop",
+      "limit": "532.08",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "iryna_bondar",
+      "to": "greenfield_procurement_desk",
+      "limit": "831.55",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "iryna_bondar",
+      "to": "sunnyharvest_bakery",
+      "limit": "1779.69",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "iryna_bondar",
+      "to": "village_butcher_shop",
+      "limit": "3674.90",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "serhii_melnyk",
+      "to": "greenfield_procurement_desk",
+      "limit": "1143.66",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "serhii_melnyk",
+      "to": "meadowdairy_collective",
+      "limit": "2389.59",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "serhii_melnyk",
+      "to": "the_edwards_family",
+      "limit": "403.38",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "serhii_melnyk",
+      "to": "daniel_hughes",
+      "limit": "386.97",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "yulia_tkachenko",
+      "to": "greenfield_procurement_desk",
+      "limit": "1537.49",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "yulia_tkachenko",
+      "to": "riverside_market_hall",
+      "limit": "2179.22",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "yulia_tkachenko",
+      "to": "morning_coffee_corner",
+      "limit": "1229.86",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "viktor_koval",
+      "to": "greenfield_procurement_desk",
+      "limit": "3214.07",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "viktor_koval",
+      "to": "riverside_grocery",
+      "limit": "2376.23",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "kateryna_marchenko",
+      "to": "greenfield_procurement_desk",
+      "limit": "1251.07",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "kateryna_marchenko",
+      "to": "sunnyharvest_bakery",
+      "limit": "1293.61",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "oleh_savchenko",
+      "to": "greenfield_procurement_desk",
+      "limit": "1109.01",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "oleh_savchenko",
+      "to": "riverside_market_hall",
+      "limit": "777.61",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "oleh_savchenko",
+      "to": "village_butcher_shop",
+      "limit": "2950.10",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "oleh_savchenko",
+      "to": "family_canteen",
+      "limit": "2629.97",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "nina_romanenko",
+      "to": "greenfield_procurement_desk",
+      "limit": "800.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "nina_romanenko",
+      "to": "the_ivanov_family",
+      "limit": "666.90",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "nina_romanenko",
+      "to": "james_hill",
+      "limit": "526.83",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "taras_klymenko",
+      "to": "greenfield_procurement_desk",
+      "limit": "1605.56",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "alina_moroz",
+      "to": "greenfield_procurement_desk",
+      "limit": "1200.37",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "alina_moroz",
+      "to": "riverside_market_hall",
+      "limit": "2493.09",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "alina_moroz",
+      "to": "farmers_corner_shop",
+      "limit": "2151.51",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "bohdan_kravets",
+      "to": "greenfield_procurement_desk",
+      "limit": "1294.93",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "svitlana_poliakova",
+      "to": "greenfield_procurement_desk",
+      "limit": "3721.43",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "svitlana_poliakova",
+      "to": "riverside_grocery",
+      "limit": "2011.96",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "denys_lysenko",
+      "to": "greenfield_procurement_desk",
+      "limit": "673.32",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "denys_lysenko",
+      "to": "riverside_market_hall",
+      "limit": "1089.25",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "denys_lysenko",
+      "to": "homegoods_mini_mart",
+      "limit": "634.93",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "denys_lysenko",
+      "to": "the_miller_family",
+      "limit": "304.39",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "denys_lysenko",
+      "to": "michael_wood",
+      "limit": "667.05",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "hanna_sydorenko",
+      "to": "greenfield_procurement_desk",
+      "limit": "2542.15",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "roman_zadorozhnyi",
+      "to": "greenfield_procurement_desk",
+      "limit": "1156.73",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "pavlo_rudenko",
+      "to": "greenfield_procurement_desk",
+      "limit": "3217.18",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "pavlo_rudenko",
+      "to": "riverside_market_hall",
+      "limit": "2823.43",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "pavlo_rudenko",
+      "to": "pharmacy_and_health_kiosk",
+      "limit": "1120.38",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "olena_fedorova",
+      "to": "greenfield_procurement_desk",
+      "limit": "3336.36",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "maksym_horbach",
+      "to": "greenfield_procurement_desk",
+      "limit": "800.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "maksym_horbach",
+      "to": "the_quinn_family",
+      "limit": "394.87",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "tetiana_kovalchuk",
+      "to": "greenfield_procurement_desk",
+      "limit": "1972.38",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "tetiana_kovalchuk",
+      "to": "riverside_market_hall",
+      "limit": "1726.12",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "tetiana_kovalchuk",
+      "to": "riverside_grocery",
+      "limit": "1348.85",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "tetiana_kovalchuk",
+      "to": "school_cafeteria",
+      "limit": "2013.09",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "andrii_boiko",
+      "to": "greenfield_procurement_desk",
+      "limit": "2485.48",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "andrii_boiko",
+      "to": "village_butcher_shop",
+      "limit": "2484.71",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "larysa_ivashchenko",
+      "to": "greenfield_procurement_desk",
+      "limit": "2853.20",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "ihor_chernenko",
+      "to": "greenfield_procurement_desk",
+      "limit": "486.44",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "ihor_chernenko",
+      "to": "riverside_market_hall",
+      "limit": "2658.67",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "ihor_chernenko",
+      "to": "weekend_street_food_stall",
+      "limit": "2965.24",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_grocery",
+      "to": "greenfield_cooperative",
+      "limit": "7793.22",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_grocery",
+      "to": "anton_petrenko",
+      "limit": "505.64",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_grocery",
+      "to": "taras_klymenko",
+      "limit": "2219.31",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_grocery",
+      "to": "family_canteen",
+      "limit": "9943.83",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_grocery",
+      "to": "school_cafeteria",
+      "limit": "6763.44",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_grocery",
+      "to": "the_adams_family",
+      "limit": "1010.36",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_grocery",
+      "to": "the_baker_family",
+      "limit": "807.45",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_grocery",
+      "to": "the_carter_family",
+      "limit": "1753.40",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_grocery",
+      "to": "the_davis_family",
+      "limit": "2585.77",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_grocery",
+      "to": "the_edwards_family",
+      "limit": "1370.70",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_grocery",
+      "to": "the_foster_family",
+      "limit": "668.51",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_grocery",
+      "to": "the_garcia_family",
+      "limit": "1930.63",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_grocery",
+      "to": "the_harris_family",
+      "limit": "1025.45",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_grocery",
+      "to": "the_ivanov_family",
+      "limit": "937.35",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_grocery",
+      "to": "the_johnson_family",
+      "limit": "1587.77",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_grocery",
+      "to": "the_king_family",
+      "limit": "3687.55",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_grocery",
+      "to": "the_lewis_family",
+      "limit": "3580.38",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_grocery",
+      "to": "the_miller_family",
+      "limit": "1825.96",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_grocery",
+      "to": "the_nelson_family",
+      "limit": "1631.63",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_grocery",
+      "to": "the_owens_family",
+      "limit": "1805.10",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_grocery",
+      "to": "the_parker_family",
+      "limit": "2826.28",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_grocery",
+      "to": "the_quinn_family",
+      "limit": "765.84",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_grocery",
+      "to": "the_robinson_family",
+      "limit": "1655.51",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_grocery",
+      "to": "the_smith_family",
+      "limit": "3128.02",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_grocery",
+      "to": "the_taylor_family",
+      "limit": "1690.31",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_grocery",
+      "to": "the_walker_family",
+      "limit": "3659.67",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_grocery",
+      "to": "the_young_family",
+      "limit": "2127.53",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_grocery",
+      "to": "oliver_price",
+      "limit": "2904.70",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_grocery",
+      "to": "emily_price",
+      "limit": "2130.08",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_grocery",
+      "to": "daniel_hughes",
+      "limit": "2543.30",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_grocery",
+      "to": "lily_hughes",
+      "limit": "2502.45",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_grocery",
+      "to": "benjamin_lee",
+      "limit": "1957.30",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_grocery",
+      "to": "isabella_lee",
+      "limit": "1632.18",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_grocery",
+      "to": "james_hill",
+      "limit": "519.55",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_grocery",
+      "to": "charlotte_hill",
+      "limit": "1225.66",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_grocery",
+      "to": "william_green",
+      "limit": "1192.05",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_grocery",
+      "to": "harper_green",
+      "limit": "1968.76",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_grocery",
+      "to": "michael_wood",
+      "limit": "658.67",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_grocery",
+      "to": "evelyn_wood",
+      "limit": "1217.47",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "riverside_grocery",
+      "to": "samuel_clark",
+      "limit": "1073.85",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "village_butcher_shop",
+      "to": "greenfield_cooperative",
+      "limit": "1735.45",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "village_butcher_shop",
+      "to": "viktor_koval",
+      "limit": "4207.69",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "village_butcher_shop",
+      "to": "the_foster_family",
+      "limit": "2450.81",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "village_butcher_shop",
+      "to": "the_nelson_family",
+      "limit": "2420.40",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "village_butcher_shop",
+      "to": "the_young_family",
+      "limit": "2317.75",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "village_butcher_shop",
+      "to": "benjamin_lee",
+      "limit": "2925.27",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "village_butcher_shop",
+      "to": "charlotte_hill",
+      "limit": "2975.55",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "morning_coffee_corner",
+      "to": "greenfield_cooperative",
+      "limit": "4096.17",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "morning_coffee_corner",
+      "to": "anton_petrenko",
+      "limit": "4322.73",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "morning_coffee_corner",
+      "to": "the_davis_family",
+      "limit": "2411.90",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "morning_coffee_corner",
+      "to": "the_lewis_family",
+      "limit": "1136.56",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "morning_coffee_corner",
+      "to": "the_taylor_family",
+      "limit": "1928.23",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "morning_coffee_corner",
+      "to": "isabella_lee",
+      "limit": "2797.69",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "family_canteen",
+      "to": "greenfield_cooperative",
+      "limit": "4001.82",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "family_canteen",
+      "to": "nina_romanenko",
+      "limit": "1756.57",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "family_canteen",
+      "to": "pavlo_rudenko",
+      "limit": "2618.14",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "family_canteen",
+      "to": "the_adams_family",
+      "limit": "3076.03",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "family_canteen",
+      "to": "the_ivanov_family",
+      "limit": "800.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "family_canteen",
+      "to": "the_quinn_family",
+      "limit": "3712.60",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "family_canteen",
+      "to": "daniel_hughes",
+      "limit": "1172.11",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "family_canteen",
+      "to": "michael_wood",
+      "limit": "1058.64",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "farmers_corner_shop",
+      "to": "greenfield_cooperative",
+      "limit": "1951.95",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "farmers_corner_shop",
+      "to": "kateryna_marchenko",
+      "limit": "969.79",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "farmers_corner_shop",
+      "to": "alina_moroz",
+      "limit": "2636.89",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "farmers_corner_shop",
+      "to": "svitlana_poliakova",
+      "limit": "5031.65",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "homegoods_mini_mart",
+      "to": "greenfield_cooperative",
+      "limit": "8259.88",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "homegoods_mini_mart",
+      "to": "anton_petrenko",
+      "limit": "2017.51",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "homegoods_mini_mart",
+      "to": "roman_zadorozhnyi",
+      "limit": "4550.86",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "pharmacy_and_health_kiosk",
+      "to": "greenfield_cooperative",
+      "limit": "4791.05",
+      "status": "frozen",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "pharmacy_and_health_kiosk",
+      "to": "chloe_evans",
+      "limit": "931.58",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "pharmacy_and_health_kiosk",
+      "to": "amelia_scott",
+      "limit": "4793.49",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "pharmacy_and_health_kiosk",
+      "to": "the_edwards_family",
+      "limit": "2728.19",
+      "status": "frozen",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "pharmacy_and_health_kiosk",
+      "to": "the_miller_family",
+      "limit": "1372.16",
+      "status": "frozen",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "pharmacy_and_health_kiosk",
+      "to": "the_walker_family",
+      "limit": "508.38",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "pharmacy_and_health_kiosk",
+      "to": "james_hill",
+      "limit": "1571.92",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "school_cafeteria",
+      "to": "greenfield_cooperative",
+      "limit": "7520.58",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "school_cafeteria",
+      "to": "noah_bennett",
+      "limit": "1047.60",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "school_cafeteria",
+      "to": "the_harris_family",
+      "limit": "2423.23",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "school_cafeteria",
+      "to": "the_parker_family",
+      "limit": "2058.46",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "school_cafeteria",
+      "to": "emily_price",
+      "limit": "815.36",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "school_cafeteria",
+      "to": "harper_green",
+      "limit": "2130.02",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "weekend_street_food_stall",
+      "to": "greenfield_cooperative",
+      "limit": "6821.81",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "weekend_street_food_stall",
+      "to": "alina_moroz",
+      "limit": "3225.25",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "weekend_street_food_stall",
+      "to": "ihor_chernenko",
+      "limit": "1784.27",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "weekend_street_food_stall",
+      "to": "noah_bennett",
+      "limit": "3169.11",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "cooperative_storefront",
+      "to": "greenfield_cooperative",
+      "limit": "2870.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "cooperative_storefront",
+      "to": "alex_turner",
+      "limit": "3590.05",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "cooperative_storefront",
+      "to": "the_garcia_family",
+      "limit": "1593.48",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "cooperative_storefront",
+      "to": "the_owens_family",
+      "limit": "2102.53",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "cooperative_storefront",
+      "to": "oliver_price",
+      "limit": "499.67",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "cooperative_storefront",
+      "to": "william_green",
+      "limit": "1914.76",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": true
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "alex_turner",
+      "to": "greenfield_cooperative",
+      "limit": "2065.46",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "alex_turner",
+      "to": "village_butcher_shop",
+      "limit": "2065.07",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "alex_turner",
+      "to": "the_johnson_family",
+      "limit": "2062.18",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "alex_turner",
+      "to": "the_quinn_family",
+      "limit": "1771.60",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "ethan_brooks",
+      "to": "greenfield_warehouse",
+      "limit": "2934.10",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "ethan_brooks",
+      "to": "pharmacy_and_health_kiosk",
+      "limit": "2599.58",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "ethan_brooks",
+      "to": "the_ivanov_family",
+      "limit": "2495.98",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "ethan_brooks",
+      "to": "the_smith_family",
+      "limit": "2051.98",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "liam_carter",
+      "to": "sunnyharvest_bakery",
+      "limit": "2436.11",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "liam_carter",
+      "to": "morning_coffee_corner",
+      "limit": "3754.52",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "liam_carter",
+      "to": "the_robinson_family",
+      "limit": "2176.79",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "liam_carter",
+      "to": "michael_wood",
+      "limit": "2918.83",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "noah_bennett",
+      "to": "meadowdairy_collective",
+      "limit": "1499.80",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "noah_bennett",
+      "to": "weekend_street_food_stall",
+      "limit": "5115.87",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "noah_bennett",
+      "to": "james_hill",
+      "limit": "1975.45",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "noah_bennett",
+      "to": "samuel_clark",
+      "limit": "2987.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "chloe_evans",
+      "to": "village_transport_co_op",
+      "limit": "800.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "chloe_evans",
+      "to": "cooperative_storefront",
+      "limit": "2965.07",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "chloe_evans",
+      "to": "the_young_family",
+      "limit": "1213.69",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "chloe_evans",
+      "to": "michael_wood",
+      "limit": "1582.89",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "chloe_evans",
+      "to": "samuel_clark",
+      "limit": "2658.27",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "grace_collins",
+      "to": "greenfield_cooperative",
+      "limit": "2645.43",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "grace_collins",
+      "to": "homegoods_mini_mart",
+      "limit": "3886.62",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "grace_collins",
+      "to": "the_miller_family",
+      "limit": "2934.53",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "grace_collins",
+      "to": "the_owens_family",
+      "limit": "1959.92",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "grace_collins",
+      "to": "the_robinson_family",
+      "limit": "1025.43",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "ava_reed",
+      "to": "greenfield_warehouse",
+      "limit": "2111.97",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "ava_reed",
+      "to": "riverside_grocery",
+      "limit": "3103.79",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "ava_reed",
+      "to": "emily_price",
+      "limit": "2884.33",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "ava_reed",
+      "to": "charlotte_hill",
+      "limit": "1395.23",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "ava_reed",
+      "to": "harper_green",
+      "limit": "2686.82",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "mason_wright",
+      "to": "sunnyharvest_bakery",
+      "limit": "2031.37",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "mason_wright",
+      "to": "pharmacy_and_health_kiosk",
+      "limit": "4092.83",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "mason_wright",
+      "to": "the_adams_family",
+      "limit": "874.60",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "mason_wright",
+      "to": "the_king_family",
+      "limit": "2325.44",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "mason_wright",
+      "to": "the_parker_family",
+      "limit": "1877.89",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "ella_morgan",
+      "to": "meadowdairy_collective",
+      "limit": "3121.70",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "ella_morgan",
+      "to": "family_canteen",
+      "limit": "2948.41",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "ella_morgan",
+      "to": "the_foster_family",
+      "limit": "2202.91",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "ella_morgan",
+      "to": "the_parker_family",
+      "limit": "1076.97",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "ella_morgan",
+      "to": "samuel_clark",
+      "limit": "1346.70",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "lucas_hayes",
+      "to": "village_transport_co_op",
+      "limit": "1993.75",
+      "status": "frozen",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "lucas_hayes",
+      "to": "cooperative_storefront",
+      "limit": "3693.89",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "lucas_hayes",
+      "to": "the_quinn_family",
+      "limit": "2846.45",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "lucas_hayes",
+      "to": "evelyn_wood",
+      "limit": "1550.15",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "mia_foster",
+      "to": "greenfield_cooperative",
+      "limit": "2557.01",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "mia_foster",
+      "to": "cooperative_storefront",
+      "limit": "2758.05",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "mia_foster",
+      "to": "the_edwards_family",
+      "limit": "2424.74",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "mia_foster",
+      "to": "daniel_hughes",
+      "limit": "1239.78",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "jack_russell",
+      "to": "greenfield_warehouse",
+      "limit": "810.57",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "jack_russell",
+      "to": "riverside_market_hall",
+      "limit": "1980.20",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "jack_russell",
+      "to": "riverside_grocery",
+      "limit": "1298.95",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "jack_russell",
+      "to": "family_canteen",
+      "limit": "2816.39",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "jack_russell",
+      "to": "the_adams_family",
+      "limit": "1697.23",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "jack_russell",
+      "to": "the_carter_family",
+      "limit": "1606.62",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "jack_russell",
+      "to": "the_young_family",
+      "limit": "2699.39",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "amelia_scott",
+      "to": "sunnyharvest_bakery",
+      "limit": "1864.93",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "amelia_scott",
+      "to": "farmers_corner_shop",
+      "limit": "1402.11",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "amelia_scott",
+      "to": "the_lewis_family",
+      "limit": "1330.21",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "amelia_scott",
+      "to": "the_miller_family",
+      "limit": "1202.60",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "amelia_scott",
+      "to": "michael_wood",
+      "limit": "1416.38",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "henry_ward",
+      "to": "meadowdairy_collective",
+      "limit": "3282.82",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "henry_ward",
+      "to": "farmers_corner_shop",
+      "limit": "4666.72",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "henry_ward",
+      "to": "the_garcia_family",
+      "limit": "2491.07",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "henry_ward",
+      "to": "the_johnson_family",
+      "limit": "1220.34",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "henry_ward",
+      "to": "the_taylor_family",
+      "limit": "1668.77",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "sophia_kim",
+      "to": "village_transport_co_op",
+      "limit": "2545.21",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "sophia_kim",
+      "to": "school_cafeteria",
+      "limit": "3319.21",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "sophia_kim",
+      "to": "charlotte_hill",
+      "limit": "920.22",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "sophia_kim",
+      "to": "william_green",
+      "limit": "2924.38",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "sophia_kim",
+      "to": "evelyn_wood",
+      "limit": "1852.77",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_adams_family",
+      "to": "anton_petrenko",
+      "limit": "292.74",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_adams_family",
+      "to": "the_baker_family",
+      "limit": "512.30",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_adams_family",
+      "to": "the_edwards_family",
+      "limit": "631.51",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_baker_family",
+      "to": "the_carter_family",
+      "limit": "630.57",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_baker_family",
+      "to": "the_foster_family",
+      "limit": "200.11",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_carter_family",
+      "to": "the_davis_family",
+      "limit": "356.26",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_carter_family",
+      "to": "the_garcia_family",
+      "limit": "884.28",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_davis_family",
+      "to": "the_edwards_family",
+      "limit": "550.86",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_davis_family",
+      "to": "the_harris_family",
+      "limit": "345.93",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_edwards_family",
+      "to": "the_foster_family",
+      "limit": "187.04",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_edwards_family",
+      "to": "the_ivanov_family",
+      "limit": "569.11",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_foster_family",
+      "to": "dmytro_kovalenko",
+      "limit": "273.54",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_foster_family",
+      "to": "the_garcia_family",
+      "limit": "783.33",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_foster_family",
+      "to": "the_johnson_family",
+      "limit": "454.81",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_garcia_family",
+      "to": "the_harris_family",
+      "limit": "162.15",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_garcia_family",
+      "to": "the_king_family",
+      "limit": "774.52",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_harris_family",
+      "to": "the_ivanov_family",
+      "limit": "276.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_harris_family",
+      "to": "the_lewis_family",
+      "limit": "652.23",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_ivanov_family",
+      "to": "the_johnson_family",
+      "limit": "315.73",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_ivanov_family",
+      "to": "the_miller_family",
+      "limit": "264.78",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_johnson_family",
+      "to": "the_king_family",
+      "limit": "876.10",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_johnson_family",
+      "to": "the_nelson_family",
+      "limit": "255.37",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_king_family",
+      "to": "yulia_tkachenko",
+      "limit": "433.60",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_king_family",
+      "to": "the_lewis_family",
+      "limit": "527.84",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_king_family",
+      "to": "the_owens_family",
+      "limit": "356.29",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_lewis_family",
+      "to": "the_miller_family",
+      "limit": "432.50",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_lewis_family",
+      "to": "the_parker_family",
+      "limit": "185.99",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_miller_family",
+      "to": "the_nelson_family",
+      "limit": "564.53",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_miller_family",
+      "to": "the_quinn_family",
+      "limit": "348.00",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_nelson_family",
+      "to": "the_owens_family",
+      "limit": "464.89",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_nelson_family",
+      "to": "the_robinson_family",
+      "limit": "336.96",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_owens_family",
+      "to": "the_parker_family",
+      "limit": "561.44",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_owens_family",
+      "to": "the_smith_family",
+      "limit": "634.07",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_parker_family",
+      "to": "oleh_savchenko",
+      "limit": "331.95",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_parker_family",
+      "to": "the_quinn_family",
+      "limit": "695.84",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_parker_family",
+      "to": "the_taylor_family",
+      "limit": "194.94",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_quinn_family",
+      "to": "the_robinson_family",
+      "limit": "184.17",
+      "status": "frozen",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_quinn_family",
+      "to": "the_walker_family",
+      "limit": "240.02",
+      "status": "frozen",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_robinson_family",
+      "to": "the_smith_family",
+      "limit": "697.17",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_robinson_family",
+      "to": "the_young_family",
+      "limit": "473.43",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_smith_family",
+      "to": "the_taylor_family",
+      "limit": "248.23",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_smith_family",
+      "to": "oliver_price",
+      "limit": "452.39",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_taylor_family",
+      "to": "the_walker_family",
+      "limit": "838.16",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_taylor_family",
+      "to": "emily_price",
+      "limit": "711.93",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_walker_family",
+      "to": "alina_moroz",
+      "limit": "228.63",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_walker_family",
+      "to": "the_young_family",
+      "limit": "589.38",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_walker_family",
+      "to": "daniel_hughes",
+      "limit": "465.64",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_young_family",
+      "to": "oliver_price",
+      "limit": "570.24",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "the_young_family",
+      "to": "lily_hughes",
+      "limit": "286.10",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "oliver_price",
+      "to": "anton_petrenko",
+      "limit": "3476.46",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "oliver_price",
+      "to": "kateryna_marchenko",
+      "limit": "469.14",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "oliver_price",
+      "to": "emily_price",
+      "limit": "212.12",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "oliver_price",
+      "to": "benjamin_lee",
+      "limit": "651.60",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "emily_price",
+      "to": "oksana_hrytsenko",
+      "limit": "501.43",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "emily_price",
+      "to": "daniel_hughes",
+      "limit": "887.09",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "emily_price",
+      "to": "isabella_lee",
+      "limit": "1010.28",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "daniel_hughes",
+      "to": "iryna_bondar",
+      "limit": "872.60",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "daniel_hughes",
+      "to": "lily_hughes",
+      "limit": "742.72",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "daniel_hughes",
+      "to": "james_hill",
+      "limit": "2945.06",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "lily_hughes",
+      "to": "yulia_tkachenko",
+      "limit": "802.35",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "lily_hughes",
+      "to": "denys_lysenko",
+      "limit": "1228.63",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "lily_hughes",
+      "to": "benjamin_lee",
+      "limit": "578.64",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "lily_hughes",
+      "to": "charlotte_hill",
+      "limit": "377.94",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "benjamin_lee",
+      "to": "kateryna_marchenko",
+      "limit": "821.45",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "benjamin_lee",
+      "to": "oleh_savchenko",
+      "limit": "521.53",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "benjamin_lee",
+      "to": "isabella_lee",
+      "limit": "1526.75",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "benjamin_lee",
+      "to": "william_green",
+      "limit": "313.87",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "isabella_lee",
+      "to": "nina_romanenko",
+      "limit": "466.64",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "isabella_lee",
+      "to": "james_hill",
+      "limit": "640.73",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "isabella_lee",
+      "to": "harper_green",
+      "limit": "3304.96",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "james_hill",
+      "to": "alina_moroz",
+      "limit": "229.36",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "james_hill",
+      "to": "charlotte_hill",
+      "limit": "277.81",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "james_hill",
+      "to": "michael_wood",
+      "limit": "2026.61",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "charlotte_hill",
+      "to": "svitlana_poliakova",
+      "limit": "2448.86",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "charlotte_hill",
+      "to": "william_green",
+      "limit": "649.58",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "charlotte_hill",
+      "to": "evelyn_wood",
+      "limit": "460.04",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "william_green",
+      "to": "maria_shevchenko",
+      "limit": "257.70",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "william_green",
+      "to": "hanna_sydorenko",
+      "limit": "629.76",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "william_green",
+      "to": "pavlo_rudenko",
+      "limit": "3529.96",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "william_green",
+      "to": "harper_green",
+      "limit": "222.58",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "william_green",
+      "to": "samuel_clark",
+      "limit": "625.52",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "harper_green",
+      "to": "pavlo_rudenko",
+      "limit": "855.47",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "harper_green",
+      "to": "the_adams_family",
+      "limit": "786.74",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "harper_green",
+      "to": "michael_wood",
+      "limit": "2203.06",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "michael_wood",
+      "to": "maksym_horbach",
+      "limit": "1083.06",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "michael_wood",
+      "to": "the_baker_family",
+      "limit": "710.39",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "michael_wood",
+      "to": "evelyn_wood",
+      "limit": "160.16",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "evelyn_wood",
+      "to": "andrii_boiko",
+      "limit": "632.19",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "evelyn_wood",
+      "to": "the_carter_family",
+      "limit": "1316.43",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "evelyn_wood",
+      "to": "samuel_clark",
+      "limit": "826.48",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "samuel_clark",
+      "to": "ihor_chernenko",
+      "limit": "713.41",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "samuel_clark",
+      "to": "the_adams_family",
+      "limit": "563.69",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "samuel_clark",
+      "to": "the_davis_family",
+      "limit": "2390.07",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "olivia_bennett",
+      "to": "greenfield_cooperative",
+      "limit": "1918.62",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "daniel_stone",
+      "to": "greenfield_cooperative",
+      "limit": "2444.28",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "emma_wright",
+      "to": "greenfield_cooperative",
+      "limit": "1063.40",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "ryan_cooper",
+      "to": "greenfield_cooperative",
+      "limit": "2954.11",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    },
+    {
+      "equivalent": "UAH",
+      "from": "sophia_turner",
+      "to": "greenfield_cooperative",
+      "limit": "1398.47",
+      "status": "active",
+      "policy": {
+        "auto_clearing": true,
+        "can_be_intermediate": false
+      }
+    }
+  ]
+}
