@@ -132,16 +132,31 @@ def run_migrations_offline() -> None:
     Calls to context.execute() here emit the given string to the
     script output.
 
-    OFFLINE MODE CANNOT ESTABLISH THE PRECONDITION, and that is measured rather than assumed
-    (2026-09-21, T1701). There is no connection to create or widen anything on, and emitting the DDL
-    into the script does not help: Alembic then emits its OWN
-    `CREATE TABLE alembic_version (version_num VARCHAR(32) ...)` - without `IF NOT EXISTS`, because
-    offline mode has no catalogue to check - and the generated script dies on the duplicate. Tried,
-    read, reverted. So this path is left exactly as it was: the generated SQL carries Alembic's
-    32-character column and stops at 010 -> 011 when applied to a fresh database. Whoever applies it
-    runs the statements in `ALEMBIC_VERSION_BOOTSTRAP` first, by hand - they are printed for that
-    purpose in `docs/ru/05-deployment.md`. Nothing in this repository generates offline SQL today;
-    the online path above is the one every caller uses.
+    OFFLINE MODE IS NOT SUPPORTED ON A FRESH DATABASE, and this paragraph says so instead of
+    offering a workaround, because the workaround it used to offer does not work (corrected
+    2026-09-22 after the Codex external review of `e2e1380..37fec08`).
+
+    What is true: there is no connection here to create or widen anything on, so the precondition
+    cannot be established from inside this function. Emitting the DDL into the script does not help
+    either - Alembic then emits its OWN `CREATE TABLE alembic_version (version_num VARCHAR(32) ...)`
+    alongside it and the script dies on the duplicate. Tried, read, reverted (2026-09-21, T1701).
+
+    What was WRONG, and mattered more: the note then told the operator to run the statements in
+    `ALEMBIC_VERSION_BOOTSTRAP` by hand before applying the generated SQL. That fails for the same
+    reason. `MigrationContext.run_migrations` emits the version table UNCONDITIONALLY when migrating
+    from base with `as_sql=True` - `alembic/runtime/migration.py:617-621` in the pinned 1.13.1,
+    `self._version.create(self.connection)` with no `checkfirst` and no `IF NOT EXISTS`, because
+    offline mode has no catalogue to ask. So the hand-run statements create the table and the
+    generated script then tries to create it again, with stop-on-error set. Running the DDL first
+    does not rescue offline mode; it only moves the failure one statement earlier.
+
+    So the claim is narrowed rather than the support widened: this path is left exactly as it was,
+    the generated SQL carries Alembic's 32-character column, and applying it to a fresh database
+    stops at 010 -> 011. NOTHING IN THIS REPOSITORY GENERATES OFFLINE SQL - the online path above is
+    the one every caller uses, and it establishes the precondition itself. An operator whose tool
+    bypasses this entry ENTIRELY, rather than running it with `--sql`, is a different case and is
+    the one `docs/ru/05-deployment.md` prints the statements for. If an offline consumer ever
+    appears, the work is a post-processing step over the generated script, and it does not exist.
     """
     url = settings.DATABASE_URL
     _require_postgresql_migration_url(url)
