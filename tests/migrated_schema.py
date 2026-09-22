@@ -56,6 +56,17 @@ Names are derived from the tier's own database name, which already carries the t
 (`geov0_test_<slug>`), so two agents' clones cannot collide (`AGENTS.md` §7), and every derived name
 is put through `scripts/validate_test_database_url.py` before it is used - the guard is enforced on
 provisioning, never relaxed for it.
+
+THE DOUBLED UNDERSCORE IS RESERVED, AND THAT RESERVATION IS THE ONLY THING THAT MAKES THE SWEEP THIS
+TASK'S OWN (2026-09-22, Codex external review of `e2e1380..37fec08`). The first version of this
+module said the prefix sweep "can only reach databases belonging to this task" because the prefix is
+the tier's own name. That reason is false: `p017fixa__probe` is a valid task slug, its tier database
+is `geov0_test_p017fixa__probe`, and the sweep run for the task `p017fixa` disconnected and DROPPED
+it - reproduced on PostgreSQL 16 with two disposable databases before this was fixed. The separator
+establishes nothing by itself; what does is that no TIER database may carry it. The guard refuses
+such a `TEST_DATABASE_URL` unless the caller asks for a scratch name on purpose
+(`assert_safe_test_database_url(..., allow_scratch_suffix=True)`), and this module refuses one at the
+other end, so `<tier>__<rest>` can only ever be a scratch database derived from `<tier>`.
 """
 
 from __future__ import annotations
@@ -94,12 +105,17 @@ TEMPLATE_SUFFIX = "tpl"
 #: into one. Provisioning refuses instead of truncating.
 MAX_IDENTIFIER_LENGTH = 63
 
-#: Scratch databases are `<tier database>__<suffix>`. The DOUBLED underscore is what makes the
-#: prefix sweep in `drop_stale_scratch_databases` safe: an ordinary neighbouring slug
-#: (`geov0_test_p017` beside `geov0_test_p017_s1a`) would be matched by a single-underscore prefix,
-#: and the sweep would drop another agent's database.
+#: Scratch databases are `<tier database>__<suffix>`. The doubled underscore keeps an ordinary
+#: neighbouring slug out of the prefix sweep (`geov0_test_p017` beside `geov0_test_p017_s1a`), but
+#: that is only half of what the sweep needs, and taking it for the whole is what let a neighbour's
+#: TIER database be dropped. The other half is the RESERVATION spelled in this module's docstring:
+#: `scripts/validate_test_database_url.py` refuses a tier database name carrying this separator, and
+#: `scratch_database_name` / `drop_stale_scratch_databases` refuse one here.
 SCRATCH_SEPARATOR = "__"
 
+#: A scratch suffix: lowercase letters, digits and underscores, at most 24 characters. The doubled
+#: underscore is excluded separately below, because a suffix carrying one would put a second
+#: separator into the derived name and make it ambiguous again.
 _SUFFIX_RE = re.compile(r"^[a-z0-9][a-z0-9_]{0,23}$")
 
 #: The shape `scripts/validate_test_database_url.py` accepts. Re-checked here before a name is ever
@@ -180,8 +196,27 @@ def scratch_database_name(base_name: str, suffix: str) -> str:
     The tier's database name already carries the task slug, so deriving from it is what keeps two
     agents' scratch databases apart (`AGENTS.md` §7). Truncating at 63 would throw that away: two
     slugs long enough to be cut would land on the same database.
+
+    THE SEPARATOR IS REFUSED IN BOTH HALVES (2026-09-22). A tier name that already carried one could
+    not be told apart from a neighbour's scratch database - `geov0_test_a__b` is either task `a__b`'s
+    own database or task `a`'s scratch `b` - and the stale-database sweep resolved that ambiguity by
+    dropping it. `scripts/validate_test_database_url.py` refuses such a tier URL; refusing it here as
+    well is what makes it one rule rather than a remote assumption about another module.
     """
 
+    if SCRATCH_SEPARATOR in base_name:
+        raise MigratedSchemaError(
+            f"the tier database name {base_name!r} contains {SCRATCH_SEPARATOR!r}, which is reserved "
+            f"as the separator between a tier database and the scratch databases derived from it. A "
+            f"tier name carrying it cannot be told apart from another task's scratch database, and "
+            f"the stale-database sweep would drop it. Use a task slug without a doubled underscore."
+        )
+    if SCRATCH_SEPARATOR in suffix:
+        raise MigratedSchemaError(
+            f"scratch database suffix {suffix!r} contains a doubled underscore, which would put a "
+            f"second separator into the derived name and make it ambiguous in exactly the way a tier "
+            f"name carrying one is."
+        )
     if not _SUFFIX_RE.fullmatch(suffix):
         raise MigratedSchemaError(
             f"scratch database suffix {suffix!r} must be lowercase letters, digits and underscores, "
@@ -230,6 +265,9 @@ def scratch_database_url(base_url: str, suffix: str) -> tuple[str, str]:
             allow_destructive_reset=os.environ.get("GEO_TEST_ALLOW_DB_RESET"),
             repo_root=REPO_ROOT,
             required_backend="postgresql",
+            # The one caller that derives a name carrying the reserved separator, on purpose. Every
+            # other caller - a tier's own TEST_DATABASE_URL - is refused such a name.
+            allow_scratch_suffix=True,
         )
     except UnsafeTestDatabaseError as exc:
         raise MigratedSchemaError(
@@ -413,10 +451,31 @@ async def create_database(connection, name: str, *, template: str | None = None)
 async def drop_stale_scratch_databases(connection, base_name: str) -> list[str]:
     """Drop every `<base_name>__*` database on this server, and return what was dropped.
 
-    This is the answer to "a run died and left its clone standing". The prefix is the tier's own
-    database name, which carries the task slug, so this can only reach databases belonging to this
-    task.
+    This is the answer to "a run died and left its clone standing".
+
+    WHAT MAKES THESE DATABASES THIS TASK'S OWN, said precisely, because the first version of this
+    docstring said something that is not true (2026-09-22, Codex external review of
+    `e2e1380..37fec08`). It said the prefix carries the task slug "so this can only reach databases
+    belonging to this task". The prefix alone establishes nothing: `geov0_test_a__b` is a perfectly
+    good tier database name for the task slug `a__b`, and this sweep, run for the task `a`,
+    terminated its sessions and dropped it. Reproduced on PostgreSQL 16 with two disposable
+    databases before the fix; `AGENTS.md` §7 is precisely what that broke.
+
+    Ownership comes from the separator being RESERVED, not from the prefix:
+    `scripts/validate_test_database_url.py` refuses a tier `TEST_DATABASE_URL` whose database name
+    contains it, so a name shaped `<base_name>__<rest>` cannot be anybody's tier database - it can
+    only be a scratch database this module derived from `base_name`. The refusal below is that same
+    rule at this end: a `base_name` arriving here with the separator in it means the guard was
+    bypassed, and the sweep stops rather than guessing which task owns the neighbours.
     """
+
+    if SCRATCH_SEPARATOR in base_name:
+        raise MigratedSchemaError(
+            f"refusing to sweep from the tier database name {base_name!r}: it contains "
+            f"{SCRATCH_SEPARATOR!r}, which is reserved as the scratch separator. Sweeping "
+            f"{base_name}{SCRATCH_SEPARATOR}* from here could drop the tier database of a task whose "
+            f"slug merely starts with this one's (AGENTS.md §7)."
+        )
 
     rows = await connection.fetch(
         "SELECT datname FROM pg_database "

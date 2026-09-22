@@ -20,6 +20,21 @@ from sqlalchemy.engine import URL, make_url
 _POSTGRES_TEST_DATABASE_RE = re.compile(r"^geov0_test_[A-Za-z0-9_-]+$")
 _TASK_SLUG_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
+#: The separator provisioning puts between a tier database and the scratch databases it derives from
+#: it (``tests/migrated_schema.py::SCRATCH_SEPARATOR``).  IT IS RESERVED, AND THIS IS WHERE THE
+#: RESERVATION IS MADE (2026-09-22, Codex external review of ``e2e1380..37fec08``).  Until then both
+#: ``geov0_test_a`` and ``geov0_test_a__b`` were accepted as tier databases, so ``geov0_test_a__b``
+#: was simultaneously task ``a__b``'s own database and, to the stale-database sweep run for task
+#: ``a``, that task's orphaned scratch database - which it disconnected and dropped.  Reproduced on
+#: PostgreSQL 16 with two disposable databases.  Refusing the ambiguous TIER name here is what makes
+#: ``<tier>__<rest>`` mean exactly one thing, so the sweep cannot reach another agent's run
+#: (``AGENTS.md`` §7).
+_SCRATCH_SEPARATOR = "__"
+
+#: A task slug or a scratch suffix: alphanumeric/dash groups joined by SINGLE underscores.  What it
+#: forbids is the doubled underscore, at either end of the name and in any position.
+_UNDOUBLED_RE = re.compile(r"^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$")
+
 
 class UnsafeTestDatabaseError(ValueError):
     """Raised when a URL is not provably dedicated to tests."""
@@ -72,6 +87,7 @@ def assert_safe_test_database_url(
     allow_destructive_reset: str | None,
     repo_root: Path,
     required_backend: str | None = None,
+    allow_scratch_suffix: bool = False,
 ) -> URL:
     """Validate that a test URL cannot silently target developer data.
 
@@ -80,6 +96,12 @@ def assert_safe_test_database_url(
     requires the destructive-reset opt-in, but the opt-in alone is never enough:
     the database name must match ``geov0_test_*``.  ``required_backend`` lets a
     test tier reject an otherwise safe URL for the wrong database backend.
+
+    ``allow_scratch_suffix`` is for the one caller that DERIVES a name carrying
+    the reserved ``__`` separator - ``tests/migrated_schema.py`` building a
+    template or a clone.  It is off by default so that a tier's own
+    ``TEST_DATABASE_URL`` can never be a name another task's sweep is entitled
+    to drop; see ``_SCRATCH_SEPARATOR`` above for what that cost before.
     """
 
     if required_backend not in (None, "postgresql"):
@@ -113,6 +135,27 @@ def assert_safe_test_database_url(
             "PostgreSQL test DB name must match geov0_test_<task>; "
             "the reset opt-in cannot override this rule."
         )
+
+    task_part, separator, scratch_part = database[len("geov0_test_") :].partition(
+        _SCRATCH_SEPARATOR
+    )
+    if separator and not allow_scratch_suffix:
+        raise UnsafeTestDatabaseError(
+            f"PostgreSQL test DB name {database!r} contains the doubled underscore that "
+            f"provisioning reserves as the separator between a tier database and its scratch "
+            f"databases. It cannot be told apart from scratch database "
+            f"{scratch_part!r} of the tier 'geov0_test_{task_part}', which that tier's run DROPS "
+            f"when it sweeps orphans - so a task slug may not contain '__'."
+        )
+    if not _UNDOUBLED_RE.fullmatch(task_part) or (
+        separator and not _UNDOUBLED_RE.fullmatch(scratch_part)
+    ):
+        raise UnsafeTestDatabaseError(
+            f"PostgreSQL test DB name {database!r} is not geov0_test_<task> with single "
+            f"underscores inside <task>: a leading, trailing or doubled underscore makes it "
+            f"ambiguous with a scratch database of a shorter task slug."
+        )
+
     if allow_destructive_reset != "1":
         raise UnsafeTestDatabaseError(
             "PostgreSQL test schema reset requires GEO_TEST_ALLOW_DB_RESET=1."

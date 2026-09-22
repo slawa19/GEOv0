@@ -31,8 +31,14 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
 
+from scripts.validate_test_database_url import (
+    UnsafeTestDatabaseError,
+    assert_safe_test_database_url,
+)
 from tests.conftest import TEST_DATABASE_URL
 from tests.migrated_schema import (
+    REPO_ROOT,
+    SCRATCH_SEPARATOR,
     assert_may_create_databases,
     cloned_database,
     create_database,
@@ -318,24 +324,54 @@ async def test_the_sweep_takes_this_tasks_orphans_and_leaves_a_neighbours_databa
     no-op that would pass by doing nothing), and a database whose name merely starts with this task's
     name is NOT (otherwise one agent's run deletes another's tier).
 
-    MUTATION that must redden this: change the sweep's separator back to a single underscore. The
-    decoy `..._decoy` is then swept too.
+    AND THE CASE THIS TEST USED TO MISS (2026-09-22, Codex external review of `e2e1380..37fec08`).
+    The decoy was `<base>_decoy`, with a SINGLE underscore - which the prefix `<base>__` cannot match
+    whatever the rest of the module does. The dangerous neighbour is the one with a DOUBLED
+    underscore: `p017fixa__probe` is a valid task slug, its tier database is
+    `geov0_test_p017fixa__probe`, and the sweep for the task `p017fixa` dropped it. Reproduced on
+    PostgreSQL 16 with two disposable databases. What closed it is not a third underscore but the
+    reservation asserted below: no TIER database may carry the separator, so a `<base>__*` name can
+    only be a scratch database of `<base>` - and dropping it is then correct rather than lucky.
+
+    MUTATIONS that must redden this: change the sweep's separator back to a single underscore (the
+    `..._decoy` is then swept too); or let `assert_safe_test_database_url` accept a tier name
+    carrying the separator again (the reservation assertion below then fails, and with it the only
+    reason the doubled-underscore drop is legitimate).
     """
 
     base = _base_name()
     orphan = scratch_database_name(base, "p017orphan")
     decoy = f"{base}_decoy"
+    doubled = f"{base}{SCRATCH_SEPARATOR}p017probe"
+
+    # THE RESERVATION FIRST, because it is what makes the drop below defensible. If a tier could be
+    # named like this, the sweep would be destroying a neighbour's database, not collecting its own
+    # orphan - and no assertion about `dropped` could tell the two apart.
+    with pytest.raises(UnsafeTestDatabaseError, match="doubled underscore"):
+        assert_safe_test_database_url(
+            make_url(_url()).set(database=doubled).render_as_string(hide_password=False),
+            allow_destructive_reset="1",
+            repo_root=REPO_ROOT,
+            required_backend="postgresql",
+        )
 
     connection = await maintenance_connection(_url())
     try:
         await drop_database(connection, orphan)
         await drop_database(connection, decoy)
+        await drop_database(connection, doubled)
         await create_database(connection, orphan)
         await create_database(connection, decoy)
+        await create_database(connection, doubled)
 
         dropped = await drop_stale_scratch_databases(connection, base)
 
         assert orphan in dropped, dropped
+        assert doubled in dropped, (
+            "a `<tier>__<name>` database was left standing. It cannot be a tier database of any "
+            "task - the guard above refuses that name - so it is this task's orphan and the sweep "
+            "has to take it."
+        )
         assert decoy not in dropped, dropped
         assert base not in dropped, "the sweep dropped the tier's own database"
         assert bool(
@@ -352,6 +388,7 @@ async def test_the_sweep_takes_this_tasks_orphans_and_leaves_a_neighbours_databa
     finally:
         try:
             await drop_database(connection, decoy)
+            await drop_database(connection, doubled)
         finally:
             await connection.close()
 
