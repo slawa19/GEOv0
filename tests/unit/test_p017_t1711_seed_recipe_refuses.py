@@ -145,7 +145,15 @@ def test_a_sqlite_file_is_accepted_under_local_run_and_refused_outside_it():
     """`tmp_path` is NOT used as the outside case on purpose: the canonical runner points pytest's
     basetemp at `.local-run/test-runs/<slug>/pytest`, so a temporary directory is INSIDE the very
     tree this guard allows, and the refusal half of this test passed vacuously until it was run.
-    The repository root is the case the rule exists for (`AGENTS.md` §12: no `*.db` there)."""
+    The repository root is the case the rule exists for (`AGENTS.md` §12: no `*.db` there).
+
+    THIS MODULE IS NAMED IN THE ALLOWLIST OF
+    `tests/unit/test_p014_t1406_no_mutable_database_in_the_working_tree.py`, which refuses a sqlite
+    URL built in `tests/**` from a path outside the scratch tree - and finds this one, correctly.
+    The URL here is the SUBJECT of the assertion rather than a location: it is handed to a pure
+    predicate, no engine is opened and no file is created. That is why the name was added to the
+    list instead of the URL being spelled some way the scan does not see, which would have taken
+    the guard down for every future line of this file as well."""
 
     inside = _REPO_ROOT / ".local-run" / "seed-guard-probe" / "probe.db"
     assert_target_is_disposable(make_url(f"sqlite+aiosqlite:///{inside.as_posix()}"))
