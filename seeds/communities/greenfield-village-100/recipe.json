@@ -1,0 +1,445 @@
+{
+  "schema_version": "recipe/1",
+  "community_id": "greenfield-village-100",
+  "title": "GreenField Village: осенняя неделя после урожая",
+  "summary": "Сорок одна операция, написанная руками: урожай уходит через закупку и переработку, домохозяйства берут продукты «на счёт», три платежа идут по цепочке через хабы к производителям, с которыми у плательщика нет линии доверия, часы считаются в HOUR, евровые расчёты кооператива с двумя специалистами показывают третий эквивалент, пятеро участников замораживаются по разным житейским причинам, лавка кооператива почти выбирает лимит на складе, треугольник молочка–кооператив–столовая гасится клирингом, а треугольник пекарня–кооператив–семейная столовая складывается после клиринга и остаётся клирингуемым. Концы названы символическими ref из community.json: настоящие PID появятся только на прогоне.",
+  "commands": [
+    {
+      "id": "greenfield.001.procurement-takes-grain",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "greenfield_procurement_desk",
+      "payee": "anton_petrenko",
+      "amount": "1500.00",
+      "routing": "direct",
+      "why": "Закупка кооператива забирает зерно Антона сразу после обмолота и рассчитывается после продажи — линия доверия Антона к закупке открыта именно под эту отсрочку.",
+      "expect": "Долг «закупка должна Антону» равен 1500.00 UAH. На линии anton_petrenko → greenfield_procurement_desk (лимит 1707.27) остаётся 207.27."
+    },
+    {
+      "id": "greenfield.002.bakery-takes-flour",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "sunnyharvest_bakery",
+      "payee": "kateryna_marchenko",
+      "amount": "1150.00",
+      "routing": "direct",
+      "why": "Пекарня берёт муку на мельнице Катерины под недельную выпечку.",
+      "expect": "Долг «пекарня должна Катерине» равен 1150.00 UAH. На линии kateryna_marchenko → sunnyharvest_bakery (лимит 1293.61) остаётся 143.61."
+    },
+    {
+      "id": "greenfield.003.dairy-takes-fodder",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "meadowdairy_collective",
+      "payee": "anton_petrenko",
+      "amount": "2400.00",
+      "routing": "direct",
+      "why": "Молочка закупает у Антона фураж на зиму. Один производитель — два крупных покупателя: так у зернового хозяйства и складывается положение кредитора.",
+      "expect": "Долг «молочка должна Антону» равен 2400.00 UAH. Антон становится кредитором на 3900.00 UAH суммарно по двум линиям."
+    },
+    {
+      "id": "greenfield.004.butcher-takes-poultry",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "village_butcher_shop",
+      "payee": "iryna_bondar",
+      "amount": "3200.00",
+      "routing": "direct",
+      "why": "Мясная лавка забирает птицу и яйца у Ирины на неделю вперёд.",
+      "expect": "Долг «мясная лавка должна Ирине» равен 3200.00 UAH. На линии iryna_bondar → village_butcher_shop (лимит 3674.90) остаётся 474.90."
+    },
+    {
+      "id": "greenfield.005.market-hall-takes-honey",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "riverside_market_hall",
+      "payee": "dmytro_kovalenko",
+      "amount": "2800.00",
+      "routing": "direct",
+      "why": "Рыночный павильон берёт мёд Дмитрия на осеннюю ярмарку.",
+      "expect": "Долг «павильон должен Дмитрию» равен 2800.00 UAH. На линии dmytro_kovalenko → riverside_market_hall (лимит 3196.53) остаётся 396.53."
+    },
+    {
+      "id": "greenfield.006.tech-steward-takes-seedlings",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "sophia_turner",
+      "payee": "hilltop_greenhouses",
+      "amount": "1800.00",
+      "routing": "direct",
+      "why": "София забирает в теплицах рассаду для общинного сада — последняя партия перед тем, как теплицы уйдут на зимнюю консервацию.",
+      "expect": "Долг «София должна теплицам» равен 1800.00 UAH. На линии hilltop_greenhouses → sophia_turner (лимит 2449.51) остаётся 649.51."
+    },
+    {
+      "id": "greenfield.007.adams-market-week",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "the_adams_family",
+      "payee": "riverside_market_hall",
+      "amount": "620.00",
+      "routing": "open",
+      "why": "Недельная закупка семьи Адамс на рынке — самый обычный платёж села.",
+      "expect": "Платёж COMMITTED, нетто-позиция семьи в UAH падает на 620.00, павильона — растёт на столько же. Маршрут выбирает роутер, рецепт его не утверждает."
+    },
+    {
+      "id": "greenfield.008.foster-butcher-week",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "the_foster_family",
+      "payee": "village_butcher_shop",
+      "amount": "540.00",
+      "routing": "open",
+      "why": "Семья Фостер берёт мясо «на счёт» — та же неделя, другая точка розницы.",
+      "expect": "Платёж COMMITTED, нетто-позиция семьи в UAH падает на 540.00."
+    },
+    {
+      "id": "greenfield.009.davis-coffee-tab",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "the_davis_family",
+      "payee": "morning_coffee_corner",
+      "amount": "310.00",
+      "routing": "open",
+      "why": "Кофейня держит открытые счета постоянным гостям; семья Дэвис набирает свой недельный.",
+      "expect": "Платёж COMMITTED, нетто-позиция семьи в UAH падает на 310.00."
+    },
+    {
+      "id": "greenfield.010.garcia-storefront",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "the_garcia_family",
+      "payee": "cooperative_storefront",
+      "amount": "480.00",
+      "routing": "open",
+      "why": "Лавка кооператива — ближайшая к дому точка для семьи Гарсия.",
+      "expect": "Платёж COMMITTED, нетто-позиция семьи в UAH падает на 480.00."
+    },
+    {
+      "id": "greenfield.011.walker-pharmacy",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "the_walker_family",
+      "payee": "pharmacy_and_health_kiosk",
+      "amount": "400.00",
+      "routing": "open",
+      "why": "Семья Уокер покупает лекарства в киоске здоровья за несколько дней до того, как киоск закроется.",
+      "expect": "Платёж COMMITTED, нетто-позиция семьи в UAH падает на 400.00. Лимит доверия киоска к этой семье — всего 508.38, так что её счёт в аптеке почти выбран; но это маленький лимит, а не сетевое горлышко, и рецепт не утверждает, каким маршрутом прошёл платёж."
+    },
+    {
+      "id": "greenfield.012.quinn-market-week",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "the_quinn_family",
+      "payee": "riverside_market_hall",
+      "amount": "700.00",
+      "routing": "open",
+      "why": "Последняя закупка семьи Куинн перед переездом: долг останется висеть и после того, как их счёт заморозят.",
+      "expect": "Платёж COMMITTED, нетто-позиция семьи в UAH падает на 700.00."
+    },
+    {
+      "id": "greenfield.013.owens-storefront",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "the_owens_family",
+      "payee": "cooperative_storefront",
+      "amount": "560.00",
+      "routing": "open",
+      "why": "Второе домохозяйство за неделю в лавке кооператива — так у розницы и набирается портфель должников.",
+      "expect": "Платёж COMMITTED. Нетто-позиция лавки в UAH выросла за неделю на 1040.00 — на сумму покупок семей Гарсия и Оуэнс; кто именно оказался её прямым должником, зависит от маршрутов, и рецепт этого не утверждает."
+    },
+    {
+      "id": "greenfield.014.evelyn-pays-tutor",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "evelyn_wood",
+      "payee": "lucas_hayes",
+      "amount": "900.00",
+      "routing": "open",
+      "why": "Эвелин платит репетитору за занятия с внуком — последний месяц перед тем, как Лукас уедет учиться сам.",
+      "expect": "Платёж COMMITTED, нетто-позиция Эвелин в UAH падает на 900.00, Лукаса — растёт на 900.00."
+    },
+    {
+      "id": "greenfield.015.coop-settles-operations-lead",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "greenfield_cooperative",
+      "payee": "ryan_cooper",
+      "amount": "900.00",
+      "routing": "direct",
+      "why": "Кооператив рассчитывается с операционным руководителем за последний месяц работы. Расчёт идёт до заморозки его счёта, а не после: агент уходит с должности, и после этого его линиями уже не пользуются.",
+      "expect": "Долг «кооператив должен Райану» равен 900.00 UAH на линии ryan_cooper → greenfield_cooperative (лимит 2954.11); остаётся 2054.11."
+    },
+    {
+      "id": "greenfield.016.adams-pays-herbal-tea-through-market",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "the_adams_family",
+      "payee": "yulia_tkachenko",
+      "amount": "400.00",
+      "routing": "chain",
+      "why": "Семья Адамс заказывает у Юлии травяной чай. Прямой линии доверия между ними нет — Юлия сдаёт товар на рынок, а не торгует с домохозяйствами. Платёж идёт по цепочке через рынок, где у семьи открыт счёт.",
+      "expect": "Платёж COMMITTED по маршруту длиной не меньше двух хопов. Нетто-позиция семьи в UAH падает на 400.00, Юлии — растёт на 400.00, посредник выходит в ноль."
+    },
+    {
+      "id": "greenfield.017.carter-pays-berry-farm-through-dairy",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "the_carter_family",
+      "payee": "oksana_hrytsenko",
+      "amount": "380.00",
+      "routing": "chain",
+      "why": "Ягоды Оксаны уходят на переработку в молочку, а семья Картер берёт их уже в составе продукции. Отдельная линия доверия между ними не нужна: цепочка складывается из тех связей, что есть.",
+      "expect": "Платёж COMMITTED по маршруту длиной не меньше двух хопов. Нетто-позиция семьи падает на 380.00, Оксаны — растёт на 380.00."
+    },
+    {
+      "id": "greenfield.018.baker-pays-plumber-through-bakery",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "the_baker_family",
+      "payee": "liam_carter",
+      "amount": "420.00",
+      "routing": "chain",
+      "why": "Семья Бейкер вызывает сантехника. С Лиамом у неё линии нет, зато есть счёт в пекарне, а Лиам чинил пекарне печное оборудование. Третья цепочка идёт через третий хаб — пекарню, не через рынок и не через молочку.",
+      "expect": "Платёж COMMITTED по маршруту длиной не меньше двух хопов. Нетто-позиция семьи падает на 420.00, Лиама — растёт на 420.00."
+    },
+    {
+      "id": "greenfield.019.baker-pays-electrician-hours",
+      "op": "payment",
+      "equivalent": "HOUR",
+      "payer": "the_baker_family",
+      "payee": "ethan_brooks",
+      "amount": "3.50",
+      "routing": "open",
+      "why": "Итан менял проводку у Бейкеров. Такая работа в селе считается часами: HOUR — отдельная экономика, она не складывается с гривной и не зачитывается против неё.",
+      "expect": "Платёж COMMITTED в HOUR. Нетто-позиция семьи в HOUR равна −3.50, Итана +3.50; на позиции в UAH этот платёж не влияет."
+    },
+    {
+      "id": "greenfield.020.king-pays-childcare-hours",
+      "op": "payment",
+      "equivalent": "HOUR",
+      "payer": "the_king_family",
+      "payee": "mia_foster",
+      "amount": "4.00",
+      "routing": "open",
+      "why": "Мия сидела с детьми Кингов четыре вечера.",
+      "expect": "Платёж COMMITTED в HOUR, нетто-позиция семьи в HOUR равна −4.00."
+    },
+    {
+      "id": "greenfield.021.walker-pays-accountant-hours",
+      "op": "payment",
+      "equivalent": "HOUR",
+      "payer": "the_walker_family",
+      "payee": "grace_collins",
+      "amount": "4.25",
+      "routing": "direct",
+      "why": "Грейс помогала Уокерам с годовой отчётностью. Четыре с четвертью часа: дробная часть в HOUR живёт наравне с целой, точность этого эквивалента — два знака, как у гривны.",
+      "expect": "Долг «семья Уокер должна Грейс» равен 4.25 HOUR, ровно с двумя знаками. На линии grace_collins → the_walker_family (лимит 5.00) остаётся 0.75 — 15 % лимита, заметно, но выше порога узкого места."
+    },
+    {
+      "id": "greenfield.022.coop-pays-trustline-officer-hours",
+      "op": "payment",
+      "equivalent": "HOUR",
+      "payer": "greenfield_cooperative",
+      "payee": "daniel_stone",
+      "amount": "3.00",
+      "routing": "direct",
+      "why": "Даниэль вёл приём заявок на линии доверия. Часы платит организация, а не сосед — таймбанк села устроен не только горизонтально.",
+      "expect": "Долг «кооператив должен Даниэлю» равен 3.00 HOUR. На линии daniel_stone → greenfield_cooperative (лимит 5.00) остаётся 2.00."
+    },
+    {
+      "id": "greenfield.023.builder-pays-care-visits-through-household",
+      "op": "payment",
+      "equivalent": "HOUR",
+      "payer": "alex_turner",
+      "payee": "evelyn_wood",
+      "amount": "3.00",
+      "routing": "chain",
+      "why": "Алекс расплачивается с Эвелин за уход за своей матерью. Линии доверия между ними нет, зато у обоих открыты часы с семьёй Адамс — Алекс строил им сарай, Эвелин навещает их старших. Цепочка в HOUR работает ровно так же, как в UAH.",
+      "expect": "Платёж COMMITTED по маршруту длиной не меньше двух хопов в HOUR. Нетто-позиция Алекса в HOUR равна −3.00, Эвелин +3.00, у посредника не меняется."
+    },
+    {
+      "id": "greenfield.024.it-support-buys-equipment-eur",
+      "op": "payment",
+      "equivalent": "EUR",
+      "payer": "mason_wright",
+      "payee": "greenfield_cooperative",
+      "amount": "420.00",
+      "routing": "open",
+      "why": "Мейсон берёт через кооператив сетевое оборудование у внешнего поставщика — тот выставляет счёт в евро, поэтому и расчёт внутри села идёт в EUR. Весь евровый подграф — четыре линии между кооперативом и двумя специалистами, и другого пути от Мейсона просто нет: маршрут здесь задаёт топология, а не constraints, поэтому max_hops не ставится.",
+      "expect": "Долг «Мейсон должен кооперативу» равен 420.00 EUR. Эквивалент EUR перестаёт быть пустым — этого требует приёмка «активность в каждом эквиваленте»."
+    },
+    {
+      "id": "greenfield.025.coop-pays-translator-eur",
+      "op": "payment",
+      "equivalent": "EUR",
+      "payer": "greenfield_cooperative",
+      "payee": "sophia_kim",
+      "amount": "380.00",
+      "routing": "open",
+      "why": "София переводила кооперативу документы по внешнему гранту, и гонорар считается в той же валюте, что и грант. Второй участник в EUR — чтобы евровый оборот не выглядел одной парой.",
+      "expect": "Долг «кооператив должен Софии» равен 380.00 EUR. Встречного долга с Мейсоном он не гасит: это другая пара участников, а зачёт встречных долгов работает только внутри одной пары."
+    },
+    {
+      "id": "greenfield.026.freeze-greenhouses",
+      "op": "freeze",
+      "participant": "hilltop_greenhouses",
+      "why": "Теплицы уходят на зимнюю консервацию — до весны в них никто не работает. Описание объявляет их frozen; состояние в базе создаёт эта операция, и стоит она после того, как София успела забрать рассаду.",
+      "expect": "Участник получает в базе статус suspended через admin.participants.freeze (app/api/v1/admin.py:977-992). Долг Софии в 1800.00 UAH остаётся: замораживается участник, а не обязательство."
+    },
+    {
+      "id": "greenfield.027.freeze-pharmacy-kiosk",
+      "op": "freeze",
+      "participant": "pharmacy_and_health_kiosk",
+      "why": "Киоск здоровья закрывается: фармацевт уезжает, замены пока нет.",
+      "expect": "Статус suspended. Долг семьи Уокер в 400.00 UAH остаётся висеть на замороженном участнике."
+    },
+    {
+      "id": "greenfield.028.freeze-tutor",
+      "op": "freeze",
+      "participant": "lucas_hayes",
+      "why": "Лукас уезжает учиться и закрывает практику до лета.",
+      "expect": "Статус suspended. Долг Эвелин в 900.00 UAH остаётся."
+    },
+    {
+      "id": "greenfield.029.freeze-quinn-family",
+      "op": "freeze",
+      "participant": "the_quinn_family",
+      "why": "Семья Куинн уезжает из села. Их счёт замораживают, а незакрытый долг рынку остаётся предметом разбирательства — именно такой случай и нужно уметь показать на экране.",
+      "expect": "Статус suspended. Долг рынку в 700.00 UAH остаётся в базе."
+    },
+    {
+      "id": "greenfield.030.freeze-operations-lead",
+      "op": "freeze",
+      "participant": "ryan_cooper",
+      "why": "Райан уходит с должности операционного руководителя; расчёт с ним уже произведён командой greenfield.015, поэтому заморозка ничего не обрывает на полпути.",
+      "expect": "Статус suspended. Пятый и последний замороженный участник сообщества — ровно столько их объявлено в описании."
+    },
+    {
+      "id": "greenfield.031.storefront-restock-monday",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "cooperative_storefront",
+      "payee": "greenfield_warehouse",
+      "amount": "520.00",
+      "routing": "direct",
+      "why": "Первая из трёх выборок со склада перед осенней ярмаркой. У лавки кооператива самый маленький складской лимит из всей розницы (1529.95), и три обычные выборки его почти исчерпывают.",
+      "expect": "Долг «лавка должна складу» равен 520.00 UAH; на линии greenfield_warehouse → cooperative_storefront остаётся 1009.95."
+    },
+    {
+      "id": "greenfield.032.storefront-restock-thursday",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "cooperative_storefront",
+      "payee": "greenfield_warehouse",
+      "amount": "480.00",
+      "routing": "direct",
+      "why": "Вторая выборка — под четверговый завоз в лавку.",
+      "expect": "Долг «лавка должна складу» равен 1000.00 UAH; остаётся 529.95 — около 35 % лимита."
+    },
+    {
+      "id": "greenfield.033.storefront-restock-fair",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "cooperative_storefront",
+      "payee": "greenfield_warehouse",
+      "amount": "430.00",
+      "routing": "direct",
+      "why": "Третья выборка — под саму ярмарку. После неё лавка упирается в складской лимит: следующая партия не пройдёт, пока она не рассчитается. Все три команды идут с max_hops=1 именно поэтому: без ограничения роутер вправе провести выборку в обход через кооператив, и задуманное ребро не набралось бы.",
+      "expect": "Долг «лавка должна складу» равен 1430.00 UAH. На линии greenfield_warehouse → cooperative_storefront остаётся 99.95 из 1529.95 — 6.53 % лимита, ниже порога 10 %. Это единственное такое ребро в сообществе, и оно попадает в админский экран узких мест."
+    },
+    {
+      "id": "greenfield.034.dairy-buys-coop-supplies",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "meadowdairy_collective",
+      "payee": "greenfield_cooperative",
+      "amount": "3200.00",
+      "routing": "direct",
+      "why": "Первое ребро недельного треугольника: молочка берёт в кооперативе тару, закваску и корма «на счёт». max_hops=1 здесь обязателен — рецепту нужен долг именно на этой линии, а не эквивалентный результат окольным путём.",
+      "expect": "Долг «молочка должна кооперативу» равен 3200.00 UAH на линии greenfield_cooperative → meadowdairy_collective (лимит 10298.82)."
+    },
+    {
+      "id": "greenfield.035.cafeteria-takes-dairy",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "school_cafeteria",
+      "payee": "meadowdairy_collective",
+      "amount": "2450.00",
+      "routing": "direct",
+      "why": "Второе ребро: школьная столовая берёт молоко и сыр на месяц вперёд. Это самое маленькое из трёх обязательств — оно и определит сумму взаимозачёта.",
+      "expect": "Долг «столовая должна молочке» равен 2450.00 UAH на линии meadowdairy_collective → school_cafeteria (лимит 5434.39)."
+    },
+    {
+      "id": "greenfield.036.coop-feeds-harvest-crews",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "greenfield_cooperative",
+      "payee": "school_cafeteria",
+      "amount": "4100.00",
+      "routing": "direct",
+      "why": "Третье ребро замыкает круг: кооператив кормит в школьной столовой бригады на уборке урожая. Денег никто никому не переводил — а круг долгов уже есть.",
+      "expect": "Долг «кооператив должен столовой» равен 4100.00 UAH на линии school_cafeteria → greenfield_cooperative (лимит 7520.58). Цикл долгов замкнулся: молочка → кооператив → столовая → молочка."
+    },
+    {
+      "id": "greenfield.037.clear-dairy-coop-cafeteria",
+      "op": "clearing",
+      "equivalent": "UAH",
+      "cycle": [
+        "meadowdairy_collective",
+        "greenfield_cooperative",
+        "school_cafeteria"
+      ],
+      "amount": "2450.00",
+      "mode": "execute",
+      "why": "Трое должны по кругу, и часть долга гасится взаимозачётом, не двигая ни одной гривны. Цикл назван поимённо, а не отдан auto_clear: auto_clear гасит все циклы эквивалента подряд, и итоговое состояние перестало бы быть детерминированным.",
+      "expect": "Исполняется ровно один клиринг на 2450.00 UAH — минимум из трёх обязательств. После него долг «столовая должна молочке» исчезает (0.00), «молочка должна кооперативу» становится 750.00, «кооператив должен столовой» — 1650.00. Суммарный долг в UAH падает на 7350.00 (2450.00 на каждом из трёх рёбер), а нетто-позиция каждого из троих не меняется ни на копейку — это инвариант нейтральности клиринга."
+    },
+    {
+      "id": "greenfield.038.bakery-buys-coop-flour-stock",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "sunnyharvest_bakery",
+      "payee": "greenfield_cooperative",
+      "amount": "2800.00",
+      "routing": "direct",
+      "why": "Неделя пошла по второму кругу: пекарня берёт в кооперативе сахар, дрожжи и упаковку. Первое ребро нового треугольника — и строится оно уже после того, как клиринг отработал.",
+      "expect": "Долг «пекарня должна кооперативу» равен 2800.00 UAH на линии greenfield_cooperative → sunnyharvest_bakery (лимит 10668.62)."
+    },
+    {
+      "id": "greenfield.039.canteen-takes-bread",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "family_canteen",
+      "payee": "sunnyharvest_bakery",
+      "amount": "3600.00",
+      "routing": "direct",
+      "why": "Семейная столовая берёт хлеб у пекарни на месяц вперёд.",
+      "expect": "Долг «столовая должна пекарне» равен 3600.00 UAH на линии sunnyharvest_bakery → family_canteen (лимит 9119.72)."
+    },
+    {
+      "id": "greenfield.040.coop-books-canteen-lunches",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "greenfield_cooperative",
+      "payee": "family_canteen",
+      "amount": "2150.00",
+      "routing": "direct",
+      "why": "Кооператив оплачивает в семейной столовой обеды для приезжих бригад. Круг замыкается: пекарня → кооператив → столовая → пекарня.",
+      "expect": "Долг «кооператив должен столовой» равен 2150.00 UAH на линии family_canteen → greenfield_cooperative (лимит 4001.82). Новый цикл долгов замкнут."
+    },
+    {
+      "id": "greenfield.041.surviving-cycle-stays-clearable",
+      "op": "clearing",
+      "equivalent": "UAH",
+      "cycle": [
+        "sunnyharvest_bakery",
+        "greenfield_cooperative",
+        "family_canteen"
+      ],
+      "amount": "2150.00",
+      "mode": "assert_clearable",
+      "why": "Последняя команда рецепта ничего не исполняет. Она утверждает, что цикл существует и годен к клирингу — и переживёт прогон, потому что построен после единственной исполняющей команды клиринга. Админка должна показывать одновременно и результат отработавшего клиринга, и то, что ещё осталось погасить.",
+      "expect": "find_cycles по UAH возвращает этот цикл; сумма к погашению — 2150.00 (минимум из 2800.00, 2150.00 и 3600.00). Клиринг по нему НЕ исполняется: все три долга остаются в базе в полном размере."
+    }
+  ]
+}
