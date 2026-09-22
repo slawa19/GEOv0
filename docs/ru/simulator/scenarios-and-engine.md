@@ -408,7 +408,8 @@ flowchart TD
   C -->|sync copy| D[Admin UI public fixtures\n admin-ui/public/admin-fixtures/v1]
   D -->|npm run validate:fixtures| Dv[Validation\n admin-ui/scripts/validate-fixtures.mjs]
 
-  C -->|mapping rules| E[Simulator seed-scenarios generator\n scripts/generate_simulator_seed_scenarios.py]
+  B -->|structure extracted once| CD[Community description\n seeds/communities/*/community.json]
+  CD -->|structure| E[Simulator seed-scenarios generator\n scripts/generate_simulator_seed_scenarios.py]
   E -->|write| F[Seed scenarios\n fixtures/simulator/*/scenario.json]
   F -->|schema validation| Fs[scenario.schema.json]
 

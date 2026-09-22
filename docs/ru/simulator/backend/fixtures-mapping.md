@@ -18,10 +18,13 @@
 Контракт выхода:
 - `fixtures/simulator/scenario.schema.json`
 
-Seed-логика и «семантика ролей» (для групп/профилей):
+Структура сообщества (участники, группы, линии, эквиваленты) — **`seeds/communities/<id>/community.json`** (с 2026-09-21, `T1712`): генератор seed-сценариев читает описание, а не импортирует seed-генераторы. Поведение (профили, веса, модели сумм) остаётся в самом генераторе.
+
+Замысел и «семантика ролей»:
 - `docs/ru/seeds/seed-greenfield-village-100.md`
-- `admin-fixtures/tools/generate_seed_greenfield_village_100.py`
-- `admin-fixtures/tools/generate_seed_riverside_town_50.py`
+- `docs/ru/seeds/README.md`
+
+**Исторически** структура жила в генераторах `admin-fixtures/tools/generate_seed_greenfield_village_100.py` и `generate_seed_riverside_town_50.py`; они пока существуют и по-прежнему собирают канонические admin-фикстуры, но входом сценария больше не являются.
 
 ---
 
@@ -107,9 +110,9 @@ TrustLine direction фиксирована:
 - добавить “business-intermediate backbone”: UAH trustlines `anchors/retail (business) → services/producers/agents (person)`.
   - такие ребра дают маршрутам intermediates, потому что у business-кредитора обычно `policy.can_be_intermediate=true`.
 
-Реализация находится в seed v2 генераторах:
-- `admin-fixtures/tools/generate_seed_greenfield_village_100_v2.py`
-- `admin-fixtures/tools/generate_seed_riverside_town_50_v2.py`
+Результат этой логики **перенесён в описание** (`seeds/communities/<id>/community.json`, `T1712`), откуда его и читает генератор сценариев. Исходная реализация — `admin-fixtures/tools/generate_seed_greenfield_village_100_v2.py` и `generate_seed_riverside_town_50_v2.py`.
+
+**Правило посредничества измерено 2026-09-21 и оказалось шире, чем описывалось раньше:** `can_be_intermediate` решает **кредитор один** (`bool(from_is_business)`), а не пара «business ↔ business». В Greenfield это 147 линий `business → person` против 48 `business ↔ business`; в Riverside 63 против 18.
 
 ---
 
@@ -120,7 +123,10 @@ TrustLine direction фиксирована:
 - Для «seed-сценариев» (greenfield-village-100, riverside-town-50) **рекомендуется** добавлять: это фиксирует роли и делает поведение runner воспроизводимым.
 
 ### 3.2 groupId для seed GreenField Village (100)
-Опираемся на seed-спеку и детерминированную нумерацию PID в генераторе.
+
+**С 2026-09-21 (`T1712`) группа участника задана явно** — поле `participants[].group` в `seeds/communities/greenfield-village-100/community.json`, проверяемое против объявленного списка групп. Выводить её из формы PID больше не нужно и не следует: это ровно тот случай из `AGENTS.md` §9, когда смысл восстанавливают из формы вместо того, чтобы взять его из источника.
+
+Ниже — **историческое** описание прежнего вывода, сохранённое для чтения старых артефактов.
 
 Как получить индекс `idx` из PID:
 - PID имеет формат `PID_U<NNNN>_<hash>`
