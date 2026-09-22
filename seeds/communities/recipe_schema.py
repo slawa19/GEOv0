@@ -45,7 +45,10 @@ Three operations, because the seed needs exactly three:
   rather than in the loader.
 
 * ``clearing`` — a cycle of debts, named by its participants in debtor ->
-  creditor order. ``mode: "execute"`` runs it; ``mode: "assert_clearable"``
+  creditor order, which is the order `docs/ru/02-protocol-spec.md:1127-1128`
+  uses. The cycle is closed implicitly: the last participant owes the first,
+  and the first is **not** repeated at the end. ``mode: "execute"`` runs it;
+  ``mode: "assert_clearable"``
   asserts the cycle is there and clearable without running it, which is how a
   recipe leaves a *surviving* cycle behind for the admin screens to show.
 
