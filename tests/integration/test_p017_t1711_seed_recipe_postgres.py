@@ -1,9 +1,14 @@
 """The recipe seed on PostgreSQL: it runs, its acceptance passes, and the acceptance can FAIL.
 
-Programme 017, `T1711`. Two halves, and the second is the one that makes the first mean anything:
+Programme 017, `T1711`. Three groups, and the last is the one that makes the first mean anything:
 
 * the control - the Riverside recipe runs end to end on a freshly migrated database and every
   acceptance check passes; a second run of the same command is REFUSED rather than replayed;
+* the paths where it must NOT finish - a description declaring a state no operation reaches
+  (`greenfield-village-100`) is refused before the first write; a command that its validator accepts
+  but a database cannot perform stops the run and names itself, leaving what came before it in
+  place; an absent database and an empty one are named refusals rather than tracebacks or green
+  verdicts;
 * the counter-checks - for each of the seven acceptance checks, the database is doctored in the one
   way that check exists to notice, the check is re-run and must FAIL, and the doctoring is undone
   and the check must pass again (`AGENTS.md` §9, anti-vacuum). A check that stayed green through
