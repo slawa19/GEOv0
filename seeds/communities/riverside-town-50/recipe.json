@@ -1,0 +1,413 @@
+{
+  "schema_version": "recipe/1",
+  "community_id": "riverside-town-50",
+  "title": "Riverside Town: неделя приречного городка",
+  "summary": "Тридцать семь операций, написанных руками: улов приходит на берег, домохозяйства берут рыбу и продукты «на счёт», часть платежей идёт по цепочке через торговые точки, таймбанк считает часы, сезонный счёт гида в евро закрывается вместе с самим гидом, аптека закрывается с висящими долгами, у рыбного магазина почти кончается лимит на рынке, недельный треугольник рынок–рыбак–кооператив гасится клирингом, а после клиринга складывается новый треугольник, который клиринг уже не трогает. Рецепт называет концы символическими ref из community.json: настоящие PID появятся только на прогоне.",
+  "commands": [
+    {
+      "id": "riverside.001.market-takes-ivan-catch",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "fish_market_and_cold_storage",
+      "payee": "ivan_kozak",
+      "amount": "1180.00",
+      "routing": "direct",
+      "why": "Утренний улов Ивана уходит на рынок под холодильник. Рынок продаёт рыбу всю неделю и рассчитывается по её итогам, поэтому берёт улов в долг — линия доверия Ивана к рынку открыта ровно для этого.",
+      "expect": "Долг «рынок должен Ивану» в UAH равен 1180.00. На линии ivan_kozak → fish_market_and_cold_storage (лимит 1495.10) остаётся 315.10 свободной ёмкости."
+    },
+    {
+      "id": "riverside.002.smokehouse-takes-ivan-fish",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "nadia_morska",
+      "payee": "ivan_kozak",
+      "amount": "600.00",
+      "routing": "direct",
+      "why": "Надя коптит часть улова Ивана: сырьё забирает сегодня, деньги отдаёт после продажи готовой рыбы.",
+      "expect": "Долг «Надя должна Ивану» равен 600.00 UAH. На линии ivan_kozak → nadia_morska (лимит 727.27) остаётся 127.27."
+    },
+    {
+      "id": "riverside.003.market-takes-smoked-fish",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "fish_market_and_cold_storage",
+      "payee": "nadia_morska",
+      "amount": "1400.00",
+      "routing": "direct",
+      "why": "Копчёная рыба Нади едет на витрину рынка. Переработка получает деньги позже, чем отдаёт товар, — это второе звено той же цепочки поставки.",
+      "expect": "Долг «рынок должен Наде» равен 1400.00 UAH. На линии nadia_morska → fish_market_and_cold_storage (лимит 2341.96) остаётся 941.96. У рынка теперь два кредитора-производителя."
+    },
+    {
+      "id": "riverside.004.coop-rents-port-space",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "riverside_fishing_co_operative",
+      "payee": "river_port_warehouses",
+      "amount": "2400.00",
+      "routing": "direct",
+      "why": "Кооператив держит общий улов в портовых складах и платит за аренду по итогам месяца, а не вперёд.",
+      "expect": "Долг «кооператив должен порту» равен 2400.00 UAH. На линии river_port_warehouses → riverside_fishing_co_operative (лимит 3014.08) остаётся 614.08."
+    },
+    {
+      "id": "riverside.005.counter-takes-petro-catch",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "cooperative_fish_counter",
+      "payee": "petro_rybka",
+      "amount": "1500.00",
+      "routing": "direct",
+      "why": "Кооперативный прилавок берёт улов Петра на реализацию: продаёт в розницу и рассчитывается с рыбаком после выходных.",
+      "expect": "Долг «прилавок должен Петру» равен 1500.00 UAH. На линии petro_rybka → cooperative_fish_counter (лимит 1920.79) остаётся 420.79."
+    },
+    {
+      "id": "riverside.006.berehovy-weekly-fish",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "the_berehovy_family",
+      "payee": "fresh_catch_fish_shop",
+      "amount": "480.00",
+      "routing": "open",
+      "why": "Обычная недельная покупка рыбы «запишите на мой счёт» в магазине у дома — самый частый платёж городка.",
+      "expect": "Платёж COMMITTED. Нетто-позиция семьи в UAH уменьшается на 480.00, магазина — увеличивается на столько же. Маршрут выбирает роутер, и рецепт его не утверждает."
+    },
+    {
+      "id": "riverside.007.moriak-weekly-groceries",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "the_moriak_family",
+      "payee": "town_grocery",
+      "amount": "620.00",
+      "routing": "open",
+      "why": "Недельная бакалея семьи Моряк: крупа, масло, хлеб — всё на общий счёт в магазине.",
+      "expect": "Платёж COMMITTED, нетто-позиция семьи в UAH падает на 620.00. Бакалея становится кредитором второго домохозяйства подряд — это её обычная роль."
+    },
+    {
+      "id": "riverside.008.richkovi-restaurant-dinner",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "the_richkovi_family",
+      "payee": "river_view_restaurant",
+      "amount": "350.00",
+      "routing": "open",
+      "why": "Семья Речковых отмечает день рождения в ресторане на набережной и просит записать вечер на счёт.",
+      "expect": "Платёж COMMITTED, нетто-позиция семьи в UAH падает на 350.00, ресторана — растёт на 350.00."
+    },
+    {
+      "id": "riverside.009.dnipro-cafe-tab",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "the_dnipro_family",
+      "payee": "marina_caf",
+      "amount": "410.00",
+      "routing": "open",
+      "why": "Кафе на марине держит открытые счета для постоянных посетителей; семья Днипро набирает свой недельный.",
+      "expect": "Платёж COMMITTED, нетто-позиция семьи в UAH падает на 410.00."
+    },
+    {
+      "id": "riverside.010.zatoka-fish-shop",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "the_zatoka_family",
+      "payee": "fresh_catch_fish_shop",
+      "amount": "300.00",
+      "routing": "open",
+      "why": "У семьи Затока в рыбном магазине самый маленький лимит доверия из всех домохозяйств (405.68), и покупка занимает почти весь — так выглядит новая семья в сети, а не авария.",
+      "expect": "Платёж COMMITTED. На линии fresh_catch_fish_shop → the_zatoka_family остаётся 105.68 — около четверти лимита: заметно, но выше порога узкого места."
+    },
+    {
+      "id": "riverside.011.khvylia-grocery",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "the_khvylia_family",
+      "payee": "town_grocery",
+      "amount": "540.00",
+      "routing": "open",
+      "why": "Третье домохозяйство за неделю закупается в бакалее: так у розницы и набирается портфель мелких должников.",
+      "expect": "Платёж COMMITTED. У town_grocery три домохозяйства-должника в UAH, суммарно на 1160.00."
+    },
+    {
+      "id": "riverside.012.moriak-pays-smokehouse-through-retail",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "the_moriak_family",
+      "payee": "nadia_morska",
+      "amount": "300.00",
+      "routing": "chain",
+      "why": "Семья Моряк заказывает у коптильни рыбу к празднику. Прямой линии доверия между семьёй и Надей нет и быть не должно — Надя не торгует в розницу. Платёж проходит по цепочке: у семьи открыт счёт в торговой точке, а торговая точка закупается у коптильни. Ради этого протокол и существует.",
+      "expect": "Платёж COMMITTED по маршруту длиной не меньше двух хопов. Нетто-позиция семьи в UAH падает на 300.00, Нади — растёт на 300.00, у посредника не меняется. Через кого именно прошёл платёж — выбор роутера: у семьи открыт счёт и в рыбном магазине, и в кафе, и обе точки закупаются у Нади."
+    },
+    {
+      "id": "riverside.013.dnipro-pays-mussels-through-retail",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "the_dnipro_family",
+      "payee": "liudmyla_ozerna",
+      "amount": "260.00",
+      "routing": "chain",
+      "why": "Мидии Людмилы попадают в город только через прилавок бакалеи; напрямую семья Днипро у неё не покупает и линии доверия с ней не имеет.",
+      "expect": "Платёж COMMITTED по маршруту длиной не меньше двух хопов. Нетто-позиция семьи падает на 260.00, Людмилы — растёт на 260.00, посредник выходит в ноль."
+    },
+    {
+      "id": "riverside.014.pryliv-pays-water-plants-through-cafe",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "the_pryliv_family",
+      "payee": "olha_vodiana",
+      "amount": "280.00",
+      "routing": "chain",
+      "why": "Семья Прылив берёт у Ольги водные растения для пруда. Ольга поставляет зелень кафе на марине, а у семьи там открыт счёт — цепочка складывается сама, отдельная линия доверия не нужна.",
+      "expect": "Платёж COMMITTED по маршруту длиной не меньше двух хопов. Нетто-позиция семьи падает на 280.00, Ольги — растёт на 280.00."
+    },
+    {
+      "id": "riverside.015.ivan-pays-net-repair-in-hours",
+      "op": "payment",
+      "equivalent": "HOUR",
+      "payer": "ivan_kozak",
+      "payee": "natalia_seti",
+      "amount": "6.00",
+      "routing": "open",
+      "why": "Наталья перебрала Ивану сети. В таймбанке городка такая работа считается часами, а не гривнами, и это отдельная экономика: HOUR и UAH не складываются и не зачитываются друг против друга.",
+      "expect": "Платёж COMMITTED в HOUR. Нетто-позиция Ивана в HOUR равна −6.00, Натальи +6.00; позиций в UAH этот платёж не касается вовсе."
+    },
+    {
+      "id": "riverside.016.petro-pays-engine-service-in-hours",
+      "op": "payment",
+      "equivalent": "HOUR",
+      "payer": "petro_rybka",
+      "payee": "roman_motornyi",
+      "amount": "8.00",
+      "routing": "open",
+      "why": "Роман перебрал двигатель на лодке Петра — восемь часов работы, записанных в таймбанк.",
+      "expect": "Платёж COMMITTED в HOUR, нетто-позиция Петра в HOUR равна −8.00."
+    },
+    {
+      "id": "riverside.017.berehovy-pays-nurse-hours",
+      "op": "payment",
+      "equivalent": "HOUR",
+      "payer": "the_berehovy_family",
+      "payee": "svitlana_medyk",
+      "amount": "4.00",
+      "routing": "direct",
+      "why": "Светлана ходит к старшим Береговым делать уколы. Рецепт фиксирует именно это ребро: часы медсестры — самая понятная строка таймбанка на экране.",
+      "expect": "Долг «семья Береговых должна Светлане» равен 4.00 HOUR. На линии svitlana_medyk → the_berehovy_family (лимит 9.00) остаётся 5.00."
+    },
+    {
+      "id": "riverside.018.rybchenko-pays-catering-hours",
+      "op": "payment",
+      "equivalent": "HOUR",
+      "payer": "the_rybchenko_family",
+      "payee": "olena_kuhnia",
+      "amount": "5.50",
+      "routing": "direct",
+      "why": "Олена готовила на семейном празднике Рыбченко. Пять с половиной часов — проверка того, что дробная часть в HOUR живёт наравне с целой: точность этого эквивалента такая же, как у гривны, два знака.",
+      "expect": "Долг «семья Рыбченко должна Олене» равен 5.50 HOUR, ровно с двумя знаками. На линии olena_kuhnia → the_rybchenko_family (лимит 9.00) остаётся 3.50."
+    },
+    {
+      "id": "riverside.019.market-pays-ice-supply-hours",
+      "op": "payment",
+      "equivalent": "HOUR",
+      "payer": "fish_market_and_cold_storage",
+      "payee": "dmytro_kholodny",
+      "amount": "7.00",
+      "routing": "direct",
+      "why": "Дмитрий обслуживал льдогенератор рынка. Часы платит не человек, а организация — таймбанк не только про соседей.",
+      "expect": "Долг «рынок должен Дмитрию» равен 7.00 HOUR. На линии dmytro_kholodny → fish_market_and_cold_storage (лимит 9.00) остаётся 2.00."
+    },
+    {
+      "id": "riverside.020.neighbours-settle-hours-through-centre",
+      "op": "payment",
+      "equivalent": "HOUR",
+      "payer": "the_berehovy_family",
+      "payee": "the_richkovi_family",
+      "amount": "3.00",
+      "routing": "chain",
+      "why": "Две соседские семьи не открывали линию доверия друг к другу — и не обязаны. Часы между ними проходят через общинный центр, у которого таймбанк открыт с обеими. Цепочка работает в HOUR так же, как в UAH.",
+      "expect": "Платёж COMMITTED по маршруту длиной не меньше двух хопов в HOUR. Нетто-позиция Береговых в HOUR падает ещё на 3.00, Речковых — растёт на 3.00."
+    },
+    {
+      "id": "riverside.021.guide-pays-season-charters-eur",
+      "op": "payment",
+      "equivalent": "EUR",
+      "payer": "anna_turystka",
+      "payee": "riverside_fishing_co_operative",
+      "amount": "160.00",
+      "routing": "open",
+      "why": "Анна возит туристов на лодках кооператива и рассчитывается за сезон в евро, потому что в евро ей платят сами туристы. Это весь евровый оборот городка: в описании объявлены ровно две линии EUR, обе между Анной и кооперативом, так что ограничивать маршрут нечем и незачем — его задаёт топология, а не constraints.",
+      "expect": "Долг «Анна должна кооперативу» равен 160.00 EUR. Эквивалент EUR перестаёт быть пустым — этого и требует приёмка «активность в каждом эквиваленте»."
+    },
+    {
+      "id": "riverside.022.coop-pays-guide-commission-eur",
+      "op": "payment",
+      "equivalent": "EUR",
+      "payer": "riverside_fishing_co_operative",
+      "payee": "anna_turystka",
+      "amount": "110.00",
+      "routing": "open",
+      "why": "Кооператив возвращает Анне комиссию за приведённых клиентов. Встречный платёж по той же паре — самый наглядный способ показать, что движок не заводит второй долг навстречу первому.",
+      "expect": "Встречного долга не появляется: платёж сначала гасит уже существующий (app/core/payments/engine.py:1795-1805). Остаётся один долг «Анна должна кооперативу» — 50.00 EUR."
+    },
+    {
+      "id": "riverside.023.freeze-tourism-guide",
+      "op": "freeze",
+      "participant": "anna_turystka",
+      "why": "Сезон закончился, Анна уезжает до весны и просит заморозить счёт. Описание уже объявляет её frozen — но статус в описании это намерение, а состояние в базе создаёт операция, и у операции есть момент: заморозка идёт после евровых расчётов, а не до, иначе показывать было бы нечего.",
+      "expect": "Участник получает в базе статус suspended через admin.participants.freeze (app/api/v1/admin.py:977-992; UI-словарь называет это состояние frozen, app/api/v1/admin.py:135-152). Долг в 50.00 EUR никуда не девается: замораживается участник, а не обязательство."
+    },
+    {
+      "id": "riverside.024.pharmacy-last-restock",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "riverside_pharmacy",
+      "payee": "riverside_fishing_co_operative",
+      "amount": "1500.00",
+      "routing": "direct",
+      "why": "Последняя закупка аптеки перед закрытием: товар она берёт через общую закупку кооператива и рассчитаться уже не успеет.",
+      "expect": "Долг «аптека должна кооперативу» равен 1500.00 UAH. На линии riverside_fishing_co_operative → riverside_pharmacy (лимит 5102.31) остаётся 3602.31."
+    },
+    {
+      "id": "riverside.025.rybchenko-buys-medicine",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "the_rybchenko_family",
+      "payee": "riverside_pharmacy",
+      "amount": "620.00",
+      "routing": "direct",
+      "why": "Семья Рыбченко успевает купить лекарства «на счёт» за день до закрытия аптеки.",
+      "expect": "Долг «семья Рыбченко должна аптеке» равен 620.00 UAH. На линии riverside_pharmacy → the_rybchenko_family (лимит 1328.20) остаётся 708.20."
+    },
+    {
+      "id": "riverside.026.freeze-pharmacy",
+      "op": "freeze",
+      "participant": "riverside_pharmacy",
+      "why": "Провизор уходит, аптека закрывается до нового арендатора. Замораживать её надо именно после обеих команд выше: иначе на экране будет пустой замороженный узел, а нужен замороженный узел с висящими обязательствами по обе стороны.",
+      "expect": "Участник получает статус suspended. Оба обязательства остаются в базе: аптека должна кооперативу 1500.00 UAH, семья Рыбченко должна аптеке 620.00 UAH. Заморозка участника не гасит и не прячет долги."
+    },
+    {
+      "id": "riverside.027.shop-restock-monday",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "fresh_catch_fish_shop",
+      "payee": "fish_market_and_cold_storage",
+      "amount": "1800.00",
+      "routing": "direct",
+      "why": "Первая из трёх закупок недели. Рыбный магазин берёт товар на рынке под свой лимит доверия — и за неделю почти его выбирает. Горлышко в такой сети возникает не от аварии, а от обычной торговли.",
+      "expect": "Долг «магазин должен рынку» равен 1800.00 UAH; на линии fish_market_and_cold_storage → fresh_catch_fish_shop (лимит 6625.80) остаётся 4825.80."
+    },
+    {
+      "id": "riverside.028.shop-restock-thursday",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "fresh_catch_fish_shop",
+      "payee": "fish_market_and_cold_storage",
+      "amount": "2100.00",
+      "routing": "direct",
+      "why": "Вторая закупка недели, под четверговый завоз.",
+      "expect": "Долг «магазин должен рынку» равен 3900.00 UAH; на той же линии остаётся 2725.80 — примерно 41 % лимита."
+    },
+    {
+      "id": "riverside.029.shop-restock-weekend",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "fresh_catch_fish_shop",
+      "payee": "fish_market_and_cold_storage",
+      "amount": "2150.00",
+      "routing": "direct",
+      "why": "Третья закупка — под выходные, самый большой оборот. После неё магазин упирается в лимит доверия рынка: следующая партия не пройдёт, пока он не рассчитается. Ради этого все три команды идут с max_hops=1: без ограничения роутер вправе развести закупку в обход, и задуманное ребро не набралось бы.",
+      "expect": "Долг «магазин должен рынку» равен 6050.00 UAH. На линии fish_market_and_cold_storage → fresh_catch_fish_shop остаётся 575.80 из 6625.80 — 8.69 % лимита, то есть ниже порога 10 %. Это единственное такое ребро в сообществе, и оно попадает в админский экран узких мест."
+    },
+    {
+      "id": "riverside.030.market-takes-petro-week-catch",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "fish_market_and_cold_storage",
+      "payee": "petro_rybka",
+      "amount": "1150.00",
+      "routing": "direct",
+      "why": "Первое ребро недельного треугольника: рынок забирает улов Петра с отсрочкой. max_hops=1 здесь обязателен — рецепту нужен долг именно на этой линии, а не эквивалентный результат окольным путём.",
+      "expect": "Долг «рынок должен Петру» равен 1150.00 UAH на линии petro_rybka → fish_market_and_cold_storage (лимит 1286.65)."
+    },
+    {
+      "id": "riverside.031.petro-buys-gear-from-coop",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "petro_rybka",
+      "payee": "riverside_fishing_co_operative",
+      "amount": "940.00",
+      "routing": "direct",
+      "why": "Второе ребро: Пётр берёт в кооперативе топливо, лёд и снасти «на счёт». Это самое маленькое из трёх обязательств — и именно оно определит сумму взаимозачёта.",
+      "expect": "Долг «Пётр должен кооперативу» равен 940.00 UAH на линии riverside_fishing_co_operative → petro_rybka (лимит 3178.32)."
+    },
+    {
+      "id": "riverside.032.coop-rents-cold-storage",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "riverside_fishing_co_operative",
+      "payee": "fish_market_and_cold_storage",
+      "amount": "1480.00",
+      "routing": "direct",
+      "why": "Третье ребро замыкает круг: кооператив арендует у рынка холодильные камеры под общий улов. Денег никто никому не переводил — а круг долгов уже есть.",
+      "expect": "Долг «кооператив должен рынку» равен 1480.00 UAH на линии fish_market_and_cold_storage → riverside_fishing_co_operative (лимит 10749.68). Цикл долгов замкнулся: рынок → Пётр → кооператив → рынок."
+    },
+    {
+      "id": "riverside.033.clear-market-petro-coop",
+      "op": "clearing",
+      "equivalent": "UAH",
+      "cycle": [
+        "fish_market_and_cold_storage",
+        "petro_rybka",
+        "riverside_fishing_co_operative"
+      ],
+      "amount": "940.00",
+      "mode": "execute",
+      "why": "Ради этого и нужен клиринг: трое должны по кругу, и часть долга гасится взаимозачётом, не двигая ни одной гривны. Цикл назван поимённо, а не отдан auto_clear: auto_clear гасит все циклы эквивалента подряд, и итоговое состояние перестало бы быть детерминированным.",
+      "expect": "Исполняется ровно один клиринг на 940.00 UAH — минимум из трёх обязательств. После него долг «Пётр должен кооперативу» исчезает (0.00), «рынок должен Петру» становится 210.00, «кооператив должен рынку» — 540.00. Суммарный долг в UAH падает на 2820.00 (940.00 на каждом из трёх рёбер), а нетто-позиция каждого из троих не меняется ни на копейку — это инвариант нейтральности клиринга."
+    },
+    {
+      "id": "riverside.034.caterer-takes-ivan-fish",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "olena_kuhnia",
+      "payee": "ivan_kozak",
+      "amount": "880.00",
+      "routing": "direct",
+      "why": "Неделя пошла по второму кругу: Олена берёт у Ивана рыбу на кейтеринг. Первое ребро нового треугольника — и строится оно уже после того, как клиринг отработал.",
+      "expect": "Долг «Олена должна Ивану» равен 880.00 UAH на линии ivan_kozak → olena_kuhnia (лимит 1124.16)."
+    },
+    {
+      "id": "riverside.035.grocery-orders-prepared-meals",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "town_grocery",
+      "payee": "olena_kuhnia",
+      "amount": "1240.00",
+      "routing": "direct",
+      "why": "Бакалея заказывает у Олены готовые салаты и обеды на витрину.",
+      "expect": "Долг «бакалея должна Олене» равен 1240.00 UAH на линии olena_kuhnia → town_grocery (лимит 3866.30)."
+    },
+    {
+      "id": "riverside.036.ivan-household-shopping",
+      "op": "payment",
+      "equivalent": "UAH",
+      "payer": "ivan_kozak",
+      "payee": "town_grocery",
+      "amount": "1015.00",
+      "routing": "direct",
+      "why": "Иван не только рыбак, но и покупатель: его семья закупается в той же бакалее. Круг замыкается на человеке, который его начал.",
+      "expect": "Долг «Иван должен бакалее» равен 1015.00 UAH на линии town_grocery → ivan_kozak (лимит 2132.52). Новый цикл долгов замкнут: Олена → Иван → бакалея → Олена."
+    },
+    {
+      "id": "riverside.037.surviving-cycle-stays-clearable",
+      "op": "clearing",
+      "equivalent": "UAH",
+      "cycle": [
+        "olena_kuhnia",
+        "ivan_kozak",
+        "town_grocery"
+      ],
+      "amount": "880.00",
+      "mode": "assert_clearable",
+      "why": "Последняя команда рецепта ничего не исполняет. Она утверждает, что цикл существует и годен к клирингу — и переживёт прогон, потому что построен после единственной исполняющей команды клиринга. Админка должна показывать одновременно и результат отработавшего клиринга, и то, что ещё осталось погасить; без выжившего цикла второй половины экрана просто нет.",
+      "expect": "find_cycles по UAH возвращает этот цикл; сумма к погашению — 880.00 (минимум из 880.00, 1015.00 и 1240.00). Клиринг по нему НЕ исполняется: все три долга остаются в базе в полном размере."
+    }
+  ]
+}
