@@ -103,6 +103,21 @@ def test_the_committed_recipe_is_valid_against_its_description(community_id, doc
 
 
 @pytest.mark.parametrize("community_id", COMMUNITY_IDS)
+def test_the_entry_point_T1711_will_call_loads_both_halves_together(community_id):
+    """`load_recipe` is the one call that reads the description and the recipe.
+
+    It exists so the executor never holds a recipe that was not checked against
+    the description it names.
+    """
+
+    from recipe_schema import load_recipe
+
+    loaded = load_recipe(community_id, root=COMMUNITIES_DIR)
+    assert loaded["community_id"] == community_id
+    assert loaded["commands"]
+
+
+@pytest.mark.parametrize("community_id", COMMUNITY_IDS)
 def test_the_recipe_is_committed_as_the_repository_writes_json(community_id):
     path = COMMUNITIES_DIR / community_id / "recipe.json"
     raw = path.read_bytes()
@@ -419,6 +434,20 @@ def _duplicate_id(recipe, community):
     recipe["commands"][1]["id"] = recipe["commands"][0]["id"]
 
 
+def _drop_top_level(key: str) -> Callable:
+    def mutate(recipe, community):
+        del recipe[key]
+
+    return mutate
+
+
+def _drop_key(command_id: str, key: str) -> Callable:
+    def mutate(recipe, community):
+        del recipe["commands"][_first_index(recipe, command_id)][key]
+
+    return mutate
+
+
 def _repeat_in_cycle(command_id: str) -> Callable:
     def mutate(recipe, community):
         command = recipe["commands"][_first_index(recipe, command_id)]
@@ -615,6 +644,36 @@ MUTATIONS: list[tuple[str, Callable, str]] = [
         "an extra top-level key nobody reads",
         _set_top_level("debts", []),
         "unknown top-level keys",
+    ),
+    (
+        "a command missing a key its operation needs",
+        _drop_key("riverside.001.market-takes-ivan-catch", "amount"),
+        "is missing keys ['amount']",
+    ),
+    (
+        "a payment in an equivalent nobody declared",
+        _set_command("riverside.001.market-takes-ivan-catch", "equivalent", "BTC"),
+        "is not a declared equivalent",
+    ),
+    (
+        "a clearing mode the executor would not know what to do with",
+        _set_command("riverside.033.clear-market-petro-coop", "mode", "maybe"),
+        "mode",
+    ),
+    (
+        "a recipe with no commands at all",
+        _set_top_level("commands", []),
+        "commands must be a non-empty array",
+    ),
+    (
+        "a recipe that forgot to say what it summarises",
+        _drop_top_level("summary"),
+        "missing top-level keys ['summary']",
+    ),
+    (
+        "a command that does not say which operation it is",
+        _drop_key("riverside.001.market-takes-ivan-catch", "op"),
+        "is missing keys ['op']",
     ),
 ]
 

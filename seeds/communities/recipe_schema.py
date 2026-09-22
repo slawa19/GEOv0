@@ -463,7 +463,15 @@ def max_hops_for(command: dict[str, Any]) -> int | None:
 
 
 def load_recipe(community_id: str, *, root: Path | None = None) -> dict[str, Any]:
-    """Read and validate ``seeds/communities/<community_id>/recipe.json``."""
+    """Read and validate ``seeds/communities/<community_id>/recipe.json``.
+
+    The caller must have ``seeds/communities`` importable, which every existing
+    consumer of `community_schema` already arranges by putting that directory on
+    ``sys.path`` (`scripts/generate_simulator_seed_scenarios.py:33-34`,
+    `admin-fixtures/tools/extract_community_description.py:41-42`). A caller that
+    loads this file by path instead should call :func:`validate_recipe` directly
+    with a description it read itself.
+    """
 
     from community_schema import load_community  # noqa: PLC0415
 
