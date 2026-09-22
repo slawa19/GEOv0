@@ -32,6 +32,7 @@ from scripts.seed_recipe import (  # noqa: E402
     SeedRefusal,
     _is_transient,
     _match_cycle,
+    _Run,
     assert_environment_is_safe,
     assert_every_check_reported,
     assert_target_is_disposable,
@@ -182,6 +183,73 @@ def test_a_logical_failure_is_not_transient(exc):
     to everything: the seed would then retry a refusal three times and report it as a conflict."""
 
     assert _is_transient(exc) is False
+
+
+class _FakeSession:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+def _run_with_fake_sessions():
+    community = {
+        "community_id": "probe",
+        "participants": [],
+        "equivalents": [],
+        "trustlines": [],
+    }
+    return _Run(_FakeSession, community, {"commands": []})
+
+
+async def test_a_transient_failure_is_retried_and_counted():
+    """The retry is the reason the command id is the payment's `tx_id`: a second attempt re-sends
+    the same identifier, so either the first attempt left nothing or the replay returns what it
+    stored. Here only the loop is measured - that it retries, that it stops, and that it counts."""
+
+    run = _run_with_fake_sessions()
+    attempts = []
+
+    async def body(session):
+        attempts.append(1)
+        if len(attempts) < 3:
+            raise _dbapi_error("40001")
+        return "done"
+
+    assert await run._attempt("probe", body) == "done"
+    assert len(attempts) == 3
+    assert run.report.retries == 2
+
+
+async def test_a_logical_failure_is_not_retried_at_all():
+    """The half that programme 004 paid for. A refusal retried three times is a refusal reported as
+    a conflict, and the operator reads the wrong problem."""
+
+    run = _run_with_fake_sessions()
+    attempts = []
+
+    async def body(session):
+        attempts.append(1)
+        raise _dbapi_error("23505")
+
+    with pytest.raises(SeedRefusal, match="probe"):
+        await run._attempt("probe", body)
+    assert attempts == [1]
+    assert run.report.retries == 0
+
+
+async def test_a_transient_failure_that_never_clears_ends_as_a_refusal():
+    run = _run_with_fake_sessions()
+    attempts = []
+
+    async def body(session):
+        attempts.append(1)
+        raise _dbapi_error("40P01")
+
+    with pytest.raises(SeedRefusal, match="still a transient database conflict"):
+        await run._attempt("probe", body)
+    assert len(attempts) == 4, "four attempts is the declared bound, not an accident"
 
 
 # =================================================================================================

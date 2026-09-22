@@ -747,6 +747,15 @@ async def _check_reconciliation(session_factory, run: _Run) -> dict[str, dict[st
     Three of the seven checks are read off one verification, because they are three questions about
     the same verdict: was it `PASSED`, did the baseline it stands on hold nothing, and did criterion
     (b) recompute every operation rather than a part of them.
+
+    WHAT `every_operation_examined` DOES NOT SEE. `operations_examined` is summed over the
+    equivalents, so an operation that touched two of them counts twice, while `operations_recorded`
+    counts rows. The comparison is an EQUALITY, so that inflation makes the check fail rather than
+    pass - the error is on the strict side. It is still not a per-operation join: an unexamined
+    operation could in principle be masked by a cross-equivalent one in the same run. No recipe
+    command produces a cross-equivalent operation (a payment and a clearing each live in one
+    equivalent), so the case does not arise today; if one ever does, this is the check to replace
+    with a join rather than to loosen.
     """
 
     statuses: dict[str, str] = {}
