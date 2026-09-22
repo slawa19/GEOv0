@@ -29,7 +29,7 @@ from decimal import Decimal
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import event, make_url, select, text
+from sqlalchemy import event, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -39,9 +39,9 @@ from app.core.payments.engine import PaymentEngine
 from app.db.base import Base
 from app.db.models.debt import Debt
 from tests.debt_setup import debt_fixture_setup
-from tests.integration.test_p015_step5a_reconciliation_postgres import _scratch_url, _sqlstates
+from tests.integration.test_p015_step5a_reconciliation_postgres import _sqlstates
 from tests.integration.test_p015_t1544_operator_stop_races_postgres import _advisory_waiter_exists
-from tests.migrated_schema import ALEMBIC_VERSION_BOOTSTRAP, run_alembic_upgrade_head
+from tests.migrated_schema import run_alembic_upgrade_head, scratch_databases
 from tests.unit.test_p015_b4_wrong_writer_is_recorded_faithfully import (
     _drop_triangle,
     _edges,
@@ -149,38 +149,20 @@ async def test_step5b_p_both_construction_paths_widen_only_the_intent_version_an
     databases and intent version 3 is accepted on the migrated one, red.
     """
 
-    import asyncpg
-
-    url = _postgres_url()
-    migrated_url, migrated_name = _scratch_url(url, "s5bmig")
-    metadata_url, metadata_name = _scratch_url(url, "s5bmeta")
-    parsed = make_url(url)
-    maintenance = await asyncpg.connect(
-        host=parsed.host, port=parsed.port or 5432, user=parsed.username,
-        password=parsed.password, database="postgres",
-    )
-    try:
-        for name in (migrated_name, metadata_name):
-            await maintenance.execute(f'DROP DATABASE IF EXISTS "{name}"')
-            await maintenance.execute(f'CREATE DATABASE "{name}"')
-    except Exception as exc:  # noqa: BLE001
-        await maintenance.close()
-        pytest.skip(f"CREATE DATABASE is not permitted here ({exc!r}): an ABSENT measurement, not a pass")
-
-    try:
+    # NOT a skip when the role cannot create databases (T1701): `scratch_databases` raises. Until
+    # 2026-09-21 this said "an ABSENT measurement, not a pass" and then reported a pass anyway.
+    async with scratch_databases(_postgres_url(), "s5bmig", "s5bmeta") as (
+        migrated_url,
+        metadata_url,
+    ):
         engine = create_async_engine(metadata_url, poolclass=NullPool)
         try:
             async with engine.begin() as connection:
                 await connection.run_sync(Base.metadata.create_all)
         finally:
             await engine.dispose()
-        engine = create_async_engine(migrated_url, poolclass=NullPool)
-        try:
-            async with engine.begin() as connection:
-                for statement in ALEMBIC_VERSION_BOOTSTRAP:
-                    await connection.exec_driver_sql(statement)
-        finally:
-            await engine.dispose()
+        # No preconditioning here: `migrations/env.py` owns the `alembic_version` widening and
+        # establishes it inside this run (T1701).
         run_alembic_upgrade_head(migrated_url)
 
         from_metadata, metadata_bites = await _version_catalogue_and_bites(metadata_url)
@@ -191,12 +173,6 @@ async def test_step5b_p_both_construction_paths_widen_only_the_intent_version_an
         expected = {"intent=2": None, "intent=3": "23514", "money=2": "23514", "schema=2": "23514"}
         for label, bites in (("metadata", metadata_bites), ("alembic", migrated_bites)):
             assert bites == expected, f"{label}: {bites}"
-    finally:
-        try:
-            for name in (migrated_name, metadata_name):
-                await maintenance.execute(f'DROP DATABASE IF EXISTS "{name}"')
-        finally:
-            await maintenance.close()
 
 
 # =================================================================================================

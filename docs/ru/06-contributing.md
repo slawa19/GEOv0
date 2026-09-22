@@ -241,11 +241,12 @@ $env:LOG_LEVEL = "DEBUG"
 подсказкой `run: python scripts/init_sqlite_db.py`, и локальная dev-база по умолчанию как раз
 SQLite (`.local-run/geov0.db`). Для неё схема создаётся скриптом, а не Alembic.
 
-На **свежей** PostgreSQL-базе перед первым `upgrade head` нужно предусловие — колонка
+На **свежей** PostgreSQL-базе первому `upgrade head` нужно предусловие — колонка
 `alembic_version.version_num` шириной `VARCHAR(128)`, иначе переход 010 → 011 падает с
-`StringDataRightTruncationError`. Подробности и SQL — в
+`StringDataRightTruncationError`. С 2026-09-21 (`T1701`) его выполняет сам `migrations/env.py`,
+поэтому вручную делать ничего не нужно ни на одном из путей запуска. Подробности, история и SQL
+для инструмента, обходящего вход миграций, — в
 [`05-deployment.md`](05-deployment.md#предусловие-на-свежей-базе-ширина-alembic_versionversion_num).
-В контейнерном и тестовом путях предусловие уже выполняется само.
 
 ---
 

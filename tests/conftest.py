@@ -25,7 +25,6 @@ from app.db.sqlite_transaction_control import install_sqlite_transaction_control
 from app.main import app  # noqa: E402
 from scripts.validate_test_database_url import assert_safe_test_database_url  # noqa: E402
 from tests.migrated_schema import (  # noqa: E402
-    ALEMBIC_VERSION_BOOTSTRAP,
     repository_head,
     run_alembic_upgrade_head,
 )
@@ -232,11 +231,12 @@ async def _build_migrated_schema() -> None:
         ).scalars().all()
         for table_name in existing:
             await conn.exec_driver_sql(f'DROP TABLE IF EXISTS public."{table_name}" CASCADE')
-        for statement in ALEMBIC_VERSION_BOOTSTRAP:
-            await conn.exec_driver_sql(statement)
 
     # Blocking, inside the loop, on purpose: nothing else in this session may proceed until the
     # schema exists, and `migrations/env.py` ends in `asyncio.run(...)` so it cannot be awaited.
+    # The `alembic_version` precondition that used to be spelled here is established by
+    # `migrations/env.py` inside this run (T1701): the table was just dropped with everything else,
+    # and the migration entry creates it wide enough for a 46-character revision id.
     run_alembic_upgrade_head(TEST_DATABASE_URL)
 
     async with engine.connect() as conn:

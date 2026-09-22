@@ -135,6 +135,8 @@ def test_entrypoint_preserves_custom_command_after_migrations(tmp_path: Path) ->
     bin_dir.mkdir()
     trace = tmp_path / "trace.log"
     stubs = {
+        # `python` is stubbed although the entrypoint no longer calls it: if a preflight ever
+        # comes back to this file, the trace below shows it instead of passing silently.
         "python": "#!/bin/sh\ncat >/dev/null\nprintf 'preflight\\n' >> \"$TRACE\"\n",
         "alembic": "#!/bin/sh\nprintf 'alembic:%s\\n' \"$*\" >> \"$TRACE\"\n",
         "custom-command": (
@@ -168,8 +170,13 @@ def test_entrypoint_preserves_custom_command_after_migrations(tmp_path: Path) ->
         text=True,
     )
 
+    # The `alembic_version` preflight moved into `migrations/env.py` under T1701 (2026-09-21), so the
+    # entrypoint runs the migrations and nothing before them. What this test is for is unchanged: the
+    # migrations run BEFORE the image's own command, and the command survives with its arguments
+    # intact. That the preflight still happens is held by
+    # `tests/unit/test_p017_t1701_the_alembic_version_bootstrap_has_one_owner.py` and measured by the
+    # provisioning tests, which build a database from empty through this same entry.
     assert trace.read_text(encoding="utf-8").splitlines() == [
-        "preflight",
         "alembic:-c migrations/alembic.ini upgrade head",
         "command:alpha|two words",
     ]

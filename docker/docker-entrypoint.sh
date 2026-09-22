@@ -1,60 +1,26 @@
 #!/bin/bash
 set -e
 
-# Preflight: ensure alembic_version.version_num can store long revision ids.
-# Alembic default is VARCHAR(32), but this repo uses longer revision strings
-# (e.g. 011_transactions_payment_payload_btree_indexes).
-python - <<'PY'
-import asyncio
-import os
-import asyncpg
+# The `alembic_version` precondition (T1535) is NOT spelled here any more. Since T1701 (2026-09-21)
+# `migrations/env.py` creates-or-widens `alembic_version.version_num` itself, so every caller of the
+# migration entry gets it and this file CALLS that entry instead of carrying a second copy of the DDL.
+# What stays here is the one thing the migration entry cannot say as clearly: which URL this container
+# was handed, refused before anything connects.
+if [ -z "${DATABASE_URL:-}" ]; then
+  echo "docker-entrypoint.sh: DATABASE_URL is not set" >&2
+  exit 1
+fi
 
+case "$DATABASE_URL" in
+  postgresql://*|postgresql+asyncpg://*) ;;
+  *)
+    # Print the scheme only: the rest of the URL carries credentials.
+    echo "docker-entrypoint.sh: unsupported DATABASE_URL scheme: ${DATABASE_URL%%:*}" >&2
+    exit 1
+    ;;
+esac
 
-def normalize_pg_url(url: str) -> str:
-    # Expected: postgresql+asyncpg://user:pass@host:port/db
-    if url.startswith("postgresql+asyncpg://"):
-        return "postgresql://" + url[len("postgresql+asyncpg://") :]
-    if url.startswith("postgresql://"):
-        return url
-    raise SystemExit(f"Unsupported DATABASE_URL scheme: {url.split(':', 1)[0]}")
-
-
-async def main() -> None:
-    db_url = os.environ.get("DATABASE_URL")
-    if not db_url:
-        raise SystemExit("DATABASE_URL is not set")
-
-    pg_url = normalize_pg_url(db_url)
-
-    # Ensure table exists and column is wide enough (idempotent).
-    ddl = """
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1
-    FROM information_schema.tables
-    WHERE table_schema = 'public' AND table_name = 'alembic_version'
-  ) THEN
-    CREATE TABLE alembic_version (
-      version_num VARCHAR(128) NOT NULL PRIMARY KEY
-    );
-  ELSE
-    ALTER TABLE alembic_version
-      ALTER COLUMN version_num TYPE VARCHAR(128);
-  END IF;
-END $$;
-"""
-    conn = await asyncpg.connect(pg_url)
-    try:
-        await conn.execute(ddl)
-    finally:
-        await conn.close()
-
-
-asyncio.run(main())
-PY
-
-# Run migrations
+# Run migrations (this is also what establishes the alembic_version precondition)
 alembic -c migrations/alembic.ini upgrade head
 
 # Load seed data (if needed)
