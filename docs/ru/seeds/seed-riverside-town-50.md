@@ -92,13 +92,23 @@
 
 Клиринг работает за счёт **замкнутых циклов долгов**, которые можно взаимно погасить.
 
-### Cycle 1: Basic Fish Supply Chain (3 nodes)
+### Два разных графа — не перепутать
+
+В этом разделе рисуются **графы долгов**, а не `trustlines`. Стрелка `A -->|owes| B` читается «A должен B», то есть **должник → кредитор**. Это направление, **обратное** правилу `trustline` из раздела выше (`from → to` = кредитор → должник). Цикл клиринга ищется именно по графу долгов.
+
+Исключение — Cycle 3 ниже: там нарисованы `trustlines`, и это подписано на самой диаграмме.
+
+### Цикл всегда внутри одного эквивалента
+
+Клиринг замыкает цикл долгов **в одном эквиваленте**. Смешанный цикл не гасится: клиринг отвергает набор долгов с разными эквивалентами (`app/core/clearing/service.py:1587-1590`, «Clearing cycle spans multiple equivalents»). Автоматической конвертации между эквивалентами протокол не делает вовсе, а рыночный обмен описан как future extension вне scope v0.1 (`docs/ru/02-protocol-spec.md`, раздел F) — и к клирингу он всё равно отношения не имеет. Если нужно показать два эквивалента — это **два цикла**, а не один.
+
+### Cycle 1: Basic Fish Supply Chain (3 nodes, UAH)
 
 ```mermaid
 graph LR
-    F[Ivan Kozak<br/>Fisherman] -->|owes 2000 UAH| M[Fish Market]
-    M -->|owes 1500 UAH| S[Fresh Catch Shop]
-    S -->|owes 1800 UAH| F
+    F[Ivan Kozak<br/>Fisherman] -->|owes 1800 UAH| S[Fresh Catch Shop]
+    S -->|owes 1500 UAH| M[Fish Market]
+    M -->|owes 2000 UAH| F
     
     style F fill:#e1f5fe
     style M fill:#fff3e0
@@ -112,22 +122,49 @@ graph LR
 
 **Clearing**: min(2000, 1500, 1800) = **1500 UAH** взаимно погашается!
 
-### Cycle 2: Service + Supply (4 nodes)
+### Cycle 2a: Service + Supply (3 nodes, UAH)
 
 ```mermaid
 graph TB
-    VC[Boat Mechanic<br/>Viktor] -->|owes 500 HOUR| F[Petro Rybka<br/>Fisherman]
-    F -->|owes 3000 UAH| MK[Fish Market]
-    MK -->|owes 400 UAH| RS[Restaurant]
-    RS -->|owes 300 HOUR| VC
+    RS[River View<br/>Restaurant] -->|owes 400 UAH| MK[Fish Market]
+    MK -->|owes 3000 UAH| F[Petro Rybka<br/>Fisherman]
+    F -->|owes 900 UAH| RS
     
-    style VC fill:#f3e5f5
     style F fill:#e1f5fe
     style MK fill:#fff3e0
     style RS fill:#ffebee
 ```
 
-**Особенность**: Цикл включает два эквивалента (UAH + HOUR). Клиринг возможен только при наличии **обменного курса** между UAH и HOUR в системе.
+**Расшифровка**:
+- Petro сдал улов на рынок, рынок должен ему 3000 UAH
+- Ресторан взял рыбу у рынка на реализацию, ресторан должен рынку 400 UAH
+- Petro со своей бригадой обедает в ресторане «на счёт», Petro должен ресторану 900 UAH
+
+**Clearing**: min(3000, 400, 900) = **400 UAH** взаимно погашается.
+
+### Cycle 2b: Таймбанк соседей (3 nodes, HOUR)
+
+```mermaid
+graph TB
+    HH[The Moriak Family<br/>Household] -->|owes 400 HOUR| VC[Viktor Veslo<br/>Boat Mechanic]
+    VC -->|owes 300 HOUR| F[Petro Rybka<br/>Fisherman]
+    F -->|owes 500 HOUR| HH
+    
+    style VC fill:#f3e5f5
+    style F fill:#e1f5fe
+    style HH fill:#e8f5e9
+```
+
+**Расшифровка**:
+- Viktor перебрал двигатель на лодке семьи Моряк, семья должна ему 400 HOUR
+- Petro возил Viktor'а на испытания двигателей и помогал в мастерской, Viktor должен Petro 300 HOUR
+- Семья Моряк чинила Petro сети и разбирала улов, Petro должен семье 500 HOUR
+
+**Clearing**: min(400, 300, 500) = **300 HOUR** взаимно погашается.
+
+Направления здесь согласованы с таблицей степеней выше: в `HOUR` кредитуют услуги и домохозяйства, должниками чаще оказываются производители и домохозяйства, а розница в `HOUR` не участвует вовсе.
+
+**Почему это два цикла, а не один**: сюжеты соседние, но обязательства живут в разных эквивалентах. Долг в UAH и долг в HOUR не складываются и не зачитываются друг против друга — их гасят два независимых клиринга.
 
 ### Cycle 3: Hub Liquidity Triangle (3 hubs)
 
