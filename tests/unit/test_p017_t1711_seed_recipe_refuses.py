@@ -73,6 +73,26 @@ def test_riverside_is_seedable_and_greenfield_is_not_and_the_difference_is_named
         ), f"{creditor} -> {debtor} in {equivalent} is not named in the refusal"
 
 
+async def test_a_community_with_no_recipe_is_a_refusal_that_lists_the_ones_that_have_one():
+    """`scripts/seed_db.py --community` also offers the two `-v2` fixture pack ids, which have no
+    description and no recipe at all. The counter-check is the other half of the same call: the two
+    real communities ARE listed, so this is a wrong-argument message and not a blanket failure."""
+
+    from scripts.seed_recipe import seed_community
+
+    with pytest.raises(SeedRefusal) as refusal:
+        await seed_community(
+            lambda: None,  # never reached: the description is loaded first
+            community_id="riverside-town-50-v2",
+            communities_root=_COMMUNITIES,
+            env="test",
+        )
+    message = str(refusal.value)
+    assert "riverside-town-50-v2" in message
+    assert "riverside-town-50'" in message
+    assert "greenfield-village-100'" in message
+
+
 def test_a_frozen_participant_is_reachable_and_therefore_not_refused():
     """The freeze operation exists (`app/api/v1/admin.py:977`), so a frozen PARTICIPANT is not an
     unreachable state - and the rule must not sweep it up with the frozen LINES."""

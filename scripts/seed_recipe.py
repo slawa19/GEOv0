@@ -1126,8 +1126,20 @@ async def seed_community(
     """Seed one community by running its recipe. Raises `SeedRefusal` and writes nothing further."""
 
     root = communities_root if communities_root is not None else _COMMUNITIES_DIR
-    community = community_schema.load_community(community_id, root=root)
-    recipe = recipe_schema.load_recipe(community_id, root=root)
+    try:
+        community = community_schema.load_community(community_id, root=root)
+        recipe = recipe_schema.load_recipe(community_id, root=root)
+    except FileNotFoundError as missing:
+        # `scripts/seed_db.py --community` also offers the two `-v2` fixture pack ids, which have
+        # no description and no recipe. A traceback would read as a defect; this reads as the
+        # wrong argument, and says which communities can be seeded this way.
+        seedable = sorted(
+            child.name for child in root.iterdir() if (child / "recipe.json").is_file()
+        ) if root.is_dir() else []
+        raise SeedRefusal(
+            f"{community_id} has no description and recipe under {root}: {missing}. "
+            f"Communities that can be seeded by recipe: {seedable}"
+        ) from missing
 
     offenders = unreachable_declared_states(community)
     if offenders:
