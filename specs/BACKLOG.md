@@ -966,7 +966,7 @@ Postgres, оба E2E и super-smoke остаются `scheduled/manual`. Пат�
 ```powershell
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_<slug>"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-.\scriptserify_local.ps1 -TaskSlug <slug> -BackendOnly `
+.\scripts\verify_local.ps1 -TaskSlug <slug> -BackendOnly `
   -BackendSelector tests/integration/test_simulator_super_smoke.py -IncludeExpensive
 ```
 
