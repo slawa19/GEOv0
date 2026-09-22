@@ -1,6 +1,17 @@
-# Seeds (RU): Проектирование сообщества и генерация фикстур
+# Seeds (RU): Проектирование сообщества, описание и рецепт
 
-Эта папка содержит **seed-документы** — человекочитаемые спецификации того, *каким мы хотим видеть* демо‑сообщество: участники, экономические роли, набор `equivalents` и ожидаемые паттерны направленности `trustlines`. На основе seed‑документа создаются **детерминированные fixtures** для Admin UI.
+Эта папка содержит **seed-документы** — человекочитаемые спецификации того, *каким мы хотим видеть* демо‑сообщество: участники, экономические роли, набор `equivalents` и ожидаемые паттерны направленности `trustlines`.
+
+Замысел из seed‑документа превращается в машиночитаемое **описание сообщества** (`seeds/communities/<community>/community.json`), а описание — в **один ростер** для всех потребителей. Долги, балансы и история в описание не записываются: они получаются **операциями**.
+
+```
+seed-документ (замысел, .md)
+        │
+        ▼
+community.json  ─────────────┬────────────►  сценарий симулятора (структура + поведение сценария)
+(структура: кто есть кто,    │
+ кто кому доверяет)          └────────────►  рецепт операций → долги и балансы в БД  (T1711/T1713, ещё не существует)
+```
 
 ## Содержание
 1. [Что такое seed-документ](#что-такое-seed-документ)
@@ -9,10 +20,11 @@
 4. [Role-Based TrustLine Patterns](#role-based-trustline-patterns)
 5. [Clearing Cycles](#clearing-cycles)
 6. [Создание нового seed](#создание-нового-seed)
-7. [Разработка генератора](#разработка-генератора)
-8. [Fixture Generation Workflow](#fixture-generation-workflow)
+7. [Описание сообщества (`community.json`)](#описание-сообщества-communityjson)
+8. [Кто читает описание](#кто-читает-описание)
 9. [Quality Checklist](#quality-checklist)
 10. [Anti-Patterns](#anti-patterns)
+11. [Исторический путь: пакет фикстур Admin UI](#исторический-путь-пакет-фикстур-admin-ui)
 
 ## Что такое seed-документ
 
@@ -34,18 +46,14 @@ Seed‑документ — это НЕ:
 
 ## Доступные seeds
 
-| Seed | Участников | Основная тема | Equivalents | Что посмотреть в первую очередь | Генератор |
+| Seed | Участников | Основная тема | Equivalents | Что посмотреть в первую очередь | Описание |
 |------|-----------:|---------------|-------------|----------------------------------|----------|
-| [seed-greenfield-village-100.md](seed-greenfield-village-100.md) | 100 | «Село/громада» (кооператив, склад, закупка, рынок, пекарня, сервисы) | `UAH`, `EUR`, `HOUR` | Разделы про экономическую логику и degree‑summary | `admin-fixtures/tools/generate_fixtures.py --seed greenfield-village-100` |
-| [seed-riverside-town-50.md](seed-riverside-town-50.md) | 50 | «Приречный городок» (рыболовство, порт/кооп, рынок, сервисы в `HOUR`) | `UAH`, `EUR`, `HOUR` | Разделы `Economic Logic`, `Clearing Cycles Examples` | `admin-fixtures/tools/generate_fixtures.py --seed riverside-town-50` |
-| [seed-greenfield-village-100-v2.md](seed-greenfield-village-100-v2.md) | 100 | Greenfield v1, but with realistic person caps + clearing-first policy | `UAH`, `EUR`, `HOUR` | Что изменилось vs v1 (caps, auto_clearing, intermediates) | `admin-fixtures/tools/generate_fixtures.py --seed greenfield-village-100-v2` |
-| [seed-riverside-town-50-v2.md](seed-riverside-town-50-v2.md) | 50 | Riverside v1, but with realistic person caps + clearing-first policy | `UAH`, `EUR`, `HOUR` | Что изменилось vs v1 (caps, auto_clearing, intermediates) | `admin-fixtures/tools/generate_fixtures.py --seed riverside-town-50-v2` |
+| [seed-greenfield-village-100.md](seed-greenfield-village-100.md) + [v2](seed-greenfield-village-100-v2.md) | 100 | «Село/громада» (кооператив, склад, закупка, рынок, пекарня, сервисы) | `UAH`, `EUR`, `HOUR` | Разделы про экономическую логику и degree‑summary | `seeds/communities/greenfield-village-100/community.json` |
+| [seed-riverside-town-50.md](seed-riverside-town-50.md) + [v2](seed-riverside-town-50-v2.md) | 50 | «Приречный городок» (рыболовство, порт/кооп, рынок, сервисы в `HOUR`) | `UAH`, `EUR`, `HOUR` | Разделы `Economic Logic`, `Clearing Cycles Examples` | `seeds/communities/riverside-town-50/community.json` |
 
 Примечание:
-- Единственный «активный» набор фикстур для Admin UI — `admin-fixtures/v1`.
-- Admin UI всегда синхронизирует именно `admin-fixtures/v1` → `admin-ui/public/admin-fixtures/v1`.
-- Запускай `admin-fixtures/tools/generate_fixtures.py`: это единая точка входа, которая выбирает seed без двусмысленности.
-- Seed‑скрипты `generate_seed_*.py` считаются внутренними (их использует `generate_fixtures.py`) и могут перезаписать любой `--out-v1`.
+- Описание несёт **топологию v2** — она отличается от базовой лимитами, политиками маршрутизации и клиринга и связностью. Замер: Greenfield — 100 участников и 523 линии (UAH 432, HOUR 87, EUR 4) против 439 линий у базовой версии; Riverside — 50 участников и 316 линий (UAH 218, HOUR 96, EUR 2) против 222. Актуальные числа закреплены константами в `tests/unit/test_p017_t1712_community_descriptions.py`, а не пересказом здесь.
+- Отдельных «v1 и v2» описаний нет: документы v2 остаются как объяснение того, *что* v2 поменяла, а в машиночитаемом виде живёт только v2.
 
 ## TrustLine Direction Rule
 
@@ -216,111 +224,80 @@ creditor → debtor
 
 Сделай минимум 2–5 целевых клиринговых циклов:
 - выпиши цикл словами (экономическая история);
-- зафиксируй роли и `equivalent`;
+- зафиксируй роли и **один** `equivalent` на цикл — смешанный цикл клирингом не гасится;
 - убедись, что цикл может возникнуть *из реальных сценариев*, а не из случайной связности.
 
-## Разработка генератора
+### 6) Перенос замысла в описание
 
-Генератор — это детерминированный код, который по seed‑логике строит fixtures pack (participants/equivalents/trustlines/…).
+Замысел становится машиночитаемым в `seeds/communities/<community>/community.json` — см. [Описание сообщества](#описание-сообщества-communityjson). Для нового сообщества описание пишется и правится руками. Единственное, что его перезаписывает, — временный мост `admin-fixtures/tools/extract_community_description.py`, и он знает только два существующих сообщества.
 
-Важно: у проекта есть единая точка входа для генерации canonical pack — `admin-fixtures/tools/generate_fixtures.py`.
+## Описание сообщества (`community.json`)
 
-Рекомендованный путь:
+Seed‑документ — это замысел. **Описание сообщества** — тот же замысел в машиночитаемом виде, и это **единственный ростер** в репозитории: раньше один и тот же состав участников был записан дважды — в seed‑генераторах и в сценариях симулятора.
 
-1) Возьми за основу существующий генератор:
-- `admin-fixtures/tools/generate_seed_greenfield_village_100.py`
-- `admin-fixtures/tools/generate_seed_riverside_town_50.py`
+Файл: `seeds/communities/<community>/community.json`. Схема и валидатор: `seeds/communities/community_schema.py` (без внешних зависимостей, чтобы его можно было звать до установки чего бы то ни было).
 
-Оба используют общий модуль:
-- `admin-fixtures/tools/seedlib.py`
+### Что в описании есть
 
-2) Создай новый seed‑скрипт вида:
-- `admin-fixtures/tools/generate_seed_<your_seed_name>.py`
+| Поле | Что это | Почему именно так |
+|------|---------|-------------------|
+| `equivalents[]` | `code`, `precision`, `description`, `is_active` | Точность — часть контракта, а не умолчание: по ней проверяется число знаков в лимите |
+| `groups[]` | `id`, короткий `label`, `description` | Экономические роли объявлены один раз и по имени |
+| `participants[]` | `ref`, `index`, `pid`, `name`, `type`, `group`, `status`, необязательная `role` | `ref` — символическое имя, которым участника зовёт рецепт; `group` записан **явно** |
+| `trustlines[]` | `equivalent`, `from`, `to` (символические `ref`), `limit`, `status`, `policy` | `from → to` = кредитор → должник; `limit` — **десятичная строка**, никогда не float |
 
-3) Зарегистрируй seed в unified entrypoint:
-- добавь `seed_id` в choices в `admin-fixtures/tools/generate_fixtures.py`
-- добавь ветку в `_load_seed_module(...)`.
+`policy` несёт ровно два решения — `auto_clearing` и `can_be_intermediate`. Лишние ключи валидатор отвергает: политика, которую никто не читает, — это обещание, которого нет.
 
-4) Добавь guardrails, чтобы новый seed нельзя было «подсунуть» случайно:
-- обнови allow‑list `seed_id` в `admin-ui/scripts/validate-fixtures.mjs`
-- при необходимости добавь seed в таблицу выше ("Доступные seeds").
+### Чего в описании нет — и почему
 
-5) Требования к генератору:
-- **Детерминизм**: одинаковый вход → одинаковый JSON (включая порядок элементов).
-- **Стабильные идентификаторы**: `pid`/`id` должны генерироваться повторяемо (без `random`/`uuid4` без фиксированного seed).
-- **Стабильная сортировка**: не полагаться на порядок `dict` из неочевидных источников.
-- **Контроль дублей**: запрет дубликатов `(equivalent, from, to)`.
-- **Экономическая семантика**: направления `trustlines` должны соответствовать seed‑документу.
+Долгов, балансов, `used`/`available`, транзакций и дат. Всё это — **результат операций**, а не структура. Раньше долг на линии был `лимит × ((n % 17) + 1) / 20` с расставленными вручную «горлышками» по 93 %, а транзакции не знали ролей вовсе. Теперь долги получаются исполнением рецепта, и каждый из них объясняется записанной операцией.
 
-4) Что должен записывать генератор (минимум для Admin UI):
-- `admin-fixtures/v1/datasets/participants.json`
-- `admin-fixtures/v1/datasets/equivalents.json`
-- `admin-fixtures/v1/datasets/trustlines.json`
+### Два идентификатора и зачем оба
 
-Также рекомендуется (используется в аналитике и ряде страниц):
-- `admin-fixtures/v1/datasets/debts.json` (детерминированно выводится из `trustlines.used`)
-- `admin-fixtures/v1/datasets/clearing-cycles.json`
-- `admin-fixtures/v1/datasets/transactions.json`
-- `admin-fixtures/v1/_meta.json`
+- `ref` — символическое имя (`ivan_kozak`, `fish_market_and_cold_storage`). Им пользуется рецепт и им пользуются тесты. Оно переживает любую перегенерацию.
+- `pid` — **фикстурная** личность. Ею уже подписаны закоммиченные сценарии симулятора, поэтому она несётся вперёд дословно. Это **не** PID участника в базе: там `PID = base58(sha256(public_key))` от пары ключей, сгенерированной **на прогон** (`app/core/crypto.py`), и рецепт разрешает `ref` → настоящий PID своей таблицей.
 
-Опционально (если UI/сценарии используют):
-- `admin-fixtures/v1/datasets/incidents.json`
+Группа участника — отдельное поле. Прежний способ («это домохозяйство, потому что в имени есть подстрока `(Household)`», «это услуга, потому что индекс PID попал в диапазон 46–60») в Greenfield недосчитывался 13 домохозяйств из 35; проверка на это закреплена константой в `tests/unit/test_p017_t1712_community_descriptions.py`.
 
-## Fixture Generation Workflow
+### Как поменять описание
 
-### Canonical fixtures
+Правь `community.json` руками, затем перегенерируй то, что из него выводится, и прогони гейт:
 
-Источник истины (JSON) живёт в:
-- `admin-fixtures/v1/datasets/*.json`
-
-### Public fixtures для Admin UI
-
-Копия, используемая UI во время разработки/демо:
-- `admin-ui/public/admin-fixtures/v1/datasets/*.json`
-
-Она перезаписывается скриптом синхронизации:
-- `admin-ui/scripts/sync-fixtures.mjs`
-
-### Как регенерировать
-
-1) Запусти детерминированный генератор (пример):
-
-```bash
-python admin-fixtures/tools/generate_fixtures.py --seed greenfield-village-100
+```powershell
+./.venv/Scripts/python.exe scripts/generate_simulator_seed_scenarios.py
+./scripts/verify_local.ps1 -TaskSlug <slug> -BackendOnly -BackendSelector tests/unit/test_p017_t1712_community_descriptions.py
 ```
 
-или:
+Пока генераторы `admin-fixtures/tools/generate_seed_*_v2.py` ещё в дереве, описание можно и **пересобрать** из них — так оно и появилось:
 
-```bash
-python admin-fixtures/tools/generate_fixtures.py --seed riverside-town-50
+```powershell
+./.venv/Scripts/python.exe admin-fixtures/tools/extract_community_description.py
 ```
 
-Если ты работаешь с несколькими сообществами параллельно, используй packs:
+Этот мост временный и умрёт вместе с генераторами. Пока он жив, тест сверяет описание с тем, что генераторы производят, — именно это делает их будущее удаление удалением, а не потерей.
 
-```bash
-python admin-fixtures/tools/generate_fixtures.py --seed riverside-town-50 --pack
-python admin-fixtures/tools/generate_fixtures.py --seed riverside-town-50 --pack --activate
+## Кто читает описание
+
+### Сценарии симулятора — работает сегодня
+
+Сценарий симулятора = **описание сообщества + собственные поведенческие настройки сценария**. Структура (кто есть кто, кто кому доверяет) приходит из `community.json`; поведение (профили групп, веса получателей, модели сумм, цепочки потоков, прогрев, дрейф доверия, сезонные стресс‑события) принадлежит сценарию и живёт в генераторе.
+
+```powershell
+./.venv/Scripts/python.exe scripts/generate_simulator_seed_scenarios.py
 ```
 
-Notes:
-- На Windows лучше запускать из venv (пример): `D:/.../.venv/Scripts/python.exe admin-fixtures/tools/generate_fixtures.py --seed greenfield-village-100`.
-- По умолчанию генератор пишет в `admin-fixtures/v1` (canonical active pack).
-- `--pack` пишет в `admin-fixtures/packs/<seed_id>/v1` и не трогает canonical, пока ты явно не сделаешь `--activate`.
+Пишет `fixtures/simulator/<scenario_id>/scenario.json` и валидирует результат по `fixtures/simulator/scenario.schema.json`. Генерация детерминирована: одно и то же описание даёт одни и те же байты, включая переводы строк.
 
-2) Синхронизируй и провалидируй fixtures для UI:
+Профиль `*-realistic-v2` — **одноэквивалентный**: линии в `HOUR` и `EUR` в этот сценарий не попадают. Они не удалены из описания — они просто не выбраны этим сценарием.
 
-```bash
-cd admin-ui
-npm run sync:fixtures
-npm run validate:fixtures
-```
+Почему формат описания не совпадает с форматом сценария: сценарий смешивает структуру с тактами, прогревом и стрессом и допускает числовой `limit` и произвольный объект `policy` (`fixtures/simulator/scenario.schema.json`). Для денег это слишком слабо.
 
-Notes:
-- `npm run dev` запускает `predev`, который автоматически делает sync+validate.
+### Рецепт операций — ещё не существует
 
+Второй потребитель описания — компактный рецепт настоящих операций (регистрации, линии, платежи, клиринг), который исполняется через доменные сервисы и **порождает** долги и балансы. Он спроектирован в `specs/017-postgres-only-engine/spec.md` (задачи `T1711`, `T1713`) и **на момент написания этого раздела не реализован**. Не ссылайтесь на него как на существующий путь.
 ## Quality Checklist
 
-Чеклист для ревью seed‑документа и результата генерации.
+Чеклист для ревью seed‑документа и описания сообщества.
 
 ### Seed-документ (спецификация)
 
@@ -330,16 +307,24 @@ Notes:
 - Зафиксировано правило направления `trustlines` и примеры по ролям.
 - Есть минимум 2–5 правдоподобных циклов клиринга (3–6 узлов).
 
-### Fixtures/Graph (результат генератора)
+### Описание сообщества (`community.json`)
 
-- Детерминированный output (одинаковый запуск → одинаковый JSON контент и порядок).
-- Количества совпадают ожиданиям (например, 50/100 участников).
-- Нет дубликатов `trustlines` для `(equivalent, from, to)`.
+Первые четыре пункта проверяет валидатор `seeds/communities/community_schema.py` — он же отвергает описание, которое их нарушает; остальные требуют глаз.
+
+- Лимиты — десятичные строки, число знаков не больше `precision` своего эквивалента.
+- Нет дубликатов `(equivalent, from, to)` и нет петель.
+- Каждая группа объявлена и непуста; каждый участник называет свою группу явно.
+- В описании нет долгов, балансов, `used`/`available`, транзакций и дат.
+- Количества совпадают ожиданиям (например, 50/100 участников) — и закреплены константами в тесте, а не числом в тексте.
 - Направления `trustlines` экономически согласованы с ролями (см. таблицу выше).
 - В графе нет «изолированных» кластеров без мостов (если это не задумано специально).
 - Хабы действительно имеют «много ↔ много» и связывают кластеры.
-- Домохозяйства чаще должники, чем кредиторы (за исключением небольших `HOUR`‑обменов/взаимопомощи).
 - `EUR` не доминирует (если нет отдельной цели тестировать multi‑equivalent routing).
+
+### Что выводится из описания
+
+- Детерминированный output: один и тот же вход даёт одни и те же байты (проверяется прогоном дважды, а не заявляется).
+- Генерируемые копии руками не правятся — правится источник.
 
 ## Anti-Patterns
 
@@ -368,3 +353,19 @@ Notes:
 6) **Нестабильный генератор (diff-noise)**
 - Симптом: каждый запуск меняет порядок/значения без изменений логики.
 - Как избежать: фиксированные источники времени, стабильная сортировка, отсутствие недетерминированных идентификаторов.
+
+## Исторический путь: пакет фикстур Admin UI
+
+**Статус: исторический, выводится из обращения.** Раздел оставлен, потому что путь ещё работает и ещё кому‑то нужен, а не потому, что по нему стоит строить новое.
+
+До описания сообществ Admin UI читал заготовленный пакет JSON, который собирали seed‑генераторы:
+
+- единая точка входа — `admin-fixtures/tools/generate_fixtures.py --seed <seed_id>` (варианты `--pack`, `--pack --activate`);
+- seed‑скрипты `admin-fixtures/tools/generate_seed_*.py` (базовые и `_v2`) и общий `admin-fixtures/tools/seedlib.py`;
+- canonical‑пакет — `admin-fixtures/v1/datasets/*.json` плюс `_meta.json`;
+- публичная копия для UI — `admin-ui/public/admin-fixtures/v1/datasets/*.json`, её перезаписывает `admin-ui/scripts/sync-fixtures.mjs` (`npm --prefix admin-ui run sync:fixtures`, затем `validate:fixtures`; `npm run dev` делает это через `predev`);
+- allow‑list `seed_id` — `admin-ui/scripts/validate-fixtures.mjs`.
+
+**Почему выводится.** Пакет кладёт в UI *выдуманный результат*: `debts.json` выводится из `trustlines.used`, а `transactions.json` собирается отдельно и ролей не знает, так что засеянные транзакции не объясняют засеянные долги. Замена — данные, произведённые самим продуктом: описание сообщества плюс рецепт операций (`specs/017-postgres-only-engine/spec.md`, `T1711`).
+
+Структурная часть этих генераторов уже перенесена в `seeds/communities/*/community.json`; удаление самих генераторов — отдельный срез той же программы. Генерируемые копии руками не правятся: их источник — генератор.
