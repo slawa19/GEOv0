@@ -419,6 +419,21 @@ def _duplicate_id(recipe, community):
     recipe["commands"][1]["id"] = recipe["commands"][0]["id"]
 
 
+def _repeat_in_cycle(command_id: str) -> Callable:
+    def mutate(recipe, community):
+        command = recipe["commands"][_first_index(recipe, command_id)]
+        command["cycle"] = [command["cycle"][0], command["cycle"][1], command["cycle"][0]]
+
+    return mutate
+
+
+def _duplicate_freeze(recipe, community):
+    index = _first_index(recipe, "riverside.026.freeze-pharmacy")
+    twin = copy.deepcopy(recipe["commands"][index])
+    twin["id"] = twin["id"] + ".again"
+    recipe["commands"].append(twin)
+
+
 def _swap_payment_ends(command_id: str) -> Callable:
     def mutate(recipe, community):
         command = recipe["commands"][_first_index(recipe, command_id)]
@@ -558,6 +573,48 @@ MUTATIONS: list[tuple[str, Callable, str]] = [
         "an operation the executor cannot perform",
         _set_command("riverside.001.market-takes-ivan-catch", "op", "mint"),
         "op",
+    ),
+    (
+        "a payment from somebody to themselves",
+        _set_command("riverside.001.market-takes-ivan-catch", "payee", "fish_market_and_cold_storage"),
+        "to itself",
+    ),
+    (
+        "a payee nobody in that equivalent can owe",
+        _set_command("riverside.021.guide-pays-season-charters-eur", "payee", "ivan_kozak"),
+        "nobody can owe payee",
+    ),
+    (
+        "a cycle that names the same participant twice",
+        _repeat_in_cycle("riverside.033.clear-market-petro-coop"),
+        "the same participant twice",
+    ),
+    (
+        "a cycle edge no single-hop payment builds",
+        _set_command("riverside.030.market-takes-petro-week-catch", "routing", "open"),
+        "is built by 0 preceding single-hop payments",
+    ),
+    (
+        "a freeze written twice for the same participant",
+        _duplicate_freeze,
+        "already frozen at command",
+    ),
+    (
+        "an identifier too long for a tx_id",
+        _set_command(
+            "riverside.001.market-takes-ivan-catch", "id", "riverside.001." + "x" * 60
+        ),
+        "is longer than 64 characters",
+    ),
+    (
+        "a command that explains nothing",
+        _set_command("riverside.001.market-takes-ivan-catch", "why", "  "),
+        "why must be a non-empty string",
+    ),
+    (
+        "an extra top-level key nobody reads",
+        _set_top_level("debts", []),
+        "unknown top-level keys",
     ),
 ]
 
