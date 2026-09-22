@@ -68,7 +68,6 @@ if str(_COMMUNITIES_DIR) not in sys.path:
 
 from nacl.signing import SigningKey  # noqa: E402
 from sqlalchemy import func, select  # noqa: E402
-from sqlalchemy.engine import make_url  # noqa: E402
 
 import community_schema  # noqa: E402
 import recipe_schema  # noqa: E402
@@ -298,10 +297,14 @@ class _Identity:
     ref: str
     pid: str
     public_key: str
-    _signing_key: SigningKey
+    #: `None` only in `reverify`, which re-reads an already seeded database and signs nothing: the
+    #: keys of the run that created it are gone by design.
+    _signing_key: SigningKey | None
     participant_id: uuid.UUID
 
     def sign(self, message: bytes) -> str:
+        if self._signing_key is None:
+            raise SeedRefusal(f"{self.ref} has no signing key in this process; it cannot act")
         return base64.b64encode(self._signing_key.sign(message).signature).decode("utf-8")
 
 
@@ -1025,6 +1028,58 @@ def write_key_table(run: _Run, *, root: Path | None = None) -> Path:
 # ==================================================================================================
 
 
+async def reverify(
+    session_factory: Callable[[], Any],
+    *,
+    community_id: str,
+    refs_to_pid: dict[str, str],
+    communities_root: Path | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Run the acceptance again over an ALREADY seeded database, without seeding anything.
+
+    The seed's verdict is only worth what it can still say about a database later, so the checks are
+    reachable without the run that produced it: `refs_to_pid` is the table the run wrote out, and
+    everything else is read back. A readiness probe (`T1710`) and the counter-checks in
+    `tests/integration/test_p017_t1711_seed_recipe_postgres.py` both need exactly this.
+    """
+
+    root = communities_root if communities_root is not None else _COMMUNITIES_DIR
+    community = community_schema.load_community(community_id, root=root)
+    recipe = recipe_schema.load_recipe(community_id, root=root)
+    run = _Run(session_factory, community, recipe)
+
+    async with session_factory() as session:
+        run.equivalent_ids = {
+            code: eid for code, eid in (await session.execute(select(Equivalent.code, Equivalent.id))).all()
+        }
+        rows = (
+            await session.execute(
+                select(Participant.pid, Participant.id).where(
+                    Participant.pid.in_(sorted(refs_to_pid.values()))
+                )
+            )
+        ).all()
+    id_by_pid = {pid: participant_id for pid, participant_id in rows}
+
+    missing = sorted(ref for ref, pid in refs_to_pid.items() if pid not in id_by_pid)
+    if missing:
+        raise SeedRefusal(
+            f"{len(missing)} participant(s) of {community_id} named by the ref -> PID table are not "
+            f"in this database: {missing[:10]}"
+        )
+    run.identities = {
+        ref: _Identity(
+            ref=ref,
+            pid=pid,
+            public_key="",
+            _signing_key=None,
+            participant_id=id_by_pid[pid],
+        )
+        for ref, pid in refs_to_pid.items()
+    }
+    return await run_acceptance(session_factory, run)
+
+
 async def seed_community(
     session_factory: Callable[[], Any],
     *,
@@ -1049,9 +1104,20 @@ async def seed_community(
         )
 
     assert_environment_is_safe(env)
-    assert_target_is_disposable(await database_url(session_factory))
-    async with session_factory() as session:
-        await assert_database_is_empty(session)
+    url = await database_url(session_factory)
+    assert_target_is_disposable(url)
+    try:
+        async with session_factory() as session:
+            await assert_database_is_empty(session)
+    except SeedRefusal:
+        raise
+    except Exception as exc:
+        # A database that is absent, unreachable or unmigrated is a refusal with a name, not a
+        # driver traceback. The URL is rendered with the password hidden (`AGENTS.md` §12).
+        raise SeedRefusal(
+            f"cannot read the target database {url.render_as_string(hide_password=True)}: "
+            f"{type(exc).__name__}: {exc}"
+        ) from exc
 
     run = _Run(session_factory, community, recipe)
 
