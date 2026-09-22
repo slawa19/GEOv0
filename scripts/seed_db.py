@@ -653,9 +653,12 @@ async def main() -> None:
     parser = argparse.ArgumentParser(description="Seed GEOv0 DB with demo data")
     parser.add_argument(
         "--source",
-        choices=["fixtures", "seeds"],
+        choices=["fixtures", "seeds", "recipe"],
         default=None,
-        help="Seed source: fixtures (admin-fixtures datasets) or seeds (legacy seeds/*.json)",
+        help=(
+            "Seed source: recipe (run a community's recipe through the domain services), "
+            "fixtures (admin-fixtures datasets) or seeds (legacy seeds/*.json)"
+        ),
     )
     parser.add_argument(
         "--max-transactions",
@@ -679,8 +682,9 @@ async def main() -> None:
         ],
         default=None,
         help=(
-            "When --source fixtures, generate and seed from a specific community fixture pack into .local-run "
-            "(does not modify tracked admin-fixtures/v1)."
+            "With --source fixtures, generate and seed from a specific community fixture pack into .local-run "
+            "(does not modify tracked admin-fixtures/v1). With --source recipe, the community whose "
+            "description and recipe under seeds/communities/ are executed; required there."
         ),
     )
     parser.add_argument(
@@ -695,6 +699,37 @@ async def main() -> None:
         # Ergonomic default: if fixtures datasets exist, use them (best UI demo experience).
         datasets_dir = os.path.join(repo_root, "admin-fixtures", "v1", "datasets")
         source = "fixtures" if os.path.isdir(datasets_dir) else "seeds"
+
+    if source == "recipe":
+        # THE RECIPE PATH DOES NOT INSERT ROWS. It performs the community's operations through
+        # ParticipantService / TrustLineService / PaymentService / ClearingService and the admin
+        # freeze handler, takes the reconciliation baseline on empty debts before the first
+        # payment, and then RECONCILES what it produced. See `scripts/seed_recipe.py`.
+        #
+        # The direct-insert paths above and `--source fixtures` are deliberately left standing:
+        # the launcher and the Admin e2e still use them (`T1710`, programme 017), and they go when
+        # those move.
+        from scripts.seed_recipe import SeedRefusal, seed_community
+
+        if not args.community:
+            print(
+                "--source recipe needs --community; a recipe belongs to one community.",
+                file=sys.stderr,
+            )
+            raise SystemExit(2)
+
+        from app.db.session import AsyncSessionLocal
+
+        try:
+            report = await seed_community(AsyncSessionLocal, community_id=args.community)
+        except SeedRefusal as refusal:
+            print(f"Seeding refused: {refusal}", file=sys.stderr)
+            raise SystemExit(1) from refusal
+        print(f"Seeding completed successfully (source=recipe). {report.summary()}")
+        for name, check in sorted(report.acceptance.items()):
+            print(f"  acceptance {name}: PASSED - {check['detail']}")
+        print(f"  ref -> PID table: {report.key_table_path}")
+        return
 
     if source == "fixtures":
         if args.community:
