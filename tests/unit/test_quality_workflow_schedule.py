@@ -1,3 +1,4 @@
+import copy
 from pathlib import Path
 
 import yaml
@@ -22,6 +23,34 @@ def _step_commands(job: dict) -> list[str]:
         for step in job.get("steps", [])
         if isinstance(step, dict) and step.get("run")
     ]
+
+
+def conditional_or_tolerated_steps(job: dict) -> list[str]:
+    """Every `run:` step of `job` that is conditional or allowed to fail, named with its reason.
+
+    THIS FUNCTION EXISTS BECAUSE EVERY CHECK IN THIS FILE READ THE JOB AND NONE READ ITS STEPS
+    (2026-09-22, Codex external review of `e2e1380..37fec08`). `test_both_halves_of_the_required_gate
+    _run_on_every_pull_request` asserts `"if" not in backend`, which is a fact about the job and
+    says nothing about what happens inside it: hanging `if: github.event_name == 'schedule'` on the
+    migration preflight and on both PostgreSQL steps left that assertion true, left the service
+    container and the commands where they were, and took PostgreSQL off every pull request.
+    `continue-on-error: true` does the same to the failure, not to the run. `AGENTS.md` §15: the
+    question is not whether a guard is there, it is whether there is a way around it.
+
+    Factored out rather than asserted inline so the counter-check below can feed it a workflow that
+    HAS those attributes and see it complain (§9, anti-vacuum).
+    """
+
+    findings: list[str] = []
+    for step in job.get("steps", []):
+        if not isinstance(step, dict) or not step.get("run"):
+            continue
+        name = step.get("name") or _step_commands({"steps": [step]})[0][:60]
+        if step.get("if") is not None:
+            findings.append(f"{name}: if: {step['if']}")
+        if step.get("continue-on-error") in (True, "true"):
+            findings.append(f"{name}: continue-on-error: true")
+    return findings
 
 
 def test_container_smoke_runs_on_schedule_and_manual_dispatch() -> None:
@@ -125,6 +154,56 @@ def test_the_required_backend_job_owns_the_postgres_service_and_the_alembic_head
     assert "bash docker/docker-entrypoint.sh true" in "\n".join(
         _step_commands(backend)
     )
+
+
+def test_no_step_of_either_required_half_is_conditional_or_allowed_to_fail() -> None:
+    """The job being unconditional is not the same as its work being unconditional.
+
+    A required gate is only required where its steps are: the migration preflight, the concurrency
+    matrix, the PostgreSQL marker tier and the default tier all have to run on a pull request and
+    all have to be able to fail it. This is the check that `"if" not in backend` above was mistaken
+    for.
+    """
+
+    workflow = _workflow()
+    for job_id in ("required-backend", "required-ui"):
+        findings = conditional_or_tolerated_steps(workflow["jobs"][job_id])
+        assert not findings, (
+            f"Job '{job_id}' has steps that are conditional or allowed to fail: {findings}. The "
+            "job itself carries no `if:`, so nothing else in this file would notice."
+        )
+
+
+def test_the_step_level_check_notices_both_ways_around_it() -> None:
+    """COUNTER-CHECK for the function above, with the committed workflow as its control.
+
+    Control first (§9): on the unmutated workflow the finder must be silent, otherwise the two
+    refusals below would be evidence about a finder that complains at everything.
+    """
+
+    workflow = _workflow()
+    backend = workflow["jobs"]["required-backend"]
+    assert conditional_or_tolerated_steps(backend) == []
+
+    scheduled_preflight = copy.deepcopy(backend)
+    for step in scheduled_preflight["steps"]:
+        if isinstance(step, dict) and "check_alembic_heads.py" in str(step.get("run", "")):
+            step["if"] = "github.event_name == 'schedule'"
+    findings = conditional_or_tolerated_steps(scheduled_preflight)
+    assert findings and any("schedule" in finding for finding in findings), findings
+
+    tolerated_postgres = copy.deepcopy(backend)
+    mutated = 0
+    for step in tolerated_postgres["steps"]:
+        if isinstance(step, dict) and "-BackendMarker postgres" in str(step.get("run", "")):
+            step["continue-on-error"] = True
+            mutated += 1
+    assert mutated == 2, (
+        f"expected two PostgreSQL marker steps to mutate, found {mutated}; the mutation would "
+        "otherwise prove nothing"
+    )
+    findings = conditional_or_tolerated_steps(tolerated_postgres)
+    assert len(findings) == 2 and all("continue-on-error" in f for f in findings), findings
 
 
 def test_postgresql_is_no_longer_a_schedule_only_job() -> None:

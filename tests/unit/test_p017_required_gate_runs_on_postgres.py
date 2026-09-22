@@ -24,14 +24,24 @@ and locally, against a disposable database, by:
     .\\scripts\\verify_local.ps1 -TaskSlug <slug> -BackendOnly -BackendMarker postgres `
       -BackendSelector tests/integration
 
-WHERE IT LIVES, AND WHY NOT WHERE THE SPEC SAID. 017 `spec.md:61` names
-`tests/integration/test_p017_required_gate_runs_on_postgres.py`. That path is not available: this
-repository's own taxonomy requires every `tests/integration/*_postgres.py` module to carry
+WHERE IT LIVES, AND THE CORRECTED REASON (2026-09-22). 017 `spec.md:61` named
+`tests/integration/test_p017_required_gate_runs_on_postgres.py`. THAT EXACT PATH is not available:
+the repository's taxonomy requires every module whose FILENAME ENDS IN `_postgres.py` to carry
 `pytest.mark.postgres` (`tests/unit/test_postgres_test_taxonomy.py:123-152`), and the marker would
 take this guard out of the default tier - the one tier that must notice the required gate losing
 PostgreSQL. Measured 2026-09-21: placed as the spec wrote it, the taxonomy guard failed with
-"PostgreSQL suffix modules without marker". The file reads one YAML file and needs no database, so
-it belongs here beside the other workflow-form guards.
+"PostgreSQL suffix modules without marker". But the first version of this note went further and said
+`tests/integration/` was therefore impossible, which the external review of `e2e1380..37fec08`
+refuted: the taxonomy reads the SUFFIX, not every filename mentioning PostgreSQL, so
+`tests/integration/test_p017_required_postgres_gate.py` would be unmarked and visible in the default
+tier. The location stands on what the file IS - it reads one YAML file, opens no database and needs
+no session - and not on there being no alternative.
+
+AND WHAT IT READS GREW ON 2026-09-22. Until then every check here read the JOB and none read its
+STEPS, so a schedule-only `if:` or a `continue-on-error: true` on the PostgreSQL steps left the job's
+condition, service container, URL, marker and selectors all intact while a pull request ran only the
+default tier. Step conditions and failure tolerance are now violations, with mutations 4-7 in
+`test_the_guard_notices_a_gate_that_lost_postgres` as the counter-check.
 """
 
 from __future__ import annotations
@@ -164,6 +174,38 @@ def required_postgres_backend_violations(workflow: dict[str, Any]) -> list[str]:
         )
 
     for job_id, job, step in marker_steps:
+        # A STEP CONDITION IS A WAY PAST THIS GUARD, NOT A GAP IN IT (2026-09-22, Codex external
+        # review of `e2e1380..37fec08`). Everything below used to read the JOB - its `if:`, its
+        # service, its environment - and nothing read the step. Hanging
+        # `if: github.event_name == 'schedule'` on both PostgreSQL steps left every one of those
+        # job-level facts intact while a pull request ran only the default tier; so did
+        # `continue-on-error: true`, which keeps the step running and stops it failing the gate.
+        # `AGENTS.md` §15: look for the way AROUND a guard, not for its absence.
+        condition = step.get("if")
+        if condition is not None:
+            violations.append(
+                f"Job '{job_id}', step {step.get('name')!r}: carries `if: {condition}`. A required "
+                "PostgreSQL session must be unconditional - a step condition narrows it while the "
+                "job's own `if:`, its service container and its environment all still look right."
+            )
+        if step.get("continue-on-error") in (True, "true"):
+            violations.append(
+                f"Job '{job_id}', step {step.get('name')!r}: carries `continue-on-error: true`, so "
+                "a PostgreSQL failure would be reported and then ignored, and the required gate "
+                "would be green with the money path unobserved."
+            )
+        if job.get("if") is not None:
+            violations.append(
+                f"Job '{job_id}' carries `if: {job.get('if')}`. It is not the schedule/dispatch "
+                "condition this guard recognises, but any job condition can exclude pull requests; "
+                "the required PostgreSQL job runs unconditionally or it is not required."
+            )
+        if job.get("continue-on-error") in (True, "true"):
+            violations.append(
+                f"Job '{job_id}' carries `continue-on-error: true`, so nothing in it can fail the "
+                "required gate."
+            )
+
         env = _effective_env(job, step)
         url = env.get("TEST_DATABASE_URL", "")
         if not _POSTGRES_TEST_DB.fullmatch(url):
@@ -217,7 +259,14 @@ def test_the_required_backend_gate_declares_postgres_and_its_url() -> None:
 
 
 def test_the_guard_notices_a_gate_that_lost_postgres() -> None:
-    """Counter-check: the three ways this gate has actually regressed must each be caught."""
+    """Counter-check: every way this gate can lose PostgreSQL must be caught.
+
+    Mutations 1-3 are the ways it has actually regressed. Mutations 4-6 are the ways AROUND it that
+    the external review of `e2e1380..37fec08` proposed and the guard did not see: the job kept its
+    service, its URL, its marker and its selectors, and a pull request still ran only the default
+    tier. They are witnesses, not history - but a guard that misses them is not evidence about the
+    gate, only about the last shape someone happened to break.
+    """
 
     workflow = _load_workflow()
     assert not required_postgres_backend_violations(workflow), (
@@ -255,6 +304,35 @@ def test_the_guard_notices_a_gate_that_lost_postgres() -> None:
             )
     assert required_postgres_backend_violations(sqlite_url)
 
+    # 4. The PostgreSQL STEPS become schedule-only while the job stays unconditional.
+    scheduled_steps = copy.deepcopy(workflow)
+    job = scheduled_steps["jobs"][_required_postgres_job_id(scheduled_steps)]
+    for step in _verify_local_steps(job):
+        if "-BackendMarker postgres" in _run_text(step):
+            step["if"] = "github.event_name == 'schedule'"
+    assert required_postgres_backend_violations(scheduled_steps)
+
+    # 5. The PostgreSQL steps keep running and stop mattering.
+    tolerated = copy.deepcopy(workflow)
+    job = tolerated["jobs"][_required_postgres_job_id(tolerated)]
+    for step in _verify_local_steps(job):
+        if "-BackendMarker postgres" in _run_text(step):
+            step["continue-on-error"] = True
+    assert required_postgres_backend_violations(tolerated)
+
+    # 6. A job condition that is not the schedule/dispatch one this guard recognises, and still
+    #    takes PostgreSQL off every pull request.
+    not_on_pull_request = copy.deepcopy(workflow)
+    not_on_pull_request["jobs"][_required_postgres_job_id(not_on_pull_request)]["if"] = (
+        "github.event_name != 'pull_request'"
+    )
+    assert required_postgres_backend_violations(not_on_pull_request)
+
+    # 7. The whole job is allowed to fail.
+    tolerant_job = copy.deepcopy(workflow)
+    tolerant_job["jobs"][_required_postgres_job_id(tolerant_job)]["continue-on-error"] = True
+    assert required_postgres_backend_violations(tolerant_job)
+
 
 def test_the_counter_check_is_not_vacuous() -> None:
     """The mutations above must be reachable: the committed workflow must have what they break."""
@@ -282,3 +360,17 @@ def test_the_counter_check_is_not_vacuous() -> None:
             f"Job '{job_id}' has a PostgreSQL service but runs no -BackendMarker postgres "
             "session, so its URL mutation would flip nothing." + _LIMITS
         )
+        # Mutations 4-7 only prove something if the committed workflow does NOT already carry the
+        # thing they add. An `if:` or a `continue-on-error:` already present would make those four
+        # assertions pass by doing nothing.
+        assert "if" not in workflow["jobs"][job_id], (
+            f"Job '{job_id}' already carries a condition, so mutation 6 would flip nothing."
+        )
+        assert "continue-on-error" not in workflow["jobs"][job_id], (
+            f"Job '{job_id}' already tolerates failure, so mutation 7 would flip nothing."
+        )
+        for step in marker_steps:
+            assert "if" not in step and "continue-on-error" not in step, (
+                f"Job '{job_id}', step {step.get('name')!r} already carries a condition or "
+                "failure tolerance, so mutations 4 and 5 would flip nothing."
+            )
