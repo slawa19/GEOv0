@@ -89,9 +89,7 @@
     - `services (person) → retail (business)`
   - Эти связи помогают закрывать циклы долгов и давать клирингу материал.
 
-Реализация в репо (детерминированные v2 seeds):
-- `admin-fixtures/tools/generate_seed_greenfield_village_100_v2.py` (функция `_add_extra_uah_service_links`)
-- `admin-fixtures/tools/generate_seed_riverside_town_50_v2.py` (функция `_add_extra_uah_service_links`)
+Результат зафиксирован в описании сообщества `seeds/communities/<id>/community.json`, откуда его читает генератор сценариев (`T1712`, 2026-09-21). Исходная реализация — функция `_add_extra_uah_service_links` в `admin-fixtures/tools/generate_seed_greenfield_village_100_v2.py` и `generate_seed_riverside_town_50_v2.py`; она по-прежнему собирает канонические admin-фикстуры, но входом сценария больше не является.
 
 Минимальный sanity-check результата:
 - `tx_failed_by_code.ROUTING_NO_CAPACITY` должен падать (а не расти) после усиления UAH-графа.
