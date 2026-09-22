@@ -300,6 +300,37 @@ async def test_a_command_that_cannot_be_performed_stops_the_seed_and_names_itsel
             await engine.dispose()
 
 
+async def test_the_acceptance_refuses_an_empty_database_instead_of_passing_it(template_name):
+    """The acceptance run against a database that holds NOTHING must not come back green.
+
+    A verdict that is true of an empty database is a verdict about nothing, and `reverify` is the
+    entry point where that could happen: it takes the `ref -> PID` table of a run and re-checks
+    whatever database it is pointed at. Pointed at an empty one, it has to say so.
+    """
+
+    async with cloned_database(
+        _postgres_url(), template_name=template_name, suffix="p017t1711seed"
+    ) as seeded_url:
+        seeded_engine, seeded_factory = _factory_for(seeded_url)
+        try:
+            report = await seed_community(seeded_factory, community_id=COMMUNITY, env="test")
+        finally:
+            await seeded_engine.dispose()
+
+        async with cloned_database(
+            _postgres_url(), template_name=template_name, suffix="p017t1711empty"
+        ) as empty_url:
+            engine, factory = _factory_for(empty_url)
+            try:
+                with pytest.raises(SeedRefusal) as refusal:
+                    await reverify(
+                        factory, community_id=COMMUNITY, refs_to_pid=report.refs_to_pid
+                    )
+                assert "not in this database" in str(refusal.value)
+            finally:
+                await engine.dispose()
+
+
 async def test_an_absent_database_is_a_named_refusal(template_name):
     """A URL that satisfies the name contract but points at nothing must refuse by name rather than
     surface a driver traceback - and the password must not be in the message (`AGENTS.md` §12)."""

@@ -30,6 +30,7 @@ from scripts.seed_recipe import (  # noqa: E402
     ACCEPTANCE_CHECKS,
     REACHABLE_TRUSTLINE_STATUSES,
     SeedRefusal,
+    _check_activity_per_equivalent,
     _is_transient,
     _match_cycle,
     _Run,
@@ -285,6 +286,66 @@ def test_a_different_cycle_of_the_same_length_does_not_match():
 
 def test_nothing_detected_matches_nothing():
     assert _match_cycle([], frozenset({("A", "B"), ("B", "C"), ("C", "A")})) is None
+
+
+# =================================================================================================
+# The activity check counts what the DESCRIPTION declares, not what the database happens to hold
+# =================================================================================================
+
+
+class _Result:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def all(self):
+        return self._rows
+
+
+class _StubSession:
+    def __init__(self, rows):
+        self._rows = rows
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def execute(self, *args, **kwargs):
+        return _Result(self._rows)
+
+
+def _activity_run(equivalent_ids):
+    community = community_schema.load_community("riverside-town-50", root=_COMMUNITIES)
+    run = _Run(lambda: _StubSession([]), community, {"commands": []})
+    run.equivalent_ids = equivalent_ids
+    return run, community
+
+
+async def test_activity_passes_when_every_declared_equivalent_carries_operations():
+    import uuid
+
+    ids = {code: uuid.uuid4() for code in ("UAH", "EUR", "HOUR")}
+    run, _ = _activity_run(ids)
+    rows = [(equivalent_id, 3) for equivalent_id in ids.values()]
+
+    verdict = await _check_activity_per_equivalent(lambda: _StubSession(rows), run)
+    assert verdict["passed"] is True
+    assert verdict["operations_per_equivalent"] == {"UAH": 3, "EUR": 3, "HOUR": 3}
+
+
+async def test_activity_fails_when_a_declared_equivalent_is_not_even_in_the_database():
+    """The hole this rule had. It used to walk the equivalents the DATABASE holds and filter them by
+    the declared set, so an equivalent that was never created produced no idle entry and the check
+    passed by having nothing to look at."""
+
+    run, community = _activity_run({})
+    verdict = await _check_activity_per_equivalent(lambda: _StubSession([]), run)
+
+    declared_active = sorted(e["code"] for e in community["equivalents"] if e["is_active"])
+    assert declared_active, "the description must declare active equivalents for this to mean anything"
+    assert verdict["passed"] is False
+    assert sorted(verdict["absent_equivalents"]) == declared_active
 
 
 # =================================================================================================

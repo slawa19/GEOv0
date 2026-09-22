@@ -555,9 +555,17 @@ class _Run:
         """
 
         for code, equivalent_id in sorted(self.equivalent_ids.items()):
-            async with self.session() as session:
+
+            async def body(session, equivalent_id=equivalent_id):
                 taken = await take_baseline(session, equivalent_id)
                 await session.commit()
+                return taken
+
+            # Through the same retry as everything else: `take_baseline` takes the equivalent's
+            # owner lock, so it is a writer like the others. A retry after a SUCCESSFUL commit would
+            # meet `BaselineAlreadyTaken`, which is not transient and becomes a refusal - the right
+            # answer, since nothing re-baselines.
+            taken = await self._attempt(f"take the baseline of {code}", body)
             if taken.offsets_recorded or taken.entries_read:
                 raise SeedRefusal(
                     f"the baseline of {code} is not empty ({taken.offsets_recorded} offset(s) over "
@@ -791,9 +799,15 @@ async def _check_reconciliation(session_factory, run: _Run) -> dict[str, dict[st
 
     return {
         "reconciliation_passed": {
-            "passed": not failing,
+            # `statuses` must be non-empty: "no equivalent failed" is true of a database with no
+            # equivalents in it, and a check that passes on an empty database is not a check.
+            "passed": bool(statuses) and not failing,
             "statuses": statuses,
-            "detail": f"equivalents not PASSED: {failing}" if failing else "every equivalent PASSED",
+            "detail": (
+                "no equivalent was verified at all"
+                if not statuses
+                else (f"equivalents not PASSED: {failing}" if failing else "every equivalent PASSED")
+            ),
         },
         "baseline_offsets_are_zero": {
             "passed": offsets == 0,
@@ -943,21 +957,33 @@ async def _check_activity_per_equivalent(session_factory, run: _Run) -> dict[str
         ).all()
     by_id = {equivalent_id: int(count) for equivalent_id, count in rows}
 
-    active = {
-        declared["code"]
-        for declared in run.community["equivalents"]
-        if declared["is_active"]
-    }
+    active = sorted(
+        declared["code"] for declared in run.community["equivalents"] if declared["is_active"]
+    )
+    # ITERATED OVER WHAT THE DESCRIPTION DECLARES, not over what the database happens to hold. The
+    # first version walked `run.equivalent_ids` and filtered it by the declared set, so a declared
+    # equivalent that was never created simply did not appear - and "no idle equivalent" was true
+    # because the equivalent itself was missing. That is the shape `AGENTS.md` §9 calls a rule that
+    # passes by having nothing to look at.
     per_code = {
-        code: by_id.get(equivalent_id, 0)
-        for code, equivalent_id in run.equivalent_ids.items()
-        if code in active
+        code: by_id.get(run.equivalent_ids.get(code), 0) if code in run.equivalent_ids else 0
+        for code in active
     }
     idle = sorted(code for code, count in per_code.items() if count == 0)
+    absent = sorted(code for code in active if code not in run.equivalent_ids)
     return {
-        "passed": not idle,
+        "passed": bool(active) and not idle,
         "operations_per_equivalent": per_code,
-        "detail": "every active equivalent saw money" if not idle else f"idle equivalents: {idle}",
+        "absent_equivalents": absent,
+        "detail": (
+            "the description declares no active equivalent at all"
+            if not active
+            else (
+                "every active equivalent saw money"
+                if not idle
+                else f"idle equivalents: {idle}" + (f" (absent from the database: {absent})" if absent else "")
+            )
+        ),
     }
 
 
