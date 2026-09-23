@@ -104,7 +104,6 @@ from app.db.reconciliation_tables import (
     debt_reconciliation_baselines,
     debt_reconciliation_results,
 )
-from app.db.sqlite_transaction_control import sqlite_transaction_control_is_installed
 
 __all__ = [
     "BaselineAlreadyTaken",
@@ -951,13 +950,6 @@ async def open_verification_snapshot(session: Any) -> None:
         await session.connection(
             execution_options={"isolation_level": "REPEATABLE READ", "postgresql_readonly": True}
         )
-    elif dialect == "sqlite":
-        if not sqlite_transaction_control_is_installed(bind):
-            raise ReconciliationSnapshotError(
-                "this SQLite engine has no explicit transaction control (T1525), so the verifier's reads "
-                "would not share a snapshot; refusing to produce a verdict"
-            )
-        await session.connection()
     else:
         raise ReconciliationSnapshotError(f"no snapshot recipe for dialect {dialect!r}")
 
@@ -1069,13 +1061,6 @@ async def _open_reaction_transaction(session: Any) -> None:
     dialect = bind.dialect.name
     if dialect == "postgresql":
         await session.connection(execution_options={"isolation_level": "REPEATABLE READ"})
-    elif dialect == "sqlite":
-        if not sqlite_transaction_control_is_installed(bind):
-            raise ReconciliationSnapshotError(
-                "this SQLite engine has no explicit transaction control (T1525); refusing to hold an "
-                "equivalent on reads that do not share a snapshot"
-            )
-        await session.connection()
     else:
         raise ReconciliationSnapshotError(f"no reaction transaction recipe for dialect {dialect!r}")
 

@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import AbstractSet, Any, Awaitable, Callable, List, Literal
 
-from sqlalchemy import select, and_, or_, func
+from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
@@ -16,7 +16,6 @@ from app.config import settings
 from app.db.models.transaction import Transaction
 from app.db.models.participant import Participant
 from app.db.models.equivalent import Equivalent
-from app.db.sqlite_transaction_control import sqlite_busy_error_name
 from app.schemas.payment import (
     PaymentConstraints,
     PaymentCreateRequest,
@@ -54,8 +53,8 @@ UNVERIFIABLE_LEGACY_IDENTITY_REASON = "unverifiable_legacy_identity"
 def _iter_exception_chain(exc: BaseException):
     """The chain a CLASSIFICATION may read: `orig` / `__cause__` only, never `__context__`.
 
-    ONE RULE FOR BOTH DECISIONS BELOW, 2026-09-12. `_payment_db_sqlstate` and the SQLite busy
-    check in `_classify_payment_db_error` both walk this generator, so they cannot drift apart:
+    ONE RULE FOR BOTH DECISIONS BELOW, 2026-09-12. `_payment_db_sqlstate` and
+    `_classify_payment_db_error` both walk this generator, so they cannot drift apart:
     the exception under inspection decides if it carries its own code, and otherwise only
     DELIBERATE wrapping is followed.
 
@@ -113,22 +112,6 @@ def _classify_payment_db_error(exc: BaseException) -> GeoException:
         if not isinstance(current, DBAPIError):
             continue
         if _payment_db_sqlstate(current) in _RETRYABLE_PAYMENT_SQLSTATES:
-            return RetryablePaymentConflictException()
-        # T1525: the SQLite twin of 40001. A staged payment runs inside the caller's transaction,
-        # so the engine cannot take a fresh snapshot itself and propagates the busy error as a
-        # typed conflict rather than a terminal internal error. The code carries the dialect -
-        # only sqlite3 errors have `sqlite_errorcode` - so this needs no bind of its own.
-        #
-        # WHAT THE CALLER ACTUALLY DOES WITH IT, corrected 2026-09-12: this comment used to say
-        # the simulator tick "owns the restart" and replays the unit of work. It does not. The
-        # conflict propagates out of the tick's payments phase, the orchestrator rolls the tick
-        # session back, counts one error and records `REAL_MODE_TICK_FAILED`
-        # (`real_tick_orchestrator.py`); the next heartbeat starts a NEW tick with a higher
-        # `tick_index` (`runtime_impl.py`), it does not re-run the failed one. On the HTTP path
-        # the conflict becomes 409 E008 with `retryable: true` and the client owns the retry.
-        # The typed conflict is therefore worth raising - it keeps a transient conflict from
-        # being recorded as an internal error - but no tick-level replay owner exists today.
-        if sqlite_busy_error_name(current) is not None:
             return RetryablePaymentConflictException()
     return GeoException()
 
@@ -528,7 +511,7 @@ class PaymentService:
                 if str(code).strip()
             }
         )
-        if not codes or not self.engine._is_postgres():
+        if not codes:
             return
 
         rows = (
@@ -1438,25 +1421,9 @@ class PaymentService:
         page: int = 1,
         per_page: int = 20,
     ) -> List[PaymentResult]:
-        bind = None
-        try:
-            bind = self.session.get_bind()
-        except Exception:
-            bind = getattr(self.session, "bind", None)
-
-        dialect_name = None
-        try:
-            dialect_name = bind.dialect.name if bind is not None else None
-        except Exception:
-            dialect_name = None
-
         def _normalize_dt(value: datetime | None) -> datetime | None:
             if value is None:
                 return None
-            if dialect_name == "sqlite":
-                if value.tzinfo is None:
-                    return value
-                return value.astimezone(timezone.utc).replace(tzinfo=None)
             # For client/server DBs (e.g. Postgres), prefer aware UTC.
             if value.tzinfo is None:
                 return value.replace(tzinfo=timezone.utc)
@@ -1471,19 +1438,9 @@ class PaymentService:
         if status != "all":
             clauses.append(Transaction.state == status)
         if from_date is not None:
-            if dialect_name == "sqlite":
-                clauses.append(
-                    func.datetime(Transaction.created_at) >= func.datetime(from_date)
-                )
-            else:
-                clauses.append(Transaction.created_at >= from_date)
+            clauses.append(Transaction.created_at >= from_date)
         if to_date is not None:
-            if dialect_name == "sqlite":
-                clauses.append(
-                    func.datetime(Transaction.created_at) <= func.datetime(to_date)
-                )
-            else:
-                clauses.append(Transaction.created_at <= to_date)
+            clauses.append(Transaction.created_at <= to_date)
 
         # Direction filtering.
         payload = Transaction.payload

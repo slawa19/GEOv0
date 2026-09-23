@@ -295,14 +295,13 @@ class RealTickOrchestrator:
             competitor's commit is exactly what invalidates that picture.
             """
             owner_service = PaymentService(session)
-            if owner_service.engine._is_postgres():
-                # No `commit()` first, unlike the code this replaced: that commit existed to close
-                # initialization reads before the monetary unit of work, and this session is new,
-                # so it has none. The owner set is this transaction's first statement. A
-                # SERIALIZABLE waiter can still receive 40001 here - and now there is something
-                # that restarts at this outer owner, which is what the old comment promised and
-                # nothing delivered: `app/core/simulator/money_replay.py`.
-                await owner_service.acquire_staged_equivalent_owner_locks(equivalents)
+            # No `commit()` first, unlike the code this replaced: that commit existed to close
+            # initialization reads before the monetary unit of work, and this session is new,
+            # so it has none. The owner set is this transaction's first statement. A
+            # SERIALIZABLE waiter can still receive 40001 here - and now there is something
+            # that restarts at this outer owner, which is what the old comment promised and
+            # nothing delivered: `app/core/simulator/money_replay.py`.
+            await owner_service.acquire_staged_equivalent_owner_locks(equivalents)
 
             return await rr._real_tick_payments_coordinator.run_payments_phase(
                 session=session,

@@ -291,11 +291,23 @@ def _run_with_phase(
     return run, phase, emitter, committed_effect
 
 
+async def _no_owner_locks(self, equivalent_codes) -> None:
+    return None
+
+
 def _bind_session(monkeypatch, session: _Session) -> None:
     monkeypatch.setattr(
         orchestrator_module.db_session,
         "AsyncSessionLocal",
         lambda: _SessionContext(session),
+    )
+    # The fake session has no database. Until 017 stage 3 (S5) the owner-lock call was skipped
+    # here because the fake had no PostgreSQL bind; the call is now unconditional, so it is stubbed
+    # explicitly. Owner locks are measured on PostgreSQL elsewhere, not by this module.
+    monkeypatch.setattr(
+        orchestrator_module.PaymentService,
+        "acquire_staged_equivalent_owner_locks",
+        _no_owner_locks,
     )
 
 

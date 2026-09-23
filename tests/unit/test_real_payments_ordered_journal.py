@@ -28,6 +28,22 @@ from app.utils.exceptions import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _no_database_owner_locks(monkeypatch):
+    """The fake session has no database, so the owner-lock acquisition is stubbed explicitly.
+
+    Until 017 stage 3 (S5) it was skipped because the fake had no PostgreSQL bind; the call is now
+    unconditional. A test that asserts on the owner lock installs its own double over this one.
+    """
+
+    async def _no_owner_locks(self, equivalent_codes) -> None:
+        return None
+
+    monkeypatch.setattr(
+        PaymentService, "acquire_staged_equivalent_owner_locks", _no_owner_locks
+    )
+
+
 @dataclass(frozen=True)
 class _Action:
     seq: int

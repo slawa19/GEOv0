@@ -452,8 +452,8 @@ async def test_a_second_transient_failure_propagates_and_leaves_the_event_pendin
 async def test_a_non_transient_staging_error_is_recorded_not_retried(db_session) -> None:
     """Anti-vacuum for the retry predicate: only the transient set restarts the unit of work.
 
-    That set is 40001/40P01/55P03 (and, until SQLite leaves `app/`, the SQLite busy family). A
-    driver error outside it is recorded and the event fired, exactly as before.
+    That set is 40001/40P01/55P03. A driver error outside it is recorded and the event fired,
+    exactly as before.
     """
     world = await _seed_debt_world(db_session)
     runner, arts = _make_runner()

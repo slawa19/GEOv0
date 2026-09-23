@@ -392,20 +392,8 @@ class ClearingService:
             commit_error = exc
         return caller_cancellation, commit_error
 
-    def _dialect_name(self) -> str | None:
-        try:
-            return self.session.get_bind().dialect.name
-        except Exception:
-            return None
-
-    def _is_sqlite(self) -> bool:
-        return self._dialect_name() == "sqlite"
-
     def _bind_uuid(self, uid: uuid.UUID) -> object:
         """Return UUID in a format supported by the current DBAPI for raw SQL binds."""
-        if self._is_sqlite():
-            # SQLAlchemy stores UUIDs in SQLite as CHAR(32) hex (no dashes).
-            return uid.hex
         return uid
 
     # `_bind_decimal` USED TO LIVE HERE AND IS GONE (2026-08-24 / p012 `F-012-3`, `T1202`).
@@ -435,7 +423,7 @@ class ClearingService:
         """Bind material for `_scope_predicate`, or None when the scope is not applied."""
         if allowed_participant_ids is None:
             return None
-        # Raw text() needs an expanding bind for IN, and SQLite stores UUIDs as bare hex.
+        # Raw text() needs an expanding bind for IN.
         return [self._bind_uuid(pid) for pid in sorted(allowed_participant_ids)]
 
     async def _resolve_scope_ids(self, allowed_participant_pids):
@@ -462,17 +450,6 @@ class ClearingService:
         - missing key -> allow
         - explicit false-ish -> reject
         """
-        dialect = self._dialect_name()
-        if dialect == "sqlite":
-            # json_extract returns 0/1 for JSON booleans; can also surface strings.
-            return (
-                "("
-                f"{alias}.policy IS NULL OR "
-                f"json_extract({alias}.policy, '$.auto_clearing') IS NULL OR "
-                f"json_extract({alias}.policy, '$.auto_clearing') NOT IN (0, 'false', '0', 'no', 'off')"
-                ")"
-            )
-
         # Postgres (json/jsonb): policy->>'auto_clearing' yields text.
         return (
             "("
@@ -653,15 +630,8 @@ class ClearingService:
         if precision is None:
             precision = await self._equivalent_precision(equivalent_id)
 
-        dialect = self._dialect_name()
-
         least_expr = "LEAST(d1.amount, d2.amount, d3.amount)"
-        if dialect == "sqlite":
-            # SQLite supports scalar min(x, y, z) as a LEAST replacement.
-            least_expr = "min(d1.amount, d2.amount, d3.amount)"
 
-        # NOTE: When executing raw SQL (text()), sqlite3 DBAPI does not accept uuid.UUID
-        # as a bound parameter. Normalize binds for SQLite only.
         equivalent_id_param = self._bind_uuid(equivalent_id)
 
         # a = d1.debtor, b = d1.creditor (= d2.debtor), c = d2.creditor (= d3.debtor);
@@ -784,11 +754,7 @@ class ClearingService:
         if precision is None:
             precision = await self._equivalent_precision(equivalent_id)
 
-        dialect = self._dialect_name()
-
         least_expr = "LEAST(d1.amount, d2.amount, d3.amount, d4.amount)"
-        if dialect == "sqlite":
-            least_expr = "min(d1.amount, d2.amount, d3.amount, d4.amount)"
 
         equivalent_id_param = self._bind_uuid(equivalent_id)
 
@@ -1520,7 +1486,7 @@ class ClearingService:
                 RuntimeError("Clearing cycle escaped participant scope: empty perimeter")
             )
 
-        if self._dialect_name() not in {"postgresql", "postgres"} or not cycle:
+        if not cycle:
             return await self._execute_clearing_with_amount(
                 cycle,
                 allowed_participant_ids=allowed_ids,

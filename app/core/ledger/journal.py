@@ -174,7 +174,6 @@ from app.db.journal_tables import (
 )
 from app.db.models.debt import Debt
 from app.db.reconciliation_tables import debt_reconciliation_baselines
-from app.db.sqlite_transaction_control import sqlite_transaction_control_is_installed
 
 __all__ = [
     "DEBT_TABLE_NAME",
@@ -2727,25 +2726,6 @@ def _refuse_unusable_transaction(conn: Connection, root: RootTransaction | None)
             "stopped watching, so 'the record and the money commit together' is not something "
             "this journal can promise here.",
         )
-    if conn.engine.dialect.name == "sqlite":
-        if not sqlite_transaction_control_is_installed(conn.engine):
-            raise DebtJournalError(
-                Reason.NO_TRANSACTION_CONTROL,
-                "this SQLite engine has no explicit transaction control (T1525), so a savepoint "
-                "opened before the first write is its own transaction and its RELEASE commits it "
-                "past any rollback. See app/db/sqlite_transaction_control.py.",
-            )
-        # THE SAME PROBE AS THE `begin` GUARD, and not a second reading of the same attribute
-        # (T1528): two implementations of "does the driver have a transaction open" drift apart, and
-        # this one had already lost the distinction between False and unmeasured that the other one
-        # was being fixed for.
-        if _driver_transaction_is_live(conn) is False:
-            raise DebtJournalError(
-                Reason.NO_TRANSACTION_CONTROL,
-                "this SQLite connection has no database transaction open even though SQLAlchemy "
-                "believes one began - registration of the transaction control is retroactive to "
-                "neither open connections nor open transactions.",
-            )
 
 
 def _validate_arguments(
