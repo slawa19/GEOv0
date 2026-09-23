@@ -88,6 +88,24 @@ _CONNECT_TIMEOUT_SECONDS = 10.0
 _STATEMENT_TIMEOUT_SECONDS = 60.0
 
 
+def adopted_key_table_path(database: str) -> Path:
+    """Where THIS database's `ref -> PID` table lives.
+
+    The seed writes one table per COMMUNITY (`scripts/seed_recipe.py::key_table_path`), overwritten
+    by the next run of that community - which is right for the seed and wrong for a readiness probe,
+    because two databases in one checkout are routinely seeded from the same community: the
+    launcher's `geov0_dev_local` and the Admin e2e's disposable database. Measured on 2026-09-23: the
+    e2e's seed overwrote the community table, and the launcher's next `start` refused its own
+    perfectly good database because the PIDs it was checking belonged to the e2e's run.
+
+    So each database keeps its own copy, taken right after its own seed, and readiness reads only
+    that. A database with no copy is refused by name rather than checked against somebody else's
+    PIDs.
+    """
+
+    return _REPO_ROOT / ".local-run" / "dev-databases" / database / "participants.json"
+
+
 def _is_loopback_host(host: str) -> bool:
     candidate = (host or "").strip()
     if not candidate:
@@ -290,6 +308,7 @@ async def cmd_reset(url: URL) -> int:
             await connection.execute(
                 f'CREATE DATABASE "{name}"', timeout=_STATEMENT_TIMEOUT_SECONDS
             )
+            _forget_adopted_key_table(url)
             print(f"Database {name!r} did not exist; created empty.")
             return 0
 
@@ -310,6 +329,7 @@ async def cmd_reset(url: URL) -> int:
                 f"never forces a drop, so this database is untouched."
             ) from exc
         await connection.execute(f'CREATE DATABASE "{name}"', timeout=_STATEMENT_TIMEOUT_SECONDS)
+        _forget_adopted_key_table(url)
         print(f"Database {name!r} dropped and recreated empty.")
         return 0
     finally:
@@ -331,10 +351,49 @@ async def cmd_drop(url: URL) -> int:
                 + "."
             )
         await connection.execute(f'DROP DATABASE "{name}"', timeout=_STATEMENT_TIMEOUT_SECONDS)
+        _forget_adopted_key_table(url)
         print(f"Database {name!r} dropped.")
         return 0
     finally:
         await connection.close()
+
+
+async def cmd_adopt(url: URL, *, community: str) -> int:
+    """Copy the seed's freshly written `ref -> PID` table into this database's own place.
+
+    Run immediately after seeding THIS database, before anything else seeds the same community
+    somewhere else. Copying rather than referencing is the point: the source is overwritten by the
+    next run of that community, and a readiness probe that followed it would be checking the wrong
+    PIDs (see `adopted_key_table_path`).
+    """
+
+    import shutil
+
+    from scripts.seed_recipe import key_table_path
+
+    source = key_table_path(community)
+    if not source.is_file():
+        raise DevDatabaseRefusal(
+            f"The seed of {community} wrote no ref -> PID table at {source}, so there is nothing to "
+            f"adopt for {url.database!r}. Seed it first."
+        )
+    destination = adopted_key_table_path(url.database or "")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source, destination)
+    print(f"Adopted the ref -> PID table of {community} for {url.database!r}: {destination}")
+    return 0
+
+
+def _forget_adopted_key_table(url: URL) -> None:
+    """A dropped database's adopted table is stale metadata, and stale metadata is a false answer."""
+
+    table = adopted_key_table_path(url.database or "")
+    try:
+        table.unlink(missing_ok=True)
+    except OSError as exc:
+        # Not fatal - the database is gone either way - but never silent, because a leftover table
+        # would be read by the next `ready` on a database of the same name.
+        print(f"warning: could not remove {table}: {exc}", file=sys.stderr)
 
 
 async def _assert_schema_at_head(url: URL) -> str:
@@ -398,12 +457,7 @@ async def cmd_ready(url: URL, *, community: str) -> int:
     print(f"schema: at head {head}")
 
     from app.db.session import AsyncSessionLocal
-    from scripts.seed_recipe import (
-        SeedRefusal,
-        assert_database_is_empty,
-        key_table_path,
-        reverify,
-    )
+    from scripts.seed_recipe import SeedRefusal, assert_database_is_empty, reverify
 
     try:
         async with AsyncSessionLocal() as session:
@@ -418,12 +472,13 @@ async def cmd_ready(url: URL, *, community: str) -> int:
         print("population: empty (schema only)")
         return 3
 
-    table = key_table_path(community)
+    table = adopted_key_table_path(url.database or "")
     if not table.is_file():
         raise DevDatabaseRefusal(
-            f"Database {url.database!r} holds data, but the ref -> PID table this seed writes "
-            f"({table}) is gone, so its population cannot be checked against the recipe. That is an "
-            f"unfinished or foreign initialization. Reset it: .\\scripts\\run_local.ps1 reset-db"
+            f"Database {url.database!r} holds data, but no ref -> PID table was adopted for it "
+            f"({table}), so its population cannot be checked against the recipe. Either it was "
+            f"seeded without `dev_database.py adopt`, or this is an unfinished or foreign "
+            f"initialization. Reset it: .\\scripts\\run_local.ps1 reset-db"
         )
     try:
         document = json.loads(table.read_text(encoding="utf-8"))
@@ -432,6 +487,12 @@ async def cmd_ready(url: URL, *, community: str) -> int:
         raise DevDatabaseRefusal(
             f"The ref -> PID table {table} cannot be read: {type(exc).__name__}: {exc}"
         ) from exc
+    adopted_community = document.get("community_id")
+    if adopted_community != community:
+        raise DevDatabaseRefusal(
+            f"Database {url.database!r} was seeded from {adopted_community!r}, not {community!r}. "
+            f"Ask for that community, or reset the database."
+        )
 
     try:
         checks = await reverify(AsyncSessionLocal, community_id=community, refs_to_pid=refs_to_pid)
@@ -464,6 +525,8 @@ async def _run(args: argparse.Namespace) -> int:
         return await cmd_reset(url)
     if args.command == "drop":
         return await cmd_drop(url)
+    if args.command == "adopt":
+        return await cmd_adopt(url, community=args.community)
     if args.command == "ready":
         return await cmd_ready(url, community=args.community)
     raise UnsafeDevDatabaseError(f"Unknown command {args.command!r}.")
@@ -473,11 +536,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Lifecycle and readiness of the launcher's PostgreSQL database."
     )
-    parser.add_argument("command", choices=("validate", "ensure", "reset", "drop", "ready"))
+    parser.add_argument(
+        "command", choices=("validate", "ensure", "reset", "drop", "adopt", "ready")
+    )
     parser.add_argument(
         "--community",
         default="riverside-town-50",
-        help="For `ready`: the community whose recipe this database is expected to hold.",
+        help=(
+            "For `adopt` and `ready`: the community whose recipe this database was seeded from, "
+            "and is expected to still hold."
+        ),
     )
     args = parser.parse_args(argv)
 

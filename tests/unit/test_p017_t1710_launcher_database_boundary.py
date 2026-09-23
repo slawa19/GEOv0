@@ -165,6 +165,53 @@ def test_the_tripwire_can_actually_fire(monkeypatch: pytest.MonkeyPatch) -> None
     assert reached == ["postgres"]
 
 
+def test_each_database_checks_its_own_ref_to_pid_table() -> None:
+    """Two databases seeded from one community must not share the table readiness is checked against.
+
+    Reproduced on 2026-09-23 with the previous design: the Admin e2e seeded its disposable database
+    from `riverside-town-50`, which overwrote the one table the seed keeps per community, and the
+    launcher's next `start` refused its own untouched database because the PIDs it compared against
+    belonged to the e2e's run. The paths must differ per database, and neither may be the seed's own
+    community-wide path.
+    """
+
+    from scripts.seed_recipe import key_table_path
+
+    launcher = dev_database.adopted_key_table_path("geov0_dev_local")
+    disposable = dev_database.adopted_key_table_path("geov0_dev_phase4-1a2b3c4d")
+
+    assert launcher != disposable
+    assert launcher != key_table_path("riverside-town-50")
+    assert disposable != key_table_path("riverside-town-50")
+    # Under the repository's runtime root, like every other artefact family (`AGENTS.md` section 12).
+    assert (_REPO_ROOT / ".local-run") in launcher.parents
+
+
+def test_dropping_a_database_forgets_its_adopted_table(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A dropped database's adopted table is stale metadata, and stale metadata answers falsely.
+
+    Left behind, it would be read by the next `ready` on a database that was re-created under the
+    same name - reporting the population of a database that no longer exists.
+    """
+
+    table = tmp_path / "geov0_dev_local" / "participants.json"
+    table.parent.mkdir(parents=True)
+    table.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(dev_database, "adopted_key_table_path", lambda _database: table)
+
+    dev_database._forget_adopted_key_table(
+        dev_database.assert_safe_dev_database_url(_url("geov0_dev_local"))
+    )
+
+    assert not table.exists()
+    # Idempotent: a second call on an absent file is not an error.
+    dev_database._forget_adopted_key_table(
+        dev_database.assert_safe_dev_database_url(_url("geov0_dev_local"))
+    )
+
+
 def test_the_reset_path_never_forces_a_drop() -> None:
     """The server is the last line of defence, so nothing here may take that defence away.
 

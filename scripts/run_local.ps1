@@ -894,7 +894,7 @@ function Invoke-DevDatabaseCommand {
     .DESCRIPTION
         The exit code carries meaning this launcher has to branch on - 3 means "migrated and empty,
         seed it" - so a helper that threw on anything non-zero would turn a normal state into a
-        failure. Callers that want a failure say so with -FailOn.
+        failure. Callers that want a failure say so with -FailOnNonZero.
     #>
     param(
         [string]$PythonExe,
@@ -1011,6 +1011,10 @@ function Initialize-LauncherDatabase {
 
     Write-Host "     Seeding $SeedCommunity through its recipe..." -ForegroundColor Gray
     Invoke-PythonScript -PythonExe $PythonExe -ScriptPath (Join-Path $RepoRoot 'scripts\seed_db.py') -Arguments @('--source', 'recipe', '--community', $SeedCommunity) -Description "seed_db.py --source recipe"
+    # Immediately, before anything else seeds the same community: the seed writes ONE ref -> PID
+    # table per community and the next run of that community overwrites it, so this database takes
+    # its own copy or its readiness would later be checked against another run's PIDs.
+    $null = Invoke-DevDatabaseCommand -PythonExe $PythonExe -Command 'adopt' -Arguments @('--community', $SeedCommunity) -FailOnNonZero
     # The seed takes the reconciliation baseline itself, on empty debts and before the first payment
     # (`scripts/seed_recipe.py::take_baselines`). Taking one here afterwards would adopt the whole
     # seed and certify nothing, so there is no baseline call on this path.

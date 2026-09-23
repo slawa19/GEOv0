@@ -329,6 +329,10 @@ python -m alembic -c migrations/alembic.ini upgrade head
 #    the debt reconciliation baseline itself, on empty debts and before the first payment.
 python scripts/seed_db.py --source recipe --community riverside-town-50
 
+# 2b) Keep this database's own copy of the seed's ref -> PID table: the seed writes one per
+#     community and the next run of that community overwrites it.
+python scripts/dev_database.py adopt --community riverside-town-50
+
 # 3) Check what you got: schema, population, baseline
 python scripts/dev_database.py ready
 
@@ -583,6 +587,7 @@ python -m alembic -c migrations/alembic.ini upgrade head
 # The recipe runs real participants, trust lines, payments and a clearing through the domain
 # services, and takes the reconciliation baseline itself before the first payment.
 python scripts/seed_db.py --source recipe --community riverside-town-50
+python scripts/dev_database.py adopt --community riverside-town-50
 python scripts/dev_database.py ready
 
 python -m uvicorn app.main:app --reload --port 18000

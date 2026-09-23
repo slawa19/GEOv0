@@ -132,6 +132,12 @@ try {
         & $pythonExe scripts/seed_db.py --source recipe --community riverside-town-50
         if ($LASTEXITCODE -ne 0) { throw 'Recipe seed failed.' }
 
+        # The seed writes one ref -> PID table per community, overwritten by the next run of that
+        # community. This disposable database takes its own copy so the readiness probe below is
+        # checking ITS population - and so that this run does not invalidate the launcher's.
+        & $pythonExe scripts/dev_database.py adopt --community riverside-town-50
+        if ($LASTEXITCODE -ne 0) { throw "Adopting the seed's ref -> PID table failed." }
+
         # The seed asserts its own acceptance; this asserts the same of the database the backend is
         # about to be pointed at, which is the check that would catch a half-written seed.
         & $pythonExe scripts/dev_database.py ready --community riverside-town-50
