@@ -237,6 +237,10 @@ High‑level roadmap (subject to change):
 
 Recommended: use the repo runner script (it starts **Backend + Admin UI**, manages ports, and writes `admin-ui/.env.local`).
 
+**The launcher needs a running PostgreSQL** — programme 017 removed the SQLite engine, so there is no
+file-backed fallback. `docker compose up -d db`, or, on a machine without Docker,
+[`docs/ru/backend/postgres-local-portable.md`](docs/ru/backend/postgres-local-portable.md).
+
 ```powershell
 .\scripts\run_local.ps1 start
 ```
@@ -247,9 +251,25 @@ Common actions:
 .\scripts\run_local.ps1 status
 .\scripts\run_local.ps1 stop
 
-# (optional) Recreate SQLite DB and seed from canonical admin fixtures (richer demo data)
-.\scripts\run_local.ps1 reset-db -SeedSource fixtures -FixturesCommunity greenfield-village-100 -RegenerateFixtures
+# Readiness of the launcher's database: schema at head, the recipe's population, the baseline
+.\scripts\run_local.ps1 check-db
+
+# Recreate the launcher's own database and run the community recipe through the domain services
+.\scripts\run_local.ps1 reset-db
 ```
+
+**The launcher's database.** Each launcher run owns exactly one PostgreSQL database,
+`geov0_dev_<DbSlug>` (`geov0_dev_local` by default), on `127.0.0.1:5432` as role `geo`. Only a name
+matching that contract can ever be reset — `scripts/dev_database.py` refuses anything else, and no
+flag overrides it. Parallel agents each take their own slug (`-DbSlug p017t1710`) so they do not
+share a mutable database. Override the cluster with `-PgHost` / `-PgPort` / `-PgUser` and the
+environment variable `GEO_DEV_PG_PASSWORD`.
+
+**Leftover `.local-run/*.db` files are yours.** The launchers no longer read, write or delete them:
+removing the SQLite engine did not authorize deleting anybody's data
+(`docs/ru/09-decisions-and-defaults.md:17-19`). If you still need what is in one, open it with any
+SQLite client before you delete it; otherwise delete it yourself when you are ready. Nothing in the
+repository will do it for you.
 
 ### Prerequisites
 
@@ -293,23 +313,30 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml exec app python s
 # Docs: /docs
 ```
 
-If Docker is unavailable, you can run the backend locally using SQLite (development only):
+If Docker is unavailable, run a portable PostgreSQL
+([`docs/ru/backend/postgres-local-portable.md`](docs/ru/backend/postgres-local-portable.md)) and point
+the backend at a database of your own:
 
 ```powershell
 $env:ENV = 'dev'
+$env:DATABASE_URL = 'postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_dev_local'
 
-# 1) Initialize SQLite schema (creates ./.local-run/geov0.db)
-python scripts/init_sqlite_db.py
+# 1) Create the database and bring it to head (the one migration entry)
+python scripts/dev_database.py ensure
+python -m alembic -c migrations/alembic.ini upgrade head
 
-# 2) Seed demo data (from ./seeds/*.json)
-python scripts/seed_db.py
+# 2) Seed by running a community's committed recipe through the domain services. The recipe takes
+#    the debt reconciliation baseline itself, on empty debts and before the first payment.
+python scripts/seed_db.py --source recipe --community riverside-town-50
 
-# 2b) Right after seeding, before any payments: take the debt reconciliation baseline
-python scripts/take_reconciliation_baseline.py --all
+# 3) Check what you got: schema, population, baseline
+python scripts/dev_database.py ready
 
-# 3) Run API
+# 4) Run API
 python -m uvicorn app.main:app --reload --port 18000
 ```
+
+`.\scripts\run_local.ps1 start` does all four steps for you.
 
 ### Debt reconciliation baseline
 
@@ -317,10 +344,13 @@ The scheduled integrity loop checks every equivalent's `debts` against the debt 
 criterion (a): detection of changes made around the application). The check needs one **baseline** per
 equivalent; without it the stored result is `UNVERIFIABLE`.
 
-- **Fresh local database — automatic.** `scripts/run_local.ps1` (`start` on a missing database and
-  `reset-db`), `scripts/run_full_stack.ps1` (a missing database and `-ResetDb`) and
-  `scripts/verify_admin_phase4_real_contract.ps1` take it right after seeding, before the backend
-  starts, and fail if it fails. After a manual seed, run
+- **Fresh local database — automatic, and taken by the seed itself.** `scripts/run_local.ps1`
+  (`start` on an empty database and `reset-db`), `scripts/run_full_stack.ps1` (an empty database and
+  `-ResetDb`) and `scripts/verify_admin_phase4_real_contract.ps1` all seed by running a community's
+  recipe, and that recipe takes the baseline on empty debts before its first payment
+  (`scripts/seed_recipe.py`). They then re-check it, and fail if it does not hold. There is no
+  separate baseline step on these paths, and adding one after seeding would adopt the whole seed and
+  certify nothing. After a manual seed by some other route, run
   `python scripts/take_reconciliation_baseline.py --all` yourself before any payments.
 - **Upgrading an existing database — explicit and manual (cutover).** Make the system quiet first: stop
   client traffic and simulator runs, and stop anything that writes `debts` around the application
@@ -365,12 +395,12 @@ The verifier gives pytest a task-specific SQLite DB and basetemp by default. Par
 agents must pass a unique slug, for example
 `.\scripts\verify_local.ps1 -TaskSlug agent_contract_review`.
 
-Local databases, pytest cache/basetemp, logs, PID/NDJSON and browser-test output
-belong under the ignored `.local-run/` runtime root. An existing legacy
-`./geov0.db` is never moved or deleted automatically; set
-`DATABASE_URL=sqlite+aiosqlite:///./geov0.db` only when you intentionally need it.
-The runner's reset action is restricted to the new `.local-run` default and fails
-closed for this legacy override or any custom URL.
+Pytest cache/basetemp, logs, PID/NDJSON and browser-test output belong under the
+ignored `.local-run/` runtime root. Any SQLite file left there, and a legacy
+`./geov0.db` in the repository root, is **your data**: no script moves, reads or
+deletes it any more, and removing the SQLite engine did not authorize deleting it.
+The launchers' reset action is restricted to their own `geov0_dev_<slug>`
+PostgreSQL database and fails closed for every other name.
 
 GitHub Actions runs the same verifier with Python 3.11 and Node 22.12. PostgreSQL
 integration, production container/schema smoke, simulator super-smoke, Admin E2E,
@@ -501,17 +531,21 @@ Recommended on Windows (one command, avoids PowerShell quoting / port pitfalls):
 .\scripts\run_local.ps1 start
 ```
 
-Choose a full community dataset (and refresh DB):
+Refresh the database from the community recipe:
 
 ```powershell
-# Greenfield (100 participants)
-.\scripts\run_local.ps1 reset-db -SeedSource fixtures -FixturesCommunity greenfield-village-100 -RegenerateFixtures
-.\scripts\run_local.ps1 start -SeedSource fixtures -FixturesCommunity greenfield-village-100
-
-# Riverside (50 participants)
-.\scripts\run_local.ps1 reset-db -SeedSource fixtures -FixturesCommunity riverside-town-50 -RegenerateFixtures
-.\scripts\run_local.ps1 start -SeedSource fixtures -FixturesCommunity riverside-town-50
+# Riverside (50 participants) - the default
+.\scripts\run_local.ps1 reset-db
+.\scripts\run_local.ps1 start
 ```
+
+`-SeedCommunity` names the community, but `riverside-town-50` is the only one that can be seeded
+today: `greenfield-village-100` declares nine frozen trust lines that no product operation creates,
+so the seed refuses it by name rather than writing a domain column directly (`specs/BACKLOG.md`,
+2026-09-22). The Admin UI token is handed to the Admin UI in `VITE_ADMIN_TOKEN`, and the Simulator
+UI gets its own `VITE_GEO_DEV_ACCESS_TOKEN`; both default to the backend's dev token, and
+`GEO_DEV_ADMIN_TOKEN` overrides both. If you set it, clear the Simulator UI's stored token
+(`geo.sim.v2.accessToken` in localStorage), which wins over the variable.
 
 Stop:
 
@@ -536,34 +570,27 @@ $env:VITE_API_BASE_URL = 'http://localhost:8000'
 npm --prefix admin-ui run dev
 ```
 
-No-Docker quickstart (SQLite):
+No-Docker quickstart (portable PostgreSQL —
+[`docs/ru/backend/postgres-local-portable.md`](docs/ru/backend/postgres-local-portable.md)):
 
 ```powershell
 $env:ENV = 'dev'
+$env:DATABASE_URL = 'postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_dev_local'
 
-python scripts/init_sqlite_db.py
-# Recommended: seed from canonical admin fixtures datasets (richer demo data, like fixtures-mode UI)
-python scripts/seed_db.py --source fixtures
+python scripts/dev_database.py ensure
+python -m alembic -c migrations/alembic.ini upgrade head
 
-# Choose a full community pack without modifying tracked fixtures (writes to .local-run/fixture-packs):
-python scripts/seed_db.py --source fixtures --community greenfield-village-100
-python scripts/seed_db.py --source fixtures --community riverside-town-50
-
-# Validate a generated pack (example: Riverside)
-cd admin-ui
-node scripts/validate-fixtures.mjs --only-pack --v1-dir ..\.local-run\fixture-packs\riverside-town-50\v1
-
-# Legacy small seed set:
-# python scripts/seed_db.py --source seeds
-
-# Right after seeding, before any payments (see "Debt reconciliation baseline")
-python scripts/take_reconciliation_baseline.py --all
+# The recipe runs real participants, trust lines, payments and a clearing through the domain
+# services, and takes the reconciliation baseline itself before the first payment.
+python scripts/seed_db.py --source recipe --community riverside-town-50
+python scripts/dev_database.py ready
 
 python -m uvicorn app.main:app --reload --port 18000
 
 npm --prefix admin-ui install
 $env:VITE_API_MODE = 'real'
 $env:VITE_API_BASE_URL = 'http://127.0.0.1:18000'
+$env:VITE_ADMIN_TOKEN = 'dev-admin-token-change-me'
 npm --prefix admin-ui run dev
 ```
 
