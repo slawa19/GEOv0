@@ -7,6 +7,17 @@ from httpx import AsyncClient
 from app.core.payments.service import PaymentService
 from app.core.simulator.runtime import runtime
 from app.utils.exceptions import TimeoutException
+from tests.conftest import MODE_B
+
+# MODE B (017 stage 2b, T1702). A real-mode run seeds its scenario and commits it on the simulator's
+# own sessions: equivalent UAH, 100 participants and 432 trust lines landed in the TIER database and
+# stayed there, so every later test that creates UAH or counts participants failed on
+# `equivalents_code_key` - 42 failures in one process with this module first. It was the fourth
+# polluter of the stage-2 catalogue, and a hidden one: while `test_simulator_real_snapshot_db_enrichment`
+# still leaked UAH itself, this module's leak was shadowed by it. Fixing that polluter unmasked this
+# one. In mode B the run's commits land in a clone dropped after the test, and `client` routes the
+# simulator's `AsyncSessionLocal` to it. On SQLite nothing changes.
+pytestmark = MODE_B
 
 
 @pytest.mark.asyncio
