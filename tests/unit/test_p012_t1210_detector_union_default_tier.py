@@ -41,6 +41,7 @@ from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 
 from tests.debt_setup import debt_fixture_setup
+from tests.conftest import MODE_B
 
 _EQ = "DUX"
 
@@ -200,6 +201,7 @@ async def test_within_a_length_the_largest_executable_cycle_comes_first(db_sessi
     )
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_auto_clear_over_a_shared_edge_clears_the_large_cycle_and_leaves_the_small(
     db_session,
@@ -240,6 +242,7 @@ async def test_auto_clear_over_a_shared_edge_clears_the_large_cycle_and_leaves_t
     )
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_auto_clear_orders_the_union_when_the_sql_path_is_down(
     db_session, monkeypatch
@@ -280,6 +283,7 @@ async def test_auto_clear_orders_the_union_when_the_sql_path_is_down(
     )
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_the_ladder_widens_when_short_cycles_exist_but_none_executes(
     db_session, monkeypatch

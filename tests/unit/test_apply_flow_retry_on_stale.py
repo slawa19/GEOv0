@@ -9,9 +9,17 @@ from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 
+from tests.conftest import MODE_B, sessionmaker_of
 from tests.debt_setup import debt_fixture_setup, writer_operation
 
 
+# MODE B (017 stage 2b, T1702). The stale version is made by a SECOND session's commit. In mode A on
+# PostgreSQL the seed is never committed - `commit()` releases a SAVEPOINT inside the fixture's
+# outer transaction - so another session cannot see it: `NoResultFound` on the second session's read
+# (stage-2 catalogue, class VIS). Mode B commits for real on a clone; the second session reaches the
+# clone through `sessionmaker_of`, not through `TestingSessionLocal`, which is the tier's database
+# there.
+@MODE_B
 @pytest.mark.asyncio
 async def test_apply_flow_retries_on_stale_data(db_session):
     """Ensures PaymentEngine._apply_flow retries StaleDataError and succeeds.
@@ -62,9 +70,7 @@ async def test_apply_flow_retries_on_stale_data(db_session):
         db_session.add(debt)
     await db_session.commit()
 
-    from tests.conftest import TestingSessionLocal
-
-    async with TestingSessionLocal() as s_fresh:
+    async with sessionmaker_of(db_session)() as s_fresh:
         # Bump the version in a separate session.
         d2 = (
             await s_fresh.execute(select(Debt).where(Debt.id == debt.id))

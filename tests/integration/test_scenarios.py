@@ -6,6 +6,7 @@ import uuid
 from app.core.auth.crypto import generate_keypair
 from app.core.auth.canonical import canonical_json
 from nacl.signing import SigningKey
+from tests.conftest import MODE_B
 
 
 def _sign_payment_request(
@@ -558,6 +559,7 @@ async def test_multipath_payment(client: AsyncClient, db_session):
     assert len(body["routes"]) == 2
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_clearing(client: AsyncClient, db_session):
     """

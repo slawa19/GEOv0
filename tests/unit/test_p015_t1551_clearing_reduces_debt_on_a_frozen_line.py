@@ -46,6 +46,7 @@ from app.db.models.trustline import TrustLine
 from app.utils.exceptions import IntegrityViolationException
 from tests.debt_setup import debt_fixture_setup
 from tests.unit.test_scenario_inject_topology import _make_run, _make_runner
+from tests.conftest import MODE_B
 
 _CONSENT = {"auto_clearing": True}
 _REFUSAL = {"auto_clearing": False}
@@ -173,6 +174,7 @@ async def test_the_quadrangle_query_returns_a_cycle_through_a_frozen_line(db_ses
 # --- the reduction ---------------------------------------------------------------------------
 
 
+@MODE_B
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", ["active", "frozen"])
 async def test_clearing_reduces_the_over_limit_debt_on_a_frozen_line(db_session, status):
@@ -216,6 +218,7 @@ async def test_clearing_reduces_the_over_limit_debt_on_a_frozen_line(db_session,
 # --- control: consent is still required -------------------------------------------------------
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_a_frozen_line_without_consent_is_still_not_cleared(db_session):
     ring = await _ring(
@@ -236,6 +239,7 @@ async def test_a_frozen_line_without_consent_is_still_not_cleared(db_session):
 # --- the application path: the simulator's freeze inject --------------------------------------
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_a_cycle_through_lines_frozen_by_the_simulator_inject_is_cleared(db_session):
     # The only assignment of `frozen` in the application is the simulator's `freeze_participant`

@@ -39,7 +39,7 @@ from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
-from tests.conftest import TestingSessionLocal
+from tests.conftest import MODE_B, sessionmaker_of
 
 from tests.debt_setup import debt_fixture_setup
 
@@ -85,6 +85,10 @@ async def _seed_debt_behind_a_frozen_line(db_session) -> tuple[Equivalent, Debt]
     return eq, debt
 
 
+# MODE B (017 stage 2b, T1702): the witness is a SEPARATE session, and in mode A on PostgreSQL it
+# could not see the uncommitted seed - "the debt behind a frozen line was destroyed" was reported of
+# a debt that was never visible to it (stage-2 catalogue, class VIS).
+@MODE_B
 @pytest.mark.asyncio
 @pytest.mark.parametrize("path", _REPAIRS)
 async def test_repair_endpoints_refuse_while_the_finding_is_open(
@@ -107,7 +111,7 @@ async def test_repair_endpoints_refuse_while_the_finding_is_open(
 
     # Read back through a SEPARATE durable session, the way the repair atomicity tests do. The
     # request's own session is not a witness to what survived it.
-    async with TestingSessionLocal() as durable:
+    async with sessionmaker_of(db_session)() as durable:
         after = (
             await durable.execute(select(Debt).where(Debt.id == debt_id))
         ).scalar_one_or_none()

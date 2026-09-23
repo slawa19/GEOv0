@@ -8,9 +8,19 @@ reproducer). The executor now only STAGES (`stage_inject_event`) and PUBLISHES
 (`publish_committed_inject`); `RealRunnerImpl._apply_due_scenario_events` owns every boundary.
 
 WHAT THIS FILE PROVES, on the default SQLite tier, and always through the database: every effect
-is read back through a NEW session (`TestingSessionLocal()`), never through the session under test
+is read back through a NEW session (`world.sessions()`), never through the session under test
 and never through a counter standing in for the row. SQLite takes no advisory lock, so the lock
 itself is proven on PostgreSQL; the lock SET check is enforced on every dialect and proven here.
+
+MODE B, EVERY TEST THAT TAKES `db_session` (017 stage 2b, T1702). A new session sees only what was
+COMMITTED. In mode A on PostgreSQL nothing the test commits is - `commit()` releases a SAVEPOINT
+inside the fixture's outer transaction - so the reads below saw no seed at all: twelve tests failed
+on it (`NoResultFound`, `assert None == Decimal('10.00')`), and every assertion of ABSENCE
+(`_fresh_debt(world) is None`) passed whether or not the owner had rolled back, because the second
+session could not have seen the row either way. One test hung for ever: its second session inserts a
+trustline whose foreign keys wait on participants the first, still-open transaction holds (stage-2
+catalogue, section 5). In mode B the commits are real, on a clone, and `world.sessions()` reaches that
+clone. The two tests of SQLite's own refusal run on a SQLite stand of their own (`sqlite_stand`).
 
 A NOTE ON THE STAND. `db_session` on SQLite is a plain session. The owner rolls back, and a
 rollback expires every instance in the session, so ids and pids are captured as plain values right
@@ -22,20 +32,29 @@ from __future__ import annotations
 import asyncio
 import uuid
 from dataclasses import dataclass
+from types import SimpleNamespace
 from decimal import Decimal
 from typing import Any
 
 import pytest
+import pytest_asyncio
 from sqlalchemy import delete, event, select
 from sqlalchemy.exc import DBAPIError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from app.core.simulator.inject_executor import InjectOwnerLockSetTooNarrow
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
-from app.db.sqlite_transaction_control import sqlite_busy_error_name
-from tests.conftest import TestingSessionLocal, engine as _test_engine
+from app.db.base import Base
+from app.db.sqlite_transaction_control import (
+    install_sqlite_transaction_control,
+    sqlite_busy_error_name,
+)
+from tests.conftest import MODE_B, sessionmaker_of
+from tests.scratch_db import install_test_sqlite_pragmas
 from tests.unit.test_scenario_inject_topology import _make_run, _make_runner, _nonce
 
 from tests.debt_setup import debt_fixture_setup, writer_operation
@@ -67,9 +86,14 @@ class _World:
     creditor_pid: str
     debtor_id: uuid.UUID
     debtor_pid: str
+    #: Where a NEW session over this world's database comes from: the mode-B clone's sessionmaker on
+    #: PostgreSQL, the tier's on SQLite, the stand's own for the SQLite-mechanism tests.
+    sessions: Any
 
 
-async def _seed_debt_world(db_session, *, existing: Decimal | None = None) -> _World:
+async def _seed_debt_world(
+    db_session, *, existing: Decimal | None = None, sessions: Any = None
+) -> _World:
     n = _nonce()
     eq = Equivalent(code=f"W{n}".upper()[:16], precision=2, is_active=True)
     creditor = Participant(
@@ -102,7 +126,10 @@ async def _seed_debt_world(db_session, *, existing: Decimal | None = None) -> _W
                 )
             )
     await db_session.commit()
-    return _World(eq.id, eq.code, creditor.id, creditor.pid, debtor.id, debtor.pid)
+    return _World(
+        eq.id, eq.code, creditor.id, creditor.pid, debtor.id, debtor.pid,
+        sessions if sessions is not None else sessionmaker_of(db_session),
+    )
 
 
 def _debt_event(world: _World, amount: str = "10.00") -> dict[str, Any]:
@@ -145,7 +172,7 @@ def _debt_run(world: _World):
 
 
 async def _fresh_debt(world: _World) -> Decimal | None:
-    async with TestingSessionLocal() as s:
+    async with world.sessions() as s:
         value = (
             await s.execute(
                 select(Debt.amount).where(
@@ -158,8 +185,8 @@ async def _fresh_debt(world: _World) -> Decimal | None:
     return None if value is None else Decimal(str(value))
 
 
-async def _fresh_participant_ids(pid: str) -> list[uuid.UUID]:
-    async with TestingSessionLocal() as s:
+async def _fresh_participant_ids(world: _World, pid: str) -> list[uuid.UUID]:
+    async with world.sessions() as s:
         return list(
             (await s.execute(select(Participant.id).where(Participant.pid == pid))).scalars().all()
         )
@@ -269,6 +296,7 @@ async def _stage_debt_with_a_caller_row(db_session, runner, world: _World) -> st
     return caller_pid
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_staging_leaves_the_transaction_to_its_caller_rollback(db_session) -> None:
     world = await _seed_debt_world(db_session)
@@ -281,11 +309,12 @@ async def test_staging_leaves_the_transaction_to_its_caller_rollback(db_session)
         "the injected debt survived the CALLER's rollback: staging committed a transaction it "
         "does not own"
     )
-    assert await _fresh_participant_ids(caller_pid) == [], (
+    assert await _fresh_participant_ids(world, caller_pid) == [], (
         "the caller's own row survived its rollback: staging committed the caller's work"
     )
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_staging_leaves_the_transaction_to_its_caller_commit_control(db_session) -> None:
     """Control: the same staging, committed by the caller, lands both rows - exactly."""
@@ -296,7 +325,7 @@ async def test_staging_leaves_the_transaction_to_its_caller_commit_control(db_se
     await db_session.commit()
 
     assert await _fresh_debt(world) == Decimal("10.00")
-    assert len(await _fresh_participant_ids(caller_pid)) == 1
+    assert len(await _fresh_participant_ids(world, caller_pid)) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -304,6 +333,7 @@ async def test_staging_leaves_the_transaction_to_its_caller_commit_control(db_se
 # ---------------------------------------------------------------------------
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_the_owner_refuses_a_session_with_unflushed_changes(db_session) -> None:
     world = await _seed_debt_world(db_session)
@@ -325,10 +355,11 @@ async def test_the_owner_refuses_a_session_with_unflushed_changes(db_session) ->
     assert run._real_fired_scenario_event_indexes == set()
     assert arts.payloads == []
     assert await _fresh_debt(world) is None
-    assert await _fresh_participant_ids(stray_pid) == [], "the owner committed the caller's work"
+    assert await _fresh_participant_ids(world, stray_pid) == [], "the owner committed the caller's work"
     db_session.expunge_all()
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_the_owner_returns_with_no_transaction_open(db_session) -> None:
     world = await _seed_debt_world(db_session)
@@ -353,6 +384,7 @@ async def test_the_owner_returns_with_no_transaction_open(db_session) -> None:
 # ---------------------------------------------------------------------------
 
 
+@MODE_B
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("where", "error_kwargs"),
@@ -391,6 +423,7 @@ async def test_a_transient_failure_is_retried_and_applied_exactly_once(
     assert not db_session.in_transaction()
 
 
+@MODE_B
 @pytest.mark.asyncio
 @pytest.mark.parametrize("where", ["staging", "commit"])
 async def test_a_second_transient_failure_propagates_and_leaves_the_event_pending(
@@ -424,6 +457,43 @@ async def test_a_second_transient_failure_propagates_and_leaves_the_event_pendin
     assert not db_session.in_transaction()
 
 
+# ---------------------------------------------------------------------------
+# The SQLite-mechanism stand
+# ---------------------------------------------------------------------------
+
+
+@pytest_asyncio.fixture
+async def sqlite_stand(tmp_path):
+    """A SQLite database of the two stale-snapshot tests' own, whatever the tier runs on.
+
+    WHY (017 stage 2b, T1702). Those two tests prove how the owner treats a transient SQLITE refusal -
+    `SQLITE_BUSY` from a second writer while the unit of work holds SQLite's write lock. The mechanism
+    lives in `app/` until stage 3 retires SQLite, and its coverage has to live as long. They used to run
+    on the tier's database and refused (`assert dialect.name == "sqlite"`) on PostgreSQL, where the
+    refusal they provoke cannot exist; tied to the tier, they would have stopped measuring anything the
+    day the tier moved. On this stand they run on SQLite on both tiers.
+
+    The engine is built the way the tier's SQLite engine is (`tests/conftest.py`): the same connection
+    pragmas (`install_test_sqlite_pragmas`: foreign keys, `busy_timeout`, WAL) and the same transaction
+    control, on a file under `tmp_path` - the task-isolated basetemp - with the application schema.
+    """
+
+    url = f"sqlite+aiosqlite:///{(tmp_path / 'inject-ownership-sqlite.db').as_posix()}"
+    stand_engine = create_async_engine(url, poolclass=NullPool, connect_args={"timeout": 30})
+    install_test_sqlite_pragmas(stand_engine.sync_engine, url=url)
+    install_sqlite_transaction_control(stand_engine.sync_engine)
+    try:
+        async with stand_engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        sessions = async_sessionmaker(
+            bind=stand_engine, class_=AsyncSession, expire_on_commit=False, autoflush=False
+        )
+        async with sessions() as session:
+            yield SimpleNamespace(session=session, sessions=sessions, engine=stand_engine)
+    finally:
+        await stand_engine.dispose()
+
+
 class _CommitFromAnotherSession:
     """Tries to commit from a SECOND session while the owner's unit of work is in flight.
 
@@ -449,9 +519,10 @@ class _CommitFromAnotherSession:
     produces, and the tests read it back by name.
     """
 
-    def __init__(self, runner, *, on_calls: set[int]) -> None:
+    def __init__(self, runner, *, on_calls: set[int], sessions) -> None:
         self._real = runner._inject_executor.stage_inject_event
         self._on_calls = set(on_calls)
+        self._sessions = sessions
         self.calls = 0
         self.blocked = 0
         runner._inject_executor.stage_inject_event = self  # this runner only
@@ -461,7 +532,7 @@ class _CommitFromAnotherSession:
         staged = await self._real(session, **kwargs)
         if self.calls in self._on_calls:
             n = _nonce()
-            async with TestingSessionLocal() as other:
+            async with self._sessions() as other:
                 # A short wait, set on THIS connection only. The suite's `busy_timeout` is 30s
                 # (`tests/conftest.py`), and since the owner now holds the write lock for its whole
                 # unit of work the second session would sit out all thirty of them before being
@@ -482,7 +553,7 @@ class _CommitFromAnotherSession:
 
 
 @pytest.mark.asyncio
-async def test_a_stale_snapshot_is_transient_and_the_inject_lands_exactly_once(db_session) -> None:
+async def test_a_stale_snapshot_is_transient_and_the_inject_lands_exactly_once(sqlite_stand) -> None:
     """T1525: a transient SQLite refusal must restart the unit of work, not drop the inject.
 
     `_is_transient_inject_db_error` matched PostgreSQL SQLSTATEs only, and classified as an ordinary
@@ -496,14 +567,15 @@ async def test_a_stale_snapshot_is_transient_and_the_inject_lands_exactly_once(d
     writer is the one refused, with `database is locked`. The property asserted below is unchanged:
     the unit of work restarts, the inject lands exactly once, and the event is fired once.
     """
-    assert _test_engine.dialect.name == "sqlite", (
-        f"this stand forces a SQLite stale snapshot; the test engine is {_test_engine.dialect.name}"
+    db_session = sqlite_stand.session
+    assert sqlite_stand.engine.dialect.name == "sqlite", sqlite_stand.engine.dialect.name
+    world = await _seed_debt_world(
+        db_session, existing=Decimal("5.12345678"), sessions=sqlite_stand.sessions
     )
-    world = await _seed_debt_world(db_session, existing=Decimal("5.12345678"))
     runner, arts = _make_runner()
     run = _debt_run(world)
 
-    spy = _CommitFromAnotherSession(runner, on_calls={1})
+    spy = _CommitFromAnotherSession(runner, on_calls={1}, sessions=sqlite_stand.sessions)
 
     await runner._apply_due_scenario_events(
         db_session, run_id="r1", run=run, scenario=_debt_scenario(world)
@@ -521,15 +593,16 @@ async def test_a_stale_snapshot_is_transient_and_the_inject_lands_exactly_once(d
 
 
 @pytest.mark.asyncio
-async def test_a_stale_snapshot_on_both_attempts_leaves_the_event_pending(db_session) -> None:
+async def test_a_stale_snapshot_on_both_attempts_leaves_the_event_pending(sqlite_stand) -> None:
     """The budget is finite, and a spent budget must leave the event PENDING, never fired."""
-    assert _test_engine.dialect.name == "sqlite", _test_engine.dialect.name
-    world = await _seed_debt_world(db_session)
+    db_session = sqlite_stand.session
+    assert sqlite_stand.engine.dialect.name == "sqlite", sqlite_stand.engine.dialect.name
+    world = await _seed_debt_world(db_session, sessions=sqlite_stand.sessions)
     runner, arts = _make_runner()
     run = _debt_run(world)
     later = _debt_event(world, "1.00")
 
-    spy = _CommitFromAnotherSession(runner, on_calls={1, 2})
+    spy = _CommitFromAnotherSession(runner, on_calls={1, 2}, sessions=sqlite_stand.sessions)
 
     with pytest.raises(DBAPIError) as refusal:
         await runner._apply_due_scenario_events(
@@ -551,6 +624,7 @@ async def test_a_stale_snapshot_on_both_attempts_leaves_the_event_pending(db_ses
     assert not db_session.in_transaction()
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_a_non_transient_staging_error_is_recorded_not_retried(db_session) -> None:
     """Anti-vacuum for the retry predicate: only the transient set restarts the unit of work.
@@ -588,6 +662,7 @@ class _FreezeWorld:
     other_id: uuid.UUID
     other_pid: str
     tl_id: uuid.UUID
+    sessions: Any
 
 
 async def _seed_freeze_world(db_session) -> _FreezeWorld:
@@ -615,7 +690,8 @@ async def _seed_freeze_world(db_session) -> _FreezeWorld:
     db_session.add(tl)
     await db_session.commit()
     return _FreezeWorld(
-        run_eq.id, run_eq.code, other_eq.id, target.id, target.pid, other.id, other.pid, tl.id
+        run_eq.id, run_eq.code, other_eq.id, target.id, target.pid, other.id, other.pid, tl.id,
+        sessionmaker_of(db_session),
     )
 
 
@@ -636,7 +712,7 @@ def _freeze_scenario(w: _FreezeWorld) -> dict[str, Any]:
 
 
 async def _fresh_freeze_state(w: _FreezeWorld) -> tuple[str, str]:
-    async with TestingSessionLocal() as s:
+    async with w.sessions() as s:
         p_status = (
             await s.execute(select(Participant.status).where(Participant.id == w.target_id))
         ).scalar_one()
@@ -646,6 +722,7 @@ async def _fresh_freeze_state(w: _FreezeWorld) -> tuple[str, str]:
     return str(p_status), str(tl_status)
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_staging_a_freeze_outside_the_lock_set_raises_before_staging_it(db_session) -> None:
     w = await _seed_freeze_world(db_session)
@@ -669,6 +746,7 @@ async def test_staging_a_freeze_outside_the_lock_set_raises_before_staging_it(db
     assert await _fresh_freeze_state(w) == ("active", "active")
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_the_owner_locks_a_freezes_incident_equivalents_before_staging(db_session) -> None:
     """The owner reads the incident equivalents first: one attempt, no expansion needed."""
@@ -690,6 +768,7 @@ async def test_the_owner_locks_a_freezes_incident_equivalents_before_staging(db_
     assert _notes(arts) == ["inject applied"]
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_the_owner_widens_the_lock_set_once_for_a_trustline_created_after_its_read(
     db_session,
@@ -700,7 +779,7 @@ async def test_the_owner_widens_the_lock_set_once_for_a_trustline_created_after_
     owner's lock-set read - rather than by hoping two tasks interleave.
     """
     w = await _seed_freeze_world(db_session)
-    async with TestingSessionLocal() as s:  # start with no incident trustline at all
+    async with w.sessions() as s:  # start with no incident trustline at all
         await s.execute(delete(TrustLine).where(TrustLine.id == w.tl_id))
         await s.commit()
     runner, arts = _make_runner()
@@ -716,7 +795,7 @@ async def test_the_owner_widens_the_lock_set_once_for_a_trustline_created_after_
     async def _resolve_then_a_trustline_appears(session, **kwargs):
         lock_ids = await real_resolve(session, **kwargs)
         if not created:
-            async with TestingSessionLocal() as s:
+            async with w.sessions() as s:
                 tl = TrustLine(
                     from_participant_id=w.other_id,
                     to_participant_id=w.target_id,
@@ -740,7 +819,7 @@ async def test_the_owner_widens_the_lock_set_once_for_a_trustline_created_after_
         frozenset({w.run_eq_id}),
         frozenset({w.run_eq_id, w.other_eq_id}),
     ], spy.locked_sets
-    async with TestingSessionLocal() as s:
+    async with w.sessions() as s:
         tl_status = (
             await s.execute(select(TrustLine.status).where(TrustLine.id == created[0]))
         ).scalar_one()
@@ -752,6 +831,7 @@ async def test_the_owner_widens_the_lock_set_once_for_a_trustline_created_after_
     assert _notes(arts) == ["inject applied"]
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_a_freeze_of_two_participants_in_two_outside_equivalents_completes(
     db_session,
@@ -811,7 +891,7 @@ async def test_a_freeze_of_two_participants_in_two_outside_equivalents_completes
     await runner._apply_due_scenario_events(db_session, run_id="r1", run=run, scenario=scenario)
 
     assert spy.locked_sets == [frozenset({run_eq.id, eq_a.id, eq_b.id})], spy.locked_sets
-    async with TestingSessionLocal() as s:
+    async with sessionmaker_of(db_session)() as s:
         statuses = dict(
             (
                 await s.execute(
@@ -834,6 +914,7 @@ async def test_a_freeze_of_two_participants_in_two_outside_equivalents_completes
     assert _notes(arts) == ["inject applied"]
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_a_second_lock_set_expansion_leaves_the_event_pending(db_session) -> None:
     world = await _seed_debt_world(db_session)
@@ -860,6 +941,7 @@ async def test_a_second_lock_set_expansion_leaves_the_event_pending(db_session) 
     assert _notes(arts) == []
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_a_flush_error_is_a_known_rollback_not_an_unknown_outcome(
     db_session, monkeypatch
@@ -901,6 +983,7 @@ async def test_a_flush_error_is_a_known_rollback_not_an_unknown_outcome(
 # ---------------------------------------------------------------------------
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_a_non_transient_commit_error_keeps_the_event_fired_and_is_not_retried(
     db_session, monkeypatch
@@ -921,6 +1004,7 @@ async def test_a_non_transient_commit_error_keeps_the_event_fired_and_is_not_ret
     assert not db_session.in_transaction()
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_cancellation_during_the_commit_keeps_the_event_fired(
     db_session, monkeypatch
@@ -944,6 +1028,7 @@ async def test_cancellation_during_the_commit_keeps_the_event_fired(
     await db_session.rollback()
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_cancellation_while_staging_rolls_back_and_leaves_the_event_pending(
     db_session,
@@ -970,6 +1055,7 @@ async def test_cancellation_while_staging_rolls_back_and_leaves_the_event_pendin
 # ---------------------------------------------------------------------------
 
 
+@MODE_B
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failing", ["edge_patch_builder", "artifacts"])
 async def test_a_publish_failure_after_commit_keeps_the_committed_inject(
@@ -1022,6 +1108,7 @@ def _add_participant_event(sponsor_pid: str, new_pid: str, eq_code: str) -> dict
     }
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_staging_does_not_touch_the_shared_pid_map(db_session) -> None:
     world = await _seed_debt_world(db_session)
@@ -1046,10 +1133,11 @@ async def test_staging_does_not_touch_the_shared_pid_map(db_session) -> None:
     assert shared == before, "staging wrote a participant id that does not exist yet into the shared map"
 
     await db_session.rollback()
-    assert await _fresh_participant_ids(new_pid) == []
+    assert await _fresh_participant_ids(world, new_pid) == []
     assert shared == before
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_a_rolled_back_add_participant_is_not_seen_by_the_retry_but_a_committed_one_is(
     db_session, monkeypatch
@@ -1071,7 +1159,7 @@ async def test_a_rolled_back_add_participant_is_not_seen_by_the_retry_but_a_comm
 
     await runner._apply_due_scenario_events(db_session, run_id="r1", run=run, scenario=scenario)
 
-    committed_ids = await _fresh_participant_ids(new_pid)
+    committed_ids = await _fresh_participant_ids(world, new_pid)
     assert len(committed_ids) == 1, committed_ids
     assert spy.calls == 3  # add_participant twice (retry), then the debt event once
     assert new_pid not in spy.pid_maps[1], (

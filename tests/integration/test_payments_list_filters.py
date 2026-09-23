@@ -14,6 +14,7 @@ from tests.integration.test_scenarios import (
     _sign_payment_request,
     _sign_trustline_create_request,
 )
+from tests.conftest import MODE_B
 
 
 async def _seed_equivalent(db_session, code: str):
@@ -27,6 +28,13 @@ async def _seed_equivalent(db_session, code: str):
     return eq
 
 
+# MODE B (017 stage 2b, T1702). The filters below tell payments apart by `created_at`, which is
+# `server_default=func.now()` (`app/db/models/transaction.py:18`), and PostgreSQL's `now()` is the
+# start of the TRANSACTION. Mode A holds the whole test in one outer transaction, so every payment
+# got the same `created_at` and `from_date = p2.created_at` also admitted `p1` (stage-2 catalogue
+# 9.5, class TXTIME). In the application each request is its own transaction, as it is in mode B:
+# an artefact of the fixture, not a defect of the model.
+@MODE_B
 @pytest.mark.asyncio
 async def test_list_payments_filters(client: AsyncClient, db_session):
     await _seed_equivalent(db_session, "USD")

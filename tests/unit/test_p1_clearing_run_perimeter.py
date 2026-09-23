@@ -42,6 +42,7 @@ from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 
 from tests.debt_setup import debt_fixture_setup
+from tests.conftest import MODE_B
 
 _EQ = "RPX"
 
@@ -199,6 +200,7 @@ def run_b_too(monkeypatch):
     return simulator_module
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_the_owning_run_still_clears_its_own_cycle(client, db_session, run_b_too):
     """Anti-vacuum: the perimeter must refuse strangers, not disable clearing.
@@ -266,6 +268,7 @@ async def test_detection_treats_an_empty_perimeter_as_nobody(db_session):
     assert await service.find_cycles(_EQ, max_depth=6, allowed_participant_pids=set()) == []
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_execution_layer_refuses_a_cycle_outside_the_perimeter(db_session):
     """Even a cycle handed in directly must be refused, not silently skipped."""
@@ -337,6 +340,7 @@ async def test_the_sql_producer_itself_is_scoped(db_session):
 # Found by external review of this batch: two ways the perimeter was still bypassable.
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_a_committed_replay_is_not_returned_to_a_foreign_scope(db_session):
     """The replay shortcut returned before the guard, handing over a stranger's amount.

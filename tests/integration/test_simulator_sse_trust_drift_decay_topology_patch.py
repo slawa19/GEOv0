@@ -5,6 +5,16 @@ import pytest
 from httpx import AsyncClient
 
 from app.core.simulator.runtime import runtime
+from tests.conftest import MODE_B
+
+
+# MODE B (017 stage 2b, T1702). A real-mode run commits through its own sessions. In mode A on
+# PostgreSQL those commits landed in the tier's database and outlived the test - measured 2026-09-23
+# (stage-2 catalogue 9.6): participants `alice` and `bob`, a line, a debt and a transaction survived,
+# and ten later tests failed on `participants_pid_key` or on a line they had not seeded. In mode B
+# they land in a clone dropped after the test, and `client` routes the simulator's
+# `AsyncSessionLocal` to it. On SQLite nothing changes.
+pytestmark = MODE_B
 
 
 @pytest.mark.asyncio

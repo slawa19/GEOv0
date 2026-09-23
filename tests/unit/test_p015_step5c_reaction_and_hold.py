@@ -58,6 +58,7 @@ from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 from app.db.reconciliation_tables import debt_reconciliation_results
 from app.utils.exceptions import ConflictException, RetryablePaymentConflictException
+from tests.conftest import MODE_B, sessionmaker_of
 from tests.debt_setup import debt_fixture_setup, purge_test_ledger
 from tests.unit.test_p015_b4_wrong_writer_is_recorded_faithfully import (
     _drop_triangle,
@@ -547,7 +548,17 @@ async def test_step5c_the_evidence_of_a_hold_cannot_be_deleted_while_held(db_ses
                 factory,
                 lambda d: f"DELETE FROM debt_reconciliation_results WHERE id = '{_literal(d, hold)}'",
             )
-        assert "FOREIGN KEY" in str(refused.value), refused.value
+        # A FOREIGN KEY refusal, named the way each database names it (017 stage 2b): SQLite says
+        # "FOREIGN KEY constraint failed" and has no code; PostgreSQL says "violates foreign key
+        # constraint" and carries SQLSTATE 23503 (foreign_key_violation). The old assertion was the
+        # SQLite text alone and could only fail on PostgreSQL, whatever the database refused with.
+        if factory.kw["bind"].dialect.name == "sqlite":
+            assert "FOREIGN KEY" in str(refused.value), refused.value
+        else:
+            orig = refused.value.orig
+            assert (getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)) == "23503", (
+                refused.value
+            )
         assert await _hold_of(factory, triangle.equivalent.id) == hold
         assert await _latest_result_ids(factory, triangle.equivalent.id) == [hold]
     finally:
@@ -791,13 +802,18 @@ async def test_step5c_a_held_equivalent_refuses_clearing_and_another_equivalent_
         await _drop_cycle(factory, free)
 
 
+# MODE B (017 stage 2b, T1702): the world is seeded on `db_session` and the hold is written on a
+# session of its own. In mode A on PostgreSQL that session could not see the uncommitted equivalent -
+# `ForeignKeyViolationError` on `debt_reconciliation_results` - and clearing refuses a connection-bound
+# session besides (stage-2 catalogue, class VIS).
+@MODE_B
 @pytest.mark.asyncio
 async def test_step5c_clearing_real_reports_the_hold_as_its_declared_409(client, db_session, monkeypatch) -> None:
     """The simulator's `clearing-real` route maps the hold to its declared 409, not `500 CLEARING_FAILED`.
 
     MUTATION: match only `equivalent_inactive` in `app/api/v1/simulator.py` - 500, red.
     """
-    from tests.conftest import TestingSessionLocal as factory
+    factory = sessionmaker_of(db_session)
     from tests.integration.test_p015_t1544_operator_stop_refuses_money import run_owning_the_cycle  # noqa: F401
 
     import app.api.v1.simulator as simulator_module
@@ -871,6 +887,12 @@ async def _clear(client, code: str, reason: str | None = "reconciled after the i
     )
 
 
+# MODE B (017 stage 2b, T1702): the route runs on `db_session` and the world lives on sessions of its
+# own. In mode A on PostgreSQL the route's session is the fixture's one long outer transaction, at the
+# application's SERIALIZABLE level, and the other sessions' commits conflict with it: `SerializationError
+# ... due to concurrent update` (stage-2 catalogue, class 40001). In the application every request is
+# its own transaction, as it is in mode B.
+@MODE_B
 @pytest.mark.asyncio
 async def test_step5c_the_hold_is_cleared_only_explicitly_after_a_later_passed_and_audited(
     client, db_session
@@ -888,7 +910,7 @@ async def test_step5c_the_hold_is_cleared_only_explicitly_after_a_later_passed_a
     NOT REDDENABLE, and said so: `latest.id == hold_result_id` alone. A hold only ever points at a FAILED
     row and a row's status never changes, so the status condition already implies it.
     """
-    from tests.conftest import TestingSessionLocal as factory
+    factory = sessionmaker_of(db_session)
 
     triangle, debt = await _faulty_triangle(factory)
     code = triangle.equivalent.code

@@ -505,13 +505,15 @@ async def _dispose_engines_at_end() -> AsyncGenerator[None, None]:
         pass
 
 
-@pytest_asyncio.fixture
-async def db_session() -> AsyncGenerator[AsyncSession, None]:
-    """SQLAlchemy session with a per-test transaction that is rolled back.
+@asynccontextmanager
+async def _session_for_one_test(*, mode_b: bool):
+    """The body of `db_session`: one test's session, in mode A or mode B.
 
-    With the measurement instrument `GEO_TEST_FIXTURE_MODE=B` (see above) it is a mode-B session
-    instead, on a clone dropped after the test. The tier's own schema is still built then, because a
-    test that imports `TestingSessionLocal` directly keeps reaching the tier's database.
+    `mode_b=True` on PostgreSQL is a mode-B session on a clone dropped after the test. On SQLite the
+    flag changes nothing - the SQLite branch below is already a plain engine-bound session whose
+    commits are real, reset per test - which is why a mode-B test of the default tier still runs on
+    the SQLite tier unchanged. The tier's own schema is built either way, because a test that imports
+    `TestingSessionLocal` directly keeps reaching the tier's database.
     """
 
     await _ensure_schema_initialized()
@@ -547,7 +549,7 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
     except Exception:
         pass
 
-    if _FIXTURE_MODE == "B":
+    if mode_b and not _is_sqlite:
         async with _committed_database_context() as database:
             async with database.sessionmaker() as session:
                 session.info["geo_committed_database"] = database
@@ -619,6 +621,46 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
             # class FIXA, 62 tests in 24 files); SQLite never ran this branch.
             yield session
         await transaction.rollback()
+
+
+#: MODE B FOR ONE TEST OF THE DEFAULT TIER (017 stage 2b, T1702). Put `@MODE_B` on a test, or
+#: `pytestmark = MODE_B` on a module, and `db_session` - and with it `client`, which requests it - is a
+#: mode-B session for that test: a clone on PostgreSQL, dropped after the test. On SQLite it changes
+#: nothing, because the SQLite `db_session` is already an engine-bound session whose commits are real
+#: and which is reset per test; that is what lets the same test keep running on the SQLite tier until
+#: stage 3, which `committed_session` (it refuses SQLite) cannot.
+#:
+#: WHY A PARAMETRIZATION AND NOT A MARKER: markers are registered in `pytest.ini` and select or
+#: deselect tests; this must do neither. An indirect parameter is how pytest hands one fixture a
+#: per-test value, and the `[mode_b]` it adds to the node id says in every report which mode ran.
+#: It selects and deselects nothing - a mode-B test is collected exactly as before.
+#:
+#: A test that needs a SECOND session reaches the same database through `sessionmaker_of(session)`,
+#: never through `TestingSessionLocal` directly: on PostgreSQL that is the tier's database, where the
+#: clone's commits are not.
+MODE_B = pytest.mark.parametrize("db_session", ["B"], indirect=True, ids=["mode_b"])
+
+
+@pytest_asyncio.fixture
+async def db_session(request) -> AsyncGenerator[AsyncSession, None]:
+    """SQLAlchemy session with a per-test transaction that is rolled back (mode A).
+
+    A test carrying `MODE_B` gets a mode-B session instead (see `MODE_B`), and so does every test
+    under the measurement instrument `GEO_TEST_FIXTURE_MODE=B` (see above).
+    """
+
+    requested = getattr(request, "param", "A")
+    if requested not in {"A", "B"}:
+        raise RuntimeError(f"db_session takes the mode A or B, got {requested!r}")
+    async with _session_for_one_test(mode_b=requested == "B" or _FIXTURE_MODE == "B") as session:
+        yield session
+
+
+def sessionmaker_of(session: AsyncSession):
+    """The sessionmaker over the database `session` talks to: the mode-B clone's, else the tier's."""
+
+    committed = session.info.get("geo_committed_database")
+    return committed.sessionmaker if committed is not None else TestingSessionLocal
 
 
 @pytest_asyncio.fixture

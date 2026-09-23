@@ -48,6 +48,7 @@ from tests.integration.test_scenarios import (
     _sign_trustline_create_request,
     register_and_login,
 )
+from tests.conftest import MODE_B
 
 ADMIN = {"X-Admin-Token": settings.ADMIN_TOKEN}
 
@@ -308,6 +309,7 @@ async def test_a_payment_prepared_before_the_stop_is_refused_at_commit(
     assert locks == 0
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_clearing_in_a_deactivated_equivalent_is_refused_and_keeps_the_debts(
     client, db_session
@@ -381,6 +383,7 @@ def run_owning_the_cycle(monkeypatch):
     return simulator_module
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_clearing_real_reports_the_stop_as_its_declared_409(
     client, db_session, run_owning_the_cycle

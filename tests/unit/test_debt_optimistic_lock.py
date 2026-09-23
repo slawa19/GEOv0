@@ -3,13 +3,20 @@
 The lost-update class this guards has not changed. What changed on 2026-09-12 (T1525) is HOW SQLite
 reports it. With the transaction control installed, a session that has read holds a real snapshot, so
 the second writer is refused by the DATABASE with SQLITE_BUSY_SNAPSHOT before the ORM ever compares
-`version`; on PostgreSQL (and on SQLite before the control, where reads were autocommitted) the write
-reaches the row and the ORM raises `StaleDataError` because `version` has moved.
+`version`. On SQLite before the control, where reads were autocommitted, the write reached the row
+and the ORM raised `StaleDataError` because `version` had moved.
+
+ON POSTGRESQL THE DATABASE REFUSES FIRST TOO - measured 2026-09-23 (017 stage 2b), when this module
+first ran there in mode B. The tier engine runs at the application's isolation level (T1549, default
+SERIALIZABLE), and at that level the stale writer's UPDATE is refused with SQLSTATE 40001
+("could not serialize access ... Canceled on identification as a pivot, during write") before the
+ORM compares `version`. The PostgreSQL branch below used to expect `StaleDataError`: it had never
+run, and that is the READ COMMITTED outcome, an isolation level the application does not use. 40001
+is what `PaymentEngine._is_retryable_db_error` retries, the counterpart of SQLITE_BUSY_SNAPSHOT.
 
 The test therefore asserts the invariant on both tiers - the committed value survives, the stale
 writer is refused - and names the mechanism for the backend it is running on rather than accepting
-"some exception". Only the SQLite tier selects this module today (it carries no `postgres` marker);
-the PostgreSQL branch states the contract that tier would have to satisfy.
+"some exception".
 """
 
 import uuid
@@ -25,9 +32,17 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.sqlite_transaction_control import sqlite_busy_error_name
 
+from tests.conftest import MODE_B, sessionmaker_of
 from tests.debt_setup import debt_fixture_setup
 
 
+# MODE B (017 stage 2b, T1702). Three sessions besides `db_session` read the seeded debt. In mode A
+# on PostgreSQL the seed is never committed - `commit()` releases a SAVEPOINT inside the fixture's
+# outer transaction - so another session cannot see it: `NoResultFound` on the first of them
+# (stage-2 catalogue, class VIS). Mode B commits for real on a clone; the other sessions reach the
+# clone through `sessionmaker_of`, not through `TestingSessionLocal`, which is the tier's database
+# there.
+@MODE_B
 @pytest.mark.asyncio
 async def test_a_stale_writer_cannot_overwrite_the_committed_debt_amount(db_session):
     nonce = uuid.uuid4().hex[:10]
@@ -64,10 +79,11 @@ async def test_a_stale_writer_cannot_overwrite_the_committed_debt_amount(db_sess
     await db_session.commit()
 
     # Two separate sessions, so the second one holds a genuinely stale view of the row.
-    from tests.conftest import TestingSessionLocal, engine
+    sessions = sessionmaker_of(db_session)
+    dialect = db_session.get_bind().dialect.name
 
-    async with TestingSessionLocal() as s1:
-        async with TestingSessionLocal() as s2:
+    async with sessions() as s1:
+        async with sessions() as s2:
             debt1 = (
                 await s1.execute(select(Debt).where(Debt.id == d.id))
             ).scalar_one()
@@ -92,19 +108,25 @@ async def test_a_stale_writer_cannot_overwrite_the_committed_debt_amount(db_sess
                 await s2.commit()
             await s2.rollback()
 
-    if engine.dialect.name == "sqlite":
+    if dialect == "sqlite":
         # The database refuses the write itself: the snapshot s2 read at is older than s1's commit,
         # and no amount of waiting can make it current. `PaymentEngine._is_retryable_db_error`
         # classifies exactly this as retryable - see
         # `tests/unit/test_p015_t1525_sqlite_stale_snapshot_is_retried.py`.
         assert sqlite_busy_error_name(refusal.value) == "SQLITE_BUSY_SNAPSHOT", refusal.value
     else:
-        # The write reaches the row, matches zero rows on `version`, and the ORM says so.
-        assert isinstance(refusal.value, StaleDataError), refusal.value
+        # The database refuses the write itself, as on SQLite: SERIALIZABLE cannot let a writer
+        # whose snapshot predates s1's commit update the row s1 changed. By SQLSTATE, not by class:
+        # a `DBAPIError` of any other code is not this refusal.
+        assert isinstance(refusal.value, DBAPIError), refusal.value
+        sqlstate = getattr(refusal.value.orig, "sqlstate", None) or getattr(
+            refusal.value.orig, "pgcode", None
+        )
+        assert sqlstate == "40001", refusal.value
 
     # The invariant, read back on a third session: the committed update stands, the stale one is
     # nowhere, and the row moved forward exactly one version.
-    async with TestingSessionLocal() as fresh:
+    async with sessions() as fresh:
         stored = (
             await fresh.execute(
                 select(Debt.amount, Debt.version).where(Debt.id == d.id)

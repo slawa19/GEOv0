@@ -6,8 +6,10 @@ from httpx import AsyncClient
 from tests.integration.test_scenarios import register_and_login
 
 from tests.debt_setup import debt_fixture_setup
+from tests.conftest import MODE_B
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_clearing_max_depth_blocks_and_allows_length_5_cycle(client: AsyncClient, db_session):
     # Create an auth user to call clearing endpoints.

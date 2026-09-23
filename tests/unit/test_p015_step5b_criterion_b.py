@@ -53,6 +53,7 @@ from app.db.journal_tables import (
 )
 from app.db.models.debt import Debt
 from app.db.models.integrity_checkpoint import IntegrityCheckpoint
+from tests.conftest import MODE_B, sessionmaker_of
 from tests.unit.test_p015_b4_wrong_writer_is_recorded_faithfully import (
     ATOM,
     _audit,
@@ -743,13 +744,19 @@ async def _apply_inject(db_session, world) -> None:
     )
 
 
+# MODE B (017 stage 2b, T1702). The inject world is seeded on `db_session` and every read after it -
+# the baseline, the envelope, the verdict - is taken on sessions of their own. In mode A on PostgreSQL
+# those sessions could not see the uncommitted seed, and the baseline failed on the foreign key to
+# an equivalent it could not see (stage-2 catalogue, class VIS). The other tests of this module seed
+# and read through `factory` alone, so they pass in mode A and were left there.
+@MODE_B
 @pytest.mark.asyncio
 async def test_step5b_an_honest_inject_is_checked_as_its_subset_and_passed(db_session) -> None:
     """A real inject of 1.00 onto a debt of 5.00: PASSED, recorded as `subset`, never as full.
 
     MUTATION: record INJECT as `full_recomputation` in `_READABLE_ENVELOPES` - red on the coverage.
     """
-    from tests.conftest import TestingSessionLocal as factory
+    factory = sessionmaker_of(db_session)
 
     world = await _inject_world(db_session)
     await _baseline(factory, world.eq.id)
@@ -765,6 +772,7 @@ async def test_step5b_an_honest_inject_is_checked_as_its_subset_and_passed(db_se
     assert outcome.detail()["criterion_b"]["limited"] == ["subset:INJECT"], outcome.detail()
 
 
+@MODE_B
 @pytest.mark.asyncio
 @pytest.mark.parametrize("corruption", ["atom_writer", "intent_amount", "split_edge", "decrease"])
 async def test_step5b_an_inject_outside_its_subset_is_failed(db_session, corruption) -> None:
@@ -779,7 +787,7 @@ async def test_step5b_an_inject_outside_its_subset_is_failed(db_session, corrupt
 
     MUTATIONS: remove each rule from `_inject_subset` - its own case goes red.
     """
-    from tests.conftest import TestingSessionLocal as factory
+    factory = sessionmaker_of(db_session)
     import _pytest.monkeypatch
 
     patch = _pytest.monkeypatch.MonkeyPatch()

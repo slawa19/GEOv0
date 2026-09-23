@@ -19,6 +19,7 @@ from app.db.models.trustline import TrustLine
 from app.utils.exceptions import IntegrityViolationException
 
 from tests.debt_setup import debt_fixture_setup, writer_operation
+from tests.conftest import MODE_B
 
 
 @pytest.mark.asyncio
@@ -543,6 +544,7 @@ async def test_payment_commit_writes_integrity_audit_log_on_success(
     assert locks == []
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_clearing_writes_integrity_audit_log_on_success(db_session):
     nonce = uuid.uuid4().hex[:10]
@@ -615,6 +617,14 @@ async def test_clearing_writes_integrity_audit_log_on_success(db_session):
         db_session.add_all([d_ab, d_bc, d_ca])
     await db_session.commit()
 
+    # Captured as plain values BEFORE clearing. On PostgreSQL clearing runs on its own interlock
+    # connection and ends the caller's transaction first (`_rollback_before_interlock`,
+    # `app/core/clearing/service.py`), and a rollback expires every instance in this session: reading
+    # `eq.id` afterwards is a lazy load, which async SQLAlchemy refuses with `MissingGreenlet`.
+    # SQLite executes on this session and never rolled it back, so the stale read went unnoticed;
+    # mode B is the first time this test reached the PostgreSQL path (017 stage 2b).
+    eq_id = eq.id
+
     svc = ClearingService(db_session)
     cleared = await svc.execute_clearing_with_amount(
         [{"debt_id": str(d_ab.id)}, {"debt_id": str(d_bc.id)}, {"debt_id": str(d_ca.id)}]
@@ -637,7 +647,7 @@ async def test_clearing_writes_integrity_audit_log_on_success(db_session):
     assert log.verification_passed is True
 
     remaining = (
-        (await db_session.execute(select(Debt).where(Debt.equivalent_id == eq.id)))
+        (await db_session.execute(select(Debt).where(Debt.equivalent_id == eq_id)))
         .scalars()
         .all()
     )
