@@ -30,6 +30,20 @@ the counterexample is precisely a value outside it. Those tests do not go throug
 first, and say so in the failure text, so that "the dialect changed this number" can never be
 confused with "this test used a number the tier cannot hold".
 
+WHICH DATABASE, since programme 017 (`T1702`, 2026-09-23). The tier database for everything whose
+subject is the journal's recording rule, which holds on either backend. A disposable SQLite file of
+the test's own (`sqlite_money_stand`) for the five tests whose subject IS SQLite: `C12` and its
+control, condition 4, and both halves of `C19`. Their premises are measurements of what SQLite's
+float binding does to a value (`C12`, condition 4) or of which CHECKs SQLite's schema carries
+(`C19`), and on PostgreSQL those premises are false: it stores every one of the `C12` values
+exactly, and migration 024 made `delta = after - before` a CHECK there, so a forged `U` with equal
+endpoints is refused by the arithmetic rule rather than the shape rule and the shape-valid lie is
+refused outright. They used to depend on the tier happening to be SQLite; on a PostgreSQL tier their
+own assertions said so (`stand: this database stored 100000000000.00000001 unchanged`; `refused by
+'chk_debt_journal_entries_delta_arithmetic', not by chk_debt_journal_entries_shape`). The PostgreSQL
+copy of the same inventory, with the rule that speaks THERE, is
+`tests/integration/test_p015_b4_entries_and_money_postgres.py`. No assertion changed.
+
 MARKER, HISTORICAL. This module carried `b4_counterexample` and was deselected from the canonical
 gate while the debt journal did not exist. Step 4 slice C built it and REMOVED THE MARKER, not the
 assertions: every test below still asserts exactly what it asserted while it was red, and each one
@@ -47,13 +61,18 @@ import uuid
 from decimal import Decimal
 
 import pytest
+import pytest_asyncio
 from sqlalchemy import Uuid as SaUuid, bindparam, event, select, text
 from sqlalchemy.exc import DatabaseError, StatementError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm.exc import StaleDataError
+from sqlalchemy.pool import NullPool
 
+from app.db.base import Base
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
+from app.db.sqlite_transaction_control import install_sqlite_transaction_control
 from tests.debt_setup import debt_fixture_setup
 from tests.p015_b4_support import (
     ENTRIES_TABLE,
@@ -72,6 +91,35 @@ from tests.p015_b4_support import (
     stored_operations,
     stored_rows,
 )
+from tests.scratch_db import install_test_sqlite_pragmas
+
+
+@pytest_asyncio.fixture
+async def sqlite_money_stand(tmp_path):
+    """`(engine, sessionmaker)` over a fresh SQLite file, wired as the conftest wires its SQLite engine.
+
+    For the tests whose subject is SQLite itself (see the module docstring). Same connect pragmas,
+    same transaction control, the `create_all` schema the SQLite tier has, and the conftest's
+    sessionmaker options. The journal needs nothing of its own: it is armed on the `Engine` and
+    `Session` classes for the whole process.
+    """
+    url = f"sqlite+aiosqlite:///{(tmp_path / 'money.db').as_posix()}"
+    stand_engine = create_async_engine(url, poolclass=NullPool, connect_args={"timeout": 30})
+    install_test_sqlite_pragmas(stand_engine.sync_engine, url=url)
+    install_sqlite_transaction_control(stand_engine.sync_engine)
+    async with stand_engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(
+        bind=stand_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autoflush=False,
+        join_transaction_mode="create_savepoint",
+    )
+    try:
+        yield stand_engine, factory
+    finally:
+        await stand_engine.dispose()
 
 
 def _identity(name: str) -> str:
@@ -175,7 +223,7 @@ async def _refusal_or_database_error(api, awaitable):
     return None
 
 
-async def _round_trip_through_the_real_database(factory, world: World, value: Decimal):
+async def _round_trip_through_the_real_database(factory, world: World, value: Decimal, *, engine):
     """Store `value` on this world's edge, read it back on a NEW session, remove it again.
 
     Returns `(stored, error)`: exactly one is not None. This is the MEASUREMENT the money
@@ -183,7 +231,6 @@ async def _round_trip_through_the_real_database(factory, world: World, value: De
     this dialect actually kept (`AGENTS.md` §1, "никаких гипотез из памяти сессии").
     """
     from app.core.ledger import journal
-    from tests.conftest import engine
 
     row_id = uuid.uuid4()
     # THE JOURNAL STANDS DOWN FOR THIS MEASUREMENT, and it must. What is being measured here is what
@@ -506,7 +553,7 @@ _UNSTORABLE_ON_SQLITE = [
 )
 @pytest.mark.asyncio
 async def test_c12_a_value_this_dialect_cannot_hold_is_refused_before_any_debt_sql(
-    db_session, label, value, today
+    sqlite_money_stand, label, value, today
 ) -> None:
     """C12, DEFECT-SHAPED. A money value the driver would change must never reach the database.
 
@@ -528,13 +575,16 @@ async def test_c12_a_value_this_dialect_cannot_hold_is_refused_before_any_debt_s
     against the dialect's round-trip (every case here has scale <= 8 after quantisation or is
     perfectly representable as a `Decimal`), or move the check into `after_flush`.
     """
-    from tests.conftest import TestingSessionLocal as factory, engine
+    engine, factory = sqlite_money_stand
+    assert engine.dialect.name == "sqlite", engine.dialect.name
 
     api = journal_api()
     world = await seed_world(factory)
     amount = Decimal(value)
     try:
-        stored, error = await _round_trip_through_the_real_database(factory, world, amount)
+        stored, error = await _round_trip_through_the_real_database(
+            factory, world, amount, engine=engine
+        )
 
         # NON-VACUITY, FIRST, and measured: this value really is one this money core must not
         # accept - either because the dialect changes it, or because the database itself objects,
@@ -593,7 +643,9 @@ async def test_c12_a_value_this_dialect_cannot_hold_is_refused_before_any_debt_s
 
 @pytest.mark.parametrize("value", ["1.000000000", "67108863.99999999"])
 @pytest.mark.asyncio
-async def test_c12_control_a_value_this_dialect_holds_exactly_is_accepted(db_session, value) -> None:
+async def test_c12_control_a_value_this_dialect_holds_exactly_is_accepted(
+    sqlite_money_stand, value
+) -> None:
     """C12, anti-vacuum control. GREEN today and after step 4.
 
     The refusals above are only meaningful if the rule they encode has a passing side. `1.000000000`
@@ -601,11 +653,14 @@ async def test_c12_control_a_value_this_dialect_holds_exactly_is_accepted(db_ses
     change its VALUE; `67108863.99999999` is the last atom below 2^26 and round-trips exactly. A
     storability rule that refused either would stop payments from happening at all.
     """
-    from tests.conftest import TestingSessionLocal as factory
+    engine, factory = sqlite_money_stand
+    assert engine.dialect.name == "sqlite", engine.dialect.name
 
     world = await seed_world(factory)
     try:
-        stored, error = await _round_trip_through_the_real_database(factory, world, Decimal(value))
+        stored, error = await _round_trip_through_the_real_database(
+            factory, world, Decimal(value), engine=engine
+        )
         assert error is None, f"the database refused a legitimate amount {value}: {error!r}"
         assert stored == Decimal(value), (
             f"{value} is supposed to round-trip exactly on this dialect and came back as {stored!r}"
@@ -621,7 +676,7 @@ async def test_c12_control_a_value_this_dialect_holds_exactly_is_accepted(db_ses
 
 @pytest.mark.asyncio
 async def test_condition4_a_delta_this_dialect_cannot_hold_is_refused_though_both_ends_fit(
-    db_session,
+    sqlite_money_stand,
 ) -> None:
     """Binding condition 4, DEFECT-SHAPED. The reviewer's counterexample, verbatim.
 
@@ -643,7 +698,8 @@ async def test_condition4_a_delta_this_dialect_cannot_hold_is_refused_though_bot
     MUTATION once step 4 exists: validate `amount_before` and `amount_after` and derive `delta`
     without validating it; this test must go red again and the `C12` cases above must stay green.
     """
-    from tests.conftest import TestingSessionLocal as factory, engine
+    engine, factory = sqlite_money_stand
+    assert engine.dialect.name == "sqlite", engine.dialect.name
 
     api = journal_api()
     world = await seed_world(factory)
@@ -654,11 +710,15 @@ async def test_condition4_a_delta_this_dialect_cannot_hold_is_refused_though_bot
         # NON-VACUITY, FIRST, and measured rather than reasoned: both ENDPOINTS survive this
         # dialect unchanged and the DELTA does not. If any of the three were to change, the
         # counterexample would be about the endpoints again and would prove nothing new.
-        stored_start, start_error = await _round_trip_through_the_real_database(factory, world, start)
-        stored_finish, finish_error = await _round_trip_through_the_real_database(
-            factory, world, finish
+        stored_start, start_error = await _round_trip_through_the_real_database(
+            factory, world, start, engine=engine
         )
-        stored_delta, _ = await _round_trip_through_the_real_database(factory, world, -delta)
+        stored_finish, finish_error = await _round_trip_through_the_real_database(
+            factory, world, finish, engine=engine
+        )
+        stored_delta, _ = await _round_trip_through_the_real_database(
+            factory, world, -delta, engine=engine
+        )
         assert (start_error, finish_error) == (None, None), (start_error, finish_error)
         assert stored_start == start and stored_finish == finish, (
             f"stand: an endpoint no longer round-trips exactly here ({stored_start!r}, "
@@ -1081,10 +1141,17 @@ async def test_c18_entries_come_from_the_attempt_that_succeeded_and_not_the_stal
                     # it flushes - outside the savepoint below, so the rollback of the losing
                     # attempt cannot undo the competitor's work as well. Through the driver: see
                     # the docstring.
+                    # The id is written as this dialect STORES it (32 hex on SQLite, the canonical
+                    # form on PostgreSQL) and inlined rather than bound: `exec_driver_sql` takes the
+                    # DRIVER's placeholder syntax, which is `?` for sqlite3 and `$1` for asyncpg, and
+                    # a `?` sent to PostgreSQL is a syntax error. The value comes from a `uuid.UUID`,
+                    # so nothing here is interpolated from data.
+                    stored_id = (
+                        debt.id.hex if connection.dialect.name == "sqlite" else str(debt.id)
+                    )
                     await connection.exec_driver_sql(
                         "UPDATE debts SET amount = 31.00000000, version = version + 1 "
-                        "WHERE id = ?",
-                        (debt.id.hex,),
+                        f"WHERE id = '{stored_id}'"  # noqa: S608
                     )
 
                     # The shape of `_apply_flow` (`app/core/payments/engine.py:1474-1553`): each
@@ -1233,7 +1300,7 @@ def _refusing_constraint(error: BaseException | None) -> str | None:
 )
 @pytest.mark.asyncio
 async def test_c19_a_shape_invalid_forged_row_is_refused_by_the_named_check(
-    db_session, label, table, overrides, constraint, why
+    sqlite_money_stand, label, table, overrides, constraint, why
 ) -> None:
     """C19, API-SHAPED. The write guard is not the last line; the CHECK constraints are.
 
@@ -1253,8 +1320,14 @@ async def test_c19_a_shape_invalid_forged_row_is_refused_by_the_named_check(
     MUTATION: drop `constraint` from migration 021 and from `app/db/journal_tables.py`. Only the
     cases naming it go red; every other case stays green, and a case that was previously being caught
     by a neighbouring rule would now fail on the NAME rather than pass on the error.
+
+    THIS IS THE SQLITE COPY OF THE INVENTORY, and it runs on the module's SQLite stand whatever the
+    tier is. On PostgreSQL `chk_debt_journal_entries_delta_arithmetic` (migration 024) together with
+    `delta <> 0` implies `before <> after`, so "an update whose endpoints are equal" cannot be posed
+    there as a shape-only forgery at all; the PostgreSQL copy names the rule that refuses it there.
     """
-    from tests.conftest import TestingSessionLocal as factory
+    engine, factory = sqlite_money_stand
+    assert engine.dialect.name == "sqlite", engine.dialect.name
 
     target = OPERATIONS_TABLE if table == "operation" else ENTRIES_TABLE
     probe = await stored_rows(factory, f"SELECT 1 FROM {target} LIMIT 1")  # noqa: S608
@@ -1284,7 +1357,9 @@ async def test_c19_a_shape_invalid_forged_row_is_refused_by_the_named_check(
 
 
 @pytest.mark.asyncio
-async def test_c19_a_shape_valid_lie_is_accepted_and_is_therefore_step_6_s_job(db_session) -> None:
+async def test_c19_a_shape_valid_lie_is_accepted_and_is_therefore_step_6_s_job(
+    sqlite_money_stand,
+) -> None:
     """C19, API-SHAPED. A recorded LIMIT, not a requirement - and it is red for the same reason.
 
     `after - before = delta` cannot be a CHECK: on SQLite the columns are REAL, and a cross-row
@@ -1297,8 +1372,15 @@ async def test_c19_a_shape_valid_lie_is_accepted_and_is_therefore_step_6_s_job(d
     This test therefore asserts that the forgery IS accepted. It is red today because the table does
     not exist - the non-vacuity assertion below says so - and once step 4 lands it becomes a green
     guard whose failure would mean the boundary moved and step 6's acceptance list is out of date.
+
+    THE BOUNDARY DID MOVE, ON POSTGRESQL ONLY: migration 024 made the arithmetic a CHECK there
+    (`chk_debt_journal_entries_delta_arithmetic`, asserted by name in
+    `tests/integration/test_p015_b4_entries_and_money_postgres.py`), and it is deliberately not
+    installed on SQLite (`app/db/journal_tables.py`). So this statement is about SQLite, and it runs
+    on the module's SQLite stand whatever the tier is.
     """
-    from tests.conftest import TestingSessionLocal as factory
+    engine, factory = sqlite_money_stand
+    assert engine.dialect.name == "sqlite", engine.dialect.name
 
     probe = await stored_rows(factory, f"SELECT 1 FROM {ENTRIES_TABLE} LIMIT 1")  # noqa: S608
     assert probe is not None, missing_journal_tables(probe, ENTRIES_TABLE)

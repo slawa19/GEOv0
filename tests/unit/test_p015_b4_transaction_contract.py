@@ -47,6 +47,7 @@ import weakref
 from contextlib import AsyncExitStack
 from decimal import Decimal
 
+import asyncpg
 import pytest
 from sqlalchemy import event, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -107,7 +108,7 @@ async def _raw_driver_connection(session):
 
 
 def _driver_transaction_state(driver) -> str:
-    """`open`, `none` or `closed`, from `sqlite3.Connection.in_transaction`.
+    """`open`, `none` or `closed`, asked of the DRIVER connection in its own words.
 
     `closed` is reported as its own answer rather than folded into `none`. A connection that has
     been handed back to the pool and closed cannot hold a transaction open, but it also cannot show
@@ -115,7 +116,18 @@ def _driver_transaction_state(driver) -> str:
     either way, and accepting that would be exactly the "compensation further downstream" this
     repository forbids (`AGENTS.md` §9). A test that needs the distinction must therefore keep the
     connection checked out itself.
+
+    TWO DRIVERS, ONE QUESTION (programme 017, `T1702`, 2026-09-23). This read only
+    `sqlite3.Connection.in_transaction`, so on a PostgreSQL tier it raised `AttributeError` before
+    the scenario could say anything. asyncpg answers the same question with
+    `Connection.is_in_transaction()`, which reports the transaction status the SERVER sent with its
+    last ReadyForQuery - the database's own state, as `in_transaction` is sqlite3's - and
+    `is_closed()` for the closed case. The three answers and what each one means are unchanged.
     """
+    if isinstance(driver, asyncpg.Connection):
+        if driver.is_closed():
+            return "closed"
+        return "open" if driver.is_in_transaction() else "none"
     try:
         return "open" if driver.in_transaction else "none"
     except ValueError:

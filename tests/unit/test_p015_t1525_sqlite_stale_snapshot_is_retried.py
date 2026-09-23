@@ -22,6 +22,16 @@ retry instead of being swallowed.
 These tests assert the EFFECT of that: a payment whose commit loses the snapshot race is retried and
 succeeds, with the concurrent write visible; a non-retryable SQLite error is still not retried; and
 the budget is finite, so a permanently losing payment ends in a refusal rather than a loop.
+
+THE DATABASE IS THIS MODULE'S OWN SQLITE FILE, NOT THE TIER'S (programme 017, `T1702`, 2026-09-23).
+The race is a property of SQLite's WAL snapshots, so these tests were true only while the default
+tier happened to run on SQLite; on a PostgreSQL tier they measured asyncpg's 40001 instead, and the
+budget test left four participants, a line, a debt and a transaction committed in the tier database,
+which turned seven neighbours' global counts red (`specs/017-postgres-only-engine/stage2-catalogue.md`,
+9.6). `sqlite_wal_stand` builds a disposable file under `tmp_path` wired exactly as the conftest wires
+its SQLite engine - the connect pragmas (WAL, foreign keys, busy timeout) and the transaction
+control - with the `create_all` schema and the conftest's sessionmaker options. The assertions are
+unchanged. The module goes away with the mechanism in stage 3.
 """
 
 from __future__ import annotations
@@ -30,8 +40,11 @@ import uuid
 from decimal import Decimal
 
 import pytest
+import pytest_asyncio
 from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError, IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from app.config import settings
 from app.core.payments.engine import PaymentEngine
@@ -39,8 +52,12 @@ from app.core.payments.router import PaymentRouter
 from app.core.payments.service import PaymentService, _classify_payment_db_error
 from app.db.models.debt import Debt
 from app.db.models.participant import Participant
+from app.db.base import Base
 from app.db.models.transaction import Transaction
-from app.db.sqlite_transaction_control import sqlite_busy_error_name
+from app.db.sqlite_transaction_control import (
+    install_sqlite_transaction_control,
+    sqlite_busy_error_name,
+)
 from app.utils.exceptions import RetryablePaymentConflictException
 from tests.unit.test_p015_t1525_sqlite_savepoint_is_not_a_transaction import (
     _PAYMENT,
@@ -51,8 +68,35 @@ from tests.unit.test_p015_t1525_sqlite_savepoint_is_not_a_transaction import (
 )
 
 from tests.debt_setup import debt_fixture_setup, purge_test_ledger
+from tests.scratch_db import install_test_sqlite_pragmas
 
 _CONCURRENT = Decimal("3.25")
+
+
+@pytest_asyncio.fixture
+async def sqlite_wal_stand(tmp_path):
+    """`(engine, sessionmaker)` over a fresh SQLite file wired as the conftest wires its SQLite engine.
+
+    WAL is not optional here: a stale snapshot exists only in WAL mode, where a reader keeps its
+    snapshot while a writer commits. In the rollback journal the competitor would block instead.
+    """
+    url = f"sqlite+aiosqlite:///{(tmp_path / 'stale-snapshot.db').as_posix()}"
+    stand_engine = create_async_engine(url, poolclass=NullPool, connect_args={"timeout": 30})
+    install_test_sqlite_pragmas(stand_engine.sync_engine, url=url)
+    install_sqlite_transaction_control(stand_engine.sync_engine)
+    async with stand_engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(
+        bind=stand_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autoflush=False,
+        join_transaction_mode="create_savepoint",
+    )
+    try:
+        yield stand_engine, factory
+    finally:
+        await stand_engine.dispose()
 
 
 async def _make_outsiders(factory, world: _World) -> tuple[Participant, Participant]:
@@ -163,7 +207,7 @@ async def _concurrent_debts(factory, world: _World, x, y) -> list[Decimal]:
 
 @pytest.mark.asyncio
 async def test_a_payment_that_loses_the_snapshot_race_is_retried_and_commits(
-    db_session, monkeypatch, caplog
+    sqlite_wal_stand, monkeypatch, caplog
 ) -> None:
     """RED without the dialect-aware classifier: the payment dies of "database is locked".
 
@@ -171,7 +215,7 @@ async def test_a_payment_that_loses_the_snapshot_race_is_retried_and_commits(
     writes, so its first attempt hits SQLITE_BUSY_SNAPSHOT. The second attempt must start from a
     fresh snapshot - which is why the concurrent debt has to be visible to it - and commit.
     """
-    from tests.conftest import TestingSessionLocal, engine
+    engine, TestingSessionLocal = sqlite_wal_stand
 
     assert engine.dialect.name == "sqlite", engine.dialect.name
     world = await _seed_world(TestingSessionLocal)
@@ -239,14 +283,15 @@ async def test_a_payment_that_loses_the_snapshot_race_is_retried_and_commits(
 
 @pytest.mark.asyncio
 async def test_a_payment_that_keeps_losing_the_race_is_refused_after_a_finite_budget(
-    db_session, monkeypatch, caplog
+    sqlite_wal_stand, monkeypatch, caplog
 ) -> None:
     """Counter-proof for the retry budget: a permanently losing payment refuses, it does not loop.
 
     Every attempt is beaten by a concurrent commit, so every attempt raises. The wrapper must stop
     after `COMMIT_RETRY_ATTEMPTS` and the payment must not be stored.
     """
-    from tests.conftest import TestingSessionLocal
+    engine, TestingSessionLocal = sqlite_wal_stand
+    assert engine.dialect.name == "sqlite", engine.dialect.name
 
     world = await _seed_world(TestingSessionLocal)
     x, y = await _make_outsiders(TestingSessionLocal, world)
@@ -310,7 +355,9 @@ async def test_a_payment_that_keeps_losing_the_race_is_refused_after_a_finite_bu
 
 
 @pytest.mark.asyncio
-async def test_the_classifier_reads_the_error_code_and_refuses_everything_else(db_session) -> None:
+async def test_the_classifier_reads_the_error_code_and_refuses_everything_else(
+    sqlite_wal_stand,
+) -> None:
     """Counter-proof for the predicate: busy is retryable BY CODE, an integrity error is not.
 
     Both errors are produced by the real driver, not constructed: the first from a genuine snapshot
@@ -318,7 +365,8 @@ async def test_the_classifier_reads_the_error_code_and_refuses_everything_else(d
     is also the anti-vacuum for the matching rule - if a driver update stopped surfacing the code,
     the predicate would go quietly permissive and this is what notices.
     """
-    from tests.conftest import TestingSessionLocal
+    engine, TestingSessionLocal = sqlite_wal_stand
+    assert engine.dialect.name == "sqlite", engine.dialect.name
 
     world = await _seed_world(TestingSessionLocal)
     try:

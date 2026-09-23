@@ -33,6 +33,18 @@ tries to replace the bind-layer guard on this tier with a `CHECK`.
 
 THE MUTATION that must turn `test_a` red again: remove `MoneyNumeric` from `Debt.amount` in
 `app/db/models/debt.py` - the refusal falls back to `NOT NULL` and the assertion below quotes it.
+
+THE STAND IS THIS MODULE'S OWN SQLITE DATABASE, NOT THE TIER'S (programme 017, `T1702`, 2026-09-23).
+Both tests are statements about SQLite and nothing else, so they used to be true only while the
+default tier happened to run on SQLite. On a PostgreSQL tier `test_b` could not even be spelled
+(`typeof(?)` is SQLite), and `test_a` passed there while measuring PostgreSQL - and, worse, left its
+seeded debt committed in the tier database, where it turned neighbours' global debt counts red
+(`specs/017-postgres-only-engine/stage2-catalogue.md`, 9.6). Each test now builds a disposable SQLite
+file under its own `tmp_path`, with exactly what the SQLite tier engine gets on connect - the
+conftest's pragmas and the T1525 transaction control - and a schema from `create_all`, as that tier
+has. The assertions are unchanged; what changed is only that "this tier" now always means SQLite,
+whatever `TEST_DATABASE_URL` is, and that nothing is written to the tier database at all. The module
+goes away with SQLite in stage 3.
 """
 
 from __future__ import annotations
@@ -41,22 +53,50 @@ import uuid
 from decimal import Decimal
 
 import pytest
+import pytest_asyncio
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError, StatementError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
+from app.db.base import Base
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
+from app.db.sqlite_transaction_control import install_sqlite_transaction_control
 
 from tests.debt_setup import debt_fixture_setup
+from tests.scratch_db import install_test_sqlite_pragmas
 
 
-async def _seed():
+@pytest_asyncio.fixture
+async def sqlite_stand(tmp_path):
+    """`(engine, sessionmaker)` over a fresh SQLite file, shaped like the SQLite tier's engine.
+
+    Same connect-time pragmas (`tests/scratch_db.py`), same transaction control, same
+    `create_all` schema and the same sessionmaker options as `tests.conftest.TestingSessionLocal`
+    minus the savepoint join, which only matters for a fixture-owned outer transaction and there is
+    none here.
+    """
+    url = f"sqlite+aiosqlite:///{(tmp_path / 't1526.db').as_posix()}"
+    stand_engine = create_async_engine(url, poolclass=NullPool, connect_args={"timeout": 30})
+    install_test_sqlite_pragmas(stand_engine.sync_engine, url=url)
+    install_sqlite_transaction_control(stand_engine.sync_engine)
+    async with stand_engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(
+        bind=stand_engine, class_=AsyncSession, expire_on_commit=False, autoflush=False
+    )
+    try:
+        yield stand_engine, factory
+    finally:
+        await stand_engine.dispose()
+
+
+async def _seed(factory):
     """One equivalent, two participants and one ordinary debt, committed on their own session."""
-    from tests.conftest import TestingSessionLocal
-
     n = uuid.uuid4().hex[:8]
-    async with TestingSessionLocal() as session:
+    async with factory() as session:
         equivalent = Equivalent(code=f"NAN{n}".upper()[:16], precision=2, is_active=True)
         debtor = Participant(
             pid=f"NAND_{n}", display_name="Debtor", public_key=f"pk_nand_{n}",
@@ -81,11 +121,9 @@ async def _seed():
         return equivalent.id, debtor.id, creditor.id
 
 
-async def _amounts(equivalent_id) -> list[str]:
+async def _amounts(factory, equivalent_id) -> list[str]:
     """The amounts the DATABASE holds for this equivalent, read on a NEW session."""
-    from tests.conftest import TestingSessionLocal
-
-    async with TestingSessionLocal() as fresh:
+    async with factory() as fresh:
         rows = (
             await fresh.execute(select(Debt.amount).where(Debt.equivalent_id == equivalent_id))
         ).scalars().all()
@@ -93,19 +131,21 @@ async def _amounts(equivalent_id) -> list[str]:
 
 
 @pytest.mark.asyncio
-async def test_a_the_refusal_of_a_nan_amount_must_name_the_money_rule(db_session):
+async def test_a_the_refusal_of_a_nan_amount_must_name_the_money_rule(sqlite_stand):
     """RED TODAY: the refusal is `NOT NULL constraint failed: debts.amount`.
 
-    `db_session` is requested for its schema setup and its per-test table reset only; every write
-    below goes through its own session so that "committed" and "never written" cannot be confused.
+    Every write below goes through its own session on the module's SQLite stand, so that
+    "committed" and "never written" cannot be confused.
     """
-    from tests.conftest import TestingSessionLocal, engine
+    engine, factory = sqlite_stand
+    assert engine.dialect.name == "sqlite", engine.dialect.name
 
-    equivalent_id, debtor_id, creditor_id = await _seed()
+    equivalent_id, debtor_id, creditor_id = await _seed(factory)
 
     # NON-VACUITY: this tier really stores money, so a refusal below is about the VALUE.
-    assert await _amounts(equivalent_id) == ["5.00000000"], (
-        f"the stand could not store an ordinary debt ({await _amounts(equivalent_id)!r}), so it "
+    assert await _amounts(factory, equivalent_id) == ["5.00000000"], (
+        f"the stand could not store an ordinary debt "
+        f"({await _amounts(factory, equivalent_id)!r}), so it "
         f"cannot tell a refusal from a broken stand"
     )
 
@@ -124,7 +164,7 @@ async def test_a_the_refusal_of_a_nan_amount_must_name_the_money_rule(db_session
     refusal: BaseException | None = None
     journal.uninstall_write_guard(engine)
     try:
-        async with TestingSessionLocal() as session:
+        async with factory() as session:
             async with debt_fixture_setup(session, label="setup"):
                 session.add(
                     Debt(
@@ -142,7 +182,7 @@ async def test_a_the_refusal_of_a_nan_amount_must_name_the_money_rule(db_session
     finally:
         journal.install_write_guard(engine)
 
-    stored = await _amounts(equivalent_id)
+    stored = await _amounts(factory, equivalent_id)
     assert stored == ["5.00000000"], (
         f"a NaN amount reached the column on this tier too: {stored!r}"
     )
@@ -164,7 +204,7 @@ async def test_a_the_refusal_of_a_nan_amount_must_name_the_money_rule(db_session
 
 
 @pytest.mark.asyncio
-async def test_b_a_check_constraint_on_this_tier_can_never_refuse_a_nan(db_session):
+async def test_b_a_check_constraint_on_this_tier_can_never_refuse_a_nan(sqlite_stand):
     """MEASUREMENT, green before and after: why the SQLite fix cannot be a CHECK constraint.
 
     Two facts of this dialect, both measured against the real driver rather than recalled:
@@ -177,7 +217,8 @@ async def test_b_a_check_constraint_on_this_tier_can_never_refuse_a_nan(db_sessi
     This test fails if either fact stops holding, which is the day the design decision behind
     `MoneyNumeric` has to be revisited.
     """
-    from tests.conftest import engine
+    engine, _factory = sqlite_stand
+    assert engine.dialect.name == "sqlite", engine.dialect.name
 
     nan = float("nan")
     async with engine.begin() as conn:
