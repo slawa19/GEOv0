@@ -355,3 +355,136 @@ blocker: state "idle in transaction", last query "RELEASE SAVEPOINT sa_savepoint
 | 187 | `unit/test_trustline_audit_fail_closed.py` :: `test_create_checkpoint_failure_is_not_swallowed_or_committed[2]` | FAILED | assert 1 == 0 | RESIDUE | PASSED | PASSED | keep / A |
 | 188 | `unit/test_trustline_audit_fail_closed.py` :: `test_create_fails_closed_when_actual_invariant_checker_is_unavailable` | FAILED | assert 1 == 0 | RESIDUE | PASSED | PASSED | keep / A |
 | 189 | `unit/test_zero_debt_policy.py` :: `test_clearing_deletes_zero_debts` | FAILED | app.utils.exceptions.GeoException: Internal server error | CLR | FAILED | FAILED | keep / B |
+
+## 9. Перезамер после `0d4c25a` — 2026-09-23
+
+Разделы 1–8 выше — историческое измерение слайса 2a от `ea14726`; они не правлены. Этот раздел — то же измерение тем же способом после одной правки: `0d4c25a` удалила из фикстуры режима A рецепт SQLAlchemy 1.4 (явный `begin_nested()` и слушатель `after_transaction_end` `_restart_savepoint`), оставив `join_transaction_mode="create_savepoint"`. Ни один тест, ассерт и ни одна строка `app/` не менялись.
+
+**Снято на:** ветка `claude/017-stage2b-remeasure` от `0d4c25a`, та же машина и тот же переносной PostgreSQL 16 на `127.0.0.1:5432`, база тира `geov0_test_p017s2m`, slug `p017s2m`.
+
+### 9.1 Как снято
+
+Команда раздела 1 с заменой slug и базы (`-TaskSlug p017s2m`, `geov0_test_p017s2m`), регистратор `tests/stage2_catalogue_recorder.py`, `--timeout=180`, режим A (`GEO_TEST_FIXTURE_MODE` не задан).
+
+| проход | что | прогонов | стена | итог |
+|---|---|---|---|---|
+| A (записанный) | весь дефолтный тир, режим A | 2: первый процесс завершил pytest-timeout на том же зависании №1 раздела 5, второй продолжил до `sessionfinish` | 488 с + 180 с ожидания таймаута; 127 с | 9.2 |
+| изоляция | каждый из 21 файла (все файлы RESIDUE и файлы шести непрошедших FIXA) отдельным прогоном, свежая схема | 21 | около 3 мин | 9.4, 9.6 |
+| непрерывный A + зонд | весь тир одним процессом, зависание №1 исключено `--deselect`; измерительный плагин **вне дерева** (`-p leak_probe` из каталога сессии, в репозитории его нет) после teardown каждого теста считает строки 10 таблиц базы тира свежим соединением и пишет nodeid, после которого число изменилось | 1 | 974 с — **несравнимо** с 814 с 2a: зонд добавляет запросы на каждый тест | `2565 passed, 135 failed, 4 skipped, 310 deselected`, pytest exit 1 |
+| пары | «загрязнитель + жертва» в одном процессе, порядок задан командной строкой; контроль — жертвы без загрязнителя | 11 | секунды каждый | 9.6 |
+| зонд изоляции самой правки | `-BackendMarker postgres -BackendSelector tests/integration/test_p017_mode_a_isolation_survives_an_application_commit_postgres.py` | 1 | — | `2 passed`, exit 0 |
+
+`310 deselected` против 307 у 2a: +2 — модуль-зонд изоляции из `0d4c25a` (маркер `postgres`), +1 — исключённое зависание.
+
+### 9.2 Числа до / после
+
+**Собрано 2705** (без изменений). Регистратор насчитал 2706 ответов: тот же дубль `test_p012_t1201_money_door_bounds.py::test_is_storable_money_refuses_what_the_column_would_change[<object object at 0x…>]` после перезапуска (оба раза PASSED), вычтен.
+
+| исход на Postgres, режим A | 2a (`ea14726`) | после `0d4c25a` | Δ |
+|---|---|---|---|
+| PASSED | 2512 | **2568** | +56 |
+| FAILED | 174 | **132** | −42 |
+| ERROR | 14 | **0** | −14 |
+| TIMEOUT | 1 | **1** | 0 (то же зависание №1) |
+| SKIPPED | 4 | **4** | 0 (те же четыре) |
+| **сумма** | **2705** | **2705** | |
+
+Непрошедших 189 → **133**; файлов с непрошедшими 62 → **44**. **Ни один тест, прошедший в 2a, не упал**: все 133 непрошедших есть в поимённом каталоге раздела 8.
+
+Непрерывный прогон дал на 3 непрошедших больше записанного: `2565 + 135 + 4 + 1 (исключённое зависание) = 2705`. Лишние три — остаток, зависящий от формы прогона («Граница», п. 3), разобраны в 9.6.
+
+### 9.3 Классы до / после (записанный прогон)
+
+| класс | 2a: тестов / файлов | после: тестов / файлов | что изменилось |
+|---|---|---|---|
+| FIXA | 62 / 24 | **0 / 0** | 56 прошли; 6 упали по другой причине (9.4) |
+| RESIDUE | 52 / 17 | **55 / 18** | ни один не исчез; +3 бывших FIXA (9.4, 9.6) |
+| VIS | 24 / 7 | 24 / 7 | |
+| CLR | 20 / 9 | **22 / 10** | +2 бывших FIXA: за платежом открылся отказ клиринга |
+| DIALECT-SQL | 11 / 3 | 11 / 3 | |
+| SQLITE-MECH | 10 / 4 | 10 / 4 | |
+| SCHEMA-CHECK | 3 / 2 | 3 / 2 | |
+| 40001 | 3 / 3 | 3 / 3 | |
+| DIALECT-PREMISE | 2 / 1 | 2 / 1 | |
+| DIALECT-MESSAGE | 1 / 1 | 1 / 1 | |
+| HANG | 1 / 1 | 1 / 1 | то же зависание №1 |
+| **TXTIME** (новый) | — | **1 / 1** | 9.5 |
+| **сумма** | **189 / 62** | **133 / 44** | = 132 FAILED + 1 TIMEOUT |
+
+Неизменившиеся классы сверены построчно: у всех не-FIXA строк раздела 8 первая строка `E …` в перезамере та же (единственное отличие — `delay_s` в логе ретрая строки 156: время, а не причина).
+
+### 9.4 Судьба 62 FIXA
+
+**56 прошли**, включая все 14 бывших ERROR (фикстуры `money_scenario` двух модулей `test_p011_*_on_the_wire.py`) и оба селектора спеки «обязаны остаться зелёными»: `test_payments_idempotency.py` (2/2) и `test_payments_2pc.py::test_commit_updates_transaction_updated_at`. Все FIXA-строки 19 файлов из 24 прошли; в оставшихся пяти файлах — шесть тестов:
+
+| # (разд. 8) | тест | причина — дословно из трейсбека | новый класс | изоляция |
+|---|---|---|---|---|
+| 30 | `integration/test_p015_t1544_operator_stop_refuses_money.py::test_clearing_in_a_deactivated_equivalent_is_refused_and_keeps_the_debts` | `assert 500 == 409`, `{"error":{"code":"E010",…"details":{"cleared_cycles":0,"partial":false}}}`; лог `event=clearing.external_connection_bind_unsupported`, `RuntimeError: PostgreSQL clearing requires an engine-bound AsyncSession` | CLR | FAILED |
+| 43 | `integration/test_scenarios.py::test_clearing` | `assert 500 == 200`; тот же лог `clearing.external_connection_bind_unsupported` | CLR — **ровно предсказание инвентаря**, которое 2a записал «не наблюдалось» (4.2): платёж перед клирингом больше не падает, и отказ `[CLR]` стал виден | FAILED |
+| 41 | `integration/test_payments_list_filters.py::test_list_payments_filters` | `assert {'76c6d1be-…'} == {'cb09ed8f-…'}`, `Extra items in the left set` на фильтре `from_date` (`:233`) | **TXTIME** (9.5) | FAILED |
+| 52 | `unit/test_admin_abort_tx.py::test_admin_abort_tx_aborts_and_audits` | `UniqueViolationError … "participants_pid_key"` | RESIDUE (в 2a — `FIXA *`; теперь файл в изоляции `10 passed`) | PASSED |
+| 181 | `unit/test_payment_staged_post_commit.py::test_staged_payment_cancellation_rolls_back_without_effects` | `assert 2 == 0` | RESIDUE | PASSED |
+| 182 | `unit/test_payment_staged_post_commit.py::test_staged_payment_effects_apply_once_after_outer_commit` | `assert 3 == 1` | RESIDUE | PASSED |
+
+### 9.5 Что удаление слушателя открыло
+
+**Среди 2512 тестов, прошедших в 2a, новых падений нет** — сверено по всему тиру, а не по выборке.
+
+Открылись причины, которые раньше **маскировал** ранний отказ FIXA (тест падал, не дойдя до них):
+
+- **CLR ×2** (#30, #43) — 9.4.
+- **RESIDUE ×2** (#181, #182) — тесты теперь доходят до глобального счёта долгов и видят чужие закоммиченные строки (9.6).
+- **TXTIME ×1 — новый класс, не предсказанный ни инвентарём, ни 2a.** `test_list_payments_filters` различает платежи по `created_at`, а `transactions.created_at` задаётся `server_default=func.now()` (`app/db/models/transaction.py:18`). В PostgreSQL `now()` — время начала **транзакции**, а режим A держит весь тест в одной внешней транзакции. Измерено, а не выведено: прогон файла с `-l` показывает у `p1`, `p2`, `p3` одинаковые `created_at` и `committed_at` (`'2026-09-23T16:50:56.247435Z'`), поэтому `from_date = p2.created_at` пропускает и `p1`. Под переключателем B тест в 2a проходил (раздел 8); в этом перезамере B не мерялся.
+
+Замечено попутно, **ни одного теста этим не уронено**: в захваченных логах семи упавших тестов стоит чужое `DataError: invalid input for query argument $11: 3500158664 (value out of int32 range)` на `INSERT INTO simulator_runs (… seed …)` — `seed` симулятора не помещается в `INTEGER` колонки на PostgreSQL. Это лог фоновой записи прогона симулятора, не причина падения тех тестов, в чьих логах он виден; был ли он в 2a, не проверялось.
+
+### 9.6 RESIDUE: гипотеза «остаток оставлял FIXA» опровергнута, загрязнители названы
+
+**Из 52 тестов RESIDUE не исчез ни один** — все 52 FAILED в записанном прогоне с той же первой строкой `E …`. Падения FIXA посреди транзакции остатка не производили. Класс вырос до **55** (+#52, #181, #182).
+
+Загрязнители найдены зондом непрерывного прогона (9.1), и **каждая связь подтверждена парой** «загрязнитель + жертва» в одном процессе; контроль — те же жертвы без загрязнителя (изоляция, все проходят).
+
+| загрязнитель — что закоммичено в базу тира и пережило тест (по зонду) | жертвы | пара |
+|---|---|---|
+| `integration/test_simulator_real_snapshot_db_enrichment.py::test_real_mode_graph_snapshot_enriches_used_and_net_sign` — 100 участников, эквивалент `UAH`, 432 линии | **38**, все `equivalents_code_key` (`DETAIL: Key (code)=(UAH) already exists`): `test_admin_clearing_cycles` 1, `test_admin_graph_ego` 1, `test_admin_graph_snapshot` 2, `test_admin_liquidity_summary` 1, `test_admin_trustlines_bottlenecks` 1, `test_admin_trustlines_list` 1, `test_admin_whoami_and_extras::test_admin_equivalents_include_inactive` 1, `test_interact_actions_backend_p1` 30 (и 31-й, `CLR *`, с тем же симптомом в полном прогоне) | все 38 (+31-й) |
+| `integration/test_simulator_sse_trust_drift_decay_topology_patch.py::test_simulator_sse_trust_drift_decay_emits_edge_patch_not_empty_topology_changed` — участники `alice`, `bob`, линия, долг, транзакция | **10**: 9 `participants_pid_key` (`Key (pid)=(alice)` / `(bob)`) — `test_trustlines_get_by_id` 1, `test_admin_abort_tx` 1, `test_admin_incidents_list` 2, `test_admin_participant_metrics` 2, `test_admin_participants_list` 1, `test_admin_participants_stats` 1, `test_admin_whoami_and_extras::test_admin_graph_snapshot_include_extras_smoke` 1; и `test_p013_t1302_…::test_asked_and_empty_is_distinguishable_from_not_asked` («precondition: both are empty», лишняя линия от `bob`) | все 10 |
+| `unit/test_p015_t1525_sqlite_stale_snapshot_is_retried.py::test_a_payment_that_keeps_losing_the_race_is_refused_after_a_finite_budget` (сам SQLITE-MECH, #156) — 4 участника, эквивалент, линия, долг, транзакция | **7** во втором процессе записанного прогона: `test_payment_staged_post_commit` 3 (глобальный счёт `Debt`), `test_scenario_inject_topology::test_malformed_inject_effect_skipped` 1 и `test_trustline_audit_fail_closed` 3 (глобальный счёт `TrustLine`) | все 7 |
+| `unit/test_p015_t1526_nan_amount_is_refused_by_the_wrong_constraint.py::test_a_the_refusal_of_a_nan_amount_must_name_the_money_rule` (сам **проходит**) — 2 участника, эквивалент, долг | второй источник для `test_payment_staged_post_commit` 3: в записанном прогоне `2 == 0` = долг T1525 + долг T1526 | да |
+| `integration/test_simulator_sse_real_smoke.py` — 3 долга, 2 транзакции | в непрерывной форме — глобальные счётчики долгов (ниже); в записанной не предшествует жертвам второго процесса | да (`staged_post_commit` 3, `assert 3 == 0`) |
+
+38 + 10 + 7 = **55**. Из пяти загрязнителей три — прогоны симулятора в реальном режиме, два — модули T1525/T1526. Каким путём их запись проходит мимо внешней транзакции режима A, по коду не прослеживалось; измерен только эффект — строки видны свежему соединению после teardown.
+
+**Остаток, зависящий от формы прогона.** В непрерывном прогоне к 55 добавляются ещё три — жертвы, которые в записанном прогоне попали во второй, «чистый» процесс: `unit/test_p015_t1523_the_commit_landed_then_the_caller_failed.py` 2 (`assert 5 == 1` — глобальный счёт долгов; это бывшие FIXA #154, #155) и `unit/test_trustline_signatures.py::test_trustline_create_rejects_invalid_signature` (`Key (pid)=(bob)`; уже названа в «Граница», п. 3). Пара с загрязнителем trust-drift воспроизвела все три; без него — `3 passed`. Непрерывный RESIDUE = **58**.
+
+Запись, пережившая тест, но без найденных жертв: `test_p011_json_artifacts_…`, `test_simulator_artifacts_events_ndjson`, `test_simulator_sse_replay_410` (строки `simulator_runs`), модули step5a/5b/5c (`integrity_checkpoints`, одна строка `integrity_audit_log`).
+
+**Попутно, не разобрано:** `test_simulator_sse_real_smoke.py`, зелёный в полном прогоне и в 2a, первым тестом процесса в паре **упал** с `SerializationError` (40001); тем же 40001 падали оба других симуляторных загрязнителя (они и в каталоге 2a — класс 40001, #47, #48). Зависимость от порядка не мерялась.
+
+### 9.7 Разбивка оставшихся 133 — вход для разделения 2b
+
+| класс | тестов | файлов | где чинится |
+|---|---|---|---|
+| RESIDUE | 55 | 18 | у **пяти загрязнителей** (9.6), а не у 18 жертв: жертвы в изоляции зелёные |
+| VIS | 24 | 7 | без изменений, раздел 8 |
+| CLR | 22 | 10 | 9 файлов раздела 3 + `integration/test_scenarios.py`; в `test_p015_t1544_operator_stop_refuses_money.py` теперь 2 CLR вместо CLR + FIXA |
+| DIALECT-SQL | 11 | 3 | без изменений |
+| SQLITE-MECH | 10 | 4 | без изменений |
+| SCHEMA-CHECK | 3 | 2 | без изменений |
+| 40001 | 3 | 3 | без изменений |
+| DIALECT-PREMISE | 2 | 1 | без изменений |
+| TXTIME | 1 | 1 | `integration/test_payments_list_filters.py` |
+| HANG | 1 | 1 | без изменений, раздел 5 |
+| DIALECT-MESSAGE | 1 | 1 | без изменений |
+| **сумма** | **133** | **44** | |
+
+Оба файла T1525/T1526 инвентарь уже назначил `delete`; два симуляторных загрязнителя сами в классе 40001. Что перевод или удаление этих файлов снимает и их жертв — **вывод из пар, а не измерение после удаления**.
+
+### 9.8 Чего перезамер не измерил
+
+- **Режим B** не перезамерялся: колонка «switch B» раздела 8 — от `ea14726`.
+- **Непрерывная форма** снята с зондом: её стена (974 с) несравнима, числа исходов сравнимы.
+- **Механизм записи загрязнителей в обход внешней транзакции** — не прослежен по коду, только эффект.
+- **40001 у `test_simulator_sse_real_smoke.py` первым в процессе** — один прогон, не повторялся.
+- **`simulator_runs.seed` вне int32** — наблюдение из логов, отдельным тестом не проверено.
+- **Файлы на собственном SQLite** (раздел 6) — по-прежнему отсутствующее измерение Postgres.
+- **Linux и CI** не мерялись.
