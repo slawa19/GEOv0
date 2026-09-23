@@ -334,8 +334,8 @@ class _Identity:
     ref: str
     pid: str
     public_key: str
-    #: `None` only in `reverify`, which re-reads an already seeded database and signs nothing: the
-    #: keys of the run that created it are gone by design.
+    #: `None` only in a run rebuilt by `_load_seeded_run`, which re-reads an already seeded
+    #: database and signs nothing: the keys of the run that created it are gone by design.
     _signing_key: SigningKey | None
     participant_id: uuid.UUID
 
@@ -1100,19 +1100,35 @@ def write_key_table(run: _Run, *, root: Path | None = None) -> Path:
 # ==================================================================================================
 
 
-async def reverify(
+#: What `dev_database.py ready` requires on every start, out of `ACCEPTANCE_CHECKS`.
+#:
+#: The acceptance asks "did the seed finish correctly", once, right after the seed. A start asks "is
+#: this database fit to run on", every time - including after the product has been USED, and using
+#: it changes the demonstration state that `bottleneck_edge_below_threshold`,
+#: `surviving_cycle_still_clearable` and `activity_in_every_equivalent` describe: `/clearing/auto`
+#: clears the surviving cycle, payments move the bottleneck. Readiness that re-ran all seven refused
+#: a correct database and advised resetting it (Codex external review of `37fec08..5e687dd`, F1,
+#: 2026-09-23). What a start needs is the reconciliation: the money the journal explains is the
+#: money in `debts`, which a legitimate operation keeps true. The other two reconciliation checks
+#: are properties of the SEED's verdict (the baseline adopted nothing; every operation of the seed
+#: was fully recomputed) and are not kept either. The second would go red on a sound database the
+#: moment the simulator's injector writes an `INJECT` operation, which reconciliation examines only
+#: as a subset (`app/core/ledger/reconciliation.py:162`) - a limit the verdict records about
+#: itself, not a defect of the database.
+READINESS_CHECKS = ("reconciliation_passed",)
+
+
+async def _load_seeded_run(
     session_factory: Callable[[], Any],
     *,
     community_id: str,
     refs_to_pid: dict[str, str],
-    communities_root: Path | None = None,
-) -> dict[str, dict[str, Any]]:
-    """Run the acceptance again over an ALREADY seeded database, without seeding anything.
+    communities_root: Path | None,
+) -> _Run:
+    """Rebuild a run over an ALREADY seeded database from its `ref -> PID` table, signing nothing.
 
-    The seed's verdict is only worth what it can still say about a database later, so the checks are
-    reachable without the run that produced it: `refs_to_pid` is the table the run wrote out, and
-    everything else is read back. A readiness probe (`T1710`) and the counter-checks in
-    `tests/integration/test_p017_t1711_seed_recipe_postgres.py` both need exactly this.
+    Refuses when a participant the table names is not in the database: that is a different or
+    unfinished population, not the one the table describes.
     """
 
     root = communities_root if communities_root is not None else _COMMUNITIES_DIR
@@ -1149,7 +1165,50 @@ async def reverify(
         )
         for ref, pid in refs_to_pid.items()
     }
+    return run
+
+
+async def reverify(
+    session_factory: Callable[[], Any],
+    *,
+    community_id: str,
+    refs_to_pid: dict[str, str],
+    communities_root: Path | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Run the whole ACCEPTANCE again over an already seeded database, without seeding anything.
+
+    All seven checks, so this answers "is this still the state the seed left" - which is what the
+    counter-checks in `tests/integration/test_p017_t1711_seed_recipe_postgres.py` need, and which a
+    database the product has since used is allowed to fail. It is NOT the start gate; that is
+    `check_ready_to_start`.
+    """
+
+    run = await _load_seeded_run(
+        session_factory,
+        community_id=community_id,
+        refs_to_pid=refs_to_pid,
+        communities_root=communities_root,
+    )
     return await run_acceptance(session_factory, run)
+
+
+async def check_ready_to_start(
+    session_factory: Callable[[], Any],
+    *,
+    community_id: str,
+    refs_to_pid: dict[str, str],
+    communities_root: Path | None = None,
+) -> dict[str, dict[str, Any]]:
+    """The `READINESS_CHECKS` over a seeded database: its population is there and it reconciles."""
+
+    run = await _load_seeded_run(
+        session_factory,
+        community_id=community_id,
+        refs_to_pid=refs_to_pid,
+        communities_root=communities_root,
+    )
+    reconciliation = await _check_reconciliation(session_factory, run)
+    return {name: reconciliation[name] for name in READINESS_CHECKS}
 
 
 async def seed_community(

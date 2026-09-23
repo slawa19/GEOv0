@@ -444,7 +444,13 @@ async def _assert_schema_at_head(url: URL) -> str:
 
 
 async def cmd_ready(url: URL, *, community: str) -> int:
-    """Schema, population and baseline - the three things an unfinished seed leaves half-done.
+    """Schema at head, the seeded population present, and the money reconciles.
+
+    NOT the seed's acceptance. The acceptance (`scripts/seed_recipe.py::run_acceptance`) is checked
+    once, by the seed, right after it ran; it includes the demonstration state the seed leaves - a
+    surviving cycle, a bottleneck - which the product legitimately changes the first time somebody
+    clears or pays. This probe runs on every start, so it asks only what a start needs
+    (`scripts/seed_recipe.py::READINESS_CHECKS`).
 
     Nothing here is a warning. A database whose schema is stamped but whose population is a partial
     seed is exactly the state programme 017 refuses to start a stack on (`AGENTS.md` section 9: an
@@ -457,7 +463,7 @@ async def cmd_ready(url: URL, *, community: str) -> int:
     print(f"schema: at head {head}")
 
     from app.db.session import AsyncSessionLocal
-    from scripts.seed_recipe import SeedRefusal, assert_database_is_empty, reverify
+    from scripts.seed_recipe import SeedRefusal, assert_database_is_empty, check_ready_to_start
 
     try:
         async with AsyncSessionLocal() as session:
@@ -495,7 +501,9 @@ async def cmd_ready(url: URL, *, community: str) -> int:
         )
 
     try:
-        checks = await reverify(AsyncSessionLocal, community_id=community, refs_to_pid=refs_to_pid)
+        checks = await check_ready_to_start(
+            AsyncSessionLocal, community_id=community, refs_to_pid=refs_to_pid
+        )
     except SeedRefusal as refusal:
         raise DevDatabaseRefusal(
             f"Database {url.database!r} is not a finished seed of {community}: {refusal} "
@@ -508,8 +516,8 @@ async def cmd_ready(url: URL, *, community: str) -> int:
     failed = sorted(name for name, check in checks.items() if not check["passed"])
     if failed:
         raise DevDatabaseRefusal(
-            f"Database {url.database!r} holds a seed of {community} that no longer satisfies "
-            f"{len(failed)} check(s): {failed}. Reset it: .\\scripts\\run_local.ps1 reset-db"
+            f"Database {url.database!r} holds a population of {community} that fails "
+            f"{len(failed)} readiness check(s): {failed}. Reset it: .\\scripts\\run_local.ps1 reset-db"
         )
     print(f"population: {community}, ready")
     return 0

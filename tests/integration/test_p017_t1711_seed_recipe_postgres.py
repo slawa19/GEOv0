@@ -536,3 +536,87 @@ async def test_every_acceptance_check_reddens_on_the_state_it_exists_to_notice(t
                 )
         finally:
             await engine.dispose()
+
+
+# =================================================================================================
+# Readiness is not acceptance: a database the product has USED must still start
+# =================================================================================================
+
+
+async def test_the_launcher_readiness_survives_a_clearing_the_product_ran(
+    template_name, monkeypatch, tmp_path
+):
+    """Clearing is the product's main function; running it must not make the next start refuse.
+
+    Codex external review of `37fec08..5e687dd`, F1 (2026-09-23): `dev_database.py ready` re-ran all
+    seven acceptance checks, three of which describe the DEMONSTRATION state right after the seed -
+    a surviving cycle, a bottleneck, an executed clearing. One `POST /clearing/auto?equivalent=UAH`
+    extinguishes the surviving cycle, and the launcher then refused a correct database and advised
+    resetting it. Readiness is narrowed to what a start needs; the acceptance stays whole.
+
+    Driven through `cmd_ready` itself - the function both launchers call - and not through a helper,
+    so that what goes red here is what refused the owner's stack.
+    """
+
+    import json
+
+    import app.db.session as db_session
+    from sqlalchemy.engine import make_url
+
+    from app.core.clearing.service import ClearingService
+    from scripts import dev_database
+
+    async with cloned_database(
+        _postgres_url(), template_name=template_name, suffix="p017t1710ready"
+    ) as clone_url:
+        engine, factory = _factory_for(clone_url)
+        try:
+            report = await seed_community(factory, community_id=COMMUNITY, env="test", allow_scratch_suffix=True)
+            table = tmp_path / "participants.json"
+            table.write_text(
+                json.dumps(
+                    {
+                        "community_id": COMMUNITY,
+                        "participants": {
+                            ref: {"pid": pid} for ref, pid in report.refs_to_pid.items()
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            monkeypatch.setattr(dev_database, "adopted_key_table_path", lambda _database: table)
+            monkeypatch.setattr(db_session, "AsyncSessionLocal", factory)
+            url = make_url(clone_url)
+
+            # Control: the freshly seeded database is ready.
+            assert await dev_database.cmd_ready(url, community=COMMUNITY) == 0
+
+            # The product clears UAH - the same service call `POST /clearing/auto` makes.
+            async with factory() as session:
+                cleared = await ClearingService(session).auto_clear("UAH", max_depth=6)
+            assert cleared >= 1, "auto-clearing found nothing to clear; the scenario is vacuous"
+
+            # The demonstration state is gone, and the ACCEPTANCE still says so - it is not weakened.
+            after = await reverify(factory, community_id=COMMUNITY, refs_to_pid=report.refs_to_pid)
+            assert not after["surviving_cycle_still_clearable"]["passed"], after[
+                "surviving_cycle_still_clearable"
+            ]
+            assert after["reconciliation_passed"]["passed"], after["reconciliation_passed"]
+
+            # The database is still correct, so the stack may start on it.
+            assert await dev_database.cmd_ready(url, community=COMMUNITY) == 0
+
+            # Counter-check (AGENTS.md section 9): narrowed readiness still refuses money that the
+            # journal does not explain.
+            debt_id = (await _rows(factory, "SELECT id FROM debts ORDER BY amount DESC LIMIT 1"))[0][0]
+            await _driver_sql(
+                factory, [f"UPDATE debts SET amount = amount + 1 WHERE id = {_literal(debt_id)}"]
+            )
+            with pytest.raises(dev_database.DevDatabaseRefusal, match="reconciliation_passed"):
+                await dev_database.cmd_ready(url, community=COMMUNITY)
+            await _driver_sql(
+                factory, [f"UPDATE debts SET amount = amount - 1 WHERE id = {_literal(debt_id)}"]
+            )
+            assert await dev_database.cmd_ready(url, community=COMMUNITY) == 0
+        finally:
+            await engine.dispose()
