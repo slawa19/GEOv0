@@ -1,14 +1,79 @@
+"""Equivalent writers refuse a non-canonical row; reads and repairs survive a legacy one.
+
+WHERE A LEGACY CODE CAN EXIST, and therefore where two of these tests run (programme 017, `T1702`,
+2026-09-23). A row whose CODE is outside `^[A-Z0-9_]{1,16}$` can only exist in a database without
+`chk_equivalents_code_format`. Migration 007 installs that CHECK on PostgreSQL only, validated
+against the rows already there, and every writer in the application refuses such a code
+(`app/utils/validation.py`) - so on a migrated PostgreSQL database the row cannot be written, and the
+tests that seeded one there were refused by the schema before they measured anything
+(`CheckViolationError ... "chk_equivalents_code_format"`). The CHECK is right and stays; the tests'
+premise is a fact about SQLite, where migration 007 installs no such CHECK and a legacy row is a real
+possibility. So those two tests run on a SQLite file of their own, whatever the tier is
+(`legacy_sqlite_session`, which the module's `db_session` hands to the conftest's `client`). Their
+assertions are unchanged. A legacy PRECISION is reachable on either backend - no CHECK bounds it -
+and its tests stay on the tier.
+"""
+
 from __future__ import annotations
 
 import pytest
+import pytest_asyncio
 from sqlalchemy import insert, select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from app.config import settings
 from app.core.simulator.real_scenario_seeder import RealScenarioSeeder
+from app.db.base import Base
 from app.db.models.audit_log import AuditLog
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
+from app.db.sqlite_transaction_control import install_sqlite_transaction_control
 from app.utils.exceptions import BadRequestException
+from tests.scratch_db import install_test_sqlite_pragmas
+
+
+@pytest_asyncio.fixture
+async def legacy_sqlite_session(tmp_path):
+    """A session over a fresh SQLite file: the schema a legacy code can live in.
+
+    Wired as the conftest wires its SQLite engine - connect pragmas, transaction control, the
+    `create_all` schema and its sessionmaker options - so the request handlers run against it exactly
+    as they would on the SQLite tier.
+    """
+    url = f"sqlite+aiosqlite:///{(tmp_path / 'legacy.db').as_posix()}"
+    legacy_engine = create_async_engine(url, poolclass=NullPool, connect_args={"timeout": 30})
+    install_test_sqlite_pragmas(legacy_engine.sync_engine, url=url)
+    install_sqlite_transaction_control(legacy_engine.sync_engine)
+    async with legacy_engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(
+        bind=legacy_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autoflush=False,
+        join_transaction_mode="create_savepoint",
+    )
+    try:
+        async with factory() as session:
+            assert session.bind.dialect.name == "sqlite", session.bind.dialect.name
+            yield session
+    finally:
+        await legacy_engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def db_session(db_session, request):
+    """The tier's `db_session`, unless the test asked for `legacy_sqlite_session`.
+
+    Overridden here and not in each test because the conftest's `client` (and `auth_headers` through
+    it) takes `db_session` by name: this is what makes the request handlers of a legacy-code test run
+    on the SQLite file the test seeded, rather than on the tier database where the row cannot exist.
+    """
+    if "legacy_sqlite_session" in request.fixturenames:
+        yield request.getfixturevalue("legacy_sqlite_session")
+    else:
+        yield db_session
 
 
 def _admin_headers() -> dict[str, str]:
@@ -83,6 +148,7 @@ def test_orm_writer_rejects_noncanonical_equivalent_precision() -> None:
 
 @pytest.mark.asyncio
 async def test_legacy_invalid_equivalent_rows_remain_visible_on_read_surfaces(
+    legacy_sqlite_session,
     client,
     db_session,
     auth_headers,
@@ -189,6 +255,7 @@ async def test_admin_can_repair_legacy_precision_when_code_is_canonical(
 
 @pytest.mark.asyncio
 async def test_admin_patch_rejects_invalid_legacy_code_before_mutation(
+    legacy_sqlite_session,
     client,
     db_session,
 ) -> None:
