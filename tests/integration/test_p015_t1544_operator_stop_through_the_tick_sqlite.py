@@ -13,9 +13,18 @@ and the tick continues). This module drives `RealRunner.tick_real_mode` itself -
 functions - for more ticks than the consecutive-failure limit, and each test asserts that the refusal
 really happened, so a path that never ran cannot pass.
 
-The stand: a file-backed WAL SQLite database with the application's pragmas and transaction control,
-installed as `AsyncSessionLocal` so the tick's own sessions use it. The heartbeat that advances
-`tick_index` is not part of `tick_real_mode`, so the loop below advances it.
+The stand: a mode-B clone of the migrated PostgreSQL template (`committed_database`, dropped after the
+test), reached through a pooled engine configured like the application's
+(`tests/simulator_tick_stand.py`) and installed as `AsyncSessionLocal` so the tick's own sessions use
+it. Mode B and not the savepoint-wrapped `db_session`: the tick opens and commits sessions of its own,
+and its clearing refuses a connection-bound session, so the stand needs commits that are real. The
+heartbeat that advances `tick_index` is not part of `tick_real_mode`, so the loop below advances it.
+
+MOVED OFF SQLITE (017 stage 3, slice S2a). Until then the stand was a file-backed WAL SQLite database
+from `tests/scratch_db`. The rule this module holds is not about SQLite, and the stand would have died
+with the SQLite driver taking the module's coverage with it, without a single red test. The asserts
+are unchanged; only the stand moved. The file name keeps its old suffix so the references to it in
+`specs/` stay true.
 """
 
 from __future__ import annotations
@@ -31,27 +40,22 @@ from typing import Any
 import pytest
 import pytest_asyncio
 from sqlalchemy import func, select, text, update
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import NullPool
 
 from app.core.payments.engine import PaymentEngine
 from app.core.payments.router import PaymentRouter
 from app.core.payments.service import PaymentService
 from app.core.simulator.models import RunRecord
 from app.core.simulator.real_runner import RealRunner
-from app.db.base import Base
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
-from app.db.sqlite_transaction_control import install_sqlite_transaction_control
 from app.utils.exceptions import ConflictException
 from tests.debt_setup import debt_fixture_setup
-from tests.integration.test_p015_p1_money_replay_sqlite import _Sse, _install
-from tests.scratch_db import install_test_sqlite_pragmas, remove_scratch_db, scratch_db_url
-
-_SLUG = "t1544-tick-lifecycle-sqlite"
+from tests.simulator_tick_stand import RecordingSse as _Sse
+from tests.simulator_tick_stand import install_tick_stand as _install
+from tests.simulator_tick_stand import pooled_sessionmaker_over
 
 
 def _utc_now() -> datetime:
@@ -59,22 +63,10 @@ def _utc_now() -> datetime:
 
 
 @pytest_asyncio.fixture
-async def factory():
-    url = scratch_db_url(_SLUG)
-    engine = create_async_engine(url, echo=False, poolclass=NullPool, connect_args={"timeout": 10})
-    install_test_sqlite_pragmas(engine.sync_engine, url=url)
-    install_sqlite_transaction_control(engine.sync_engine)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-        await conn.run_sync(Base.metadata.create_all)
-    session_factory = async_sessionmaker(
-        bind=engine, class_=AsyncSession, expire_on_commit=False, autoflush=False
-    )
-    try:
+async def factory(committed_database):
+    """Real commits on a disposable clone, visible to every session the tick opens."""
+    async with pooled_sessionmaker_over(committed_database.url) as session_factory:
         yield session_factory
-    finally:
-        await engine.dispose()
-        remove_scratch_db(_SLUG)
 
 
 class _Artifacts:

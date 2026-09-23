@@ -235,6 +235,20 @@ async def test_a_an_orm_write_of_nan_must_not_reach_the_money_column(factory):
             "the write was not refused; nothing between the application and the column objected "
             "to an amount that is not a number"
         )
+        # THE REFUSAL NAMES THE MONEY RULE, and it is `MoneyNumeric`'s (`app/db/types.py`). Carried
+        # over from `tests/unit/test_p015_t1526_nan_amount_is_refused_by_the_wrong_constraint.py`
+        # (017 stage 3), which held this message on the SQLite stand only. On this backend the
+        # column's CHECK would refuse too, one line later and in its own words; this pins that the
+        # refusal comes BEFORE the statement is sent and says what is wrong with the value.
+        message = str(refusal)
+        assert "NOT NULL" not in message, (
+            f"the refusal comes from the WRONG CONSTRAINT: {message!r}. An amount WAS supplied; it "
+            f"is not a number."
+        )
+        assert "non-finite" in message.lower(), (
+            f"the refusal does not say what is wrong with the value: {message!r}. It must name the "
+            f"value's own defect - that it is not a finite number."
+        )
     finally:
         await _cleanup(factory, world)
 

@@ -1,8 +1,8 @@
 """Step 5c through the real-mode TICK: an integrity-hold refusal is a rejection, not an error of the run.
 
-The rule is T1544's, and so is the stand (`test_p015_t1544_operator_stop_through_the_tick_sqlite.py`): this
-module drives `RealRunner.tick_real_mode` itself - not the phase functions - for MORE ticks than the
-consecutive-failure limit, with the equivalent under an integrity hold instead of deactivated, and each test
+The rule is T1544's, and so is the stand (`test_p015_t1544_operator_stop_through_the_tick_sqlite.py`, a
+mode-B PostgreSQL clone since 017 stage 3 slice S2a - it was a SQLite file before): this module drives
+`RealRunner.tick_real_mode` itself - not the phase functions - for MORE ticks than the consecutive-failure limit, with the equivalent under an integrity hold instead of deactivated, and each test
 asserts that the hold refusal really happened, so a path that never ran cannot pass.
 
 Asserted after every run, because a refusal that works when a function is called directly can still damage
@@ -21,7 +21,6 @@ import uuid
 from decimal import Decimal
 
 import pytest
-import pytest_asyncio
 from sqlalchemy import func, select, text
 
 from app.core.payments.engine import PaymentEngine
@@ -30,7 +29,7 @@ from app.db.models.debt import Debt
 from app.db.models.transaction import Transaction
 from app.utils.exceptions import ConflictException
 from tests.debt_setup import debt_fixture_setup
-from tests.integration.test_p015_p1_money_replay_sqlite import _install
+from tests.simulator_tick_stand import install_tick_stand as _install
 from tests.integration.test_p015_t1544_operator_stop_through_the_tick_sqlite import (  # noqa: F401 - fixture
     _Artifacts,
     _assert_the_run_was_not_charged,
@@ -46,16 +45,6 @@ from tests.integration.test_p015_t1544_operator_stop_through_the_tick_sqlite imp
 from tests.unit.test_p015_step5c_reaction_and_hold import hold_directly
 
 HOLD = PaymentEngine.EQUIVALENT_INTEGRITY_HOLD_REASON
-
-
-@pytest_asyncio.fixture(autouse=True)
-async def _release_holds_after_the_test(factory):
-    """Teardown only: the scratch stand `drop_all`s its file at the next start, and SQLite's `drop_all`
-    over a held equivalent fails (the hold's FK is RESTRICT). Finalised before `factory` disposes."""
-    yield
-    async with factory() as s:
-        await s.execute(text("UPDATE equivalents SET integrity_hold_result_id = NULL"))
-        await s.commit()
 
 
 @pytest.mark.asyncio

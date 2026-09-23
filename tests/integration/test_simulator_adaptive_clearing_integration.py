@@ -6,7 +6,15 @@ Tests:
 2) static mode: verify that static policy is unchanged by the presence of
    adaptive code paths.
 
-Uses isolated SQLite DB (same pattern as test_simulator_clearing_no_deadlock.py).
+The one test here that runs a real tick (`test_static_policy_unchanged_with_adaptive_code_present`)
+does so on a mode-B PostgreSQL clone (`committed_database`, dropped after the test): the tick opens and
+commits sessions of its own and its clearing refuses a connection-bound session, so it needs commits
+that are real. The coordinator and policy tests never touch a database and ask for none.
+
+MOVED OFF SQLITE (017 stage 3, slice S2a). Until then every test here asked for an isolated SQLite
+file, which only the static-policy test ever used; the asserts are unchanged. The SQLite engine below
+survives only for `test_this_modules_engine_has_the_application_sqlite_pragmas`, a test of the SQLite
+mechanism that leaves with it in the deletion slice.
 """
 from __future__ import annotations
 
@@ -22,7 +30,7 @@ from pathlib import Path
 
 import pytest
 import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from app.db.base import Base
@@ -36,6 +44,7 @@ from app.core.simulator.real_runner import RealRunner
 from tests.scratch_db import install_test_sqlite_pragmas, scratch_db_path, scratch_db_url
 
 from tests.debt_setup import debt_fixture_setup
+from tests.simulator_tick_stand import pooled_sessionmaker_over
 
 
 # ---------------------------------------------------------------------------
@@ -84,13 +93,10 @@ async def adaptive_engine():
 
 
 @pytest_asyncio.fixture
-async def adaptive_session_factory(adaptive_engine):
-    return async_sessionmaker(
-        bind=adaptive_engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-        autoflush=False,
-    )
+async def adaptive_session_factory(committed_database):
+    """A mode-B clone, pooled like the application: the tick's sessions must see what the seed committed."""
+    async with pooled_sessionmaker_over(committed_database.url) as factory:
+        yield factory
 
 
 async def test_this_modules_engine_has_the_application_sqlite_pragmas(adaptive_engine) -> None:
@@ -258,7 +264,6 @@ def _make_runner(
 
 @pytest.mark.asyncio
 async def test_adaptive_policy_triggers_clearing_on_high_rejection_rate(
-    adaptive_session_factory,
     monkeypatch,
 ) -> None:
     """When no_capacity_rate exceeds HIGH threshold, adaptive policy triggers clearing.
@@ -410,7 +415,6 @@ async def test_static_policy_unchanged_with_adaptive_code_present(
 
 @pytest.mark.asyncio
 async def test_adaptive_coordinator_respects_cooldown(
-    adaptive_session_factory,
     monkeypatch,
 ) -> None:
     """Adaptive clearing coordinator must respect min_interval_ticks cooldown."""
@@ -478,7 +482,6 @@ async def test_adaptive_coordinator_respects_cooldown(
 
 @pytest.mark.asyncio
 async def test_guardrail_inflight_blocks_clearing(
-    adaptive_session_factory,
     monkeypatch,
 ) -> None:
     """When in_flight > inflight_threshold, coordinator must skip all clearing (§3.2)."""
@@ -557,7 +560,6 @@ async def test_guardrail_inflight_blocks_clearing(
 
 @pytest.mark.asyncio
 async def test_guardrail_queue_depth_blocks_clearing(
-    adaptive_session_factory,
     monkeypatch,
 ) -> None:
     """When queue_depth > queue_depth_threshold, coordinator must skip all clearing."""
@@ -634,7 +636,6 @@ async def test_guardrail_queue_depth_blocks_clearing(
 
 @pytest.mark.asyncio
 async def test_adaptive_coordinator_processes_equivalents_in_sorted_order(
-    adaptive_session_factory,
     monkeypatch,
 ) -> None:
     """Coordinator MUST iterate equivalents in deterministic order (sorted).

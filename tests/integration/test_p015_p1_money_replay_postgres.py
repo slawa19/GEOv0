@@ -449,6 +449,32 @@ def _record_staged_conflicts(monkeypatch) -> list[str]:
     return conflicts
 
 
+def _record_conflict_sqlstates(monkeypatch) -> list[str | None]:
+    """The SQLSTATE of the DATABASE error behind every conflict the tick's payments raised.
+
+    Carried over from the SQLite stand (017 stage 3, slice S2a), where the same recorder read the
+    SQLite error code: the typed `RetryablePaymentConflictException` alone does not prove that THIS
+    stand produced the conflict it was built for - an owner-preflight change raises the same type
+    with no database error behind it. The original error survives as the exception's `__cause__`,
+    and the service's own reader of it is what is asked here.
+    """
+    from app.core.payments.service import _payment_db_sqlstate
+
+    sqlstates: list[str | None] = []
+    original = PaymentService.create_payment_internal_staged
+
+    async def _recording(self, *args, **kwargs):
+        try:
+            return await original(self, *args, **kwargs)
+        except RetryablePaymentConflictException as exc:
+            cause = exc.__cause__
+            sqlstates.append(_payment_db_sqlstate(cause) if cause is not None else None)
+            raise
+
+    monkeypatch.setattr(PaymentService, "create_payment_internal_staged", _recording)
+    return sqlstates
+
+
 async def _debts(session_factory, world: _World) -> dict[tuple[str, str], Decimal]:
     pid_by_id = {
         world.sender.id: world.sender.pid,
@@ -535,6 +561,7 @@ async def test_a_real_serialization_failure_replays_the_money_phase_and_commits_
         runner = _runner(run, _scenario(world), sse)
         _install(monkeypatch, factory)
         plans = _record_plans(monkeypatch, runner)
+        sqlstates = _record_conflict_sqlstates(monkeypatch)
         commits = _competitor_after_snapshot(
             monkeypatch, runner, factory, world, amount=_COMPETITOR, only_first=True
         )
@@ -553,6 +580,10 @@ async def test_a_real_serialization_failure_replays_the_money_phase_and_commits_
             f"the replay did not run on a serialization failure: {replays}"
         )
         assert len(commits) == 1, commits
+        # ...and the database error behind that typed conflict was a genuine serialization failure,
+        # read by its SQLSTATE, not merely something that shares the exception type. Carried over
+        # from `test_p015_p1_money_replay_sqlite.py`, which asserted SQLITE_BUSY_SNAPSHOT here.
+        assert sqlstates == ["40001"], sqlstates
 
         # ── The plan was recomputed against a snapshot that includes the competitor ───
         assert len(plans) == 2, f"the money phase was not replanned: {plans}"
@@ -585,6 +616,7 @@ async def test_a_real_serialization_failure_replays_the_money_phase_and_commits_
         assert sse.published("tx.failed") == 0
         assert run.committed_total == 1
         assert run.attempts_total == 1
+        assert run.rejected_total == 0
 
         # ── A transient conflict is not an error ──────────────────────────────────────
         assert run.errors_total == 0
@@ -592,7 +624,11 @@ async def test_a_real_serialization_failure_replays_the_money_phase_and_commits_
         assert run.state == "running"
         assert run._real_money_conflicts_total == 1
         assert run._real_money_replays_total == 1
+        # The replay SUCCEEDED: the budget was not exhausted and the tick made progress. These two
+        # and `rejected_total` above were asserted only by the SQLite stand until 017 stage 3.
+        assert run._real_money_replay_exhausted_total == 0
         assert run._real_money_committed_ticks_total == 1
+        assert run._real_consec_money_no_progress_ticks == 0
     finally:
         await _cleanup(factory, world)
 
@@ -661,6 +697,18 @@ async def test_a_genuine_40001_is_raised_by_the_staged_write_on_this_backend(
         # amount changes the key while a replan that does not keeps it. Either way the tick ends
         # with one transaction: re-planning regenerates load that was never accepted, and cannot
         # duplicate a payment.
+        if shape == "write-skew":
+            # THE COMPETITOR'S OWN CHANGE SURVIVES THE REPLAY, on a row the tick never writes.
+            # Carried over from `test_the_competitors_own_change_survives_the_replay` of the SQLite
+            # stand (017 stage 3): a replay whose rollback reached past its own attempt would look
+            # identical in every assertion about the tick's payment and would silently lose someone
+            # else's committed work. (The same-row shape holds the same property on the shared row,
+            # in `test_a_real_serialization_failure_replays_the_money_phase_and_commits_once`.)
+            debts = await _debts(factory, world)
+            assert debts.get((world.outsider_a.pid, world.outsider_b.pid)) == _SKEW, (
+                f"the replay rolled back a change that was not its own: {debts}"
+            )
+
         replanned_amount_changed = Decimal(plans[0][0].amount) != Decimal(plans[1][0].amount)
         assert replanned_amount_changed is (shape == "same-row"), (
             f"{shape}: expected the plan to change only when the competitor consumed capacity on "

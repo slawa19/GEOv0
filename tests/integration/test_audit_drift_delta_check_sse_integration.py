@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import logging
 import threading
@@ -11,7 +12,7 @@ from typing import Any
 
 import pytest
 import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
 
 from app.core.simulator.edge_patch_builder import EdgePatchBuilder
@@ -76,16 +77,6 @@ async def engine():
             pass
 
 
-@pytest_asyncio.fixture
-async def session_factory(engine):
-    return async_sessionmaker(
-        bind=engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-        autoflush=False,
-    )
-
-
 async def test_this_modules_engine_has_the_application_sqlite_pragmas(engine) -> None:
     """T1525: WAL and enforced foreign keys, or this module's results do not transfer.
 
@@ -114,8 +105,12 @@ class _PlannedAction:
 
 
 @pytest.mark.asyncio
-async def test_delta_check_drift_emits_audit_drift_sse(monkeypatch, session_factory) -> None:
-    async with session_factory() as session:
+async def test_delta_check_drift_emits_audit_drift_sse(monkeypatch, db_session) -> None:
+    # MODE A (017 stage 3, slice S2a): the executor works on the ONE session it is handed and opens
+    # none of its own, so the savepoint-wrapped `db_session` is enough, and cheaper than a clone.
+    # Until then this test ran on a SQLite file of its own. `nullcontext` only keeps the body as it
+    # was: the fixture, not this block, owns the session.
+    async with contextlib.nullcontext(db_session) as session:
         eq = Equivalent(code="UAH", is_active=True, precision=2, metadata_={})
         p1 = Participant(
             pid="p1",

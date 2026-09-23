@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
 import app.core.simulator.storage as simulator_storage
@@ -30,6 +30,7 @@ from app.db.models.trustline import TrustLine
 from tests.scratch_db import install_test_sqlite_pragmas, scratch_db_path, scratch_db_url
 
 from tests.debt_setup import debt_fixture_setup
+from tests.simulator_tick_stand import pooled_sessionmaker_over
 
 
 # T1406: this module used to build its engine from a RELATIVE path, so the database landed
@@ -84,13 +85,16 @@ async def audit_engine():
 
 
 @pytest_asyncio.fixture
-async def audit_session_factory(audit_engine):
-    return async_sessionmaker(
-        bind=audit_engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-        autoflush=False,
-    )
+async def audit_session_factory(committed_database):
+    """A mode-B PostgreSQL clone's sessionmaker (017 stage 3, slice S2a; a SQLite file before).
+
+    Mode B and not `db_session`: the tick opens and commits sessions of its own, and the audit row
+    this module asserts is read back on a NEW session after the tick has committed it. The SQLite
+    engine above survives only for the pragma test, a test of the SQLite mechanism that leaves with
+    it in the deletion slice. Pooled like the application's engine (`tests/simulator_tick_stand.py`).
+    """
+    async with pooled_sessionmaker_over(committed_database.url) as factory:
+        yield factory
 
 
 async def test_this_modules_engine_has_the_application_sqlite_pragmas(audit_engine) -> None:
