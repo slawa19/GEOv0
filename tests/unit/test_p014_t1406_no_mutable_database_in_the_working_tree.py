@@ -240,11 +240,19 @@ def test_no_test_module_builds_a_sqlite_url_outside_the_scratch_tree() -> None:
         # These quote a rejected or redacted URL as DATA - they assert what the settings guard and
         # the database guard REFUSE, so the string is the subject rather than a location. Naming
         # each one is a claim about that file; a new name cannot be added without making it.
+        #
+        # `test_p017_t1711_seed_recipe_refuses.py` (added 2026-09-22, programme 017 `T1711`) is the
+        # same claim about a fifth file. It exercises `scripts/seed_recipe.assert_target_is_disposable`,
+        # whose whole job is to decide WHERE a seed may write, so the URL outside the scratch tree
+        # is the case under test and cannot be written any other way. It opens no engine and
+        # creates no database: the URLs go to a pure predicate and nowhere else, which the
+        # filesystem guard above keeps honest independently of this list.
         if path.name in {
             "test_p014_t1406_no_mutable_database_in_the_working_tree.py",
             "test_settings_guardrails.py",
             "test_test_database_guard.py",
             "test_run_full_stack_database_url_redaction.py",
+            "test_p017_t1711_seed_recipe_refuses.py",
         }:
             continue
         scanned += 1

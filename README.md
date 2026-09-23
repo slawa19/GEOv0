@@ -567,6 +567,26 @@ $env:VITE_API_BASE_URL = 'http://127.0.0.1:18000'
 npm --prefix admin-ui run dev
 ```
 
+**Seeding by performing the operations instead of inserting their result** (programme 017, `T1711`).
+The fixture paths above insert debts and transactions a generator invented; this one runs the
+community's hand-written recipe (`seeds/communities/<id>/recipe.json`) through
+`ParticipantService` / `TrustLineService` / `PaymentService` / `ClearingService` and the admin freeze
+handler, with a key pair generated per participant per run and kept only in memory:
+
+```powershell
+python scripts/seed_db.py --source recipe --community riverside-town-50
+```
+
+It takes the reconciliation baseline itself, on empty debts before the first payment, so
+`take_reconciliation_baseline.py` is **not** run afterwards - and it finishes by reconciling what it
+produced, printing one line per acceptance check. The symbolic `ref -> PID` table of the run is
+written to `.local-run/seed-recipe/<community>/participants.json`; the private keys are not written
+anywhere, which is why a second run is refused rather than replayed.
+
+Two refusals are deliberate: a database that is not empty (the earlier run's keys are gone, so its
+participants cannot be addressed again), and `greenfield-village-100`, whose description declares
+nine `frozen` trust lines that no product operation can write (`specs/BACKLOG.md`, 2026-09-22).
+
 Note: the Admin UI role selector (`admin/operator/auditor`) is a **UI-only** convenience (stored in localStorage) that hides/disables some actions.
 It is not an authorization boundary; the backend must enforce permissions.
 
