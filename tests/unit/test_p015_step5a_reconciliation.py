@@ -2,7 +2,9 @@
 
 WHAT IS UNDER TEST. `app/core/ledger/reconciliation.py` - criterion (a), DETECTION OF CHANGE MADE AROUND
 THE APPLICATION: for every edge of an equivalent, `current debt - sum(journal delta) == baseline offset`,
-plus the per-row `amount_after - amount_before == delta` that SQLite cannot hold as a constraint.
+plus the per-row `amount_after - amount_before == delta`, which PostgreSQL also holds as a constraint
+(`chk_debt_journal_entries_delta_arithmetic`, migration 024) - see the arithmetic test for why the
+verifier's own check is still measured.
 
 THE REPRODUCTION THAT JUSTIFIES IT, asserted in the first test and measured before any of this existed
 (2026-09-14, this module's first version on HEAD `053c58b`): a one-atom `UPDATE debts` issued through the
@@ -12,18 +14,19 @@ driver left the integrity checkpoint `healthy`, `passed: True`, `alerts: []`, wi
 WHAT IT DOES NOT SEE, and one test says so on purpose: a writer that journals a WRONG change faithfully.
 `C6` is that writer; criterion (a) is PASSED on it, and refuting it is criterion (b), step 5b.
 
-TIER. SQLite, the default tier. Money inside `|v| < 2^26`. Every verdict is read on a new session. The
+TIER. PostgreSQL. Money inside `|v| < 2^26`. Every verdict is read on a new session. The
 changes "around the application" go through `exec_driver_sql`, the one door the write guard documents as
 unseen - which is exactly what an operator's SQL or a partial restore is.
 
 MUTATIONS. Each test names the mutation that must turn it red; the report of step 5a records the runs.
 
-TWO TESTS RUN ON A SQLITE FILE OF THEIR OWN (programme 017, `T1702`, 2026-09-23), whatever the tier
-is, because their subject exists only on SQLite: the per-row arithmetic check that SQLite cannot hold
-as a constraint (on PostgreSQL `chk_debt_journal_entries_delta_arithmetic` refuses the forged row
-before the verifier can see it), and the refusal to give a verdict without the SQLite transaction
-control (on PostgreSQL there is no such control to be missing). `sqlite_reconciliation_stand` wires
-the file exactly as the conftest wires its SQLite engine. Every other test stays on the tier.
+ONE TEST RUNS ON A DISPOSABLE CLONE WITHOUT THE ARITHMETIC CHECK (programme 017 stage 3, slice S3;
+on a SQLite file of its own before). On the tier database `chk_debt_journal_entries_delta_arithmetic`
+refuses the forged row before the verifier can see it, so the verifier's per-row check - an existing
+rule of the money path - could be deleted with the tier staying green. The clone is where that rule is
+still measured (spec 017, Changelog 2026-09-24: a rule a constraint makes unreachable stays measured).
+The refusal to give a verdict without the SQLite transaction control left with SQLite: on PostgreSQL
+there is no such control to be missing.
 """
 
 from __future__ import annotations
@@ -36,8 +39,6 @@ from types import SimpleNamespace
 import pytest
 import pytest_asyncio
 from sqlalchemy import func, select, update
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import NullPool
 
 from app.core.integrity import compute_integrity_checkpoint_for_equivalent
 from app.core.ledger.journal import DebtJournalError, Reason, debt_operation
@@ -51,7 +52,6 @@ from app.core.ledger.reconciliation import (
     verify_journal_equals_change,
 )
 from app.core.payments.engine import PaymentEngine
-from app.db.base import Base
 from app.db.journal_tables import debt_journal_entries
 from app.db.models.audit_log import IntegrityAuditLog
 from app.db.models.debt import Debt
@@ -62,9 +62,7 @@ from app.db.reconciliation_tables import (
     debt_reconciliation_baselines,
     debt_reconciliation_results,
 )
-from app.db.sqlite_transaction_control import install_sqlite_transaction_control
 from tests.debt_setup import debt_fixture_setup
-from tests.scratch_db import install_test_sqlite_pragmas
 from tests.unit.test_p015_b4_wrong_writer_is_recorded_faithfully import (
     _audit,
     _collapse_the_route,
@@ -84,30 +82,28 @@ CHECKPOINT_CHECKS = {"zero_sum", "trust_limits", "debt_symmetry"}
 # ==============================================================================================
 
 
-@pytest_asyncio.fixture
-async def sqlite_reconciliation_stand(tmp_path):
-    """A sessionmaker over a fresh SQLite file, wired as the conftest wires its SQLite engine.
+#: The PostgreSQL CHECK that holds `delta = amount_after - amount_before` in the table itself.
+_ARITHMETIC_CHECK = "chk_debt_journal_entries_delta_arithmetic"
 
-    Same connect pragmas, same transaction control, the `create_all` schema the SQLite tier has, and
-    the conftest's sessionmaker options. For the two tests whose subject exists only on SQLite.
+
+@pytest_asyncio.fixture
+async def clone_without_the_arithmetic_check(committed_database):
+    """A sessionmaker over a DISPOSABLE clone (mode B) from which the delta-arithmetic CHECK is dropped.
+
+    WHY: on PostgreSQL that CHECK refuses a journal row whose delta contradicts its own ends before
+    the verifier's per-row comparison can see it - which is correct, and is asserted where it belongs
+    (`tests/integration/test_p015_t1530_delta_arithmetic_postgres.py`). But the per-row comparison is
+    a rule of the verifier, and on the tier database it can never be reached, so its mutation would
+    stay green. On a clone dropped when the test ends, removing the CHECK isolates the stage that owns
+    the rule; nothing outside this test sees the altered schema. `DROP CONSTRAINT` without
+    `IF EXISTS` is the non-vacuity: it fails unless the CHECK was there.
     """
-    url = f"sqlite+aiosqlite:///{(tmp_path / 'reconciliation.db').as_posix()}"
-    stand_engine = create_async_engine(url, poolclass=NullPool, connect_args={"timeout": 30})
-    install_test_sqlite_pragmas(stand_engine.sync_engine, url=url)
-    install_sqlite_transaction_control(stand_engine.sync_engine)
-    async with stand_engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    factory = async_sessionmaker(
-        bind=stand_engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-        autoflush=False,
-        join_transaction_mode="create_savepoint",
-    )
-    try:
-        yield factory
-    finally:
-        await stand_engine.dispose()
+
+    async with committed_database.engine.begin() as connection:
+        await connection.exec_driver_sql(
+            f"ALTER TABLE {debt_journal_entries.name} DROP CONSTRAINT {_ARITHMETIC_CHECK}"
+        )
+    yield committed_database.sessionmaker
 
 
 def _literal(dialect: str, value: uuid.UUID) -> str:
@@ -425,23 +421,22 @@ async def test_step5a_without_a_baseline_the_result_is_unverifiable_never_passed
 
 @pytest.mark.asyncio
 async def test_step5a_a_journal_row_contradicting_its_own_arithmetic_is_failed_and_dominates(
-    sqlite_reconciliation_stand,
+    clone_without_the_arithmetic_check,
 ) -> None:
     """A row saying `-> 11` with `delta 10`, and no baseline: FAILED, with the baseline still missing.
 
-    Two properties in one stand, because on SQLite only the row arithmetic is conclusive without a
-    baseline: the per-row check that SQLite cannot hold as a constraint, and `FAILED` dominating
-    `UNVERIFIABLE`.
+    Two properties in one stand, because only the row arithmetic is conclusive without a baseline:
+    the verifier's per-row check, and `FAILED` dominating `UNVERIFIABLE`.
 
     MUTATIONS: (1) remove the per-row comparison in `_journal_sums` - no finding, UNVERIFIABLE, red;
     (2) test `missing_evidence` before `findings` in `ReconciliationOutcome.status` - UNVERIFIABLE, red.
 
-    ON SQLITE WHATEVER THE TIER IS: on PostgreSQL the forged row is refused by
+    ON A CLONE WITHOUT THE CHECK: with the schema intact the forged row is refused by
     `chk_debt_journal_entries_delta_arithmetic` (migration 024) and the per-row check "can only fire
-    if the constraint is gone" (`app/core/ledger/reconciliation.py`, module docstring).
+    if the constraint is gone" (`app/core/ledger/reconciliation.py`, module docstring). The clone is
+    where it is gone (see `clone_without_the_arithmetic_check`); until 017 stage 3 this ran on SQLite.
     """
-    factory = sqlite_reconciliation_stand
-    assert factory.kw["bind"].dialect.name == "sqlite"
+    factory = clone_without_the_arithmetic_check
 
     triangle = await _seed_triangle(factory, trustlines=[("b", "a", "100")])
     try:
@@ -753,38 +748,6 @@ async def test_step5a_different_findings_under_the_same_status_insert(db_session
         latest = _latest(rows)
         detail = json.loads(latest.detail) if isinstance(latest.detail, str) else latest.detail
         assert detail["findings"][0]["debtor_id"] == str(triangle.b.id), detail
-    finally:
-        await _drop_triangle(factory, triangle)
-
-
-@pytest.mark.asyncio
-async def test_step5a_without_sqlite_transaction_control_there_is_no_verdict(
-    sqlite_reconciliation_stand, monkeypatch
-) -> None:
-    """The snapshot premise is refused, not assumed: an error and no row; with the control, a verdict.
-
-    MUTATION: remove the refusal in `open_verification_snapshot` - a PASSED row appears, red.
-
-    ON SQLITE WHATEVER THE TIER IS: the refusal is about a SQLite engine's transaction control, so on
-    a PostgreSQL tier there is nothing for it to refuse and the patched predicate is never asked.
-    """
-    from app.core.ledger import reconciliation
-
-    factory = sqlite_reconciliation_stand
-    assert factory.kw["bind"].dialect.name == "sqlite"
-
-    triangle = await _seed_triangle(factory, trustlines=[])
-    try:
-        await _baseline(factory, triangle.equivalent.id)
-        monkeypatch.setattr(reconciliation, "sqlite_transaction_control_is_installed", lambda _engine: False)
-        counts = await reconciliation.run_scheduled_reconciliation(
-            factory, equivalent_ids=[triangle.equivalent.id]
-        )
-        assert counts["error"] == 1, counts
-        assert await _result_rows(factory, triangle.equivalent.id) == []
-
-        monkeypatch.undo()
-        assert (await _run_once(factory, triangle.equivalent.id))[PASSED] == 1
     finally:
         await _drop_triangle(factory, triangle)
 

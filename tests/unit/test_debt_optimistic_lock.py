@@ -1,22 +1,15 @@
-"""Two sessions cannot overwrite each other's debt amount - and the mechanism has a name per backend.
+"""Two sessions cannot overwrite each other's debt amount, and the database refuses the stale writer.
 
-The lost-update class this guards has not changed. What changed on 2026-09-12 (T1525) is HOW SQLite
-reports it. With the transaction control installed, a session that has read holds a real snapshot, so
-the second writer is refused by the DATABASE with SQLITE_BUSY_SNAPSHOT before the ORM ever compares
-`version`. On SQLite before the control, where reads were autocommitted, the write reached the row
-and the ORM raised `StaleDataError` because `version` had moved.
-
-ON POSTGRESQL THE DATABASE REFUSES FIRST TOO - measured 2026-09-23 (017 stage 2b), when this module
-first ran there in mode B. The tier engine runs at the application's isolation level (T1549, default
+THE DATABASE REFUSES FIRST - measured 2026-09-23 (017 stage 2b), when this module first ran on
+PostgreSQL in mode B. The tier engine runs at the application's isolation level (T1549, default
 SERIALIZABLE), and at that level the stale writer's UPDATE is refused with SQLSTATE 40001
 ("could not serialize access ... Canceled on identification as a pivot, during write") before the
-ORM compares `version`. The PostgreSQL branch below used to expect `StaleDataError`: it had never
-run, and that is the READ COMMITTED outcome, an isolation level the application does not use. 40001
-is what `PaymentEngine._is_retryable_db_error` retries, the counterpart of SQLITE_BUSY_SNAPSHOT.
+ORM compares `version`. `StaleDataError` would be the READ COMMITTED outcome, an isolation level the
+application does not use. 40001 is what `PaymentEngine._is_retryable_db_error` retries.
 
-The test therefore asserts the invariant on both tiers - the committed value survives, the stale
-writer is refused - and names the mechanism for the backend it is running on rather than accepting
-"some exception".
+The test asserts the invariant - the committed value survives, the stale writer is refused - and
+names the mechanism rather than accepting "some exception". Until 017 stage 3 (slice S3) it also
+had a SQLite branch expecting SQLITE_BUSY_SNAPSHOT; that branch left with SQLite.
 """
 
 import uuid
@@ -30,7 +23,6 @@ from sqlalchemy.orm.exc import StaleDataError
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
-from app.db.sqlite_transaction_control import sqlite_busy_error_name
 
 from tests.conftest import MODE_B, sessionmaker_of
 from tests.debt_setup import debt_fixture_setup
@@ -80,7 +72,6 @@ async def test_a_stale_writer_cannot_overwrite_the_committed_debt_amount(db_sess
 
     # Two separate sessions, so the second one holds a genuinely stale view of the row.
     sessions = sessionmaker_of(db_session)
-    dialect = db_session.get_bind().dialect.name
 
     async with sessions() as s1:
         async with sessions() as s2:
@@ -108,21 +99,14 @@ async def test_a_stale_writer_cannot_overwrite_the_committed_debt_amount(db_sess
                 await s2.commit()
             await s2.rollback()
 
-    if dialect == "sqlite":
-        # The database refuses the write itself: the snapshot s2 read at is older than s1's commit,
-        # and no amount of waiting can make it current. `PaymentEngine._is_retryable_db_error`
-        # classifies exactly this as retryable - see
-        # `tests/unit/test_p015_t1525_sqlite_stale_snapshot_is_retried.py`.
-        assert sqlite_busy_error_name(refusal.value) == "SQLITE_BUSY_SNAPSHOT", refusal.value
-    else:
-        # The database refuses the write itself, as on SQLite: SERIALIZABLE cannot let a writer
-        # whose snapshot predates s1's commit update the row s1 changed. By SQLSTATE, not by class:
-        # a `DBAPIError` of any other code is not this refusal.
-        assert isinstance(refusal.value, DBAPIError), refusal.value
-        sqlstate = getattr(refusal.value.orig, "sqlstate", None) or getattr(
-            refusal.value.orig, "pgcode", None
-        )
-        assert sqlstate == "40001", refusal.value
+    # The database refuses the write itself: SERIALIZABLE cannot let a writer whose snapshot predates
+    # s1's commit update the row s1 changed. By SQLSTATE, not by class: a `DBAPIError` of any other
+    # code is not this refusal.
+    assert isinstance(refusal.value, DBAPIError), refusal.value
+    sqlstate = getattr(refusal.value.orig, "sqlstate", None) or getattr(
+        refusal.value.orig, "pgcode", None
+    )
+    assert sqlstate == "40001", refusal.value
 
     # The invariant, read back on a third session: the committed update stands, the stale one is
     # nowhere, and the row moved forward exactly one version.

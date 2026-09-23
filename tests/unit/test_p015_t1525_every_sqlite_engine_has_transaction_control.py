@@ -109,17 +109,13 @@ _POSTGRES_GUARANTEED_URL_NAMES = {"TEST_DATABASE_URL"}
 #: SQLite-capable. `_require_a_postgres_tier_url` refuses any non-PostgreSQL `TEST_DATABASE_URL`
 #: before the engine is built, so the scan now reads it as PostgreSQL-only by refusal, which is true.
 #: Its installer call and SQLite branches stay until stage 3 removes them with the mechanism.
+#:
+#: EVERY TEST MODULE LEFT THIS LIST ON 2026-09-24 (017 stage 3, slice S3): the SQLite stands, the
+#: pragma tests of the five simulator modules and the tests of the SQLite mechanism were deleted, so
+#: no test builds a SQLite engine any more. What remains is the application's own construction, which
+#: the slices that remove SQLite from `app/` delete together with this guard.
 _KNOWN_SQLITE_CONSTRUCTIONS = {
     "app/db/session.py",
-    "tests/integration/test_audit_drift_delta_check_sse_integration.py",
-    "tests/integration/test_post_tick_audit_drift_runner_integration.py",
-    "tests/integration/test_simulator_adaptive_clearing_effectiveness_ab.py",
-    "tests/integration/test_simulator_adaptive_clearing_integration.py",
-    "tests/integration/test_simulator_clearing_no_deadlock.py",
-    "tests/unit/test_p012_numeric_scale_rounding_is_invisible_on_sqlite.py",
-    "tests/unit/test_sqlite_dev_schema_repair.py",
-    "tests/unit/test_p015_t1525_sqlite_transaction_control_is_in_effect.py",
-    "tests/unit/test_p015_t1525_a_busy_does_not_mask_and_does_not_promise.py",
 }
 
 

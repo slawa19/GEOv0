@@ -27,8 +27,8 @@ module IS the mutation - these are not descriptions of a flip, they perform it.
 
 WHAT IS DELIBERATELY NOT HERE. Whether `Numeric(20, 8)` really rounds rather than truncates is a
 fact about PostgreSQL and is measured on the PostgreSQL tier
-(`tests/integration/test_p012_rt1_*`), because SQLite does not round on write at all
-(`tests/unit/test_p012_numeric_scale_rounding_is_invisible_on_sqlite.py`). This module asserts
+(`tests/integration/test_p012_rt1_*`), because SQLite did not round on write at all (measured by a
+SQLite-only module deleted with SQLite in programme 017 stage 3). This module asserts
 only what the door does, which is backend-independent.
 """
 

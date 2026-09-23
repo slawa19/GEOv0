@@ -10,7 +10,6 @@ from httpx import AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.engine import make_url
-from sqlalchemy.exc import OperationalError
 from sqlalchemy.pool import NullPool
 
 # Tests must select their permissive environment explicitly before app.config
@@ -23,7 +22,6 @@ from app.config import settings  # noqa: E402
 from app.core.auth.canonical import canonical_json  # noqa: E402
 from app.core.auth.crypto import generate_keypair  # noqa: E402
 from app.db.base import Base  # noqa: E402
-from app.db.sqlite_transaction_control import install_sqlite_transaction_control  # noqa: E402
 from app.main import app  # noqa: E402
 from scripts.validate_test_database_url import assert_safe_test_database_url  # noqa: E402
 from tests.migrated_schema import (  # noqa: E402
@@ -35,7 +33,6 @@ from tests.migrated_schema import (  # noqa: E402
     repository_head,
     run_alembic_upgrade_head,
 )
-from tests.scratch_db import install_test_sqlite_pragmas  # noqa: E402
 
 # --- Database Fixtures ---
 
@@ -54,8 +51,8 @@ from tests.scratch_db import install_test_sqlite_pragmas  # noqa: E402
 # anyway, one step later and less clearly) or set it on the operator's behalf, which is exactly what
 # the opt-in exists to prevent. So the debug path names its database explicitly.
 #
-# The URL guard below still accepts SQLite on its own: `tests/scratch_db.py` builds SQLite stands
-# for the tests of the SQLite mechanism, which live until stage 3. The TIER is what refuses it.
+# Since stage 3 (slice S3) no test builds a SQLite stand of its own either: the tests of the SQLite
+# mechanism, `tests/scratch_db.py` and the SQLite branches of this file left with SQLite.
 _POSTGRES_HOW_TO = "docs/ru/backend/postgres-local-portable.md"
 _TIER_URL_EXAMPLE = "postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_<slug>"
 
@@ -124,19 +121,7 @@ def pytest_collection_modifyitems(session, config, items) -> None:
 # `tests/unit/test_the_tier_refuses_a_database_that_is_not_postgres.py`.
 
 
-_is_sqlite = _validated_test_database_url.get_backend_name() == "sqlite"
-if _is_sqlite:
-    sqlite_database = _validated_test_database_url.database
-    if sqlite_database and sqlite_database != ":memory:":
-        sqlite_path = Path(sqlite_database)
-        if not sqlite_path.is_absolute():
-            sqlite_path = Path(__file__).resolve().parents[1] / sqlite_path
-        sqlite_path.parent.mkdir(parents=True, exist_ok=True)
 _use_migrated_schema = os.environ.get("GEO_TEST_USE_MIGRATED_SCHEMA") == "1"
-if _use_migrated_schema and _is_sqlite:
-    raise RuntimeError(
-        "GEO_TEST_USE_MIGRATED_SCHEMA=1 is supported only for PostgreSQL tests."
-    )
 
 
 def _test_engine_isolation_kwargs(backend_name: str) -> dict[str, str]:
@@ -172,46 +157,8 @@ engine = create_async_engine(
     TEST_DATABASE_URL,
     echo=False,
     poolclass=NullPool,
-    connect_args={"timeout": 30} if _is_sqlite else {},
     **_test_engine_isolation_kwargs(_validated_test_database_url.get_backend_name()),
 )
-# FOREIGN KEYS ARE ENFORCED ON THE SQLITE TIER, as they are in the application.
-#
-# The application engine sets `PRAGMA foreign_keys=ON` (app/db/session.py:48). Until 2026-09-11
-# this test engine did not, so the whole default tier ran with every foreign key unenforced while
-# the application it tests enforces them - a stand unable to see any referential effect, CASCADE,
-# RESTRICT or a dangling reference alike. Measured when it was switched on: 20 tests in four files
-# failed with `FOREIGN KEY constraint failed`. Half built a Transaction or PrepareLock referencing a
-# Participant that did not exist; the other half wrote a PrepareLock before its Transaction in the
-# same flush, because `PrepareLock.tx_id` is a bare ForeignKey with no ORM relationship and so
-# carries no insert ordering. Both are states the application cannot produce. Fixed in the tests,
-# not by leaving the pragma off; `tests/unit/test_sqlite_test_engine_enforces_foreign_keys.py` holds
-# the switch in place.
-#
-# It matters beyond those 20: programme 015's journal, operation envelopes and the RESTRICT that
-# replaces the Debt -> Equivalent cascade are all referential, and the default tier must be able to
-# see them fail.
-#
-# THE CONNECTION PRAGMAS LIVE HERE, ON CONNECT, AND NOT IN THE PER-TEST RESET (T1525, 2026-09-12).
-# `busy_timeout` and `journal_mode = WAL` used to be executed inside `engine.begin()` in `db_session`,
-# under a `try/except: pass`. That only worked because the driver sent no `BEGIN` there. With the
-# transaction control below a `BEGIN` is sent, and SQLite refuses to change the journal mode inside a
-# transaction - the swallow would have hidden it, and a fresh database would silently stay in the
-# rollback journal. `foreign_keys` has the same property (it is a no-op inside a transaction), which
-# is why it was already here. `tests/unit/test_p015_t1525_sqlite_transaction_control_is_in_effect.py`
-# holds this in place on a fresh database file.
-if _is_sqlite:
-    # ONE definition of these pragmas, in `tests/scratch_db.py`, shared with the five integration
-    # modules that build SQLite engines of their own (T1525, 2026-09-12). Those five used to carry
-    # the transaction control WITHOUT the pragmas, so they ran in the rollback journal with foreign
-    # keys unenforced while this tier ran in WAL with them on - and a concurrency result measured
-    # under one does not transfer to the other.
-    install_test_sqlite_pragmas(engine.sync_engine, url=_validated_test_database_url)
-    # T1525: without this a savepoint opened before the first write is its own transaction on
-    # SQLite and a root rollback does not undo it - see `app/db/sqlite_transaction_control.py`. The
-    # default tier is the tier that is supposed to prove atomicity, so it runs with the same control
-    # as the application engine.
-    install_sqlite_transaction_control(engine.sync_engine)
 
 
 TestingSessionLocal = async_sessionmaker(
@@ -318,17 +265,6 @@ async def _ensure_schema_initialized() -> None:
             return
 
         async with engine.begin() as conn:
-            if _is_sqlite:
-                # STEP 5c: SQLite's `drop_all` over a file whose last test left a hold fails with
-                # `FOREIGN KEY constraint failed` - the hold's FK is RESTRICT and `use_alter` does not
-                # order SQLite's implicit DELETEs (measured 2026-09-14). Release holds first, if this
-                # file already has the column.
-                columns = await conn.exec_driver_sql("PRAGMA table_info(equivalents)")
-                if "integrity_hold_result_id" in {row[1] for row in columns.fetchall()}:
-                    await conn.exec_driver_sql(
-                        "UPDATE equivalents SET integrity_hold_result_id = NULL "
-                        "WHERE integrity_hold_result_id IS NOT NULL"
-                    )
             await conn.run_sync(Base.metadata.drop_all)
             await conn.run_sync(Base.metadata.create_all)
 
@@ -540,18 +476,15 @@ async def _dispose_engines_at_end() -> AsyncGenerator[None, None]:
 async def _session_for_one_test(*, mode_b: bool):
     """The body of `db_session`: one test's session, in mode A or mode B.
 
-    `mode_b=True` on PostgreSQL is a mode-B session on a clone dropped after the test. On SQLite the
-    flag changes nothing - the SQLite branch below is already a plain engine-bound session whose
-    commits are real, reset per test - which is why a mode-B test of the default tier still runs on
-    the SQLite tier unchanged. The tier's own schema is built either way, because a test that imports
-    `TestingSessionLocal` directly keeps reaching the tier's database.
+    `mode_b=True` is a mode-B session on a clone dropped after the test. The tier's own schema is
+    built either way, because a test that imports `TestingSessionLocal` directly keeps reaching the
+    tier's database.
     """
 
     await _ensure_schema_initialized()
 
-    # Simulator runtime can spawn background tasks (heartbeat / real-mode tick)
-    # that keep DB connections open. Under SQLite this can race with our per-test
-    # hard reset (table deletes) and produce "database is locked".
+    # Simulator runtime can spawn background tasks (heartbeat / real-mode tick) that keep DB
+    # connections open; stop any run a previous test left behind before this test starts.
     try:
         from app.core.simulator.runtime import runtime as simulator_runtime
 
@@ -568,69 +501,16 @@ async def _session_for_one_test(*, mode_b: bool):
                     await simulator_runtime.stop(run_id)
                 except Exception:
                     pass
-
-            # Release any pooled SQLite connections that could keep locks.
-            if _is_sqlite:
-                try:
-                    await app_db_session.engine.dispose()
-                except Exception:
-                    pass
         finally:
             app_db_session.AsyncSessionLocal = _orig_async_session_local
     except Exception:
         pass
 
-    if mode_b and not _is_sqlite:
+    if mode_b:
         async with _committed_database_context() as database:
             async with database.sessionmaker() as session:
                 session.info["geo_committed_database"] = database
                 yield session
-        return
-
-    if _is_sqlite:
-        # SQLite has flaky transactional isolation under rapid commit-heavy tests.
-        # For stability we hard-reset DB state per test.
-        # Truncating tables is much faster than drop/create for the whole schema.
-        try:
-            # Best-effort: ensure any other engine in the process is disposed before writes.
-            from app.db.session import engine as app_engine
-
-            await app_engine.dispose()
-        except Exception:
-            pass
-
-        # SQLite can intermittently raise "database is locked" if some background task
-        # is still releasing a connection/transaction. The busy timeout is set on connect
-        # (`_sqlite_connection_pragmas`); a small retry loop de-flakes test teardown/setup
-        # on Windows.
-        for attempt in range(6):
-            try:
-                async with engine.begin() as conn:
-                    # STEP 5c: `equivalents.integrity_hold_result_id` is RESTRICT on the result row it
-                    # names, and results are deleted before equivalents below. Release holds first.
-                    await conn.exec_driver_sql(
-                        "UPDATE equivalents SET integrity_hold_result_id = NULL "
-                        "WHERE integrity_hold_result_id IS NOT NULL"
-                    )
-                    for table in reversed(Base.metadata.sorted_tables):
-                        # `exec_driver_sql` and NOT `conn.execute(table.delete())`, since the debt
-                        # journal was armed (programme 015 step 4 slice C): a Core DELETE against
-                        # `debts` or against the three journal tables is refused by the write guard,
-                        # and rightly - it is exactly the shape of an unrecorded money write. A test
-                        # reset is not a money write, it is the disposal of a whole test database,
-                        # so it goes round the guard the way design v2 §8 R6 says it may: through
-                        # the driver, which fires no `before_execute` at all. The table names come
-                        # from `Base.metadata`, so nothing here is interpolated from data.
-                        await conn.exec_driver_sql(f'DELETE FROM "{table.name}"')
-                break
-            except OperationalError as e:
-                msg = str(e).lower()
-                if "database is locked" not in msg or attempt >= 5:
-                    raise
-                await asyncio.sleep(0.25 * (attempt + 1))
-
-        async with TestingSessionLocal() as session:
-            yield session
         return
 
     async with engine.connect() as connection:
@@ -656,10 +536,7 @@ async def _session_for_one_test(*, mode_b: bool):
 
 #: MODE B FOR ONE TEST OF THE DEFAULT TIER (017 stage 2b, T1702). Put `@MODE_B` on a test, or
 #: `pytestmark = MODE_B` on a module, and `db_session` - and with it `client`, which requests it - is a
-#: mode-B session for that test: a clone on PostgreSQL, dropped after the test. On SQLite it changes
-#: nothing, because the SQLite `db_session` is already an engine-bound session whose commits are real
-#: and which is reset per test; that is what lets the same test keep running on the SQLite tier until
-#: stage 3, which `committed_session` (it refuses SQLite) cannot.
+#: mode-B session for that test: a clone of the migrated template, dropped after the test.
 #:
 #: WHY A PARAMETRIZATION AND NOT A MARKER: markers are registered in `pytest.ini` and select or
 #: deselect tests; this must do neither. An indirect parameter is how pytest hands one fixture a

@@ -10,9 +10,14 @@ THE REFUSAL IS A REJECTION OF THAT INJECT, NOT AN ERROR OF THE RUN - the rule th
 already applies to a refused payment. The event is consumed with a visible note, writes no debt and
 no envelope, and is not retried: reactivating the equivalent later does not re-apply it.
 
-On SQLite this is the plain refusal. The race binding (`FOR SHARE` against a deactivating PATCH)
-belongs to PostgreSQL and is held in `test_p015_t1544_operator_stop_races_postgres.py`; the tick
-lifecycle is held in `test_p015_t1544_operator_stop_through_the_tick_sqlite.py`.
+This is the plain refusal, on the tier database (PostgreSQL, mode A). Its sharpest assert - no
+`INSERT INTO debt_operations` is SENT for the refused inject, read from the statements the engine
+executed rather than from the table afterwards - is the one an external review found to catch a
+misplaced guard that the table-level asserts missed (015 `spec.md:1748`); since 017 stage 2 it runs on
+PostgreSQL, the form 017 promised to keep. The race binding (`FOR SHARE` against a deactivating PATCH)
+is held in `test_p015_t1544_operator_stop_races_postgres.py`; the tick lifecycle in
+`test_p015_t1544_operator_stop_through_the_tick_sqlite.py` (a mode-B PostgreSQL clone since 017
+stage 3, whatever its file name says).
 """
 
 from __future__ import annotations

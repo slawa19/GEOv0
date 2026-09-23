@@ -48,8 +48,8 @@ raises - are now classified separately and tested separately, and an unmeasured 
 TIER. PostgreSQL since programme 017 stage 3 (2026-09-24): the stand's own engine over the tier
 database, real root commits, a world of its own purged after each test (`tests/p015_b4a_stand.py::
 new_postgres_stand`). Until then these rules were measured ONLY on SQLite, and the PostgreSQL
-modules named below covered only what SQLite could not see. The one test whose subject is the
-aiosqlite transaction probe stays on the SQLite stand. The PostgreSQL halves - UUID spelling through
+modules named below covered only what SQLite could not see. The one test whose subject was the
+aiosqlite transaction probe left with SQLite (017 stage 3, slice S3). The PostgreSQL halves - UUID spelling through
 `literal()`, asyncpg's own transaction probe, and the readback against a driver that returns
 `NUMERIC` as `Decimal` - are in
 `tests/integration/test_p015_t1528_the_statement_is_read_not_guessed_postgres.py`.
@@ -69,7 +69,7 @@ from sqlalchemy.exc import InvalidRequestError
 
 from app.core.ledger import journal
 from app.db.models.debt import Debt
-from tests.p015_b4a_stand import Stand, exact_money, identity, new_postgres_stand, new_sqlite_stand
+from tests.p015_b4a_stand import Stand, exact_money, identity, new_postgres_stand
 
 
 @pytest_asyncio.fixture
@@ -79,17 +79,6 @@ async def stand():
         yield built
     finally:
         await built.close(purge=True)
-
-
-@pytest_asyncio.fixture
-async def sqlite_stand(tmp_path):
-    """The SQLite stand, for the one test whose subject IS the SQLite driver; leaves with SQLite."""
-
-    built = await new_sqlite_stand(tmp_path, extra_participants=2)
-    try:
-        yield built
-    finally:
-        await built.close()
 
 
 # =================================================================================================
@@ -671,45 +660,6 @@ def test_t1528_the_begin_guard_classifies_each_driver_answer_separately(
     with pytest.raises(journal.DebtJournalError) as refusal:
         journal._on_begin(connection)
     assert refusal.value.reason == expected, f"{label}: {refusal.value}"
-
-
-@pytest.mark.asyncio
-async def test_t1528_the_sqlite_driver_answers_the_transaction_probe_with_a_bool(
-    sqlite_stand: Stand,
-) -> None:
-    """T1528, review item 4, THE CONTRACT STATED AS A MEASUREMENT rather than as a comment.
-
-    The refusal above is only harmless because no driver this repository runs on ever produces the
-    unmeasured answer. That is a claim about aiosqlite and asyncpg, so it is measured on each tier
-    rather than asserted in prose: here, that the probe answers a real `bool` both outside and
-    inside a transaction, and that it says True for a transaction that is open.
-
-    Without this, "refuse when the driver will not say" could be refusing every `begin` in the
-    system and the tests above would still pass.
-
-    MUTATION that must redden this: return `None` from the probe whenever the driver answers through
-    an ATTRIBUTE rather than through a method. Measured: the whole module turns red, because every
-    SQLite `begin` in the process is then refused as `unmeasured_db_transaction` - including the
-    stand's own. That is the cost this test exists to bound, and the reason the refusal is safe is
-    this measurement and not an argument.
-    """
-
-    async with sqlite_stand.engine.connect() as aconn:
-        sync_connection = aconn.sync_connection
-        idle = journal._driver_transaction_is_live(sync_connection)
-        transaction = await aconn.begin()
-        await aconn.execute(select(Debt.id).limit(1))
-        live = journal._driver_transaction_is_live(sync_connection)
-        await transaction.rollback()
-
-    assert idle is False, (
-        f"aiosqlite did not answer the transaction probe with False on an idle connection "
-        f"({idle!r}); the `begin` guard would refuse every transaction in this process"
-    )
-    assert live is True, (
-        f"aiosqlite did not report an open transaction as live ({live!r}), so the guard's only "
-        f"positive finding is unreachable on this tier"
-    )
 
 
 # =================================================================================================

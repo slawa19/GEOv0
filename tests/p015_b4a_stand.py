@@ -8,25 +8,23 @@ shared test engine would break that promise for every other module in the run, a
 `db_session` would additionally hide the commit and rollback boundaries the mechanism is about -
 that fixture wraps each test in a transaction of its own.
 
-So each stand here owns its own engine, its own `Session` subclass and its own world. There are two
-builders. `new_postgres_stand` is the one the journal's rules are measured on since programme 017
-stage 3; its docstring says how it shares the tier database safely. `new_sqlite_stand` remains for
-the few tests whose subject is SQLite itself, and leaves with SQLite. A SQLite stand owns:
+So each stand here owns its own engine, its own `Session` subclass and its own world. The builder is
+`new_postgres_stand`, over the tier's PostgreSQL database; its docstring says how it shares that
+database safely. `arm_stand` arms a stand on an engine a test built itself (a mode-B clone, say).
+Until programme 017 stage 3 there was also `new_sqlite_stand`, a SQLite file per test with the T1525
+transaction control; it left with SQLite (slice S3). Every stand owns:
 
-* its own SQLite FILE under the test's `tmp_path` (never `:memory:` with a `StaticPool`, because a
-  shared connection would let an UNCOMMITTED write be read back by a "fresh" session, and every
-  verdict in these tests is read on a fresh one),
 * its own sync `Session` SUBCLASS, so the session-level half of the journal is registered on a
   class that exists only for this test,
-* `install_sqlite_transaction_control`, because a savepoint opened before the first write is
-  otherwise its own transaction on SQLite and a root rollback does not undo it (T1525) - and
-  because the journal refuses to open an operation on a SQLite engine without it.
+* a world of its own (fresh equivalents and participants), so a test on the shared database counts
+  and purges only what it created.
 
-MONEY STAYS INSIDE `|v| < 2^26` on the SQLite tier: the domain where a scale-8 `Numeric`
-round-trips exactly through the driver's float binding (design v2 §4). `exact_money` refuses
-anything outside it, so a test cannot quietly become a measurement of SQLite's float conversion.
-The one exception is a test whose assertion IS the refusal of an unstorable value; those name the
-value themselves and never store it.
+MONEY STAYS INSIDE `|v| < 2^26`: the domain where a scale-8 `Numeric` round-tripped exactly through
+SQLite's float binding (design v2 §4). PostgreSQL holds the whole `NUMERIC(20, 8)` domain exactly, so
+the bound is no longer a precondition of correctness; `exact_money` keeps enforcing it so that the
+tests carried over from the SQLite stand keep the values they were written with. The one exception
+is a test whose assertion IS the refusal of an unacceptable value; those name the value themselves
+and never store it.
 """
 
 from __future__ import annotations
@@ -46,7 +44,6 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.orm import Session
 
 from app.core.ledger import journal
-from app.db.base import Base
 from app.db.journal_tables import (
     debt_journal_entries,
     debt_operation_equivalents,
@@ -55,7 +52,6 @@ from app.db.journal_tables import (
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
-from app.db.sqlite_transaction_control import install_sqlite_transaction_control
 
 #: Largest absolute scale-8 money value SQLite is proven to round-trip exactly (design v2 §4).
 EXACT_DOMAIN_LIMIT = Decimal(2**26)
@@ -93,10 +89,10 @@ class Stand:
     debtor_id: uuid.UUID
     creditor_id: uuid.UUID
     extra_ids: list[uuid.UUID] = field(default_factory=list)
-    #: Journal-table row counts when the stand was armed. Zero on a SQLite stand, whose database file
-    #: is its own; on the PostgreSQL stand the tier database is shared with the rest of the run, so
-    #: `counts()` answers "how many rows did THIS test add", which on a file of its own is the same
-    #: number as the absolute count. Tests run one at a time, so nothing else moves it in between.
+    #: Journal-table row counts when the stand was armed. The tier database is shared with the rest of
+    #: the run, so `counts()` answers "how many rows did THIS test add" - on a database of the test's
+    #: own (a clone, or the SQLite file stands had until 017 stage 3) the same number as the absolute
+    #: count. Tests run one at a time, so nothing else moves it in between.
     count_baseline: dict[str, int] = field(default_factory=dict)
 
     # -- building blocks -------------------------------------------------------------------
@@ -280,36 +276,6 @@ class Stand:
         await self.engine.dispose()
 
 
-async def new_sqlite_stand(
-    tmp_path: Any, *, filename: str = "journal.db", extra_participants: int = 0
-) -> Stand:
-    """A SQLite stand on its own database file under the test's `tmp_path`.
-
-    `tmp_path` and not a path this module invents: under the canonical runner that directory is
-    `.local-run/test-runs/<slug>/pytest/...`, which is the only tree a test may write a mutable
-    database into (T1406, `tests/scratch_db.py`) - and it is per test, so one test's database can
-    never be another's.
-    """
-
-    engine = create_async_engine(
-        f"sqlite+aiosqlite:///{(tmp_path / filename).as_posix()}", connect_args={"timeout": 30}
-    )
-
-    @_listens_on_connect(engine)
-    def _pragmas(dbapi_connection, _record) -> None:
-        cursor = dbapi_connection.cursor()
-        try:
-            cursor.execute("PRAGMA foreign_keys=ON")
-            cursor.execute("PRAGMA busy_timeout=30000")
-        finally:
-            cursor.close()
-
-    install_sqlite_transaction_control(engine.sync_engine)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    return await _arm(engine, extra_participants=extra_participants)
-
-
 async def new_postgres_stand(*, extra_participants: int = 0) -> Stand:
     """A stand on the tier's PostgreSQL database, with real root commits, purged by `close`.
 
@@ -350,16 +316,6 @@ async def new_postgres_stand(*, extra_participants: int = 0) -> Stand:
     built = await _arm(engine, extra_participants=extra_participants)
     built.count_baseline = await built._absolute_counts()
     return built
-
-
-def _listens_on_connect(engine: AsyncEngine):
-    from sqlalchemy import event
-
-    def decorate(fn):
-        event.listen(engine.sync_engine, "connect", fn)
-        return fn
-
-    return decorate
 
 
 async def _arm(engine: AsyncEngine, *, extra_participants: int) -> Stand:

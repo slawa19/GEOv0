@@ -18,31 +18,21 @@ need a real payment and a real clearing cycle rather than a bare session. The Po
 TWO KINDS OF RED, the same two the first slice established and they read differently:
 
 * DEFECT-SHAPED - the scenario runs today to its end and the database keeps what the journal would
-  have refused. The failure quotes real stored money. `C12` and condition 4 are the sharp ones here:
-  this tree stores `0.123456789` as `0.12345679` and `Infinity` as `Infinity`, and nothing objects.
+  have refused. The failure quotes real stored money.
 * API-SHAPED - the property has no carrier: there is no entries table to look in, no envelope to
   conflict with. These assert non-vacuity FIRST, so they cannot pass having measured nothing.
 
-TIER. SQLite, the default tier. Money stays inside `|v| < 2^26` - the domain where scale-8 values
-round-trip exactly through the driver's float binding (design v2 §4) - EXCEPT where the subject of
-the counterexample is precisely a value outside it. Those tests do not go through
-`tests.p015_b4_support.exact_money`; they measure the real round-trip against the real database
-first, and say so in the failure text, so that "the dialect changed this number" can never be
-confused with "this test used a number the tier cannot hold".
+TIER. PostgreSQL: the tier database for every test whose subject is the journal's recording rule, and
+a disposable mode-B clone for `C15`, whose writer runs in a process of its own. Money stays inside
+`|v| < 2^26` (design v2 §4).
 
-WHICH DATABASE, since programme 017 (`T1702`, 2026-09-23). The tier database for everything whose
-subject is the journal's recording rule, which holds on either backend. A disposable SQLite file of
-the test's own (`sqlite_money_stand`) for the five tests whose subject IS SQLite: `C12` and its
-control, condition 4, and both halves of `C19`. Their premises are measurements of what SQLite's
-float binding does to a value (`C12`, condition 4) or of which CHECKs SQLite's schema carries
-(`C19`), and on PostgreSQL those premises are false: it stores every one of the `C12` values
-exactly, and migration 024 made `delta = after - before` a CHECK there, so a forged `U` with equal
-endpoints is refused by the arithmetic rule rather than the shape rule and the shape-valid lie is
-refused outright. They used to depend on the tier happening to be SQLite; on a PostgreSQL tier their
-own assertions said so (`stand: this database stored 100000000000.00000001 unchanged`; `refused by
-'chk_debt_journal_entries_delta_arithmetic', not by chk_debt_journal_entries_shape`). The PostgreSQL
-copy of the same inventory, with the rule that speaks THERE, is
-`tests/integration/test_p015_b4_entries_and_money_postgres.py`. No assertion changed.
+WHAT LEFT THIS MODULE WITH SQLITE (programme 017 stage 3, slice S3). Five tests ran on a SQLite file
+of their own because their premise was a measurement of SQLite: `C12` and its control and condition
+4 (what SQLite's float binding does to a value) and both halves of `C19` (which CHECKs SQLite's
+schema carries). On PostgreSQL those premises are false - every `C12` value inside the domain is
+stored exactly, and migration 024 makes `delta = after - before` a CHECK. The PostgreSQL inventory,
+with the rule that speaks there, is `tests/integration/test_p015_b4_entries_and_money_postgres.py`
+(`test_c12_p_*`, `test_c19_p_*`).
 
 MARKER, HISTORICAL. This module carried `b4_counterexample` and was deselected from the canonical
 gate while the debt journal did not exist. Step 4 slice C built it and REMOVED THE MARKER, not the
@@ -53,7 +43,6 @@ names in its docstring the mutation that must turn it red again.
 from __future__ import annotations
 
 import os
-import re
 import subprocess
 import sys
 import textwrap
@@ -61,22 +50,16 @@ import uuid
 from decimal import Decimal
 
 import pytest
-import pytest_asyncio
-from sqlalchemy import Uuid as SaUuid, bindparam, event, select, text
-from sqlalchemy.exc import DatabaseError, StatementError
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy import Uuid as SaUuid, bindparam, select, text
+from sqlalchemy.exc import DatabaseError
 from sqlalchemy.orm.exc import StaleDataError
-from sqlalchemy.pool import NullPool
 
-from app.db.base import Base
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
-from app.db.sqlite_transaction_control import install_sqlite_transaction_control
 from tests.debt_setup import debt_fixture_setup
 from tests.p015_b4_support import (
     ENTRIES_TABLE,
-    JOURNAL_MODULE,
     OPERATIONS_TABLE,
     World,
     drop_world,
@@ -84,42 +67,11 @@ from tests.p015_b4_support import (
     journal_api,
     missing_journal_tables,
     operation,
-    refusal_of,
     seed_world,
     stored_debts,
     stored_entries,
     stored_operations,
-    stored_rows,
 )
-from tests.scratch_db import install_test_sqlite_pragmas
-
-
-@pytest_asyncio.fixture
-async def sqlite_money_stand(tmp_path):
-    """`(engine, sessionmaker)` over a fresh SQLite file, wired as the conftest wires its SQLite engine.
-
-    For the tests whose subject is SQLite itself (see the module docstring). Same connect pragmas,
-    same transaction control, the `create_all` schema the SQLite tier has, and the conftest's
-    sessionmaker options. The journal needs nothing of its own: it is armed on the `Engine` and
-    `Session` classes for the whole process.
-    """
-    url = f"sqlite+aiosqlite:///{(tmp_path / 'money.db').as_posix()}"
-    stand_engine = create_async_engine(url, poolclass=NullPool, connect_args={"timeout": 30})
-    install_test_sqlite_pragmas(stand_engine.sync_engine, url=url)
-    install_sqlite_transaction_control(stand_engine.sync_engine)
-    async with stand_engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    factory = async_sessionmaker(
-        bind=stand_engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-        autoflush=False,
-        join_transaction_mode="create_savepoint",
-    )
-    try:
-        yield stand_engine, factory
-    finally:
-        await stand_engine.dispose()
 
 
 def _identity(name: str) -> str:
@@ -148,64 +100,6 @@ def _money(rows: list[dict] | None, key: str) -> list[Decimal | None]:
     return [None if row[key] is None else Decimal(str(row[key])) for row in rows or []]
 
 
-class _DebtStatements:
-    """Records every statement that reaches the connection naming the `debts` table.
-
-    "Refused BEFORE any SQL" is a requirement about the ORDER of two things, and the only way to see
-    it is to watch the connection. Reading the table afterwards cannot: a statement that ran and was
-    rolled back leaves the same empty table as a statement that never ran, and design v2 §4's rule
-    is explicitly "refusal before SQL" - a value the dialect would change must never be sent, not
-    sent and then undone.
-    """
-
-    def __init__(self) -> None:
-        self.seen: list[str] = []
-
-    def __call__(self, _conn, clauseelement, _multiparams, _params, _options) -> None:
-        table = getattr(getattr(clauseelement, "table", None), "name", None)
-        if table == "debts":
-            self.seen.append(type(clauseelement).__name__)
-
-
-def _watch_debt_statements(engine) -> _DebtStatements:
-    recorder = _DebtStatements()
-    event.listen(engine.sync_engine, "before_execute", recorder)
-    return recorder
-
-
-def _obeys_the_money_rules(value: Decimal) -> bool:
-    """Design v2 §4 rule 3 minus its dialect clause, restated here for the ANTI-VACUUM only.
-
-    It is deliberately a restatement and not an import: the rule it describes does not exist yet,
-    and the module that will own it is what these counterexamples are written against. It is used
-    in exactly one place - to say "this value is forbidden for a reason OTHER than the round-trip" -
-    so a future step 4 that legalises one of these values makes the non-vacuity assertion speak up
-    instead of letting the test pass having measured nothing.
-    """
-    if not value.is_finite():
-        return False
-    if value != value.quantize(Decimal("1E-8")):
-        return False
-    return abs(value) < Decimal(10) ** 12
-
-
-def _debt_row(world: World, amount: Decimal) -> Debt:
-    """A `Debt` on this world's edge with an amount `exact_money()` would refuse.
-
-    `World.debt` guards the proven-exact SQLite domain, which is right for every test whose subject
-    is something other than money precision. These tests' subject IS money precision, so they build
-    the row directly and measure what the database does with it.
-    """
-    return Debt(
-        id=uuid.uuid4(),
-        debtor_id=world.debtor.id,
-        creditor_id=world.creditor.id,
-        equivalent_id=world.equivalent.id,
-        amount=amount,
-        version=0,
-    )
-
-
 async def _refusal_or_database_error(api, awaitable):
     """`refusal_of`, widened to the database's own complaint.
 
@@ -221,52 +115,6 @@ async def _refusal_or_database_error(api, awaitable):
     except DatabaseError as exc:
         return exc
     return None
-
-
-async def _round_trip_through_the_real_database(factory, world: World, value: Decimal, *, engine):
-    """Store `value` on this world's edge, read it back on a NEW session, remove it again.
-
-    Returns `(stored, error)`: exactly one is not None. This is the MEASUREMENT the money
-    counterexamples stand on - never an analytical claim about floats, always what this database on
-    this dialect actually kept (`AGENTS.md` §1, "никаких гипотез из памяти сессии").
-    """
-    from app.core.ledger import journal
-
-    row_id = uuid.uuid4()
-    # THE JOURNAL STANDS DOWN FOR THIS MEASUREMENT, and it must. What is being measured here is what
-    # THE DIALECT does with a value - the ground truth every money counterexample above stands on -
-    # and a journal that refused the write would replace that measurement with its own opinion: the
-    # non-vacuity assertion "this database really would change this number" would then be proven by
-    # the very rule it is supposed to justify. So the write guard is lifted on this engine for the
-    # round trip and re-armed immediately afterwards. Nothing else in the process is affected: the
-    # stand-down is per engine (`app/core/ledger/journal.py`, `uninstall_write_guard`).
-    journal.uninstall_write_guard(engine)
-    try:
-        try:
-            async with factory() as session:
-                session.add(
-                    Debt(
-                        id=row_id,
-                        debtor_id=world.debtor.id,
-                        creditor_id=world.creditor.id,
-                        equivalent_id=world.equivalent.id,
-                        amount=value,
-                        version=0,
-                    )
-                )
-                await session.commit()
-        except (DatabaseError, StatementError) as exc:
-            return None, exc
-        async with factory() as fresh:
-            stored = (
-                await fresh.execute(select(Debt.amount).where(Debt.id == row_id))
-            ).scalar_one_or_none()
-        async with factory() as cleanup:
-            await cleanup.execute(Debt.__table__.delete().where(Debt.id == row_id))
-            await cleanup.commit()
-    finally:
-        journal.install_write_guard(engine)
-    return (None if stored is None else Decimal(str(stored))), None
 
 
 # ==============================================================================================
@@ -531,266 +379,6 @@ async def test_c4_a_deleted_edge_that_comes_back_is_an_insert_and_not_an_update(
 
 
 # ==============================================================================================
-# C12 - money this dialect would silently change
-# ==============================================================================================
-
-
-#: `(label, value, what this tree does with it today)`. The third element is not decoration: it is
-#: the measured current behaviour, quoted in the failure so that the reader of a red run sees what
-#: is actually in the database rather than a claim about floats. Re-measured 2026-09-12 against a
-#: real aiosqlite engine with T1525 transaction control.
-_UNSTORABLE_ON_SQLITE = [
-    ("more than eight decimal places", "0.123456789", "stored as 0.12345679"),
-    ("at the magnitude ceiling", "1E12", "stored as 1000000000000.00000000"),
-    ("not a number", "NaN", "sent as SQL NULL and refused by NOT NULL, with a misleading message"),
-    ("infinite", "Infinity", "stored as Infinity - the database now holds an infinite debt"),
-    ("one atom past the exact domain", "100000000000.00000001", "stored as 100000000000.00000000"),
-]
-
-
-@pytest.mark.parametrize(
-    "label,value,today", _UNSTORABLE_ON_SQLITE, ids=[row[0] for row in _UNSTORABLE_ON_SQLITE]
-)
-@pytest.mark.asyncio
-async def test_c12_a_value_this_dialect_cannot_hold_is_refused_before_any_debt_sql(
-    sqlite_money_stand, label, value, today
-) -> None:
-    """C12, DEFECT-SHAPED. A money value the driver would change must never reach the database.
-
-    Design v2 §4 rule 3: an operation refuses a value unless
-    `result_processor(bind_processor(v)) == v` for the SESSION'S ACTUAL DIALECT, and it refuses
-    BEFORE the SQL. Both halves matter. The dialect half is why this is not a constant: PostgreSQL
-    stores every one of these exactly, and it is SQLite - the default `DATABASE_URL` of this
-    application (`app/config.py:55`) - that silently rounds.
-
-    The "before SQL" half is why this test watches the connection instead of reading the table
-    afterwards. A statement that ran and was rolled back leaves the same empty table as a statement
-    that never ran, and accepting the first would be leaning on a rollback to undo a corruption -
-    the "compensation further downstream" `AGENTS.md` §9 forbids.
-
-    RED TODAY BECAUSE: nothing checks storability, the INSERT is sent, and the database keeps a
-    DIFFERENT number than the one the caller wrote - or, for `NaN`, refuses it with a NOT NULL
-    message that names the wrong problem.
-    MUTATION once step 4 exists: check the value against `Decimal`'s own scale and range instead of
-    against the dialect's round-trip (every case here has scale <= 8 after quantisation or is
-    perfectly representable as a `Decimal`), or move the check into `after_flush`.
-    """
-    engine, factory = sqlite_money_stand
-    assert engine.dialect.name == "sqlite", engine.dialect.name
-
-    api = journal_api()
-    world = await seed_world(factory)
-    amount = Decimal(value)
-    try:
-        stored, error = await _round_trip_through_the_real_database(
-            factory, world, amount, engine=engine
-        )
-
-        # NON-VACUITY, FIRST, and measured: this value really is one this money core must not
-        # accept - either because the dialect changes it, or because the database itself objects,
-        # or because it is outside the domain design v2 §4 defines at all. Three of the five cases
-        # here are round-trip failures and two are not (`1E12` and `Infinity` are stored back
-        # BYTE-FOR-BYTE and are forbidden for other reasons), so a bare "it changed" assertion
-        # would be false for them, and a test that asserted nothing here could pass having measured
-        # a value that is perfectly legal.
-        assert stored != amount or error is not None or not _obeys_the_money_rules(amount), (
-            f"stand: this database stored {value} unchanged (read back {stored!r}) and the money "
-            f"rules of design v2 §4 permit it, so `{label}` is no longer an unacceptable value here "
-            f"and this counterexample has lost its subject"
-        )
-
-        recorder = _watch_debt_statements(engine)
-        refusal = None
-        try:
-            async with factory() as session:
-                async with await _open(api, session, world, "unstorable"):
-                    session.add(_debt_row(world, amount))
-                    refusal = await _refusal_or_database_error(api, session.flush())
-                if refusal is None:
-                    refusal = await _refusal_or_database_error(api, session.commit())
-        except (DatabaseError, StatementError, *api.refusals) as exc:
-            # The database's own complaint is not the journal's refusal, and the `sent` assertion
-            # below is what says so. Recorded here only so the scenario finishes.
-            #
-            # A journal refusal can arrive here as well, from the operation's own completion: the
-            # hook refused the flush and poisoned the root, the Debt is still pending, and closing
-            # the block flushes it again. The FIRST refusal is the one that names the money
-            # predicate, so it is the one kept.
-            refusal = refusal if refusal is not None else exc
-        finally:
-            event.remove(engine.sync_engine, "before_execute", recorder)
-
-        after = await stored_debts(factory, world)
-
-        # VERDICT.
-        assert not recorder.seen, (
-            f"a debt amount of {value} ({label}) reached the `debts` table as {recorder.seen}; this "
-            f"database {today}. A value outside the money domain of design v2 §4 - not finite, past "
-            f"the magnitude ceiling, or one this dialect would silently change - must be refused by "
-            f"{JOURNAL_MODULE} BEFORE the statement is sent, not stored and corrected afterwards. "
-            f"The table now holds {after or 'nothing, because the database itself objected'}."
-        )
-        assert isinstance(refusal, api.refusals), (
-            f"the refusal of a debt amount of {value} ({label}) was {refusal!r}, which is not one "
-            f"of {JOURNAL_MODULE}'s refusal types. This database {today}: the database's own "
-            f"complaint arrives after the statement, names the wrong problem, and does not exist "
-            f"for the cases this backend stores happily."
-        )
-        assert after == {}, f"the unstorable amount is durable: {after}"
-    finally:
-        await drop_world(factory, world)
-
-
-@pytest.mark.parametrize("value", ["1.000000000", "67108863.99999999"])
-@pytest.mark.asyncio
-async def test_c12_control_a_value_this_dialect_holds_exactly_is_accepted(
-    sqlite_money_stand, value
-) -> None:
-    """C12, anti-vacuum control. GREEN today and after step 4.
-
-    The refusals above are only meaningful if the rule they encode has a passing side. `1.000000000`
-    is written with nine decimal places and is accepted, because quantisation to scale 8 does not
-    change its VALUE; `67108863.99999999` is the last atom below 2^26 and round-trips exactly. A
-    storability rule that refused either would stop payments from happening at all.
-    """
-    engine, factory = sqlite_money_stand
-    assert engine.dialect.name == "sqlite", engine.dialect.name
-
-    world = await seed_world(factory)
-    try:
-        stored, error = await _round_trip_through_the_real_database(
-            factory, world, Decimal(value), engine=engine
-        )
-        assert error is None, f"the database refused a legitimate amount {value}: {error!r}"
-        assert stored == Decimal(value), (
-            f"{value} is supposed to round-trip exactly on this dialect and came back as {stored!r}"
-        )
-    finally:
-        await drop_world(factory, world)
-
-
-# ==============================================================================================
-# Binding condition 4 - the DELTA must be storable, not only the endpoints
-# ==============================================================================================
-
-
-@pytest.mark.asyncio
-async def test_condition4_a_delta_this_dialect_cannot_hold_is_refused_though_both_ends_fit(
-    sqlite_money_stand,
-) -> None:
-    """Binding condition 4, DEFECT-SHAPED. The reviewer's counterexample, verbatim.
-
-    "Точная сохраняемость проверяется у дельты, а не только у `before`/`after`:
-    `100000000000 -> 0.00000001` - оба значения точны, дельта `-99999999999.99999999` читается как
-    `-100000000000.00000000`. Отказ - до SQL долга." (spec, `B4` acceptance condition 4.)
-
-    WHY A PER-VALUE CHECK IS NOT ENOUGH, which is the whole point. `100000000000` and `0.00000001`
-    each round-trip through this dialect unchanged - the test measures both against the real
-    database below, so the premise is not taken on faith. Their difference does not. A journal that
-    validated `amount_before` and `amount_after` and then computed `delta` from them would store a
-    delta that is wrong by a whole atom, and every downstream sum - step 5's chain, step 6's
-    reconstruction - would be wrong by that atom with nothing to reveal it, because each of the
-    three columns is individually storable and the CHECK constraints of design v2 §5 are all
-    satisfied.
-
-    RED TODAY BECAUSE: nothing checks anything, and the UPDATE goes through. The `debts` row is left
-    holding `0.00000001` with the journal that should have refused it absent entirely.
-    MUTATION once step 4 exists: validate `amount_before` and `amount_after` and derive `delta`
-    without validating it; this test must go red again and the `C12` cases above must stay green.
-    """
-    engine, factory = sqlite_money_stand
-    assert engine.dialect.name == "sqlite", engine.dialect.name
-
-    api = journal_api()
-    world = await seed_world(factory)
-    start = Decimal("100000000000")
-    finish = Decimal("0.00000001")
-    delta = finish - start
-    try:
-        # NON-VACUITY, FIRST, and measured rather than reasoned: both ENDPOINTS survive this
-        # dialect unchanged and the DELTA does not. If any of the three were to change, the
-        # counterexample would be about the endpoints again and would prove nothing new.
-        stored_start, start_error = await _round_trip_through_the_real_database(
-            factory, world, start, engine=engine
-        )
-        stored_finish, finish_error = await _round_trip_through_the_real_database(
-            factory, world, finish, engine=engine
-        )
-        stored_delta, _ = await _round_trip_through_the_real_database(
-            factory, world, -delta, engine=engine
-        )
-        assert (start_error, finish_error) == (None, None), (start_error, finish_error)
-        assert stored_start == start and stored_finish == finish, (
-            f"stand: an endpoint no longer round-trips exactly here ({stored_start!r}, "
-            f"{stored_finish!r}); this counterexample needs both endpoints to be storable"
-        )
-        assert stored_delta != -delta, (
-            f"stand: this database now stores {-delta} exactly (read back {stored_delta!r}), so the "
-            f"delta is no longer the unstorable part and condition 4 has lost its counterexample"
-        )
-
-        async with factory() as setup:
-            async with debt_fixture_setup(setup, label="delta-start"):
-                setup.add(
-                    Debt(
-                        id=uuid.uuid4(),
-                        debtor_id=world.debtor.id,
-                        creditor_id=world.creditor.id,
-                        equivalent_id=world.equivalent.id,
-                        amount=start,
-                        version=0,
-                    )
-                )
-            await setup.commit()
-
-        recorder = _watch_debt_statements(engine)
-        refusal = None
-        # THE BLOCK EXIT REFUSES TOO, and that is the journal working. The hook refused this
-        # flush and poisoned the root; the operation context then tries to complete, flushes the
-        # Debt that is still pending, and is refused again for the poison. The FIRST refusal - the
-        # one that names the money predicate - is the one this test is about, so it is kept and the
-        # second is only allowed to end the scenario.
-        try:
-            async with factory() as session:
-                async with await _open(api, session, world, "delta-storability"):
-                    debt = (
-                        await session.execute(
-                            select(Debt).where(Debt.equivalent_id == world.equivalent.id)
-                        )
-                    ).scalar_one()
-                    debt.amount = finish
-                    refusal = await refusal_of(api, session.flush())
-                if refusal is None:
-                    await refusal_of(api, session.commit())
-        except api.refusals as exc:  # noqa: B902 - the refusal contract is the subject under test
-            refusal = refusal if refusal is not None else exc
-        finally:
-            event.remove(engine.sync_engine, "before_execute", recorder)
-
-        after = await stored_debts(factory, world)
-
-        # VERDICT.
-        assert not recorder.seen, (
-            f"the UPDATE moving a debt from {start:f} to {finish:f} reached `debts` as "
-            f"{recorder.seen}. Both endpoints are storable on this dialect - they were measured "
-            f"above and came back as {stored_start:f} and {stored_finish:f} - and the delta "
-            f"{delta:f} is not: its magnitude {-delta:f} reads back as {stored_delta:f}, wrong by "
-            f"one whole atom. {JOURNAL_MODULE} must refuse this operation BEFORE the debt SQL, "
-            f"because once the row is written the journal has no way to record the movement "
-            f"truthfully: `amount_before`, `amount_after` and `delta` would each satisfy every "
-            f"CHECK of design v2 §5 while their arithmetic is false. `debts` now holds {after}."
-        )
-        assert refusal is not None, (
-            f"nothing refused a movement whose delta this dialect cannot hold; `debts` holds {after}"
-        )
-        assert after == {("debtor", "creditor", "eq"): start}, (
-            f"the refused movement was applied anyway: {after}"
-        )
-    finally:
-        await drop_world(factory, world)
-
-
-# ==============================================================================================
 # C13 - an identity is spent once
 # ==============================================================================================
 
@@ -876,20 +464,16 @@ import asyncio, sys, uuid
 from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.db.base import Base
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
-from app.db.sqlite_transaction_control import install_sqlite_transaction_control
 
 URL = sys.argv[1]
 
 
 async def main() -> str:
+    # The database is a clone of the migrated template: the schema is already there.
     engine = create_async_engine(URL)
-    install_sqlite_transaction_control(engine.sync_engine)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
     tag = uuid.uuid4().hex[:8].upper()
     async with factory() as session:
@@ -907,6 +491,7 @@ async def main() -> str:
                              equivalent_id=ids[0], amount=Decimal("21.00000000"), version=0))
             await session.commit()
     except BaseException as exc:
+        await engine.dispose()
         return "REFUSED:" + type(exc).__name__
     async with factory() as fresh:
         from sqlalchemy import select
@@ -921,7 +506,7 @@ print(asyncio.run(main()))
 
 @pytest.mark.asyncio
 async def test_c15_a_process_that_imports_only_the_models_still_cannot_write_a_debt(
-    tmp_path,
+    tmp_path, committed_database
 ) -> None:
     """C15, DEFECT-SHAPED. The protection must live with the models, not with the application.
 
@@ -940,7 +525,10 @@ async def test_c15_a_process_that_imports_only_the_models_still_cannot_write_a_d
     """
     script = tmp_path / "uninstrumented_writer.py"
     script.write_text(textwrap.dedent(_UNINSTRUMENTED_WRITER), encoding="utf-8")
-    url = f"sqlite+aiosqlite:///{(tmp_path / 'c15.db').as_posix()}"
+    # A disposable mode-B clone of the migrated template (017 stage 3, slice S3; a SQLite file in
+    # `tmp_path` before). The subprocess commits for real, so it must not write into the tier's
+    # database; the clone is dropped when the test ends.
+    url = committed_database.url
 
     # `app` is not installed into the virtualenv, and `python script.py` puts the SCRIPT's
     # directory on `sys.path`, not the working directory - so the repository root is passed
@@ -1198,322 +786,3 @@ async def test_c18_entries_come_from_the_attempt_that_succeeded_and_not_the_stal
         )
     finally:
         await drop_world(factory, world)
-
-
-# ==============================================================================================
-# C19 - forged journal rows
-# ==============================================================================================
-
-
-#: Each row: `(label, table, column overrides, the CHECK that must refuse it, why)`. The overrides
-#: are applied on top of a well-formed row, and EVERY CASE VIOLATES EXACTLY ONE NAMED CONSTRAINT -
-#: which is the whole reason the constraint name is in the table and is asserted below.
-#:
-#: CORRECTED 2026-09-13, external review. The case "an update that changes nothing" set
-#: `amount_before == amount_after` AND `delta = 0`, so it violated
-#: `chk_debt_journal_entries_shape` and `chk_debt_journal_entries_delta` at once while the test
-#: asserted only `error is not None`. Dropping either constraint from migration 021 left it green,
-#: and the mutation its own docstring names - "drop the named CHECK; this case must go red" - could
-#: not be run at all. It is split into the two cases below, each differing from a legal row in one
-#: way, and the refusal is now matched BY NAME.
-_SHAPE_INVALID_FORGERIES = [
-    (
-        "an insert that claims a previous amount",
-        "entry",
-        {"effect": "I", "amount_before": "5.00000000"},
-        "chk_debt_journal_entries_shape",
-        "an I has no before; a forged one would let a reconstruction start from an invented state",
-    ),
-    (
-        "an update whose endpoints are equal",
-        "entry",
-        # `delta` stays legal (non-zero), so `chk_debt_journal_entries_delta` is satisfied and the
-        # only thing wrong with this row is its shape.
-        {"effect": "U", "amount_before": "5.00000000", "amount_after": "5.00000000",
-         "delta": "1.00000000"},
-        "chk_debt_journal_entries_shape",
-        "a U whose endpoints are equal recorded a movement that did not happen",
-    ),
-    (
-        "an entry whose delta is zero",
-        "entry",
-        # The shape stays legal - a U with two different endpoints - so the zero delta is the only
-        # lie in the row, and `chk_debt_journal_entries_delta` is the only rule that can catch it.
-        {"effect": "U", "amount_before": "5.00000000", "amount_after": "6.00000000",
-         "delta": "0.00000000"},
-        "chk_debt_journal_entries_delta",
-        "`delta <> 0`: an entry that moved nothing is not an effect and must not be counted as one",
-    ),
-    (
-        "a completed envelope with no digest",
-        "operation",
-        {"state": "COMPLETED", "effect_digest": None},
-        "chk_debt_operations_completion",
-        "COMPLETED implies every completion column is present (design v2 §5)",
-    ),
-    (
-        "a completed envelope with a negative effect count",
-        "operation",
-        {"state": "COMPLETED", "effect_count": -1},
-        "chk_debt_operations_completion",
-        "`effect_count >= 0`, which design v2 §5 puts inside the completion CHECK rather than in "
-        "a clause of its own",
-    ),
-    (
-        "an envelope written by a schema this build does not know",
-        "operation",
-        {"schema_version": 2},
-        "chk_debt_operations_schema_version",
-        "`schema_version IN (1)` - a row from a future encoding must not be read as if it were this one",
-    ),
-]
-
-
-#: SQLite says `CHECK constraint failed: <name>`; PostgreSQL says
-#: `violates check constraint "<name>"`. Both name the constraint, and the name is the only thing
-#: that distinguishes a refusal by the rule under test from a refusal by a neighbouring one - the
-#: other CHECK on the same table, a NOT NULL, or the foreign key the UUID-binding trap recorded on
-#: `_insert` used to hit.
-_CONSTRAINT_IN_ERROR = re.compile(
-    r'(?:CHECK constraint failed:\s*|violates check constraint\s*")([A-Za-z0-9_]+)'
-)
-
-
-def _refusing_constraint(error: BaseException | None) -> str | None:
-    """The name of the CHECK constraint that refused, or None when the error names none.
-
-    None is a different answer from "a different constraint": an error that names no constraint at
-    all is not a CHECK refusal, and the assertion that reads this quotes the whole error so a red
-    run shows which rule really spoke.
-    """
-
-    if error is None:
-        return None
-    found = _CONSTRAINT_IN_ERROR.search(str(error))
-    return found.group(1) if found else None
-
-
-@pytest.mark.parametrize(
-    "label,table,overrides,constraint,why",
-    _SHAPE_INVALID_FORGERIES,
-    ids=[row[0] for row in _SHAPE_INVALID_FORGERIES],
-)
-@pytest.mark.asyncio
-async def test_c19_a_shape_invalid_forged_row_is_refused_by_the_named_check(
-    sqlite_money_stand, label, table, overrides, constraint, why
-) -> None:
-    """C19, API-SHAPED. The write guard is not the last line; the CHECK constraints are.
-
-    Design v2 §6's `before_execute` guard does not see `text()` or `exec_driver_sql`, and says so.
-    That documented hole is only acceptable because the SHAPE of a journal row is enforced by the
-    database itself: a forgery that gets past the guard still has to satisfy every CHECK in design
-    v2 §5. This counterexample is the inventory of what those CHECKs must actually reject.
-
-    RED TODAY BECAUSE: the journal tables do not exist, so the forged INSERT fails with "no such
-    table" - which is NOT a CHECK refusal and must not be allowed to read as one. The non-vacuity
-    assertion is therefore placed first and demands the table.
-    AND THE REFUSAL IS MATCHED BY NAME, which is what makes that mutation runnable. `error is not
-    None` is satisfied by any error at all: a foreign key, a NOT NULL, or the OTHER CHECK on the same
-    table. Each case above therefore differs from a legal row in exactly one way and names the one
-    constraint that may speak.
-
-    MUTATION: drop `constraint` from migration 021 and from `app/db/journal_tables.py`. Only the
-    cases naming it go red; every other case stays green, and a case that was previously being caught
-    by a neighbouring rule would now fail on the NAME rather than pass on the error.
-
-    THIS IS THE SQLITE COPY OF THE INVENTORY, and it runs on the module's SQLite stand whatever the
-    tier is. On PostgreSQL `chk_debt_journal_entries_delta_arithmetic` (migration 024) together with
-    `delta <> 0` implies `before <> after`, so "an update whose endpoints are equal" cannot be posed
-    there as a shape-only forgery at all; the PostgreSQL copy names the rule that refuses it there.
-    """
-    engine, factory = sqlite_money_stand
-    assert engine.dialect.name == "sqlite", engine.dialect.name
-
-    target = OPERATIONS_TABLE if table == "operation" else ENTRIES_TABLE
-    probe = await stored_rows(factory, f"SELECT 1 FROM {target} LIMIT 1")  # noqa: S608
-
-    # NON-VACUITY, FIRST.
-    assert probe is not None, missing_journal_tables(probe, target)
-
-    world = await seed_world(factory)
-    try:
-        error = await _forge(factory, world, table, overrides)
-
-        # VERDICT.
-        assert error is not None, (
-            f"the database accepted a forged journal row - {label}. {why}. A raw writer that gets "
-            f"past the `before_execute` guard (design v2 §6 does not intercept `text()` or "
-            f"`exec_driver_sql`, and says so) must still be stopped by the CHECK constraints of "
-            f"migration 021; otherwise the guard's documented hole is a hole in the money history."
-        )
-        assert _refusing_constraint(error) == constraint, (
-            f"the forgery `{label}` was refused by {_refusing_constraint(error)!r}, not by "
-            f"`{constraint}`: {error}. {why}. A case caught by a neighbouring rule says nothing "
-            f"about the rule it is named after, and the mutation `drop {constraint}` would leave it "
-            f"green."
-        )
-    finally:
-        await drop_world(factory, world)
-
-
-@pytest.mark.asyncio
-async def test_c19_a_shape_valid_lie_is_accepted_and_is_therefore_step_6_s_job(
-    sqlite_money_stand,
-) -> None:
-    """C19, API-SHAPED. A recorded LIMIT, not a requirement - and it is red for the same reason.
-
-    `after - before = delta` cannot be a CHECK: on SQLite the columns are REAL, and a cross-row
-    constraint is not portable at all (design v2 §5). So a forged entry whose three money columns
-    are individually legal but do not agree with each other WILL be accepted by the database. That
-    is not a defect to fix in step 4; it is the precise boundary between what the schema can promise
-    and what step 6's verifier has to check, and writing it down as an executable expectation is how
-    the boundary stops being folklore.
-
-    This test therefore asserts that the forgery IS accepted. It is red today because the table does
-    not exist - the non-vacuity assertion below says so - and once step 4 lands it becomes a green
-    guard whose failure would mean the boundary moved and step 6's acceptance list is out of date.
-
-    THE BOUNDARY DID MOVE, ON POSTGRESQL ONLY: migration 024 made the arithmetic a CHECK there
-    (`chk_debt_journal_entries_delta_arithmetic`, asserted by name in
-    `tests/integration/test_p015_b4_entries_and_money_postgres.py`), and it is deliberately not
-    installed on SQLite (`app/db/journal_tables.py`). So this statement is about SQLite, and it runs
-    on the module's SQLite stand whatever the tier is.
-    """
-    engine, factory = sqlite_money_stand
-    assert engine.dialect.name == "sqlite", engine.dialect.name
-
-    probe = await stored_rows(factory, f"SELECT 1 FROM {ENTRIES_TABLE} LIMIT 1")  # noqa: S608
-    assert probe is not None, missing_journal_tables(probe, ENTRIES_TABLE)
-
-    world = await seed_world(factory)
-    try:
-        error = await _forge(
-            factory,
-            world,
-            "entry",
-            {
-                "effect": "U",
-                "amount_before": "5.00000000",
-                "amount_after": "6.00000000",
-                # Every column is legal on its own; together they are a lie.
-                "delta": "99.00000000",
-            },
-        )
-        assert error is None, (
-            f"the database refused a SHAPE-VALID forged entry: {error!r}. If migration 021 really "
-            f"can reject this, design v2 §5's decision to leave `after - before = delta` to the "
-            f"step-6 verifier is out of date and the step-6 acceptance list must be revised - this "
-            f"is a specification change, not a passing test."
-        )
-    finally:
-        await drop_world(factory, world)
-
-
-def _envelope_row(operation_id: uuid.UUID, overrides: dict) -> dict:
-    """A well-formed OPEN envelope, then `overrides` on top. Completion columns are NULL."""
-    row = {
-        "id": operation_id,
-        "kind": "TEST_FIXTURE",
-        "identity": _identity("forgery"),
-        "tx_id": None,
-        "intent": "{}",
-        "intent_digest": "0" * 64,
-        "schema_version": 1,
-        "money_encoding_version": 1,
-        "intent_encoding_version": 1,
-        # Written explicitly rather than left to a server default. If step 4 makes `opened_at` NOT
-        # NULL without one, every forgery below would fail on THAT and the test would pass without
-        # the CHECK it names ever being exercised - a green for the wrong reason, which is what
-        # these counterexamples exist to prevent.
-        "opened_at": "2026-09-12T00:00:00+00:00",
-        "state": "OPEN",
-        "completed_at": None,
-        "flush_count": None,
-        "effect_count": None,
-        "effect_digest": None,
-    }
-    row.update(overrides)
-    # A COMPLETED envelope needs every completion column, so the cases that forge one supply only
-    # the column they are lying about and this fills in legal values for the rest. Without it a
-    # "COMPLETED with no digest" forgery would also be missing three other NOT-NULL-when-COMPLETED
-    # columns, and a refusal would not say which CHECK caught it.
-    if row["state"] == "COMPLETED":
-        defaults = {
-            "completed_at": "2026-09-12T00:00:00+00:00",
-            "flush_count": 1,
-            "effect_count": 1,
-            "effect_digest": "1" * 64,
-        }
-        for column, value in defaults.items():
-            if column not in overrides:
-                row[column] = value
-    return row
-
-
-def _entry_row(operation_id: uuid.UUID, world: World, overrides: dict) -> dict:
-    row = {
-        "id": uuid.uuid4(),
-        "operation_id": operation_id,
-        "flush_ordinal": 1,
-        "equivalent_id": world.equivalent.id,
-        "debtor_id": world.debtor.id,
-        "creditor_id": world.creditor.id,
-        "effect": "U",
-        "amount_before": "5.00000000",
-        "amount_after": "6.00000000",
-        "delta": "1.00000000",
-    }
-    row.update(overrides)
-    return row
-
-
-#: Columns of the journal tables whose values are UUIDs.
-_UUID_COLUMNS = frozenset({"id", "operation_id", "equivalent_id", "debtor_id", "creditor_id"})
-
-
-def _insert(table: str, row: dict):
-    """The forged INSERT, with every UUID bound as a UUID and not as a string.
-
-    THE TYPE ON THE BIND IS LOAD-BEARING, measured 2026-09-12 when the journal was armed.
-    `sqlalchemy.Uuid(as_uuid=True)` stores the 32-character hex WITHOUT dashes on SQLite and a
-    native `uuid` on PostgreSQL. A forgery that bound `str(world.debtor.id)` therefore referenced a
-    participant that does not exist on the default tier, and the database refused it with
-    `FOREIGN KEY constraint failed` - an error, so `assert error is not None` passed, and the CHECK
-    constraint the case is named after was never reached. Every entry forgery was a false green.
-    """
-
-    columns = list(row)
-    statement = text(
-        f"INSERT INTO {table} "  # noqa: S608
-        f"({', '.join(columns)}) VALUES ({', '.join(':' + name for name in columns)})"
-    )
-    binds = [
-        bindparam(name, type_=SaUuid(as_uuid=True))
-        for name in columns
-        if name in _UUID_COLUMNS
-    ]
-    return statement.bindparams(*binds) if binds else statement
-
-
-async def _forge(factory, world: World, table: str, overrides: dict):
-    """INSERT a raw journal row, well-formed except for `overrides`. Returns the error, or None.
-
-    An entry needs an envelope to point at (`operation_id` is a RESTRICT foreign key), so the entry
-    cases insert BOTH in one transaction under the same `operation_id`. If the envelope were the
-    thing that failed, the returned error would be about the envelope and the entry's CHECK would
-    never be exercised - so the envelope is inserted unmodified and its failure is reported
-    separately by the assertion in the caller, which names the table it expected to hear from.
-    """
-    operation_id = uuid.uuid4()
-    async with factory() as session:
-        try:
-            envelope = _envelope_row(operation_id, overrides if table == "operation" else {})
-            await session.execute(_insert(OPERATIONS_TABLE, envelope), envelope)
-            if table == "entry":
-                entry = _entry_row(operation_id, world, overrides)
-                await session.execute(_insert(ENTRIES_TABLE, entry), entry)
-            await session.commit()
-        except DatabaseError as exc:
-            await session.rollback()
-            return exc
-    return None
