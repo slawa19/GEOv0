@@ -46,6 +46,10 @@ def _is_live_trustline_uniqueness_violation(exc: IntegrityError) -> bool:
     A second review then showed the text fallback was still too loose.  It now requires the
     full triple, an explicit uniqueness signal AND the table name, and it walks the whole
     `__cause__` chain rather than one level.
+
+    That text fallback read SQLite's driver message, which carries neither a constraint name
+    nor a sqlstate; it left with SQLite (programme 017, stage 3).  A PostgreSQL driver error
+    always carries a sqlstate, so one that names no constraint and is not 23505 is not ours.
     """
     orig = getattr(exc, "orig", None)
     if orig is None:
@@ -89,16 +93,7 @@ def _is_live_trustline_uniqueness_violation(exc: IntegrityError) -> bool:
         )
         return _matches_live_triple(detail)
 
-    text = str(orig)
-    lowered = text.lower()
-    if "unique" not in lowered:
-        # CHECK, NOT NULL and foreign-key violations keep their own meaning.
-        return False
-    if _LIVE_TRUSTLINE_INDEX in text:
-        return True
-    if "trust_lines" not in lowered:
-        return False
-    return _matches_live_triple(text)
+    return False
 
 
 def _matches_live_triple(text: str) -> bool:

@@ -74,10 +74,7 @@ class AlembicVersionBootstrapError(RuntimeError):
 def _require_postgresql_migration_url(database_url: str) -> None:
     backend = make_url(database_url).get_backend_name()
     if backend != "postgresql":
-        raise RuntimeError(
-            "Alembic migrations support PostgreSQL only. "
-            "For a local SQLite database, run: python scripts/init_sqlite_db.py"
-        )
+        raise RuntimeError("Alembic migrations support PostgreSQL only.")
 
 
 async def _bootstrap_alembic_version(connection) -> None:

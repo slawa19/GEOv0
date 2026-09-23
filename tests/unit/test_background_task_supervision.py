@@ -175,9 +175,6 @@ async def test_lifespan_stops_supervised_tasks_before_closing_resources(
         events.append("security_set" if client is not None else "security_clear")
 
     monkeypatch.setattr(main_module.settings, "REDIS_ENABLED", True)
-    monkeypatch.setattr(main_module, "_sqlite_ensure_debts_version_column", AsyncMock())
-    monkeypatch.setattr(main_module, "_sqlite_refuse_pre_027_debt_operations", AsyncMock())
-    monkeypatch.setattr(main_module, "_sqlite_ensure_equivalents_integrity_hold_column", AsyncMock())
     monkeypatch.setattr(main_module, "_start_configured_background_tasks", start_background_tasks)
     monkeypatch.setattr(main_module, "engine", engine_sentinel)
     monkeypatch.setattr(redis_asyncio, "from_url", lambda *args, **kwargs: redis_sentinel)

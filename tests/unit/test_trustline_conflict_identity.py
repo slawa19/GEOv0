@@ -44,25 +44,26 @@ def _integrity(orig: Exception) -> IntegrityError:
 
 
 @pytest.mark.parametrize(
-    ("driver_message", "expected"),
+    "driver_message",
     [
-        # SQLite spells the columns out; this is the real clash.
-        (
-            "UNIQUE constraint failed: trust_lines.from_participant_id, "
-            "trust_lines.to_participant_id, trust_lines.equivalent_id",
-            True,
-        ),
         # Unrelated failures must keep their own meaning.
-        ("CHECK constraint failed: chk_trust_line_status", False),
-        ("CHECK constraint failed: chk_trust_line_limit_positive", False),
-        ("FOREIGN KEY constraint failed", False),
-        ("NOT NULL constraint failed: trust_lines.equivalent_id", False),
+        "CHECK constraint failed: chk_trust_line_status",
+        "CHECK constraint failed: chk_trust_line_limit_positive",
+        "FOREIGN KEY constraint failed",
+        "NOT NULL constraint failed: trust_lines.equivalent_id",
         # A uniqueness clash on a DIFFERENT table is not ours either.
-        ("UNIQUE constraint failed: participants.pid", False),
+        "UNIQUE constraint failed: participants.pid",
+        # Programme 017 stage 3: the message-only (SQLite) text fallback is gone. A driver error
+        # with neither a constraint name nor a sqlstate is not classified from its prose, even
+        # when that prose names the full triple; the declared clash is recognised from the
+        # PostgreSQL facts instead (the 23505 tests below are the positive counter-check).
+        "UNIQUE constraint failed: trust_lines.from_participant_id, "
+        "trust_lines.to_participant_id, trust_lines.equivalent_id",
+        f"UNIQUE constraint failed: {_LIVE_TRUSTLINE_INDEX}",
     ],
 )
-def test_classifier_reads_the_driver_error_and_not_the_statement(driver_message, expected):
-    assert _is_live_trustline_uniqueness_violation(_integrity(_DriverError(driver_message))) is expected
+def test_classifier_reads_the_driver_error_and_not_the_statement(driver_message):
+    assert _is_live_trustline_uniqueness_violation(_integrity(_DriverError(driver_message))) is False
 
 
 def test_classifier_prefers_the_constraint_name_when_the_driver_provides_it():
@@ -86,28 +87,6 @@ class _Asyncpg23505(Exception):
         self.detail = detail
 
 
-@pytest.mark.parametrize(
-    ("driver_message", "expected"),
-    [
-        # Two of the three columns is NOT our index -- some other pair uniqueness.
-        (
-            "UNIQUE constraint failed: trust_lines.from_participant_id, "
-            "trust_lines.to_participant_id",
-            False,
-        ),
-        # The word "unique" in an unrelated sentence must not be enough.
-        (
-            "value is not unique enough for trust_lines.from_participant_id and "
-            "to_participant_id and equivalent_id",
-            True,  # documented limitation: a text fallback cannot parse prose
-        ),
-    ],
-)
-def test_text_fallback_requires_the_full_triple(driver_message, expected):
-    """The SQLite fallback needs all three columns; two of them belong to someone else."""
-    assert _is_live_trustline_uniqueness_violation(_integrity(_DriverError(driver_message))) is expected
-
-
 def test_constraint_name_is_found_through_a_nested_cause_chain():
     """Drivers wrap differently; nesting depth is not fixed at one level."""
     inner = _AsyncpgLike(_LIVE_TRUSTLINE_INDEX)
@@ -128,6 +107,20 @@ def test_postgres_unique_violation_without_a_constraint_name_uses_sqlstate_and_t
 
     assert _is_live_trustline_uniqueness_violation(_integrity(ours)) is True
     assert _is_live_trustline_uniqueness_violation(_integrity(other_table)) is False
+
+
+def test_postgres_unique_violation_on_two_of_the_three_columns_is_not_ours():
+    """All three columns of the live index must be named; two of them belong to someone else.
+
+    Carried over (programme 017 stage 3) from the removed SQLite text-fallback case, in the
+    form PostgreSQL reports it: 23505 on `trust_lines` whose DETAIL names only a pair.
+    """
+    pair = _Asyncpg23505(
+        "trust_lines",
+        "Key (from_participant_id, to_participant_id)=(1, 2) already exists.",
+    )
+
+    assert _is_live_trustline_uniqueness_violation(_integrity(pair)) is False
 
 
 class _SqlAlchemyAsyncpgWrapper(Exception):

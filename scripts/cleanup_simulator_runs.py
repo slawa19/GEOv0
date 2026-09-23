@@ -212,11 +212,7 @@ async def main() -> int:
                 planned_run_ids = await _plan_db_deletions(cutoff=cutoff)
                 db_usable = True
             except Exception as e:
-                msg = str(e)
-                if "no such table" in msg and "simulator_runs" in msg:
-                    print("DB: skipped (simulator_runs table not found)")
-                else:
-                    print(f"[WARN] DB cleanup skipped (DB unavailable): {e}")
+                print(f"[WARN] DB cleanup skipped (DB unavailable): {e}")
                 planned_run_ids = []
 
     planned_artifacts_dirs: list[Path] = []
