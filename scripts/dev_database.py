@@ -14,7 +14,8 @@ listing or a launcher log (`AGENTS.md` section 12) - the same reason
 Exit codes, because PowerShell drives on them:
 
     0  the command succeeded (for `ready`: the database is seeded and reconciles)
-    1  a logical refusal - the state is wrong and retrying will not change it
+    1  a logical refusal - the state is wrong and retrying will not change it (for `create`: the
+       database already existed, so this caller did not create it)
     2  the URL is not a database this module is allowed to touch, or the arguments are wrong
     3  `ready` only: the database is migrated and EMPTY, so the caller should seed it
     4  PostgreSQL could not be reached - transient, and the caller is told how to start it
@@ -295,6 +296,34 @@ async def cmd_ensure(url: URL) -> int:
         await connection.close()
 
 
+async def cmd_create(url: URL) -> int:
+    """Create the database, and succeed ONLY if this call is the one that created it.
+
+    For a caller that will drop what it created - the Admin e2e's disposable database. `ensure`
+    cannot tell that caller whether the database was its own: it answers 0 for a database it found
+    (Codex external review of `37fec08..5e687dd`, F4, 2026-09-23). No existence check first: a plain
+    `CREATE DATABASE` fails on a taken name, so there is no window between asking and creating.
+    """
+
+    import asyncpg
+
+    connection = await _connect(url, "postgres")
+    try:
+        try:
+            await connection.execute(
+                f'CREATE DATABASE "{url.database}"', timeout=_STATEMENT_TIMEOUT_SECONDS
+            )
+        except asyncpg.DuplicateDatabaseError as exc:
+            raise DevDatabaseRefusal(
+                f"Database {url.database!r} already exists, so this caller did not create it and "
+                f"must not drop it. A disposable name that is already taken is somebody else's."
+            ) from exc
+        print(f"Database {url.database!r} created.")
+        return 0
+    finally:
+        await connection.close()
+
+
 async def cmd_reset(url: URL) -> int:
     """Drop and recreate the launcher's database - refusing while anything is connected to it.
 
@@ -534,6 +563,8 @@ async def _run(args: argparse.Namespace) -> int:
         return await cmd_validate(url)
     if args.command == "ensure":
         return await cmd_ensure(url)
+    if args.command == "create":
+        return await cmd_create(url)
     if args.command == "reset":
         return await cmd_reset(url)
     if args.command == "drop":
@@ -550,7 +581,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         description="Lifecycle and readiness of the launcher's PostgreSQL database."
     )
     parser.add_argument(
-        "command", choices=("validate", "ensure", "reset", "drop", "adopt", "ready")
+        "command", choices=("validate", "ensure", "create", "reset", "drop", "adopt", "ready")
     )
     parser.add_argument(
         "--community",
