@@ -1,13 +1,21 @@
 """System-level A/B benchmark: static vs adaptive clearing policy (§7.5.4.2).
 
-Runs RealRunner on an isolated SQLite DB with a fixed seed and compares
-static vs adaptive across non-flaky invariants:
+Runs RealRunner on a disposable PostgreSQL clone of the migrated template (mode B) with a fixed
+seed and compares static vs adaptive across non-flaky invariants:
   - budgets respected
   - errors_total == 0
   - adaptive does not degrade committed_rate beyond EPS
   - adaptive does not increase no_capacity_rate beyond EPS
 
 Marked @pytest.mark.slow — run separately: pytest -m slow
+
+MOVED OFF SQLITE (017 stage 3, slice S2a). Until then both runs shared one SQLite file, dropped and
+recreated between them. Now each run gets a clone of its own, which is the same "fresh schema per
+run" on the database the application runs on; the error-budget control gets one clone through
+`committed_database`. Mode B and not `db_session`: the tick opens and commits sessions of its own and
+its clearing refuses a connection-bound session. The asserts are unchanged. The SQLite engine below
+survives only for `test_this_modules_engine_has_the_application_sqlite_pragmas`, a test of the SQLite
+mechanism that leaves with it in the deletion slice.
 """
 from __future__ import annotations
 
@@ -35,6 +43,7 @@ from app.core.simulator.real_runner import RealRunner
 from tests.scratch_db import install_test_sqlite_pragmas, scratch_db_path, scratch_db_url
 
 from tests.debt_setup import debt_fixture_setup
+from tests.simulator_tick_stand import pooled_sessionmaker_over
 
 
 # ---------------------------------------------------------------------------
@@ -88,6 +97,13 @@ async def ab_db():
             Path(db_path + suffix).unlink(missing_ok=True)
         except Exception:
             pass
+
+
+@pytest_asyncio.fixture
+async def ab_factory(committed_database):
+    """A mode-B clone, pooled like the application, for the tests that need ONE fresh database."""
+    async with pooled_sessionmaker_over(committed_database.url) as factory:
+        yield factory
 
 
 async def test_this_modules_engine_has_the_application_sqlite_pragmas(ab_db) -> None:
@@ -357,43 +373,49 @@ async def _run_benchmark(
 
 @pytest.mark.slow
 @pytest.mark.asyncio
-async def test_adaptive_does_not_degrade_vs_static(ab_db, monkeypatch):
+async def test_adaptive_does_not_degrade_vs_static(monkeypatch):
     """A/B comparison: adaptive must not significantly degrade committed_rate
     or increase no_capacity_rate compared to static baseline."""
 
-    engine, factory, db_path = ab_db
+    # Two clones, one after the other, never `committed_database`: every clone of a session reuses
+    # one name and `cloned_database` drops that name before copying, so a clone opened while the
+    # fixture's is alive would drop it.
+    from tests.conftest import _committed_database_context
 
-    async with factory() as session:
-        eq_code, pids = await _seed_network(session)
+    async with _committed_database_context() as static_database, pooled_sessionmaker_over(
+        static_database.url
+    ) as factory:
+        async with factory() as session:
+            eq_code, pids = await _seed_network(session)
 
-    scenario = {
-        "equivalents": [eq_code],
-        "participants": [{"id": pid} for pid in pids],
-        "trustlines": [
-            {"from": pids[i], "to": pids[(i+1) % len(pids)], "equivalent": eq_code, "limit": "500", "status": "active"}
-            for i in range(len(pids))
-        ],
-        "behaviorProfiles": [],
-    }
+        scenario = {
+            "equivalents": [eq_code],
+            "participants": [{"id": pid} for pid in pids],
+            "trustlines": [
+                {"from": pids[i], "to": pids[(i+1) % len(pids)], "equivalent": eq_code, "limit": "500", "status": "active"}
+                for i in range(len(pids))
+            ],
+            "behaviorProfiles": [],
+        }
 
-    # Run static baseline
-    static_metrics = await _run_benchmark(
-        factory, monkeypatch, policy="static",
-        eq_code=eq_code, pids=pids, scenario=scenario,
-    )
+        # Run static baseline
+        static_metrics = await _run_benchmark(
+            factory, monkeypatch, policy="static",
+            eq_code=eq_code, pids=pids, scenario=scenario,
+        )
 
-    # Re-seed DB (clean state for adaptive run)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-        await conn.run_sync(Base.metadata.create_all)
-    async with factory() as session:
-        await _seed_network(session)
+    # A fresh database for the adaptive run (clean state), seeded the same way.
+    async with _committed_database_context() as adaptive_database, pooled_sessionmaker_over(
+        adaptive_database.url
+    ) as factory:
+        async with factory() as session:
+            await _seed_network(session)
 
-    # Run adaptive
-    adaptive_metrics = await _run_benchmark(
-        factory, monkeypatch, policy="adaptive",
-        eq_code=eq_code, pids=pids, scenario=scenario,
-    )
+        # Run adaptive
+        adaptive_metrics = await _run_benchmark(
+            factory, monkeypatch, policy="adaptive",
+            eq_code=eq_code, pids=pids, scenario=scenario,
+        )
 
     # ── Assertions (non-flaky invariants) ───────────────────────
     # 1. Errors must be 0
@@ -484,7 +506,7 @@ async def test_adaptive_does_not_degrade_vs_static(ab_db, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_the_error_budget_assertion_can_see_a_failed_tick(ab_db, monkeypatch) -> None:
+async def test_the_error_budget_assertion_can_see_a_failed_tick(ab_factory, monkeypatch) -> None:
     """Control for `errors_total == 0`: a deliberately failed tick MUST turn it red.
 
     RED BEFORE 2026-09-12. This benchmark counted only exceptions that ESCAPED
@@ -503,7 +525,7 @@ async def test_the_error_budget_assertion_can_see_a_failed_tick(ab_db, monkeypat
         RealTickTrustDriftCoordinator,
     )
 
-    _engine, factory, _db_path = ab_db
+    factory = ab_factory
     async with factory() as session:
         eq_code, pids = await _seed_network(session)
 

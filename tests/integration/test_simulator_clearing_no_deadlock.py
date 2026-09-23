@@ -1,18 +1,31 @@
-"""Regression test for Bug X: SQLite deadlock when clearing runs concurrently
-with an uncommitted parent session.
+"""Regression test for Bug X: a deadlock when clearing runs while the tick's parent session
+still holds an open transaction.
 
 The scenario:
-  1. Parent session writes data (INSERT) but does NOT commit — holds the SQLite write lock.
-  2. A second (clearing) session tries to write + commit.
-  3. On SQLite (single-writer), session 2 blocks waiting for the write lock.
-  4. If the parent awaits session 2 → classic deadlock.
+  1. The parent (tick) session writes and does NOT commit - it keeps its transaction, its row locks
+     and its transaction-level advisory locks.
+  2. Clearing runs in a session of its own and has to write and commit the same rows.
+  3. The second session waits for what the first one holds.
+  4. If the parent awaits the second session, neither can proceed - a deadlock.
 
 The fix (cd321e3+): tick_real_mode commits the parent session BEFORE spawning the
-clearing session.  This test verifies the invariant by running tick_real_mode on a
-real SQLite database with debts that form a clearable triangle, and asserting that
-clearing completes within a reasonable timeout (no hang).
+clearing session. This test verifies the invariant by running tick_real_mode on a real database
+with debts that form a clearable triangle, and asserting that clearing completes within a
+reasonable timeout (no hang) and really cleared the cycle.
 
-If someone removes the early commit, this test will hang and be killed by the 12s timeout.
+If someone removes the early commit, clearing waits on the parent and the test fails - measured
+2026-09-24 on PostgreSQL by removing the commit in `RealTickClearingCoordinator.maybe_run_clearing`:
+no `clearing.done`, red. That holds only because the stand makes the parent hold the equivalent's
+owner lock when clearing is reached (see the test body); without it the same mutation stayed green.
+
+MOVED OFF SQLITE (017 stage 3, slice S2a), deliberately rather than deleted. It was written for
+SQLite's single write lock; on PostgreSQL the locks are per row and per advisory key, and a parent
+session holding them while it awaits a clearing session that needs the same rows is a real risk
+there too - arguably a sharper one, because the application runs on PostgreSQL. The stand is a mode-B
+clone of the migrated template (`committed_database`), because the tick and the clearing open and
+commit sessions of their own. The asserts are unchanged. The SQLite engine below survives only for
+`test_this_modules_engine_has_the_application_sqlite_pragmas`, a test of the SQLite mechanism that
+leaves with it in the deletion slice.
 """
 from __future__ import annotations
 
@@ -28,7 +41,7 @@ from pathlib import Path
 
 import pytest
 import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from app.db.base import Base
@@ -42,6 +55,7 @@ from app.core.simulator.real_runner import RealRunner
 from tests.scratch_db import install_test_sqlite_pragmas, scratch_db_path, scratch_db_url
 
 from tests.debt_setup import debt_fixture_setup
+from tests.simulator_tick_stand import pooled_sessionmaker_over
 
 
 # ---------------------------------------------------------------------------
@@ -113,14 +127,10 @@ async def test_this_modules_engine_has_the_application_sqlite_pragmas(deadlock_e
 
 
 @pytest_asyncio.fixture
-async def deadlock_session_factory(deadlock_engine):
-    factory = async_sessionmaker(
-        bind=deadlock_engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-        autoflush=False,
-    )
-    return factory
+async def deadlock_session_factory(committed_database):
+    """A mode-B PostgreSQL clone, pooled like the application: the tick and the clearing commit for real."""
+    async with pooled_sessionmaker_over(committed_database.url) as factory:
+        yield factory
 
 
 # ---------------------------------------------------------------------------
@@ -200,15 +210,17 @@ async def _seed_triangle(session: AsyncSession) -> tuple[str, list[str]]:
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_clearing_does_not_deadlock_on_sqlite(
+async def test_the_tick_commits_its_parent_session_before_clearing(
     deadlock_session_factory,
     monkeypatch,
 ) -> None:
-    """tick_real_mode must commit before clearing to avoid SQLite single-writer deadlock.
+    """tick_real_mode must commit before clearing, or clearing waits on the parent's locks.
 
-    This test seeds a clearable triangle into a real SQLite DB and runs a
+    This test seeds a clearable triangle into a real database and runs a
     full tick_real_mode.  If the parent session is NOT committed before clearing,
-    the clearing session will block on the write lock → deadlock → timeout → FAIL.
+    the clearing session will block on the parent's locks → deadlock → timeout → FAIL.
+
+    Renamed from `test_clearing_does_not_deadlock_on_sqlite` when it moved to PostgreSQL.
     """
     import app.db.session as app_db_session
     import app.core.simulator.storage as simulator_storage
@@ -307,6 +319,33 @@ async def test_clearing_does_not_deadlock_on_sqlite(
     # Give clearing a generous budget — the point is it should NOT deadlock
     runner._real_clearing_time_budget_ms = 5000
 
+    # THE PARENT HOLDS WHAT CLEARING NEEDS when clearing is reached (added 2026-09-24, 017 stage 3,
+    # slice S2a). Since programme 015 / P1 the money commits at its own boundary, so by the time the
+    # tick reaches clearing its parent session holds nothing - and this test stayed green with the
+    # early commit REMOVED, on SQLite at 8e55455 and on PostgreSQL alike (measured by that very
+    # mutation). The invariant is still the tick's: whatever the parent holds when clearing is due
+    # must be released first. So the stand puts the parent in Bug X's shape - an open transaction
+    # holding the equivalent's owner lock, which clearing takes too - and the early commit is what
+    # must release it. Without that commit clearing waits on the parent and never clears.
+    from sqlalchemy import select as _select
+
+    from app.core.payments.engine import PaymentEngine
+
+    async with deadlock_session_factory() as tmp:
+        equivalent_id = (
+            await tmp.execute(_select(Equivalent.id).where(Equivalent.code == eq_code))
+        ).scalar_one()
+    parent_held_the_owner_lock: list[int] = []
+    coordinator = runner._real_tick_clearing_coordinator
+    original_maybe_run_clearing = coordinator.maybe_run_clearing
+
+    async def _parent_holds_the_owner_lock_then_clears(**kwargs):
+        await PaymentEngine(kwargs["session"])._acquire_equivalent_owner_locks({equivalent_id})
+        parent_held_the_owner_lock.append(1)
+        return await original_maybe_run_clearing(**kwargs)
+
+    monkeypatch.setattr(coordinator, "maybe_run_clearing", _parent_holds_the_owner_lock_then_clears)
+
     # Run tick_real_mode with a timeout — if it deadlocks, asyncio.wait_for raises TimeoutError
     try:
         await asyncio.wait_for(runner.tick_real_mode("deadlock-test"), timeout=10.0)
@@ -316,6 +355,9 @@ async def test_clearing_does_not_deadlock_on_sqlite(
             "write transaction while clearing tries to write on a separate session. "
             "Ensure session.commit() is called BEFORE tick_real_mode_clearing()."
         )
+
+    # Non-vacuity: the parent really held the lock when clearing was reached.
+    assert parent_held_the_owner_lock == [1], parent_held_the_owner_lock
 
     # Verify clearing actually ran and completed (not just skipped)
     assert len(clearing_done_events) >= 1, (
