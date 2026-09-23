@@ -11,6 +11,18 @@ reset, under a swallow. With a real `BEGIN` SQLite refuses a journal-mode change
 so that placement would leave a fresh database in the rollback journal without a sound. Journal mode
 is persistent in the database file, so reading it on the shared test database proves nothing about a
 fresh one; the test therefore also opens a FRESH file with the conftest's own connect listener.
+
+THE LIVE-CONNECTION CHECKS RUN ON AN ENGINE OF THIS MODULE'S OWN (programme 017, `T1702`, 2026-09-23).
+They used to ask `tests.conftest.engine`, which was right only while the default tier ran on
+SQLite: on a PostgreSQL tier the same tests asked asyncpg for `in_transaction` and `PRAGMA`. The
+mechanism they hold in place is still in the code until stage 3 removes it, so the coverage has to
+live with it rather than with the tier. `tier_shaped_sqlite` below builds a disposable SQLite file
+with EXACTLY the two calls the conftest makes for its SQLite engine - `install_test_sqlite_pragmas`
+and `install_sqlite_transaction_control` - and the conftest's sessionmaker options, and every
+assertion is unchanged and asked of that engine. What the conftest ITSELF wires is asserted in
+addition wherever the tier is SQLite (`_the_tier_engine_if_sqlite`), and by the source guard
+`test_p015_t1525_every_sqlite_engine_has_transaction_control.py` whatever the tier is. On a
+PostgreSQL tier there is no SQLite tier engine to wire, so that one half has no subject there.
 """
 
 from __future__ import annotations
@@ -18,16 +30,52 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import pytest_asyncio
 from sqlalchemy import func, select, text
-from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from app.db.base import Base
 from app.db.models.equivalent import Equivalent
 from app.db.sqlite_transaction_control import (
     install_sqlite_transaction_control,
     sqlite_transaction_control_is_installed,
 )
 from tests.scratch_db import install_test_sqlite_pragmas
+
+
+@pytest_asyncio.fixture
+async def tier_shaped_sqlite(tmp_path: Path):
+    """`(engine, sessionmaker)`: a fresh SQLite file wired exactly as the conftest wires its SQLite engine.
+
+    The same two connect-time calls, in the same order, as `tests/conftest.py` makes for a SQLite
+    `TEST_DATABASE_URL`; the same `NullPool` and driver timeout; the conftest's sessionmaker options;
+    and the schema from `create_all`, as the SQLite tier has it.
+    """
+    url = f"sqlite+aiosqlite:///{(tmp_path / 'tier-shaped.db').as_posix()}"
+    shaped = create_async_engine(url, poolclass=NullPool, connect_args={"timeout": 30})
+    install_test_sqlite_pragmas(shaped.sync_engine, url=url)
+    install_sqlite_transaction_control(shaped.sync_engine)
+    async with shaped.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(
+        bind=shaped,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autoflush=False,
+        join_transaction_mode="create_savepoint",
+    )
+    try:
+        yield shaped, factory
+    finally:
+        await shaped.dispose()
+
+
+def _the_tier_engine_if_sqlite():
+    """`tests.conftest.engine` when the tier runs on SQLite, else None: there is nothing to wire."""
+    from tests.conftest import engine
+
+    return engine if engine.dialect.name == "sqlite" else None
 
 
 async def _driver_in_transaction(session) -> bool:
@@ -38,15 +86,20 @@ async def _driver_in_transaction(session) -> bool:
 
 
 @pytest.mark.asyncio
-async def test_a_read_after_begin_is_inside_a_database_transaction(db_session) -> None:
-    from tests.conftest import TestingSessionLocal, engine
+async def test_a_read_after_begin_is_inside_a_database_transaction(tier_shaped_sqlite) -> None:
+    engine, TestingSessionLocal = tier_shaped_sqlite
 
     assert engine.dialect.name == "sqlite", (
-        f"this module checks the default SQLite tier; the test engine is {engine.dialect.name}"
+        f"this module checks a SQLite engine; the stand engine is {engine.dialect.name}"
     )
     # Registration only - see the function's docstring and the limit test at the bottom of this
     # module. What proves the control is in EFFECT is the `in_transaction` assertion below.
     assert sqlite_transaction_control_is_installed(engine.sync_engine)
+    tier_engine = _the_tier_engine_if_sqlite()
+    if tier_engine is not None:
+        assert sqlite_transaction_control_is_installed(tier_engine.sync_engine), (
+            "the SQLite tier engine in tests/conftest.py no longer registers the transaction control"
+        )
 
     async with TestingSessionLocal() as session:
         await session.begin()
@@ -61,14 +114,16 @@ async def test_a_read_after_begin_is_inside_a_database_transaction(db_session) -
 
 
 @pytest.mark.asyncio
-async def test_one_connection_is_outside_then_inside_then_outside_a_transaction(db_session) -> None:
+async def test_one_connection_is_outside_then_inside_then_outside_a_transaction(
+    tier_shaped_sqlite,
+) -> None:
     """The same probe on one live connection must report False, True, False.
 
     Anti-vacuum for the check above: a probe that always says True would pass it on a connection
     in legacy mode. Here the False before the read and after the commit shows the probe can see the
     difference, and the True in between is the control at work.
     """
-    from tests.conftest import engine
+    engine, _factory = tier_shaped_sqlite
 
     async with engine.connect() as conn:
         raw = await conn.get_raw_connection()
@@ -93,9 +148,19 @@ async def test_one_connection_is_outside_then_inside_then_outside_a_transaction(
 
 
 @pytest.mark.asyncio
-async def test_the_default_test_database_is_in_wal(db_session) -> None:
-    mode = (await db_session.execute(text("PRAGMA journal_mode"))).scalar_one()
+async def test_the_default_test_database_is_in_wal(tier_shaped_sqlite) -> None:
+    """Read through a session, after the schema was built, as the tier's `db_session` read it."""
+    _engine, factory = tier_shaped_sqlite
+    async with factory() as session:
+        mode = (await session.execute(text("PRAGMA journal_mode"))).scalar_one()
     assert str(mode).lower() == "wal", mode
+    tier_engine = _the_tier_engine_if_sqlite()
+    if tier_engine is not None:
+        # A read only: the tier's shared file, which is the one a journal-mode regression in the
+        # per-test reset would leave behind.
+        async with tier_engine.connect() as connection:
+            tier_mode = (await connection.execute(text("PRAGMA journal_mode"))).scalar_one()
+        assert str(tier_mode).lower() == "wal", tier_mode
 
 
 @pytest.mark.asyncio
@@ -106,11 +171,11 @@ async def test_a_fresh_database_gets_wal_from_the_conftest_connect_listener(tmp_
     listener and the transaction control - and nothing else. If WAL is not set on connect (for
     example because the pragma went back inside a transaction), this file stays in `delete`.
     """
-    import tests.conftest as conftest
-
-    assert getattr(conftest.engine.sync_engine, "_geo_test_sqlite_pragmas_installed", False), (
-        "the test engine no longer sets its connection pragmas on connect"
-    )
+    tier_engine = _the_tier_engine_if_sqlite()
+    if tier_engine is not None:
+        assert getattr(tier_engine.sync_engine, "_geo_test_sqlite_pragmas_installed", False), (
+            "the test engine no longer sets its connection pragmas on connect"
+        )
 
     fresh_url = f"sqlite+aiosqlite:///{(tmp_path / 'fresh.db').as_posix()}"
     fresh = create_async_engine(fresh_url, poolclass=NullPool)
