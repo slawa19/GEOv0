@@ -496,8 +496,79 @@ async def drop_stale_scratch_databases(connection, base_name: str) -> list[str]:
 # =====================================================================================================
 
 
+async def ensure_tier_database(base_url: str) -> bool:
+    """Create the tier's OWN database when it does not exist yet; return whether it was created.
+
+    WHY THE TIER NEEDS THIS (T1702, measured 2026-09-23). Until this function the PostgreSQL tier
+    never created its database: pointed at `geov0_test_<slug>` on a server where that database did not
+    exist, the default tier produced 705 errors with one cause, `InvalidCatalogNameError: database
+    "geov0_test_p017s2probe" does not exist`. CI never saw it because the service container creates
+    `geov0_test_ci` itself (`POSTGRES_DB`), so a green CI said nothing about a fresh local clone.
+
+    ONLY WHAT THE GUARD WOULD ALSO LET THE TIER RESET MAY BE CREATED HERE. The URL goes through
+    `assert_safe_test_database_url` with the tier's own reset opt-in and WITHOUT the scratch-suffix
+    allowance, so a name the tier could not drop (`geov0_dev_*`, a doubled underscore, a missing
+    `GEO_TEST_ALLOW_DB_RESET=1`) is refused before any connection is opened. An existing database is
+    left exactly as it is - the schema is built afterwards by the tier, not here.
+
+    `CREATEDB` is asked for only when there is something to create, and its absence is the same
+    refusal the template raises (`assert_may_create_databases`): a missing precondition, never a skip.
+    """
+
+    parsed = make_url(base_url)
+    if parsed.get_backend_name() != "postgresql":
+        raise MigratedSchemaError(
+            f"only a PostgreSQL tier database can be created here; this URL uses "
+            f"{parsed.get_backend_name()!r}."
+        )
+    try:
+        assert_safe_test_database_url(
+            base_url,
+            allow_destructive_reset=os.environ.get("GEO_TEST_ALLOW_DB_RESET"),
+            repo_root=REPO_ROOT,
+            required_backend="postgresql",
+        )
+    except UnsafeTestDatabaseError as exc:
+        raise MigratedSchemaError(
+            f"the tier's TEST_DATABASE_URL is not one the test-database guard accepts ({exc}), so it "
+            f"is not created either: the tier may only create what it would be allowed to reset."
+        ) from exc
+
+    name = parsed.database or ""
+    _quoted(name)  # shape check before the name is used at all
+    connection = await maintenance_connection(base_url)
+    try:
+        exists = await connection.fetchval(
+            "SELECT 1 FROM pg_database WHERE datname = $1", name, timeout=_STATEMENT_TIMEOUT_SECONDS
+        )
+        if exists:
+            return False
+        await assert_may_create_databases(connection)
+        await create_database(connection, name)
+        return True
+    finally:
+        await connection.close()
+
+
+async def database_exists(base_url: str, name: str) -> bool:
+    """Whether `name` exists on the server `base_url` points at. One maintenance round trip."""
+
+    _quoted(name)
+    connection = await maintenance_connection(base_url)
+    try:
+        return bool(
+            await connection.fetchval(
+                "SELECT 1 FROM pg_database WHERE datname = $1",
+                name,
+                timeout=_STATEMENT_TIMEOUT_SECONDS,
+            )
+        )
+    finally:
+        await connection.close()
+
+
 async def provision_migrated_template(
-    base_url: str, *, suffix: str = TEMPLATE_SUFFIX
+    base_url: str, *, suffix: str = TEMPLATE_SUFFIX, sweep_stale: bool = True
 ) -> tuple[str, str]:
     """Build the template database with the migrations, from empty, and return `(url, name)`.
 
@@ -508,13 +579,23 @@ async def provision_migrated_template(
     Building the template is the start of a tier run, so it is also where every scratch database this
     task left behind is swept - including clones whose per-test suffix no later run would name again.
     The sweep is bounded by this task's own database name, so it cannot reach a neighbour's.
+
+    `sweep_stale=False` drops only THIS template's own name before rebuilding it (T1702). It is for a
+    caller that builds its template in the MIDDLE of a session - the mode-B fixture in
+    `tests/conftest.py` - where the sweep would drop the templates other modules of the same session
+    have cached (`test_p017_t1701_schema_provisioning_postgres.py`, `test_p017_t1711_seed_recipe_postgres.py`)
+    and fail them for a reason that is not theirs. Such a caller keeps its own clones bounded by
+    reusing one clone name, which `cloned_database` drops before every copy.
     """
 
     template_url, template_name = scratch_database_url(base_url, suffix)
     connection = await maintenance_connection(base_url)
     try:
         await assert_may_create_databases(connection)
-        await drop_stale_scratch_databases(connection, make_url(base_url).database or "")
+        if sweep_stale:
+            await drop_stale_scratch_databases(connection, make_url(base_url).database or "")
+        else:
+            await drop_database(connection, template_name)
         await create_database(connection, template_name)
     finally:
         await connection.close()
