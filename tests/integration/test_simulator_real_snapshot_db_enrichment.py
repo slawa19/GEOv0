@@ -9,9 +9,22 @@ from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
-from tests.conftest import TestingSessionLocal
+from tests.conftest import sessionmaker_of
 
-from tests.debt_setup import debt_fixture_setup
+from tests.debt_setup import _uuid_literals, debt_fixture_setup
+
+
+@pytest.fixture
+def db_session(db_session_mode_b):
+    """MODE B (017 stage 2b, T1702): the run seeds its scenario through its own sessions and commits.
+
+    In mode A those commits landed in the tier's database and outlived the test - measured 2026-09-23
+    (stage-2 catalogue 9.6): 100 participants, the equivalent `UAH` and 432 lines survived, and 38
+    later tests failed on `equivalents_code_key`. Here they land in a clone dropped after the test; the
+    `client` fixture routes the simulator's `AsyncSessionLocal` to the same clone. On SQLite this is the
+    tier's ordinary session, unchanged.
+    """
+    return db_session_mode_b
 
 
 @pytest_asyncio.fixture
@@ -107,7 +120,7 @@ async def test_real_mode_graph_snapshot_enriches_used_and_net_sign(
     # above, so a write through it would be read -> write -> commit inside one transaction, which is
     # exactly the shape that fails under a concurrent writer (measured: it failed once in four full
     # tier runs even with the write moved to the last possible moment).
-    async with TestingSessionLocal() as setup:
+    async with sessionmaker_of(db_session)() as setup:
         # ONE EDGE, THROUGH THE DRIVER. `session.execute(delete(Debt))` is Core DML the journal's
         # write guard refuses (that is `C2`), and the guard is right to: a Core DELETE against
         # `debts` is indistinguishable from a writer removing money with no record. This is a test
@@ -115,9 +128,19 @@ async def test_real_mode_graph_snapshot_enriches_used_and_net_sign(
         # §8 R6). It stays narrow on purpose - `purge_test_ledger` would remove the whole
         # equivalent's journal, and the comment above is about which edge this transaction opens
         # with, not about the book.
-        await (await setup.connection()).exec_driver_sql(
-            "DELETE FROM debts WHERE equivalent_id = ? AND creditor_id = ? AND debtor_id = ?",
-            (eq_id.hex, creditor_id.hex, debtor_id.hex),
+        #
+        # THE IDS ARE INTERPOLATED, NOT BOUND, and that is what makes the statement dialect-neutral:
+        # a bound driver statement spells its placeholders in the driver's paramstyle (`?` for
+        # aiosqlite, `$1` for asyncpg), and the `?` this used to carry was a syntax error on
+        # PostgreSQL. `_uuid_literals` puts every value through `uuid.UUID` first and renders it the
+        # way the dialect stores it (hex on SQLite) - the same route `purge_test_ledger` takes.
+        connection = await setup.connection()
+        eq_lit, creditor_lit, debtor_lit = _uuid_literals(
+            [eq_id, creditor_id, debtor_id], connection.dialect.name
+        )
+        await connection.exec_driver_sql(
+            f"DELETE FROM debts WHERE equivalent_id = '{eq_lit}' "  # noqa: S608 - uuid-validated
+            f"AND creditor_id = '{creditor_lit}' AND debtor_id = '{debtor_lit}'"
         )
         async with debt_fixture_setup(setup, label="setup"):
             setup.add(

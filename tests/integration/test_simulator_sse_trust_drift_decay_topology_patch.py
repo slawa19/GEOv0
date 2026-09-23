@@ -7,6 +7,18 @@ from httpx import AsyncClient
 from app.core.simulator.runtime import runtime
 
 
+@pytest.fixture
+def db_session(db_session_mode_b):
+    """MODE B (017 stage 2b, T1702): a real-mode run commits through its own sessions, and in mode A those commits land in the
+    tier's database and outlive the test - measured 2026-09-23 (stage-2 catalogue 9.6): participants `alice` and `bob`, a line, a debt and a transaction survived, and ten later tests
+    failed on `participants_pid_key` or on a line they did not seed.
+
+    On SQLite this is the tier's ordinary session, unchanged; on PostgreSQL a clone dropped after the
+    test, and the `client` fixture routes the simulator's own sessions (`AsyncSessionLocal`) to it.
+    """
+    return db_session_mode_b
+
+
 @pytest.mark.asyncio
 async def test_simulator_sse_trust_drift_decay_emits_edge_patch_not_empty_topology_changed(
     client: AsyncClient,
