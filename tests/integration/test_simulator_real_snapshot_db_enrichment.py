@@ -9,22 +9,18 @@ from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
-from tests.conftest import sessionmaker_of
+from tests.conftest import MODE_B, sessionmaker_of
 
 from tests.debt_setup import _uuid_literals, debt_fixture_setup
 
 
-@pytest.fixture
-def db_session(db_session_mode_b):
-    """MODE B (017 stage 2b, T1702): the run seeds its scenario through its own sessions and commits.
-
-    In mode A those commits landed in the tier's database and outlived the test - measured 2026-09-23
-    (stage-2 catalogue 9.6): 100 participants, the equivalent `UAH` and 432 lines survived, and 38
-    later tests failed on `equivalents_code_key`. Here they land in a clone dropped after the test; the
-    `client` fixture routes the simulator's `AsyncSessionLocal` to the same clone. On SQLite this is the
-    tier's ordinary session, unchanged.
-    """
-    return db_session_mode_b
+# MODE B (017 stage 2b, T1702). The run seeds its scenario through its own sessions and commits. In
+# mode A on PostgreSQL those commits landed in the tier's database and outlived the test - measured
+# 2026-09-23 (stage-2 catalogue 9.6): the equivalent `UAH`, 100 participants and 432 lines survived,
+# and 38 later tests failed on `equivalents_code_key`. In mode B they land in a clone dropped after
+# the test, and `client` routes the simulator's `AsyncSessionLocal` to the same clone. On SQLite
+# nothing changes: the tier's session already commits for real and is reset per test.
+pytestmark = MODE_B
 
 
 @pytest_asyncio.fixture

@@ -507,7 +507,7 @@ async def _dispose_engines_at_end() -> AsyncGenerator[None, None]:
 
 @asynccontextmanager
 async def _session_for_one_test(*, mode_b: bool):
-    """The body shared by `db_session` and `db_session_mode_b`: one test's session.
+    """The body of `db_session`: one test's session, in mode A or mode B.
 
     `mode_b=True` on PostgreSQL is a mode-B session on a clone dropped after the test. On SQLite the
     flag changes nothing - the SQLite branch below is already a plain engine-bound session whose
@@ -623,38 +623,36 @@ async def _session_for_one_test(*, mode_b: bool):
         await transaction.rollback()
 
 
+#: MODE B FOR ONE TEST OF THE DEFAULT TIER (017 stage 2b, T1702). Put `@MODE_B` on a test, or
+#: `pytestmark = MODE_B` on a module, and `db_session` - and with it `client`, which requests it - is a
+#: mode-B session for that test: a clone on PostgreSQL, dropped after the test. On SQLite it changes
+#: nothing, because the SQLite `db_session` is already an engine-bound session whose commits are real
+#: and which is reset per test; that is what lets the same test keep running on the SQLite tier until
+#: stage 3, which `committed_session` (it refuses SQLite) cannot.
+#:
+#: WHY A PARAMETRIZATION AND NOT A MARKER: markers are registered in `pytest.ini` and select or
+#: deselect tests; this must do neither. An indirect parameter is how pytest hands one fixture a
+#: per-test value, and the `[mode_b]` it adds to the node id says in every report which mode ran.
+#: It selects and deselects nothing - a mode-B test is collected exactly as before.
+#:
+#: A test that needs a SECOND session reaches the same database through `sessionmaker_of(session)`,
+#: never through `TestingSessionLocal` directly: on PostgreSQL that is the tier's database, where the
+#: clone's commits are not.
+MODE_B = pytest.mark.parametrize("db_session", ["B"], indirect=True, ids=["mode_b"])
+
+
 @pytest_asyncio.fixture
-async def db_session() -> AsyncGenerator[AsyncSession, None]:
+async def db_session(request) -> AsyncGenerator[AsyncSession, None]:
     """SQLAlchemy session with a per-test transaction that is rolled back (mode A).
 
-    With the measurement instrument `GEO_TEST_FIXTURE_MODE=B` (see above) it is a mode-B session
-    instead, on a clone dropped after the test.
+    A test carrying `MODE_B` gets a mode-B session instead (see `MODE_B`), and so does every test
+    under the measurement instrument `GEO_TEST_FIXTURE_MODE=B` (see above).
     """
 
-    async with _session_for_one_test(mode_b=_FIXTURE_MODE == "B") as session:
-        yield session
-
-
-@pytest_asyncio.fixture
-async def db_session_mode_b() -> AsyncGenerator[AsyncSession, None]:
-    """MODE B FOR A TEST OF THE DEFAULT TIER, which runs on SQLite as well (017 stage 2b, T1702).
-
-    `committed_session` refuses SQLite, which is right for a postgres-marked module and wrong for a
-    default-tier one: the same test has to keep running on the SQLite tier until stage 3. This is the
-    one fixture that serves both - a mode-B clone on PostgreSQL, and on SQLite the tier's ordinary
-    session, which already commits for real and is reset per test. A module opts in by overriding
-    `db_session` with it, so `client` (which requests `db_session`) follows:
-
-        @pytest.fixture
-        def db_session(db_session_mode_b):
-            return db_session_mode_b
-
-    A test that needs a SECOND session reaches the same database through `sessionmaker_of(session)`,
-    never through `TestingSessionLocal` directly: on PostgreSQL that is the tier's database, where the
-    clone's commits are not.
-    """
-
-    async with _session_for_one_test(mode_b=True) as session:
+    requested = getattr(request, "param", "A")
+    if requested not in {"A", "B"}:
+        raise RuntimeError(f"db_session takes the mode A or B, got {requested!r}")
+    async with _session_for_one_test(mode_b=requested == "B" or _FIXTURE_MODE == "B") as session:
         yield session
 
 

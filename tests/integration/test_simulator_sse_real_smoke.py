@@ -5,17 +5,15 @@ import pytest
 from httpx import AsyncClient
 
 from app.core.simulator.runtime import runtime
+from tests.conftest import MODE_B
 
 
-@pytest.fixture
-def db_session(db_session_mode_b):
-    """MODE B (017 stage 2b, T1702): a real-mode run commits through its own sessions, and in mode A those commits land in the
-    tier's database and outlive the test - measured 2026-09-23 (stage-2 catalogue 9.6): three debts and two transactions survived, and later tests counting `Debt` globally saw them.
-
-    On SQLite this is the tier's ordinary session, unchanged; on PostgreSQL a clone dropped after the
-    test, and the `client` fixture routes the simulator's own sessions (`AsyncSessionLocal`) to it.
-    """
-    return db_session_mode_b
+# MODE B (017 stage 2b, T1702). A real-mode run commits through its own sessions. In mode A on
+# PostgreSQL those commits landed in the tier's database and outlived the test - measured 2026-09-23
+# (stage-2 catalogue 9.6): three debts and two transactions survived, and later tests that count
+# `Debt` globally saw them. In mode B they land in a clone dropped after the test, and `client`
+# routes the simulator's `AsyncSessionLocal` to it. On SQLite nothing changes.
+pytestmark = MODE_B
 
 
 @pytest.mark.asyncio
