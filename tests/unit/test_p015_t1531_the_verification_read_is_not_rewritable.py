@@ -27,8 +27,11 @@ closure report would quietly drop:
   measures it open, on purpose: when someone closes it, that test goes red and the docstrings that
   say it is open have to change with it.
 
-TIER. SQLite, the default tier. The PostgreSQL halves - asyncpg's `numeric_dollar` placeholders, its
-native `uuid` spelling and its `NUMERIC` results - are in
+TIER. PostgreSQL since programme 017 stage 3 (2026-09-24): the stand's own engine over the tier
+database, real root commits, a world of its own purged after each test (`tests/p015_b4a_stand.py::
+new_postgres_stand`). Until then these rules were measured ONLY on SQLite, and the PostgreSQL
+modules named below covered only what SQLite could not see. The PostgreSQL halves - asyncpg's
+`numeric_dollar` placeholders, its native `uuid` spelling and its `NUMERIC` results - are in
 `tests/integration/test_p015_t1530_delta_arithmetic_postgres.py`.
 """
 
@@ -44,16 +47,16 @@ from sqlalchemy.exc import InvalidRequestError
 
 from app.core.ledger import journal
 from app.db.models.debt import Debt
-from tests.p015_b4a_stand import Stand, exact_money, identity, new_sqlite_stand
+from tests.p015_b4a_stand import Stand, exact_money, identity, new_postgres_stand
 
 
 @pytest_asyncio.fixture
-async def stand(tmp_path):
-    built = await new_sqlite_stand(tmp_path)
+async def stand():
+    built = await new_postgres_stand()
     try:
         yield built
     finally:
-        await built.close()
+        await built.close(purge=True)
 
 
 _SCENARIO_END = (journal.DebtJournalError, InvalidRequestError)
@@ -361,8 +364,10 @@ async def test_t1531_before_cursor_execute_is_still_a_surface_and_is_not_claimed
         if flattened.startswith("SELECT id, equivalent_id, debtor_id, creditor_id, amount FROM"):
             rewrote.append(flattened)
             return (
-                "SELECT id, equivalent_id, debtor_id, creditor_id, 11.0 AS amount FROM debts "
-                "WHERE id IN (?)",
+                stand.driver_sql(
+                    "SELECT id, equivalent_id, debtor_id, creditor_id, 11.0 AS amount FROM debts "
+                    "WHERE id IN (?)"
+                ),
                 parameters,
             )
         return statement, parameters

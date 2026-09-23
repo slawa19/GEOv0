@@ -18,8 +18,13 @@ WHAT EVERY TEST HERE DOES, without exception:
 * names in its docstring the MUTATION that must turn it red again. A guard whose mutation was
   never run is a guard nobody has measured (`AGENTS.md` §9, anti-vacuum).
 
-TIER. SQLite, default tier, one database file per test under `tmp_path`, money inside `|v| < 2^26`
-(design v2 §4). What SQLite cannot host - an AUTOCOMMIT engine, a two-phase root, a DML CTE, a NaN
+TIER. PostgreSQL since programme 017 stage 3 (2026-09-24): the stand's own engine over the tier
+database, real root commits, a world of its own purged after each test (`tests/p015_b4a_stand.py::
+new_postgres_stand`). Until then these rules were measured ONLY on SQLite, and the PostgreSQL
+modules named below covered only what SQLite could not see. Money stays inside `|v| < 2^26`
+(design v2 §4) except where a test says otherwise. Two tests stay on the SQLite stand because their
+subject IS SQLite and they leave with it: the transaction-control refusal and the round-trip
+predicate. What SQLite could not host - an AUTOCOMMIT engine, a two-phase root, a DML CTE, a NaN
 that actually reaches a column - is in
 `tests/integration/test_p015_b4a_journal_postgres.py`, with the reason stated there.
 """
@@ -38,16 +43,16 @@ from sqlalchemy import delete, event, insert, select, update
 from app.core.ledger import journal
 from app.db.journal_tables import debt_journal_entries, debt_operations
 from app.db.models.debt import Debt
-from tests.p015_b4a_stand import Stand, exact_money, identity, new_sqlite_stand
+from tests.p015_b4a_stand import Stand, exact_money, identity, new_postgres_stand, new_sqlite_stand
 
 
 @pytest_asyncio.fixture
-async def stand(tmp_path):
-    built = await new_sqlite_stand(tmp_path, extra_participants=2)
+async def stand():
+    built = await new_postgres_stand(extra_participants=2)
     try:
         yield built
     finally:
-        await built.close()
+        await built.close(purge=True)
 
 
 class _BusinessFailure(RuntimeError):
@@ -888,7 +893,10 @@ async def test_the_write_guard_names_exec_driver_sql_as_its_one_blind_spot(stand
         await session.commit()
 
     async with stand.engine.begin() as connection:
-        await connection.exec_driver_sql("UPDATE debts SET amount = 27.0")
+        # Scoped to this stand's equivalent: the database is the tier's, not a file of this test's.
+        await connection.exec_driver_sql(
+            f"UPDATE debts SET amount = 27.0 WHERE equivalent_id = '{stand.equivalent_id.hex}'"
+        )
     through_the_driver = await stand.stored_debts()
 
     refusal: BaseException | None = None
@@ -927,7 +935,6 @@ async def test_the_write_guard_names_exec_driver_sql_as_its_one_blind_spot(stand
         (Decimal("Infinity"), journal.Reason.MONEY_FINITENESS),
         (Decimal("1E12"), journal.Reason.MONEY_MAGNITUDE),
         (Decimal("0.123456789"), journal.Reason.MONEY_QUANTIZATION),
-        (Decimal("100000000000.00000001"), journal.Reason.MONEY_ROUND_TRIP),
     ],
 )
 @pytest.mark.asyncio
@@ -946,8 +953,69 @@ async def test_the_hook_refuses_an_unstorable_amount_by_the_predicate_it_violate
 
     MUTATION that must redden this: collapse `_check_storable` into a single `is_storable` raising
     one reason, and each parametrisation fails on the reason it expected.
+
+    THE FOURTH PREDICATE, ROUND TRIP, IS NOT A CASE HERE, and that is a measurement of PostgreSQL,
+    not a gap: `NUMERIC(20, 8)` through asyncpg is exact, so every value the first three predicates
+    let through reads back unchanged and nothing on this tier can be refused as `money_round_trip`.
+    The value that used to be its case, `100000000000.00000001`, is asserted STORED EXACTLY here by
+    `test_a_value_sqlite_would_change_is_exact_money_on_postgresql`; the refusal itself is still
+    measured on the SQLite stand by `test_the_round_trip_predicate_refuses_what_sqlite_would_change`,
+    the only dialect in this repository on which it can fire.
     """
 
+    await _assert_refused_before_any_debt_sql(stand, raw, expected_reason)
+
+
+@pytest.mark.asyncio
+async def test_the_round_trip_predicate_refuses_what_sqlite_would_change(tmp_path) -> None:
+    """C12, the fourth predicate, on the one dialect where it can fire: SQLite's float binding.
+
+    `100000000000.00000001` passes finiteness, magnitude and quantization, and SQLite would store
+    it as a different number. A SQLITE MECHANISM TEST, kept on the SQLite stand on purpose and left
+    for the slice that removes SQLite (programme 017 stage 3) - on PostgreSQL the same value is
+    exact money (`test_a_value_sqlite_would_change_is_exact_money_on_postgresql`).
+
+    MUTATION that must redden this: drop the `_round_trip` comparison from `_check_storable`.
+    """
+
+    built = await new_sqlite_stand(tmp_path, extra_participants=2)
+    try:
+        await _assert_refused_before_any_debt_sql(
+            built, Decimal("100000000000.00000001"), journal.Reason.MONEY_ROUND_TRIP
+        )
+    finally:
+        await built.close()
+
+
+@pytest.mark.asyncio
+async def test_a_value_sqlite_would_change_is_exact_money_on_postgresql(stand: Stand) -> None:
+    """The round-trip predicate's silence on PostgreSQL is correct, and this shows why.
+
+    The value SQLite refuses as `money_round_trip` is inside `NUMERIC(20, 8)` and PostgreSQL holds
+    it byte for byte: the debt, the entry and the read-back agree to the last atom. If the predicate
+    were silent because it was blind rather than because the value is exact, the stored amount below
+    would differ from the one written.
+
+    MUTATION that must redden this: store `float(value)` in `_effects_of_flush`'s entry amounts, or
+    make `_round_trip` quantize to fewer places.
+    """
+
+    ident = identity("pg-exact")
+    value = Decimal("100000000000.00000001")
+    async with stand.factory() as session:
+        async with stand.operation("pg-exact", session=session, identity=ident):
+            session.add(stand.debt("0", raw_amount=value))
+            await session.flush()
+        await session.commit()
+
+    assert await stand.stored_debts() == {("debtor", "creditor", "eq"): value}
+    entries = await stand.entries(ident)
+    assert [(row["effect"], row["amount_after"], row["delta"]) for row in entries] == [
+        ("I", value, value)
+    ], entries
+
+
+async def _assert_refused_before_any_debt_sql(stand: Stand, raw, expected_reason: str) -> None:
     debt_statements: list[str] = []
 
     def _watch(_conn, clause, _multiparams, _params, _options) -> None:
@@ -1042,16 +1110,14 @@ async def test_nan_is_refused_by_the_hook_and_not_by_the_not_null_that_fires_tod
 
 
 @pytest.mark.asyncio
-async def test_an_operation_refuses_to_open_on_an_engine_with_no_write_guard(tmp_path) -> None:
+async def test_an_operation_refuses_to_open_on_an_engine_with_no_write_guard() -> None:
     """An operation on an un-instrumented engine would record what it was told and miss the rest.
 
     MUTATION that must redden this: drop the `journal_is_installed` check from
     `_refuse_unusable_transaction`.
     """
 
-    from tests.p015_b4a_stand import new_sqlite_stand as build
-
-    built = await build(tmp_path, filename="unarmed.db")
+    built = await new_postgres_stand()
     journal.uninstall_journal(built.engine, built.session_class)
     try:
         async with built.factory() as session:
@@ -1068,7 +1134,7 @@ async def test_an_operation_refuses_to_open_on_an_engine_with_no_write_guard(tmp
             await session.commit()
         assert [row["state"] for row in await built.envelopes(ident)] == ["COMPLETED"]
     finally:
-        await built.close()
+        await built.close(purge=True)
 
 
 @pytest.mark.asyncio
@@ -1244,13 +1310,18 @@ async def test_a_forged_entry_shape_is_refused_by_the_check_constraints(stand: S
         await session.commit()
     operation_id = (await stand.envelopes(ident))[0]["id"]
 
+    # ONE TRANSACTION PER SHAPE. On PostgreSQL the first refused statement aborts its transaction,
+    # and every later statement in it fails with "current transaction is aborted" whatever its shape
+    # - a refusal that would be about the transaction and not about the row. SQLite, where these
+    # used to share one transaction, keeps a transaction usable after a constraint failure.
     refused = {}
-    async with stand.engine.begin() as connection:
-        for name, values in (
-            ("insert_with_before", "'I', 1.0, 2.0, 1.0"),
-            ("update_that_changed_nothing", "'U', 2.0, 2.0, 1.0"),
-            ("zero_delta", "'U', 2.0, 3.0, 0"),
-        ):
+    why: dict[str, str] = {}
+    for name, values in (
+        ("insert_with_before", "'I', 1.0, 2.0, 1.0"),
+        ("update_that_changed_nothing", "'U', 2.0, 2.0, 1.0"),
+        ("zero_delta", "'U', 2.0, 3.0, 0"),
+    ):
+        async with stand.engine.begin() as connection:
             try:
                 await connection.exec_driver_sql(
                     "INSERT INTO debt_journal_entries (id, operation_id, flush_ordinal, "
@@ -1261,6 +1332,7 @@ async def test_a_forged_entry_shape_is_refused_by_the_check_constraints(stand: S
                 )
             except Exception as exc:  # noqa: BLE001 - the database's refusal is the subject
                 refused[name] = type(exc).__name__
+                why[name] = str(exc)
 
     # NON-VACUITY: a well-shaped row through the same raw path IS accepted, so the refusals above
     # are about the shapes and not about this statement being unusable.
@@ -1273,6 +1345,8 @@ async def test_a_forged_entry_shape_is_refused_by_the_check_constraints(stand: S
         )
 
     assert set(refused) == {"insert_with_before", "update_that_changed_nothing", "zero_delta"}, refused
+    # Each refusal is a CHECK constraint's, and not a transaction already aborted by the one before.
+    assert all("check constraint" in text.lower() for text in why.values()), why
     assert (await stand.counts())["debt_journal_entries"] == 2
 
 
