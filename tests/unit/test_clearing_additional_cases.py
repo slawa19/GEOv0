@@ -854,24 +854,47 @@ async def test_execute_clearing_rollback_failure_keeps_original_error_sanitized(
     cycles = await service.find_cycles(eq.code, max_depth=3)
     assert cycles
     original_rollback = db_session.rollback
+    neutrality_calls: list[object] = []
 
     async def _fail_execution(*_args, **_kwargs):
+        neutrality_calls.append(_args)
         raise RuntimeError("execution private detail")
 
-    async def _fail_rollback():
-        raise RuntimeError("rollback private detail")
+    # THE ROLLBACK OF THE SESSION THAT EXECUTED, and only the one after the execution failed (017
+    # stage 2 closing review, F5). This test used to fail `db_session.rollback` itself. On PostgreSQL
+    # clearing rolls the caller's session back BEFORE execution (`_rollback_before_interlock`), so
+    # that injected failure fired there, the handler logged `clearing.rollback_failed` and raised
+    # E010, and every assertion below passed without the neutrality check ever being called
+    # (measured: `assert 0 == 1` on the counter above). The execution itself runs in clearing's own
+    # interlock session, whose rollback is the one this test is about.
+    real_rollback = AsyncSession.rollback
+    failed_rollbacks: list[object] = []
+
+    async def _fail_rollback_after_execution_failed(self):
+        if neutrality_calls and not failed_rollbacks:
+            failed_rollbacks.append(self)
+            raise RuntimeError("rollback private detail")
+        return await real_rollback(self)
 
     monkeypatch.setattr(
         InvariantChecker,
         "verify_clearing_neutrality",
         _fail_execution,
     )
-    monkeypatch.setattr(db_session, "rollback", _fail_rollback)
+    monkeypatch.setattr(AsyncSession, "rollback", _fail_rollback_after_execution_failed)
 
     try:
         with pytest.raises(GeoException) as exc_info:
             await service.execute_clearing_with_amount(cycles[0])
 
+        assert len(neutrality_calls) == 1, (
+            "non-vacuity: the execution never reached the neutrality check, so the rollback that "
+            "failed was not the one after an execution failure"
+        )
+        assert len(failed_rollbacks) == 1, (
+            "non-vacuity: no rollback was attempted after the execution failed"
+        )
+        assert "execution private detail" in str(exc_info.value.__cause__)
         assert exc_info.value.code == "E010"
         assert "private detail" not in exc_info.value.message
         assert any(

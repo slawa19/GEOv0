@@ -18,6 +18,17 @@ committed row stays invisible.
 What this guard does NOT see: a leak through a second engine, a background task, or a session the
 test opens itself - those bypass the fixture and are mode B's business. It checks the fixture,
 not every path a test can take to the database.
+
+Two preconditions are checked rather than assumed (017 stage 2 closing review, F3 and F4):
+
+- THE OBSERVER LOOKS AT THE DATABASE THE TEST WROTE TO. Under `GEO_TEST_FIXTURE_MODE=B` the fixture
+  hands out a session on a disposable clone, and the observer - always the tier's engine - then
+  proved an absence in a database nobody had written to: the test passed, measured 2026-09-23. The
+  test now compares `current_database()` on both sides and refuses when they differ.
+- THE CONTROL BUILDS THE SCHEMA ITSELF. It requests no fixture, and the schema is built lazily by
+  the first `db_session`; on a fresh task database it failed with `relation "equivalents" does not
+  exist` whenever it ran first, measured 2026-09-23 - a result that depended on which tests ran
+  before it.
 """
 
 from __future__ import annotations
@@ -43,7 +54,11 @@ async def _visible_from_a_fresh_connection(code: str) -> bool:
 async def test_the_probe_can_see_a_row_that_really_was_committed():
     """Counter-check first: without it the next test could pass because the probe sees nothing."""
 
-    from tests.conftest import engine as test_engine
+    from tests.conftest import _ensure_schema_initialized, engine as test_engine
+
+    # The same schema build `db_session` performs, so this control does not depend on whether a
+    # test that requested the fixture happened to run before it.
+    await _ensure_schema_initialized()
 
     code = "Q" + uuid.uuid4().hex[:5].upper()
     async with test_engine.connect() as writer:
@@ -70,6 +85,19 @@ async def test_an_application_commit_inside_mode_a_stays_inside_the_test(db_sess
     """The fixture's session commits the way application code does; nothing may escape it."""
 
     from app.db.models.equivalent import Equivalent
+    from tests.conftest import engine as test_engine
+
+    # The absence below is only evidence if the observer looks at the database the session writes
+    # to. A mode-B session (e.g. under GEO_TEST_FIXTURE_MODE=B) writes to a clone, and the absence
+    # would then hold in the tier by construction.
+    written_to = await db_session.scalar(text("SELECT current_database()"))
+    async with test_engine.connect() as observer:
+        observed = await observer.scalar(text("SELECT current_database()"))
+    assert written_to == observed, (
+        f"the fixture's session writes to {written_to!r} but the observer reads {observed!r}: this "
+        f"is not mode A (is GEO_TEST_FIXTURE_MODE=B set?), and an absence measured in another "
+        f"database proves nothing about the savepoint"
+    )
 
     code = "Q" + uuid.uuid4().hex[:5].upper()
     db_session.add(Equivalent(code=code, precision=2, is_active=True))
