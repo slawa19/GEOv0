@@ -80,6 +80,10 @@ from app.utils.exceptions import RetryablePaymentConflictException
 from tests.debt_setup import debt_fixture_setup
 from tests.debt_setup import purge_test_ledger
 
+# MODE B (017 stage 2c, T1702): every commit of this module lands in a clone dropped after the test,
+# not in the tier database it shares with mode-A tests - see `tests/tier_on_a_clone.py`.
+from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
+
 pytestmark = pytest.mark.postgres
 
 _LIMIT = Decimal("1000.00")
@@ -98,12 +102,13 @@ def _utc_now() -> datetime:
 
 
 @pytest_asyncio.fixture
-async def factory():
-    from tests.conftest import TEST_DATABASE_URL, _ensure_schema_initialized
-
-    await _ensure_schema_initialized()
+async def factory(committed_database):
+    # ON THE CLONE, NOT THE TIER (017 stage 2c): this engine commits for real, and the tier database
+    # is shared with mode-A tests in one process - see `tests/tier_on_a_clone.py`. The modules that
+    # import this fixture import `tier_sessions_on_a_clone` too, so their `TestingSessionLocal`
+    # observers read the same clone this engine writes.
     engine = create_async_engine(
-        TEST_DATABASE_URL,
+        committed_database.url,
         pool_size=5,
         max_overflow=0,
         pool_timeout=20,

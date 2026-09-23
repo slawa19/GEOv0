@@ -77,6 +77,10 @@ from tests.integration.test_scenarios import (
 
 from tests.debt_setup import debt_fixture_setup, purge_test_ledger
 
+# MODE B (017 stage 2c, T1702): every commit of this module lands in a clone dropped after the test,
+# not in the tier database it shares with mode-A tests - see `tests/tier_on_a_clone.py`.
+from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
+
 pytestmark = pytest.mark.postgres
 
 
