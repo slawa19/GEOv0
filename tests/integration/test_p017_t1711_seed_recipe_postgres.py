@@ -128,7 +128,7 @@ async def test_the_recipe_runs_and_every_acceptance_check_passes(template_name):
     ) as clone_url:
         engine, factory = _factory_for(clone_url)
         try:
-            report = await seed_community(factory, community_id=COMMUNITY, env="test")
+            report = await seed_community(factory, community_id=COMMUNITY, env="test", allow_scratch_suffix=True)
 
             assert report.participants == EXPECTED_PARTICIPANTS
             assert report.trustlines == EXPECTED_TRUSTLINES
@@ -166,7 +166,7 @@ async def test_the_recipe_runs_and_every_acceptance_check_passes(template_name):
             # cannot be addressed again: replaying onto them is not possible, and pretending
             # otherwise would double the money.
             with pytest.raises(SeedRefusal, match="not empty"):
-                await seed_community(factory, community_id=COMMUNITY, env="test")
+                await seed_community(factory, community_id=COMMUNITY, env="test", allow_scratch_suffix=True)
 
             # And the refusal changed nothing.
             assert await _scalar(factory, "SELECT count(*) FROM participants") == EXPECTED_PARTICIPANTS
@@ -189,7 +189,7 @@ async def test_a_community_declaring_an_unreachable_state_is_refused_before_anyt
         try:
             with pytest.raises(SeedRefusal) as refusal:
                 await seed_community(
-                    factory, community_id="greenfield-village-100", env="test"
+                    factory, community_id="greenfield-village-100", env="test", allow_scratch_suffix=True
                 )
             assert "9 state(s)" in str(refusal.value)
             assert "frozen" in str(refusal.value)
@@ -284,7 +284,7 @@ async def test_a_command_that_cannot_be_performed_stops_the_seed_and_names_itsel
                     factory,
                     community_id=COMMUNITY,
                     communities_root=root,
-                    env="test",
+                    env="test", allow_scratch_suffix=True,
                 )
             assert "impossible.002.guide-pays-more-than-exists" in str(refusal.value)
 
@@ -300,7 +300,7 @@ async def test_a_command_that_cannot_be_performed_stops_the_seed_and_names_itsel
 
             # And a fresh attempt on the half-written database is refused rather than continued.
             with pytest.raises(SeedRefusal, match="not empty"):
-                await seed_community(factory, community_id=COMMUNITY, env="test")
+                await seed_community(factory, community_id=COMMUNITY, env="test", allow_scratch_suffix=True)
         finally:
             await engine.dispose()
 
@@ -318,7 +318,7 @@ async def test_the_acceptance_refuses_an_empty_database_instead_of_passing_it(te
     ) as seeded_url:
         seeded_engine, seeded_factory = _factory_for(seeded_url)
         try:
-            report = await seed_community(seeded_factory, community_id=COMMUNITY, env="test")
+            report = await seed_community(seeded_factory, community_id=COMMUNITY, env="test", allow_scratch_suffix=True)
         finally:
             await seeded_engine.dispose()
 
@@ -506,7 +506,7 @@ async def test_every_acceptance_check_reddens_on_the_state_it_exists_to_notice(t
     ) as clone_url:
         engine, factory = _factory_for(clone_url)
         try:
-            report = await seed_community(factory, community_id=COMMUNITY, env="test")
+            report = await seed_community(factory, community_id=COMMUNITY, env="test", allow_scratch_suffix=True)
             refs_to_pid = report.refs_to_pid
 
             async def verdicts():

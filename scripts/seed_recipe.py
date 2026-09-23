@@ -47,7 +47,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
-import re
 import sys
 import uuid
 from dataclasses import dataclass, field
@@ -117,10 +116,6 @@ REACHABLE_TRUSTLINE_STATUSES = frozenset({"active"})
 #: A description's participant statuses and the operation that reaches each one.
 #: `frozen` is `admin.participants.freeze`, which writes `suspended` (`app/api/v1/admin.py:977`).
 REACHABLE_PARTICIPANT_STATUSES = frozenset({"active", "frozen"})
-
-#: A disposable database, by name. `geov0_dev_<slug>` is the launcher's (`T1710`),
-#: `geov0_test_<slug>` the test harness's (`scripts/validate_test_database_url.py:20`).
-_DISPOSABLE_POSTGRES_DATABASE_RE = re.compile(r"^geov0_(dev|test)_[A-Za-z0-9_-]+$")
 
 #: Attempts per command, and the delay before each retry. Only a TRANSIENT failure is retried, and a
 #: retry re-sends the same command id, which is the payment's `tx_id`: the replay returns the stored
@@ -205,18 +200,60 @@ async def database_url(session_factory: Callable[[], Any]) -> Any:
         return engine.url
 
 
-def assert_target_is_disposable(url: Any) -> None:
-    """Refuse any database that is not, by its own name, a disposable local one."""
+def assert_target_is_disposable(url: Any, *, allow_scratch_suffix: bool = False) -> None:
+    """Refuse any database that is not, by its own name, a disposable local one.
+
+    For PostgreSQL the seed OWNS NO NAME CONTRACT and keeps no copy of one: `geov0_dev_<slug>` is
+    decided by `scripts/dev_database.py`, `geov0_test_<slug>` by `scripts/validate_test_database_url.py`.
+    The copy this function used to hold - one regex over both - accepted `geov0_test_a__b`, a name
+    provisioning reserves for the scratch databases of task `a` and drops when it sweeps them (Codex
+    external review of `37fec08..5e687dd`, F5, 2026-09-23).
+
+    `allow_scratch_suffix` means what it means in the test guard, for the same kind of caller: a
+    test seeding a clone that provisioning derived as `<tier>__<suffix>`. The supported CLI
+    (`scripts/seed_db.py --source recipe`) leaves it off.
+    """
 
     backend = url.get_backend_name()
     if backend in {"postgresql", "postgres"}:
         database = url.database or ""
-        if not _DISPOSABLE_POSTGRES_DATABASE_RE.match(database):
-            raise SeedRefusal(
-                f"PostgreSQL database {database!r} is not a disposable seed database; the name "
-                f"contract is {_DISPOSABLE_POSTGRES_DATABASE_RE.pattern}"
+        rendered = url.render_as_string(hide_password=False)
+        if database.startswith("geov0_dev_"):
+            from scripts.dev_database import (  # noqa: PLC0415
+                UnsafeDevDatabaseError,
+                assert_safe_dev_database_url,
             )
-        return
+
+            try:
+                assert_safe_dev_database_url(rendered)
+            except UnsafeDevDatabaseError as refusal:
+                raise SeedRefusal(f"not a disposable seed database: {refusal}") from None
+            return
+        if database.startswith("geov0_test_"):
+            from scripts.validate_test_database_url import (  # noqa: PLC0415
+                UnsafeTestDatabaseError,
+                assert_safe_test_database_url,
+            )
+
+            try:
+                # "1": the guard's last rule is the opt-in for the harness's destructive schema
+                # RESET. The seed resets nothing - it refuses a database that is not empty - so
+                # that opt-in is not the question asked here; every NAME rule before it is.
+                assert_safe_test_database_url(
+                    rendered,
+                    allow_destructive_reset="1",
+                    repo_root=_REPO_ROOT,
+                    required_backend="postgresql",
+                    allow_scratch_suffix=allow_scratch_suffix,
+                )
+            except UnsafeTestDatabaseError as refusal:
+                raise SeedRefusal(f"not a disposable seed database: {refusal}") from None
+            return
+        raise SeedRefusal(
+            f"PostgreSQL database {database!r} is not a disposable seed database: only "
+            f"geov0_dev_<slug> (scripts/dev_database.py) and geov0_test_<slug> "
+            f"(scripts/validate_test_database_url.py) are"
+        )
     if backend == "sqlite":
         database = url.database or ""
         if database in {"", ":memory:"}:
@@ -1122,6 +1159,7 @@ async def seed_community(
     communities_root: Path | None = None,
     key_table_root: Path | None = None,
     env: str | None = None,
+    allow_scratch_suffix: bool = False,
 ) -> SeedReport:
     """Seed one community by running its recipe. Raises `SeedRefusal` and writes nothing further."""
 
@@ -1152,7 +1190,7 @@ async def seed_community(
 
     assert_environment_is_safe(env)
     url = await database_url(session_factory)
-    assert_target_is_disposable(url)
+    assert_target_is_disposable(url, allow_scratch_suffix=allow_scratch_suffix)
     try:
         async with session_factory() as session:
             await assert_database_is_empty(session)
