@@ -10,8 +10,6 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$previousEnv = [Environment]::GetEnvironmentVariable('ENV', 'Process')
-$previousEnvironment = [Environment]::GetEnvironmentVariable('ENVIRONMENT', 'Process')
 
 $pythonCandidates = @(
     (Join-Path $repoRoot '.venv\Scripts\python.exe'),
@@ -44,11 +42,10 @@ function Resolve-Python {
 }
 
 try {
-    # Fixture generation imports application modules. Give that child process an
-    # explicit permissive environment without leaking it into the caller.
-    $env:ENV = 'test'
-    $env:ENVIRONMENT = 'test'
-
+    # The generator needs no application settings and no database: it loads only the
+    # stdlib-only visualisation rules (see its _load_viz_rules). So no ENV or DATABASE_URL
+    # is set here; tests/unit/test_p017_s1_demo_fixture_generator_needs_no_database.py
+    # holds that line.
     $python = Resolve-Python
 
     if (-not $python) {
@@ -82,7 +79,4 @@ try {
     Write-Warning "Demo fixtures sync failed: $($_.Exception.Message). Using cached."
     if ($Strict) { exit 1 }
     exit 0
-} finally {
-    [Environment]::SetEnvironmentVariable('ENV', $previousEnv, 'Process')
-    [Environment]::SetEnvironmentVariable('ENVIRONMENT', $previousEnvironment, 'Process')
 }
