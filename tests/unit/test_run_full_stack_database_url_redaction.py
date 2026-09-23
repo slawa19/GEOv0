@@ -424,10 +424,15 @@ def test_database_and_ownership_preflight_precede_first_main_stop() -> None:
         main.index("Get-SafeDatabaseDisplayUrl -DatabaseUrl $EffectiveDatabaseUrl")
         < stop_index
     )
+    # Programme 017 `T1710` replaced the SQLite-only reset restriction with two preflights: the
+    # destructive-boundary check that owns the `geov0_dev_<slug>` name contract, and the proof that
+    # the application resolves the same database this launcher manages. Both are fallible, so both
+    # belong before the first stop for the same reason the line they replace did.
     assert (
-        main.index("if ($ResetDb -and $EffectiveDatabaseUrl -ne $DefaultDatabaseUrl)")
+        main.index("Invoke-DevDatabaseCommand -PythonExe $Python -Command 'validate'")
         < stop_index
     )
+    assert main.index('if ($EffectiveDatabaseUrl -ne $DevDatabaseUrl)') < stop_index
     assert (
         main.index("Assert-ServiceOwnershipForReplacement -Services $Services")
         < stop_index

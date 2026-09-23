@@ -3,7 +3,8 @@
     Запуск полного стека GEO: Backend + Admin UI + Simulator UI в real mode.
 
 .DESCRIPTION
-    Скрипт запускает все три компонента системы с единой базой данных SQLite.
+    Скрипт запускает все три компонента системы с единой базой данных PostgreSQL
+    (geov0_dev_<DbSlug>).
     - Backend (FastAPI/uvicorn) на порту 18000
     - Admin UI (Vite) на порту 5173
     - Simulator UI (Vite) на порту 5176
@@ -27,8 +28,8 @@
     Показать статус всех сервисов.
 
 .EXAMPLE
-    .\run_full_stack.ps1 -ResetDb -FixturesCommunity greenfield-village-100
-    Пересоздать БД с данными Greenfield и запустить полный стек.
+    .\run_full_stack.ps1 -ResetDb
+    Пересоздать базу лаунчера, исполнить рецепт Riverside и запустить полный стек.
 #>
 [CmdletBinding()]
 param(
@@ -41,10 +42,20 @@ param(
     [int]$SimulatorUiPort = 5176,
 
     [switch]$ResetDb,
-    
-    [ValidateSet('greenfield-village-100', 'riverside-town-50', 'greenfield-village-100-v2', 'riverside-town-50-v2')]
-    [string]$FixturesCommunity = 'greenfield-village-100',
-    
+
+    # The launcher's own PostgreSQL database is geov0_dev_<DbSlug>. Parallel agents each take their
+    # own slug so they do not share a mutable database (`AGENTS.md` §7).
+    [string]$DbSlug = 'local',
+    [string]$PgHost = '127.0.0.1',
+    [int]$PgPort = 5432,
+    [string]$PgUser = 'geo',
+
+    # The community whose committed recipe is executed through the domain services to populate the
+    # database. `greenfield-village-100` is accepted so its own named refusal is what the operator
+    # sees (specs/BACKLOG.md 2026-09-22), not a parameter-validation error that hides the reason.
+    [ValidateSet('riverside-town-50', 'greenfield-village-100')]
+    [string]$SeedCommunity = 'riverside-town-50',
+
     [switch]$ShowWindows,
     [switch]$NoInstall,
 
@@ -54,6 +65,13 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# The slug is refused here as well as in scripts/dev_database.py, because here it is still a NAME
+# and the message can say so; there it is already part of a URL. The pattern is the one AGENTS.md §5
+# reserves: alphanumeric/dash groups joined by single underscores, never a doubled underscore.
+if ($DbSlug -notmatch '^[A-Za-z0-9-]+(_[A-Za-z0-9-]+)*$') {
+    throw "-DbSlug '$DbSlug' is not a launcher slug: alphanumeric and dash groups joined by single underscores, no doubled underscore (AGENTS.md §5)."
+}
 
 # This entrypoint is explicitly for the permissive local-development profile.
 $env:ENV = 'dev'
@@ -92,10 +110,22 @@ $AdminUiDir = Join-Path $RepoRoot 'admin-ui'
 $SimulatorUiDir = Join-Path $RepoRoot 'simulator-ui/v2'
 $AdminEnvLocalPath = Join-Path $AdminUiDir '.env.local'
 $SimulatorEnvLocalPath = Join-Path $SimulatorUiDir '.env.local'
-$DefaultDatabaseUrl = 'sqlite+aiosqlite:///./.local-run/geov0.db'
-$LegacyRootDatabaseUrl = 'sqlite+aiosqlite:///./geov0.db'
-$DefaultDatabasePath = Join-Path $StateDir 'geov0.db'
-$LegacyRootDatabasePath = Join-Path $RepoRoot 'geov0.db'
+
+# Programme 017: PostgreSQL is the only engine. The launcher owns exactly one database, named after
+# its slug, and `scripts/dev_database.py` is the single owner of what may be done to that name.
+$DevDatabaseName = "geov0_dev_$DbSlug"
+$DevDatabasePassword = if ([string]::IsNullOrWhiteSpace($env:GEO_DEV_PG_PASSWORD)) { 'geo' } else { $env:GEO_DEV_PG_PASSWORD }
+$DevDatabaseUrl = "postgresql+asyncpg://${PgUser}:${DevDatabasePassword}@${PgHost}:${PgPort}/${DevDatabaseName}"
+# Printed instead of the URL: it carries no credentials by construction.
+$DevDatabaseDisplay = "postgresql+asyncpg://${PgUser}@${PgHost}:${PgPort}/${DevDatabaseName}"
+
+# The admin token each client receives in ITS OWN variable (never a shared one, never printed).
+# Default is the backend's own dev default, so a browser that already stored it keeps working; set
+# GEO_DEV_ADMIN_TOKEN to use another one.
+$DevAdminToken = if ([string]::IsNullOrWhiteSpace($env:GEO_DEV_ADMIN_TOKEN)) { 'dev-admin-token-change-me' } else { $env:GEO_DEV_ADMIN_TOKEN }
+
+$env:DATABASE_URL = $DevDatabaseUrl
+$env:ADMIN_TOKEN = $DevAdminToken
 
 # Create state directory
 if (-not (Test-Path $StateDir)) {
@@ -493,6 +523,109 @@ function Invoke-PythonScript {
     if ($LASTEXITCODE -ne 0) {
         throw "$Description failed with exit code $LASTEXITCODE"
     }
+}
+
+function Invoke-DevDatabaseCommand {
+    <#
+    .SYNOPSIS
+        Run scripts/dev_database.py and RETURN its exit code instead of throwing.
+
+    .DESCRIPTION
+        The exit code carries meaning this launcher has to branch on - 3 means "migrated and empty,
+        seed it" - so a helper that threw on anything non-zero would turn a normal state into a
+        failure. Callers that want a failure say so with -FailOnNonZero.
+    #>
+    param(
+        [string]$PythonExe,
+        [Parameter(Mandatory = $true)][string]$Command,
+        [string[]]$Arguments = @(),
+        [switch]$FailOnNonZero
+    )
+
+    $script = Join-Path $RepoRoot 'scripts\dev_database.py'
+    if (-not (Test-Path -LiteralPath $script -PathType Leaf)) {
+        throw "Script not found: $script"
+    }
+    # The tool's stdout is CAPTURED and re-emitted, not returned: a function returns everything it
+    # writes to the success stream, so letting the native command write there would make the caller
+    # receive the report lines and the exit code as one array - and `-eq 3` would silently be false.
+    # stderr is deliberately not redirected, so a refusal reaches the console unchanged.
+    Push-Location $RepoRoot
+    try {
+        $output = & $PythonExe $script $Command @Arguments
+    } finally {
+        Pop-Location
+    }
+    $code = $LASTEXITCODE
+    foreach ($line in @($output)) { Write-Host $line }
+    if ($FailOnNonZero -and $code -ne 0) {
+        # Exit 4 is the one TRANSIENT class: the cluster is not answering, and the operator's next
+        # move is to start it rather than to look at the database. Every other code is a state that
+        # a retry will not change, so the two are not reported with one sentence.
+        if ($code -eq 4) {
+            throw "PostgreSQL is not reachable at ${PgHost}:${PgPort}, so $DevDatabaseName cannot be prepared. Start the cluster (docs/ru/backend/postgres-local-portable.md section 3) and run this again."
+        }
+        throw "dev_database.py $Command failed with exit code $code."
+    }
+    return $code
+}
+
+function Invoke-MigrationEntrypoint {
+    <#
+    .SYNOPSIS
+        The one migration entry: `alembic -c migrations/alembic.ini upgrade head`.
+
+    .DESCRIPTION
+        Not a second copy of the schema bootstrap. Since `T1701` the `alembic_version` precondition
+        is established by `migrations/env.py` inside this very run, so every caller of this entry
+        gets it and the launcher carries no DDL of its own (consultation 2026-09-21: one owner for
+        the bootstrap). `docker/docker-entrypoint.sh` calls the same entry.
+    #>
+    param([string]$PythonExe)
+
+    Push-Location $RepoRoot
+    try {
+        & $PythonExe -m alembic -c migrations/alembic.ini upgrade head
+    } finally {
+        Pop-Location
+    }
+    if ($LASTEXITCODE -ne 0) {
+        throw "alembic upgrade head failed with exit code $LASTEXITCODE."
+    }
+}
+
+function Initialize-LauncherDatabase {
+    <#
+    .SYNOPSIS
+        Bring the launcher's database to "migrated, seeded, reconciling" - or refuse and say why.
+
+    .DESCRIPTION
+        The readiness probe is the gate, not a hint. Exit 3 from `dev_database.py ready` means the
+        schema is at head and the database is empty, which is the one state seeding is allowed to
+        start from; the seed itself refuses a non-empty database and names what it found (`T1711`).
+        Any other non-zero code is an unfinished or foreign initialization, and the stack does not
+        start on top of it (`AGENTS.md` §9).
+    #>
+    param([string]$PythonExe)
+
+    $null = Invoke-DevDatabaseCommand -PythonExe $PythonExe -Command 'ensure' -FailOnNonZero
+    Invoke-MigrationEntrypoint -PythonExe $PythonExe
+
+    $ready = Invoke-DevDatabaseCommand -PythonExe $PythonExe -Command 'ready' -Arguments @('--community', $SeedCommunity)
+    if ($ready -eq 0) { return }
+    if ($ready -ne 3) {
+        if ($ready -eq 4) {
+            throw "PostgreSQL stopped answering at ${PgHost}:${PgPort} while $DevDatabaseName was being checked. Start the cluster (docs/ru/backend/postgres-local-portable.md section 3) and run this again."
+        }
+        throw "The launcher database $DevDatabaseName is not ready (dev_database.py ready exited $ready); the reason is printed above. It is not safe to start the stack on it."
+    }
+
+    Write-Host "     Seeding $SeedCommunity through its recipe..." -ForegroundColor Gray
+    Invoke-PythonScript -PythonExe $PythonExe -ScriptPath (Join-Path $RepoRoot 'scripts\seed_db.py') -Arguments @('--source', 'recipe', '--community', $SeedCommunity) -Description "seed_db.py --source recipe"
+    # The seed takes the reconciliation baseline itself, on empty debts and before the first payment
+    # (`scripts/seed_recipe.py::take_baselines`). Taking one here afterwards would adopt the whole
+    # seed and certify nothing, so there is no baseline call on this path.
+    $null = Invoke-DevDatabaseCommand -PythonExe $PythonExe -Command 'ready' -Arguments @('--community', $SeedCommunity) -FailOnNonZero
 }
 
 function Get-EffectiveDatabaseUrl {
@@ -1018,20 +1151,19 @@ Write-Host "[OK] Node.js: $($Tools.Node)" -ForegroundColor Green
 $Python = $Tools.Python
 
 Set-EnvOverrides -Pairs $BackendEnv
+
+# Two separate facts, and both matter. `dev_database.py validate` is the destructive-boundary check
+# - the one place that decides whether this name may ever be dropped. The comparison against the
+# application's own settings proves that the uvicorn process this launcher starts will inherit
+# exactly that database, instead of reading a different one from `.env`. Neither message prints the
+# URL: it carries the password (`AGENTS.md` §12).
+$null = Invoke-DevDatabaseCommand -PythonExe $Python -Command 'validate' -FailOnNonZero
 $EffectiveDatabaseUrl = Get-EffectiveDatabaseUrl -PythonExe $Python
 $SafeDatabaseDisplayUrl = Get-SafeDatabaseDisplayUrl -DatabaseUrl $EffectiveDatabaseUrl
-
-$LocalDatabasePath = if ($EffectiveDatabaseUrl -eq $DefaultDatabaseUrl) {
-    $DefaultDatabasePath
-} elseif ($EffectiveDatabaseUrl -eq $LegacyRootDatabaseUrl) {
-    $LegacyRootDatabasePath
-} else {
-    $null
+if ($EffectiveDatabaseUrl -ne $DevDatabaseUrl) {
+    throw "The application resolves a different DATABASE_URL than this launcher manages ($DevDatabaseName). Clear DATABASE_URL from .env and from this shell, then run again."
 }
 
-if ($ResetDb -and $EffectiveDatabaseUrl -ne $DefaultDatabaseUrl) {
-    throw '-ResetDb is restricted to the default .local-run SQLite DB; legacy or custom DATABASE_URL values are never deleted.'
-}
 if ($NoInstall -and -not (Test-Path (Join-Path $AdminUiDir 'node_modules'))) {
     throw '-NoInstall used but admin-ui/node_modules not found. Run without -NoInstall once (or run npm install in admin-ui).'
 }
@@ -1047,40 +1179,17 @@ if ($Action -eq 'restart') {
 }
 
 if ($ResetDb) {
-    Write-Host "[2/8] Resetting database..." -ForegroundColor Yellow
-    if (Test-Path $DefaultDatabasePath) {
-        Remove-Item -Force $DefaultDatabasePath
-        Write-Host "     Deleted existing DB" -ForegroundColor Gray
-    }
-    Invoke-PythonScript -PythonExe $Python -ScriptPath (Join-Path $RepoRoot 'scripts\init_sqlite_db.py') -Description "init_sqlite_db.py"
-    $seedArgs = @('--source', 'fixtures', '--community', $FixturesCommunity, '--regenerate-fixtures')
-    Invoke-PythonScript -PythonExe $Python -ScriptPath (Join-Path $RepoRoot 'scripts\seed_db.py') -Arguments $seedArgs -Description "seed_db.py"
-    # Programme 015 step 5a: reconciliation baseline right after seeding, before the backend starts.
-    # A failure throws and fails the reset.
-    Invoke-PythonScript -PythonExe $Python -ScriptPath (Join-Path $RepoRoot 'scripts\take_reconciliation_baseline.py') -Arguments @('--all') -Description "take_reconciliation_baseline.py --all"
-    Write-Host "     DB initialized with $FixturesCommunity" -ForegroundColor Green
+    # The processes were stopped immediately above, and `Stop-AllServices -FailOnConflict` has
+    # already thrown if anything it could not prove stopped is still there. The drop itself is a
+    # plain DROP DATABASE and refuses while ANY session is still connected - including one this
+    # launcher does not own.
+    Write-Host "[2/8] Resetting database $DevDatabaseDisplay ..." -ForegroundColor Yellow
+    $null = Invoke-DevDatabaseCommand -PythonExe $Python -Command 'reset' -FailOnNonZero
+    Initialize-LauncherDatabase -PythonExe $Python
+    Write-Host "     DB initialized with $SeedCommunity" -ForegroundColor Green
 } else {
-    Write-Host "[2/8] Checking database..." -ForegroundColor Yellow
-    if (-not $LocalDatabasePath) {
-        Write-Host "     Using explicit DATABASE_URL; automatic SQLite initialization is skipped." -ForegroundColor Gray
-    } elseif (-not (Test-Path $LocalDatabasePath)) {
-        Write-Host "     DB not found, initializing..." -ForegroundColor Gray
-        Invoke-PythonScript -PythonExe $Python -ScriptPath (Join-Path $RepoRoot 'scripts\init_sqlite_db.py') -Description "init_sqlite_db.py"
-        $seedArgs = @('--source', 'fixtures', '--community', $FixturesCommunity, '--regenerate-fixtures')
-        Invoke-PythonScript -PythonExe $Python -ScriptPath (Join-Path $RepoRoot 'scripts\seed_db.py') -Arguments $seedArgs -Description "seed_db.py"
-        # Step 5a: baseline right after seeding, before the backend starts; a failure aborts the launch.
-        Invoke-PythonScript -PythonExe $Python -ScriptPath (Join-Path $RepoRoot 'scripts\take_reconciliation_baseline.py') -Arguments @('--all') -Description "take_reconciliation_baseline.py --all"
-        Write-Host "     DB initialized with $FixturesCommunity" -ForegroundColor Green
-    } else {
-        Write-Host "     DB exists: $LocalDatabasePath" -ForegroundColor Gray
-        # 2026-08-22 / p009: an existing SQLite DB used to be left completely untouched, so
-        # a database created before migration 019 kept the old unconditional trust-line
-        # UNIQUE forever -- Alembic refuses to run on SQLite, and this was the only script
-        # that could have fixed it. init_sqlite_db.py is idempotent (create_all is
-        # checkfirst, and the rebuild only fires on the stale shape), so running it here
-        # costs nothing and is the only place the repair can reach an existing database.
-        Invoke-PythonScript -PythonExe $Python -ScriptPath (Join-Path $RepoRoot 'scripts\init_sqlite_db.py') -Description "init_sqlite_db.py (schema check)"
-    }
+    Write-Host "[2/8] Preparing database $DevDatabaseDisplay ..." -ForegroundColor Yellow
+    Initialize-LauncherDatabase -PythonExe $Python
 }
 
 Write-Host "[3/8] Starting Backend (uvicorn on port $BackendPort)..." -ForegroundColor Yellow
@@ -1135,7 +1244,17 @@ $AdminUiErrLogPath = Ensure-LogFilePath -Path $AdminUiErrLogPath
 
 $adminUiViteScript = Get-ViteScriptPath -ProjectDir $AdminUiDir
 $adminUiDirectArgs = @(('"{0}"' -f $adminUiViteScript), '--port', "$AdminUiPort", '--strictPort')
-$adminUiProcess = Start-Process -FilePath $Tools.Node -ArgumentList $adminUiDirectArgs -WorkingDirectory $AdminUiDir -WindowStyle $WindowStyle -RedirectStandardOutput $AdminUiOutLogPath -RedirectStandardError $AdminUiErrLogPath -PassThru
+# EACH CLIENT GETS ITS OWN VARIABLE, set only around that client's start, so the Admin UI's token
+# never enters the Simulator UI's process and neither value is written to a log or to a file in the
+# working tree (`AGENTS.md` §12). The two UIs authenticate to one backend, but they do not share a
+# variable to do it.
+$env:VITE_ADMIN_TOKEN = $DevAdminToken
+try {
+    $adminUiProcess = Start-Process -FilePath $Tools.Node -ArgumentList $adminUiDirectArgs -WorkingDirectory $AdminUiDir -WindowStyle $WindowStyle -RedirectStandardOutput $AdminUiOutLogPath -RedirectStandardError $AdminUiErrLogPath -PassThru
+} finally {
+    Remove-Item Env:VITE_ADMIN_TOKEN -ErrorAction SilentlyContinue
+}
+Write-Host "     Admin UI token supplied as VITE_ADMIN_TOKEN (value not logged)" -ForegroundColor Gray
 $adminUiOwnership = Wait-ForLaunchedServiceOwnership -Service $AdminUiService -Process $adminUiProcess -TimeoutSec 60
 $StartedThisAttempt += [pscustomobject]@{
     Service = $AdminUiService
@@ -1155,7 +1274,15 @@ $SimulatorUiErrLogPath = Ensure-LogFilePath -Path $SimulatorUiErrLogPath
 
 $simulatorUiViteScript = Get-ViteScriptPath -ProjectDir $SimulatorUiDir
 $simulatorUiDirectArgs = @(('"{0}"' -f $simulatorUiViteScript), '--port', "$SimulatorUiPort", '--strictPort')
-$simulatorUiProcess = Start-Process -FilePath $Tools.Node -ArgumentList $simulatorUiDirectArgs -WorkingDirectory $SimulatorUiDir -WindowStyle $WindowStyle -RedirectStandardOutput $SimulatorUiOutLogPath -RedirectStandardError $SimulatorUiErrLogPath -PassThru
+# The Simulator UI's own variable - a different name from the Admin UI's, read by
+# `simulator-ui/v2/src/composables/useSimulatorApp.ts:543`.
+$env:VITE_GEO_DEV_ACCESS_TOKEN = $DevAdminToken
+try {
+    $simulatorUiProcess = Start-Process -FilePath $Tools.Node -ArgumentList $simulatorUiDirectArgs -WorkingDirectory $SimulatorUiDir -WindowStyle $WindowStyle -RedirectStandardOutput $SimulatorUiOutLogPath -RedirectStandardError $SimulatorUiErrLogPath -PassThru
+} finally {
+    Remove-Item Env:VITE_GEO_DEV_ACCESS_TOKEN -ErrorAction SilentlyContinue
+}
+Write-Host "     Simulator UI token supplied as VITE_GEO_DEV_ACCESS_TOKEN (value not logged)" -ForegroundColor Gray
 $simulatorUiOwnership = Wait-ForLaunchedServiceOwnership -Service $SimulatorUiService -Process $simulatorUiProcess -TimeoutSec 60
 $StartedThisAttempt += [pscustomobject]@{
     Service = $SimulatorUiService
