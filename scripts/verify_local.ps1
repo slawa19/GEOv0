@@ -5,8 +5,6 @@ param(
     [string]$TaskSlug = 'verify-local',
     [switch]$StaticDiagnostics,
     [string[]]$BackendSelector = @(),
-    [ValidatePattern('^[A-Za-z_][A-Za-z0-9_]*$')]
-    [string]$BackendMarker,
     [switch]$IncludeExpensive,
     [switch]$BackendOnly,
     [switch]$UiOnly
@@ -31,7 +29,6 @@ if ($BackendOnly -and $UiOnly) {
 if ($UiOnly) {
     $ignoredBackendArguments = @()
     if ($BackendSelector.Count -gt 0) { $ignoredBackendArguments += '-BackendSelector' }
-    if ($BackendMarker) { $ignoredBackendArguments += '-BackendMarker' }
     if ($IncludeExpensive) { $ignoredBackendArguments += '-IncludeExpensive' }
     if ($ignoredBackendArguments.Count -gt 0) {
         throw "-UiOnly runs no backend step, so $($ignoredBackendArguments -join ', ') would be accepted and ignored. Drop the switch, or drop -UiOnly and let the backend half run."
@@ -115,15 +112,46 @@ $testRunsRoot = Join-Path $localRunRoot 'test-runs'
 $taskRoot = Join-Path $testRunsRoot $TaskSlug
 $baseTemp = Join-Path $taskRoot 'pytest'
 $artifactRoot = Join-Path $taskRoot 'artifacts'
-$defaultTestDb = "sqlite+aiosqlite:///./.local-run/test-runs/$TaskSlug/test.db"
+# THE TIER RUNS ONLY ON POSTGRESQL (017 stage 2c, T1702). Until then an unset TEST_DATABASE_URL
+# meant a SQLite file under this task's directory, and PostgreSQL was a second tier behind
+# `-BackendMarker postgres`. Both are gone. An unset URL is now DERIVED from the task slug:
+#
+#     postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_<TaskSlug>
+#
+# WHY DERIVING IS SAFE, WHICH IS THE WHOLE QUESTION, because deriving also means setting the
+# destructive-reset opt-in on the operator's behalf:
+#   * the name is `geov0_test_` + a slug that `ValidatePattern` above has already restricted to
+#     [A-Za-z0-9_-], so it matches the guard's `geov0_test_*` rule BY CONSTRUCTION and cannot name a
+#     developer database (`geov0`, `geov0_dev_*`), carry a quote, a slash or a second URL part; a slug
+#     with the reserved `__` is still refused by the guard, opt-in or not;
+#   * the host is the literal 127.0.0.1 - this machine - and the credentials are the documented
+#     local convention (AGENTS.md section 5), so a wrong server cannot be reached by accident;
+#   * the tier creates that database itself if it is missing (tests/migrated_schema.py,
+#     ensure_tier_database), so there is nothing else it could be;
+#   * the opt-in is set ONLY in the derived branch. A URL handed in from outside keeps needing
+#     GEO_TEST_ALLOW_DB_RESET=1 from whoever handed it in, exactly as before; the guard step below
+#     refuses it otherwise. Both variables are restored when the runner exits.
+# `127.0.0.1`, not `localhost`: see AGENTS.md section 5 (2 s per connection over IPv6 first).
+$derivedTestDb = "postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_$TaskSlug"
 $previousTestDatabaseUrl = $env:TEST_DATABASE_URL
+$previousAllowDbReset = $env:GEO_TEST_ALLOW_DB_RESET
+$previousUseMigratedSchema = $env:GEO_TEST_USE_MIGRATED_SCHEMA
 $previousTestArtifactRoot = $env:GEO_TEST_ARTIFACT_ROOT
 
 New-Item -ItemType Directory -Path $artifactRoot -Force | Out-Null
 
 try {
-    if (-not $env:TEST_DATABASE_URL) {
-        $env:TEST_DATABASE_URL = $defaultTestDb
+    if (-not $UiOnly) {
+        if (-not $env:TEST_DATABASE_URL) {
+            $env:TEST_DATABASE_URL = $derivedTestDb
+            $env:GEO_TEST_ALLOW_DB_RESET = '1'
+            Write-Host "TEST_DATABASE_URL not set: using the derived $($derivedTestDb -replace '//geo:geo@', '//geo:***@')" -ForegroundColor Cyan
+        }
+        # The tier builds its schema with the migrations, as CI does, not with `create_all`: the two
+        # differ (87 against 90 constraints, measured T1534), and only the migrated one is deployed.
+        if (-not $env:GEO_TEST_USE_MIGRATED_SCHEMA) {
+            $env:GEO_TEST_USE_MIGRATED_SCHEMA = '1'
+        }
     }
     $env:GEO_TEST_ARTIFACT_ROOT = $artifactRoot
 
@@ -136,11 +164,8 @@ try {
                 }
             }
             Invoke-RequiredStep -Name 'Test database safety guard' -Command {
-                $databaseGuardArgs = @()
-                if ($BackendMarker -eq 'postgres') {
-                    $databaseGuardArgs += @('--require-backend', 'postgresql')
-                }
-                & $pythonExe scripts/validate_test_database_url.py @databaseGuardArgs
+                # Always PostgreSQL: there is no other tier any more (017 stage 2c).
+                & $pythonExe scripts/validate_test_database_url.py --require-backend postgresql
             }
             Invoke-RequiredStep -Name 'Backend tests (pytest)' -Command {
                 $pytestCache = Join-Path $taskRoot 'cache'
@@ -150,21 +175,16 @@ try {
                     '-o', "cache_dir=$pytestCache",
                     '-q'
                 )
-                # NOTHING IS EXCLUDED FROM A TIER BEYOND `slow` AND `postgres`, and that is a deletion
-                # worth naming: until 2026-09-12 every branch below also appended
-                # `and not b4_counterexample`, which took the 107 programme-015 step-2 counterexamples
-                # out of the default tier, out of -IncludeExpensive and out of an explicitly requested
-                # marker alike. They were red on purpose while the debt journal did not exist. Step 4
-                # slice C built it; the counterexamples went green through the journal, with their
-                # assertions untouched, and the exclusion left with the marker (see pytest.ini).
-                if ($BackendMarker) {
-                    $pytestArgs += @('-m', $BackendMarker)
-                }
-                elseif ($IncludeExpensive) {
-                    $pytestArgs += @('-m', 'not postgres')
-                }
-                else {
-                    $pytestArgs += @('-m', 'not slow and not postgres')
+                # NOTHING IS EXCLUDED FROM THE TIER BEYOND `slow`, and both deletions are worth naming.
+                # Until 2026-09-12 every branch also appended `and not b4_counterexample`, which took
+                # the 107 programme-015 step-2 counterexamples out of every tier while the debt journal
+                # did not exist; they went green through the journal and the exclusion left with the
+                # marker. Until 017 stage 2c the default also subtracted `postgres`, which ran the
+                # PostgreSQL tests as a second tier behind `-BackendMarker postgres`; that tier and the
+                # parameter are gone, and every database test runs on the PostgreSQL tier. With
+                # -IncludeExpensive nothing at all is excluded.
+                if (-not $IncludeExpensive) {
+                    $pytestArgs += @('-m', 'not slow')
                 }
                 if ($BackendSelector.Count -gt 0) {
                     $pytestArgs += '--'
@@ -222,6 +242,8 @@ try {
 }
 finally {
     $env:TEST_DATABASE_URL = $previousTestDatabaseUrl
+    $env:GEO_TEST_ALLOW_DB_RESET = $previousAllowDbReset
+    $env:GEO_TEST_USE_MIGRATED_SCHEMA = $previousUseMigratedSchema
     $env:GEO_TEST_ARTIFACT_ROOT = $previousTestArtifactRoot
 }
 

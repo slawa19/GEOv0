@@ -125,20 +125,22 @@ def test_pytest_no_longer_registers_the_marker() -> None:
 def test_the_canonical_runner_subtracts_the_marker_from_no_tier() -> None:
     """No branch of the runner's marker expression may exclude it.
 
-    Three branches, and all three mattered: the default tier, `-IncludeExpensive`, and an explicitly
-    requested `-BackendMarker`. Each carried `and not b4_counterexample` and each has stopped. A
-    runner that put the exclusion back would take the counterexamples out of the gate without any
-    module in `tests/` changing, so the assertion above could not see it.
+    Three branches then, and all three mattered: the default tier, `-IncludeExpensive`, and an
+    explicitly requested `-BackendMarker`. Each carried `and not b4_counterexample` and each has
+    stopped. A runner that put the exclusion back would take the counterexamples out of the gate
+    without any module in `tests/` changing, so the assertion above could not see it. Since 017
+    stage 2c there are two branches - `-BackendMarker` left with the `postgres` marker - and the
+    default expression is `not slow`.
     """
 
     runner = (_ROOT / "scripts" / "verify_local.ps1").read_text(encoding="utf-8")
 
-    assert "'not slow and not postgres'" in runner, (
-        "the runner's DEFAULT marker expression is not `not slow and not postgres` any more; if it "
-        "has grown another exclusion, say which tests it removes and why they may not run"
+    assert "@('-m', 'not slow')" in runner, (
+        "the runner's DEFAULT marker expression is not `not slow` any more; if it has grown another "
+        "exclusion, say which tests it removes and why they may not run"
     )
-    assert "'not postgres'" in runner, (
-        "the runner's -IncludeExpensive expression is not `not postgres` any more"
+    assert "if (-not $IncludeExpensive) {" in runner, (
+        "the runner no longer drops the marker expression entirely under -IncludeExpensive"
     )
     offending = [
         line.strip()
@@ -146,7 +148,6 @@ def test_the_canonical_runner_subtracts_the_marker_from_no_tier() -> None:
         if _MARKER in line and not line.strip().startswith("#")
     ]
     assert not offending, (
-        f"the canonical runner subtracts `{_MARKER}` again: {offending}. Every tier - default, "
-        f"-IncludeExpensive and an explicitly requested -BackendMarker - must select the step-4 "
-        f"counterexamples like any other test."
+        f"the canonical runner subtracts `{_MARKER}` again: {offending}. Every tier - default "
+        f"and -IncludeExpensive - must select the step-4 counterexamples like any other test."
     )

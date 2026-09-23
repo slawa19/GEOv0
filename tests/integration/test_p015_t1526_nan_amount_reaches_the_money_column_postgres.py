@@ -73,8 +73,6 @@ from app.db.models.participant import Participant
 from tests.debt_setup import debt_fixture_setup
 from tests.debt_setup import purge_test_ledger
 
-pytestmark = pytest.mark.postgres
-
 
 @pytest_asyncio.fixture
 async def factory():

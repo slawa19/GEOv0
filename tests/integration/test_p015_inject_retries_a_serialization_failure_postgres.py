@@ -44,8 +44,6 @@ from tests.integration.test_p015_inject_holds_the_owner_lock_postgres import (  
 
 from tests.debt_setup import debt_fixture_setup
 
-pytestmark = pytest.mark.postgres
-
 
 _EXISTING = Decimal("5.00")
 _CONCURRENT = Decimal("7.12345678")

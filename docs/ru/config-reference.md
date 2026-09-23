@@ -102,13 +102,14 @@ configuration persistence.
 [`scripts/verify_local.ps1`](../../scripts/verify_local.ps1) по умолчанию назначает
 уникальные для `TaskSlug`:
 
-- `TEST_DATABASE_URL=.local-run/test-runs/<TaskSlug>/test.db`;
+- `TEST_DATABASE_URL=postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_<TaskSlug>`
+  (если не задан; вместе с `GEO_TEST_ALLOW_DB_RESET=1` только для этого выведенного имени);
 - pytest basetemp и cache;
 - `GEO_TEST_ARTIFACT_ROOT=.local-run/test-runs/<TaskSlug>/artifacts`.
 
-Для Postgres-тестов задавайте отдельную disposable DB и только после проверки URL
-включайте `GEO_TEST_ALLOW_DB_RESET=1`. Прямой pytest — debug path; его fallback
-также находится под `.local-run/test-runs/direct-pytest/`.
+Тир тестов идёт только на PostgreSQL (017, стадия 2c, 2026-09-23). Свою базу задавайте
+явно и только после проверки URL включайте `GEO_TEST_ALLOW_DB_RESET=1`. Прямой pytest —
+debug path: у него умолчания нет, `TEST_DATABASE_URL` обязателен.
 
 ## UI build-time параметры
 

@@ -121,7 +121,11 @@ def assert_safe_test_database_url(
             )
         if required_backend == "postgresql":
             raise UnsafeTestDatabaseError(
-                "This test tier requires the PostgreSQL database backend."
+                "This test tier requires the PostgreSQL database backend. Unset "
+                "TEST_DATABASE_URL to let scripts/verify_local.ps1 derive "
+                "postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_<TaskSlug>, or set it to "
+                "such a URL with GEO_TEST_ALLOW_DB_RESET=1. No PostgreSQL on this machine? See "
+                "docs/ru/backend/postgres-local-portable.md."
             )
         return url
 

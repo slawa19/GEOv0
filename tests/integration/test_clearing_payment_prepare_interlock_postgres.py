@@ -19,8 +19,6 @@ from sqlalchemy.ext.asyncio import (
 from tests.debt_setup import debt_fixture_setup, purge_test_ledger
 
 
-pytestmark = pytest.mark.postgres
-
 
 def _require_postgres(db_session) -> None:
     dialect = db_session.get_bind().dialect.name

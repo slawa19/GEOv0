@@ -50,8 +50,6 @@ from tests.unit.test_p015_step5a_reconciliation import (
     _verify,
 )
 
-pytestmark = pytest.mark.postgres
-
 _TABLES = (
     "debt_reconciliation_baselines",
     "debt_reconciliation_baseline_offsets",

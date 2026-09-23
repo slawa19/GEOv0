@@ -78,7 +78,9 @@ from tests.integration.test_p015_t1544_operator_stop_races_postgres import (  # 
 from tests.migrated_schema import REPO_ROOT, run_alembic_upgrade_head, scratch_databases
 from tests.unit.test_p015_step5c_reaction_and_hold import hold_directly
 
-pytestmark = pytest.mark.postgres
+# MODE B (017 stage 2c, T1702): every commit of this module lands in a clone dropped after the test,
+# not in the tier database it shares with mode-A tests - see `tests/tier_on_a_clone.py`.
+from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
 
 HOLD = PaymentEngine.EQUIVALENT_INTEGRITY_HOLD_REASON
 _ATOM = Decimal("0.00000001")

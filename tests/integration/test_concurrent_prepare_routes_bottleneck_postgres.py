@@ -9,8 +9,6 @@ from sqlalchemy import select
 from tests.debt_setup import purge_test_ledger
 
 
-pytestmark = pytest.mark.postgres
-
 
 @pytest.mark.asyncio
 async def test_concurrent_payments_shared_bottleneck_commit_once_postgres(

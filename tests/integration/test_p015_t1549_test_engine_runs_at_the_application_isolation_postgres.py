@@ -23,8 +23,6 @@ from sqlalchemy.pool import NullPool
 
 from app.config import settings
 
-pytestmark = pytest.mark.postgres
-
 
 def _normalised(level: str) -> str:
     return str(level).strip().lower().replace("_", " ")

@@ -52,8 +52,6 @@ from app.core.auth.canonical import canonical_json
 from app.core.auth.crypto import generate_keypair
 from app.utils.exceptions import ConflictException
 
-pytestmark = pytest.mark.postgres
-
 
 def _url() -> str:
     url = os.environ.get("TEST_DATABASE_URL", "")

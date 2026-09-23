@@ -67,7 +67,15 @@ jobs:
           python scripts/check_alembic_heads.py
           bash docker/docker-entrypoint.sh true
 
-      - name: Run Phase 2 PostgreSQL concurrency matrix
+      # ONE PYTEST SESSION, THE WHOLE TIER, ON POSTGRESQL (017 stage 2c, T1702). Until then this job
+      # ran three: the three-selector concurrency matrix and the `-BackendMarker postgres` tier, both
+      # on PostgreSQL, and then the default tier on SQLite with no database environment at all.
+      # Stage 2 moved the default tier to PostgreSQL and 2c removed the marker, so the three sessions
+      # became one. Nothing is selected by file: the matrix's three tests are collected by the tier
+      # like every other test, and `tests/unit/test_p017_required_gate_runs_on_postgres.py` names
+      # them one by one and fails if the session could stop collecting any of them. The environment
+      # is on the step, not the job, so the migration preflight above keeps its own.
+      - name: Run the backend tier on PostgreSQL and the single Alembic head check
         shell: pwsh
         env:
           ENV: test
@@ -75,45 +83,6 @@ jobs:
           TEST_DATABASE_URL: postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_ci
           GEO_TEST_ALLOW_DB_RESET: "1"
           GEO_TEST_USE_MIGRATED_SCHEMA: "1"
-        run: |
-          $selectors = @(
-            'tests/integration/test_concurrent_prepare_routes_bottleneck_postgres.py::test_concurrent_payments_shared_bottleneck_commit_once_postgres'
-            'tests/integration/test_concurrent_clearing_payment_lost_update_postgres.py::test_concurrent_payment_and_clearing_same_trustline_preserve_effects_postgres'
-            'tests/integration/test_payment_idempotency_postgres.py::test_concurrent_duplicate_payment_request_never_regresses_terminal_state_postgres'
-          )
-          ./scripts/verify_local.ps1 `
-            -Python ((Get-Command python).Source) `
-            -TaskSlug ci-postgres-phase2 `
-            -BackendOnly `
-            -BackendMarker postgres `
-            -BackendSelector $selectors
-
-      - name: Run PostgreSQL marker tier
-        shell: pwsh
-        env:
-          ENV: test
-          DATABASE_URL: postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_ci
-          TEST_DATABASE_URL: postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_ci
-          GEO_TEST_ALLOW_DB_RESET: "1"
-          GEO_TEST_USE_MIGRATED_SCHEMA: "1"
-        run: >-
-          ./scripts/verify_local.ps1
-          -Python ((Get-Command python).Source)
-          -TaskSlug ci-postgres
-          -BackendOnly
-          -BackendMarker postgres
-          -BackendSelector tests/integration
-
-      # LAST ON PURPOSE, AND NOT SET UP LIKE THE STEPS ABOVE. The default tier still builds its
-      # schema with `create_all` on SQLite - stage 2 of programme 017 is what moves it - so
-      # `TEST_DATABASE_URL` is set on the PostgreSQL steps only and never at job level: a job-level
-      # PostgreSQL URL would silently take this step with it, and `GEO_TEST_USE_MIGRATED_SCHEMA=1`
-      # would abort it outright (tests/conftest.py:99-103). It runs after the PostgreSQL sessions
-      # because this tier has never run on Linux in CI before - it lived on windows-latest until
-      # 2026-09-21 - and a first-run Linux failure here must not hide the PostgreSQL evidence this
-      # job was created to produce.
-      - name: Run the default backend tier and the single Alembic head check
-        shell: pwsh
         run: >-
           ./scripts/verify_local.ps1
           -Python ((Get-Command python).Source)
@@ -263,12 +232,12 @@ jobs:
         run: docker image rm --force "$DEV_CONTEXT_IMAGE" || true
 
   # The `postgres` job stood here until 2026-09-21. It ran on the weekly schedule and on manual
-  # dispatch only, and it owned both PostgreSQL pytest sessions. Both sessions - the three-selector
-  # concurrency matrix and the `-BackendMarker postgres -BackendSelector tests/integration` marker
-  # tier - now run in `required-backend` above, on every pull request, with the same task slugs
-  # (`ci-postgres-phase2`, `ci-postgres`) and the same migration preflight through the production
-  # entrypoint. Nothing of it was dropped; see `tests/unit/test_p017_required_gate_runs_on_postgres.py`,
-  # which fails if either session goes back to a schedule-only job.
+  # dispatch only, and it owned both PostgreSQL pytest sessions. They moved into `required-backend`
+  # above on 2026-09-21, and on 2026-09-23 (017 stage 2c) they and the default tier became ONE
+  # session of the whole tier on PostgreSQL, with the same migration preflight through the
+  # production entrypoint. Nothing of it was dropped; see
+  # `tests/unit/test_p017_required_gate_runs_on_postgres.py`, which names the concurrency matrix's
+  # three tests and fails if the tier goes back to a schedule-only job.
   container-smoke:
     name: Production-like container and schema smoke (scheduled/manual)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'

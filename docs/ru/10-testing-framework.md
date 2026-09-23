@@ -11,13 +11,16 @@
 .\scripts\verify_local.ps1 -TaskSlug phase6_example
 ```
 
-Команда запускает backend tier без `slow` и `postgres`, проверку одного
+Команда запускает backend tier на PostgreSQL без `slow`, проверку одного
 Alembic head, а затем lint/unit/build для Admin UI и lint/typecheck/unit/build для
 Simulator UI v2. Успешный локальный запуск не доказывает статус опубликованного CI.
 
-Каждый параллельный процесс получает уникальный `TaskSlug`. Его DB, pytest
+Каждый параллельный процесс получает уникальный `TaskSlug`. Его pytest
 basetemp/cache и failure artifacts находятся в
-`.local-run/test-runs/<TaskSlug>/`; общий task-less output запрещён.
+`.local-run/test-runs/<TaskSlug>/`, а база — `geov0_test_<TaskSlug>` на
+`127.0.0.1:5432` (раннер выводит URL сам, если `TEST_DATABASE_URL` не задан, и тир
+создаёт базу); общий task-less output запрещён. Нет PostgreSQL на машине —
+[`docs/ru/backend/postgres-local-portable.md`](backend/postgres-local-portable.md).
 
 ## Узкие backend-проверки
 
@@ -28,8 +31,9 @@ $taskSlug = 'agent_contract_review'
 ```
 
 Selector сначала проходит safety guard. Прямой вызов `python -m pytest` допустим
-для диагностики, но не заменяет canonical path; его fallback DB/cache/artifacts
-также изолированы под `.local-run/test-runs/direct-pytest/`.
+для диагностики, но не заменяет canonical path; его cache изолирован под
+`.local-run/test-runs/direct-pytest/`, а базу умолчанием он не получает: `TEST_DATABASE_URL`
+(PostgreSQL, `geov0_test_*`) и `GEO_TEST_ALLOW_DB_RESET=1` задаются явно.
 
 Уровни evidence различаются:
 
@@ -39,19 +43,20 @@ Selector сначала проходит safety guard. Прямой вызов `
 - Postgres concurrency — locks/isolation/concurrent writers;
 - E2E — пользовательский путь через реальный UI/backend.
 
-SQLite не доказывает Postgres semantics. Для marker `postgres` используйте
-отдельную disposable DB, проверьте её имя и лишь затем разрешайте reset:
+С 2026-09-23 (017, стадия 2c) SQLite-тира и marker `postgres` нет: каждый
+backend-тест идёт на PostgreSQL. Если база выбрана вами, а не выведена раннером,
+проверьте её имя и лишь затем разрешайте reset:
 
 ```powershell
 $taskSlug = 'agent_payments_review'
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_$taskSlug"
 $env:GEO_TEST_ALLOW_DB_RESET = '1'
-.\scripts\verify_local.ps1 -TaskSlug $taskSlug -BackendOnly -BackendMarker postgres
+.\scripts\verify_local.ps1 -TaskSlug $taskSlug -BackendOnly
 ```
 
-Fail-closed действует и для диагностического прямого pytest: если после marker-
-фильтрации выбран хотя бы один `postgres` test, а `TEST_DATABASE_URL` использует
-другой backend, collection завершается UsageError/exit `4`, а не зелёным skip.
+Fail-closed действует и для диагностического прямого pytest: SQLite-URL или
+отсутствующий `TEST_DATABASE_URL` завершают прогон UsageError/exit `4` ещё до сбора
+тестов, а не зелёным skip.
 
 ## UI и дорогие проверки
 

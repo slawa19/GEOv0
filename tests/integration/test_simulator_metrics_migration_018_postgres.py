@@ -44,8 +44,6 @@ from alembic.migration import MigrationContext
 from alembic.operations import Operations
 
 
-pytestmark = pytest.mark.postgres
-
 
 PROBE_SCHEMA = "t715_migration_probe"
 

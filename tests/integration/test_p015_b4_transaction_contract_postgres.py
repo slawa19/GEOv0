@@ -70,8 +70,6 @@ from tests.p015_b4_support import (
     stored_rows,
 )
 
-pytestmark = pytest.mark.postgres
-
 
 def _identity(name: str) -> str:
     return f"p015-b4/{name}/{uuid.uuid4().hex[:12]}"

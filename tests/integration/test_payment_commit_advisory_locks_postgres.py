@@ -18,8 +18,6 @@ from app.utils.exceptions import RoutingException
 from tests.debt_setup import purge_test_ledger
 
 
-pytestmark = pytest.mark.postgres
-
 
 def _require_postgres(db_session) -> None:
     dialect = None

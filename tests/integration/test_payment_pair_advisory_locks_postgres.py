@@ -6,8 +6,6 @@ from sqlalchemy.exc import DBAPIError
 from app.core.payments.engine import PaymentEngine
 
 
-pytestmark = pytest.mark.postgres
-
 
 def _sqlstate(exc: DBAPIError) -> str | None:
     orig = getattr(exc, "orig", None)

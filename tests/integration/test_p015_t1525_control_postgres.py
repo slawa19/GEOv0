@@ -38,8 +38,6 @@ from tests.unit.test_p015_t1525_sqlite_savepoint_is_not_a_transaction import (
     _seed_world,
 )
 
-pytestmark = pytest.mark.postgres
-
 
 @pytest_asyncio.fixture
 async def serializable_factory():

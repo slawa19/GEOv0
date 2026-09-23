@@ -46,8 +46,6 @@ from app.db.journal_tables import debt_journal_entries
 from app.db.models.debt import Debt
 from tests.p015_b4a_stand import Stand, arm_stand, identity
 
-pytestmark = pytest.mark.postgres
-
 
 @pytest_asyncio.fixture
 async def stand():

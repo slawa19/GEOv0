@@ -68,8 +68,6 @@ from app.db.models.trustline import TrustLine
 from tests.debt_setup import debt_fixture_setup, purge_test_ledger
 from tests.p015_b4_support import ENTRIES_TABLE, OPERATIONS_TABLE, missing_journal_tables, stored_rows
 
-pytestmark = pytest.mark.postgres
-
 #: One scale-8 atom. The clearing half of `C6` is wrong by exactly this much on every edge.
 ATOM = Decimal("0.00000001")
 

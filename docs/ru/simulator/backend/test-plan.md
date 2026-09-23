@@ -40,10 +40,10 @@
 - Базовые фикстуры клиента/БД: `tests/conftest.py`.
 
 Важно про БД в тестах:
-- Канонический verifier назначает task-local SQLite URL под
-  `.local-run/test-runs/<TaskSlug>/test.db`; прямой pytest использует отдельный
-  fallback `direct-pytest/test.db` в том же runtime root.
-- Для **не-SQLite** тестовых БД потребуется `GEO_TEST_ALLOW_DB_RESET=1` (guardrail в `tests/conftest.py`).
+- Тир идёт только на PostgreSQL. Канонический verifier выводит task-local базу
+  `geov0_test_<TaskSlug>` на `127.0.0.1:5432`; прямой pytest умолчания не имеет и
+  требует явного `TEST_DATABASE_URL` (017, стадия 2c).
+- Для явно заданной базы потребуется `GEO_TEST_ALLOW_DB_RESET=1` (guardrail в `tests/conftest.py`).
 
 ### 2.2 UI e2e (Playwright)
 - Simulator UI demo tests уже существуют в `simulator-ui/v2/e2e` и запускаются через `npm --prefix simulator-ui/v2 run test:e2e`.

@@ -35,8 +35,6 @@ from sqlalchemy import delete, func, select, text
 
 from tests.debt_setup import purge_test_ledger
 
-pytestmark = pytest.mark.postgres
-
 
 async def _effects(session, tx_id: str, equivalent_id) -> dict[str, object]:
     """The triple, read on a connection of its own: debts, transaction rows, the journal."""

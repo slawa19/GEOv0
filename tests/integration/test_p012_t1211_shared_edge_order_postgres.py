@@ -28,8 +28,6 @@ from tests.unit.test_p012_t1210_detector_union_default_tier import (
     _seed_graph,
 )
 
-pytestmark = pytest.mark.postgres
-
 
 @pytest.mark.asyncio
 async def test_within_a_length_the_largest_executable_cycle_comes_first_pg(db_session) -> None:

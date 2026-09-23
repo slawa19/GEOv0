@@ -13,8 +13,6 @@ from sqlalchemy.exc import DBAPIError
 from tests.debt_setup import purge_test_ledger
 
 
-pytestmark = pytest.mark.postgres
-
 #: How long the competitor may wait for its row. A healthy run commits it in milliseconds; a wait
 #: this long means it is queued behind a lock the payment itself holds (T1544 retarget).
 _COMPETITOR_TIMEOUT_S = 10.0

@@ -31,8 +31,6 @@ from app.core.simulator import storage as simulator_storage
 from app.db.models.participant import Participant
 
 
-pytestmark = pytest.mark.postgres
-
 
 @pytest.mark.asyncio
 async def test_failed_bottlenecks_write_does_not_discard_the_callers_transaction(db_session):

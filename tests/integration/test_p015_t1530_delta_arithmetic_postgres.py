@@ -56,8 +56,6 @@ from app.db.models.participant import Participant
 from tests.migrated_schema import run_alembic_upgrade_head, scratch_databases
 from tests.p015_b4a_stand import Stand, arm_stand, identity
 
-pytestmark = pytest.mark.postgres
-
 _SCENARIO_END = (journal.DebtJournalError, InvalidRequestError)
 
 #: The constraint this slice adds, and the predicate both construction paths must produce.

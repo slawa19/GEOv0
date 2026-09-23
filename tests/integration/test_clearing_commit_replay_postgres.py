@@ -14,8 +14,6 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionm
 from tests.debt_setup import debt_fixture_setup, purge_test_ledger
 
 
-pytestmark = pytest.mark.postgres
-
 
 async def _wait_for_matching_advisory_wait(
     observer,

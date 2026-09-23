@@ -123,7 +123,7 @@ node --version; npm --version
 git status --short
 ```
 
-**Блокером считается только:** отсутствие Python-интерпретатора (`.venv` и `python` в PATH); `ImportError` ядровых зависимостей; отсутствие `npm` для задачи, затрагивающей UI; недоступный Postgres для задачи с маркером `postgres`. Всё остальное — не повод продолжать разведку.
+**Блокером считается только:** отсутствие Python-интерпретатора (`.venv` и `python` в PATH); `ImportError` ядровых зависимостей; отсутствие `npm` для задачи, затрагивающей UI; недоступный Postgres для любой задачи, которая гоняет backend-тир (с 2026-09-23, стадия 2c программы 017, тир идёт только на Postgres, а маркера `postgres` больше нет). Всё остальное — не повод продолжать разведку.
 
 До любого вывода «окружение сломано» проверьте фактические executable paths и версии. На Windows используйте PowerShell; не вставляйте bash heredoc в PowerShell.
 
@@ -139,18 +139,19 @@ Canonical local entrypoint — `scripts/verify_local.ps1`. Он же испол�
 
 | Параметр | Что делает |
 |---|---|
-| `-TaskSlug <slug>` | Изолирует basetemp, pytest cache, artifact root и default test DB под `.local-run/test-runs/<slug>/`. Обязателен при параллельной работе. **Двойное подчёркивание в слаге запрещено** (2026-09-22, внешнее ревью `T1701`): провизионирование Postgres строит имена шаблона и клона как `<база тира>__<суффикс>`, и пока `__` не был зарезервирован, задача со слагом `a` дропала базу задачи `a__b` — воспроизведено на живом сервере. Страж отказывает на шаге проверки БД, до старта pytest |
+| `-TaskSlug <slug>` | Изолирует basetemp, pytest cache и artifact root под `.local-run/test-runs/<slug>/` и даёт имя тестовой базы: при незаданном `TEST_DATABASE_URL` раннер выводит `postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_<slug>` и **только для этого выведенного имени** ставит `GEO_TEST_ALLOW_DB_RESET=1`; переданный извне URL по-прежнему требует опт-ина от того, кто его передал (017, стадия 2c, 2026-09-23). Тир сам создаёт базу, если её нет. Обязателен при параллельной работе. **Двойное подчёркивание в слаге запрещено** (2026-09-22, внешнее ревью `T1701`): провизионирование Postgres строит имена шаблона и клона как `<база тира>__<суффикс>`, и пока `__` не был зарезервирован, задача со слагом `a` дропала базу задачи `a__b` — воспроизведено на живом сервере. Страж отказывает на шаге проверки БД, до старта pytest |
 | `-BackendOnly` | Только backend-тесты и проверка единственного Alembic head; UI-шаги пропускаются. **Head-check переехал сюда из UI-половины 2026-09-21** (017, `T1701`): он про backend, а разделение обязательного гейта на два job'а оставило бы его в UI-половине и потеряло |
 | `-UiOnly` | Только UI-шаги; backend-тесты не запускаются. Взаимно исключающ с `-BackendOnly` и с любым backend-параметром — сочетание отказывает, а не молчит. **Python всё равно нужен в окружении:** production build Simulator UI v2 имеет `prebuild`-шаг `sync:demo-fixtures:strict`, который зовёт генератор фикстур, импортирующий `app.core.simulator` (измерено 2026-09-21 первым прогоном разделённого гейта). Раннер Python для себя не разрешает — генератор берёт его из PATH |
 | `-BackendSelector <paths>` | Позиционные pytest-пути; проходят через `scripts/validate_pytest_selectors.py` |
-| `-BackendMarker <marker>` | **Заменяет** дефолтное marker-выражение и передаётся в pytest как есть. Для `postgres` дополнительно требует Postgres-URL в guard'е |
-| `-IncludeExpensive` | Marker-выражение становится `not postgres` (то есть slow включается) |
+| `-IncludeExpensive` | Marker-выражение снимается целиком (slow включается). Дефолт — `not slow` |
 | `-StaticDiagnostics` | Локально выводит Ruff и Black как non-blocking диагностику; в CI Ruff блокирует отдельно |
 | `-Python <path>` | Явный интерпретатор (так вызывает CI) |
 
 **`b4_counterexample` снят 2026-09-12 — и снятие важнее самого маркера.** Программа 015, фаза B: 107 контрпримеров приёмки шага 4 были написаны **до** журнала долгов, красны намеренно, и исключались из **каждого** тира, чтобы постоянно красный прогон не перестал быть сигналом для соседних сессий в общем дереве (§7). Контракт был записан заглавными буквами в `pytest.ini`: **шаг 4 снимает маркер, а не правит ассерты**. Слайс C шага 4 собрал `app/core/ledger/journal.py`, встроил его в четырёх продовых писателей и вооружил глобально; контрпримеры позеленели **через журнал**, ассерты не тронуты, маркер удалён из `pytest.ini`, `scripts/verify_local.ps1` и семи модулей. Теперь тот же файл `tests/unit/test_p015_b4_counterexample_marker_is_not_a_hiding_place.py` держит маркер **снаружи**: он краснеет, если маркер снова зарегистрирован, снова навешен или снова вычитается раннером. Вернуть его — значит вынести из гейта настоящее падение, то есть ровно то ложное зелёное, о котором следующий абзац.
 
-**Marker-семантика — источник ложного зелёного.** По умолчанию runner подставляет `-m "not slow and not postgres"`. Селектор, указывающий на файл с маркером `postgres`, без `-BackendMarker postgres` даёт `no tests collected (1 deselected)` и pytest exit `5`. Canonical wrapper на этом падает громко. Прямой `python -m pytest` с фактически выбранным `postgres` test теперь fail-closed в collection: неправильный backend даёт UsageError/exit `4`, а не зелёный skip. Всегда сверяйте число собранных тестов с ожидаемым.
+**Маркер `postgres` и параметр `-BackendMarker` сняты 2026-09-23** (017, стадия 2c, `T1702`). Тир один и идёт на PostgreSQL: `tests/conftest.py` отказывает на SQLite-URL и на отсутствующем URL ещё до сбора тестов (UsageError, exit `4`) — и в раннере, и в прямом `python -m pytest`, где URL задаётся явно. Суффикс `_postgres.py` в именах модулей остался историческим.
+
+**Marker-семантика — источник ложного зелёного.** По умолчанию runner подставляет `-m "not slow"`; селектор, указывающий только на `slow`-тесты, без `-IncludeExpensive` даёт `no tests collected` и pytest exit `5`, и canonical wrapper на этом падает громко. Всегда сверяйте число собранных тестов с ожидаемым.
 
 ### Что реально проверяет CI
 
@@ -158,14 +159,14 @@ Canonical local entrypoint — `scripts/verify_local.ps1`. Он же испол�
 
 | Job | Триггеры | Блокирует |
 |---|---|---|
-| `required-backend` (`verify_local.ps1 -BackendOnly`, ubuntu, сервис `postgres:16`) | PR, push в main, dispatch, schedule | да |
+| `required-backend` (одна сессия всего тира `verify_local.ps1 -BackendOnly` на сервисе `postgres:16`, ubuntu) | PR, push в main, dispatch, schedule | да |
 | `required-ui` (`verify_local.ps1 -UiOnly`, windows) | те же | да |
 | `ui-smoke` (Chromium smoke обоих UI) | PR, push в main, dispatch, schedule | да |
 | `static-diagnostics` (Ruff, Black) | те же | Ruff — **да**; Black — **нет** (`continue-on-error`) |
 | `simulator-super-smoke`, `admin-e2e`, `simulator-visual-e2e` | только schedule / workflow_dispatch | — |
 | `container-smoke` | только schedule / workflow_dispatch | — |
 
-Следствия: на обычном PR **не** проверяются полные Admin E2E, Simulator visual E2E и container-паритет. **Postgres-конкурентность проверяется с 2026-09-21** (017, `T1701`): расписанный job `postgres` упразднён, обе его pytest-сессии — матрица конкурентности и маркерный тир — переехали в обязательный `required-backend`, и это был смысл среза. Playwright smoke обоих UI при этом проверяется — `ui-smoke` вызывает `test:e2e:smoke` и блокирует. Не сокращайте это до «E2E на PR нет»: smoke — тоже Playwright. Mypy в репозитории не настроен и не запускается. Пиннутый Ruff для `app migrations` обязан быть зелёным; Black остаётся известным repository-wide долгом, поэтому:
+Следствия: на обычном PR **не** проверяются полные Admin E2E, Simulator visual E2E и container-паритет. **Postgres-конкурентность проверяется с 2026-09-21** (017, `T1701`): расписанный job `postgres` упразднён, обе его pytest-сессии — матрица конкурентности и маркерный тир — переехали в обязательный `required-backend`, и это был смысл среза. **С 2026-09-23** (стадия 2c) три сессии job'а — матрица, маркерный тир и дефолтный тир на SQLite — стали одной сессией всего тира на PostgreSQL; три теста матрицы собираются тиром сами и поимённо держатся `tests/unit/test_p017_required_gate_runs_on_postgres.py`. `simulator-super-smoke` сервиса Postgres не имеет (причина — `specs/BACKLOG.md`) и после снятия SQLite-тира без него не проходит. Playwright smoke обоих UI при этом проверяется — `ui-smoke` вызывает `test:e2e:smoke` и блокирует. Не сокращайте это до «E2E на PR нет»: smoke — тоже Playwright. Mypy в репозитории не настроен и не запускается. Пиннутый Ruff для `app migrations` обязан быть зелёным; Black остаётся известным repository-wide долгом, поэтому:
 
 - не заявляйте «CI green» или «все gates green» — называйте конкретный job, SHA и exit code;
 - не превращайте текущие Black findings в блокер несвязанной задачи (см. храповик, §6);
@@ -196,23 +197,23 @@ npm --prefix simulator-ui/v2 run build
 .\scripts\verify_local.ps1 -TaskSlug premerge_payment_slice
 ```
 
-Покрывает backend-tier по умолчанию, единственность Alembic head, а также lint/test/build обоих UI. **Исключает `slow` и `postgres`.** Команда не является утверждением, что baseline уже зелёный: каждый известный baseline failure фиксируйте дословно и отделяйте от регрессий текущего slice.
+Покрывает backend-tier на PostgreSQL, единственность Alembic head, а также lint/test/build обоих UI. **Исключает `slow`.** Команда не является утверждением, что baseline уже зелёный: каждый известный baseline failure фиксируйте дословно и отделяйте от регрессий текущего slice.
 
 ### Postgres gate
 
-SQLite не доказывает advisory locks, concurrent writers, FK/isolation и SERIALIZABLE retry. Нужна отдельная disposable DB **и** маркер:
+С 2026-09-23 это не отдельный гейт: каждый backend-тест идёт на PostgreSQL, и все команды выше уже его используют через выведенный URL. Явный URL нужен, только если база выбрана вами, — тогда и опт-ин ваш:
 
 ```powershell
 $taskSlug = "agent_payments_review"
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_$taskSlug"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-.\scripts\verify_local.ps1 -TaskSlug $taskSlug -BackendOnly -BackendMarker postgres `
+.\scripts\verify_local.ps1 -TaskSlug $taskSlug -BackendOnly `
   -BackendSelector tests/integration/test_payment_engine_uow_retry_postgres.py
 ```
 
 **Хост — `127.0.0.1`, а не `localhost`** (исправлено 2026-09-13, `T1550`). Локальный PostgreSQL слушает только IPv4, а `localhost` сначала пробует `::1` и получает отказ примерно через 2 s — на **каждое** соединение: замерено 0.13–0.14 s против 2.16–2.19 s. Тесты открывают новое соединение на каждую сессию, поэтому гейт через `localhost` шёл около 30 минут вместо 3. Страж URL хост не проверяет, так что оба адреса ему равны; разница только во времени.
 
-Без `-BackendMarker postgres` тесты будут отсеяны маркером, а guard URL не потребует Postgres. Никогда не выставляйте `GEO_TEST_ALLOW_DB_RESET=1`, пока фактически не проверили, что URL указывает на отдельную тестовую DB. Не используйте developer/prod DB.
+Нет PostgreSQL на машине — `docs/ru/backend/postgres-local-portable.md`. Никогда не выставляйте `GEO_TEST_ALLOW_DB_RESET=1`, пока фактически не проверили, что URL указывает на отдельную тестовую DB. Не используйте developer/prod DB.
 
 ### E2E и дорогие проверки
 

@@ -84,8 +84,6 @@ from app.db.models.trustline import TrustLine
 
 from tests.debt_setup import debt_fixture_setup
 
-pytestmark = pytest.mark.postgres
-
 
 def _api_default_max_depth() -> int:
     """The depth `GET /api/v1/clearing/cycles` uses when the caller names none.

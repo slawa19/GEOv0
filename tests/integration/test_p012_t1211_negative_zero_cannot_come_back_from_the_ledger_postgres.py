@@ -25,7 +25,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import text
 
-pytestmark = [pytest.mark.postgres, pytest.mark.asyncio]
+pytestmark = pytest.mark.asyncio
 
 
 #: Every way a negative zero can be put into the column: written literally, written as a bare

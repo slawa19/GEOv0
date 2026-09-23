@@ -14,8 +14,6 @@ from app.config import settings
 from tests.debt_setup import debt_fixture_setup, purge_test_ledger
 
 
-pytestmark = pytest.mark.postgres
-
 
 async def _wait_for_matching_advisory_wait(observer, *, waiter_pid: int) -> bool:
     try:

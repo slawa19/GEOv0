@@ -31,8 +31,6 @@ from app.db.models.trustline import TrustLine
 from app.utils.exceptions import IntegrityViolationException
 from tests.debt_setup import debt_fixture_setup, purge_test_ledger
 
-pytestmark = pytest.mark.postgres
-
 
 async def test_clearing_reduces_the_over_limit_debt_on_a_frozen_line_postgres() -> None:
     from tests.conftest import TestingSessionLocal, _ensure_schema_initialized

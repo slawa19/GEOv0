@@ -36,8 +36,6 @@ from app.core.ledger import journal
 from app.db.models.debt import Debt
 from tests.p015_b4a_stand import Stand, arm_stand, identity
 
-pytestmark = pytest.mark.postgres
-
 #: What the rest of a scenario raises once a refusal has been swallowed to reach the assertions.
 _SCENARIO_END = (journal.DebtJournalError, InvalidRequestError)
 

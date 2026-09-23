@@ -52,8 +52,6 @@ from tests.migrated_schema import (
     scratch_database_url,
 )
 
-pytestmark = pytest.mark.postgres
-
 _TEMPLATE_SUFFIX = "p017tpl"
 _template_name: str | None = None
 
@@ -62,9 +60,10 @@ def _url() -> str:
     """The tier's URL, refused rather than skipped when it is not PostgreSQL.
 
     A RAISE and not a `pytest.skip`: T1701's whole subject is that a provisioning precondition
-    reported as a skip is a measurement nobody took. `tests/conftest.py::pytest_collection_finish`
-    already fails the session closed when a postgres-marked test is selected on another backend, so
-    this is the second lock on the same door rather than a new policy.
+    reported as a skip is a measurement nobody took. `tests/conftest.py::_require_a_postgres_tier_url`
+    already refuses any non-PostgreSQL tier URL before collection (until 017 stage 2c the same door
+    was `pytest_collection_finish`, for postgres-marked selections), so this is the second lock on
+    the same door rather than a new policy.
     """
 
     if "postgresql" not in TEST_DATABASE_URL:

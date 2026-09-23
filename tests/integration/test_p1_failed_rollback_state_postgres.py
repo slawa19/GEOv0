@@ -35,8 +35,6 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db.models.equivalent import Equivalent
 
-pytestmark = pytest.mark.postgres
-
 
 def _url() -> str:
     url = os.environ.get("TEST_DATABASE_URL", "")

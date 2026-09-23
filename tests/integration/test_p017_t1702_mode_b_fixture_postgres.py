@@ -46,8 +46,6 @@ from tests.migrated_schema import (
     maintenance_connection,
 )
 
-pytestmark = pytest.mark.postgres
-
 _CLEARING_REFUSAL = "PostgreSQL clearing requires an engine-bound AsyncSession"
 
 

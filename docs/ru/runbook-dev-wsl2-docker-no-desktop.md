@@ -311,7 +311,7 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 4) Запустить конкретный тест:
 
 ```powershell
-.\scripts\verify_local.ps1 -TaskSlug runbook_postgres -BackendOnly -BackendMarker postgres `
+.\scripts\verify_local.ps1 -TaskSlug runbook_postgres -BackendOnly `
   -BackendSelector tests/integration/test_concurrent_prepare_routes_bottleneck_postgres.py
 ```
 
