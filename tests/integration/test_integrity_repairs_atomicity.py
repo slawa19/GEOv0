@@ -19,9 +19,15 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.core.ledger.journal import DebtJournalError, Reason
-from tests.conftest import TestingSessionLocal
+from tests.conftest import MODE_B, sessionmaker_of
 
 from tests.debt_setup import debt_fixture_setup
+
+# MODE B (017 stage 2b, T1702), for the whole module: both tests read the debts "on a session of
+# their own", before and after the repair. In mode A on PostgreSQL that session could not see the
+# uncommitted seed - the first test failed its non-vacuity check ("stand: no debts were seeded"), the
+# second passed on two empty reads (stage-2 catalogue, class VIS).
+pytestmark = MODE_B
 
 
 def _repair_request(operation: str) -> Request:
@@ -37,10 +43,14 @@ def _repair_request(operation: str) -> Request:
     )
 
 
-async def _stored_debts(equivalent_id) -> list[tuple]:
-    """The debts of one equivalent, read on a session of their own, as plain values."""
+async def _stored_debts(db_session, equivalent_id) -> list[tuple]:
+    """The debts of one equivalent, read on a session of their own, as plain values.
 
-    async with TestingSessionLocal() as fresh:
+    The session of their own is opened over the database `db_session` talks to (`sessionmaker_of`):
+    on PostgreSQL in mode B that is a clone, and `TestingSessionLocal` would read the tier instead.
+    """
+
+    async with sessionmaker_of(db_session)() as fresh:
         rows = (
             await fresh.execute(
                 select(Debt.debtor_id, Debt.creditor_id, Debt.amount)
@@ -185,7 +195,7 @@ async def test_an_uninstrumented_repair_is_refused_before_it_writes_anything(
     await db_session.commit()
     equivalent_id = equivalent.id
 
-    before = await _stored_debts(equivalent_id)
+    before = await _stored_debts(db_session, equivalent_id)
     action = f"admin.integrity.repair.{operation.replace('-', '_')}"
 
     PaymentRouter._graph_cache[code] = _cache_value()
@@ -209,7 +219,7 @@ async def test_an_uninstrumented_repair_is_refused_before_it_writes_anything(
         assert refusal.value.reason == Reason.NO_OPERATION, refusal.value
 
         # And it was refused before it did anything else.
-        assert await _stored_debts(equivalent_id) == before
+        assert await _stored_debts(db_session, equivalent_id) == before
         assert await _admin_audit(db_session, action=action) is None
         assert PaymentRouter._topology_cache.get(code) == {"sentinel": {"value"}}
     finally:
@@ -289,7 +299,11 @@ async def test_the_refusal_precedes_the_injected_pre_commit_failure(
             )
     await db_session.commit()
     equivalent_id = equivalent.id
-    before = await _stored_debts(equivalent_id)
+    before = await _stored_debts(db_session, equivalent_id)
+    # NON-VACUITY, as in the test above: without seeded debts "nothing moved" below is true of a
+    # repair that found nothing. This test had no such check, and on PostgreSQL in mode A it passed
+    # on exactly that: the second session saw no debts before and none after (017 stage 2b).
+    assert before, "stand: no debts were seeded, so the repair would touch nothing"
 
     action = f"admin.integrity.repair.{operation.replace('-', '_')}"
     injected: list[int] = []
@@ -333,7 +347,7 @@ async def test_the_refusal_precedes_the_injected_pre_commit_failure(
     )
 
     # The rollback assertions, unchanged.
-    assert await _stored_debts(equivalent_id) == before
+    assert await _stored_debts(db_session, equivalent_id) == before
     assert await _admin_audit(db_session, action=action) is None
     assert code in PaymentRouter._graph_cache
     assert PaymentRouter._topology_cache.get(code) == {"sentinel": {"value"}}
