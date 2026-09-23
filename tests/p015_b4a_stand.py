@@ -8,7 +8,10 @@ shared test engine would break that promise for every other module in the run, a
 `db_session` would additionally hide the commit and rollback boundaries the mechanism is about -
 that fixture wraps each test in a transaction of its own.
 
-So each stand here owns:
+So each stand here owns its own engine, its own `Session` subclass and its own world. There are two
+builders. `new_postgres_stand` is the one the journal's rules are measured on since programme 017
+stage 3; its docstring says how it shares the tier database safely. `new_sqlite_stand` remains for
+the few tests whose subject is SQLite itself, and leaves with SQLite. A SQLite stand owns:
 
 * its own SQLite FILE under the test's `tmp_path` (never `:memory:` with a `StaticPool`, because a
   shared connection would let an UNCOMMITTED write be read back by a "fresh" session, and every
@@ -90,6 +93,11 @@ class Stand:
     debtor_id: uuid.UUID
     creditor_id: uuid.UUID
     extra_ids: list[uuid.UUID] = field(default_factory=list)
+    #: Journal-table row counts when the stand was armed. Zero on a SQLite stand, whose database file
+    #: is its own; on the PostgreSQL stand the tier database is shared with the rest of the run, so
+    #: `counts()` answers "how many rows did THIS test add", which on a file of its own is the same
+    #: number as the absolute count. Tests run one at a time, so nothing else moves it in between.
+    count_baseline: dict[str, int] = field(default_factory=dict)
 
     # -- building blocks -------------------------------------------------------------------
 
@@ -205,14 +213,41 @@ class Stand:
         )
 
     async def counts(self) -> dict[str, int]:
-        """How many rows each journal table holds right now, read fresh."""
+        """How many rows each journal table gained since the stand was armed, read fresh.
 
+        WHOLE TABLES, not this stand's world: a write the guard should have refused lands wherever
+        the statement put it, and a count scoped to the stand's identities or equivalents would not
+        see a forged row that named something else. The baseline is what makes the whole-table count
+        usable on a database other tests share (see `count_baseline`).
+        """
+
+        counted = await self._absolute_counts()
+        return {name: n - self.count_baseline.get(name, 0) for name, n in counted.items()}
+
+    async def _absolute_counts(self) -> dict[str, int]:
         counted = {}
         for table in (debt_operations, debt_journal_entries, debt_operation_equivalents):
             counted[table.name] = (
                 await self.rows(select(func.count().label("n")).select_from(table))
             )[0]["n"]
         return counted
+
+    def driver_sql(self, statement: str) -> str:
+        """A raw statement written with `?` placeholders, in the placeholder style of this engine.
+
+        `exec_driver_sql` hands the string to the DBAPI untouched, so the placeholder is the driver's
+        business: `qmark` on sqlite3, `numeric_dollar` (`$1`) on asyncpg. The journal meets the same
+        difference through the dialect's `paramstyle` - this is a dialect's spelling, not behaviour.
+        """
+
+        style = self.engine.dialect.paramstyle
+        if style == "qmark":
+            return statement
+        if style not in {"numeric_dollar", "numeric"}:
+            raise ValueError(f"no placeholder rewrite for paramstyle {style!r}")
+        prefix = "$" if style == "numeric_dollar" else ":"
+        parts = statement.split("?")
+        return parts[0] + "".join(f"{prefix}{index}{part}" for index, part in enumerate(parts[1:], 1))
 
     async def purge(self) -> None:
         """Delete everything this stand created, through `exec_driver_sql`.
@@ -273,6 +308,48 @@ async def new_sqlite_stand(
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
     return await _arm(engine, extra_participants=extra_participants)
+
+
+async def new_postgres_stand(*, extra_participants: int = 0) -> Stand:
+    """A stand on the tier's PostgreSQL database, with real root commits, purged by `close`.
+
+    THE ENGINE IS THE STAND'S OWN, over conftest's `TEST_DATABASE_URL` - never the tier's session
+    fixture, whose outer transaction would turn every commit these tests are about into a savepoint
+    release. `tests/conftest.py::_require_a_postgres_tier_url` refuses a non-PostgreSQL URL before
+    anything is collected, so this construction cannot be SQLite (which is also how
+    `tests/unit/test_p015_t1525_every_sqlite_engine_has_transaction_control.py` reads it).
+
+    It runs at the application's isolation level, read from the same setting the tier engine reads
+    (T1549), so the journal is measured at SERIALIZABLE and not at the server default.
+
+    WHY NOT A CLONED DATABASE PER TEST (the mode-B fixture). Every test here commits for real, so
+    each would need its own clone, and a clone measured 0.35-0.82 s to create and drop on this
+    machine (2026-09-24) -
+    for about seventy tests that is most of the required job's remaining budget. The stand instead
+    builds a world of its own (fresh equivalents and participants), `counts()` subtracts what the
+    tables held when it was armed, and `close(purge=True)` removes what it created. The price is
+    named: the world is isolated by construction, the database is not. The purge runs in each
+    fixture's `finally`, so rows survive only if the purge itself fails - loudly, as a teardown
+    error - and even then the next stand's baseline absorbs them rather than miscounting.
+    """
+
+    from tests.conftest import (
+        TEST_DATABASE_URL,
+        _ensure_schema_initialized,
+        _test_engine_isolation_kwargs,
+    )
+
+    await _ensure_schema_initialized()
+    engine = create_async_engine(
+        TEST_DATABASE_URL,
+        pool_size=4,
+        max_overflow=0,
+        pool_timeout=15,
+        **_test_engine_isolation_kwargs("postgresql"),
+    )
+    built = await _arm(engine, extra_participants=extra_participants)
+    built.count_baseline = await built._absolute_counts()
+    return built
 
 
 def _listens_on_connect(engine: AsyncEngine):

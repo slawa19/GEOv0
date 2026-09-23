@@ -45,9 +45,13 @@ ANSWERED NOTHING into "no transaction is open", so the carry-over the guard exis
 excluded when the question could not be asked. The four answers - True, False, None and a probe that
 raises - are now classified separately and tested separately, and an unmeasured state is REFUSED.
 
-TIER. SQLite, default tier, one database file per test under `tmp_path`, money inside `|v| < 2^26`
-(design v2 §4). The PostgreSQL halves - UUID spelling through `literal()`, asyncpg's own transaction
-probe, and the readback against a driver that returns `NUMERIC` as `Decimal` - are in
+TIER. PostgreSQL since programme 017 stage 3 (2026-09-24): the stand's own engine over the tier
+database, real root commits, a world of its own purged after each test (`tests/p015_b4a_stand.py::
+new_postgres_stand`). Until then these rules were measured ONLY on SQLite, and the PostgreSQL
+modules named below covered only what SQLite could not see. The one test whose subject is the
+aiosqlite transaction probe stays on the SQLite stand. The PostgreSQL halves - UUID spelling through
+`literal()`, asyncpg's own transaction probe, and the readback against a driver that returns
+`NUMERIC` as `Decimal` - are in
 `tests/integration/test_p015_t1528_the_statement_is_read_not_guessed_postgres.py`.
 """
 
@@ -65,11 +69,22 @@ from sqlalchemy.exc import InvalidRequestError
 
 from app.core.ledger import journal
 from app.db.models.debt import Debt
-from tests.p015_b4a_stand import Stand, exact_money, identity, new_sqlite_stand
+from tests.p015_b4a_stand import Stand, exact_money, identity, new_postgres_stand, new_sqlite_stand
 
 
 @pytest_asyncio.fixture
-async def stand(tmp_path):
+async def stand():
+    built = await new_postgres_stand(extra_participants=2)
+    try:
+        yield built
+    finally:
+        await built.close(purge=True)
+
+
+@pytest_asyncio.fixture
+async def sqlite_stand(tmp_path):
+    """The SQLite stand, for the one test whose subject IS the SQLite driver; leaves with SQLite."""
+
     built = await new_sqlite_stand(tmp_path, extra_participants=2)
     try:
         yield built
@@ -660,7 +675,7 @@ def test_t1528_the_begin_guard_classifies_each_driver_answer_separately(
 
 @pytest.mark.asyncio
 async def test_t1528_the_sqlite_driver_answers_the_transaction_probe_with_a_bool(
-    stand: Stand,
+    sqlite_stand: Stand,
 ) -> None:
     """T1528, review item 4, THE CONTRACT STATED AS A MEASUREMENT rather than as a comment.
 
@@ -679,7 +694,7 @@ async def test_t1528_the_sqlite_driver_answers_the_transaction_probe_with_a_bool
     this measurement and not an argument.
     """
 
-    async with stand.engine.connect() as aconn:
+    async with sqlite_stand.engine.connect() as aconn:
         sync_connection = aconn.sync_connection
         idle = journal._driver_transaction_is_live(sync_connection)
         transaction = await aconn.begin()

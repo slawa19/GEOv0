@@ -38,8 +38,11 @@ alone does not. Neither layer subsumes the other:
    list, as a multiset, in both directions. Plus a membership check at completion, so the digest is
    taken over rows the journal can account for.
 
-TIER. SQLite, the default tier, one database file per test under `tmp_path`, money inside `|v| < 2^26`
-(design v2 §4).
+TIER. PostgreSQL since programme 017 stage 3 (2026-09-24): the stand's own engine over the tier
+database, real root commits, a world of its own purged after each test (`tests/p015_b4a_stand.py::
+new_postgres_stand`). Until then these rules were measured ONLY on SQLite, and the PostgreSQL
+modules named below covered only what SQLite could not see. The delta-contradiction test runs on a
+disposable clone without the arithmetic CHECK (see `stand_without_the_arithmetic_check`).
 """
 
 from __future__ import annotations
@@ -58,12 +61,40 @@ from sqlalchemy.schema import CreateTable
 from app.core.ledger import journal
 from app.db.journal_tables import debt_journal_entries
 from app.db.models.debt import Debt
-from tests.p015_b4a_stand import Stand, exact_money, identity, new_sqlite_stand
+from tests.p015_b4a_stand import Stand, arm_stand, exact_money, identity, new_postgres_stand
 
 
 @pytest_asyncio.fixture
-async def stand(tmp_path):
-    built = await new_sqlite_stand(tmp_path, extra_participants=1)
+async def stand():
+    built = await new_postgres_stand(extra_participants=1)
+    try:
+        yield built
+    finally:
+        await built.close(purge=True)
+
+
+#: The PostgreSQL-only CHECK that holds `delta = amount_after - amount_before` in the table itself.
+_ARITHMETIC_CHECK = "chk_debt_journal_entries_delta_arithmetic"
+
+
+@pytest_asyncio.fixture
+async def stand_without_the_arithmetic_check(committed_database):
+    """A stand on a DISPOSABLE clone (mode B) from which the delta-arithmetic CHECK is dropped.
+
+    WHY: on PostgreSQL that CHECK refuses an entry whose delta contradicts its own ends before the
+    journal's readback can see it - which is correct and is asserted where it belongs
+    (`tests/integration/test_p015_t1530_delta_arithmetic_postgres.py`). But the readback's own delta
+    comparison is a rule of the journal, and on the tier database it can never be reached, so its
+    mutation would stay green. On a clone that is dropped when the test ends, removing the CHECK
+    isolates the stage that owns the rule; nothing outside this test ever sees the altered schema.
+    `DROP CONSTRAINT` without `IF EXISTS` is the non-vacuity: it fails unless the CHECK was there.
+    """
+
+    async with committed_database.engine.begin() as connection:
+        await connection.exec_driver_sql(
+            f"ALTER TABLE {debt_journal_entries.name} DROP CONSTRAINT {_ARITHMETIC_CHECK}"
+        )
+    built = await arm_stand(committed_database.engine, extra_participants=1)
     try:
         yield built
     finally:
@@ -224,7 +255,9 @@ async def test_t1530_an_entry_whose_amount_was_rewritten_after_the_guard_is_refu
 
 
 @pytest.mark.asyncio
-async def test_t1530_an_entry_whose_delta_contradicts_its_own_ends_is_refused(stand: Stand) -> None:
+async def test_t1530_an_entry_whose_delta_contradicts_its_own_ends_is_refused(
+    stand_without_the_arithmetic_check: Stand,
+) -> None:
     """T1530 P1, DEFECT-SHAPED. `amount_before = 10, amount_after = 11, delta = 2` was storable.
 
     THE SECOND SHAPE, AND IT IS THE ONE THE TABLE ITSELF SHOULD HAVE REFUSED. Measured at `64f92d2`
@@ -233,16 +266,19 @@ async def test_t1530_an_entry_whose_delta_contradicts_its_own_ends_is_refused(st
     journal's per-edge deltas equal the edge's final amount minus its initial one - is false for this
     edge from the moment that row exists.
 
-    ON THIS TIER THE READBACK IS WHAT REFUSES IT, under `unrecorded_journal_entry`. On PostgreSQL the
-    database refuses it first, under `chk_debt_journal_entries_delta_arithmetic`, and which of the two
-    speaks first is asserted there rather than guessed here
-    (`tests/integration/test_p015_t1530_delta_arithmetic_postgres.py`).
+    HERE THE READBACK IS WHAT REFUSES IT, under `unrecorded_journal_entry`. With the schema intact
+    PostgreSQL refuses it first, under `chk_debt_journal_entries_delta_arithmetic`, and which of the
+    two speaks first is asserted there rather than guessed here
+    (`tests/integration/test_p015_t1530_delta_arithmetic_postgres.py`). This test runs on a clone
+    without that CHECK (see `stand_without_the_arithmetic_check`), because what it measures is the
+    journal's own comparison and not the table's.
 
     MUTATION that must redden this again: compare only the edge and the amounts in `_effect_code`
     (drop `_money_key(effect.delta)` from it and the matching component from `_stored_entry_code`).
     The tampered delta then matches and the refusal disappears.
     """
 
+    stand = stand_without_the_arithmetic_check
     ident = identity("t1530-delta")
     debt_id = await _committed_debt(stand, "10.00")
 
@@ -431,8 +467,13 @@ async def test_t1530_an_entry_altered_after_its_flush_is_refused_before_the_dige
                 # altered at all, which is why the counterexample uses it.
                 connection = await session.connection()
                 result = await connection.exec_driver_sql(
-                    f"UPDATE {debt_journal_entries.name} SET delta = 2.0 "
-                    f"WHERE operation_id IN (SELECT id FROM debt_operations WHERE identity = ?)",
+                    # `amount_after` moves WITH `delta`, so the row still satisfies PostgreSQL's
+                    # arithmetic CHECK (10 -> 12 is +2): a tamper the table accepts, which leaves
+                    # the journal's readback as the only thing that can refuse it.
+                    stand.driver_sql(
+                        f"UPDATE {debt_journal_entries.name} SET amount_after = 12.0, delta = 2.0 "
+                        f"WHERE operation_id IN (SELECT id FROM debt_operations WHERE identity = ?)"
+                    ),
                     (ident,),
                 )
                 altered = result.rowcount

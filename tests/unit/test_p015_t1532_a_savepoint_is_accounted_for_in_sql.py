@@ -33,7 +33,10 @@ DEEPER than the operation's chain and are therefore outside both halves. The who
 
 WHAT REMAINS OPEN is in the last test, measured rather than argued.
 
-TIER. SQLite, the default tier, one database file per test under `tmp_path`.
+TIER. PostgreSQL since programme 017 stage 3 (2026-09-24): the stand's own engine over the tier
+database, real root commits, a world of its own purged after each test (`tests/p015_b4a_stand.py::
+new_postgres_stand`). Until then these rules were measured ONLY on SQLite, and the PostgreSQL
+modules named below covered only what SQLite could not see.
 """
 
 from __future__ import annotations
@@ -48,16 +51,16 @@ from sqlalchemy.exc import InvalidRequestError
 
 from app.core.ledger import journal
 from app.db.models.debt import Debt
-from tests.p015_b4a_stand import Stand, exact_money, identity, new_sqlite_stand
+from tests.p015_b4a_stand import Stand, exact_money, identity, new_postgres_stand
 
 
 @pytest_asyncio.fixture
-async def stand(tmp_path):
-    built = await new_sqlite_stand(tmp_path, extra_participants=2)
+async def stand():
+    built = await new_postgres_stand(extra_participants=2)
     try:
         yield built
     finally:
-        await built.close()
+        await built.close(purge=True)
 
 
 class _PreventedTheRollback(BaseException):
