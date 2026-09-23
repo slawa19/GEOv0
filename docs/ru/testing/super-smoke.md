@@ -11,7 +11,7 @@ deterministic real logic и real-mode HTTP startup. Он не предназна
   -BackendSelector tests/integration/test_simulator_super_smoke.py -IncludeExpensive
 ```
 
-Команда изолирует SQLite, pytest basetemp/cache и postmortem output под
+Команда изолирует тестовую базу PostgreSQL `geov0_test_simulator_super_smoke`, pytest basetemp/cache и postmortem output под
 `.local-run/test-runs/simulator_super_smoke/`. Для параллельного запуска назначьте
 другой `TaskSlug`; shared DB/output запрещены.
 

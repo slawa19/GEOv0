@@ -4,13 +4,13 @@
 Область: backend
 Последнее обновление: 2026-09-23
 
-Как за несколько минут поднять PostgreSQL, пригодный для `-BackendMarker postgres`, на машине без
+Как за несколько минут поднять PostgreSQL, на котором идёт тир тестов, на машине без
 Docker и без прав администратора. Написано после фактического подъёма 2026-08-20; все ловушки ниже —
 не гипотетические, каждая встречена в реальном прогоне.
 
-**Когда это нужно.** Дефолтный tier тестов пока идёт на SQLite, и его достаточно для большинства
-правок. Postgres обязателен там, где SQLite ничего не доказывает: блокировки, изоляция,
-конкурентность, поведение `NUMERIC`, миграции. См. `AGENTS.md` §4 и §8.
+**Когда это нужно.** Всегда, когда запускаются backend-тесты: с 2026-09-23 (017, стадия 2c) тир
+тестов идёт только на PostgreSQL, SQLite-тира больше нет, и без запущенного кластера
+`scripts/verify_local.ps1` отказывает до сбора тестов. См. `AGENTS.md` §5.
 
 **И он обязателен, чтобы вообще поднять стек.** С `T1710` (программа 017) `scripts/run_local.ps1` и
 `scripts/run_full_stack.ps1` работают только на PostgreSQL: файлового движка у лаунчера больше нет,
@@ -32,9 +32,10 @@ Docker и без прав администратора. Написано пос�
 3. **Версия должна совпадать с CI.** `.github/workflows/quality.yml` пинит `postgres:16`. Ставить
    «последнее» значит получить локальные гейты, не представляющие CI.
 4. **Сброс схемы требует `GEO_TEST_ALLOW_DB_RESET=1`.** Это предохранитель, а не препятствие: без
-   него `verify_local.ps1` откажется трогать Postgres. CI выставляет тот же флаг.
-5. **Дефолтному unit-tier нельзя подавать `TEST_DATABASE_URL`.** Он рассчитан на SQLite; Postgres в
-   этой переменной даст ложную красноту на тестах, которые к нему отношения не имеют.
+   него `verify_local.ps1` откажется трогать Postgres, если URL передан вами. Для базы, которую
+   раннер вывел из `-TaskSlug` сам, флаг ставит он. CI выставляет тот же флаг.
+5. ~~Дефолтному unit-tier нельзя подавать `TEST_DATABASE_URL`.~~ Снято 2026-09-23 (017, стадия 2c):
+   тир один и идёт только на PostgreSQL; SQLite-URL в этой переменной — отказ до сбора тестов.
 
 ## 1. Скачать бинарники
 
@@ -124,14 +125,17 @@ bash docker/docker-entrypoint.sh true      # применяет миграции
 ```powershell
 $env:TEST_DATABASE_URL       = "postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_ci"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-.\scripts\verify_local.ps1 -TaskSlug <ваш_слаг> -BackendOnly -BackendMarker postgres -BackendSelector tests/integration
+.\scripts\verify_local.ps1 -TaskSlug <ваш_слаг> -BackendOnly
 ```
+
+Без `TEST_DATABASE_URL` раннер сам выводит `geov0_test_<ваш_слаг>` на `127.0.0.1:5432` и тир
+создаёт эту базу; явный URL, как выше, нужен только для базы, выбранной вами.
 
 Гейт печатает `Test database guard passed (backend=postgresql, database='geov0_test_ci')` — это и
 есть подтверждение, что прогон шёл против Postgres, а не против SQLite. **Смотрите на эту строку, а
 не на «passed»:** зелёный SQLite-прогон легко принять за Postgres-evidence.
 
-Перед прогоном дефолтного tier переменную снимите:
+Чтобы вернуться к выведенной раннером базе задачи, переменные снимите:
 
 ```powershell
 Remove-Item Env:TEST_DATABASE_URL, Env:GEO_TEST_ALLOW_DB_RESET -ErrorAction SilentlyContinue

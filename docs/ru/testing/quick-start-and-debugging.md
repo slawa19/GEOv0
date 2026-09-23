@@ -27,8 +27,9 @@ basetemp, cache и failure artifacts окажутся в
   -BackendSelector tests/contract/test_openapi_contract.py
 ```
 
-Прямой `python -m pytest` — debug path: он не заменяет verifier и использует
-fallback state под `.local-run/test-runs/direct-pytest/`.
+Прямой `python -m pytest` — debug path: он не заменяет verifier, держит cache под
+`.local-run/test-runs/direct-pytest/` и требует явного PostgreSQL `TEST_DATABASE_URL` —
+умолчания базы у него нет (017, стадия 2c).
 
 ## Диагностика окружения
 
