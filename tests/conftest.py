@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient
-from sqlalchemy import event, text
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import OperationalError
@@ -603,15 +603,20 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
     async with engine.connect() as connection:
         transaction = await connection.begin()
         async with TestingSessionLocal(bind=connection) as session:
-            # Use SAVEPOINTs so application code can call session.commit() without
-            # breaking test isolation.
-            await session.begin_nested()
-
-            @event.listens_for(session.sync_session, "after_transaction_end")
-            def _restart_savepoint(sess, trans):
-                if trans.nested and trans._parent and not trans._parent.nested:
-                    sess.begin_nested()
-
+            # `TestingSessionLocal` joins this outer transaction with
+            # join_transaction_mode="create_savepoint": the session's own commit and rollback become
+            # SAVEPOINT release and rollback, and the outer transaction is never touched, so the
+            # rollback below undoes the whole test. That is SQLAlchemy 2.0's built-in form of
+            # "join an external transaction", and it needs nothing else.
+            #
+            # This fixture used to add the SQLAlchemy 1.4 recipe on top of it - an explicit
+            # begin_nested() plus an after_transaction_end listener that reopened a SAVEPOINT
+            # whenever one ended. Under create_savepoint that listener is redundant and actively
+            # wrong: the payment engine opens its own begin_nested() (engine.py _run_uow_with_retry,
+            # _apply_flow), the listener fired as that savepoint closed and started another one
+            # underneath it, and the application then failed with "Can't operate on closed
+            # transaction inside context manager". Measured 2026-09-23 on PostgreSQL (017 stage 2a,
+            # class FIXA, 62 tests in 24 files); SQLite never ran this branch.
             yield session
         await transaction.rollback()
 
