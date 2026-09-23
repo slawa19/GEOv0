@@ -53,8 +53,16 @@ if (-not $backendPortFree -or -not $uiPortFree) {
     throw 'A required Phase 4 smoke port is already in use.'
 }
 
-$databasePath = Join-Path $runRoot 'admin-real.db'
-$databaseUrl = 'sqlite+aiosqlite:///' + $databasePath.Replace('\', '/')
+# Programme 017 `T1710`: this is the only Admin e2e with a real backend, and it now runs on a
+# disposable PostgreSQL database created for this run and dropped in the `finally`. The name carries
+# the run id so two runs cannot collide, and it obeys the same contract every launcher database
+# obeys - `scripts/dev_database.py` refuses anything else, which is what makes the drop below safe.
+$databaseName = "geov0_dev_$($TaskSlug -replace '_', '-')-$($runId.Substring(0, 8))"
+$pgHost = if ([string]::IsNullOrWhiteSpace($env:GEO_DEV_PG_HOST)) { '127.0.0.1' } else { $env:GEO_DEV_PG_HOST }
+$pgPort = if ([string]::IsNullOrWhiteSpace($env:GEO_DEV_PG_PORT)) { '5432' } else { $env:GEO_DEV_PG_PORT }
+$pgUser = if ([string]::IsNullOrWhiteSpace($env:GEO_DEV_PG_USER)) { 'geo' } else { $env:GEO_DEV_PG_USER }
+$pgPassword = if ([string]::IsNullOrWhiteSpace($env:GEO_DEV_PG_PASSWORD)) { 'geo' } else { $env:GEO_DEV_PG_PASSWORD }
+$databaseUrl = "postgresql+asyncpg://${pgUser}:${pgPassword}@${pgHost}:${pgPort}/${databaseName}"
 $backendOrigin = "http://127.0.0.1:$BackendPort"
 $uiOrigin = "http://127.0.0.1:$UiPort"
 $adminToken = 'phase4-' + [guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N')
@@ -82,6 +90,7 @@ foreach ($key in $environment.Keys) {
 
 $backendProcess = $null
 $uiProcess = $null
+$databaseCreated = $false
 
 function Wait-LocalEndpoint {
     param(
@@ -108,16 +117,31 @@ function Wait-LocalEndpoint {
 try {
     Push-Location $repoRoot
     try {
-        & $pythonExe scripts/init_sqlite_db.py
-        if ($LASTEXITCODE -ne 0) { throw 'SQLite schema initialization failed.' }
+        & $pythonExe scripts/dev_database.py ensure
+        if ($LASTEXITCODE -ne 0) { throw "Creating the disposable database failed (exit $LASTEXITCODE)." }
+        $databaseCreated = $true
 
-        & $pythonExe scripts/seed_db.py --source fixtures
-        if ($LASTEXITCODE -ne 0) { throw 'Fixture seed failed.' }
+        # The one migration entry, the same one `docker/docker-entrypoint.sh` calls. The
+        # `alembic_version` precondition comes from `migrations/env.py` inside this run.
+        & $pythonExe -m alembic -c migrations/alembic.ini upgrade head
+        if ($LASTEXITCODE -ne 0) { throw 'alembic upgrade head failed.' }
 
-        # Programme 015 step 5a: the fresh database becomes checkable only with a baseline, taken
-        # right after seeding and before the backend starts.
-        & $pythonExe scripts/take_reconciliation_baseline.py --all
-        if ($LASTEXITCODE -ne 0) { throw 'Reconciliation baseline failed.' }
+        # Real operations through the domain services, not rows written past them: participants,
+        # trust lines, payments and a clearing, with the reconciliation baseline taken on empty
+        # debts before the first payment (`scripts/seed_recipe.py`).
+        & $pythonExe scripts/seed_db.py --source recipe --community riverside-town-50
+        if ($LASTEXITCODE -ne 0) { throw 'Recipe seed failed.' }
+
+        # The seed writes one ref -> PID table per community, overwritten by the next run of that
+        # community. This disposable database takes its own copy so the readiness probe below is
+        # checking ITS population - and so that this run does not invalidate the launcher's.
+        & $pythonExe scripts/dev_database.py adopt --community riverside-town-50
+        if ($LASTEXITCODE -ne 0) { throw "Adopting the seed's ref -> PID table failed." }
+
+        # The seed asserts its own acceptance; this asserts the same of the database the backend is
+        # about to be pointed at, which is the check that would catch a half-written seed.
+        & $pythonExe scripts/dev_database.py ready --community riverside-town-50
+        if ($LASTEXITCODE -ne 0) { throw "The seeded database is not ready (exit $LASTEXITCODE)." }
     } finally {
         Pop-Location
     }
@@ -158,11 +182,17 @@ try {
         }
     }
 
-    foreach ($databaseArtifact in @($databasePath, "$databasePath-wal", "$databasePath-shm")) {
-        $resolvedArtifact = [System.IO.Path]::GetFullPath($databaseArtifact)
-        if ($resolvedArtifact.StartsWith($resolvedRunRoot + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase) -and
-            (Test-Path -LiteralPath $resolvedArtifact -PathType Leaf)) {
-            Remove-Item -LiteralPath $resolvedArtifact -Force
+    # The processes are stopped ABOVE this line, and the drop below is a plain DROP DATABASE that
+    # `scripts/dev_database.py` refuses while any session is still connected. A database this run
+    # did not create is never dropped - `$databaseCreated` is set only after `ensure` succeeded.
+    $databaseDropped = $false
+    if ($databaseCreated) {
+        Push-Location $repoRoot
+        try {
+            & $pythonExe scripts/dev_database.py drop
+            $databaseDropped = ($LASTEXITCODE -eq 0)
+        } finally {
+            Pop-Location
         }
     }
 
@@ -170,5 +200,12 @@ try {
         [Environment]::SetEnvironmentVariable($key, $previousEnvironment[$key], 'Process')
     }
     Write-Host 'Owned-process cleanup: complete'
-    Write-Host 'Disposable database cleanup: complete'
+    if (-not $databaseCreated) {
+        Write-Host 'Disposable database cleanup: nothing was created'
+    } elseif ($databaseDropped) {
+        Write-Host "Disposable database cleanup: complete ($databaseName dropped)"
+    } else {
+        # Named, not swallowed: a database left behind is a leak the operator has to know about.
+        Write-Warning "Disposable database cleanup: FAILED, $databaseName still exists. Drop it by hand."
+    }
 }

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
-import sqlite3
+import os
+import socket
 import time
 import urllib.error
 import urllib.request
@@ -11,6 +13,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy.engine import URL, make_url
+
 
 @dataclass(frozen=True)
 class RunWindow:
@@ -18,7 +22,16 @@ class RunWindow:
     stopped_at: datetime
 
 
-def _parse_dt(s: str) -> datetime:
+def _parse_dt(s: Any) -> datetime:
+    """Accept both what a driver returns and what an API returns.
+
+    PostgreSQL's `timestamptz` arrives from asyncpg as an aware `datetime`; the same instant coming
+    back from the HTTP API is an ISO string. Programme 017 moved this analysis onto PostgreSQL, so
+    both shapes reach here and coercing one into the other is the whole of this function.
+    """
+
+    if isinstance(s, datetime):
+        return s
     return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
 
 
@@ -74,33 +87,78 @@ def _download(
         out_path.write_bytes(resp.read())
 
 
-def _load_run_window(db: sqlite3.Connection, run_id: str) -> RunWindow | None:
-    row = db.execute(
-        "SELECT started_at, stopped_at FROM simulator_runs WHERE run_id = ?",
-        (run_id,),
-    ).fetchone()
-    if not row or not row[0] or not row[1]:
+#: Bounded, because an unbounded connect is how this script hangs after a successful run with the
+#: artefacts already downloaded and nothing said about why.
+_DB_CONNECT_TIMEOUT_SECONDS = 10.0
+_DB_STATEMENT_TIMEOUT_SECONDS = 120.0
+
+
+def _database_dsn(database_url: str) -> str:
+    """A libpq DSN for asyncpg, from the same URL the application is configured with."""
+
+    url = make_url(database_url)
+    if url.get_backend_name() != "postgresql":
+        raise SystemExit(
+            f"This analysis reads PostgreSQL; --database-url names {url.get_backend_name()!r}. "
+            f"Programme 017 removed the SQLite engine."
+        )
+    return URL.create(
+        "postgresql",
+        username=url.username,
+        password=url.password,
+        host=url.host,
+        port=url.port,
+        database=url.database,
+    ).render_as_string(hide_password=False)
+
+
+async def _connect(database_url: str) -> Any:
+    """Open the analysis connection, telling a stopped cluster apart from a wrong credential."""
+
+    import asyncpg
+
+    try:
+        return await asyncpg.connect(
+            _database_dsn(database_url), timeout=_DB_CONNECT_TIMEOUT_SECONDS
+        )
+    except (asyncpg.InvalidPasswordError, asyncpg.InvalidCatalogNameError) as exc:
+        raise SystemExit(f"The analysis database refused this connection: {exc}") from exc
+    except (OSError, socket.gaierror, asyncio.TimeoutError, TimeoutError) as exc:
+        raise SystemExit(
+            f"PostgreSQL is not reachable for the post-run analysis ({type(exc).__name__}: {exc}). "
+            f"Start the cluster - docs/ru/backend/postgres-local-portable.md section 3."
+        ) from exc
+
+
+async def _load_run_window(db: Any, run_id: str) -> RunWindow | None:
+    row = await db.fetchrow(
+        "SELECT started_at, stopped_at FROM simulator_runs WHERE run_id = $1",
+        run_id,
+        timeout=_DB_STATEMENT_TIMEOUT_SECONDS,
+    )
+    if not row or not row["started_at"] or not row["stopped_at"]:
         return None
-    return RunWindow(started_at=_parse_dt(row[0]), stopped_at=_parse_dt(row[1]))
+    return RunWindow(
+        started_at=_parse_dt(row["started_at"]), stopped_at=_parse_dt(row["stopped_at"])
+    )
 
 
-def _collect_payment_amounts(db: sqlite3.Connection, window: RunWindow, equivalent: str) -> list[float]:
-    rows = db.execute(
-        "SELECT payload, created_at FROM transactions WHERE type = 'PAYMENT'"
-    ).fetchall()
+async def _collect_payment_amounts(db: Any, window: RunWindow, equivalent: str) -> list[float]:
+    # Narrowed in SQL rather than in Python: on PostgreSQL the whole PAYMENT history of a seeded
+    # community would otherwise cross the wire to be discarded here.
+    rows = await db.fetch(
+        "SELECT payload, created_at FROM transactions "
+        "WHERE type = 'PAYMENT' AND created_at BETWEEN $1 AND $2",
+        window.started_at,
+        window.stopped_at,
+        timeout=_DB_STATEMENT_TIMEOUT_SECONDS,
+    )
 
     out: list[float] = []
     eq = str(equivalent).upper()
 
-    for payload_raw, created_at_raw in rows:
-        try:
-            created_at = _parse_dt(created_at_raw)
-        except Exception:
-            continue
-        if created_at < window.started_at or created_at > window.stopped_at:
-            continue
-
-        payload = payload_raw
+    for row in rows:
+        payload = row["payload"]
         if isinstance(payload, str):
             try:
                 payload = json.loads(payload)
@@ -174,9 +232,12 @@ def main() -> int:
     ap.add_argument("--max-amount", type=float, default=1500.0)
     ap.add_argument("--out-dir", default=str(Path(".local-run") / "analysis"))
     ap.add_argument(
-        "--db",
-        default=str(Path(".local-run") / "geov0.db"),
-        help="SQLite DB used for the post-run payment analysis",
+        "--database-url",
+        default=os.environ.get("DATABASE_URL", ""),
+        help=(
+            "PostgreSQL URL used for the post-run payment analysis; defaults to DATABASE_URL, "
+            "which is what the launcher exports"
+        ),
     )
     ap.add_argument("--timeout-sec", type=int, default=30, help="HTTP client timeout (seconds)")
     args = ap.parse_args()
@@ -344,16 +405,29 @@ def main() -> int:
         except Exception:
             print("run.counters=unavailable (failed to parse summary.json)")
 
-    db_path = Path(args.db).resolve()
-    db = sqlite3.connect(f"file:{db_path.as_posix()}?mode=ro", uri=True)
-    window = _load_run_window(db, run_id)
+    if not str(args.database_url).strip():
+        raise SystemExit(
+            "No database URL for the post-run analysis: pass --database-url or set DATABASE_URL "
+            "(the launcher exports it)."
+        )
+
+    async def _read() -> tuple[RunWindow | None, list[float]]:
+        db = await _connect(args.database_url)
+        try:
+            window = await _load_run_window(db, run_id)
+            if not window:
+                return None, []
+            return window, await _collect_payment_amounts(
+                db, window, equivalent=args.equivalent
+            )
+        finally:
+            await db.close()
+
+    window, amounts = asyncio.run(_read())
 
     if not window:
         print("db_window=missing")
         return 0
-
-    amounts = _collect_payment_amounts(db, window, equivalent=args.equivalent)
-    db.close()
 
     if not amounts:
         print("payments.count=0")
@@ -378,4 +452,10 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    import sys
+
+    if sys.platform == "win32":
+        # asyncpg needs the selector loop on Windows; the rest of this repository's entrypoints
+        # (`scripts/seed_db.py`) set the same policy for the same reason.
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     raise SystemExit(main())
