@@ -109,8 +109,12 @@ def adopted_key_table_path(database: str) -> Path:
 def _is_loopback_host(host: str) -> bool:
     candidate = (host or "").strip()
     if not candidate:
-        # An empty host means a local socket, which cannot reach another machine.
-        return True
+        # An OMITTED host is not a local socket. asyncpg fills it the way libpq does, and `PGHOST`
+        # comes first (https://magicstack.github.io/asyncpg/current/api/index.html#asyncpg.connect),
+        # so the database this URL names can be on whatever machine the environment says. What this
+        # module drops, it must be able to name, so the host is required and must be loopback
+        # (Codex external review of `37fec08..5e687dd`, F3, 2026-09-23).
+        return False
     if candidate.lower() == "localhost":
         return True
     try:
@@ -143,8 +147,9 @@ def assert_safe_dev_database_url(database_url: str) -> URL:
 
     if not _is_loopback_host(url.host or ""):
         raise UnsafeDevDatabaseError(
-            f"The launcher database must live on a loopback host; this URL points at "
-            f"{url.host!r}. This script drops databases, and it will not do that over a network."
+            f"The launcher database must live on an explicitly named loopback host; this URL "
+            f"points at {url.host or '<omitted, which the driver would take from PGHOST>'!r}. "
+            f"This script drops databases, and it will not do that over a network."
         )
 
     database = url.database or ""

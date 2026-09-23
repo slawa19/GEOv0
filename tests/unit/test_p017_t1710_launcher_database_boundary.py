@@ -250,3 +250,33 @@ def test_the_environment_carries_the_url_and_argv_does_not() -> None:
 
     with pytest.raises(SystemExit):
         dev_database.main(["ensure", "--database-url", _url("geov0_dev_local")])
+
+
+# ==================================================================================================
+# Closing review of stage 1 (Codex, `37fec08..5e687dd`, 2026-09-23): F3 and F4
+# ==================================================================================================
+
+
+@pytest.mark.parametrize(
+    "database_url",
+    [
+        "postgresql+asyncpg://geo:geo@/geov0_dev_local",
+        "postgresql+asyncpg:///geov0_dev_local",
+        "postgresql+asyncpg://geo:geo@:5432/geov0_dev_local",
+    ],
+)
+def test_an_omitted_host_is_refused_because_the_driver_fills_it_from_pghost(
+    database_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """F3. A URL with no host is NOT a local socket: asyncpg takes the host from `PGHOST` first.
+
+    With `PGHOST` pointing at another machine, the omitted host is that machine, and this module
+    drops databases. The control is the explicit loopback URL under the same `PGHOST`: accepted,
+    so the refusal is about the omission and not about the environment variable.
+    """
+
+    monkeypatch.setenv("PGHOST", "db.example.com")
+    assert dev_database.assert_safe_dev_database_url(_url("geov0_dev_local"))
+
+    with pytest.raises(dev_database.UnsafeDevDatabaseError, match="loopback"):
+        dev_database.assert_safe_dev_database_url(database_url)
