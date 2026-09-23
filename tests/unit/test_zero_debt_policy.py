@@ -13,8 +13,10 @@ from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 
 from tests.debt_setup import debt_fixture_setup
+from tests.conftest import MODE_B
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_clearing_deletes_zero_debts(db_session):
     nonce = uuid.uuid4().hex[:10]
@@ -43,8 +45,18 @@ async def test_clearing_deletes_zero_debts(db_session):
 
     await db_session.commit()
 
+    # Captured as plain values BEFORE clearing. On PostgreSQL clearing runs on its own interlock
+    # connection and ends the caller's transaction first (`_rollback_before_interlock`,
+    # `app/core/clearing/service.py`), and a rollback expires every instance in this session: reading
+    # `eq.code`, `eq.id` or a participant's `pid` afterwards is a lazy load, which async SQLAlchemy
+    # refuses with `MissingGreenlet`. SQLite executes on this session and never rolled it back, so
+    # the stale read went unnoticed; mode B is the first time this test reached the PostgreSQL path
+    # (017 stage 2b).
+    eq_id, eq_code = eq.id, eq.code
+    pids = {a.pid, b.pid, c.pid}
+
     service = ClearingService(db_session)
-    cycles = await service.find_cycles(eq.code, max_depth=3)
+    cycles = await service.find_cycles(eq_code, max_depth=3)
     assert cycles
 
     ok = await service.execute_clearing(cycles[0])
@@ -57,7 +69,7 @@ async def test_clearing_deletes_zero_debts(db_session):
     ).scalars().one()
 
     assert tx.state == "COMMITTED"
-    assert tx.payload["equivalent"] == eq.code
+    assert tx.payload["equivalent"] == eq_code
     # 012, second round: the payload amount is rendered by the one money-string renderer, so a
     # precision-2 equivalent stores "10.00".  The literal used to be "10", and that literal was
     # only ever true on SQLite: PostgreSQL returns `Numeric(20, 8)` at the column's scale, so
@@ -81,16 +93,16 @@ async def test_clearing_deletes_zero_debts(db_session):
     ).scalars().one()
 
     assert audit.tx_id == tx.tx_id
-    assert audit.equivalent_code == eq.code
+    assert audit.equivalent_code == eq_code
     assert isinstance(audit.affected_participants, dict)
     assert isinstance(audit.affected_participants.get("participants"), list)
-    assert set(audit.affected_participants["participants"]) == {a.pid, b.pid, c.pid}
+    assert set(audit.affected_participants["participants"]) == pids
     assert isinstance(audit.affected_participants.get("edges"), list)
     assert len(audit.affected_participants["edges"]) == 3
 
     remaining = (
         await db_session.execute(
-            select(Debt).where(Debt.equivalent_id == eq.id)
+            select(Debt).where(Debt.equivalent_id == eq_id)
         )
     ).scalars().all()
 

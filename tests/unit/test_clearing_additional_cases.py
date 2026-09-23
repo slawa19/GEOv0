@@ -4,6 +4,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.clearing.service import ClearingService
 from app.core.invariants import InvariantChecker
@@ -17,6 +18,7 @@ from app.db.models.trustline import TrustLine
 from app.utils.exceptions import GeoException
 
 from tests.debt_setup import debt_fixture_setup
+from tests.conftest import MODE_B
 
 
 def _mk_eq(code_prefix: str) -> Equivalent:
@@ -414,6 +416,7 @@ async def test_self_loop_not_allowed(db_session):
     await db_session.rollback()
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_auto_clear_clears_multiple_independent_cycles(db_session):
     eq = _mk_eq("M")
@@ -532,6 +535,7 @@ async def test_auto_clear_surfaces_sanitized_failure_after_partial_progress(
         assert "event=clearing.auto_clear_find_failed" in caplog.text
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_execute_clearing_unexpected_failure_rolls_back_and_surfaces_sanitized_error(
     db_session,
@@ -628,6 +632,7 @@ async def test_execute_clearing_unexpected_failure_rolls_back_and_surfaces_sanit
         PaymentRouter.invalidate_cache(eq_code)
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_execute_clearing_policy_lookup_failure_rolls_back_without_effects(
     db_session,
@@ -698,6 +703,7 @@ async def test_execute_clearing_policy_lookup_failure_rolls_back_without_effects
         PaymentRouter.invalidate_cache(eq_code)
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_execute_clearing_policy_skip_remains_non_exceptional(db_session):
     eq = _mk_eq("K")
@@ -744,26 +750,45 @@ async def test_execute_clearing_policy_skip_remains_non_exceptional(db_session):
     assert result is None
 
 
+@MODE_B
 @pytest.mark.asyncio
-async def test_execute_clearing_nonpositive_defensive_skip_rolls_back(db_session):
+async def test_execute_clearing_nonpositive_defensive_skip_rolls_back(db_session, monkeypatch):
     eq, _ = await _setup_committed_triangle(db_session, code_prefix="N")
     service = ClearingService(db_session)
     cycles = await service.find_cycles(eq.code, max_depth=3)
     assert cycles
 
     debt_id = uuid.UUID(str(cycles[0][0]["debt_id"]))
-    dirty_debt = await db_session.get(Debt, debt_id)
-    assert dirty_debt is not None
     # The database CHECK makes a committed nonpositive Debt impossible. Keep
     # the defensive branch covered through the non-flushed identity map only.
-    dirty_debt.amount = Decimal("0")
+    #
+    # THE IDENTITY MAP OF THE SESSION THAT EXECUTES, which is not always the caller's (017 stage 2b).
+    # On SQLite clearing executes on `db_session`; on PostgreSQL it executes on its own interlock
+    # session over a connection of its own, and reads the debt fresh from there. Dirtying the
+    # caller's map, as this test did, reaches the branch on SQLite only: on PostgreSQL in mode B the
+    # clearing simply succeeded (`assert Decimal('10.00000000') is None`), and in mode A the
+    # connection-bound refusal hid that. So the debt is dirtied in whichever session
+    # `_execute_clearing_with_amount` runs on, immediately before it runs.
+    real_execute = ClearingService._execute_clearing_with_amount
+    dirtied_in: list[object] = []
+
+    async def _dirty_then_execute(self, *args, **kwargs):
+        dirty_debt = await self.session.get(Debt, debt_id)
+        assert dirty_debt is not None
+        dirty_debt.amount = Decimal("0")
+        dirtied_in.append(self.session)
+        return await real_execute(self, *args, **kwargs)
+
+    monkeypatch.setattr(ClearingService, "_execute_clearing_with_amount", _dirty_then_execute)
 
     result = await service.execute_clearing_with_amount(cycles[0])
 
+    assert len(dirtied_in) == 1, "non-vacuity: the executing session's debt was never dirtied"
     assert result is None
     assert not db_session.in_transaction()
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_execute_clearing_commit_failure_rolls_back_without_visible_effects(
     db_session,
@@ -775,13 +800,28 @@ async def test_execute_clearing_commit_failure_rolls_back_without_visible_effect
     assert cycles
     eq_id = eq.id
 
-    async def _fail_commit():
-        raise RuntimeError("commit failed with private detail")
+    # THE COMMIT OF THE SESSION THAT EXECUTES, which is not always the caller's (017 stage 2b). On
+    # SQLite clearing commits `db_session`; on PostgreSQL it commits its own interlock session, so
+    # failing `db_session.commit` failed nothing there: in mode B the test answered `DID NOT RAISE`,
+    # and in mode A it passed only because the connection-bound refusal raised the same
+    # `GeoException` before any commit (stage-2 catalogue 4.3). Clearing has exactly one commit on
+    # either path (`ClearingService._commit_to_terminal`), so the FIRST commit any session makes
+    # from here on is the one that fails.
+    real_commit = AsyncSession.commit
+    failed_commits: list[object] = []
 
-    monkeypatch.setattr(db_session, "commit", _fail_commit)
+    async def _fail_first_commit(self):
+        if not failed_commits:
+            failed_commits.append(self)
+            raise RuntimeError("commit failed with private detail")
+        return await real_commit(self)
+
+    monkeypatch.setattr(AsyncSession, "commit", _fail_first_commit)
 
     with pytest.raises(GeoException) as exc_info:
         await service.execute_clearing_with_amount(cycles[0])
+
+    assert len(failed_commits) == 1, "non-vacuity: the clearing's commit was never attempted"
 
     assert exc_info.value.code == "E010"
     assert "private detail" not in exc_info.value.message
@@ -802,6 +842,7 @@ async def test_execute_clearing_commit_failure_rolls_back_without_visible_effect
     )
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_execute_clearing_rollback_failure_keeps_original_error_sanitized(
     db_session,
@@ -841,6 +882,7 @@ async def test_execute_clearing_rollback_failure_keeps_original_error_sanitized(
         await original_rollback()
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_execute_clearing_checkpoint_failure_is_explicitly_best_effort(
     db_session,

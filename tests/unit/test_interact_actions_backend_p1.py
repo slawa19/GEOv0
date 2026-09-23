@@ -31,6 +31,7 @@ from app.utils.exceptions import (
 )
 
 from tests.debt_setup import debt_fixture_setup
+from tests.conftest import MODE_B
 
 
 @pytest.fixture
@@ -1092,6 +1093,7 @@ async def test_action_clearing_real_happy_zero_cycles(client, db_session, intera
     assert isinstance(payload.get("cycles"), list)
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_action_clearing_real_total_cleared_amount_is_actual_not_precalc(
     client, db_session, interact_actions_enabled, monkeypatch
