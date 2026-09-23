@@ -118,7 +118,6 @@ def test_a_frozen_participant_is_reachable_and_therefore_not_refused():
     [
         "postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_dev_launcher",
         "postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_p017t1711",
-        "postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_p017t1711__clone",
         "sqlite+aiosqlite:///:memory:",
     ],
 )
@@ -402,3 +401,45 @@ def test_an_undeclared_check_is_refused():
     checks["clearing_probably_happened"] = {"passed": True, "detail": "ok"}
     with pytest.raises(SeedRefusal, match="unknown check"):
         assert_every_check_reported(checks)
+
+
+# =================================================================================================
+# Closing review of stage 1 (Codex, `37fec08..5e687dd`, 2026-09-23): F5
+# =================================================================================================
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        # A name provisioning reserves for ITS scratch databases: the sweep of task `a` drops it.
+        "postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_a__b",
+        "postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_p017t1711__clone",
+        "postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_dev_a__b",
+        # Leading / trailing / doubled underscores, which the regex copy let through.
+        "postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test__a",
+        "postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_dev_a_",
+        # The launcher's database over a network: the launcher's own rule refuses it.
+        "postgresql+asyncpg://geo:geo@10.0.0.5:5432/geov0_dev_local",
+    ],
+)
+def test_the_seed_applies_the_test_and_launcher_name_rules_instead_of_a_copy(url):
+    """F5. The seed decided "disposable" with its own regex, which accepted the reserved `__`.
+
+    The seed is not the owner of either name contract, so it now asks the two owners
+    (`scripts/validate_test_database_url.py`, `scripts/dev_database.py`). The control is
+    `test_a_disposable_database_is_accepted` above, run against the same function.
+    """
+
+    with pytest.raises(SeedRefusal):
+        assert_target_is_disposable(make_url(url))
+
+
+def test_a_scratch_clone_is_seedable_only_when_the_caller_says_it_derived_it():
+    """The integration tests seed the clones provisioning derived (`<tier>__<suffix>`), as the
+    provisioning module itself may create them. That is the one caller for whom the reserved
+    separator is its own; the supported CLI (`scripts/seed_db.py --source recipe`) is not it."""
+
+    clone = make_url("postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_p017t1711__clone")
+    assert_target_is_disposable(clone, allow_scratch_suffix=True)
+    with pytest.raises(SeedRefusal):
+        assert_target_is_disposable(clone)

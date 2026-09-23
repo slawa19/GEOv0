@@ -250,3 +250,83 @@ def test_the_environment_carries_the_url_and_argv_does_not() -> None:
 
     with pytest.raises(SystemExit):
         dev_database.main(["ensure", "--database-url", _url("geov0_dev_local")])
+
+
+# ==================================================================================================
+# Closing review of stage 1 (Codex, `37fec08..5e687dd`, 2026-09-23): F3 and F4
+# ==================================================================================================
+
+
+@pytest.mark.parametrize(
+    "database_url",
+    [
+        "postgresql+asyncpg://geo:geo@/geov0_dev_local",
+        "postgresql+asyncpg:///geov0_dev_local",
+        "postgresql+asyncpg://geo:geo@:5432/geov0_dev_local",
+    ],
+)
+def test_an_omitted_host_is_refused_because_the_driver_fills_it_from_pghost(
+    database_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """F3. A URL with no host is NOT a local socket: asyncpg takes the host from `PGHOST` first.
+
+    With `PGHOST` pointing at another machine, the omitted host is that machine, and this module
+    drops databases. The control is the explicit loopback URL under the same `PGHOST`: accepted,
+    so the refusal is about the omission and not about the environment variable.
+    """
+
+    monkeypatch.setenv("PGHOST", "db.example.com")
+    assert dev_database.assert_safe_dev_database_url(_url("geov0_dev_local"))
+
+    with pytest.raises(dev_database.UnsafeDevDatabaseError, match="loopback"):
+        dev_database.assert_safe_dev_database_url(database_url)
+
+
+class _FakeMaintenanceConnection:
+    """Just enough of an asyncpg connection for `create`: an existing name makes CREATE fail."""
+
+    def __init__(self, existing: set[str]) -> None:
+        self.existing = existing
+        self.executed: list[str] = []
+
+    async def execute(self, statement: str, **_kwargs: object) -> None:
+        import asyncpg
+
+        self.executed.append(statement)
+        name = statement.split('"')[1]
+        if name in self.existing:
+            raise asyncpg.DuplicateDatabaseError(f'database "{name}" already exists')
+        self.existing.add(name)
+
+    async def fetchval(self, _statement: str, name: str, **_kwargs: object) -> object:
+        return 1 if name in self.existing else None
+
+    async def close(self) -> None:
+        return None
+
+
+@pytest.mark.parametrize("already_there", [False, True])
+def test_create_succeeds_only_for_the_caller_that_created_the_database(
+    already_there: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """F4. The Admin e2e drops, in its `finally`, the database it believes it created.
+
+    `ensure` answers 0 whether it created the database or found it, so it cannot carry that belief.
+    `create` answers 0 ONLY when this call created it, and refuses a name that is already taken -
+    for a disposable name with a run id in it, a collision means something is wrong, and the database
+    found there belongs to somebody else. The control is the absent-name half of the same test.
+    """
+
+    name = "geov0_dev_phase4-1a2b3c4d"
+    connection = _FakeMaintenanceConnection({name} if already_there else set())
+
+    async def _connect(_url: object, _database: str) -> _FakeMaintenanceConnection:
+        return connection
+
+    monkeypatch.setattr(dev_database, "_connect", _connect)
+    monkeypatch.setenv("DATABASE_URL", _url(name))
+
+    assert dev_database.main(["create"]) == (1 if already_there else 0)
+    assert name in connection.existing
+    # And `ensure` keeps its meaning for the launchers, which re-use their database on every start.
+    assert dev_database.main(["ensure"]) == 0

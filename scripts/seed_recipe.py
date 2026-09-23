@@ -47,7 +47,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
-import re
 import sys
 import uuid
 from dataclasses import dataclass, field
@@ -117,10 +116,6 @@ REACHABLE_TRUSTLINE_STATUSES = frozenset({"active"})
 #: A description's participant statuses and the operation that reaches each one.
 #: `frozen` is `admin.participants.freeze`, which writes `suspended` (`app/api/v1/admin.py:977`).
 REACHABLE_PARTICIPANT_STATUSES = frozenset({"active", "frozen"})
-
-#: A disposable database, by name. `geov0_dev_<slug>` is the launcher's (`T1710`),
-#: `geov0_test_<slug>` the test harness's (`scripts/validate_test_database_url.py:20`).
-_DISPOSABLE_POSTGRES_DATABASE_RE = re.compile(r"^geov0_(dev|test)_[A-Za-z0-9_-]+$")
 
 #: Attempts per command, and the delay before each retry. Only a TRANSIENT failure is retried, and a
 #: retry re-sends the same command id, which is the payment's `tx_id`: the replay returns the stored
@@ -205,18 +200,60 @@ async def database_url(session_factory: Callable[[], Any]) -> Any:
         return engine.url
 
 
-def assert_target_is_disposable(url: Any) -> None:
-    """Refuse any database that is not, by its own name, a disposable local one."""
+def assert_target_is_disposable(url: Any, *, allow_scratch_suffix: bool = False) -> None:
+    """Refuse any database that is not, by its own name, a disposable local one.
+
+    For PostgreSQL the seed OWNS NO NAME CONTRACT and keeps no copy of one: `geov0_dev_<slug>` is
+    decided by `scripts/dev_database.py`, `geov0_test_<slug>` by `scripts/validate_test_database_url.py`.
+    The copy this function used to hold - one regex over both - accepted `geov0_test_a__b`, a name
+    provisioning reserves for the scratch databases of task `a` and drops when it sweeps them (Codex
+    external review of `37fec08..5e687dd`, F5, 2026-09-23).
+
+    `allow_scratch_suffix` means what it means in the test guard, for the same kind of caller: a
+    test seeding a clone that provisioning derived as `<tier>__<suffix>`. The supported CLI
+    (`scripts/seed_db.py --source recipe`) leaves it off.
+    """
 
     backend = url.get_backend_name()
     if backend in {"postgresql", "postgres"}:
         database = url.database or ""
-        if not _DISPOSABLE_POSTGRES_DATABASE_RE.match(database):
-            raise SeedRefusal(
-                f"PostgreSQL database {database!r} is not a disposable seed database; the name "
-                f"contract is {_DISPOSABLE_POSTGRES_DATABASE_RE.pattern}"
+        rendered = url.render_as_string(hide_password=False)
+        if database.startswith("geov0_dev_"):
+            from scripts.dev_database import (  # noqa: PLC0415
+                UnsafeDevDatabaseError,
+                assert_safe_dev_database_url,
             )
-        return
+
+            try:
+                assert_safe_dev_database_url(rendered)
+            except UnsafeDevDatabaseError as refusal:
+                raise SeedRefusal(f"not a disposable seed database: {refusal}") from None
+            return
+        if database.startswith("geov0_test_"):
+            from scripts.validate_test_database_url import (  # noqa: PLC0415
+                UnsafeTestDatabaseError,
+                assert_safe_test_database_url,
+            )
+
+            try:
+                # "1": the guard's last rule is the opt-in for the harness's destructive schema
+                # RESET. The seed resets nothing - it refuses a database that is not empty - so
+                # that opt-in is not the question asked here; every NAME rule before it is.
+                assert_safe_test_database_url(
+                    rendered,
+                    allow_destructive_reset="1",
+                    repo_root=_REPO_ROOT,
+                    required_backend="postgresql",
+                    allow_scratch_suffix=allow_scratch_suffix,
+                )
+            except UnsafeTestDatabaseError as refusal:
+                raise SeedRefusal(f"not a disposable seed database: {refusal}") from None
+            return
+        raise SeedRefusal(
+            f"PostgreSQL database {database!r} is not a disposable seed database: only "
+            f"geov0_dev_<slug> (scripts/dev_database.py) and geov0_test_<slug> "
+            f"(scripts/validate_test_database_url.py) are"
+        )
     if backend == "sqlite":
         database = url.database or ""
         if database in {"", ":memory:"}:
@@ -297,8 +334,8 @@ class _Identity:
     ref: str
     pid: str
     public_key: str
-    #: `None` only in `reverify`, which re-reads an already seeded database and signs nothing: the
-    #: keys of the run that created it are gone by design.
+    #: `None` only in a run rebuilt by `_load_seeded_run`, which re-reads an already seeded
+    #: database and signs nothing: the keys of the run that created it are gone by design.
     _signing_key: SigningKey | None
     participant_id: uuid.UUID
 
@@ -545,13 +582,20 @@ class _Run:
     # -- the empty baseline -----------------------------------------------------------------
 
     async def take_baselines(self) -> None:
-        """THE BASELINE COMES BEFORE THE FIRST PAYMENT, and that ordering is the whole point.
+        """THE BASELINE COMES BEFORE THE FIRST PAYMENT - the stricter of two sound orderings.
 
-        A baseline adopts whatever the journal does not explain and certifies none of it
-        (`app/core/ledger/reconciliation.py:974`). Taken now - trust lines exist, debts do not - it
-        adopts nothing, and then `debts == baseline + sum(journal)` checks EVERYTHING this seed goes
-        on to do. Taken afterwards it would adopt the whole seed and prove nothing about it, while
-        still returning `PASSED`.
+        A baseline records, per edge, `current debt - sum(journal deltas)` as an offset it adopts and
+        does not certify (`app/core/ledger/reconciliation.py:999`). Taken afterwards it would NOT
+        adopt the seed wholesale, as an earlier version of this docstring claimed: correctly
+        journalled payments leave zero offsets, and their operations stay examinable. What it would
+        adopt is only a debt the journal fails to explain - which `baseline_offsets_are_zero` would
+        still report. So both orderings end in the same verdict for a correct seed.
+
+        Before is chosen because it makes the claim trivial where it is made: taken now - trust
+        lines exist, debts do not - the baseline can only be empty, that emptiness is asserted right
+        here (`offsets_recorded` and `entries_read` both zero), and every debt the seed goes on to
+        write is then checked by `debts == baseline + sum(journal)` alone, with no offset in the sum
+        to reason about (Codex external review of `37fec08..5e687dd`, F10, 2026-09-23).
         """
 
         for code, equivalent_id in sorted(self.equivalent_ids.items()):
@@ -1063,19 +1107,35 @@ def write_key_table(run: _Run, *, root: Path | None = None) -> Path:
 # ==================================================================================================
 
 
-async def reverify(
+#: What `dev_database.py ready` requires on every start, out of `ACCEPTANCE_CHECKS`.
+#:
+#: The acceptance asks "did the seed finish correctly", once, right after the seed. A start asks "is
+#: this database fit to run on", every time - including after the product has been USED, and using
+#: it changes the demonstration state that `bottleneck_edge_below_threshold`,
+#: `surviving_cycle_still_clearable` and `activity_in_every_equivalent` describe: `/clearing/auto`
+#: clears the surviving cycle, payments move the bottleneck. Readiness that re-ran all seven refused
+#: a correct database and advised resetting it (Codex external review of `37fec08..5e687dd`, F1,
+#: 2026-09-23). What a start needs is the reconciliation: the money the journal explains is the
+#: money in `debts`, which a legitimate operation keeps true. The other two reconciliation checks
+#: are properties of the SEED's verdict (the baseline adopted nothing; every operation of the seed
+#: was fully recomputed) and are not kept either. The second would go red on a sound database the
+#: moment the simulator's injector writes an `INJECT` operation, which reconciliation examines only
+#: as a subset (`app/core/ledger/reconciliation.py:162`) - a limit the verdict records about
+#: itself, not a defect of the database.
+READINESS_CHECKS = ("reconciliation_passed",)
+
+
+async def _load_seeded_run(
     session_factory: Callable[[], Any],
     *,
     community_id: str,
     refs_to_pid: dict[str, str],
-    communities_root: Path | None = None,
-) -> dict[str, dict[str, Any]]:
-    """Run the acceptance again over an ALREADY seeded database, without seeding anything.
+    communities_root: Path | None,
+) -> _Run:
+    """Rebuild a run over an ALREADY seeded database from its `ref -> PID` table, signing nothing.
 
-    The seed's verdict is only worth what it can still say about a database later, so the checks are
-    reachable without the run that produced it: `refs_to_pid` is the table the run wrote out, and
-    everything else is read back. A readiness probe (`T1710`) and the counter-checks in
-    `tests/integration/test_p017_t1711_seed_recipe_postgres.py` both need exactly this.
+    Refuses when a participant the table names is not in the database: that is a different or
+    unfinished population, not the one the table describes.
     """
 
     root = communities_root if communities_root is not None else _COMMUNITIES_DIR
@@ -1112,7 +1172,50 @@ async def reverify(
         )
         for ref, pid in refs_to_pid.items()
     }
+    return run
+
+
+async def reverify(
+    session_factory: Callable[[], Any],
+    *,
+    community_id: str,
+    refs_to_pid: dict[str, str],
+    communities_root: Path | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Run the whole ACCEPTANCE again over an already seeded database, without seeding anything.
+
+    All seven checks, so this answers "is this still the state the seed left" - which is what the
+    counter-checks in `tests/integration/test_p017_t1711_seed_recipe_postgres.py` need, and which a
+    database the product has since used is allowed to fail. It is NOT the start gate; that is
+    `check_ready_to_start`.
+    """
+
+    run = await _load_seeded_run(
+        session_factory,
+        community_id=community_id,
+        refs_to_pid=refs_to_pid,
+        communities_root=communities_root,
+    )
     return await run_acceptance(session_factory, run)
+
+
+async def check_ready_to_start(
+    session_factory: Callable[[], Any],
+    *,
+    community_id: str,
+    refs_to_pid: dict[str, str],
+    communities_root: Path | None = None,
+) -> dict[str, dict[str, Any]]:
+    """The `READINESS_CHECKS` over a seeded database: its population is there and it reconciles."""
+
+    run = await _load_seeded_run(
+        session_factory,
+        community_id=community_id,
+        refs_to_pid=refs_to_pid,
+        communities_root=communities_root,
+    )
+    reconciliation = await _check_reconciliation(session_factory, run)
+    return {name: reconciliation[name] for name in READINESS_CHECKS}
 
 
 async def seed_community(
@@ -1122,6 +1225,7 @@ async def seed_community(
     communities_root: Path | None = None,
     key_table_root: Path | None = None,
     env: str | None = None,
+    allow_scratch_suffix: bool = False,
 ) -> SeedReport:
     """Seed one community by running its recipe. Raises `SeedRefusal` and writes nothing further."""
 
@@ -1152,7 +1256,7 @@ async def seed_community(
 
     assert_environment_is_safe(env)
     url = await database_url(session_factory)
-    assert_target_is_disposable(url)
+    assert_target_is_disposable(url, allow_scratch_suffix=allow_scratch_suffix)
     try:
         async with session_factory() as session:
             await assert_database_is_empty(session)

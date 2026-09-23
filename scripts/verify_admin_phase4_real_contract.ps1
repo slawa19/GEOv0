@@ -117,7 +117,10 @@ function Wait-LocalEndpoint {
 try {
     Push-Location $repoRoot
     try {
-        & $pythonExe scripts/dev_database.py ensure
+        # `create`, not `ensure`: `ensure` also answers 0 for a database it merely FOUND, and the
+        # `finally` below drops what this run created. `create` answers 0 only to the call that
+        # created the database; a name that is already taken is refused, and then nothing is dropped.
+        & $pythonExe scripts/dev_database.py create
         if ($LASTEXITCODE -ne 0) { throw "Creating the disposable database failed (exit $LASTEXITCODE)." }
         $databaseCreated = $true
 
@@ -184,7 +187,8 @@ try {
 
     # The processes are stopped ABOVE this line, and the drop below is a plain DROP DATABASE that
     # `scripts/dev_database.py` refuses while any session is still connected. A database this run
-    # did not create is never dropped - `$databaseCreated` is set only after `ensure` succeeded.
+    # did not create is never dropped - `$databaseCreated` is set only after `create` succeeded, and
+    # `create` succeeds only for the call that actually created the database.
     $databaseDropped = $false
     if ($databaseCreated) {
         Push-Location $repoRoot

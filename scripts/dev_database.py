@@ -14,7 +14,8 @@ listing or a launcher log (`AGENTS.md` section 12) - the same reason
 Exit codes, because PowerShell drives on them:
 
     0  the command succeeded (for `ready`: the database is seeded and reconciles)
-    1  a logical refusal - the state is wrong and retrying will not change it
+    1  a logical refusal - the state is wrong and retrying will not change it (for `create`: the
+       database already existed, so this caller did not create it)
     2  the URL is not a database this module is allowed to touch, or the arguments are wrong
     3  `ready` only: the database is migrated and EMPTY, so the caller should seed it
     4  PostgreSQL could not be reached - transient, and the caller is told how to start it
@@ -109,8 +110,12 @@ def adopted_key_table_path(database: str) -> Path:
 def _is_loopback_host(host: str) -> bool:
     candidate = (host or "").strip()
     if not candidate:
-        # An empty host means a local socket, which cannot reach another machine.
-        return True
+        # An OMITTED host is not a local socket. asyncpg fills it the way libpq does, and `PGHOST`
+        # comes first (https://magicstack.github.io/asyncpg/current/api/index.html#asyncpg.connect),
+        # so the database this URL names can be on whatever machine the environment says. What this
+        # module drops, it must be able to name, so the host is required and must be loopback
+        # (Codex external review of `37fec08..5e687dd`, F3, 2026-09-23).
+        return False
     if candidate.lower() == "localhost":
         return True
     try:
@@ -143,8 +148,9 @@ def assert_safe_dev_database_url(database_url: str) -> URL:
 
     if not _is_loopback_host(url.host or ""):
         raise UnsafeDevDatabaseError(
-            f"The launcher database must live on a loopback host; this URL points at "
-            f"{url.host!r}. This script drops databases, and it will not do that over a network."
+            f"The launcher database must live on an explicitly named loopback host; this URL "
+            f"points at {url.host or '<omitted, which the driver would take from PGHOST>'!r}. "
+            f"This script drops databases, and it will not do that over a network."
         )
 
     database = url.database or ""
@@ -284,6 +290,34 @@ async def cmd_ensure(url: URL) -> int:
         await connection.execute(
             f'CREATE DATABASE "{url.database}"', timeout=_STATEMENT_TIMEOUT_SECONDS
         )
+        print(f"Database {url.database!r} created.")
+        return 0
+    finally:
+        await connection.close()
+
+
+async def cmd_create(url: URL) -> int:
+    """Create the database, and succeed ONLY if this call is the one that created it.
+
+    For a caller that will drop what it created - the Admin e2e's disposable database. `ensure`
+    cannot tell that caller whether the database was its own: it answers 0 for a database it found
+    (Codex external review of `37fec08..5e687dd`, F4, 2026-09-23). No existence check first: a plain
+    `CREATE DATABASE` fails on a taken name, so there is no window between asking and creating.
+    """
+
+    import asyncpg
+
+    connection = await _connect(url, "postgres")
+    try:
+        try:
+            await connection.execute(
+                f'CREATE DATABASE "{url.database}"', timeout=_STATEMENT_TIMEOUT_SECONDS
+            )
+        except asyncpg.DuplicateDatabaseError as exc:
+            raise DevDatabaseRefusal(
+                f"Database {url.database!r} already exists, so this caller did not create it and "
+                f"must not drop it. A disposable name that is already taken is somebody else's."
+            ) from exc
         print(f"Database {url.database!r} created.")
         return 0
     finally:
@@ -444,7 +478,13 @@ async def _assert_schema_at_head(url: URL) -> str:
 
 
 async def cmd_ready(url: URL, *, community: str) -> int:
-    """Schema, population and baseline - the three things an unfinished seed leaves half-done.
+    """Schema at head, the seeded population present, and the money reconciles.
+
+    NOT the seed's acceptance. The acceptance (`scripts/seed_recipe.py::run_acceptance`) is checked
+    once, by the seed, right after it ran; it includes the demonstration state the seed leaves - a
+    surviving cycle, a bottleneck - which the product legitimately changes the first time somebody
+    clears or pays. This probe runs on every start, so it asks only what a start needs
+    (`scripts/seed_recipe.py::READINESS_CHECKS`).
 
     Nothing here is a warning. A database whose schema is stamped but whose population is a partial
     seed is exactly the state programme 017 refuses to start a stack on (`AGENTS.md` section 9: an
@@ -457,7 +497,7 @@ async def cmd_ready(url: URL, *, community: str) -> int:
     print(f"schema: at head {head}")
 
     from app.db.session import AsyncSessionLocal
-    from scripts.seed_recipe import SeedRefusal, assert_database_is_empty, reverify
+    from scripts.seed_recipe import SeedRefusal, assert_database_is_empty, check_ready_to_start
 
     try:
         async with AsyncSessionLocal() as session:
@@ -495,7 +535,9 @@ async def cmd_ready(url: URL, *, community: str) -> int:
         )
 
     try:
-        checks = await reverify(AsyncSessionLocal, community_id=community, refs_to_pid=refs_to_pid)
+        checks = await check_ready_to_start(
+            AsyncSessionLocal, community_id=community, refs_to_pid=refs_to_pid
+        )
     except SeedRefusal as refusal:
         raise DevDatabaseRefusal(
             f"Database {url.database!r} is not a finished seed of {community}: {refusal} "
@@ -508,8 +550,8 @@ async def cmd_ready(url: URL, *, community: str) -> int:
     failed = sorted(name for name, check in checks.items() if not check["passed"])
     if failed:
         raise DevDatabaseRefusal(
-            f"Database {url.database!r} holds a seed of {community} that no longer satisfies "
-            f"{len(failed)} check(s): {failed}. Reset it: .\\scripts\\run_local.ps1 reset-db"
+            f"Database {url.database!r} holds a population of {community} that fails "
+            f"{len(failed)} readiness check(s): {failed}. Reset it: .\\scripts\\run_local.ps1 reset-db"
         )
     print(f"population: {community}, ready")
     return 0
@@ -521,6 +563,8 @@ async def _run(args: argparse.Namespace) -> int:
         return await cmd_validate(url)
     if args.command == "ensure":
         return await cmd_ensure(url)
+    if args.command == "create":
+        return await cmd_create(url)
     if args.command == "reset":
         return await cmd_reset(url)
     if args.command == "drop":
@@ -537,7 +581,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         description="Lifecycle and readiness of the launcher's PostgreSQL database."
     )
     parser.add_argument(
-        "command", choices=("validate", "ensure", "reset", "drop", "adopt", "ready")
+        "command", choices=("validate", "ensure", "create", "reset", "drop", "adopt", "ready")
     )
     parser.add_argument(
         "--community",
