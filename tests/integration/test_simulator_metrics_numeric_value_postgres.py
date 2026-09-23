@@ -37,8 +37,6 @@ from app.core.simulator.real_tick_metrics import RealTickMetrics
 from app.db.models.simulator_storage import SimulatorRunMetric
 
 
-pytestmark = pytest.mark.postgres
-
 
 # 19 significant digits. binary64 holds ~17, so any float stage changes it.
 _TOO_PRECISE_FOR_FLOAT = Decimal("12345678901.12345678")

@@ -48,8 +48,6 @@ from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 
-pytestmark = pytest.mark.postgres
-
 #: The amount the reproducer lost. Kept as the literal that was measured disappearing.
 AMOUNT = Decimal("925.31000000")
 

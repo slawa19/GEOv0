@@ -159,9 +159,10 @@ def test_the_required_backend_job_owns_the_postgres_service_and_the_alembic_head
 def test_no_step_of_either_required_half_is_conditional_or_allowed_to_fail() -> None:
     """The job being unconditional is not the same as its work being unconditional.
 
-    A required gate is only required where its steps are: the migration preflight, the concurrency
-    matrix, the PostgreSQL marker tier and the default tier all have to run on a pull request and
-    all have to be able to fail it. This is the check that `"if" not in backend` above was mistaken
+    A required gate is only required where its steps are: the migration preflight and the backend
+    tier on PostgreSQL (one session since 017 stage 2c; it was three - the concurrency matrix, the
+    marker tier and the default tier) all have to run on a pull request and all have to be able to
+    fail it. This is the check that `"if" not in backend` above was mistaken
     for.
     """
 
@@ -195,15 +196,16 @@ def test_the_step_level_check_notices_both_ways_around_it() -> None:
     tolerated_postgres = copy.deepcopy(backend)
     mutated = 0
     for step in tolerated_postgres["steps"]:
-        if isinstance(step, dict) and "-BackendMarker postgres" in str(step.get("run", "")):
+        run = str(step.get("run", "")) if isinstance(step, dict) else ""
+        if "verify_local.ps1" in run and "-BackendOnly" in run:
             step["continue-on-error"] = True
             mutated += 1
-    assert mutated == 2, (
-        f"expected two PostgreSQL marker steps to mutate, found {mutated}; the mutation would "
+    assert mutated == 1, (
+        f"expected the one backend-tier step to mutate, found {mutated}; the mutation would "
         "otherwise prove nothing"
     )
     findings = conditional_or_tolerated_steps(tolerated_postgres)
-    assert len(findings) == 2 and all("continue-on-error" in f for f in findings), findings
+    assert len(findings) == 1 and all("continue-on-error" in f for f in findings), findings
 
 
 def test_postgresql_is_no_longer_a_schedule_only_job() -> None:
@@ -220,9 +222,30 @@ def test_postgresql_is_no_longer_a_schedule_only_job() -> None:
         for job_id, job in jobs.items()
         if isinstance(job, dict) and job.get("if") == _SCHEDULE_ONLY_IF
     }
-    for job_id in scheduled_only:
-        commands = " ".join(_step_commands(jobs[job_id]))
-        assert "-BackendMarker postgres" not in commands, (
-            f"Job '{job_id}' runs the PostgreSQL marker tier but only on schedule/dispatch; "
-            "stage 1 of programme 017 moved that tier onto every pull request."
-        )
+    # THE WHOLE BACKEND TIER RUNS IN `required-backend` AND NOWHERE ELSE (reworded 017 stage 2c).
+    # Until then this asserted that no scheduled job asked for `-BackendMarker postgres`; the
+    # parameter is gone, and a scheduled job would now take PostgreSQL off pull requests by running
+    # the WHOLE tier - `-BackendOnly` without a selector - instead. A scheduled job may still run one
+    # named selector (the simulator super-smoke does).
+    whole_tier_on_schedule = sorted(
+        job_id
+        for job_id in scheduled_only
+        for command in _step_commands(jobs[job_id])
+        if "verify_local.ps1" in command
+        and "-BackendOnly" in command
+        and "-BackendSelector" not in command
+    )
+    assert not whole_tier_on_schedule, (
+        f"Job(s) {whole_tier_on_schedule} run the whole backend tier on schedule/dispatch only; "
+        "stage 1 of programme 017 moved it onto every pull request."
+    )
+    scheduled_selector_runs = [
+        command
+        for job_id in scheduled_only
+        for command in _step_commands(jobs[job_id])
+        if "verify_local.ps1" in command and "-BackendOnly" in command
+    ]
+    assert scheduled_selector_runs, (
+        "no scheduled job runs verify_local.ps1 -BackendOnly at all, so the check above ran over "
+        "nothing (anti-vacuum, AGENTS.md section 9); if the super-smoke moved, update this test"
+    )

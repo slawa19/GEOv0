@@ -84,8 +84,6 @@ from tests.debt_setup import purge_test_ledger
 # not in the tier database it shares with mode-A tests - see `tests/tier_on_a_clone.py`.
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
 
-pytestmark = pytest.mark.postgres
-
 _LIMIT = Decimal("1000.00")
 #: Seeded before the tick so both writers UPDATE the same row instead of inserting it.
 _OPENING = Decimal("100.00")
@@ -107,8 +105,13 @@ async def factory(committed_database):
     # is shared with mode-A tests in one process - see `tests/tier_on_a_clone.py`. The modules that
     # import this fixture import `tier_sessions_on_a_clone` too, so their `TestingSessionLocal`
     # observers read the same clone this engine writes.
+    url = committed_database.url
+    if not url.startswith("postgresql"):
+        # A clone is made by `CREATE DATABASE ... TEMPLATE`, so this cannot happen; it is spelled
+        # as a refusal because a SQLite engine here would need the T1525 transaction control.
+        raise RuntimeError(f"a mode-B clone must be PostgreSQL, got {url!r}")
     engine = create_async_engine(
-        committed_database.url,
+        url,
         pool_size=5,
         max_overflow=0,
         pool_timeout=20,

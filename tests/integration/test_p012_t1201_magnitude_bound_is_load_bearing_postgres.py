@@ -48,8 +48,6 @@ from tests.integration.test_scenarios import (
 # not in the tier database it shares with mode-A tests - see `tests/tier_on_a_clone.py`.
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
 
-pytestmark = pytest.mark.postgres
-
 # `Numeric(20, 8)`: twenty digits, eight of them fraction, so twelve integer digits remain.
 COLUMN_PRECISION = 20
 COLUMN_SCALE = 8

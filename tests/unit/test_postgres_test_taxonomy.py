@@ -120,7 +120,17 @@ def _executable_command(run_block: str) -> str:
     return re.sub(r"\s+", " ", " ".join(command_lines).replace("\\", " "))
 
 
-def test_postgres_module_suffix_is_the_marker_owned_taxonomy() -> None:
+# THE TAXONOMY INVERTED ON 2026-09-23 (017 stage 2c, T1702), AND WHAT IT PROTECTS DID NOT CHANGE.
+# Until then a module named `*_postgres.py` had to carry `pytest.mark.postgres`, and a marked module
+# had to carry the suffix: the marker moved it out of the SQLite default tier into the PostgreSQL
+# one, where its PostgreSQL-only premise held. What that protected was "a PostgreSQL module runs
+# where PostgreSQL is". Since 2c the one tier IS PostgreSQL (`tests/conftest.py` refuses anything
+# else) and the marker is gone, so the same protection now reads: no module may take itself out of
+# that tier by a `postgres` marker. Under `--strict-markers` an unregistered marker already fails
+# collection; this names the module instead of leaving a collection error to be read. The suffix
+# stays as history and still owns the PostgreSQL-only dialect skips, which are now unreachable but
+# name the module's premise.
+def test_no_module_takes_itself_out_of_the_postgres_tier() -> None:
     modules = _parse_test_modules()
     candidates = {
         path.relative_to(_ROOT)
@@ -132,23 +142,33 @@ def test_postgres_module_suffix_is_the_marker_owned_taxonomy() -> None:
         for path, tree in modules.items()
         if _has_postgres_only_dialect_skip(tree)
     }
-    marked = {
-        path.relative_to(_ROOT)
+    marked = sorted(
+        str(path.relative_to(_ROOT))
         for path, tree in modules.items()
         if _declares_module_postgres_marker(tree)
-    }
+    )
+    config = (_ROOT / "pytest.ini").read_text(encoding="utf-8")
 
-    missing_markers = sorted(str(path) for path in candidates - marked)
-    misnamed_markers = sorted(str(path) for path in marked - candidates)
+    # Anti-vacuum: the scan must still see the modules the marker used to cover (56 on 2026-09-23).
+    assert len(candidates) >= 50, f"only {len(candidates)} *_postgres.py modules found"
+    assert not marked, f"modules marked `postgres` again - there is no second tier to go to: {marked}"
+    assert "\n    postgres:" not in config, "pytest.ini registers the `postgres` marker again"
     misnamed_dialect_skips = sorted(str(path) for path in dialect_skip_modules - candidates)
-    assert not missing_markers, (
-        f"PostgreSQL suffix modules without marker: {missing_markers}"
-    )
-    assert not misnamed_markers, (
-        f"PostgreSQL-marked modules without _postgres.py suffix: {misnamed_markers}"
-    )
     assert not misnamed_dialect_skips, (
         f"PostgreSQL dialect-skip modules without suffix: {misnamed_dialect_skips}"
+    )
+
+
+def test_the_marker_scan_still_sees_a_marker() -> None:
+    """Counter-check for the scan above: a planted module marker is found in each spelling."""
+
+    for source in (
+        "import pytest\npytestmark = pytest.mark.postgres\n",
+        "import pytest\npytestmark = [pytest.mark.postgres, pytest.mark.asyncio]\n",
+    ):
+        assert _declares_module_postgres_marker(ast.parse(source)), source
+    assert not _declares_module_postgres_marker(
+        ast.parse("import pytest\npytestmark = pytest.mark.asyncio\n")
     )
 
 
@@ -161,7 +181,14 @@ def test_postgres_module_suffix_is_the_marker_owned_taxonomy() -> None:
 _POSTGRES_CI_JOB = "required-backend"
 
 
-def test_postgres_ci_job_selects_marker_tier_without_file_allowlist() -> None:
+def test_postgres_ci_job_runs_the_whole_tier_without_file_allowlist() -> None:
+    """One canonical backend-tier command, no raw pytest, and no file selected.
+
+    Until 017 stage 2c this asserted exactly one `-BackendMarker postgres -BackendSelector
+    tests/integration` command. The job now runs ONE session of the whole tier, so "no file
+    allowlist" became "no selector at all": the matrix and the former marker tier are collected by
+    the tier itself.
+    """
     workflow = (_ROOT / ".github" / "workflows" / "quality.yml").read_text(
         encoding="utf-8"
     )
@@ -175,19 +202,19 @@ def test_postgres_ci_job_selects_marker_tier_without_file_allowlist() -> None:
         for command in commands
         if re.match(r"^python(?:\.exe)? -m pytest\b", command, flags=re.IGNORECASE)
     ]
-    marker_tier_commands = [
+    tier_commands = [
         command
         for command in commands
         if command.startswith("./scripts/verify_local.ps1 ")
-        and "-BackendMarker postgres" in command
     ]
 
     assert raw_pytest_commands == []
-    assert len(marker_tier_commands) == 1
-    command = marker_tier_commands[0]
-    assert "-TaskSlug ci-postgres" in command
+    assert len(tier_commands) == 1, tier_commands
+    command = tier_commands[0]
+    assert "-TaskSlug ci-required-backend" in command
     assert "-BackendOnly" in command
-    assert "-BackendSelector tests/integration" in command
+    assert "-BackendSelector" not in command
+    assert "-BackendMarker" not in command
     assert ".py" not in command
 
 

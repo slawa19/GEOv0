@@ -40,8 +40,6 @@ from app.utils.exceptions import GeoException
 from tests.debt_setup import debt_fixture_setup
 from tests.debt_setup import purge_test_ledger
 
-pytestmark = pytest.mark.postgres
-
 
 def _url() -> str:
     url = os.environ.get("TEST_DATABASE_URL", "")

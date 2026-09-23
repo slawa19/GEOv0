@@ -82,8 +82,6 @@ from tests.unit.test_p015_step5c_reaction_and_hold import hold_directly
 # not in the tier database it shares with mode-A tests - see `tests/tier_on_a_clone.py`.
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
 
-pytestmark = pytest.mark.postgres
-
 HOLD = PaymentEngine.EQUIVALENT_INTEGRITY_HOLD_REASON
 _ATOM = Decimal("0.00000001")
 

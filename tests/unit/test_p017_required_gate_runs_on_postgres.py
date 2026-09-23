@@ -3,8 +3,7 @@
 WHAT THIS PROVES. `.github/workflows/quality.yml` declares a job that (a) runs on every pull
 request - it carries no `if:` that narrows it to `schedule`/`workflow_dispatch` - (b) has a
 `postgres:` service container, and (c) hands `scripts/verify_local.ps1` a PostgreSQL
-`TEST_DATABASE_URL` for the PostgreSQL-marker sessions that used to live in the scheduled
-`postgres` job. Until 2026-09-21 no required job had any of the three: PostgreSQL ran only on the
+`TEST_DATABASE_URL` for its backend tier. Until 2026-09-21 no required job had any of the three: PostgreSQL ran only on the
 weekly schedule and on manual dispatch (`quality.yml:156-159` before this change), so a pull
 request could be green while every advisory lock, `FOR UPDATE` and SERIALIZABLE retry in the money
 path went unobserved (017 `spec.md`, Problem, defect 1).
@@ -19,10 +18,7 @@ by the number of tests it reports collecting:
 
 and locally, against a disposable database, by:
 
-    $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_<slug>"
-    $env:GEO_TEST_ALLOW_DB_RESET = "1"
-    .\\scripts\\verify_local.ps1 -TaskSlug <slug> -BackendOnly -BackendMarker postgres `
-      -BackendSelector tests/integration
+    .\\scripts\\verify_local.ps1 -TaskSlug <slug> -BackendOnly
 
 WHERE IT LIVES, AND THE CORRECTED REASON (2026-09-22). 017 `spec.md:61` named
 `tests/integration/test_p017_required_gate_runs_on_postgres.py`. THAT EXACT PATH is not available:
@@ -42,10 +38,20 @@ STEPS, so a schedule-only `if:` or a `continue-on-error: true` on the PostgreSQL
 condition, service container, URL, marker and selectors all intact while a pull request ran only the
 default tier. Step conditions and failure tolerance are now violations, with mutations 4-7 in
 `test_the_guard_notices_a_gate_that_lost_postgres` as the counter-check.
+
+AND WHAT IT LOOKS FOR CHANGED ON 2026-09-23 (017 stage 2c). Until then the job ran three sessions -
+the concurrency matrix and the marker tier on PostgreSQL, the default tier on SQLite - and this guard
+found the PostgreSQL ones by `-BackendMarker postgres` and checked the matrix by its three selectors
+on the command line. The marker and the parameter are gone and the job runs ONE session of the whole
+tier. So it now finds the backend-tier step (`-BackendOnly`), requires that it selects no files at all
+(a `-BackendSelector` would narrow the whole tier to a subset while every other fact still looked
+right - mutation 8), and checks the matrix where it can now be lost: its three tests must still exist
+under their names and carry no `slow` marker, which is the one thing the tier's `not slow` excludes.
 """
 
 from __future__ import annotations
 
+import ast
 import copy
 import re
 from pathlib import Path
@@ -68,8 +74,6 @@ _CONCURRENCY_SELECTORS = (
     "::test_concurrent_duplicate_payment_request_never_regresses_terminal_state_postgres",
 )
 
-_MARKER_TIER_SELECTOR = "-BackendSelector tests/integration"
-
 _SCHEDULED_ONLY = re.compile(
     r"github\.event_name\s*==\s*'(?:schedule|workflow_dispatch)'"
 )
@@ -83,8 +87,8 @@ _LIMITS = (
     "DECLARES. It cannot show that any test executed against PostgreSQL, that the service "
     "container came up, or that the marker expression selected anything at all. Check the run "
     "itself - `gh run view <run-id> --log --job \"Required backend gates (PostgreSQL)\"` - and "
-    "the collected-test count in it; locally, run the tier against a disposable geov0_test_* "
-    "database with -BackendMarker postgres."
+    "the collected-test count in it; locally, `scripts/verify_local.ps1 -TaskSlug <slug> -BackendOnly` "
+    "against a disposable geov0_test_* database."
 )
 
 
@@ -123,6 +127,49 @@ def _verify_local_steps(job: dict[str, Any]) -> list[dict[str, Any]]:
     return [step for step in _steps(job) if "verify_local.ps1" in _run_text(step)]
 
 
+def _tier_steps(job: dict[str, Any]) -> list[dict[str, Any]]:
+    """The steps that run the backend tier: `verify_local.ps1 -BackendOnly`."""
+
+    return [step for step in _verify_local_steps(job) if "-BackendOnly" in _run_text(step)]
+
+
+def _is_slow_marker(node: ast.AST) -> bool:
+    return (
+        isinstance(node, ast.Attribute)
+        and node.attr == "slow"
+        and isinstance(node.value, ast.Attribute)
+        and node.value.attr == "mark"
+    )
+
+
+def concurrency_test_problems(source: str, test_name: str) -> list[str]:
+    """Why the tier's `not slow` session would NOT collect `test_name` from this module's source.
+
+    Empty means it would. A pure function of the source so the counter-check can plant the two ways
+    to lose a test - renaming it and marking it `slow` - without touching a real module.
+    """
+
+    tree = ast.parse(source)
+    problems: list[str] = []
+    for statement in tree.body:
+        if isinstance(statement, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == "pytestmark" for t in statement.targets
+        ):
+            if any(_is_slow_marker(node) for node in ast.walk(statement.value)):
+                problems.append("the module is marked slow")
+    functions = [
+        node
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == test_name
+    ]
+    if not functions:
+        problems.append(f"no test named {test_name}")
+    for function in functions:
+        if any(_is_slow_marker(node) for d in function.decorator_list for node in ast.walk(d)):
+            problems.append(f"{test_name} is marked slow")
+    return problems
+
+
 def required_postgres_backend_violations(workflow: dict[str, Any]) -> list[str]:
     """Return one message per broken requirement; empty means the gate has the declared shape.
 
@@ -159,21 +206,18 @@ def required_postgres_backend_violations(workflow: dict[str, Any]) -> list[str]:
             "the state 017 stage 1 removed."
         )
 
-    marker_steps: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
+    tier_steps: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
     for job_id, job in postgres_jobs.items():
-        for step in _verify_local_steps(job):
-            if "-BackendMarker postgres" in _run_text(step):
-                marker_steps.append((job_id, job, step))
+        for step in _tier_steps(job):
+            tier_steps.append((job_id, job, step))
 
-    if not marker_steps:
+    if not tier_steps:
         violations.append(
-            "No required PostgreSQL job runs verify_local.ps1 with -BackendMarker postgres. "
-            "Without that marker the postgres-marked tests are deselected by the default "
-            "`not slow and not postgres` expression and the job passes having collected none of "
-            "them (AGENTS.md §5)."
+            "No required PostgreSQL job runs the backend tier (verify_local.ps1 -BackendOnly). "
+            "The service container would be up and nothing would use it."
         )
 
-    for job_id, job, step in marker_steps:
+    for job_id, job, step in tier_steps:
         # A STEP CONDITION IS A WAY PAST THIS GUARD, NOT A GAP IN IT (2026-09-22, Codex external
         # review of `e2e1380..37fec08`). Everything below used to read the JOB - its `if:`, its
         # service, its environment - and nothing read the step. Hanging
@@ -210,9 +254,9 @@ def required_postgres_backend_violations(workflow: dict[str, Any]) -> list[str]:
         url = env.get("TEST_DATABASE_URL", "")
         if not _POSTGRES_TEST_DB.fullmatch(url):
             violations.append(
-                f"Job '{job_id}', step {step.get('name')!r}: TEST_DATABASE_URL is {url!r}; a "
-                "PostgreSQL marker session needs a postgresql+asyncpg URL on a geov0_test_* "
-                "database, otherwise the tier fails closed in collection instead of running."
+                f"Job '{job_id}', step {step.get('name')!r}: TEST_DATABASE_URL is {url!r}; "
+                "the backend tier needs a postgresql+asyncpg URL on a geov0_test_* database; "
+                "tests/conftest.py refuses any other before collecting a test."
             )
         if env.get("GEO_TEST_ALLOW_DB_RESET") != "1":
             violations.append(
@@ -220,34 +264,12 @@ def required_postgres_backend_violations(workflow: dict[str, Any]) -> list[str]:
                 "so scripts/validate_test_database_url.py refuses the PostgreSQL URL."
             )
 
-    marker_runs = [_run_text(step) for _, _, step in marker_steps]
-    if not any(_MARKER_TIER_SELECTOR in run for run in marker_runs):
-        violations.append(
-            "The PostgreSQL marker tier (-BackendMarker postgres -BackendSelector "
-            "tests/integration) is not in a required job."
-        )
-    for selector in _CONCURRENCY_SELECTORS:
-        if not any(selector in run for run in marker_runs):
+        if "-BackendSelector" in _run_text(step):
             violations.append(
-                f"Concurrency selector not present in any required PostgreSQL job: {selector}"
+                f"Job '{job_id}', step {step.get('name')!r}: passes -BackendSelector, so the required "
+                "PostgreSQL session runs a subset of the tier. It must select no files - the whole tier "
+                "is the gate, the concurrency matrix included."
             )
-
-    scheduled_marker_tiers = sorted(
-        job_id
-        for job_id, job in jobs.items()
-        if isinstance(job, dict)
-        and _is_scheduled_only(job)
-        and any(
-            "-BackendMarker postgres" in _run_text(step)
-            and _MARKER_TIER_SELECTOR in _run_text(step)
-            for step in _verify_local_steps(job)
-        )
-    )
-    if scheduled_marker_tiers:
-        violations.append(
-            "The PostgreSQL marker tier is back in a schedule/dispatch-only job "
-            f"({', '.join(scheduled_marker_tiers)}): a pull request would not run it."
-        )
 
     return violations
 
@@ -298,7 +320,7 @@ def test_the_guard_notices_a_gate_that_lost_postgres() -> None:
     sqlite_url = copy.deepcopy(workflow)
     job = sqlite_url["jobs"][_required_postgres_job_id(sqlite_url)]
     for step in _verify_local_steps(job):
-        if "-BackendMarker postgres" in _run_text(step):
+        if "-BackendOnly" in _run_text(step):
             step.setdefault("env", {})["TEST_DATABASE_URL"] = (
                 "sqlite+aiosqlite:///./.local-run/test-runs/ci/test.db"
             )
@@ -308,7 +330,7 @@ def test_the_guard_notices_a_gate_that_lost_postgres() -> None:
     scheduled_steps = copy.deepcopy(workflow)
     job = scheduled_steps["jobs"][_required_postgres_job_id(scheduled_steps)]
     for step in _verify_local_steps(job):
-        if "-BackendMarker postgres" in _run_text(step):
+        if "-BackendOnly" in _run_text(step):
             step["if"] = "github.event_name == 'schedule'"
     assert required_postgres_backend_violations(scheduled_steps)
 
@@ -316,7 +338,7 @@ def test_the_guard_notices_a_gate_that_lost_postgres() -> None:
     tolerated = copy.deepcopy(workflow)
     job = tolerated["jobs"][_required_postgres_job_id(tolerated)]
     for step in _verify_local_steps(job):
-        if "-BackendMarker postgres" in _run_text(step):
+        if "-BackendOnly" in _run_text(step):
             step["continue-on-error"] = True
     assert required_postgres_backend_violations(tolerated)
 
@@ -332,6 +354,14 @@ def test_the_guard_notices_a_gate_that_lost_postgres() -> None:
     tolerant_job = copy.deepcopy(workflow)
     tolerant_job["jobs"][_required_postgres_job_id(tolerant_job)]["continue-on-error"] = True
     assert required_postgres_backend_violations(tolerant_job)
+
+    # 8. The session keeps its service, URL and step, and quietly narrows to part of the tier.
+    narrowed = copy.deepcopy(workflow)
+    job = narrowed["jobs"][_required_postgres_job_id(narrowed)]
+    for step in _verify_local_steps(job):
+        if "-BackendOnly" in _run_text(step):
+            step["run"] = str(step["run"]) + " -BackendSelector tests/unit"
+    assert required_postgres_backend_violations(narrowed)
 
 
 def test_the_counter_check_is_not_vacuous() -> None:
@@ -351,14 +381,10 @@ def test_the_counter_check_is_not_vacuous() -> None:
         "would have proved nothing." + _LIMITS
     )
     for job_id in postgres_job_ids:
-        marker_steps = [
-            step
-            for step in _verify_local_steps(workflow["jobs"][job_id])
-            if "-BackendMarker postgres" in _run_text(step)
-        ]
+        marker_steps = _tier_steps(workflow["jobs"][job_id])
         assert marker_steps, (
-            f"Job '{job_id}' has a PostgreSQL service but runs no -BackendMarker postgres "
-            "session, so its URL mutation would flip nothing." + _LIMITS
+            f"Job '{job_id}' has a PostgreSQL service but runs no backend tier "
+            "(verify_local.ps1 -BackendOnly), so its URL mutation would flip nothing." + _LIMITS
         )
         # Mutations 4-7 only prove something if the committed workflow does NOT already carry the
         # thing they add. An `if:` or a `continue-on-error:` already present would make those four
@@ -370,7 +396,41 @@ def test_the_counter_check_is_not_vacuous() -> None:
             f"Job '{job_id}' already tolerates failure, so mutation 7 would flip nothing."
         )
         for step in marker_steps:
+            assert "-BackendSelector" not in _run_text(step), (
+                f"Job '{job_id}', step {step.get('name')!r} already selects files, so mutation 8 "
+                "would flip nothing."
+            )
             assert "if" not in step and "continue-on-error" not in step, (
                 f"Job '{job_id}', step {step.get('name')!r} already carries a condition or "
                 "failure tolerance, so mutations 4 and 5 would flip nothing."
             )
+
+
+def test_the_concurrency_matrix_is_still_collected_by_the_tier() -> None:
+    """The three matrix tests exist under their names and nothing marks them `slow`.
+
+    FORM, not truth: this reads the modules. That the tier actually collected and passed them is in
+    the job's log (`gh run view <run-id> --log --job "Required backend gates (PostgreSQL)"`), where the
+    whole-tier session reports them among its passed tests.
+    """
+
+    problems = []
+    for selector in _CONCURRENCY_SELECTORS:
+        path, _, name = selector.partition("::")
+        source = (_ROOT / path).read_text(encoding="utf-8")
+        problems.extend(f"{selector}: {p}" for p in concurrency_test_problems(source, name))
+    assert not problems, "\n".join(problems) + _LIMITS
+
+
+def test_the_matrix_check_notices_a_renamed_or_slowed_test() -> None:
+    """Counter-check for the one above: the two ways the tier's `not slow` session loses a test."""
+
+    healthy = "import pytest\n\nasync def test_x():\n    pass\n"
+    assert concurrency_test_problems(healthy, "test_x") == []
+    assert concurrency_test_problems(healthy, "test_y")
+    assert concurrency_test_problems(
+        "import pytest\n\n@pytest.mark.slow\nasync def test_x():\n    pass\n", "test_x"
+    )
+    assert concurrency_test_problems(
+        "import pytest\npytestmark = [pytest.mark.slow]\n\nasync def test_x():\n    pass\n", "test_x"
+    )

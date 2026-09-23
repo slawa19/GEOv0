@@ -108,8 +108,6 @@ from app.db.models.trustline import TrustLine
 
 from tests.debt_setup import debt_fixture_setup, purge_test_ledger
 
-pytestmark = pytest.mark.postgres
-
 
 def _route_default(endpoint, name: str) -> int:
     """The default a route publishes, read from the route.

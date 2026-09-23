@@ -27,8 +27,6 @@ import uuid
 import pytest
 from sqlalchemy import text
 
-pytestmark = pytest.mark.postgres
-
 
 async def _visible_from_a_fresh_connection(code: str) -> bool:
     """Whether a row with this code is visible to a connection that shares nothing with the test."""

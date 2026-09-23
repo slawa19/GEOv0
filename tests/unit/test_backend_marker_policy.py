@@ -1387,9 +1387,9 @@ def _parse_verifier_arguments(arguments: str) -> dict[str, str | bool] | None:
         "-taskslug": 1,
         "-staticdiagnostics": 0,
         "-backendselector": 1,
-        "-backendmarker": 1,
         "-includeexpensive": 0,
         "-backendonly": 0,
+        "-uionly": 0,
         "-python": 1,
     }
     parsed: dict[str, str | bool] = {}
@@ -1411,16 +1411,6 @@ def _parse_verifier_arguments(arguments: str) -> dict[str, str | bool] | None:
     if (
         isinstance(task_slug, str)
         and re.fullmatch(r"[A-Za-z0-9_-]+", task_slug) is None
-    ):
-        return None
-    backend_marker = parsed.get("-backendmarker")
-    if (
-        isinstance(backend_marker, str)
-        and re.fullmatch(
-            r"[A-Za-z_][A-Za-z0-9_]*",
-            backend_marker,
-        )
-        is None
     ):
         return None
     return parsed
@@ -1475,7 +1465,7 @@ def _postgres_example_violations(
         f"{path}: {violation}"
         for violation in _unsupported_owned_powershell_blocks(
             content,
-            owner_pattern=r"(?:TEST_DATABASE_URL|-BackendMarker\s+postgres)",
+            owner_pattern=r"TEST_DATABASE_URL",
         )
     )
     if require_create is None:
@@ -1509,6 +1499,7 @@ def _postgres_example_violations(
     url_indexes: list[int] = []
     reset_indexes: list[int] = []
     verifier_indexes: list[int] = []
+    all_verifiers: list[tuple[int, str]] = []
     for command_index, command in enumerate(commands):
         nested_command, is_nested = _unwrap_execution_context(command)
         if is_nested and (
@@ -1542,7 +1533,17 @@ def _postgres_example_violations(
             verifier_arguments = _canonical_verifier_arguments(command)
             if verifier_arguments is None:
                 violations.append(f"{path}: invalid verifier invocation: {command}")
-            elif verifier_arguments.get("-backendmarker") == "postgres":
+            else:
+                all_verifiers.append((command_index, command))
+
+    # WHICH VERIFIER IS THE POSTGRESQL EXAMPLE (017 stage 2c). Until then it was the one carrying
+    # `-IncludeExpensive`. The parameter is gone - a documented `-BackendMarker` is now an
+    # invalid invocation, reported above - and every backend run is a PostgreSQL run, so the example
+    # is the verifier that the explicit `TEST_DATABASE_URL` is set up for: every one after it.
+    # Verifiers BEFORE it rely on the runner's derived default URL and are not this example.
+    if url_indexes:
+        for command_index, command in all_verifiers:
+            if command_index > min(url_indexes):
                 postgres_verifiers.append(command)
                 verifier_indexes.append(command_index)
 
@@ -1572,7 +1573,7 @@ def _postgres_example_violations(
     if not reset_values or any(value != "1" for value in reset_values):
         violations.append(f"{path}: missing executable GEO_TEST_ALLOW_DB_RESET=1")
     if not postgres_verifiers:
-        violations.append(f"{path}: missing -BackendMarker postgres")
+        violations.append(f"{path}: no verifier invocation after the PostgreSQL test URL")
     if verifier_indexes and (
         not url_indexes
         or not reset_indexes
@@ -1606,7 +1607,7 @@ def test_backend_e2e_is_not_a_registered_or_filtered_empty_tier() -> None:
 
     assert "e2e:" not in pytest_config
     assert e2e_markers == []
-    assert "not slow and not postgres" in verifier
+    assert "@('-m', 'not slow')" in verifier
     assert "not e2e" not in verifier
 
 
@@ -1657,7 +1658,9 @@ def test_stable_contributor_guide_uses_canonical_backend_tiers() -> None:
     )
     assert "geov0_test_docs_en" in english_guide
     assert 'localhost:5432/geov0"' not in english_guide
-    assert "-BackendMarker postgres" in english_guide
+    # Retired with the `postgres` marker (017 stage 2c): a guide still showing it would hand the
+    # reader a command the runner refuses.
+    assert "-BackendMarker" not in english_guide
 
 
 def test_active_operational_docs_do_not_bypass_the_canonical_pytest_runner() -> None:
@@ -1888,7 +1891,7 @@ $callback = {
 createdb -U geo geov0_test_data_roles
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_data_roles"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 ```
 """
 
@@ -1918,7 +1921,7 @@ def test_postgres_doc_guard_rejects_all_local_scriptblock_definitions(
 createdb -U geo geov0_test_callback_shape
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_callback_shape"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 ```
 """
     assert _postgres_example_violations(
@@ -1936,7 +1939,7 @@ $metadata = @{
 createdb -U geo geov0_test_data_roles
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_data_roles"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 ```
 """
     assert _postgres_example_violations(
@@ -1951,7 +1954,7 @@ $metadata = @{ if = 1; while = 2; exit = "value" }
 createdb -U geo geov0_test_inline_data
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_inline_data"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 ```
 """
     assert _postgres_example_violations(
@@ -1966,7 +1969,7 @@ $callback = { exit 0 }; & $callback
 createdb -U geo geov0_test_callback
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_callback"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 ```
 """
     assert _postgres_example_violations(
@@ -2004,7 +2007,7 @@ def test_postgres_doc_guard_rejects_unsupported_control_bodies(
         '$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/'
         'geov0_test_valid_control"\n'
         '$env:GEO_TEST_ALLOW_DB_RESET = "1"\n'
-        "./scripts/verify_local.ps1 -BackendMarker postgres\n"
+        "./scripts/verify_local.ps1 -IncludeExpensive\n"
         "```\n"
     )
     assert _postgres_example_violations(
@@ -2098,50 +2101,52 @@ def test_contributor_venv_guard_rejects_missing_executable_setup_roles(
 @pytest.mark.parametrize(
     ("command", "expected"),
     [
-        (r".\scripts\verify_local.ps1 -BackendMarker postgres", True),
-        (r'& ".\scripts\verify_local.ps1" -BackendMarker postgres', True),
+        (r".\scripts\verify_local.ps1 -IncludeExpensive", True),
+        (r'& ".\scripts\verify_local.ps1" -IncludeExpensive', True),
         (
             "powershell.exe -NoProfile -File ./scripts/verify_local.ps1 "
-            "-BackendMarker postgres",
+            "-IncludeExpensive",
             True,
         ),
-        (r".\other\verify_local.ps1 -BackendMarker postgres", False),
-        (r"C:\temp\verify_local.ps1 -BackendMarker postgres", False),
-        ("verify_local.ps1 -BackendMarker postgres", False),
-        ('"./scripts/verify_local.ps1" -BackendMarker postgres', False),
+        (r".\other\verify_local.ps1 -IncludeExpensive", False),
+        (r"C:\temp\verify_local.ps1 -IncludeExpensive", False),
+        ("verify_local.ps1 -IncludeExpensive", False),
+        ('"./scripts/verify_local.ps1" -IncludeExpensive', False),
         (
             '"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" '
-            "-NoProfile -File ./scripts/verify_local.ps1 -BackendMarker postgres",
+            "-NoProfile -File ./scripts/verify_local.ps1 -IncludeExpensive",
             False,
         ),
         (
             "powershell -Command Write-Host -File ./scripts/verify_local.ps1 "
-            "-BackendMarker postgres",
+            "-IncludeExpensive",
             False,
         ),
         (
             "powershell.exe -ExecutionPolicy DefinitelyNotAPolicy "
-            "-File ./scripts/verify_local.ps1 -BackendMarker postgres",
+            "-File ./scripts/verify_local.ps1 -IncludeExpensive",
             False,
         ),
         (
             "./scripts/verify_local.ps1 -DefinitelyNotAParameter x "
-            "-BackendMarker postgres",
+            "-IncludeExpensive",
             False,
         ),
         (
-            "./scripts/verify_local.ps1 -TaskSlug bad.slug -BackendMarker postgres",
+            "./scripts/verify_local.ps1 -TaskSlug bad.slug -IncludeExpensive",
             False,
         ),
         (
-            "./scripts/verify_local.ps1 -BackendMarker postgres "
-            "-BackendMarker postgres",
+            "./scripts/verify_local.ps1 -IncludeExpensive "
+            "-IncludeExpensive",
             False,
         ),
         (
-            './scripts/verify_local.ps1 -TaskSlug "safe -BackendMarker postgres "',
+            './scripts/verify_local.ps1 -TaskSlug "safe -IncludeExpensive "',
             False,
         ),
+        # Retired 2026-09-23 with the `postgres` marker (017 stage 2c): the runner refuses it.
+        ("./scripts/verify_local.ps1 -BackendMarker postgres", False),
     ],
 )
 def test_canonical_verifier_guard_requires_repository_script_path(
@@ -2290,7 +2295,7 @@ pytest.exe after_commented_terminator
 createdb -U geo geov0_test_
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 ```
 """,
         """
@@ -2298,7 +2303,7 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 createdb -U geo geov0_test_created
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_other"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 ```
 """,
         """
@@ -2306,14 +2311,14 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 # createdb -U geo geov0_test_comment
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_comment"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-# ./scripts/verify_local.ps1 -BackendMarker postgres
+# ./scripts/verify_local.ps1 -IncludeExpensive
 ```
 """,
         """
 ```powershell
 createdb -U geo geov0_test_missing_reset
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_missing_reset"
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 ```
 """,
         """
@@ -2321,14 +2326,14 @@ $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test
 Write-Host "createdb -U geo geov0_test_echo"
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_echo"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-Write-Host "./scripts/verify_local.ps1 -BackendMarker postgres"
+Write-Host "./scripts/verify_local.ps1 -IncludeExpensive"
 ```
 """,
         """
 ```powershell
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_missing_create"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 ```
 """,
         """
@@ -2336,14 +2341,14 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 createdb -U geo geov0_test_trailing_comment
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_trailing_comment"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-Write-Host "not a verifier" # ./scripts/verify_local.ps1 -BackendMarker postgres
+Write-Host "not a verifier" # ./scripts/verify_local.ps1 -IncludeExpensive
 ```
 """,
         """
 ```powershell
 <#
 createdb -U geo geov0_test_block_comment
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 #>
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_block_comment"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
@@ -2353,7 +2358,7 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 ```powershell
 Write-Host "comment starts"; <#
 createdb -U geo geov0_test_inline_block_comment
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 #>
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_inline_block_comment"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
@@ -2364,7 +2369,7 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 createdb -U geo geov0_test_command_mode
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_command_mode"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-powershell -Command Write-Host -File ./scripts/verify_local.ps1 -BackendMarker postgres
+powershell -Command Write-Host -File ./scripts/verify_local.ps1 -IncludeExpensive
 ```
 """,
         """
@@ -2372,7 +2377,7 @@ powershell -Command Write-Host -File ./scripts/verify_local.ps1 -BackendMarker p
 createdb -U geo geov0_test_bad_continuation
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_bad_continuation"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres `
+./scripts/verify_local.ps1 -IncludeExpensive `
   -DefinitelyNotAParameter x
 ```
 """,
@@ -2381,7 +2386,7 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 createdb -U geo geov0_test_dangling_continuation
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_dangling_continuation"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres `
+./scripts/verify_local.ps1 -IncludeExpensive `
 ```
 """,
         """
@@ -2389,8 +2394,8 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 createdb -U geo geov0_test_invalid_sibling
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_invalid_sibling"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -DefinitelyNotAParameter x -BackendMarker postgres
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -DefinitelyNotAParameter x -IncludeExpensive
+./scripts/verify_local.ps1 -IncludeExpensive
 ```
 """,
         """
@@ -2398,7 +2403,7 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 createdb -U geo geov0_test_unbalanced_quote
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_unbalanced_quote"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker "postgres
+./scripts/verify_local.ps1 -TaskSlug "unbalanced
 ```
 """,
         """
@@ -2406,7 +2411,7 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 createdb -U geo geov0_test_unbalanced_url
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_unbalanced_url
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 ```
 """,
         (
@@ -2415,7 +2420,7 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 createdb -U geo geov0_test_backtick_whitespace
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_backtick_whitespace"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres `"""
+./scripts/verify_local.ps1 -IncludeExpensive `"""
             + "   \n"
             + """  -BackendOnly
 ```
@@ -2426,7 +2431,7 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 createdb -U geo geov0_test_backtick_before_comment
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_backtick_before_comment"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres ` # real comment
+./scripts/verify_local.ps1 -IncludeExpensive ` # real comment
   -BackendOnly
 ```
 """,
@@ -2435,7 +2440,7 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 createdb -U geo geov0_test_escaped_comment_marker
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_escaped_comment_marker"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres `#not_a_comment
+./scripts/verify_local.ps1 -IncludeExpensive `#not_a_comment
   -BackendOnly
 ```
 """,
@@ -2444,7 +2449,7 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 createdb -U geo geov0_test_indented_here_end
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_indented_here_end"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 $ignored = @'
 not executable
   '@
@@ -2455,7 +2460,7 @@ not executable
 createdb -U geo geov0_test_missing_here_end
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_missing_here_end"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 $ignored = @'
 not executable
 ```
@@ -2465,7 +2470,7 @@ not executable
 createdb -U geo geov0_test_missing_block_end
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_missing_block_end"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 Write-Host "before"; <# unclosed comment
 ```
 """,
@@ -2474,7 +2479,7 @@ Write-Host "before"; <# unclosed comment
 createdb -U geo geov0_test_unbalanced_executable
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_unbalanced_executable"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-"./scripts/verify_local.ps1 -BackendMarker postgres
+"./scripts/verify_local.ps1 -IncludeExpensive
 ```
 """,
         """
@@ -2482,7 +2487,7 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 createdb -U geo geov0_test_unbalanced_file
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_unbalanced_file"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-powershell -File "./scripts/verify_local.ps1 -BackendMarker postgres
+powershell -File "./scripts/verify_local.ps1 -IncludeExpensive
 ```
 """,
         """
@@ -2490,7 +2495,7 @@ powershell -File "./scripts/verify_local.ps1 -BackendMarker postgres
 createdb -U geo geov0_test_unbalanced_reset
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_unbalanced_reset"
 $env:GEO_TEST_ALLOW_DB_RESET = "1
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 ```
 """,
         """
@@ -2498,7 +2503,7 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1
 createdb -U geo "geov0_test_unbalanced_createdb
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_unbalanced_createdb"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 ```
 """,
         """
@@ -2506,7 +2511,7 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 createdb -U geo geov0_test_invalid_here_suffix
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_invalid_here_suffix"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 $ignored = @'
 not executable
 '@Write-Output "invalid suffix"
@@ -2517,7 +2522,7 @@ not executable
 createdb -U geo geov0_test_fake_here_header
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_fake_here_header"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 $ignored = "unterminated @'
 '@
 ```
@@ -2527,7 +2532,7 @@ $ignored = "unterminated @'
 createdb -U geo geov0_test_dangling_non_verifier
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_dangling_non_verifier"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 Write-Host "incomplete" `
 ```
 """,
@@ -2536,7 +2541,7 @@ Write-Host "incomplete" `
 createdb -U geo geov0_test_continuation_blank
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_continuation_blank"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres `
+./scripts/verify_local.ps1 -IncludeExpensive `
 
   -BackendOnly
 ```
@@ -2546,7 +2551,7 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 createdb -U geo geov0_test_continuation_comment
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_continuation_comment"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres `
+./scripts/verify_local.ps1 -IncludeExpensive `
 # continuation interrupted
   -BackendOnly
 ```
@@ -2556,7 +2561,7 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 createdb -U geo geov0_test_unbalanced_delimiter
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_unbalanced_delimiter")
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 ```
 """,
         """
@@ -2564,7 +2569,7 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 createdb -U geo geov0_test_incomplete_pipeline
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_incomplete_pipeline"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 Write-Output "incomplete" |
 ```
 """,
@@ -2573,7 +2578,7 @@ Write-Output "incomplete" |
 createdb -U geo geov0_test_pipeline_comment
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_pipeline_comment"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 Write-Output "incomplete" | # no pipeline target
 ```
 """,
@@ -2582,7 +2587,7 @@ Write-Output "incomplete" | # no pipeline target
 createdb -U geo geov0_test_incomplete_chain
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_incomplete_chain"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 Write-Output "incomplete" &&
 ```
 """,
@@ -2591,7 +2596,7 @@ Write-Output "incomplete" &&
 createdb -U geo geov0_test_url_suffix
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_url_suffix" definitely_invalid
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 ```
 """,
         """
@@ -2599,7 +2604,7 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 createdb -U geo geov0_test_reset_suffix
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_reset_suffix"
 $env:GEO_TEST_ALLOW_DB_RESET = "1" definitely_invalid
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 ```
 """,
         """
@@ -2610,7 +2615,7 @@ if ($false) {
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_dead_control_flow"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
 if ($false) {
-    ./scripts/verify_local.ps1 -BackendMarker postgres
+    ./scripts/verify_local.ps1 -IncludeExpensive
 }
 ```
 """,
@@ -2619,7 +2624,7 @@ if ($false) {
 if ($false) { Write-Output "noop"; createdb -U geo geov0_test_dead_same_line; }
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_dead_same_line"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-if ($false) { Write-Output "noop"; ./scripts/verify_local.ps1 -BackendMarker postgres; }
+if ($false) { Write-Output "noop"; ./scripts/verify_local.ps1 -IncludeExpensive; }
 ```
 """,
         """
@@ -2627,7 +2632,7 @@ if ($false) { Write-Output "noop"; ./scripts/verify_local.ps1 -BackendMarker pos
 createdb -U geo geov0_test_mid_token_hash
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_mid_token_hash"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres -TaskSlug safe#invalid
+./scripts/verify_local.ps1 -IncludeExpensive -TaskSlug safe#invalid
 ```
 """,
         """
@@ -2635,7 +2640,7 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 createdb -U geo geov0_test_unclosed_control
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_unclosed_control"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 if ($true) {
 ```
 """,
@@ -2645,7 +2650,7 @@ if ($true) {
 createdb -U geo geov0_test_orphan_close
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_orphan_close"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 ```
 """,
         """
@@ -2653,7 +2658,7 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 createdb -U geo geov0_test_crossed_grouping
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_crossed_grouping"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 Write-Host ({)}
 ```
 """,
@@ -2662,7 +2667,7 @@ Write-Host ({)}
 createdb -U geo geov0_test_missing_operand
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_missing_operand"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 Write-Host (1 + )
 ```
 """,
@@ -2672,7 +2677,7 @@ return
 createdb -U geo geov0_test_after_return
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_after_return"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 ```
 """,
         """
@@ -2681,7 +2686,7 @@ if ($true) { return }
 createdb -U geo geov0_test_after_guaranteed_return
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_after_guaranteed_return"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 ```
 """,
         """
@@ -2690,7 +2695,7 @@ if (1 -eq 1) { return }
 createdb -U geo geov0_test_after_constant_equality
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_after_constant_equality"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 ```
 """,
         """
@@ -2699,7 +2704,7 @@ if (($true)) { return }
 createdb -U geo geov0_test_after_parenthesized_true
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_after_parenthesized_true"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 ```
 """,
         """
@@ -2708,7 +2713,7 @@ if (1.0 -eq 1) { return }
 createdb -U geo geov0_test_after_numeric_equality
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_after_numeric_equality"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 ```
 """,
         """
@@ -2717,7 +2722,7 @@ if ('A' -eq 'a') { return }
 createdb -U geo geov0_test_after_casefold_equality
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_after_casefold_equality"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 ```
 """,
         """
@@ -2729,7 +2734,7 @@ if ($true)
 createdb -U geo geov0_test_after_multiline_true
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_after_multiline_true"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 ```
 """,
         """
@@ -2740,7 +2745,7 @@ if (
 createdb -U geo geov0_test_after_split_condition
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_after_split_condition"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 ```
 """,
         """
@@ -2748,14 +2753,14 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 createdb -U geo geov0_test_unclosed_createdb_group (
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_unclosed_createdb_group"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 ```
 """,
         """
 ```powershell
 createdb -U geo geov0_test_wrong_order
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_wrong_order"
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
 ```
 """,
@@ -2765,7 +2770,7 @@ $taskSlug = "single_quote"
 createdb -U geo geov0_test_single_quote
 $env:TEST_DATABASE_URL = 'postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_$taskSlug'
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 ```
 """,
     ],
@@ -2809,7 +2814,7 @@ def test_postgres_doc_guard_fails_closed_after_control_flow(
         '$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/'
         'geov0_test_control_flow"\n'
         '$env:GEO_TEST_ALLOW_DB_RESET = "1"\n'
-        "./scripts/verify_local.ps1 -BackendMarker postgres\n"
+        "./scripts/verify_local.ps1 -IncludeExpensive\n"
         "```\n"
     )
 
@@ -2861,7 +2866,7 @@ def test_postgres_doc_guard_rejects_invalid_expression(
 createdb -U geo geov0_test_binary_operand
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_binary_operand"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 Write-Host ({invalid_expression}
 ```
 """
@@ -2902,7 +2907,7 @@ def test_postgres_doc_guard_rejects_control_statement_without_block(
 createdb -U geo geov0_test_missing_control_block
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@localhost:5432/geov0_test_missing_control_block"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-./scripts/verify_local.ps1 -BackendMarker postgres
+./scripts/verify_local.ps1 -IncludeExpensive
 {invalid_control_statement}
 ```
 """
@@ -2912,3 +2917,24 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
         content,
         require_create=True,
     )
+
+
+def test_postgres_doc_guard_accepts_a_minimal_correct_example() -> None:
+    """POSITIVE CONTROL for the `rejects` tests above (added 017 stage 2c).
+
+    Each of them asserts only that SOME violation is reported. Without a planted example that is
+    reported clean, they would stay green on a guard that complains about everything - which is what
+    a retired verifier parameter in every planted snippet would have made them.
+    """
+
+    content = """
+```powershell
+createdb -U geo geov0_test_positive_control
+$env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_positive_control"
+$env:GEO_TEST_ALLOW_DB_RESET = "1"
+./scripts/verify_local.ps1 -TaskSlug positive_control -BackendOnly
+```
+"""
+    assert _postgres_example_violations(Path("synthetic.md"), content, require_create=True) == []
+    retired = content.replace("-BackendOnly", "-BackendOnly -BackendMarker postgres")
+    assert _postgres_example_violations(Path("synthetic.md"), retired, require_create=True)

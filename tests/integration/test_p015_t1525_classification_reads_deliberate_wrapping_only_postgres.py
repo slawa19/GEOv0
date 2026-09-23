@@ -58,8 +58,6 @@ from app.utils.exceptions import RetryablePaymentConflictException
 from tests.debt_setup import debt_fixture_setup
 from tests.debt_setup import purge_test_ledger
 
-pytestmark = pytest.mark.postgres
-
 
 @pytest_asyncio.fixture
 async def serializable_factory():

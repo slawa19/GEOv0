@@ -44,8 +44,6 @@ from app.schemas.trustline import TrustLineCloseRequest, TrustLineCreateRequest
 from app.utils.exceptions import ConflictException, GeoException
 
 
-pytestmark = pytest.mark.postgres
-
 
 def _sign(private_key_b64: str, payload: dict) -> str:
     signing_key = SigningKey(base64.b64decode(private_key_b64))

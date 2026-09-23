@@ -57,8 +57,6 @@ from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from tests.debt_setup import purge_test_ledger
 
-pytestmark = pytest.mark.postgres
-
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)

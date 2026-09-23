@@ -51,8 +51,6 @@ from tests.unit.test_p015_b4_wrong_writer_is_recorded_faithfully import (
 )
 from tests.unit.test_p015_step5a_reconciliation import _fixture_debts, _verify
 
-pytestmark = pytest.mark.postgres
-
 
 def _postgres_url() -> str:
     """The refusal that makes every engine this module builds PostgreSQL-only (T1525 guard): it is

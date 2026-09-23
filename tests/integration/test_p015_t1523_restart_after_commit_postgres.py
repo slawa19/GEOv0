@@ -45,8 +45,6 @@ from sqlalchemy import delete, select
 
 from tests.debt_setup import purge_test_ledger
 
-pytestmark = pytest.mark.postgres
-
 _CHILD = Path(__file__).resolve().parent / "t1523_restart_child.py"
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 EXIT_AFTER_COMMIT = 17

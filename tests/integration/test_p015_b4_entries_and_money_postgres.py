@@ -96,8 +96,6 @@ from tests.p015_b4_support import (
     stored_rows,
 )
 
-pytestmark = pytest.mark.postgres
-
 
 # ==============================================================================================
 # Money, in integer atoms

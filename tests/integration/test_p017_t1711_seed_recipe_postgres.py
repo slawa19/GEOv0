@@ -40,8 +40,6 @@ from app.config import settings
 from scripts.seed_recipe import SeedRefusal, reverify, seed_community
 from tests.migrated_schema import cloned_database, provision_migrated_template
 
-pytestmark = pytest.mark.postgres
-
 COMMUNITY = "riverside-town-50"
 
 #: 33 payments + 2 clearings (one executed, one asserted) + 2 freezes = the Riverside recipe.

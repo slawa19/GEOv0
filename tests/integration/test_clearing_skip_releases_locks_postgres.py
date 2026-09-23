@@ -14,8 +14,6 @@ from sqlalchemy import delete, select, text
 from tests.debt_setup import debt_fixture_setup, purge_test_ledger
 
 
-pytestmark = pytest.mark.postgres
-
 
 @pytest.mark.parametrize(
     "skip_branch",

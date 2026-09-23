@@ -9,8 +9,6 @@ from sqlalchemy.exc import DBAPIError
 from tests.debt_setup import purge_test_ledger
 
 
-pytestmark = pytest.mark.postgres
-
 
 @pytest.mark.asyncio
 async def test_payment_engine_commit_retries_whole_uow_on_serialization_failure_postgres(

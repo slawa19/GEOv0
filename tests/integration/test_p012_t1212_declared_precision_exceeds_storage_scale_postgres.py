@@ -84,7 +84,6 @@ from app.utils.validation import (
 # tests below need no mark, and marking the module put the mark on the one SYNCHRONOUS test here
 # as well - which pytest-asyncio reports as a warning, i.e. a real inconsistency printed on every
 # postgres run.
-pytestmark = [pytest.mark.postgres]
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 

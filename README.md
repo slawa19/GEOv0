@@ -379,9 +379,11 @@ Health endpoints (also available as `/api/v1/*` aliases):
 ### Testing (single entry point)
 
 The canonical required local gate is the root PowerShell verifier. It runs the
-default backend pytest tier (excluding `slow`/`postgres`), asserts a single Alembic
+backend pytest tier on PostgreSQL (excluding `slow`), asserts a single Alembic
 head, and runs Admin UI lint/unit/build plus Simulator UI v2
-lint/typecheck/unit/build:
+lint/typecheck/unit/build. The backend tier needs a running PostgreSQL: see
+[`docs/ru/backend/postgres-local-portable.md`](docs/ru/backend/postgres-local-portable.md)
+if the machine has none.
 
 ```powershell
 # One-time setup
@@ -395,7 +397,10 @@ npm --prefix simulator-ui/v2 ci
 .\scripts\verify_local.ps1
 ```
 
-The verifier gives pytest a task-specific SQLite DB and basetemp by default. Parallel
+The verifier gives pytest a task-specific PostgreSQL database and basetemp by default:
+with `TEST_DATABASE_URL` unset it uses
+`postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_<TaskSlug>`, creates that
+database if it is missing, and sets the reset opt-in for that derived name only. Parallel
 agents must pass a unique slug, for example
 `.\scripts\verify_local.ps1 -TaskSlug agent_contract_review`.
 
@@ -406,8 +411,9 @@ deletes it any more, and removing the SQLite engine did not authorize deleting i
 The launchers' reset action is restricted to their own `geov0_dev_<slug>`
 PostgreSQL database and fails closed for every other name.
 
-GitHub Actions runs the same verifier with Python 3.11 and Node 22.12. PostgreSQL
-integration, production container/schema smoke, simulator super-smoke, Admin E2E,
+GitHub Actions runs the same verifier with Python 3.11 and Node 22.12; its required
+backend job runs the whole tier on a `postgres:16` service on every pull request.
+Production container/schema smoke, simulator super-smoke, Admin E2E,
 and Windows Simulator visual E2E jobs run only on the weekly schedule or manual dispatch; see
 `.github/workflows/quality.yml`. The presence of the workflow is not evidence of a
 green CI run until the published job finishes successfully.
@@ -445,10 +451,12 @@ schemas, payments/clearing behavior consumed by the simulator, or UI-facing even
 payloads. Through the verifier it writes ignored postmortem artifacts under the
 task-local `.local-run/test-runs/<TaskSlug>/artifacts/` root.
 
-#### Postgres-backed backend tests (when isolation/locking matters)
+#### The test database is PostgreSQL
 
-SQLite cannot validate real locking/isolation behavior. Use a dedicated disposable
-PostgreSQL database and verify its name before enabling schema reset:
+Every backend test runs on PostgreSQL; there is no SQLite tier and no `postgres`
+marker any more (programme 017, stage 2). The commands above use the database the
+verifier derives from the task slug. To point the tier at a database you chose
+yourself, name it explicitly - the reset opt-in is then yours to give:
 
 ```powershell
 $taskSlug = "agent_contract_review"
@@ -456,17 +464,17 @@ docker compose up -d db
 docker exec geov0-db createdb -U geo "geov0_test_$taskSlug" 2>$null
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_$taskSlug"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
-.\scripts\verify_local.ps1 -TaskSlug $taskSlug -BackendOnly -BackendMarker postgres -BackendSelector tests/integration/test_concurrent_prepare_routes_bottleneck_postgres.py
+.\scripts\verify_local.ps1 -TaskSlug $taskSlug -BackendOnly -BackendSelector tests/integration/test_concurrent_prepare_routes_bottleneck_postgres.py
 ```
 
 No Docker on the machine? See [`docs/ru/backend/postgres-local-portable.md`](docs/ru/backend/postgres-local-portable.md)
 for a portable PostgreSQL that needs neither Docker nor administrator rights, matched to the version CI pins.
 
-The harness rejects non-SQLite databases unless both the database name matches
-`geov0_test_*` and `GEO_TEST_ALLOW_DB_RESET=1`. The opt-in flag cannot override
-an unsafe name. Direct pytest also fails during collection whenever a selected
-`postgres` test uses a non-PostgreSQL `TEST_DATABASE_URL`; a skipped SQLite run is
-not accepted as evidence. Never point it at developer, shared, staging, or
+The harness rejects a database unless both its name matches `geov0_test_*` and
+`GEO_TEST_ALLOW_DB_RESET=1` is set. The opt-in flag cannot override an unsafe name.
+A SQLite or missing `TEST_DATABASE_URL` ends the run before any test is collected
+(exit 4), in the verifier and in direct pytest alike; a SQLite run is not accepted
+as evidence. Never point it at developer, shared, staging, or
 production data.
 
 #### UI commands and E2E

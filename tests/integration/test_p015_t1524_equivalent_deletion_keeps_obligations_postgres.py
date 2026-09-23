@@ -44,8 +44,6 @@ from tests.debt_setup import purge_test_ledger
 # not in the tier database it shares with mode-A tests - see `tests/tier_on_a_clone.py`.
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
 
-pytestmark = pytest.mark.postgres
-
 pg_client = make_pg_client_fixture()
 
 

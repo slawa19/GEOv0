@@ -12,8 +12,6 @@ from sqlalchemy import delete, func, select, text
 from tests.debt_setup import purge_test_ledger
 
 
-pytestmark = pytest.mark.postgres
-
 
 @pytest.mark.asyncio
 async def test_concurrent_duplicate_payment_request_never_regresses_terminal_state_postgres(

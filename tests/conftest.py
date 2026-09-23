@@ -39,13 +39,50 @@ from tests.scratch_db import install_test_sqlite_pragmas  # noqa: E402
 
 # --- Database Fixtures ---
 
-# IMPORTANT: always point this to a dedicated test DB.
-# For non-SQLite backends this test suite will DROP/CREATE schema when explicitly allowed.
-# Defaulting to settings.DATABASE_URL is unsafe because it may point at a developer DB.
-TEST_DATABASE_URL = os.environ.get(
-    "TEST_DATABASE_URL",
-    "sqlite+aiosqlite:///./.local-run/test-runs/direct-pytest/test.db",
-)
+# THE TIER RUNS ONLY ON POSTGRESQL, AND THE URL HAS NO DEFAULT HERE (017 stage 2c, T1702).
+#
+# Until stage 2c an unset `TEST_DATABASE_URL` meant a SQLite file under `.local-run/test-runs/`, and
+# PostgreSQL was a second tier reached through the `postgres` marker. The marker is gone: every
+# database test runs on PostgreSQL, so a SQLite URL - or none - is refused right here, before the
+# engine below is built and before a single test is collected. A refusal, never a skip: a run that
+# went green on another backend would be evidence of nothing.
+#
+# WHY NO DEFAULT IN THIS FILE, although `scripts/verify_local.ps1` derives one. The canonical runner
+# derives `geov0_test_<TaskSlug>` from its own validated slug and sets the destructive-reset opt-in for
+# THAT name only. This module is also imported by a bare `python -m pytest`, a debug path with no slug
+# and no one to own the opt-in; deriving a URL here would either run without the opt-in (and refuse
+# anyway, one step later and less clearly) or set it on the operator's behalf, which is exactly what
+# the opt-in exists to prevent. So the debug path names its database explicitly.
+#
+# The URL guard below still accepts SQLite on its own: `tests/scratch_db.py` builds SQLite stands
+# for the tests of the SQLite mechanism, which live until stage 3. The TIER is what refuses it.
+_POSTGRES_HOW_TO = "docs/ru/backend/postgres-local-portable.md"
+_TIER_URL_EXAMPLE = "postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_<slug>"
+
+
+def _require_a_postgres_tier_url(url: str | None) -> str:
+    if not url:
+        raise pytest.UsageError(
+            "TEST_DATABASE_URL is not set. The test tier runs only on PostgreSQL and has no default "
+            "database: run it through `scripts/verify_local.ps1 -TaskSlug <slug>`, which derives "
+            f"{_TIER_URL_EXAMPLE} from the slug, or set TEST_DATABASE_URL to such a URL together with "
+            f"GEO_TEST_ALLOW_DB_RESET=1. No PostgreSQL on this machine? See {_POSTGRES_HOW_TO}."
+        )
+    try:
+        backend = make_url(url).get_backend_name()
+    except Exception as exc:  # noqa: BLE001 - any parse failure is the same refusal
+        raise pytest.UsageError("TEST_DATABASE_URL is not a valid SQLAlchemy URL.") from exc
+    if backend != "postgresql":
+        raise pytest.UsageError(
+            f"The test tier runs only on PostgreSQL; TEST_DATABASE_URL uses {backend!r}. "
+            f"Set it to {_TIER_URL_EXAMPLE} with GEO_TEST_ALLOW_DB_RESET=1, or unset it and run "
+            f"`scripts/verify_local.ps1`, which derives one. No PostgreSQL on this machine? See "
+            f"{_POSTGRES_HOW_TO}."
+        )
+    return url
+
+
+TEST_DATABASE_URL = _require_a_postgres_tier_url(os.environ.get("TEST_DATABASE_URL"))
 
 _validated_test_database_url = assert_safe_test_database_url(
     TEST_DATABASE_URL,
@@ -79,19 +116,12 @@ def pytest_collection_modifyitems(session, config, items) -> None:
     _openapi_conformance.move_report_test_last(items)
 
 
-def pytest_collection_finish(session: pytest.Session) -> None:
-    """Fail closed when selected PostgreSQL tests use another DB backend."""
-    selected_postgres = [
-        item.nodeid
-        for item in session.items
-        if item.get_closest_marker("postgres") is not None
-    ]
-    if selected_postgres and _validated_test_database_url.get_backend_name() != "postgresql":
-        raise pytest.UsageError(
-            "PostgreSQL-marked tests were selected, but TEST_DATABASE_URL does not use "
-            "PostgreSQL. Set a dedicated geov0_test_* PostgreSQL URL and "
-            "GEO_TEST_ALLOW_DB_RESET=1, or deselect the postgres marker."
-        )
+# `pytest_collection_finish` USED TO LIVE HERE AND IS GONE WITH THE MARKER (017 stage 2c). It failed
+# the session closed when a `postgres`-marked test was SELECTED on a non-PostgreSQL URL. Its question -
+# "can a test that needs PostgreSQL run without it?" - is now answered for the whole tier, earlier, by
+# `_require_a_postgres_tier_url` above: nothing is collected on another backend, so a check after
+# collection would be a check that can never fire. The refusal and its control are
+# `tests/unit/test_the_tier_refuses_a_database_that_is_not_postgres.py`.
 
 
 _is_sqlite = _validated_test_database_url.get_backend_name() == "sqlite"
@@ -350,7 +380,8 @@ def init_db() -> None:
         created = _run_in_fresh_thread(lambda: ensure_tier_database(TEST_DATABASE_URL))
     except MigratedSchemaError as exc:
         pytest.exit(
-            f"the PostgreSQL tier cannot provide its own database: {exc}",
+            f"the PostgreSQL tier cannot provide its own database: {exc} "
+            f"(no PostgreSQL on this machine? See {_POSTGRES_HOW_TO})",
             returncode=pytest.ExitCode.USAGE_ERROR,
         )
     if created:

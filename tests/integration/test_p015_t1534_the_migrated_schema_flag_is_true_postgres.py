@@ -41,8 +41,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.base import Base
 from tests.migrated_schema import repository_head
 
-pytestmark = pytest.mark.postgres
-
 _LIVE_PRIMARY_KEYS = text(
     "SELECT c.conrelid::regclass::text, c.conname "
     "FROM pg_constraint c "
