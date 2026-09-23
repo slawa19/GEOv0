@@ -11,3 +11,9 @@ ruff==0.1.14
 # load-bearing, so the dependency is declared here - an importorskip around them would make
 # them pass silently on a machine that lacks it, which is the vacuum they exist to close.
 openapi-schema-validator==0.9.0
+# T1702 (017 stage 2a). A hung PostgreSQL test waits forever: two were found by hand on 2026-09-23 at
+# 5-9 minutes each, and the required gate would sit silent until its 45-minute job timeout without
+# naming the test. `faulthandler_timeout` dumps stacks but fails nothing; this plugin fails the run
+# (on Linux, the one test by name). The value, its measurement and the Windows caveat live in
+# `pytest.ini`.
+pytest-timeout==2.4.0

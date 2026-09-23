@@ -1,6 +1,7 @@
 from typing import AsyncGenerator
 import os
 import asyncio
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,7 @@ import pytest_asyncio
 from httpx import AsyncClient
 from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.engine import make_url
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.pool import NullPool
 
@@ -25,6 +27,11 @@ from app.db.sqlite_transaction_control import install_sqlite_transaction_control
 from app.main import app  # noqa: E402
 from scripts.validate_test_database_url import assert_safe_test_database_url  # noqa: E402
 from tests.migrated_schema import (  # noqa: E402
+    MigratedSchemaError,
+    cloned_database,
+    database_exists,
+    ensure_tier_database,
+    provision_migrated_template,
     repository_head,
     run_alembic_upgrade_head,
 )
@@ -298,14 +305,189 @@ async def _ensure_schema_initialized() -> None:
         _schema_ready = True
 
 
+def _run_in_fresh_thread(make_coroutine):
+    """Run a coroutine to completion on a private event loop in a private thread.
+
+    Not `asyncio.run` on this thread: it ends with `set_event_loop(None)`, which would take away the
+    loop pytest-asyncio installed for the session. A thread of its own has its own loop state.
+    """
+
+    import threading
+
+    outcome: dict[str, object] = {}
+
+    def _target() -> None:
+        try:
+            outcome["value"] = asyncio.run(make_coroutine())
+        except BaseException as exc:  # noqa: BLE001 - handed back to the caller unchanged
+            outcome["error"] = exc
+
+    worker = threading.Thread(target=_target, name="geo-test-provisioning")
+    worker.start()
+    worker.join()
+    if "error" in outcome:
+        raise outcome["error"]  # type: ignore[misc]
+    return outcome.get("value")
+
+
 @pytest.fixture(scope="session", autouse=True)
 def init_db() -> None:
-    """Guardrail fixture.
+    """The PostgreSQL tier's own database exists before the first test runs (T1702).
 
-    Schema initialization is performed lazily in the first `db_session` to keep
-    the suite async-fixture-scope-free.
+    Schema initialization is still performed lazily in the first `db_session`. What happens here is
+    the step before it, which until 2026-09-23 nothing did: on a server where `geov0_test_<slug>` did
+    not exist the tier produced 705 errors with one cause, `InvalidCatalogNameError`, and CI never saw
+    it because its service container creates the database itself. `ensure_tier_database` creates
+    only a name the guard would also let this tier reset, and refuses without `CREATEDB`.
+
+    A REFUSAL ENDS THE SESSION rather than erroring every test: one clear reason instead of the same
+    traceback two thousand times, and a non-zero exit either way - never a skip.
     """
+
+    if _validated_test_database_url.get_backend_name() != "postgresql":
+        return None
+    try:
+        created = _run_in_fresh_thread(lambda: ensure_tier_database(TEST_DATABASE_URL))
+    except MigratedSchemaError as exc:
+        pytest.exit(
+            f"the PostgreSQL tier cannot provide its own database: {exc}",
+            returncode=pytest.ExitCode.USAGE_ERROR,
+        )
+    if created:
+        print(
+            f"\n[tests/conftest.py] created the tier database "
+            f"{_validated_test_database_url.database!r}"
+        )
     return None
+
+
+# =====================================================================================================
+# MODE B - a disposable database with real root commits (programme 017, T1702)
+# =====================================================================================================
+#
+# Mode A is `db_session` below: one connection, one outer transaction, SAVEPOINTs, rolled back. On
+# PostgreSQL three things cannot happen inside it, and the stage-2 inventory
+# (`specs/017-postgres-only-engine/t1706-inventory.md`, section 1) names them: clearing refuses a
+# connection-bound session (`app/core/clearing/service.py:1530-1539`); another session cannot see
+# what was never committed; and a second writer contending for a lock waits on the first test
+# connection forever. Mode B is the answer to all three: a database CLONED from a template the
+# migrations built, sessions bound to an ENGINE over it, commits that are real, and the whole
+# database dropped when the test ends - so nothing leaks into the next test either.
+#
+# One clone name, reused: tests run one at a time, `cloned_database` drops the name before every
+# copy, so a crashed run leaves at most one clone behind and the next test reclaims it.
+#
+# The template is built ONCE per session on first use and rebuilt only if it has gone. It can go:
+# `provision_migrated_template` with its default sweep (the T1701 and T1711 modules) drops every
+# `<tier>__*` database, this one included. Building it here WITHOUT the sweep is what keeps this
+# fixture from dropping those modules' cached templates in turn.
+
+_MODE_B_TEMPLATE_SUFFIX = "modebtpl"
+_MODE_B_CLONE_SUFFIX = "modeb"
+_mode_b_template_name: str | None = None
+
+#: MEASUREMENT INSTRUMENT, NOT A TIER SETTING. `GEO_TEST_FIXTURE_MODE=B` makes `db_session` (and
+#: with it `client`) hand out a mode-B session instead of the savepoint one, for EVERY test of the
+#: run. It exists so the stage-2 catalogue can measure, per test, whether mode B actually repairs
+#: what fails in mode A - the inventory predicted it by reading and no one had run it. It selects
+#: and deselects nothing. Unset (the default, and the only value any gate uses) means mode A.
+_FIXTURE_MODE = os.environ.get("GEO_TEST_FIXTURE_MODE", "A").strip().upper() or "A"
+if _FIXTURE_MODE not in {"A", "B"}:
+    raise RuntimeError(
+        f"GEO_TEST_FIXTURE_MODE must be A or B, got {_FIXTURE_MODE!r}. Unset it for the ordinary tier."
+    )
+
+
+class CommittedDatabase:
+    """What a mode-B test gets: the clone's URL, an engine over it, and a sessionmaker bound to it.
+
+    The engine runs at the application's isolation level, read from the same setting as the tier
+    engine (`_test_engine_isolation_kwargs`, T1549), so mode B does not quietly become READ COMMITTED.
+    """
+
+    def __init__(self, url: str, engine_, sessionmaker_) -> None:
+        self.url = url
+        self.engine = engine_
+        self.sessionmaker = sessionmaker_
+
+
+async def _mode_b_template() -> str:
+    global _mode_b_template_name
+    if _mode_b_template_name is not None and await database_exists(
+        TEST_DATABASE_URL, _mode_b_template_name
+    ):
+        return _mode_b_template_name
+    _, _mode_b_template_name = await provision_migrated_template(
+        TEST_DATABASE_URL, suffix=_MODE_B_TEMPLATE_SUFFIX, sweep_stale=False
+    )
+    return _mode_b_template_name
+
+
+def _mode_b_engine(clone_url: str):
+    """An engine over a mode-B clone, or `None` for a SQLite URL, for which no clone can exist.
+
+    The early return is the shape `tests/unit/test_p015_t1525_every_sqlite_engine_has_transaction_control.py`
+    reads as "this construction cannot be SQLite" (the shape of `app/db/session.py`); the caller
+    refuses the `None`. A clone is made by `CREATE DATABASE ... TEMPLATE`, so it is PostgreSQL by
+    construction, and `install_sqlite_transaction_control` refuses a non-SQLite engine.
+    """
+
+    if make_url(clone_url).get_backend_name() == "sqlite":
+        return None
+    return create_async_engine(
+        clone_url,
+        echo=False,
+        poolclass=NullPool,
+        **_test_engine_isolation_kwargs("postgresql"),
+    )
+
+
+@asynccontextmanager
+async def _committed_database_context():
+    if _validated_test_database_url.get_backend_name() != "postgresql":
+        # A refusal, not a skip: a mode-B test that ran on another backend would measure nothing.
+        raise RuntimeError(
+            "mode B (a disposable database with real commits) exists only on PostgreSQL; "
+            f"TEST_DATABASE_URL uses {_validated_test_database_url.get_backend_name()!r}."
+        )
+    template_name = await _mode_b_template()
+    async with cloned_database(
+        TEST_DATABASE_URL, template_name=template_name, suffix=_MODE_B_CLONE_SUFFIX
+    ) as clone_url:
+        clone_engine = _mode_b_engine(clone_url)
+        if clone_engine is None:
+            raise RuntimeError(f"mode B cannot build an engine over {clone_url!r}: not PostgreSQL.")
+        clone_sessionmaker = async_sessionmaker(
+            bind=clone_engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+            autoflush=False,
+        )
+        try:
+            yield CommittedDatabase(clone_url, clone_engine, clone_sessionmaker)
+        finally:
+            # Before the drop: `cloned_database` terminates stragglers, but a pool that is still
+            # checked out would make the drop race it.
+            await clone_engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def committed_database() -> AsyncGenerator[CommittedDatabase, None]:
+    """Mode B: a fresh clone of the migrated template, dropped when the test ends however it ends."""
+
+    async with _committed_database_context() as database:
+        yield database
+
+
+@pytest_asyncio.fixture
+async def committed_session(
+    committed_database: CommittedDatabase,
+) -> AsyncGenerator[AsyncSession, None]:
+    """Mode B's drop-in for `db_session`: an engine-bound session whose `commit()` is a real commit."""
+
+    async with committed_database.sessionmaker() as session:
+        session.info["geo_committed_database"] = committed_database
+        yield session
 
 
 @pytest_asyncio.fixture(scope="session", autouse=True)
@@ -325,7 +507,12 @@ async def _dispose_engines_at_end() -> AsyncGenerator[None, None]:
 
 @pytest_asyncio.fixture
 async def db_session() -> AsyncGenerator[AsyncSession, None]:
-    """SQLAlchemy session with a per-test transaction that is rolled back."""
+    """SQLAlchemy session with a per-test transaction that is rolled back.
+
+    With the measurement instrument `GEO_TEST_FIXTURE_MODE=B` (see above) it is a mode-B session
+    instead, on a clone dropped after the test. The tier's own schema is still built then, because a
+    test that imports `TestingSessionLocal` directly keeps reaching the tier's database.
+    """
 
     await _ensure_schema_initialized()
 
@@ -359,6 +546,13 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
             app_db_session.AsyncSessionLocal = _orig_async_session_local
     except Exception:
         pass
+
+    if _FIXTURE_MODE == "B":
+        async with _committed_database_context() as database:
+            async with database.sessionmaker() as session:
+                session.info["geo_committed_database"] = database
+                yield session
+        return
 
     if _is_sqlite:
         # SQLite has flaky transactional isolation under rapid commit-heavy tests.
@@ -431,7 +625,11 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
     # sessionmaker so background tasks operate on the same DB as request handlers.
     import app.db.session as app_db_session
     _orig_async_session_local = app_db_session.AsyncSessionLocal
-    app_db_session.AsyncSessionLocal = TestingSessionLocal
+    # In mode B the background work has to reach the CLONE the request handlers use, not the tier.
+    committed = db_session.info.get("geo_committed_database")
+    app_db_session.AsyncSessionLocal = (
+        committed.sessionmaker if committed is not None else TestingSessionLocal
+    )
 
     async def override_get_db():
         yield db_session
