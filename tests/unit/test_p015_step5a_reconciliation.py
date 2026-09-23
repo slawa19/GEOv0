@@ -17,6 +17,13 @@ changes "around the application" go through `exec_driver_sql`, the one door the 
 unseen - which is exactly what an operator's SQL or a partial restore is.
 
 MUTATIONS. Each test names the mutation that must turn it red; the report of step 5a records the runs.
+
+TWO TESTS RUN ON A SQLITE FILE OF THEIR OWN (programme 017, `T1702`, 2026-09-23), whatever the tier
+is, because their subject exists only on SQLite: the per-row arithmetic check that SQLite cannot hold
+as a constraint (on PostgreSQL `chk_debt_journal_entries_delta_arithmetic` refuses the forged row
+before the verifier can see it), and the refusal to give a verdict without the SQLite transaction
+control (on PostgreSQL there is no such control to be missing). `sqlite_reconciliation_stand` wires
+the file exactly as the conftest wires its SQLite engine. Every other test stays on the tier.
 """
 
 from __future__ import annotations
@@ -27,7 +34,10 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
+import pytest_asyncio
 from sqlalchemy import func, select, update
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from app.core.integrity import compute_integrity_checkpoint_for_equivalent
 from app.core.ledger.journal import DebtJournalError, Reason, debt_operation
@@ -41,6 +51,7 @@ from app.core.ledger.reconciliation import (
     verify_journal_equals_change,
 )
 from app.core.payments.engine import PaymentEngine
+from app.db.base import Base
 from app.db.journal_tables import debt_journal_entries
 from app.db.models.audit_log import IntegrityAuditLog
 from app.db.models.debt import Debt
@@ -51,7 +62,9 @@ from app.db.reconciliation_tables import (
     debt_reconciliation_baselines,
     debt_reconciliation_results,
 )
+from app.db.sqlite_transaction_control import install_sqlite_transaction_control
 from tests.debt_setup import debt_fixture_setup
+from tests.scratch_db import install_test_sqlite_pragmas
 from tests.unit.test_p015_b4_wrong_writer_is_recorded_faithfully import (
     _audit,
     _collapse_the_route,
@@ -69,6 +82,32 @@ CHECKPOINT_CHECKS = {"zero_sum", "trust_limits", "debt_symmetry"}
 # ==============================================================================================
 # Stand helpers
 # ==============================================================================================
+
+
+@pytest_asyncio.fixture
+async def sqlite_reconciliation_stand(tmp_path):
+    """A sessionmaker over a fresh SQLite file, wired as the conftest wires its SQLite engine.
+
+    Same connect pragmas, same transaction control, the `create_all` schema the SQLite tier has, and
+    the conftest's sessionmaker options. For the two tests whose subject exists only on SQLite.
+    """
+    url = f"sqlite+aiosqlite:///{(tmp_path / 'reconciliation.db').as_posix()}"
+    stand_engine = create_async_engine(url, poolclass=NullPool, connect_args={"timeout": 30})
+    install_test_sqlite_pragmas(stand_engine.sync_engine, url=url)
+    install_sqlite_transaction_control(stand_engine.sync_engine)
+    async with stand_engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(
+        bind=stand_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autoflush=False,
+        join_transaction_mode="create_savepoint",
+    )
+    try:
+        yield factory
+    finally:
+        await stand_engine.dispose()
 
 
 def _literal(dialect: str, value: uuid.UUID) -> str:
@@ -386,7 +425,7 @@ async def test_step5a_without_a_baseline_the_result_is_unverifiable_never_passed
 
 @pytest.mark.asyncio
 async def test_step5a_a_journal_row_contradicting_its_own_arithmetic_is_failed_and_dominates(
-    db_session,
+    sqlite_reconciliation_stand,
 ) -> None:
     """A row saying `-> 11` with `delta 10`, and no baseline: FAILED, with the baseline still missing.
 
@@ -396,8 +435,13 @@ async def test_step5a_a_journal_row_contradicting_its_own_arithmetic_is_failed_a
 
     MUTATIONS: (1) remove the per-row comparison in `_journal_sums` - no finding, UNVERIFIABLE, red;
     (2) test `missing_evidence` before `findings` in `ReconciliationOutcome.status` - UNVERIFIABLE, red.
+
+    ON SQLITE WHATEVER THE TIER IS: on PostgreSQL the forged row is refused by
+    `chk_debt_journal_entries_delta_arithmetic` (migration 024) and the per-row check "can only fire
+    if the constraint is gone" (`app/core/ledger/reconciliation.py`, module docstring).
     """
-    from tests.conftest import TestingSessionLocal as factory
+    factory = sqlite_reconciliation_stand
+    assert factory.kw["bind"].dialect.name == "sqlite"
 
     triangle = await _seed_triangle(factory, trustlines=[("b", "a", "100")])
     try:
@@ -714,13 +758,20 @@ async def test_step5a_different_findings_under_the_same_status_insert(db_session
 
 
 @pytest.mark.asyncio
-async def test_step5a_without_sqlite_transaction_control_there_is_no_verdict(db_session, monkeypatch) -> None:
+async def test_step5a_without_sqlite_transaction_control_there_is_no_verdict(
+    sqlite_reconciliation_stand, monkeypatch
+) -> None:
     """The snapshot premise is refused, not assumed: an error and no row; with the control, a verdict.
 
     MUTATION: remove the refusal in `open_verification_snapshot` - a PASSED row appears, red.
+
+    ON SQLITE WHATEVER THE TIER IS: the refusal is about a SQLite engine's transaction control, so on
+    a PostgreSQL tier there is nothing for it to refuse and the patched predicate is never asked.
     """
     from app.core.ledger import reconciliation
-    from tests.conftest import TestingSessionLocal as factory
+
+    factory = sqlite_reconciliation_stand
+    assert factory.kw["bind"].dialect.name == "sqlite"
 
     triangle = await _seed_triangle(factory, trustlines=[])
     try:
