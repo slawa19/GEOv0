@@ -71,6 +71,31 @@ async def _drop(name: str) -> None:
         await connection.close()
 
 
+def _refuse_if_someone_elses(name: str, exists: bool) -> None:
+    """The databases below are NEVER dropped unless this test created them (017 stage 2 closing
+    review, F1).
+
+    They are tier databases by construction - `ensure_tier_database` creates nothing else, and the
+    child tier refuses anything else - so every name they can take is also a legitimate tier name:
+    `geov0_test_a_t1702new` is task `a_t1702new`'s own database. These tests used to drop the name
+    unconditionally before and after; measured 2026-09-23, a planted `geov0_test_p017s2fix_t1702new`
+    and `..._t1702child`, each holding a table with a row, were both gone after a green run under
+    the slug `p017s2fix`. The reserved `__` cannot help here: a scratch-shaped name is exactly what
+    `ensure_tier_database` refuses (the parametrized refusal below). So a pre-existing database is
+    refused, loudly, and left exactly as it is.
+
+    WHAT THIS DOES NOT CLOSE: a task with that slug creating the database between the absence check
+    and the cleanup below would still lose it. That window is this test's own run.
+    """
+
+    if exists:
+        pytest.fail(
+            f"database {name!r} already exists. It is a legitimate tier database name (task slug "
+            f"{name.removeprefix('geov0_test_')!r}), so this test will not drop it: it may be another "
+            f"task's. If it is a leftover of this test, drop it by hand and rerun."
+        )
+
+
 # =====================================================================================================
 # 1. The tier creates its own database
 # =====================================================================================================
@@ -79,15 +104,17 @@ async def _drop(name: str) -> None:
 async def test_ensure_tier_database_creates_a_missing_database_once():
     name = f"{make_url(TEST_DATABASE_URL).database}_t1702new"
     url = _url_with_database(name)
-    await _drop(name)
+    _refuse_if_someone_elses(name, await database_exists(TEST_DATABASE_URL, name))
+    created = False
     try:
-        assert not await database_exists(TEST_DATABASE_URL, name)
-        assert await ensure_tier_database(url) is True
+        created = await ensure_tier_database(url)
+        assert created is True
         assert await database_exists(TEST_DATABASE_URL, name)
         # Idempotent: an existing database is reported, not recreated and not touched.
         assert await ensure_tier_database(url) is False
     finally:
-        await _drop(name)
+        if created:
+            await _drop(name)
 
 
 @pytest.mark.parametrize(
@@ -128,9 +155,8 @@ def test_a_tier_pointed_at_a_missing_database_creates_it_and_runs():
         return asyncio.run(coro)
 
     # A thread-free `asyncio.run` is safe here: this test is synchronous, so no loop is running.
-    _run(_drop(name))
+    _refuse_if_someone_elses(name, _run(database_exists(TEST_DATABASE_URL, name)))
     try:
-        assert not _run(database_exists(TEST_DATABASE_URL, name))
         environment = dict(
             os.environ,
             TEST_DATABASE_URL=url,
