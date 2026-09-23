@@ -3,20 +3,41 @@ from __future__ import annotations
 import argparse
 import copy
 import hashlib
+import importlib.util
 import json
 import sys
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from types import ModuleType
 from typing import Any, Iterable
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
 
-from app.core.simulator import viz_rules  # noqa: E402
+
+def _load_viz_rules() -> ModuleType:
+    # The generator runs in the Simulator UI `prebuild`, which must not need a database.
+    # `from app.core.simulator import viz_rules` would execute the package `__init__`, and
+    # through it `app.db.session` and `app.config`: an engine and settings built at import,
+    # `ENV` and `DATABASE_URL` required, the database driver loaded. `viz_rules.py` itself
+    # uses only the standard library, so it is loaded by path, under a private name, without
+    # touching the `app` package at all. The backend keeps importing the same file normally,
+    # so both sides still share one set of rules. If `viz_rules.py` ever grows an import of
+    # the application, this load fails loudly and
+    # `tests/unit/test_p017_s1_demo_fixture_generator_needs_no_database.py` goes red.
+    path = REPO_ROOT / "app" / "core" / "simulator" / "viz_rules.py"
+    spec = importlib.util.spec_from_file_location("_demo_fixtures_viz_rules", path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load visualisation rules from {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+viz_rules = _load_viz_rules()
 
 
 def read_json(path: Path) -> Any:
