@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-import sqlite3
 import subprocess
 import sys
 
@@ -50,28 +49,3 @@ def test_sqlite_alembic_fails_before_executing_revisions(extra_args: list[str]) 
     assert _MESSAGE in output
     assert "Running upgrade" not in output
     assert "CREATE EXTENSION" not in output
-
-
-def test_supported_sqlite_initializer_remains_available(tmp_path: Path) -> None:
-    database_path = tmp_path / "local.db"
-    database_url = f"sqlite+aiosqlite:///{database_path.as_posix()}"
-
-    result = subprocess.run(
-        [sys.executable, "scripts/init_sqlite_db.py"],
-        cwd=_ROOT,
-        env=_test_env(database_url=database_url),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    output = result.stdout + result.stderr
-    assert result.returncode == 0, output
-    with sqlite3.connect(database_path) as connection:
-        tables = {
-            row[0]
-            for row in connection.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table'"
-            )
-        }
-    assert {"participants", "trust_lines", "transactions"} <= tables

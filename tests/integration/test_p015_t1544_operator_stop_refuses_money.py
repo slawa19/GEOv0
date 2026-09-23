@@ -1,4 +1,4 @@
-"""T1544: the operator's equivalent-level stop refuses money - the refusal itself, on SQLite.
+"""T1544: the operator's equivalent-level stop refuses money - the refusal itself.
 
 WHAT WAS WRONG. `PATCH /admin/equivalents/{code}` with `is_active=false` is the operator's only
 equivalent-level stop, and no money path read it: reproduced 2026-09-13 through the admin API - after
@@ -17,8 +17,8 @@ The refusal is `409/E008` WITHOUT `details.retryable`: that flag belongs to the 
 variant, and repeating a request against a deactivated equivalent cannot succeed.
 
 WHAT IT DOES NOT HOLD. The race guarantees - a PATCH racing a payment commit, a PATCH racing a clearing
-- belong to PostgreSQL: SQLite's advisory owner lock is a no-op and `FOR SHARE` renders nothing. They
-are in `test_p015_t1544_operator_stop_races_postgres.py`.
+- need two concurrent transactions and are in `test_p015_t1544_operator_stop_races_postgres.py`. (This
+module was written for SQLite, where the owner lock was a no-op; it runs on PostgreSQL since 017.)
 """
 
 from __future__ import annotations

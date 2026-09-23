@@ -29,9 +29,8 @@ that contradicts itself, which a readback against the computed effects sees and 
 alone does not. Neither layer subsumes the other:
 
 1. A DATABASE CONSTRAINT, `chk_debt_journal_entries_delta_arithmetic`, below the entire listener
-   pipeline. POSTGRESQL ONLY, and the asymmetry is measured rather than convenient - see
-   `test_t1530_the_arithmetic_constraint_is_postgresql_only_and_the_reason_is_measured` and
-   `app/db/journal_tables.py`. Its PostgreSQL half, on both construction paths, is
+   pipeline, installed on PostgreSQL (`app/db/journal_tables.py`; the test that measured why SQLite
+   could not carry it left with SQLite in 017 stage 3). On both construction paths it is
    `tests/integration/test_p015_t1530_delta_arithmetic_postgres.py`.
 2. A READBACK OF THE ENTRIES (`journal.py::_verify_entries`), on the same discipline as `_reconcile`:
    after the INSERT has run, the stored rows are read back and required to be exactly the `_Effect`
@@ -54,9 +53,7 @@ from typing import Any
 import pytest
 import pytest_asyncio
 from sqlalchemy import event, select
-from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.exc import InvalidRequestError
-from sqlalchemy.schema import CreateTable
 
 from app.core.ledger import journal
 from app.db.journal_tables import debt_journal_entries
@@ -555,67 +552,6 @@ async def test_t1530_entries_a_savepoint_rollback_removed_are_not_a_disagreement
 # =================================================================================================
 # The database constraint, and why it is on one dialect only
 # =================================================================================================
-
-
-def test_t1530_the_arithmetic_constraint_is_postgresql_only_and_the_reason_is_measured() -> None:
-    """T1530, layer 1. The constraint is in the PostgreSQL DDL and deliberately not in SQLite's.
-
-    A CONSTRAINT THAT EXISTS ON ONE DIALECT AND NOT THE OTHER IS EXACTLY THE TRAP THIS PROGRAMME HAS
-    ALREADY RECORDED, so the asymmetry is asserted here together with the measurement that forces it.
-    On SQLite `Numeric` binds through `float` (`processors.to_float`, no native decimal), so
-    `delta = COALESCE(after, 0) - COALESCE(before, 0)` is floating-point arithmetic there and it is
-    FALSE for ordinary money. This test re-measures that on sqlite3 itself rather than citing it: if
-    SQLite ever stores these columns exactly, the second half fails and the constraint should be
-    installed on both.
-
-    THE CONSTRUCTION PATHS ARE A DIFFERENT QUESTION AND ARE NOT THIS TEST'S. `Base.metadata.create_all`
-    and `alembic upgrade head` must agree on PostgreSQL, which needs a PostgreSQL server and is
-    asserted in `tests/integration/test_p015_t1530_delta_arithmetic_postgres.py`.
-
-    MUTATION that must redden this: remove `.ddl_if(dialect="postgresql")` in
-    `app/db/journal_tables.py` - the SQLite half then fails, which is the point of asserting both
-    halves rather than only the presence.
-    """
-
-    name = "chk_debt_journal_entries_delta_arithmetic"
-    # DIALECTS AND NOT ENGINES: a `create_engine` in a test has to be paired with
-    # `install_sqlite_transaction_control` (T1525, and that guard caught this line), and nothing here
-    # needs a connection - compiling DDL is a dialect's job.
-    for dialect, expected in ((postgresql.dialect(), True), (sqlite.dialect(), False)):
-        ddl = str(CreateTable(debt_journal_entries).compile(dialect=dialect))
-        assert (name in ddl) is expected, (
-            f"{dialect.name}: expected the arithmetic CHECK to be "
-            f"{'present' if expected else 'absent'} in the DDL `Base.metadata.create_all` would "
-            f"emit:\n{ddl}"
-        )
-
-    # AND THE REASON, RE-MEASURED. Two legitimate scale-8 movements inside the proven-exact SQLite
-    # domain whose float difference is not the delta.
-    import sqlite3
-
-    connection = sqlite3.connect(":memory:")
-    connection.execute(
-        "CREATE TABLE e (before_ NUMERIC(20,8), after_ NUMERIC(20,8), delta NUMERIC(20,8), "
-        "CHECK (delta = COALESCE(after_, 0) - COALESCE(before_, 0)))"
-    )
-    refused = []
-    for before, after, delta in (
-        ("10.00000001", "10.00000002", "0.00000001"),
-        ("33554431.99999999", "33554432.00000001", "0.00000002"),
-    ):
-        try:
-            connection.execute(
-                "INSERT INTO e VALUES (?, ?, ?)", [float(value) for value in (before, after, delta)]
-            )
-        except sqlite3.IntegrityError:
-            refused.append((before, after, delta, float(after) - float(before)))
-    connection.close()
-
-    assert len(refused) == 2, (
-        "SQLite now satisfies `delta = after - before` for these scale-8 movements, so the reason "
-        "this constraint is PostgreSQL-only no longer holds and `ddl_if` should be reconsidered: "
-        f"refused {refused}"
-    )
 
 
 def test_t1530_the_migration_and_the_metadata_spell_the_same_predicate() -> None:

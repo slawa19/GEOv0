@@ -7,10 +7,10 @@ held, and the next inject event of the tick wrote `debts` unlocked
 reproducer). The executor now only STAGES (`stage_inject_event`) and PUBLISHES
 (`publish_committed_inject`); `RealRunnerImpl._apply_due_scenario_events` owns every boundary.
 
-WHAT THIS FILE PROVES, on the default SQLite tier, and always through the database: every effect
-is read back through a NEW session (`world.sessions()`), never through the session under test
-and never through a counter standing in for the row. SQLite takes no advisory lock, so the lock
-itself is proven on PostgreSQL; the lock SET check is enforced on every dialect and proven here.
+WHAT THIS FILE PROVES, always through the database: every effect is read back through a NEW session
+(`world.sessions()`), never through the session under test and never through a counter standing in
+for the row. The lock itself is proven by the PostgreSQL module named above; the lock SET check is
+proven here.
 
 MODE B, EVERY TEST THAT TAKES `db_session` (017 stage 2b, T1702). A new session sees only what was
 COMMITTED. In mode A on PostgreSQL nothing the test commits is - `commit()` releases a SAVEPOINT
@@ -20,10 +20,11 @@ on it (`NoResultFound`, `assert None == Decimal('10.00')`), and every assertion 
 session could not have seen the row either way. One test hung for ever: its second session inserts a
 trustline whose foreign keys wait on participants the first, still-open transaction holds (stage-2
 catalogue, section 5). In mode B the commits are real, on a clone, and `world.sessions()` reaches that
-clone. The two tests of SQLite's own refusal run on a SQLite stand of their own (`sqlite_stand`).
+clone. The two tests of SQLite's own busy refusal left with SQLite (017 stage 3, slice S3); a real
+40001 restarting the whole unit of work is `tests/integration/
+test_p015_inject_retries_a_serialization_failure_postgres.py`.
 
-A NOTE ON THE STAND. `db_session` on SQLite is a plain session. The owner rolls back, and a
-rollback expires every instance in the session, so ids and pids are captured as plain values right
+A NOTE ON THE STAND. The owner rolls back, and a rollback expires every instance in the session, so ids and pids are captured as plain values right
 after seeding and ORM instances are not touched afterwards.
 """
 
@@ -32,29 +33,19 @@ from __future__ import annotations
 import asyncio
 import uuid
 from dataclasses import dataclass
-from types import SimpleNamespace
 from decimal import Decimal
 from typing import Any
 
 import pytest
-import pytest_asyncio
 from sqlalchemy import delete, event, select
 from sqlalchemy.exc import DBAPIError
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import NullPool
 
 from app.core.simulator.inject_executor import InjectOwnerLockSetTooNarrow
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
-from app.db.base import Base
-from app.db.sqlite_transaction_control import (
-    install_sqlite_transaction_control,
-    sqlite_busy_error_name,
-)
 from tests.conftest import MODE_B, sessionmaker_of
-from tests.scratch_db import install_test_sqlite_pragmas
 from tests.unit.test_scenario_inject_topology import _make_run, _make_runner, _nonce
 
 from tests.debt_setup import debt_fixture_setup, writer_operation
@@ -86,8 +77,7 @@ class _World:
     creditor_pid: str
     debtor_id: uuid.UUID
     debtor_pid: str
-    #: Where a NEW session over this world's database comes from: the mode-B clone's sessionmaker on
-    #: PostgreSQL, the tier's on SQLite, the stand's own for the SQLite-mechanism tests.
+    #: Where a NEW session over this world's database comes from: the mode-B clone's sessionmaker.
     sessions: Any
 
 
@@ -457,180 +447,13 @@ async def test_a_second_transient_failure_propagates_and_leaves_the_event_pendin
     assert not db_session.in_transaction()
 
 
-# ---------------------------------------------------------------------------
-# The SQLite-mechanism stand
-# ---------------------------------------------------------------------------
-
-
-@pytest_asyncio.fixture
-async def sqlite_stand(tmp_path):
-    """A SQLite database of the two stale-snapshot tests' own, whatever the tier runs on.
-
-    WHY (017 stage 2b, T1702). Those two tests prove how the owner treats a transient SQLITE refusal -
-    `SQLITE_BUSY` from a second writer while the unit of work holds SQLite's write lock. The mechanism
-    lives in `app/` until stage 3 retires SQLite, and its coverage has to live as long. They used to run
-    on the tier's database and refused (`assert dialect.name == "sqlite"`) on PostgreSQL, where the
-    refusal they provoke cannot exist; tied to the tier, they would have stopped measuring anything the
-    day the tier moved. On this stand they run on SQLite on both tiers.
-
-    The engine is built the way the tier's SQLite engine is (`tests/conftest.py`): the same connection
-    pragmas (`install_test_sqlite_pragmas`: foreign keys, `busy_timeout`, WAL) and the same transaction
-    control, on a file under `tmp_path` - the task-isolated basetemp - with the application schema.
-    """
-
-    url = f"sqlite+aiosqlite:///{(tmp_path / 'inject-ownership-sqlite.db').as_posix()}"
-    stand_engine = create_async_engine(url, poolclass=NullPool, connect_args={"timeout": 30})
-    install_test_sqlite_pragmas(stand_engine.sync_engine, url=url)
-    install_sqlite_transaction_control(stand_engine.sync_engine)
-    try:
-        async with stand_engine.begin() as connection:
-            await connection.run_sync(Base.metadata.create_all)
-        sessions = async_sessionmaker(
-            bind=stand_engine, class_=AsyncSession, expire_on_commit=False, autoflush=False
-        )
-        async with sessions() as session:
-            yield SimpleNamespace(session=session, sessions=sessions, engine=stand_engine)
-    finally:
-        await stand_engine.dispose()
-
-
-class _CommitFromAnotherSession:
-    """Tries to commit from a SECOND session while the owner's unit of work is in flight.
-
-    WHAT THIS USED TO PRODUCE, AND WHAT IT PRODUCES NOW - the change is the journal's, and it is
-    measured (2026-09-12, step 4 slice C). Before the debt journal was armed, the owner's unit of
-    work had only READ by the time staging returned, so a commit by anyone else left it on a stale
-    snapshot and its next write was refused with `SQLITE_BUSY_SNAPSHOT`. That was the real
-    interleaving `T1525` created.
-
-    The journal opens the inject's operation BEFORE staging and writes its envelope there, so the
-    unit of work now holds SQLite's write lock from its first statement. The second session
-    therefore cannot commit at all: it waits and is refused with `database is locked`
-    (`SQLITE_BUSY`). A write-first transaction has no stale snapshot to be caught on - the window
-    the old error described does not exist on this path any more.
-
-    BOTH OUTCOMES ARE THE SAME CLASS to the code under test, which is why these tests still measure
-    what they were written for: a transient database refusal must restart the whole unit of work,
-    and must never let the inject be recorded as applied or silently dropped. The classification of
-    `SQLITE_BUSY_SNAPSHOT` itself is still proven directly, on a stand that builds the stale
-    snapshot by hand, in `tests/unit/test_p015_t1525_sqlite_stale_snapshot_is_retried.py`.
-
-    Nothing here fabricates an error or its code: the driver raises whichever one the database
-    produces, and the tests read it back by name.
-    """
-
-    def __init__(self, runner, *, on_calls: set[int], sessions) -> None:
-        self._real = runner._inject_executor.stage_inject_event
-        self._on_calls = set(on_calls)
-        self._sessions = sessions
-        self.calls = 0
-        self.blocked = 0
-        runner._inject_executor.stage_inject_event = self  # this runner only
-
-    async def __call__(self, session, **kwargs):
-        self.calls += 1
-        staged = await self._real(session, **kwargs)
-        if self.calls in self._on_calls:
-            n = _nonce()
-            async with self._sessions() as other:
-                # A short wait, set on THIS connection only. The suite's `busy_timeout` is 30s
-                # (`tests/conftest.py`), and since the owner now holds the write lock for its whole
-                # unit of work the second session would sit out all thirty of them before being
-                # refused - twice per test.
-                await (await other.connection()).exec_driver_sql("PRAGMA busy_timeout = 250")
-                other.add(
-                    Participant(
-                        pid=f"BUSY_{n}", display_name="Busy writer",
-                        public_key=f"pk_busy_{n}"[:64], type="person", status="active",
-                    )
-                )
-                try:
-                    await other.commit()
-                except DBAPIError:
-                    self.blocked += 1
-                    raise
-        return staged
-
-
-@pytest.mark.asyncio
-async def test_a_stale_snapshot_is_transient_and_the_inject_lands_exactly_once(sqlite_stand) -> None:
-    """T1525: a transient SQLite refusal must restart the unit of work, not drop the inject.
-
-    `_is_transient_inject_db_error` matched PostgreSQL SQLSTATEs only, and classified as an ordinary
-    error a transient SQLite refusal reopens exactly the loss mode 55P03 was added for: the owner
-    records "inject failed (db error)", marks the event FIRED, and the inject is dropped.
-
-    WHICH REFUSAL THE STAND PRODUCES CHANGED WITH THE JOURNAL (2026-09-12, step 4 slice C), and the
-    spy's docstring carries the measurement. It used to be `SQLITE_BUSY_SNAPSHOT` - the owner read
-    before it wrote, and a concurrent commit left it on a stale snapshot. The journal's envelope is
-    now the unit of work's FIRST statement, so it holds the write lock throughout and the concurrent
-    writer is the one refused, with `database is locked`. The property asserted below is unchanged:
-    the unit of work restarts, the inject lands exactly once, and the event is fired once.
-    """
-    db_session = sqlite_stand.session
-    assert sqlite_stand.engine.dialect.name == "sqlite", sqlite_stand.engine.dialect.name
-    world = await _seed_debt_world(
-        db_session, existing=Decimal("5.12345678"), sessions=sqlite_stand.sessions
-    )
-    runner, arts = _make_runner()
-    run = _debt_run(world)
-
-    spy = _CommitFromAnotherSession(runner, on_calls={1}, sessions=sqlite_stand.sessions)
-
-    await runner._apply_due_scenario_events(
-        db_session, run_id="r1", run=run, scenario=_debt_scenario(world)
-    )
-
-    # NON-VACUITY: the second writer really tried, and really collided with this unit of work.
-    assert spy.blocked == 1, "non-vacuity: the concurrent writer was never refused"
-    assert spy.calls == 2, f"expected one retry of the whole unit of work, stage ran {spy.calls}x"
-    assert await _fresh_debt(world) == Decimal("15.12345678"), (
-        "the injected 10.00 must land exactly once on 5.12345678"
-    )
-    assert run._real_fired_scenario_event_indexes == {0}
-    assert _notes(arts) == ["inject applied"]
-    assert not db_session.in_transaction()
-
-
-@pytest.mark.asyncio
-async def test_a_stale_snapshot_on_both_attempts_leaves_the_event_pending(sqlite_stand) -> None:
-    """The budget is finite, and a spent budget must leave the event PENDING, never fired."""
-    db_session = sqlite_stand.session
-    assert sqlite_stand.engine.dialect.name == "sqlite", sqlite_stand.engine.dialect.name
-    world = await _seed_debt_world(db_session, sessions=sqlite_stand.sessions)
-    runner, arts = _make_runner()
-    run = _debt_run(world)
-    later = _debt_event(world, "1.00")
-
-    spy = _CommitFromAnotherSession(runner, on_calls={1, 2}, sessions=sqlite_stand.sessions)
-
-    with pytest.raises(DBAPIError) as refusal:
-        await runner._apply_due_scenario_events(
-            db_session, run_id="r1", run=run, scenario=_debt_scenario(world, _debt_event(world), later)
-        )
-
-    # The error that propagated is the real one, by code - not something else that also fails.
-    # `SQLITE_BUSY` and no longer `SQLITE_BUSY_SNAPSHOT`: the journal's envelope makes this unit of
-    # work write-first, so the collision is over the write lock rather than over a stale snapshot
-    # (see `_CommitFromAnotherSession`). Both are `sqlite_busy_error_name` codes and both are
-    # transient; which one the database produces is the database's to decide, and this reads it back
-    # rather than asserting a class.
-    assert sqlite_busy_error_name(refusal.value) == "SQLITE_BUSY", refusal.value
-    assert spy.blocked == 2, "non-vacuity: both attempts must have collided"
-    assert spy.calls == 2, "the later event must not run after the failure propagated"
-    assert run._real_fired_scenario_event_indexes == set()
-    assert await _fresh_debt(world) is None
-    assert _notes(arts, 0) == [] and _notes(arts, 1) == []
-    assert not db_session.in_transaction()
-
-
 @MODE_B
 @pytest.mark.asyncio
 async def test_a_non_transient_staging_error_is_recorded_not_retried(db_session) -> None:
     """Anti-vacuum for the retry predicate: only the transient set restarts the unit of work.
 
-    That set is 40001/40P01/55P03 and, since T1525, the SQLite busy family. A driver error outside
-    it is recorded and the event fired, exactly as before.
+    That set is 40001/40P01/55P03 (and, until SQLite leaves `app/`, the SQLite busy family). A
+    driver error outside it is recorded and the event fired, exactly as before.
     """
     world = await _seed_debt_world(db_session)
     runner, arts = _make_runner()

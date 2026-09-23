@@ -22,9 +22,9 @@ TIER. PostgreSQL since programme 017 stage 3 (2026-09-24): the stand's own engin
 database, real root commits, a world of its own purged after each test (`tests/p015_b4a_stand.py::
 new_postgres_stand`). Until then these rules were measured ONLY on SQLite, and the PostgreSQL
 modules named below covered only what SQLite could not see. Money stays inside `|v| < 2^26`
-(design v2 §4) except where a test says otherwise. Two tests stay on the SQLite stand because their
-subject IS SQLite and they leave with it: the transaction-control refusal and the round-trip
-predicate. What SQLite could not host - an AUTOCOMMIT engine, a two-phase root, a DML CTE, a NaN
+(design v2 §4) except where a test says otherwise. The two tests whose subject was SQLite itself - the
+transaction-control refusal and the round-trip predicate's refusal - left with SQLite (017 stage 3,
+slice S3); on PostgreSQL neither refusal can fire. What SQLite could not host - an AUTOCOMMIT engine, a two-phase root, a DML CTE, a NaN
 that actually reaches a column - is in
 `tests/integration/test_p015_b4a_journal_postgres.py`, with the reason stated there.
 """
@@ -43,7 +43,7 @@ from sqlalchemy import delete, event, insert, select, update
 from app.core.ledger import journal
 from app.db.journal_tables import debt_journal_entries, debt_operations
 from app.db.models.debt import Debt
-from tests.p015_b4a_stand import Stand, exact_money, identity, new_postgres_stand, new_sqlite_stand
+from tests.p015_b4a_stand import Stand, exact_money, identity, new_postgres_stand
 
 
 @pytest_asyncio.fixture
@@ -958,33 +958,12 @@ async def test_the_hook_refuses_an_unstorable_amount_by_the_predicate_it_violate
     not a gap: `NUMERIC(20, 8)` through asyncpg is exact, so every value the first three predicates
     let through reads back unchanged and nothing on this tier can be refused as `money_round_trip`.
     The value that used to be its case, `100000000000.00000001`, is asserted STORED EXACTLY here by
-    `test_a_value_sqlite_would_change_is_exact_money_on_postgresql`; the refusal itself is still
-    measured on the SQLite stand by `test_the_round_trip_predicate_refuses_what_sqlite_would_change`,
-    the only dialect in this repository on which it can fire.
+    `test_a_value_sqlite_would_change_is_exact_money_on_postgresql`. The refusal itself was measured
+    on a SQLite stand, the only dialect on which it could fire, and left with SQLite (017 stage 3,
+    slice S3).
     """
 
     await _assert_refused_before_any_debt_sql(stand, raw, expected_reason)
-
-
-@pytest.mark.asyncio
-async def test_the_round_trip_predicate_refuses_what_sqlite_would_change(tmp_path) -> None:
-    """C12, the fourth predicate, on the one dialect where it can fire: SQLite's float binding.
-
-    `100000000000.00000001` passes finiteness, magnitude and quantization, and SQLite would store
-    it as a different number. A SQLITE MECHANISM TEST, kept on the SQLite stand on purpose and left
-    for the slice that removes SQLite (programme 017 stage 3) - on PostgreSQL the same value is
-    exact money (`test_a_value_sqlite_would_change_is_exact_money_on_postgresql`).
-
-    MUTATION that must redden this: drop the `_round_trip` comparison from `_check_storable`.
-    """
-
-    built = await new_sqlite_stand(tmp_path, extra_participants=2)
-    try:
-        await _assert_refused_before_any_debt_sql(
-            built, Decimal("100000000000.00000001"), journal.Reason.MONEY_ROUND_TRIP
-        )
-    finally:
-        await built.close()
 
 
 @pytest.mark.asyncio
@@ -1135,58 +1114,6 @@ async def test_an_operation_refuses_to_open_on_an_engine_with_no_write_guard() -
         assert [row["state"] for row in await built.envelopes(ident)] == ["COMPLETED"]
     finally:
         await built.close(purge=True)
-
-
-@pytest.mark.asyncio
-async def test_an_operation_refuses_to_open_on_sqlite_without_transaction_control(tmp_path) -> None:
-    """T1525 is a precondition, not an optional extra, and the journal checks it at the door.
-
-    Without explicit transaction control a savepoint opened before the first write IS the
-    transaction on SQLite, its RELEASE commits it, and a root rollback undoes nothing - so the
-    journal's entire "the record commits with the money" promise would be false on that engine.
-
-    MUTATION that must redden this: drop the `sqlite_transaction_control_is_installed` branch from
-    `_refuse_unusable_transaction`.
-    """
-
-    from sqlalchemy.orm import Session
-    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
-    from app.db.base import Base
-
-    engine = create_async_engine(f"sqlite+aiosqlite:///{(tmp_path / 'raw.db').as_posix()}")
-
-    class _RawSession(Session):
-        pass
-
-    factory = async_sessionmaker(
-        bind=engine, class_=AsyncSession, sync_session_class=_RawSession, autoflush=False
-    )
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    journal.install_journal(engine, _RawSession)
-    try:
-        async with factory() as session:
-            with pytest.raises(journal.DebtJournalError) as refusal:
-                async with journal.debt_operation(
-                    session, kind="SEED", identity=identity("uncontrolled"), intent={}
-                ):
-                    pass
-        assert refusal.value.reason == journal.Reason.NO_TRANSACTION_CONTROL, refusal.value
-
-        # NON-VACUITY: installing the control makes the same open succeed on the same engine.
-        from app.db.sqlite_transaction_control import install_sqlite_transaction_control
-
-        install_sqlite_transaction_control(engine.sync_engine)
-        async with factory() as session:
-            async with journal.debt_operation(
-                session, kind="SEED", identity=identity("controlled"), intent={}
-            ):
-                pass
-            await session.commit()
-    finally:
-        journal.uninstall_journal(engine, _RawSession)
-        await engine.dispose()
 
 
 @pytest.mark.asyncio

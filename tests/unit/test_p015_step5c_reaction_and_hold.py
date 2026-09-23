@@ -10,9 +10,11 @@ WHAT IS UNDER TEST.
   and the `clearing-real` simulator route's declared 409. One reason per refusal; `equivalent_inactive`
   wins.
 * `POST /admin/equivalents/{code}/integrity-hold/clear`: only after a later `PASSED`, audited.
-* The SQLite dev-file compatibility column added at startup.
 
-TIER. SQLite, the default tier. The race guarantees - the hold racing a payment commit and a clearing,
+The SQLite dev-file compatibility column added at startup was tested here too; that test left with
+SQLite (017 stage 3, slice S3) - it drove a SQLite-only startup probe of `app/main.py`.
+
+TIER. PostgreSQL. The race guarantees - the hold racing a payment commit and a clearing,
 the owner lock before the snapshot, the clear under the owner lock - are PostgreSQL's and live in
 `tests/integration/test_p015_step5c_hold_races_postgres.py`. The simulator tick lifecycle lives in
 `tests/integration/test_p015_step5c_hold_through_the_tick_sqlite.py`.
@@ -28,10 +30,8 @@ import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
 
 import pytest
-from fastapi import FastAPI
 from sqlalchemy import event, func, insert, select, update
 
 from app.config import settings
@@ -548,17 +548,12 @@ async def test_step5c_the_evidence_of_a_hold_cannot_be_deleted_while_held(db_ses
                 factory,
                 lambda d: f"DELETE FROM debt_reconciliation_results WHERE id = '{_literal(d, hold)}'",
             )
-        # A FOREIGN KEY refusal, named the way each database names it (017 stage 2b): SQLite says
-        # "FOREIGN KEY constraint failed" and has no code; PostgreSQL says "violates foreign key
-        # constraint" and carries SQLSTATE 23503 (foreign_key_violation). The old assertion was the
-        # SQLite text alone and could only fail on PostgreSQL, whatever the database refused with.
-        if factory.kw["bind"].dialect.name == "sqlite":
-            assert "FOREIGN KEY" in str(refused.value), refused.value
-        else:
-            orig = refused.value.orig
-            assert (getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)) == "23503", (
-                refused.value
-            )
+        # A FOREIGN KEY refusal, by SQLSTATE 23503 (foreign_key_violation). Until 017 stage 3 this
+        # also accepted SQLite's "FOREIGN KEY constraint failed", which carries no code.
+        orig = refused.value.orig
+        assert (getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)) == "23503", (
+            refused.value
+        )
         assert await _hold_of(factory, triangle.equivalent.id) == hold
         assert await _latest_result_ids(factory, triangle.equivalent.id) == [hold]
     finally:
@@ -976,115 +971,3 @@ async def test_step5c_the_hold_is_cleared_only_explicitly_after_a_later_passed_a
         assert unknown.status_code == 404, unknown.text
     finally:
         await _drop_triangle(factory, triangle)
-
-
-# ==============================================================================================
-# SQLite dev files: the additive startup column
-# ==============================================================================================
-
-
-def _sync_engine(url: str):
-    """A sync SQLite engine on a throwaway file, with the transaction control every SQLite engine carries."""
-
-    from sqlalchemy import create_engine
-    from sqlalchemy.pool import NullPool
-
-    from app.db.sqlite_transaction_control import install_sqlite_transaction_control
-
-    sync = create_engine(url.replace("+aiosqlite", ""), poolclass=NullPool)
-    install_sqlite_transaction_control(sync)
-    return sync
-
-
-def _file_url(tmp_path, name: str, ddl: str | None) -> str:
-    path = tmp_path / f"{name}.db"
-    url = f"sqlite+aiosqlite:///{path.as_posix()}"
-    sync = _sync_engine(url)
-    try:
-        with sync.begin() as connection:
-            connection.exec_driver_sql("CREATE TABLE placeholder (id INTEGER)")
-            if ddl is not None:
-                connection.exec_driver_sql(ddl)
-    finally:
-        sync.dispose()
-    return url
-
-
-def _columns(url: str) -> dict[str, tuple]:
-    sync = _sync_engine(url)
-    try:
-        with sync.connect() as connection:
-            return {row[1]: tuple(row) for row in connection.exec_driver_sql("PRAGMA table_info(equivalents)")}
-    finally:
-        sync.dispose()
-
-
-@pytest.mark.asyncio
-async def test_step5c_startup_adds_the_hold_column_to_an_existing_sqlite_file_once(tmp_path, monkeypatch) -> None:
-    """An equivalents table from before step 5c gains a nullable column, rows keep NULL; a second start
-    changes nothing; a file without the table and a PostgreSQL URL are left alone; `lifespan` calls it.
-
-    MUTATIONS: (1) make the function return at once - no column, red; (2) remove its call from
-    `lifespan` - the sentinel is never reached, red.
-    """
-    from sqlalchemy.ext.asyncio import create_async_engine
-    from sqlalchemy.pool import NullPool
-
-    import app.main as main_module
-
-    old = _file_url(tmp_path, "pre_5c", "CREATE TABLE equivalents (id CHAR(32) PRIMARY KEY, code VARCHAR(16))")
-    engines = []
-
-    def _point(url: str) -> None:
-        from app.db.sqlite_transaction_control import install_sqlite_transaction_control
-
-        engine = create_async_engine(url, poolclass=NullPool)
-        install_sqlite_transaction_control(engine.sync_engine)
-        engines.append(engine)
-        monkeypatch.setattr(main_module.settings, "DATABASE_URL", url)
-        monkeypatch.setattr(main_module, "engine", engine)
-
-    try:
-        sync = _sync_engine(old)
-        with sync.begin() as connection:
-            connection.exec_driver_sql("INSERT INTO equivalents (id, code) VALUES ('00', 'OLD')")
-        sync.dispose()
-
-        _point(old)
-        await main_module._sqlite_ensure_equivalents_integrity_hold_column()
-        columns = _columns(old)
-        assert "integrity_hold_result_id" in columns, columns
-        _cid, _name, _type, notnull, default, _pk = columns["integrity_hold_result_id"]
-        assert (notnull, default) == (0, None), columns
-        await main_module._sqlite_ensure_equivalents_integrity_hold_column()
-        assert list(_columns(old)) == list(columns), "a second start changed the table again"
-        sync = _sync_engine(old)
-        with sync.connect() as connection:
-            assert connection.exec_driver_sql("SELECT integrity_hold_result_id FROM equivalents").all() == [(None,)]
-        sync.dispose()
-
-        _point(_file_url(tmp_path, "no_table", None))
-        await main_module._sqlite_ensure_equivalents_integrity_hold_column()
-
-        class _Untouchable:
-            def begin(self):  # pragma: no cover - reaching it is the failure
-                raise AssertionError("the SQLite column fix touched a PostgreSQL engine")
-
-        monkeypatch.setattr(main_module.settings, "DATABASE_URL", "postgresql+asyncpg://geo:geo@127.0.0.1:5432/x")
-        monkeypatch.setattr(main_module, "engine", _Untouchable())
-        await main_module._sqlite_ensure_equivalents_integrity_hold_column()
-
-        class _Reached(Exception):
-            pass
-
-        monkeypatch.setattr(main_module, "_sqlite_ensure_debts_version_column", AsyncMock(return_value=None))
-        monkeypatch.setattr(main_module, "_sqlite_refuse_pre_027_debt_operations", AsyncMock(return_value=None))
-        monkeypatch.setattr(
-            main_module, "_sqlite_ensure_equivalents_integrity_hold_column", AsyncMock(side_effect=_Reached)
-        )
-        with pytest.raises(_Reached):
-            async with main_module.lifespan(FastAPI()):
-                pytest.fail("startup went past the column fix without calling it")
-    finally:
-        for engine in engines:
-            engine.sync_engine.dispose()

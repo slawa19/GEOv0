@@ -9,8 +9,8 @@ the tier's engine. What survives unchanged is the point of the old test: a run o
 must END, loudly, with exit 4 and a reason - never pass, never skip.
 
 The three cases are the three ways a URL can arrive: SQLite (the old default, still accepted by the
-URL guard for the SQLite stands of `tests/scratch_db.py`, which is why the TIER has to refuse it
-itself), no URL at all, and a PostgreSQL URL - the control, collected without a server, so the refusal
+URL guard `scripts/validate_test_database_url.py`, which is why the TIER has to refuse it itself),
+no URL at all, and a PostgreSQL URL - the control, collected without a server, so the refusal
 is shown to be about the backend and not about everything.
 
 It runs pytest in a subprocess and only `--collect-only`: no database is opened in any case.

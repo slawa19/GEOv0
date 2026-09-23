@@ -34,7 +34,8 @@ processor, and it disagrees with PostgreSQL on the tie case - `0.123456785` beco
 keeps `1e-09 > 0` so `chk_debt_amount_positive` never fires and no 500 is produced. The whole
 class is therefore invisible, or visible with the wrong shape and the wrong cause, on the default
 tier: a green or red SQLite run says nothing about production. The executable form of that
-measurement is `tests/unit/test_p012_numeric_scale_rounding_is_invisible_on_sqlite.py`.
+measurement was `tests/unit/test_p012_numeric_scale_rounding_is_invisible_on_sqlite.py`, deleted with
+SQLite in programme 017 stage 3 (slice S3).
 
 WHAT THE FIX DOES (T1201). Reject at the door what the column cannot hold. `POST /payments`
 parses its amount with `parse_money_amount` (`app/core/payments/service.py:510`), which refuses

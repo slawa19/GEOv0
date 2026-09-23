@@ -8,14 +8,15 @@ expensive and neither is visible from a green suite:
 * Too permissive - a terminal failure classified as a conflict is replayed until the budget runs
   out, and then reported as contention rather than as the error it is. It would also be excluded
   from the error budget, so a genuinely broken run would never stop.
-* Too strict - a real 40001 or SQLITE_BUSY is treated as a programmatic failure, the replay never
-  happens, and P1's defect is back with the tick counted as an error.
+* Too strict - a real 40001 is treated as a programmatic failure, the replay never happens, and
+  P1's defect is back with the tick counted as an error.
 
-THE ERRORS HERE ARE PRODUCED BY THE DRIVER, NOT CONSTRUCTED. A busy comes from a genuine snapshot
-race on a file-backed WAL database with the production transaction control; an integrity error
-comes from a foreign key the database refuses. A hand-built exception would only prove that the
-predicate matches what the test author believed the driver emits, which is the assumption that
-produced the masking defect `sqlite_busy_error_name` documents.
+THE TWO REAL ERRORS HERE ARE PRODUCED BY THE DRIVER, NOT CONSTRUCTED. A 40001 comes from a genuine
+concurrent update of one row at SERIALIZABLE, on a disposable PostgreSQL clone (mode B); an
+integrity error comes from a foreign key the same database refuses. A hand-built exception would only
+prove that the predicate matches what the test author believed the driver emits. Until 017 stage 3
+(slice S3) both were produced on a SQLite file as a SQLITE_BUSY_SNAPSHOT and a SQLite foreign-key
+error; the SQLite half left with SQLite, and these are its PostgreSQL form.
 """
 
 from __future__ import annotations
@@ -26,34 +27,26 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import NullPool
 
 from app.core.simulator.money_replay import MoneyCommitOutcomeUnknown, money_conflict_name
-from app.db.sqlite_transaction_control import (
-    install_sqlite_transaction_control,
-    sqlite_busy_error_name,
-)
 from app.utils.exceptions import (
     ConflictException,
     IntegrityViolationException,
     RetryablePaymentConflictException,
     TimeoutException,
 )
-from tests.scratch_db import install_test_sqlite_pragmas
 
 
 @pytest_asyncio.fixture
-async def race_factory(tmp_path):
-    """A file-backed WAL engine: SQLITE_BUSY_SNAPSHOT needs WAL and a real transaction on both sides."""
-    url = f"sqlite+aiosqlite:///{(tmp_path / 'p1-predicate.db').as_posix()}"
-    engine = create_async_engine(url, poolclass=NullPool)
-    install_test_sqlite_pragmas(engine.sync_engine, url=url)
-    install_sqlite_transaction_control(engine.sync_engine)
-    async with engine.begin() as conn:
-        await conn.execute(
-            text("CREATE TABLE probe (id INTEGER PRIMARY KEY, v TEXT NOT NULL)")
-        )
+async def race_factory(committed_database):
+    """A disposable PostgreSQL clone (mode B) at the application's isolation level, with two tables.
+
+    Mode B because a serialization failure needs two transactions that both COMMIT or try to: the
+    savepoint-wrapped `db_session` has one connection and no real commit. The clone is dropped when
+    the test ends, so the probe tables never reach the tier's database.
+    """
+    async with committed_database.engine.begin() as conn:
+        await conn.execute(text("CREATE TABLE probe (id INTEGER PRIMARY KEY, v TEXT NOT NULL)"))
         await conn.execute(
             text(
                 "CREATE TABLE child ("
@@ -62,42 +55,42 @@ async def race_factory(tmp_path):
                 ")"
             )
         )
-    factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
-    try:
-        yield factory
-    finally:
-        await engine.dispose()
+        await conn.execute(text("INSERT INTO probe (id, v) VALUES (1, 'seed')"))
+    yield committed_database.sessionmaker
 
 
-async def _real_busy_snapshot(factory) -> DBAPIError:
-    """A genuine SQLITE_BUSY_SNAPSHOT: a reader's write after another connection committed."""
+def _sqlstate(error: BaseException) -> str | None:
+    orig = getattr(error, "orig", None)
+    return getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)
+
+
+async def _real_serialization_failure(factory) -> DBAPIError:
+    """A genuine 40001: a SERIALIZABLE reader updates a row another transaction changed and committed."""
     async with factory() as reader, factory() as writer:
-        # Both take a read snapshot. With the transaction control in place this is a real
-        # transaction in the database, which is what makes the snapshot exist at all.
-        await reader.execute(text("SELECT id FROM probe LIMIT 1"))
-        await writer.execute(text("SELECT id FROM probe LIMIT 1"))
+        # Both take their snapshot by reading the row.
+        await reader.execute(text("SELECT v FROM probe WHERE id = 1"))
+        await writer.execute(text("SELECT v FROM probe WHERE id = 1"))
 
-        await writer.execute(text("INSERT INTO probe (v) VALUES ('writer')"))
+        await writer.execute(text("UPDATE probe SET v = 'writer' WHERE id = 1"))
         await writer.commit()
 
-        with pytest.raises(DBAPIError) as busy:
-            await reader.execute(text("INSERT INTO probe (v) VALUES ('reader')"))
-            await reader.flush()
+        with pytest.raises(DBAPIError) as conflict:
+            await reader.execute(text("UPDATE probe SET v = 'reader' WHERE id = 1"))
+            await reader.commit()
         await reader.rollback()
-    return busy.value
+    return conflict.value
 
 
 @pytest.mark.asyncio
-async def test_a_real_sqlite_busy_snapshot_is_a_money_conflict(race_factory) -> None:
-    """The accepting half: the conflict the replay exists for is recognised, by CODE."""
-    busy = await _real_busy_snapshot(race_factory)
+async def test_a_real_serialization_failure_is_a_money_conflict(race_factory) -> None:
+    """The accepting half: the conflict the replay exists for is recognised, by SQLSTATE."""
+    conflict = await _real_serialization_failure(race_factory)
 
-    # Non-vacuity for the stand itself: if a driver update stopped surfacing the code, the
-    # predicate would go quietly permissive and this is what notices.
-    assert sqlite_busy_error_name(busy) == "SQLITE_BUSY_SNAPSHOT"
-    assert getattr(busy.orig, "sqlite_errorcode", None) == 517
+    # Non-vacuity for the stand itself: the driver really surfaced a serialization failure. If it
+    # stopped surfacing the code, the predicate would go quietly strict and this is what notices.
+    assert _sqlstate(conflict) == "40001", conflict
 
-    assert money_conflict_name(busy) == "SQLITE_BUSY_SNAPSHOT"
+    assert money_conflict_name(conflict) == "40001"
 
 
 @pytest.mark.asyncio
@@ -113,10 +106,11 @@ async def test_a_real_integrity_error_on_the_same_backend_is_not_a_money_conflic
         # The error surfaces from the statement itself, not from a later flush: this is Core DML,
         # so there is no unit of work to flush.
         with pytest.raises(IntegrityError) as integrity:
-            await session.execute(text("INSERT INTO child (parent_id) VALUES (424242)"))
+            await session.execute(text("INSERT INTO child (id, parent_id) VALUES (1, 424242)"))
         await session.rollback()
 
-    assert sqlite_busy_error_name(integrity.value) is None
+    # Non-vacuity: a real foreign-key refusal, not some other error.
+    assert _sqlstate(integrity.value) == "23503", integrity.value
     assert money_conflict_name(integrity.value) is None
 
 

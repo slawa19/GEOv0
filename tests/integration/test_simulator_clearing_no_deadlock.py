@@ -23,9 +23,8 @@ SQLite's single write lock; on PostgreSQL the locks are per row and per advisory
 session holding them while it awaits a clearing session that needs the same rows is a real risk
 there too - arguably a sharper one, because the application runs on PostgreSQL. The stand is a mode-B
 clone of the migrated template (`committed_database`), because the tick and the clearing open and
-commit sessions of their own. The asserts are unchanged. The SQLite engine below survives only for
-`test_this_modules_engine_has_the_application_sqlite_pragmas`, a test of the SQLite mechanism that
-leaves with it in the deletion slice.
+commit sessions of their own. The asserts are unchanged. The SQLite engine and its pragma test, which
+were all that remained of the old stand, left with SQLite (017 stage 3, slice S3).
 """
 from __future__ import annotations
 
@@ -37,93 +36,25 @@ import threading
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
-from pathlib import Path
 
 import pytest
 import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.pool import NullPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.base import Base
-from app.db.sqlite_transaction_control import install_sqlite_transaction_control
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.core.simulator.models import RunRecord
 from app.core.simulator.real_runner import RealRunner
-from tests.scratch_db import install_test_sqlite_pragmas, scratch_db_path, scratch_db_url
 
 from tests.debt_setup import debt_fixture_setup
 from tests.simulator_tick_stand import pooled_sessionmaker_over
 
 
 # ---------------------------------------------------------------------------
-# Isolated SQLite DB for this test (avoids interfering with other tests)
+# A mode-B PostgreSQL clone for this test (avoids interfering with other tests)
 # ---------------------------------------------------------------------------
-
-# T1406: this module used to build its engine from a RELATIVE path, so the database landed
-# in the repository root - against AGENTS.md §7/§12, and unnoticed because the test-database
-# guard validates a URL and never looks at the filesystem. `tests/scratch_db` gives it a
-# directory of its own under `.local-run/test-runs/`, which also keeps concurrent sessions in
-# the shared working tree from colliding.
-_TEST_DB_SLUG = "simulator-clearing-no-deadlock"
-_TEST_DB_PATH = str(scratch_db_path(_TEST_DB_SLUG))
-_TEST_DB_URL = scratch_db_url(_TEST_DB_SLUG)
-
-
-@pytest_asyncio.fixture
-async def deadlock_engine():
-    """Create a fresh SQLite engine + schema for the deadlock test."""
-    # Clean up any leftover DB
-    for suffix in ("", "-journal", "-wal", "-shm"):
-        try:
-            Path(_TEST_DB_PATH + suffix).unlink(missing_ok=True)
-        except Exception:
-            pass
-
-    eng = create_async_engine(
-        _TEST_DB_URL,
-        echo=False,
-        poolclass=NullPool,
-        connect_args={"timeout": 5},  # short timeout to detect deadlock fast
-    )
-    # T1525: the same SQLite transaction control AND the same connection pragmas as the application
-    # engine - WAL, foreign keys, busy timeout. This module measures DEADLOCK behaviour, and the
-    # rollback journal it used to run in has different locking from the application's WAL, so
-    # without the pragmas its result did not transfer at all. Held by the pragma test below.
-    install_test_sqlite_pragmas(eng.sync_engine, url=_TEST_DB_URL)
-    install_sqlite_transaction_control(eng.sync_engine)
-
-    async with eng.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    yield eng
-
-    await eng.dispose()
-    for suffix in ("", "-journal", "-wal", "-shm"):
-        try:
-            Path(_TEST_DB_PATH + suffix).unlink(missing_ok=True)
-        except Exception:
-            pass
-
-
-async def test_this_modules_engine_has_the_application_sqlite_pragmas(deadlock_engine) -> None:
-    """T1525: WAL and enforced foreign keys, or this module's deadlock result does not transfer.
-
-    This module is the sharpest case of the five: it MEASURES locking behaviour. Until 2026-09-12
-    its engine carried only the transaction control, so it ran in the rollback journal - where a
-    reader holds a SHARED lock and blocks writers - while the application runs in WAL, where a
-    reader that then writes is refused outright instead. A "no deadlock" result under one says
-    nothing about the other.
-    """
-    from sqlalchemy import text
-
-    async with deadlock_engine.connect() as conn:
-        journal_mode = (await conn.execute(text("PRAGMA journal_mode"))).scalar_one()
-        foreign_keys = (await conn.execute(text("PRAGMA foreign_keys"))).scalar_one()
-    assert str(journal_mode).lower() == "wal", journal_mode
-    assert int(foreign_keys) == 1, foreign_keys
 
 
 @pytest_asyncio.fixture

@@ -16,7 +16,10 @@ programme 014 exists to remove, so it is not left to carry this alone.
 
 The source guard is order-independent. It reads `tests/**` and refuses a sqlite URL built from a
 path outside the scratch tree, so a NEW module reintroducing the pattern is caught whether or not
-it ever ran. That is the guard that closes the class; the filesystem one closes the incident.
+it ever ran. Since 017 stage 3 (slice S3) no test builds a SQLite database at all; the guard stays
+because the filesystem half still matters (developers' `.local-run/*.db` files are not deleted by
+017) and a reintroduced SQLite stand would otherwise land wherever its author pointed it. That is
+the guard that closes the class; the filesystem one closes the incident.
 
 Both have counter-tests below. A guard that cannot fail is what this programme is about, and the
 first version of the T705 guard in programme 007 passed on a deletion because it matched a word
@@ -31,9 +34,12 @@ from pathlib import Path
 
 import pytest
 
-from tests.scratch_db import SCRATCH_ROOT, scratch_db_path
-
 _ROOT = Path(__file__).resolve().parents[2]
+
+#: The one directory tree a test may write a mutable database into - the layout
+#: `scripts/verify_local.ps1` uses per task slug. Defined here since 017 stage 3 (slice S3), when
+#: `tests/scratch_db.py`, the SQLite-stand helper that used to own it, left with SQLite.
+SCRATCH_ROOT = _ROOT / ".local-run" / "test-runs"
 
 #: Directories that are not part of the repository's own sources.
 _PRUNED = {
@@ -106,11 +112,23 @@ def test_the_filesystem_guard_can_actually_see_a_stray(tmp_path: Path) -> None:
 def test_the_scanned_set_is_not_empty_in_this_repository() -> None:
     """An empty search passing for a clean one is how this class survives.
 
-    The scratch tree holds at least this session's own database, so a walk that finds NOTHING
-    means the walk is broken, not that the tree is clean.
+    The test plants one database file of its own in the scratch tree and requires the walk over the
+    REAL repository to find it, so a walk that finds nothing means the walk is broken, not that the
+    tree is clean. Until 017 stage 3 (slice S3) it leaned on the session's own SQLite database being
+    there; the tier is PostgreSQL-only now and no test leaves a database file behind, so the premise
+    is planted rather than assumed.
     """
-    scanned = _walk_for_databases(_ROOT)
-    assert scanned, "the walk found no database anywhere, including the scratch tree - it is broken"
+    sentinel = SCRATCH_ROOT / "t1406-self-check" / "sentinel.db"
+    sentinel.parent.mkdir(parents=True, exist_ok=True)
+    sentinel.write_bytes(b"x")
+    try:
+        scanned = _walk_for_databases(_ROOT)
+        assert sentinel in scanned, (
+            "the walk did not find the database this test planted in the scratch tree - it is broken"
+        )
+        assert _is_sanctioned(sentinel)
+    finally:
+        sentinel.unlink(missing_ok=True)
 
 
 # ---------------------------------------------------------------------------
@@ -120,8 +138,9 @@ def test_the_scanned_set_is_not_empty_in_this_repository() -> None:
 _SQLITE_URL = re.compile(r"sqlite(?:\+\w+)?:///")
 
 #: Expression roots that decide a path OUTSIDE the repository or INSIDE the scratch tree.
-#: `tmp_path` is pytest's per-test directory; the other two are `tests.scratch_db`.
-_SANCTIONED_ROOTS = {"tmp_path", "scratch_db_path", "scratch_db_url", "SCRATCH_ROOT"}
+#: `tmp_path` is pytest's per-test directory; `SCRATCH_ROOT` is the scratch tree itself. (The helper
+#: names of `tests/scratch_db.py` were sanctioned too, until it left with SQLite in 017 stage 3.)
+_SANCTIONED_ROOTS = {"tmp_path", "SCRATCH_ROOT"}
 
 
 def _roots(node: ast.AST) -> set[str]:
@@ -182,7 +201,7 @@ def _unsanctioned_sqlite_urls(source: str) -> list[str]:
     """sqlite URLs whose path is decided outside the scratch tree.
 
     Skips `:memory:`, anything naming `.local-run`, and any interpolation that resolves to
-    `tmp_path` or `tests.scratch_db`.
+    `tmp_path` or `SCRATCH_ROOT`.
     """
     tree = ast.parse(source)
     bindings = _bindings(tree)
@@ -263,7 +282,7 @@ def test_no_test_module_builds_a_sqlite_url_outside_the_scratch_tree() -> None:
     assert findings == [], (
         "test modules building a sqlite URL outside `.local-run/`: "
         + "; ".join(findings)
-        + ". Use `tests.scratch_db.scratch_db_url(<slug>)`."
+        + ". Put a test database under `tmp_path` or `.local-run/test-runs/<slug>/`."
     )
 
 
@@ -275,12 +294,14 @@ def test_no_test_module_builds_a_sqlite_url_outside_the_scratch_tree() -> None:
         ('URL = "sqlite+aiosqlite:///./.local-run/test-runs/x/test.db"', 0),
         ('URL = "sqlite+aiosqlite:///:memory:"', 0),
         # The two forms that made the first edition of this guard wrong, kept as cases rather
-        # than as a comment: a path handed in by pytest, and the helper this task introduced.
+        # than as a comment: a path handed in by pytest, and a path built from the scratch root.
+        # (The second used to go through the `tests/scratch_db.py` helper, which left with SQLite
+        # in 017 stage 3, slice S3.)
         ('URL = f"sqlite:///{tmp_path / \'stale.db\'}"', 0),
-        ('P = str(scratch_db_path("x"))\nURL = f"sqlite+aiosqlite:///{P}"', 0),
+        ('P = str(SCRATCH_ROOT / "x" / "test.db")\nURL = f"sqlite+aiosqlite:///{P}"', 0),
     ),
     ids=("literal-relative", "f-string-relative", "scratch-tree", "memory",
-         "tmp-path", "through-the-helper"),
+         "tmp-path", "through-the-scratch-root"),
 )
 def test_the_source_guard_detects_what_it_claims_to(source: str, expected: int) -> None:
     """Counter-test, including the f-string form the five offending modules actually used.
@@ -290,10 +311,3 @@ def test_the_source_guard_detects_what_it_claims_to(source: str, expected: int) 
     What it does carry is a sqlite URL with nothing sanctioned in it, which is what this matches.
     """
     assert len(_unsanctioned_sqlite_urls(source)) == expected
-
-
-def test_the_scratch_helper_puts_the_file_where_the_guard_expects() -> None:
-    path = scratch_db_path("t1406-self-check")
-    assert path.parent.parent == SCRATCH_ROOT
-    assert _is_sanctioned(path)
-    assert path.parent.is_dir()

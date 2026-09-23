@@ -12,9 +12,8 @@ commits sessions of its own and its clearing refuses a connection-bound session,
 that are real. The coordinator and policy tests never touch a database and ask for none.
 
 MOVED OFF SQLITE (017 stage 3, slice S2a). Until then every test here asked for an isolated SQLite
-file, which only the static-policy test ever used; the asserts are unchanged. The SQLite engine below
-survives only for `test_this_modules_engine_has_the_application_sqlite_pragmas`, a test of the SQLite
-mechanism that leaves with it in the deletion slice.
+file, which only the static-policy test ever used; the asserts are unchanged. The SQLite engine and
+its pragma test, which were all that remained of the old stand, left with SQLite (017 stage 3, slice S3).
 """
 from __future__ import annotations
 
@@ -26,70 +25,25 @@ import threading
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
-from pathlib import Path
 
 import pytest
 import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.pool import NullPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.base import Base
-from app.db.sqlite_transaction_control import install_sqlite_transaction_control
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.core.simulator.models import RunRecord
 from app.core.simulator.real_runner import RealRunner
-from tests.scratch_db import install_test_sqlite_pragmas, scratch_db_path, scratch_db_url
 
 from tests.debt_setup import debt_fixture_setup
 from tests.simulator_tick_stand import pooled_sessionmaker_over
 
 
 # ---------------------------------------------------------------------------
-# Isolated SQLite DB
+# Mode-B PostgreSQL clone
 # ---------------------------------------------------------------------------
-
-# T1406: this module used to build its engine from a RELATIVE path, so the database landed
-# in the repository root - against AGENTS.md §7/§12, and unnoticed because the test-database
-# guard validates a URL and never looks at the filesystem. `tests/scratch_db` gives it a
-# directory of its own under `.local-run/test-runs/`, which also keeps concurrent sessions in
-# the shared working tree from colliding.
-_TEST_DB_SLUG = "simulator-adaptive-clearing"
-_TEST_DB_PATH = str(scratch_db_path(_TEST_DB_SLUG))
-_TEST_DB_URL = scratch_db_url(_TEST_DB_SLUG)
-
-
-@pytest_asyncio.fixture
-async def adaptive_engine():
-    for suffix in ("", "-journal", "-wal", "-shm"):
-        try:
-            Path(_TEST_DB_PATH + suffix).unlink(missing_ok=True)
-        except Exception:
-            pass
-
-    eng = create_async_engine(
-        _TEST_DB_URL,
-        echo=False,
-        poolclass=NullPool,
-        connect_args={"timeout": 5},
-    )
-    # T1525: the same SQLite transaction control AND the same connection pragmas as the application
-    # engine - WAL, foreign keys, busy timeout. Without the pragmas this module ran in the rollback
-    # journal with foreign keys unenforced, so neither its concurrency nor its referential results
-    # transferred to the application. Held by the pragma test at the bottom of this module.
-    install_test_sqlite_pragmas(eng.sync_engine, url=_TEST_DB_URL)
-    install_sqlite_transaction_control(eng.sync_engine)
-    async with eng.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    yield eng
-    await eng.dispose()
-    for suffix in ("", "-journal", "-wal", "-shm"):
-        try:
-            Path(_TEST_DB_PATH + suffix).unlink(missing_ok=True)
-        except Exception:
-            pass
 
 
 @pytest_asyncio.fixture
@@ -97,24 +51,6 @@ async def adaptive_session_factory(committed_database):
     """A mode-B clone, pooled like the application: the tick's sessions must see what the seed committed."""
     async with pooled_sessionmaker_over(committed_database.url) as factory:
         yield factory
-
-
-async def test_this_modules_engine_has_the_application_sqlite_pragmas(adaptive_engine) -> None:
-    """T1525: WAL and enforced foreign keys, or this module's results do not transfer.
-
-    This engine is built here rather than taken from `tests/conftest.py`, and until 2026-09-12 it
-    received only the transaction control. In the rollback journal a reader holds a SHARED lock and
-    blocks writers, where under WAL a reader that then writes is refused outright - opposite
-    failure modes - and with `foreign_keys` off this module could not see a referential violation
-    the application refuses.
-    """
-    from sqlalchemy import text
-
-    async with adaptive_engine.connect() as conn:
-        journal_mode = (await conn.execute(text("PRAGMA journal_mode"))).scalar_one()
-        foreign_keys = (await conn.execute(text("PRAGMA foreign_keys"))).scalar_one()
-    assert str(journal_mode).lower() == "wal", journal_mode
-    assert int(foreign_keys) == 1, foreign_keys
 
 
 # ---------------------------------------------------------------------------

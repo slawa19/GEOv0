@@ -1,13 +1,15 @@
-"""The test engine must enforce foreign keys, or the default tier cannot see a referential effect.
+"""The test tier's database must enforce foreign keys, or it cannot see a referential effect.
 
-The application engine sets `PRAGMA foreign_keys=ON` (`app/db/session.py:48`). The test engine did
-not until 2026-09-11, so every foreign key was unenforced on the default SQLite tier while the
-application it tests enforced them: a CASCADE that destroys a debt, a RESTRICT that protects one and
-a reference to a row that does not exist all looked identical. This module holds the switch in place.
+Written 2026-09-11 for the SQLite tier, whose test engine did not set `PRAGMA foreign_keys=ON` while
+the application engine did: every foreign key was unenforced there, and a CASCADE that destroys a
+debt, a RESTRICT that protects one and a reference to a row that does not exist all looked identical.
+Since 017 the tier runs only on PostgreSQL, where enforcement is not a switch, but the property the
+module holds - the schema the tier tests against refuses a dangling reference, including the bare
+`PrepareLock.tx_id` foreign key that carries no ORM insert ordering - is still the one the money
+tests rely on. Renamed from `test_sqlite_test_engine_enforces_foreign_keys.py` in 017 stage 3, slice S3.
 
 It is written as a counter-proof rather than as a reading of the setting: it performs an insert that
-violates a foreign key and requires the database to refuse. Checking that the pragma is "set" would
-pass on a connection the listener never reached.
+violates a foreign key and requires the database to refuse.
 """
 
 from __future__ import annotations

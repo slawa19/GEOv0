@@ -4,9 +4,9 @@ WHAT IS UNDER TEST HERE, and what is not. This module drives
 `run_money_phase_with_bounded_replay` directly, with a fake session and a fake money attempt, so
 that each decision of the policy can be forced on purpose: a conflict before the commit, a conflict
 at the commit, a commit whose outcome is unknown, a budget that runs out, a programmatic failure
-that must not be replayed. Real database conflicts are the subject of the two stands that run
-against real backends - `tests/integration/test_p015_p1_money_replay_sqlite.py` and
-`tests/integration/test_p015_p1_money_replay_postgres.py`; what those cannot do is reach every
+that must not be replayed. Real database conflicts are the subject of the stand that runs
+against a real backend - `tests/integration/test_p015_p1_money_replay_postgres.py` (its SQLite
+sibling left with SQLite in programme 017 stage 3); what that stand cannot do is reach every
 branch deliberately, which is why both exist.
 
 The observation buffer is the REAL `DeferredRealPaymentEffects` with real `_PaymentObservation`
