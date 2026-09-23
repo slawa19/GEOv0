@@ -582,13 +582,20 @@ class _Run:
     # -- the empty baseline -----------------------------------------------------------------
 
     async def take_baselines(self) -> None:
-        """THE BASELINE COMES BEFORE THE FIRST PAYMENT, and that ordering is the whole point.
+        """THE BASELINE COMES BEFORE THE FIRST PAYMENT - the stricter of two sound orderings.
 
-        A baseline adopts whatever the journal does not explain and certifies none of it
-        (`app/core/ledger/reconciliation.py:974`). Taken now - trust lines exist, debts do not - it
-        adopts nothing, and then `debts == baseline + sum(journal)` checks EVERYTHING this seed goes
-        on to do. Taken afterwards it would adopt the whole seed and prove nothing about it, while
-        still returning `PASSED`.
+        A baseline records, per edge, `current debt - sum(journal deltas)` as an offset it adopts and
+        does not certify (`app/core/ledger/reconciliation.py:999`). Taken afterwards it would NOT
+        adopt the seed wholesale, as an earlier version of this docstring claimed: correctly
+        journalled payments leave zero offsets, and their operations stay examinable. What it would
+        adopt is only a debt the journal fails to explain - which `baseline_offsets_are_zero` would
+        still report. So both orderings end in the same verdict for a correct seed.
+
+        Before is chosen because it makes the claim trivial where it is made: taken now - trust
+        lines exist, debts do not - the baseline can only be empty, that emptiness is asserted right
+        here (`offsets_recorded` and `entries_read` both zero), and every debt the seed goes on to
+        write is then checked by `debts == baseline + sum(journal)` alone, with no offset in the sum
+        to reason about (Codex external review of `37fec08..5e687dd`, F10, 2026-09-23).
         """
 
         for code, equivalent_id in sorted(self.equivalent_ids.items()):

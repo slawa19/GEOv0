@@ -92,8 +92,11 @@ SCHEMA_VERSION = "recipe/1"
 COMMUNITIES_DIR = Path(__file__).resolve().parent
 
 #: `PaymentCreateRequest.tx_id`, verbatim (`app/schemas/payment.py:38`). The
-#: command id IS the tx_id the executor sends, which is what makes the recipe
-#: idempotent: re-running it re-sends the same identifiers.
+#: command id IS the tx_id the executor sends. That makes a RETRY of one command
+#: inside one run safe (the replay returns the stored result); it does NOT make a
+#: second run idempotent. A new run generates new key pairs, so its PIDs differ,
+#: and the executor refuses a database that is not empty
+#: (`scripts/seed_recipe.py::assert_database_is_empty`).
 TX_ID_RE = re.compile(r"^[A-Za-z0-9._:-]+$")
 TX_ID_MAX_LENGTH = 64
 
