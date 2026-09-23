@@ -505,13 +505,15 @@ async def _dispose_engines_at_end() -> AsyncGenerator[None, None]:
         pass
 
 
-@pytest_asyncio.fixture
-async def db_session() -> AsyncGenerator[AsyncSession, None]:
-    """SQLAlchemy session with a per-test transaction that is rolled back.
+@asynccontextmanager
+async def _session_for_one_test(*, mode_b: bool):
+    """The body shared by `db_session` and `db_session_mode_b`: one test's session.
 
-    With the measurement instrument `GEO_TEST_FIXTURE_MODE=B` (see above) it is a mode-B session
-    instead, on a clone dropped after the test. The tier's own schema is still built then, because a
-    test that imports `TestingSessionLocal` directly keeps reaching the tier's database.
+    `mode_b=True` on PostgreSQL is a mode-B session on a clone dropped after the test. On SQLite the
+    flag changes nothing - the SQLite branch below is already a plain engine-bound session whose
+    commits are real, reset per test - which is why a mode-B test of the default tier still runs on
+    the SQLite tier unchanged. The tier's own schema is built either way, because a test that imports
+    `TestingSessionLocal` directly keeps reaching the tier's database.
     """
 
     await _ensure_schema_initialized()
@@ -547,7 +549,7 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
     except Exception:
         pass
 
-    if _FIXTURE_MODE == "B":
+    if mode_b and not _is_sqlite:
         async with _committed_database_context() as database:
             async with database.sessionmaker() as session:
                 session.info["geo_committed_database"] = database
@@ -619,6 +621,48 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
             # class FIXA, 62 tests in 24 files); SQLite never ran this branch.
             yield session
         await transaction.rollback()
+
+
+@pytest_asyncio.fixture
+async def db_session() -> AsyncGenerator[AsyncSession, None]:
+    """SQLAlchemy session with a per-test transaction that is rolled back (mode A).
+
+    With the measurement instrument `GEO_TEST_FIXTURE_MODE=B` (see above) it is a mode-B session
+    instead, on a clone dropped after the test.
+    """
+
+    async with _session_for_one_test(mode_b=_FIXTURE_MODE == "B") as session:
+        yield session
+
+
+@pytest_asyncio.fixture
+async def db_session_mode_b() -> AsyncGenerator[AsyncSession, None]:
+    """MODE B FOR A TEST OF THE DEFAULT TIER, which runs on SQLite as well (017 stage 2b, T1702).
+
+    `committed_session` refuses SQLite, which is right for a postgres-marked module and wrong for a
+    default-tier one: the same test has to keep running on the SQLite tier until stage 3. This is the
+    one fixture that serves both - a mode-B clone on PostgreSQL, and on SQLite the tier's ordinary
+    session, which already commits for real and is reset per test. A module opts in by overriding
+    `db_session` with it, so `client` (which requests `db_session`) follows:
+
+        @pytest.fixture
+        def db_session(db_session_mode_b):
+            return db_session_mode_b
+
+    A test that needs a SECOND session reaches the same database through `sessionmaker_of(session)`,
+    never through `TestingSessionLocal` directly: on PostgreSQL that is the tier's database, where the
+    clone's commits are not.
+    """
+
+    async with _session_for_one_test(mode_b=True) as session:
+        yield session
+
+
+def sessionmaker_of(session: AsyncSession):
+    """The sessionmaker over the database `session` talks to: the mode-B clone's, else the tier's."""
+
+    committed = session.info.get("geo_committed_database")
+    return committed.sessionmaker if committed is not None else TestingSessionLocal
 
 
 @pytest_asyncio.fixture
