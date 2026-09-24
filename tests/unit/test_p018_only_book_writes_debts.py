@@ -44,11 +44,6 @@ _ROOT = Path(__file__).resolve().parents[2]
 _SCANNED_ROOTS = ("app", "scripts")
 _THE_WRITER = "app/core/ledger/book.py"
 
-#: TRANSITIONAL, and two-sided. Slice A2 of stage A deletes the integrity repair endpoints
-#: (`T1806`) in parallel with this slice. Until it merges, `app/api/v1/integrity.py` still writes
-#: debts and is the ONLY tolerated exception; the moment it stops writing, the test below demands
-#: this set be emptied, so the allowance cannot outlive the thing it allows.
-_AWAITING_REMOVAL_BY_T1806 = frozenset({"app/api/v1/integrity.py"})
 
 _SQL_DML = frozenset({"delete", "update", "insert"})
 
@@ -193,7 +188,7 @@ def test_only_book_writes_debts_in_app_and_scripts() -> None:
     unexpected = {
         path: findings
         for path, findings in writers.items()
-        if path != _THE_WRITER and path not in _AWAITING_REMOVAL_BY_T1806
+        if path != _THE_WRITER
     }
     assert not unexpected, (
         "debts are written outside app/core/ledger/book.py:\n"
@@ -204,17 +199,6 @@ def test_only_book_writes_debts_in_app_and_scripts() -> None:
     assert _THE_WRITER in writers, (
         f"{_THE_WRITER} writes no debt the guard can see - either the writer moved (update "
         f"_THE_WRITER) or the scan went blind. Found writers: {sorted(writers)}"
-    )
-
-
-def test_the_transitional_allowance_is_still_needed() -> None:
-    """Two-sided: the day `integrity.py` stops writing debts (`T1806`), the allowance must go."""
-
-    writers = writers_under(_ROOT)
-    stale = sorted(path for path in _AWAITING_REMOVAL_BY_T1806 if path not in writers)
-    assert not stale, (
-        f"{stale} no longer write debts; remove them from _AWAITING_REMOVAL_BY_T1806 so the "
-        f"guard's expected set is exactly {{{_THE_WRITER}}}."
     )
 
 
