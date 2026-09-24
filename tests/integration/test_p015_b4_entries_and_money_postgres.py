@@ -2070,7 +2070,6 @@ async def test_c17_p_a_raw_delete_of_an_equivalent_with_history_is_refused_by_th
     then succeeds and takes the history with it, silently.
     """
     from app.core.money_boundary import _EQUIVALENT_OWNER_LOCK_NAMESPACE, MoneyBoundary
-    from app.core.money_boundary import MoneyBoundary
 
     seeded = await _seed(serializable_factory)
     world = seeded.world
