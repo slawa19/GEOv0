@@ -515,13 +515,18 @@ async def test_payment_commit_writes_integrity_audit_log_on_success(
 
     engine = PaymentEngine(db_session)
     original_apply_flow = engine._apply_flow
+    perturbed: list[tuple] = []
 
     async def _apply_flow_and_expire(*args, **kwargs):
         await original_apply_flow(*args, **kwargs)
         db_session.expire_all()
+        perturbed.append(args)
 
     monkeypatch.setattr(engine, "_apply_flow", _apply_flow_and_expire)
     assert await engine.commit(tx_id) is True
+    # 018 stage A: the flow's algebra moved into the book and `_apply_flow` forwards to it; the
+    # perturbation is only evidence if the commit still goes through it - once per flow.
+    assert len(perturbed) == 1, perturbed
 
     log = (
         await db_session.execute(

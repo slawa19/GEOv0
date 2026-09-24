@@ -27,7 +27,7 @@ from app.core.payments.engine import PaymentEngine
 from app.core.payments.router import PaymentRouter
 from app.core.invariants import InvariantChecker
 from app.core.integrity import compute_integrity_checkpoint_for_equivalent
-from app.core.ledger.journal import debt_operation
+from app.core.ledger.book import Book, ClearingReduction, operation_for
 
 logger = logging.getLogger(__name__)
 
@@ -2036,37 +2036,36 @@ class ClearingService:
             # the cycle is unchanged whenever nothing else is writing, so an intent built from the
             # detection amounts would look right in every single-threaded test and describe a state
             # this clearing did not act on the first time it raced.
-            async with debt_operation(
+            async with Book.operation(
                 self.session,
-                kind="CLEARING",
-                identity=tx_id_str,
-                tx_id=tx_id_str,
-                intent={
-                    "tx_id": tx_id_str,
-                    "clear_amount": f"{clear_amount.quantize(Decimal('1E-8')):f}",
-                    "equivalent_id": str(debts[0].equivalent_id),
-                    "cycle": [
-                        {
-                            "debt_id": str(debt.id),
-                            "amount": f"{debt.amount.quantize(Decimal('1E-8')):f}",
-                            "debtor_id": str(debt.debtor_id),
-                            "creditor_id": str(debt.creditor_id),
-                        }
-                        for debt in debts
-                    ],
-                },
-                scope_equivalent_ids={debts[0].equivalent_id},
-                intent_equivalent_ids={debts[0].equivalent_id},
-            ):
+                operation_for(
+                    "CLEARING",
+                    tx_id_str,
+                    tx_id=tx_id_str,
+                    intent={
+                        "tx_id": tx_id_str,
+                        "clear_amount": f"{clear_amount.quantize(Decimal('1E-8')):f}",
+                        "equivalent_id": str(debts[0].equivalent_id),
+                        "cycle": [
+                            {
+                                "debt_id": str(debt.id),
+                                "amount": f"{debt.amount.quantize(Decimal('1E-8')):f}",
+                                "debtor_id": str(debt.debtor_id),
+                                "creditor_id": str(debt.creditor_id),
+                            }
+                            for debt in debts
+                        ],
+                    },
+                    scope_equivalent_ids={debts[0].equivalent_id},
+                    intent_equivalent_ids={debts[0].equivalent_id},
+                ),
+            ) as posting:
                 for debt in debts:
                     if debt.amount < clear_amount:
                         raise GeoException(f"Debt {debt.id} amount changed during clearing")
 
-                    debt.amount -= clear_amount
-                    if debt.amount == 0:
-                        await self.session.delete(debt)
-                    else:
-                        self.session.add(debt)
+                    # Decrease, and delete at zero: the book's CLEARING semantics (018 stage A).
+                    await posting.apply(ClearingReduction(debt=debt, amount=clear_amount))
 
                 await self.session.flush()
 

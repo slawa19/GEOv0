@@ -14,11 +14,11 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.core.simulator.cache_invalidator import (
     invalidate_caches_after_inject as _invalidate_caches_after_inject,
 )
+from app.core.ledger.book import APPLIED, REFUSED_OPPOSING_DEBT, Book, InjectIncrease
 from app.core.simulator.artifacts import ArtifactsManager
 from app.core.simulator.models import InjectResult, RunRecord
 from app.core.simulator.net_balance_utils import to_money_str
 from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter
-from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
@@ -510,84 +510,30 @@ class InjectExecutor:
                 skipped += 1
                 return False
 
-            # F-015-12: ONE DIRECTION PER PAIR (protocol §11.2.4). A debt the other way round
-            # between the same two participants in the same equivalent refuses this effect: it is
-            # skipped like an effect over the trust limit. Refusal, not netting - netting would
-            # write a decrease, which the INJECT rule of criterion (b) reads as a contradiction
-            # (`reconciliation._inject_subset`, `entry_is_not_an_increase`).
-            #
-            # The flush first: the session runs with `autoflush=False`, so a reverse debt STAGED by
-            # an earlier effect of this same event would be invisible to the read below. A flush
-            # error propagates (`SQLAlchemyError`), as this method's contract requires.
-            #
-            # A reverse debt committed concurrently is not missed either: this read and the write
-            # below run in the owner's SERIALIZABLE transaction, and every other writer that can
-            # create a direction reads the opposite edge too (`PaymentEngine._apply_flow`, and this
-            # very check), so the pair of transactions is a read-write cycle that PostgreSQL breaks
-            # with 40001. The owner retries once on a fresh snapshot (which then sees the reverse
-            # debt and refuses); if the retry conflicts again, the owner rolls back and leaves the
-            # event pending - fail-closed, never both directions (`real_runner_impl.py:711-724`,
-            # `:784-797`). Reasoned from SSI, not measured by a concurrent stand.
-            await session.flush()
-            reverse_amount = (
-                await session.execute(
-                    select(Debt.amount).where(
-                        Debt.debtor_id == creditor_id,
-                        Debt.creditor_id == debtor_id,
-                        Debt.equivalent_id == eq_id,
-                    )
+            # THE WRITE IS THE BOOK'S (018 stage A): increase or refuse. An effect opposite to an
+            # existing debt (F-015-12, protocol §11.2.4) and an effect whose result would exceed the
+            # trust limit are both REFUSED and counted as skipped; neither nets. The book flushes
+            # before its reads, so an effect staged earlier in this event is seen - the rule and its
+            # concurrency argument are documented at `_apply_inject_increase`.
+            outcome = await Book.current(session).apply(
+                InjectIncrease(
+                    debtor_id=debtor_id,
+                    creditor_id=creditor_id,
+                    equivalent_id=eq_id,
+                    amount=amount,
+                    ceiling=tl_limit_amt,
                 )
-            ).scalar_one_or_none()
-            if reverse_amount is not None and Decimal(str(reverse_amount)) > 0:
+            )
+            if outcome == REFUSED_OPPOSING_DEBT:
                 self._logger.warning(
                     "simulator.real.inject.inject_debt.opposing_debt_exists equivalent=%s",
                     eq,
                 )
                 skipped += 1
                 return False
-
-            existing = (
-                await session.execute(
-                    select(Debt).where(
-                        Debt.debtor_id == debtor_id,
-                        Debt.creditor_id == creditor_id,
-                        Debt.equivalent_id == eq_id,
-                    )
-                )
-            ).scalar_one_or_none()
-
-            if existing is None:
-                new_amt = amount
-                if new_amt > tl_limit_amt:
-                    skipped += 1
-                    return False
-                session.add(
-                    Debt(
-                        debtor_id=debtor_id,
-                        creditor_id=creditor_id,
-                        equivalent_id=eq_id,
-                        amount=new_amt,
-                    )
-                )
-            else:
-                # NO RE-QUANTISATION OF WHAT IS ALREADY STORED. T1514 of programme 015.
-                #
-                # This read the row back, added its own amount and rounded the SUM down to cents
-                # before writing it back. `debts` is shared with the production core, which stores
-                # at the column's own scale - `Numeric(20, 8)` - and since 012/T1201 the money door
-                # refuses anything the column cannot hold unchanged, so eight fraction digits are
-                # legitimate ledger content. A debt of 5.12345678 became 6.12 after an injected
-                # 1.00: 0.00345678 destroyed by a rounding nobody asked for, in a table the
-                # simulator does not own, and the result feeds the next operation.
-                #
-                # `amount` is already normalised to the simulator's own input scale above, so the
-                # sum is storable as it stands. Normalising the INPUT is the simulator's business;
-                # rewriting a stored value is not.
-                new_amt = Decimal(str(existing.amount)) + amount
-                if new_amt > tl_limit_amt:
-                    skipped += 1
-                    return False
-                existing.amount = new_amt
+            if outcome != APPLIED:
+                skipped += 1
+                return False
 
             applied += 1
             total_applied += amount

@@ -15,7 +15,7 @@ from sqlalchemy import select
 # Добавляем корень проекта в путь поиска
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.core.ledger.journal import debt_operation
+from app.core.ledger.book import Book, NewDebt, operation_for
 from app.db.session import get_db_session
 from app.db.models import AuditLog, Debt, Equivalent, Participant, Transaction, TrustLine
 from app.utils.validation import (
@@ -434,19 +434,22 @@ async def _seed_from_admin_fixtures_datasets(
             # sha256 of the dataset FILE BYTES (hashed before they were parsed, so it is the
             # artefact on disk and not this script's reading of it), and `batch` is fresh per run -
             # seeding the same pack twice is two operations, not a duplicate of one.
-            async with debt_operation(
+            async with Book.operation(
                 session,
-                kind="SEED",
-                identity=f"{label}:{manifest_sha256}:{uuid.uuid4()}",
-                intent={
-                    "label": label,
-                    "datasets_dir": os.path.basename(datasets_dir),
-                    "manifest_sha256": manifest_sha256,
-                    "debts_declared": len(debts_data or []),
-                },
-                scope_equivalent_ids=None,
-            ):
+                operation_for(
+                    "SEED",
+                    f"{label}:{manifest_sha256}:{uuid.uuid4()}",
+                    {
+                        "label": label,
+                        "datasets_dir": os.path.basename(datasets_dir),
+                        "manifest_sha256": manifest_sha256,
+                        "debts_declared": len(debts_data or []),
+                    },
+                    scope_equivalent_ids=None,
+                ),
+            ) as posting:
                 # --- Debts ---
+                debts_seeded = 0
                 existing_debts = set(
                     (
                         await session.execute(
@@ -454,7 +457,6 @@ async def _seed_from_admin_fixtures_datasets(
                         )
                     ).all()
                 )
-                debt_models: list[Debt] = []
                 for item in debts_data or []:
                     debtor_pid = str(item.get("debtor") or "").strip()
                     creditor_pid = str(item.get("creditor") or "").strip()
@@ -476,15 +478,16 @@ async def _seed_from_admin_fixtures_datasets(
                     if key in existing_debts:
                         continue
 
-                    debt_models.append(
-                        Debt(
+                    # The book creates the row (018 stage A: the single writer of `debts`).
+                    await posting.apply(
+                        NewDebt(
                             debtor_id=debtor.id,
                             creditor_id=creditor.id,
                             equivalent_id=eq.id,
                             amount=amt,
                         )
                     )
-                session.add_all(debt_models)
+                    debts_seeded += 1
                 await session.flush()
 
             # --- Transactions (subset, plus a few "stuck" ones for Incidents dashboard) ---
@@ -637,7 +640,7 @@ async def _seed_from_admin_fixtures_datasets(
             await session.commit()
             print(
                 "Seeding completed successfully. "
-                f"equivalents={len(eq_models)} participants={len(p_models)} trustlines={len(tl_models)} debts={len(debt_models)} "
+                f"equivalents={len(eq_models)} participants={len(p_models)} trustlines={len(tl_models)} debts={debts_seeded} "
                 f"transactions={len(tx_models)} audit_log={len(al_models)}"
             )
         except Exception as e:

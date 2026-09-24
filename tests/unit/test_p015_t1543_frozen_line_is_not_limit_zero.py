@@ -187,10 +187,12 @@ def _engine_that_survives_flow_retries(db_session, monkeypatch) -> PaymentEngine
     # stale-data retry does, and the audit path must survive it.
     engine = PaymentEngine(db_session)
     original_apply_flow = engine._apply_flow
+    engine.perturbed_flows = []  # 018 stage A: proof the perturbation ran, asserted by the callers
 
     async def _apply_flow_and_expire(*args, **kwargs):
         await original_apply_flow(*args, **kwargs)
         db_session.expire_all()
+        engine.perturbed_flows.append(args)
 
     monkeypatch.setattr(engine, "_apply_flow", _apply_flow_and_expire)
     return engine
@@ -224,6 +226,7 @@ async def test_a_payment_beside_a_frozen_line_is_recorded_as_verified(db_session
 
     engine = _engine_that_survives_flow_retries(db_session, monkeypatch)
     assert await engine.commit(tx_id) is True
+    assert len(engine.perturbed_flows) == 1, engine.perturbed_flows
 
     log = (
         await db_session.execute(
@@ -254,6 +257,7 @@ async def test_a_partial_repayment_of_debt_on_a_frozen_line_commits(db_session, 
 
     engine = _engine_that_survives_flow_retries(db_session, monkeypatch)
     assert await engine.commit(tx_id) is True
+    assert len(engine.perturbed_flows) == 1, engine.perturbed_flows
 
     remaining = (
         await db_session.execute(
