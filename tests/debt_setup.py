@@ -37,7 +37,8 @@ call on the right-hand side, and that hidden call is exactly the interesting cas
 DISPOSAL (018 stage B1, 2026-09-24). `purge_test_ledger`, which deleted a test's debts and journal rows
 through the driver, left with its last caller (`tests/p015_b4_support.drop_world`): the database now
 refuses every one of those deletes, and a test that commits runs on a disposable clone whose drop is
-the disposal (`tests/tier_on_a_clone.py`, `tests/p018_support.py::module_clone`).
+the disposal (`tests/tier_on_a_clone.py`, `tests/p018_support.py::module_clone`). `_uuid_literals` stays: other
+modules still render ids through it.
 """
 
 from __future__ import annotations
@@ -182,6 +183,27 @@ async def writer_operation(
         ),
     ) as posting:
         yield posting
+
+
+def _uuid_literals(values: Iterable[Any]) -> list[str]:
+    """The values as SQL literals of PostgreSQL's native `uuid`, or a loud failure.
+
+    EVERY VALUE GOES THROUGH `uuid.UUID` FIRST, which is what makes interpolating them safe -
+    nothing that is not a UUID can reach a statement.
+
+    THE SPELLING WAS PER DIALECT until 017 stage 3, which is not cosmetic. `sqlalchemy.Uuid(as_uuid=True)`
+    stored the 32-character hex WITHOUT dashes on SQLite and a native `uuid` on PostgreSQL, so a
+    statement written with the canonical dashed form matched nothing at all on the SQLite tier - it
+    deleted no rows, raised nothing, and the next `DELETE FROM participants` failed on a foreign key
+    whose referent the teardown believed it had removed. Measured 2026-09-12 while activating the
+    journal, and it is exactly the shape of a cleanup that silently does nothing.
+
+    KEPT when `purge_test_ledger` left (018 stage B1): other modules still render ids through it
+    (`tests/integration/test_simulator_real_snapshot_db_enrichment.py`).
+    """
+
+    ids = [uuid.UUID(str(value)) for value in values]
+    return [str(value) for value in ids]
 
 
 async def add_debts(session: Any, debts: Iterable[Any], *, label: str = "setup") -> Sequence[Any]:
