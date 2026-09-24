@@ -794,7 +794,7 @@ Stock phrase: "REWRITE IN PLACE: unchanged" means the assertion text stays. Its 
 | `tests/unit/test_p015_b4_wrong_writer_is_recorded_faithfully.py` (`WU`) | REWRITE IN PLACE: `ordinal`; группировка C5 по flush — DROP; все помощники для step5a/5b/5c сохранены |
 | `tests/integration/test_p015_b4_wrong_writer_is_recorded_faithfully_postgres.py` (`WP`) | REWRITE IN PLACE: `ordinal` |
 | `tests/p015_b4_support.py` | REWRITE: `journal_api`/`JournalApi`/`_NoRefusalExistsYet`/`scenario_end_refusals`/`refusal_of`/`drop_world` удалены; `operation()` открывает `Book.operation`; `stored_operations` без `flush_count`; `stored_entries` по `ordinal` |
-| `tests/debt_setup.py` | `purge_test_ledger`, `_uuid_literals`, `_sql_in` удалены вместе с последним вызывающим (`drop_world`) |
+| `tests/debt_setup.py` | `purge_test_ledger` и `_sql_in` удалены вместе с последним вызывающим (`drop_world`); `_uuid_literals` оставлен — его импортирует `tests/integration/test_simulator_real_snapshot_db_enrichment.py` |
 
 Сокращения узлов: `N` = `tests/integration/test_p018_b_step4_counterexamples_postgres.py` (новый модуль, один клон на модуль), `A` = `tests/integration/test_p018_a_write_without_context_is_refused_by_the_database.py`, `G` = `tests/integration/test_p018_b_journal_guards_postgres.py`, `BC` = `tests/integration/test_p018_b_book_transaction_contract_postgres.py`, `B0A` = `tests/integration/test_p018_b0a_money_the_column_cannot_hold.py`, `K` = `tests/integration/test_p018_book_keeps_each_kind_to_its_semantics.py`, `FB` = `tests/unit/test_p015_b4_fixture_blocks_contain_only_fixture_setup.py`; `EP`, `EU`, `WU`, `WP` — как выше.
 
@@ -1108,7 +1108,7 @@ Clone counts measured by a fixture-setup counter over these 35 modules (245 test
 
 **Not converted, on purpose — B1 owns them:** `purge_test_ledger` stays for its one caller `p015_b4_support.drop_world`, used only by the listener-mechanism modules B1 deletes or rewrites (`test_p015_b4_write_guard.py`, `test_p015_b4_transaction_contract{,_postgres}.py`, `test_p015_b4_entries_and_money.py`, `test_p015_b4_r4_...`); `p015_b4a_stand.Stand.purge` (listener-mechanism files); `test_p015_t1533_..._postgres.py` raw `DELETE FROM debts` (its setup needs the corruption helper first, finding F5); the mid-test `DELETE FROM debts` in `test_simulator_real_snapshot_db_enrichment.py` (not disposal).
 
-**B1 part ii, group 1 (2026-09-24):** `p015_b4_support.drop_world` and `purge_test_ledger` (with `_uuid_literals`, `_sql_in`) are deleted - no caller remains; `p015_b4a_stand.Stand.purge` went with the stand. The surviving group-1 modules dispose by clone: `test_p015_b4_entries_and_money.py` and the new `test_p018_b_step4_counterexamples_postgres.py` share one module clone each (`tests/p018_support.py::module_clone`), the rest keep their B0b clones. Details: section 6.B1.
+**B1 part ii, group 1 (2026-09-24):** `p015_b4_support.drop_world` and `purge_test_ledger` (with `_sql_in`; `_uuid_literals` stays for the snapshot-enrichment module) are deleted - no caller remains; `p015_b4a_stand.Stand.purge` went with the stand. The surviving group-1 modules dispose by clone: `test_p015_b4_entries_and_money.py` and the new `test_p018_b_step4_counterexamples_postgres.py` share one module clone each (`tests/p018_support.py::module_clone`), the rest keep their B0b clones. Details: section 6.B1.
 
 **Timing (local, Windows, PostgreSQL 16.9; the full tier's wall time moves ±90 s between identical runs here, so only same-conditions comparisons are attributable):**
 
