@@ -12,7 +12,6 @@ from uuid import UUID
 from sqlalchemy import select, and_, or_, delete, update, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import DBAPIError
-from sqlalchemy.orm.exc import StaleDataError
 
 from app.db.models.prepare_lock import PrepareLock
 from app.db.models.debt import Debt
@@ -31,7 +30,12 @@ from app.utils.exceptions import (
 from app.utils.metrics import PAYMENT_EVENTS_TOTAL
 
 from app.core.integrity import compute_integrity_checkpoint_for_equivalent
-from app.core.ledger.journal import debt_operation
+from app.core.ledger.book import (
+    DEBT_OPERATION_IDENTITY_CONSTRAINTS as _DEBT_OPERATION_IDENTITY_CONSTRAINTS,
+    Book,
+    PaymentFlow,
+    operation_for,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,15 +43,8 @@ logger = logging.getLogger(__name__)
 #: Scale 8, the scale every money column in this repository carries.
 _MONEY_QUANTUM = Decimal("1E-8")
 
-#: The unique constraints that spell an operation envelope's IDENTITY - the declaration "this
-#: operation has already been opened", and nothing else about it (T1529). Written out rather than
-#: read off `debt_operations.constraints`, because a retry predicate that widens itself whenever
-#: somebody adds a unique constraint to that table is a policy change nobody decided;
-#: `tests/unit/test_p015_t1529_the_envelope_identity_is_a_retryable_race.py` reddens if the set and
-#: the schema ever disagree.
-_DEBT_OPERATION_IDENTITY_CONSTRAINTS = frozenset(
-    {"uq_debt_operations_kind_identity", "uq_debt_operations_tx_id"}
-)
+#: `_DEBT_OPERATION_IDENTITY_CONSTRAINTS` (T1529) lives in `app/core/ledger/book.py` since 018 stage A
+#: and is imported above under its old name: the envelope is the book's.
 
 
 def _scale8_money(amount: Decimal) -> str:
@@ -1475,7 +1472,7 @@ class PaymentEngine:
             # carried out.
             #
             # WHERE IT CLOSES, and this is load-bearing rather than tidy: BEFORE
-            # `delete(PrepareLock)` below. `debt_operation` INSERTs and flushes the envelope at
+            # `delete(PrepareLock)` below. `Book.operation` INSERTs and flushes the envelope at
             # open, so the row is already on this connection when the locks are deleted. The
             # prepare locks are the only authoritative statement of what this payment was allowed
             # to do; once they are gone, an envelope not yet written could never be reconstructed,
@@ -1489,35 +1486,37 @@ class PaymentEngine:
             _intent_equivalent_ids = self._equivalent_ids_from_validated_locks(
                 validated_locks
             )
-            async with debt_operation(
+            async with Book.operation(
                 self.session,
-                kind="PAYMENT",
-                identity=tx_id,
-                tx_id=tx_id,
-                intent={
-                    "tx_id": tx_id,
-                    "locks": [
-                        {
-                            "lock_id": str(lock.lock_id),
-                            "flows": [
-                                {
-                                    "from": str(flow.from_id),
-                                    "to": str(flow.to_id),
-                                    "amount": _scale8_money(flow.amount),
-                                    "equivalent": str(flow.equivalent_id),
-                                }
-                                for flow in lock.flows
-                            ],
-                        }
-                        for lock in validated_locks
-                    ],
-                    # Intent encoding version 2 (step 5b): both directions of every flow pair, as
-                    # they stood before the first flow ran. Without it the netted deltas cannot be
-                    # recomputed from the envelope - `_apply_flow` reads the reverse debt.
-                    "prestate": payment_prestate,
-                },
-                scope_equivalent_ids=_intent_equivalent_ids,
-                intent_equivalent_ids=_intent_equivalent_ids,
+                operation_for(
+                    "PAYMENT",
+                    tx_id,
+                    tx_id=tx_id,
+                    intent={
+                        "tx_id": tx_id,
+                        "locks": [
+                            {
+                                "lock_id": str(lock.lock_id),
+                                "flows": [
+                                    {
+                                        "from": str(flow.from_id),
+                                        "to": str(flow.to_id),
+                                        "amount": _scale8_money(flow.amount),
+                                        "equivalent": str(flow.equivalent_id),
+                                    }
+                                    for flow in lock.flows
+                                ],
+                            }
+                            for lock in validated_locks
+                        ],
+                        # Intent encoding version 2 (step 5b): both directions of every flow pair, as
+                        # they stood before the first flow ran. Without it the netted deltas cannot be
+                        # recomputed from the envelope - `_apply_flow` reads the reverse debt.
+                        "prestate": payment_prestate,
+                    },
+                    scope_equivalent_ids=_intent_equivalent_ids,
+                    intent_equivalent_ids=_intent_equivalent_ids,
+                ),
             ):
                 # 2. Process each lock (segment)
                 flows_by_equivalent: dict[UUID, list[tuple[UUID, UUID, Decimal]]] = {}
@@ -1715,92 +1714,17 @@ class PaymentEngine:
     async def _apply_flow(
         self, from_id: UUID, to_id: UUID, amount: Decimal, equivalent_id: UUID
     ):
+        """Apply flow of `amount` from `from_id` to `to_id` - through the book.
+
+        The algebra (reduce the receiver's debt to the sender, grow the sender's debt, net a mutual
+        pair, delete a zero) and its `StaleDataError` retry loop live in
+        `app/core/ledger/book.py` since programme 018 stage A, the single writer of `debts`. This
+        method stays as the forwarding point on purpose: tests perturb the payment path by patching
+        it, and they must keep executing their perturbation (018 `T1802`).
         """
-        Apply flow of `amount` from `from_id` to `to_id`.
-        Logic:
-          1. If receiver owes sender: reduce that debt.
-          2. If remaining amount > 0: increase sender's debt to receiver.
-        """
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                async with self.session.begin_nested():
-                    remaining_amount = amount
-
-                    # 1. Check if Receiver owes Sender (Debt: debtor=to, creditor=from)
-                    debt_r_s = await self._get_debt(to_id, from_id, equivalent_id)
-
-                    if debt_r_s and debt_r_s.amount > 0:
-                        reduction = min(remaining_amount, debt_r_s.amount)
-                        debt_r_s.amount -= reduction
-                        remaining_amount -= reduction
-
-                        if debt_r_s.amount == 0:
-                            await self.session.delete(debt_r_s)
-                        else:
-                            self.session.add(debt_r_s)
-
-                    if remaining_amount > 0:
-                        # 2. Increase Sender's debt to Receiver (Debt: debtor=from, creditor=to)
-                        debt_s_r = await self._get_debt(from_id, to_id, equivalent_id)
-                        if not debt_s_r:
-                            # Create new debt record
-                            debt_s_r = Debt(
-                                debtor_id=from_id,
-                                creditor_id=to_id,
-                                equivalent_id=equivalent_id,
-                                amount=Decimal("0"),
-                            )
-
-                        debt_s_r.amount += remaining_amount
-                        self.session.add(debt_s_r)
-
-                    # NOTE: app sessions may run with autoflush=False. Ensure the DB view is
-                    # consistent before the symmetry-netting queries below.
-                    await self.session.flush()
-
-                    # Enforce debt symmetry by netting mutual debts, if any.
-                    debt_forward = await self._get_debt(from_id, to_id, equivalent_id)
-                    debt_reverse = await self._get_debt(to_id, from_id, equivalent_id)
-                    if (
-                        debt_forward
-                        and debt_reverse
-                        and debt_forward.amount > 0
-                        and debt_reverse.amount > 0
-                    ):
-                        net = min(debt_forward.amount, debt_reverse.amount)
-                        debt_forward.amount -= net
-                        debt_reverse.amount -= net
-
-                        if debt_forward.amount == 0:
-                            await self.session.delete(debt_forward)
-                        else:
-                            self.session.add(debt_forward)
-
-                        if debt_reverse.amount == 0:
-                            await self.session.delete(debt_reverse)
-                        else:
-                            self.session.add(debt_reverse)
-
-                        # Flush netting effects immediately so later flows / invariant checks
-                        # don't observe a transient mutual-debt state.
-                        await self.session.flush()
-
-                return
-            except StaleDataError:
-                if attempt >= max_retries - 1:
-                    raise
-                logger.warning(
-                    "event=apply_flow.stale_data retry=%s/%s from=%s to=%s",
-                    attempt + 1,
-                    max_retries,
-                    str(from_id),
-                    str(to_id),
-                )
-                try:
-                    self.session.expire_all()
-                except Exception:
-                    pass
+        await Book.current(self.session).apply(
+            PaymentFlow(from_id=from_id, to_id=to_id, amount=amount, equivalent_id=equivalent_id)
+        )
 
     async def _snapshot_net_positions(
         self,

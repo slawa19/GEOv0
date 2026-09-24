@@ -116,7 +116,7 @@ def _node_id() -> str:
 async def debt_fixture_setup(session: Any, *, label: str) -> AsyncIterator[Any]:
     """Declare that the debts written in this block are fixture setup, not a payment.
 
-    Yields the journal's operation record when the journal is installed, and `None` when it is not.
+    Yields the book's posting (018 stage A) when the journal is installed, and `None` when it is not.
     Callers must not depend on the yielded value: it exists so that a test which needs the envelope
     can reach it once the journal is live, not as part of the setup contract.
 
@@ -135,17 +135,24 @@ async def debt_fixture_setup(session: Any, *, label: str) -> AsyncIterator[Any]:
         yield None
         return
 
-    from app.core.ledger.journal import debt_operation
+    # THE ENVELOPE IS THE BOOK'S (018 stage A): the fixture operation opens through `Book`, the
+    # single writer of `debts`, like every application writer. The rows the test builds inside the
+    # block are test code, outside `app/` and `scripts/` and so outside the single-writer guard by
+    # construction (`tests/unit/test_p018_only_book_writes_debts.py`); the journal records them as
+    # this operation's effects exactly as before.
+    from app.core.ledger.book import Book, operation_for
 
     node_id = _node_id()
-    async with debt_operation(
+    async with Book.operation(
         session,
-        kind=FIXTURE_OPERATION_KIND,
-        identity=f"{node_id}:{label}:{uuid.uuid4()}",
-        intent={"node_id": node_id, "label": label},
-        scope_equivalent_ids=None,
-    ) as record:
-        yield record
+        operation_for(
+            FIXTURE_OPERATION_KIND,
+            f"{node_id}:{label}:{uuid.uuid4()}",
+            {"node_id": node_id, "label": label},
+            scope_equivalent_ids=None,
+        ),
+    ) as posting:
+        yield posting
 
 
 @asynccontextmanager
@@ -177,7 +184,7 @@ async def writer_operation(
         yield None
         return
 
-    from app.core.ledger.journal import debt_operation
+    from app.core.ledger.book import Book, operation_for
     from app.db.journal_tables import OPERATION_KINDS_WITH_TX
 
     tx_id = None
@@ -196,16 +203,22 @@ async def writer_operation(
         )
         await session.flush()
 
-    async with debt_operation(
+    # THE BOOK'S OPERATION (018 stage A). The writer internals these tests drive
+    # (`PaymentEngine._apply_flow`, `InjectExecutor.stage_inject_event`) apply their effects through
+    # `Book.current(session)`, so the operation they run under has to be a `Book` posting.
+    equivalent_ids = set(equivalent_ids)
+    async with Book.operation(
         session,
-        kind=kind,
-        identity=f"{_node_id()}:{label}:{uuid.uuid4()}",
-        tx_id=tx_id,
-        intent={"node_id": _node_id(), "label": label, "driven_directly": True},
-        scope_equivalent_ids=set(equivalent_ids),
-        intent_equivalent_ids=set(equivalent_ids),
-    ) as record:
-        yield record
+        operation_for(
+            kind,
+            f"{_node_id()}:{label}:{uuid.uuid4()}",
+            {"node_id": _node_id(), "label": label, "driven_directly": True},
+            tx_id=tx_id,
+            scope_equivalent_ids=equivalent_ids,
+            intent_equivalent_ids=equivalent_ids,
+        ),
+    ) as posting:
+        yield posting
 
 
 def _uuid_literals(values: Iterable[Any]) -> list[str]:

@@ -70,7 +70,7 @@ from sqlalchemy import text  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine  # noqa: E402
 from sqlalchemy.pool import NullPool  # noqa: E402
 
-from app.db.models.debt import Debt  # noqa: E402
+from app.core.ledger.book import Book, NewDebt, Posting, operation_for  # noqa: E402
 from app.db.models.equivalent import Equivalent  # noqa: E402
 from app.db.models.participant import Participant  # noqa: E402
 from app.db.models.trustline import TrustLine  # noqa: E402
@@ -172,17 +172,23 @@ def _make_participant(index: int) -> Participant:
     )
 
 
-def _edge(
+async def _edge(
     session: AsyncSession,
+    posting: Posting,
     equivalent: Equivalent,
     debtor: Participant,
     creditor: Participant,
     amount: Decimal,
 ) -> None:
-    """One debt plus the active trust line the detector requires to accept it."""
-    session.add(
-        Debt(
-            id=uuid.uuid4(),
+    """One debt plus the active trust line the detector requires to accept it.
+
+    The debt goes through the book (programme 018 stage A, the single writer of `debts`) inside
+    one `SEED` operation for the whole graph. Before that it was a bare `session.add(Debt(...))`,
+    which the debt journal refuses at flush (`no_operation`) since 015 armed it - measured
+    2026-09-24: the script could no longer build its graph at all.
+    """
+    await posting.apply(
+        NewDebt(
             debtor_id=debtor.id,
             creditor_id=creditor.id,
             equivalent_id=equivalent.id,
@@ -227,34 +233,50 @@ async def build_graph(session: AsyncSession) -> Equivalent:
         session.add(participant)
     await session.flush()
 
-    rnd = random.Random(42)
-    seen: set[tuple[int, int]] = set()
-    made = 0
-    while made < N_EDGES:
-        a, b = rnd.randrange(N_PARTICIPANTS), rnd.randrange(N_PARTICIPANTS)
-        if a == b or (a, b) in seen:
-            continue
-        seen.add((a, b))
-        amount = (
-            BOUNDARY_AMOUNT
-            if made % BOUNDARY_EVERY == 0
-            else Decimal(rnd.randrange(1, 100000)) / Decimal(100)
-        )
-        _edge(session, equivalent, participants[a], participants[b], amount)
-        made += 1
-        if made % 500 == 0:
-            await session.flush()
+    async with Book.operation(
+        session,
+        operation_for(
+            "SEED",
+            f"measure_clearing_min_amount_plan:{uuid.uuid4()}",
+            {"script": "measure_clearing_min_amount_plan", "edges": N_EDGES},
+            scope_equivalent_ids=None,
+        ),
+    ) as posting:
+        rnd = random.Random(42)
+        seen: set[tuple[int, int]] = set()
+        made = 0
+        while made < N_EDGES:
+            a, b = rnd.randrange(N_PARTICIPANTS), rnd.randrange(N_PARTICIPANTS)
+            if a == b or (a, b) in seen:
+                continue
+            seen.add((a, b))
+            amount = (
+                BOUNDARY_AMOUNT
+                if made % BOUNDARY_EVERY == 0
+                else Decimal(rnd.randrange(1, 100000)) / Decimal(100)
+            )
+            await _edge(session, posting, equivalent, participants[a], participants[b], amount)
+            made += 1
+            if made % 500 == 0:
+                await session.flush()
 
-    # Planted boundary triangles: x -> y -> z -> x, every edge exactly at the threshold.
-    # The detector matches d1.creditor = d2.debtor, d2.creditor = d3.debtor,
-    # d3.creditor = d1.debtor, so this closed triple is a cycle it finds - and one whose
-    # LEAST is exactly BOUNDARY_AMOUNT, which `> :min_amount` rejects.  This, not the
-    # random 1-in-50 edges, is what makes the predicate provably bite.
-    for triangle in range(BOUNDARY_TRIANGLES):
-        base = N_PARTICIPANTS + 3 * triangle
-        ring = participants[base:base + 3]
-        for offset in range(3):
-            _edge(session, equivalent, ring[offset], ring[(offset + 1) % 3], BOUNDARY_AMOUNT)
+        # Planted boundary triangles: x -> y -> z -> x, every edge exactly at the threshold.
+        # The detector matches d1.creditor = d2.debtor, d2.creditor = d3.debtor,
+        # d3.creditor = d1.debtor, so this closed triple is a cycle it finds - and one whose
+        # LEAST is exactly BOUNDARY_AMOUNT, which `> :min_amount` rejects.  This, not the
+        # random 1-in-50 edges, is what makes the predicate provably bite.
+        for triangle in range(BOUNDARY_TRIANGLES):
+            base = N_PARTICIPANTS + 3 * triangle
+            ring = participants[base:base + 3]
+            for offset in range(3):
+                await _edge(
+                    session,
+                    posting,
+                    equivalent,
+                    ring[offset],
+                    ring[(offset + 1) % 3],
+                    BOUNDARY_AMOUNT,
+                )
     await session.commit()
 
     for table in ("debts", "trust_lines", "participants"):

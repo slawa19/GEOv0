@@ -21,10 +21,11 @@ import pytest
 from sqlalchemy import UniqueConstraint
 from sqlalchemy.exc import DBAPIError
 
-from app.core.payments.engine import (
-    _DEBT_OPERATION_IDENTITY_CONSTRAINTS,
-    PaymentEngine,
+# 018 stage A: the set moved to the book, which owns the envelope; the engine imports it from there.
+from app.core.ledger.book import (
+    DEBT_OPERATION_IDENTITY_CONSTRAINTS as _DEBT_OPERATION_IDENTITY_CONSTRAINTS,
 )
+from app.core.payments.engine import PaymentEngine
 from app.db.journal_tables import debt_operations
 
 ENVELOPE_INSERT = (
