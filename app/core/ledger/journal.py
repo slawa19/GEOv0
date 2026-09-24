@@ -485,12 +485,14 @@ def _check_storable(value: Decimal | None, *, what: str) -> None:
     THE FOURTH PREDICATE, ROUND TRIP (`money_round_trip`), WAS DELETED in programme 017 stage 3
     (slice S7), BY MEASUREMENT. It asked the column type's own bind and result processors what the
     dialect would read back. On `postgresql+asyncpg` - the only driver `app/config.py` accepts - the
-    `Numeric` bind processor is `None` and the result processor cannot be built without a result-set
-    type, so the answer was the value itself, by identity: a probe over 250,015 values (edges of the
-    scale-8 domain and random atoms up to +-10^12) found `_round_trip(v) is v` for every one and the
-    refusal never fired. It could fire only on SQLite, where `Numeric` binds through float. PostgreSQL
-    holding the full `NUMERIC(20, 8)` domain exactly is measured end to end by
-    `tests/unit/test_p015_b4a_journal_mechanism.py::test_a_value_sqlite_would_change_is_exact_money_on_postgresql`.
+    dialect's `Numeric` implementation (`sqlalchemy.dialects.postgresql.asyncpg.AsyncpgNumeric`,
+    SQLAlchemy 2.0.25) has `bind_processor(dialect) is None` and, for a NUMERIC column (oid 1700),
+    `result_processor(dialect, 1700) is None`: asyncpg's own `Decimal` passes both ways untouched, so
+    the answer was the value itself and the refusal could not fire. It could fire only on SQLite,
+    where `Numeric` binds through float. PostgreSQL holding the full `NUMERIC(20, 8)` domain exactly
+    is held end to end by
+    `tests/unit/test_p015_b4a_journal_mechanism.py::test_a_value_sqlite_would_change_is_exact_money_on_postgresql`
+    and `tests/integration/test_p015_b4a_journal_postgres.py::test_an_operation_records_full_width_money_exactly`.
     """
 
     if value is None:

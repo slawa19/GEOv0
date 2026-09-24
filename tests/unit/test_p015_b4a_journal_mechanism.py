@@ -32,6 +32,7 @@ that actually reaches a column - is in
 from __future__ import annotations
 
 import gc
+import re
 import uuid
 import weakref
 from decimal import Decimal
@@ -1223,8 +1224,17 @@ async def test_a_forged_entry_shape_is_refused_by_the_check_constraints(stand: S
     equal, a delta of zero. Shape-VALID forgeries are not closed here and are a step-6 verifier
     item; that is a stated boundary, not a silence.
 
-    MUTATION that must redden this: drop `chk_debt_journal_entries_shape` or
-    `chk_debt_journal_entries_delta`.
+    Each forgery asserts the NAME of the CHECK that refuses it, not merely that some CHECK did
+    (2026-09-24: the zero-delta case used to violate the arithmetic CHECK too, and any CHECK was
+    accepted). PostgreSQL tests a row's CHECKs in alphabetical order by name and reports the first
+    that fails, so where a forgery must violate two, the name asserted is the one PostgreSQL reaches
+    first.
+
+    MUTATION that must redden this: drop `chk_debt_journal_entries_shape` (the I with a before then
+    passes) or `chk_debt_journal_entries_delta` (the zero delta is then reported by
+    `chk_debt_journal_entries_delta_arithmetic` instead). Drop it from migration 022 AND
+    `app/db/journal_tables.py`: the canonical runner builds the schema from the migrations, so a
+    model-only mutation stays green (measured 2026-09-24).
     """
 
     ident = identity("shape")
@@ -1237,15 +1247,26 @@ async def test_a_forged_entry_shape_is_refused_by_the_check_constraints(stand: S
 
     # ONE TRANSACTION PER SHAPE. On PostgreSQL the first refused statement aborts its transaction,
     # and every later statement in it fails with "current transaction is aborted" whatever its shape
-    # - a refusal that would be about the transaction and not about the row. SQLite, where these
-    # used to share one transaction, keeps a transaction usable after a constraint failure.
-    refused = {}
+    # - a refusal that would be about the transaction and not about the row.
+    #
+    # WHICH CHECK EACH SHAPE HITS. Amounts are positive and `delta = after - before`, so a zero
+    # delta forces a U with equal amounts: no zero-delta row violates `..._delta` alone. It also
+    # violates `..._shape` (or, with unequal amounts, `..._delta_arithmetic`), and `..._delta`
+    # sorts before both - dropping it changes the reported name, which is what reddens the test.
+    # For the same reason a U with equal amounts cannot be a shape-only forgery: a non-zero delta
+    # contradicts the arithmetic, which is the CHECK reported for it. The I with a before
+    # satisfies the arithmetic (1 = 2 - 1) and violates only `..._shape`.
+    refused: dict[str, str | None] = {}
     why: dict[str, str] = {}
-    for name, values in (
-        ("insert_with_before", "'I', 1.0, 2.0, 1.0"),
-        ("update_that_changed_nothing", "'U', 2.0, 2.0, 1.0"),
-        ("zero_delta", "'U', 2.0, 3.0, 0"),
-    ):
+    expected = {
+        "insert_with_before": ("'I', 1.0, 2.0, 1.0", "chk_debt_journal_entries_shape"),
+        "update_that_changed_nothing": (
+            "'U', 2.0, 2.0, 1.0",
+            "chk_debt_journal_entries_delta_arithmetic",
+        ),
+        "zero_delta": ("'U', 2.0, 2.0, 0", "chk_debt_journal_entries_delta"),
+    }
+    for name, (values, _constraint) in expected.items():
         async with stand.engine.begin() as connection:
             try:
                 await connection.exec_driver_sql(
@@ -1256,7 +1277,8 @@ async def test_a_forged_entry_shape_is_refused_by_the_check_constraints(stand: S
                     f"'{stand.extra_ids[0].hex}', {values})"
                 )
             except Exception as exc:  # noqa: BLE001 - the database's refusal is the subject
-                refused[name] = type(exc).__name__
+                found = re.search(r'violates check constraint "([A-Za-z0-9_]+)"', str(exc))
+                refused[name] = found.group(1) if found else None
                 why[name] = str(exc)
 
     # NON-VACUITY: a well-shaped row through the same raw path IS accepted, so the refusals above
@@ -1269,9 +1291,8 @@ async def test_a_forged_entry_shape_is_refused_by_the_check_constraints(stand: S
             f"'{stand.debtor_id.hex}', '{stand.extra_ids[0].hex}', 'U', 2.0, 3.0, 1.0)"
         )
 
-    assert set(refused) == {"insert_with_before", "update_that_changed_nothing", "zero_delta"}, refused
-    # Each refusal is a CHECK constraint's, and not a transaction already aborted by the one before.
-    assert all("check constraint" in text.lower() for text in why.values()), why
+    # Each refusal is the named CHECK's, and not another CHECK's or an aborted transaction's.
+    assert refused == {name: constraint for name, (_values, constraint) in expected.items()}, why
     assert (await stand.counts())["debt_journal_entries"] == 2
 
 

@@ -1328,8 +1328,7 @@ async def admin_update_equivalent(
         # holding it through the commit below leaves two outcomes only: the clearing commits before
         # this PATCH returns, or this PATCH commits first and the clearing refuses. Payments are
         # bound to the same cutoff by their commit-time `FOR SHARE` read instead (see
-        # `PaymentEngine.refuse_inactive_equivalents`). Same call as the delete path below. A no-op
-        # on SQLite: the guarantee is PostgreSQL's.
+        # `PaymentEngine.refuse_inactive_equivalents`). Same call as the delete path below.
         await PaymentEngine(db).acquire_staged_equivalent_owner_locks([eq.id])
 
     before = {
@@ -1428,7 +1427,7 @@ async def admin_clear_equivalent_integrity_hold(
     new FAILED is serialised with this clear. The two predicate reads take row locks (`FOR UPDATE` on the
     equivalent, `FOR SHARE` on the latest result): under SERIALIZABLE this transaction's snapshot predates
     its wait on the owner lock, and a row changed after that snapshot then fails with 40001 instead of
-    being read stale - the T1544 recipe. A no-op on SQLite.
+    being read stale - the T1544 recipe.
     """
 
     from sqlalchemy import update as sql_update
@@ -1548,8 +1547,8 @@ async def admin_delete_equivalent(
 
     # T1524: take the equivalent's owner lock BEFORE the authoritative checks and hold it through the
     # delete. Payments and clearing hold the same lock for their whole commit, so neither can create
-    # a debt between the usage count below and the commit. On SQLite this is a no-op; the RESTRICT
-    # foreign key is the guarantee there and everywhere, and the lock only narrows the window.
+    # a debt between the usage count below and the commit. The RESTRICT foreign key remains the
+    # guarantee; the lock only narrows the window.
     await PaymentEngine(db).acquire_staged_equivalent_owner_locks([eq.id])
 
     if eq.is_active:

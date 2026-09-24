@@ -213,7 +213,7 @@ type Insight = {
   - «Снизить интенсивность (сделки реже) и сравнить метрики»
   - «Проверить DB/Redis, блокировки, нагрузку»
 - technicalNotes:
-  - «SQLite в real mode часто проявляет локи/таймауты, лучше Postgres+Redis»
+  - «Локи/таймауты в real mode — проверить нагрузку на Postgres и Redis»
 
 ### 6.6 Частые отказы/аборты (FREQUENT_ABORTS / HIGH_USED)
 **Сигналы:**

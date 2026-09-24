@@ -94,8 +94,7 @@ class ClearingService:
 
         A plain read is binding only where it is taken in a snapshot newer than the owner lock -
         the PostgreSQL interlock path, which rolls back after acquiring it - because a deactivating
-        PATCH holds the same lock through its commit. On SQLite that lock is a no-op and the check is
-        a plain refusal without a race guarantee.
+        PATCH holds the same lock through its commit.
         """
         try:
             await PaymentEngine(self.session).refuse_inactive_equivalents(
@@ -906,8 +905,7 @@ class ClearingService:
     def _policy_flag(policy: dict | None, key: str, *, default: bool) -> bool:
         """Parse a boolean flag from a policy JSON blob.
 
-        SQLite JSON handling can surface values as strings in some flows.
-        We treat common falsy string forms as False.
+        A flag may arrive as a string; common falsy string forms are treated as False.
         """
         if policy is None:
             return default
@@ -969,7 +967,7 @@ class ClearingService:
 
         # Use the same policy evaluation path as execution time.
         # This is intentionally less optimized than the bulk trustline fetch, but
-        # keeps behavior consistent and avoids subtle SQLite/JSON edge cases.
+        # keeps behavior consistent with execution.
         filtered: List[List[Dict]] = []
         for cycle in cycles:
             cycle_debts: List[Debt] = []

@@ -962,8 +962,7 @@ async def take_baseline(session: Any, equivalent_id: uuid.UUID) -> BaselineTaken
     (`scripts/take_reconciliation_baseline.py`). It adopts whatever the journal does not explain and
     certifies none of it.
 
-    THE OWNER LOCK serialises this with payments and clearing on PostgreSQL (a no-op on SQLite, as for
-    every other holder of it). Under `SERIALIZABLE` the snapshot is taken at the lock statement, before
+    THE OWNER LOCK serialises this with payments and clearing. Under `SERIALIZABLE` the snapshot is taken at the lock statement, before
     any wait, so a money operation that commits while this waits is invisible here - and that is still
     consistent, because such an operation changed `debts` and wrote the matching entries in the same
     commit: its edges keep `debt - sum(delta)` unchanged.
@@ -1131,8 +1130,7 @@ async def react_to_failed(session_factory: Callable[[], Any], equivalent_id: uui
     5. ONLY THEN the structured log and the metric. Emitted before the commit they would report a hold
        that rolled back.
 
-    WHAT THE LOCK BINDS, on PostgreSQL (on SQLite the owner lock is a no-op and the refusal carries no
-    race guarantee, as for T1544): a payment commit reads the hold with `FOR SHARE` after its own owner
+    WHAT THE LOCK BINDS: a payment commit reads the hold with `FOR SHARE` after its own owner
     lock, so it either commits before this hold or meets 40001 and refuses on the retry; a clearing
     reads it in its fresh post-lock snapshot, so it either commits before this hold or refuses.
 
