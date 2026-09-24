@@ -70,7 +70,6 @@ def _unique_violation(statement: str, constraint: str) -> DBAPIError:
 
 def _engine(monkeypatch, session=None) -> PaymentEngine:
     engine = PaymentEngine(session or _FakeSession())  # type: ignore[arg-type]
-    monkeypatch.setattr(engine, "_is_postgres", lambda: True)
     return engine
 
 

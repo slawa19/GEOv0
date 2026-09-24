@@ -32,7 +32,6 @@ from app.utils.metrics import PAYMENT_EVENTS_TOTAL
 
 from app.core.integrity import compute_integrity_checkpoint_for_equivalent
 from app.core.ledger.journal import debt_operation
-from app.db.sqlite_transaction_control import sqlite_busy_error_name
 
 logger = logging.getLogger(__name__)
 
@@ -134,16 +133,6 @@ class PaymentEngine:
         self._advisory_lock_timeout_enabled = True
         self._advisory_lock_deadline: float | None = None
 
-    def _dialect_name(self) -> str | None:
-        bind = getattr(self.session, "bind", None)
-        return getattr(getattr(bind, "dialect", None), "name", None)
-
-    def _is_postgres(self) -> bool:
-        return self._dialect_name() in {"postgresql", "postgres"}
-
-    def _is_sqlite(self) -> bool:
-        return self._dialect_name() == "sqlite"
-
     @staticmethod
     def _segment_lock_key(
         *, equivalent_id: UUID, from_participant_id: UUID, to_participant_id: UUID
@@ -179,9 +168,6 @@ class PaymentEngine:
         equivalent_ids: set[UUID] | list[UUID] | tuple[UUID, ...],
     ) -> None:
         """Acquire the complete equivalent owner set in one global order."""
-        if not self._is_postgres():
-            return
-
         keys = sorted(
             {
                 self._equivalent_owner_lock_key(equivalent_id)
@@ -203,9 +189,6 @@ class PaymentEngine:
         equivalent_ids: set[UUID] | list[UUID] | tuple[UUID, ...],
     ) -> None:
         """Acquire a caller-owned staged batch's complete equivalent set."""
-        if not self._is_postgres():
-            return
-
         previous_lock_timeout = await self.session.scalar(text("SHOW lock_timeout"))
         acquired = False
         try:
@@ -234,9 +217,6 @@ class PaymentEngine:
         transaction to obtain a fresh SERIALIZABLE snapshot, and explicitly
         releases this session-level lock before returning the connection.
         """
-        if not self._is_postgres():
-            return
-
         await self._set_local_advisory_lock_timeout()
         await self.session.execute(
             text("SELECT pg_advisory_lock(:namespace, :key)"),
@@ -251,9 +231,6 @@ class PaymentEngine:
         equivalent_id: UUID,
     ) -> bool:
         """Release one session-level owner lock from a pinned connection."""
-        if not self._is_postgres():
-            return True
-
         return bool(
             await self.session.scalar(
                 text("SELECT pg_advisory_unlock(:namespace, :key)"),
@@ -266,9 +243,6 @@ class PaymentEngine:
 
     async def _acquire_tx_advisory_lock(self, tx_id: str) -> None:
         """Serialize all state transitions for one tx before authoritative reads."""
-        if not self._is_postgres():
-            return
-
         await self._set_local_advisory_lock_timeout()
         await self.session.execute(
             text("SELECT pg_advisory_xact_lock(:namespace, :key)"),
@@ -305,9 +279,6 @@ class PaymentEngine:
         keys: set[int] | list[int] | tuple[int, ...],
     ) -> None:
         """Acquire unique segment keys in one global deadlock-safe order."""
-        if not self._is_postgres():
-            return
-
         for key in sorted(set(keys)):
             await self._set_local_advisory_lock_timeout()
             await self.session.execute(
@@ -581,9 +552,6 @@ class PaymentEngine:
         PostgreSQL callers re-read under the tx lock and reject any changed
         metadata rather than acquiring a newly appeared owner key out of order.
         """
-        if not self._is_postgres():
-            return None
-
         locks = await self._load_prepare_locks(tx_id)
         if not locks:
             return (), False
@@ -601,25 +569,6 @@ class PaymentEngine:
     def _is_retryable_db_error(self, exc: BaseException, *, op: str) -> bool:
         if not isinstance(exc, DBAPIError):
             return False
-
-        if not self._is_postgres():
-            # T1525: on SQLite a unit of work that has read holds a snapshot, and a write on a
-            # stale one fails at once with SQLITE_BUSY_SNAPSHOT.
-            #
-            # A BUSY DOES NOT BY ITSELF MEAN THE TRANSACTION ROLLED BACK - corrected 2026-09-12,
-            # this comment used to claim "nothing of the unit of work is written". Measured: a
-            # `commit()` with a statement still in progress fails with SQLITE_BUSY and leaves the
-            # transaction OPEN with its own rows still visible inside it. What makes retrying safe
-            # here is not the error, it is the retry wrapper: `_run_uow_with_retry` rolls back
-            # before re-running and refuses to retry at all if that rollback fails, so the second
-            # attempt can never run on top of this attempt's uncommitted rows. It then reads the
-            # concurrent value - the same contract 40001 has on PostgreSQL.
-            #
-            # Before the transaction control existed this could not happen (reads were
-            # autocommitted) and the ORM raised StaleDataError instead, which `_apply_flow`
-            # retried; without this branch that retry is silently lost. See
-            # `app/db/sqlite_transaction_control.py`.
-            return self._is_sqlite() and sqlite_busy_error_name(exc) is not None
 
         orig = getattr(exc, "orig", None)
         # asyncpg uses `sqlstate`, psycopg2 uses `pgcode`.
@@ -781,18 +730,10 @@ class PaymentEngine:
                     continue
                 except DBAPIError as exc:
                     pgcode = self._get_pgcode(exc)
-                    sqlite_busy = (
-                        sqlite_busy_error_name(exc) if self._is_sqlite() else None
-                    )
                     if use_savepoint and pgcode in {"40P01", "40001"}:
                         # A transaction-level owner lock or SERIALIZABLE snapshot
                         # survives savepoint rollback. Retrying here recreates the
                         # same conflict; the outer owner must restart its whole UoW.
-                        raise
-                    if use_savepoint and sqlite_busy is not None:
-                        # T1525, the SQLite twin of the branch above: the stale snapshot belongs to
-                        # the caller's transaction, and rolling back to a savepoint keeps it. Only
-                        # the outer owner can take a fresh one, so this must propagate.
                         raise
                     attempt += 1
 
@@ -842,14 +783,12 @@ class PaymentEngine:
                     delay = delay * (1.0 + 0.25 * random.random())
 
                     logger.warning(
-                        "event=payment.uow_retry op=%s attempt=%s/%s delay_s=%.3f pgcode=%s "
-                        "sqlite_error=%s",
+                        "event=payment.uow_retry op=%s attempt=%s/%s delay_s=%.3f pgcode=%s",
                         op,
                         attempt,
                         self._retry_attempts,
                         delay,
                         pgcode,
-                        sqlite_busy,
                     )
                     await asyncio.sleep(delay)
         finally:

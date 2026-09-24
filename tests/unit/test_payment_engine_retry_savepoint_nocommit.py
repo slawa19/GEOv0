@@ -49,9 +49,6 @@ async def test_staged_serialization_failure_is_owned_by_outer_transaction(monkey
     eng._retry_base_delay_s = 0.0
     eng._retry_max_delay_s = 0.0
 
-    # Force Postgres + retryable.
-    monkeypatch.setattr(eng, "_is_postgres", lambda: True)
-
     calls = {"n": 0}
 
     class _FakePgError(Exception):
@@ -85,7 +82,6 @@ def test_unique_violation_retry_is_narrowed_to_commit_debt_business_key(monkeypa
 
     session = _FakeAsyncSession()
     eng = PaymentEngine(session)  # type: ignore[arg-type]
-    monkeypatch.setattr(eng, "_is_postgres", lambda: True)
 
     class _FakePgError(Exception):
         sqlstate = "23505"
@@ -129,7 +125,6 @@ async def test_savepoint_uow_does_not_leak_local_lock_timeout(monkeypatch):
 
     session = _FakeAsyncSession()
     eng = PaymentEngine(session)  # type: ignore[arg-type]
-    monkeypatch.setattr(eng, "_is_postgres", lambda: True)
 
     async def _fn():
         await eng._acquire_segment_advisory_lock_keys([7])
@@ -153,7 +148,6 @@ async def test_lock_not_available_is_mapped_to_asyncio_timeout(monkeypatch):
 
     session = _FakeAsyncSession()
     eng = PaymentEngine(session)  # type: ignore[arg-type]
-    monkeypatch.setattr(eng, "_is_postgres", lambda: True)
 
     class _FakePgError(Exception):
         sqlstate = "55P03"

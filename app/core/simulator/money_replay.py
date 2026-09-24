@@ -88,7 +88,7 @@ def money_conflict_name(exc: BaseException | None) -> str | None:
     The predicate the whole replay rests on, so it names its inputs rather than matching text:
 
     * `RetryablePaymentConflictException` is the typed conflict the payment service raises once it
-      has classified a 40001/40P01 or a SQLite busy (`app/core/payments/service.py:93-110`). It is
+      has classified a 40001/40P01 (`app/core/payments/service.py::_classify_payment_db_error`). It is
       what a staged payment propagates.
     * A raw `DBAPIError` is classified here because the money boundary contains statements the
       payment service never sees - the debt snapshot read and the owner-lock acquisition - and a

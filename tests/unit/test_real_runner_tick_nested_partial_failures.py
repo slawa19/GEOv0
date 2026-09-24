@@ -222,6 +222,18 @@ async def test_real_runner_tick_real_mode_uses_nested_tx_and_survives_one_action
         raising=True,
     )
 
+    # The dummy session has no database. Until 017 stage 3 (S5) the owner-lock acquisition was
+    # skipped because it had no PostgreSQL bind; the call is now unconditional, so it is stubbed.
+    async def _no_owner_locks(self, equivalent_codes) -> None:
+        return None
+
+    monkeypatch.setattr(
+        PaymentService,
+        "acquire_staged_equivalent_owner_locks",
+        _no_owner_locks,
+        raising=True,
+    )
+
     # Make viz patches fast-fail (they are best-effort and must not abort the tick).
     async def _viz_create_fail(*args, **kwargs):
         raise RuntimeError("skip")

@@ -514,6 +514,9 @@ async def test_commit_acquires_keys_derived_from_loaded_prepare_locks(monkeypatc
         }
     )
     session = _CommitSession(SimpleNamespace(state="PREPARED"), [lock])
+    # The owner preflight reads the locks before the tx lock (017 stage 3, S5: it used to be
+    # skipped here because this fake has no PostgreSQL bind).
+    session.responses.insert(0, _ScalarsResult([lock]))
     engine = PaymentEngine(session)
     expected_key = PaymentEngine._segment_lock_key(
         equivalent_id=equivalent_id,
@@ -525,6 +528,9 @@ async def test_commit_acquires_keys_derived_from_loaded_prepare_locks(monkeypatc
     class _StopAfterAcquire(RuntimeError):
         pass
 
+    async def _capture_owner_acquire(equivalent_ids):
+        acquired.append(("owner", set(equivalent_ids)))
+
     async def _capture_tx_acquire(_tx_id):
         acquired.append(("tx", None))
 
@@ -532,10 +538,15 @@ async def test_commit_acquires_keys_derived_from_loaded_prepare_locks(monkeypatc
         acquired.append(("segment", set(keys)))
         raise _StopAfterAcquire
 
+    monkeypatch.setattr(engine, "_acquire_equivalent_owner_locks", _capture_owner_acquire)
     monkeypatch.setattr(engine, "_acquire_tx_advisory_lock", _capture_tx_acquire)
     monkeypatch.setattr(engine, "_acquire_segment_advisory_lock_keys", _capture_acquire)
 
     with pytest.raises(_StopAfterAcquire):
         await engine.commit(tx_id)
 
-    assert acquired == [("tx", None), ("segment", {expected_key})]
+    assert acquired == [
+        ("owner", {equivalent_id}),
+        ("tx", None),
+        ("segment", {expected_key}),
+    ]
