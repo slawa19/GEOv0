@@ -62,7 +62,7 @@ from typing import Any
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import delete, select, text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.payments.router import PaymentRouter
@@ -78,10 +78,10 @@ from app.db.models.trustline import TrustLine
 from app.utils.exceptions import RetryablePaymentConflictException
 
 from tests.debt_setup import debt_fixture_setup
-from tests.debt_setup import purge_test_ledger
 
 # MODE B (017 stage 2c, T1702): every commit of this module lands in a clone dropped after the test,
-# not in the tier database it shares with mode-A tests - see `tests/tier_on_a_clone.py`.
+# not in the tier database it shares with mode-A tests - see `tests/tier_on_a_clone.py`. Since 018 B0b
+# the drop is the only disposal of rows: nothing is deleted row by row.
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
 
 _LIMIT = Decimal("1000.00")
@@ -175,28 +175,9 @@ async def _seed(session_factory) -> _World:
     return _World(eq, sender, receiver, outsider_a, outsider_b)
 
 
-async def _cleanup(session_factory, world: _World) -> None:
-    ids = [world.sender.id, world.receiver.id, world.outsider_a.id, world.outsider_b.id]
-    async with session_factory() as s:
-        # The debts AND the journal rows that describe them, through the driver and BEFORE the
-        # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
-        # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
-        # envelope still standing would block the transaction delete above it.
-        await purge_test_ledger(s, equivalent_ids=[world.equivalent.id])
-        tx_ids = list(
-            (
-                await s.execute(
-                    select(Transaction.tx_id).where(Transaction.initiator_id.in_(ids))
-                )
-            ).scalars()
-        )
-        if tx_ids:
-            await s.execute(delete(PrepareLock).where(PrepareLock.tx_id.in_(tx_ids)))
-            await s.execute(delete(Transaction).where(Transaction.tx_id.in_(tx_ids)))
-        await s.execute(delete(TrustLine).where(TrustLine.equivalent_id == world.equivalent.id))
-        await s.execute(delete(Participant).where(Participant.id.in_(ids)))
-        await s.execute(delete(Equivalent).where(Equivalent.id == world.equivalent.id))
-        await s.commit()
+def _forget_the_route_cache(world: _World) -> None:
+    """The one piece of state that outlives the clone: this process's route cache for the code."""
+
     PaymentRouter.invalidate_cache(world.equivalent.code)
 
 
@@ -630,7 +611,7 @@ async def test_a_real_serialization_failure_replays_the_money_phase_and_commits_
         assert run._real_money_committed_ticks_total == 1
         assert run._real_consec_money_no_progress_ticks == 0
     finally:
-        await _cleanup(factory, world)
+        _forget_the_route_cache(world)
 
 
 @pytest.mark.parametrize("shape", ["same-row", "write-skew"])
@@ -715,7 +696,7 @@ async def test_a_genuine_40001_is_raised_by_the_staged_write_on_this_backend(
             f"the planned edge; got {plans[0][0].amount} then {plans[1][0].amount}"
         )
     finally:
-        await _cleanup(factory, world)
+        _forget_the_route_cache(world)
 
 
 @pytest.mark.asyncio
@@ -763,7 +744,7 @@ async def test_the_staged_prefix_of_a_conflicted_attempt_is_rolled_back(
         assert sse.published("tx.updated") == len(plans[1])
         assert run.committed_total == len(plans[1])
     finally:
-        await _cleanup(factory, world)
+        _forget_the_route_cache(world)
 
 
 @pytest.mark.asyncio
@@ -808,7 +789,7 @@ async def test_permanent_contention_exhausts_the_budget_without_spending_the_err
         assert run._real_money_replay_exhausted_total == 1
         assert run._real_consec_money_no_progress_ticks == 1
     finally:
-        await _cleanup(factory, world)
+        _forget_the_route_cache(world)
 
 
 @pytest.mark.asyncio
@@ -854,4 +835,4 @@ async def test_a_tail_failure_after_the_money_commit_never_replays_money(
         assert run.last_error["code"] == "REAL_MODE_TICK_FAILED"
         assert run.errors_total == 1
     finally:
-        await _cleanup(factory, world)
+        _forget_the_route_cache(world)

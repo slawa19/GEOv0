@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError
 
 from app.core.payments.engine import PaymentEngine
@@ -16,7 +16,12 @@ from app.db.models.prepare_lock import PrepareLock
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 
-from tests.debt_setup import debt_fixture_setup, purge_test_ledger
+from tests.debt_setup import debt_fixture_setup
+
+# The first test seeds and commits payments through several sessions and runs on a disposable clone
+# of the migrated template; its rows go with the clone's drop (018 B0b; see `tests/tier_on_a_clone.py`).
+# The other two only take advisory locks on random ids, commit no row, and stay on the tier.
+from tests.tier_on_a_clone import tier_on_a_clone  # noqa: E402,F401 - opt-in fixture
 
 
 
@@ -177,36 +182,8 @@ async def _seed_staged_batches() -> dict:
     }
 
 
-async def _cleanup_seed(seed: dict) -> None:
-    from tests.conftest import TestingSessionLocal
-
-    tx_ids = list(seed["tx_ids"].values())
-    async with TestingSessionLocal() as cleanup:
-        # The debts AND the journal rows that describe them, through the driver and BEFORE the
-        # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
-        # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
-        # envelope still standing would block the transaction delete above it.
-        await purge_test_ledger(cleanup, equivalent_ids=[seed["equivalent_id"]])
-        await cleanup.execute(
-            delete(IntegrityAuditLog).where(IntegrityAuditLog.tx_id.in_(tx_ids))
-        )
-        await cleanup.execute(delete(PrepareLock).where(PrepareLock.tx_id.in_(tx_ids)))
-        await cleanup.execute(delete(Transaction).where(Transaction.tx_id.in_(tx_ids)))
-        await cleanup.execute(
-            delete(TrustLine).where(
-                TrustLine.equivalent_id == seed["equivalent_id"]
-            )
-        )
-        await cleanup.execute(
-            delete(Participant).where(Participant.id.in_(seed["participant_ids"]))
-        )
-        await cleanup.execute(
-            delete(Equivalent).where(Equivalent.id == seed["equivalent_id"])
-        )
-        await cleanup.commit()
-
-
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("tier_on_a_clone")
 async def test_staged_multicall_batches_do_not_exhaust_retry_on_retained_locks_postgres(
     db_session,
 ) -> None:
@@ -272,94 +249,91 @@ async def test_staged_multicall_batches_do_not_exhaust_retry_on_retained_locks_p
                 await session.rollback()
                 raise
 
-    try:
-        batches = [
-            (seed["tx_ids"]["left_ab"], seed["tx_ids"]["left_bc"]),
-            (seed["tx_ids"]["right_bc"], seed["tx_ids"]["right_ab"]),
-        ]
-        async with TestingSessionLocal() as observer:
-            barrier_task = asyncio.create_task(
-                _release_barrier_for_current_or_coarse_owner(observer)
-            )
-            results = await asyncio.wait_for(
-                asyncio.gather(
-                    *(_run_batch(*batch) for batch in batches),
-                    return_exceptions=True,
-                ),
-                timeout=20.0,
-            )
-            await barrier_task
-        failure_indexes = [
-            index
-            for index, result in enumerate(results)
-            if isinstance(result, BaseException)
-        ]
-        assert len(failure_indexes) == 1
-        failed_index = failure_indexes[0]
-        assert _sqlstate(results[failed_index]) == "40001"
+    batches = [
+        (seed["tx_ids"]["left_ab"], seed["tx_ids"]["left_bc"]),
+        (seed["tx_ids"]["right_bc"], seed["tx_ids"]["right_ab"]),
+    ]
+    async with TestingSessionLocal() as observer:
+        barrier_task = asyncio.create_task(
+            _release_barrier_for_current_or_coarse_owner(observer)
+        )
+        results = await asyncio.wait_for(
+            asyncio.gather(
+                *(_run_batch(*batch) for batch in batches),
+                return_exceptions=True,
+            ),
+            timeout=20.0,
+        )
+        await barrier_task
+    failure_indexes = [
+        index
+        for index, result in enumerate(results)
+        if isinstance(result, BaseException)
+    ]
+    assert len(failure_indexes) == 1
+    failed_index = failure_indexes[0]
+    assert _sqlstate(results[failed_index]) == "40001"
 
-        # The serialization snapshot belongs to the whole staged owner, not the
-        # savepoint. Retry the failed batch in a fresh outer transaction.
-        results[failed_index] = await _run_batch(*batches[failed_index])
-        assert results == [True, True]
+    # The serialization snapshot belongs to the whole staged owner, not the
+    # savepoint. Retry the failed batch in a fresh outer transaction.
+    results[failed_index] = await _run_batch(*batches[failed_index])
+    assert results == [True, True]
 
-        async with TestingSessionLocal() as verify:
-            tx_ids = list(seed["tx_ids"].values())
-            states = (
-                await verify.scalars(
-                    select(Transaction.state).where(Transaction.tx_id.in_(tx_ids))
-                )
-            ).all()
-            assert states == ["COMMITTED"] * 4
-            debts = {
-                tuple(row)
-                for row in (
-                    await verify.execute(
-                        select(Debt.debtor_id, Debt.creditor_id, Debt.amount).where(
-                            Debt.equivalent_id == seed["equivalent_id"]
-                        )
-                    )
-                ).all()
-            }
-            assert debts == {
-                (
-                    seed["participant_a_id"],
-                    seed["participant_b_id"],
-                    Decimal("4.00000000"),
-                ),
-                (
-                    seed["participant_b_id"],
-                    seed["participant_c_id"],
-                    Decimal("4.00000000"),
-                ),
-            }
-            assert (
-                await verify.scalar(
-                    select(func.count()).select_from(PrepareLock).where(
-                        PrepareLock.tx_id.in_(tx_ids)
-                    )
-                )
-                == 0
+    async with TestingSessionLocal() as verify:
+        tx_ids = list(seed["tx_ids"].values())
+        states = (
+            await verify.scalars(
+                select(Transaction.state).where(Transaction.tx_id.in_(tx_ids))
             )
-            assert (
-                await verify.scalar(
-                    select(func.count()).select_from(IntegrityAuditLog).where(
-                        IntegrityAuditLog.tx_id.in_(tx_ids),
-                        IntegrityAuditLog.operation_type == "PAYMENT",
-                    )
-                )
-                == 4
-            )
-            limits = (
-                await verify.scalars(
-                    select(TrustLine.limit).where(
-                        TrustLine.equivalent_id == seed["equivalent_id"]
+        ).all()
+        assert states == ["COMMITTED"] * 4
+        debts = {
+            tuple(row)
+            for row in (
+                await verify.execute(
+                    select(Debt.debtor_id, Debt.creditor_id, Debt.amount).where(
+                        Debt.equivalent_id == seed["equivalent_id"]
                     )
                 )
             ).all()
-            assert limits == [Decimal("50.00000000")] * 2
-    finally:
-        await _cleanup_seed(seed)
+        }
+        assert debts == {
+            (
+                seed["participant_a_id"],
+                seed["participant_b_id"],
+                Decimal("4.00000000"),
+            ),
+            (
+                seed["participant_b_id"],
+                seed["participant_c_id"],
+                Decimal("4.00000000"),
+            ),
+        }
+        assert (
+            await verify.scalar(
+                select(func.count()).select_from(PrepareLock).where(
+                    PrepareLock.tx_id.in_(tx_ids)
+                )
+            )
+            == 0
+        )
+        assert (
+            await verify.scalar(
+                select(func.count()).select_from(IntegrityAuditLog).where(
+                    IntegrityAuditLog.tx_id.in_(tx_ids),
+                    IntegrityAuditLog.operation_type == "PAYMENT",
+                )
+            )
+            == 4
+        )
+        limits = (
+            await verify.scalars(
+                select(TrustLine.limit).where(
+                    TrustLine.equivalent_id == seed["equivalent_id"]
+                )
+            )
+        ).all()
+        assert limits == [Decimal("50.00000000")] * 2
 
 
 @pytest.mark.asyncio

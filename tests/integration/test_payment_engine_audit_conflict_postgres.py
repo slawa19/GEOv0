@@ -8,9 +8,13 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import delete, select, update
+from sqlalchemy import select, update
 from sqlalchemy.exc import DBAPIError
-from tests.debt_setup import purge_test_ledger
+
+# Every test here commits through several sessions and runs on a disposable clone of the migrated
+# template; its rows go with the clone's drop and nothing is deleted row by row (018 B0b; see
+# `tests/tier_on_a_clone.py`).
+from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
 
 
 #: How long the competitor may wait for its row. A healthy run commits it in milliseconds; a wait
@@ -183,63 +187,41 @@ async def test_audit_serialization_failure_retries_before_transaction_is_poisone
         conflicting_checkpoint,
     )
 
-    try:
-        async with TestingSessionLocal() as session:
-            await session.connection(
-                execution_options={"isolation_level": "SERIALIZABLE"}
-            )
-            engine = PaymentEngine(session)
-            engine._retry_attempts = 2
-            engine._retry_base_delay_s = 0.0
-            engine._retry_max_delay_s = 0.0
+    async with TestingSessionLocal() as session:
+        await session.connection(
+            execution_options={"isolation_level": "SERIALIZABLE"}
+        )
+        engine = PaymentEngine(session)
+        engine._retry_attempts = 2
+        engine._retry_base_delay_s = 0.0
+        engine._retry_max_delay_s = 0.0
 
-            try:
-                with caplog.at_level(logging.WARNING):
-                    committed = await engine.commit(tx_id)
-            except DBAPIError as exc:
-                # Before T401, the audit block swallows the real 40001 and the
-                # following DELETE reports only the poisoned-session symptom.
-                assert engine._get_pgcode(exc) == "25P02"
-                raise
+        try:
+            with caplog.at_level(logging.WARNING):
+                committed = await engine.commit(tx_id)
+        except DBAPIError as exc:
+            # Before T401, the audit block swallows the real 40001 and the
+            # following DELETE reports only the poisoned-session symptom.
+            assert engine._get_pgcode(exc) == "25P02"
+            raise
 
-            assert not competitor_timed_out, (
-                f"the competitor could not update its row within {_COMPETITOR_TIMEOUT_S} s: it is "
-                "queued behind a lock the payment commit holds, so no serialization failure was "
-                "produced and this test measured nothing"
+        assert not competitor_timed_out, (
+            f"the competitor could not update its row within {_COMPETITOR_TIMEOUT_S} s: it is "
+            "queued behind a lock the payment commit holds, so no serialization failure was "
+            "produced and this test measured nothing"
+        )
+        # PREMISE: the retry was a genuine 40001, not a pass with no conflict at all.
+        retries = [
+            record.getMessage()
+            for record in caplog.records
+            if "event=payment.uow_retry op=commit" in record.getMessage()
+        ]
+        assert any("pgcode=40001" in message for message in retries), retries
+        assert committed is True
+        state = (
+            await session.execute(
+                select(Transaction.state).where(Transaction.tx_id == tx_id)
             )
-            # PREMISE: the retry was a genuine 40001, not a pass with no conflict at all.
-            retries = [
-                record.getMessage()
-                for record in caplog.records
-                if "event=payment.uow_retry op=commit" in record.getMessage()
-            ]
-            assert any("pgcode=40001" in message for message in retries), retries
-            assert committed is True
-            state = (
-                await session.execute(
-                    select(Transaction.state).where(Transaction.tx_id == tx_id)
-                )
-            ).scalar_one()
-            assert state == "COMMITTED"
-            assert checkpoint_calls >= 4
-    finally:
-        async with TestingSessionLocal() as cleanup:
-            # The debts AND the journal rows that describe them, through the driver and BEFORE the
-            # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
-            # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
-            # envelope still standing would block the transaction delete above it.
-            await purge_test_ledger(cleanup, equivalent_ids=[equivalent.id])
-            await cleanup.execute(delete(PrepareLock).where(PrepareLock.tx_id == tx_id))
-            await cleanup.execute(delete(Transaction).where(Transaction.tx_id == tx_id))
-            await cleanup.execute(
-                delete(TrustLine).where(TrustLine.equivalent_id == equivalent.id)
-            )
-            await cleanup.execute(
-                delete(Participant).where(
-                    Participant.pid.in_([sender.pid, receiver.pid])
-                )
-            )
-            await cleanup.execute(
-                delete(Equivalent).where(Equivalent.id == equivalent.id)
-            )
-            await cleanup.commit()
+        ).scalar_one()
+        assert state == "COMMITTED"
+        assert checkpoint_calls >= 4

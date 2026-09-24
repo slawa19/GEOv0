@@ -9,9 +9,14 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import delete, select, text
+from sqlalchemy import select, text
 
-from tests.debt_setup import debt_fixture_setup, purge_test_ledger
+from tests.debt_setup import debt_fixture_setup
+
+# Every test here commits through several sessions and runs on a disposable clone of the migrated
+# template; its rows go with the clone's drop and nothing is deleted row by row (018 B0b; see
+# `tests/tier_on_a_clone.py`).
+from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
 
 
 
@@ -197,32 +202,6 @@ async def test_skip_ends_service_owned_transaction_postgres(
     finally:
         await session.rollback()
         await session.close()
-        async with TestingSessionLocal() as cleanup:
-            # The debts AND the journal rows that describe them, through the driver and BEFORE the
-            # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
-            # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
-            # envelope still standing would block the transaction delete above it.
-            await purge_test_ledger(cleanup, equivalent_ids=[equivalent_id])
-            await cleanup.execute(
-                delete(PrepareLock).where(
-                    PrepareLock.participant_id.in_(participant_ids)
-                )
-            )
-            await cleanup.execute(
-                delete(Transaction).where(
-                    Transaction.initiator_id.in_(participant_ids)
-                )
-            )
-            await cleanup.execute(
-                delete(TrustLine).where(TrustLine.equivalent_id == equivalent_id)
-            )
-            await cleanup.execute(
-                delete(Participant).where(Participant.id.in_(participant_ids))
-            )
-            await cleanup.execute(
-                delete(Equivalent).where(Equivalent.id == equivalent_id)
-            )
-            await cleanup.commit()
 
 
 @pytest.mark.asyncio
@@ -240,7 +219,6 @@ async def test_policy_skip_releases_debt_rows_before_concurrent_payment_postgres
     from app.core.clearing.service import ClearingService
     from app.core.payments.router import PaymentRouter
     from app.core.payments.service import PaymentService
-    from app.db.models.audit_log import IntegrityAuditLog
     from app.db.models.debt import Debt
     from app.db.models.equivalent import Equivalent
     from app.db.models.participant import Participant
@@ -454,41 +432,6 @@ async def test_policy_skip_releases_debt_rows_before_concurrent_payment_postgres
                         await session.rollback()
                         await session.close()
 
-                async with TestingSessionLocal() as cleanup:
-                    # The debts AND the journal rows that describe them, through the driver and BEFORE the
-                    # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
-                    # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
-                    # envelope still standing would block the transaction delete above it.
-                    await purge_test_ledger(cleanup, equivalent_ids=[equivalent_id])
-                    await cleanup.execute(
-                        delete(IntegrityAuditLog).where(
-                            IntegrityAuditLog.equivalent_code == equivalent_code
-                        )
-                    )
-                    await cleanup.execute(
-                        delete(PrepareLock).where(
-                            PrepareLock.tx_id.in_(payment_tx_ids)
-                        )
-                    )
-                    await cleanup.execute(
-                        delete(Transaction).where(
-                            Transaction.initiator_id.in_(participant_ids)
-                        )
-                    )
-                    await cleanup.execute(
-                        delete(TrustLine).where(
-                            TrustLine.equivalent_id == equivalent_id
-                        )
-                    )
-                    await cleanup.execute(
-                        delete(Participant).where(
-                            Participant.id.in_(participant_ids)
-                        )
-                    )
-                    await cleanup.execute(
-                        delete(Equivalent).where(Equivalent.id == equivalent_id)
-                    )
-                    await cleanup.commit()
             PaymentRouter.invalidate_cache(equivalent_code)
         except BaseException as teardown_error:
             if primary_error is None:

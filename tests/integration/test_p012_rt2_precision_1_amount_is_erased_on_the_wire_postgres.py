@@ -57,7 +57,7 @@ import pytest
 import pytest_asyncio
 from httpx import AsyncClient
 from nacl.signing import SigningKey
-from sqlalchemy import delete, select, text
+from sqlalchemy import select, text
 
 from app.core.simulator.edge_patch_builder import EdgePatchBuilder
 from app.core.simulator.models import RunRecord
@@ -75,10 +75,11 @@ from tests.integration.test_scenarios import (
     register_and_login,
 )
 
-from tests.debt_setup import debt_fixture_setup, purge_test_ledger
+from tests.debt_setup import debt_fixture_setup
 
 # MODE B (017 stage 2c, T1702): every commit of this module lands in a clone dropped after the test,
-# not in the tier database it shares with mode-A tests - see `tests/tier_on_a_clone.py`.
+# not in the tier database it shares with mode-A tests - see `tests/tier_on_a_clone.py`. Since 018 B0b
+# the drop is the only disposal: nothing is deleted row by row.
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
 
 
@@ -113,15 +114,13 @@ class _Scenario(dict):
 
 @pytest_asyncio.fixture
 async def scenario_factory(pg_client: AsyncClient):
-    """Builds committed sender/receiver/equivalent/trustline sets and cleans them up.
+    """Builds committed sender/receiver/equivalent/trustline sets.
 
-    Rows are really written (see the fixture note in the RT-012-1 module), so every id created
-    here is tracked and removed at teardown.
+    Rows are really written (see the fixture note in the RT-012-1 module); they live in this test's
+    clone and go with its drop.
     """
 
     from tests.conftest import TestingSessionLocal
-
-    created: list[_Scenario] = []
 
     async def _build(*, code: str, precision: int, label: str) -> _Scenario:
         async with TestingSessionLocal() as session:
@@ -181,45 +180,9 @@ async def scenario_factory(pg_client: AsyncClient):
             receiver=receiver,
             participants=[(r[0], r[1]) for r in rows],
         )
-        created.append(built)
         return built
 
-    try:
-        yield _build
-    finally:
-        async with TestingSessionLocal() as cleanup:
-            for built in created:
-                ids = [pid for pid, _ in built["participants"]]
-                # The debts AND the journal rows that describe them, through the driver and BEFORE
-                # the deletes below: `session.execute(delete(Debt))` is Core DML the write guard
-                # refuses (that is `C2`), and `debt_operations.tx_id` RESTRICTs
-                # `transactions.tx_id`, so an envelope still standing would block the transaction
-                # delete further down.
-                await purge_test_ledger(cleanup, equivalent_ids=[built["equivalent_id"]])
-                await cleanup.execute(
-                    delete(TrustLine).where(TrustLine.equivalent_id == built["equivalent_id"])
-                )
-                if ids:
-                    await cleanup.execute(
-                        text("DELETE FROM prepare_locks WHERE participant_id = ANY(:ids)"),
-                        {"ids": ids},
-                    )
-                    await cleanup.execute(
-                        text(
-                            "DELETE FROM integrity_audit_log WHERE tx_id IN "
-                            "(SELECT tx_id FROM transactions WHERE initiator_id = ANY(:ids))"
-                        ),
-                        {"ids": ids},
-                    )
-                    await cleanup.execute(
-                        text("DELETE FROM transactions WHERE initiator_id = ANY(:ids)"),
-                        {"ids": ids},
-                    )
-                    await cleanup.execute(delete(Participant).where(Participant.id.in_(ids)))
-                await cleanup.execute(
-                    delete(Equivalent).where(Equivalent.id == built["equivalent_id"])
-                )
-            await cleanup.commit()
+    yield _build
 
 
 async def _pay(pg_client: AsyncClient, built: _Scenario, amount: str) -> tuple[int, dict[str, Any]]:

@@ -54,11 +54,16 @@ from app.db.journal_tables import (
 from app.db.models.debt import Debt
 from app.db.models.integrity_checkpoint import IntegrityCheckpoint
 from tests.conftest import MODE_B, sessionmaker_of
+
+# Every test commits through sessions of its own, so it runs on a disposable clone of the migrated
+# template and leaves its rows to the clone's drop (018 B0b; see `tests/tier_on_a_clone.py`): the two
+# `MODE_B` tests through `db_session`'s clone, every other test through `tier_on_a_clone`, which it
+# opts into by name - never both in one test, since both clone under one name.
+from tests.tier_on_a_clone import tier_on_a_clone  # noqa: E402,F401 - opt-in fixture
 from tests.unit.test_p015_b4_wrong_writer_is_recorded_faithfully import (
     ATOM,
     _audit,
     _collapse_the_route,
-    _drop_triangle,
     _edges,
     _prepare_payment,
     _seed_triangle,
@@ -236,6 +241,7 @@ def _kinds(findings) -> set[tuple]:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("tier_on_a_clone")
 async def test_step5b_an_honest_payment_records_both_directions_and_is_recomputed_in_full(db_session) -> None:
     """A payment over a MUTUAL pair (A owes B 10, B owes A 7), paying A -> B -> C 5: PASSED, fully.
 
@@ -253,43 +259,41 @@ async def test_step5b_an_honest_payment_records_both_directions_and_is_recompute
     from tests.conftest import TestingSessionLocal as factory
 
     triangle = await _seed_triangle(factory, trustlines=[("b", "a", "100"), ("a", "b", "100"), ("c", "b", "100")])
-    try:
-        await _fixture_debts(factory, triangle, [("a", "b", "10"), ("b", "a", "7")])
-        await _baseline(factory, triangle.equivalent.id)
+    await _fixture_debts(factory, triangle, [("a", "b", "10"), ("b", "a", "7")])
+    await _baseline(factory, triangle.equivalent.id)
 
-        tx_id = await _pay(factory, triangle, ["a", "b", "c"], "5")
-        assert await _tx_state(factory, tx_id) == "COMMITTED"
-        assert await _edges(factory, triangle) == {
-            ("a", "b"): Decimal("8.00000000"),
-            ("b", "c"): Decimal("5.00000000"),
-        }, "stand: the payment did not net the mutual pair"
+    tx_id = await _pay(factory, triangle, ["a", "b", "c"], "5")
+    assert await _tx_state(factory, tx_id) == "COMMITTED"
+    assert await _edges(factory, triangle) == {
+        ("a", "b"): Decimal("8.00000000"),
+        ("b", "c"): Decimal("5.00000000"),
+    }, "stand: the payment did not net the mutual pair"
 
-        envelope = await _operation(factory, equivalent_id=triangle.equivalent.id, kind="PAYMENT")
-        assert envelope.version == PAYMENT_INTENT_ENCODING_VERSION == 2, envelope
-        prestate = {
-            (triangle.name(uuid.UUID(p["debtor"])), triangle.name(uuid.UUID(p["creditor"]))): p["amount"]
-            for p in envelope.intent["prestate"]
-        }
-        assert prestate == {
-            ("a", "b"): "10.00000000",
-            ("b", "a"): "7.00000000",
-            ("b", "c"): "0.00000000",
-            ("c", "b"): "0.00000000",
-        }, envelope.intent["prestate"]
-        assert len(await _operation_entries(factory, envelope.id)) == 4
+    envelope = await _operation(factory, equivalent_id=triangle.equivalent.id, kind="PAYMENT")
+    assert envelope.version == PAYMENT_INTENT_ENCODING_VERSION == 2, envelope
+    prestate = {
+        (triangle.name(uuid.UUID(p["debtor"])), triangle.name(uuid.UUID(p["creditor"]))): p["amount"]
+        for p in envelope.intent["prestate"]
+    }
+    assert prestate == {
+        ("a", "b"): "10.00000000",
+        ("b", "a"): "7.00000000",
+        ("b", "c"): "0.00000000",
+        ("c", "b"): "0.00000000",
+    }, envelope.intent["prestate"]
+    assert len(await _operation_entries(factory, envelope.id)) == 4
 
-        outcome = await _verify(factory, triangle.equivalent.id)
-        assert outcome.status == PASSED, f"an honest payment was not PASSED by criterion (b): {outcome}"
-        assert _coverage(outcome) == {
-            "full_recomputation": {"PAYMENT": 1},
-            "not_examined": {"TEST_FIXTURE": 1},
-        }, outcome.detail()
-        assert outcome.detail()["criterion_b"]["limited"] == [], outcome.detail()
-    finally:
-        await _drop_triangle(factory, triangle)
+    outcome = await _verify(factory, triangle.equivalent.id)
+    assert outcome.status == PASSED, f"an honest payment was not PASSED by criterion (b): {outcome}"
+    assert _coverage(outcome) == {
+        "full_recomputation": {"PAYMENT": 1},
+        "not_examined": {"TEST_FIXTURE": 1},
+    }, outcome.detail()
+    assert outcome.detail()["criterion_b"]["limited"] == [], outcome.detail()
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("tier_on_a_clone")
 async def test_step5b_the_c6_wrong_route_is_failed_by_b_while_a_stays_blind(db_session) -> None:
     """`C6` (i): A -> B -> C journalled faithfully as one A -> C. (a) has nothing to say; (b) FAILS.
 
@@ -330,11 +334,11 @@ async def test_step5b_the_c6_wrong_route_is_failed_by_b_while_a_stays_blind(db_s
         assert _kinds(_b_findings(outcome)) >= {("b_prestate_mismatch", a, c)}, outcome.findings
     finally:
         patch.undo()
-        await _drop_triangle(factory, triangle)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("corruption", ["recorded_delta", "intent_flow", "prestate"])
+@pytest.mark.usefixtures("tier_on_a_clone")
 async def test_step5b_a_corrupted_payment_record_is_failed(db_session, corruption) -> None:
     """A -> B 5 over A owing B 10. Each record is corrupted coordinately; (a) silent, (b) FAILED.
 
@@ -349,45 +353,43 @@ async def test_step5b_a_corrupted_payment_record_is_failed(db_session, corruptio
     from tests.conftest import TestingSessionLocal as factory
 
     triangle = await _seed_triangle(factory, trustlines=[("b", "a", "100")])
-    try:
-        await _fixture_debts(factory, triangle, [("a", "b", "10")])
-        await _baseline(factory, triangle.equivalent.id)
-        await _pay(factory, triangle, ["a", "b"], "5")
-        assert (await _verify(factory, triangle.equivalent.id)).status == PASSED
-        envelope = await _operation(factory, equivalent_id=triangle.equivalent.id, kind="PAYMENT")
-        a, b = str(triangle.a.id), str(triangle.b.id)
+    await _fixture_debts(factory, triangle, [("a", "b", "10")])
+    await _baseline(factory, triangle.equivalent.id)
+    await _pay(factory, triangle, ["a", "b"], "5")
+    assert (await _verify(factory, triangle.equivalent.id)).status == PASSED
+    envelope = await _operation(factory, equivalent_id=triangle.equivalent.id, kind="PAYMENT")
+    a, b = str(triangle.a.id), str(triangle.b.id)
 
-        if corruption == "recorded_delta":
-            (entry,) = await _operation_entries(factory, envelope.id)
-            await _move_entry_and_debt(
-                factory,
-                entry,
-                new_after=Decimal("16"),
-                debt_id=await _debt_id(factory, triangle.equivalent.id, triangle.a.id, triangle.b.id),
-            )
-            expected = {("b_delta_mismatch", a, b)}
-        elif corruption == "intent_flow":
-            intent = copy.deepcopy(envelope.intent)
-            intent["locks"][0]["flows"][0]["amount"] = "4.00000000"
-            await _rewrite_intent(factory, envelope.id, intent)
-            expected = {("b_delta_mismatch", a, b)}
-        else:
-            intent = copy.deepcopy(envelope.intent)
-            for item in intent["prestate"]:
-                if (item["debtor"], item["creditor"]) == (a, b):
-                    item["amount"] = "12.00000000"
-            await _rewrite_intent(factory, envelope.id, intent)
-            expected = {("b_prestate_mismatch", a, b)}
+    if corruption == "recorded_delta":
+        (entry,) = await _operation_entries(factory, envelope.id)
+        await _move_entry_and_debt(
+            factory,
+            entry,
+            new_after=Decimal("16"),
+            debt_id=await _debt_id(factory, triangle.equivalent.id, triangle.a.id, triangle.b.id),
+        )
+        expected = {("b_delta_mismatch", a, b)}
+    elif corruption == "intent_flow":
+        intent = copy.deepcopy(envelope.intent)
+        intent["locks"][0]["flows"][0]["amount"] = "4.00000000"
+        await _rewrite_intent(factory, envelope.id, intent)
+        expected = {("b_delta_mismatch", a, b)}
+    else:
+        intent = copy.deepcopy(envelope.intent)
+        for item in intent["prestate"]:
+            if (item["debtor"], item["creditor"]) == (a, b):
+                item["amount"] = "12.00000000"
+        await _rewrite_intent(factory, envelope.id, intent)
+        expected = {("b_prestate_mismatch", a, b)}
 
-        outcome = await _verify(factory, triangle.equivalent.id)
-        assert _a_findings(outcome) == [], f"stand: the corruption was not coordinated: {outcome}"
-        assert outcome.status == FAILED, outcome
-        assert _kinds(_b_findings(outcome)) == expected, outcome.findings
-    finally:
-        await _drop_triangle(factory, triangle)
+    outcome = await _verify(factory, triangle.equivalent.id)
+    assert _a_findings(outcome) == [], f"stand: the corruption was not coordinated: {outcome}"
+    assert outcome.status == FAILED, outcome
+    assert _kinds(_b_findings(outcome)) == expected, outcome.findings
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("tier_on_a_clone")
 async def test_step5b_net_neutral_cycle_inflation_on_a_payment_is_failed(db_session) -> None:
     """T1508: after A -> B -> C 5, the cycle A -> B -> C -> A is inflated by 7 in debts AND journal.
 
@@ -401,40 +403,37 @@ async def test_step5b_net_neutral_cycle_inflation_on_a_payment_is_failed(db_sess
     from tests.conftest import TestingSessionLocal as factory
 
     triangle = await _seed_triangle(factory, trustlines=[("b", "a", "100"), ("c", "b", "100")])
-    try:
-        await _baseline(factory, triangle.equivalent.id)
-        await _pay(factory, triangle, ["a", "b", "c"], "5")
-        envelope = await _operation(factory, equivalent_id=triangle.equivalent.id, kind="PAYMENT")
-        entries = await _operation_entries(factory, envelope.id)
-        eq = triangle.equivalent.id
+    await _baseline(factory, triangle.equivalent.id)
+    await _pay(factory, triangle, ["a", "b", "c"], "5")
+    envelope = await _operation(factory, equivalent_id=triangle.equivalent.id, kind="PAYMENT")
+    entries = await _operation_entries(factory, envelope.id)
+    eq = triangle.equivalent.id
 
-        def _net(edges: dict) -> dict:
-            net = {"a": Decimal(0), "b": Decimal(0), "c": Decimal(0)}
-            for (debtor, creditor), amount in edges.items():
-                net[debtor] -= amount
-                net[creditor] += amount
-            return net
+    def _net(edges: dict) -> dict:
+        net = {"a": Decimal(0), "b": Decimal(0), "c": Decimal(0)}
+        for (debtor, creditor), amount in edges.items():
+            net[debtor] -= amount
+            net[creditor] += amount
+        return net
 
-        net_before = _net(await _edges(factory, triangle))
-        for debtor, creditor in (("a", "b"), ("b", "c")):
-            d, c = getattr(triangle, debtor).id, getattr(triangle, creditor).id
-            await _move_entry_and_debt(
-                factory, _edge_of(entries, d, c), new_after=Decimal("12"), debt_id=await _debt_id(factory, eq, d, c)
-            )
-        await _add_entry_and_debt(factory, envelope.id, eq, triangle.c.id, triangle.a.id, Decimal("7"))
+    net_before = _net(await _edges(factory, triangle))
+    for debtor, creditor in (("a", "b"), ("b", "c")):
+        d, c = getattr(triangle, debtor).id, getattr(triangle, creditor).id
+        await _move_entry_and_debt(
+            factory, _edge_of(entries, d, c), new_after=Decimal("12"), debt_id=await _debt_id(factory, eq, d, c)
+        )
+    await _add_entry_and_debt(factory, envelope.id, eq, triangle.c.id, triangle.a.id, Decimal("7"))
 
-        assert _net(await _edges(factory, triangle)) == net_before, "stand: the inflation is not net-neutral"
-        outcome = await _verify(factory, eq)
-        assert _a_findings(outcome) == [], f"stand: criterion (a) saw the coordinated inflation: {outcome}"
-        assert outcome.status == FAILED, outcome
-        a, b, c = (str(p.id) for p in (triangle.a, triangle.b, triangle.c))
-        assert {k for k in _kinds(_b_findings(outcome)) if k[0] == "b_delta_mismatch"} == {
-            ("b_delta_mismatch", a, b),
-            ("b_delta_mismatch", b, c),
-            ("b_delta_mismatch", c, a),
-        }, outcome.findings
-    finally:
-        await _drop_triangle(factory, triangle)
+    assert _net(await _edges(factory, triangle)) == net_before, "stand: the inflation is not net-neutral"
+    outcome = await _verify(factory, eq)
+    assert _a_findings(outcome) == [], f"stand: criterion (a) saw the coordinated inflation: {outcome}"
+    assert outcome.status == FAILED, outcome
+    a, b, c = (str(p.id) for p in (triangle.a, triangle.b, triangle.c))
+    assert {k for k in _kinds(_b_findings(outcome)) if k[0] == "b_delta_mismatch"} == {
+        ("b_delta_mismatch", a, b),
+        ("b_delta_mismatch", b, c),
+        ("b_delta_mismatch", c, a),
+    }, outcome.findings
 
 
 # ==============================================================================================
@@ -451,6 +450,7 @@ async def _downgrade_to_v1(factory, envelope) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("tier_on_a_clone")
 async def test_step5b_a_v1_payment_is_structural_only_and_never_a_full_recomputation(db_session) -> None:
     """A v1 payment: PASSED as STRUCTURE, recorded as `structural_only`, and its limit is real.
 
@@ -463,41 +463,39 @@ async def test_step5b_a_v1_payment_is_structural_only_and_never_a_full_recomputa
     from tests.conftest import TestingSessionLocal as factory
 
     triangle = await _seed_triangle(factory, trustlines=[("b", "a", "100")])
-    try:
-        await _fixture_debts(factory, triangle, [("a", "b", "10")])
-        await _baseline(factory, triangle.equivalent.id)
-        await _pay(factory, triangle, ["a", "b"], "5")
-        v2 = await _verify(factory, triangle.equivalent.id)
-        assert v2.status == PASSED and _coverage(v2)["full_recomputation"] == {"PAYMENT": 1}, v2
+    await _fixture_debts(factory, triangle, [("a", "b", "10")])
+    await _baseline(factory, triangle.equivalent.id)
+    await _pay(factory, triangle, ["a", "b"], "5")
+    v2 = await _verify(factory, triangle.equivalent.id)
+    assert v2.status == PASSED and _coverage(v2)["full_recomputation"] == {"PAYMENT": 1}, v2
 
-        envelope = await _operation(factory, equivalent_id=triangle.equivalent.id, kind="PAYMENT")
-        await _downgrade_to_v1(factory, envelope)
-        assert (await _operation(factory, equivalent_id=triangle.equivalent.id, kind="PAYMENT")).version == 1
+    envelope = await _operation(factory, equivalent_id=triangle.equivalent.id, kind="PAYMENT")
+    await _downgrade_to_v1(factory, envelope)
+    assert (await _operation(factory, equivalent_id=triangle.equivalent.id, kind="PAYMENT")).version == 1
 
-        v1 = await _verify(factory, triangle.equivalent.id)
-        assert v1.status == PASSED, v1
-        assert _coverage(v1) == {"structural_only": {"PAYMENT": 1}, "not_examined": {"TEST_FIXTURE": 1}}, (
-            f"a v1 payment was reported as something other than structural only: {v1.detail()}"
-        )
-        assert v1.detail()["criterion_b"]["limited"] == ["structural_only:PAYMENT"], v1.detail()
-        assert v1.fingerprint() != v2.fingerprint(), "the limit of (b) did not enter the fingerprint"
+    v1 = await _verify(factory, triangle.equivalent.id)
+    assert v1.status == PASSED, v1
+    assert _coverage(v1) == {"structural_only": {"PAYMENT": 1}, "not_examined": {"TEST_FIXTURE": 1}}, (
+        f"a v1 payment was reported as something other than structural only: {v1.detail()}"
+    )
+    assert v1.detail()["criterion_b"]["limited"] == ["structural_only:PAYMENT"], v1.detail()
+    assert v1.fingerprint() != v2.fingerprint(), "the limit of (b) did not enter the fingerprint"
 
-        (entry,) = await _operation_entries(factory, envelope.id)
-        await _move_entry_and_debt(
-            factory,
-            entry,
-            new_after=Decimal("16"),
-            debt_id=await _debt_id(factory, triangle.equivalent.id, triangle.a.id, triangle.b.id),
-        )
-        limit = await _verify(factory, triangle.equivalent.id)
-        assert limit.status == PASSED and limit.findings == (), (
-            f"the structural check claimed more than structure: {limit}"
-        )
-    finally:
-        await _drop_triangle(factory, triangle)
+    (entry,) = await _operation_entries(factory, envelope.id)
+    await _move_entry_and_debt(
+        factory,
+        entry,
+        new_after=Decimal("16"),
+        debt_id=await _debt_id(factory, triangle.equivalent.id, triangle.a.id, triangle.b.id),
+    )
+    limit = await _verify(factory, triangle.equivalent.id)
+    assert limit.status == PASSED and limit.findings == (), (
+        f"the structural check claimed more than structure: {limit}"
+    )
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("tier_on_a_clone")
 async def test_step5b_a_v1_payment_with_an_edge_outside_its_flow_pairs_is_failed(db_session) -> None:
     """The structure a v1 payment CAN be held to: every journalled edge is a direction of a flow pair.
 
@@ -526,7 +524,6 @@ async def test_step5b_a_v1_payment_with_an_edge_outside_its_flow_pairs_is_failed
         }, outcome.findings
     finally:
         patch.undo()
-        await _drop_triangle(factory, triangle)
 
 
 # ==============================================================================================
@@ -550,6 +547,7 @@ async def _cycle_triangle(factory):
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("tier_on_a_clone")
 async def test_step5b_an_honest_clearing_is_recomputed_in_full_and_passed(db_session) -> None:
     """10/20/30 cleared by 10: A -> B deleted, B -> C 10, C -> A 20. PASSED, fully recomputed.
 
@@ -559,22 +557,20 @@ async def test_step5b_an_honest_clearing_is_recomputed_in_full_and_passed(db_ses
     from tests.conftest import TestingSessionLocal as factory
 
     triangle = await _cycle_triangle(factory)
-    try:
-        debts = await _fixture_debts(factory, triangle, _CYCLE)
-        await _baseline(factory, triangle.equivalent.id)
-        assert await _clear_cycle(factory, debts) == Decimal("10")
-        assert await _edges(factory, triangle) == {
-            ("b", "c"): Decimal("10.00000000"),
-            ("c", "a"): Decimal("20.00000000"),
-        }
-        outcome = await _verify(factory, triangle.equivalent.id)
-        assert outcome.status == PASSED, outcome
-        assert _coverage(outcome) == {"full_recomputation": {"CLEARING": 1}, "not_examined": {"TEST_FIXTURE": 1}}
-    finally:
-        await _drop_triangle(factory, triangle)
+    debts = await _fixture_debts(factory, triangle, _CYCLE)
+    await _baseline(factory, triangle.equivalent.id)
+    assert await _clear_cycle(factory, debts) == Decimal("10")
+    assert await _edges(factory, triangle) == {
+        ("b", "c"): Decimal("10.00000000"),
+        ("c", "a"): Decimal("20.00000000"),
+    }
+    outcome = await _verify(factory, triangle.equivalent.id)
+    assert outcome.status == PASSED, outcome
+    assert _coverage(outcome) == {"full_recomputation": {"CLEARING": 1}, "not_examined": {"TEST_FIXTURE": 1}}
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("tier_on_a_clone")
 async def test_step5b_the_c6_under_clearing_is_failed_by_b_while_a_stays_blind(db_session) -> None:
     """`C6` (ii): one atom left on every edge of a 10/10/10 cycle, journalled faithfully.
 
@@ -609,13 +605,13 @@ async def test_step5b_the_c6_under_clearing_is_failed_by_b_while_a_stays_blind(d
         if remove_listener is not None:
             remove_listener()
         patch.undo()
-        await _drop_triangle(factory, triangle)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "corruption", ["recorded_delta", "clear_amount", "prestate", "cycle_not_closed", "cycle_inflation"]
 )
+@pytest.mark.usefixtures("tier_on_a_clone")
 async def test_step5b_a_corrupted_clearing_record_is_failed(db_session, corruption) -> None:
     """The 10/20/30 clearing, each record corrupted coordinately; (a) silent, (b) FAILED for its reason.
 
@@ -633,89 +629,86 @@ async def test_step5b_a_corrupted_clearing_record_is_failed(db_session, corrupti
     from tests.conftest import TestingSessionLocal as factory
 
     triangle = await _cycle_triangle(factory)
-    try:
-        debts = await _fixture_debts(factory, triangle, _CYCLE)
-        await _baseline(factory, triangle.equivalent.id)
-        await _clear_cycle(factory, debts)
-        assert (await _verify(factory, triangle.equivalent.id)).status == PASSED
-        eq = triangle.equivalent.id
-        envelope = await _operation(factory, equivalent_id=eq, kind="CLEARING")
-        entries = await _operation_entries(factory, envelope.id)
-        a, b, c = triangle.a.id, triangle.b.id, triangle.c.id
+    debts = await _fixture_debts(factory, triangle, _CYCLE)
+    await _baseline(factory, triangle.equivalent.id)
+    await _clear_cycle(factory, debts)
+    assert (await _verify(factory, triangle.equivalent.id)).status == PASSED
+    eq = triangle.equivalent.id
+    envelope = await _operation(factory, equivalent_id=eq, kind="CLEARING")
+    entries = await _operation_entries(factory, envelope.id)
+    a, b, c = triangle.a.id, triangle.b.id, triangle.c.id
 
-        if corruption == "recorded_delta":
+    if corruption == "recorded_delta":
+        await _move_entry_and_debt(
+            factory, _edge_of(entries, b, c), new_after=Decimal("11"), debt_id=await _debt_id(factory, eq, b, c)
+        )
+        expected = {("b_delta_mismatch", str(b), str(c))}
+        reasons = set()
+    elif corruption == "clear_amount":
+        intent = copy.deepcopy(envelope.intent)
+        intent["clear_amount"] = "9.00000000"
+        await _rewrite_intent(factory, envelope.id, intent)
+        expected = {("b_intent_malformed", None, None)}
+        reasons = {"clear_amount_is_not_the_cycle_minimum"}
+    elif corruption == "prestate":
+        intent = copy.deepcopy(envelope.intent)
+        for item in intent["cycle"]:
+            if (item["debtor_id"], item["creditor_id"]) == (str(c), str(a)):
+                item["amount"] = "31.00000000"
+        await _rewrite_intent(factory, envelope.id, intent)
+        expected = {("b_prestate_mismatch", str(c), str(a))}
+        reasons = set()
+    elif corruption == "cycle_not_closed":
+        intent = copy.deepcopy(envelope.intent)
+        for item in intent["cycle"]:
+            if (item["debtor_id"], item["creditor_id"]) == (str(c), str(a)):
+                item["creditor_id"] = str(b)
+        await _rewrite_intent(factory, envelope.id, intent)
+        expected = None
+        reasons = {"clearing_cycle_is_not_closed"}
+    else:
+        # A -> B was deleted by the clearing: its `D` entry becomes an `U` ending at 7, and the debt
+        # comes back holding 7. The other two end 7 higher.
+        deleted = _edge_of(entries, a, b)
+        debt_id = uuid.uuid4()
+        await _around_the_application(
+            factory,
+            lambda d: (
+                "UPDATE debt_journal_entries SET effect = 'U', amount_after = '7.00000000', "
+                f"delta = '-3.00000000' WHERE id = '{_literal(d, deleted.id)}'"
+            ),
+        )
+        await _around_the_application(
+            factory,
+            lambda d: (
+                "INSERT INTO debts (id, debtor_id, creditor_id, equivalent_id, amount, version) VALUES "
+                f"('{_literal(d, debt_id)}', '{_literal(d, a)}', '{_literal(d, b)}', '{_literal(d, eq)}', "
+                "'7.00000000', 0)"
+            ),
+        )
+        for debtor, creditor, after in ((b, c, "17"), (c, a, "27")):
             await _move_entry_and_debt(
-                factory, _edge_of(entries, b, c), new_after=Decimal("11"), debt_id=await _debt_id(factory, eq, b, c)
-            )
-            expected = {("b_delta_mismatch", str(b), str(c))}
-            reasons = set()
-        elif corruption == "clear_amount":
-            intent = copy.deepcopy(envelope.intent)
-            intent["clear_amount"] = "9.00000000"
-            await _rewrite_intent(factory, envelope.id, intent)
-            expected = {("b_intent_malformed", None, None)}
-            reasons = {"clear_amount_is_not_the_cycle_minimum"}
-        elif corruption == "prestate":
-            intent = copy.deepcopy(envelope.intent)
-            for item in intent["cycle"]:
-                if (item["debtor_id"], item["creditor_id"]) == (str(c), str(a)):
-                    item["amount"] = "31.00000000"
-            await _rewrite_intent(factory, envelope.id, intent)
-            expected = {("b_prestate_mismatch", str(c), str(a))}
-            reasons = set()
-        elif corruption == "cycle_not_closed":
-            intent = copy.deepcopy(envelope.intent)
-            for item in intent["cycle"]:
-                if (item["debtor_id"], item["creditor_id"]) == (str(c), str(a)):
-                    item["creditor_id"] = str(b)
-            await _rewrite_intent(factory, envelope.id, intent)
-            expected = None
-            reasons = {"clearing_cycle_is_not_closed"}
-        else:
-            # A -> B was deleted by the clearing: its `D` entry becomes an `U` ending at 7, and the debt
-            # comes back holding 7. The other two end 7 higher.
-            deleted = _edge_of(entries, a, b)
-            debt_id = uuid.uuid4()
-            await _around_the_application(
                 factory,
-                lambda d: (
-                    "UPDATE debt_journal_entries SET effect = 'U', amount_after = '7.00000000', "
-                    f"delta = '-3.00000000' WHERE id = '{_literal(d, deleted.id)}'"
-                ),
+                _edge_of(entries, debtor, creditor),
+                new_after=Decimal(after),
+                debt_id=await _debt_id(factory, eq, debtor, creditor),
             )
-            await _around_the_application(
-                factory,
-                lambda d: (
-                    "INSERT INTO debts (id, debtor_id, creditor_id, equivalent_id, amount, version) VALUES "
-                    f"('{_literal(d, debt_id)}', '{_literal(d, a)}', '{_literal(d, b)}', '{_literal(d, eq)}', "
-                    "'7.00000000', 0)"
-                ),
-            )
-            for debtor, creditor, after in ((b, c, "17"), (c, a, "27")):
-                await _move_entry_and_debt(
-                    factory,
-                    _edge_of(entries, debtor, creditor),
-                    new_after=Decimal(after),
-                    debt_id=await _debt_id(factory, eq, debtor, creditor),
-                )
-            expected = {
-                ("b_delta_mismatch", str(a), str(b)),
-                ("b_delta_mismatch", str(b), str(c)),
-                ("b_delta_mismatch", str(c), str(a)),
-            }
-            reasons = set()
+        expected = {
+            ("b_delta_mismatch", str(a), str(b)),
+            ("b_delta_mismatch", str(b), str(c)),
+            ("b_delta_mismatch", str(c), str(a)),
+        }
+        reasons = set()
 
-        outcome = await _verify(factory, eq)
-        assert _a_findings(outcome) == [], f"stand: the corruption was not coordinated: {outcome}"
-        assert outcome.status == FAILED, outcome
-        found_reasons = {f.get("reason") for f in _b_findings(outcome) if f["kind"] == "b_intent_malformed"}
-        assert reasons <= found_reasons, outcome.findings
-        if expected is not None:
-            assert _kinds(_b_findings(outcome)) == expected, outcome.findings
-        if corruption == "clear_amount":
-            assert found_reasons == reasons, outcome.findings
-    finally:
-        await _drop_triangle(factory, triangle)
+    outcome = await _verify(factory, eq)
+    assert _a_findings(outcome) == [], f"stand: the corruption was not coordinated: {outcome}"
+    assert outcome.status == FAILED, outcome
+    found_reasons = {f.get("reason") for f in _b_findings(outcome) if f["kind"] == "b_intent_malformed"}
+    assert reasons <= found_reasons, outcome.findings
+    if expected is not None:
+        assert _kinds(_b_findings(outcome)) == expected, outcome.findings
+    if corruption == "clear_amount":
+        assert found_reasons == reasons, outcome.findings
 
 
 # ==============================================================================================
@@ -854,6 +847,7 @@ async def test_step5b_an_inject_outside_its_subset_is_failed(db_session, corrupt
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("tier_on_a_clone")
 async def test_step5b_the_version_split_and_the_check_on_the_metadata_path(db_session) -> None:
     """Only PAYMENT writes intent version 2; the CHECK admits 2 and refuses 3 on the create_all schema.
 
@@ -867,55 +861,53 @@ async def test_step5b_the_version_split_and_the_check_on_the_metadata_path(db_se
     triangle = await _seed_triangle(
         factory, trustlines=[("b", "a", "100"), ("c", "b", "100"), ("a", "c", "100"), ("a", "b", "100")]
     )
-    try:
-        await _clear_cycle(factory, await _fixture_debts(factory, triangle, _CYCLE))
-        await _pay(factory, triangle, ["b", "a"], "1")
-        ops = debt_operations.c
-        async with factory() as session:
-            versions = {
-                (kind, schema, money, intent)
-                for kind, schema, money, intent in (
-                    await session.execute(
-                        select(ops.kind, ops.schema_version, ops.money_encoding_version, ops.intent_encoding_version)
-                        .join(debt_operation_equivalents, debt_operation_equivalents.c.operation_id == ops.id)
-                        .where(debt_operation_equivalents.c.equivalent_id == triangle.equivalent.id)
-                    )
-                ).all()
-            }
-        assert versions == {("PAYMENT", 1, 1, 2), ("TEST_FIXTURE", 1, 1, 1), ("CLEARING", 1, 1, 1)}, versions
-
-        async def _insert(column: str, value: int) -> str | None:
-            operation_id = uuid.uuid4()
-            values = {"schema_version": 1, "money_encoding_version": 1, "intent_encoding_version": 1, column: value}
-            try:
-                await _around_the_application(
-                    factory,
-                    lambda d: (
-                        "INSERT INTO debt_operations (id, kind, identity, tx_id, intent, intent_digest, "
-                        "schema_version, money_encoding_version, intent_encoding_version, opened_at, state) "
-                        f"VALUES ('{_literal(d, operation_id)}', 'TEST_FIXTURE', 'step5b-check-{operation_id}', NULL, "
-                        f"'{{}}', '{'0' * 64}', {values['schema_version']}, {values['money_encoding_version']}, "
-                        f"{values['intent_encoding_version']}, '2026-09-14T00:00:00+00:00', 'OPEN')"
-                    ),
+    await _clear_cycle(factory, await _fixture_debts(factory, triangle, _CYCLE))
+    await _pay(factory, triangle, ["b", "a"], "1")
+    ops = debt_operations.c
+    async with factory() as session:
+        versions = {
+            (kind, schema, money, intent)
+            for kind, schema, money, intent in (
+                await session.execute(
+                    select(ops.kind, ops.schema_version, ops.money_encoding_version, ops.intent_encoding_version)
+                    .join(debt_operation_equivalents, debt_operation_equivalents.c.operation_id == ops.id)
+                    .where(debt_operation_equivalents.c.equivalent_id == triangle.equivalent.id)
                 )
-            except IntegrityError as exc:
-                return str(exc.orig)
-            await _around_the_application(
-                factory, lambda d: f"DELETE FROM debt_operations WHERE id = '{_literal(d, operation_id)}'"
-            )
-            return None
+            ).all()
+        }
+    assert versions == {("PAYMENT", 1, 1, 2), ("TEST_FIXTURE", 1, 1, 1), ("CLEARING", 1, 1, 1)}, versions
 
-        assert await _insert("intent_encoding_version", 2) is None, "intent version 2 was refused"
-        refused = await _insert("intent_encoding_version", 3)
-        assert refused is not None and "chk_debt_operations_intent_version" in refused, refused
-        for column in ("schema_version", "money_encoding_version"):
-            refused = await _insert(column, 2)
-            assert refused is not None and "CHECK" in refused.upper(), (column, refused)
-    finally:
-        await _drop_triangle(factory, triangle)
+    async def _insert(column: str, value: int) -> str | None:
+        operation_id = uuid.uuid4()
+        values = {"schema_version": 1, "money_encoding_version": 1, "intent_encoding_version": 1, column: value}
+        try:
+            await _around_the_application(
+                factory,
+                lambda d: (
+                    "INSERT INTO debt_operations (id, kind, identity, tx_id, intent, intent_digest, "
+                    "schema_version, money_encoding_version, intent_encoding_version, opened_at, state) "
+                    f"VALUES ('{_literal(d, operation_id)}', 'TEST_FIXTURE', 'step5b-check-{operation_id}', NULL, "
+                    f"'{{}}', '{'0' * 64}', {values['schema_version']}, {values['money_encoding_version']}, "
+                    f"{values['intent_encoding_version']}, '2026-09-14T00:00:00+00:00', 'OPEN')"
+                ),
+            )
+        except IntegrityError as exc:
+            return str(exc.orig)
+        await _around_the_application(
+            factory, lambda d: f"DELETE FROM debt_operations WHERE id = '{_literal(d, operation_id)}'"
+        )
+        return None
+
+    assert await _insert("intent_encoding_version", 2) is None, "intent version 2 was refused"
+    refused = await _insert("intent_encoding_version", 3)
+    assert refused is not None and "chk_debt_operations_intent_version" in refused, refused
+    for column in ("schema_version", "money_encoding_version"):
+        refused = await _insert(column, 2)
+        assert refused is not None and "CHECK" in refused.upper(), (column, refused)
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("tier_on_a_clone")
 async def test_step5b_a_b_finding_is_stored_in_the_same_row_and_fingerprint_and_never_in_a_checkpoint(
     db_session, monkeypatch
 ) -> None:
@@ -930,51 +922,48 @@ async def test_step5b_a_b_finding_is_stored_in_the_same_row_and_fingerprint_and_
     triangle = await _seed_triangle(
         factory, trustlines=[("b", "a", "100"), ("c", "b", "100"), ("c", "a", "100")]
     )
-    try:
-        await _baseline(factory, triangle.equivalent.id)
-        tx_id = await _prepare_payment(factory, triangle, ["a", "b", "c"], Decimal("5"))
-        _collapse_the_route(monkeypatch, triangle)
-        async with factory() as session:
-            await PaymentEngine(session).commit(tx_id)
-        monkeypatch.undo()
+    await _baseline(factory, triangle.equivalent.id)
+    tx_id = await _prepare_payment(factory, triangle, ["a", "b", "c"], Decimal("5"))
+    _collapse_the_route(monkeypatch, triangle)
+    async with factory() as session:
+        await PaymentEngine(session).commit(tx_id)
+    monkeypatch.undo()
 
-        # STEP 5c CHANGED THE STAND, NOT THE CLAIM (2026-09-14): the scheduled FAILED would now hold the
-        # equivalent, and the hold refuses the honest payment below. The (b) fault identity still matters
-        # wherever that payment is reachable (a hold that failed to commit, one released around the
-        # application), so only the reaction is stubbed - after `undo()`, which would remove it.
-        from app.core.ledger import reconciliation
+    # STEP 5c CHANGED THE STAND, NOT THE CLAIM (2026-09-14): the scheduled FAILED would now hold the
+    # equivalent, and the hold refuses the honest payment below. The (b) fault identity still matters
+    # wherever that payment is reachable (a hold that failed to commit, one released around the
+    # application), so only the reaction is stubbed - after `undo()`, which would remove it.
+    from app.core.ledger import reconciliation
 
-        async def _no_reaction(session_factory, equivalent_id):
-            return reconciliation.HoldDecision(reconciliation.HOLD_NOT_CONFIRMED)
+    async def _no_reaction(session_factory, equivalent_id):
+        return reconciliation.HoldDecision(reconciliation.HOLD_NOT_CONFIRMED)
 
-        monkeypatch.setattr(reconciliation, "react_to_failed", _no_reaction)
+    monkeypatch.setattr(reconciliation, "react_to_failed", _no_reaction)
 
-        await _scheduled_run(monkeypatch, factory)
-        results = await _results(factory, triangle.equivalent.id)
-        assert [status for status, _ in results] == [FAILED], results
-        detail = results[0][1]
-        assert detail["criterion"] == CRITERION_A and detail["criterion_b"]["criterion"] == CRITERION_B, detail
-        assert {f["kind"] for f in detail["findings"]} >= {"b_delta_mismatch"}, detail
+    await _scheduled_run(monkeypatch, factory)
+    results = await _results(factory, triangle.equivalent.id)
+    assert [status for status, _ in results] == [FAILED], results
+    detail = results[0][1]
+    assert detail["criterion"] == CRITERION_A and detail["criterion_b"]["criterion"] == CRITERION_B, detail
+    assert {f["kind"] for f in detail["findings"]} >= {"b_delta_mismatch"}, detail
 
-        async with factory() as session:
-            (status,) = (
-                await session.execute(
-                    select(IntegrityCheckpoint.invariants_status).where(
-                        IntegrityCheckpoint.equivalent_id == triangle.equivalent.id
-                    )
+    async with factory() as session:
+        (status,) = (
+            await session.execute(
+                select(IntegrityCheckpoint.invariants_status).where(
+                    IntegrityCheckpoint.equivalent_id == triangle.equivalent.id
                 )
-            ).scalars().all()
-        assert set(status["checks"]) == CHECKPOINT_CHECKS and status["passed"] is True, status
-        assert "reconcil" not in json.dumps(status).lower() and await _audit(factory, tx_id) == [True]
+            )
+        ).scalars().all()
+    assert set(status["checks"]) == CHECKPOINT_CHECKS and status["passed"] is True, status
+    assert "reconcil" not in json.dumps(status).lower() and await _audit(factory, tx_id) == [True]
 
-        (first,) = await _result_rows(factory, triangle.equivalent.id)
-        await _pay(factory, triangle, ["a", "b"], "1")
-        counts = await _run_once(factory, triangle.equivalent.id)
-        assert (counts[FAILED], counts["rows_inserted"], counts["rows_unchanged"]) == (1, 0, 1), counts
-        (row,) = await _result_rows(factory, triangle.equivalent.id)
-        assert row.fingerprint == first.fingerprint, "an honest payment changed the (b) fault identity"
-    finally:
-        await _drop_triangle(factory, triangle)
+    (first,) = await _result_rows(factory, triangle.equivalent.id)
+    await _pay(factory, triangle, ["a", "b"], "1")
+    counts = await _run_once(factory, triangle.equivalent.id)
+    assert (counts[FAILED], counts["rows_inserted"], counts["rows_unchanged"]) == (1, 0, 1), counts
+    (row,) = await _result_rows(factory, triangle.equivalent.id)
+    assert row.fingerprint == first.fingerprint, "an honest payment changed the (b) fault identity"
 
 
 # ==============================================================================================
@@ -983,7 +972,10 @@ async def test_step5b_a_b_finding_is_stored_in_the_same_row_and_fingerprint_and_
 
 
 @pytest.mark.asyncio
-async def test_step5b_the_prestate_is_one_read_after_the_operator_stop_and_before_the_envelope(db_session) -> None:
+@pytest.mark.usefixtures("tier_on_a_clone")
+async def test_step5b_the_prestate_is_one_read_after_the_operator_stop_and_before_the_envelope(
+    db_session, committed_database
+) -> None:
     """ANCHORED, not merely present. On a two-hop payment (two pairs, four directions), the statements
     sent between the operator-stop read of `equivalents` and `INSERT INTO debt_operations` are EXACTLY one,
     and it reads `debts`. The TTL read of `prepare_locks` precedes the stop, as T1544 fixed it.
@@ -992,36 +984,33 @@ async def test_step5b_the_prestate_is_one_read_after_the_operator_stop_and_befor
     (2) read each direction with its own SELECT - four statements, red.
     """
     from tests.conftest import TestingSessionLocal as factory
-    from tests.conftest import engine
 
+    engine = committed_database.engine
     triangle = await _seed_triangle(factory, trustlines=[("b", "a", "100"), ("c", "b", "100")])
     statements: list[str] = []
 
     def _record(conn, cursor, statement, parameters, context, executemany) -> None:
         statements.append(" ".join(str(statement).split()).upper())
 
+    tx_id = await _prepare_payment(factory, triangle, ["a", "b", "c"], Decimal("5"))
+    event.listen(engine.sync_engine, "before_cursor_execute", _record)
     try:
-        tx_id = await _prepare_payment(factory, triangle, ["a", "b", "c"], Decimal("5"))
-        event.listen(engine.sync_engine, "before_cursor_execute", _record)
-        try:
-            async with factory() as session:
-                await PaymentEngine(session).commit(tx_id)
-        finally:
-            event.remove(engine.sync_engine, "before_cursor_execute", _record)
-        assert await _tx_state(factory, tx_id) == "COMMITTED"
-
-        stops = [i for i, s in enumerate(statements) if s.startswith("SELECT EQUIVALENTS.CODE, EQUIVALENTS.IS_ACTIVE")]
-        envelopes = [i for i, s in enumerate(statements) if s.startswith("INSERT INTO DEBT_OPERATIONS")]
-        # The TTL branch's own read: the only statement comparing `expires_at` with the database clock.
-        ttl = [i for i, s in enumerate(statements) if "PREPARE_LOCKS.EXPIRES_AT <=" in s]
-        assert len(stops) == 1 and len(envelopes) == 1 and len(ttl) == 1, (
-            f"premise: the anchors were not each seen once: stop={stops} envelope={envelopes} ttl={ttl}\n"
-            + "\n".join(statements)
-        )
-        assert ttl[0] < stops[0] < envelopes[0], (ttl, stops, envelopes)
-        between = statements[stops[0] + 1 : envelopes[0]]
-        assert len(between) == 1 and " FROM DEBTS " in f"{between[0]} " and between[0].startswith("SELECT"), (
-            f"expected exactly one batched read of debts between the operator stop and the envelope: {between}"
-        )
+        async with factory() as session:
+            await PaymentEngine(session).commit(tx_id)
     finally:
-        await _drop_triangle(factory, triangle)
+        event.remove(engine.sync_engine, "before_cursor_execute", _record)
+    assert await _tx_state(factory, tx_id) == "COMMITTED"
+
+    stops = [i for i, s in enumerate(statements) if s.startswith("SELECT EQUIVALENTS.CODE, EQUIVALENTS.IS_ACTIVE")]
+    envelopes = [i for i, s in enumerate(statements) if s.startswith("INSERT INTO DEBT_OPERATIONS")]
+    # The TTL branch's own read: the only statement comparing `expires_at` with the database clock.
+    ttl = [i for i, s in enumerate(statements) if "PREPARE_LOCKS.EXPIRES_AT <=" in s]
+    assert len(stops) == 1 and len(envelopes) == 1 and len(ttl) == 1, (
+        f"premise: the anchors were not each seen once: stop={stops} envelope={envelopes} ttl={ttl}\n"
+        + "\n".join(statements)
+    )
+    assert ttl[0] < stops[0] < envelopes[0], (ttl, stops, envelopes)
+    between = statements[stops[0] + 1 : envelopes[0]]
+    assert len(between) == 1 and " FROM DEBTS " in f"{between[0]} " and between[0].startswith("SELECT"), (
+        f"expected exactly one batched read of debts between the operator stop and the envelope: {between}"
+    )

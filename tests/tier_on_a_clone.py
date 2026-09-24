@@ -30,7 +30,24 @@ instead (see `factory` in `test_p015_p1_money_replay_postgres.py`).
 
 WHAT IT DOES NOT DO: it does not reach a name bound at import time (`from tests.conftest import
 TestingSessionLocal` at module level) - every module that imports this was checked to have none - and
-it does not move `db_session`, which is still mode A on the tier.
+it does not move `db_session`, which is still mode A on the tier. Nor does it rebind
+`tests.conftest.engine`: a module that needs an engine over the clone asks for `committed_database`
+and uses `committed_database.engine` or `.url` by name, so a reader sees which database each engine,
+observer and child process talks to. (Rebinding the tier engine would also move the mode-A `db_session`
+and, on the first test of a run, `_ensure_schema_initialized` onto the clone.)
+
+TWO SPELLINGS, ONE REBINDING (018 B0b). Importing `tier_sessions_on_a_clone` makes the rebinding
+autouse for the whole module. Importing `tier_on_a_clone` instead makes it an ordinary fixture that a
+test opts into with `@pytest.mark.usefixtures("tier_on_a_clone")`: for a module whose other tests
+write nothing that outlives them (mode A, or no committed rows) and should not pay for a clone each.
+The two are independent fixtures over one helper rather than one depending on the other, because a
+fixture's dependency must be visible by name in the requesting module and only the imported name is.
+
+WHY THE ROW-BY-ROW CLEANUPS WENT (018 B0b). Until B0b the family deleted what it committed, journal
+rows included (`purge_test_ledger`). Stage B1 puts the journal in the database and REFUSES deletes of
+its rows, so a cleanup of that shape cannot survive it; on a clone it is also redundant, because the
+drop takes every row with it. Never mix this with `MODE_B` in one test: both clone under the same name
+(`_MODE_B_CLONE_SUFFIX`), and the second copy would drop the first.
 """
 
 from __future__ import annotations
@@ -40,9 +57,21 @@ from typing import AsyncGenerator
 import pytest_asyncio
 
 
-@pytest_asyncio.fixture(autouse=True)
-async def tier_sessions_on_a_clone(committed_database, monkeypatch) -> AsyncGenerator[object, None]:
+def _rebind_the_tier_sessions(committed_database, monkeypatch) -> None:
     import tests.conftest as tier
 
     monkeypatch.setattr(tier, "TestingSessionLocal", committed_database.sessionmaker)
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def tier_sessions_on_a_clone(committed_database, monkeypatch) -> AsyncGenerator[object, None]:
+    _rebind_the_tier_sessions(committed_database, monkeypatch)
+    yield committed_database
+
+
+@pytest_asyncio.fixture
+async def tier_on_a_clone(committed_database, monkeypatch) -> AsyncGenerator[object, None]:
+    """The same rebinding for one test, opted into with `@pytest.mark.usefixtures("tier_on_a_clone")`."""
+
+    _rebind_the_tier_sessions(committed_database, monkeypatch)
     yield committed_database

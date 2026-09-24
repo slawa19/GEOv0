@@ -27,6 +27,11 @@ rule of the money path - could be deleted with the tier staying green. The clone
 still measured (spec 017, Changelog 2026-09-24: a rule a constraint makes unreachable stays measured).
 The refusal to give a verdict without the SQLite transaction control left with SQLite: on PostgreSQL
 there is no such control to be missing.
+
+EVERY TEST RUNS ON A DISPOSABLE CLONE (018 B0b). The tests commit through sessions of their own, so each
+runs on a clone of the migrated template (`tests/tier_on_a_clone.py`), and the clone's drop is the only
+disposal of what it wrote - until B0b each test deleted its triangle by id, journal included. The test
+above that needs the CHECK gone drops it from that same clone.
 """
 
 from __future__ import annotations
@@ -63,10 +68,10 @@ from app.db.reconciliation_tables import (
     debt_reconciliation_results,
 )
 from tests.debt_setup import debt_fixture_setup
+from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: F401 - autouse fixture
 from tests.unit.test_p015_b4_wrong_writer_is_recorded_faithfully import (
     _audit,
     _collapse_the_route,
-    _drop_triangle,
     _edges,
     _prepare_payment,
     _seed_triangle,
@@ -322,38 +327,35 @@ async def test_step5a_a_one_atom_change_around_the_application_is_failed(db_sess
     from tests.conftest import TestingSessionLocal as factory
 
     triangle = await _seed_triangle(factory, trustlines=[("b", "a", "100")])
-    try:
-        (debt,) = await _fixture_debts(factory, triangle, [("a", "b", "10")])
-        taken = await _baseline(factory, triangle.equivalent.id)
-        assert (taken.offsets_recorded, taken.edges_seen) == (0, 1), taken
+    (debt,) = await _fixture_debts(factory, triangle, [("a", "b", "10")])
+    taken = await _baseline(factory, triangle.equivalent.id)
+    assert (taken.offsets_recorded, taken.edges_seen) == (0, 1), taken
 
-        control = await _verify(factory, triangle.equivalent.id)
-        assert control.status == PASSED, f"stand: the untouched state is not PASSED: {control}"
+    control = await _verify(factory, triangle.equivalent.id)
+    assert control.status == PASSED, f"stand: the untouched state is not PASSED: {control}"
 
-        await _around_the_application(
-            factory,
-            lambda d: f"UPDATE debts SET amount = '10.00000001' WHERE id = '{_literal(d, debt.id)}'",
+    await _around_the_application(
+        factory,
+        lambda d: f"UPDATE debts SET amount = '10.00000001' WHERE id = '{_literal(d, debt.id)}'",
+    )
+    assert await _edges(factory, triangle) == {("a", "b"): Decimal("10.00000001")}
+
+    # THE REPRODUCTION: nothing that existed before step 5a sees the change.
+    async with factory() as session:
+        checkpoint = await compute_integrity_checkpoint_for_equivalent(
+            session, equivalent_id=triangle.equivalent.id
         )
-        assert await _edges(factory, triangle) == {("a", "b"): Decimal("10.00000001")}
+    assert checkpoint.invariants_status["passed"] is True, checkpoint.invariants_status
+    assert checkpoint.invariants_status["alerts"] == [], checkpoint.invariants_status
 
-        # THE REPRODUCTION: nothing that existed before step 5a sees the change.
-        async with factory() as session:
-            checkpoint = await compute_integrity_checkpoint_for_equivalent(
-                session, equivalent_id=triangle.equivalent.id
-            )
-        assert checkpoint.invariants_status["passed"] is True, checkpoint.invariants_status
-        assert checkpoint.invariants_status["alerts"] == [], checkpoint.invariants_status
-
-        outcome = await _verify(factory, triangle.equivalent.id)
-        assert outcome.status == FAILED, (
-            f"one atom was added to a debt around the application and criterion (a) said "
-            f"{outcome.status}: {outcome}"
-        )
-        finding = _one_edge(outcome, "edge_residual")
-        assert finding["unexplained"] == "0.00000001", finding
-        assert outcome.edges_checked == 1, outcome
-    finally:
-        await _drop_triangle(factory, triangle)
+    outcome = await _verify(factory, triangle.equivalent.id)
+    assert outcome.status == FAILED, (
+        f"one atom was added to a debt around the application and criterion (a) said "
+        f"{outcome.status}: {outcome}"
+    )
+    finding = _one_edge(outcome, "edge_residual")
+    assert finding["unexplained"] == "0.00000001", finding
+    assert outcome.edges_checked == 1, outcome
 
 
 @pytest.mark.asyncio
@@ -369,27 +371,24 @@ async def test_step5a_an_application_payment_that_moves_debts_and_journal_is_pas
     from tests.conftest import TestingSessionLocal as factory
 
     triangle = await _seed_triangle(factory, trustlines=[("b", "a", "100"), ("c", "b", "100")])
-    try:
-        await _fixture_debts(factory, triangle, [("b", "a", "3")])
-        await _baseline(factory, triangle.equivalent.id)
-        entries_before = len(await _entries(factory, triangle.equivalent.id))
+    await _fixture_debts(factory, triangle, [("b", "a", "3")])
+    await _baseline(factory, triangle.equivalent.id)
+    entries_before = len(await _entries(factory, triangle.equivalent.id))
 
-        await _pay(factory, triangle, ["a", "b", "c"], "5")
+    await _pay(factory, triangle, ["a", "b", "c"], "5")
 
-        assert await _edges(factory, triangle) == {
-            ("a", "b"): Decimal("2.00000000"),
-            ("b", "c"): Decimal("5.00000000"),
-        }, "stand: the payment did not produce the expected state"
-        assert len(await _entries(factory, triangle.equivalent.id)) > entries_before
+    assert await _edges(factory, triangle) == {
+        ("a", "b"): Decimal("2.00000000"),
+        ("b", "c"): Decimal("5.00000000"),
+    }, "stand: the payment did not produce the expected state"
+    assert len(await _entries(factory, triangle.equivalent.id)) > entries_before
 
-        outcome = await _verify(factory, triangle.equivalent.id)
-        assert outcome.status == PASSED, f"an honest payment was not PASSED: {outcome}"
-        assert outcome.edges_checked == 3, outcome
-        assert await _offsets(factory, triangle.equivalent.id) == [], (
-            "a fully journalled equivalent recorded non-zero offsets; an absent row must mean zero"
-        )
-    finally:
-        await _drop_triangle(factory, triangle)
+    outcome = await _verify(factory, triangle.equivalent.id)
+    assert outcome.status == PASSED, f"an honest payment was not PASSED: {outcome}"
+    assert outcome.edges_checked == 3, outcome
+    assert await _offsets(factory, triangle.equivalent.id) == [], (
+        "a fully journalled equivalent recorded non-zero offsets; an absent row must mean zero"
+    )
 
 
 @pytest.mark.asyncio
@@ -403,20 +402,17 @@ async def test_step5a_without_a_baseline_the_result_is_unverifiable_never_passed
     from tests.conftest import TestingSessionLocal as factory
 
     triangle = await _seed_triangle(factory, trustlines=[("b", "a", "100")])
-    try:
-        (debt,) = await _fixture_debts(factory, triangle, [("a", "b", "10")])
-        await _around_the_application(
-            factory,
-            lambda d: f"UPDATE debts SET amount = '10.00000001' WHERE id = '{_literal(d, debt.id)}'",
-        )
+    (debt,) = await _fixture_debts(factory, triangle, [("a", "b", "10")])
+    await _around_the_application(
+        factory,
+        lambda d: f"UPDATE debts SET amount = '10.00000001' WHERE id = '{_literal(d, debt.id)}'",
+    )
 
-        outcome = await _verify(factory, triangle.equivalent.id)
-        assert outcome.status == UNVERIFIABLE, outcome
-        assert outcome.missing_evidence == ("baseline",), outcome
-        assert outcome.findings == (), outcome
-        assert outcome.entries_read == 1, "stand: the journal evidence existed and was read"
-    finally:
-        await _drop_triangle(factory, triangle)
+    outcome = await _verify(factory, triangle.equivalent.id)
+    assert outcome.status == UNVERIFIABLE, outcome
+    assert outcome.missing_evidence == ("baseline",), outcome
+    assert outcome.findings == (), outcome
+    assert outcome.entries_read == 1, "stand: the journal evidence existed and was read"
 
 
 @pytest.mark.asyncio
@@ -439,24 +435,21 @@ async def test_step5a_a_journal_row_contradicting_its_own_arithmetic_is_failed_a
     factory = clone_without_the_arithmetic_check
 
     triangle = await _seed_triangle(factory, trustlines=[("b", "a", "100")])
-    try:
-        await _fixture_debts(factory, triangle, [("a", "b", "10")])
-        (entry,) = await _entries(factory, triangle.equivalent.id)
-        await _around_the_application(
-            factory,
-            lambda d: (
-                f"UPDATE debt_journal_entries SET amount_after = '11' "
-                f"WHERE id = '{_literal(d, entry.id)}'"
-            ),
-        )
+    await _fixture_debts(factory, triangle, [("a", "b", "10")])
+    (entry,) = await _entries(factory, triangle.equivalent.id)
+    await _around_the_application(
+        factory,
+        lambda d: (
+            f"UPDATE debt_journal_entries SET amount_after = '11' "
+            f"WHERE id = '{_literal(d, entry.id)}'"
+        ),
+    )
 
-        outcome = await _verify(factory, triangle.equivalent.id)
-        assert outcome.status == FAILED, outcome
-        assert outcome.missing_evidence == ("baseline",), outcome
-        finding = _one_edge(outcome, "entry_arithmetic")
-        assert (finding["amount_after"], finding["delta"]) == ("11.00000000", "10.00000000"), finding
-    finally:
-        await _drop_triangle(factory, triangle)
+    outcome = await _verify(factory, triangle.equivalent.id)
+    assert outcome.status == FAILED, outcome
+    assert outcome.missing_evidence == ("baseline",), outcome
+    finding = _one_edge(outcome, "entry_arithmetic")
+    assert (finding["amount_after"], finding["delta"]) == ("11.00000000", "10.00000000"), finding
 
 
 @pytest.mark.asyncio
@@ -472,26 +465,23 @@ async def test_step5a_a_missing_delta_on_an_edge_the_application_removed_is_fail
     from tests.conftest import TestingSessionLocal as factory
 
     triangle = await _seed_triangle(factory, trustlines=[("b", "a", "100"), ("a", "b", "100")])
-    try:
-        await _fixture_debts(factory, triangle, [("a", "b", "10")])
-        await _baseline(factory, triangle.equivalent.id)
-        await _pay(factory, triangle, ["b", "a"], "10")
-        assert await _edges(factory, triangle) == {}, "stand: the payment did not remove the edge"
-        assert (await _verify(factory, triangle.equivalent.id)).status == PASSED
+    await _fixture_debts(factory, triangle, [("a", "b", "10")])
+    await _baseline(factory, triangle.equivalent.id)
+    await _pay(factory, triangle, ["b", "a"], "10")
+    assert await _edges(factory, triangle) == {}, "stand: the payment did not remove the edge"
+    assert (await _verify(factory, triangle.equivalent.id)).status == PASSED
 
-        deletions = [e for e in await _entries(factory, triangle.equivalent.id) if e.effect == "D"]
-        assert len(deletions) == 1, deletions
-        await _around_the_application(
-            factory,
-            lambda d: f"DELETE FROM debt_journal_entries WHERE id = '{_literal(d, deletions[0].id)}'",
-        )
+    deletions = [e for e in await _entries(factory, triangle.equivalent.id) if e.effect == "D"]
+    assert len(deletions) == 1, deletions
+    await _around_the_application(
+        factory,
+        lambda d: f"DELETE FROM debt_journal_entries WHERE id = '{_literal(d, deletions[0].id)}'",
+    )
 
-        outcome = await _verify(factory, triangle.equivalent.id)
-        assert outcome.status == FAILED, outcome
-        finding = _one_edge(outcome, "edge_residual")
-        assert (finding["current_debt"], finding["unexplained"]) == ("0.00000000", "-10.00000000"), finding
-    finally:
-        await _drop_triangle(factory, triangle)
+    outcome = await _verify(factory, triangle.equivalent.id)
+    assert outcome.status == FAILED, outcome
+    finding = _one_edge(outcome, "edge_residual")
+    assert (finding["current_debt"], finding["unexplained"]) == ("0.00000000", "-10.00000000"), finding
 
 
 @pytest.mark.asyncio
@@ -504,32 +494,29 @@ async def test_step5a_a_duplicated_delta_is_failed(db_session) -> None:
     from tests.conftest import TestingSessionLocal as factory
 
     triangle = await _seed_triangle(factory, trustlines=[("b", "a", "100")])
-    try:
-        await _fixture_debts(factory, triangle, [("a", "b", "10")])
-        await _baseline(factory, triangle.equivalent.id)
-        await _pay(factory, triangle, ["a", "b"], "5")
-        assert await _edges(factory, triangle) == {("a", "b"): Decimal("15.00000000")}
-        assert (await _verify(factory, triangle.equivalent.id)).status == PASSED
+    await _fixture_debts(factory, triangle, [("a", "b", "10")])
+    await _baseline(factory, triangle.equivalent.id)
+    await _pay(factory, triangle, ["a", "b"], "5")
+    assert await _edges(factory, triangle) == {("a", "b"): Decimal("15.00000000")}
+    assert (await _verify(factory, triangle.equivalent.id)).status == PASSED
 
-        updates = [e for e in await _entries(factory, triangle.equivalent.id) if e.effect == "U"]
-        assert len(updates) == 1, updates
-        copy_id = uuid.uuid4()
-        await _around_the_application(
-            factory,
-            lambda d: (
-                "INSERT INTO debt_journal_entries (id, operation_id, flush_ordinal, equivalent_id, "
-                "debtor_id, creditor_id, effect, amount_before, amount_after, delta, recorded_at) "
-                f"SELECT '{_literal(d, copy_id)}', operation_id, flush_ordinal + 100, equivalent_id, "
-                "debtor_id, creditor_id, effect, amount_before, amount_after, delta, recorded_at "
-                f"FROM debt_journal_entries WHERE id = '{_literal(d, updates[0].id)}'"
-            ),
-        )
+    updates = [e for e in await _entries(factory, triangle.equivalent.id) if e.effect == "U"]
+    assert len(updates) == 1, updates
+    copy_id = uuid.uuid4()
+    await _around_the_application(
+        factory,
+        lambda d: (
+            "INSERT INTO debt_journal_entries (id, operation_id, flush_ordinal, equivalent_id, "
+            "debtor_id, creditor_id, effect, amount_before, amount_after, delta, recorded_at) "
+            f"SELECT '{_literal(d, copy_id)}', operation_id, flush_ordinal + 100, equivalent_id, "
+            "debtor_id, creditor_id, effect, amount_before, amount_after, delta, recorded_at "
+            f"FROM debt_journal_entries WHERE id = '{_literal(d, updates[0].id)}'"
+        ),
+    )
 
-        outcome = await _verify(factory, triangle.equivalent.id)
-        assert outcome.status == FAILED, outcome
-        assert _one_edge(outcome, "edge_residual")["unexplained"] == "-5.00000000", outcome
-    finally:
-        await _drop_triangle(factory, triangle)
+    outcome = await _verify(factory, triangle.equivalent.id)
+    assert outcome.status == FAILED, outcome
+    assert _one_edge(outcome, "edge_residual")["unexplained"] == "-5.00000000", outcome
 
 
 @pytest.mark.asyncio
@@ -547,10 +534,7 @@ async def test_step5a_a_payment_committed_between_the_verifiers_reads_is_still_p
     from tests.conftest import TestingSessionLocal as factory
 
     seen = await interleave_a_payment_between_the_verifiers_reads(factory, monkeypatch)
-    try:
-        _assert_interleave(seen)
-    finally:
-        await _drop_triangle(factory, seen["triangle"])
+    _assert_interleave(seen)
 
 
 # ==============================================================================================
@@ -599,26 +583,23 @@ async def test_step5a_an_unchanged_verdict_keeps_one_row_and_advances_last_check
     from tests.conftest import TestingSessionLocal as factory
 
     triangle = await _seed_triangle(factory, trustlines=[])
-    try:
-        await _fixture_debts(factory, triangle, [("a", "b", "10")])
-        await _baseline(factory, triangle.equivalent.id)
+    await _fixture_debts(factory, triangle, [("a", "b", "10")])
+    await _baseline(factory, triangle.equivalent.id)
 
-        assert (await _run_once(factory, triangle.equivalent.id))["rows_inserted"] == 1
-        (first,) = await _result_rows(factory, triangle.equivalent.id)
-        seen = [first.last_checked_at]
-        for _ in range(2):
-            counts = await _run_once(factory, triangle.equivalent.id)
-            assert (counts["rows_inserted"], counts["rows_unchanged"]) == (0, 1), counts
-            rows = await _result_rows(factory, triangle.equivalent.id)
-            assert len(rows) == 1, rows
-            seen.append(rows[0].last_checked_at)
+    assert (await _run_once(factory, triangle.equivalent.id))["rows_inserted"] == 1
+    (first,) = await _result_rows(factory, triangle.equivalent.id)
+    seen = [first.last_checked_at]
+    for _ in range(2):
+        counts = await _run_once(factory, triangle.equivalent.id)
+        assert (counts["rows_inserted"], counts["rows_unchanged"]) == (0, 1), counts
+        rows = await _result_rows(factory, triangle.equivalent.id)
+        assert len(rows) == 1, rows
+        seen.append(rows[0].last_checked_at)
 
-        (row,) = await _result_rows(factory, triangle.equivalent.id)
-        assert (row.status, row.is_latest) == (PASSED, True), row
-        assert row.checked_at == first.checked_at, "the first observation time moved"
-        assert seen[0] < seen[1] < seen[2], f"last_checked_at did not advance: {seen}"
-    finally:
-        await _drop_triangle(factory, triangle)
+    (row,) = await _result_rows(factory, triangle.equivalent.id)
+    assert (row.status, row.is_latest) == (PASSED, True), row
+    assert row.checked_at == first.checked_at, "the first observation time moved"
+    assert seen[0] < seen[1] < seen[2], f"last_checked_at did not advance: {seen}"
 
 
 @pytest.mark.asyncio
@@ -633,28 +614,25 @@ async def test_step5a_a_failed_then_passed_transition_inserts_and_keeps_the_fail
     from tests.conftest import TestingSessionLocal as factory
 
     triangle = await _seed_triangle(factory, trustlines=[])
-    try:
-        (debt,) = await _fixture_debts(factory, triangle, [("a", "b", "10")])
-        await _baseline(factory, triangle.equivalent.id)
+    (debt,) = await _fixture_debts(factory, triangle, [("a", "b", "10")])
+    await _baseline(factory, triangle.equivalent.id)
 
-        await _around_the_application(
-            factory, lambda d: f"UPDATE debts SET amount = '10.00000001' WHERE id = '{_literal(d, debt.id)}'"
-        )
-        await _run_once(factory, triangle.equivalent.id)
-        await _around_the_application(
-            factory, lambda d: f"UPDATE debts SET amount = '10' WHERE id = '{_literal(d, debt.id)}'"
-        )
-        assert (await _run_once(factory, triangle.equivalent.id))["rows_inserted"] == 1
-        assert (await _run_once(factory, triangle.equivalent.id))["rows_unchanged"] == 1
+    await _around_the_application(
+        factory, lambda d: f"UPDATE debts SET amount = '10.00000001' WHERE id = '{_literal(d, debt.id)}'"
+    )
+    await _run_once(factory, triangle.equivalent.id)
+    await _around_the_application(
+        factory, lambda d: f"UPDATE debts SET amount = '10' WHERE id = '{_literal(d, debt.id)}'"
+    )
+    assert (await _run_once(factory, triangle.equivalent.id))["rows_inserted"] == 1
+    assert (await _run_once(factory, triangle.equivalent.id))["rows_unchanged"] == 1
 
-        rows = await _result_rows(factory, triangle.equivalent.id)
-        assert sorted(row.status for row in rows) == [FAILED, PASSED], rows
-        assert _latest(rows).status == PASSED, rows
-        (failed,) = [row for row in rows if row.status == FAILED]
-        detail = json.loads(failed.detail) if isinstance(failed.detail, str) else failed.detail
-        assert detail["findings"][0]["unexplained"] == "0.00000001", detail
-    finally:
-        await _drop_triangle(factory, triangle)
+    rows = await _result_rows(factory, triangle.equivalent.id)
+    assert sorted(row.status for row in rows) == [FAILED, PASSED], rows
+    assert _latest(rows).status == PASSED, rows
+    (failed,) = [row for row in rows if row.status == FAILED]
+    detail = json.loads(failed.detail) if isinstance(failed.detail, str) else failed.detail
+    assert detail["findings"][0]["unexplained"] == "0.00000001", detail
 
 
 @pytest.mark.asyncio
@@ -683,37 +661,34 @@ async def test_step5a_a_payment_on_an_already_failed_edge_keeps_the_fault_identi
     monkeypatch.setattr(reconciliation, "react_to_failed", _no_reaction)
 
     triangle = await _seed_triangle(factory, trustlines=[("b", "a", "100")])
-    try:
-        (debt,) = await _fixture_debts(factory, triangle, [("a", "b", "10")])
-        await _baseline(factory, triangle.equivalent.id)
-        await _around_the_application(
-            factory, lambda d: f"UPDATE debts SET amount = '11' WHERE id = '{_literal(d, debt.id)}'"
-        )
-        assert (await _run_once(factory, triangle.equivalent.id))[FAILED] == 1
-        (first,) = await _result_rows(factory, triangle.equivalent.id)
+    (debt,) = await _fixture_debts(factory, triangle, [("a", "b", "10")])
+    await _baseline(factory, triangle.equivalent.id)
+    await _around_the_application(
+        factory, lambda d: f"UPDATE debts SET amount = '11' WHERE id = '{_literal(d, debt.id)}'"
+    )
+    assert (await _run_once(factory, triangle.equivalent.id))[FAILED] == 1
+    (first,) = await _result_rows(factory, triangle.equivalent.id)
 
-        await _pay(factory, triangle, ["a", "b"], "5")
-        assert await _edges(factory, triangle) == {("a", "b"): Decimal("16.00000000")}, "stand: no payment"
-        counts = await _run_once(factory, triangle.equivalent.id)
-        assert (counts[FAILED], counts["rows_inserted"], counts["rows_unchanged"]) == (1, 0, 1), counts
+    await _pay(factory, triangle, ["a", "b"], "5")
+    assert await _edges(factory, triangle) == {("a", "b"): Decimal("16.00000000")}, "stand: no payment"
+    counts = await _run_once(factory, triangle.equivalent.id)
+    assert (counts[FAILED], counts["rows_inserted"], counts["rows_unchanged"]) == (1, 0, 1), counts
 
-        (row,) = await _result_rows(factory, triangle.equivalent.id)
-        assert row.fingerprint == first.fingerprint, "the fault identity changed with a legitimate payment"
-        assert row.last_checked_at > first.last_checked_at, row
-        detail = json.loads(row.detail) if isinstance(row.detail, str) else row.detail
-        assert (detail["findings"][0]["current_debt"], detail["findings"][0]["unexplained"]) == (
-            "11.00000000",
-            "1.00000000",
-        ), "detail no longer shows the amounts as first observed"
+    (row,) = await _result_rows(factory, triangle.equivalent.id)
+    assert row.fingerprint == first.fingerprint, "the fault identity changed with a legitimate payment"
+    assert row.last_checked_at > first.last_checked_at, row
+    detail = json.loads(row.detail) if isinstance(row.detail, str) else row.detail
+    assert (detail["findings"][0]["current_debt"], detail["findings"][0]["unexplained"]) == (
+        "11.00000000",
+        "1.00000000",
+    ), "detail no longer shows the amounts as first observed"
 
-        await _around_the_application(
-            factory, lambda d: f"UPDATE debts SET amount = '18' WHERE id = '{_literal(d, debt.id)}'"
-        )
-        assert (await _run_once(factory, triangle.equivalent.id))["rows_inserted"] == 1
-        rows = await _result_rows(factory, triangle.equivalent.id)
-        assert len(rows) == 2 and rows[0].fingerprint != rows[1].fingerprint, rows
-    finally:
-        await _drop_triangle(factory, triangle)
+    await _around_the_application(
+        factory, lambda d: f"UPDATE debts SET amount = '18' WHERE id = '{_literal(d, debt.id)}'"
+    )
+    assert (await _run_once(factory, triangle.equivalent.id))["rows_inserted"] == 1
+    rows = await _result_rows(factory, triangle.equivalent.id)
+    assert len(rows) == 2 and rows[0].fingerprint != rows[1].fingerprint, rows
 
 
 @pytest.mark.asyncio
@@ -725,31 +700,28 @@ async def test_step5a_different_findings_under_the_same_status_insert(db_session
     from tests.conftest import TestingSessionLocal as factory
 
     triangle = await _seed_triangle(factory, trustlines=[])
-    try:
-        ab, bc = await _fixture_debts(factory, triangle, [("a", "b", "10"), ("b", "c", "4")])
-        await _baseline(factory, triangle.equivalent.id)
+    ab, bc = await _fixture_debts(factory, triangle, [("a", "b", "10"), ("b", "c", "4")])
+    await _baseline(factory, triangle.equivalent.id)
 
-        await _around_the_application(
-            factory, lambda d: f"UPDATE debts SET amount = '11' WHERE id = '{_literal(d, ab.id)}'"
-        )
-        await _run_once(factory, triangle.equivalent.id)
-        await _around_the_application(
-            factory, lambda d: f"UPDATE debts SET amount = '10' WHERE id = '{_literal(d, ab.id)}'"
-        )
-        await _around_the_application(
-            factory, lambda d: f"UPDATE debts SET amount = '5' WHERE id = '{_literal(d, bc.id)}'"
-        )
-        counts = await _run_once(factory, triangle.equivalent.id)
-        assert (counts[FAILED], counts["rows_inserted"]) == (1, 1), counts
+    await _around_the_application(
+        factory, lambda d: f"UPDATE debts SET amount = '11' WHERE id = '{_literal(d, ab.id)}'"
+    )
+    await _run_once(factory, triangle.equivalent.id)
+    await _around_the_application(
+        factory, lambda d: f"UPDATE debts SET amount = '10' WHERE id = '{_literal(d, ab.id)}'"
+    )
+    await _around_the_application(
+        factory, lambda d: f"UPDATE debts SET amount = '5' WHERE id = '{_literal(d, bc.id)}'"
+    )
+    counts = await _run_once(factory, triangle.equivalent.id)
+    assert (counts[FAILED], counts["rows_inserted"]) == (1, 1), counts
 
-        rows = await _result_rows(factory, triangle.equivalent.id)
-        assert [row.status for row in rows] == [FAILED, FAILED], rows
-        assert rows[0].fingerprint != rows[1].fingerprint, rows
-        latest = _latest(rows)
-        detail = json.loads(latest.detail) if isinstance(latest.detail, str) else latest.detail
-        assert detail["findings"][0]["debtor_id"] == str(triangle.b.id), detail
-    finally:
-        await _drop_triangle(factory, triangle)
+    rows = await _result_rows(factory, triangle.equivalent.id)
+    assert [row.status for row in rows] == [FAILED, FAILED], rows
+    assert rows[0].fingerprint != rows[1].fingerprint, rows
+    latest = _latest(rows)
+    detail = json.loads(latest.detail) if isinstance(latest.detail, str) else latest.detail
+    assert detail["findings"][0]["debtor_id"] == str(triangle.b.id), detail
 
 
 # ==============================================================================================
@@ -774,32 +746,29 @@ async def test_step5a_the_baseline_adopts_a_debt_the_journal_cannot_explain_and_
     from tests.conftest import TestingSessionLocal as factory
 
     triangle = await _seed_triangle(factory, trustlines=[("b", "a", "100")])
-    try:
-        adopted_id = uuid.uuid4()
-        await _around_the_application(
-            factory,
-            lambda d: (
-                "INSERT INTO debts (id, debtor_id, creditor_id, equivalent_id, amount, version) "
-                f"VALUES ('{_literal(d, adopted_id)}', '{_literal(d, triangle.a.id)}', "
-                f"'{_literal(d, triangle.b.id)}', '{_literal(d, triangle.equivalent.id)}', '7', 0)"
-            ),
-        )
-        await _fixture_debts(factory, triangle, [("b", "c", "4")])
+    adopted_id = uuid.uuid4()
+    await _around_the_application(
+        factory,
+        lambda d: (
+            "INSERT INTO debts (id, debtor_id, creditor_id, equivalent_id, amount, version) "
+            f"VALUES ('{_literal(d, adopted_id)}', '{_literal(d, triangle.a.id)}', "
+            f"'{_literal(d, triangle.b.id)}', '{_literal(d, triangle.equivalent.id)}', '7', 0)"
+        ),
+    )
+    await _fixture_debts(factory, triangle, [("b", "c", "4")])
 
-        taken = await _baseline(factory, triangle.equivalent.id)
-        assert (taken.offsets_recorded, taken.edges_seen) == (1, 2), taken
-        assert await _offsets(factory, triangle.equivalent.id) == [
-            (triangle.a.id, triangle.b.id, Decimal("7.00000000"))
-        ]
-        assert (await _verify(factory, triangle.equivalent.id)).status == PASSED
+    taken = await _baseline(factory, triangle.equivalent.id)
+    assert (taken.offsets_recorded, taken.edges_seen) == (1, 2), taken
+    assert await _offsets(factory, triangle.equivalent.id) == [
+        (triangle.a.id, triangle.b.id, Decimal("7.00000000"))
+    ]
+    assert (await _verify(factory, triangle.equivalent.id)).status == PASSED
 
-        await _pay(factory, triangle, ["a", "b"], "1")
-        assert (await _edges(factory, triangle))[("a", "b")] == Decimal("8.00000000")
-        outcome = await _verify(factory, triangle.equivalent.id)
-        assert outcome.status == PASSED, outcome
-        assert outcome.edges_checked == 2, outcome
-    finally:
-        await _drop_triangle(factory, triangle)
+    await _pay(factory, triangle, ["a", "b"], "1")
+    assert (await _edges(factory, triangle))[("a", "b")] == Decimal("8.00000000")
+    outcome = await _verify(factory, triangle.equivalent.id)
+    assert outcome.status == PASSED, outcome
+    assert outcome.edges_checked == 2, outcome
 
 
 @pytest.mark.asyncio
@@ -808,21 +777,18 @@ async def test_step5a_an_equivalent_has_exactly_one_baseline(db_session) -> None
     from tests.conftest import TestingSessionLocal as factory
 
     triangle = await _seed_triangle(factory, trustlines=[])
-    try:
+    await _baseline(factory, triangle.equivalent.id)
+    with pytest.raises(BaselineAlreadyTaken):
         await _baseline(factory, triangle.equivalent.id)
-        with pytest.raises(BaselineAlreadyTaken):
-            await _baseline(factory, triangle.equivalent.id)
-        async with factory() as session:
-            headers = (
-                await session.execute(
-                    select(func.count()).select_from(debt_reconciliation_baselines).where(
-                        debt_reconciliation_baselines.c.equivalent_id == triangle.equivalent.id
-                    )
+    async with factory() as session:
+        headers = (
+            await session.execute(
+                select(func.count()).select_from(debt_reconciliation_baselines).where(
+                    debt_reconciliation_baselines.c.equivalent_id == triangle.equivalent.id
                 )
-            ).scalar_one()
-        assert headers == 1
-    finally:
-        await _drop_triangle(factory, triangle)
+            )
+        ).scalar_one()
+    assert headers == 1
 
 
 @pytest.mark.asyncio
@@ -840,50 +806,46 @@ async def test_step5a_a_seed_or_fixture_write_after_the_baseline_is_refused(db_s
 
     baselined = await _seed_triangle(factory, trustlines=[])
     open_book = await _seed_triangle(factory, trustlines=[])
-    try:
-        await _fixture_debts(factory, baselined, [("a", "b", "10")])
-        await _baseline(factory, baselined.equivalent.id)
-        before = await _edges(factory, baselined)
-        entries_before = len(await _entries(factory, baselined.equivalent.id))
+    await _fixture_debts(factory, baselined, [("a", "b", "10")])
+    await _baseline(factory, baselined.equivalent.id)
+    before = await _edges(factory, baselined)
+    entries_before = len(await _entries(factory, baselined.equivalent.id))
 
-        async def _write(triangle) -> None:
-            late = Debt(
-                id=uuid.uuid4(),
-                debtor_id=triangle.b.id,
-                creditor_id=triangle.c.id,
-                equivalent_id=triangle.equivalent.id,
-                amount=Decimal("4"),
-                version=0,
-            )
-            async with factory() as session:
-                if kind == "TEST_FIXTURE":
-                    async with debt_fixture_setup(session, label="after-baseline"):
-                        session.add(late)
-                else:
-                    async with debt_operation(
-                        session,
-                        kind="SEED",
-                        identity=f"step5a-late-seed/{uuid.uuid4()}",
-                        intent={"probe": "after-baseline"},
-                        scope_equivalent_ids=None,
-                    ):
-                        session.add(late)
-                await session.commit()
-
-        with pytest.raises(DebtJournalError) as refused:
-            await _write(baselined)
-        assert refused.value.reason == Reason.UNVERIFIABLE_WRITER_AFTER_BASELINE, refused.value
-        assert await _edges(factory, baselined) == before, "the refused write is durable"
-        assert len(await _entries(factory, baselined.equivalent.id)) == entries_before
-        assert (await _verify(factory, baselined.equivalent.id)).status == PASSED
-
-        await _write(open_book)
-        assert await _edges(factory, open_book) == {("b", "c"): Decimal("4.00000000")}, (
-            "stand: the same write to an equivalent without a baseline did not commit"
+    async def _write(triangle) -> None:
+        late = Debt(
+            id=uuid.uuid4(),
+            debtor_id=triangle.b.id,
+            creditor_id=triangle.c.id,
+            equivalent_id=triangle.equivalent.id,
+            amount=Decimal("4"),
+            version=0,
         )
-    finally:
-        await _drop_triangle(factory, baselined)
-        await _drop_triangle(factory, open_book)
+        async with factory() as session:
+            if kind == "TEST_FIXTURE":
+                async with debt_fixture_setup(session, label="after-baseline"):
+                    session.add(late)
+            else:
+                async with debt_operation(
+                    session,
+                    kind="SEED",
+                    identity=f"step5a-late-seed/{uuid.uuid4()}",
+                    intent={"probe": "after-baseline"},
+                    scope_equivalent_ids=None,
+                ):
+                    session.add(late)
+            await session.commit()
+
+    with pytest.raises(DebtJournalError) as refused:
+        await _write(baselined)
+    assert refused.value.reason == Reason.UNVERIFIABLE_WRITER_AFTER_BASELINE, refused.value
+    assert await _edges(factory, baselined) == before, "the refused write is durable"
+    assert len(await _entries(factory, baselined.equivalent.id)) == entries_before
+    assert (await _verify(factory, baselined.equivalent.id)).status == PASSED
+
+    await _write(open_book)
+    assert await _edges(factory, open_book) == {("b", "c"): Decimal("4.00000000")}, (
+        "stand: the same write to an equivalent without a baseline did not commit"
+    )
 
 
 # ==============================================================================================
@@ -907,56 +869,53 @@ async def test_step5a_the_scheduled_result_is_its_own_row_and_never_enters_a_che
     from tests.conftest import TestingSessionLocal as factory
 
     triangle = await _seed_triangle(factory, trustlines=[("b", "a", "100")])
-    try:
-        (debt,) = await _fixture_debts(factory, triangle, [("a", "b", "10")])
-        await _baseline(factory, triangle.equivalent.id)
-        # A whole unit, not an atom: the atom's precision has its own control above, and this test is
-        # about where the result goes, so a precision mutation must not redden it.
-        await _around_the_application(
-            factory,
-            lambda d: f"UPDATE debts SET amount = '11' WHERE id = '{_literal(d, debt.id)}'",
+    (debt,) = await _fixture_debts(factory, triangle, [("a", "b", "10")])
+    await _baseline(factory, triangle.equivalent.id)
+    # A whole unit, not an atom: the atom's precision has its own control above, and this test is
+    # about where the result goes, so a precision mutation must not redden it.
+    await _around_the_application(
+        factory,
+        lambda d: f"UPDATE debts SET amount = '11' WHERE id = '{_literal(d, debt.id)}'",
+    )
+    async with factory() as session:
+        await session.execute(
+            update(Equivalent).where(Equivalent.id == triangle.equivalent.id).values(is_active=False)
         )
-        async with factory() as session:
+        await session.commit()
+        audit_before = (
+            await session.execute(select(func.count()).select_from(IntegrityAuditLog))
+        ).scalar_one()
+
+    # The participant-reachable checkpoint computation writes no result.
+    async with factory() as session:
+        await compute_integrity_checkpoint_for_equivalent(session, equivalent_id=triangle.equivalent.id)
+    assert await _results(factory, triangle.equivalent.id) == []
+
+    await _scheduled_run(monkeypatch, factory)
+
+    results = await _results(factory, triangle.equivalent.id)
+    assert [status for status, _ in results] == [FAILED], results
+    assert results[0][1]["criterion"] == CRITERION_A, results
+    assert results[0][1]["findings"][0]["kind"] == "edge_residual", results
+
+    async with factory() as session:
+        checkpoints = (
             await session.execute(
-                update(Equivalent).where(Equivalent.id == triangle.equivalent.id).values(is_active=False)
-            )
-            await session.commit()
-            audit_before = (
-                await session.execute(select(func.count()).select_from(IntegrityAuditLog))
-            ).scalar_one()
-
-        # The participant-reachable checkpoint computation writes no result.
-        async with factory() as session:
-            await compute_integrity_checkpoint_for_equivalent(session, equivalent_id=triangle.equivalent.id)
-        assert await _results(factory, triangle.equivalent.id) == []
-
-        await _scheduled_run(monkeypatch, factory)
-
-        results = await _results(factory, triangle.equivalent.id)
-        assert [status for status, _ in results] == [FAILED], results
-        assert results[0][1]["criterion"] == CRITERION_A, results
-        assert results[0][1]["findings"][0]["kind"] == "edge_residual", results
-
-        async with factory() as session:
-            checkpoints = (
-                await session.execute(
-                    select(IntegrityCheckpoint.invariants_status).where(
-                        IntegrityCheckpoint.equivalent_id == triangle.equivalent.id
-                    )
+                select(IntegrityCheckpoint.invariants_status).where(
+                    IntegrityCheckpoint.equivalent_id == triangle.equivalent.id
                 )
-            ).scalars().all()
-            audit_after = (
-                await session.execute(select(func.count()).select_from(IntegrityAuditLog))
-            ).scalar_one()
-        assert len(checkpoints) == 1, checkpoints
-        status = checkpoints[0]
-        assert set(status["checks"]) == CHECKPOINT_CHECKS, status["checks"]
-        assert status["passed"] is True and status["status"] == "healthy", status
-        assert status["alerts"] == [], status
-        assert "reconcil" not in json.dumps(status).lower(), status
-        assert audit_after == audit_before, "the scheduled reconciliation wrote an audit row"
-    finally:
-        await _drop_triangle(factory, triangle)
+            )
+        ).scalars().all()
+        audit_after = (
+            await session.execute(select(func.count()).select_from(IntegrityAuditLog))
+        ).scalar_one()
+    assert len(checkpoints) == 1, checkpoints
+    status = checkpoints[0]
+    assert set(status["checks"]) == CHECKPOINT_CHECKS, status["checks"]
+    assert status["passed"] is True and status["status"] == "healthy", status
+    assert status["alerts"] == [], status
+    assert "reconcil" not in json.dumps(status).lower(), status
+    assert audit_after == audit_before, "the scheduled reconciliation wrote an audit row"
 
 
 @pytest.mark.asyncio
@@ -979,47 +938,44 @@ async def test_step5a_c6_still_commits_verified_and_criterion_a_is_blind_to_it_u
     triangle = await _seed_triangle(
         factory, trustlines=[("b", "a", "100"), ("c", "b", "100"), ("c", "a", "100")]
     )
-    try:
-        await _baseline(factory, triangle.equivalent.id)
-        tx_id = await _prepare_payment(factory, triangle, ["a", "b", "c"], Decimal("5"))
-        _collapse_the_route(monkeypatch, triangle)
-        async with factory() as session:
-            await PaymentEngine(session).commit(tx_id)
+    await _baseline(factory, triangle.equivalent.id)
+    tx_id = await _prepare_payment(factory, triangle, ["a", "b", "c"], Decimal("5"))
+    _collapse_the_route(monkeypatch, triangle)
+    async with factory() as session:
+        await PaymentEngine(session).commit(tx_id)
 
-        assert await _edges(factory, triangle) == {("a", "c"): Decimal("5.00000000")}
-        assert await _tx_state(factory, tx_id) == "COMMITTED"
-        assert await _audit(factory, tx_id) == [True]
+    assert await _edges(factory, triangle) == {("a", "c"): Decimal("5.00000000")}
+    assert await _tx_state(factory, tx_id) == "COMMITTED"
+    assert await _audit(factory, tx_id) == [True]
 
-        await _scheduled_run(monkeypatch, factory)
-        results = await _results(factory, triangle.equivalent.id)
-        # STEP 5b: the same row now carries criterion (b), and (b) refutes C6. What this test keeps is the
-        # "(a) passes, (b) fails" counterprobe - no criterion (a) finding, and (b) findings present.
-        assert [s for s, _ in results] == [FAILED], results
-        kinds = {f["kind"] for f in results[0][1]["findings"]}
-        assert kinds and all(kind.startswith("b_") for kind in kinds), (
-            "criterion (a) on the C6 state was expected silent - the wrong edge is journalled faithfully - "
-            f"and criterion (b) to refute it: {kinds}"
-        )
+    await _scheduled_run(monkeypatch, factory)
+    results = await _results(factory, triangle.equivalent.id)
+    # STEP 5b: the same row now carries criterion (b), and (b) refutes C6. What this test keeps is the
+    # "(a) passes, (b) fails" counterprobe - no criterion (a) finding, and (b) findings present.
+    assert [s for s, _ in results] == [FAILED], results
+    kinds = {f["kind"] for f in results[0][1]["findings"]}
+    assert kinds and all(kind.startswith("b_") for kind in kinds), (
+        "criterion (a) on the C6 state was expected silent - the wrong edge is journalled faithfully - "
+        f"and criterion (b) to refute it: {kinds}"
+    )
 
-        async with factory() as session:
-            debt_id = (
-                await session.execute(
-                    select(Debt.id).where(
-                        Debt.equivalent_id == triangle.equivalent.id,
-                        Debt.debtor_id == triangle.a.id,
-                        Debt.creditor_id == triangle.c.id,
-                    )
+    async with factory() as session:
+        debt_id = (
+            await session.execute(
+                select(Debt.id).where(
+                    Debt.equivalent_id == triangle.equivalent.id,
+                    Debt.debtor_id == triangle.a.id,
+                    Debt.creditor_id == triangle.c.id,
                 )
-            ).scalar_one()
-        await _around_the_application(
-            factory,
-            lambda d: f"UPDATE debts SET amount = '6' WHERE id = '{_literal(d, debt_id)}'",
-        )
-        await _scheduled_run(monkeypatch, factory)
-        rows = await _results(factory, triangle.equivalent.id)
-        # Two FAILED rows since step 5b: the first carries only (b), the transition adds (a)'s residual.
-        assert sorted(s for s, _ in rows) == [FAILED, FAILED], rows
-        assert any(f["kind"] == "edge_residual" for _, detail in rows for f in detail["findings"]), rows
-        assert await _audit(factory, tx_id) == [True], "the scheduled run touched the payment's audit row"
-    finally:
-        await _drop_triangle(factory, triangle)
+            )
+        ).scalar_one()
+    await _around_the_application(
+        factory,
+        lambda d: f"UPDATE debts SET amount = '6' WHERE id = '{_literal(d, debt_id)}'",
+    )
+    await _scheduled_run(monkeypatch, factory)
+    rows = await _results(factory, triangle.equivalent.id)
+    # Two FAILED rows since step 5b: the first carries only (b), the transition adds (a)'s residual.
+    assert sorted(s for s, _ in rows) == [FAILED, FAILED], rows
+    assert any(f["kind"] == "edge_residual" for _, detail in rows for f in detail["findings"]), rows
+    assert await _audit(factory, tx_id) == [True], "the scheduled run touched the payment's audit row"

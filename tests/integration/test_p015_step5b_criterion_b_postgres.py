@@ -18,7 +18,9 @@ WHAT THIS TIER ADDS over `tests/unit/test_p015_step5b_criterion_b.py`:
 * THE PLACEMENT against the advisory locks, which SQLite does not have.
 * ASYNCPG spellings for every SQLite control of criterion (b) that does not need the inject stand.
 
-Every test purges what it created.
+Every test that commits does so on a disposable clone of the migrated template (`committed_database`),
+and the clone's drop is the only disposal of what it wrote (018 B0b; until then each test deleted its
+rows by id, journal included). The construction-path test builds its own scratch databases.
 """
 
 from __future__ import annotations
@@ -42,8 +44,8 @@ from tests.debt_setup import debt_fixture_setup
 from tests.integration.test_p015_step5a_reconciliation_postgres import _sqlstates
 from tests.integration.test_p015_t1544_operator_stop_races_postgres import _advisory_waiter_exists
 from tests.migrated_schema import run_alembic_upgrade_head, scratch_databases
+from tests.tier_on_a_clone import tier_on_a_clone  # noqa: F401 - fixture, requested by `factory`
 from tests.unit.test_p015_b4_wrong_writer_is_recorded_faithfully import (
-    _drop_triangle,
     _edges,
     _prepare_payment,
     _seed_triangle,
@@ -64,16 +66,15 @@ def _postgres_url() -> str:
 
 
 @pytest_asyncio.fixture
-async def factory():
-    from tests.conftest import TestingSessionLocal, _ensure_schema_initialized
+async def factory(tier_on_a_clone):
+    """The clone's sessionmaker, with `tests.conftest.TestingSessionLocal` rebound to the same clone:
+    shared helpers that observe through that name (`pg_locks ... current_database()`) must look at the
+    database the test writes to (018 B0b)."""
+    yield tier_on_a_clone.sessionmaker
 
-    _postgres_url()
-    await _ensure_schema_initialized()
-    yield TestingSessionLocal
 
-
-def _serializable_sessions():
-    engine = create_async_engine(_postgres_url(), isolation_level="SERIALIZABLE", poolclass=NullPool)
+def _serializable_sessions(url: str):
+    engine = create_async_engine(url, isolation_level="SERIALIZABLE", poolclass=NullPool)
     return engine, async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
 
 
@@ -179,41 +180,39 @@ async def test_step5b_p_both_construction_paths_widen_only_the_intent_version_an
 
 
 @pytest.mark.asyncio
-async def test_step5b_p_the_prestate_read_follows_every_advisory_lock_and_the_for_share(factory) -> None:
+async def test_step5b_p_the_prestate_read_follows_every_advisory_lock_and_the_for_share(
+    factory, committed_database
+) -> None:
     """On PostgreSQL the anchors are real locks: every `pg_advisory_xact_lock` of the commit, then the
     operator-stop `FOR SHARE`, then EXACTLY ONE statement - the batched read of `debts` - then the envelope.
 
     MUTATION: move `_read_payment_prestate` above `_acquire_segment_advisory_lock_keys` - it now precedes
     an advisory lock and nothing sits between the stop and the envelope, red.
     """
-    from tests.conftest import engine
-
+    engine = committed_database.engine
     triangle = await _seed_triangle(factory, trustlines=[("b", "a", "100"), ("c", "b", "100")])
     statements: list[str] = []
 
     def _record(conn, cursor, statement, parameters, context, executemany) -> None:
         statements.append(" ".join(str(statement).split()).upper())
 
+    tx_id = await _prepare_payment(factory, triangle, ["a", "b", "c"], Decimal("5"))
+    event.listen(engine.sync_engine, "before_cursor_execute", _record)
     try:
-        tx_id = await _prepare_payment(factory, triangle, ["a", "b", "c"], Decimal("5"))
-        event.listen(engine.sync_engine, "before_cursor_execute", _record)
-        try:
-            async with factory() as session:
-                await PaymentEngine(session).commit(tx_id)
-        finally:
-            event.remove(engine.sync_engine, "before_cursor_execute", _record)
-        assert await _tx_state(factory, tx_id) == "COMMITTED"
-
-        locks = [i for i, s in enumerate(statements) if "PG_ADVISORY_XACT_LOCK" in s]
-        stops = [i for i, s in enumerate(statements) if s.startswith("SELECT EQUIVALENTS.CODE, EQUIVALENTS.IS_ACTIVE")]
-        envelopes = [i for i, s in enumerate(statements) if s.startswith("INSERT INTO DEBT_OPERATIONS")]
-        assert locks and len(stops) == 1 and len(envelopes) == 1, "\n".join(statements)
-        assert "FOR SHARE" in statements[stops[0]], statements[stops[0]]
-        assert max(locks) < stops[0] < envelopes[0], (locks, stops, envelopes)
-        between = statements[stops[0] + 1 : envelopes[0]]
-        assert len(between) == 1 and between[0].startswith("SELECT") and " FROM DEBTS " in f"{between[0]} ", between
+        async with factory() as session:
+            await PaymentEngine(session).commit(tx_id)
     finally:
-        await _drop_triangle(factory, triangle)
+        event.remove(engine.sync_engine, "before_cursor_execute", _record)
+    assert await _tx_state(factory, tx_id) == "COMMITTED"
+
+    locks = [i for i, s in enumerate(statements) if "PG_ADVISORY_XACT_LOCK" in s]
+    stops = [i for i, s in enumerate(statements) if s.startswith("SELECT EQUIVALENTS.CODE, EQUIVALENTS.IS_ACTIVE")]
+    envelopes = [i for i, s in enumerate(statements) if s.startswith("INSERT INTO DEBT_OPERATIONS")]
+    assert locks and len(stops) == 1 and len(envelopes) == 1, "\n".join(statements)
+    assert "FOR SHARE" in statements[stops[0]], statements[stops[0]]
+    assert max(locks) < stops[0] < envelopes[0], (locks, stops, envelopes)
+    between = statements[stops[0] + 1 : envelopes[0]]
+    assert len(between) == 1 and between[0].startswith("SELECT") and " FROM DEBTS " in f"{between[0]} ", between
 
 
 # =================================================================================================
@@ -282,7 +281,7 @@ async def _race_a_writer_into_the_prestate_window(factory, monkeypatch, payment_
 
 @pytest.mark.asyncio
 async def test_step5b_p_at_serializable_a_writer_outside_the_owner_lock_cannot_make_the_record_disagree(
-    factory, monkeypatch
+    factory, committed_database, monkeypatch
 ) -> None:
     """The application's isolation. The payment read B -> A = 3 and paused; a fixture moved it to 4 and
     committed. MEASURED: the commit's own update of that row fails with 40001, the unit of work retries,
@@ -292,7 +291,7 @@ async def test_step5b_p_at_serializable_a_writer_outside_the_owner_lock_cannot_m
     retry applies to 4 what the record says was 3, criterion (b) FAILS, red.
     """
 
-    engine, sessions = _serializable_sessions()
+    engine, sessions = _serializable_sessions(committed_database.url)
     seen = None
     try:
         seen = await _race_a_writer_into_the_prestate_window(factory, monkeypatch, sessions)
@@ -305,13 +304,11 @@ async def test_step5b_p_at_serializable_a_writer_outside_the_owner_lock_cannot_m
         assert unit._b_findings(seen["outcome"]) == [], seen["outcome"]
     finally:
         await engine.dispose()
-        if seen is not None:
-            await _drop_triangle(factory, seen["triangle"])
 
 
 @pytest.mark.asyncio
 async def test_step5b_p_stand_control_at_read_committed_the_same_race_does_make_the_record_disagree(
-    factory, monkeypatch
+    factory, committed_database, monkeypatch
 ) -> None:
     """THE METER - A DIAGNOSTIC COUNTER-PROBE AT READ COMMITTED, which the application never runs at. The same
     race with the payment on an engine that ASKS for READ COMMITTED itself: no 40001, one read, the payment
@@ -327,7 +324,9 @@ async def test_step5b_p_stand_control_at_read_committed_the_same_race_does_make_
     clearing, inject); SEED and TEST_FIXTURE do not, and are refused after the baseline.
     """
 
-    engine = create_async_engine(_postgres_url(), isolation_level="READ COMMITTED", poolclass=NullPool)
+    engine = create_async_engine(
+        committed_database.url, isolation_level="READ COMMITTED", poolclass=NullPool
+    )
     read_committed = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
     seen = None
     try:
@@ -342,8 +341,6 @@ async def test_step5b_p_stand_control_at_read_committed_the_same_race_does_make_
         assert ("b_prestate_mismatch", str(seen["triangle"].b.id), str(seen["triangle"].a.id)) in kinds, kinds
     finally:
         await engine.dispose()
-        if seen is not None:
-            await _drop_triangle(factory, seen["triangle"])
 
 
 @pytest.mark.asyncio
@@ -410,7 +407,6 @@ async def test_step5b_p_an_application_writer_waits_on_the_owner_lock_through_th
         assert unit._coverage(outcome)["full_recomputation"] == {"CLEARING": 1, "PAYMENT": 1}, outcome.detail()
     finally:
         monkeypatch.undo()
-        await _drop_triangle(factory, triangle)
 
 
 # =================================================================================================
@@ -463,7 +459,9 @@ async def test_step5b_p_a_b_finding_is_stored_in_the_same_row_on_asyncpg(factory
 
 
 @pytest.mark.asyncio
-async def test_step5b_p_an_unwidened_version_check_refuses_the_payment_and_the_service_aborts_it(factory) -> None:
+async def test_step5b_p_an_unwidened_version_check_refuses_the_payment_and_the_service_aborts_it(
+    factory, committed_database
+) -> None:
     """RULE: a refusal is followed through its caller. The one refusal step 5b can add is the database's -
     a version-2 envelope against a CHECK still at `IN (1)` (code deployed without migration 027). Here the
     CHECK is narrowed back (`NOT VALID`, so rows already stored do not block it) and a real payment goes
@@ -480,14 +478,14 @@ async def test_step5b_p_an_unwidened_version_check_refuses_the_payment_and_the_s
     from app.utils.exceptions import GeoException
     from tests.integration.test_p015_p1_money_replay_postgres import (
         _OPENING,
-        _cleanup,
         _debts,
+        _forget_the_route_cache,
         _prepare_locks,
         _seed,
         _transactions,
     )
 
-    engine, sessions = _serializable_sessions()
+    engine, sessions = _serializable_sessions(committed_database.url)
     world = await _seed(sessions)
     narrowed = False
     try:
@@ -544,5 +542,5 @@ async def test_step5b_p_an_unwidened_version_check_refuses_the_payment_and_the_s
                     )
                 )
                 await session.commit()
-        await _cleanup(sessions, world)
+        _forget_the_route_cache(world)
         await engine.dispose()

@@ -34,9 +34,11 @@ THE TWO CRITERIA, unchanged from the SQLite module and from design v2 §9 `C5`:
 
 THE STAND. Its own engine with `isolation_level="SERIALIZABLE"` and a real pool, never the
 `db_session` fixture, whose outer transaction would hide the very commit boundaries these
-counterexamples are about. `geov0_test_ci` is SHARED with other sessions, so every test cleans up
-in a `finally` scoped to the ids it created, and an autouse fixture asserts afterwards that they
-are gone.
+counterexamples are about. Every test runs on a disposable clone of the migrated template
+(`committed_database`), and the clone's drop is the only disposal of what it committed (018 B0b).
+Until B0b the tier was shared, each test deleted its rows by id - journal included - and an autouse
+fixture asserted they were gone; on a clone that check would read an empty tier and pass vacuously,
+so it went with the cleanup.
 
 MARKER, HISTORICAL. This module carried `b4_counterexample` alongside `postgres` and was deselected
 from every tier while the debt journal did not exist. Step 4 slice C built it and REMOVED THE
@@ -53,7 +55,7 @@ from decimal import Decimal
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import delete, event, func, select
+from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.clearing.service import ClearingService
@@ -65,7 +67,7 @@ from app.db.models.participant import Participant
 from app.db.models.prepare_lock import PrepareLock
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
-from tests.debt_setup import debt_fixture_setup, purge_test_ledger
+from tests.debt_setup import debt_fixture_setup
 from tests.p015_b4_support import ENTRIES_TABLE, OPERATIONS_TABLE, missing_journal_tables, stored_rows
 
 #: One scale-8 atom. The clearing half of `C6` is wrong by exactly this much on every edge.
@@ -78,7 +80,7 @@ FULL_SIZE = Decimal("999999999999.99999999")
 
 
 @pytest_asyncio.fixture
-async def serializable_factory():
+async def serializable_factory(committed_database):
     """A sessionmaker over this module's own SERIALIZABLE engine with a real pool.
 
     Never `db_session`: that fixture wraps each PostgreSQL test in an outer transaction that is
@@ -86,11 +88,8 @@ async def serializable_factory():
     release and "the wrong state is COMMITTED and durable" - the whole point of `C6` - could not be
     observed at all.
     """
-    from tests.conftest import TEST_DATABASE_URL, _ensure_schema_initialized
-
-    await _ensure_schema_initialized()
     engine = create_async_engine(
-        TEST_DATABASE_URL,
+        committed_database.url,
         pool_size=4,
         max_overflow=0,
         pool_timeout=15,
@@ -122,12 +121,6 @@ class _Triangle:
 
     def name(self, participant_id) -> str:
         return self.by_id.get(participant_id, str(participant_id))
-
-
-#: Every triangle THIS PROCESS seeded. The leak check after each test is scoped to these ids and
-#: never to the `B4C6` prefix: `geov0_test_ci` is shared, and a check that read the prefix would be
-#: asserting about a neighbouring session's rows.
-_SEEDED: list[_Triangle] = []
 
 
 async def _seed_triangle(factory, *, trustlines: list[tuple[str, str, Decimal]]) -> _Triangle:
@@ -164,103 +157,7 @@ async def _seed_triangle(factory, *, trustlines: list[tuple[str, str, Decimal]])
                 )
             )
         await session.commit()
-    triangle = _Triangle(equivalent, people)
-    _SEEDED.append(triangle)
-    return triangle
-
-
-async def _drop_triangle(factory, triangle: _Triangle) -> None:
-    """Remove exactly what this module created, by id, in foreign-key order.
-
-    `transactions.initiator_id` is RESTRICT (`app/db/models/transaction.py:13`) and
-    `prepare_locks.tx_id` references `transactions`, so both go before the participants;
-    `debts.equivalent_id` is RESTRICT since T1524, so the debts go before the equivalent.
-    `debts.debtor_id` is still CASCADE, so deleting participants first WOULD take the debts with
-    them silently - exactly the removal T1524 exists to make impossible - and this teardown
-    therefore never leans on a cascade to do its work.
-    """
-    async with factory() as session:
-        # Both kinds are found by initiator: a CLEARING transaction's `initiator_id` is one of the
-        # cycle's own participants (`app/core/clearing/service.py:1993`), so this one query covers
-        # the payments this module prepared and the clearings it ran.
-        tx_ids = list(
-            (
-                await session.execute(
-                    select(Transaction.tx_id).where(
-                        Transaction.initiator_id.in_(triangle.participant_ids)
-                    )
-                )
-            ).scalars().all()
-        )
-        # The debts and the journal go through the driver, and BEFORE the transactions: once the
-        # journal is armed, `session.execute(delete(Debt))` is Core DML the write guard refuses, and
-        # `debt_operations.tx_id` is a RESTRICT reference to `transactions.tx_id`, so an envelope
-        # still standing would block the delete above it. See `tests/debt_setup.purge_test_ledger`.
-        await purge_test_ledger(
-            session, equivalent_ids=[triangle.equivalent_id], tx_ids=tx_ids
-        )
-        if tx_ids:
-            await session.execute(delete(PrepareLock).where(PrepareLock.tx_id.in_(tx_ids)))
-            await session.execute(
-                delete(IntegrityAuditLog).where(IntegrityAuditLog.tx_id.in_(tx_ids))
-            )
-            await session.execute(delete(Transaction).where(Transaction.tx_id.in_(tx_ids)))
-        await session.execute(
-            delete(IntegrityAuditLog).where(
-                IntegrityAuditLog.equivalent_code == triangle.equivalent_code
-            )
-        )
-        await session.execute(
-            delete(TrustLine).where(TrustLine.equivalent_id == triangle.equivalent_id)
-        )
-        await session.execute(
-            delete(Participant).where(Participant.id.in_(triangle.participant_ids))
-        )
-        await session.execute(delete(Equivalent).where(Equivalent.id == triangle.equivalent_id))
-        await session.commit()
-
-
-@pytest_asyncio.fixture(autouse=True)
-async def every_seeded_row_is_gone_when_the_test_ends():
-    """The CHECK, not the cleanup - the cleanup is each test's own `finally`.
-
-    A `finally` per test is only as good as the next author remembering to write one, so this
-    asserts the outcome instead of trusting the habit. This session leaked three rows a run from a
-    module that had no such check, which is why it exists here from the first commit rather than
-    after the leak.
-
-    It reads through `TestingSessionLocal` rather than this module's own engine, because that
-    engine's fixture may already have been disposed by the time the teardown runs.
-    """
-    yield
-
-    if not _SEEDED:
-        return
-    from tests.conftest import TestingSessionLocal
-
-    equivalent_ids = [triangle.equivalent_id for triangle in _SEEDED]
-    participant_ids = [pid for triangle in _SEEDED for pid in triangle.participant_ids]
-    async with TestingSessionLocal() as session:
-        debts = await session.scalar(
-            select(func.count()).select_from(Debt).where(Debt.equivalent_id.in_(equivalent_ids))
-        )
-        equivalents = await session.scalar(
-            select(func.count()).select_from(Equivalent).where(Equivalent.id.in_(equivalent_ids))
-        )
-        participants = await session.scalar(
-            select(func.count()).select_from(Participant).where(Participant.id.in_(participant_ids))
-        )
-        transactions = await session.scalar(
-            select(func.count())
-            .select_from(Transaction)
-            .where(Transaction.initiator_id.in_(participant_ids))
-        )
-    assert (debts, equivalents, participants, transactions) == (0, 0, 0, 0), (
-        f"this module left rows behind in a SHARED database: {debts} debt(s), {equivalents} "
-        f"equivalent(s), {participants} participant(s), {transactions} transaction(s) of the "
-        f"{len(_SEEDED)} triangle(s) it seeded. Every test that calls `_seed_triangle` must call "
-        f"`_drop_triangle` from a `finally`."
-    )
+    return _Triangle(equivalent, people)
 
 
 async def _edges(factory, triangle: _Triangle) -> dict[tuple[str, str], int]:
@@ -689,60 +586,57 @@ async def test_c5_p_the_journal_of_an_honest_payment_is_exact_at_full_money_size
     forward = FULL_SIZE - 10 * ATOM
     reverse = forward - 2 * ATOM
     payment = forward - ATOM
-    try:
-        async with serializable_factory() as session:
-            async with debt_fixture_setup(session, label="mutual-edges"):
-                session.add_all(
-                    [
-                        Debt(id=uuid.uuid4(), debtor_id=triangle.a.id, creditor_id=triangle.b.id,
-                             equivalent_id=triangle.equivalent_id, amount=forward, version=0),
-                        Debt(id=uuid.uuid4(), debtor_id=triangle.b.id, creditor_id=triangle.a.id,
-                             equivalent_id=triangle.equivalent_id, amount=reverse, version=0),
-                    ]
-                )
-            await session.commit()
+    async with serializable_factory() as session:
+        async with debt_fixture_setup(session, label="mutual-edges"):
+            session.add_all(
+                [
+                    Debt(id=uuid.uuid4(), debtor_id=triangle.a.id, creditor_id=triangle.b.id,
+                         equivalent_id=triangle.equivalent_id, amount=forward, version=0),
+                    Debt(id=uuid.uuid4(), debtor_id=triangle.b.id, creditor_id=triangle.a.id,
+                         equivalent_id=triangle.equivalent_id, amount=reverse, version=0),
+                ]
+            )
+        await session.commit()
 
-        before = await _edges(serializable_factory, triangle)
-        tx_id = await _prepare_payment(serializable_factory, triangle, ["a", "b"], payment)
-        flows = await _intent_flows(serializable_factory, triangle, tx_id)
+    before = await _edges(serializable_factory, triangle)
+    tx_id = await _prepare_payment(serializable_factory, triangle, ["a", "b"], payment)
+    flows = await _intent_flows(serializable_factory, triangle, tx_id)
 
-        async with serializable_factory() as session:
-            await PaymentEngine(session).commit(tx_id)
+    async with serializable_factory() as session:
+        await PaymentEngine(session).commit(tx_id)
 
-        after = await _edges(serializable_factory, triangle)
+    after = await _edges(serializable_factory, triangle)
 
-        # NON-VACUITY: the stand really holds the values it claims, to the atom, and the payment
-        # really committed. `before` is read back from PostgreSQL, not assumed from the literals.
-        assert before == {
-            ("a", "b"): _atoms(forward),
-            ("b", "a"): _atoms(reverse),
-        }, f"stand: PostgreSQL did not store the seeded amounts exactly: {before}"
-        assert await _tx_state(serializable_factory, tx_id) == "COMMITTED"
-        assert flows == [("a", "b", _atoms(payment))], flows
+    # NON-VACUITY: the stand really holds the values it claims, to the atom, and the payment
+    # really committed. `before` is read back from PostgreSQL, not assumed from the literals.
+    assert before == {
+        ("a", "b"): _atoms(forward),
+        ("b", "a"): _atoms(reverse),
+    }, f"stand: PostgreSQL did not store the seeded amounts exactly: {before}"
+    assert await _tx_state(serializable_factory, tx_id) == "COMMITTED"
+    assert flows == [("a", "b", _atoms(payment))], flows
 
-        # CRITERION (b), computable today.
-        implied = _payment_implied_by_intent(before, flows)
-        assert implied == after, (
-            f"criterion (b) fails on an HONEST payment: the intent {flows} implies {implied} and "
-            f"the database holds {after}, in atoms. Either the independent algebra in this module "
-            f"is not the rule the engine implements, or the engine has stopped implementing it."
-        )
-        # And the arithmetic is stated outright, so a silent change on BOTH sides cannot hide.
-        assert after == {("a", "b"): _atoms(forward) + 1}, (
-            f"stand: the payment did not consume the reverse debt exactly and leave one atom on "
-            f"the forward edge: {after}"
-        )
+    # CRITERION (b), computable today.
+    implied = _payment_implied_by_intent(before, flows)
+    assert implied == after, (
+        f"criterion (b) fails on an HONEST payment: the intent {flows} implies {implied} and "
+        f"the database holds {after}, in atoms. Either the independent algebra in this module "
+        f"is not the rule the engine implements, or the engine has stopped implementing it."
+    )
+    # And the arithmetic is stated outright, so a silent change on BOTH sides cannot hide.
+    assert after == {("a", "b"): _atoms(forward) + 1}, (
+        f"stand: the payment did not consume the reverse debt exactly and leave one atom on "
+        f"the forward edge: {after}"
+    )
 
-        # CRITERION (a). RED TODAY.
-        entries = await _entries_for_tx(serializable_factory, tx_id)
-        assert entries is not None, missing_journal_tables(entries, ENTRIES_TABLE)
-        totals = await _journal_totals_per_edge(serializable_factory, triangle, tx_id)
-        assert totals == _observed_change(before, after), (
-            f"criterion (a) fails in atoms: the journal's deltas per edge are {totals} and the "
-            f"change the payment made is {_observed_change(before, after)}"
-        )
-    finally:
-        await _drop_triangle(serializable_factory, triangle)
+    # CRITERION (a). RED TODAY.
+    entries = await _entries_for_tx(serializable_factory, tx_id)
+    assert entries is not None, missing_journal_tables(entries, ENTRIES_TABLE)
+    totals = await _journal_totals_per_edge(serializable_factory, triangle, tx_id)
+    assert totals == _observed_change(before, after), (
+        f"criterion (a) fails in atoms: the journal's deltas per edge are {totals} and the "
+        f"change the payment made is {_observed_change(before, after)}"
+    )
 
 
 # ==============================================================================================
@@ -803,100 +697,97 @@ async def test_c6_p_a_payment_that_writes_the_wrong_edge_passes_every_barrier_to
             ("c", "a", FULL_SIZE),
         ],
     )
-    try:
-        before = await _edges(serializable_factory, triangle)
-        tx_id = await _prepare_payment(serializable_factory, triangle, ["a", "b", "c"], FULL_SIZE)
-        flows = await _intent_flows(serializable_factory, triangle, tx_id)
+    before = await _edges(serializable_factory, triangle)
+    tx_id = await _prepare_payment(serializable_factory, triangle, ["a", "b", "c"], FULL_SIZE)
+    flows = await _intent_flows(serializable_factory, triangle, tx_id)
 
-        calls = _collapse_the_route(monkeypatch, triangle)
-        async with serializable_factory() as session:
-            await PaymentEngine(session).commit(tx_id)
+    calls = _collapse_the_route(monkeypatch, triangle)
+    async with serializable_factory() as session:
+        await PaymentEngine(session).commit(tx_id)
 
-        after = await _edges(serializable_factory, triangle)
-        audit = await _audit(serializable_factory, tx_id)
-        state = await _tx_state(serializable_factory, tx_id)
+    after = await _edges(serializable_factory, triangle)
+    audit = await _audit(serializable_factory, tx_id)
+    state = await _tx_state(serializable_factory, tx_id)
 
-        # NON-VACUITY: the wrong writer really ran, and `A -> C` was written exactly once.
-        assert sorted(calls) == [("a", "b"), ("b", "c")], (
-            f"stand: the engine did not apply the two declared segments exactly once each: {calls}"
-        )
-        assert before == {}, f"stand: the equivalent was not empty before the payment: {before}"
+    # NON-VACUITY: the wrong writer really ran, and `A -> C` was written exactly once.
+    assert sorted(calls) == [("a", "b"), ("b", "c")], (
+        f"stand: the engine did not apply the two declared segments exactly once each: {calls}"
+    )
+    assert before == {}, f"stand: the equivalent was not empty before the payment: {before}"
 
-        # THE COMMITTED WRONG STATE, read on a session that is not the writer's, in atoms.
-        assert after == {("a", "c"): _atoms(FULL_SIZE)}, (
-            f"stand: the collapsed route did not produce a single A -> C obligation: {after}"
-        )
-        assert state == "COMMITTED", f"stand: the wrong payment did not commit: {state}"
-        assert audit == [True], (
-            f"stand: the integrity audit did not record this payment as verified ({audit}), so the "
-            f"counterexample is no longer about a writer that passes every barrier. If this is a "
-            f"real improvement, the barrier that caught it must be named and C6 rewritten around it."
-        )
+    # THE COMMITTED WRONG STATE, read on a session that is not the writer's, in atoms.
+    assert after == {("a", "c"): _atoms(FULL_SIZE)}, (
+        f"stand: the collapsed route did not produce a single A -> C obligation: {after}"
+    )
+    assert state == "COMMITTED", f"stand: the wrong payment did not commit: {state}"
+    assert audit == [True], (
+        f"stand: the integrity audit did not record this payment as verified ({audit}), so the "
+        f"counterexample is no longer about a writer that passes every barrier. If this is a "
+        f"real improvement, the barrier that caught it must be named and C6 rewritten around it."
+    )
 
-        # THE STAND, and it needs no journal: what the payment DECLARED - captured from the prepare
-        # locks before the commit deleted them - disagrees with what it did. Asserted FIRST so this
-        # test can never pass having measured neither criterion.
-        declared = _payment_implied_by_intent(before, flows)
-        assert flows == [
-            ("a", "b", _atoms(FULL_SIZE)),
-            ("b", "c", _atoms(FULL_SIZE)),
-        ], flows
-        assert declared == {
-            ("a", "b"): _atoms(FULL_SIZE),
-            ("b", "c"): _atoms(FULL_SIZE),
-        }, declared
-        assert declared != after, (
-            "the declared route and the committed state agree, so this stand cannot tell a wrong "
-            "writer from an honest one and nothing below it means anything"
-        )
+    # THE STAND, and it needs no journal: what the payment DECLARED - captured from the prepare
+    # locks before the commit deleted them - disagrees with what it did. Asserted FIRST so this
+    # test can never pass having measured neither criterion.
+    declared = _payment_implied_by_intent(before, flows)
+    assert flows == [
+        ("a", "b", _atoms(FULL_SIZE)),
+        ("b", "c", _atoms(FULL_SIZE)),
+    ], flows
+    assert declared == {
+        ("a", "b"): _atoms(FULL_SIZE),
+        ("b", "c"): _atoms(FULL_SIZE),
+    }, declared
+    assert declared != after, (
+        "the declared route and the committed state agree, so this stand cannot tell a wrong "
+        "writer from an honest one and nothing below it means anything"
+    )
 
-        # CRITERION (b), REPLAYED FROM THE INTENT AS THE ENVELOPE STORED IT.
-        envelopes = await _envelope_intents_for_tx(serializable_factory, tx_id)
-        assert envelopes is not None, (
-            "a payment routed A -> B -> C committed a single A -> C obligation and was recorded as "
-            "verified, and there is no envelope to read its declared intent out of. "
-            + missing_journal_tables(envelopes, OPERATIONS_TABLE)
-        )
-        assert len(envelopes) == 1 and envelopes[0]["kind"] == "PAYMENT", (
-            f"the committed payment left {envelopes} instead of exactly one PAYMENT envelope"
-        )
-        assert envelopes[0]["state"] == "COMPLETED", envelopes
-        recorded = _recorded_payment_flows(triangle, envelopes[0]["intent"])
-        assert recorded == flows, (
-            f"the envelope's intent is not what the payment declared. Stored, in atoms: {recorded}. "
-            f"The prepare locks, immediately before the commit deleted them: {flows}. An intent that "
-            f"is the writer's own result cannot disagree with the result, and being able to disagree "
-            f"is the entire reason it is recorded (design v2 §7)."
-        )
-        implied = _payment_implied_by_intent(before, recorded)
-        assert implied == declared, (
-            f"replaying the STORED intent gives {implied} while the prepared flows give {declared}; "
-            f"criterion (b) is then not a check on the envelope at all"
-        )
-        assert implied != after, (
-            "criterion (b) did not refute the collapsed route: the intent the envelope recorded "
-            "implies exactly the state the wrong writer produced"
-        )
+    # CRITERION (b), REPLAYED FROM THE INTENT AS THE ENVELOPE STORED IT.
+    envelopes = await _envelope_intents_for_tx(serializable_factory, tx_id)
+    assert envelopes is not None, (
+        "a payment routed A -> B -> C committed a single A -> C obligation and was recorded as "
+        "verified, and there is no envelope to read its declared intent out of. "
+        + missing_journal_tables(envelopes, OPERATIONS_TABLE)
+    )
+    assert len(envelopes) == 1 and envelopes[0]["kind"] == "PAYMENT", (
+        f"the committed payment left {envelopes} instead of exactly one PAYMENT envelope"
+    )
+    assert envelopes[0]["state"] == "COMPLETED", envelopes
+    recorded = _recorded_payment_flows(triangle, envelopes[0]["intent"])
+    assert recorded == flows, (
+        f"the envelope's intent is not what the payment declared. Stored, in atoms: {recorded}. "
+        f"The prepare locks, immediately before the commit deleted them: {flows}. An intent that "
+        f"is the writer's own result cannot disagree with the result, and being able to disagree "
+        f"is the entire reason it is recorded (design v2 §7)."
+    )
+    implied = _payment_implied_by_intent(before, recorded)
+    assert implied == declared, (
+        f"replaying the STORED intent gives {implied} while the prepared flows give {declared}; "
+        f"criterion (b) is then not a check on the envelope at all"
+    )
+    assert implied != after, (
+        "criterion (b) did not refute the collapsed route: the intent the envelope recorded "
+        "implies exactly the state the wrong writer produced"
+    )
 
-        # CRITERION (a). This is the counterexample.
-        entries = await _entries_for_tx(serializable_factory, tx_id)
-        assert entries is not None, (
-            f"on PostgreSQL, with the equivalent owner lock and both segment locks held under "
-            f"SERIALIZABLE, a payment routed A -> B -> C committed a single A -> C obligation of "
-            f"{FULL_SIZE}, was recorded as verified (verification_passed={audit}), left the "
-            f"transaction {state} and passed check_payment_delta, check_trust_limits and "
-            f"check_debt_symmetry - because the total is right and only the ROUTE is a lie. The "
-            f"database holds {after} in atoms; the payment declared {implied}. "
-            + missing_journal_tables(entries, ENTRIES_TABLE)
-        )
-        totals = await _journal_totals_per_edge(serializable_factory, triangle, tx_id)
-        assert totals == _observed_change(before, after), (
-            f"criterion (a) fails: the journal must record FAITHFULLY what the writer did, even - "
-            f"especially - when what it did was wrong. Journal says {totals}, the database changed "
-            f"by {_observed_change(before, after)}."
-        )
-    finally:
-        await _drop_triangle(serializable_factory, triangle)
+    # CRITERION (a). This is the counterexample.
+    entries = await _entries_for_tx(serializable_factory, tx_id)
+    assert entries is not None, (
+        f"on PostgreSQL, with the equivalent owner lock and both segment locks held under "
+        f"SERIALIZABLE, a payment routed A -> B -> C committed a single A -> C obligation of "
+        f"{FULL_SIZE}, was recorded as verified (verification_passed={audit}), left the "
+        f"transaction {state} and passed check_payment_delta, check_trust_limits and "
+        f"check_debt_symmetry - because the total is right and only the ROUTE is a lie. The "
+        f"database holds {after} in atoms; the payment declared {implied}. "
+        + missing_journal_tables(entries, ENTRIES_TABLE)
+    )
+    totals = await _journal_totals_per_edge(serializable_factory, triangle, tx_id)
+    assert totals == _observed_change(before, after), (
+        f"criterion (a) fails: the journal must record FAITHFULLY what the writer did, even - "
+        f"especially - when what it did was wrong. Journal says {totals}, the database changed "
+        f"by {_observed_change(before, after)}."
+    )
 
 
 @pytest.mark.asyncio
@@ -929,59 +820,56 @@ async def test_c6_p_control_the_same_payment_without_the_wrapper_satisfies_crite
         serializable_factory,
         trustlines=[("b", "a", FULL_SIZE), ("c", "b", FULL_SIZE), ("c", "a", FULL_SIZE)],
     )
-    try:
-        before = await _edges(serializable_factory, triangle)
-        tx_id = await _prepare_payment(serializable_factory, triangle, ["a", "b", "c"], FULL_SIZE)
-        flows = await _intent_flows(serializable_factory, triangle, tx_id)
+    before = await _edges(serializable_factory, triangle)
+    tx_id = await _prepare_payment(serializable_factory, triangle, ["a", "b", "c"], FULL_SIZE)
+    flows = await _intent_flows(serializable_factory, triangle, tx_id)
 
-        async with serializable_factory() as session:
-            await PaymentEngine(session).commit(tx_id)
+    async with serializable_factory() as session:
+        await PaymentEngine(session).commit(tx_id)
 
-        after = await _edges(serializable_factory, triangle)
-        assert await _tx_state(serializable_factory, tx_id) == "COMMITTED"
+    after = await _edges(serializable_factory, triangle)
+    assert await _tx_state(serializable_factory, tx_id) == "COMMITTED"
 
-        # NON-VACUITY, FIRST: the payment really committed the two-hop state at full money size.
-        assert after == {
-            ("a", "b"): _atoms(FULL_SIZE),
-            ("b", "c"): _atoms(FULL_SIZE),
-        }, after
+    # NON-VACUITY, FIRST: the payment really committed the two-hop state at full money size.
+    assert after == {
+        ("a", "b"): _atoms(FULL_SIZE),
+        ("b", "c"): _atoms(FULL_SIZE),
+    }, after
 
-        # HALF ONE, the snapshot path: this module's algebra is the rule the engine implements.
-        assert _payment_implied_by_intent(before, flows) == after, (
-            f"criterion (b) fails on an honest A -> B -> C payment: intent implies "
-            f"{_payment_implied_by_intent(before, flows)}, database holds {after}. The algebra in "
-            f"this module is not the rule the engine implements, and C6's refutation is worthless."
-        )
+    # HALF ONE, the snapshot path: this module's algebra is the rule the engine implements.
+    assert _payment_implied_by_intent(before, flows) == after, (
+        f"criterion (b) fails on an honest A -> B -> C payment: intent implies "
+        f"{_payment_implied_by_intent(before, flows)}, database holds {after}. The algebra in "
+        f"this module is not the rule the engine implements, and C6's refutation is worthless."
+    )
 
-        # HALF TWO, THE PATH C6-P REFUTES WITH: the envelope's own stored intent.
-        envelopes = await _envelope_intents_for_tx(serializable_factory, tx_id)
-        assert envelopes is not None, (
-            "an honest A -> B -> C payment committed and left no envelope to read its intent out "
-            "of. " + missing_journal_tables(envelopes, OPERATIONS_TABLE)
-        )
-        assert len(envelopes) == 1 and envelopes[0]["kind"] == "PAYMENT", (
-            f"the honest payment left {envelopes} instead of exactly one PAYMENT envelope"
-        )
-        assert envelopes[0]["state"] == "COMPLETED", (
-            f"the honest payment committed with its envelope {envelopes[0]['state']}: {envelopes}"
-        )
-        recorded = _recorded_payment_flows(triangle, envelopes[0]["intent"])
-        assert recorded, (
-            f"stand: the envelope's intent decoded to no flows at all, so the replay below would "
-            f"trivially return the pre-state: {envelopes[0]['intent']}"
-        )
-        assert recorded == sorted(flows), (
-            f"the envelope's stored intent {recorded} is not what the prepare locks authorised "
-            f"{sorted(flows)} on an HONEST payment, so the two criteria are measured against two "
-            f"different declarations."
-        )
-        assert _payment_implied_by_intent(before, recorded) == after, (
-            f"criterion (b) fails on an honest payment replayed from the intent the ENVELOPE "
-            f"stored: implied {_payment_implied_by_intent(before, recorded)}, database holds "
-            f"{after}. C6-P's refutation of the collapsed route runs through this path."
-        )
-    finally:
-        await _drop_triangle(serializable_factory, triangle)
+    # HALF TWO, THE PATH C6-P REFUTES WITH: the envelope's own stored intent.
+    envelopes = await _envelope_intents_for_tx(serializable_factory, tx_id)
+    assert envelopes is not None, (
+        "an honest A -> B -> C payment committed and left no envelope to read its intent out "
+        "of. " + missing_journal_tables(envelopes, OPERATIONS_TABLE)
+    )
+    assert len(envelopes) == 1 and envelopes[0]["kind"] == "PAYMENT", (
+        f"the honest payment left {envelopes} instead of exactly one PAYMENT envelope"
+    )
+    assert envelopes[0]["state"] == "COMPLETED", (
+        f"the honest payment committed with its envelope {envelopes[0]['state']}: {envelopes}"
+    )
+    recorded = _recorded_payment_flows(triangle, envelopes[0]["intent"])
+    assert recorded, (
+        f"stand: the envelope's intent decoded to no flows at all, so the replay below would "
+        f"trivially return the pre-state: {envelopes[0]['intent']}"
+    )
+    assert recorded == sorted(flows), (
+        f"the envelope's stored intent {recorded} is not what the prepare locks authorised "
+        f"{sorted(flows)} on an HONEST payment, so the two criteria are measured against two "
+        f"different declarations."
+    )
+    assert _payment_implied_by_intent(before, recorded) == after, (
+        f"criterion (b) fails on an honest payment replayed from the intent the ENVELOPE "
+        f"stored: implied {_payment_implied_by_intent(before, recorded)}, database holds "
+        f"{after}. C6-P's refutation of the collapsed route runs through this path."
+    )
 
 
 # ==============================================================================================
@@ -1029,131 +917,128 @@ async def test_c6_p_a_clearing_cycle_that_leaves_one_atom_on_every_edge_is_still
         trustlines=[("b", "a", FULL_SIZE), ("c", "b", FULL_SIZE), ("a", "c", FULL_SIZE)],
     )
     cycle_edges = [("a", "b"), ("b", "c"), ("c", "a")]
+    debt_ids: list[str] = []
+    # Built outside the fixture block, added inside it: a loop is not fixture setup as far as
+    # `fixture_block_violations` is concerned, and the rows and the single flush are unchanged.
+    cycle_debts = [
+        Debt(
+            id=uuid.uuid4(),
+            debtor_id=getattr(triangle, debtor).id,
+            creditor_id=getattr(triangle, creditor).id,
+            equivalent_id=triangle.equivalent_id,
+            amount=FULL_SIZE,
+            version=0,
+        )
+        for debtor, creditor in cycle_edges
+    ]
+    debt_ids.extend(str(debt.id) for debt in cycle_debts)
+    async with serializable_factory() as session:
+        async with debt_fixture_setup(session, label="cycle"):
+            session.add_all(cycle_debts)
+        await session.commit()
+
+    before = await _edges(serializable_factory, triangle)
+    armed, remove_listener = _under_clear_by_one_atom(monkeypatch)
     try:
-        debt_ids: list[str] = []
-        # Built outside the fixture block, added inside it: a loop is not fixture setup as far as
-        # `fixture_block_violations` is concerned, and the rows and the single flush are unchanged.
-        cycle_debts = [
-            Debt(
-                id=uuid.uuid4(),
-                debtor_id=getattr(triangle, debtor).id,
-                creditor_id=getattr(triangle, creditor).id,
-                equivalent_id=triangle.equivalent_id,
-                amount=FULL_SIZE,
-                version=0,
-            )
-            for debtor, creditor in cycle_edges
-        ]
-        debt_ids.extend(str(debt.id) for debt in cycle_debts)
         async with serializable_factory() as session:
-            async with debt_fixture_setup(session, label="cycle"):
-                session.add_all(cycle_debts)
-            await session.commit()
-
-        before = await _edges(serializable_factory, triangle)
-        armed, remove_listener = _under_clear_by_one_atom(monkeypatch)
-        try:
-            async with serializable_factory() as session:
-                cleared = await ClearingService(session).execute_clearing_with_amount(
-                    [{"debt_id": debt_id} for debt_id in debt_ids]
-                )
-        finally:
-            remove_listener()
-
-        after = await _edges(serializable_factory, triangle)
-        async with serializable_factory() as fresh:
-            clearing_tx = (
-                await fresh.execute(
-                    select(Transaction.tx_id, Transaction.state).where(
-                        Transaction.type == "CLEARING",
-                        # Scoped to this triangle: `geov0_test_ci` is shared, and an unscoped query
-                        # would read a neighbouring session's clearing.
-                        Transaction.initiator_id.in_(triangle.participant_ids),
-                    )
-                )
-            ).all()
-            audit = list(
-                (
-                    await fresh.execute(
-                        select(IntegrityAuditLog.verification_passed).where(
-                            IntegrityAuditLog.operation_type == "CLEARING",
-                            IntegrityAuditLog.equivalent_code == triangle.equivalent_code,
-                        )
-                    )
-                ).scalars().all()
+            cleared = await ClearingService(session).execute_clearing_with_amount(
+                [{"debt_id": debt_id} for debt_id in debt_ids]
             )
-
-        # NON-VACUITY: the skim really fired once per edge, and the service really cleared.
-        assert armed["hits"] == 3, (
-            f"stand: the under-clearing listener fired {armed['hits']} times, not once per edge"
-        )
-        assert cleared == FULL_SIZE, f"stand: the service did not clear the cycle: {cleared!r}"
-        assert before == {edge: _atoms(FULL_SIZE) for edge in cycle_edges}, before
-
-        # THE COMMITTED WRONG STATE, read independently, in atoms.
-        assert after == {edge: 1 for edge in cycle_edges}, (
-            f"stand: the under-clearing did not leave exactly one atom on every edge: {after}"
-        )
-        assert [row.state for row in clearing_tx] == ["COMMITTED"], clearing_tx
-        assert audit == [True], (
-            f"stand: the clearing was not recorded as verified ({audit}), so this is no longer a "
-            f"writer that passes every barrier"
-        )
-
-        # THE STAND, and it needs no journal: the documented rule applied to the independently
-        # measured pre-state implies an empty equivalent, and the database is not empty.
-        assert _clearing_implied_by_intent(before, cycle_edges) == {}, (
-            f"stand: the documented clearing rule does not close this cycle in the module's own "
-            f"algebra: {_clearing_implied_by_intent(before, cycle_edges)}"
-        )
-
-        clearing_tx_id = clearing_tx[0].tx_id
-
-        # CRITERION (b), REPLAYED FROM THE INTENT AS THE ENVELOPE STORED IT.
-        envelopes = await _envelope_intents_for_tx(serializable_factory, clearing_tx_id)
-        assert envelopes is not None, (
-            f"a cycle was reported as cleared while leaving {after} behind, and there is no envelope "
-            f"to read the pre-amounts it acted on out of. "
-            + missing_journal_tables(envelopes, OPERATIONS_TABLE)
-        )
-        assert len(envelopes) == 1 and envelopes[0]["kind"] == "CLEARING", (
-            f"the clearing left {envelopes} instead of exactly one CLEARING envelope"
-        )
-        assert envelopes[0]["state"] == "COMPLETED", envelopes
-        recorded_pre = _recorded_clearing_pre_amounts(triangle, envelopes[0]["intent"])
-        assert recorded_pre == before, (
-            f"the envelope recorded pre-amounts {recorded_pre} (atoms), and the cycle this clearing "
-            f"acted on held {before}. The intent must be the state read under FOR UPDATE, not the "
-            f"state the writer left behind - an intent taken from the outcome can only ever agree "
-            f"with the outcome (design v2 §7, `C14`)."
-        )
-        implied = _clearing_implied_by_recorded_cycle(recorded_pre)
-        assert implied == {}, (
-            f"replaying the stored intent does not close the cycle: {implied}"
-        )
-        assert implied != after, (
-            "criterion (b) did not refute the under-clearing: the intent the envelope recorded "
-            "implies exactly the state the wrong writer left"
-        )
-
-        # CRITERION (a). This is the counterexample.
-        entries = await _entries_for_tx(serializable_factory, clearing_tx_id)
-        assert entries is not None, (
-            f"on PostgreSQL, through the clearing interlock and with the cycle's debts held "
-            f"FOR UPDATE, a cycle of {FULL_SIZE} on every edge was committed, reported as clearing "
-            f"{cleared}, recorded as verified (verification_passed={audit}) and left every "
-            f"participant's net position unchanged - while leaving one atom on every edge instead "
-            f"of closing the cycle. verify_clearing_neutrality cannot see this, because one atom "
-            f"owed and one atom owed to you net to nothing. "
-            + missing_journal_tables(entries, ENTRIES_TABLE)
-        )
-        totals = await _journal_totals_per_edge(serializable_factory, triangle, clearing_tx_id)
-        assert totals == _observed_change(before, after), (
-            f"criterion (a) fails: journal says {totals}, the database changed by "
-            f"{_observed_change(before, after)}"
-        )
     finally:
-        await _drop_triangle(serializable_factory, triangle)
+        remove_listener()
+
+    after = await _edges(serializable_factory, triangle)
+    async with serializable_factory() as fresh:
+        clearing_tx = (
+            await fresh.execute(
+                select(Transaction.tx_id, Transaction.state).where(
+                    Transaction.type == "CLEARING",
+                    # Scoped to this triangle: `geov0_test_ci` is shared, and an unscoped query
+                    # would read a neighbouring session's clearing.
+                    Transaction.initiator_id.in_(triangle.participant_ids),
+                )
+            )
+        ).all()
+        audit = list(
+            (
+                await fresh.execute(
+                    select(IntegrityAuditLog.verification_passed).where(
+                        IntegrityAuditLog.operation_type == "CLEARING",
+                        IntegrityAuditLog.equivalent_code == triangle.equivalent_code,
+                    )
+                )
+            ).scalars().all()
+        )
+
+    # NON-VACUITY: the skim really fired once per edge, and the service really cleared.
+    assert armed["hits"] == 3, (
+        f"stand: the under-clearing listener fired {armed['hits']} times, not once per edge"
+    )
+    assert cleared == FULL_SIZE, f"stand: the service did not clear the cycle: {cleared!r}"
+    assert before == {edge: _atoms(FULL_SIZE) for edge in cycle_edges}, before
+
+    # THE COMMITTED WRONG STATE, read independently, in atoms.
+    assert after == {edge: 1 for edge in cycle_edges}, (
+        f"stand: the under-clearing did not leave exactly one atom on every edge: {after}"
+    )
+    assert [row.state for row in clearing_tx] == ["COMMITTED"], clearing_tx
+    assert audit == [True], (
+        f"stand: the clearing was not recorded as verified ({audit}), so this is no longer a "
+        f"writer that passes every barrier"
+    )
+
+    # THE STAND, and it needs no journal: the documented rule applied to the independently
+    # measured pre-state implies an empty equivalent, and the database is not empty.
+    assert _clearing_implied_by_intent(before, cycle_edges) == {}, (
+        f"stand: the documented clearing rule does not close this cycle in the module's own "
+        f"algebra: {_clearing_implied_by_intent(before, cycle_edges)}"
+    )
+
+    clearing_tx_id = clearing_tx[0].tx_id
+
+    # CRITERION (b), REPLAYED FROM THE INTENT AS THE ENVELOPE STORED IT.
+    envelopes = await _envelope_intents_for_tx(serializable_factory, clearing_tx_id)
+    assert envelopes is not None, (
+        f"a cycle was reported as cleared while leaving {after} behind, and there is no envelope "
+        f"to read the pre-amounts it acted on out of. "
+        + missing_journal_tables(envelopes, OPERATIONS_TABLE)
+    )
+    assert len(envelopes) == 1 and envelopes[0]["kind"] == "CLEARING", (
+        f"the clearing left {envelopes} instead of exactly one CLEARING envelope"
+    )
+    assert envelopes[0]["state"] == "COMPLETED", envelopes
+    recorded_pre = _recorded_clearing_pre_amounts(triangle, envelopes[0]["intent"])
+    assert recorded_pre == before, (
+        f"the envelope recorded pre-amounts {recorded_pre} (atoms), and the cycle this clearing "
+        f"acted on held {before}. The intent must be the state read under FOR UPDATE, not the "
+        f"state the writer left behind - an intent taken from the outcome can only ever agree "
+        f"with the outcome (design v2 §7, `C14`)."
+    )
+    implied = _clearing_implied_by_recorded_cycle(recorded_pre)
+    assert implied == {}, (
+        f"replaying the stored intent does not close the cycle: {implied}"
+    )
+    assert implied != after, (
+        "criterion (b) did not refute the under-clearing: the intent the envelope recorded "
+        "implies exactly the state the wrong writer left"
+    )
+
+    # CRITERION (a). This is the counterexample.
+    entries = await _entries_for_tx(serializable_factory, clearing_tx_id)
+    assert entries is not None, (
+        f"on PostgreSQL, through the clearing interlock and with the cycle's debts held "
+        f"FOR UPDATE, a cycle of {FULL_SIZE} on every edge was committed, reported as clearing "
+        f"{cleared}, recorded as verified (verification_passed={audit}) and left every "
+        f"participant's net position unchanged - while leaving one atom on every edge instead "
+        f"of closing the cycle. verify_clearing_neutrality cannot see this, because one atom "
+        f"owed and one atom owed to you net to nothing. "
+        + missing_journal_tables(entries, ENTRIES_TABLE)
+    )
+    totals = await _journal_totals_per_edge(serializable_factory, triangle, clearing_tx_id)
+    assert totals == _observed_change(before, after), (
+        f"criterion (a) fails: journal says {totals}, the database changed by "
+        f"{_observed_change(before, after)}"
+    )
 
 
 @pytest.mark.asyncio
@@ -1184,69 +1069,66 @@ async def test_c6_p_control_the_same_cycle_without_the_listener_satisfies_criter
         trustlines=[("b", "a", FULL_SIZE), ("c", "b", FULL_SIZE), ("a", "c", FULL_SIZE)],
     )
     cycle_edges = [("a", "b"), ("b", "c"), ("c", "a")]
-    try:
-        debt_ids: list[str] = []
-        # Built outside the fixture block, added inside it: a loop is not fixture setup as far as
-        # `fixture_block_violations` is concerned, and the rows and the single flush are unchanged.
-        cycle_debts = [
-            Debt(
-                id=uuid.uuid4(),
-                debtor_id=getattr(triangle, debtor).id,
-                creditor_id=getattr(triangle, creditor).id,
-                equivalent_id=triangle.equivalent_id,
-                amount=FULL_SIZE,
-                version=0,
-            )
-            for debtor, creditor in cycle_edges
-        ]
-        debt_ids.extend(str(debt.id) for debt in cycle_debts)
-        async with serializable_factory() as session:
-            async with debt_fixture_setup(session, label="cycle"):
-                session.add_all(cycle_debts)
-            await session.commit()
+    debt_ids: list[str] = []
+    # Built outside the fixture block, added inside it: a loop is not fixture setup as far as
+    # `fixture_block_violations` is concerned, and the rows and the single flush are unchanged.
+    cycle_debts = [
+        Debt(
+            id=uuid.uuid4(),
+            debtor_id=getattr(triangle, debtor).id,
+            creditor_id=getattr(triangle, creditor).id,
+            equivalent_id=triangle.equivalent_id,
+            amount=FULL_SIZE,
+            version=0,
+        )
+        for debtor, creditor in cycle_edges
+    ]
+    debt_ids.extend(str(debt.id) for debt in cycle_debts)
+    async with serializable_factory() as session:
+        async with debt_fixture_setup(session, label="cycle"):
+            session.add_all(cycle_debts)
+        await session.commit()
 
-        before = await _edges(serializable_factory, triangle)
-        async with serializable_factory() as session:
-            cleared = await ClearingService(session).execute_clearing_with_amount(
-                [{"debt_id": debt_id} for debt_id in debt_ids]
-            )
-
-        after = await _edges(serializable_factory, triangle)
-
-        # NON-VACUITY, FIRST: a full-size cycle really existed and really closed.
-        assert cleared == FULL_SIZE, cleared
-        assert before == {edge: _atoms(FULL_SIZE) for edge in cycle_edges}, (
-            f"stand: the cycle this control clears is not full-size on every edge: {before}"
+    before = await _edges(serializable_factory, triangle)
+    async with serializable_factory() as session:
+        cleared = await ClearingService(session).execute_clearing_with_amount(
+            [{"debt_id": debt_id} for debt_id in debt_ids]
         )
 
-        # HALF ONE, the test's own read of the pre-state.
-        assert _clearing_implied_by_intent(before, cycle_edges) == after == {}, (
-            f"criterion (b) fails on an honest clearing: implied "
-            f"{_clearing_implied_by_intent(before, cycle_edges)}, database {after}"
-        )
+    after = await _edges(serializable_factory, triangle)
 
-        # HALF TWO, THE PATH C6-P (ii) REFUTES WITH: the pre-amounts the envelope stored.
-        clearing_tx_id = await _clearing_tx_id(serializable_factory, triangle)
-        envelopes = await _envelope_intents_for_tx(serializable_factory, clearing_tx_id)
-        assert envelopes is not None, (
-            "an honest full-size cycle closed and left no envelope to read its pre-amounts out of. "
-            + missing_journal_tables(envelopes, OPERATIONS_TABLE)
-        )
-        assert len(envelopes) == 1 and envelopes[0]["kind"] == "CLEARING", (
-            f"the honest clearing left {envelopes} instead of exactly one CLEARING envelope"
-        )
-        assert envelopes[0]["state"] == "COMPLETED", (
-            f"the honest clearing committed with its envelope {envelopes[0]['state']}: {envelopes}"
-        )
-        recorded_pre = _recorded_clearing_pre_amounts(triangle, envelopes[0]["intent"])
-        assert recorded_pre == before, (
-            f"the envelope recorded pre-amounts {recorded_pre} while the cycle held {before} on an "
-            f"HONEST clearing. An intent taken from the outcome agrees with the outcome by "
-            f"construction, and C6 (ii) turns on it being able to disagree."
-        )
-        assert _clearing_implied_by_recorded_cycle(recorded_pre) == after == {}, (
-            f"criterion (b) fails on an honest clearing replayed from the pre-amounts the ENVELOPE "
-            f"stored: implied {_clearing_implied_by_recorded_cycle(recorded_pre)}, database {after}"
-        )
-    finally:
-        await _drop_triangle(serializable_factory, triangle)
+    # NON-VACUITY, FIRST: a full-size cycle really existed and really closed.
+    assert cleared == FULL_SIZE, cleared
+    assert before == {edge: _atoms(FULL_SIZE) for edge in cycle_edges}, (
+        f"stand: the cycle this control clears is not full-size on every edge: {before}"
+    )
+
+    # HALF ONE, the test's own read of the pre-state.
+    assert _clearing_implied_by_intent(before, cycle_edges) == after == {}, (
+        f"criterion (b) fails on an honest clearing: implied "
+        f"{_clearing_implied_by_intent(before, cycle_edges)}, database {after}"
+    )
+
+    # HALF TWO, THE PATH C6-P (ii) REFUTES WITH: the pre-amounts the envelope stored.
+    clearing_tx_id = await _clearing_tx_id(serializable_factory, triangle)
+    envelopes = await _envelope_intents_for_tx(serializable_factory, clearing_tx_id)
+    assert envelopes is not None, (
+        "an honest full-size cycle closed and left no envelope to read its pre-amounts out of. "
+        + missing_journal_tables(envelopes, OPERATIONS_TABLE)
+    )
+    assert len(envelopes) == 1 and envelopes[0]["kind"] == "CLEARING", (
+        f"the honest clearing left {envelopes} instead of exactly one CLEARING envelope"
+    )
+    assert envelopes[0]["state"] == "COMPLETED", (
+        f"the honest clearing committed with its envelope {envelopes[0]['state']}: {envelopes}"
+    )
+    recorded_pre = _recorded_clearing_pre_amounts(triangle, envelopes[0]["intent"])
+    assert recorded_pre == before, (
+        f"the envelope recorded pre-amounts {recorded_pre} while the cycle held {before} on an "
+        f"HONEST clearing. An intent taken from the outcome agrees with the outcome by "
+        f"construction, and C6 (ii) turns on it being able to disagree."
+    )
+    assert _clearing_implied_by_recorded_cycle(recorded_pre) == after == {}, (
+        f"criterion (b) fails on an honest clearing replayed from the pre-amounts the ENVELOPE "
+        f"stored: implied {_clearing_implied_by_recorded_cycle(recorded_pre)}, database {after}"
+    )

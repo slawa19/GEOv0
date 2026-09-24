@@ -20,37 +20,29 @@ leaving them in a shared database.
 
 from __future__ import annotations
 
-import os
 import uuid
 from decimal import Decimal
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.clearing.service import ClearingService
 from app.db.models.debt import Debt
-from app.db.models.transaction import Transaction
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.utils.exceptions import GeoException
 
 from tests.debt_setup import debt_fixture_setup
-from tests.debt_setup import purge_test_ledger
-
-
-def _url() -> str:
-    url = os.environ.get("TEST_DATABASE_URL", "")
-    if "postgresql" not in url:
-        pytest.skip("the interlock path exists on PostgreSQL only")
-    return url
 
 
 @pytest_asyncio.fixture
-async def engine_bound_sessions():
-    engine = create_async_engine(_url())
+async def engine_bound_sessions(committed_database):
+    # Over this test's disposable clone of the migrated template: the clone's drop is the only
+    # disposal of what the test commits (018 B0b).
+    engine = create_async_engine(committed_database.url)
     try:
         yield async_sessionmaker(engine, expire_on_commit=False)
     finally:
@@ -118,25 +110,6 @@ async def _amounts(sessionmaker, eq_id) -> list[Decimal]:
     return sorted(Decimal(str(a)) for a in rows)
 
 
-async def _cleanup(sessionmaker, eq_id, ids) -> None:
-    participant_ids = [v for k, v in ids.items() if not k.startswith("pid:")]
-    async with sessionmaker() as s:
-        # The debts AND the journal rows that describe them, through the driver and BEFORE the
-        # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
-        # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
-        # envelope still standing would block the transaction delete above it.
-        await purge_test_ledger(s, equivalent_ids=[eq_id])
-        await s.execute(delete(TrustLine).where(TrustLine.equivalent_id == eq_id))
-        # A successful clearing writes a CLEARING transaction whose initiator is one of
-        # these participants, and the FK is ondelete=RESTRICT.
-        await s.execute(
-            delete(Transaction).where(Transaction.initiator_id.in_(participant_ids))
-        )
-        await s.execute(delete(Participant).where(Participant.id.in_(participant_ids)))
-        await s.execute(delete(Equivalent).where(Equivalent.id == eq_id))
-        await s.commit()
-
-
 @pytest.mark.asyncio
 async def test_interlock_path_refuses_a_cycle_outside_the_perimeter(
     engine_bound_sessions,
@@ -145,26 +118,23 @@ async def test_interlock_path_refuses_a_cycle_outside_the_perimeter(
     eq_code, eq_id, ids = await _seed(sessionmaker)
     foreign_scope = {ids["pid:a1"], ids["pid:a2"], ids["pid:a3"]}  # type: ignore[index]
 
-    try:
-        async with sessionmaker() as session:
-            service = ClearingService(session)
+    async with sessionmaker() as session:
+        service = ClearingService(session)
 
-            # Detection without a perimeter, so the cycle really exists and the guard is
-            # what refuses it - not an empty candidate list.
-            cycles = await service.find_cycles(eq_code, max_depth=6)
-            assert len(cycles) == 1, f"the stand must hold exactly one cycle: {cycles}"
+        # Detection without a perimeter, so the cycle really exists and the guard is
+        # what refuses it - not an empty candidate list.
+        cycles = await service.find_cycles(eq_code, max_depth=6)
+        assert len(cycles) == 1, f"the stand must hold exactly one cycle: {cycles}"
 
-            with pytest.raises(GeoException):
-                await service.execute_clearing_with_amount(
-                    cycles[0], allowed_participant_pids=foreign_scope
-                )
+        with pytest.raises(GeoException):
+            await service.execute_clearing_with_amount(
+                cycles[0], allowed_participant_pids=foreign_scope
+            )
 
-        after = await _amounts(sessionmaker, eq_id)
-        assert after == [Decimal("100")] * 3, (
-            f"the refused clearing still changed another run's debts: {after}"
-        )
-    finally:
-        await _cleanup(sessionmaker, eq_id, ids)
+    after = await _amounts(sessionmaker, eq_id)
+    assert after == [Decimal("100")] * 3, (
+        f"the refused clearing still changed another run's debts: {after}"
+    )
 
 
 @pytest.mark.asyncio
@@ -177,23 +147,20 @@ async def test_interlock_path_still_clears_for_the_owning_run(
     eq_code, eq_id, ids = await _seed(sessionmaker)
     own_scope = {ids["pid:b1"], ids["pid:b2"], ids["pid:b3"]}  # type: ignore[index]
 
-    try:
-        async with sessionmaker() as session:
-            service = ClearingService(session)
-            cycles = await service.find_cycles(
-                eq_code, max_depth=6, allowed_participant_pids=own_scope
-            )
-            assert len(cycles) == 1, f"the owning run must still see its cycle: {cycles}"
+    async with sessionmaker() as session:
+        service = ClearingService(session)
+        cycles = await service.find_cycles(
+            eq_code, max_depth=6, allowed_participant_pids=own_scope
+        )
+        assert len(cycles) == 1, f"the owning run must still see its cycle: {cycles}"
 
-            cleared = await service.execute_clearing_with_amount(
-                cycles[0], allowed_participant_pids=own_scope
-            )
+        cleared = await service.execute_clearing_with_amount(
+            cycles[0], allowed_participant_pids=own_scope
+        )
 
-        assert cleared == Decimal("100"), cleared
-        after = await _amounts(sessionmaker, eq_id)
-        assert after == [], f"the owning run's cycle should be gone, got {after}"
-    finally:
-        await _cleanup(sessionmaker, eq_id, ids)
+    assert cleared == Decimal("100"), cleared
+    after = await _amounts(sessionmaker, eq_id)
+    assert after == [], f"the owning run's cycle should be gone, got {after}"
 
 
 @pytest.mark.asyncio
@@ -211,23 +178,20 @@ async def test_the_expanding_bind_works_on_postgresql(engine_bound_sessions) -> 
     sessionmaker = engine_bound_sessions
     _eq_code, eq_id, ids = await _seed(sessionmaker)
 
-    try:
-        async with sessionmaker() as session:
-            service = ClearingService(session)
+    async with sessionmaker() as session:
+        service = ClearingService(session)
 
-            unscoped = await service.find_triangles_sql(eq_id)
-            assert len(unscoped) == 3, (
-                f"one triangle, one row per starting vertex: {unscoped}"
-            )
+        unscoped = await service.find_triangles_sql(eq_id)
+        assert len(unscoped) == 3, (
+            f"one triangle, one row per starting vertex: {unscoped}"
+        )
 
-            foreign = {ids["a1"], ids["a2"], ids["a3"]}
-            assert await service.find_triangles_sql(
-                eq_id, allowed_participant_ids=foreign
-            ) == [], "the SQL producer returned another run's cycle"
+        foreign = {ids["a1"], ids["a2"], ids["a3"]}
+        assert await service.find_triangles_sql(
+            eq_id, allowed_participant_ids=foreign
+        ) == [], "the SQL producer returned another run's cycle"
 
-            own = {ids["b1"], ids["b2"], ids["b3"]}
-            assert len(
-                await service.find_triangles_sql(eq_id, allowed_participant_ids=own)
-            ) == 3, "the predicate rejected the owning run as well"
-    finally:
-        await _cleanup(sessionmaker, eq_id, ids)
+        own = {ids["b1"], ids["b2"], ids["b3"]}
+        assert len(
+            await service.find_triangles_sql(eq_id, allowed_participant_ids=own)
+        ) == 3, "the predicate rejected the owning run as well"

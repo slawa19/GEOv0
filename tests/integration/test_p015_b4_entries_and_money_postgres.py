@@ -34,10 +34,11 @@ connection, which hides the commit boundaries these counterexamples are about an
 clearing refuses outright (`app/core/clearing/service.py:1494-1504`). Every verdict is read back on
 a NEW session or a NEW connection, never through the session under test.
 
-THE DATABASE IS SHARED. `geov0_test_ci` is used by several sessions working in this tree at once, so
-every cleanup and every leak check below is scoped to the ids THIS PROCESS created. A check written
-against a name prefix would be measuring a neighbour's rows; see `_SEEDED` and
-`every_seeded_row_is_gone_when_the_test_ends`.
+THE DATABASE IS A DISPOSABLE CLONE (018 B0b). The stand's engine is built over `committed_database`,
+a clone of the migrated template dropped when the test ends, so the drop is the only disposal of what
+a test committed. Until B0b each test deleted its rows by id, journal included (`purge_test_ledger`),
+and an autouse check asserted that nothing was left in the SHARED tier; on a clone that check would
+read an empty tier and pass vacuously, so it went with the cleanup it verified.
 
 READ `tests/p015_b4_support.py` for the import rule and the two kinds of red.
 
@@ -54,24 +55,22 @@ import asyncio
 import json
 import re
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal, localcontext
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import delete, event, func, select, text
+from sqlalchemy import event, select, text
 from sqlalchemy.exc import DatabaseError, DBAPIError, StatementError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.db.models.audit_log import AuditLog, IntegrityAuditLog
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
-from app.db.models.participant import Participant
 from app.db.models.prepare_lock import PrepareLock
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
-from tests.debt_setup import debt_fixture_setup, purge_test_ledger
+from tests.debt_setup import debt_fixture_setup
 
 # The proven inject stand, imported rather than rebuilt: `observed_factory` is its own SERIALIZABLE
 # engine with the session class whose debt flushes are observed, and `C8`'s inject half drives the
@@ -85,7 +84,6 @@ from tests.p015_b4_support import (
     OPERATION_EQUIVALENTS_TABLE,
     OPERATIONS_TABLE,
     World,
-    drop_world,
     journal_api,
     missing_journal_tables,
     operation,
@@ -164,7 +162,7 @@ def _obeys_the_money_rules(value: Decimal) -> bool:
 
 
 @pytest_asyncio.fixture
-async def serializable_engine():
+async def serializable_engine(committed_database):
     """This module's own SERIALIZABLE engine with a real pool.
 
     `pool_size=8` is not generosity. PostgreSQL clearing checks out a PINNED work connection of its
@@ -176,11 +174,8 @@ async def serializable_engine():
     `NullPool` is deliberately NOT used: a released connection would be closed, and several
     assertions here turn on a connection surviving its transaction.
     """
-    from tests.conftest import TEST_DATABASE_URL, _ensure_schema_initialized
-
-    await _ensure_schema_initialized()
     engine = create_async_engine(
-        TEST_DATABASE_URL,
+        committed_database.url,
         pool_size=8,
         max_overflow=0,
         pool_timeout=20,
@@ -233,124 +228,13 @@ async def observer():
 
 @dataclass
 class _Seeded:
-    """One world this PROCESS committed, plus everything the real owners hung off it."""
+    """One world this test committed on its clone."""
 
     world: World
-    tx_ids: list[str] = field(default_factory=list)
-
-    @property
-    def codes(self) -> list[str]:
-        return [self.world.equivalent.code, self.world.other_equivalent.code]
-
-
-#: Every world this PROCESS seeded. The leak check is scoped to these ids rather than to the `B4`
-#: code prefix, because `geov0_test_ci` is SHARED between sessions working in this tree: a check that
-#: read the prefix would redden on a neighbour's rows and go quiet about its own.
-_SEEDED: list[_Seeded] = []
 
 
 async def _seed(factory, *, extra_participants: int = 0) -> _Seeded:
-    seeded = _Seeded(await seed_world(factory, extra_participants=extra_participants))
-    _SEEDED.append(seeded)
-    return seeded
-
-
-async def _cleanup(factory, seeded: _Seeded) -> None:
-    """Remove exactly what this test committed, by id. Never a blanket delete: the database is shared.
-
-    THE ORDER IS NOT ARBITRARY. `prepare_locks.tx_id` is a foreign key to `transactions.tx_id` and
-    `transactions.initiator_id` is RESTRICT, so locks go before transactions and transactions before
-    participants. `debts.equivalent_id` is RESTRICT since T1524, so debts go before the equivalent -
-    `drop_world` does that part. `debts.debtor_id`/`creditor_id` are still CASCADE (R2-13), so
-    deleting participants first WOULD take the debts with them silently, which is the exact removal
-    T1524 exists to make impossible; this teardown never leans on a cascade.
-    """
-    world = seeded.world
-    async with factory() as session:
-        # THE JOURNAL FIRST, and through the driver. `debt_operations.tx_id` is a RESTRICT reference
-        # to `transactions.tx_id`, so an envelope still standing refuses the transaction delete
-        # below it; and `session.execute(delete(Debt))` - which `drop_world` used to do at the end -
-        # is Core DML the write guard refuses (`C2`). `purge_test_ledger` does both, scoped to this
-        # world's ids. `drop_world` still runs at the end for the participants and equivalents.
-        await purge_test_ledger(
-            session, equivalent_ids=world.equivalent_ids, tx_ids=seeded.tx_ids
-        )
-        await session.execute(
-            delete(PrepareLock).where(PrepareLock.participant_id.in_(world.participant_ids))
-        )
-        await session.execute(
-            delete(IntegrityAuditLog).where(IntegrityAuditLog.equivalent_code.in_(seeded.codes))
-        )
-        await session.execute(delete(AuditLog).where(AuditLog.object_id.in_(seeded.codes)))
-        await session.execute(
-            delete(Transaction).where(Transaction.initiator_id.in_(world.participant_ids))
-        )
-        if seeded.tx_ids:
-            await session.execute(
-                delete(PrepareLock).where(PrepareLock.tx_id.in_(seeded.tx_ids))
-            )
-            await session.execute(
-                delete(Transaction).where(Transaction.tx_id.in_(seeded.tx_ids))
-            )
-        await session.execute(
-            delete(TrustLine).where(TrustLine.equivalent_id.in_(world.equivalent_ids))
-        )
-        await session.commit()
-    await drop_world(factory, world)
-
-
-@pytest_asyncio.fixture(autouse=True)
-async def every_seeded_row_is_gone_when_the_test_ends():
-    """The CHECK, not the cleanup - the cleanup is each test's own `finally`.
-
-    A `finally` per test is only as good as the next author remembering to write one, so this
-    asserts the OUTCOME instead of trusting the habit: a test added later that forgets its `finally`
-    reddens here, naming the rows it left in a database other sessions are using. The same shape
-    closed the same defect in `test_p015_t1525_classification_reads_deliberate_wrapping_only_
-    postgres.py` on 2026-09-12, where three tests seeded and none cleaned up.
-
-    It reads through `TestingSessionLocal` rather than this module's own engine, because that
-    engine's fixture may already have been disposed by the time this teardown runs, and a plain
-    count needs none of what it provides.
-    """
-    yield
-
-    if not _SEEDED:
-        return
-    from tests.conftest import TestingSessionLocal
-
-    equivalent_ids = [i for s in _SEEDED for i in s.world.equivalent_ids]
-    participant_ids = [i for s in _SEEDED for i in s.world.participant_ids]
-    codes = [code for s in _SEEDED for code in s.codes]
-
-    async def _count(session, model, condition) -> int:
-        return int(await session.scalar(select(func.count()).select_from(model).where(condition)))
-
-    async with TestingSessionLocal() as session:
-        left = {
-            "debts": await _count(session, Debt, Debt.equivalent_id.in_(equivalent_ids)),
-            "trustlines": await _count(
-                session, TrustLine, TrustLine.equivalent_id.in_(equivalent_ids)
-            ),
-            "prepare_locks": await _count(
-                session, PrepareLock, PrepareLock.participant_id.in_(participant_ids)
-            ),
-            "transactions": await _count(
-                session, Transaction, Transaction.initiator_id.in_(participant_ids)
-            ),
-            "integrity_audit_logs": await _count(
-                session, IntegrityAuditLog, IntegrityAuditLog.equivalent_code.in_(codes)
-            ),
-            "audit_logs": await _count(session, AuditLog, AuditLog.object_id.in_(codes)),
-            "participants": await _count(session, Participant, Participant.id.in_(participant_ids)),
-            "equivalents": await _count(session, Equivalent, Equivalent.id.in_(equivalent_ids)),
-        }
-
-    assert not any(left.values()), (
-        f"this module left rows behind in a SHARED database: {left}, out of the "
-        f"{len(_SEEDED)} world(s) it has seeded in this process. Every test that calls `_seed` must "
-        f"call `_cleanup` from a `finally`."
-    )
+    return _Seeded(await seed_world(factory, extra_participants=extra_participants))
 
 
 def _identity(name: str) -> str:
@@ -534,68 +418,65 @@ async def test_c4_p_the_life_of_one_edge_at_full_money_size_is_exact_integer_ato
     seeded = await _seed(serializable_factory)
     world = seeded.world
     identity = _identity("full-size-edge")
-    try:
-        stored_full, full_error = await _round_trip(serializable_factory, world, FULL_SIZE)
+    stored_full, full_error = await _round_trip(serializable_factory, world, FULL_SIZE)
 
-        async with serializable_factory() as session:
-            async with await _open(api, session, world, "full-size-edge", identity=identity):
-                debt = _debt_row(world, FULL_SIZE)
-                session.add(debt)
-                await session.flush()
-                debt.amount = ATOM
-                await session.flush()
-                await session.delete(debt)
-                await session.flush()
-            await session.commit()
+    async with serializable_factory() as session:
+        async with await _open(api, session, world, "full-size-edge", identity=identity):
+            debt = _debt_row(world, FULL_SIZE)
+            session.add(debt)
+            await session.flush()
+            debt.amount = ATOM
+            await session.flush()
+            await session.delete(debt)
+            await session.flush()
+        await session.commit()
 
-        entries = await stored_entries(serializable_factory, identity)
-        after = await stored_debts(serializable_factory, world)
+    entries = await stored_entries(serializable_factory, identity)
+    after = await stored_debts(serializable_factory, world)
 
-        # NON-VACUITY, FIRST. Without the table there is nothing to be right or wrong about, and
-        # every assertion below would be about an empty list.
-        assert entries is not None, missing_journal_tables(entries, ENTRIES_TABLE)
+    # NON-VACUITY, FIRST. Without the table there is nothing to be right or wrong about, and
+    # every assertion below would be about an empty list.
+    assert entries is not None, missing_journal_tables(entries, ENTRIES_TABLE)
 
-        # NON-VACUITY, MEASURED: this tier really holds the full size exactly. If it did not, the
-        # atom comparisons below would be measuring the driver rather than the journal - which is
-        # exactly the confusion `EXACT_DOMAIN_LIMIT` exists to prevent on the other tier.
-        assert full_error is None and stored_full is not None, (
-            f"stand: this database refused {FULL_SIZE} outright ({full_error!r}), so it is not the "
-            f"money-acceptance tier design v2 §4 rule 1 describes"
-        )
-        assert _atoms(stored_full) == _atoms(FULL_SIZE), (
-            f"stand: {FULL_SIZE} came back as {stored_full} - {_atoms(stored_full)} atoms instead "
-            f"of {_atoms(FULL_SIZE)}. Exact acceptance at full size is the premise of this test."
-        )
+    # NON-VACUITY, MEASURED: this tier really holds the full size exactly. If it did not, the
+    # atom comparisons below would be measuring the driver rather than the journal - which is
+    # exactly the confusion `EXACT_DOMAIN_LIMIT` exists to prevent on the other tier.
+    assert full_error is None and stored_full is not None, (
+        f"stand: this database refused {FULL_SIZE} outright ({full_error!r}), so it is not the "
+        f"money-acceptance tier design v2 §4 rule 1 describes"
+    )
+    assert _atoms(stored_full) == _atoms(FULL_SIZE), (
+        f"stand: {FULL_SIZE} came back as {stored_full} - {_atoms(stored_full)} atoms instead "
+        f"of {_atoms(FULL_SIZE)}. Exact acceptance at full size is the premise of this test."
+    )
 
-        # NON-VACUITY: the three flushes really happened and the edge really ended gone.
-        assert after == {}, f"stand: the edge survived the operation: {after}"
+    # NON-VACUITY: the three flushes really happened and the edge really ended gone.
+    assert after == {}, f"stand: the edge survived the operation: {after}"
 
-        # VERDICT.
-        assert [row["flush_ordinal"] for row in entries] == [1, 2, 3], entries
-        assert [row["effect"] for row in entries] == ["I", "U", "D"], (
-            f"the three flushes were not recorded as INSERT, UPDATE, DELETE: {entries}"
-        )
-        assert _atom_column(entries, "amount_before") == [
-            None,
-            99999999999999999999,
-            1,
-        ], f"an entry's `amount_before` is not the previous entry's `amount_after`: {entries}"
-        assert _atom_column(entries, "amount_after") == [
-            99999999999999999999,
-            1,
-            None,
-        ], entries
-        assert _atom_column(entries, "delta") == [
-            99999999999999999999,
-            -99999999999999999998,
-            -1,
-        ], (
-            f"the deltas are not exact at full money size: {entries}. Every number here is a whole "
-            f"count of 1e-8 atoms and is compared as an integer; there is no tolerance on this tier "
-            f"(design v2 §4 rule 1)."
-        )
-    finally:
-        await _cleanup(serializable_factory, seeded)
+    # VERDICT.
+    assert [row["flush_ordinal"] for row in entries] == [1, 2, 3], entries
+    assert [row["effect"] for row in entries] == ["I", "U", "D"], (
+        f"the three flushes were not recorded as INSERT, UPDATE, DELETE: {entries}"
+    )
+    assert _atom_column(entries, "amount_before") == [
+        None,
+        99999999999999999999,
+        1,
+    ], f"an entry's `amount_before` is not the previous entry's `amount_after`: {entries}"
+    assert _atom_column(entries, "amount_after") == [
+        99999999999999999999,
+        1,
+        None,
+    ], entries
+    assert _atom_column(entries, "delta") == [
+        99999999999999999999,
+        -99999999999999999998,
+        -1,
+    ], (
+        f"the deltas are not exact at full money size: {entries}. Every number here is a whole "
+        f"count of 1e-8 atoms and is compared as an integer; there is no tolerance on this tier "
+        f"(design v2 §4 rule 1)."
+    )
 
 
 # ==============================================================================================
@@ -645,118 +526,115 @@ async def test_c8_a_real_40001_leaves_one_envelope_and_only_the_successful_attem
     identity = _identity("real-40001")
     conflict: DBAPIError | None = None
     sqlstate: str | None = None
-    try:
-        starting_edge = _debt_row(world, Decimal("10.00000000"))
-        async with serializable_factory() as setup:
-            async with debt_fixture_setup(setup, label="starting-edge"):
-                setup.add(starting_edge)
-            await setup.commit()
+    starting_edge = _debt_row(world, Decimal("10.00000000"))
+    async with serializable_factory() as setup:
+        async with debt_fixture_setup(setup, label="starting-edge"):
+            setup.add(starting_edge)
+        await setup.commit()
 
-        mine = select(Debt).where(Debt.equivalent_id == world.equivalent.id)
+    mine = select(Debt).where(Debt.equivalent_id == world.equivalent.id)
 
-        async with serializable_factory() as loser, serializable_factory() as winner:
-            # Both transactions READ the row first: that is what makes the later write a
-            # serialization failure rather than a plain lock wait.
-            await loser.execute(mine)
+    async with serializable_factory() as loser, serializable_factory() as winner:
+        # Both transactions READ the row first: that is what makes the later write a
+        # serialization failure rather than a plain lock wait.
+        await loser.execute(mine)
 
-            # BOTH WRITES GO THROUGH THE ORM. They used to be Core `Debt.__table__.update()`,
-            # which the journal's write guard refuses outright - that is `C2`, and it is refused
-            # whether or not an operation is open, because a Core statement is not in the flush plan
-            # the hook verified. The serialization failure this case is about is produced by two
-            # SERIALIZABLE transactions that read the same row and then write it, which is exactly
-            # what these two ORM writes do.
-            winning = (await winner.execute(mine)).scalar_one()
-            async with debt_fixture_setup(winner, label="the-winner"):
-                winning.amount = Decimal("31.00000000")
-            await winner.commit()
+        # BOTH WRITES GO THROUGH THE ORM. They used to be Core `Debt.__table__.update()`,
+        # which the journal's write guard refuses outright - that is `C2`, and it is refused
+        # whether or not an operation is open, because a Core statement is not in the flush plan
+        # the hook verified. The serialization failure this case is about is produced by two
+        # SERIALIZABLE transactions that read the same row and then write it, which is exactly
+        # what these two ORM writes do.
+        winning = (await winner.execute(mine)).scalar_one()
+        async with debt_fixture_setup(winner, label="the-winner"):
+            winning.amount = Decimal("31.00000000")
+        await winner.commit()
 
-            try:
-                losing = (await loser.execute(mine)).scalar_one()
-                async with await _open(api, loser, world, "real-40001", identity=identity):
-                    losing.amount = Decimal("44.00000000")
-                    await loser.flush()
-                await loser.commit()
-            except DBAPIError as exc:
-                conflict = exc
-                sqlstate = getattr(exc.orig, "sqlstate", None)
-            await loser.rollback()
+        try:
+            losing = (await loser.execute(mine)).scalar_one()
+            async with await _open(api, loser, world, "real-40001", identity=identity):
+                losing.amount = Decimal("44.00000000")
+                await loser.flush()
+            await loser.commit()
+        except DBAPIError as exc:
+            conflict = exc
+            sqlstate = getattr(exc.orig, "sqlstate", None)
+        await loser.rollback()
 
-        # THE RETRY: the whole unit of work again, under the same identity, on a fresh transaction.
-        async with serializable_factory() as retry:
-            debt = (await retry.execute(mine)).scalar_one()
-            async with await _open(api, retry, world, "real-40001", identity=identity):
-                debt.amount = Decimal("44.00000000")
-                await retry.flush()
-            await retry.commit()
+    # THE RETRY: the whole unit of work again, under the same identity, on a fresh transaction.
+    async with serializable_factory() as retry:
+        debt = (await retry.execute(mine)).scalar_one()
+        async with await _open(api, retry, world, "real-40001", identity=identity):
+            debt.amount = Decimal("44.00000000")
+            await retry.flush()
+        await retry.commit()
 
-        entries = await stored_entries(serializable_factory, identity)
-        envelopes = await stored_operations(serializable_factory, identity)
-        after = await stored_debts(serializable_factory, world)
-        async with serializable_factory() as fresh:
-            transactions = (
-                await fresh.execute(
-                    select(Transaction.tx_id).where(
-                        Transaction.initiator_id.in_(world.participant_ids)
-                    )
+    entries = await stored_entries(serializable_factory, identity)
+    envelopes = await stored_operations(serializable_factory, identity)
+    after = await stored_debts(serializable_factory, world)
+    async with serializable_factory() as fresh:
+        transactions = (
+            await fresh.execute(
+                select(Transaction.tx_id).where(
+                    Transaction.initiator_id.in_(world.participant_ids)
                 )
-            ).scalars().all()
-            locks = (
-                await fresh.execute(
-                    select(PrepareLock.tx_id).where(
-                        PrepareLock.participant_id.in_(world.participant_ids)
-                    )
+            )
+        ).scalars().all()
+        locks = (
+            await fresh.execute(
+                select(PrepareLock.tx_id).where(
+                    PrepareLock.participant_id.in_(world.participant_ids)
                 )
-            ).scalars().all()
+            )
+        ).scalars().all()
 
-        # NON-VACUITY, FIRST.
-        assert entries is not None, missing_journal_tables(entries, ENTRIES_TABLE)
+    # NON-VACUITY, FIRST.
+    assert entries is not None, missing_journal_tables(entries, ENTRIES_TABLE)
 
-        # NON-VACUITY: the conflict was real, and it was the one PostgreSQL raises for a
-        # serialization failure. A stand that produced a lock wait, a deadlock or nothing at all
-        # would measure none of what this test is named for.
-        assert conflict is not None and sqlstate == "40001", (
-            f"stand: the concurrent write was not refused with a genuine serialization failure "
-            f"(exception={conflict!r}, sqlstate={sqlstate!r}). Without a real 40001 this test "
-            f"observes an ordinary retry and says nothing about C8."
-        )
-        # NON-VACUITY: the retry really won the edge.
-        assert after == {("debtor", "creditor", "eq"): Decimal("44.00000000")}, (
-            f"stand: the retry did not end up owning the edge: {after}"
-        )
+    # NON-VACUITY: the conflict was real, and it was the one PostgreSQL raises for a
+    # serialization failure. A stand that produced a lock wait, a deadlock or nothing at all
+    # would measure none of what this test is named for.
+    assert conflict is not None and sqlstate == "40001", (
+        f"stand: the concurrent write was not refused with a genuine serialization failure "
+        f"(exception={conflict!r}, sqlstate={sqlstate!r}). Without a real 40001 this test "
+        f"observes an ordinary retry and says nothing about C8."
+    )
+    # NON-VACUITY: the retry really won the edge.
+    assert after == {("debtor", "creditor", "eq"): Decimal("44.00000000")}, (
+        f"stand: the retry did not end up owning the edge: {after}"
+    )
 
-        # VERDICT.
-        assert envelopes is not None, missing_journal_tables(envelopes, OPERATIONS_TABLE)
-        assert len(envelopes) == 1 and envelopes[0]["state"] == "COMPLETED", (
-            f"a unit of work that was refused with a 40001 and retried under the same identity left "
-            f"{envelopes}. Exactly one COMPLETED envelope per identity is what makes a retried "
-            f"writer recognisable instead of counted twice."
-        )
-        assert len(entries) == 1 and entries[0]["effect"] == "U", (
-            f"the attempt that was refused with a 40001 left a trace in the journal: {entries}. "
-            f"Only the flush that reached the database may produce an entry."
-        )
-        assert _atom_column(entries, "amount_before") == [3100000000], (
-            f"the retry's entry does not record the value the database actually held when it ran "
-            f"({entries}); `amount_before` must be the concurrent writer's value, not the one this "
-            f"session had loaded before losing the race"
-        )
-        assert _atom_column(entries, "delta") == [1300000000], entries
-        assert list(transactions) == [] and list(locks) == [], (
-            f"the retried operation invented payment state: transactions={list(transactions)}, "
-            f"prepare_locks={list(locks)}. A TEST_FIXTURE operation owns neither."
-        )
-        equivalents = await stored_rows(
-            serializable_factory,
-            f"SELECT equivalent_id, effect_count FROM {OPERATION_EQUIVALENTS_TABLE} "  # noqa: S608
-            f"WHERE operation_id = :id",
-            {"id": envelopes[0]["id"]},
-        )
-        assert equivalents is not None and len(equivalents) == 1, (
-            f"the completion did not write exactly one `{OPERATION_EQUIVALENTS_TABLE}` row for the "
-            f"one equivalent the retry touched: {equivalents}"
-        )
-    finally:
-        await _cleanup(serializable_factory, seeded)
+    # VERDICT.
+    assert envelopes is not None, missing_journal_tables(envelopes, OPERATIONS_TABLE)
+    assert len(envelopes) == 1 and envelopes[0]["state"] == "COMPLETED", (
+        f"a unit of work that was refused with a 40001 and retried under the same identity left "
+        f"{envelopes}. Exactly one COMPLETED envelope per identity is what makes a retried "
+        f"writer recognisable instead of counted twice."
+    )
+    assert len(entries) == 1 and entries[0]["effect"] == "U", (
+        f"the attempt that was refused with a 40001 left a trace in the journal: {entries}. "
+        f"Only the flush that reached the database may produce an entry."
+    )
+    assert _atom_column(entries, "amount_before") == [3100000000], (
+        f"the retry's entry does not record the value the database actually held when it ran "
+        f"({entries}); `amount_before` must be the concurrent writer's value, not the one this "
+        f"session had loaded before losing the race"
+    )
+    assert _atom_column(entries, "delta") == [1300000000], entries
+    assert list(transactions) == [] and list(locks) == [], (
+        f"the retried operation invented payment state: transactions={list(transactions)}, "
+        f"prepare_locks={list(locks)}. A TEST_FIXTURE operation owns neither."
+    )
+    equivalents = await stored_rows(
+        serializable_factory,
+        f"SELECT equivalent_id, effect_count FROM {OPERATION_EQUIVALENTS_TABLE} "  # noqa: S608
+        f"WHERE operation_id = :id",
+        {"id": envelopes[0]["id"]},
+    )
+    assert equivalents is not None and len(equivalents) == 1, (
+        f"the completion did not write exactly one `{OPERATION_EQUIVALENTS_TABLE}` row for the "
+        f"one equivalent the retry touched: {equivalents}"
+    )
 
 
 
@@ -856,96 +734,93 @@ async def test_c8_the_payment_owners_own_retry_leaves_one_envelope_and_the_winni
 
     seeded = await _seed(serializable_factory)
     world = seeded.world
-    try:
-        # Built BEFORE the block: `fixture_block_violations` allows only constructors and session
-        # calls inside one, and `_debt_row(...)` is indistinguishable in the AST from a helper that
-        # drives a writer. Same object, same single `add`, same flush.
-        starting_edge = _debt_row(world, starting)
-        async with serializable_factory() as setup:
-            async with debt_fixture_setup(setup, label="c8-owner-starting-edge"):
-                setup.add(starting_edge)
-            await setup.commit()
+    # Built BEFORE the block: `fixture_block_violations` allows only constructors and session
+    # calls inside one, and `_debt_row(...)` is indistinguishable in the AST from a helper that
+    # drives a writer. Same object, same single `add`, same flush.
+    starting_edge = _debt_row(world, starting)
+    async with serializable_factory() as setup:
+        async with debt_fixture_setup(setup, label="c8-owner-starting-edge"):
+            setup.add(starting_edge)
+        await setup.commit()
 
-        tx_id = await _seed_payment(serializable_factory, seeded, amount=str(paid))
+    tx_id = await _seed_payment(serializable_factory, seeded, amount=str(paid))
 
-        wrapper, calls, sqlstates = _a_competitor_commits_before_the_first_flow(
-            serializable_factory, seeded, competitor_amount
-        )
-        monkeypatch.setattr(PaymentEngine, "_apply_flow", wrapper)
-        async with serializable_factory() as commit_session:
-            await PaymentEngine(commit_session).commit(tx_id)
+    wrapper, calls, sqlstates = _a_competitor_commits_before_the_first_flow(
+        serializable_factory, seeded, competitor_amount
+    )
+    monkeypatch.setattr(PaymentEngine, "_apply_flow", wrapper)
+    async with serializable_factory() as commit_session:
+        await PaymentEngine(commit_session).commit(tx_id)
 
-        entries = await stored_entries(serializable_factory, tx_id)
-        envelopes = await _envelopes_with_intent(serializable_factory, tx_id=tx_id)
-        after = await stored_debts(serializable_factory, world)
-        tx_state = await stored_rows(
-            serializable_factory,
-            "SELECT state FROM transactions WHERE tx_id = :tx_id",
-            {"tx_id": tx_id},
-        )
-        surviving_locks = await stored_rows(
-            serializable_factory,
-            "SELECT id FROM prepare_locks WHERE tx_id = :tx_id",
-            {"tx_id": tx_id},
-        )
+    entries = await stored_entries(serializable_factory, tx_id)
+    envelopes = await _envelopes_with_intent(serializable_factory, tx_id=tx_id)
+    after = await stored_debts(serializable_factory, world)
+    tx_state = await stored_rows(
+        serializable_factory,
+        "SELECT state FROM transactions WHERE tx_id = :tx_id",
+        {"tx_id": tx_id},
+    )
+    surviving_locks = await stored_rows(
+        serializable_factory,
+        "SELECT id FROM prepare_locks WHERE tx_id = :tx_id",
+        {"tx_id": tx_id},
+    )
 
-        # NON-VACUITY, FIRST.
-        assert envelopes is not None, missing_journal_tables(envelopes, OPERATIONS_TABLE)
+    # NON-VACUITY, FIRST.
+    assert envelopes is not None, missing_journal_tables(envelopes, OPERATIONS_TABLE)
 
-        # NON-VACUITY: the conflict was real, it was a serialization failure, and the OWNER retried.
-        # A stand that produced a lock wait, or that never conflicted at all, would measure an
-        # ordinary payment and say nothing about C8.
-        assert sqlstates == ["40001"], (
-            f"stand: the payment's own write was not refused with exactly one genuine serialization "
-            f"failure (observed {sqlstates}). Without a real 40001 at `_apply_flow` this test "
-            f"observes an ordinary commit."
-        )
-        assert len(calls) == 2, (
-            f"stand: `_apply_flow` ran {len(calls)} time(s), so `_run_uow_with_retry` did not re-run "
-            f"the whole unit of work and this is not the owner's retry"
-        )
-        assert after == {
-            ("debtor", "creditor", "eq"): competitor_amount + paid
-        }, (
-            f"stand: the retry did not apply the payment on top of the competitor's value: {after}. "
-            f"An amount of {starting + paid} would mean the retry replayed its own stale snapshot "
-            f"and silently discarded the concurrent write."
-        )
-        assert [row["state"] for row in tx_state or []] == ["COMMITTED"], tx_state
-        assert surviving_locks == [], (
-            f"stand: the prepare locks outlived the committed payment: {surviving_locks}"
-        )
+    # NON-VACUITY: the conflict was real, it was a serialization failure, and the OWNER retried.
+    # A stand that produced a lock wait, or that never conflicted at all, would measure an
+    # ordinary payment and say nothing about C8.
+    assert sqlstates == ["40001"], (
+        f"stand: the payment's own write was not refused with exactly one genuine serialization "
+        f"failure (observed {sqlstates}). Without a real 40001 at `_apply_flow` this test "
+        f"observes an ordinary commit."
+    )
+    assert len(calls) == 2, (
+        f"stand: `_apply_flow` ran {len(calls)} time(s), so `_run_uow_with_retry` did not re-run "
+        f"the whole unit of work and this is not the owner's retry"
+    )
+    assert after == {
+        ("debtor", "creditor", "eq"): competitor_amount + paid
+    }, (
+        f"stand: the retry did not apply the payment on top of the competitor's value: {after}. "
+        f"An amount of {starting + paid} would mean the retry replayed its own stale snapshot "
+        f"and silently discarded the concurrent write."
+    )
+    assert [row["state"] for row in tx_state or []] == ["COMMITTED"], tx_state
+    assert surviving_locks == [], (
+        f"stand: the prepare locks outlived the committed payment: {surviving_locks}"
+    )
 
-        # VERDICT.
-        assert len(envelopes) == 1, (
-            f"a payment that was refused with a 40001 and retried by its OWN loop left "
-            f"{envelopes}. Exactly one envelope per tx_id is what makes a retried writer "
-            f"recognisable instead of counted twice; the losing attempt's envelope must have gone "
-            f"back with its rollback."
-        )
-        assert envelopes[0]["kind"] == "PAYMENT" and envelopes[0]["state"] == "COMPLETED", envelopes
-        assert entries is not None and len(entries) == 1 and entries[0]["effect"] == "U", (
-            f"the attempt that was refused with a 40001 left a trace in the journal: {entries}. "
-            f"Only the flush that reached the database may produce an entry."
-        )
-        assert _atom_column(entries, "amount_before") == [_atoms(competitor_amount)], (
-            f"the retry's entry does not record the value the database actually held when it ran "
-            f"({entries}); `amount_before` must be the competitor's {competitor_amount}, not the "
-            f"{starting} this session had loaded before losing the race"
-        )
-        assert _atom_column(entries, "delta") == [_atoms(paid)], entries
-        equivalents = await stored_rows(
-            serializable_factory,
-            f"SELECT equivalent_id, effect_count FROM {OPERATION_EQUIVALENTS_TABLE} "  # noqa: S608
-            f"WHERE operation_id = :id",
-            {"id": envelopes[0]["id"]},
-        )
-        assert equivalents is not None and len(equivalents) == 1, (
-            f"the completion did not write exactly one `{OPERATION_EQUIVALENTS_TABLE}` row for the "
-            f"one equivalent the payment touched: {equivalents}"
-        )
-    finally:
-        await _cleanup(serializable_factory, seeded)
+    # VERDICT.
+    assert len(envelopes) == 1, (
+        f"a payment that was refused with a 40001 and retried by its OWN loop left "
+        f"{envelopes}. Exactly one envelope per tx_id is what makes a retried writer "
+        f"recognisable instead of counted twice; the losing attempt's envelope must have gone "
+        f"back with its rollback."
+    )
+    assert envelopes[0]["kind"] == "PAYMENT" and envelopes[0]["state"] == "COMPLETED", envelopes
+    assert entries is not None and len(entries) == 1 and entries[0]["effect"] == "U", (
+        f"the attempt that was refused with a 40001 left a trace in the journal: {entries}. "
+        f"Only the flush that reached the database may produce an entry."
+    )
+    assert _atom_column(entries, "amount_before") == [_atoms(competitor_amount)], (
+        f"the retry's entry does not record the value the database actually held when it ran "
+        f"({entries}); `amount_before` must be the competitor's {competitor_amount}, not the "
+        f"{starting} this session had loaded before losing the race"
+    )
+    assert _atom_column(entries, "delta") == [_atoms(paid)], entries
+    equivalents = await stored_rows(
+        serializable_factory,
+        f"SELECT equivalent_id, effect_count FROM {OPERATION_EQUIVALENTS_TABLE} "  # noqa: S608
+        f"WHERE operation_id = :id",
+        {"id": envelopes[0]["id"]},
+    )
+    assert equivalents is not None and len(equivalents) == 1, (
+        f"the completion did not write exactly one `{OPERATION_EQUIVALENTS_TABLE}` row for the "
+        f"one equivalent the payment touched: {equivalents}"
+    )
 
 
 @pytest.mark.asyncio
@@ -981,7 +856,6 @@ async def test_c8_the_inject_owners_own_retry_leaves_one_envelope_and_the_winnin
     from app.core.ledger import journal
     from tests.integration.test_p015_inject_holds_the_owner_lock_postgres import (
         _Artifacts,
-        _cleanup as _cleanup_inject_world,
         _run,
         _runner,
         _seed as _seed_inject_world,
@@ -996,150 +870,147 @@ async def test_c8_the_inject_owners_own_retry_leaves_one_envelope_and_the_winnin
     equivalent = world.equivalents[0]
     run_id = f"p015-b4-c8-inject-{uuid.uuid4().hex[:8]}"
     identity = f"{run_id}:0"
-    try:
-        async with observed_factory() as setup:
-            async with debt_fixture_setup(setup, label="c8-inject-starting-edge"):
-                setup.add(
-                    Debt(
-                        debtor_id=world.debtor.id,
-                        creditor_id=world.creditor.id,
-                        equivalent_id=equivalent.id,
-                        amount=existing,
-                    )
+    async with observed_factory() as setup:
+        async with debt_fixture_setup(setup, label="c8-inject-starting-edge"):
+            setup.add(
+                Debt(
+                    debtor_id=world.debtor.id,
+                    creditor_id=world.creditor.id,
+                    equivalent_id=equivalent.id,
+                    amount=existing,
                 )
-            await setup.commit()
-
-        creditor, debtor = world.creditor.pid, world.debtor.pid
-        scenario = {
-            "equivalents": [eq.code for eq in world.equivalents],
-            "participants": [{"id": creditor}, {"id": debtor}],
-            "trustlines": [
-                {
-                    "from": creditor,
-                    "to": debtor,
-                    "equivalent": equivalent.code,
-                    "limit": "100.00",
-                    "status": "active",
-                }
-            ],
-            "behaviorProfiles": [],
-            "events": [
-                {
-                    "type": "inject",
-                    "time": 0,
-                    "effects": [
-                        {
-                            "op": "inject_debt",
-                            "from": creditor,
-                            "to": debtor,
-                            "equivalent": equivalent.code,
-                            "amount": str(injected),
-                        }
-                    ],
-                }
-            ],
-        }
-        run = _run(world, run_id)
-        artifacts = _Artifacts()
-        runner = _runner(run, scenario, artifacts)
-
-        real_stage = runner._inject_executor.stage_inject_event
-        stage_calls = 0
-
-        async def _stage_then_a_competitor_commits(session, **kwargs):
-            nonlocal stage_calls
-            stage_calls += 1
-            staged = await real_stage(session, **kwargs)  # has read the debt at 5.00
-            if stage_calls == 1:
-                # THE COMPETITOR, exactly as the step-3 retry stand builds it: a Core `update(Debt)`
-                # with the journal stood down on this engine only. It has to stay a Core statement -
-                # routing it through the ORM would add a third debt flush to `_observations`, which
-                # the sibling stand counts - and standing the journal down is what lets a Core
-                # statement through at all (`C2`). What it stands for is "somebody else committed
-                # the row", and the `40001` that follows is PostgreSQL's, not this helper's.
-                engine = observed_factory.kw.get("bind")
-                journal.uninstall_write_guard(engine)
-                try:
-                    async with observed_factory() as other:
-                        await other.execute(
-                            sa_update(Debt)
-                            .where(
-                                Debt.debtor_id == world.debtor.id,
-                                Debt.creditor_id == world.creditor.id,
-                                Debt.equivalent_id == equivalent.id,
-                            )
-                            .values(amount=concurrent)
-                        )
-                        await other.commit()
-                finally:
-                    journal.install_write_guard(engine)
-            return staged
-
-        runner._inject_executor.stage_inject_event = _stage_then_a_competitor_commits
-
-        sqlstates: list[str | None] = []
-
-        async with observed_factory() as session:
-            real_flush = session.flush
-
-            async def _flush(*args, **kwargs):
-                try:
-                    return await real_flush(*args, **kwargs)
-                except DBAPIError as exc:
-                    sqlstates.append(
-                        getattr(exc.orig, "sqlstate", None) or getattr(exc.orig, "pgcode", None)
-                    )
-                    raise
-
-            session.flush = _flush  # type: ignore[method-assign]
-            await runner._apply_due_scenario_events(
-                session, run_id=run.run_id, run=run, scenario=scenario
             )
+        await setup.commit()
 
-        envelopes = await stored_operations(observed_factory, identity)
-        entries = await stored_entries(observed_factory, identity)
-        stored = await _stored_inject(observed_factory, world)
+    creditor, debtor = world.creditor.pid, world.debtor.pid
+    scenario = {
+        "equivalents": [eq.code for eq in world.equivalents],
+        "participants": [{"id": creditor}, {"id": debtor}],
+        "trustlines": [
+            {
+                "from": creditor,
+                "to": debtor,
+                "equivalent": equivalent.code,
+                "limit": "100.00",
+                "status": "active",
+            }
+        ],
+        "behaviorProfiles": [],
+        "events": [
+            {
+                "type": "inject",
+                "time": 0,
+                "effects": [
+                    {
+                        "op": "inject_debt",
+                        "from": creditor,
+                        "to": debtor,
+                        "equivalent": equivalent.code,
+                        "amount": str(injected),
+                    }
+                ],
+            }
+        ],
+    }
+    run = _run(world, run_id)
+    artifacts = _Artifacts()
+    runner = _runner(run, scenario, artifacts)
 
-        # NON-VACUITY, FIRST.
-        assert envelopes is not None, missing_journal_tables(envelopes, OPERATIONS_TABLE)
+    real_stage = runner._inject_executor.stage_inject_event
+    stage_calls = 0
 
-        # NON-VACUITY: the conflict was real, at the owner's explicit flush of the staged writes,
-        # and the owner re-ran the WHOLE unit of work rather than only the commit.
-        assert sqlstates == ["40001"], (
-            f"stand: the inject's staged write was not refused with exactly one genuine "
-            f"serialization failure at the owner's flush (observed {sqlstates})"
-        )
-        assert stage_calls == 2, (
-            f"stand: the unit of work was staged {stage_calls} time(s), so the owner did not re-run "
-            f"it and this is not the inject owner's retry"
-        )
-        assert stored == {equivalent.id: concurrent + injected}, (
-            f"stand: expected the concurrent {concurrent} plus the injected {injected} exactly once, "
-            f"stored {stored}"
+    async def _stage_then_a_competitor_commits(session, **kwargs):
+        nonlocal stage_calls
+        stage_calls += 1
+        staged = await real_stage(session, **kwargs)  # has read the debt at 5.00
+        if stage_calls == 1:
+            # THE COMPETITOR, exactly as the step-3 retry stand builds it: a Core `update(Debt)`
+            # with the journal stood down on this engine only. It has to stay a Core statement -
+            # routing it through the ORM would add a third debt flush to `_observations`, which
+            # the sibling stand counts - and standing the journal down is what lets a Core
+            # statement through at all (`C2`). What it stands for is "somebody else committed
+            # the row", and the `40001` that follows is PostgreSQL's, not this helper's.
+            engine = observed_factory.kw.get("bind")
+            journal.uninstall_write_guard(engine)
+            try:
+                async with observed_factory() as other:
+                    await other.execute(
+                        sa_update(Debt)
+                        .where(
+                            Debt.debtor_id == world.debtor.id,
+                            Debt.creditor_id == world.creditor.id,
+                            Debt.equivalent_id == equivalent.id,
+                        )
+                        .values(amount=concurrent)
+                    )
+                    await other.commit()
+            finally:
+                journal.install_write_guard(engine)
+        return staged
+
+    runner._inject_executor.stage_inject_event = _stage_then_a_competitor_commits
+
+    sqlstates: list[str | None] = []
+
+    async with observed_factory() as session:
+        real_flush = session.flush
+
+        async def _flush(*args, **kwargs):
+            try:
+                return await real_flush(*args, **kwargs)
+            except DBAPIError as exc:
+                sqlstates.append(
+                    getattr(exc.orig, "sqlstate", None) or getattr(exc.orig, "pgcode", None)
+                )
+                raise
+
+        session.flush = _flush  # type: ignore[method-assign]
+        await runner._apply_due_scenario_events(
+            session, run_id=run.run_id, run=run, scenario=scenario
         )
 
-        # VERDICT.
-        assert len(envelopes) == 1, (
-            f"an inject that was refused with a 40001 and retried by its own loop left {envelopes} "
-            f"for identity {identity}. The envelope is opened per ATTEMPT under an identity that is "
-            f"per EVENT, so the rolled-back attempt's envelope must be gone - otherwise the retry "
-            f"collides on UNIQUE(kind, identity) instead of recording the work it did."
-        )
-        assert envelopes[0]["kind"] == "INJECT" and envelopes[0]["state"] == "COMPLETED", envelopes
-        assert envelopes[0]["tx_id"] is None, (
-            f"an INJECT envelope carries no tx_id (design v2 §5): {envelopes}"
-        )
-        assert entries is not None and len(entries) == 1 and entries[0]["effect"] == "U", (
-            f"the attempt that was refused with a 40001 left a trace in the journal: {entries}"
-        )
-        assert _atom_column(entries, "amount_before") == [_atoms(concurrent)], (
-            f"the retry's entry does not record the value the database held when it ran ({entries}); "
-            f"`amount_before` must be the competitor's {concurrent}, not the {existing} the first "
-            f"attempt had read"
-        )
-        assert _atom_column(entries, "delta") == [_atoms(injected)], entries
-    finally:
-        await _cleanup_inject_world(observed_factory, world)
+    envelopes = await stored_operations(observed_factory, identity)
+    entries = await stored_entries(observed_factory, identity)
+    stored = await _stored_inject(observed_factory, world)
+
+    # NON-VACUITY, FIRST.
+    assert envelopes is not None, missing_journal_tables(envelopes, OPERATIONS_TABLE)
+
+    # NON-VACUITY: the conflict was real, at the owner's explicit flush of the staged writes,
+    # and the owner re-ran the WHOLE unit of work rather than only the commit.
+    assert sqlstates == ["40001"], (
+        f"stand: the inject's staged write was not refused with exactly one genuine "
+        f"serialization failure at the owner's flush (observed {sqlstates})"
+    )
+    assert stage_calls == 2, (
+        f"stand: the unit of work was staged {stage_calls} time(s), so the owner did not re-run "
+        f"it and this is not the inject owner's retry"
+    )
+    assert stored == {equivalent.id: concurrent + injected}, (
+        f"stand: expected the concurrent {concurrent} plus the injected {injected} exactly once, "
+        f"stored {stored}"
+    )
+
+    # VERDICT.
+    assert len(envelopes) == 1, (
+        f"an inject that was refused with a 40001 and retried by its own loop left {envelopes} "
+        f"for identity {identity}. The envelope is opened per ATTEMPT under an identity that is "
+        f"per EVENT, so the rolled-back attempt's envelope must be gone - otherwise the retry "
+        f"collides on UNIQUE(kind, identity) instead of recording the work it did."
+    )
+    assert envelopes[0]["kind"] == "INJECT" and envelopes[0]["state"] == "COMPLETED", envelopes
+    assert envelopes[0]["tx_id"] is None, (
+        f"an INJECT envelope carries no tx_id (design v2 §5): {envelopes}"
+    )
+    assert entries is not None and len(entries) == 1 and entries[0]["effect"] == "U", (
+        f"the attempt that was refused with a 40001 left a trace in the journal: {entries}"
+    )
+    assert _atom_column(entries, "amount_before") == [_atoms(concurrent)], (
+        f"the retry's entry does not record the value the database held when it ran ({entries}); "
+        f"`amount_before` must be the competitor's {concurrent}, not the {existing} the first "
+        f"attempt had read"
+    )
+    assert _atom_column(entries, "delta") == [_atoms(injected)], entries
 
 
 # ==============================================================================================
@@ -1221,73 +1092,70 @@ async def test_c12_p_a_value_outside_the_money_domain_is_refused_before_any_debt
     seeded = await _seed(serializable_factory)
     world = seeded.world
     amount = Decimal(value)
+    stored, error = await _round_trip(serializable_factory, world, amount)
+
+    # NON-VACUITY, FIRST, and MEASURED: this value really is one this money core must not
+    # accept - either because the dialect changes it, or because the column itself objects, or
+    # because it is outside the domain design v2 §4 defines at all. Two of the four cases here
+    # are round-trip failures and two are not, so a bare "it changed" assertion would be false
+    # for half of them and a test that asserted nothing here could pass having measured a value
+    # that is perfectly legal.
+    assert stored != amount or error is not None or not _obeys_the_money_rules(amount), (
+        f"stand: this database stored {value} unchanged (read back {stored!r}) and the money "
+        f"rules of design v2 §4 permit it, so `{label}` is no longer an unacceptable value here "
+        f"and this counterexample has lost its subject"
+    )
+    # NON-VACUITY: the parametrisation's claim about WHY it is unacceptable is checked, not
+    # asserted in prose. A dialect-dependent case must be one the database changed silently; a
+    # dialect-independent one must be forbidden by the rule itself, whatever the database does.
+    if dialect_dependent:
+        assert error is None and stored is not None and stored != amount, (
+            f"stand: `{label}` is recorded as dialect-dependent, but this database did not "
+            f"silently change it (stored={stored!r}, error={error!r})"
+        )
+    else:
+        assert not _obeys_the_money_rules(amount), (
+            f"stand: `{label}` is recorded as forbidden on every dialect, but the restated "
+            f"rules of design v2 §4 accept {value}"
+        )
+
+    recorder = _watch_debt_statements(serializable_engine)
+    refusal = None
     try:
-        stored, error = await _round_trip(serializable_factory, world, amount)
-
-        # NON-VACUITY, FIRST, and MEASURED: this value really is one this money core must not
-        # accept - either because the dialect changes it, or because the column itself objects, or
-        # because it is outside the domain design v2 §4 defines at all. Two of the four cases here
-        # are round-trip failures and two are not, so a bare "it changed" assertion would be false
-        # for half of them and a test that asserted nothing here could pass having measured a value
-        # that is perfectly legal.
-        assert stored != amount or error is not None or not _obeys_the_money_rules(amount), (
-            f"stand: this database stored {value} unchanged (read back {stored!r}) and the money "
-            f"rules of design v2 §4 permit it, so `{label}` is no longer an unacceptable value here "
-            f"and this counterexample has lost its subject"
-        )
-        # NON-VACUITY: the parametrisation's claim about WHY it is unacceptable is checked, not
-        # asserted in prose. A dialect-dependent case must be one the database changed silently; a
-        # dialect-independent one must be forbidden by the rule itself, whatever the database does.
-        if dialect_dependent:
-            assert error is None and stored is not None and stored != amount, (
-                f"stand: `{label}` is recorded as dialect-dependent, but this database did not "
-                f"silently change it (stored={stored!r}, error={error!r})"
-            )
-        else:
-            assert not _obeys_the_money_rules(amount), (
-                f"stand: `{label}` is recorded as forbidden on every dialect, but the restated "
-                f"rules of design v2 §4 accept {value}"
-            )
-
-        recorder = _watch_debt_statements(serializable_engine)
-        refusal = None
-        try:
-            async with serializable_factory() as session:
-                async with await _open(api, session, world, "unstorable"):
-                    session.add(_debt_row(world, amount))
-                    refusal = await _refusal_or_database_error(api, session.flush())
-                if refusal is None:
-                    refusal = await _refusal_or_database_error(api, session.commit())
-        except (DatabaseError, StatementError, *api.refusals) as exc:
-            # The database's own complaint is not the journal's refusal, and the `seen` assertion
-            # below is what says so. Recorded here only so the scenario finishes.
-            #
-            # A journal refusal can arrive here as well, from the operation's own completion: the
-            # hook refused the flush and poisoned the root, the Debt is still pending, and closing
-            # the block flushes it again. The FIRST refusal is the one that names the money
-            # predicate, so it is the one kept.
-            refusal = refusal if refusal is not None else exc
-        finally:
-            event.remove(serializable_engine.sync_engine, "before_execute", recorder)
-
-        after = await stored_debts(serializable_factory, world)
-
-        # VERDICT.
-        assert not recorder.seen, (
-            f"a debt amount of {value} ({label}) reached the `debts` table as {recorder.seen}; this "
-            f"database {today}. A value outside the money domain of design v2 §4 must be refused by "
-            f"{JOURNAL_MODULE} BEFORE the statement is sent, not stored and corrected afterwards. "
-            f"The table now holds {after or 'nothing, because the database itself objected'}."
-        )
-        assert isinstance(refusal, api.refusals), (
-            f"the refusal of a debt amount of {value} ({label}) was {refusal!r}, which is not one "
-            f"of {JOURNAL_MODULE}'s refusal types. This database {today}: the column's own complaint "
-            f"arrives after the statement, names the wrong problem, and for the cases this backend "
-            f"stores happily it does not exist at all."
-        )
-        assert after == {}, f"the unacceptable amount is durable: {after}"
+        async with serializable_factory() as session:
+            async with await _open(api, session, world, "unstorable"):
+                session.add(_debt_row(world, amount))
+                refusal = await _refusal_or_database_error(api, session.flush())
+            if refusal is None:
+                refusal = await _refusal_or_database_error(api, session.commit())
+    except (DatabaseError, StatementError, *api.refusals) as exc:
+        # The database's own complaint is not the journal's refusal, and the `seen` assertion
+        # below is what says so. Recorded here only so the scenario finishes.
+        #
+        # A journal refusal can arrive here as well, from the operation's own completion: the
+        # hook refused the flush and poisoned the root, the Debt is still pending, and closing
+        # the block flushes it again. The FIRST refusal is the one that names the money
+        # predicate, so it is the one kept.
+        refusal = refusal if refusal is not None else exc
     finally:
-        await _cleanup(serializable_factory, seeded)
+        event.remove(serializable_engine.sync_engine, "before_execute", recorder)
+
+    after = await stored_debts(serializable_factory, world)
+
+    # VERDICT.
+    assert not recorder.seen, (
+        f"a debt amount of {value} ({label}) reached the `debts` table as {recorder.seen}; this "
+        f"database {today}. A value outside the money domain of design v2 §4 must be refused by "
+        f"{JOURNAL_MODULE} BEFORE the statement is sent, not stored and corrected afterwards. "
+        f"The table now holds {after or 'nothing, because the database itself objected'}."
+    )
+    assert isinstance(refusal, api.refusals), (
+        f"the refusal of a debt amount of {value} ({label}) was {refusal!r}, which is not one "
+        f"of {JOURNAL_MODULE}'s refusal types. This database {today}: the column's own complaint "
+        f"arrives after the statement, names the wrong problem, and for the cases this backend "
+        f"stores happily it does not exist at all."
+    )
+    assert after == {}, f"the unacceptable amount is durable: {after}"
 
 
 @pytest.mark.parametrize(
@@ -1325,15 +1193,12 @@ async def test_c12_p_control_this_dialect_stores_the_whole_domain_exactly(
     session's actual dialect.
     """
     seeded = await _seed(serializable_factory)
-    try:
-        stored, error = await _round_trip(serializable_factory, seeded.world, Decimal(value))
-        assert error is None, f"this database refused a legitimate amount {value} ({why_here}): {error!r}"
-        assert stored is not None and _atoms(stored) == _atoms(Decimal(value)), (
-            f"{value} is supposed to be stored exactly on this dialect ({why_here}) and came back "
-            f"as {stored!r} - {_atoms_or_none(stored)} atoms instead of {_atoms(Decimal(value))}"
-        )
-    finally:
-        await _cleanup(serializable_factory, seeded)
+    stored, error = await _round_trip(serializable_factory, seeded.world, Decimal(value))
+    assert error is None, f"this database refused a legitimate amount {value} ({why_here}): {error!r}"
+    assert stored is not None and _atoms(stored) == _atoms(Decimal(value)), (
+        f"{value} is supposed to be stored exactly on this dialect ({why_here}) and came back "
+        f"as {stored!r} - {_atoms_or_none(stored)} atoms instead of {_atoms(Decimal(value))}"
+    )
 
 
 # ==============================================================================================
@@ -1401,49 +1266,46 @@ async def test_c13_p_two_concurrent_openers_of_one_identity_and_the_database_ref
                 return exc
             return None
 
-    try:
-        outcomes = await asyncio.wait_for(
-            asyncio.gather(
-                _opener("a", world.creditor.id),
-                _opener("b", world.extra_participants[0].id),
-                return_exceptions=True,
-            ),
-            timeout=30,
-        )
-        envelopes = await stored_operations(serializable_factory, identity)
-        after = await stored_debts(serializable_factory, world)
+    outcomes = await asyncio.wait_for(
+        asyncio.gather(
+            _opener("a", world.creditor.id),
+            _opener("b", world.extra_participants[0].id),
+            return_exceptions=True,
+        ),
+        timeout=30,
+    )
+    envelopes = await stored_operations(serializable_factory, identity)
+    after = await stored_debts(serializable_factory, world)
 
-        # NON-VACUITY, FIRST.
-        assert envelopes is not None, missing_journal_tables(envelopes, OPERATIONS_TABLE)
+    # NON-VACUITY, FIRST.
+    assert envelopes is not None, missing_journal_tables(envelopes, OPERATIONS_TABLE)
 
-        # NON-VACUITY: the two openers really overlapped. Both reached the barrier before either
-        # was released, so neither could have seen the other's envelope by ordinary sequencing.
-        assert log[:2] == ["a:at-barrier", "b:at-barrier"] or log[:2] == [
-            "b:at-barrier",
-            "a:at-barrier",
-        ], f"stand: the two openers did not both reach the barrier before either proceeded: {log}"
-        assert not barrier.broken, "stand: the barrier broke, so the two openers never overlapped"
+    # NON-VACUITY: the two openers really overlapped. Both reached the barrier before either
+    # was released, so neither could have seen the other's envelope by ordinary sequencing.
+    assert log[:2] == ["a:at-barrier", "b:at-barrier"] or log[:2] == [
+        "b:at-barrier",
+        "a:at-barrier",
+    ], f"stand: the two openers did not both reach the barrier before either proceeded: {log}"
+    assert not barrier.broken, "stand: the barrier broke, so the two openers never overlapped"
 
-        refused = [outcome for outcome in outcomes if isinstance(outcome, BaseException)]
-        succeeded = [outcome for outcome in outcomes if outcome is None]
+    refused = [outcome for outcome in outcomes if isinstance(outcome, BaseException)]
+    succeeded = [outcome for outcome in outcomes if outcome is None]
 
-        # VERDICT.
-        assert len(succeeded) == 1 and len(refused) == 1, (
-            f"two concurrent openers of the identity {identity!r} produced {outcomes} - "
-            f"{len(succeeded)} success(es) and {len(refused)} refusal(s). An identity is spent once: "
-            f"`UNIQUE(kind, identity)` must let exactly one of them through, and it must be the "
-            f"DATABASE that decides, because both of them read the table before either wrote to it."
-        )
-        assert isinstance(refused[0], (DatabaseError, StatementError, *api.refusals)), (
-            f"the loser of the race was refused by {refused[0]!r}, which is neither the database's "
-            f"integrity error nor one of {JOURNAL_MODULE}'s refusal types"
-        )
-        assert len(envelopes) == 1, f"the refused opener still left an envelope behind: {envelopes}"
-        assert len(after) == 1, (
-            f"both openers' debts are durable, so neither operation was refused at all: {after}"
-        )
-    finally:
-        await _cleanup(serializable_factory, seeded)
+    # VERDICT.
+    assert len(succeeded) == 1 and len(refused) == 1, (
+        f"two concurrent openers of the identity {identity!r} produced {outcomes} - "
+        f"{len(succeeded)} success(es) and {len(refused)} refusal(s). An identity is spent once: "
+        f"`UNIQUE(kind, identity)` must let exactly one of them through, and it must be the "
+        f"DATABASE that decides, because both of them read the table before either wrote to it."
+    )
+    assert isinstance(refused[0], (DatabaseError, StatementError, *api.refusals)), (
+        f"the loser of the race was refused by {refused[0]!r}, which is neither the database's "
+        f"integrity error nor one of {JOURNAL_MODULE}'s refusal types"
+    )
+    assert len(envelopes) == 1, f"the refused opener still left an envelope behind: {envelopes}"
+    assert len(after) == 1, (
+        f"both openers' debts are durable, so neither operation was refused at all: {after}"
+    )
 
 
 # ==============================================================================================
@@ -1462,7 +1324,6 @@ async def _seed_payment(factory, seeded: _Seeded, *, amount: str, limit: str = "
 
     world = seeded.world
     tx_id = str(uuid.uuid4())
-    seeded.tx_ids.append(tx_id)
     async with factory() as setup:
         setup.add(
             TrustLine(
@@ -1578,77 +1439,74 @@ async def test_c14_the_payment_envelope_is_written_before_its_prepare_locks_are_
     assert api is not None  # the handle is resolved inside the body; see tests/p015_b4_support.py
     seeded = await _seed(serializable_factory)
     world = seeded.world
+    tx_id = await _seed_payment(serializable_factory, seeded, amount="8.00")
+
+    # The snapshot BEFORE the commit, on its own session: `commit` is about to delete these rows.
+    snapshot = await stored_rows(
+        serializable_factory,
+        "SELECT participant_id::text AS participant_id, effects FROM prepare_locks "
+        "WHERE tx_id = :tx_id ORDER BY participant_id",
+        {"tx_id": tx_id},
+    )
+
+    watcher = _PrepareLockDeleteWatcher(tx_id)
+    event.listen(serializable_engine.sync_engine, "before_execute", watcher)
     try:
-        tx_id = await _seed_payment(serializable_factory, seeded, amount="8.00")
-
-        # The snapshot BEFORE the commit, on its own session: `commit` is about to delete these rows.
-        snapshot = await stored_rows(
-            serializable_factory,
-            "SELECT participant_id::text AS participant_id, effects FROM prepare_locks "
-            "WHERE tx_id = :tx_id ORDER BY participant_id",
-            {"tx_id": tx_id},
-        )
-
-        watcher = _PrepareLockDeleteWatcher(tx_id)
-        event.listen(serializable_engine.sync_engine, "before_execute", watcher)
-        try:
-            async with serializable_factory() as commit_session:
-                await PaymentEngine(commit_session).commit(tx_id)
-        finally:
-            event.remove(serializable_engine.sync_engine, "before_execute", watcher)
-
-        envelopes = await _envelopes_with_intent(serializable_factory, tx_id=tx_id)
-        after = await stored_debts(serializable_factory, world)
-        tx_state = await stored_rows(
-            serializable_factory,
-            "SELECT state FROM transactions WHERE tx_id = :tx_id",
-            {"tx_id": tx_id},
-        )
-        surviving_locks = await stored_rows(
-            serializable_factory,
-            "SELECT id FROM prepare_locks WHERE tx_id = :tx_id",
-            {"tx_id": tx_id},
-        )
-
-        # NON-VACUITY, FIRST.
-        assert envelopes is not None, missing_journal_tables(envelopes, OPERATIONS_TABLE)
-
-        # NON-VACUITY: the real owner really ran, really deleted its locks, and really moved money.
-        assert snapshot, f"stand: `prepare` wrote no PrepareLock for {tx_id}, so there was nothing to delete"
-        assert watcher.deletes == 1, (
-            f"stand: the listener saw {watcher.deletes} DELETE(s) against `prepare_locks` during the "
-            f"commit; the ordering requirement below has nothing to attach to"
-        )
-        assert surviving_locks == [], f"stand: the prepare locks outlived the commit: {surviving_locks}"
-        assert [row["state"] for row in tx_state or []] == ["COMMITTED"], tx_state
-        assert after == {("debtor", "creditor", "eq"): Decimal("8.00000000")}, (
-            f"stand: the real payment did not move the money it was prepared for: {after}"
-        )
-
-        # VERDICT.
-        assert len(envelopes) == 1 and envelopes[0]["state"] == "COMPLETED", (
-            f"a committed payment left {envelopes} instead of exactly one COMPLETED envelope for "
-            f"tx_id={tx_id}"
-        )
-        assert envelopes[0]["kind"] == "PAYMENT", envelopes
-        recorded = _decoded_intent(envelopes[0])
-        expected_flows = [_decoded_json(row["effects"]) for row in snapshot]
-        assert _flows_of(recorded) == _flows_of({"flows": expected_flows}), (
-            f"the envelope's intent does not describe the prepared effects it committed. Recorded: "
-            f"{recorded}. The locks held, immediately before the commit deleted them: "
-            f"{expected_flows}. Design v2 §7 requires the intent to be the validated flows per lock, "
-            f"as exact scale-8 strings, so step 6 can recompute the payment from the envelope alone."
-        )
-        assert watcher.table_present is True and watcher.envelopes_visible == 1, (
-            f"at the moment the commit deleted the prepare locks, the connection doing the deleting "
-            f"could see {watcher.envelopes_visible!r} envelope row(s) for this payment "
-            f"(table_present={watcher.table_present!r}). Design v2 §7 flushes the envelope AT OPEN, "
-            f"before `delete(PrepareLock)`: an envelope written later is an envelope that a crash "
-            f"between the two statements would lose, leaving a payment whose locks are gone and "
-            f"whose journal never began."
-        )
+        async with serializable_factory() as commit_session:
+            await PaymentEngine(commit_session).commit(tx_id)
     finally:
-        await _cleanup(serializable_factory, seeded)
+        event.remove(serializable_engine.sync_engine, "before_execute", watcher)
+
+    envelopes = await _envelopes_with_intent(serializable_factory, tx_id=tx_id)
+    after = await stored_debts(serializable_factory, world)
+    tx_state = await stored_rows(
+        serializable_factory,
+        "SELECT state FROM transactions WHERE tx_id = :tx_id",
+        {"tx_id": tx_id},
+    )
+    surviving_locks = await stored_rows(
+        serializable_factory,
+        "SELECT id FROM prepare_locks WHERE tx_id = :tx_id",
+        {"tx_id": tx_id},
+    )
+
+    # NON-VACUITY, FIRST.
+    assert envelopes is not None, missing_journal_tables(envelopes, OPERATIONS_TABLE)
+
+    # NON-VACUITY: the real owner really ran, really deleted its locks, and really moved money.
+    assert snapshot, f"stand: `prepare` wrote no PrepareLock for {tx_id}, so there was nothing to delete"
+    assert watcher.deletes == 1, (
+        f"stand: the listener saw {watcher.deletes} DELETE(s) against `prepare_locks` during the "
+        f"commit; the ordering requirement below has nothing to attach to"
+    )
+    assert surviving_locks == [], f"stand: the prepare locks outlived the commit: {surviving_locks}"
+    assert [row["state"] for row in tx_state or []] == ["COMMITTED"], tx_state
+    assert after == {("debtor", "creditor", "eq"): Decimal("8.00000000")}, (
+        f"stand: the real payment did not move the money it was prepared for: {after}"
+    )
+
+    # VERDICT.
+    assert len(envelopes) == 1 and envelopes[0]["state"] == "COMPLETED", (
+        f"a committed payment left {envelopes} instead of exactly one COMPLETED envelope for "
+        f"tx_id={tx_id}"
+    )
+    assert envelopes[0]["kind"] == "PAYMENT", envelopes
+    recorded = _decoded_intent(envelopes[0])
+    expected_flows = [_decoded_json(row["effects"]) for row in snapshot]
+    assert _flows_of(recorded) == _flows_of({"flows": expected_flows}), (
+        f"the envelope's intent does not describe the prepared effects it committed. Recorded: "
+        f"{recorded}. The locks held, immediately before the commit deleted them: "
+        f"{expected_flows}. Design v2 §7 requires the intent to be the validated flows per lock, "
+        f"as exact scale-8 strings, so step 6 can recompute the payment from the envelope alone."
+    )
+    assert watcher.table_present is True and watcher.envelopes_visible == 1, (
+        f"at the moment the commit deleted the prepare locks, the connection doing the deleting "
+        f"could see {watcher.envelopes_visible!r} envelope row(s) for this payment "
+        f"(table_present={watcher.table_present!r}). Design v2 §7 flushes the envelope AT OPEN, "
+        f"before `delete(PrepareLock)`: an envelope written later is an envelope that a crash "
+        f"between the two statements would lose, leaving a payment whose locks are gone and "
+        f"whose journal never began."
+    )
 
 
 def _flows_of(intent) -> list[dict]:
@@ -1719,94 +1577,90 @@ async def test_c14_the_clearing_envelope_records_the_pre_amounts_it_actually_cle
     world = seeded.world
     a, b, c = world.debtor, world.creditor, world.extra_participants[0]
     debt_ids = [uuid.uuid4() for _ in range(3)]
-    try:
-        # Built before the fixture block: `fixture_block_violations` allows only constructors and
-        # session calls inside one, and a comprehension is control flow.
-        cycle_debts = [
-            Debt(
-                id=debt_id,
-                debtor_id=debtor.id,
-                creditor_id=creditor.id,
-                equivalent_id=world.equivalent.id,
-                amount=Decimal(amount),
-                version=0,
-            )
-            for debt_id, debtor, creditor, amount in (
-                (debt_ids[0], a, b, "100.00000000"),
-                (debt_ids[1], b, c, "30.00000000"),
-                (debt_ids[2], c, a, "40.00000000"),
-            )
-        ]
-        async with serializable_factory() as setup:
-            setup.add_all(
-                [
-                    TrustLine(
-                        from_participant_id=creditor.id,
-                        to_participant_id=debtor.id,
-                        equivalent_id=world.equivalent.id,
-                        limit=Decimal("500.00"),
-                        policy={"auto_clearing": True},
-                        status="active",
-                    )
-                    for debtor, creditor in ((a, b), (b, c), (c, a))
-                ]
-            )
-            async with debt_fixture_setup(setup, label="cycle"):
-                setup.add_all(cycle_debts)
-            await setup.commit()
-
-        # The pre-amounts, captured independently and BEFORE the clearing runs.
-        async with serializable_factory() as reader:
-            pre_amounts = {
-                str(debt_id): _atoms(amount)
-                for debt_id, amount in (
-                    await reader.execute(
-                        select(Debt.id, Debt.amount).where(Debt.id.in_(debt_ids))
-                    )
-                ).all()
-            }
-
-        cycle = [{"debt_id": str(debt_id)} for debt_id in debt_ids]
-        async with serializable_factory() as clearing_session:
-            service = ClearingService(clearing_session)
-            execution_tx_id = service._execution_tx_id(debt_ids)
-            seeded.tx_ids.append(execution_tx_id)
-            cleared = await asyncio.wait_for(
-                service.execute_clearing_with_amount(cycle), timeout=60
-            )
-
-        envelopes = await _envelopes_with_intent(serializable_factory, tx_id=execution_tx_id)
-        after = await stored_debts(serializable_factory, world)
-
-        # NON-VACUITY, FIRST.
-        assert envelopes is not None, missing_journal_tables(envelopes, OPERATIONS_TABLE)
-
-        # NON-VACUITY: a real clearing really ran and really moved the exact amount it should have.
-        assert cleared is not None and _atoms(cleared) == 3000000000, (
-            f"stand: the clearing returned {cleared!r} instead of the cycle minimum 30.00000000, so "
-            f"it was skipped and this test observes nothing"
+    # Built before the fixture block: `fixture_block_violations` allows only constructors and
+    # session calls inside one, and a comprehension is control flow.
+    cycle_debts = [
+        Debt(
+            id=debt_id,
+            debtor_id=debtor.id,
+            creditor_id=creditor.id,
+            equivalent_id=world.equivalent.id,
+            amount=Decimal(amount),
+            version=0,
         )
-        assert {key: _atoms(value) for key, value in after.items()} == {
-            ("debtor", "creditor", "eq"): 7000000000,
-            ("extra0", "debtor", "eq"): 1000000000,
-        }, f"stand: the cycle was not reduced by exactly 30.00000000 on every edge: {after}"
+        for debt_id, debtor, creditor, amount in (
+            (debt_ids[0], a, b, "100.00000000"),
+            (debt_ids[1], b, c, "30.00000000"),
+            (debt_ids[2], c, a, "40.00000000"),
+        )
+    ]
+    async with serializable_factory() as setup:
+        setup.add_all(
+            [
+                TrustLine(
+                    from_participant_id=creditor.id,
+                    to_participant_id=debtor.id,
+                    equivalent_id=world.equivalent.id,
+                    limit=Decimal("500.00"),
+                    policy={"auto_clearing": True},
+                    status="active",
+                )
+                for debtor, creditor in ((a, b), (b, c), (c, a))
+            ]
+        )
+        async with debt_fixture_setup(setup, label="cycle"):
+            setup.add_all(cycle_debts)
+        await setup.commit()
 
-        # VERDICT.
-        assert len(envelopes) == 1 and envelopes[0]["state"] == "COMPLETED", (
-            f"a committed clearing left {envelopes} instead of exactly one COMPLETED envelope for "
-            f"tx_id={execution_tx_id}"
+    # The pre-amounts, captured independently and BEFORE the clearing runs.
+    async with serializable_factory() as reader:
+        pre_amounts = {
+            str(debt_id): _atoms(amount)
+            for debt_id, amount in (
+                await reader.execute(
+                    select(Debt.id, Debt.amount).where(Debt.id.in_(debt_ids))
+                )
+            ).all()
+        }
+
+    cycle = [{"debt_id": str(debt_id)} for debt_id in debt_ids]
+    async with serializable_factory() as clearing_session:
+        service = ClearingService(clearing_session)
+        execution_tx_id = service._execution_tx_id(debt_ids)
+        cleared = await asyncio.wait_for(
+            service.execute_clearing_with_amount(cycle), timeout=60
         )
-        assert envelopes[0]["kind"] == "CLEARING", envelopes
-        recorded = _decoded_intent(envelopes[0])
-        assert _debt_atoms_in(recorded) == pre_amounts, (
-            f"the clearing's intent does not record the amounts it actually acted on. Recorded: "
-            f"{_debt_atoms_in(recorded)}. Captured independently before the clearing ran: "
-            f"{pre_amounts}. Design v2 §7 requires the cycle's debt ids with their locked "
-            f"(`FOR UPDATE`) amounts, because step 6 reconstructs the cleared cycle from the "
-            f"envelope and nothing else survives the clearing to be compared against."
-        )
-    finally:
-        await _cleanup(serializable_factory, seeded)
+
+    envelopes = await _envelopes_with_intent(serializable_factory, tx_id=execution_tx_id)
+    after = await stored_debts(serializable_factory, world)
+
+    # NON-VACUITY, FIRST.
+    assert envelopes is not None, missing_journal_tables(envelopes, OPERATIONS_TABLE)
+
+    # NON-VACUITY: a real clearing really ran and really moved the exact amount it should have.
+    assert cleared is not None and _atoms(cleared) == 3000000000, (
+        f"stand: the clearing returned {cleared!r} instead of the cycle minimum 30.00000000, so "
+        f"it was skipped and this test observes nothing"
+    )
+    assert {key: _atoms(value) for key, value in after.items()} == {
+        ("debtor", "creditor", "eq"): 7000000000,
+        ("extra0", "debtor", "eq"): 1000000000,
+    }, f"stand: the cycle was not reduced by exactly 30.00000000 on every edge: {after}"
+
+    # VERDICT.
+    assert len(envelopes) == 1 and envelopes[0]["state"] == "COMPLETED", (
+        f"a committed clearing left {envelopes} instead of exactly one COMPLETED envelope for "
+        f"tx_id={execution_tx_id}"
+    )
+    assert envelopes[0]["kind"] == "CLEARING", envelopes
+    recorded = _decoded_intent(envelopes[0])
+    assert _debt_atoms_in(recorded) == pre_amounts, (
+        f"the clearing's intent does not record the amounts it actually acted on. Recorded: "
+        f"{_debt_atoms_in(recorded)}. Captured independently before the clearing ran: "
+        f"{pre_amounts}. Design v2 §7 requires the cycle's debt ids with their locked "
+        f"(`FOR UPDATE`) amounts, because step 6 reconstructs the cleared cycle from the "
+        f"envelope and nothing else survives the clearing to be compared against."
+    )
 
 
 def _debt_atoms_in(intent) -> dict[str, int]:
@@ -1920,62 +1774,59 @@ async def test_c17_p_deleting_an_equivalent_whose_only_debt_was_cleared_is_refus
     seeded = await _seed(serializable_factory)
     world = seeded.world
     identity = _identity("history-outlives-equivalent")
-    try:
-        await _history_only_equivalent(api, serializable_factory, world, identity)
-        await _deactivate(serializable_factory, world)
+    await _history_only_equivalent(api, serializable_factory, world, identity)
+    await _deactivate(serializable_factory, world)
 
-        entries = await stored_entries(serializable_factory, identity)
-        debts_now = await stored_debts(serializable_factory, world)
+    entries = await stored_entries(serializable_factory, identity)
+    debts_now = await stored_debts(serializable_factory, world)
 
-        # NON-VACUITY, FIRST.
-        assert entries is not None, missing_journal_tables(entries, ENTRIES_TABLE)
-        assert len(entries) == 2, f"stand: the operation left {entries} instead of an I and a D"
-        # NON-VACUITY: nothing else can refuse this delete. With a live debt the refusal would be
-        # T1524's RESTRICT and with a trustline it would be the route's own usage count, and this
-        # test would pass without a journal existing at all.
-        assert debts_now == {}, (
-            f"stand: a debt is still live, so any refusal below would be T1524's, not the "
-            f"journal's: {debts_now}"
-        )
+    # NON-VACUITY, FIRST.
+    assert entries is not None, missing_journal_tables(entries, ENTRIES_TABLE)
+    assert len(entries) == 2, f"stand: the operation left {entries} instead of an I and a D"
+    # NON-VACUITY: nothing else can refuse this delete. With a live debt the refusal would be
+    # T1524's RESTRICT and with a trustline it would be the route's own usage count, and this
+    # test would pass without a journal existing at all.
+    assert debts_now == {}, (
+        f"stand: a debt is still live, so any refusal below would be T1524's, not the "
+        f"journal's: {debts_now}"
+    )
 
-        failure: BaseException | None = None
-        async with serializable_factory() as admin_session:
-            try:
-                await admin_delete_equivalent(
-                    world.equivalent.code,
-                    AdminEquivalentDeleteRequest(reason="p015 b4 counterexample"),
-                    _admin_request(),
-                    db=admin_session,
-                )
-            except BaseException as exc:  # classified below
-                failure = exc
+    failure: BaseException | None = None
+    async with serializable_factory() as admin_session:
+        try:
+            await admin_delete_equivalent(
+                world.equivalent.code,
+                AdminEquivalentDeleteRequest(reason="p015 b4 counterexample"),
+                _admin_request(),
+                db=admin_session,
+            )
+        except BaseException as exc:  # classified below
+            failure = exc
 
-        async with serializable_factory() as fresh:
-            survivor = (
-                await fresh.execute(
-                    select(Equivalent.id).where(Equivalent.id == world.equivalent.id)
-                )
-            ).scalar_one_or_none()
+    async with serializable_factory() as fresh:
+        survivor = (
+            await fresh.execute(
+                select(Equivalent.id).where(Equivalent.id == world.equivalent.id)
+            )
+        ).scalar_one_or_none()
 
-        # VERDICT.
-        assert isinstance(failure, ConflictException) and failure.status_code == 409, (
-            f"the admin route deleted an equivalent that {len(entries)} journal entries name, and "
-            f"answered {failure!r}. Those entries are now money history denominated in a row that "
-            f"does not exist. Every journal foreign key is RESTRICT for this reason (design v2 §5), "
-            f"and the route reports the resulting refusal as the same 409 an equivalent in use gets."
-        )
-        assert (failure.details or {}).get("reason") == "referenced_by_existing_rows", (
-            f"the 409 does not name the reason the delete was refused: {failure.details}. "
-            f"`referenced_by_existing_rows` is the answer `app/api/v1/admin.py:1465-1467` gives when "
-            f"the database itself refuses; an equivalent with journal history and no debts must "
-            f"reach that branch, not the usage-count branch above it."
-        )
-        assert survivor is not None, "the equivalent is gone despite the refusal"
-        assert len(await stored_entries(serializable_factory, identity) or []) == 2, (
-            "the journal entries did not survive the refused delete"
-        )
-    finally:
-        await _cleanup(serializable_factory, seeded)
+    # VERDICT.
+    assert isinstance(failure, ConflictException) and failure.status_code == 409, (
+        f"the admin route deleted an equivalent that {len(entries)} journal entries name, and "
+        f"answered {failure!r}. Those entries are now money history denominated in a row that "
+        f"does not exist. Every journal foreign key is RESTRICT for this reason (design v2 §5), "
+        f"and the route reports the resulting refusal as the same 409 an equivalent in use gets."
+    )
+    assert (failure.details or {}).get("reason") == "referenced_by_existing_rows", (
+        f"the 409 does not name the reason the delete was refused: {failure.details}. "
+        f"`referenced_by_existing_rows` is the answer `app/api/v1/admin.py:1465-1467` gives when "
+        f"the database itself refuses; an equivalent with journal history and no debts must "
+        f"reach that branch, not the usage-count branch above it."
+    )
+    assert survivor is not None, "the equivalent is gone despite the refusal"
+    assert len(await stored_entries(serializable_factory, identity) or []) == 2, (
+        "the journal entries did not survive the refused delete"
+    )
 
 
 @pytest.mark.parametrize("order", ["payment first", "delete first"])
@@ -2042,136 +1893,133 @@ async def test_c17_p_the_owner_lock_race_never_leaves_an_equivalent_gone_with_it
     seeded = await _seed(serializable_factory)
     world = seeded.world
     lock_key = PaymentEngine._equivalent_owner_lock_key(world.equivalent.id)
+    tx_id = await _seed_payment(serializable_factory, seeded, amount="9.00")
+    await _deactivate(serializable_factory, world)
+
+    payment_session = serializable_factory()
+    admin_session = serializable_factory()
+    gate = serializable_factory()
     try:
-        tx_id = await _seed_payment(serializable_factory, seeded, amount="9.00")
-        await _deactivate(serializable_factory, world)
+        payment_pid = int(await payment_session.scalar(text("SELECT pg_backend_pid()")))
+        admin_pid = int(await admin_session.scalar(text("SELECT pg_backend_pid()")))
 
-        payment_session = serializable_factory()
-        admin_session = serializable_factory()
-        gate = serializable_factory()
-        try:
-            payment_pid = int(await payment_session.scalar(text("SELECT pg_backend_pid()")))
-            admin_pid = int(await admin_session.scalar(text("SELECT pg_backend_pid()")))
+        # The gate: the same advisory lock, held in its own transaction, so both real owners
+        # have to queue behind it in the order they ask.
+        await gate.execute(
+            text("SELECT pg_advisory_xact_lock(:ns, :key)"),
+            {"ns": _EQUIVALENT_OWNER_LOCK_NAMESPACE, "key": lock_key},
+        )
 
-            # The gate: the same advisory lock, held in its own transaction, so both real owners
-            # have to queue behind it in the order they ask.
-            await gate.execute(
-                text("SELECT pg_advisory_xact_lock(:ns, :key)"),
-                {"ns": _EQUIVALENT_OWNER_LOCK_NAMESPACE, "key": lock_key},
+        async def _run_payment():
+            return await PaymentEngine(payment_session).commit(tx_id)
+
+        async def _run_delete():
+            try:
+                return await admin_delete_equivalent(
+                    world.equivalent.code,
+                    AdminEquivalentDeleteRequest(reason="p015 b4 counterexample"),
+                    _admin_request(),
+                    db=admin_session,
+                )
+            finally:
+                # THE REQUEST'S SESSION ENDS WHEN THE REQUEST DOES, and here that is not
+                # decoration - it is what releases the owner lock. The route raises its
+                # usage-count `ConflictException` BEFORE the `try` that rolls back
+                # (`app/api/v1/admin.py:1435-1437`), so the transaction-scoped advisory lock it
+                # took at `:1428` is still held when the exception leaves the function. In
+                # production `get_db_session` (`app/db/session.py:92-94`) closes the session as
+                # the request unwinds and the lock goes with it. Measured without this line: the
+                # payment queued behind the delete never got the lock and failed with "Payment
+                # advisory lock timed out" after its five-second budget - a stand artefact that
+                # would have read as a property failure.
+                await admin_session.rollback()
+
+        if order == "payment first":
+            first, first_pid, second, second_pid = (
+                _run_payment, payment_pid, _run_delete, admin_pid,
+            )
+        else:
+            first, first_pid, second, second_pid = (
+                _run_delete, admin_pid, _run_payment, payment_pid,
             )
 
-            async def _run_payment():
-                return await PaymentEngine(payment_session).commit(tx_id)
+        first_task = asyncio.create_task(first())
+        first_queued = await _until(lambda: observer(first_pid))
+        second_task = asyncio.create_task(second())
+        second_queued = await _until(lambda: observer(second_pid))
 
-            async def _run_delete():
-                try:
-                    return await admin_delete_equivalent(
-                        world.equivalent.code,
-                        AdminEquivalentDeleteRequest(reason="p015 b4 counterexample"),
-                        _admin_request(),
-                        db=admin_session,
-                    )
-                finally:
-                    # THE REQUEST'S SESSION ENDS WHEN THE REQUEST DOES, and here that is not
-                    # decoration - it is what releases the owner lock. The route raises its
-                    # usage-count `ConflictException` BEFORE the `try` that rolls back
-                    # (`app/api/v1/admin.py:1435-1437`), so the transaction-scoped advisory lock it
-                    # took at `:1428` is still held when the exception leaves the function. In
-                    # production `get_db_session` (`app/db/session.py:92-94`) closes the session as
-                    # the request unwinds and the lock goes with it. Measured without this line: the
-                    # payment queued behind the delete never got the lock and failed with "Payment
-                    # advisory lock timed out" after its five-second budget - a stand artefact that
-                    # would have read as a property failure.
-                    await admin_session.rollback()
-
-            if order == "payment first":
-                first, first_pid, second, second_pid = (
-                    _run_payment, payment_pid, _run_delete, admin_pid,
-                )
-            else:
-                first, first_pid, second, second_pid = (
-                    _run_delete, admin_pid, _run_payment, payment_pid,
-                )
-
-            first_task = asyncio.create_task(first())
-            first_queued = await _until(lambda: observer(first_pid))
-            second_task = asyncio.create_task(second())
-            second_queued = await _until(lambda: observer(second_pid))
-
-            await gate.rollback()
-            outcomes = await asyncio.wait_for(
-                asyncio.gather(first_task, second_task, return_exceptions=True), timeout=60
-            )
-        finally:
-            for session in (gate, admin_session, payment_session):
-                try:
-                    await session.rollback()
-                finally:
-                    await session.close()
-
-        payment_outcome, delete_outcome = (
-            outcomes if order == "payment first" else tuple(reversed(outcomes))
+        await gate.rollback()
+        outcomes = await asyncio.wait_for(
+            asyncio.gather(first_task, second_task, return_exceptions=True), timeout=60
         )
-        envelopes = await _envelopes_with_intent(serializable_factory, tx_id=tx_id)
-        entries = await stored_rows(
-            serializable_factory,
-            f"SELECT id FROM {ENTRIES_TABLE} WHERE equivalent_id = :eq",  # noqa: S608
-            {"eq": str(world.equivalent.id)},
-        )
-        debts_now = await stored_debts(serializable_factory, world)
-        async with serializable_factory() as fresh:
-            survivor = (
-                await fresh.execute(
-                    select(Equivalent.id).where(Equivalent.id == world.equivalent.id)
-                )
-            ).scalar_one_or_none()
-
-        # NON-VACUITY, FIRST.
-        assert envelopes is not None, missing_journal_tables(envelopes, OPERATIONS_TABLE)
-
-        # NON-VACUITY: the race really happened in the intended order, and both participants really
-        # contended for the SAME lock. Without these two observations the gather below would be
-        # measuring whatever the scheduler happened to do.
-        assert first_queued and second_queued, (
-            f"stand: the two owners did not both queue on the equivalent owner lock before the gate "
-            f"released it (first={first_queued}, second={second_queued}); the order '{order}' was "
-            f"not forced and this run measured no race"
-        )
-
-        # VERDICT - the invariant §10.1 states, and the one outcome that is reachable through the
-        # real route in both orders.
-        assert isinstance(delete_outcome, ConflictException), (
-            f"the admin delete answered {delete_outcome!r} in the '{order}' order. An equivalent "
-            f"that a payment holds a trustline and an envelope for must not be deletable, whichever "
-            f"of the two reached the owner lock first."
-        )
-        assert survivor is not None, (
-            f"the equivalent is GONE after the '{order}' order, while the database still holds "
-            f"debts={debts_now} and {len(entries or [])} journal entr(ies) denominated in it. That "
-            f"is the state design v2 §10.1 forbids outright."
-        )
-        # T1544, 2026-09-14: THE PAYMENT HALF OF THIS RACE IS CLOSED. The delete requires an INACTIVE
-        # equivalent (`admin_delete_equivalent`) and a payment requires an ACTIVE one
-        # (`PaymentEngine.refuse_inactive_equivalents`, read at commit under the owner lock), so the
-        # premise this stand used to force - a payment committing into an equivalent deactivated for
-        # deletion - is refused in BOTH orders. The invariant assertions above are unchanged; only the
-        # payment's expected outcome changed, from "commits 9.00 with one COMPLETED envelope" to the
-        # operator-stop refusal with no money and no envelope.
-        assert isinstance(payment_outcome, ConflictException) and payment_outcome.status_code == 409, (
-            f"the payment in the '{order}' order answered {payment_outcome!r}; a payment into an "
-            f"equivalent deactivated for deletion must be refused by the operator stop (T1544)"
-        )
-        assert payment_outcome.code == "E008", payment_outcome.code
-        assert (payment_outcome.details or {}).get(
-            "reason"
-        ) == PaymentEngine.EQUIVALENT_INACTIVE_REASON, payment_outcome.details
-        assert "retryable" not in (payment_outcome.details or {}), payment_outcome.details
-        assert envelopes == [], (
-            f"the refused payment left envelopes {envelopes} in the '{order}' order"
-        )
-        assert debts_now == {}, debts_now
     finally:
-        await _cleanup(serializable_factory, seeded)
+        for session in (gate, admin_session, payment_session):
+            try:
+                await session.rollback()
+            finally:
+                await session.close()
+
+    payment_outcome, delete_outcome = (
+        outcomes if order == "payment first" else tuple(reversed(outcomes))
+    )
+    envelopes = await _envelopes_with_intent(serializable_factory, tx_id=tx_id)
+    entries = await stored_rows(
+        serializable_factory,
+        f"SELECT id FROM {ENTRIES_TABLE} WHERE equivalent_id = :eq",  # noqa: S608
+        {"eq": str(world.equivalent.id)},
+    )
+    debts_now = await stored_debts(serializable_factory, world)
+    async with serializable_factory() as fresh:
+        survivor = (
+            await fresh.execute(
+                select(Equivalent.id).where(Equivalent.id == world.equivalent.id)
+            )
+        ).scalar_one_or_none()
+
+    # NON-VACUITY, FIRST.
+    assert envelopes is not None, missing_journal_tables(envelopes, OPERATIONS_TABLE)
+
+    # NON-VACUITY: the race really happened in the intended order, and both participants really
+    # contended for the SAME lock. Without these two observations the gather below would be
+    # measuring whatever the scheduler happened to do.
+    assert first_queued and second_queued, (
+        f"stand: the two owners did not both queue on the equivalent owner lock before the gate "
+        f"released it (first={first_queued}, second={second_queued}); the order '{order}' was "
+        f"not forced and this run measured no race"
+    )
+
+    # VERDICT - the invariant §10.1 states, and the one outcome that is reachable through the
+    # real route in both orders.
+    assert isinstance(delete_outcome, ConflictException), (
+        f"the admin delete answered {delete_outcome!r} in the '{order}' order. An equivalent "
+        f"that a payment holds a trustline and an envelope for must not be deletable, whichever "
+        f"of the two reached the owner lock first."
+    )
+    assert survivor is not None, (
+        f"the equivalent is GONE after the '{order}' order, while the database still holds "
+        f"debts={debts_now} and {len(entries or [])} journal entr(ies) denominated in it. That "
+        f"is the state design v2 §10.1 forbids outright."
+    )
+    # T1544, 2026-09-14: THE PAYMENT HALF OF THIS RACE IS CLOSED. The delete requires an INACTIVE
+    # equivalent (`admin_delete_equivalent`) and a payment requires an ACTIVE one
+    # (`PaymentEngine.refuse_inactive_equivalents`, read at commit under the owner lock), so the
+    # premise this stand used to force - a payment committing into an equivalent deactivated for
+    # deletion - is refused in BOTH orders. The invariant assertions above are unchanged; only the
+    # payment's expected outcome changed, from "commits 9.00 with one COMPLETED envelope" to the
+    # operator-stop refusal with no money and no envelope.
+    assert isinstance(payment_outcome, ConflictException) and payment_outcome.status_code == 409, (
+        f"the payment in the '{order}' order answered {payment_outcome!r}; a payment into an "
+        f"equivalent deactivated for deletion must be refused by the operator stop (T1544)"
+    )
+    assert payment_outcome.code == "E008", payment_outcome.code
+    assert (payment_outcome.details or {}).get(
+        "reason"
+    ) == PaymentEngine.EQUIVALENT_INACTIVE_REASON, payment_outcome.details
+    assert "retryable" not in (payment_outcome.details or {}), payment_outcome.details
+    assert envelopes == [], (
+        f"the refused payment left envelopes {envelopes} in the '{order}' order"
+    )
+    assert debts_now == {}, debts_now
 
 
 async def _until(predicate, *, attempts: int = 500, step: float = 0.01) -> bool:
@@ -2217,59 +2065,56 @@ async def test_c17_p_a_raw_delete_of_an_equivalent_with_history_is_refused_by_th
     seeded = await _seed(serializable_factory)
     world = seeded.world
     identity = _identity("raw-delete-with-history")
-    try:
-        await _history_only_equivalent(api, serializable_factory, world, identity)
+    await _history_only_equivalent(api, serializable_factory, world, identity)
 
-        entries = await stored_entries(serializable_factory, identity)
-        debts_now = await stored_debts(serializable_factory, world)
+    entries = await stored_entries(serializable_factory, identity)
+    debts_now = await stored_debts(serializable_factory, world)
 
-        # NON-VACUITY, FIRST.
-        assert entries is not None, missing_journal_tables(entries, ENTRIES_TABLE)
-        assert len(entries) == 2, f"stand: the operation left {entries} instead of an I and a D"
-        # NON-VACUITY: T1524's RESTRICT has nothing to hold here, so any refusal is the journal's.
-        assert debts_now == {}, (
-            f"stand: a debt is still live, so the refusal below would be T1524's: {debts_now}"
+    # NON-VACUITY, FIRST.
+    assert entries is not None, missing_journal_tables(entries, ENTRIES_TABLE)
+    assert len(entries) == 2, f"stand: the operation left {entries} instead of an I and a D"
+    # NON-VACUITY: T1524's RESTRICT has nothing to hold here, so any refusal is the journal's.
+    assert debts_now == {}, (
+        f"stand: a debt is still live, so the refusal below would be T1524's: {debts_now}"
+    )
+
+    error = None
+    async with serializable_factory() as remover:
+        await remover.execute(
+            text("SELECT pg_advisory_xact_lock(:ns, :key)"),
+            {
+                "ns": _EQUIVALENT_OWNER_LOCK_NAMESPACE,
+                "key": PaymentEngine._equivalent_owner_lock_key(world.equivalent.id),
+            },
         )
-
-        error = None
-        async with serializable_factory() as remover:
+        try:
             await remover.execute(
-                text("SELECT pg_advisory_xact_lock(:ns, :key)"),
-                {
-                    "ns": _EQUIVALENT_OWNER_LOCK_NAMESPACE,
-                    "key": PaymentEngine._equivalent_owner_lock_key(world.equivalent.id),
-                },
+                text("DELETE FROM equivalents WHERE id = :id"),
+                {"id": str(world.equivalent.id)},
             )
-            try:
-                await remover.execute(
-                    text("DELETE FROM equivalents WHERE id = :id"),
-                    {"id": str(world.equivalent.id)},
-                )
-                await remover.commit()
-            except DatabaseError as exc:
-                error = exc
-                await remover.rollback()
+            await remover.commit()
+        except DatabaseError as exc:
+            error = exc
+            await remover.rollback()
 
-        async with serializable_factory() as fresh:
-            survivor = (
-                await fresh.execute(
-                    select(Equivalent.id).where(Equivalent.id == world.equivalent.id)
-                )
-            ).scalar_one_or_none()
+    async with serializable_factory() as fresh:
+        survivor = (
+            await fresh.execute(
+                select(Equivalent.id).where(Equivalent.id == world.equivalent.id)
+            )
+        ).scalar_one_or_none()
 
-        # VERDICT.
-        assert error is not None, (
-            f"a raw DELETE removed the equivalent that {len(entries)} journal entries name, and the "
-            f"database allowed it. The entries are now money history denominated in a row that does "
-            f"not exist, and no application code was involved that could have noticed. Every journal "
-            f"foreign key is RESTRICT for this reason (design v2 §5)."
-        )
-        assert survivor is not None, "the equivalent is gone despite the refusal"
-        assert len(await stored_entries(serializable_factory, identity) or []) == 2, (
-            "the journal entries did not survive the refused delete"
-        )
-    finally:
-        await _cleanup(serializable_factory, seeded)
+    # VERDICT.
+    assert error is not None, (
+        f"a raw DELETE removed the equivalent that {len(entries)} journal entries name, and the "
+        f"database allowed it. The entries are now money history denominated in a row that does "
+        f"not exist, and no application code was involved that could have noticed. Every journal "
+        f"foreign key is RESTRICT for this reason (design v2 §5)."
+    )
+    assert survivor is not None, "the equivalent is gone despite the refusal"
+    assert len(await stored_entries(serializable_factory, identity) or []) == 2, (
+        "the journal entries did not survive the refused delete"
+    )
 
 
 # ==============================================================================================
@@ -2311,75 +2156,72 @@ async def test_c18_p_entries_come_from_the_retry_and_carry_the_concurrent_value(
     world = seeded.world
     identity = _identity("40001-version-bump")
     sqlstates: list[str | None] = []
-    try:
-        starting_edge = _debt_row(world, Decimal("10.00000000"))
-        async with serializable_factory() as setup:
-            async with debt_fixture_setup(setup, label="starting-edge"):
-                setup.add(starting_edge)
-            await setup.commit()
+    starting_edge = _debt_row(world, Decimal("10.00000000"))
+    async with serializable_factory() as setup:
+        async with debt_fixture_setup(setup, label="starting-edge"):
+            setup.add(starting_edge)
+        await setup.commit()
 
-        mine = select(Debt).where(Debt.equivalent_id == world.equivalent.id)
+    mine = select(Debt).where(Debt.equivalent_id == world.equivalent.id)
 
-        async with serializable_factory() as loser, serializable_factory() as winner:
-            losing = (await loser.execute(mine)).scalar_one()
-            competing = (await winner.execute(mine)).scalar_one()
+    async with serializable_factory() as loser, serializable_factory() as winner:
+        losing = (await loser.execute(mine)).scalar_one()
+        competing = (await winner.execute(mine)).scalar_one()
 
-            # The competitor bumps the row through the ORM, so `version` really moves - and it
-            # declares itself, because the journal asks every movement of money to name the
-            # operation that made it, a competitor's included.
-            async with debt_fixture_setup(winner, label="the-competitor"):
-                competing.amount = Decimal("31.00000000")
-            await winner.commit()
+        # The competitor bumps the row through the ORM, so `version` really moves - and it
+        # declares itself, because the journal asks every movement of money to name the
+        # operation that made it, a competitor's included.
+        async with debt_fixture_setup(winner, label="the-competitor"):
+            competing.amount = Decimal("31.00000000")
+        await winner.commit()
 
-            try:
-                async with await _open(api, loser, world, "40001-version-bump", identity=identity):
-                    losing.amount = Decimal("44.00000000")
-                    await loser.flush()
-                await loser.commit()
-            except DBAPIError as exc:
-                sqlstates.append(getattr(exc.orig, "sqlstate", None))
-            await loser.rollback()
+        try:
+            async with await _open(api, loser, world, "40001-version-bump", identity=identity):
+                losing.amount = Decimal("44.00000000")
+                await loser.flush()
+            await loser.commit()
+        except DBAPIError as exc:
+            sqlstates.append(getattr(exc.orig, "sqlstate", None))
+        await loser.rollback()
 
-        async with serializable_factory() as retry:
-            debt = (await retry.execute(mine)).scalar_one()
-            async with await _open(api, retry, world, "40001-version-bump", identity=identity):
-                debt.amount = Decimal("44.00000000")
-                await retry.flush()
-            await retry.commit()
+    async with serializable_factory() as retry:
+        debt = (await retry.execute(mine)).scalar_one()
+        async with await _open(api, retry, world, "40001-version-bump", identity=identity):
+            debt.amount = Decimal("44.00000000")
+            await retry.flush()
+        await retry.commit()
 
-        entries = await stored_entries(serializable_factory, identity)
-        envelopes = await stored_operations(serializable_factory, identity)
-        after = await stored_debts(serializable_factory, world)
+    entries = await stored_entries(serializable_factory, identity)
+    envelopes = await stored_operations(serializable_factory, identity)
+    after = await stored_debts(serializable_factory, world)
 
-        # NON-VACUITY, FIRST.
-        assert entries is not None, missing_journal_tables(entries, ENTRIES_TABLE)
+    # NON-VACUITY, FIRST.
+    assert entries is not None, missing_journal_tables(entries, ENTRIES_TABLE)
 
-        # NON-VACUITY: the race produced a genuine serialization failure, exactly once.
-        assert sqlstates == ["40001"], (
-            f"stand: the concurrent version bump produced SQLSTATE(s) {sqlstates} instead of exactly "
-            f"one 40001; without it this test measures nothing about a losing attempt"
-        )
-        assert after == {("debtor", "creditor", "eq"): Decimal("44.00000000")}, (
-            f"stand: the retry did not win the edge: {after}"
-        )
+    # NON-VACUITY: the race produced a genuine serialization failure, exactly once.
+    assert sqlstates == ["40001"], (
+        f"stand: the concurrent version bump produced SQLSTATE(s) {sqlstates} instead of exactly "
+        f"one 40001; without it this test measures nothing about a losing attempt"
+    )
+    assert after == {("debtor", "creditor", "eq"): Decimal("44.00000000")}, (
+        f"stand: the retry did not win the edge: {after}"
+    )
 
-        # VERDICT.
-        assert len(entries) == 1 and entries[0]["effect"] == "U", (
-            f"the losing attempt left a trace in the journal: {entries}. Only the flush that reached "
-            f"the database may produce an entry."
-        )
-        assert _atom_column(entries, "amount_before") == [3100000000], (
-            f"the retry's entry records `amount_before` as the value this session had loaded before "
-            f"losing the race, not the value the database actually held: {entries}"
-        )
-        assert _atom_column(entries, "delta") == [1300000000], (
-            f"the delta was computed against a state that never existed: {entries}"
-        )
-        assert envelopes is not None and len(envelopes) == 1, (
-            f"the refused attempt and the retry left {envelopes} instead of one envelope"
-        )
-    finally:
-        await _cleanup(serializable_factory, seeded)
+    # VERDICT.
+    assert len(entries) == 1 and entries[0]["effect"] == "U", (
+        f"the losing attempt left a trace in the journal: {entries}. Only the flush that reached "
+        f"the database may produce an entry."
+    )
+    assert _atom_column(entries, "amount_before") == [3100000000], (
+        f"the retry's entry records `amount_before` as the value this session had loaded before "
+        f"losing the race, not the value the database actually held: {entries}"
+    )
+    assert _atom_column(entries, "delta") == [1300000000], (
+        f"the delta was computed against a state that never existed: {entries}"
+    )
+    assert envelopes is not None and len(envelopes) == 1, (
+        f"the refused attempt and the retry left {envelopes} instead of one envelope"
+    )
 
 
 # ==============================================================================================
@@ -2561,23 +2403,20 @@ async def test_c19_p_a_shape_invalid_forged_row_is_refused_by_the_named_rule(
     assert probe is not None, missing_journal_tables(probe, target)
 
     seeded = await _seed(serializable_factory)
-    try:
-        error = await _forge(serializable_factory, seeded.world, table, overrides)
+    error = await _forge(serializable_factory, seeded.world, table, overrides)
 
-        # VERDICT.
-        assert error is not None, (
-            f"the database accepted a forged journal row - {label}. {why}. A raw writer that gets "
-            f"past the `before_execute` guard (design v2 §6 does not intercept `text()` or "
-            f"`exec_driver_sql`, and says so) must still be stopped by the CHECK constraints of "
-            f"migration 021; otherwise the guard's documented hole is a hole in the money history."
-        )
-        assert _refused_by(error) == refused_by, (
-            f"the forgery `{label}` was refused by {_refused_by(error)!r}, not by `{refused_by}`: "
-            f"{error}. {why}. A case caught by a neighbouring rule says nothing about the rule it is "
-            f"named after, and the mutation `drop {refused_by}` would leave it green."
-        )
-    finally:
-        await _cleanup(serializable_factory, seeded)
+    # VERDICT.
+    assert error is not None, (
+        f"the database accepted a forged journal row - {label}. {why}. A raw writer that gets "
+        f"past the `before_execute` guard (design v2 §6 does not intercept `text()` or "
+        f"`exec_driver_sql`, and says so) must still be stopped by the CHECK constraints of "
+        f"migration 021; otherwise the guard's documented hole is a hole in the money history."
+    )
+    assert _refused_by(error) == refused_by, (
+        f"the forgery `{label}` was refused by {_refused_by(error)!r}, not by `{refused_by}`: "
+        f"{error}. {why}. A case caught by a neighbouring rule says nothing about the rule it is "
+        f"named after, and the mutation `drop {refused_by}` would leave it green."
+    )
 
 
 @pytest.mark.asyncio
@@ -2627,54 +2466,51 @@ async def test_c19_p_the_boundary_with_step_6_moved_on_this_tier_and_here_is_whe
     assert probe is not None, missing_journal_tables(probe, ENTRIES_TABLE)
 
     seeded = await _seed(serializable_factory)
-    try:
-        # HALF ONE: the arithmetic lie is now the DATABASE's to refuse.
-        arithmetic_lie = await _forge(
-            serializable_factory,
-            seeded.world,
-            "entry",
-            {
-                "effect": "U",
-                "amount_before": "5.00000000",
-                "amount_after": "6.00000000",
-                # Every column is legal on its own; together they contradict each other.
-                "delta": "99.00000000",
-            },
-        )
-        assert arithmetic_lie is not None, (
-            "the database accepted an entry whose delta contradicts its own endpoints. T1530 added "
-            "`chk_debt_journal_entries_delta_arithmetic` for exactly this row, and without it a "
-            "journal entry can say `5 -> 6, delta 99` with nothing refusing."
-        )
-        assert _refused_by(arithmetic_lie) == "check:chk_debt_journal_entries_delta_arithmetic", (
-            f"the arithmetic lie was refused by {_refused_by(arithmetic_lie)!r} rather than by the "
-            f"constraint that names the arithmetic: {arithmetic_lie}. A row caught by a neighbouring "
-            f"rule says nothing about this one."
-        )
+    # HALF ONE: the arithmetic lie is now the DATABASE's to refuse.
+    arithmetic_lie = await _forge(
+        serializable_factory,
+        seeded.world,
+        "entry",
+        {
+            "effect": "U",
+            "amount_before": "5.00000000",
+            "amount_after": "6.00000000",
+            # Every column is legal on its own; together they contradict each other.
+            "delta": "99.00000000",
+        },
+    )
+    assert arithmetic_lie is not None, (
+        "the database accepted an entry whose delta contradicts its own endpoints. T1530 added "
+        "`chk_debt_journal_entries_delta_arithmetic` for exactly this row, and without it a "
+        "journal entry can say `5 -> 6, delta 99` with nothing refusing."
+    )
+    assert _refused_by(arithmetic_lie) == "check:chk_debt_journal_entries_delta_arithmetic", (
+        f"the arithmetic lie was refused by {_refused_by(arithmetic_lie)!r} rather than by the "
+        f"constraint that names the arithmetic: {arithmetic_lie}. A row caught by a neighbouring "
+        f"rule says nothing about this one."
+    )
 
-        # HALF TWO: what NO single-row CHECK can see remains step 6's, and is still accepted.
-        cross_row_lie = await _forge(
-            serializable_factory,
-            seeded.world,
-            "entry",
-            {
-                "effect": "U",
-                # Internally consistent to the last digit, and a lie about the edge it names: the
-                # edge never stood at 5, so no reconstruction from these entries reaches the stored
-                # debt. That is a statement about OTHER rows, and it is step 6's to check.
-                "amount_before": "5.00000000",
-                "amount_after": "6.00000000",
-                "delta": "1.00000000",
-            },
-        )
-        assert cross_row_lie is None, (
-            f"the database refused an entry that is internally consistent and false only in relation "
-            f"to other rows: {cross_row_lie!r}. If a single-row CHECK can now reject this, the "
-            f"boundary has moved AGAIN and step 6's acceptance list is out of date - which is a "
-            f"specification change, not a passing test."
-        )
-    finally:
-        await _cleanup(serializable_factory, seeded)
+    # HALF TWO: what NO single-row CHECK can see remains step 6's, and is still accepted.
+    cross_row_lie = await _forge(
+        serializable_factory,
+        seeded.world,
+        "entry",
+        {
+            "effect": "U",
+            # Internally consistent to the last digit, and a lie about the edge it names: the
+            # edge never stood at 5, so no reconstruction from these entries reaches the stored
+            # debt. That is a statement about OTHER rows, and it is step 6's to check.
+            "amount_before": "5.00000000",
+            "amount_after": "6.00000000",
+            "delta": "1.00000000",
+        },
+    )
+    assert cross_row_lie is None, (
+        f"the database refused an entry that is internally consistent and false only in relation "
+        f"to other rows: {cross_row_lie!r}. If a single-row CHECK can now reject this, the "
+        f"boundary has moved AGAIN and step 6's acceptance list is out of date - which is a "
+        f"specification change, not a passing test."
+    )
 
 
 def _envelope_row(operation_id: uuid.UUID, overrides: dict) -> dict:

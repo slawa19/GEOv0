@@ -71,17 +71,14 @@ import pytest
 import pytest_asyncio
 from httpx import AsyncClient
 from nacl.signing import SigningKey
-from sqlalchemy import delete, text
+from sqlalchemy import text
 
 from app.db.models.equivalent import Equivalent
-from app.db.models.participant import Participant
-from app.db.models.trustline import TrustLine
 from app.utils import validation
 import app.core.payments.engine as engine_module
 from app.utils.exceptions import BadRequestException
 from app.utils.validation import MONEY_MAX_SCALE, parse_money_amount
 from tests.integration.p012_pg_http import make_pg_client_fixture
-from tests.debt_setup import purge_test_ledger
 from tests.integration.test_scenarios import (
     _sign_payment_request,
     _sign_trustline_create_request,
@@ -89,7 +86,8 @@ from tests.integration.test_scenarios import (
 )
 
 # MODE B (017 stage 2c, T1702): every commit of this module lands in a clone dropped after the test,
-# not in the tier database it shares with mode-A tests - see `tests/tier_on_a_clone.py`.
+# not in the tier database it shares with mode-A tests - see `tests/tier_on_a_clone.py`. Since 018 B0b
+# the drop is the only disposal: nothing is deleted row by row.
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
 
 
@@ -146,82 +144,38 @@ async def scenario(pg_client: AsyncClient) -> AsyncGenerator[_Scenario, None]:
         await session.commit()
         equivalent_id = equivalent.id
 
-    participant_ids: list[uuid.UUID] = []
-    try:
-        sender = await register_and_login(pg_client, f"RT1_Sender_{nonce}")
-        receiver = await register_and_login(pg_client, f"RT1_Receiver_{nonce}")
+    sender = await register_and_login(pg_client, f"RT1_Sender_{nonce}")
+    receiver = await register_and_login(pg_client, f"RT1_Receiver_{nonce}")
 
-        # A trustline from -> to is creditor -> debtor, so the receiver must extend it for the
-        # sender to have capacity.
-        receiver_key = SigningKey(base64.b64decode(receiver["priv"]))
-        response = await pg_client.post(
-            "/api/v1/trustlines",
-            headers=receiver["headers"],
-            json={
-                "to": sender["pid"],
-                "equivalent": code,
-                "limit": TRUSTLINE_LIMIT,
-                "signature": _sign_trustline_create_request(
-                    signing_key=receiver_key,
-                    to_pid=sender["pid"],
-                    equivalent=code,
-                    limit=TRUSTLINE_LIMIT,
-                ),
-            },
-        )
-        assert response.status_code == 201, (
-            "setup failed: without capacity every payment below would be rejected for the wrong "
-            f"reason and the module would prove nothing. {response.text}"
-        )
+    # A trustline from -> to is creditor -> debtor, so the receiver must extend it for the
+    # sender to have capacity.
+    receiver_key = SigningKey(base64.b64decode(receiver["priv"]))
+    response = await pg_client.post(
+        "/api/v1/trustlines",
+        headers=receiver["headers"],
+        json={
+            "to": sender["pid"],
+            "equivalent": code,
+            "limit": TRUSTLINE_LIMIT,
+            "signature": _sign_trustline_create_request(
+                signing_key=receiver_key,
+                to_pid=sender["pid"],
+                equivalent=code,
+                limit=TRUSTLINE_LIMIT,
+            ),
+        },
+    )
+    assert response.status_code == 201, (
+        "setup failed: without capacity every payment below would be rejected for the wrong "
+        f"reason and the module would prove nothing. {response.text}"
+    )
 
-        async with TestingSessionLocal() as session:
-            rows = (
-                await session.execute(
-                    text("SELECT id FROM participants WHERE pid = ANY(:pids)"),
-                    {"pids": [sender["pid"], receiver["pid"]]},
-                )
-            ).all()
-            participant_ids = [r[0] for r in rows]
-
-        yield _Scenario(
-            sender=sender,
-            receiver=receiver,
-            code=code,
-            equivalent_id=equivalent_id,
-        )
-    finally:
-        async with TestingSessionLocal() as cleanup:
-            # The debts AND the journal rows that describe them, through the driver and BEFORE the
-            # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
-            # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
-            # envelope still standing would block the transaction delete above it.
-            await purge_test_ledger(cleanup, equivalent_ids=[equivalent_id])
-            await cleanup.execute(
-                delete(TrustLine).where(TrustLine.equivalent_id == equivalent_id)
-            )
-            if participant_ids:
-                # prepare_locks.tx_id references transactions.tx_id, and
-                # transactions.initiator_id is ON DELETE RESTRICT, so the order matters.
-                await cleanup.execute(
-                    text("DELETE FROM prepare_locks WHERE participant_id = ANY(:ids)"),
-                    {"ids": participant_ids},
-                )
-                await cleanup.execute(
-                    text(
-                        "DELETE FROM integrity_audit_log WHERE tx_id IN "
-                        "(SELECT tx_id FROM transactions WHERE initiator_id = ANY(:ids))"
-                    ),
-                    {"ids": participant_ids},
-                )
-                await cleanup.execute(
-                    text("DELETE FROM transactions WHERE initiator_id = ANY(:ids)"),
-                    {"ids": participant_ids},
-                )
-                await cleanup.execute(
-                    delete(Participant).where(Participant.id.in_(participant_ids))
-                )
-            await cleanup.execute(delete(Equivalent).where(Equivalent.id == equivalent_id))
-            await cleanup.commit()
+    yield _Scenario(
+        sender=sender,
+        receiver=receiver,
+        code=code,
+        equivalent_id=equivalent_id,
+    )
 
 
 async def _submit_signed_payment(

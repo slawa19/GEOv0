@@ -31,9 +31,13 @@ import uuid
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import func, select, text
 
-from tests.debt_setup import purge_test_ledger
+
+# Every test here commits through several sessions and runs on a disposable clone of the migrated
+# template; its rows go with the clone's drop and nothing is deleted row by row (018 B0b; see
+# `tests/tier_on_a_clone.py`).
+from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
 
 
 async def _effects(session, tx_id: str, equivalent_id) -> dict[str, object]:
@@ -184,37 +188,6 @@ class _Stand:
         )
         return session
 
-    async def cleanup(self) -> None:
-        from app.db.models.audit_log import IntegrityAuditLog
-        from app.db.models.equivalent import Equivalent
-        from app.db.models.participant import Participant
-        from app.db.models.prepare_lock import PrepareLock
-        from app.db.models.transaction import Transaction
-        from app.db.models.trustline import TrustLine
-        from tests.conftest import TestingSessionLocal
-
-        async with TestingSessionLocal() as cleanup:
-            # The journal rows first, through the driver: `debt_operations.tx_id` RESTRICTs the
-            # transaction row, and Core DML against `debts` is refused by the write guard.
-            await purge_test_ledger(cleanup, equivalent_ids=[self.equivalent_id])
-            await cleanup.execute(
-                delete(IntegrityAuditLog).where(IntegrityAuditLog.tx_id == self.tx_id)
-            )
-            await cleanup.execute(delete(PrepareLock).where(PrepareLock.tx_id == self.tx_id))
-            await cleanup.execute(delete(Transaction).where(Transaction.tx_id == self.tx_id))
-            await cleanup.execute(
-                delete(TrustLine).where(TrustLine.equivalent_id == self.equivalent_id)
-            )
-            await cleanup.execute(
-                delete(Participant).where(
-                    Participant.id.in_([self.sender_id, self.receiver_id])
-                )
-            )
-            await cleanup.execute(
-                delete(Equivalent).where(Equivalent.id == self.equivalent_id)
-            )
-            await cleanup.commit()
-
 
 async def _stop_tasks(tasks) -> None:
     live = [task for task in tasks if task is not None]
@@ -357,7 +330,6 @@ async def test_a_second_request_while_the_first_is_prepared_is_refused_in_progre
                 if session is not None:
                     await session.rollback()
                     await session.close()
-            await stand.cleanup()
         except BaseException as teardown_error:
             if primary_error is None:
                 raise
@@ -606,7 +578,6 @@ async def test_the_insert_race_at_serializable_leaves_one_payment_postgres(
                 if session is not None:
                     await session.rollback()
                     await session.close()
-            await stand.cleanup()
         except BaseException as teardown_error:
             if primary_error is None:
                 raise

@@ -53,7 +53,6 @@ from app.db.models.transaction import Transaction
 from app.main import app
 from app.utils.exceptions import ConflictException, RetryablePaymentConflictException
 from tests.integration.test_clearing_payment_prepare_interlock_postgres import (
-    _cleanup_interlock_case,
     _no_advisory_lock_is_held,
     _seed_interlock_case,
     _use_serializable,
@@ -61,7 +60,7 @@ from tests.integration.test_clearing_payment_prepare_interlock_postgres import (
 from tests.integration.test_p015_p1_money_replay_postgres import (  # noqa: F401 - `factory` is a fixture
     _OPENING,
     _Sse,
-    _cleanup,
+    _forget_the_route_cache,
     _debts,
     _install,
     _prepare_locks,
@@ -258,7 +257,7 @@ async def test_a_payment_prepared_before_the_stop_and_waiting_behind_it_is_refus
             if task is not None and not task.done():
                 task.cancel()
                 await asyncio.wait([task], timeout=5)
-        await _cleanup(factory, world)
+        _forget_the_route_cache(world)
 
 
 # ── clearing <-> PATCH: the PATCH's owner lock ───────────────────────────────────────────────
@@ -329,7 +328,6 @@ async def test_a_deactivating_patch_waits_for_a_clearing_that_already_read_the_f
                 await asyncio.wait([task], timeout=5)
         await clearing_session.rollback()
         await clearing_session.close()
-        await _cleanup_interlock_case(seed)
 
 
 @pytest.mark.asyncio
@@ -408,7 +406,6 @@ async def test_a_clearing_that_waited_behind_the_patch_refuses_in_its_fresh_snap
                 await asyncio.wait([task], timeout=5)
         await clearing_session.rollback()
         await clearing_session.close()
-        await _cleanup_interlock_case(seed)
 
 
 # ── staged simulator payments: the same commit guard, through the bounded money replay ────────
@@ -506,7 +503,7 @@ async def test_a_tick_that_waited_behind_the_patch_discards_its_attempt_and_the_
             if task is not None and not task.done():
                 task.cancel()
                 await asyncio.wait([task], timeout=5)
-        await _cleanup(factory, world)
+        _forget_the_route_cache(world)
 
 
 @pytest.mark.asyncio
@@ -570,7 +567,7 @@ async def test_a_commit_guard_conflict_on_every_attempt_exhausts_the_budget_with
         assert run._real_consec_money_no_progress_ticks == 1
         assert await _is_active(factory, world.equivalent.id) is True
     finally:
-        await _cleanup(factory, world)
+        _forget_the_route_cache(world)
 
 
 # ── placement: the payment guard sits below the TTL branch, immediately before the envelope ──────
@@ -647,7 +644,7 @@ async def test_an_expired_payment_in_a_deactivated_equivalent_is_aborted_as_expi
         assert await _transactions(factory, world) == {tx_id: "ABORTED"}
         assert await _debts(factory, world) == {(world.sender.pid, world.receiver.pid): _OPENING}
     finally:
-        await _cleanup(factory, world)
+        _forget_the_route_cache(world)
 
 
 @pytest.mark.asyncio
@@ -728,7 +725,7 @@ async def test_a_patch_arriving_while_a_payment_holds_the_stop_check_waits_for_t
             if task is not None and not task.done():
                 task.cancel()
                 await asyncio.wait([task], timeout=5)
-        await _cleanup(factory, world)
+        _forget_the_route_cache(world)
 
 
 # ── the real-mode inject writer: PATCH first ──────────────────────────────────────────────────
@@ -830,4 +827,4 @@ async def test_an_inject_that_waited_behind_the_patch_is_refused_and_writes_noth
             if pending is not None and not pending.done():
                 pending.cancel()
                 await asyncio.wait([pending], timeout=5)
-        await _cleanup(factory, world)
+        _forget_the_route_cache(world)

@@ -11,7 +11,9 @@ WHAT THIS TIER ADDS over `tests/unit/test_p015_step5a_reconciliation.py`:
   snapshot. The claim in `journal._complete` is that `SERIALIZABLE` - the application's isolation level -
   refuses one of the two with `40001`. It is measured here, not argued.
 
-Every test purges what it created.
+Every test that commits does so on a disposable clone of the migrated template (`committed_database`),
+and the clone's drop is the only disposal of what it wrote (018 B0b; until then each test deleted its
+rows by id, journal included). The construction-path test builds its own scratch databases.
 """
 
 from __future__ import annotations
@@ -34,8 +36,8 @@ from app.db.models.participant import Participant
 from app.db.reconciliation_tables import BASELINE_COMMENT
 from tests.debt_setup import debt_fixture_setup
 from tests.migrated_schema import run_alembic_upgrade_head, scratch_databases
+from tests.tier_on_a_clone import tier_on_a_clone  # noqa: F401 - fixture, requested by `factory`
 from tests.unit.test_p015_b4_wrong_writer_is_recorded_faithfully import (
-    _drop_triangle,
     _edges,
     _seed_triangle,
 )
@@ -66,12 +68,11 @@ def _postgres_url() -> str:
 
 
 @pytest_asyncio.fixture
-async def factory():
-    from tests.conftest import TestingSessionLocal, _ensure_schema_initialized
-
-    _postgres_url()
-    await _ensure_schema_initialized()
-    yield TestingSessionLocal
+async def factory(tier_on_a_clone):
+    """The clone's sessionmaker, with `tests.conftest.TestingSessionLocal` rebound to the same clone:
+    shared helpers that observe through that name (`pg_locks ... current_database()`) must look at the
+    database the test writes to (018 B0b)."""
+    yield tier_on_a_clone.sessionmaker
 
 
 # =================================================================================================
@@ -244,46 +245,42 @@ async def test_step5a_p_passed_failed_unverifiable_and_the_scheduled_row(factory
 
     triangle = await _seed_triangle(factory, trustlines=[("b", "a", "100"), ("c", "b", "100")])
     unbaselined = await _seed_triangle(factory, trustlines=[])
-    try:
-        await _fixture_debts(factory, triangle, [("b", "a", "3")])
-        await _fixture_debts(factory, unbaselined, [("a", "b", "2")])
-        await _baseline(factory, triangle.equivalent.id)
+    await _fixture_debts(factory, triangle, [("b", "a", "3")])
+    await _fixture_debts(factory, unbaselined, [("a", "b", "2")])
+    await _baseline(factory, triangle.equivalent.id)
 
-        await _pay(factory, triangle, ["a", "b", "c"], "5")
-        assert await _edges(factory, triangle) == {
-            ("a", "b"): Decimal("2.00000000"),
-            ("b", "c"): Decimal("5.00000000"),
-        }
-        honest = await _verify(factory, triangle.equivalent.id)
-        assert (honest.status, honest.edges_checked) == (PASSED, 3), honest
+    await _pay(factory, triangle, ["a", "b", "c"], "5")
+    assert await _edges(factory, triangle) == {
+        ("a", "b"): Decimal("2.00000000"),
+        ("b", "c"): Decimal("5.00000000"),
+    }
+    honest = await _verify(factory, triangle.equivalent.id)
+    assert (honest.status, honest.edges_checked) == (PASSED, 3), honest
 
-        async with factory() as session:
-            debt_id = (
-                await session.execute(
-                    select(Debt.id).where(
-                        Debt.equivalent_id == triangle.equivalent.id, Debt.debtor_id == triangle.b.id
-                    )
+    async with factory() as session:
+        debt_id = (
+            await session.execute(
+                select(Debt.id).where(
+                    Debt.equivalent_id == triangle.equivalent.id, Debt.debtor_id == triangle.b.id
                 )
-            ).scalar_one()
-        await _around_the_application(
-            factory,
-            lambda d: f"UPDATE debts SET amount = '5.00000001' WHERE id = '{_literal(d, debt_id)}'",
-        )
-        failed = await _verify(factory, triangle.equivalent.id)
-        assert failed.status == FAILED, failed
-        assert [f["unexplained"] for f in failed.findings] == ["0.00000001"], failed
+            )
+        ).scalar_one()
+    await _around_the_application(
+        factory,
+        lambda d: f"UPDATE debts SET amount = '5.00000001' WHERE id = '{_literal(d, debt_id)}'",
+    )
+    failed = await _verify(factory, triangle.equivalent.id)
+    assert failed.status == FAILED, failed
+    assert [f["unexplained"] for f in failed.findings] == ["0.00000001"], failed
 
-        assert (await _verify(factory, unbaselined.equivalent.id)).status == UNVERIFIABLE
+    assert (await _verify(factory, unbaselined.equivalent.id)).status == UNVERIFIABLE
 
-        await _scheduled_run(monkeypatch, factory)
-        # And a repeat is a transition of nothing: still one row each (boolean marker and partial
-        # unique index on this dialect).
-        await _scheduled_run(monkeypatch, factory)
-        assert [s for s, _ in await _results(factory, triangle.equivalent.id)] == [FAILED]
-        assert [s for s, _ in await _results(factory, unbaselined.equivalent.id)] == [UNVERIFIABLE]
-    finally:
-        await _drop_triangle(factory, triangle)
-        await _drop_triangle(factory, unbaselined)
+    await _scheduled_run(monkeypatch, factory)
+    # And a repeat is a transition of nothing: still one row each (boolean marker and partial
+    # unique index on this dialect).
+    await _scheduled_run(monkeypatch, factory)
+    assert [s for s, _ in await _results(factory, triangle.equivalent.id)] == [FAILED]
+    assert [s for s, _ in await _results(factory, unbaselined.equivalent.id)] == [UNVERIFIABLE]
 
 
 @pytest.mark.asyncio
@@ -291,27 +288,24 @@ async def test_step5a_p_a_fixture_write_after_the_baseline_is_refused(factory) -
     """The refusal's `IN (...)` over native uuids, on asyncpg."""
 
     triangle = await _seed_triangle(factory, trustlines=[])
-    try:
-        await _fixture_debts(factory, triangle, [("a", "b", "10")])
-        await _baseline(factory, triangle.equivalent.id)
-        late = Debt(
-            id=uuid.uuid4(), debtor_id=triangle.b.id, creditor_id=triangle.c.id,
-            equivalent_id=triangle.equivalent.id, amount=Decimal("4"), version=0,
-        )
-        with pytest.raises(DebtJournalError) as refused:
-            async with factory() as session:
-                async with debt_fixture_setup(session, label="after-baseline"):
-                    session.add(late)
-                await session.commit()
-        assert refused.value.reason == Reason.UNVERIFIABLE_WRITER_AFTER_BASELINE, refused.value
-        assert await _edges(factory, triangle) == {("a", "b"): Decimal("10.00000000")}
-    finally:
-        await _drop_triangle(factory, triangle)
+    await _fixture_debts(factory, triangle, [("a", "b", "10")])
+    await _baseline(factory, triangle.equivalent.id)
+    late = Debt(
+        id=uuid.uuid4(), debtor_id=triangle.b.id, creditor_id=triangle.c.id,
+        equivalent_id=triangle.equivalent.id, amount=Decimal("4"), version=0,
+    )
+    with pytest.raises(DebtJournalError) as refused:
+        async with factory() as session:
+            async with debt_fixture_setup(session, label="after-baseline"):
+                session.add(late)
+            await session.commit()
+    assert refused.value.reason == Reason.UNVERIFIABLE_WRITER_AFTER_BASELINE, refused.value
+    assert await _edges(factory, triangle) == {("a", "b"): Decimal("10.00000000")}
 
 
 @pytest.mark.asyncio
 async def test_step5a_p_a_payment_committed_between_the_verifiers_reads_is_still_passed(
-    factory, monkeypatch
+    factory, committed_database, monkeypatch
 ) -> None:
     """The forced interleaving on PostgreSQL - A DIAGNOSTIC COUNTER-PROBE AT READ COMMITTED.
 
@@ -332,7 +326,9 @@ async def test_step5a_p_a_payment_committed_between_the_verifiers_reads_is_still
         interleave_a_payment_between_the_verifiers_reads,
     )
 
-    engine = create_async_engine(_postgres_url(), isolation_level="READ COMMITTED", poolclass=NullPool)
+    engine = create_async_engine(
+        committed_database.url, isolation_level="READ COMMITTED", poolclass=NullPool
+    )
     read_committed = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
     seen = None
     try:
@@ -343,8 +339,6 @@ async def test_step5a_p_a_payment_committed_between_the_verifiers_reads_is_still
         _assert_interleave(seen)
     finally:
         await engine.dispose()
-        if seen is not None:
-            await _drop_triangle(factory, seen["triangle"])
 
 
 def _sqlstates(exc: BaseException | None) -> set[str]:
@@ -363,7 +357,7 @@ def _sqlstates(exc: BaseException | None) -> set[str]:
 
 @pytest.mark.asyncio
 async def test_step5a_p_a_baseline_committed_while_a_seed_is_open_cannot_commit_alongside_it(
-    factory,
+    factory, committed_database
 ) -> None:
     """THE CUTOVER RACE, under the application's isolation level.
 
@@ -376,7 +370,7 @@ async def test_step5a_p_a_baseline_committed_while_a_seed_is_open_cannot_commit_
     the refusal in `journal._complete` is racy and the claim in its comment is false.
     """
 
-    url = _postgres_url()
+    url = committed_database.url
     serializable = create_async_engine(url, isolation_level="SERIALIZABLE", poolclass=NullPool)
     sessions = async_sessionmaker(serializable, expire_on_commit=False, autoflush=False)
     triangle = await _seed_triangle(factory, trustlines=[])
@@ -423,4 +417,3 @@ async def test_step5a_p_a_baseline_committed_while_a_seed_is_open_cannot_commit_
         assert headers == 1, "the baseline did not stand"
     finally:
         await serializable.dispose()
-        await _drop_triangle(factory, triangle)

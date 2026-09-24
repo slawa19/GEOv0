@@ -8,10 +8,15 @@ import uuid
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import delete, select, text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker
 
-from tests.debt_setup import debt_fixture_setup, purge_test_ledger
+from tests.debt_setup import debt_fixture_setup
+
+# Every test here commits through several sessions, so each runs on a disposable clone of the migrated
+# template and its rows go with the clone's drop - nothing is deleted row by row (018 B0b; see
+# `tests/tier_on_a_clone.py`). The SERIALIZABLE engines are built over `committed_database.engine`.
+from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
 
 
 
@@ -55,6 +60,7 @@ async def _wait_for_matching_advisory_wait(
 @pytest.mark.asyncio
 async def test_concurrent_same_cycle_serializable_resolves_one_durable_occurrence_postgres(
     db_session,
+    committed_database,
     monkeypatch,
 ):
     """Equivalent ownership serializes one occurrence and its durable replay."""
@@ -69,10 +75,11 @@ async def test_concurrent_same_cycle_serializable_resolves_one_durable_occurrenc
     from app.db.models.debt import Debt
     from app.db.models.equivalent import Equivalent
     from app.db.models.participant import Participant
-    from app.db.models.prepare_lock import PrepareLock
     from app.db.models.transaction import Transaction
     from app.db.models.trustline import TrustLine
-    from tests.conftest import TestingSessionLocal, engine as test_engine
+    from tests.conftest import TestingSessionLocal
+
+    test_engine = committed_database.engine
 
     nonce = uuid.uuid4().hex[:10]
     equivalent_id = uuid.uuid4()
@@ -273,41 +280,6 @@ async def test_concurrent_same_cycle_serializable_resolves_one_durable_occurrenc
                 if observer is not None:
                     await observer.rollback()
                     await observer.close()
-                async with TestingSessionLocal() as cleanup:
-                    # The debts AND the journal rows that describe them, through the driver and BEFORE the
-                    # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
-                    # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
-                    # envelope still standing would block the transaction delete above it.
-                    await purge_test_ledger(cleanup, equivalent_ids=[equivalent_id])
-                    await cleanup.execute(
-                        delete(IntegrityAuditLog).where(
-                            IntegrityAuditLog.equivalent_code == equivalent_code
-                        )
-                    )
-                    await cleanup.execute(
-                        delete(PrepareLock).where(
-                            PrepareLock.participant_id.in_(participant_ids)
-                        )
-                    )
-                    await cleanup.execute(
-                        delete(Transaction).where(
-                            Transaction.initiator_id.in_(participant_ids)
-                        )
-                    )
-                    await cleanup.execute(
-                        delete(TrustLine).where(
-                            TrustLine.equivalent_id == equivalent_id
-                        )
-                    )
-                    await cleanup.execute(
-                        delete(Participant).where(
-                            Participant.id.in_(participant_ids)
-                        )
-                    )
-                    await cleanup.execute(
-                        delete(Equivalent).where(Equivalent.id == equivalent_id)
-                    )
-                    await cleanup.commit()
         except BaseException as teardown_error:
             if primary_error is None:
                 raise
@@ -320,6 +292,7 @@ async def test_concurrent_same_cycle_serializable_resolves_one_durable_occurrenc
 @pytest.mark.asyncio
 async def test_serializable_conflict_without_committed_occurrence_stays_failure_postgres(
     db_session,
+    committed_database,
 ):
     """A real 40001 must not become success without the deterministic transaction."""
 
@@ -332,11 +305,12 @@ async def test_serializable_conflict_without_committed_occurrence_stays_failure_
     from app.db.models.debt import Debt
     from app.db.models.equivalent import Equivalent
     from app.db.models.participant import Participant
-    from app.db.models.prepare_lock import PrepareLock
     from app.db.models.transaction import Transaction
     from app.db.models.trustline import TrustLine
     from app.utils.exceptions import GeoException
-    from tests.conftest import TestingSessionLocal, engine as test_engine
+    from tests.conftest import TestingSessionLocal
+
+    test_engine = committed_database.engine
 
     nonce = uuid.uuid4().hex[:10]
     equivalent_id = uuid.uuid4()
@@ -541,39 +515,6 @@ async def test_serializable_conflict_without_committed_occurrence_stays_failure_
             if owner_session is not None:
                 await owner_session.rollback()
                 await owner_session.close()
-            async with TestingSessionLocal() as cleanup:
-                # The debts AND the journal rows that describe them, through the driver and BEFORE the
-                # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
-                # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
-                # envelope still standing would block the transaction delete above it.
-                await purge_test_ledger(cleanup, equivalent_ids=[equivalent_id])
-                await cleanup.execute(
-                    delete(IntegrityAuditLog).where(
-                        IntegrityAuditLog.equivalent_code == equivalent_code
-                    )
-                )
-                await cleanup.execute(
-                    delete(PrepareLock).where(
-                        PrepareLock.participant_id.in_(participant_ids)
-                    )
-                )
-                await cleanup.execute(
-                    delete(Transaction).where(
-                        Transaction.initiator_id.in_(participant_ids)
-                    )
-                )
-                await cleanup.execute(
-                    delete(TrustLine).where(
-                        TrustLine.equivalent_id == equivalent_id
-                    )
-                )
-                await cleanup.execute(
-                    delete(Participant).where(Participant.id.in_(participant_ids))
-                )
-                await cleanup.execute(
-                    delete(Equivalent).where(Equivalent.id == equivalent_id)
-                )
-                await cleanup.commit()
         except BaseException as teardown_error:
             if primary_error is None:
                 raise
@@ -610,7 +551,6 @@ async def test_post_commit_boundary_reconciles_and_new_cycle_still_executes_post
     from app.db.models.debt import Debt
     from app.db.models.equivalent import Equivalent
     from app.db.models.participant import Participant
-    from app.db.models.prepare_lock import PrepareLock
     from app.db.models.transaction import Transaction
     from app.db.models.trustline import TrustLine
     from tests.conftest import TestingSessionLocal
@@ -861,41 +801,6 @@ async def test_post_commit_boundary_reconciles_and_new_cycle_still_executes_post
                         await session.rollback()
                         await session.close()
 
-                async with TestingSessionLocal() as cleanup:
-                    # The debts AND the journal rows that describe them, through the driver and BEFORE the
-                    # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
-                    # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
-                    # envelope still standing would block the transaction delete above it.
-                    await purge_test_ledger(cleanup, equivalent_ids=[equivalent_id])
-                    await cleanup.execute(
-                        delete(IntegrityAuditLog).where(
-                            IntegrityAuditLog.equivalent_code == equivalent_code
-                        )
-                    )
-                    await cleanup.execute(
-                        delete(PrepareLock).where(
-                            PrepareLock.participant_id.in_(participant_ids)
-                        )
-                    )
-                    await cleanup.execute(
-                        delete(Transaction).where(
-                            Transaction.initiator_id.in_(participant_ids)
-                        )
-                    )
-                    await cleanup.execute(
-                        delete(TrustLine).where(
-                            TrustLine.equivalent_id == equivalent_id
-                        )
-                    )
-                    await cleanup.execute(
-                        delete(Participant).where(
-                            Participant.id.in_(participant_ids)
-                        )
-                    )
-                    await cleanup.execute(
-                        delete(Equivalent).where(Equivalent.id == equivalent_id)
-                    )
-                    await cleanup.commit()
         except BaseException as teardown_error:
             if primary_error is None:
                 raise
