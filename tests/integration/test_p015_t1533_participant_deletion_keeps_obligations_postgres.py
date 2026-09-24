@@ -17,11 +17,21 @@ has been journalled, `debt_journal_entries.debtor_id` and `.creditor_id` are alr
 (`C17`), so deleting a participant named by an entry is refused by THAT constraint - measured, on
 this same database: `violates foreign key constraint "fk_debt_journal_entries_debtor"`. A test that
 seeded its debt through `debt_fixture_setup` would therefore be GREEN UNDER CASCADE and would prove
-nothing about `debts` at all. So the row is inserted through `exec_driver_sql`, which dispatches no
-`before_execute` and so reaches `debts` without the journal write guard and without an envelope -
-exactly the state of every debt written before migration 022, every debt written by a path that does
-not journal, and every debt whose history has been disposed of. `test_the_refusal_is_the_debts_own_
-constraint` asserts that emptiness rather than assuming it.
+nothing about `debts` at all. So the row is inserted with NO ENVELOPE - exactly the state of every
+debt written before migration 022 and of every debt whose history has been disposed of.
+`test_the_refusal_is_the_debts_own_constraint` asserts that emptiness rather than assuming it.
+
+SINCE 018 STAGE B1 ONLY THE NAMED CORRUPTION HELPER CAN PRODUCE THAT ROW (spec 018 `FORK-4`, a named
+use; `tests/ledger_corruption.py`): the database refuses a write to `debts` with no operation named in
+the transaction (`GE001`), and a write inside an operation has history. The helper writes it on its own
+connection with the journal's triggers off and commits; every deletion below then runs on an ordinary
+connection with the triggers and foreign keys ON - asserted on that connection - so the refusal
+measured is the one a real deletion meets.
+
+ONE DISPOSABLE CLONE FOR THE MODULE (018 B1). The rows are committed and cannot be deleted row by row
+any more (a `DELETE FROM debts` outside an operation is `GE001` too), so the module runs on a clone of
+the migrated template (`tests/p018_support.py::module_clone`) whose drop is the only disposal. Each
+test seeds its own equivalent and participants, so the tests do not see each other's rows.
 
 HOW REACHABLE THIS IS, stated so that it is neither overstated nor used as an excuse. There is no
 participant hard-delete endpoint in `app/`: the protocol's "deleted" is a `participants.status`
@@ -29,10 +39,10 @@ value (`docs/en/02-protocol-spec.md` section 3.1), not a missing row. What this 
 below every application check - raw SQL, a future endpoint, an admin script, a repair tool - and it
 closes it for the rows the journal's own RESTRICT does not reach.
 
-WHY BOTH TIERS. `tests/unit/test_p015_t1533_participant_deletion_keeps_obligations.py` is the SQLite
-half and proves the MODEL, whose schema `Base.metadata.create_all` builds. This half runs with
-`GEO_TEST_USE_MIGRATED_SCHEMA=1` and so proves the MIGRATION, on a schema `alembic upgrade head`
-built - which is the thing T1534 made true by construction and the reason this task waited for it.
+WHY BOTH TIERS. `tests/unit/test_p015_t1533_participant_deletion_keeps_obligations.py` is the MODEL
+half, on a schema `Base.metadata.create_all` builds. This half runs on a clone of the migrated template
+and so proves the MIGRATION, on a schema `alembic upgrade head` built - which is the thing T1534 made
+true by construction and the reason this task waited for it.
 """
 
 from __future__ import annotations
@@ -43,90 +53,74 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import delete, select, text
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
+from tests.ledger_corruption import corrupt
+from tests.p018_support import module_clone
 
 #: The amount the reproducer lost. Kept as the literal that was measured disappearing.
 AMOUNT = Decimal("925.31000000")
 
 
-def _uuid_literal(value, dialect: str) -> str:
-    """A UUID as a SQL literal of this dialect's storage, or a loud failure.
-
-    `uuid.UUID` first, which is what makes the interpolation below safe. The spelling was per
-    dialect until 017 stage 3 for the reason `tests/debt_setup.py::_uuid_literals` records: a
-    statement written with the wrong one matches or inserts nothing and raises nothing. Only the
-    PostgreSQL spelling (native `uuid`) is left; `dialect` is kept so the call sites stay as they were.
-    """
-
-    parsed = uuid.UUID(str(value))
-    return str(parsed)
+@pytest.fixture(scope="module")
+def migrated_url():
+    with module_clone("p018t1533") as url:
+        yield url
 
 
-async def _seed(*, with_debt: bool):
+@pytest.fixture
+async def sessions(migrated_url):
+    """Ordinary sessions over the module's clone: triggers and foreign keys ON (asserted)."""
+
+    engine = create_async_engine(migrated_url, poolclass=NullPool)
+    factory = async_sessionmaker(bind=engine, expire_on_commit=False)
+    async with factory() as probe:
+        role = (await probe.execute(text("SHOW session_replication_role"))).scalar_one()
+    assert role == "origin", f"stand: the test's own connections run with triggers {role!r}"
+    try:
+        yield factory
+    finally:
+        await engine.dispose()
+
+
+async def _seed(sessions, url: str, *, with_debt: bool):
     """Two participants, an equivalent, and optionally ONE DEBT WITH NO JOURNAL HISTORY.
 
-    The debt goes in through `exec_driver_sql` on purpose - see the module docstring. It is not a
-    way around the write guard for convenience; it is the only way to produce the state this test
-    is about, and a journalled debt would make every assertion below vacuous.
+    The debt goes in through the named corruption helper on purpose - see the module docstring. It
+    is not a way around the triggers for convenience; it is the only way to produce the state this
+    test is about, and a journalled debt would make every assertion below vacuous.
     """
 
-    from tests.conftest import TestingSessionLocal, _ensure_schema_initialized
-
-    await _ensure_schema_initialized()
     nonce = uuid.uuid4().hex[:8]
-    async with TestingSessionLocal() as s:
+    async with sessions() as s:
         eq = Equivalent(
             code=("P" + nonce).upper()[:16], description="T1533", precision=2, is_active=True
         )
         debtor = Participant(pid="pd" + nonce, display_name="D", public_key="pkpd-" + nonce)
         creditor = Participant(pid="pc" + nonce, display_name="C", public_key="pkpc-" + nonce)
         s.add_all([eq, debtor, creditor])
-        await s.flush()
-        ids = (eq.id, debtor.id, creditor.id)
-        debt_id = None
-        if with_debt:
-            debt_id = uuid.uuid4()
-            connection = await s.connection()
-            dialect = connection.dialect.name
-            await connection.exec_driver_sql(
-                "INSERT INTO debts (id, debtor_id, creditor_id, equivalent_id, amount, version) "
-                f"VALUES ('{_uuid_literal(debt_id, dialect)}', "  # noqa: S608 - UUID-parsed above
-                f"'{_uuid_literal(debtor.id, dialect)}', "
-                f"'{_uuid_literal(creditor.id, dialect)}', "
-                f"'{_uuid_literal(eq.id, dialect)}', {AMOUNT}, 0)"
-            )
         await s.commit()
+    ids = (eq.id, debtor.id, creditor.id)
+    debt_id = None
+    if with_debt:
+        debt_id = uuid.uuid4()
+        await corrupt(
+            url,
+            [
+                "INSERT INTO debts (id, debtor_id, creditor_id, equivalent_id, amount, version) "
+                f"VALUES ('{debt_id}', '{uuid.UUID(str(debtor.id))}', "
+                f"'{uuid.UUID(str(creditor.id))}', '{uuid.UUID(str(eq.id))}', {AMOUNT}, 0)"
+            ],
+        )
     return ids, debt_id
 
 
-async def _cleanup(eq_id, participant_ids) -> None:
-    """The debt goes through the driver, for the reason `purge_test_ledger` documents.
-
-    `session.execute(delete(Debt))` is Core DML against `debts` outside a verified flush and the
-    journal's write guard refuses it (`C2`). There are no journal rows to dispose of here: this
-    module never opens an operation.
-    """
-
-    from tests.conftest import TestingSessionLocal
-
-    async with TestingSessionLocal() as s:
-        connection = await s.connection()
-        literal = _uuid_literal(eq_id, connection.dialect.name)
-        await connection.exec_driver_sql(
-            f"DELETE FROM debts WHERE equivalent_id = '{literal}'"  # noqa: S608 - UUID-parsed
-        )
-        await s.execute(delete(Participant).where(Participant.id.in_(participant_ids)))
-        await s.execute(delete(Equivalent).where(Equivalent.id == eq_id))
-        await s.commit()
-
-
-async def _debt_sum(eq_id) -> Decimal:
-    from tests.conftest import TestingSessionLocal
-
-    async with TestingSessionLocal() as s:
+async def _debt_sum(sessions, eq_id) -> Decimal:
+    async with sessions() as s:
         total = (
             await s.execute(
                 select(Debt.amount).where(Debt.equivalent_id == eq_id)
@@ -135,7 +129,7 @@ async def _debt_sum(eq_id) -> Decimal:
     return sum(total, Decimal("0"))
 
 
-async def _delete_participant(participant_id) -> IntegrityError | None:
+async def _delete_participant(sessions, participant_id) -> IntegrityError | None:
     """Delete the row the way anything below the application would, and report the refusal.
 
     BOTH THE STATEMENT AND THE COMMIT ARE INSIDE THE `try`, and that is not defensive padding.
@@ -144,9 +138,7 @@ async def _delete_participant(participant_id) -> IntegrityError | None:
     refusal as an ERROR in the test rather than as the result it is. Measured 2026-09-13.
     """
 
-    from tests.conftest import TestingSessionLocal
-
-    async with TestingSessionLocal() as s:
+    async with sessions() as s:
         try:
             await s.execute(delete(Participant).where(Participant.id == participant_id))
             await s.commit()
@@ -157,55 +149,54 @@ async def _delete_participant(participant_id) -> IntegrityError | None:
 
 
 @pytest.mark.asyncio
-async def test_the_database_refuses_to_delete_a_debtor_who_still_owes() -> None:
+async def test_the_database_refuses_to_delete_a_debtor_who_still_owes(sessions, migrated_url) -> None:
     """RED before T1533: the cascade removes the obligation and nothing refuses."""
-    (eq_id, debtor_id, creditor_id), _debt_id = await _seed(with_debt=True)
-    try:
-        before = await _debt_sum(eq_id)
-        assert before == AMOUNT, f"stand: the unjournalled debt was not seeded, sum is {before}"
+    (eq_id, debtor_id, _creditor_id), _debt_id = await _seed(sessions, migrated_url, with_debt=True)
+    before = await _debt_sum(sessions, eq_id)
+    assert before == AMOUNT, f"stand: the unjournalled debt was not seeded, sum is {before}"
 
-        error = await _delete_participant(debtor_id)
+    error = await _delete_participant(sessions, debtor_id)
 
-        after = await _debt_sum(eq_id)
-        assert after == before, (
-            f"deleting the debtor destroyed what they owed: the foreign key cascaded "
-            f"{before - after} away without loading a single Debt row"
-        )
-        assert error is not None, "the database accepted deleting a participant who still owes"
-        assert "fk_debts_debtor_id" in str(error), (
-            f"the refusal did not come from the debtor foreign key this task changed: {error}"
-        )
-    finally:
-        await _cleanup(eq_id, [debtor_id, creditor_id])
+    after = await _debt_sum(sessions, eq_id)
+    assert after == before, (
+        f"deleting the debtor destroyed what they owed: the foreign key cascaded "
+        f"{before - after} away without loading a single Debt row"
+    )
+    assert error is not None, "the database accepted deleting a participant who still owes"
+    assert "fk_debts_debtor_id" in str(error), (
+        f"the refusal did not come from the debtor foreign key this task changed: {error}"
+    )
 
 
 @pytest.mark.asyncio
-async def test_the_database_refuses_to_delete_a_creditor_who_is_still_owed() -> None:
+async def test_the_database_refuses_to_delete_a_creditor_who_is_still_owed(
+    sessions, migrated_url
+) -> None:
     """The other half of the pair, and it is not a copy: it is a SECOND constraint.
 
     `debtor_id` and `creditor_id` are separate foreign keys with separate names. Changing one and
     leaving the other would close half the hole - which is precisely the shape T1524 left behind.
     """
-    (eq_id, debtor_id, creditor_id), _debt_id = await _seed(with_debt=True)
-    try:
-        before = await _debt_sum(eq_id)
+    (eq_id, _debtor_id, creditor_id), _debt_id = await _seed(sessions, migrated_url, with_debt=True)
+    before = await _debt_sum(sessions, eq_id)
+    assert before == AMOUNT, f"stand: the unjournalled debt was not seeded, sum is {before}"
 
-        error = await _delete_participant(creditor_id)
+    error = await _delete_participant(sessions, creditor_id)
 
-        after = await _debt_sum(eq_id)
-        assert after == before, (
-            f"deleting the creditor destroyed what they were owed: {before - after} cascaded away"
-        )
-        assert error is not None, "the database accepted deleting a participant who is still owed"
-        assert "fk_debts_creditor_id" in str(error), (
-            f"the refusal did not come from the creditor foreign key this task changed: {error}"
-        )
-    finally:
-        await _cleanup(eq_id, [debtor_id, creditor_id])
+    after = await _debt_sum(sessions, eq_id)
+    assert after == before, (
+        f"deleting the creditor destroyed what they were owed: {before - after} cascaded away"
+    )
+    assert error is not None, "the database accepted deleting a participant who is still owed"
+    assert "fk_debts_creditor_id" in str(error), (
+        f"the refusal did not come from the creditor foreign key this task changed: {error}"
+    )
 
 
 @pytest.mark.asyncio
-async def test_the_refusal_is_the_debts_own_constraint_and_not_the_journals_history() -> None:
+async def test_the_refusal_is_the_debts_own_constraint_and_not_the_journals_history(
+    sessions, migrated_url
+) -> None:
     """ANTI-VACUITY. Without this, the two tests above could be passing on `C17`, not on T1533.
 
     `debt_journal_entries` RESTRICTs both participant columns, so a participant named by an entry
@@ -213,62 +204,51 @@ async def test_the_refusal_is_the_debts_own_constraint_and_not_the_journals_hist
     `violates foreign key constraint "fk_debt_journal_entries_debtor"`. This test asserts that no
     journal row names either participant, so the only constraint that can refuse is `debts`'.
     """
-    from tests.conftest import TestingSessionLocal
+    (_eq_id, debtor_id, creditor_id), _debt_id = await _seed(sessions, migrated_url, with_debt=True)
+    async with sessions() as s:
+        named = (
+            await s.execute(
+                text(
+                    "SELECT count(*) FROM debt_journal_entries "
+                    "WHERE debtor_id IN (:d, :c) OR creditor_id IN (:d, :c)"
+                ),
+                {"d": debtor_id, "c": creditor_id},
+            )
+        ).scalar_one()
+    assert named == 0, (
+        f"{named} journal entries name these participants, so the refusals asserted by the "
+        f"tests above are C17's RESTRICT and say nothing about debts' own foreign keys"
+    )
 
-    (eq_id, debtor_id, creditor_id), _debt_id = await _seed(with_debt=True)
-    try:
-        async with TestingSessionLocal() as s:
-            connection = await s.connection()
-            dialect = connection.dialect.name
-            named = (
-                await connection.exec_driver_sql(
-                    "SELECT count(*) FROM debt_journal_entries WHERE debtor_id IN "
-                    f"('{_uuid_literal(debtor_id, dialect)}', "  # noqa: S608 - UUID-parsed
-                    f"'{_uuid_literal(creditor_id, dialect)}') "
-                    "OR creditor_id IN "
-                    f"('{_uuid_literal(debtor_id, dialect)}', "
-                    f"'{_uuid_literal(creditor_id, dialect)}')"
-                )
-            ).scalar_one()
-        assert named == 0, (
-            f"{named} journal entries name these participants, so the refusals asserted by the "
-            f"tests above are C17's RESTRICT and say nothing about debts' own foreign keys"
-        )
-
-        error = await _delete_participant(debtor_id)
-        assert error is not None and "fk_debts_debtor_id" in str(error), (
-            f"with no history at all, only debts' own foreign key can refuse, and it did not: "
-            f"{error}"
-        )
-    finally:
-        await _cleanup(eq_id, [debtor_id, creditor_id])
+    error = await _delete_participant(sessions, debtor_id)
+    assert error is not None and "fk_debts_debtor_id" in str(error), (
+        f"with no history at all, only debts' own foreign key can refuse, and it did not: "
+        f"{error}"
+    )
 
 
 @pytest.mark.asyncio
-async def test_a_participant_who_owes_nothing_still_deletes() -> None:
+async def test_a_participant_who_owes_nothing_still_deletes(sessions, migrated_url) -> None:
     """Control. RESTRICT must not turn every participant deletion into a refusal.
 
     This is the half a migration gets wrong: a policy that refuses everything would also pass the
     three tests above, and would break every teardown in this suite.
     """
-    from tests.conftest import TestingSessionLocal
+    (_eq_id, debtor_id, _creditor_id), _debt_id = await _seed(
+        sessions, migrated_url, with_debt=False
+    )
+    error = await _delete_participant(sessions, debtor_id)
+    assert error is None, f"a participant with no obligations was refused deletion: {error}"
 
-    (eq_id, debtor_id, creditor_id), _debt_id = await _seed(with_debt=False)
-    try:
-        error = await _delete_participant(debtor_id)
-        assert error is None, f"a participant with no obligations was refused deletion: {error}"
-
-        async with TestingSessionLocal() as s:
-            survived = (
-                await s.execute(select(Participant.id).where(Participant.id == debtor_id))
-            ).scalar_one_or_none()
-        assert survived is None, "the delete reported success and the row is still there"
-    finally:
-        await _cleanup(eq_id, [debtor_id, creditor_id])
+    async with sessions() as s:
+        survived = (
+            await s.execute(select(Participant.id).where(Participant.id == debtor_id))
+        ).scalar_one_or_none()
+    assert survived is None, "the delete reported success and the row is still there"
 
 
 @pytest.mark.asyncio
-async def test_the_migrated_schema_declares_restrict_on_both_participant_columns() -> None:
+async def test_the_migrated_schema_declares_restrict_on_both_participant_columns(sessions) -> None:
     """Migration 025 itself, read off the catalog of the schema the migrations built.
 
     The four tests above prove the BEHAVIOUR, and they would also pass on a schema built by
@@ -277,9 +257,7 @@ async def test_the_migrated_schema_declares_restrict_on_both_participant_columns
     evidence that the MIGRATION carries the change is separate from the evidence that the model
     does. `confdeltype` is `r` for RESTRICT and `c` for CASCADE.
     """
-    from tests.conftest import TestingSessionLocal
-
-    async with TestingSessionLocal() as s:
+    async with sessions() as s:
         rows = (
             await s.execute(
                 text(

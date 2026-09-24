@@ -104,19 +104,18 @@ async def test_a_real_serialization_failure_restarts_the_whole_inject_unit_of_wo
         stage_calls += 1
         staged = await real_stage(session, **kwargs)  # has read the debt at 5.00
         if stage_calls == 1:
-            # THE COMPETITOR WRITES WITH THE JOURNAL STOOD DOWN, and both halves of that are
-            # deliberate. Its statement is a Core `update(Debt)`, which the journal's write
-            # guard refuses (`C2`) - and it has to STAY a Core statement, because the
-            # observations counted at the end of this test are ORM debt flushes: routing the
-            # competitor through the ORM would add a third and the assertion "both debt flushes
-            # ran under the owner lock" would be counting a writer that is not the inject. What
-            # this helper stands for is "somebody else committed the row", and that is what it
-            # still does. Per engine, re-armed immediately.
-            from app.core.ledger import journal
-
-            journal.uninstall_write_guard(observed_factory.kw.get("bind"))
-            try:
-                async with observed_factory() as other:
+            # THE COMPETITOR WRITES INSIDE AN OPERATION OF ITS OWN (018 stage B1). Its statement is a
+            # Core `update(Debt)`, and it has to STAY a Core statement, because the observations
+            # counted at the end of this test are ORM debt flushes: routing the competitor through
+            # the ORM would add a third and the assertion "both debt flushes ran under the owner
+            # lock" would be counting a writer that is not the inject. Until B1 it wrote with the
+            # listener journal stood down; the journal is now the database's trigger, which refuses
+            # a write outside an operation (`GE001`) and cannot be stood down, so the competitor
+            # opens a fixture operation on its OWN session and connection - the book's ownership is
+            # per session, so the inject's open operation does not refuse it. What this helper
+            # stands for is "somebody else committed the row", and that is what it still does.
+            async with observed_factory() as other:
+                async with debt_fixture_setup(other, label="concurrent-writer"):
                     await other.execute(
                         update(Debt)
                         .where(
@@ -126,9 +125,7 @@ async def test_a_real_serialization_failure_restarts_the_whole_inject_unit_of_wo
                         )
                         .values(amount=_CONCURRENT)
                     )
-                    await other.commit()
-            finally:
-                journal.install_write_guard(observed_factory.kw.get("bind"))
+                await other.commit()
         return staged
 
     runner._inject_executor.stage_inject_event = _stage_then_a_concurrent_writer_commits
