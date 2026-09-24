@@ -13,7 +13,8 @@ primitives on evidence:
    in `PaymentEngine` would make a test that patches `MoneyBoundary` pass without its perturbation ever
    running on the payment path. The one wrapper that shares a name is listed with its reason.
 2. **No access through the engine** in `app/`, `tests/` and `scripts/`: no `from ...engine import X`,
-   no `PaymentEngine.X`, no `PaymentEngine(session).X`, no `engine_module.X`, no `setattr(PaymentEngine,
+   no `PaymentEngine.X`, no `PaymentEngine(session).X`, no `engine_module.X`, no
+   `engine_module.PaymentEngine.X` / `engine_module.PaymentEngine(s).X`, no `setattr(PaymentEngine,
    "X", ...)` and no dotted patch string `"app.core.payments.engine[.PaymentEngine].X"` for a moved `X`.
 
 WHAT IT DOES NOT SEE - its silence is not proof of these: access through an engine INSTANCE held in a
@@ -107,13 +108,27 @@ def findings_for(source: str, relative: str) -> list[str]:
         elif isinstance(node, ast.Import):
             engine_modules.update(a.asname for a in node.names if a.name == ENGINE_MODULE and a.asname)
 
-    def is_engine(expr: ast.AST) -> bool:
+    def is_engine_class(expr: ast.AST) -> bool:
+        """`PaymentEngine` (or its alias), `<engine module alias>.PaymentEngine`, or the dotted path."""
         if isinstance(expr, ast.Name):
-            return expr.id in engine_classes or expr.id in engine_modules
+            return expr.id in engine_classes
+        if (
+            isinstance(expr, ast.Attribute)
+            and expr.attr == "PaymentEngine"
+            and isinstance(expr.value, ast.Name)
+            and expr.value.id in engine_modules
+        ):
+            return True
+        return ast.unparse(expr) == f"{ENGINE_MODULE}.PaymentEngine"
+
+    def is_engine(expr: ast.AST) -> bool:
+        if is_engine_class(expr):
+            return True
+        if isinstance(expr, ast.Name):
+            return expr.id in engine_modules
         if isinstance(expr, ast.Call):
-            return isinstance(expr.func, ast.Name) and expr.func.id in engine_classes
-        dotted = ast.unparse(expr)
-        return dotted in {ENGINE_MODULE, f"{ENGINE_MODULE}.PaymentEngine"}
+            return is_engine_class(expr.func)
+        return ast.unparse(expr) == ENGINE_MODULE
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Attribute) and node.attr in MOVED and is_engine(node.value):
@@ -264,6 +279,16 @@ _VIOLATIONS = {
     "patch-string": "monkeypatch.setattr('app.core.payments.engine.PaymentEngine._acquire_tx_advisory_lock', f)\n",
     "instance-call": "async def f(s):\n    await PaymentEngine(s).acquire_staged_equivalent_owner_locks([1])\n",
     "dotted-module": "import app.core.payments.engine\napp.core.payments.engine.PaymentEngine.check_payment_delta\n",
+    "module-alias-class-attribute": (
+        "from app.core.payments import engine as em\nem.PaymentEngine.MONEY_STOP_REASONS\n"
+    ),
+    "module-alias-class-setattr": (
+        "import app.core.payments.engine as em\n"
+        "monkeypatch.setattr(em.PaymentEngine, 'refuse_inactive_equivalents', f)\n"
+    ),
+    "module-alias-instance-call": (
+        "from app.core.payments import engine as em\nem.PaymentEngine(s)._acquire_tx_advisory_lock('t')\n"
+    ),
     "constant-redefined": "_EQUIVALENT_OWNER_LOCK_NAMESPACE = 1\n",
     "key-function-redefined": "def _equivalent_owner_lock_key(equivalent_id):\n    return 1\n",
     "namespace-literal": "text('SELECT pg_advisory_xact_lock(:n, :k)'), {'n': 0x475458}\n",
@@ -274,6 +299,12 @@ _LEGAL = {
     "boundary-patch": "monkeypatch.setattr(MoneyBoundary, 'refuse_inactive_equivalents', f)\n",
     "engine-non-moved": "PaymentEngine.commit\nmonkeypatch.setattr(PaymentEngine, 'commit', f)\n",
     "boundary-import": "from app.core.money_boundary import _EQUIVALENT_OWNER_LOCK_NAMESPACE\n",
+    "module-alias-non-moved": (
+        "from app.core.payments import engine as em\n"
+        "em.PaymentEngine.commit\nmonkeypatch.setattr(em.PaymentEngine, 'commit', f)\n"
+        "monkeypatch.setattr(em, 'time', clock)\n"
+    ),
+    "unrelated-alias-same-name": "import other.module as em\nem.PaymentEngine.MONEY_STOP_REASONS\n",
 }
 
 

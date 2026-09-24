@@ -217,6 +217,10 @@ class PaymentService:
     def __init__(self, session: AsyncSession):
         self.session = session
         self.engine = PaymentEngine(session)
+        # ONE money boundary for the service's lifetime, and it IS the engine: the advisory-lock
+        # deadline starts at the first lock this service takes and is shared by every later staged
+        # acquisition and by the engine's own units of work (019 stage 2 review, P2).
+        self._boundary: MoneyBoundary = self.engine
         self.router = PaymentRouter(session)
 
     def _resolve_existing_payment(
@@ -532,7 +536,7 @@ class PaymentService:
             return
 
         try:
-            await MoneyBoundary(self.session).acquire_staged_equivalent_owner_locks(
+            await self._boundary.acquire_staged_equivalent_owner_locks(
                 resolved_ids
             )
         except DBAPIError as exc:
