@@ -44,6 +44,7 @@ from sqlalchemy import func, select, text, update
 from app.api.deps import get_db
 from app.config import settings
 from app.core.clearing.service import ClearingService
+from app.core.money_boundary import MoneyBoundary
 from app.core.payments.engine import PaymentEngine
 from app.core.payments.service import PaymentService
 from app.db.models.debt import Debt
@@ -153,7 +154,7 @@ def _assert_stop_refusal(exc: BaseException, code: str) -> None:
         "the operator stop was raised as a retryable conflict"
     )
     assert exc.code == "E008"
-    assert exc.details.get("reason") == PaymentEngine.EQUIVALENT_INACTIVE_REASON, exc.details
+    assert exc.details.get("reason") == MoneyBoundary.EQUIVALENT_INACTIVE_REASON, exc.details
     assert exc.details.get("equivalents") == [code], exc.details
     assert "retryable" not in exc.details, exc.details
 
@@ -479,7 +480,7 @@ async def test_a_tick_that_waited_behind_the_patch_discards_its_attempt_and_the_
         assert len(plans) == 2 and len(plans[0]) >= 1, f"premise: no staged payment to race: {plans}"
         assert outcomes == [
             "RetryablePaymentConflictException",
-            f"ConflictException:{PaymentEngine.EQUIVALENT_INACTIVE_REASON}",
+            f"ConflictException:{MoneyBoundary.EQUIVALENT_INACTIVE_REASON}",
         ], outcomes
 
         assert await _debts(factory, world) == {(world.sender.pid, world.receiver.pid): _OPENING}
@@ -638,7 +639,7 @@ async def test_an_expired_payment_in_a_deactivated_equivalent_is_aborted_as_expi
                 await PaymentEngine(session).commit(tx_id)
 
         assert "expired before commit" in refused.value.message, refused.value.message
-        assert (refused.value.details or {}).get("reason") != PaymentEngine.EQUIVALENT_INACTIVE_REASON, (
+        assert (refused.value.details or {}).get("reason") != MoneyBoundary.EQUIVALENT_INACTIVE_REASON, (
             "an expired payment was refused as an operator stop: the guard sits above the TTL branch"
         )
         assert await _transactions(factory, world) == {tx_id: "ABORTED"}
@@ -665,7 +666,7 @@ async def test_a_patch_arriving_while_a_payment_holds_the_stop_check_waits_for_t
 
     checked = asyncio.Event()
     release_payment = asyncio.Event()
-    original_check = PaymentEngine.refuse_inactive_equivalents
+    original_check = MoneyBoundary.refuse_inactive_equivalents
 
     async def _check_then_hold(self, equivalent_ids, *, row_lock):
         await original_check(self, equivalent_ids, row_lock=row_lock)
@@ -673,7 +674,7 @@ async def test_a_patch_arriving_while_a_payment_holds_the_stop_check_waits_for_t
             checked.set()
             await release_payment.wait()
 
-    monkeypatch.setattr(PaymentEngine, "refuse_inactive_equivalents", _check_then_hold)
+    monkeypatch.setattr(MoneyBoundary, "refuse_inactive_equivalents", _check_then_hold)
 
     async def _pay(tx_id: str):
         async with factory() as session:

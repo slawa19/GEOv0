@@ -10,6 +10,7 @@ from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
+from app.core.money_boundary import MoneyBoundary
 from app.core.payments.engine import PaymentEngine
 from app.core.payments.router import PaymentRouter
 from app.config import settings
@@ -216,6 +217,10 @@ class PaymentService:
     def __init__(self, session: AsyncSession):
         self.session = session
         self.engine = PaymentEngine(session)
+        # ONE money boundary for the service's lifetime, and it IS the engine: the advisory-lock
+        # deadline starts at the first lock this service takes and is shared by every later staged
+        # acquisition and by the engine's own units of work (019 stage 2 review, P2).
+        self._boundary: MoneyBoundary = self.engine
         self.router = PaymentRouter(session)
 
     def _resolve_existing_payment(
@@ -531,7 +536,7 @@ class PaymentService:
             return
 
         try:
-            await self.engine.acquire_staged_equivalent_owner_locks(
+            await self._boundary.acquire_staged_equivalent_owner_locks(
                 resolved_ids
             )
         except DBAPIError as exc:
@@ -709,7 +714,7 @@ class PaymentService:
         # T1544: a deactivated equivalent takes no new payment. Best effort, on the row loaded above
         # and AFTER the idempotency decision, so a replay of an already-accepted tx_id still answers
         # with its stored result. It is not the binding check - that one is at commit, under the
-        # owner lock and `FOR SHARE` (`PaymentEngine.refuse_inactive_equivalents`) - and it
+        # owner lock and `FOR SHARE` (`MoneyBoundary.refuse_inactive_equivalents`) - and it
         # deliberately does not lock: forbidding a new PREPARED state after the PATCH returns would
         # be a stronger rule than this task's.
         if not equivalent.is_active:
@@ -719,7 +724,7 @@ class PaymentService:
                 PAYMENT_EVENTS_TOTAL.labels(event="create", result="conflict").inc()
             except Exception:
                 pass
-            raise PaymentEngine.inactive_equivalent_conflict([equivalent_code])
+            raise MoneyBoundary.inactive_equivalent_conflict([equivalent_code])
         # Step 5c (`T1546`): the integrity hold, on the same row, with the same best-effort standing -
         # the binding read is the commit's. After the operator stop, so one reason per refusal.
         if equivalent.integrity_hold_result_id is not None:
@@ -729,7 +734,7 @@ class PaymentService:
                 PAYMENT_EVENTS_TOTAL.labels(event="create", result="conflict").inc()
             except Exception:
                 pass
-            raise PaymentEngine.integrity_hold_conflict([equivalent_code])
+            raise MoneyBoundary.integrity_hold_conflict([equivalent_code])
 
         # 2. Routing
         tx_uuid = uuid.uuid4()

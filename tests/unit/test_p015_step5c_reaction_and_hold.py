@@ -47,6 +47,7 @@ from app.core.ledger.reconciliation import (
     UNVERIFIABLE,
     run_scheduled_reconciliation,
 )
+from app.core.money_boundary import MoneyBoundary
 from app.core.payments.engine import PaymentEngine
 from app.core.payments.service import PaymentService
 from app.db.models.audit_log import AuditLog
@@ -557,7 +558,7 @@ def _assert_hold_refusal(exc: BaseException, code: str) -> None:
     assert isinstance(exc, ConflictException), repr(exc)
     assert not isinstance(exc, RetryablePaymentConflictException), "the hold was raised as retryable"
     assert exc.code == "E008", exc.code
-    assert exc.details.get("reason") == PaymentEngine.EQUIVALENT_INTEGRITY_HOLD_REASON, exc.details
+    assert exc.details.get("reason") == MoneyBoundary.EQUIVALENT_INTEGRITY_HOLD_REASON, exc.details
     assert exc.details.get("equivalents") == [code], exc.details
     assert "retryable" not in exc.details, exc.details
 
@@ -620,11 +621,11 @@ async def test_step5c_inactive_and_held_is_refused_as_inactive(db_session) -> No
             )
     async with factory() as session:
         with pytest.raises(ConflictException) as at_helper:
-            await PaymentEngine(session).refuse_inactive_equivalents(
+            await MoneyBoundary(session).refuse_inactive_equivalents(
                 {triangle.equivalent.id}, row_lock=True
             )
     for refused in (at_prepare, at_helper):
-        assert refused.value.details["reason"] == PaymentEngine.EQUIVALENT_INACTIVE_REASON, (
+        assert refused.value.details["reason"] == MoneyBoundary.EQUIVALENT_INACTIVE_REASON, (
             refused.value.details
         )
 
@@ -824,7 +825,7 @@ async def test_step5c_clearing_real_reports_the_hold_as_its_declared_409(client,
     assert resp.status_code == 409, resp.text
     body = resp.json()
     assert body["code"] == "CONFLICT", body
-    assert body["details"]["reason"] == PaymentEngine.EQUIVALENT_INTEGRITY_HOLD_REASON, body
+    assert body["details"]["reason"] == MoneyBoundary.EQUIVALENT_INTEGRITY_HOLD_REASON, body
     assert "retryable" not in body["details"], body
     async with factory() as session:
         amounts = (await session.execute(select(Debt.amount).where(Debt.equivalent_id == eq_id))).scalars().all()

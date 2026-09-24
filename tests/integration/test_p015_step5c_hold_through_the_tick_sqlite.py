@@ -23,7 +23,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import func, select, text
 
-from app.core.payments.engine import PaymentEngine
+from app.core.money_boundary import MoneyBoundary
 from app.core.payments.service import PaymentService
 from app.db.models.debt import Debt
 from app.db.models.transaction import Transaction
@@ -44,7 +44,7 @@ from tests.integration.test_p015_t1544_operator_stop_through_the_tick_sqlite imp
 )
 from tests.unit.test_p015_step5c_reaction_and_hold import hold_directly
 
-HOLD = PaymentEngine.EQUIVALENT_INTEGRITY_HOLD_REASON
+HOLD = MoneyBoundary.EQUIVALENT_INTEGRITY_HOLD_REASON
 
 
 @pytest.mark.asyncio

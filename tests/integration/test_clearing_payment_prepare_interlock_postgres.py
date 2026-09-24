@@ -791,7 +791,7 @@ async def test_cancellation_during_interlocked_work_rolls_back_before_unlock_pos
     _require_postgres(db_session)
 
     from app.core.clearing.service import ClearingService
-    from app.core.payments.engine import PaymentEngine
+    from app.core.money_boundary import MoneyBoundary
     from app.db.models.audit_log import IntegrityAuditLog
     from app.db.models.debt import Debt
     from app.db.models.transaction import Transaction
@@ -862,7 +862,7 @@ async def test_cancellation_during_interlocked_work_rolls_back_before_unlock_pos
         await _no_advisory_lock_is_held(caplog)
         probe_session = TestingSessionLocal()
         await asyncio.wait_for(
-            PaymentEngine(probe_session).acquire_staged_equivalent_owner_locks(
+            MoneyBoundary(probe_session).acquire_staged_equivalent_owner_locks(
                 [seed["equivalent_id"]]
             ),
             timeout=_PROBE_TIMEOUT,
@@ -934,7 +934,7 @@ async def test_cancellation_during_interlock_release_preserves_durable_amount_po
         ClearingCommittedAfterCancellation,
         ClearingService,
     )
-    from app.core.payments.engine import PaymentEngine
+    from app.core.money_boundary import MoneyBoundary
     from app.db.models.transaction import Transaction
     from tests.conftest import TestingSessionLocal
 
@@ -987,7 +987,7 @@ async def test_cancellation_during_interlock_release_preserves_durable_amount_po
         await _no_advisory_lock_is_held(caplog)
         probe_session = TestingSessionLocal()
         await asyncio.wait_for(
-            PaymentEngine(probe_session).acquire_staged_equivalent_owner_locks(
+            MoneyBoundary(probe_session).acquire_staged_equivalent_owner_locks(
                 [seed["equivalent_id"]]
             ),
             timeout=_PROBE_TIMEOUT,
@@ -1015,7 +1015,7 @@ async def test_interlock_timeout_rolls_back_work_and_releases_owner_postgres(
 
     from app.config import settings
     from app.core.clearing.service import ClearingService
-    from app.core.payments.engine import PaymentEngine
+    from app.core.money_boundary import MoneyBoundary
     from app.utils.exceptions import TimeoutException
     from tests.conftest import TestingSessionLocal
 
@@ -1028,7 +1028,7 @@ async def test_interlock_timeout_rolls_back_work_and_releases_owner_postgres(
     monkeypatch.setattr(settings, "COMMIT_TIMEOUT_SECONDS", 0.05)
     monkeypatch.setattr(settings, "PAYMENT_TOTAL_TIMEOUT_SECONDS", 0.05)
     try:
-        await PaymentEngine(holder_session).acquire_staged_equivalent_owner_locks(
+        await MoneyBoundary(holder_session).acquire_staged_equivalent_owner_locks(
             [seed["equivalent_id"]]
         )
         with pytest.raises(TimeoutException):

@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError
 
+from app.core.money_boundary import MoneyBoundary
 from app.core.payments.engine import PaymentEngine
 from app.db.models.audit_log import IntegrityAuditLog
 from app.db.models.debt import Debt
@@ -359,9 +360,9 @@ async def test_staged_owner_sorts_multi_equivalent_sets_without_global_serializa
         TestingSessionLocal() as waiter_session,
         TestingSessionLocal() as independent_session,
     ):
-        holder_engine = PaymentEngine(holder_session)
-        waiter_engine = PaymentEngine(waiter_session)
-        independent_engine = PaymentEngine(independent_session)
+        holder_engine = MoneyBoundary(holder_session)
+        waiter_engine = MoneyBoundary(waiter_session)
+        independent_engine = MoneyBoundary(independent_session)
         waiter_acquire = waiter_engine._acquire_equivalent_owner_locks
 
         async def _hold_owner_set() -> None:
@@ -436,7 +437,7 @@ async def test_staged_owner_restores_outer_transaction_lock_timeout_postgres(
         before = await staged_session.scalar(text("SHOW lock_timeout"))
         assert before == "0"
 
-        engine = PaymentEngine(staged_session)
+        engine = MoneyBoundary(staged_session)
         engine._advisory_lock_budget_s = 0.05
 
         try:

@@ -46,6 +46,7 @@ from app.core.ledger.reconciliation import (
     run_scheduled_reconciliation,
     take_baseline,
 )
+from app.core.money_boundary import MoneyBoundary
 from app.core.payments.engine import PaymentEngine
 from app.core.payments.service import PaymentService
 from app.db.base import Base
@@ -82,7 +83,7 @@ from tests.unit.test_p015_step5c_reaction_and_hold import hold_directly
 # not in the tier database it shares with mode-A tests - see `tests/tier_on_a_clone.py`.
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
 
-HOLD = PaymentEngine.EQUIVALENT_INTEGRITY_HOLD_REASON
+HOLD = MoneyBoundary.EQUIVALENT_INTEGRITY_HOLD_REASON
 _ATOM = Decimal("0.00000001")
 
 
@@ -250,7 +251,7 @@ async def test_step5c_p_a_reaction_arriving_while_a_payment_holds_its_check_wait
     try:
         await _baseline_and_one_atom(factory, world.equivalent.id)
         checked, release_payment = asyncio.Event(), asyncio.Event()
-        original_check = PaymentEngine.refuse_inactive_equivalents
+        original_check = MoneyBoundary.refuse_inactive_equivalents
 
         async def _check_then_wait(self, equivalent_ids, *, row_lock):
             await original_check(self, equivalent_ids, row_lock=row_lock)
@@ -258,7 +259,7 @@ async def test_step5c_p_a_reaction_arriving_while_a_payment_holds_its_check_wait
                 checked.set()
                 await release_payment.wait()
 
-        monkeypatch.setattr(PaymentEngine, "refuse_inactive_equivalents", _check_then_wait)
+        monkeypatch.setattr(MoneyBoundary, "refuse_inactive_equivalents", _check_then_wait)
 
         async def _pay(tx_id: str):
             async with factory() as session:
@@ -311,7 +312,7 @@ async def test_step5c_p_the_owner_lock_comes_before_the_authoritative_snapshot(f
     reconcile = None
     try:
         await _baseline_and_one_atom(factory, world.equivalent.id)
-        await PaymentEngine(holder).acquire_staged_equivalent_owner_locks([world.equivalent.id])
+        await MoneyBoundary(holder).acquire_staged_equivalent_owner_locks([world.equivalent.id])
 
         reconcile = asyncio.create_task(run_scheduled_reconciliation(factory, equivalent_ids=[world.equivalent.id]))
         assert await _advisory_waiter_exists(), "premise: the reaction did not wait on the owner lock"
@@ -527,7 +528,7 @@ async def test_step5c_p_the_admin_clear_waits_for_the_owner_lock(factory, admin_
             )
             await session.commit()
 
-        await PaymentEngine(holder).acquire_staged_equivalent_owner_locks([world.equivalent.id])
+        await MoneyBoundary(holder).acquire_staged_equivalent_owner_locks([world.equivalent.id])
         clear = asyncio.create_task(
             client.post(
                 f"/api/v1/admin/equivalents/{world.equivalent.code}/integrity-hold/clear",

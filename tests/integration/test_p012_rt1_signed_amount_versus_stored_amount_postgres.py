@@ -75,7 +75,7 @@ from sqlalchemy import text
 
 from app.db.models.equivalent import Equivalent
 from app.utils import validation
-import app.core.payments.engine as engine_module
+import app.core.money_boundary as money_boundary_module
 from app.utils.exceptions import BadRequestException
 from app.utils.validation import MONEY_MAX_SCALE, parse_money_amount
 from tests.integration.p012_pg_http import make_pg_client_fixture
@@ -480,7 +480,7 @@ async def test_rt_012_1_counter_check_widening_the_door_reproduces_the_finding_e
     assert Decimal(str(details.get("total_drift"))) == Decimal("1E-9"), body
 
     # Now widen the barrier too, and the finding returns exactly as it was before T1522.
-    monkeypatch.setattr(engine_module, "_DELTA_DRIFT_TOLERANCE", Decimal("0.00000001"))
+    monkeypatch.setattr(money_boundary_module, "_DELTA_DRIFT_TOLERANCE", Decimal("0.00000001"))
 
     status_code, body = await _submit_signed_payment(pg_client, scenario, amount)
     assert status_code == 200 and body.get("status") == "COMMITTED", (

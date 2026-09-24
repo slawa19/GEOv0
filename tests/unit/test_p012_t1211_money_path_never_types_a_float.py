@@ -33,8 +33,11 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 #: The money path.  `payments`, `clearing`, `trustlines` and `balance` are the four modules 012
 #: names as the money core; `money.py` renders amounts and `validation.py` is the door.
+#: `money_boundary.py` holds the payment delta check and the lock budget, moved out of
+#: `app/core/payments/engine.py` by 019 stage 2 (`T1903`) - the scan follows the code.
 MONEY_MODULES = [
     "app/core/payments",
+    "app/core/money_boundary.py",
     "app/core/clearing",
     "app/core/trustlines",
     "app/core/balance",
@@ -96,7 +99,7 @@ TYPED, CONSTRUCTED, DECLARED = _float_sites()
 #: by name would also admit a cache of amounts.  So each site is acknowledged individually - and
 #: the list is asserted EXHAUSTED, so an entry that stops matching fails rather than lingering.
 KNOWN_NON_MONEY_FLOAT_ATTRIBUTES = {
-    ("app/core/payments/engine.py", "self._advisory_lock_deadline"):
+    ("app/core/money_boundary.py", "self._advisory_lock_deadline"):
         "an advisory-lock deadline in monotonic seconds",
     ("app/core/payments/router.py", "_graph_cache"):
         "the cache tuple's first slot is a monotonic timestamp; the amounts in it are Decimal",

@@ -62,7 +62,7 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
         pytest.skip("Postgres-only: clearing/payment row-lock and retry semantics")
 
     from app.core.clearing.service import ClearingService
-    from app.core.payments.engine import PaymentEngine
+    from app.core.money_boundary import MoneyBoundary
     from app.core.payments.service import PaymentService
     from app.db.models.audit_log import IntegrityAuditLog
     from app.db.models.debt import Debt
@@ -213,7 +213,7 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
         clearing_service = ClearingService(clearing_session)
         payment_service = PaymentService(payment_session)
         original_locked_pairs = clearing_service._locked_pairs_for_equivalent
-        original_payment_owner = PaymentEngine._acquire_equivalent_owner_locks
+        original_payment_owner = MoneyBoundary._acquire_equivalent_owner_locks
         payment_owner_attempted = asyncio.Event()
         payment_owner_pid: int | None = None
 
@@ -239,7 +239,7 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
             return await original_payment_owner(engine, equivalent_ids)
 
         monkeypatch.setattr(
-            PaymentEngine,
+            MoneyBoundary,
             "_acquire_equivalent_owner_locks",
             _observe_payment_owner,
         )

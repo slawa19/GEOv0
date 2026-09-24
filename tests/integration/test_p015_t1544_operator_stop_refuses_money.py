@@ -33,6 +33,7 @@ from nacl.signing import SigningKey
 from sqlalchemy import func, select, update
 
 from app.config import settings
+from app.core.money_boundary import MoneyBoundary
 from app.core.payments.engine import PaymentEngine
 from app.core.simulator.models import RunRecord
 from app.db.journal_tables import debt_journal_entries, debt_operations
@@ -173,7 +174,7 @@ def _assert_stop_refusal(resp, code: str) -> None:
     assert resp.status_code == 409, resp.text
     error = resp.json()["error"]
     assert error["code"] == "E008", error
-    assert error["details"]["reason"] == PaymentEngine.EQUIVALENT_INACTIVE_REASON, error
+    assert error["details"]["reason"] == MoneyBoundary.EQUIVALENT_INACTIVE_REASON, error
     assert error["details"]["equivalents"] == [code], error
     assert "retryable" not in error["details"], (
         f"the operator stop was labelled retryable; repeating it cannot succeed: {error}"
@@ -440,7 +441,7 @@ async def test_clearing_real_reports_the_stop_as_its_declared_409(
     assert resp.status_code == 409, resp.text
     body = resp.json()
     assert body["code"] == "CONFLICT", body
-    assert body["details"]["reason"] == PaymentEngine.EQUIVALENT_INACTIVE_REASON, body
+    assert body["details"]["reason"] == MoneyBoundary.EQUIVALENT_INACTIVE_REASON, body
     assert "retryable" not in body["details"], body
     db_session.expire_all()
     assert await _debt_totals(db_session, _SIM_EQ) == (3, Decimal("300"))

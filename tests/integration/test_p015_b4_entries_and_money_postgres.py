@@ -1895,16 +1895,14 @@ async def test_c17_p_the_owner_lock_race_never_leaves_an_equivalent_gone_with_it
     survives either way.
     """
     from app.api.v1.admin import admin_delete_equivalent
-    from app.core.payments.engine import (
-        _EQUIVALENT_OWNER_LOCK_NAMESPACE,
-        PaymentEngine,
-    )
+    from app.core.money_boundary import _EQUIVALENT_OWNER_LOCK_NAMESPACE, MoneyBoundary
+    from app.core.payments.engine import PaymentEngine
     from app.schemas.admin import AdminEquivalentDeleteRequest
     from app.utils.exceptions import ConflictException
 
     seeded = await _seed(serializable_factory)
     world = seeded.world
-    lock_key = PaymentEngine._equivalent_owner_lock_key(world.equivalent.id)
+    lock_key = MoneyBoundary._equivalent_owner_lock_key(world.equivalent.id)
     tx_id = await _seed_payment(serializable_factory, seeded, amount="9.00")
     await _deactivate(serializable_factory, world)
 
@@ -2026,7 +2024,7 @@ async def test_c17_p_the_owner_lock_race_never_leaves_an_equivalent_gone_with_it
     assert payment_outcome.code == "E008", payment_outcome.code
     assert (payment_outcome.details or {}).get(
         "reason"
-    ) == PaymentEngine.EQUIVALENT_INACTIVE_REASON, payment_outcome.details
+    ) == MoneyBoundary.EQUIVALENT_INACTIVE_REASON, payment_outcome.details
     assert "retryable" not in (payment_outcome.details or {}), payment_outcome.details
     assert envelopes == [], (
         f"the refused payment left envelopes {envelopes} in the '{order}' order"
@@ -2071,7 +2069,7 @@ async def test_c17_p_a_raw_delete_of_an_equivalent_with_history_is_refused_by_th
     MUTATION once step 4 exists: give migration 021's foreign keys `ondelete='CASCADE'`. The delete
     then succeeds and takes the history with it, silently.
     """
-    from app.core.payments.engine import _EQUIVALENT_OWNER_LOCK_NAMESPACE, PaymentEngine
+    from app.core.money_boundary import _EQUIVALENT_OWNER_LOCK_NAMESPACE, MoneyBoundary
 
     seeded = await _seed(serializable_factory)
     world = seeded.world
@@ -2095,7 +2093,7 @@ async def test_c17_p_a_raw_delete_of_an_equivalent_with_history_is_refused_by_th
             text("SELECT pg_advisory_xact_lock(:ns, :key)"),
             {
                 "ns": _EQUIVALENT_OWNER_LOCK_NAMESPACE,
-                "key": PaymentEngine._equivalent_owner_lock_key(world.equivalent.id),
+                "key": MoneyBoundary._equivalent_owner_lock_key(world.equivalent.id),
             },
         )
         try:

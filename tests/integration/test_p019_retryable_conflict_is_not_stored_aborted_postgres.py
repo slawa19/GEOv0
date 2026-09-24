@@ -44,6 +44,7 @@ import pytest
 from sqlalchemy import text, update
 
 from app.config import settings
+from app.core.money_boundary import MoneyBoundary
 from app.core.payments.engine import PaymentEngine
 from app.core.payments.service import PaymentService, _payment_db_sqlstate
 from app.db.models.equivalent import Equivalent
@@ -77,8 +78,8 @@ def _install_prepare_conflict(monkeypatch, factory, world: ApiWorld, stand: _Sta
 
     gates: dict[str, tuple[asyncio.Event, asyncio.Event]] = {}
     original_prepare = PaymentEngine.prepare
-    original_owner = PaymentEngine._acquire_equivalent_owner_locks
-    original_tx_lock = PaymentEngine._acquire_tx_advisory_lock
+    original_owner = MoneyBoundary._acquire_equivalent_owner_locks
+    original_tx_lock = MoneyBoundary._acquire_tx_advisory_lock
 
     async def prepare(self, tx_id, *args, **kwargs):
         if tx_id != stand.subject_tx:
@@ -142,15 +143,15 @@ def _install_prepare_conflict(monkeypatch, factory, world: ApiWorld, stand: _Sta
         return await original_tx_lock(self, tx_id)
 
     monkeypatch.setattr(PaymentEngine, "prepare", prepare)
-    monkeypatch.setattr(PaymentEngine, "_acquire_equivalent_owner_locks", owner_locks)
-    monkeypatch.setattr(PaymentEngine, "_acquire_tx_advisory_lock", tx_lock)
+    monkeypatch.setattr(MoneyBoundary, "_acquire_equivalent_owner_locks", owner_locks)
+    monkeypatch.setattr(MoneyBoundary, "_acquire_tx_advisory_lock", tx_lock)
 
 
 def _install_commit_conflict(monkeypatch, factory, world: ApiWorld, stand: _Stand) -> None:  # noqa: F811
     """A concurrent UPDATE of the equivalent row behind each commit attempt's snapshot."""
 
     original_commit = PaymentEngine.commit
-    original_guard = PaymentEngine.refuse_inactive_equivalents
+    original_guard = MoneyBoundary.refuse_inactive_equivalents
 
     async def commit(self, tx_id, *args, **kwargs):
         if tx_id != stand.subject_tx:
@@ -177,7 +178,7 @@ def _install_commit_conflict(monkeypatch, factory, world: ApiWorld, stand: _Stan
         return await original_guard(self, equivalent_ids, row_lock=row_lock)
 
     monkeypatch.setattr(PaymentEngine, "commit", commit)
-    monkeypatch.setattr(PaymentEngine, "refuse_inactive_equivalents", guard)
+    monkeypatch.setattr(MoneyBoundary, "refuse_inactive_equivalents", guard)
 
 
 @dataclass

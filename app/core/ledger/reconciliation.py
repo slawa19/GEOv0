@@ -969,9 +969,9 @@ async def take_baseline(session: Any, equivalent_id: uuid.UUID) -> BaselineTaken
     commit: its edges keep `debt - sum(delta)` unchanged.
     """
 
-    from app.core.payments.engine import PaymentEngine
+    from app.core.money_boundary import MoneyBoundary
 
-    await PaymentEngine(session).acquire_staged_equivalent_owner_locks([equivalent_id])
+    await MoneyBoundary(session).acquire_staged_equivalent_owner_locks([equivalent_id])
 
     if await _has_baseline(session, equivalent_id):
         raise BaselineAlreadyTaken(
@@ -1143,11 +1143,11 @@ async def react_to_failed(session_factory: Callable[[], Any], equivalent_id: uui
     later runs then return `already_held` without announcing it; no money moves and no false hold results.
     """
 
-    from app.core.payments.engine import PaymentEngine
+    from app.core.money_boundary import MoneyBoundary
 
     async with session_factory() as lock_session:
         try:
-            await PaymentEngine(lock_session).acquire_staged_equivalent_owner_locks([equivalent_id])
+            await MoneyBoundary(lock_session).acquire_staged_equivalent_owner_locks([equivalent_id])
             async with session_factory() as work:
                 await _open_reaction_transaction(work)
                 decision = await _confirm_and_hold(work, equivalent_id)

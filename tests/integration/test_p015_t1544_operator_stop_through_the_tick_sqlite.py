@@ -41,7 +41,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import func, select, text, update
 
-from app.core.payments.engine import PaymentEngine
+from app.core.money_boundary import MoneyBoundary
 from app.core.payments.router import PaymentRouter
 from app.core.payments.service import PaymentService
 from app.core.simulator.models import RunRecord
@@ -325,7 +325,7 @@ async def test_a_refused_staged_payment_is_rejected_and_the_tick_continues(
     with caplog.at_level(logging.WARNING):
         await _ticks(runner, run, ticks)
 
-    refused = [o for o in outcomes if o == f"refused:{PaymentEngine.EQUIVALENT_INACTIVE_REASON}"]
+    refused = [o for o in outcomes if o == f"refused:{MoneyBoundary.EQUIVALENT_INACTIVE_REASON}"]
     assert refused, f"premise: no staged payment was refused by the operator stop: {outcomes}"
     assert refused == outcomes, outcomes
     assert run.rejected_total == len(refused), (run.rejected_total, outcomes)

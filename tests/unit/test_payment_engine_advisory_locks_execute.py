@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.core.money_boundary import MoneyBoundary
 from app.core.payments.engine import PaymentEngine
 from app.utils.exceptions import GeoException
 
@@ -64,7 +65,7 @@ class _CommitSession:
 @pytest.mark.asyncio
 async def test_acquire_segment_advisory_locks_executes_pg_advisory_xact_lock_for_each_unique_segment():
     session = _Session()
-    engine = PaymentEngine(session)
+    engine = MoneyBoundary(session)
 
     eq = uuid.uuid4()
     a, b, c, d = uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
@@ -94,7 +95,7 @@ async def test_acquire_segment_advisory_locks_executes_pg_advisory_xact_lock_for
 @pytest.mark.asyncio
 async def test_acquire_segment_advisory_lock_keys_deduplicates_and_sorts_globally():
     session = _Session()
-    engine = PaymentEngine(session)
+    engine = MoneyBoundary(session)
 
     await engine._acquire_segment_advisory_lock_keys([9, -4, 9, 2, -4])
 
@@ -108,7 +109,7 @@ async def test_acquire_segment_advisory_lock_keys_deduplicates_and_sorts_globall
 @pytest.mark.asyncio
 async def test_tx_lock_key_is_stable_and_uses_domain_separate_from_segment_keys():
     session = _Session()
-    engine = PaymentEngine(session)
+    engine = MoneyBoundary(session)
     tx_id = str(uuid.uuid4())
 
     assert engine._tx_lock_key(tx_id) == engine._tx_lock_key(tx_id)
@@ -130,7 +131,7 @@ async def test_tx_lock_key_is_stable_and_uses_domain_separate_from_segment_keys(
 @pytest.mark.asyncio
 async def test_equivalent_owner_locks_are_deduplicated_sorted_and_domain_separated():
     session = _Session()
-    engine = PaymentEngine(session)
+    engine = MoneyBoundary(session)
     equivalent_a = uuid.uuid4()
     equivalent_b = uuid.uuid4()
 
@@ -237,18 +238,18 @@ async def test_segment_lock_timeout_uses_one_decreasing_commit_budget(
     monkeypatch,
 ):
     from app.config import settings
-    from app.core.payments import engine as engine_module
+    from app.core import money_boundary as money_boundary_module
 
     monkeypatch.setattr(settings, "PAYMENT_TOTAL_TIMEOUT_SECONDS", 10)
     monkeypatch.setattr(settings, "COMMIT_TIMEOUT_SECONDS", 5)
     monotonic_values = iter([100.0, 101.0])
     monkeypatch.setattr(
-        engine_module,
+        money_boundary_module,
         "time",
         SimpleNamespace(monotonic=lambda: next(monotonic_values)),
     )
     session = _Session()
-    engine = PaymentEngine(session)
+    engine = MoneyBoundary(session)
 
     await engine._acquire_segment_advisory_lock_keys([1, 2])
 
@@ -262,7 +263,7 @@ def test_advisory_lock_budget_matches_service_zero_default(monkeypatch):
     monkeypatch.setattr(settings, "PAYMENT_TOTAL_TIMEOUT_SECONDS", 0)
     monkeypatch.setattr(settings, "COMMIT_TIMEOUT_SECONDS", 0)
 
-    engine = PaymentEngine(_Session())
+    engine = MoneyBoundary(_Session())
 
     assert engine._advisory_lock_budget_s == 5.0
 
@@ -405,7 +406,7 @@ def test_persisted_prepare_lock_parser_and_keys_share_validated_flows(monkeypatc
         return 3 if to_participant_id == to_id else 7
 
     monkeypatch.setattr(
-        PaymentEngine,
+        MoneyBoundary,
         "_segment_lock_key",
         staticmethod(_fake_segment_lock_key),
     )
@@ -518,7 +519,7 @@ async def test_commit_acquires_keys_derived_from_loaded_prepare_locks(monkeypatc
     # skipped here because this fake has no PostgreSQL bind).
     session.responses.insert(0, _ScalarsResult([lock]))
     engine = PaymentEngine(session)
-    expected_key = PaymentEngine._segment_lock_key(
+    expected_key = MoneyBoundary._segment_lock_key(
         equivalent_id=equivalent_id,
         from_participant_id=from_id,
         to_participant_id=to_id,
