@@ -120,18 +120,17 @@ def _factory(url: str):
 
 
 async def _debt(factory, triangle, debtor: str, creditor: str, amount: str, label: str) -> None:
+    row = Debt(
+        id=uuid.uuid4(),
+        debtor_id=getattr(triangle, debtor).id,
+        creditor_id=getattr(triangle, creditor).id,
+        equivalent_id=triangle.equivalent_id,
+        amount=Decimal(amount),
+        version=0,
+    )
     async with factory() as session:
         async with debt_fixture_setup(session, label=label):
-            session.add(
-                Debt(
-                    id=uuid.uuid4(),
-                    debtor_id=getattr(triangle, debtor).id,
-                    creditor_id=getattr(triangle, creditor).id,
-                    equivalent_id=triangle.equivalent_id,
-                    amount=Decimal(amount),
-                    version=0,
-                )
-            )
+            session.add(row)
         await session.commit()
 
 
