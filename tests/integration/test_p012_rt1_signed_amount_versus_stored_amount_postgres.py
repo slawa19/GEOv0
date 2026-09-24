@@ -458,12 +458,45 @@ async def test_rt_012_1_counter_check_widening_the_door_reproduces_the_finding_e
     # behaviour and it must not be lost - and then the journal stands down so the barrier below can
     # be reached. Three independent guards now stand where one did, and reproducing the finding
     # requires disabling all three.
-    from app.core.ledger import journal
+    #
+    # TWO MORE JOINED ON 2026-09-24 (018 / FORK-1, slice B0a), and they are the replacement for the
+    # journal's predicate, which stage B of 018 deletes with the listener. THE BOOK checks every
+    # debt amount - input and calculated - against `debts.amount`'s declared capacity before any
+    # debt changes, and it now stands in front of the journal. `MoneyNumeric` checks the same
+    # predicate again at bind, and it is met below, after the journal's domain is widened. Both
+    # read the COLUMN's capacity, not `MONEY_MAX_SCALE`, so widening the door does not widen them:
+    # each is asserted to refuse first - new behaviour that must not be lost - and then EXPLICITLY
+    # bypassed so the later barriers can be reached. A spy on each enforcement point makes the
+    # refusal attributable: over HTTP every one of these is the same 500 E010.
+    from app.core.ledger import book, journal
+    from app.db.types import MoneyNumeric
+
+    book_refusals: list[str] = []
+    real_book_check = book._refuse_unstorable
+
+    def _spy_book_check(value: Any, *, what: str) -> None:
+        try:
+            real_book_check(value, what=what)
+        except book.BookMoneyError as refused:
+            book_refusals.append(refused.reason)
+            raise
+
+    monkeypatch.setattr(book, "_refuse_unstorable", _spy_book_check)
+    status_code, body = await _submit_signed_payment(pg_client, scenario, amount)
+    assert status_code == 500 and (body or {}).get("error", {}).get("code") == "E010", (
+        f"with every guard intact, a payment of {amount!r} must be refused before it reaches the "
+        f"ledger. Got {status_code} {body!r}."
+    )
+    assert book_refusals == ["money_quantization"], (
+        f"the refusal must be the BOOK's storability check (018 FORK-1), which stands in front of "
+        f"the journal; the book recorded {book_refusals!r}."
+    )
+    monkeypatch.setattr(book, "_refuse_unstorable", lambda value, *, what: None)
 
     status_code, body = await _submit_signed_payment(pg_client, scenario, amount)
     assert status_code == 500 and (body or {}).get("error", {}).get("code") == "E010", (
-        f"with every guard intact, a payment of {amount!r} must be refused by the debt journal "
-        f"before it reaches the ledger. Got {status_code} {body!r}."
+        f"with the book's check bypassed, a payment of {amount!r} must still be refused by the "
+        f"debt journal before it reaches the ledger. Got {status_code} {body!r}."
     )
 
     # THE THIRD GUARD IS WIDENED THE SAME WAY THE DOOR WAS - by moving the constant that decides its
@@ -472,6 +505,30 @@ async def test_rt_012_1_counter_check_widening_the_door_reproduces_the_finding_e
     # on an engine with no write guard is refused as un-instrumented (`C15`). So the journal cannot
     # be absent from this path at all; only its money domain can be widened.
     monkeypatch.setattr(journal, "_MONEY_QUANTUM", Decimal("1E-9"))
+
+    # `MoneyNumeric` AT BIND (018 FORK-1, B0a) is met next: the widened journal lets the flush
+    # build its statements, and the bind of `debts.amount` (and of the entry's amounts) refuses
+    # `0.123456789` before the statement is sent. Asserted, then bypassed like the book's check.
+    bind_refusals: list[str] = []
+    real_bind_check = MoneyNumeric._refuse_unstorable
+
+    def _spy_bind_check(self: Any, value: Any) -> None:
+        try:
+            real_bind_check(self, value)
+        except ValueError as refused:
+            bind_refusals.append(str(refused).split(":", 1)[0])
+            raise
+
+    monkeypatch.setattr(MoneyNumeric, "_refuse_unstorable", _spy_bind_check)
+    status_code, body = await _submit_signed_payment(pg_client, scenario, amount)
+    assert status_code == 500 and (body or {}).get("error", {}).get("code") == "E010", (
+        f"with the book bypassed and the journal's money domain widened, the payment of "
+        f"{amount!r} must still be refused - at bind, by MoneyNumeric. Got {status_code} {body!r}."
+    )
+    assert bind_refusals and set(bind_refusals) == {"money_quantization"}, (
+        f"the refusal must be MoneyNumeric's bind check; it recorded {bind_refusals!r}."
+    )
+    monkeypatch.setattr(MoneyNumeric, "_refuse_unstorable", lambda self, value: None)
 
     # A FOURTH GUARD JOINED THEM ON 2026-09-13 (T1528), and widening a constant does not get past
     # it, because it has no constant. The journal now reads every row it recorded BACK OUT OF THE
@@ -505,8 +562,9 @@ async def test_rt_012_1_counter_check_widening_the_door_reproduces_the_finding_e
     #
     # Asserted first because it is new behaviour and must not be lost, then stood down for the same
     # reason the fourth was: a measurement against the database has no constant to move. FIVE
-    # independent guards now stand where one did, and reproducing `F-012-1` requires disabling all
-    # five - which is the point of this staircase, not an obstacle to it.
+    # independent guards stood where one did, SEVEN since 018 B0a added the book's check and the
+    # bind check, and reproducing `F-012-1` requires disabling all of them - which is the point of
+    # this staircase, not an obstacle to it.
     status_code, body = await _submit_signed_payment(pg_client, scenario, amount)
     assert status_code == 500 and (body or {}).get("error", {}).get("code") == "E010", (
         f"with the debt readback stood down the payment of {amount!r} must still be refused - by the "

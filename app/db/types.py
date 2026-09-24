@@ -34,22 +34,33 @@ TWO GUARDS, BECAUSE NEITHER ONE COVERS THE OTHER'S PATHS.
   Those measurements were pinned by a SQLite test that left with SQLite (017 stage 3); the
   PostgreSQL half is `tests/integration/test_p015_t1526_nan_amount_reaches_the_money_column_postgres.py`.
 
-This is deliberately NOT the money door. `app/utils/validation.py::parse_money_amount` and
-`is_storable_money` own the domain rule (scale 8, magnitude below 10^12, and they already refuse
-non-finite values) for writers that answer an HTTP request or build amounts out of config. This
-module is the last thing before the wire, for the writers that never passed a door: it refuses only
-what no money column can hold at all, and it refuses it the same way on every dialect.
+This is deliberately NOT the money door. `app/utils/validation.py::parse_money_amount` owns the
+wire grammar and the HTTP-shaped refusal for writers that answer a request. This module is the last
+thing before the wire, for the writers that never passed a door.
+
+WHAT IT REFUSES WIDENED ON 2026-09-24 (018 / FORK-1, slice B0a). Until then `MoneyNumeric` refused
+only non-finite values, and the scale-8 and magnitude refusal before debt SQL lived in exactly one
+place: the debt journal's listener (`journal.py::_check_storable`), which stage B of 018 removes.
+PostgreSQL cannot take that refusal over - a `NUMERIC(20, 8)` column coerces `0.123456789` to
+`0.12345679` before any CHECK or trigger sees it. So the bind now applies THE storability predicate
+(`app/utils/validation.py::money_storability_violation`) with the column's own declared capacity:
+finiteness, `abs(value) < 10**(precision - scale)`, and exact representability at `scale`. That is
+a deliberate strengthening of every `MoneyNumeric` column's binding contract, not only of
+`debts.amount`. What it does NOT cover: raw SQL text (`exec_driver_sql`, `text()` with untyped
+binds, SQL expressions computed in the database) - the CHECK constraints stay the guarantee there,
+and they bound the magnitude and exclude `NaN` but cannot see a rounded ninth digit.
 `AGENTS.md` §9 - every stage correct by itself, no leaning on a guard further along.
 """
 
 from __future__ import annotations
 
-import math
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from sqlalchemy import Numeric
 from sqlalchemy.types import TypeDecorator
+
+from app.utils.validation import MONEY_FINITENESS, money_storability_violation
 
 __all__ = ["MONEY_COLUMN_MAX", "MoneyNumeric", "finite_money_clauses"]
 
@@ -109,45 +120,63 @@ def finite_money_clauses(column: str) -> str:
     return f"{column} <= {MONEY_COLUMN_MAX} AND {column} <> 'NaN'"
 
 
-def _is_non_finite(value: Any) -> bool:
-    """True for `NaN`, `Infinity` and `-Infinity` in any spelling a bind parameter can carry.
-
-    Anything this cannot interpret as a number answers False: refusing it is the dialect's job and
-    inventing a second opinion here would be this module guessing at values it does not own.
-    """
-
-    if isinstance(value, Decimal):
-        return not value.is_finite()
-    if isinstance(value, float):
-        return math.isnan(value) or math.isinf(value)
-    if isinstance(value, str):
-        try:
-            return not Decimal(value).is_finite()
-        except (InvalidOperation, ValueError):
-            return False
-    return False
-
-
 class MoneyNumeric(TypeDecorator):
-    """`Numeric`, plus a refusal to bind a value that is not a finite number.
+    """`Numeric(precision, scale)`, plus a refusal to bind a value the column cannot hold exactly.
 
     The DDL it emits is exactly the DDL of its `impl`, so a column that changes to this type keeps
     its type in every database and no migration is needed for the type itself.
 
+    The refusal is THE storability predicate (`money_storability_violation`) with this column's
+    declared capacity: not finite (T1526), `abs(value) >= 10**(precision - scale)`, or not exactly
+    representable at `scale` (PostgreSQL would round it). Insignificant trailing zeros pass;
+    so does the full width, `999999999999.99999999` for `(20, 8)`. A value that is not a number at
+    all in any spelling this can read (not `Decimal`/`int`/`float`/`str`) is passed through:
+    refusing it is the dialect's job.
+
     The refusal raises `ValueError`, which SQLAlchemy wraps in `StatementError` carrying the
     statement and its parameters - so the failure names the table, the column and the value,
-    instead of naming `NOT NULL`.
+    instead of naming `NOT NULL` or a rounded row. Its message begins with the predicate's reason.
     """
 
     impl = Numeric
     cache_ok = True
 
-    def process_bind_param(self, value: Any, dialect: Any) -> Any:
-        if value is not None and _is_non_finite(value):
+    def __init__(self, precision: int, scale: int, **kwargs: Any) -> None:
+        # A money column without a declared capacity would leave the bind unable to say what fits.
+        super().__init__(precision, scale, **kwargs)
+        self._max_integer_digits = int(precision) - int(scale)
+        self._max_scale = int(scale)
+
+    def _refuse_unstorable(self, value: Any) -> None:
+        """Raise when the column cannot hold `value` exactly; the one enforcement point at bind."""
+
+        if not isinstance(value, (Decimal, int, float, str)):
+            return
+        if isinstance(value, str):
+            try:
+                Decimal(value)
+            except (InvalidOperation, ValueError):
+                return
+        reason = money_storability_violation(
+            value, max_integer_digits=self._max_integer_digits, max_scale=self._max_scale
+        )
+        if reason is None:
+            return
+        if reason == MONEY_FINITENESS:
             raise ValueError(
-                f"non-finite value {value!r} cannot be stored as money: a money column holds "
-                f"finite decimal amounts only. NaN and Infinity are refused before the statement "
-                f"is sent, because PostgreSQL's NUMERIC accepts NaN and every sum over it becomes "
-                f"NaN. See app/db/types.py and migration 021_money_columns_reject_nan."
+                f"{reason}: non-finite value {value!r} cannot be stored as money: a money column "
+                f"holds finite decimal amounts only. NaN and Infinity are refused before the "
+                f"statement is sent, because PostgreSQL's NUMERIC accepts NaN and every sum over it "
+                f"becomes NaN. See app/db/types.py and migration 021_money_columns_reject_nan."
             )
+        raise ValueError(
+            f"{reason}: value {value!r} does not fit NUMERIC({self._max_integer_digits + self._max_scale}, "
+            f"{self._max_scale}) exactly - PostgreSQL would round the fraction or overflow the "
+            f"integer part, and the stored money would differ from the value given. Refused at "
+            f"bind (app/db/types.py, 018 FORK-1)."
+        )
+
+    def process_bind_param(self, value: Any, dialect: Any) -> Any:
+        if value is not None:
+            self._refuse_unstorable(value)
         return value
