@@ -1,18 +1,20 @@
 """The debt journal's three tables: unmapped Core `Table`s, on purpose.
 
 Programme 015, phase B step 4 (design v2 §5). These hold the operation envelope (what a writer
-declared it was about to do), the per-edge signed effects of every flush it made, and the
+declared it was about to do), the signed effect of every row a statement changed in `debts`, and the
 per-equivalent summary written once at completion.
 
-WHY THEY ARE NOT ORM MODELS, and it is enforcement rather than a style choice. A mapped class is
-reachable from `session.add`, `session.merge`, `bulk_save_objects`, `bulk_insert_mappings`,
-`bulk_update_mappings` and a cascade - five write paths whose refusal would then have to be built
-and kept in step. A Core `Table` that no mapper mentions has none of them: the ORM cannot address
-these tables at all, so the only way in is Core DML, and Core DML is what
-`app/core/ledger/journal.py`'s write guard inspects. The guard's own test fails if any mapper ever
-maps one of these tables.
+WHO WRITES THEM (programme 018 stage B, migration 029). The envelope and the summary: the book
+(`app/core/ledger/book.py`). The entries: the DATABASE, from `OLD`/`NEW`, in the `debts` trigger. Row
+and TRUNCATE guards on all three tables refuse everything else (`app/db/journal_triggers.py`, which
+also attaches the same DDL to `create_all`). Until stage B the listener journal
+(`app/core/ledger/journal.py`, deleted) wrote the entries from the ORM flush.
 
-They still live on `Base.metadata`, because the SQLite tiers build their schema with
+WHY THEY ARE NOT ORM MODELS: a mapped class is reachable from `session.add`, `merge`, the three
+`bulk_*` entry points and cascades. Nothing needs those paths into the journal; the guards would refuse
+them anyway, but a table no mapper mentions does not offer them at all.
+
+They still live on `Base.metadata`, because mode A of the test fixtures builds its schema with
 `Base.metadata.create_all` and a table outside the metadata would simply not exist there.
 
 MONEY COLUMNS ARE `MoneyNumeric`, NOT `Numeric` (T1526, measured 2026-09-12). The CHECK constraints

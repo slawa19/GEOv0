@@ -90,13 +90,15 @@ ALLOWED: tuple[Allowed, ...] = (
         "(`api/openapi.yaml`); a reported value, not a branch",
         "2026-09-24",
     ),
+    # `app/core/ledger/journal.py` (x5) LEFT WITH THE LISTENER JOURNAL, 018 stage B1, 2026-09-24.
+    # Its one AUTOCOMMIT read moved to the book, below; the other four had no successor.
     Allowed(
-        "app/core/ledger/journal.py",
+        "app/core/ledger/book.py",
         "dialect-object",
-        5,
-        "the connection's dialect object handed to SQLAlchemy's compiler and to the column types' "
-        "bind/result processors (`_own_select`, `_money_out`, `_bound`), and one AUTOCOMMIT "
-        "detection reading `_on_connect_isolation_level`; never compared, never branched on",
+        1,
+        "one AUTOCOMMIT detection reading the engine-level `_on_connect_isolation_level` "
+        "(`_is_autocommit_configured`, moved from the deleted listener journal); never compared "
+        "with a backend name, never branched on per dialect",
         "2026-09-24",
     ),
     # REFUSALS THAT ENFORCE THE ONE DIALECT. Each reads the backend of a URL it was handed only to
