@@ -417,6 +417,7 @@ _UNPLANNED = [
     "an after_flush listener issues core dml",
     "a pending debt keyed only through relationships",
     "a late before_flush listener moves the insert to another edge",
+    "a relationship that contradicts the key column",
 ]
 
 
@@ -496,6 +497,14 @@ async def test_an_unplanned_writer_inside_an_operation_is_recorded_as_the_row_it
                 session.add(debt)
                 await session.flush()
             expected = {(0, 1): Decimal("27")}
+        elif form == "a relationship that contradicts the key column":
+            elsewhere = await session.get(Participant, world.p(3))
+            debt = Debt(**_values(world, 0, 1, "44"), creditor=elsewhere)
+            acted.append("relationship")
+            async with Book.operation(session, _fixture(identity)):
+                session.add(debt)
+                await session.flush()
+            expected = {(0, 3): Decimal("44")}
         else:
 
             @event.listens_for(session.sync_session, "before_flush")
