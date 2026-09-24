@@ -1787,6 +1787,8 @@ function Get-ProcessIdentityObservation {
     return [pscustomobject]@{ Status = 'Exact'; Fingerprint = 'start-a' }
 }
 function Get-ListeningPid { param([int]$Port) return 999 }
+# run_local walks the listener's parents (2026-09-24); 999 is not a descendant of the launched PID.
+function Get-RunLocalDescendantListener { return $null }
 function Stop-ProcessById {
     param([int]$Id, [string]$ExpectedStartFingerprint)
     throw 'cleanup-stop-failed'
@@ -1896,6 +1898,210 @@ if (Test-Path -LiteralPath $service.OwnershipFile) { throw 'Ownership metadata s
         },
     )
     assert result.stdout == "run-local-start-separate-stop-ok"
+
+
+# 2026-09-24: on Windows `.venv\Scripts\python.exe` is a redirector that starts the base interpreter
+# as a CHILD (measured: launched PID 16076, listening interpreter PID 11892), so the backend never
+# listens on the launched PID. run_local accepts a listener that DESCENDS from the launched PID
+# (parent chain, bounded depth, parents never younger than children), records both, and stops both.
+# The process table below is a fake: {pid: start ticks} and {pid: parent pid}.
+_RUN_LOCAL_DESCENDANT_SETUP = r"""
+foreach ($name in @(
+    'Get-LauncherLifecycleLockName', 'Get-RunLocalRepositoryIdentity',
+    'Get-RunLocalOwnershipMetadata', 'Write-RunLocalOwnershipMetadata',
+    'Get-RunLocalOwnershipState', 'Get-RunLocalOwnershipPlan',
+    'Test-RunLocalOwnershipPlansEqual', 'Invoke-RunLocalOwnershipStopPlan',
+    'Get-ProcessStartTimeFingerprint', 'Get-StartFingerprintTicks',
+    'Get-RunLocalDescendantListener', 'Wait-ForRunLocalServiceOwnership'
+)) {
+    Invoke-Expression (Get-LauncherFunctionText -Name $name)
+}
+$RepoRoot = 'C:\repo-a'
+$script:StartTicks = @{}
+$script:Parents = @{}
+$script:Listener = $null
+$script:Stopped = @()
+function Get-ProcessIdentityObservation {
+    param([int]$Id, [string]$ExpectedStartFingerprint)
+    if (-not $script:StartTicks.ContainsKey($Id)) {
+        return [pscustomobject]@{ Status = 'Missing'; Fingerprint = $null }
+    }
+    $fingerprint = "utc-ticks:$($script:StartTicks[$Id])"
+    $status = if (-not $ExpectedStartFingerprint) { 'Observed' }
+        elseif ($fingerprint -eq $ExpectedStartFingerprint) { 'Exact' } else { 'Mismatch' }
+    return [pscustomobject]@{ Status = $status; Fingerprint = $fingerprint }
+}
+function Get-ProcessParentId {
+    param([int]$Id)
+    if ($script:Parents.ContainsKey($Id)) { return $script:Parents[$Id] }
+    return $null
+}
+function Get-ListeningPid { param([int]$Port) return $script:Listener }
+function Stop-ProcessById {
+    param([int]$Id, [string]$ExpectedStartFingerprint)
+    $script:Stopped += "$Id|$ExpectedStartFingerprint"
+    # Killing the redirector does not kill its child; killing the listener frees the port.
+    $script:StartTicks.Remove($Id)
+    if ($script:Listener -eq $Id) { $script:Listener = $null }
+}
+function Start-Sleep { param([int]$Milliseconds) }
+$service = [pscustomobject]@{
+    Name = 'Backend'
+    OwnershipFile = $env:PHASE7_OWNERSHIP_PATH
+    LegacyPidFile = "$($env:PHASE7_OWNERSHIP_PATH).legacy"
+    Port = 18000
+}
+"""
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+def test_run_local_adopts_a_descendant_listener_and_stop_kills_both(
+    powershell: Path,
+    tmp_path: Path,
+) -> None:
+    command = (
+        _AST_SETUP
+        + _RUN_LOCAL_DESCENDANT_SETUP
+        + r"""
+$script:StartTicks[101] = 1000
+$script:StartTicks[202] = 1001
+$script:Parents[202] = 101
+$script:Listener = 202
+$started = Wait-ForRunLocalServiceOwnership -Service $service -Process ([pscustomobject]@{ Id = 101 }) -TimeoutSec 1
+if ($started.Pid -ne 101 -or $started.ListenerPid -ne 202 -or
+    $started.ListenerProcessStartFingerprint -ne 'utc-ticks:1001') {
+    throw "Descendant listener was not returned: $($started | Out-String)"
+}
+$raw = Get-Content -LiteralPath $service.OwnershipFile -Raw | ConvertFrom-Json
+if ($raw.version -ne 2 -or $raw.pid -ne 101 -or $raw.listener_pid -ne 202 -or
+    $raw.process_start_fingerprint -ne 'utc-ticks:1000' -or $raw.listener_start_fingerprint -ne 'utc-ticks:1001') {
+    throw 'Both the launched PID and the listener were not recorded'
+}
+$state = Get-RunLocalOwnershipState -Service $service
+if (-not $state.Owned -or $state.Conflict) { throw "Descendant listener is not owned: $($state.Reason)" }
+Invoke-RunLocalOwnershipStopPlan -Services @($service)
+if (($script:Stopped -join ',') -ne '101|utc-ticks:1000,202|utc-ticks:1001') {
+    throw "Stop did not kill the redirector and then its listening child: $($script:Stopped -join ',')"
+}
+if ($script:Listener) { throw 'The port is still held' }
+if (Test-Path -LiteralPath $service.OwnershipFile) { throw 'Ownership metadata survived the stop' }
+[Console]::Out.Write('run-local-descendant-adopted-and-stopped')
+"""
+    )
+    result = _run_powershell(
+        powershell,
+        command,
+        extra_env={
+            "PHASE7_SCRIPT_PATH": str(_RUN_LOCAL),
+            "PHASE7_OWNERSHIP_PATH": str(tmp_path / "backend.owner.json"),
+        },
+    )
+    assert result.stdout == "run-local-descendant-adopted-and-stopped"
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+@pytest.mark.parametrize(
+    "table",
+    (
+        # A foreign listener: its parents never reach the launched PID.
+        "$script:StartTicks[202] = 1001; $script:StartTicks[303] = 900; $script:Parents[202] = 303",
+        # A recycled parent PID: 202 records 101 as its parent, but the 101 alive now started
+        # AFTER 202 - it is the launched process that reused a dead parent's PID, not the parent.
+        "$script:StartTicks[202] = 999; $script:Parents[202] = 101",
+        # Deeper than the bounded walk (four generations): 202 -> 5 -> 4 -> 3 -> 2 -> 101.
+        "$script:StartTicks[202] = 1005; foreach ($p in 2..5) { $script:StartTicks[$p] = 1000 + $p }; "
+        "$script:Parents[202] = 5; $script:Parents[5] = 4; $script:Parents[4] = 3; "
+        "$script:Parents[3] = 2; $script:Parents[2] = 101",
+    ),
+    ids=("foreign", "recycled-parent-pid", "too-deep"),
+)
+def test_run_local_refuses_a_listener_that_is_not_the_launched_descendant(
+    powershell: Path,
+    tmp_path: Path,
+    table: str,
+) -> None:
+    command = (
+        _AST_SETUP
+        + _RUN_LOCAL_DESCENDANT_SETUP
+        + r"""
+$script:StartTicks[101] = 1000
+$script:Listener = 202
+Invoke-Expression $env:PHASE7_TABLE
+try {
+    Wait-ForRunLocalServiceOwnership -Service $service -Process ([pscustomobject]@{ Id = 101 }) -TimeoutSec 1
+    throw 'Foreign listener was adopted'
+} catch {
+    if ($_.Exception.Message -eq 'Foreign listener was adopted') { throw }
+    if ($_.Exception.Message -notlike '*listener PID 202 is not launched PID 101*') { throw }
+}
+if (Test-Path -LiteralPath $service.OwnershipFile) { throw 'Foreign listener ownership was persisted' }
+if (($script:Stopped -join ',') -ne '101|utc-ticks:1000') {
+    throw "Only the launched process may be cleaned up: $($script:Stopped -join ',')"
+}
+[Console]::Out.Write('run-local-foreign-listener-refused')
+"""
+    )
+    result = _run_powershell(
+        powershell,
+        command,
+        extra_env={
+            "PHASE7_SCRIPT_PATH": str(_RUN_LOCAL),
+            "PHASE7_OWNERSHIP_PATH": str(tmp_path / "backend.owner.json"),
+            "PHASE7_TABLE": table,
+        },
+    )
+    assert result.stdout == "run-local-foreign-listener-refused"
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+def test_run_local_reads_version_1_ownership_and_refuses_a_malformed_version_2(
+    powershell: Path,
+    tmp_path: Path,
+) -> None:
+    command = (
+        _AST_SETUP
+        + _RUN_LOCAL_DESCENDANT_SETUP
+        + r"""
+function New-Record {
+    param([int]$Version)
+    return [ordered]@{
+        version = $Version
+        repository_identity = (Get-RunLocalRepositoryIdentity)
+        service_name = 'Backend'
+        port = 18000
+        pid = 101
+        process_start_fingerprint = 'utc-ticks:1000'
+    } | ConvertTo-Json -Compress
+}
+Set-Content -LiteralPath $service.OwnershipFile -Value (New-Record -Version 1)
+$read = Get-RunLocalOwnershipMetadata -Path $service.OwnershipFile
+if (-not $read.Valid -or $read.ListenerPid -ne 101 -or $read.ListenerProcessStartFingerprint -ne 'utc-ticks:1000') {
+    throw 'A version-1 record did not read as launched PID = listener'
+}
+$script:StartTicks[101] = 1000
+$script:Listener = 101
+if (-not (Get-RunLocalOwnershipState -Service $service).Owned) { throw 'A live version-1 owner was not owned' }
+Set-Content -LiteralPath $service.OwnershipFile -Value (New-Record -Version 2)
+if ((Get-RunLocalOwnershipMetadata -Path $service.OwnershipFile).Valid) {
+    throw 'A version-2 record without a listener was accepted'
+}
+$state = Get-RunLocalOwnershipState -Service $service
+if ($state.Owned -or -not $state.Conflict) { throw 'A malformed record was not a conflict' }
+[Console]::Out.Write('run-local-metadata-versions-ok')
+"""
+    )
+    result = _run_powershell(
+        powershell,
+        command,
+        extra_env={
+            "PHASE7_SCRIPT_PATH": str(_RUN_LOCAL),
+            "PHASE7_OWNERSHIP_PATH": str(tmp_path / "backend.owner.json"),
+        },
+    )
+    assert result.stdout == "run-local-metadata-versions-ok"
 
 
 @pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")

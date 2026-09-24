@@ -258,6 +258,61 @@ function Get-ProcessStartTimeFingerprint {
     return $identity.Fingerprint
 }
 
+function Get-ProcessParentId {
+    param([int]$Id)
+    try {
+        $row = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $Id" -ErrorAction Stop |
+            Select-Object -First 1
+    } catch {
+        return $null
+    }
+    if ($null -eq $row -or -not $row.ParentProcessId) { return $null }
+    return [int]$row.ParentProcessId
+}
+
+function Get-StartFingerprintTicks {
+    param([string]$Fingerprint)
+    if ($Fingerprint -notmatch '^utc-ticks:(\d+)$') { return $null }
+    return [long]$Matches[1]
+}
+
+function Get-RunLocalDescendantListener {
+    <#
+    The listener as a descendant of the launched process, or $null.
+
+    WHY (2026-09-24, measured): on Windows `.venv\Scripts\python.exe` is a redirector that starts the
+    base interpreter as a CHILD, so uvicorn listens on a PID that is never the launched one, and the
+    exact-PID rule refused every backend start. A listener counts as ours when its parent chain
+    reaches the launched PID within $MaxDepth generations, every parent on the way started no later
+    than its child (Windows keeps a dead parent's PID in ParentProcessId, and a recycled PID starts
+    after the child it is recorded for), and the launched PID still carries the launched fingerprint.
+    #>
+    param([int]$ListenerPid, [int]$LaunchedPid, [string]$LaunchedFingerprint, [int]$MaxDepth = 4)
+    $listenerIdentity = Get-ProcessIdentityObservation -Id $ListenerPid -ExpectedStartFingerprint ''
+    if ($listenerIdentity.Status -ne 'Observed') { return $null }
+    $childTicks = Get-StartFingerprintTicks -Fingerprint $listenerIdentity.Fingerprint
+    if ($null -eq $childTicks) { return $null }
+    $current = $ListenerPid
+    for ($depth = 0; $depth -lt $MaxDepth; $depth++) {
+        $parent = Get-ProcessParentId -Id $current
+        if (-not $parent -or $parent -le 0 -or $parent -eq $current) { return $null }
+        $parentIdentity = Get-ProcessIdentityObservation -Id $parent -ExpectedStartFingerprint ''
+        if ($parentIdentity.Status -ne 'Observed') { return $null }
+        $parentTicks = Get-StartFingerprintTicks -Fingerprint $parentIdentity.Fingerprint
+        if ($null -eq $parentTicks -or $parentTicks -gt $childTicks) { return $null }
+        if ($parent -eq $LaunchedPid) {
+            if ($parentIdentity.Fingerprint -ne $LaunchedFingerprint) { return $null }
+            return [pscustomobject]@{
+                Pid = $ListenerPid
+                ProcessStartFingerprint = $listenerIdentity.Fingerprint
+            }
+        }
+        $current = $parent
+        $childTicks = $parentTicks
+    }
+    return $null
+}
+
 function Get-RunLocalRepositoryIdentity {
     return Get-LauncherLifecycleLockName -RepositoryRoot $RepoRoot
 }
@@ -274,13 +329,28 @@ function Get-RunLocalOwnershipMetadata {
         }
         $fingerprint = [string]$metadata.process_start_fingerprint
         if ($fingerprint -notmatch '^utc-ticks:\d+$') { throw 'invalid fingerprint' }
+        # Version 1 records one PID that was both launched and listening; version 2 records the
+        # launched PID and the listener (its descendant, or itself) separately. Any other version,
+        # or a version 2 without a well-formed listener, is invalid - a conflict, never a guess.
+        $listenerPidValue = $pidValue
+        $listenerFingerprint = $fingerprint
+        if ($metadata.version -eq 2) {
+            $listenerPidValue = 0
+            if (-not [int]::TryParse([string]$metadata.listener_pid, [ref]$listenerPidValue) -or $listenerPidValue -le 0) {
+                throw 'invalid listener pid'
+            }
+            $listenerFingerprint = [string]$metadata.listener_start_fingerprint
+            if ($listenerFingerprint -notmatch '^utc-ticks:\d+$') { throw 'invalid listener fingerprint' }
+        }
         return [pscustomobject]@{
-            Valid = [bool]($metadata.version -eq 1)
+            Valid = [bool]($metadata.version -eq 1 -or $metadata.version -eq 2)
             RepositoryIdentity = [string]$metadata.repository_identity
             ServiceName = [string]$metadata.service_name
             Port = [int]$metadata.port
             Pid = $pidValue
             ProcessStartFingerprint = $fingerprint
+            ListenerPid = $listenerPidValue
+            ListenerProcessStartFingerprint = $listenerFingerprint
         }
     } catch {
         return [pscustomobject]@{ Valid = $false }
@@ -288,17 +358,29 @@ function Get-RunLocalOwnershipMetadata {
 }
 
 function Write-RunLocalOwnershipMetadata {
-    param([object]$Service, [int]$Id, [string]$ProcessStartFingerprint)
-    if ($ProcessStartFingerprint -notmatch '^utc-ticks:\d+$') {
+    param(
+        [object]$Service,
+        [int]$Id,
+        [string]$ProcessStartFingerprint,
+        [int]$ListenerId = 0,
+        [string]$ListenerStartFingerprint = ''
+    )
+    if ($ListenerId -le 0) {
+        $ListenerId = $Id
+        $ListenerStartFingerprint = $ProcessStartFingerprint
+    }
+    if ($ProcessStartFingerprint -notmatch '^utc-ticks:\d+$' -or $ListenerStartFingerprint -notmatch '^utc-ticks:\d+$') {
         throw 'Unable to persist run_local ownership because the process fingerprint is unavailable.'
     }
     $metadata = [ordered]@{
-        version = 1
+        version = 2
         repository_identity = Get-RunLocalRepositoryIdentity
         service_name = [string]$Service.Name
         port = [int]$Service.Port
         pid = $Id
         process_start_fingerprint = $ProcessStartFingerprint
+        listener_pid = $ListenerId
+        listener_start_fingerprint = $ListenerStartFingerprint
         recorded_at_utc = (Get-Date).ToUniversalTime().ToString('o')
     }
     $json = $metadata | ConvertTo-Json -Compress
@@ -332,7 +414,14 @@ function Get-RunLocalOwnershipState {
     } else {
         [pscustomobject]@{ Status = $(if ($metadataPresent) { 'Unreadable' } else { 'Missing' }); Fingerprint = $null }
     }
-    $owned = [bool]($metadataMatches -and $identity.Status -eq 'Exact' -and $listener -eq $metadata.Pid)
+    # The listener holds the port, so ownership is proven on it. With a v1 record the listener is the
+    # launched PID itself, which is the exact-PID rule as before.
+    $listenerIdentity = if (-not $metadataMatches -or $metadata.ListenerPid -eq $metadata.Pid) {
+        $identity
+    } else {
+        Get-ProcessIdentityObservation -Id $metadata.ListenerPid -ExpectedStartFingerprint $metadata.ListenerProcessStartFingerprint
+    }
+    $owned = [bool]($metadataMatches -and $listenerIdentity.Status -eq 'Exact' -and $listener -eq $metadata.ListenerPid)
     $conflict = $false
     $reason = $null
     $staleOwnershipFile = $false
@@ -349,9 +438,11 @@ function Get-RunLocalOwnershipState {
     } elseif ($listener -and -not $owned) {
         $conflict = $true
         $reason = "listener PID $listener does not match the exact owned process instance"
-    } elseif (-not $listener -and $identity.Status -in @('Exact', 'Unreadable')) {
+    } elseif (-not $listener -and (
+        $identity.Status -in @('Exact', 'Unreadable') -or $listenerIdentity.Status -in @('Exact', 'Unreadable')
+    )) {
         $conflict = $true
-        $reason = "owned PID $($metadata.Pid) is alive or unreadable but is not the expected listener"
+        $reason = "owned PID $($metadata.Pid) (listener PID $($metadata.ListenerPid)) is alive or unreadable but is not the expected listener"
     } elseif (-not $listener -and $metadataPresent -and $identity.Status -in @('Missing', 'Mismatch')) {
         $staleOwnershipFile = $true
     }
@@ -362,7 +453,10 @@ function Get-RunLocalOwnershipState {
         MetadataMatches = $metadataMatches
         SavedPid = if ($metadataMatches) { $metadata.Pid } else { $null }
         SavedProcessStartFingerprint = if ($metadataMatches) { $metadata.ProcessStartFingerprint } else { $null }
+        SavedListenerPid = if ($metadataMatches) { $metadata.ListenerPid } else { $null }
+        SavedListenerProcessStartFingerprint = if ($metadataMatches) { $metadata.ListenerProcessStartFingerprint } else { $null }
         ProcessIdentityStatus = $identity.Status
+        ListenerIdentityStatus = $listenerIdentity.Status
         ListenerPid = $listener
         EffectivePort = $effectivePort
         Owned = $owned
@@ -384,6 +478,7 @@ function Test-RunLocalOwnershipPlansEqual {
     for ($index = 0; $index -lt $InitialPlan.Count; $index++) {
         foreach ($property in @(
             'MetadataPresent', 'MetadataMatches', 'SavedPid', 'SavedProcessStartFingerprint',
+            'SavedListenerPid', 'SavedListenerProcessStartFingerprint', 'ListenerIdentityStatus',
             'ProcessIdentityStatus', 'ListenerPid', 'EffectivePort', 'Owned', 'Conflict',
             'StaleOwnershipFile', 'LegacyPidFilePresent'
         )) {
@@ -413,12 +508,25 @@ function Invoke-RunLocalOwnershipStopPlan {
     foreach ($state in $ownedStates) {
         $current = Get-RunLocalOwnershipState -Service $state.Service
         if (-not $current.Owned -or $current.SavedPid -ne $state.SavedPid -or
-            $current.SavedProcessStartFingerprint -ne $state.SavedProcessStartFingerprint) {
+            $current.SavedProcessStartFingerprint -ne $state.SavedProcessStartFingerprint -or
+            $current.SavedListenerPid -ne $state.SavedListenerPid -or
+            $current.SavedListenerProcessStartFingerprint -ne $state.SavedListenerProcessStartFingerprint) {
             throw "run_local stop refused because $($state.Service.Name) changed before execution."
         }
     }
     foreach ($state in $ownedStates) {
-        Stop-ProcessById -Id $state.SavedPid -ExpectedStartFingerprint $state.SavedProcessStartFingerprint
+        # Launched process first, then its listening descendant: on Windows stopping the venv
+        # redirector does not stop the interpreter it started, and the redirector exits by itself once
+        # its child is gone - so the other order would race that exit.
+        if ($state.SavedListenerPid -ne $state.SavedPid) {
+            $launched = Get-ProcessIdentityObservation -Id $state.SavedPid -ExpectedStartFingerprint $state.SavedProcessStartFingerprint
+            if ($launched.Status -eq 'Exact') {
+                Stop-ProcessById -Id $state.SavedPid -ExpectedStartFingerprint $state.SavedProcessStartFingerprint
+            } elseif ($launched.Status -eq 'Unreadable') {
+                throw "run_local stop refused: launched PID $($state.SavedPid) of $($state.Service.Name) is unreadable."
+            }
+        }
+        Stop-ProcessById -Id $state.SavedListenerPid -ExpectedStartFingerprint $state.SavedListenerProcessStartFingerprint
     }
     foreach ($state in $ownedStates) {
         Remove-Item -LiteralPath $state.Service.OwnershipFile -Force -ErrorAction Stop
@@ -435,6 +543,7 @@ function Wait-ForRunLocalServiceOwnership {
     }
     $launchedPid = [int]$Process.Id
     $fingerprint = $null
+    $ownedListener = $null
     $persisted = $false
     $ownershipResult = $null
     $primaryFailure = $null
@@ -452,12 +561,24 @@ function Wait-ForRunLocalServiceOwnership {
             }
             $listener = Get-ListeningPid -Port $Service.Port
             if ($listener) {
-                if ($listener -ne $launchedPid) {
-                    throw "Unable to start $($Service.Name): listener PID $listener is not launched PID $launchedPid."
+                if ($listener -eq $launchedPid) {
+                    $ownedListener = [pscustomobject]@{ Pid = $launchedPid; ProcessStartFingerprint = $fingerprint }
+                } else {
+                    $ownedListener = Get-RunLocalDescendantListener `
+                        -ListenerPid $listener -LaunchedPid $launchedPid -LaunchedFingerprint $fingerprint
                 }
-                Write-RunLocalOwnershipMetadata -Service $Service -Id $launchedPid -ProcessStartFingerprint $fingerprint
+                if ($null -eq $ownedListener) {
+                    throw "Unable to start $($Service.Name): listener PID $listener is not launched PID $launchedPid nor its descendant."
+                }
+                Write-RunLocalOwnershipMetadata -Service $Service -Id $launchedPid -ProcessStartFingerprint $fingerprint `
+                    -ListenerId $ownedListener.Pid -ListenerStartFingerprint $ownedListener.ProcessStartFingerprint
                 $persisted = $true
-                $ownershipResult = [pscustomobject]@{ Pid = $launchedPid; ProcessStartFingerprint = $fingerprint }
+                $ownershipResult = [pscustomobject]@{
+                    Pid = $launchedPid
+                    ProcessStartFingerprint = $fingerprint
+                    ListenerPid = $ownedListener.Pid
+                    ListenerProcessStartFingerprint = $ownedListener.ProcessStartFingerprint
+                }
                 break
             }
             Start-Sleep -Milliseconds 500
@@ -476,6 +597,13 @@ function Wait-ForRunLocalServiceOwnership {
                     $identity = Get-ProcessIdentityObservation -Id $launchedPid -ExpectedStartFingerprint $fingerprint
                     if ($identity.Status -eq 'Exact') {
                         Stop-ProcessById -Id $launchedPid -ExpectedStartFingerprint $fingerprint
+                    }
+                    if ($null -ne $ownedListener -and $ownedListener.Pid -ne $launchedPid) {
+                        $listenerIdentity = Get-ProcessIdentityObservation `
+                            -Id $ownedListener.Pid -ExpectedStartFingerprint $ownedListener.ProcessStartFingerprint
+                        if ($listenerIdentity.Status -eq 'Exact') {
+                            Stop-ProcessById -Id $ownedListener.Pid -ExpectedStartFingerprint $ownedListener.ProcessStartFingerprint
+                        }
                     }
                 }
             } catch {
@@ -513,6 +641,18 @@ function Undo-RunLocalStartedServices {
                     -ExpectedStartFingerprint $started.ProcessStartFingerprint
             } elseif ($identity.Status -eq 'Unreadable') {
                 throw "Unable to roll back $($started.Service.Name): process identity is unreadable."
+            }
+            if ($started.ListenerPid -and $started.ListenerPid -ne $started.Pid) {
+                $listenerIdentity = Get-ProcessIdentityObservation `
+                    -Id $started.ListenerPid `
+                    -ExpectedStartFingerprint $started.ListenerProcessStartFingerprint
+                if ($listenerIdentity.Status -eq 'Exact') {
+                    Stop-ProcessById `
+                        -Id $started.ListenerPid `
+                        -ExpectedStartFingerprint $started.ListenerProcessStartFingerprint
+                } elseif ($listenerIdentity.Status -eq 'Unreadable') {
+                    throw "Unable to roll back $($started.Service.Name): listener identity is unreadable."
+                }
             }
 
             if (Test-Path -LiteralPath $started.Service.OwnershipFile) {
@@ -1095,7 +1235,7 @@ switch ($Action) {
         $statusPlan = @(Get-RunLocalOwnershipPlan -Services (Get-RunLocalProcessServices))
         foreach ($state in $statusPlan) {
             $status = if ($state.Owned) { 'Owned' } elseif ($state.Conflict) { 'Conflict' } elseif ($state.StaleOwnershipFile) { 'Stale metadata' } else { 'Stopped' }
-            Write-Host "$($state.Service.Name): $status | Port $($state.EffectivePort) Listener=$(Get-NullCoalesce $state.ListenerPid 'None') | Owned PID=$(Get-NullCoalesce $state.SavedPid 'None')"
+            Write-Host "$($state.Service.Name): $status | Port $($state.EffectivePort) Listener=$(Get-NullCoalesce $state.ListenerPid 'None') | Owned PID=$(Get-NullCoalesce $state.SavedPid 'None') Owned listener=$(Get-NullCoalesce $state.SavedListenerPid 'None')"
             if ($state.Reason) { Write-Host "  $($state.Reason)" -ForegroundColor Yellow }
         }
         exit 0
@@ -1200,8 +1340,10 @@ switch ($Action) {
                 Service = $backendService
                 Pid = $backendOwnership.Pid
                 ProcessStartFingerprint = $backendOwnership.ProcessStartFingerprint
+                ListenerPid = $backendOwnership.ListenerPid
+                ListenerProcessStartFingerprint = $backendOwnership.ListenerProcessStartFingerprint
             }
-            Write-Host "Backend PID: $($backendOwnership.Pid)" -ForegroundColor Gray
+            Write-Host "Backend PID: $($backendOwnership.Pid) (listener $($backendOwnership.ListenerPid))" -ForegroundColor Gray
 
             if (-not (Test-HttpEndpoint -Url "http://127.0.0.1:$backendPortUsed/api/v1/health" -TimeoutSec 60)) {
                 throw "Backend health check failed. Check logs: $BackendErrLog"
@@ -1262,9 +1404,11 @@ switch ($Action) {
             Service = $backendService
             Pid = $backendOwnership.Pid
             ProcessStartFingerprint = $backendOwnership.ProcessStartFingerprint
+            ListenerPid = $backendOwnership.ListenerPid
+            ListenerProcessStartFingerprint = $backendOwnership.ListenerProcessStartFingerprint
         }
         if (-not (Test-HttpEndpoint -Url "http://127.0.0.1:$backendPortUsed/api/v1/health" -TimeoutSec 60)) { throw 'Backend health check failed.' }
-        Write-Host "     Backend PID: $($backendOwnership.Pid)" -ForegroundColor Gray
+        Write-Host "     Backend PID: $($backendOwnership.Pid) (listener $($backendOwnership.ListenerPid))" -ForegroundColor Gray
         Write-Host "     Backend is healthy!" -ForegroundColor Green
 
         Write-Host "[5/7] Configuring UI environment..." -ForegroundColor Yellow
@@ -1318,6 +1462,8 @@ switch ($Action) {
             Service = $uiService
             Pid = $uiOwnership.Pid
             ProcessStartFingerprint = $uiOwnership.ProcessStartFingerprint
+            ListenerPid = $uiOwnership.ListenerPid
+            ListenerProcessStartFingerprint = $uiOwnership.ListenerProcessStartFingerprint
         }
         Write-Host " OK" -ForegroundColor Green
         Write-Host "     UI PID: $($uiOwnership.Pid)" -ForegroundColor Gray
