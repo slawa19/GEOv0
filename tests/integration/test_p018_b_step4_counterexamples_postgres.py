@@ -169,8 +169,9 @@ async def test_a_fixture_operation_is_one_envelope_of_its_kind_with_its_entries(
     the digest, and the chain `I 10` then `U 10 -> 12` with its `ordinal` increasing.
 
     MUTATION: write `effect_count` from `ordinal` arithmetic (last minus first plus one) in
-    `app/core/ledger/book.py::_complete` - the sequence is shared, so another operation's entries in
-    between make the count wrong; or record `TG_OP` as the effect of the wrong branch in
+    `app/core/ledger/book.py::_complete` - the write rolled back in a savepoint below consumes an
+    ordinal and leaves no entry, so the surviving ordinals have a gap and the formula gives 3, not 2
+    (measured 2026-09-24); or record `TG_OP` as the effect of the wrong branch in
     `app/db/journal_triggers.py` - the effects assertion goes red.
     """
 
@@ -181,6 +182,16 @@ async def test_a_fixture_operation_is_one_envelope_of_its_kind_with_its_entries(
             debt = Debt(**_values(world, 0, 1, "10"))
             session.add(debt)
             await session.flush()
+            # A REAL GAP between the two surviving entries (Codex review of B1, 2026-09-24, P3): a
+            # write inside a savepoint that is rolled back consumes a sequence value and leaves no
+            # entry. Without it the two kept entries have consecutive ordinals, and the wrong formula
+            # `last - first + 1` would also give 2.
+            connection = await session.connection()
+            savepoint = await connection.begin_nested()
+            await connection.execute(
+                text("UPDATE debts SET amount = 11 WHERE id = :id"), {"id": debt.id}
+            )
+            await savepoint.rollback()
             debt.amount = Decimal("12")
             await session.flush()
         await session.commit()
@@ -203,6 +214,9 @@ async def test_a_fixture_operation_is_one_envelope_of_its_kind_with_its_entries(
     ]
     ordinals = [row.ordinal for row in entries]
     assert ordinals == sorted(set(ordinals)), ordinals
+    # The premise of the effect_count assertion above: the surviving ordinals are NOT contiguous, so
+    # `effect_count == 2` is a count of rows and could not come from ordinal arithmetic (which gives 3).
+    assert ordinals[-1] - ordinals[0] + 1 > len(entries), ordinals
 
 
 # =================================================================================================
