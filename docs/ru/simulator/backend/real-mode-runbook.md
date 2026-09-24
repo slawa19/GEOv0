@@ -4,7 +4,7 @@
 
 Цель этого runbook — чтобы новый разработчик мог **быстро поднять backend + UI + зависимости** и начать проверять контракты Real Mode (scenarios/runs/events/snapshots/metrics).
 
-Важно: в репозитории уже есть удобные скрипты запуска для Windows. Для «настоящей» семантики конкурентности/блокировок (payments/2PC) нужен Postgres (Docker Compose или локальный Postgres), а не SQLite.
+Важно: в репозитории уже есть удобные скрипты запуска для Windows. С программы 017 backend работает только на PostgreSQL (Docker Compose или локальный Postgres); SQLite снят.
 
 ---
 
@@ -58,28 +58,22 @@
 
 ---
 
-## 2) Данные для локальной разработки (SQLite) — «fixtures mode»
+## 2) Данные для локальной разработки
 
-`scripts/run_local.ps1` по умолчанию использует локальную SQLite базу
-`.local-run/geov0.db`. Корневой `geov0.db` — legacy/user data и требует явного
-`DATABASE_URL`; runner не переносит и не удаляет его автоматически.
+`scripts/run_local.ps1` работает на собственной PostgreSQL-базе `geov0_dev_<DbSlug>`
+(`geov0_dev_local` по умолчанию) на `127.0.0.1:5432`; нужен запущенный PostgreSQL
+(`docker compose up -d db`). Свежая база лаунчера мигрируется и наполняется рецептом
+сообщества через доменные сервисы. Прежние SQLite-файлы (`geov0.db`,
+`.local-run/geov0.db`) — данные пользователя: лаунчер их не читает и не удаляет.
 
-Если базы нет — она создаётся и засеивается.
+Чтобы **пересоздать** базу лаунчера и заново исполнить рецепт:
 
-Чтобы **пересоздать** SQLite DB и наполнить данными из канонических admin‑fixtures:
+- `./scripts/run_local.ps1 reset-db` (сообщество `-SeedCommunity`, по умолчанию `riverside-town-50`;
+  у `greenfield-village-100` рецепта пока нет, и лаунчер отказывает с названной причиной)
 
-- Greenfield (100):
-  - `./scripts/run_local.ps1 reset-db -SeedSource fixtures -FixturesCommunity greenfield-village-100 -RegenerateFixtures`
-- Riverside (50):
-  - `./scripts/run_local.ps1 reset-db -SeedSource fixtures -FixturesCommunity riverside-town-50 -RegenerateFixtures`
-
-Быстрая проверка целостности SQLite:
+Проверка готовности (схема на head, популяция рецепта, baseline):
 
 - `./scripts/run_local.ps1 check-db`
-
-Примечание:
-
-- Если скрипт предупреждает про «tiny test seed» — пересоздайте базу с Greenfield/Riverside командами выше.
 
 ---
 
@@ -101,8 +95,6 @@ Simulator UI v2 — отдельный Vite‑прототип.
 ---
 
 ## 4) Real Mode семантика: Postgres + Redis через Docker Compose
-
-SQLite удобен для UI/демо, но **не подходит** для проверки реальных свойств (изоляция транзакций, advisory locks, конкурентность prepare/commit).
 
 Для более «реального» окружения поднимайте сервисы из `docker-compose.yml`:
 

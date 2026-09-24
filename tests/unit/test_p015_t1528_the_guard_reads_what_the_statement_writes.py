@@ -621,13 +621,10 @@ _UNMEASURED = "unmeasured_db_transaction"
             _method_driver(_ProbeRaised("the driver would not say")),
             _UNMEASURED,
         ),
-        ("attribute is True", SimpleNamespace(in_transaction=True), _STALE),
-        ("attribute is False", SimpleNamespace(in_transaction=False), None),
-        (
-            "attribute is None",
-            SimpleNamespace(in_transaction=None),
-            _UNMEASURED,
-        ),
+        # sqlite3's attribute spelling is no longer read (017 stage 3, S7): unreachable on asyncpg,
+        # so a driver offering only the attribute is unmeasured, whatever the attribute says.
+        ("attribute only, True", SimpleNamespace(in_transaction=True), _UNMEASURED),
+        ("attribute only, False", SimpleNamespace(in_transaction=False), _UNMEASURED),
         ("no probe at all", SimpleNamespace(), _UNMEASURED),
         ("no driver at all", None, _UNMEASURED),
     ],
@@ -643,9 +640,11 @@ def test_t1528_the_begin_guard_classifies_each_driver_answer_separately(
     An unmeasured state is not a clean one (`AGENTS.md` §1), and the guard exists precisely for the
     case where SQLAlchemy's bookkeeping and the driver disagree.
 
-    FOUR ANSWERS, SEPARATELY, both spellings: a method (`asyncpg.Connection.is_in_transaction()`)
-    and an attribute (`sqlite3.Connection.in_transaction`), each with True, False and an unusable
-    answer, plus a probe that raises and a driver with no probe at all.
+    FOUR ANSWERS, SEPARATELY: the method (`asyncpg.Connection.is_in_transaction()`) with True,
+    False and an unusable answer, plus a probe that raises and a driver with no probe at all. The
+    attribute spelling (`sqlite3.Connection.in_transaction`) was read too until 017 stage 3 (S7)
+    deleted that fallback as unreachable on asyncpg; a driver offering only the attribute is now
+    refused as unmeasured, and the two rows for it pin that.
 
     MUTATION that must redden this: restore `return bool(probe())` in the probe, or let `_on_begin`
     return early on an unmeasured state instead of refusing.

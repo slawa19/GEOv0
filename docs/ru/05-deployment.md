@@ -96,10 +96,10 @@ proof; primary и rollback failure сохраняются раздельно. Т
 ownership любой поздний health/config/UI failure откатывает только процессы
 текущей попытки в обратном порядке, сохраняя отдельно primary и rollback evidence.
 
-Без явного `DATABASE_URL` backend использует
-`sqlite+aiosqlite:///./.local-run/geov0.db`. Старый `./geov0.db` не мигрируется и
-не удаляется автоматически; осознанный запуск на нём требует явного override.
-См. [справочник конфигурации](config-reference.md).
+`DATABASE_URL` обязателен и принимается только как `postgresql+asyncpg://...`
+(программа 017): без него backend не стартует; лаунчеры выставляют URL своей базы
+`geov0_dev_<DbSlug>`. Прежние SQLite-файлы (`./geov0.db`, `.local-run/geov0.db`) не
+читаются, не мигрируются и не удаляются. См. [справочник конфигурации](config-reference.md).
 
 ## Docker Compose
 

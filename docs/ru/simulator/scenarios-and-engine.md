@@ -107,10 +107,11 @@
 ./scripts/run_full_stack.ps1 -Action start
 ```
 
-Если нужно пересоздать локальную SQLite DB и заполнить её данными демо‑сообщества:
+Если нужно пересоздать базу лаунчера (PostgreSQL `geov0_dev_<DbSlug>`) и заново
+исполнить рецепт демо‑сообщества:
 
 ```powershell
-./scripts/run_full_stack.ps1 -Action start -ResetDb -FixturesCommunity greenfield-village-100
+./scripts/run_full_stack.ps1 -Action start -ResetDb -SeedCommunity riverside-town-50
 ```
 
 Если сценарий не виден в списке UI:

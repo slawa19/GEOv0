@@ -232,13 +232,11 @@ class Stand:
         """A raw statement written with `?` placeholders, in the placeholder style of this engine.
 
         `exec_driver_sql` hands the string to the DBAPI untouched, so the placeholder is the driver's
-        business: `qmark` on sqlite3, `numeric_dollar` (`$1`) on asyncpg. The journal meets the same
-        difference through the dialect's `paramstyle` - this is a dialect's spelling, not behaviour.
+        business: `numeric_dollar` (`$1`) on asyncpg. The `qmark` pass-through for sqlite3 left with
+        SQLite (017 stage 3, S7); any other paramstyle is refused rather than guessed.
         """
 
         style = self.engine.dialect.paramstyle
-        if style == "qmark":
-            return statement
         if style not in {"numeric_dollar", "numeric"}:
             raise ValueError(f"no placeholder rewrite for paramstyle {style!r}")
         prefix = "$" if style == "numeric_dollar" else ":"
@@ -282,8 +280,8 @@ async def new_postgres_stand(*, extra_participants: int = 0) -> Stand:
     THE ENGINE IS THE STAND'S OWN, over conftest's `TEST_DATABASE_URL` - never the tier's session
     fixture, whose outer transaction would turn every commit these tests are about into a savepoint
     release. `tests/conftest.py::_require_a_postgres_tier_url` refuses a non-PostgreSQL URL before
-    anything is collected, so this construction cannot be SQLite (which is also how
-    `tests/unit/test_p015_t1525_every_sqlite_engine_has_transaction_control.py` reads it).
+    anything is collected, so this construction cannot be SQLite (which is also how the T1525 engine
+    guard read it until it was deleted with SQLite, 017 stage 3 S7).
 
     It runs at the application's isolation level, read from the same setting the tier engine reads
     (T1549), so the journal is measured at SERIALIZABLE and not at the server default.
@@ -378,8 +376,8 @@ async def _arm(engine: AsyncEngine, *, extra_participants: int) -> Stand:
 
 
 #: `arm_stand` is exported for the PostgreSQL module, which builds its OWN engine next to its
-#: `pytest.skip` refusal - `tests/unit/test_p015_t1525_every_sqlite_engine_has_transaction_control.py`
-#: requires a PostgreSQL-only engine construction to sit beside the refusal that makes it so, and
+#: `pytest.skip` refusal - the T1525 engine guard (deleted with SQLite, 017 stage 3 S7)
+#: required a PostgreSQL-only engine construction to sit beside the refusal that makes it so, and
 #: that refusal belongs in a postgres-marked module rather than in this shared helper.
 arm_stand = _arm
 

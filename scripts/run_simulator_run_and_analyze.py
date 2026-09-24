@@ -100,7 +100,7 @@ def _database_dsn(database_url: str) -> str:
     if url.get_backend_name() != "postgresql":
         raise SystemExit(
             f"This analysis reads PostgreSQL; --database-url names {url.get_backend_name()!r}. "
-            f"Programme 017 removed the SQLite engine."
+            f"Since programme 017 PostgreSQL is the only engine."
         )
     return URL.create(
         "postgresql",

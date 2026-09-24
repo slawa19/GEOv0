@@ -124,14 +124,13 @@ def _driver_transaction_state(driver) -> str:
     last ReadyForQuery - the database's own state, as `in_transaction` is sqlite3's - and
     `is_closed()` for the closed case. The three answers and what each one means are unchanged.
     """
-    if isinstance(driver, asyncpg.Connection):
-        if driver.is_closed():
-            return "closed"
-        return "open" if driver.is_in_transaction() else "none"
-    try:
-        return "open" if driver.in_transaction else "none"
-    except ValueError:
+    # The sqlite3 arm (`in_transaction`) left with SQLite (017 stage 3, S7); any other driver is a
+    # stand this module does not know how to read, and is refused rather than guessed.
+    if not isinstance(driver, asyncpg.Connection):
+        raise TypeError(f"no transaction-state reading for driver {type(driver).__name__}")
+    if driver.is_closed():
         return "closed"
+    return "open" if driver.is_in_transaction() else "none"
 
 
 
@@ -167,16 +166,15 @@ async def _debt_amounts_in_transaction(connection, world: World) -> list[Decimal
 
 
 def _uuid_as_stored(connection, value: uuid.UUID):
-    """`value` spelled the way THIS dialect stores a `Uuid(as_uuid=True)` column.
+    """`value` spelled the way PostgreSQL stores a `Uuid(as_uuid=True)` column: a native `uuid`.
 
-    The trap this programme has been bitten by twice: SQLite keeps the 32 hex characters WITHOUT
-    dashes and PostgreSQL keeps a native `uuid`, so a `text()` comparison written with the canonical
-    dashed form matches nothing at all on the default tier - and a non-vacuity assertion that
-    matches nothing is a non-vacuity assertion that is always satisfiable by doing nothing. Same
-    rule as `tests/debt_setup.py::_uuid_literals`.
+    Until 017 stage 3 this also had a SQLite arm (32 hex WITHOUT dashes), the trap this programme
+    was bitten by twice: a `text()` comparison with the wrong spelling matches nothing, and a
+    non-vacuity assertion that matches nothing is always satisfiable by doing nothing. Same rule as
+    `tests/debt_setup.py::_uuid_literals`.
     """
 
-    return value.hex if connection.dialect.name == "sqlite" else value
+    return value
 
 
 # ==============================================================================================
@@ -511,8 +509,8 @@ async def test_condition2_a_finished_root_is_not_retained_by_the_registry(db_ses
 #
 # AUTOCOMMIT. The counterexample needs an engine built as `create_async_engine(url,
 # isolation_level="AUTOCOMMIT")`, which is the form the reviewer showed `_execution_options` cannot
-# see. On SQLite such an engine cannot exist in this repository: `tests/unit/
-# test_p015_t1525_every_sqlite_engine_has_transaction_control.py` requires every SQLite engine
+# see. On SQLite such an engine could not exist in this repository: the T1525 engine guard
+# (deleted with SQLite, 017 stage 3 S7) required every SQLite engine
 # construction to be paired with `install_sqlite_transaction_control`, and an engine that carries the
 # control is not in AUTOCOMMIT any more - the control's `begin` listener sends a real `BEGIN`. The
 # two demands are genuinely incompatible, and the guard is the one that protects money, so the

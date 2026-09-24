@@ -167,6 +167,5 @@ debt_reconciliation_results = Table(
         "equivalent_id",
         unique=True,
         postgresql_where=text("is_latest"),
-        sqlite_where=text("is_latest"),
     ),
 )

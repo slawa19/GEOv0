@@ -26,25 +26,23 @@ YAML-файла конфигурации приложения.
 
 ## База данных и локальное состояние
 
-Без явного `DATABASE_URL` локальный backend использует
-`sqlite+aiosqlite:///./.local-run/geov0.db`. Каталог создаётся при инициализации
-engine; `.local-run/` — ignored runtime root, а не fixture и не часть репозитория.
+`DATABASE_URL` обязателен и принимается только со схемой `postgresql+asyncpg://`
+(программа 017): без него или с другим драйвером приложение отказывает при старте
+(`app/config.py`). Умолчания нет. `scripts/run_local.ps1` и `scripts/run_full_stack.ps1`
+выставляют URL собственной базы лаунчера `geov0_dev_<DbSlug>` на `127.0.0.1:5432`;
+второй URL со стороны хоста — тестовый тир `geov0_test_<TaskSlug>` — описан в `README.md`.
 
-Существующий legacy-файл `./geov0.db` не переносится и не удаляется автоматически.
-Для осознанного временного запуска с ним задайте:
+Прежние SQLite-файлы (`.local-run/geov0.db`, корневой `./geov0.db`) — данные
+пользователя: tooling их не читает, не переносит и не удаляет.
 
-```powershell
-$env:DATABASE_URL = 'sqlite+aiosqlite:///./geov0.db'
-```
-
-Команды `reset-db`/`-ResetDb` при таком override завершаются ошибкой: runner
-разрешает удаление только нового default-файла под `.local-run/`.
+Команды `reset-db`/`-ResetDb` пересоздают только собственную базу лаунчера
+`geov0_dev_<DbSlug>`: другое имя `scripts/dev_database.py` сбросить не даёт.
+`.local-run/` остаётся ignored runtime root для прочего вывода, а не fixture.
 
 В Compose приложение использует Postgres URL из `docker-compose.yml`. Настройки
 пула `DB_POOL_PRE_PING`, `DB_POOL_SIZE`, `DB_MAX_OVERFLOW`,
 `DB_POOL_TIMEOUT_SECONDS`, `DB_POOL_RECYCLE_SECONDS` и
-`DB_POSTGRES_ISOLATION_LEVEL` применимы к client/server БД; SQLite работает с
-`NullPool`.
+`DB_POSTGRES_ISOLATION_LEVEL` применимы к PostgreSQL — единственному движку.
 
 ## Группы backend-параметров
 

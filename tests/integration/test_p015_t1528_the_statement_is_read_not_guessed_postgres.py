@@ -46,7 +46,8 @@ async def stand():
 
     BUILT HERE, NEXT TO ITS REFUSAL, for the reason
     `tests/integration/test_p015_b4a_journal_postgres.py` states: every SQLite-capable engine
-    construction must be paired with `install_sqlite_transaction_control` (T1525), and a construction
+    construction had to be paired with `install_sqlite_transaction_control` (T1525, deleted with
+    SQLite in 017 stage 3 S7), and a construction
     that can only ever be PostgreSQL is exempt only where a refusal in the same module says so. The
     `pytest.skip` below is that refusal.
 

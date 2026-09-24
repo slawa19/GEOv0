@@ -215,9 +215,9 @@ async def test_t1530_p_the_constraint_exists_and_bites_on_both_construction_path
 
     MUTATION that must redden this: remove the `op.create_check_constraint` call from migration
     `024_debt_journal_delta` - the migrated database then lacks it while the metadata one has it, which
-    is precisely the divergence this test exists for. Removing `.ddl_if(dialect="postgresql")` in
-    `app/db/journal_tables.py` instead leaves this green and reddens the SQLite half in
-    `tests/unit/test_p015_t1530_the_journal_reads_its_own_record_back.py`.
+    is precisely the divergence this test exists for. (The constraint's former
+    `.ddl_if(dialect="postgresql")` left with SQLite in 017 stage 3, slice S7; on PostgreSQL it
+    was always emitted, so this comparison is unchanged by that.)
     """
 
     # NOT a skip when the role cannot create databases (T1701). This module used to say, at length,

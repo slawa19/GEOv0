@@ -129,11 +129,9 @@ async def test_real_mode_graph_snapshot_enriches_used_and_net_sign(
         # a bound driver statement spells its placeholders in the driver's paramstyle (`?` for
         # aiosqlite, `$1` for asyncpg), and the `?` this used to carry was a syntax error on
         # PostgreSQL. `_uuid_literals` puts every value through `uuid.UUID` first and renders it the
-        # way the dialect stores it (hex on SQLite) - the same route `purge_test_ledger` takes.
+        # way PostgreSQL stores it - the same route `purge_test_ledger` takes.
         connection = await setup.connection()
-        eq_lit, creditor_lit, debtor_lit = _uuid_literals(
-            [eq_id, creditor_id, debtor_id], connection.dialect.name
-        )
+        eq_lit, creditor_lit, debtor_lit = _uuid_literals([eq_id, creditor_id, debtor_id])
         await connection.exec_driver_sql(
             f"DELETE FROM debts WHERE equivalent_id = '{eq_lit}' "  # noqa: S608 - uuid-validated
             f"AND creditor_id = '{creditor_lit}' AND debtor_id = '{debtor_lit}'"

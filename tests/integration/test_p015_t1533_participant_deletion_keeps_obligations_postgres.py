@@ -55,14 +55,14 @@ AMOUNT = Decimal("925.31000000")
 def _uuid_literal(value, dialect: str) -> str:
     """A UUID as a SQL literal of this dialect's storage, or a loud failure.
 
-    `uuid.UUID` first, which is what makes the interpolation below safe. And the spelling is per
-    dialect for the reason `tests/debt_setup.py::_uuid_literals` records: `Uuid(as_uuid=True)`
-    stores 32-character hex on SQLite and a native `uuid` on PostgreSQL, so a statement written with
-    the wrong one matches or inserts nothing and raises nothing.
+    `uuid.UUID` first, which is what makes the interpolation below safe. The spelling was per
+    dialect until 017 stage 3 for the reason `tests/debt_setup.py::_uuid_literals` records: a
+    statement written with the wrong one matches or inserts nothing and raises nothing. Only the
+    PostgreSQL spelling (native `uuid`) is left; `dialect` is kept so the call sites stay as they were.
     """
 
     parsed = uuid.UUID(str(value))
-    return parsed.hex if dialect == "sqlite" else str(parsed)
+    return str(parsed)
 
 
 async def _seed(*, with_debt: bool):

@@ -191,14 +191,12 @@ debt_operations = Table(
 )
 
 #: Open envelopes are the only ones a running transaction looks for, and they are a vanishing
-#: fraction of the table once the journal has any history. Partial on both dialects: SQLite has
-#: supported partial indexes since 3.8.0.
+#: fraction of the table once the journal has any history.
 Index(
     "ix_debt_operations_open",
     debt_operations.c.kind,
     debt_operations.c.identity,
     postgresql_where=text("state = 'OPEN'"),
-    sqlite_where=text("state = 'OPEN'"),
 )
 
 
@@ -270,7 +268,9 @@ debt_journal_entries = Table(
     # an `I` has no before, a `D` has no after, and the missing end is the zero the delta is
     # measured from.
     #
-    # POSTGRESQL ONLY, AND THE ASYMMETRY IS MEASURED RATHER THAN CONVENIENT. On SQLite `Numeric`
+    # HISTORY - WHY THIS WAS POSTGRESQL ONLY while SQLite was a second tier (until programme 017,
+    # stage 3, which removed SQLite and with it the `ddl_if(dialect="postgresql")` that was here;
+    # on PostgreSQL the constraint is emitted exactly as before). On SQLite `Numeric`
     # binds through `float` (`processors.to_float`, no native decimal), so this equality is floating
     # point there and it is FALSE FOR ORDINARY MONEY: measured 2026-09-13 on sqlite3, a legitimate
     # movement of `10.00000001 -> 10.00000002, delta 0.00000001` gives a left-hand side of
@@ -280,13 +280,13 @@ debt_journal_entries = Table(
     # readback of the stored entries (`app/core/ledger/journal.py::_verify_entries`), which compares
     # scale-8 `Decimal`s reconstructed by the column's own result processor rather than floats.
     #
-    # `ddl_if` and not a dialect-conditional module: `Base.metadata.create_all` must produce the
-    # SAME constraint on PostgreSQL as `alembic upgrade head` does, and the two paths are compared
-    # by name in `tests/integration/test_p015_t1530_delta_arithmetic_postgres.py`.
+    # `Base.metadata.create_all` must produce the SAME constraint as `alembic upgrade head` does,
+    # and the two paths are compared by name in
+    # `tests/integration/test_p015_t1530_delta_arithmetic_postgres.py`.
     CheckConstraint(
         "delta = COALESCE(amount_after, 0) - COALESCE(amount_before, 0)",
         name="chk_debt_journal_entries_delta_arithmetic",
-    ).ddl_if(dialect="postgresql"),
+    ),
     UniqueConstraint(
         "operation_id",
         "flush_ordinal",

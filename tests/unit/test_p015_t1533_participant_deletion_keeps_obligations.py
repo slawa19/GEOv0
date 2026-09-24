@@ -44,13 +44,13 @@ AMOUNT = Decimal("925.31000000")
 def _uuid_literal(value, dialect: str) -> str:
     """A UUID as a SQL literal of this dialect's storage. `uuid.UUID` first, which is the guard.
 
-    `Uuid(as_uuid=True)` stores 32-character hex on SQLite and a native `uuid` on PostgreSQL; the
-    same rule, and the same measured failure behind it, is recorded in
-    `tests/debt_setup.py::_uuid_literals`.
+    `Uuid(as_uuid=True)` stores a native `uuid` on PostgreSQL; the SQLite arm (32-character hex)
+    left with SQLite in 017 stage 3, and `dialect` is kept only so the call sites stay as they were.
+    The measured failure behind the rule is recorded in `tests/debt_setup.py::_uuid_literals`.
     """
 
     parsed = uuid.UUID(str(value))
-    return parsed.hex if dialect == "sqlite" else str(parsed)
+    return str(parsed)
 
 
 async def _seed(db_session, *, with_debt: bool):

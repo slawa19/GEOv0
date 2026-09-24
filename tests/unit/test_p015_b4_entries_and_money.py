@@ -729,14 +729,11 @@ async def test_c18_entries_come_from_the_attempt_that_succeeded_and_not_the_stal
                     # it flushes - outside the savepoint below, so the rollback of the losing
                     # attempt cannot undo the competitor's work as well. Through the driver: see
                     # the docstring.
-                    # The id is written as this dialect STORES it (32 hex on SQLite, the canonical
-                    # form on PostgreSQL) and inlined rather than bound: `exec_driver_sql` takes the
-                    # DRIVER's placeholder syntax, which is `?` for sqlite3 and `$1` for asyncpg, and
-                    # a `?` sent to PostgreSQL is a syntax error. The value comes from a `uuid.UUID`,
-                    # so nothing here is interpolated from data.
-                    stored_id = (
-                        debt.id.hex if connection.dialect.name == "sqlite" else str(debt.id)
-                    )
+                    # The id is written in PostgreSQL's canonical form and inlined rather than
+                    # bound: `exec_driver_sql` takes the DRIVER's placeholder syntax (`$1` for
+                    # asyncpg). The value comes from a `uuid.UUID`, so nothing here is interpolated
+                    # from data.
+                    stored_id = str(debt.id)
                     await connection.exec_driver_sql(
                         "UPDATE debts SET amount = 31.00000000, version = version + 1 "
                         f"WHERE id = '{stored_id}'"  # noqa: S608

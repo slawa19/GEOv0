@@ -38,7 +38,7 @@
 ### Проверка БД
 
 ```powershell
-.\.venv\Scripts\python.exe scripts/check_sqlite_db.py
+.\scripts\run_local.ps1 check-db
 ```
 
 ---
@@ -158,7 +158,7 @@ evt.model_dump(mode="json", by_alias=True)
 - Never paste Python code into PowerShell: run Python snippets via the Python interpreter (or prefer `mcp_pylance_mcp_s_pylanceRunCodeSnippet` / a dedicated script).
 - Avoid heredoc-style snippets in PowerShell (`<<EOF` / `<<'PY'`) — they are bash syntax and will fail.
 - If a terminal shows a `>>>` prompt, it is a Python REPL; exit it (`exit()`), then run PowerShell commands.
-- SQLite gotcha: column name `limit` is a SQL keyword; queries must quote it as `"limit"`.
+- SQL gotcha: column name `limit` is a SQL keyword; queries must quote it as `"limit"`.
 
 ### Backend restart for UI validation (Copilot must do this)
 
@@ -169,5 +169,4 @@ evt.model_dump(mode="json", by_alias=True)
 
 ## Local DB sanity checks
 
-- Preferred: run `scripts/check_sqlite_db.py` using `.venv\Scripts\python.exe`.
-- Or use the runner action: `.\scripts\run_local.ps1 check-db`.
+- Use the runner action: `.\scripts\run_local.ps1 check-db` (PostgreSQL; SQLite was removed in programme 017).

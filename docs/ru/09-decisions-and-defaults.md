@@ -11,12 +11,15 @@
 
 Краткая сводка ключевых архитектурных решений и рекомендуемых дефолтов для MVP.
 
-> **Локальный runtime root:** изменяемое состояние по умолчанию размещается под
-> ignored-каталогом `.local-run/`: SQLite backend — `.local-run/geov0.db`, test
-> DB/cache/basetemp — `.local-run/test-runs/<TaskSlug>/`, Playwright output —
-> `.local-run/playwright/`. Корневой `geov0.db` считается legacy/user data и не
-> переносится или не удаляется автоматически; его использование требует явного
-> `DATABASE_URL`. Tracked fixtures не смешиваются с runtime output.
+> **База данных — только PostgreSQL** (решение программы 017, 2026-09-21; SQLite снят
+> в стадии 3): `DATABASE_URL` обязателен и принимается только как `postgresql+asyncpg`.
+> Прежние SQLite-файлы (`.local-run/geov0.db`, корневой `geov0.db`) — данные
+> пользователя: не читаются, не переносятся и не удаляются автоматически.
+> Лаунчер работает на собственной базе `geov0_dev_<DbSlug>`, тестовый тир — на
+> `geov0_test_<TaskSlug>`. **Локальный runtime root:** изменяемое состояние на диске
+> размещается под ignored-каталогом `.local-run/`: test cache/basetemp —
+> `.local-run/test-runs/<TaskSlug>/`, Playwright output — `.local-run/playwright/`.
+> Tracked fixtures не смешиваются с runtime output.
 
 ---
 

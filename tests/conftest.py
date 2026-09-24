@@ -403,16 +403,13 @@ async def _mode_b_template() -> str:
 
 
 def _mode_b_engine(clone_url: str):
-    """An engine over a mode-B clone, or `None` for a SQLite URL, for which no clone can exist.
+    """An engine over a mode-B clone. A clone is made by `CREATE DATABASE ... TEMPLATE`, so it is
+    PostgreSQL by construction; the caller has already refused any other backend.
 
-    The early return is the shape `tests/unit/test_p015_t1525_every_sqlite_engine_has_transaction_control.py`
-    reads as "this construction cannot be SQLite" (the shape of `app/db/session.py`); the caller
-    refuses the `None`. A clone is made by `CREATE DATABASE ... TEMPLATE`, so it is PostgreSQL by
-    construction, and `install_sqlite_transaction_control` refuses a non-SQLite engine.
+    Until 017 stage 3 (slice S7) this returned `None` for a SQLite URL: that early return was the
+    shape the deleted T1525 engine guard read as "this construction cannot be SQLite".
     """
 
-    if make_url(clone_url).get_backend_name() == "sqlite":
-        return None
     return create_async_engine(
         clone_url,
         echo=False,
@@ -434,8 +431,6 @@ async def _committed_database_context():
         TEST_DATABASE_URL, template_name=template_name, suffix=_MODE_B_CLONE_SUFFIX
     ) as clone_url:
         clone_engine = _mode_b_engine(clone_url)
-        if clone_engine is None:
-            raise RuntimeError(f"mode B cannot build an engine over {clone_url!r}: not PostgreSQL.")
         clone_sessionmaker = async_sessionmaker(
             bind=clone_engine,
             class_=AsyncSession,

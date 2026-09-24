@@ -954,13 +954,13 @@ async def test_the_hook_refuses_an_unstorable_amount_by_the_predicate_it_violate
     MUTATION that must redden this: collapse `_check_storable` into a single `is_storable` raising
     one reason, and each parametrisation fails on the reason it expected.
 
-    THE FOURTH PREDICATE, ROUND TRIP, IS NOT A CASE HERE, and that is a measurement of PostgreSQL,
-    not a gap: `NUMERIC(20, 8)` through asyncpg is exact, so every value the first three predicates
-    let through reads back unchanged and nothing on this tier can be refused as `money_round_trip`.
-    The value that used to be its case, `100000000000.00000001`, is asserted STORED EXACTLY here by
-    `test_a_value_sqlite_would_change_is_exact_money_on_postgresql`. The refusal itself was measured
-    on a SQLite stand, the only dialect on which it could fire, and left with SQLite (017 stage 3,
-    slice S3).
+    THE FOURTH PREDICATE, ROUND TRIP, IS GONE, and that is a measurement of PostgreSQL, not a
+    gap: `NUMERIC(20, 8)` through asyncpg is exact, so every value the first three predicates let
+    through reads back unchanged and nothing could be refused as `money_round_trip`. Its test left
+    with the SQLite stand (017 stage 3, S3) and the predicate itself was deleted by probe (S7, see
+    `app/core/ledger/journal.py::_check_storable`). The value that used to be its case,
+    `100000000000.00000001`, is asserted STORED EXACTLY by
+    `test_a_value_sqlite_would_change_is_exact_money_on_postgresql`.
     """
 
     await _assert_refused_before_any_debt_sql(stand, raw, expected_reason)
@@ -968,15 +968,13 @@ async def test_the_hook_refuses_an_unstorable_amount_by_the_predicate_it_violate
 
 @pytest.mark.asyncio
 async def test_a_value_sqlite_would_change_is_exact_money_on_postgresql(stand: Stand) -> None:
-    """The round-trip predicate's silence on PostgreSQL is correct, and this shows why.
+    """Why the round-trip predicate could be deleted (017 stage 3, S7): PostgreSQL stores exactly.
 
-    The value SQLite refuses as `money_round_trip` is inside `NUMERIC(20, 8)` and PostgreSQL holds
-    it byte for byte: the debt, the entry and the read-back agree to the last atom. If the predicate
-    were silent because it was blind rather than because the value is exact, the stored amount below
-    would differ from the one written.
+    The value SQLite refused as `money_round_trip` is inside `NUMERIC(20, 8)` and PostgreSQL holds
+    it byte for byte: the debt, the entry and the read-back agree to the last atom. Were the
+    database changing the value, the stored amount below would differ from the one written.
 
-    MUTATION that must redden this: store `float(value)` in `_effects_of_flush`'s entry amounts, or
-    make `_round_trip` quantize to fewer places.
+    MUTATION that must redden this: store `float(value)` in `_effects_of_flush`'s entry amounts.
     """
 
     ident = identity("pg-exact")

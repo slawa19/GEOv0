@@ -15,8 +15,9 @@ TWO GUARDS, BECAUSE NEITHER ONE COVERS THE OTHER'S PATHS.
 * The CHECK constraints (migration `021_money_columns_reject_nan`) are the guarantee for everything
   that reaches the table: `psql`, a maintenance script, a future writer, anything that does not go
   through this process. They are the only guard that holds for raw SQL.
-* `MoneyNumeric` below is the guarantee for everything that goes through SQLAlchemy, and it is the
-  ONLY guard that can refuse a `NaN` on SQLite. Measured on `sqlite+aiosqlite` 2026-09-12:
+* `MoneyNumeric` below is the guarantee for everything that goes through SQLAlchemy. HISTORY (the
+  application runs on PostgreSQL only since programme 017): it was also the ONLY guard that could
+  refuse a `NaN` on SQLite. Measured on `sqlite+aiosqlite` 2026-09-12:
 
       typeof(?)      with float('nan')  ->  'null'
       SELECT ? > 0   with float('nan')  ->  NULL
@@ -30,9 +31,8 @@ TWO GUARDS, BECAUSE NEITHER ONE COVERS THE OTHER'S PATHS.
   of the driver rather than a rule of this money core - it does not transfer to PostgreSQL, where
   the same value is stored.
 
-  Those measurements are pinned by
-  `tests/unit/test_p015_t1526_nan_amount_is_refused_by_the_wrong_constraint.py`, which turns red
-  the day either stops holding and the design choice here has to be re-derived.
+  Those measurements were pinned by a SQLite test that left with SQLite (017 stage 3); the
+  PostgreSQL half is `tests/integration/test_p015_t1526_nan_amount_reaches_the_money_column_postgres.py`.
 
 This is deliberately NOT the money door. `app/utils/validation.py::parse_money_amount` and
 `is_storable_money` own the domain rule (scale 8, magnitude below 10^12, and they already refuse
@@ -147,8 +147,7 @@ class MoneyNumeric(TypeDecorator):
             raise ValueError(
                 f"non-finite value {value!r} cannot be stored as money: a money column holds "
                 f"finite decimal amounts only. NaN and Infinity are refused before the statement "
-                f"is sent, on every dialect - on PostgreSQL because NUMERIC accepts NaN and every "
-                f"sum over it becomes NaN, on SQLite because the driver would silently turn it "
-                f"into NULL. See app/db/types.py and migration 021_money_columns_reject_nan."
+                f"is sent, because PostgreSQL's NUMERIC accepts NaN and every sum over it becomes "
+                f"NaN. See app/db/types.py and migration 021_money_columns_reject_nan."
             )
         return value
