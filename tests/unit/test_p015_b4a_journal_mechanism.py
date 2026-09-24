@@ -1231,8 +1231,8 @@ async def test_a_forged_entry_shape_is_refused_by_the_check_constraints(stand: S
     first.
 
     MUTATION that must redden this: drop `chk_debt_journal_entries_shape` (the I with a before then
-    passes) or `chk_debt_journal_entries_delta` (the zero delta is then reported by
-    `chk_debt_journal_entries_delta_arithmetic` instead). Drop it from migration 022 AND
+    passes) or `chk_debt_journal_entries_delta` (the zero delta `U, 2, 2, 0` is then reported by
+    `chk_debt_journal_entries_shape` instead, measured). Drop it from migration 022 AND
     `app/db/journal_tables.py`: the canonical runner builds the schema from the migrations, so a
     model-only mutation stays green (measured 2026-09-24).
     """

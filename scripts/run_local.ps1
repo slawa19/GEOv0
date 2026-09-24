@@ -312,9 +312,15 @@ function Get-RunLocalDescendantListener {
     $childTicks = Get-StartFingerprintTicks -Fingerprint $listenerIdentity.Fingerprint
     if ($null -eq $childTicks) { return $null }
     $current = $ListenerPid
+    $currentFingerprint = $listenerIdentity.Fingerprint
     for ($depth = 0; $depth -lt $MaxDepth; $depth++) {
         $parent = Get-ProcessParentId -Id $current
         if (-not $parent -or $parent -le 0 -or $parent -eq $current) { return $null }
+        # The parent id belongs to the instance observed above only if that instance is still the
+        # one at $current AFTER the read: a PID that exited and was reused in between would lend its
+        # new parent to the old child (external review 2026-09-24, P1).
+        $recheck = Get-ProcessIdentityObservation -Id $current -ExpectedStartFingerprint $currentFingerprint
+        if ($recheck.Status -ne 'Exact') { return $null }
         $parentIdentity = Get-ProcessIdentityObservation -Id $parent -ExpectedStartFingerprint ''
         if ($parentIdentity.Status -ne 'Observed') { return $null }
         $parentTicks = Get-StartFingerprintTicks -Fingerprint $parentIdentity.Fingerprint
@@ -327,6 +333,7 @@ function Get-RunLocalDescendantListener {
             }
         }
         $current = $parent
+        $currentFingerprint = $parentIdentity.Fingerprint
         $childTicks = $parentTicks
     }
     return $null
@@ -608,10 +615,17 @@ function Wait-ForRunLocalServiceOwnership {
                 if ([string]::IsNullOrWhiteSpace($fingerprint)) {
                     if (-not $Process.HasExited) { $Process.Kill() }
                 } elseif ($null -ne $ownedListener -and $ownedListener.Pid -ne $launchedPid) {
-                    Stop-ProcessIfStillExact -Id $ownedListener.Pid `
-                        -ExpectedStartFingerprint $ownedListener.ProcessStartFingerprint -Label "$($Service.Name) listener"
-                    Stop-ProcessIfStillExact -Id $launchedPid -ExpectedStartFingerprint $fingerprint `
-                        -Label "launched $($Service.Name)"
+                    # Each stop is attempted whatever the other did; failures are reported together.
+                    $pairFailures = @()
+                    try {
+                        Stop-ProcessIfStillExact -Id $ownedListener.Pid `
+                            -ExpectedStartFingerprint $ownedListener.ProcessStartFingerprint -Label "$($Service.Name) listener"
+                    } catch { $pairFailures += $_.Exception.Message }
+                    try {
+                        Stop-ProcessIfStillExact -Id $launchedPid -ExpectedStartFingerprint $fingerprint `
+                            -Label "launched $($Service.Name)"
+                    } catch { $pairFailures += $_.Exception.Message }
+                    if ($pairFailures.Count -gt 0) { throw ($pairFailures -join '; ') }
                 } else {
                     $identity = Get-ProcessIdentityObservation -Id $launchedPid -ExpectedStartFingerprint $fingerprint
                     if ($identity.Status -eq 'Exact') {
@@ -755,18 +769,23 @@ function Get-FullStackOwnershipMetadata {
         }
         $fingerprint = [string]$metadata.process_start_fingerprint
         if ($fingerprint -notmatch '^utc-ticks:\d+$') { throw 'invalid fingerprint' }
-        # Version 2 (2026-09-24) also names the listener, a descendant of the launched PID; the
-        # listener is the process that shows full-stack is running, so it is what is read here.
+        # Version 2 (2026-09-24) also names the listener, a descendant of the launched PID. Both are
+        # kept: full-stack is active while EITHER is alive (external review 2026-09-24, P2a).
+        $listenerPidValue = $pidValue
+        $listenerFingerprint = $fingerprint
         if ($metadata.version -eq 2) {
-            if (-not [int]::TryParse([string]$metadata.listener_pid, [ref]$pidValue) -or $pidValue -le 0) { throw 'invalid listener pid' }
-            $fingerprint = [string]$metadata.listener_start_fingerprint
-            if ($fingerprint -notmatch '^utc-ticks:\d+$') { throw 'invalid listener fingerprint' }
+            $listenerPidValue = 0
+            if (-not [int]::TryParse([string]$metadata.listener_pid, [ref]$listenerPidValue) -or $listenerPidValue -le 0) { throw 'invalid listener pid' }
+            $listenerFingerprint = [string]$metadata.listener_start_fingerprint
+            if ($listenerFingerprint -notmatch '^utc-ticks:\d+$') { throw 'invalid listener fingerprint' }
         }
         return [pscustomobject]@{
             Valid = [bool]($metadata.version -eq 1 -or $metadata.version -eq 2)
             RepositoryIdentity = [string]$metadata.repository_identity
             Pid = $pidValue
             ProcessStartFingerprint = $fingerprint
+            ListenerPid = $listenerPidValue
+            ListenerProcessStartFingerprint = $listenerFingerprint
             ServiceName = [string]$metadata.service_name
             Port = [int]$metadata.port
         }
@@ -805,19 +824,30 @@ function Get-FullStackOwnershipState {
         }
     }
 
+    # The launched PID and the listener (the same PID in a v1 record, or from a reader stub that
+    # names no listener). Full-stack is active while EITHER is alive or unreadable - the rule
+    # run_full_stack.ps1's own Get-ServiceStopState applies (external review 2026-09-24, P2a).
+    $listenerPid = if ($metadata.ListenerPid) { $metadata.ListenerPid } else { $metadata.Pid }
+    $listenerFingerprint = if ($metadata.ListenerPid) { $metadata.ListenerProcessStartFingerprint } else { $metadata.ProcessStartFingerprint }
     $identity = Get-ProcessIdentityObservation `
         -Id $metadata.Pid `
         -ExpectedStartFingerprint $metadata.ProcessStartFingerprint
+    $listenerIdentity = if ($listenerPid -eq $metadata.Pid) {
+        $identity
+    } else {
+        Get-ProcessIdentityObservation -Id $listenerPid -ExpectedStartFingerprint $listenerFingerprint
+    }
+    $statuses = @($identity.Status, $listenerIdentity.Status)
     $listener = Get-ListeningPid -Port $metadata.Port
     $conflict = $false
     $reason = $null
-    if ($identity.Status -eq 'Exact' -and $listener -eq $metadata.Pid) {
+    if ($listenerIdentity.Status -eq 'Exact' -and $listener -eq $listenerPid) {
         $conflict = $true
-        $reason = "full-stack owns exact PID $($metadata.Pid) on port $($metadata.Port)"
-    } elseif ($identity.Status -eq 'Exact') {
+        $reason = "full-stack owns exact PID $listenerPid on port $($metadata.Port)"
+    } elseif ($statuses -contains 'Exact') {
         $conflict = $true
         $reason = "full-stack exact PID $($metadata.Pid) is alive but not its expected listener"
-    } elseif ($identity.Status -eq 'Unreadable') {
+    } elseif ($statuses -contains 'Unreadable') {
         $conflict = $true
         $reason = 'full-stack process identity is unreadable; metadata was retained'
     } elseif ($listener) {
@@ -826,7 +856,7 @@ function Get-FullStackOwnershipState {
     }
     $staleOwnershipFile = [bool](
         -not $conflict -and -not $listener -and
-        $identity.Status -in @('Missing', 'Mismatch')
+        $identity.Status -in @('Missing', 'Mismatch') -and $listenerIdentity.Status -in @('Missing', 'Mismatch')
     )
     return [pscustomobject]@{
         Service = $Service

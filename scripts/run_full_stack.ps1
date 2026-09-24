@@ -412,9 +412,15 @@ function Get-FullStackDescendantListener {
     $childTicks = Get-StartFingerprintTicks -Fingerprint $listenerIdentity.Fingerprint
     if ($null -eq $childTicks) { return $null }
     $current = $ListenerPid
+    $currentFingerprint = $listenerIdentity.Fingerprint
     for ($depth = 0; $depth -lt $MaxDepth; $depth++) {
         $parent = Get-ProcessParentId -Id $current
         if (-not $parent -or $parent -le 0 -or $parent -eq $current) { return $null }
+        # The parent id belongs to the instance observed above only if that instance is still the
+        # one at $current AFTER the read: a PID that exited and was reused in between would lend its
+        # new parent to the old child (external review 2026-09-24, P1).
+        $recheck = Get-ProcessIdentityObservation -Id $current -ExpectedStartFingerprint $currentFingerprint
+        if ($recheck.Status -ne 'Exact') { return $null }
         $parentIdentity = Get-ProcessIdentityObservation -Id $parent -ExpectedStartFingerprint ''
         if ($parentIdentity.Status -ne 'Observed') { return $null }
         $parentTicks = Get-StartFingerprintTicks -Fingerprint $parentIdentity.Fingerprint
@@ -427,6 +433,7 @@ function Get-FullStackDescendantListener {
             }
         }
         $current = $parent
+        $currentFingerprint = $parentIdentity.Fingerprint
         $childTicks = $parentTicks
     }
     return $null
@@ -1065,10 +1072,17 @@ function Wait-ForLaunchedServiceOwnership {
                         throw 'Exact launched process identity was unavailable for startup cleanup.'
                     }
                 } elseif ($null -ne $ownedListener -and $ownedListener.Pid -ne $launchedPid) {
-                    Stop-ProcessIfStillExact -Id $ownedListener.Pid `
-                        -ExpectedStartFingerprint $ownedListener.ProcessStartFingerprint -Label 'Startup cleanup: listener'
-                    Stop-ProcessIfStillExact -Id $launchedPid -ExpectedStartFingerprint $launchedFingerprint `
-                        -Label 'Startup cleanup: launched process'
+                    # Each stop is attempted whatever the other did; failures are reported together.
+                    $pairFailures = @()
+                    try {
+                        Stop-ProcessIfStillExact -Id $ownedListener.Pid `
+                            -ExpectedStartFingerprint $ownedListener.ProcessStartFingerprint -Label 'Startup cleanup: listener'
+                    } catch { $pairFailures += $_.Exception.Message }
+                    try {
+                        Stop-ProcessIfStillExact -Id $launchedPid -ExpectedStartFingerprint $launchedFingerprint `
+                            -Label 'Startup cleanup: launched process'
+                    } catch { $pairFailures += $_.Exception.Message }
+                    if ($pairFailures.Count -gt 0) { throw ($pairFailures -join '; ') }
                 } else {
                     $cleanupIdentity = Get-ProcessIdentityObservation `
                         -Id $launchedPid `

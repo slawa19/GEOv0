@@ -2049,8 +2049,16 @@ if (Test-Path -LiteralPath $service.OwnershipFile) { throw 'Ownership metadata s
         "$script:StartTicks[202] = 1005; foreach ($p in 2..5) { $script:StartTicks[$p] = 1000 + $p }; "
         "$script:Parents[202] = 5; $script:Parents[5] = 4; $script:Parents[4] = 3; "
         "$script:Parents[3] = 2; $script:Parents[2] = 101",
+        # A PID reused MID-WALK (external review 2026-09-24, P1): 202's parent 303 is observed as an
+        # unrelated process started at 1500; by the time 303's own parent is read, 303 has exited and
+        # been reused by a new child of 101. Without re-verifying 303 after that read, 101 (1000, not
+        # younger than the OLD 303) would be adopted as 202's ancestor.
+        "$script:StartTicks[202] = 2000; $script:StartTicks[303] = 1500; $script:Parents[202] = 303; "
+        "$script:Parents[303] = 999; function Get-ProcessParentId { param([int]$Id) "
+        "if ($Id -eq 303) { $script:StartTicks[303] = 2500; return 101 }; "
+        "if ($script:Parents.ContainsKey($Id)) { return $script:Parents[$Id] }; return $null }",
     ),
-    ids=("foreign", "recycled-parent-pid", "too-deep"),
+    ids=("foreign", "recycled-parent-pid", "too-deep", "pid-reused-mid-walk"),
 )
 def test_run_local_refuses_a_listener_that_is_not_the_launched_descendant(
     powershell: Path,
@@ -2240,8 +2248,16 @@ if (Test-Path -LiteralPath $service.PidFile) { throw 'Ownership metadata survive
         "$script:StartTicks[202] = 1005; foreach ($p in 2..5) { $script:StartTicks[$p] = 1000 + $p }; "
         "$script:Parents[202] = 5; $script:Parents[5] = 4; $script:Parents[4] = 3; "
         "$script:Parents[3] = 2; $script:Parents[2] = 101",
+        # A PID reused MID-WALK (external review 2026-09-24, P1): 202's parent 303 is observed as an
+        # unrelated process started at 1500; by the time 303's own parent is read, 303 has exited and
+        # been reused by a new child of 101. Without re-verifying 303 after that read, 101 (1000, not
+        # younger than the OLD 303) would be adopted as 202's ancestor.
+        "$script:StartTicks[202] = 2000; $script:StartTicks[303] = 1500; $script:Parents[202] = 303; "
+        "$script:Parents[303] = 999; function Get-ProcessParentId { param([int]$Id) "
+        "if ($Id -eq 303) { $script:StartTicks[303] = 2500; return 101 }; "
+        "if ($script:Parents.ContainsKey($Id)) { return $script:Parents[$Id] }; return $null }",
     ),
-    ids=("foreign", "recycled-parent-pid", "too-deep"),
+    ids=("foreign", "recycled-parent-pid", "too-deep", "pid-reused-mid-walk"),
 )
 def test_full_stack_refuses_a_listener_that_is_not_the_launched_descendant(
     powershell: Path,
@@ -2279,6 +2295,171 @@ if (($script:Stopped -join ',') -ne '101|utc-ticks:1000') {
         },
     )
     assert result.stdout == "full-stack-foreign-listener-refused"
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+@pytest.mark.parametrize(
+    ("script_path", "setup", "writer"),
+    (
+        (_RUN_LOCAL, _RUN_LOCAL_DESCENDANT_SETUP, "Write-RunLocalOwnershipMetadata"),
+        (_RUN_FULL_STACK, _FULL_STACK_DESCENDANT_SETUP, "Write-ServiceOwnershipMetadata"),
+    ),
+    ids=("run-local", "full-stack"),
+)
+def test_a_failed_listener_cleanup_still_stops_the_launched_process(
+    powershell: Path,
+    tmp_path: Path,
+    script_path: Path,
+    setup: str,
+    writer: str,
+) -> None:
+    """External review 2026-09-24, P2b: each cleanup stop is attempted whatever the other did."""
+    wait = (
+        "Wait-ForRunLocalServiceOwnership"
+        if script_path == _RUN_LOCAL
+        else "Wait-ForLaunchedServiceOwnership"
+    )
+    command = (
+        _AST_SETUP
+        + setup
+        + r"""
+$script:StartTicks[101] = 1000
+$script:StartTicks[202] = 1001
+$script:Parents[202] = 101
+$script:Listener = 202
+Invoke-Expression "function $($env:PHASE7_WRITER) { throw 'metadata-write-failed' }"
+function Stop-ProcessById {
+    param([int]$Id, [string]$ExpectedStartFingerprint)
+    $script:Stopped += "$Id|$ExpectedStartFingerprint"
+    if ($Id -eq 202) { throw 'listener-stop-failed' }
+    $script:StartTicks.Remove($Id)
+}
+try {
+    & $env:PHASE7_WAIT -Service $service -Process ([pscustomobject]@{ Id = 101 }) -TimeoutSec 1
+    throw 'Startup unexpectedly succeeded'
+} catch {
+    $message = $_.Exception.Message
+    if ($message -eq 'Startup unexpectedly succeeded') { throw }
+    if ($message -notlike '*metadata-write-failed*') { throw "Primary failure was lost: $message" }
+    if ($message -notlike '*Startup cleanup also failed*listener-stop-failed*') {
+        throw "Listener cleanup failure was lost: $message"
+    }
+}
+if (($script:Stopped -join ',') -ne '202|utc-ticks:1001,101|utc-ticks:1000') {
+    throw "The launched process was not stopped after the listener stop failed: $($script:Stopped -join ',')"
+}
+[Console]::Out.Write('cleanup-stops-both-independently')
+"""
+    )
+    result = _run_powershell(
+        powershell,
+        command,
+        extra_env={
+            "PHASE7_SCRIPT_PATH": str(script_path),
+            "PHASE7_OWNERSHIP_PATH": str(tmp_path / "backend.owner.json"),
+            "PHASE7_WRITER": writer,
+            "PHASE7_WAIT": wait,
+        },
+    )
+    assert result.stdout == "cleanup-stops-both-independently"
+
+
+# External review 2026-09-24, P2a: a v2 full-stack record names two processes, and full-stack is
+# active while EITHER is alive or unreadable. Reading only the listener let a live launched process
+# pass as stale, and run_local then deleted the record.
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+@pytest.mark.parametrize("launched_status", ("Exact", "Unreadable"))
+def test_run_local_treats_a_live_launched_full_stack_process_as_active(
+    powershell: Path,
+    launched_status: str,
+) -> None:
+    body = r"""
+$script:FullStackMetadata = New-FullStackMetadata
+$script:FullStackMetadata | Add-Member -NotePropertyName ListenerPid -NotePropertyValue 202
+$script:FullStackMetadata | Add-Member -NotePropertyName ListenerProcessStartFingerprint -NotePropertyValue 'utc-ticks:638903664000000202'
+function Get-ProcessIdentityObservation {
+    param([int]$Id, [string]$ExpectedStartFingerprint)
+    $status = if ($Id -eq 101) { $env:PHASE7_LAUNCHED_STATUS } else { 'Missing' }
+    return [pscustomobject]@{ Status = $status; Fingerprint = $ExpectedStartFingerprint }
+}
+try {
+    Assert-NoActiveFullStackOwnership
+    throw 'run_local unexpectedly accepted full-stack ownership'
+} catch {
+    if ($_.Exception.Message -eq 'run_local unexpectedly accepted full-stack ownership') { throw }
+    if ($_.Exception.Message -notlike '*run_local refused*') { throw }
+}
+if ($script:RemovedOwnershipFiles.Count -ne 0) { throw 'The full-stack record was deleted' }
+[Console]::Out.Write('run-local-launched-full-stack-active')
+"""
+    result = _run_powershell(
+        powershell,
+        _run_local_guard_command(body),
+        extra_env={
+            "PHASE7_SCRIPT_PATH": str(_RUN_LOCAL),
+            "PHASE7_LAUNCHED_STATUS": launched_status,
+        },
+    )
+    assert "run-local-launched-full-stack-active" in result.stdout
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+@pytest.mark.parametrize("launched_status", ("Exact", "Unreadable"))
+def test_run_real_treats_a_live_launched_full_stack_process_as_active(
+    powershell: Path,
+    tmp_path: Path,
+    launched_status: str,
+) -> None:
+    command = (
+        _AST_SETUP
+        + r"""
+Invoke-Expression (Get-LauncherFunctionText -Name 'Get-LauncherLifecycleLockName')
+Invoke-Expression (Get-LauncherFunctionText -Name 'Get-FullStackOwnershipMetadata')
+Invoke-Expression (Get-LauncherFunctionText -Name 'Assert-NoActiveFullStackOwnership')
+$repoRoot = 'C:\repo-a'
+$fullStackOwnershipDir = $env:PHASE7_DIR
+$record = [ordered]@{
+    version = 2
+    repository_identity = (Get-LauncherLifecycleLockName -RepositoryRoot $repoRoot)
+    service_name = 'Backend'
+    port = 18000
+    pid = 101
+    process_start_fingerprint = 'utc-ticks:1000'
+    listener_pid = 202
+    listener_start_fingerprint = 'utc-ticks:1001'
+} | ConvertTo-Json -Compress
+$file = Join-Path $fullStackOwnershipDir 'backend.owner.json'
+Set-Content -LiteralPath $file -Value $record
+function Get-ProcessIdentityObservation {
+    param([int]$Id, [string]$ExpectedStartFingerprint)
+    $status = if ($Id -eq 101) { $env:PHASE7_LAUNCHED_STATUS } else { 'Missing' }
+    return [pscustomobject]@{ Status = $status; Fingerprint = $ExpectedStartFingerprint }
+}
+function Get-ListeningPid { param([int]$Port) return $null }
+try {
+    Assert-NoActiveFullStackOwnership
+    throw 'run_real unexpectedly accepted full-stack ownership'
+} catch {
+    if ($_.Exception.Message -eq 'run_real unexpectedly accepted full-stack ownership') { throw }
+    if ($_.Exception.Message -notlike '*full-stack ownership is active or unreadable*') { throw }
+}
+if (-not (Test-Path -LiteralPath $file)) { throw 'The full-stack record was deleted' }
+[Console]::Out.Write('run-real-launched-full-stack-active')
+"""
+    )
+    result = _run_powershell(
+        powershell,
+        command,
+        extra_env={
+            "PHASE7_SCRIPT_PATH": str(_RUN_REAL_SIMULATOR),
+            "PHASE7_DIR": str(tmp_path),
+            "PHASE7_LAUNCHED_STATUS": launched_status,
+        },
+    )
+    assert result.stdout == "run-real-launched-full-stack-active"
 
 
 @pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
