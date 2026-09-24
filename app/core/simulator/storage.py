@@ -1,17 +1,13 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Callable, Optional
-
-from sqlalchemy.exc import OperationalError
+from typing import Optional
 
 from sqlalchemy import delete, select, update as sql_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 import app.db.session as db
 from app.config import settings
@@ -25,29 +21,6 @@ from app.db.models.simulator_storage import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-async def _retry_on_locked(
-    coro_factory: Callable,
-    max_retries: int = 3,
-    base_delay: float = 0.5,
-):
-    """Retry async DB operation on SQLite 'database is locked' errors."""
-    for attempt in range(max_retries + 1):
-        try:
-            return await coro_factory()
-        except OperationalError as e:
-            if "database is locked" in str(e) and attempt < max_retries:
-                delay = base_delay * (2 ** attempt)
-                logger.warning(
-                    "simulator.storage db_locked attempt=%d/%d, retrying in %.1fs",
-                    attempt + 1,
-                    max_retries,
-                    delay,
-                )
-                await asyncio.sleep(delay)
-                continue
-            raise
 
 
 def db_enabled() -> bool:
@@ -114,7 +87,7 @@ async def upsert_run(run: RunRecord) -> None:
                     await session.rollback()
                     raise
 
-        await _retry_on_locked(_do)
+        await _do()
     except Exception:
         logger.exception(
             "simulator.storage.upsert_run_failed run_id=%s", getattr(run, "run_id", "")
@@ -208,26 +181,7 @@ async def sync_artifacts(run: RunRecord) -> None:
                     )
 
                 if rows_to_upsert:
-                    bind = None
-                    try:
-                        bind = session.get_bind()
-                    except Exception:
-                        bind = getattr(session, "bind", None)
-
-                    dialect_name = None
-                    try:
-                        dialect_name = bind.dialect.name if bind is not None else None
-                    except Exception:
-                        dialect_name = None
-
-                    if dialect_name == "sqlite":
-                        insert_fn = sqlite_insert
-                    elif dialect_name in {"postgresql", "postgres"}:
-                        insert_fn = pg_insert
-                    else:
-                        raise RuntimeError(
-                            f"Unsupported SQL dialect for simulator_run_artifacts upsert: {dialect_name!r}"
-                        )
+                    insert_fn = pg_insert
 
                     table = SimulatorRunArtifact.__table__
                     stmt = insert_fn(table)
@@ -244,58 +198,13 @@ async def sync_artifacts(run: RunRecord) -> None:
 
                 await session.commit()
 
-        await _retry_on_locked(_do_sync)
+        await _do_sync()
     except Exception:
         logger.exception(
             "simulator.storage.sync_artifacts_failed run_id=%s",
             getattr(run, "run_id", ""),
         )
         return
-
-
-# 2026-08-20 / p007_t715. The two series the domain model declares as amounts
-# in the selected equivalent, i.e. the ones that carry money.
-MONEY_METRIC_KEYS = frozenset({"total_debt", "clearing_volume"})
-
-# Run ids already warned about lossy SQLite money persistence. Bounded so a long
-# lived process cannot grow this set without limit; when the cap is reached the
-# set is cleared, which at worst re-emits the warning once more for a run.
-_SQLITE_MONEY_WARNED_RUN_IDS: set[str] = set()
-_SQLITE_MONEY_WARNED_MAX_RUN_IDS = 512
-
-
-def _warn_once_sqlite_money_precision(run_id: str, keys: list[str]) -> None:
-    """Warn once per run that money metrics on SQLite are NOT exact.
-
-    `simulator_run_metrics.value` is `Numeric(20, 8)` and `MetricPoint.v` is a
-    decimal string, but SQLite has no native decimal: SQLAlchemy round-trips the
-    value through binary floating point, so `Decimal("12345678901.12345678")`
-    comes back as `Decimal("12345678901.12345695")`. The wire format would then
-    present an inexact number in the shape reserved for exact money.
-
-    SQLite stays a supported backend on purpose - it is the documented
-    no-Docker development path (`README.md`, `app/config.py` default) - so this
-    is an announced limitation, not a silent one. PostgreSQL is the only backend
-    where these series are exact, the same split AGENTS.md 4 already makes for
-    locking semantics.
-    """
-
-    key = str(run_id)
-    if key in _SQLITE_MONEY_WARNED_RUN_IDS:
-        return
-    if len(_SQLITE_MONEY_WARNED_RUN_IDS) >= _SQLITE_MONEY_WARNED_MAX_RUN_IDS:
-        _SQLITE_MONEY_WARNED_RUN_IDS.clear()
-    _SQLITE_MONEY_WARNED_RUN_IDS.add(key)
-    logger.warning(
-        "simulator.storage.sqlite_money_metrics_are_not_exact run_id=%s keys=%s "
-        "detail=%s",
-        key,
-        ",".join(sorted(keys)),
-        "SQLite stores Numeric through binary floating point, so the money "
-        "metric series persisted for this run are approximations and the "
-        "decimal strings served for them are NOT exact amounts. Use PostgreSQL "
-        "for exact simulator money metrics.",
-    )
 
 
 def _measured_value(
@@ -339,16 +248,6 @@ async def write_tick_metrics(
     rolls back only that savepoint on failure, so a failed metrics write cannot
     discard work the caller staged in the same transaction. It commits the
     caller's session only when `commit=True`.
-
-    Backend limitation (2026-08-20 / p007_t715): `SimulatorRunMetric.value` is
-    `Numeric(20, 8)` and the money series (`MONEY_METRIC_KEYS`) are served as
-    decimal strings, but **only PostgreSQL stores them exactly**. On SQLite -
-    the documented no-Docker development backend and the `app/config.py`
-    default - SQLAlchemy round-trips Numeric through binary floating point, so
-    those values are approximations wearing an exact-money shape. The condition
-    is announced once per run at WARNING level rather than hidden; see
-    `_warn_once_sqlite_money_precision` and
-    `docs/ru/simulator/backend/run-storage.md`.
     """
 
     if not db_enabled():
@@ -357,26 +256,7 @@ async def write_tick_metrics(
     try:
 
         async def _write(s) -> None:
-            bind = None
-            try:
-                bind = s.get_bind()
-            except Exception:
-                bind = getattr(s, "bind", None)
-
-            dialect_name = None
-            try:
-                dialect_name = bind.dialect.name if bind is not None else None
-            except Exception:
-                dialect_name = None
-
-            if dialect_name == "sqlite":
-                insert_fn = sqlite_insert
-            elif dialect_name in {"postgresql", "postgres"}:
-                insert_fn = pg_insert
-            else:
-                raise RuntimeError(
-                    f"Unsupported SQL dialect for simulator_run_metrics upsert: {dialect_name!r}"
-                )
+            insert_fn = pg_insert
 
             rows: list[dict[str, object]] = []
             for eq, counters in (per_equivalent or {}).items():
@@ -468,21 +348,6 @@ async def write_tick_metrics(
             if not rows:
                 return
 
-            # p007_t715: announce the SQLite money-precision limitation once per
-            # run, and only when a money series actually carries a measurement -
-            # a warning that fires with nothing at stake teaches nothing.
-            if dialect_name == "sqlite":
-                lossy_keys = sorted(
-                    {
-                        str(row["key"])
-                        for row in rows
-                        if str(row["key"]) in MONEY_METRIC_KEYS
-                        and row.get("value") is not None
-                    }
-                )
-                if lossy_keys:
-                    _warn_once_sqlite_money_precision(str(run_id), lossy_keys)
-
             table = SimulatorRunMetric.__table__
             stmt = insert_fn(table)
             stmt = stmt.on_conflict_do_update(
@@ -512,7 +377,7 @@ async def write_tick_metrics(
                         except Exception:
                             pass
                         raise
-            await _retry_on_locked(_do_write)
+            await _do_write()
         else:
             # 2026-08-20 / p007_t715: the session belongs to the caller - the
             # real-mode tick passes its own session with commit=False. A failed
@@ -722,7 +587,7 @@ async def reconcile_stale_runs() -> int:
                 count_holder[0] = result.rowcount if result.rowcount is not None else 0
                 await session.commit()
 
-        await _retry_on_locked(_do_reconcile)
+        await _do_reconcile()
         count = count_holder[0]
 
         if count:

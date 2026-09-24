@@ -63,7 +63,6 @@ from sqlalchemy.exc import DBAPIError
 from app.core.simulator.commit_resolution import resolve_commit_under_cancellation
 from app.core.simulator.models import RunRecord
 from app.db.models.transaction import Transaction
-from app.db.sqlite_transaction_control import sqlite_busy_error_name
 from app.utils.exceptions import RetryablePaymentConflictException
 
 #: PostgreSQL reports these for a transaction IT has already rolled back, which is what makes the
@@ -115,11 +114,6 @@ def money_conflict_name(exc: BaseException | None) -> str | None:
         )
         if sqlstate in _TRANSIENT_SQLSTATES:
             return str(sqlstate)
-        # Matched on the SQLite error CODE, never on the message: SQLITE_BUSY,
-        # SQLITE_BUSY_SNAPSHOT and a rollback-journal deadlock all read "database is locked".
-        busy = sqlite_busy_error_name(exc)
-        if busy is not None:
-            return busy
     return None
 
 

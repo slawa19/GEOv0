@@ -6,7 +6,6 @@ import asyncio
 import inspect
 import logging
 import os
-import re
 import time
 from datetime import datetime, timezone
 
@@ -16,7 +15,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy import text
-from sqlalchemy.engine.url import make_url
 
 from app.api.router import api_router
 from app.config import settings
@@ -320,194 +318,12 @@ def _start_configured_background_tasks(app: FastAPI) -> None:
         )
 
 
-async def _sqlite_ensure_debts_version_column() -> None:
-    """Lightweight SQLite-only schema fix for dev DB files.
-
-    Alembic migrations are primarily designed for Postgres in this repo.
-    When running locally with the default SQLite DATABASE_URL, older DB files
-    may be missing newly added columns (e.g. debts.version).
-    """
-
-    try:
-        dialect = make_url(settings.DATABASE_URL).get_backend_name()
-    except Exception:
-        return
-
-    if dialect != "sqlite":
-        return
-
-    try:
-        async with engine.begin() as conn:
-            table_exists = await conn.execute(
-                text("SELECT 1 FROM sqlite_master WHERE type='table' AND name='debts'")
-            )
-            if table_exists.scalar() is None:
-                return
-
-            cols = await conn.execute(text("PRAGMA table_info(debts)"))
-            col_names = {row[1] for row in cols.fetchall()}
-            if "version" in col_names:
-                return
-
-            logger.warning(
-                "SQLite DB is missing debts.version; applying compatibility ALTER TABLE"
-            )
-            await conn.execute(
-                text(
-                    "ALTER TABLE debts ADD COLUMN version INTEGER NOT NULL DEFAULT 0"
-                )
-            )
-    except Exception as exc:
-        # Fail fast with a clearer message than the later SQLAlchemy error.
-        raise RuntimeError(
-            "SQLite DB schema appears outdated and auto-fix failed. "
-            "For the default local database, replace ./.local-run/geov0.db; "
-            "for an explicit DATABASE_URL, repair it or point to a fresh file."
-        ) from exc
-
-
-async def _sqlite_ensure_equivalents_integrity_hold_column() -> None:
-    """Programme 015 step 5c: add `equivalents.integrity_hold_result_id` to an existing SQLite dev file.
-
-    Additive and nullable, with no backfill: nothing is held until the scheduled reaction confirms a
-    `FAILED`. PostgreSQL gets the column from migration 028; a fresh SQLite file gets it from
-    `create_all`, which never alters a table that already exists - hence this, beside the `debts.version`
-    fix above and in the same shape.
-
-    WITHOUT THE FOREIGN KEY on purpose: the model's FK names `debt_reconciliation_results`, which a file
-    older than step 5a does not have, and with `foreign_keys=ON` SQLite refuses writes to a child table
-    whose parent is missing. The reference is still written by the only writer (the reaction), and a
-    database built by `create_all` carries the FK.
-    """
-
-    try:
-        dialect = make_url(settings.DATABASE_URL).get_backend_name()
-    except Exception:
-        return
-
-    if dialect != "sqlite":
-        return
-
-    try:
-        async with engine.begin() as conn:
-            table_exists = await conn.execute(
-                text("SELECT 1 FROM sqlite_master WHERE type='table' AND name='equivalents'")
-            )
-            if table_exists.scalar() is None:
-                return
-
-            cols = await conn.execute(text("PRAGMA table_info(equivalents)"))
-            if "integrity_hold_result_id" in {row[1] for row in cols.fetchall()}:
-                return
-
-            logger.warning(
-                "SQLite DB is missing equivalents.integrity_hold_result_id; applying compatibility "
-                "ALTER TABLE"
-            )
-            await conn.execute(
-                text("ALTER TABLE equivalents ADD COLUMN integrity_hold_result_id CHAR(32)")
-            )
-    except Exception as exc:
-        raise RuntimeError(
-            "SQLite DB schema appears outdated and adding equivalents.integrity_hold_result_id failed. "
-            "Recreate the local database: .\\scripts\\run_local.ps1 reset-db "
-            "(for an explicit DATABASE_URL, point it at a fresh file)."
-        ) from exc
-
-
-#: The intent-version CHECK as SQLite stores it in `sqlite_master.sql`, e.g.
-#: `CONSTRAINT chk_debt_operations_intent_version CHECK (intent_encoding_version IN (1, 2))`.
-_SQLITE_INTENT_VERSION_CHECK = re.compile(
-    r"CONSTRAINT\s+[\"`\[]?chk_debt_operations_intent_version[\"`\]]?\s+CHECK\s*\(\s*"
-    r"intent_encoding_version\s+IN\s*\(\s*([0-9]+(?:\s*,\s*[0-9]+)*)\s*\)\s*\)",
-    re.IGNORECASE,
-)
-
-
-async def _sqlite_refuse_pre_027_debt_operations() -> None:
-    """Refuse to start on a SQLite database whose `debt_operations` cannot store a version-2 payment.
-
-    Programme 015 step 5b. A PAYMENT envelope now carries intent encoding version 2, and migration 027
-    widened the CHECK - on PostgreSQL. The local SQLite schema comes from `create_all`, which never
-    alters a table that already exists, so a database created before step 5b keeps
-    `CHECK (intent_encoding_version IN (1))` and would refuse every payment at commit (measured). That is
-    refused HERE, at startup, with the cause and the fix, rather than at the first payment.
-
-    NOT A REPAIR: `debt_operations` is referenced by journal entries and per-equivalent rows, and this is a
-    development database; it is recreated, not rebuilt. A CHECK this probe does not recognise refuses too.
-
-    A DATABASE FROM BEFORE THE DEBT JOURNAL REFUSES AS WELL (review round 3): `debts` present and no
-    `debt_operations` is an application database older than migration 022, which starts and then fails on
-    its first journalled money write. Only a genuinely empty database - no `debts` either - passes, as
-    `_sqlite_ensure_debts_version_column` passes an absent `debts`.
-    """
-
-    try:
-        dialect = make_url(settings.DATABASE_URL).get_backend_name()
-    except Exception:
-        return
-    if dialect != "sqlite":
-        return
-
-    from app.db.journal_tables import PAYMENT_INTENT_ENCODING_VERSION
-
-    fix = (
-        "Recreate the local database: .\\scripts\\run_local.ps1 reset-db "
-        "(for an explicit DATABASE_URL, point it at a fresh file)."
-    )
-    try:
-        async with engine.begin() as conn:
-            tables = {
-                str(name): sql
-                for name, sql in (
-                    await conn.execute(
-                        text(
-                            "SELECT name, sql FROM sqlite_master "
-                            "WHERE type='table' AND name IN ('debts', 'debt_operations')"
-                        )
-                    )
-                ).all()
-            }
-    except Exception as exc:
-        raise RuntimeError(
-            "Could not read the SQLite schema of debt_operations to check it against migration 027 "
-            f"(programme 015 step 5b). {fix}"
-        ) from exc
-    ddl = tables.get("debt_operations")
-    if ddl is None:
-        if "debts" not in tables:
-            return
-        raise RuntimeError(
-            "SQLite database created before the debt journal (migration 022, programme 015): it has a debts "
-            "table and no debt_operations table, so every journalled money write would fail. "
-            f"{fix}"
-        )
-
-    match = _SQLITE_INTENT_VERSION_CHECK.search(str(ddl))
-    if match is not None:
-        versions = {int(value) for value in match.group(1).split(",")}
-        if PAYMENT_INTENT_ENCODING_VERSION in versions:
-            return
-        detail = f"carries CHECK (intent_encoding_version IN ({match.group(1)}))"
-    else:
-        detail = "has an intent-version CHECK this startup probe does not recognise"
-    raise RuntimeError(
-        "SQLite database created before migration 027 (programme 015 step 5b): its debt_operations table "
-        f"{detail}, which refuses the version-2 payment envelope, so every payment would fail at commit. "
-        f"{fix}"
-    )
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.redis = None
     app.state._bg_stop_event = asyncio.Event()
     app.state._bg_tasks = []
     app.state.background_jobs = {}
-
-    await _sqlite_ensure_debts_version_column()
-    await _sqlite_refuse_pre_027_debt_operations()
-    await _sqlite_ensure_equivalents_integrity_hold_column()
 
     # §12 Recovery reconciliation: mark simulator runs that were still active
     # before the previous server process died as 'error'.  Best-effort — any

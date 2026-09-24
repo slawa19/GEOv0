@@ -45,7 +45,6 @@ class TrustLine(Base):
             'to_participant_id',
             'equivalent_id',
             unique=True,
-            sqlite_where=text("status <> 'closed'"),
             postgresql_where=text("status <> 'closed'"),
         ),
         CheckConstraint("status IN ('active', 'frozen', 'closed')", name='chk_trust_line_status'),

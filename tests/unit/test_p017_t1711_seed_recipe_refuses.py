@@ -118,7 +118,6 @@ def test_a_frozen_participant_is_reachable_and_therefore_not_refused():
     [
         "postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_dev_launcher",
         "postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_p017t1711",
-        "sqlite+aiosqlite:///:memory:",
     ],
 )
 def test_a_disposable_database_is_accepted(url):
@@ -133,33 +132,15 @@ def test_a_disposable_database_is_accepted(url):
         "postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_prod_main",
         "postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_dev_",
         "mysql+aiomysql://geo:geo@127.0.0.1:3306/geov0_dev_x",
+        # Accepted until programme 017 stage 3 (in memory, or a file under `.local-run/`); the
+        # seed now knows how to dispose of PostgreSQL databases only.
+        "sqlite+aiosqlite:///:memory:",
+        "sqlite+aiosqlite:///./.local-run/seed-guard-probe/probe.db",
     ],
 )
 def test_a_database_that_is_not_provably_disposable_is_refused(url):
     with pytest.raises(SeedRefusal):
         assert_target_is_disposable(make_url(url))
-
-
-def test_a_sqlite_file_is_accepted_under_local_run_and_refused_outside_it():
-    """`tmp_path` is NOT used as the outside case on purpose: the canonical runner points pytest's
-    basetemp at `.local-run/test-runs/<slug>/pytest`, so a temporary directory is INSIDE the very
-    tree this guard allows, and the refusal half of this test passed vacuously until it was run.
-    The repository root is the case the rule exists for (`AGENTS.md` §12: no `*.db` there).
-
-    THIS MODULE IS NAMED IN THE ALLOWLIST OF
-    `tests/unit/test_p014_t1406_no_mutable_database_in_the_working_tree.py`, which refuses a sqlite
-    URL built in `tests/**` from a path outside the scratch tree - and finds this one, correctly.
-    The URL here is the SUBJECT of the assertion rather than a location: it is handed to a pure
-    predicate, no engine is opened and no file is created. That is why the name was added to the
-    list instead of the URL being spelled some way the scan does not see, which would have taken
-    the guard down for every future line of this file as well."""
-
-    inside = _REPO_ROOT / ".local-run" / "seed-guard-probe" / "probe.db"
-    assert_target_is_disposable(make_url(f"sqlite+aiosqlite:///{inside.as_posix()}"))
-
-    outside = _REPO_ROOT / "probe.db"
-    with pytest.raises(SeedRefusal, match="local-run"):
-        assert_target_is_disposable(make_url(f"sqlite+aiosqlite:///{outside.as_posix()}"))
 
 
 @pytest.mark.parametrize("env", ["dev", "test"])

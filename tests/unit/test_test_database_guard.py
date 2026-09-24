@@ -9,113 +9,35 @@ from scripts.validate_test_database_url import (
 )
 
 
-def _sqlite_url(path: Path) -> str:
-    return f"sqlite+aiosqlite:///{path.as_posix()}"
-
-
 @pytest.mark.parametrize(
     "database_url",
     [
+        # The three shapes the guard ACCEPTED until programme 017 stage 3, and one it refused.
         "sqlite+aiosqlite:///:memory:",
         "sqlite+aiosqlite:///./.pytest_geov0.db",
         "sqlite+aiosqlite:///./.local-run/test-runs/agent_guard/test.db",
+        "sqlite+aiosqlite:///./geov0.db",
     ],
 )
-def test_accepts_explicit_local_test_databases(
+@pytest.mark.parametrize("required_backend", [None, "postgresql"])
+def test_rejects_every_sqlite_database(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     database_url: str,
+    required_backend: str | None,
 ) -> None:
+    """SQLite left the test tier (017 stage 3): no path shape and no opt-in makes one safe."""
+
     monkeypatch.chdir(tmp_path)
 
-    parsed = assert_safe_test_database_url(
-        database_url,
-        allow_destructive_reset=None,
-        repo_root=tmp_path,
-    )
-
-    assert parsed.get_backend_name() == "sqlite"
-
-
-def test_accepts_absolute_task_database_inside_repo(tmp_path: Path) -> None:
-    database_url = _sqlite_url(
-        tmp_path / ".local-run" / "test-runs" / "ci-required" / "test.db"
-    )
-
-    parsed = assert_safe_test_database_url(
-        database_url,
-        allow_destructive_reset=None,
-        repo_root=tmp_path,
-    )
-
-    assert parsed.get_backend_name() == "sqlite"
-
-
-@pytest.mark.parametrize(
-    "database_url",
-    [
-        "sqlite+aiosqlite:///./geov0.db",
-        "sqlite+aiosqlite:///./.local-run/test-runs/agent_guard/developer.db",
-        "sqlite+aiosqlite:///../repo/.pytest_geov0.db",
-    ],
-)
-def test_rejects_non_test_and_parent_relative_sqlite_databases(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    database_url: str,
-) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    monkeypatch.chdir(repo_root)
-
-    with pytest.raises(UnsafeTestDatabaseError, match="SQLite test DB"):
+    with pytest.raises(
+        UnsafeTestDatabaseError, match="Unsupported test database backend: sqlite"
+    ):
         assert_safe_test_database_url(
             database_url,
-            allow_destructive_reset=None,
-            repo_root=repo_root,
-        )
-
-
-@pytest.mark.parametrize(
-    "relative_path",
-    [
-        Path(".pytest_geov0.db"),
-        Path(".local-run/test-runs/agent_guard/test.db"),
-    ],
-)
-def test_rejects_test_shaped_absolute_database_outside_repo(
-    tmp_path: Path, relative_path: Path
-) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    external_database = tmp_path / "shared" / relative_path
-
-    with pytest.raises(UnsafeTestDatabaseError, match="SQLite test DB"):
-        assert_safe_test_database_url(
-            _sqlite_url(external_database),
-            allow_destructive_reset=None,
-            repo_root=repo_root,
-        )
-
-
-def test_rejects_task_database_symlink_that_escapes_repo(tmp_path: Path) -> None:
-    repo_root = tmp_path / "repo"
-    task_root = repo_root / ".local-run" / "test-runs" / "agent_guard"
-    task_root.mkdir(parents=True)
-    external_database = tmp_path / "shared" / "test.db"
-    external_database.parent.mkdir()
-    external_database.touch()
-    database_link = task_root / "test.db"
-    try:
-        database_link.symlink_to(external_database)
-    except OSError as exc:
-        pytest.skip(f"Symlinks are unavailable in this environment: {exc}")
-
-    with pytest.raises(UnsafeTestDatabaseError, match="SQLite test DB"):
-        assert_safe_test_database_url(
-            _sqlite_url(database_link),
-            allow_destructive_reset=None,
-            repo_root=repo_root,
+            allow_destructive_reset="1",
+            repo_root=tmp_path,
+            required_backend=required_backend,
         )
 
 
@@ -142,20 +64,6 @@ def test_accepts_safe_postgres_when_postgresql_backend_is_required(
     )
 
     assert parsed.get_backend_name() == "postgresql"
-
-
-def test_rejects_safe_sqlite_when_postgresql_backend_is_required(
-    tmp_path: Path,
-) -> None:
-    with pytest.raises(
-        UnsafeTestDatabaseError, match="requires the PostgreSQL database backend"
-    ):
-        assert_safe_test_database_url(
-            "sqlite+aiosqlite:///:memory:",
-            allow_destructive_reset=None,
-            repo_root=tmp_path,
-            required_backend="postgresql",
-        )
 
 
 def test_rejects_unknown_required_backend_before_postgres_reset_guidance(

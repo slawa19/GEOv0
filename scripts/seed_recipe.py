@@ -93,7 +93,6 @@ from app.core.trustlines.service import TrustLineService  # noqa: E402
 from app.db.journal_tables import debt_operation_equivalents, debt_operations  # noqa: E402
 from app.db.models import Debt, Equivalent, Participant, TrustLine  # noqa: E402
 from app.db.reconciliation_tables import debt_reconciliation_baseline_offsets  # noqa: E402
-from app.db.sqlite_transaction_control import sqlite_busy_error_name  # noqa: E402
 from app.schemas.admin import (  # noqa: E402
     AdminEquivalentCreateRequest,
     AdminParticipantActionRequest,
@@ -254,22 +253,6 @@ def assert_target_is_disposable(url: Any, *, allow_scratch_suffix: bool = False)
             f"geov0_dev_<slug> (scripts/dev_database.py) and geov0_test_<slug> "
             f"(scripts/validate_test_database_url.py) are"
         )
-    if backend == "sqlite":
-        database = url.database or ""
-        if database in {"", ":memory:"}:
-            return
-        resolved = Path(database)
-        if not resolved.is_absolute():
-            resolved = Path.cwd() / resolved
-        local_run = (_REPO_ROOT / ".local-run").resolve()
-        try:
-            resolved.resolve().relative_to(local_run)
-        except ValueError:
-            raise SeedRefusal(
-                f"SQLite database {database!r} is outside {local_run}; every runtime artefact of "
-                f"this repository lives under .local-run/ (AGENTS.md §12)"
-            ) from None
-        return
     raise SeedRefusal(f"backend {backend!r} is not a database this seed knows how to dispose of")
 
 
@@ -391,8 +374,7 @@ def _is_transient(exc: BaseException) -> bool:
     it. So this asks two narrow questions and answers `False` to everything else:
 
     * did a payment path already classify it as retryable (`RetryablePaymentConflictException`), or
-    * does the exception chain carry one of `_RETRYABLE_PAYMENT_SQLSTATES` (PostgreSQL), or
-      SQLite's busy twin?
+    * does the exception chain carry one of `_RETRYABLE_PAYMENT_SQLSTATES` (PostgreSQL)?
 
     The sqlstate reader and the retryable set are IMPORTED from `app/core/payments/service.py` so
     there is one definition of both, including the rule that `__context__` is not followed.
@@ -402,7 +384,7 @@ def _is_transient(exc: BaseException) -> bool:
         return True
     if _payment_db_sqlstate(exc) in _RETRYABLE_PAYMENT_SQLSTATES:
         return True
-    return sqlite_busy_error_name(exc) is not None
+    return False
 
 
 # ==================================================================================================

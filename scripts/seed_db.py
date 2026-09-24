@@ -203,7 +203,7 @@ async def _seed_from_seeds_dir(repo_root: str) -> None:
 
 
 async def _seed_from_admin_fixtures(repo_root: str, *, max_transactions: int = 500, max_audit: int = 500) -> None:
-    """Seed SQLite DB using canonical admin fixtures datasets.
+    """Seed the DB using canonical admin fixtures datasets.
 
     This makes real-mode Admin UI look like the fixtures-first prototype (rich demo data).
     """
@@ -274,7 +274,7 @@ async def _seed_from_admin_fixtures_datasets(
     max_transactions: int = 500,
     max_audit: int = 500,
 ) -> None:
-    """Seed SQLite DB using a fixture pack datasets directory."""
+    """Seed the DB using a fixture pack datasets directory."""
     if not os.path.isdir(datasets_dir):
         raise RuntimeError(f"Fixtures datasets dir not found: {datasets_dir}")
 

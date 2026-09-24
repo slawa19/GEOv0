@@ -51,7 +51,6 @@ from app.core.simulator.trust_drift_engine import TrustDriftEngine
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
-from app.db.sqlite_transaction_control import sqlite_busy_error_name
 
 # 40001 serialization_failure, 40P01 deadlock_detected: PostgreSQL has rolled the transaction back
 # and the whole unit of work may run again.
@@ -61,30 +60,13 @@ from app.db.sqlite_transaction_control import sqlite_busy_error_name
 # ordinary database error would record "inject failed" and mark the event fired, i.e. DROP the
 # inject whenever another writer held the equivalent a little too long. The tick orchestrator's own
 # lock timeout fails the tick without firing anything; the inject owner now does the same once its
-# single retry is spent. The SQLite busy family joins them for the same reason - see the predicate
-# below - and nothing else is retried.
+# single retry is spent. Nothing else is retried.
 _INJECT_TRANSIENT_SQLSTATES = frozenset({"40001", "40P01", "55P03"})
 
 
 def _is_transient_inject_db_error(exc: BaseException) -> bool:
     if not isinstance(exc, DBAPIError):
         return False
-    # T1525: on SQLite this unit of work reads its owner-lock set and then writes, so a commit by
-    # another connection in between leaves it on a stale snapshot and the write is refused with
-    # SQLITE_BUSY_SNAPSHOT. Treating that as an ordinary database error reopens the exact loss mode
-    # 55P03 was added for: the owner records "inject failed (db error)", marks the event fired, and
-    # the inject is DROPPED. Matched on sqlite3's error code through the predicate the payment
-    # engine uses, so there is one rule, not two.
-    #
-    # UNLIKE 40001, A SQLITE BUSY IS NOT A "KNOWN ROLLBACK" - corrected 2026-09-12, this comment
-    # used to claim it was. PostgreSQL rolls the transaction back itself on 40001; SQLite does not
-    # promise that, and a busy raised by `commit()` with a statement still in progress leaves the
-    # transaction open with its own rows visible inside it. What makes the restart safe here is the
-    # caller: every `continue` in the inject loop below is preceded by `await session.rollback()`,
-    # so the next attempt always starts from a fresh snapshot rather than on top of its own
-    # uncommitted rows.
-    if sqlite_busy_error_name(exc) is not None:
-        return True
     orig = getattr(exc, "orig", None)
     # asyncpg's adapted error carries `sqlstate`, psycopg's `pgcode`.
     sqlstate = getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)

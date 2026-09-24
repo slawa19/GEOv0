@@ -9,10 +9,7 @@ import pytest
 
 
 _ROOT = Path(__file__).resolve().parents[2]
-_MESSAGE = (
-    "Alembic migrations support PostgreSQL only. "
-    "For a local SQLite database, run: python scripts/init_sqlite_db.py"
-)
+_MESSAGE = "Alembic migrations support PostgreSQL only."
 
 
 def _test_env(*, database_url: str) -> dict[str, str]:

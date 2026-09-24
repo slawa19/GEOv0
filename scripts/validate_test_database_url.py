@@ -11,14 +11,13 @@ import argparse
 import os
 import re
 import sys
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Sequence
 
 from sqlalchemy.engine import URL, make_url
 
 
 _POSTGRES_TEST_DATABASE_RE = re.compile(r"^geov0_test_[A-Za-z0-9_-]+$")
-_TASK_SLUG_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 #: The separator provisioning puts between a tier database and the scratch databases it derives from
 #: it (``tests/migrated_schema.py::SCRATCH_SEPARATOR``).  IT IS RESERVED, AND THIS IS WHERE THE
@@ -51,36 +50,6 @@ def _parse_url(database_url: str) -> URL:
         ) from exc
 
 
-def _is_explicit_local_test_database(database: str, *, repo_root: Path) -> bool:
-    if database == ":memory:":
-        return True
-
-    normalized = database.replace("\\", "/")
-    if ".." in PurePosixPath(normalized).parts:
-        return False
-
-    resolved_repo_root = repo_root.resolve()
-    database_path = Path(database)
-    if not database_path.is_absolute():
-        database_path = Path.cwd() / database_path
-    resolved_database_path = database_path.resolve()
-
-    if resolved_database_path == (resolved_repo_root / ".pytest_geov0.db").resolve():
-        return True
-
-    task_runs_root = (resolved_repo_root / ".local-run" / "test-runs").resolve()
-    try:
-        relative_path = resolved_database_path.relative_to(task_runs_root)
-    except ValueError:
-        return False
-
-    return (
-        len(relative_path.parts) == 2
-        and _TASK_SLUG_RE.fullmatch(relative_path.parts[0]) is not None
-        and relative_path.parts[1] == "test.db"
-    )
-
-
 def assert_safe_test_database_url(
     database_url: str,
     *,
@@ -91,10 +60,9 @@ def assert_safe_test_database_url(
 ) -> URL:
     """Validate that a test URL cannot silently target developer data.
 
-    SQLite is accepted only for an in-memory DB, the legacy explicitly pytest
-    DB, or the canonical task-local ``.../test.db`` layout.  PostgreSQL also
-    requires the destructive-reset opt-in, but the opt-in alone is never enough:
-    the database name must match ``geov0_test_*``.  ``required_backend`` lets a
+    Only PostgreSQL is accepted (programme 017).  It requires the
+    destructive-reset opt-in, but the opt-in alone is never enough: the
+    database name must match ``geov0_test_*``.  ``required_backend`` lets a
     test tier reject an otherwise safe URL for the wrong database backend.
 
     ``allow_scratch_suffix`` is for the one caller that DERIVES a name carrying
@@ -112,22 +80,6 @@ def assert_safe_test_database_url(
     url = _parse_url(database_url)
     backend = url.get_backend_name()
     database = url.database or ""
-
-    if backend == "sqlite":
-        if not _is_explicit_local_test_database(database, repo_root=repo_root):
-            raise UnsafeTestDatabaseError(
-                "SQLite test DB must be :memory: or resolve inside the repository "
-                "to .pytest_geov0.db or .local-run/test-runs/<task>/test.db."
-            )
-        if required_backend == "postgresql":
-            raise UnsafeTestDatabaseError(
-                "This test tier requires the PostgreSQL database backend. Unset "
-                "TEST_DATABASE_URL to let scripts/verify_local.ps1 derive "
-                "postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_<TaskSlug>, or set it to "
-                "such a URL with GEO_TEST_ALLOW_DB_RESET=1. No PostgreSQL on this machine? See "
-                "docs/ru/backend/postgres-local-portable.md."
-            )
-        return url
 
     if backend != "postgresql":
         raise UnsafeTestDatabaseError(
