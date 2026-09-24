@@ -403,26 +403,22 @@ async def test_rt_012_1_counter_check_widening_the_door_reproduces_the_finding_e
     # lost - and only then widens the barrier as well, to reach the ledger state `F-012-1` is
     # about.
     #
-    # A THIRD GUARD JOINED THEM on 2026-09-12, and it stands in FRONT of the other two: programme
-    # 015 step 4 armed the debt journal, whose quantization predicate refuses an amount that does
-    # not fit scale 8 BEFORE any debt SQL is sent (design v2 §4 rule 3). It answers `500`, not a
-    # domain code, because `DebtJournalError` is deliberately not a `GeoException` (design v2 §7):
-    # a journal refusal is not a business outcome, it says the process may not write money at all.
-    # That refusal is asserted here first, for the same reason the barrier's was - it is new
-    # behaviour and it must not be lost - and then the journal stands down so the barrier below can
-    # be reached. Three independent guards now stand where one did, and reproducing the finding
-    # requires disabling all three.
+    # A THIRD GUARD STOOD HERE from 2026-09-12 to 2026-09-24: programme 015 step 4 armed the listener
+    # debt journal, whose quantization predicate refused an amount that does not fit scale 8 before
+    # any debt SQL, and two more listener guards (T1528's debt readback, T1530's entry readback)
+    # joined it. 018 stage B1 DELETED all three with the listener: the journal is now written by the
+    # database's `debts` trigger from the stored `NEW` row, so a record that disagrees with the row
+    # it describes cannot arise and there is nothing left to read back (spec 018, "Что даёт триггер
+    # — узко"). The staircase keeps the refusals that replaced them.
     #
-    # TWO MORE JOINED ON 2026-09-24 (018 / FORK-1, slice B0a), and they are the replacement for the
-    # journal's predicate, which stage B of 018 deletes with the listener. THE BOOK checks every
-    # debt amount - input and calculated - against `debts.amount`'s declared capacity before any
-    # debt changes, and it now stands in front of the journal. `MoneyNumeric` checks the same
-    # predicate again at bind, and it is met below, after the journal's domain is widened. Both
-    # read the COLUMN's capacity, not `MONEY_MAX_SCALE`, so widening the door does not widen them:
-    # each is asserted to refuse first - new behaviour that must not be lost - and then EXPLICITLY
-    # bypassed so the later barriers can be reached. A spy on each enforcement point makes the
-    # refusal attributable: over HTTP every one of these is the same 500 E010.
-    from app.core.ledger import book, journal
+    # TWO GUARDS JOINED ON 2026-09-24 (018 / FORK-1, slice B0a), and they are the replacement for the
+    # journal's predicate. THE BOOK checks every debt amount - input and calculated - against
+    # `debts.amount`'s declared capacity before any debt changes. `MoneyNumeric` checks the same
+    # predicate again at bind. Both read the COLUMN's capacity, not `MONEY_MAX_SCALE`, so widening
+    # the door does not widen them: each is asserted to refuse first - behaviour that must not be
+    # lost - and then EXPLICITLY bypassed so the later barriers can be reached. A spy on each
+    # enforcement point makes the refusal attributable: over HTTP both are the same 500 E010.
+    from app.core.ledger import book
     from app.db.types import MoneyNumeric
 
     book_refusals: list[str] = []
@@ -442,27 +438,14 @@ async def test_rt_012_1_counter_check_widening_the_door_reproduces_the_finding_e
         f"ledger. Got {status_code} {body!r}."
     )
     assert book_refusals == ["money_quantization"], (
-        f"the refusal must be the BOOK's storability check (018 FORK-1), which stands in front of "
-        f"the journal; the book recorded {book_refusals!r}."
+        f"the refusal must be the BOOK's storability check (018 FORK-1), the first barrier behind "
+        f"the door; the book recorded {book_refusals!r}."
     )
     monkeypatch.setattr(book, "_refuse_unstorable", lambda value, *, what: None)
 
-    status_code, body = await _submit_signed_payment(pg_client, scenario, amount)
-    assert status_code == 500 and (body or {}).get("error", {}).get("code") == "E010", (
-        f"with the book's check bypassed, a payment of {amount!r} must still be refused by the "
-        f"debt journal before it reaches the ledger. Got {status_code} {body!r}."
-    )
-
-    # THE THIRD GUARD IS WIDENED THE SAME WAY THE DOOR WAS - by moving the constant that decides its
-    # verdict, not by removing the guard. Standing the journal down instead is not an option and the
-    # reason is worth recording: the payment engine OPENS an operation of its own, and an operation
-    # on an engine with no write guard is refused as un-instrumented (`C15`). So the journal cannot
-    # be absent from this path at all; only its money domain can be widened.
-    monkeypatch.setattr(journal, "_MONEY_QUANTUM", Decimal("1E-9"))
-
-    # `MoneyNumeric` AT BIND (018 FORK-1, B0a) is met next: the widened journal lets the flush
-    # build its statements, and the bind of `debts.amount` (and of the entry's amounts) refuses
-    # `0.123456789` before the statement is sent. Asserted, then bypassed like the book's check.
+    # `MoneyNumeric` AT BIND (018 FORK-1, B0a) is met next: with the book's check bypassed the flush
+    # builds its statement, and the bind of `debts.amount` refuses `0.123456789` before the statement
+    # is sent. Asserted, then bypassed like the book's check.
     bind_refusals: list[str] = []
     real_bind_check = MoneyNumeric._refuse_unstorable
 
@@ -476,61 +459,13 @@ async def test_rt_012_1_counter_check_widening_the_door_reproduces_the_finding_e
     monkeypatch.setattr(MoneyNumeric, "_refuse_unstorable", _spy_bind_check)
     status_code, body = await _submit_signed_payment(pg_client, scenario, amount)
     assert status_code == 500 and (body or {}).get("error", {}).get("code") == "E010", (
-        f"with the book bypassed and the journal's money domain widened, the payment of "
-        f"{amount!r} must still be refused - at bind, by MoneyNumeric. Got {status_code} {body!r}."
+        f"with the book's check bypassed, the payment of {amount!r} must still be refused - at "
+        f"bind, by MoneyNumeric. Got {status_code} {body!r}."
     )
     assert bind_refusals and set(bind_refusals) == {"money_quantization"}, (
         f"the refusal must be MoneyNumeric's bind check; it recorded {bind_refusals!r}."
     )
     monkeypatch.setattr(MoneyNumeric, "_refuse_unstorable", lambda self, value: None)
-
-    # A FOURTH GUARD JOINED THEM ON 2026-09-13 (T1528), and widening a constant does not get past
-    # it, because it has no constant. The journal now reads every row it recorded BACK OUT OF THE
-    # DATABASE after the flush and refuses when the stored row differs from the record
-    # (`_reconcile`). This scenario is exactly such a difference and it is worth stating why: with
-    # the money domain widened to 1E-9 the journal's own round-trip predicate sees NOTHING wrong,
-    # because it asks `Numeric(20, 8)`'s processors and on asyncpg both are the identity - so it
-    # never learns that PostgreSQL itself rounds the ninth digit away. The readback learns it from
-    # the database: the entry would say `0.123456789` and `debts` holds `0.12345679`.
-    #
-    # So the refusal is asserted here first - it is new behaviour and it must not be lost - and only
-    # then is that mechanism stood down so the barrier below can be reached. Standing it down is
-    # "removing the guard" rather than "moving the constant that decides its verdict", which this
-    # module avoids everywhere else; it is done here because a measurement against the database has
-    # no constant to move, and it is the last of the four.
-    status_code, body = await _submit_signed_payment(pg_client, scenario, amount)
-    assert status_code == 500 and (body or {}).get("error", {}).get("code") == "E010", (
-        f"with the journal's money domain widened to 1E-9 the payment of {amount!r} must still be "
-        f"refused - by the readback, which compares the stored row with the record rather than with "
-        f"a predicate. Got {status_code} {body!r}."
-    )
-    monkeypatch.setattr(journal, "_reconcile", lambda conn, states: None)
-
-    # A FIFTH GUARD JOINED THEM ON 2026-09-13 (T1530), and it is the mirror of the fourth. `_reconcile`
-    # reads the DEBT row back; `_verify_entries` reads the journal's OWN entries back and requires them
-    # to be the effects the flush hook computed. With the money domain widened to 1E-9 and the debt
-    # readback stood down, this one still speaks, and for the same reason and from the other side:
-    # PostgreSQL rounds the ninth digit away when it stores the entry, so the stored entry reads
-    # `0.123456790` where the journal computed `0.123456789` (measured on this scenario, which is
-    # where the difference was found). It refuses as `unrecorded_journal_entry`.
-    #
-    # Asserted first because it is new behaviour and must not be lost, then stood down for the same
-    # reason the fourth was: a measurement against the database has no constant to move. FIVE
-    # independent guards stood where one did, SEVEN since 018 B0a added the book's check and the
-    # bind check, and reproducing `F-012-1` requires disabling all of them - which is the point of
-    # this staircase, not an obstacle to it.
-    status_code, body = await _submit_signed_payment(pg_client, scenario, amount)
-    assert status_code == 500 and (body or {}).get("error", {}).get("code") == "E010", (
-        f"with the debt readback stood down the payment of {amount!r} must still be refused - by the "
-        f"entry readback, which holds the stored journal rows to the effects the hook computed. Got "
-        f"{status_code} {body!r}."
-    )
-    monkeypatch.setattr(journal, "_verify_entries", lambda conn, op, ordinal, effects: None)
-    # T1530 IS ONE GUARD IN TWO PLACES, and both have to go: the per-flush readback above, and the
-    # completion check that holds every stored entry to the effects the operation computed before the
-    # digest is taken. Standing only the first down leaves the second refusing the same row, which is
-    # how this staircase found it.
-    monkeypatch.setattr(journal, "_verify_completed_entries", lambda record, stored: None)
 
     status_code, body = await _submit_signed_payment(pg_client, scenario, amount)
     assert status_code == 409, (
@@ -564,6 +499,30 @@ async def test_rt_012_1_counter_check_widening_the_door_reproduces_the_finding_e
     )
     assert Decimal(rows[0]) != Decimal(amount), (
         f"{_WHY}\n(reproduced deliberately by this counter-check with MONEY_MAX_SCALE=18)"
+    )
+
+    # THE RECORD IS THE STORED ROW (018 stage B1). What the deleted listener readbacks (T1528, T1530)
+    # guarded - a journal entry saying `0.123456789` beside a debt holding `0.12345679` - cannot
+    # arise any more: the `debts` trigger builds the entry from the row PostgreSQL stored. On exactly
+    # the scenario where the listener found that difference, the payment's entry for this edge holds
+    # the stored value, not the signed one.
+    from tests.conftest import TestingSessionLocal
+
+    async with TestingSessionLocal() as session:
+        recorded = (
+            await session.execute(
+                text(
+                    "SELECT e.amount_after::text FROM debt_journal_entries e "
+                    "JOIN debt_operations o ON o.id = e.operation_id "
+                    "WHERE e.equivalent_id = :eq AND o.kind = 'PAYMENT' AND o.state = 'COMPLETED' "
+                    "ORDER BY e.ordinal DESC LIMIT 1"
+                ),
+                {"eq": scenario["equivalent_id"]},
+            )
+        ).scalar_one()
+    assert recorded == rows[0], (
+        f"the committed payment's journal entry records {recorded!r} while debts holds {rows[0]!r}: "
+        f"the record is not the stored row."
     )
 
     # THE CLAIM THAT IS NOT ASSERTED, and deliberately so. `DEFAULT_MAX_AMOUNT_SCALE` is

@@ -6,9 +6,10 @@ WHAT THIS TIER ADDS over `tests/unit/test_p015_step5a_reconciliation.py`:
   three tables - columns, primary keys, foreign keys with their `ON DELETE`, CHECKs, indexes and the
   baseline's comment - and the constraints must bite on both.
 * ASYNCPG. Native `uuid`, `Decimal` untouched, `$n` placeholders, JSON binding of the result row.
-* THE CUTOVER RACE. The journal refuses a SEED written after the baseline by READING the baseline at
-  completion. A baseline committed while such an operation is open is invisible to that read under a
-  snapshot. The claim in `journal._complete` is that `SERIALIZABLE` - the application's isolation level -
+* THE CUTOVER RACE. The book refuses a SEED written after the baseline by READING the baseline at
+  completion (`app/core/ledger/book.py::_complete`, moved there from the deleted listener journal by 018
+  stage B1). A baseline committed while such an operation is open is invisible to that read under a
+  snapshot. The claim in `_complete` is that `SERIALIZABLE` - the application's isolation level -
   refuses one of the two with `40001`. It is measured here, not argued.
 
 Every test that commits does so on a disposable clone of the migrated template (`committed_database`),
@@ -27,7 +28,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from app.core.ledger.journal import DebtJournalError, Reason, debt_operation
+from app.core.ledger.book import Book, BookError, Refusal, operation_for
 from app.core.ledger.reconciliation import FAILED, PASSED, UNVERIFIABLE, take_baseline
 from app.db.base import Base
 from app.db.models.debt import Debt
@@ -294,12 +295,12 @@ async def test_step5a_p_a_fixture_write_after_the_baseline_is_refused(factory) -
         id=uuid.uuid4(), debtor_id=triangle.b.id, creditor_id=triangle.c.id,
         equivalent_id=triangle.equivalent.id, amount=Decimal("4"), version=0,
     )
-    with pytest.raises(DebtJournalError) as refused:
+    with pytest.raises(BookError) as refused:
         async with factory() as session:
             async with debt_fixture_setup(session, label="after-baseline"):
                 session.add(late)
             await session.commit()
-    assert refused.value.reason == Reason.UNVERIFIABLE_WRITER_AFTER_BASELINE, refused.value
+    assert refused.value.reason == Refusal.UNVERIFIABLE_WRITER_AFTER_BASELINE, refused.value
     assert await _edges(factory, triangle) == {("a", "b"): Decimal("10.00000000")}
 
 
@@ -367,7 +368,7 @@ async def test_step5a_p_a_baseline_committed_while_a_seed_is_open_cannot_commit_
     commit, and what stopped it is a serialization failure (`40001`), and the baseline stands.
 
     If this goes green for any other reason the assertion on the SQLSTATE says so; if the SEED commits,
-    the refusal in `journal._complete` is racy and the claim in its comment is false.
+    the refusal in `book._complete` is racy and the claim in its comment is false.
     """
 
     url = committed_database.url
@@ -382,12 +383,14 @@ async def test_step5a_p_a_baseline_committed_while_a_seed_is_open_cannot_commit_
         )
         async with sessions() as seed:
             try:
-                async with debt_operation(
+                async with Book.operation(
                     seed,
-                    kind="SEED",
-                    identity=f"step5a-race/{uuid.uuid4()}",
-                    intent={"probe": "cutover-race"},
-                    scope_equivalent_ids=None,
+                    operation_for(
+                        "SEED",
+                        f"step5a-race/{uuid.uuid4()}",
+                        {"probe": "cutover-race"},
+                        scope_equivalent_ids=None,
+                    ),
                 ):
                     seed.add(late)
                     await seed.flush()

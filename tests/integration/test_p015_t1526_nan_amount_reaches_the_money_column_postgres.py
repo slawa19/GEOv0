@@ -70,6 +70,7 @@ from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 
+from app.core.ledger.book import Book, operation_for
 from tests.debt_setup import debt_fixture_setup
 
 
@@ -180,16 +181,15 @@ async def test_a_an_orm_write_of_nan_must_not_reach_the_money_column(factory):
 
     refusal: BaseException | None = None
     second = uuid.uuid4()
-    # THE DEBT JOURNAL STANDS DOWN FOR THIS WRITE, and it must. Armed (step 4 slice C), the
-    # journal refuses a non-finite amount by its OWN finiteness predicate, before any SQL - so
-    # `MoneyNumeric` and the column's CHECK, which this module exists to hold in place, would
-    # never be reached and its mutation would leave the test green. A test screened by a second
-    # guard has stopped measuring its subject. Per engine, re-armed immediately.
-    from app.core.ledger import journal
-
-    journal.uninstall_write_guard(factory.kw.get("bind"))
-    try:
-        async with factory() as session:
+    # NOTHING STANDS DOWN (018 stage B1). Until B1 the listener journal refused a non-finite amount by
+    # its OWN predicate before any SQL, and this test uninstalled it for the write so that
+    # `MoneyNumeric` and the column's CHECK - this module's subject - were reached. The journal is now
+    # the database's trigger, which checks no money domain, and the `Debt` is added directly (not
+    # through `Posting.apply`, whose storability check would answer first), so the first thing to meet
+    # the NaN is `MoneyNumeric` at bind. The book flushes when its block ends, so the refusal is raised
+    # at the block's exit and the `try` spans the whole block.
+    async with factory() as session:
+        try:
             async with debt_fixture_setup(session, label="setup"):
                 session.add(
                     Debt(
@@ -200,13 +200,10 @@ async def test_a_an_orm_write_of_nan_must_not_reach_the_money_column(factory):
                         amount=Decimal("NaN"),
                     )
                 )
-            try:
-                await session.commit()
-            except (StatementError, DBAPIError, ValueError) as exc:
-                refusal = exc
-                await session.rollback()
-    finally:
-        journal.install_write_guard(factory.kw.get("bind"))
+            await session.commit()
+        except (StatementError, DBAPIError, ValueError) as exc:
+            refusal = exc
+            await session.rollback()
 
     stored = await _amounts(factory, world)
     assert stored == ["5.00000000"], (
@@ -253,12 +250,10 @@ async def test_b_one_nan_debt_makes_the_sum_of_the_book_stop_being_a_number(fact
     # NON-VACUITY: the sum is a real number before the NaN attempt.
     assert str(before) == "5.00000000", f"the seeded book does not sum to 5: {before!r}"
 
-    # Same stand-down, same reason as `test_a`: the subject is the COLUMN, not the journal.
-    from app.core.ledger import journal
-
-    journal.uninstall_write_guard(factory.kw.get("bind"))
-    try:
-        async with factory() as session:
+    # No stand-down since 018 B1, for the reason given in `test_a`; the refusal surfaces at the book's
+    # block exit, so the `try` spans the block.
+    async with factory() as session:
+        try:
             async with debt_fixture_setup(session, label="setup"):
                 session.add(
                     Debt(
@@ -268,12 +263,9 @@ async def test_b_one_nan_debt_makes_the_sum_of_the_book_stop_being_a_number(fact
                         amount=Decimal("NaN"),
                     )
                 )
-            try:
-                await session.commit()
-            except (StatementError, DBAPIError, ValueError):
-                await session.rollback()
-    finally:
-        journal.install_write_guard(factory.kw.get("bind"))
+            await session.commit()
+        except (StatementError, DBAPIError, ValueError):
+            await session.rollback()
 
     async with factory() as fresh:
         after = (
@@ -290,6 +282,12 @@ async def test_b_one_nan_debt_makes_the_sum_of_the_book_stop_being_a_number(fact
     )
 
 
+def _raw_operation(label: str):
+    """A `TEST_FIXTURE` operation of the book for this module's raw statements (018 B1)."""
+
+    return operation_for("TEST_FIXTURE", f"t1526/{label}/{uuid.uuid4()}", {"label": label})
+
+
 @pytest.mark.asyncio
 async def test_c_the_database_itself_refuses_nan_when_python_is_bypassed(factory):
     """RAW SQL. No ORM, no type, no application validation - only the CHECK constraint is left.
@@ -299,21 +297,29 @@ async def test_c_the_database_itself_refuses_nan_when_python_is_bypassed(factory
     reach this table, and a database-level guarantee has to hold for the `psql` session too.
     """
     world = await _seed(factory)
+    # INSIDE AN OPEN OPERATION (018 stage B1). A raw INSERT with no operation named in the transaction
+    # is refused by the `debts` trigger (`GE001`) whatever its amount, which would make both halves
+    # below measure the journal instead of the value. Both statements run inside a `TEST_FIXTURE`
+    # operation of the book on the same session - the book's own block, not `debt_fixture_setup`, whose
+    # AST guard admits no raw statement - so `geo.operation_id` is set and the only thing left to
+    # refuse the NaN is the column's CHECK (a row CHECK is evaluated before an AFTER-row trigger).
+    #
     # NON-VACUITY: the same raw statement stores an ordinary amount, so a refusal below is
     # about the VALUE and not about the statement being malformed.
     async with factory() as session:
-        await session.execute(
-            text(
-                "INSERT INTO debts (id, debtor_id, creditor_id, equivalent_id, amount, version)"
-                " VALUES (:id, :d, :c, :e, 7.00000000, 0)"
-            ),
-            {
-                "id": uuid.uuid4(),
-                "d": world.creditor_id,
-                "c": world.debtor_id,
-                "e": world.equivalent_id,
-            },
-        )
+        async with Book.operation(session, _raw_operation("raw-control")):
+            await session.execute(
+                text(
+                    "INSERT INTO debts (id, debtor_id, creditor_id, equivalent_id, amount, version)"
+                    " VALUES (:id, :d, :c, :e, 7.00000000, 0)"
+                ),
+                {
+                    "id": uuid.uuid4(),
+                    "d": world.creditor_id,
+                    "c": world.debtor_id,
+                    "e": world.equivalent_id,
+                },
+            )
         await session.commit()
     assert sorted(await _amounts(factory, world)) == ["5.00000000", "7.00000000"], (
         "the raw INSERT could not store an ordinary amount, so this stand cannot tell a "
@@ -324,21 +330,22 @@ async def test_c_the_database_itself_refuses_nan_when_python_is_bypassed(factory
     constraint = None
     async with factory() as session:
         try:
-            await session.execute(
-                text(
-                    "INSERT INTO debts (id, debtor_id, creditor_id, equivalent_id, amount,"
-                    " version) VALUES (:id, :d, :c, :e, 'NaN', 0)"
-                ),
-                {
-                    "id": uuid.uuid4(),
-                    # An edge of its own: the seeded edge and the 7.00000000 edge are both
-                    # taken, and the unique constraint would refuse this row before the
-                    # amount was looked at.
-                    "d": world.third_id,
-                    "c": world.debtor_id,
-                    "e": world.equivalent_id,
-                },
-            )
+            async with Book.operation(session, _raw_operation("raw-nan")):
+                await session.execute(
+                    text(
+                        "INSERT INTO debts (id, debtor_id, creditor_id, equivalent_id, amount,"
+                        " version) VALUES (:id, :d, :c, :e, 'NaN', 0)"
+                    ),
+                    {
+                        "id": uuid.uuid4(),
+                        # An edge of its own: the seeded edge and the 7.00000000 edge are both
+                        # taken, and the unique constraint would refuse this row before the
+                        # amount was looked at.
+                        "d": world.third_id,
+                        "c": world.debtor_id,
+                        "e": world.equivalent_id,
+                    },
+                )
             await session.commit()
         except DBAPIError as exc:
             await session.rollback()

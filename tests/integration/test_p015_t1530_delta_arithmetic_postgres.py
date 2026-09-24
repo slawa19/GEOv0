@@ -21,48 +21,46 @@ copies of the same DDL kept the difference alive. `migrations/env.py` now establ
 itself, so every caller of the migration entry - this module included - gets it, and the sentence
 "a bare command does not" is no longer true of this tree.
 
-WHAT ELSE IS HERE, and it cannot be on the SQLite tier:
+WHAT IS NO LONGER HERE (018 stage B1). This module also held the listener journal's asyncpg half of
+`T1530`/`T1531` - an entry INSERT rewritten by a neighbour and refused by the journal's readback, and a
+full-width movement recorded through that readback. The listener is deleted; the `debts` trigger writes
+the entry from `OLD`/`NEW` inside the statement, so no client INSERT of an entry exists to rewrite.
+Those effects now live in `tests/integration/test_p018_b_the_record_is_the_stored_row_postgres.py`
+(an entry never comes from a client statement; a full-width rewrite is stored and journalled as
+stored; full width recorded exactly). The two construction paths of the trigger itself are
+`tests/integration/test_p018_b_schema_parity_postgres.py`; this module keeps the CHECK.
 
-* THE PLACEHOLDERS. The journal's verification reads are hand-written SQL through `exec_driver_sql`
-  (T1531), so they spell their own placeholders: aiosqlite is `qmark` and asyncpg is `numeric_dollar`.
-  A read written against one tier binds nothing on the other, and "binds nothing" returns no rows, which
-  reads exactly like "the row is gone".
-* THE UUID SPELLING. `Uuid(as_uuid=True)` is 32 hex characters on SQLite and a native `uuid` on
-  PostgreSQL. Two counterexamples in this programme have already gone falsely green on that difference.
-* WHAT THE DRIVER RETURNS. asyncpg hands back `NUMERIC` as `Decimal` untouched, and its result processor
-  cannot even be built without a result-set column type - the branch `_money_out` has for it.
-
-Every verdict is read on a new session, each test names the mutation that must turn it red, and the
-stand purges what it created.
+THE PROBE GOES THROUGH THE NAMED CORRUPTION HELPER (spec 018 `FORK-4`, "пробы CHECK журнала", manifest
+`T1808` section 3 item 4). A direct INSERT into `debt_journal_entries` now meets the guard trigger
+first (`BEFORE ... FOR EACH ROW` fires before a CHECK is evaluated), so it would measure the guard and
+never the CHECK - asserted below as the premise. With the triggers off, in a transaction that is rolled
+back, only the CHECK can answer; an honest row is the control.
 """
 
 from __future__ import annotations
 
 import uuid
-from decimal import Decimal
+from pathlib import Path
 
 import pytest
-import pytest_asyncio
-from sqlalchemy import event, select, text
-from sqlalchemy.exc import DBAPIError, InvalidRequestError
+from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.pool import NullPool
 
-from app.core.ledger import journal
 from app.db.base import Base
 from app.db.journal_tables import debt_journal_entries
-from app.db.models.debt import Debt
-from app.db.models.equivalent import Equivalent
-from app.db.models.participant import Participant
+from tests.ledger_corruption import probe
 from tests.migrated_schema import run_alembic_upgrade_head, scratch_databases
-from tests.p015_b4a_stand import Stand, arm_stand, identity
-
-_SCENARIO_END = (journal.DebtJournalError, InvalidRequestError)
 
 #: The constraint this slice adds, and the predicate both construction paths must produce.
 _CONSTRAINT = "chk_debt_journal_entries_delta_arithmetic"
 
-#: SQLSTATE for a CHECK violation. Asserted rather than matched on prose, per `Reason`'s own rule.
+#: SQLSTATE for a CHECK violation. Asserted rather than matched on prose.
 _CHECK_VIOLATION = "23514"
+
+#: SQLSTATE of the journal tables' guard triggers (018 B1, `app/db/journal_triggers.py`).
+_GUARD = "23000"
 
 
 def _postgres_url() -> str:
@@ -78,30 +76,6 @@ def _postgres_url() -> str:
     if "postgresql" not in TEST_DATABASE_URL:
         pytest.skip(f"this module needs a PostgreSQL TEST_DATABASE_URL, got {TEST_DATABASE_URL!r}")
     return TEST_DATABASE_URL
-
-
-@pytest_asyncio.fixture
-async def stand():
-    """This module's own engine on the gate's database, with the journal armed."""
-
-    from tests.conftest import _ensure_schema_initialized
-
-    url = _postgres_url()
-    await _ensure_schema_initialized()
-    engine = create_async_engine(url, pool_size=4, max_overflow=0, pool_timeout=15)
-    built = await arm_stand(engine, extra_participants=1)
-    try:
-        yield built
-    finally:
-        await built.close(purge=True)
-
-
-async def _refusal_of(awaitable) -> BaseException | None:
-    try:
-        await awaitable
-    except journal.DebtJournalError as exc:
-        return exc
-    return None
 
 
 # =================================================================================================
@@ -129,74 +103,50 @@ async def _check_constraints(url: str, table: str) -> dict[str, str]:
         await engine.dispose()
 
 
-async def _arithmetic_bites(url: str) -> str | None:
-    """Insert a row whose delta contradicts its ends. Returns the SQLSTATE that refused it, or None.
+def _entry(delta: int) -> str:
+    """An otherwise-valid `U 10 -> 11` entry with the given delta, as one INSERT statement.
 
     THE ROW IS OTHERWISE VALID, which is what makes this a test of the arithmetic clause and not of
-    the shape clause next to it: effect `U`, both ends present and different, a non-zero bounded delta
-    - and `delta = 2` where `after - before = 1`. Its foreign keys point at rows this function creates
-    first, so a refusal can only be the arithmetic: a probe refused by a foreign key would look exactly
-    like a probe refused by the constraint, and that is the class of false evidence `Reason` exists for.
+    the shape clause next to it: effect `U`, both ends present and different, a non-zero bounded
+    delta. Its references name no rows: under the helper's `replica` setting the foreign keys are off,
+    so a refusal can only be a CHECK - and the honest control row shows no CHECK refuses the shape.
     """
 
-    engine = create_async_engine(url)
+    return (
+        "INSERT INTO debt_journal_entries (id, operation_id, ordinal, equivalent_id, debtor_id, "
+        "creditor_id, effect, amount_before, amount_after, delta) VALUES "
+        f"('{uuid.uuid4()}', '{uuid.uuid4()}', 1, '{uuid.uuid4()}', '{uuid.uuid4()}', "
+        f"'{uuid.uuid4()}', 'U', 10, 11, {int(delta)})"
+    )
+
+
+async def _directly_refused_by(url: str, statement: str) -> str | None:
+    """The SQLSTATE that refuses `statement` on an ordinary connection (triggers on), rolled back."""
+
+    engine = create_async_engine(url, poolclass=NullPool)
     try:
-        async with engine.begin() as connection:
-            tag = uuid.uuid4().hex[:8]
-            participants = [uuid.uuid4(), uuid.uuid4()]
-            equivalents = [uuid.uuid4()]
-            await connection.execute(
-                Equivalent.__table__.insert(),
-                [{"id": equivalents[0], "code": f"T15{tag[:4].upper()}", "precision": 2,
-                  "is_active": True, "metadata_": {}}],
-            )
-            await connection.execute(
-                Participant.__table__.insert(),
-                [
-                    {
-                        "id": participant,
-                        "pid": f"T1530_{index}_{tag}",
-                        "display_name": f"probe {index}",
-                        "public_key": f"pk_t1530_{index}_{tag}",
-                        "type": "person",
-                        "status": "active",
-                        "profile": {},
-                    }
-                    for index, participant in enumerate(participants)
-                ],
-            )
-            operation_id = uuid.uuid4()
-            await connection.execute(
-                text(
-                    "INSERT INTO debt_operations (id, kind, identity, intent, intent_digest, "
-                    "schema_version, money_encoding_version, intent_encoding_version, state) "
-                    "VALUES (:id, 'TEST_FIXTURE', :identity, '{}', :digest, 1, 1, 1, 'OPEN')"
-                ),
-                {"id": operation_id, "identity": f"t1530-probe/{operation_id}", "digest": "0" * 64},
-            )
+        async with engine.connect() as connection:
+            transaction = await connection.begin()
             try:
-                await connection.execute(
-                    text(
-                        "INSERT INTO debt_journal_entries (id, operation_id, flush_ordinal, "
-                        "equivalent_id, debtor_id, creditor_id, effect, amount_before, amount_after, "
-                        "delta) VALUES (:id, :operation_id, 1, :equivalent_id, :debtor_id, "
-                        ":creditor_id, 'U', 10, 11, 2)"
-                    ),
-                    {
-                        "id": uuid.uuid4(),
-                        "operation_id": operation_id,
-                        "equivalent_id": equivalents[0],
-                        "debtor_id": participants[0],
-                        "creditor_id": participants[1],
-                    },
-                )
+                await connection.exec_driver_sql(statement)
             except DBAPIError as exc:
-                return getattr(getattr(exc, "orig", None), "sqlstate", None) or getattr(
-                    exc.orig, "pgcode", None
-                )
-            return None
+                orig = getattr(exc, "orig", None)
+                return getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)
+            finally:
+                await transaction.rollback()
+        return None
     finally:
         await engine.dispose()
+
+
+async def _arithmetic_bites(url: str) -> tuple[str | None, str | None, str | None]:
+    """(direct INSERT, contradicting row through the helper, honest row through the helper)."""
+
+    return (
+        await _directly_refused_by(url, _entry(2)),
+        await probe(url, _entry(2)),
+        await probe(url, _entry(1)),
+    )
 
 
 @pytest.mark.asyncio
@@ -268,144 +218,52 @@ async def test_t1530_p_the_constraint_exists_and_bites_on_both_construction_path
 
         # AND IT BITES, on both, with the same SQLSTATE.
         for label, scratch in (("metadata", metadata_url), ("alembic", migrated_url)):
-            sqlstate = await _arithmetic_bites(scratch)
-            assert sqlstate == _CHECK_VIOLATION, (
-                f"{label}: an entry saying `10 -> 11, delta 2` was accepted (sqlstate={sqlstate!r}). "
-                f"The constraint exists in the catalogue and does not refuse, which is worse than "
-                f"its absence because the catalogue then lies."
+            direct, contradicting, honest = await _arithmetic_bites(scratch)
+            # PREMISE (018 B1): from an ordinary connection the guard trigger answers first, so a
+            # direct probe would measure the guard, not the CHECK.
+            assert direct == _GUARD, (
+                f"{label}: a direct entry INSERT was answered by {direct!r}, not by the journal "
+                f"guard; this probe's reason for going through the corruption helper is gone"
+            )
+            assert contradicting == _CHECK_VIOLATION, (
+                f"{label}: an entry saying `10 -> 11, delta 2` was accepted with the triggers off "
+                f"(sqlstate={contradicting!r}). The constraint exists in the catalogue and does not "
+                f"refuse, which is worse than its absence because the catalogue then lies."
+            )
+            assert honest is None, (
+                f"{label}: the honest `10 -> 11, delta 1` control was refused ({honest!r}), so the "
+                f"refusal above may not be the arithmetic clause"
             )
 
 
 # =================================================================================================
-# The in-process layer, on asyncpg's spellings
+# The two sources of the constraint's text (moved verbatim from the deleted
+# `tests/unit/test_p015_t1530_the_journal_reads_its_own_record_back.py`, 018 B1)
 # =================================================================================================
 
 
-@pytest.mark.asyncio
-async def test_t1530_p_a_rewritten_entry_is_refused_with_asyncpg_spellings(stand: Stand) -> None:
-    """T1530 layer 2 / T1531, on this driver. The readback binds `$1` and a native `uuid`.
+def test_t1530_the_migration_and_the_metadata_spell_the_same_predicate() -> None:
+    """T1530, layer 1. The two sources of the constraint cannot drift apart silently.
 
-    WHY THIS IS NOT A COPY OF THE SQLITE TEST. The readback is hand-written SQL now, so its
-    placeholders and its bound values are per-dialect: `numeric_dollar` here against `qmark` there, a
-    native `uuid` here against 32 hex characters there. A read that bound nothing would return no rows,
-    and no rows reads as "the entries are missing" - a refusal for the wrong reason, which is the exact
-    failure mode `Reason` exists to make visible. So the refusal's NAME is asserted, and the statement's
-    own placeholders are asserted with it.
+    NEEDS NO SERVER, WHICH IS THE POINT. The real comparison - what PostgreSQL actually holds after each
+    construction path - is the test above and needs a database. This one is the cheap half: the
+    predicate text in `app/db/journal_tables.py` and the one in migration `024_debt_journal_delta` are
+    compared as strings, so an edit to either that is not made to both is red at once.
 
-    MUTATION that must redden this: spell the placeholders `?` unconditionally in `_raw_params`. The
-    statement then fails to execute at all on asyncpg and the refusal's name changes.
+    MUTATION that must redden this: change the predicate in one of the two files.
     """
 
-    ident = identity("t1530-p-amount")
-    observed: list[str] = []
-    fired: list[str] = []
+    root = Path(__file__).resolve().parents[2]
+    migration = (
+        root / "migrations" / "versions" / "024_debt_journal_entries_delta_is_arithmetic.py"
+    ).read_text(encoding="utf-8")
+    tables = (root / "app" / "db" / "journal_tables.py").read_text(encoding="utf-8")
+    predicate = "delta = COALESCE(amount_after, 0) - COALESCE(amount_before, 0)"
 
-    def _watch(conn, cursor, statement, parameters, context, executemany):  # noqa: ANN001
-        flattened = " ".join(statement.split())
-        if flattened.startswith("SELECT flush_ordinal"):
-            observed.append(flattened)
-
-    def _rewrite(conn, clause, multiparams, params, execution_options):  # noqa: ANN001
-        table = getattr(getattr(clause, "table", None), "name", None)
-        if table != debt_journal_entries.name or not type(clause).__name__.endswith("Insert"):
-            return clause, multiparams, params
-        if isinstance(params, dict) and params and params.get("amount_after") is not None:
-            changed = dict(params)
-            changed["amount_after"] = Decimal(changed["amount_after"]) + 1
-            changed["delta"] = Decimal(changed["delta"]) + 1
-            fired.append("rewrote")
-            return clause, multiparams, changed
-        return clause, multiparams, params
-
-    # A FULL-WIDTH AMOUNT, which exists on this tier only (design v2 §4): twelve integer digits, so
-    # the comparison has to be exact rather than float-shaped.
-    before = Decimal("999999999990.00000000")
-    after = Decimal("999999999991.00000000")
-
-    # SEEDED BEFORE THE TAMPER IS INSTALLED. Registering the listener first would rewrite the SEED's
-    # own entry, and the refusal would then be about the fixture rather than about the scenario -
-    # measured, on the first run of this test.
-    async with stand.factory() as session:
-        subject = stand.debt("0", raw_amount=before)
-        async with stand.operation("t1530-p-seed", session=session):
-            session.add(subject)
-            await session.flush()
-        await session.commit()
-        debt_id = subject.id
-
-    event.listen(stand.engine.sync_engine, "after_cursor_execute", _watch)
-    event.listen(stand.engine.sync_engine, "before_execute", _rewrite, retval=True)
-    refusal: BaseException | None = None
-    try:
-        async with stand.factory() as session:
-            async with stand.operation("t1530-p-amount", session=session, identity=ident):
-                row = await session.get(Debt, debt_id)
-                row.amount = after
-                refusal = await _refusal_of(session.flush())
-            if refusal is None:
-                refusal = await _refusal_of(session.commit())
-    except _SCENARIO_END as exc:  # noqa: B902 - the refusal is the subject
-        refusal = refusal if refusal is not None else exc
-    finally:
-        event.remove(stand.engine.sync_engine, "before_execute", _rewrite)
-        event.remove(stand.engine.sync_engine, "after_cursor_execute", _watch)
-
-    async with stand.factory() as fresh:
-        stored = (
-            await fresh.execute(select(Debt.amount).where(Debt.id == debt_id))
-        ).scalar_one_or_none()
-    entries = await stand.entries(ident)
-
-    assert fired == ["rewrote"], f"stand: the entry INSERT was never rewritten ({fired})"
-    assert observed, "stand: the entry readback never ran, so nothing was verified"
-    assert "$1" in observed[0] and "$2" in observed[0], (
-        f"the entry readback is not using asyncpg's placeholders: {observed[0]!r}"
+    assert predicate in migration, (
+        f"migration 024 no longer spells the predicate as `{predicate}`; if it moved, this comparison "
+        f"has to move with it rather than be deleted"
     )
-    assert refusal is not None, (
-        f"the record said something else than the table and nothing refused: `debts` holds {stored}, "
-        f"entries {entries}"
-    )
-    assert isinstance(refusal, journal.DebtJournalError), repr(refusal)
-    assert refusal.reason in (
-        journal.Reason.UNRECORDED_JOURNAL_ENTRY,
-        journal.Reason.ROOT_POISONED,
-    ), refusal
-    assert stored == before, f"the refused flush is durable: {stored}"
-    assert entries == [], f"a refused operation still has entries: {entries}"
-
-
-@pytest.mark.asyncio
-async def test_t1530_p_an_ordinary_full_width_movement_still_records(stand: Stand) -> None:
-    """T1530, ANTI-VACUUM on this tier: the readback must not refuse a legitimate exact amount.
-
-    The readbacks decode money through the column type's own result processor, and on asyncpg that
-    processor cannot be built at all (it raises without a result-set column type) - so the value arrives
-    as `Decimal` and is used untouched. If that branch were wrong, every full-width movement would be
-    refused as a disagreement. Twelve integer digits exist only here, which is why this control is here.
-
-    MUTATION that must redden this: make `_money_out` return `_as_decimal(str(value))` through a float
-    (`float(value)`), which loses the twentieth digit and turns every full-width amount into a
-    disagreement.
-    """
-
-    ident = identity("t1530-p-ok")
-    amount = Decimal("999999999999.99999999")
-
-    async with stand.factory() as session:
-        subject = stand.debt("0", raw_amount=amount)
-        async with stand.operation("t1530-p-ok", session=session, identity=ident):
-            session.add(subject)
-            await session.flush()
-        await session.commit()
-        debt_id = subject.id
-
-    entries = await stand.entries(ident)
-    envelopes = await stand.envelopes(ident)
-    async with stand.factory() as fresh:
-        stored = (await fresh.execute(select(Debt.amount).where(Debt.id == debt_id))).scalar_one()
-
-    assert stored == amount, f"the amount did not round-trip at full width: {stored}"
-    assert len(entries) == 1, entries
-    assert entries[0]["amount_after"] == amount, entries
-    assert entries[0]["delta"] == amount, entries
-    assert envelopes and envelopes[0]["state"] == "COMPLETED", envelopes
+    assert predicate in tables, f"`app/db/journal_tables.py` no longer spells `{predicate}`"
+    assert "chk_debt_journal_entries_delta_arithmetic" in migration
+    assert "chk_debt_journal_entries_delta_arithmetic" in tables

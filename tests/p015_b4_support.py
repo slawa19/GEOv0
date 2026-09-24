@@ -1,38 +1,21 @@
-"""Scaffolding shared by the programme 015 phase B step-2 counterexamples (`B4`).
+"""Scaffolding shared by the programme 015 phase B step-4 counterexamples (`B4`). NOT a test module.
 
-WHY THIS FILE EXISTS AND WHAT IT IS NOT. The counterexamples for the debt journal are written
-BEFORE the journal exists - that is the whole point of step 2, and the spec's binding acceptance of
-`B4` (2026-09-11) says so: "каждое пишется красным контрпримером до кода". Three modules need the
-same two things, and duplicating either would let them drift apart:
+WHAT IT IS NOW (018 stage B1, 2026-09-24). The step-2 scaffolding this file was written for - an import
+of the listener journal from inside the test body, a no-op `operation()` while the journal did not
+exist, the journal's refusal types - went with `app/core/ledger/journal.py`. The journal is the
+database's (`app/db/journal_triggers.py`, migration 029) and the envelope is the book's
+(`app/core/ledger/book.py`). What stays is what the surviving modules share:
 
-* one definition of "import the API under construction from inside the test body", so that a
-  counterexample fails on the PROPERTY it names and not on a missing file;
-* one small world (two participants, one equivalent, debts) that every scenario writes into.
+* `operation()` - a `Book` operation with the keyword shape these modules spell;
+* one small world (two participants, two equivalents, optional extras) and fresh-session readers.
 
-It is not a test module (pytest collects `test_*.py` only) and it holds no assertions of its own.
+`None` from `stored_rows` still means "the query could not run", never "no rows": the
+distinction the step-2 red state needed stays useful for a table that a broken schema lacks.
 
-THE IMPORT RULE, and why it is built this way. `app/core/ledger/journal.py` does not exist today.
-Importing it at module level would make every counterexample fail with `ModuleNotFoundError` during
-collection, which proves nothing: a missing file is not a missing property, and the whole suite
-would go green the moment an empty module appeared. So:
-
-1. `journal_api()` is called INSIDE the test body. When the module is absent it returns a handle
-   whose `refusals` tuple holds a private exception class that nothing in this repository ever
-   raises. Every `except api.refusals` therefore catches nothing, the scenario runs to its end, and
-   the test fails on its own verdict assertion - "a Debt was written with no operation open and
-   nothing refused it" - which names the property.
-2. `operation()` opens a real journal operation when the module is there and is a no-op when it is
-   not. A counterexample whose subject is "operation A on this session does not cover a write on
-   that session" therefore still runs today, in its degenerate form ("nothing covers the write at
-   all"), and is red for a reason that is a strict weakening of the one it will test later. Each
-   such test says so in its own docstring; `api.available` is asserted wherever the degenerate form
-   would be VACUOUS instead of weaker.
-
-MONEY VALUES. The SQLite tier may only use the domain where scale-8 Numeric round-trips exactly
-through the driver's float binding - `|v| < 2^26` (design v2 §4, confirmed by the round-2 reviewer).
-`EXACT_DOMAIN_LIMIT` below is that bound and `exact_money()` refuses anything outside it, so a
-counterexample cannot quietly become a measurement of SQLite's float conversion instead of the
-property it was written for.
+MONEY VALUES. `exact_money` keeps the scale-8 quantisation and the old `|v| < 2^26` bound. The bound
+was the SQLite tier's exact domain; since 017 the tier is PostgreSQL only, so it is no longer a
+correctness precondition - it is kept so the unit modules keep their small, readable amounts, and the
+full-size money lives in the PostgreSQL entries module.
 """
 
 from __future__ import annotations
@@ -41,120 +24,61 @@ import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Any, AsyncIterator, Awaitable
+from typing import Any, AsyncIterator, Iterable
 
-from sqlalchemy import delete, select
+from sqlalchemy import select
 
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 
-from tests.debt_setup import purge_test_ledger
-
-#: Largest absolute scale-8 money value SQLite is proven to round-trip exactly (design v2 §4).
+#: The historical SQLite exact domain (design v2 §4); see the module docstring.
 EXACT_DOMAIN_LIMIT = Decimal(2**26)
 
-#: The module the journal will live in. Named once so a rename shows up in one place.
-JOURNAL_MODULE = "app.core.ledger.journal"
-
-
-class _NoRefusalExistsYet(BaseException):
-    """Stand-in refusal type used while the journal does not exist. Nothing ever raises it.
-
-    It inherits `BaseException` rather than `Exception` on purpose: if some future code were to
-    catch it by accident through a broad `except Exception`, the counterexample would go green
-    without the property existing, which is exactly the false green this class is here to avoid.
-    """
-
-
-@dataclass(frozen=True)
-class JournalApi:
-    """The journal API as this run found it, plus the refusal types to catch."""
-
-    module: Any | None
-    refusals: tuple[type[BaseException], ...]
-
-    @property
-    def available(self) -> bool:
-        return self.module is not None
-
-    def missing(self, what: str) -> str:
-        """The message for a non-vacuity assertion that cannot hold without the journal."""
-        return (
-            f"{what} - and it cannot be observed here at all, because {JOURNAL_MODULE} does not "
-            "exist yet, so no debt operation could be opened and the scenario below has nothing "
-            "to hold it up. This is the step-2 red state, not a passing test."
-        )
-
-
-def journal_api() -> JournalApi:
-    """Import the journal from INSIDE a test body. See the module docstring for the rule."""
-    try:
-        from app.core.ledger import journal  # type: ignore[attr-defined]
-    except ImportError:
-        return JournalApi(module=None, refusals=(_NoRefusalExistsYet,))
-    refusals = tuple(
-        cls
-        for name in ("DebtJournalError", "DebtOperationIncomplete")
-        if isinstance(cls := getattr(journal, name, None), type) and issubclass(cls, BaseException)
-    )
-    return JournalApi(module=journal, refusals=refusals or (_NoRefusalExistsYet,))
+#: The module that owns the envelope and every refusal before SQL (018). Named once for messages.
+WRITER_MODULE = "app.core.ledger.book"
 
 
 @asynccontextmanager
-async def operation(api: JournalApi, session, **kwargs: Any) -> AsyncIterator[Any]:
-    """Open a journal operation if there is one to open; otherwise run the block bare.
+async def operation(
+    session,
+    *,
+    kind: str,
+    identity: str,
+    intent: Any,
+    scope_equivalent_ids: Iterable[Any] | None = None,
+    intent_equivalent_ids: Iterable[Any] = (),
+    tx_id: str | None = None,
+) -> AsyncIterator[Any]:
+    """A `Book` operation (018): the envelope is the book's, the entries are the trigger's.
 
-    The degenerate form is deliberate and is documented per test: without the journal a scenario
-    that should be refused because its write is outside THIS operation is instead not refused
-    because there is no operation anywhere. The verdict assertion is the same sentence in both
-    worlds - "the write was refused" - and it is false today.
-    """
-    if api.module is None:
-        yield None
-        return
-    async with api.module.debt_operation(session, **kwargs) as op:
-        yield op
-
-
-def scenario_end_refusals(api: JournalApi) -> tuple[type[BaseException], ...]:
-    """What the REST of a scenario raises once a refusal has been deliberately swallowed.
-
-    A counterexample that catches the journal's refusal and keeps going does not get a quiet
-    session afterwards, and it must not: the root is poisoned, the refused work is still pending,
-    and the next thing to touch the session says so. Two shapes arrive:
-
-    * the journal's own refusal again - from the operation context's completion, which flushes the
-      Debt that is still pending and is refused for the poison;
-    * `sqlalchemy.exc.InvalidRequestError` (`PendingRollbackError`), when the refusal happened
-      inside the flush's own SQL and SQLAlchemy has already marked the transaction for rollback.
-
-    Both are the refusal continuing to hold, which is the property under test - so a scenario that
-    swallows one catches these to REACH its assertions, and keeps the FIRST refusal as its verdict.
-    Catching them is not tolerating them: every such test then asserts that nothing became durable.
+    The keyword shape is the one the deleted `debt_operation` took, so the surviving counterexamples
+    read as they did; what they now open is the only kind of operation there is.
     """
 
-    from sqlalchemy.exc import InvalidRequestError
+    from app.core.ledger.book import Book, operation_for
 
-    return (*api.refusals, InvalidRequestError)
-
-
-async def refusal_of(api: JournalApi, awaitable: Awaitable[Any]) -> BaseException | None:
-    """Run `awaitable`; return the journal's refusal if it raised one, else None."""
-    try:
-        await awaitable
-    except api.refusals as exc:  # noqa: B902 - the refusal contract is the subject under test
-        return exc
-    return None
+    async with Book.operation(
+        session,
+        operation_for(
+            kind,
+            identity,
+            intent,
+            tx_id=tx_id,
+            scope_equivalent_ids=scope_equivalent_ids,
+            intent_equivalent_ids=intent_equivalent_ids,
+        ),
+    ) as posting:
+        yield posting
 
 
 def exact_money(value: str) -> Decimal:
-    """A scale-8 amount inside the domain SQLite round-trips exactly, or a loud failure."""
+    """A scale-8 amount inside the historical exact domain, or a loud failure."""
     amount = Decimal(value).quantize(Decimal("1E-8"))
     if abs(amount) >= EXACT_DOMAIN_LIMIT:
         raise ValueError(
-            f"{value} is outside the proven-exact SQLite domain |v| < {EXACT_DOMAIN_LIMIT}; "
-            "full-size money acceptance belongs on the PostgreSQL tier (design v2 §4)"
+            f"{value} is outside |v| < {EXACT_DOMAIN_LIMIT}; full-size money acceptance belongs "
+            "to tests/integration/test_p015_b4_entries_and_money_postgres.py"
         )
     return amount
 
@@ -229,24 +153,6 @@ async def seed_world(factory, *, extra_participants: int = 0) -> World:
     return World(equivalent, other, debtor, creditor, tag, extras)
 
 
-async def drop_world(factory, world: World) -> None:
-    """Dispose of this world's rows, the journal's record of them included.
-
-    THE DEBTS AND THE JOURNAL GO THROUGH THE DRIVER, not through `session.execute(delete(Debt))`.
-    Once the journal is armed that is Core DML against `debts` outside a verified flush and is
-    refused, correctly: it is indistinguishable from a writer moving money with no record. A
-    teardown is not a money write, so it takes the documented way round (design v2 §8 R6). The
-    journal rows have to go as well - its foreign keys are RESTRICT on purpose (`C17`), so an entry
-    naming this world's equivalent would keep the `DELETE FROM equivalents` below from succeeding.
-    """
-
-    async with factory() as session:
-        await purge_test_ledger(session, equivalent_ids=world.equivalent_ids)
-        await session.execute(delete(Participant).where(Participant.id.in_(world.participant_ids)))
-        await session.execute(delete(Equivalent).where(Equivalent.id.in_(world.equivalent_ids)))
-        await session.commit()
-
-
 async def stored_debts(factory, world: World) -> dict[tuple[str, str, str], Decimal]:
     """Every debt of this world AS THE DATABASE HOLDS IT, read on a NEW session.
 
@@ -271,9 +177,7 @@ async def stored_debts(factory, world: World) -> dict[tuple[str, str, str], Deci
     }
 
 
-#: Names fixed by design v2 §5. They are written here rather than imported because the module that
-#: will own them does not exist yet, and a counterexample that cannot even name its table would be
-#: unable to say what is missing.
+#: Names fixed by design v2 §5, spelled here so a counterexample can name the table it reads.
 OPERATIONS_TABLE = "debt_operations"
 ENTRIES_TABLE = "debt_journal_entries"
 OPERATION_EQUIVALENTS_TABLE = "debt_operation_equivalents"
@@ -281,11 +185,10 @@ JOURNAL_TABLES = (OPERATIONS_TABLE, ENTRIES_TABLE, OPERATION_EQUIVALENTS_TABLE)
 
 
 async def stored_rows(factory, sql: str, params: dict[str, Any] | None = None) -> list[dict] | None:
-    """Rows for a read-only query on a NEW session, or None when the table does not exist yet.
+    """Rows for a read-only query on a NEW session, or None when the query could not run.
 
-    None and `[]` are deliberately different answers: "the journal has no table to look in" is not
-    "the journal recorded nothing", and a counterexample that let them collapse would go green the
-    day an empty module appeared (`AGENTS.md` §1, "отсутствующее измерение обязано отличаться от
+    None and `[]` are deliberately different answers: "there is no table to look in" is not "the
+    journal recorded nothing" (`AGENTS.md` §1, "отсутствующее измерение обязано отличаться от
     нулевого").
     """
     from sqlalchemy import text
@@ -303,33 +206,31 @@ async def stored_operations(factory, identity: str) -> list[dict] | None:
     """Envelope rows for one operation identity, read fresh. None when the table is absent."""
     return await stored_rows(
         factory,
-        f"SELECT id, kind, identity, state, tx_id, effect_count, flush_count "  # noqa: S608
+        f"SELECT id, kind, identity, state, tx_id, effect_count, schema_version "  # noqa: S608
         f"FROM {OPERATIONS_TABLE} WHERE identity = :identity",
         {"identity": identity},
     )
 
 
 async def stored_entries(factory, identity: str) -> list[dict] | None:
-    """Journal entries belonging to one operation identity, read fresh."""
+    """Journal entries belonging to one operation identity, read fresh, in `ordinal` order.
+
+    `ordinal` is a sequence value: strictly increasing within an operation, gapped, and NOT a flush
+    number (018 stage B1; the listener's `flush_ordinal` is gone).
+    """
     return await stored_rows(
         factory,
-        f"SELECT e.flush_ordinal, e.effect, e.amount_before, e.amount_after, e.delta "  # noqa: S608
+        f"SELECT e.ordinal, e.effect, e.amount_before, e.amount_after, e.delta, "  # noqa: S608
+        f"e.debtor_id, e.creditor_id "
         f"FROM {ENTRIES_TABLE} e JOIN {OPERATIONS_TABLE} o ON o.id = e.operation_id "
-        f"WHERE o.identity = :identity ORDER BY e.flush_ordinal",
+        f"WHERE o.identity = :identity ORDER BY e.ordinal",
         {"identity": identity},
     )
 
 
 def missing_journal_tables(rows: list[dict] | None, table: str) -> str:
     return (
-        f"the `{table}` table does not exist, so nothing in this database can record what the "
-        f"operation did. {JOURNAL_MODULE} and migration 021 are what step 4 must add; until then "
-        "this counterexample is red because the property has no carrier at all."
+        f"the `{table}` table could not be read, so nothing in this database can say what the "
+        f"operation did. Migrations 021 and 029 create and arm it; a schema without it is a broken "
+        "stand, not a passing counterexample."
     )
-
-
-#: Anything that reads `sqlite3.Connection.in_transaction` needs the driver connection, which is two
-#: wrappers down: `AsyncConnection.get_raw_connection()` gives SQLAlchemy's adapted connection and
-#: `.driver_connection` the aiosqlite one, whose `in_transaction` is the sqlite3 one's. The modules
-#: that need it also need to read it AFTER the session has finished with the connection, so they
-#: take the handle themselves rather than calling through a session here.

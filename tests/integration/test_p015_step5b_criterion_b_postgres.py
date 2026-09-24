@@ -5,7 +5,8 @@ WHAT THIS TIER ADDS over `tests/unit/test_p015_step5b_criterion_b.py`:
 
 * THE TWO CONSTRUCTION PATHS. Migration 027 widens `chk_debt_operations_intent_version`; `create_all`
   and `alembic upgrade head` must build the same three version CHECKs, and they must bite the same way:
-  intent version 2 accepted, 3 refused, a 2 in the schema or money version refused.
+  intent version 2 accepted, 3 refused, a 2 in the money version refused. Migration 029 (018 B1) widens
+  the schema version to `IN (1, 2)`: a 2 there is accepted and a 3 refused, on both paths.
 * THE PRE-STATE WINDOW, FORCED. The payment commit reads both directions of every flow pair and records
   them before it applies the flows. A barrier holds the commit right after that read while another writer
   changes one of those rows:
@@ -134,6 +135,7 @@ async def _version_catalogue_and_bites(url: str) -> tuple[dict, dict]:
             "intent=3": await _attempt("intent_encoding_version", 3),
             "money=2": await _attempt("money_encoding_version", 2),
             "schema=2": await _attempt("schema_version", 2),
+            "schema=3": await _attempt("schema_version", 3),
         }
         return definitions, bites
     finally:
@@ -169,7 +171,13 @@ async def test_step5b_p_both_construction_paths_widen_only_the_intent_version_an
 
         assert len(migrated) == 3 and migrated == from_metadata, (migrated, from_metadata)
         assert "ARRAY[1, 2]" in migrated["chk_debt_operations_intent_version"], migrated
-        expected = {"intent=2": None, "intent=3": "23514", "money=2": "23514", "schema=2": "23514"}
+        expected = {
+            "intent=2": None,
+            "intent=3": "23514",
+            "money=2": "23514",
+            "schema=2": None,
+            "schema=3": "23514",
+        }
         for label, bites in (("metadata", metadata_bites), ("alembic", migrated_bites)):
             assert bites == expected, f"{label}: {bites}"
 
@@ -211,7 +219,16 @@ async def test_step5b_p_the_prestate_read_follows_every_advisory_lock_and_the_fo
     assert locks and len(stops) == 1 and len(envelopes) == 1, "\n".join(statements)
     assert "FOR SHARE" in statements[stops[0]], statements[stops[0]]
     assert max(locks) < stops[0] < envelopes[0], (locks, stops, envelopes)
-    between = statements[stops[0] + 1 : envelopes[0]]
+    # The book's own opening (018 B1) - its nesting read of `geo.operation_id` and its SAVEPOINT - sits
+    # between the pre-state read and the envelope; named, as in the unit twin, so a second `debts` read
+    # still counts.
+    book_opening = [
+        s
+        for s in statements[stops[0] + 1 : envelopes[0]]
+        if s.startswith("SAVEPOINT ") or s.startswith("SELECT CURRENT_SETTING('GEO.OPERATION_ID', TRUE)")
+    ]
+    assert len(book_opening) == 2, f"premise: the book's opening was not seen once each: {book_opening}"
+    between = [s for s in statements[stops[0] + 1 : envelopes[0]] if s not in book_opening]
     assert len(between) == 1 and between[0].startswith("SELECT") and " FROM DEBTS " in f"{between[0]} ", between
 
 
@@ -467,7 +484,7 @@ async def test_step5b_p_an_unwidened_version_check_refuses_the_payment_and_the_s
     CHECK is narrowed back (`NOT VALID`, so rows already stored do not block it) and a real payment goes
     through `PaymentService.create_payment_internal` at the application's isolation.
 
-    TRACED AND ASSERTED: `debt_operation` fails on the envelope INSERT with 23514; `_run_uow_with_retry`
+    TRACED AND ASSERTED: `Book.operation` fails on the envelope INSERT with 23514; `_run_uow_with_retry`
     does not retry it (not a serialization class); the service's commit handler treats it as an internal
     error, not a 4xx rejection - rolls back, finds the transaction still PREPARED, ABORTS it and raises a
     5xx `GeoException` caused by the 23514. No debt moved, the prepare locks are released, no envelope.

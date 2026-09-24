@@ -98,14 +98,16 @@ for m in sorted(reach):
 
 ### Перенос из ревью стадии A (Codex, 2026-09-24, заморожено на `53df006`: `READY-TO-MERGE: YES`, `CLASS-1: 0`, два P3 класса 2)
 
-14. **`scripts/measure_clearing_min_amount_plan.py:218-222`** сбрасывает базу `TRUNCATE {table} CASCADE` по шести таблицам, включая `debts`, до операции `Book` — осознанный сброс одноразовой базы мимо `Book`, невидимый и слушателю, и гарду. После B `BEFORE TRUNCATE` его отвергнет, и хуже того — отказ **проглатывается** `except Exception: pass`, а на PostgreSQL первая ошибка прерывает транзакцию, так что и остальные `TRUNCATE` молча не выполнятся, и скрипт пойдёт строить граф на несброшенной базе (где после baseline `SEED` откажет). Стадия B даёт ему явный ограниченный путь сброса (одноразовая база скрипта создаётся заново, как клон тира, либо сброс через именованный помощник с проверкой URL, которую скрипт уже делает, `:48`, `:102`) и убирает `except Exception: pass` — отказ сброса должен останавливать замер.
-15. **Гард `tests/unit/test_p018_only_book_writes_debts.py`** не видит DML через `sqlalchemy.update(Debt)` и псевдонимы функций DML (`:127-128`: имя функции берётся только у голого `ast.Name`) и присваивания с кортежной целью `debt.amount, x = …` (`:131-135`: цель проверяется только как `ast.Attribute`). Сегодня так не пишет ни один писатель. Триггер B видит весь DML, поэтому это — объявленная слепая зона гарда: либо гард расширяется на эти формы с контрпроверкой, либо они добавляются в перечень слепых зон его сообщения (`spec.md:102`).
+14. **`scripts/measure_clearing_min_amount_plan.py:218-222`** сбрасывает базу `TRUNCATE {table} CASCADE` по шести таблицам, включая `debts`, до операции `Book` — осознанный сброс одноразовой базы мимо `Book`, невидимый и слушателю, и гарду. После B `BEFORE TRUNCATE` его отвергнет, и хуже того — отказ **проглатывается** `except Exception: pass`, а на PostgreSQL первая ошибка прерывает транзакцию, так что и остальные `TRUNCATE` молча не выполнятся, и скрипт пойдёт строить граф на несброшенной базе (где после baseline `SEED` откажет). Стадия B даёт ему явный ограниченный путь сброса (одноразовая база скрипта создаётся заново, как клон тира, либо сброс через именованный помощник с проверкой URL, которую скрипт уже делает, `:48`, `:102`) и убирает `except Exception: pass` — отказ сброса должен останавливать замер. **Сделано 2026-09-24, B1 часть iii (`0b16438`):** скрипт строит граф в собственной базе `<база>__plan`, созданной пустой, мигрированной `alembic upgrade head` и удаляемой в конце (`tests/migrated_schema.py::scratch_databases`); `TRUNCATE` и `except Exception: pass` удалены; отказ создания, миграции или удаления останавливает прогон.
+15. **Гард `tests/unit/test_p018_only_book_writes_debts.py`** не видит DML через `sqlalchemy.update(Debt)` и псевдонимы функций DML (`:127-128`: имя функции берётся только у голого `ast.Name`) и присваивания с кортежной целью `debt.amount, x = …` (`:131-135`: цель проверяется только как `ast.Attribute`). Сегодня так не пишет ни один писатель. Триггер B видит весь DML, поэтому это — объявленная слепая зона гарда: либо гард расширяется на эти формы с контрпроверкой, либо они добавляются в перечень слепых зон его сообщения (`spec.md:102`). **Сделано 2026-09-24, B1 часть iii (`6681411`):** гард распознаёт кортежные, списочные и звёздные цели с `.amount` и DML через `sqlalchemy.<verb>`, `sa.<verb>`, подмодули `sqlalchemy` и псевдонимы `from sqlalchemy[...] import <verb> as x`; контрпроверки положительные (11 новых форм) и отрицательные (4); псевдоним из модуля не-`sqlalchemy` и `getattr` — в объявленных слепых зонах.
 
 ## 4. Манифест по файлам
 
 Решение и одна строка «что проверяет» для каждого DELETE и REWRITE файла — по группам проходов. KEEP-DISPOSAL — таблица раздела 8. KEEP-AS-IS — список в конце раздела.
 
 ### 4.1. Механизм журнала (группа 1)
+
+**B1, часть ii (2026-09-24):** строки этой таблицы для файлов `b4`/`b4a` и помощника `p015_b4a_stand.py` сделаны — итог по файлам и узлы в разделе 6.B1; `t1528`/`t1530`/`t1531`/`t1532` — группа 2 части ii.
 
 | path | lines (wc -l) | what it tests | fate | reason |
 |---|---|---|---|---|
@@ -136,6 +138,8 @@ for m in sorted(reach):
 | `new_postgres_stand` (:277), `_arm`/`arm_stand` (:319/:382) | **yes** | `journal.install_journal` on a private `Session` subclass; shared-tier world chosen because a mode-B clone costs 0.35-0.82 s (`:289-292`) |
 
 ### 4.2. Записи и деньги шага 4 (группа 2)
+
+**B1, часть ii (2026-09-24):** сделано группой 1 части ii — итог по файлам, узлы и мутации в разделе 6.B1.
 
 | path | lines | what it tests | verdict | reason |
 |---|---|---|---|---|
@@ -309,7 +313,7 @@ Surviving tests cited (files do NOT import `journal.py` and do not use `p015_b4_
 | :1341, :1345, :1348, :1351, :1355, :1356 | test_the_sqlalchemy_internals_this_module_pins_still_exist | SQLAlchemy 2.0.25 private attrs | DROP: listener-internal — RootTransaction registry / savepoint accounting pins |
 | :1389, :1390 | test_an_operation_records_an_intent_equivalent_it_never_touched | touched eq `(T,T,1)`, untouched intent eq `(T,T,0)` | TO WRITE: NEW-K ⚑ 018 §2 (Phase B 9), contract item 6 |
 
-#### `tests/unit/test_p015_t1528_the_guard_reads_what_the_statement_writes.py` (REWRITE)
+#### `tests/unit/test_p015_t1528_the_guard_reads_what_the_statement_writes.py` (REWRITE) — as built in B1: 7.D
 
 | file:line | test function | effect checked | fate |
 |---|---|---|---|
@@ -334,7 +338,7 @@ Surviving tests cited (files do NOT import `journal.py` and do not use `p015_b4_
 | :798, :804, :810, :815 | test_t1528_the_statement_values_attribute_this_fix_reads_still_exists | `ValuesBase._values` pin, `_statement_values` | DROP: listener-internal — DML parser |
 | :860, :863, :864 | test_t1528_a_connection_that_accepts_no_listener_is_skipped_and_not_exposed_by_it | OptionEngine refuses listeners; journal still installed | DROP: listener-internal — arm-uninstall (per-connection registration) |
 
-#### `tests/unit/test_p015_t1530_the_journal_reads_its_own_record_back.py` (REWRITE)
+#### `tests/unit/test_p015_t1530_the_journal_reads_its_own_record_back.py` (REWRITE) — as built in B1: 7.D
 
 | file:line | test function | effect checked | fate |
 |---|---|---|---|
@@ -357,7 +361,7 @@ Surviving tests cited (files do NOT import `journal.py` and do not use `p015_b4_
 | :543, :546, :547, :548, :549 | 〃 | COMPLETED; `effect_count 1`; entry delta 1; debts 11 / 20 | TO WRITE: NEW-G |
 | :579, :583, :584, :585 | test_t1530_the_migration_and_the_metadata_spell_the_same_predicate | migration 024 and `journal_tables.py` spell the arithmetic predicate | REWRITE IN PLACE: move verbatim to a journal-free module (it reads files only; subsumed later by P1803-parity) |
 
-#### `tests/unit/test_p015_t1531_the_verification_read_is_not_rewritable.py` (DELETE)
+#### `tests/unit/test_p015_t1531_the_verification_read_is_not_rewritable.py` (DELETE) — as built in B1: 7.D
 
 | file:line | test function | effect checked | fate |
 |---|---|---|---|
@@ -371,7 +375,7 @@ Surviving tests cited (files do NOT import `journal.py` and do not use `p015_b4_
 | :436, :437, :439, :441 | test_t1531_an_unknown_paramstyle_refuses_instead_of_binding_nothing | `_raw_params` per paramstyle; UNREADABLE_VERIFICATION | DROP: listener-internal — verification read / DebtJournalError reason code |
 | :454, :457, :458 | test_t1531_the_journal_no_longer_exports_a_mark_a_statement_can_carry | module export surface | DROP: listener-internal — module deleted |
 
-#### `tests/unit/test_p015_t1532_a_savepoint_is_accounted_for_in_sql.py` (DELETE)
+#### `tests/unit/test_p015_t1532_a_savepoint_is_accounted_for_in_sql.py` (DELETE) — as built in B1: 7.D
 
 | file:line | test function | effect checked | fate |
 |---|---|---|---|
@@ -514,7 +518,7 @@ Surviving tests cited (files do NOT import `journal.py` and do not use `p015_b4_
 | :1270, :1275 | 〃 | op refused before open; no debt ⚑ cond2 | TO WRITE: NEW-D — Book refuses AUTOCOMMIT |
 | :1348, :1354, :1361, :1362 | test_condition2_p_a_two_phase_root_is_refused_before_the_operation_opens | two-phase root refused; nothing durable; no prepared xact ⚑ cond2 | DROP: listener-internal — RootTransaction registry (see C6) |
 
-#### `tests/integration/test_p015_t1528_the_statement_is_read_not_guessed_postgres.py` (DELETE)
+#### `tests/integration/test_p015_t1528_the_statement_is_read_not_guessed_postgres.py` (DELETE) — as built in B1: 7.D
 
 | file:line | test function | effect checked | fate |
 |---|---|---|---|
@@ -525,7 +529,7 @@ Surviving tests cited (files do NOT import `journal.py` and do not use `p015_b4_
 | :262, :265 | test_t1528_p_control_full_width_money_passes_the_readback | largest value stored and journalled | TO WRITE: NEW-H |
 | :293, :297, :300, :303 | test_t1528_p_asyncpg_answers_the_transaction_probe_with_a_bool | `is_in_transaction()` probe answers | DROP: listener-internal — driver probe |
 
-#### `tests/integration/test_p015_t1530_delta_arithmetic_postgres.py` (REWRITE)
+#### `tests/integration/test_p015_t1530_delta_arithmetic_postgres.py` (REWRITE) — as built in B1: 7.D
 
 | file:line | test function | effect checked | fate |
 |---|---|---|---|
@@ -771,13 +775,85 @@ Stock phrase: "REWRITE IN PLACE: unchanged" means the assertion text stays. Its 
 10. **The measurement bypasses have no stage-B equivalent.** `_round_trip` (:441-467) and the C8-inject competitor (:1049-1064) use `uninstall_write_guard` to write around the listener. Under the spec's §4 prohibition, their replacement must be a legal TEST_FIXTURE `Book` operation. Replica is not allowed in a behavioural test. These worlds have no baseline, so TEST_FIXTURE is allowed.
 11. **R4 evidence becomes moot.** The r4 file is the only behavioural evidence that the slice-B `debt_fixture_setup` wrapping is neutral. After B an unwrapped write is GE001, so neutrality stops being a question. The one live fact — a refused write surfaces at block exit because the envelope flushes at completion — moves to the new test listed under r4 row :880/:886.
 
+### 6.B1. Группа 1 (семейство b4/b4a) — как сделано в B1, часть ii (2026-09-24, ветка `claude/018-b1-g1`)
+
+Таблицы разделов 4.1, 4.2, 5 и 6 выше — анализ до B1 (якоря на `3a038d3`); они остаются как написаны. Здесь — что сделано с файлами группы 1 (распределение по брифу части ii: `b4`/`b4a` и общие помощники; `t1528`/`t1530`/`t1531`/`t1532` из раздела 4.1 — группа 2). В `app/` ничего не менялось, кроме откатанных мутаций.
+
+**По файлам:**
+
+| file | outcome |
+|---|---|
+| `tests/unit/test_p015_b4a_journal_mechanism.py` | DELETED; строки — по таблице ниже (раздел 5 решал REWRITE: всё, что не DROP, ушло в тесты части i и в новый модуль, C19 — в `EP`) |
+| `tests/integration/test_p015_b4a_journal_postgres.py` | DELETED; NaN-факты базы и C19 — в `EP` (REWRITE IN PLACE по смыслу, другой файл) |
+| `tests/p015_b4a_stand.py` | DELETED (его импортируют ещё `t1528`/`t1530`/`t1531`/`t1532` — файлы группы 2, красные и так) |
+| `tests/unit/test_p015_b4_write_guard.py` | DELETED; C21 AST — дословно в `FB` |
+| `tests/unit/test_p015_b4_transaction_contract.py`, `tests/integration/test_p015_b4_transaction_contract_postgres.py` | DELETED |
+| `tests/unit/test_p015_b4_r4_fixture_migration_is_observably_equivalent.py` | DELETED; одна строка TO WRITE — в `N` |
+| `tests/integration/test_p015_b4_entries_and_money_postgres.py` (`EP`) | REWRITE IN PLACE: `Book` вместо `debt_operation`, `ordinal`, `_round_trip` пишет внутри операции `TEST_FIXTURE` (снимается только bind-проверка `MoneyNumeric`), C8-инжект: конкурент в своей операции, C12 — `BookMoneyError` до любого SQL по `debts`, C13-P — `uq_debt_operations_kind_identity`, C19 — через `tests/ledger_corruption.py::probe_statements` (новая функция, аддитивно), `schema_version` 3, случай `NaN`-delta; плюс перенесённый тест NaN-фактов |
+| `tests/unit/test_p015_b4_entries_and_money.py` (`EU`) | REWRITE IN PLACE на клоне модуля (`module_clone`): `ordinal`, C13 — `IntegrityError` по `uq_debt_operations_kind_identity`, C15 — вердикт `GE001` из подпроцесса, C18 — конкурент в собственной операции ДО открытия этой (`FORK-3`) |
+| `tests/unit/test_p015_b4_wrong_writer_is_recorded_faithfully.py` (`WU`) | REWRITE IN PLACE: `ordinal`; группировка C5 по flush — DROP; все помощники для step5a/5b/5c сохранены |
+| `tests/integration/test_p015_b4_wrong_writer_is_recorded_faithfully_postgres.py` (`WP`) | REWRITE IN PLACE: `ordinal` |
+| `tests/p015_b4_support.py` | REWRITE: `journal_api`/`JournalApi`/`_NoRefusalExistsYet`/`scenario_end_refusals`/`refusal_of`/`drop_world` удалены; `operation()` открывает `Book.operation`; `stored_operations` без `flush_count`; `stored_entries` по `ordinal` |
+| `tests/debt_setup.py` | `purge_test_ledger` и `_sql_in` удалены вместе с последним вызывающим (`drop_world`); `_uuid_literals` оставлен — его импортирует `tests/integration/test_simulator_real_snapshot_db_enrichment.py` |
+
+Сокращения узлов: `N` = `tests/integration/test_p018_b_step4_counterexamples_postgres.py` (новый модуль, один клон на модуль), `A` = `tests/integration/test_p018_a_write_without_context_is_refused_by_the_database.py`, `G` = `tests/integration/test_p018_b_journal_guards_postgres.py`, `BC` = `tests/integration/test_p018_b_book_transaction_contract_postgres.py`, `B0A` = `tests/integration/test_p018_b0a_money_the_column_cannot_hold.py`, `K` = `tests/integration/test_p018_book_keeps_each_kind_to_its_semantics.py`, `FB` = `tests/unit/test_p015_b4_fixture_blocks_contain_only_fixture_setup.py`; `EP`, `EU`, `WU`, `WP` — как выше.
+
+**Счёт ⚑-строк по файлам** (подсчёт строк таблиц разделов 5–6 скриптом по последней колонке, как в разделе 2): `write_guard` 38 (DROP 13, TO WRITE 16, planned 7, SURVIVES 1, IN PLACE 1); `transaction_contract` 30 (DROP 12, TO WRITE 11, planned 7); `transaction_contract_postgres` 32 (DROP 13, TO WRITE 15, planned 2, SURVIVES 2); `b4a_journal_mechanism` 1 (TO WRITE); `EP` 49 (IN PLACE 36, planned 8, TO WRITE 2, DROP 3); `EU` 20 (IN PLACE); `WP` 12 (IN PLACE); `WU` 20 (SURVIVES 12, IN PLACE 7, DROP 1). Итого 202 ⚑ из 309 строк; DROP ⚑ — 42, остальные 160 держит узел из таблицы ниже.
+
+**⚑-строки → узел** (сгруппированы по исходному тесту):
+
+| source rows | node |
+|---|---|
+| `write_guard` `:203-214` C2 ×9 форм | `N::test_every_dml_door_without_an_operation_is_refused_by_the_database[*]` (8 форм); форма «engine connection» — `N::test_c9_an_open_operation_does_not_cover_an_independent_transactions_write` |
+| `write_guard` `:248-249` | SURVIVES `K::test_clearing_decreases_and_deletes_at_zero`; также `N::test_every_dml_door_inside_an_operation_lands_and_is_journalled[*]` |
+| `write_guard` `:275`; `:291` | `A::test_t1801_a_raw_driver_write_with_no_operation_is_refused_and_the_row_is_unchanged` (инверсия); `N::test_every_dml_door_without_an_operation_is_refused_by_the_database[orm update]` |
+| `write_guard` `:315`, `:337` | `G::test_t1803_an_envelope_is_born_open_completes_once_and_is_never_deleted`; `G::test_t1803_deferred_an_abandoned_open_envelope_refuses_the_commit_and_leaves_nothing` |
+| `write_guard` `:382-390` C3 | `A::test_t1803_moving_a_stored_debt_to_another_edge_is_refused_as_ge002` |
+| `write_guard` `:481`, `:559/:570`, `:623/:631` | `N::test_an_unplanned_writer_inside_an_operation_is_recorded_as_the_row_it_wrote[a pending debt keyed only through relationships / an after_flush listener issues core dml / a late before_flush listener changes the amount]` (инверсии, `FORK-2`) |
+| `write_guard` `:677-678` | `BC::test_a_fresh_session_opens_completes_and_records_one_entry_per_row` (многострочный оператор) |
+| `write_guard` `:850`, `:861-862` T1527 insert ×2 маршрута | `N::test_an_unplanned_writer_...[a late before_flush listener moves the insert to another edge]`, `[a relationship that contradicts the key column]` |
+| `write_guard` `:932-946`; `:1032-1040` | `N::test_t1527_a_key_change_through_the_orm_is_refused_as_ge002[a relationship assignment]`, `[an expired key attribute]` |
+| `write_guard` `:1174-1189` | `A::test_t1801_f_an_update_that_moves_no_money_passes_and_records_nothing` |
+| `write_guard` `:1247-1259` C20 | `N::test_c20_an_out_of_scope_effect_takes_its_in_scope_sibling_with_it` |
+| `write_guard` `:1310-1327` C20/NEW-K | `BC::test_a_fresh_session_opens_completes_and_records_one_entry_per_row`, `BC::test_an_operation_with_no_effects_completes_with_zero` |
+| `write_guard` `:1403-1415` C21 AST | `FB::test_c21_the_fixture_block_guard_rejects_application_calls[*]` |
+| `write_guard` `:1457` C21 | `N::test_c21_an_application_operation_inside_a_fixture_operation_is_refused` |
+| `transaction_contract` `:267-279` C1 | `N::test_every_dml_door_without_an_operation_is_refused_by_the_database[orm insert/orm update/orm delete]` + `N::test_every_dml_door_inside_an_operation_lands_and_is_journalled[то же]` |
+| `transaction_contract` `:337-348` C1 | `N::test_c1_a_swallowed_refusal_leaves_nothing_durable_and_the_session_recovers` |
+| `transaction_contract` `:572-583` C7 | `N::test_c7_a_rolled_back_operation_leaves_nothing_and_the_identity_reopens_on_the_same_connection` |
+| `transaction_contract` `:639-654` C7 | `G::test_t1803_deferred_normal_and_caller_savepoint_rollback_both_commit` |
+| `transaction_contract` `:702-707` C9 | `A::test_t1801_b_a_pooled_connection_after_a_committed_operation_refuses_again` |
+| `transaction_contract` `:882-898`, `:1012-1027`, `:1110-1114`; PG `:618-632`, `:705-708` | `G::test_t1803_deferred_an_abandoned_open_envelope_refuses_the_commit_and_leaves_nothing` (там же `pg_stat_activity.state == 'idle'`) |
+| `transaction_contract` `:941-952` C9 control | `G::test_t1803_deferred_normal_and_caller_savepoint_rollback_both_commit` |
+| `transaction_contract` `:1209-1223`, `:1327-1363` (кроме DROP); PG `:929-944`, `:1035-1061` (кроме DROP) | `N::test_c11_a_failure_inside_one_operation_leaves_nothing_and_its_sibling_commits[the envelope INSERT at open / the completion UPDATE / a cancellation during the completion UPDATE]` |
+| `transaction_contract` `:1456-1473`; PG `:1140-1163` | `N::test_c11_...[a business rejection in the body / a cancellation in the body]` |
+| PG `:201-211` C2 CTE ×2 | `N::test_every_dml_door_without_an_operation_is_refused_by_the_database[select with a writing cte / insert from select with a dml cte]` |
+| PG `:297`, `:308-309` T1527 | `N::test_an_unplanned_writer_...[a late before_flush listener moves the insert to another edge]` (натив UUID на PG) |
+| PG `:351-356` | SURVIVES `K::test_clearing_decreases_and_deletes_at_zero`; `tests/integration/test_payments_idempotency.py::test_payments_tx_id_returns_same_result` |
+| PG `:498-499` T1527 | `N::test_t1527_a_prevented_root_rollback_after_a_failed_operation_commits_nothing_of_it` (три посылки сохранены) |
+| PG `:560-566`, `:758-766` | `N::test_c7_a_rolled_back_operation_...` |
+| PG `:815-825` C9 | `N::test_c9_an_open_operation_does_not_cover_an_independent_transactions_write` |
+| PG `:1228-1275` cond2 | `N::test_condition2_an_autocommit_root_is_refused_before_the_operation_opens` (посылки: опции слепы, диалект AUTOCOMMIT, строка переживает откат) |
+| `b4a_journal_mechanism` `:1389-1390` (⚑018) | `BC::test_a_fresh_session_opens_completes_and_records_one_entry_per_row`, `BC::test_an_operation_with_no_effects_completes_with_zero` |
+| `EP` C4-P, C8 ×3, C12-P ×2, C13-P, C14 ×2, C17-P ×3, C18-P, C19-P ×2 | те же имена в `EP` (REWRITE IN PLACE); C8 ручной повтор оставлен на месте, а не перенесён в запланированный `test_p018_a_serialization_failure_*` (там нет проверок `transactions`/`prepare_locks` и строки членства) |
+| `EP` `:701-743` C8 (TO WRITE planned) | `EP::test_c8_a_real_40001_leaves_one_envelope_and_only_the_successful_attempts_entries` (на месте); механизм — ещё `tests/integration/test_p018_a_serialization_failure_leaves_no_envelope.py` |
+| `EP` `:1265-1271` C12 (TO WRITE) | `EP::test_c12_p_a_value_outside_the_money_domain_is_refused_before_any_debt_sql[*]` (`BookMoneyError`, `reason` — имя предиката) и `B0A::test_the_book_refuses_a_scale_9_input_before_any_debt_changes` |
+| `EU` C4 ×4, C13, C15, C17, C18 | те же имена в `EU` |
+| `WP` C5-P, C6-P | те же имена в `WP` |
+| `WU` C5, C13 ×2 | те же имена в `WU` |
+| `WU` C6 ×4 (SURVIVES) | остались на месте (`WU::test_c6_*`) и продолжают держаться узлами SURVIVES раздела 6 |
+
+**DROP (⚑ 42, без ⚑ 31)** — ровно строки DROP разделов 5 и 6 для этих файлов, с их названными контрактами: учёт savepoint'ов (condition 1, `:431-441`, C10 RELEASE), реестр `RootTransaction` (condition 2, C9 `session_ref` `:776-787` — инверсия атрибуции закреплена `BC::test_nesting_is_refused_in_the_session_and_through_a_shared_connection`, `FORK-3`), отравление корня (C11 `:1219`, `:1344-1366`, PG `:939`, `:945`, `:1050-1064` — инверсия закреплена сиблингом в `N::test_c11_*`), зонд драйвера (T1527-P `:477-494`), грант `_journal_write` и классификатор операторов, вид `before_flush`, коды `DebtJournalError`, импорт-шим `journal_api()` (C14/C17 `api is not None` ×3), двухфазный корень (C6: `max_prepared_transactions = 0`), R4 целиком (arm/uninstall), группировка по flush (`WU` `:601`, `EP` `:563`/`EU` `:173` — точные `1..n`).
+
+**Мутации (откатаны, дерево `app/` и `migrations/` чистое после каждой):** M1 — в `_DEBTS_JOURNAL` (миграция 029 и `app/db/journal_triggers.py`) `RETURN NULL` перед отказом `GE001` → красные 18: все 15 `N::test_every_dml_door_without_*`, `N::test_c9_*`, `N::test_c1_*`, `EU::test_c15_*`. M2 — запись `I` меняет местами должника и кредитора → красные 14: 8 `N::test_every_dml_door_inside_*` (формы со вставкой), 4 `N::test_an_unplanned_writer_*`, `WU::test_c6_a_payment_*`, `WP::test_c6_p_a_payment_*`. M3 — `book._refuse_unstorable` без предиката → красные 4 `EP::test_c12_p_a_value_outside_*`. M4 — `Book.operation` не поднимает исключение после `_abandon` → красные 8 (`N::test_c11_*` ×5, `N::test_c20_*`, `N::test_t1527_a_prevented_*`, `N::test_debt_fixture_setup_surfaces_*`). M5 — `chk_debt_journal_entries_shape` в миграции 022 без условий для `I` → красный `EP::test_c19_p_a_shape_invalid_forged_row_is_refused_by_the_named_rule[an insert that claims a previous amount]`. M6 — триггер никогда не пишет `U` → красные 7 (`EP` C4-P, C8 ×3, C18-P; `EU` C4, C18). Мутации триггера делались в обеих копиях SQL: миграционная схема (все тесты группы на ней) читает копию миграции 029.
+
 ## 7. Карта по ассертам — сверка, критерий (б), удержание (группа 3)
 
 - **HELPER** = the one named corruption helper of spec 018 §2 (`session_replication_role = replica` on a separate connection, commits the given statements). Not written yet.
 - **Book-refusal** = the stage-B `Book` refusal of `SEED`/`TEST_FIXTURE` after baseline (spec :71, moved from `journal._complete`).
 - **cleanup** = mechanism from spec "Уборка тестов в стадии B" (clone/rollback preferred; else bounded replica purge after all asserts).
 
-#### tests/unit/test_p015_step5a_reconciliation.py
+#### tests/unit/test_p015_step5a_reconciliation.py — as built in B1: 7.D
 
 | file:line | test function | effect checked | fate |
 |---|---|---|---|
@@ -811,7 +887,7 @@ Stock phrase: "REWRITE IN PLACE: unchanged" means the assertion text stays. Its 
 | :989-1002 | test_step5a_c6_still_commits_verified_and_criterion_a_is_blind_to_it_until_the_book_moves | C6 COMMITTED, audit [True], stored FAILED with only `b_*` ⚑ 018 VP §2 criterion (б)/7c "(а) passes, (б) fails" | REWRITE IN PLACE: unchanged (writer is honest-context ORM; trigger journals the wrong edge faithfully) |
 | :1014-1023 | same | later atom adds `edge_residual`; audit untouched | REWRITE IN PLACE: :1014-1017 via HELPER |
 
-#### tests/integration/test_p015_step5a_reconciliation_postgres.py
+#### tests/integration/test_p015_step5a_reconciliation_postgres.py — as built in B1: 7.D
 
 | file:line | test function | effect checked | fate |
 |---|---|---|---|
@@ -825,7 +901,7 @@ Stock phrase: "REWRITE IN PLACE: unchanged" means the assertion text stays. Its 
 | :385-404 | test_step5a_p_a_baseline_committed_while_a_seed_is_open_cannot_commit_alongside_it | SEED opened via `debt_operation` | REWRITE IN PLACE: `Book.operation` SEED on the SERIALIZABLE session; baseline taken while it is open |
 | :409-423 | same | SEED not committed, cause 40001, baseline stands ⚑ T1501 cutover race | REWRITE IN PLACE: unchanged asserts (docstring: `journal._complete` → Book completion) |
 
-#### tests/integration/test_p015_t1526_nan_amount_reaches_the_money_column_postgres.py
+#### tests/integration/test_p015_t1526_nan_amount_reaches_the_money_column_postgres.py — as built in B1: 7.D
 
 | file:line | test function | effect checked | fate |
 |---|---|---|---|
@@ -838,7 +914,7 @@ Stock phrase: "REWRITE IN PLACE: unchanged" means the assertion text stays. Its 
 | :347-384 | same | raw NaN INSERT refused 23514 by `chk_debt_amount_positive`, nothing stored ⚑ T1526 (migration reproducer) | REWRITE IN PLACE: run it under the same context so GE001 cannot be the refusal (CHECK precedes AFTER-row trigger anyway; asserts unchanged) |
 | :422, :456, :460 | test_d_the_same_hole_in_the_other_money_column_is_closed_too | NaN limit refused 23514 ⚑ T1526 | REWRITE IN PLACE: unaffected (trust_lines); cleanup only |
 
-#### tests/integration/test_p012_rt1_signed_amount_versus_stored_amount_postgres.py
+#### tests/integration/test_p012_rt1_signed_amount_versus_stored_amount_postgres.py — as built in B1: 7.D
 
 | file:line | test function | effect checked | fate |
 |---|---|---|---|
@@ -854,7 +930,7 @@ Stock phrase: "REWRITE IN PLACE: unchanged" means the assertion text stays. Its 
 | :539-555 | same | barrier widened → COMMITTED; ledger holds 0.12345679 ≠ signed | REWRITE IN PLACE: unchanged |
 | (new, in place) | same | journal entry of that commit records the STORED value (0.12345679), not the signed one — trigger-side replacement of T1528/T1530 on this scenario | TO WRITE: `assert entry.amount_after == rows[0]` read from `debt_journal_entries` after :547 |
 
-#### tests/integration/test_p015_inject_retries_a_serialization_failure_postgres.py
+#### tests/integration/test_p015_inject_retries_a_serialization_failure_postgres.py — as built in B1: 7.D
 
 | file:line | test function | effect checked | fate |
 |---|---|---|---|
@@ -863,7 +939,7 @@ Stock phrase: "REWRITE IN PLACE: unchanged" means the assertion text stays. Its 
 | :166-176 | same | staged twice; stored = concurrent + injected once; fired index; note | REWRITE IN PLACE: unchanged |
 | :179-181 | same | both inject debt flushes under owner lock (own listener) | REWRITE IN PLACE: unchanged (competitor Core update adds no ORM Debt flush) |
 
-#### tests/unit/test_p015_step5b_criterion_b.py
+#### tests/unit/test_p015_step5b_criterion_b.py — as built in B1: 7.D
 
 Helpers: `_rewrite_intent` :165-179, `_move_entry_and_debt` :182-197, `_add_entry_and_debt` :200-221 → REWRITE IN PLACE: all via HELPER; `flush_ordinal`→`ordinal` (:134, :215). `_downgrade_to_v1` :445-450 → HELPER, also `schema_version = 1` (C10).
 
@@ -885,7 +961,7 @@ Helpers: `_rewrite_intent` :165-179, `_move_entry_and_debt` :182-197, `_add_entr
 | :954-975 | test_step5b_a_b_finding_is_stored_in_the_same_row_and_fingerprint_and_never_in_a_checkpoint | one FAILED row, both criteria, checkpoint untouched, fingerprint stable | REWRITE IN PLACE: unaffected; cleanup only |
 | :1011-1024 | test_step5b_the_prestate_is_one_read_after_the_operator_stop_and_before_the_envelope | exactly one statement (batched `debts` read) between stop and envelope INSERT | REWRITE IN PLACE: Book's SAVEPOINT now sits between (C4) — ignore `SAVEPOINT`/`RELEASE` statements in `between`, or anchor on the SAVEPOINT |
 
-#### tests/integration/test_p015_step5b_criterion_b_postgres.py
+#### tests/integration/test_p015_step5b_criterion_b_postgres.py — as built in B1: 7.D
 
 | file:line | test function | effect checked | fate |
 |---|---|---|---|
@@ -898,7 +974,7 @@ Helpers: `_rewrite_intent` :165-179, `_move_entry_and_debt` :182-197, `_add_entr
 | :455 | test_step5b_p_a_b_finding_is_stored_in_the_same_row_on_asyncpg | unit fn on asyncpg | REWRITE IN PLACE: follows unit |
 | :517-533 | test_step5b_p_an_unwidened_version_check_refuses_the_payment_and_the_service_aborts_it | 23514 on envelope INSERT → 5xx, ABORTED, no debt moved, no lock, no envelope | REWRITE IN PLACE: unaffected (Book savepoint rollback leaves no envelope); restore CHECK text unchanged |
 
-#### tests/unit/test_p015_step5c_reaction_and_hold.py
+#### tests/unit/test_p015_step5c_reaction_and_hold.py — as built in B1: 7.D
 
 `_set_debt` :148-151 → REWRITE IN PLACE: via HELPER (both the "fault" and the "repair" writes). `hold_directly` :107-135 keep (domain helper, imported by races :79 and tick :45).
 
@@ -920,7 +996,7 @@ Helpers: `_rewrite_intent` :165-179, `_move_entry_and_debt` :182-197, `_add_entr
 | :863-870 | test_step5c_clearing_real_reports_the_hold_as_its_declared_409 | 409 declared reason, debts unchanged | REWRITE IN PLACE: unaffected (MODE_B) |
 | :915-969 | test_step5c_the_hold_is_cleared_only_explicitly_after_a_later_passed_and_audited | full lifecycle, audit ⚑ T1546 | REWRITE IN PLACE: F1/F2/repair (:910, :921, :928) via HELPER |
 
-#### tests/integration/test_p015_step5c_hold_races_postgres.py
+#### tests/integration/test_p015_step5c_hold_races_postgres.py — as built in B1: 7.D
 
 `_baseline_and_one_atom` :97-110 → REWRITE IN PLACE: atom via HELPER.
 
@@ -936,7 +1012,7 @@ Helpers: `_rewrite_intent` :165-179, `_move_entry_and_debt` :182-197, `_add_entr
 | :567-568 | test_step5c_p_the_evidence_of_a_hold_cannot_be_deleted_while_held | 23503, hold remains ⚑ T1546 | REWRITE IN PLACE: unaffected |
 | :638-681 | test_step5c_p_both_construction_paths_build_the_same_hold_column_and_the_downgrade_refuses_a_hold | hold column/FK equal; 028 downgrade refuses while held | REWRITE IN PLACE: unaffected text; now also passes through 029 downgrade (C11) |
 
-#### tests/integration/test_payment_commit_advisory_locks_postgres.py
+#### tests/integration/test_payment_commit_advisory_locks_postgres.py — as built in B1: 7.D
 
 | file:line | test function | effect checked | fate |
 |---|---|---|---|
@@ -946,7 +1022,7 @@ Helpers: `_rewrite_intent` :165-179, `_move_entry_and_debt` :182-197, `_add_entr
 | :743-813 | test_concurrent_duplicate_commit_is_idempotent_with_journal_history_postgres | premise (history, index plan, parked, 23505 at envelope INSERT, envelope constraint); idempotent result; one COMPLETED envelope ⚑ T1529 | REWRITE IN PLACE: asserts unchanged; re-measure 23505/40001 distribution (C6) |
 | all other asserts | tests :321, :475, :1004, :1120, :1246 | advisory-lock protocol | REWRITE IN PLACE: unaffected; cleanup `_cleanup_seed` :165 only. :475 (duplicate commit via 40001 path) ⚑ T1529 |
 
-#### tests/integration/test_p017_t1711_seed_recipe_postgres.py
+#### tests/integration/test_p017_t1711_seed_recipe_postgres.py — as built in B1: 7.D
 
 | file:line | test function | effect checked | fate |
 |---|---|---|---|
@@ -978,6 +1054,71 @@ Helpers: `_rewrite_intent` :165-179, `_move_entry_and_debt` :182-197, `_add_entr
 13. **Ordinal collisions in forged duplicates.** `test_p015_step5a_reconciliation.py:520-522` uses `flush_ordinal + 100`; with a shared sequence the unique `(operation_id, ordinal, equivalent_id, debtor_id, creditor_id)` is only hit on the same op and edge — negligible, but use a fresh `nextval` or `max+1`.
 14. **Cleanup exposure in this group.** Direct `purge_test_ledger` callers: t1526 :146, rt1 :198, advisory :165, step5c unit :737, :742; indirect through `_drop_triangle` (b4 :142 — step5a unit, step5a_p, step5b unit, step5b_p, step5c unit), p1_money_replay `_cleanup`, interlock `_cleanup_interlock_case`, inject_holds `_cleanup` :193. Already on clones (purge droppable): rt1 (:93), step5c races (:83), step5b inject tests (MODE_B), tick (t1544 `committed_database`), t1711 (`cloned_database`). The rest commit on the tier DB through `TestingSessionLocal` while taking `db_session` (mode A, but outer-rollback does not cover them) → spec option (1) means moving them to a clone.
 15. **Entry-count assumptions to re-measure (hypothesis).** step5b unit :279 (`4` entries), step5a unit :483 (one `D`), :515 (one `U`), step5b :767 (one `U`): the listener wrote one entry per edge per flush; the trigger writes one per row statement. Equal if the ORM issues one statement per row per flush (expected), but not proven.
+
+### 7.D. B1 part ii, group 2 — as built (2026-09-24, branch `claude/018-b1-g2`, commit `c9b4a7c`)
+
+Scope: the reconciliation/hold family, the raw writers of group 3, and the `T1528`/`T1530`/`T1531`/`T1532` files of section 5. The tables of sections 5 and 7 above stay as the pre-B1 analysis; this is what was built. Node ids are `path::function`; `[..]` = every parametrisation.
+
+**Per file.**
+
+| file | outcome |
+|---|---|
+| `tests/unit/test_p015_step5a_reconciliation.py` | REWRITE in place: `_around_the_application` now calls the named corruption helper (`tests/ledger_corruption.py::corrupt`, URL of the factory's clone); new `_driver_statement` (triggers and FKs on) for tables the journal does not guard; forged duplicate uses `nextval('debt_journal_entries_ordinal_seq')`; SEED/TEST_FIXTURE after baseline → `BookError`, `Refusal.UNVERIFIABLE_WRITER_AFTER_BASELINE`; contradictory arithmetic = helper on the CHECK-less clone (both exceptions). 17 tests |
+| `tests/integration/test_p015_step5a_reconciliation_postgres.py` | REWRITE in place: refusal via `BookError`; the cutover race opens `Book.operation(SEED)`; still `40001` (measured). 5 tests |
+| `tests/unit/test_p015_step5b_criterion_b.py` | REWRITE in place: `ordinal`; helper corruptions; `_downgrade_to_v1` also sets `schema_version = 1` (7.C item 10); version probe in a rolled-back transaction, `schema_version` 1 and 2 admitted, 3 refused, money 2 refused; new envelopes `(kind, 2, 1, intent)`; the pre-state anchor names the book's opening (context read + `SAVEPOINT`) instead of counting it. Entry count `4` re-measured: unchanged. 23 tests |
+| `tests/integration/test_p015_step5b_criterion_b_postgres.py` | REWRITE in place: `schema=2` → admitted, `schema=3` → `23514`, both paths; same anchor. 22 tests |
+| `tests/unit/test_p015_step5c_reaction_and_hold.py` | REWRITE in place: faults via the helper (through `_around_the_application`); the evidence-DELETE test uses `_driver_statement`, because `replica` would switch its FK off. `hold_directly` unchanged (the tick module collects again once step 5a does). 15 tests |
+| `tests/integration/test_p015_step5c_hold_races_postgres.py` | REWRITE in place: atom and repair via the helper (takes no advisory lock). 9 tests |
+| `tests/integration/test_p015_step5c_hold_through_the_tick_sqlite.py` | KEEP-AS-IS, collects again. 3 tests |
+| `tests/integration/test_p015_t1526_nan_amount_reaches_the_money_column_postgres.py` | REWRITE in place: no stand-down; `try` spans the fixture block (book flushes at exit); `test_c` raw INSERTs run inside a `Book.operation(TEST_FIXTURE)` (context set; not `debt_fixture_setup`, same guard), NaN still `23514 chk_debt_amount_positive`. 4 tests |
+| `tests/integration/test_p012_rt1_signed_amount_versus_stored_amount_postgres.py` | REWRITE in place: the three listener stairs (`_MONEY_QUANTUM`, `_reconcile`, `_verify_entries`/`_verify_completed_entries`) dropped; Book check → `MoneyNumeric` bind → 409 drift → COMMITTED; NEW assertion: the payment's entry `amount_after` equals the stored `0.12345679`. 7 tests |
+| `tests/integration/test_p015_inject_retries_a_serialization_failure_postgres.py` | REWRITE in place: competitor Core `update(Debt)` inside its own `Book.operation(TEST_FIXTURE)` on its own session (not a `debt_fixture_setup` block, whose AST guard admits no Core statement); `40001` still at the owner's flush (asserted). 1 test |
+| `tests/integration/test_payment_commit_advisory_locks_postgres.py` | REWRITE in place: history filler inserts `OPEN` (schema 2, no `flush_count`) and completes in the same transaction, `ANALYZE` after commit; plan probe mirrors the book's completion UPDATE. Re-measured: `23505` 18/18 attempts (3 runs × 6), premise unchanged. 6 tests |
+| `tests/integration/test_p017_t1711_seed_recipe_postgres.py` | REWRITE in place: every doctoring and restore through the helper. 7 tests |
+| `tests/unit/test_p015_t1533_participant_deletion_keeps_obligations.py` | REWRITE: module scratch database built by `create_all` (the MODEL half); debt without history seeded by the helper; deletion on an ordinary connection, `session_replication_role = origin` asserted. 4 tests |
+| `tests/integration/test_p015_t1533_participant_deletion_keeps_obligations_postgres.py` | REWRITE: module clone of the migrated template (was the tier, whose `create_all` schema failed the constraint-name asserts on the debug path at `2fb1056`); helper seed; FK name asserts and "no history" kept; row cleanup gone. 5 tests |
+| `tests/integration/test_p015_t1530_delta_arithmetic_postgres.py` | REWRITE: CHECK comparison on both paths kept; the bite probe goes through `tests/ledger_corruption.py::probe` with an honest control, premise: a direct INSERT is answered by the guard (`23000`); predicate-text test moved in verbatim; the listener tests dropped (NEW-C/NEW-H below). 2 tests |
+| `tests/unit/test_p015_t1528_the_guard_reads_what_the_statement_writes.py`, `tests/unit/test_p015_t1530_the_journal_reads_its_own_record_back.py` | DELETED (planned REWRITE realised as re-homing): every surviving row is a NEW-C/A/G/H or planned `T1801`/`T1803` test below; the rest were DROP |
+| `tests/unit/test_p015_t1531_the_verification_read_is_not_rewritable.py`, `tests/unit/test_p015_t1532_a_savepoint_is_accounted_for_in_sql.py`, `tests/integration/test_p015_t1528_the_statement_is_read_not_guessed_postgres.py` | DELETED as planned |
+| **new** `tests/integration/test_p018_b_the_record_is_the_stored_row_postgres.py` | NEW-C, NEW-A, NEW-G, NEW-H for these files' rows. 8 tests |
+
+**⚑ rows of these files → node.** Counted over the section 5 and 7 tables of the files above: 190 rows, 90 ⚑ — REWRITE IN PLACE 112 (46 ⚑), TO WRITE 38 (27 ⚑), DROP 38 (17 ⚑), KEEP 2. Every REWRITE IN PLACE row stays on its own test (same name, table above). TO WRITE and re-homed rows:
+
+| rows (section 5/7) | node |
+|---|---|
+| t1528 unit :230, :241, :244 (⚑ T1528, inverted) | `tests/integration/test_p018_b_the_record_is_the_stored_row_postgres.py::test_a_sql_expression_amount_from_a_late_listener_is_stored_and_journalled_as_stored` |
+| t1528 unit :299, :305-:316; t1528 PG :150-:163 (⚑ T1528, P1803-GE002) | `…the_record_is_the_stored_row_postgres.py::test_a_literal_edge_from_a_late_listener_is_refused_as_a_key_change` + `tests/integration/test_p018_a_write_without_context_is_refused_by_the_database.py::test_t1803_moving_a_stored_debt_to_another_edge_is_refused_as_ge002` |
+| t1528 unit :383-:398; t1531 :163, :180, :181 (⚑, inverted) | `…::test_parameters_rewritten_on_the_connection_are_what_is_stored_and_journalled` |
+| t1528 unit :465-:477 (⚑, inverted) | `…::test_an_insert_rewritten_on_the_engine_instance_is_stored_and_journalled_as_stored` |
+| t1528 unit :517-:521 | `…::test_one_flush_with_an_insert_an_update_and_a_delete_and_one_multi_row_statement` |
+| t1528 unit :562-:567 (P1801 (е)) | `tests/integration/test_p018_a_write_without_context_is_refused_by_the_database.py::test_t1801_f_an_update_that_moves_no_money_passes_and_records_nothing` |
+| t1530 unit :237, :249-:251, :304, :311, :312, :421, :422; t1530 PG :359, :373, :374 (⚑ T1530, inverted) | `…::test_the_entry_insert_is_never_a_client_statement_so_no_listener_can_rewrite_it` (+ full-width form below for PG :373) |
+| t1530 unit :362-:365 (⚑ P1803-jINSERT) | `tests/integration/test_p018_b_journal_guards_postgres.py::test_t1803_a_direct_entry_insert_is_refused_even_with_a_valid_open_context` |
+| t1530 unit :487-:498 (⚑ T1530/T1538, P1803-guard) | `tests/integration/test_p018_b_journal_guards_postgres.py::test_t1803_entries_and_membership_are_never_rewritten_and_no_journal_table_truncates` |
+| t1530 unit :539, :543-:549; t1532 :312, :319 (NEW-G) | `…::test_an_inner_savepoint_rolled_back_inside_an_operation_leaves_only_what_survived` |
+| t1532 :311, :318 (P1803-deferred normal / sp-rollback) | `tests/integration/test_p018_b_journal_guards_postgres.py::test_t1803_deferred_normal_and_caller_savepoint_rollback_both_commit` |
+| t1528 PG :222, :230, :231 (⚑); t1528 PG :262, :265; t1530 PG :407-:411 (NEW-H) | `…::test_full_width_money_is_stored_and_journalled_exactly_even_when_rewritten` |
+| t1530 unit :579-:585 (REWRITE IN PLACE, moved) | `tests/integration/test_p015_t1530_delta_arithmetic_postgres.py::test_t1530_the_migration_and_the_metadata_spell_the_same_predicate` |
+| t1530 PG :250-:272 (⚑ T1530/018) | `tests/integration/test_p015_t1530_delta_arithmetic_postgres.py::test_t1530_p_the_constraint_exists_and_bites_on_both_construction_paths` |
+| step5a unit "(new)" (⚑ T1505/T1508 decision 018) | `tests/integration/test_p018_a_write_without_context_is_refused_by_the_database.py::test_t1801_a_raw_driver_write_with_no_operation_is_refused_and_the_row_is_unchanged` |
+| rt1 "(new, in place)" | `tests/integration/test_p012_rt1_signed_amount_versus_stored_amount_postgres.py::test_rt_012_1_counter_check_widening_the_door_reproduces_the_finding_end_to_end` |
+| T1533 (4.4, F5: "no journal history", "debt FK refuses deletion") | `tests/unit/test_p015_t1533_participant_deletion_keeps_obligations.py::{test_the_database_refuses_to_delete_a_debtor_who_still_owes, test_the_database_refuses_to_delete_a_creditor_who_is_still_owed, test_no_journal_history_names_these_participants, test_a_participant_who_owes_nothing_still_deletes}`; `tests/integration/test_p015_t1533_participant_deletion_keeps_obligations_postgres.py::{same four, with test_the_refusal_is_the_debts_own_constraint_and_not_the_journals_history, test_the_migrated_schema_declares_restrict_on_both_participant_columns}` |
+
+**DROP rows (38, 17 ⚑)** — exactly the rows marked DROP in the section 5 and 7 tables of these files, each with the removed contract named there: `_journal_write` grant/parser, `_reconcile` and `_verify_entries` readbacks, `before_execute` provenance and `_raw_params`, savepoint accounting (`LOST_SAVEPOINT_CLOSE`, `pending_savepoint_rollbacks`), driver probe, per-connection registration, module exports, `flush_count` arithmetic, `journal.py` import rows, the RT1 journal stairs. The `FORK-2` flip of the prevented-savepoint-rollback rows (t1528 :750-:767, t1532 :161-:188): supported-path protection is `tests/integration/test_p018_b_book_transaction_contract_postgres.py::test_fork2_a_failed_rollback_after_completed_makes_the_transaction_unusable` and `::test_fork2_a_failure_after_completed_whose_rollback_succeeds_is_an_ordinary_refusal` (part i).
+
+**Mutations (each reverted; `git status` of `app/`, `migrations/` clean after):**
+
+| mutation | red |
+|---|---|
+| `reconciliation._current_debts` reads `debts.amount` at 7 decimals | 18: step5a unit ×2, step5a PG ×1, step5c unit ×10, hold races ×5 |
+| `book._complete`: post-baseline SEED/TEST_FIXTURE refusal disabled | 4: step5a unit `[TEST_FIXTURE]`, `[SEED]`; step5a PG fixture refusal and cutover race |
+| `debts` trigger U branch never writes (`… OR true THEN RETURN NULL`, `journal_triggers.py` and migration 029) | 6 of 8 in `test_p018_b_the_record_is_the_stored_row_postgres.py` (the two green: engine-instance INSERT, literal-edge refusal) |
+| `debts` trigger I branch records `round(NEW.amount, 7)` (both copies) | RT1 counter-check: `entry records '0.12345680' while debts holds '0.12345679'` |
+| model `debts.debtor_id` `ondelete='CASCADE'` | T1533 unit debtor test |
+| `MoneyNumeric._refuse_unstorable` a no-op | T1526 `test_a` (message no longer names "non-finite") |
+| criterion (b) findings not added to the outcome | 31 of 45 step5b unit + PG |
+
+**Durations (local, debug path, `--durations=0`, same file set; module fixtures counted on their first test).** At `2fb1056` (listener) 443.7 s summed (4 T1533 PG failures there, on the tier's `create_all` schema); after, 461.2 s (+17.5 s): step5a unit +8.7, step5b unit +10.2 (each corruption opens its own helper engine and checks the privilege), T1533 unit +3.4 (a `create_all` scratch database), new module +4.4; deleted listener files −4.5, T1530 PG −3.2, step5b PG −5.9. `test_p017_t1711_seed_recipe_postgres.py` is 252.6 → 255.5 s of either total (unchanged by this slice; not in the `not slow` exclusion).
 
 ## 8. Механизм уборки для каждого вызывающего `purge_test_ledger`
 
@@ -1031,6 +1172,8 @@ Clone counts measured by a fixture-setup counter over these 35 modules (245 test
 **Removed:** the three autouse "every seeded row is gone" checkers (`test_p015_b4_entries_and_money_postgres.py`, `test_p015_b4_wrong_writer_..._postgres.py`, `test_p015_t1525_classification_..._postgres.py`) — fixtures, not tests, so the collected count is unchanged; the helpers `_drop_triangle` (unit wrong-writer), `_drop_cycle` (step5c), the `_cleanup`s of inject-holds, p1 money replay (now `_forget_the_route_cache`), t1524, t1525 ×2, t1526, perimeter, b4 entries pg (with `_SEEDED`), wrong-writer pg (with `_SEEDED`), `_cleanup_interlock_case`, `_cleanup_seed` ×3, `Stand.cleanup` (t1523), `_forget_the_journal_history`, and every inline cleanup block.
 
 **Not converted, on purpose — B1 owns them:** `purge_test_ledger` stays for its one caller `p015_b4_support.drop_world`, used only by the listener-mechanism modules B1 deletes or rewrites (`test_p015_b4_write_guard.py`, `test_p015_b4_transaction_contract{,_postgres}.py`, `test_p015_b4_entries_and_money.py`, `test_p015_b4_r4_...`); `p015_b4a_stand.Stand.purge` (listener-mechanism files); `test_p015_t1533_..._postgres.py` raw `DELETE FROM debts` (its setup needs the corruption helper first, finding F5); the mid-test `DELETE FROM debts` in `test_simulator_real_snapshot_db_enrichment.py` (not disposal).
+
+**B1 part ii, group 1 (2026-09-24):** `p015_b4_support.drop_world` and `purge_test_ledger` (with `_sql_in`; `_uuid_literals` stays for the snapshot-enrichment module) are deleted - no caller remains; `p015_b4a_stand.Stand.purge` went with the stand. The surviving group-1 modules dispose by clone: `test_p015_b4_entries_and_money.py` and the new `test_p018_b_step4_counterexamples_postgres.py` share one module clone each (`tests/p018_support.py::module_clone`), the rest keep their B0b clones. Details: section 6.B1.
 
 **Timing (local, Windows, PostgreSQL 16.9; the full tier's wall time moves ±90 s between identical runs here, so only same-conditions comparisons are attributable):**
 

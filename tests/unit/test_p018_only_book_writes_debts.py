@@ -10,14 +10,21 @@ WHAT IT LOOKS FOR - six forms, each read from the source text:
 
 1. `Debt(...)` - a constructor call (also `models.Debt(...)`, and an import alias `Debt as D`);
 2. an assignment (`=`, `+=`, `-=`, annotated) to an attribute named `amount`, in a module that
-   imports `Debt`;
+   imports `Debt` - also as one element of a tuple/list target or behind a star
+   (`debt.amount, other = ...`, `*debt.amount, = ...`);
 3. `<x>.delete(<name>)` where `<name>`, in the same function, is a Debt: bound from `Debt(...)`,
    bound from an expression that names `Debt` (`select(Debt)...`, `await session.get(Debt, ...)`),
    iterated out of such an expression, or given an `.amount` assignment;
-4. `delete(Debt)`; 5. `update(Debt)`; 6. `insert(Debt)`.
+4. `delete(Debt)`; 5. `update(Debt)`; 6. `insert(Debt)` - under the bare name, under an import
+   alias from a `sqlalchemy` module (`from sqlalchemy import update as upd`,
+   `from sqlalchemy.dialects.postgresql import insert as pg_insert`), and as an attribute of a
+   `sqlalchemy` module name (`sqlalchemy.update(Debt)`, `sa.delete(Debt)`, `postgresql.insert(Debt)`).
 
 WHAT IT DOES NOT SEE - its silence is not evidence about these, and they are closed by the database
 trigger of stage B, not by this guard (spec 018, Verification §1):
+
+* a DML function imported under an alias from a module that is not `sqlalchemy` (a re-export:
+  `from app.somewhere import update as u`), or fetched dynamically (`getattr(sa, "update")`);
 
 * re-binding the class (`D = Debt`) - an IMPORT alias is followed, an assignment is not;
 * objects that come back from a call and are never named as a Debt in the function
@@ -30,6 +37,16 @@ trigger of stage B, not by this guard (spec 018, Verification §1):
 
 It is a bounded MAINTENANCE sentinel: it stops the ordinary way of adding a second writer, and names
 the ways it cannot stop.
+
+IT IS NOT THE BARRIER (since stage B, migration `029`, 2026-09-24). The database now sees every DML on
+`debts` whatever its source form: the row trigger refuses a write outside an `OPEN` operation envelope
+(`GE001`) and journals every accepted one from `OLD`/`NEW`, and `TRUNCATE` is refused. A write this
+guard misses is therefore refused or recorded by the database, not lost. What the guard still buys is
+earlier, cheaper feedback at review time - that a second place in `app/`/`scripts/` has started
+writing debts, even one that opens its own envelope correctly and so passes the trigger - and that is
+all it claims. Extending it to the forms above (tuple targets, `sqlalchemy.update(Debt)`, aliased DML,
+added 2026-09-24 from the stage-A external review, manifest `T1808` item 15) narrows its blind spots;
+it does not make its silence a proof.
 """
 
 from __future__ import annotations
@@ -50,9 +67,79 @@ _SQL_DML = frozenset({"delete", "update", "insert"})
 BLIND_SPOTS = (
     "re-binding the class (D = Debt); objects returned from calls and never named as a Debt; "
     "setattr(); bulk_*/mappings/merge; Core DML through Debt.__table__; raw SQL (text(), "
-    "exec_driver_sql, COPY); helpers outside app/ and scripts/. These are closed by the stage-B "
-    "database trigger, not by this guard."
+    "exec_driver_sql, COPY); DML functions aliased from a non-sqlalchemy module or fetched with "
+    "getattr(); helpers outside app/ and scripts/. The stage-B database trigger sees all of these "
+    "(refuses a write without an OPEN envelope, journals an accepted one); this guard is a "
+    "maintenance aid, not the barrier."
 )
+
+
+def _is_sqlalchemy_module(module: str | None) -> bool:
+    return module is not None and (module == "sqlalchemy" or module.startswith("sqlalchemy."))
+
+
+def _dml_bindings(tree: ast.AST) -> tuple[dict[str, str], set[str]]:
+    """How this module can reach a SQLAlchemy DML constructor.
+
+    Returns `(function aliases, module names)`:
+
+    * function aliases - local name -> DML verb, for `from sqlalchemy[...] import update as upd`
+      (the bare names `delete`/`update`/`insert` are matched whatever their origin, as before);
+    * module names - local names bound to a `sqlalchemy` module: `import sqlalchemy`,
+      `import sqlalchemy as sa`, `import sqlalchemy.dialects.postgresql as pg`, and any
+      non-DML name imported from a `sqlalchemy` module (`from sqlalchemy.dialects import
+      postgresql`, `from sqlalchemy import sql`), whose attribute `update`/`delete`/`insert` is
+      then a DML constructor.
+    """
+
+    aliases: dict[str, str] = {}
+    modules: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if _is_sqlalchemy_module(alias.name):
+                    modules.add(alias.asname or alias.name.split(".")[0])
+        elif isinstance(node, ast.ImportFrom) and _is_sqlalchemy_module(node.module):
+            for alias in node.names:
+                local = alias.asname or alias.name
+                if alias.name in _SQL_DML:
+                    aliases[local] = alias.name
+                else:
+                    modules.add(local)
+    return aliases, modules
+
+
+def _root_name(node: ast.AST) -> str | None:
+    while isinstance(node, ast.Attribute):
+        node = node.value
+    return node.id if isinstance(node, ast.Name) else None
+
+
+def _dml_verb(func: ast.AST, aliases: dict[str, str], modules: set[str]) -> str | None:
+    """The DML verb `func` names, or `None`: bare name, sqlalchemy alias, or `<sa module>.<verb>`."""
+
+    if isinstance(func, ast.Name):
+        if func.id in _SQL_DML:
+            return func.id
+        return aliases.get(func.id)
+    if isinstance(func, ast.Attribute) and func.attr in _SQL_DML and _root_name(func.value) in modules:
+        return func.attr
+    return None
+
+
+def _flat_targets(target: ast.AST) -> list[ast.AST]:
+    """Every leaf of an assignment target: tuple/list elements and starred values, recursively."""
+
+    if isinstance(target, (ast.Tuple, ast.List)):
+        return [leaf for element in target.elts for leaf in _flat_targets(element)]
+    if isinstance(target, ast.Starred):
+        return _flat_targets(target.value)
+    return [target]
+
+
+def _assigned_leaves(node: ast.AST) -> list[ast.AST]:
+    targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+    return [leaf for target in targets for leaf in _flat_targets(target)]
 
 
 def _debt_names(tree: ast.AST) -> set[str]:
@@ -100,8 +187,7 @@ def _debt_bound_names(scope: ast.AST, debt_names: set[str]) -> set[str]:
         elif isinstance(node, (ast.For, ast.AsyncFor)) and _mentions_debt(node.iter, debt_names):
             bound.update(_target_names(node.target))
         if isinstance(node, (ast.Assign, ast.AugAssign, ast.AnnAssign)):
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            for target in targets:
+            for target in _assigned_leaves(node):
                 if (
                     isinstance(target, ast.Attribute)
                     and target.attr == "amount"
@@ -116,6 +202,7 @@ def debt_writes(source: str, *, path: str = "<source>") -> list[str]:
 
     tree = ast.parse(source, filename=path)
     debt_names = _debt_names(tree)
+    dml_aliases, sqlalchemy_modules = _dml_bindings(tree)
     found: list[str] = []
 
     def report(node: ast.AST, form: str) -> None:
@@ -125,12 +212,11 @@ def debt_writes(source: str, *, path: str = "<source>") -> list[str]:
         if isinstance(node, ast.Call):
             if _is_debt_ref(node.func, debt_names):
                 report(node, "Debt(...) constructed")
-            func_name = node.func.id if isinstance(node.func, ast.Name) else None
-            if func_name in _SQL_DML and node.args and _is_debt_ref(node.args[0], debt_names):
-                report(node, f"{func_name}(Debt)")
+            verb = _dml_verb(node.func, dml_aliases, sqlalchemy_modules)
+            if verb is not None and node.args and _is_debt_ref(node.args[0], debt_names):
+                report(node, f"{verb}(Debt)")
         if debt_names and isinstance(node, (ast.Assign, ast.AugAssign, ast.AnnAssign)):
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            for target in targets:
+            for target in _assigned_leaves(node):
                 if isinstance(target, ast.Attribute) and target.attr == "amount":
                     report(node, "assignment to .amount in a module that imports Debt")
 
@@ -272,6 +358,71 @@ _POSITIVE = {
         async def f(session):
             await session.execute(insert(Debt).values(amount=1))
     """,
+    # Manifest T1808 item 15 (stage-A external review, 2026-09-24): the forms the first version
+    # could not see.
+    "amount in a tuple target": """
+        from app.db.models import Debt
+        async def f(debt, x, y):
+            debt.amount, other = x, y
+    """,
+    "amount in a nested list target": """
+        from app.db.models import Debt
+        async def f(debt, pairs):
+            [first, (debt.amount, second)] = pairs
+    """,
+    "amount behind a star": """
+        from app.db.models import Debt
+        async def f(debt, values):
+            head, *debt.amount = values
+    """,
+    "session.delete of a Debt named by a tuple amount assignment": """
+        from app.db.models import Debt
+        async def f(session, debt, x):
+            debt.amount, n = x, 0
+            await session.delete(debt)
+    """,
+    "sqlalchemy.update(Debt)": """
+        import sqlalchemy
+        from app.db.models import Debt
+        async def f(session):
+            await session.execute(sqlalchemy.update(Debt).values(amount=1))
+    """,
+    "sa.delete(Debt)": """
+        import sqlalchemy as sa
+        from app.db.models import Debt
+        async def f(session):
+            await session.execute(sa.delete(Debt))
+    """,
+    "sqlalchemy.sql.expression.insert(Debt)": """
+        import sqlalchemy
+        from app.db.models import Debt
+        async def f(session):
+            await session.execute(sqlalchemy.sql.expression.insert(Debt).values(amount=1))
+    """,
+    "postgresql.insert(Debt) from a sqlalchemy submodule": """
+        from sqlalchemy.dialects import postgresql
+        from app.db.models import Debt
+        async def f(session):
+            await session.execute(postgresql.insert(Debt).values(amount=1))
+    """,
+    "aliased update": """
+        from sqlalchemy import update as sa_update
+        from app.db.models import Debt
+        async def f(session):
+            await session.execute(sa_update(Debt).values(amount=1))
+    """,
+    "aliased delete": """
+        from sqlalchemy.sql import delete as remove
+        from app.db.models import Debt
+        async def f(session):
+            await session.execute(remove(Debt))
+    """,
+    "aliased postgresql insert": """
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+        from app.db.models import Debt
+        async def f(session):
+            await session.execute(pg_insert(Debt).values(amount=1).on_conflict_do_nothing())
+    """,
 }
 
 _NEGATIVE = {
@@ -296,6 +447,31 @@ _NEGATIVE = {
         @router.delete("/x")
         async def f():
             return None
+    """,
+    # Counter-checks for the item-15 extension: the widened recognition must not swallow these.
+    "a tuple assignment of other attributes": """
+        from app.db.models import Debt
+        async def f(debt, x, y):
+            debt.version, debt.updated_at = x, y
+    """,
+    "sa.select(Debt) and sa.update of another model": """
+        import sqlalchemy as sa
+        from app.db.models import Debt, TrustLine
+        async def f(session):
+            await session.execute(sa.select(Debt))
+            await session.execute(sa.update(TrustLine).values(limit=1))
+    """,
+    "aliased sqlalchemy update of another model": """
+        from sqlalchemy import update as sa_update
+        from app.db.models import Debt, TrustLine
+        async def f(session):
+            await session.execute(sa_update(TrustLine).values(limit=1))
+    """,
+    "update() on something that is not a sqlalchemy module": """
+        from app.db.models import Debt
+        def f(registry):
+            registry.update(Debt)
+            {}.update(Debt)
     """,
 }
 

@@ -22,14 +22,13 @@ from .integrity_checkpoint import IntegrityCheckpoint
 from .config import Config
 from .simulator_storage import SimulatorRun, SimulatorRunMetric, SimulatorRunBottleneck, SimulatorRunArtifact
 
-# ARMING THE DEBT JOURNAL (programme 015, phase B step 4 slice C). Importing this module installs
-# the journal's listeners on the `Engine` and `Session` classes, so that from here on a row in
-# `debts` may only change inside a declared operation. It is imported HERE, with the tables it
-# protects, because that is the only place that covers a process which imported the models and
-# nothing else - a maintenance script, a REPL, `scripts/seed_db.py` run by hand. See the activation
-# note at the bottom of `app/core/ledger/journal.py`; `tests/unit/test_p015_b4_entries_and_money.py`
-# (`C15`) is the counterexample that tells this placement apart from an application entry point.
-import app.core.ledger.journal  # noqa: E402,F401  (imported for its arming side effect)
+# THE DEBT JOURNAL IS WRITTEN BY THE DATABASE (programme 018 stage B, migration 029). This import
+# attaches the journal's sequence, functions and triggers to the tables' `after_create`, so that a
+# schema built with `Base.metadata.create_all` (mode A of the test fixtures) carries the same writer
+# and guards as a migrated one; `tests/integration/test_p018_b_schema_parity_postgres.py` compares
+# the two. It replaced the import that armed the listener journal (`app/core/ledger/journal.py`,
+# deleted by the same stage): nothing is installed on any engine or session any more.
+from app.db import journal_triggers as _journal_triggers  # noqa: E402,F401
 
 __all__ = [
     "Base",

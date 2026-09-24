@@ -74,6 +74,7 @@ from tests.unit.test_p015_b4_wrong_writer_is_recorded_faithfully import (
 from tests.unit.test_p015_step5a_reconciliation import (
     _around_the_application,
     _baseline,
+    _driver_statement,
     _fixture_debts,
     _literal,
     _result_rows,
@@ -530,8 +531,10 @@ async def test_step5c_the_evidence_of_a_hold_cannot_be_deleted_while_held(db_ses
     hold = await _hold_of(factory, triangle.equivalent.id)
     assert counts[f"hold_{HOLD_SET}"] == 1 and hold is not None, f"premise: {counts}"
 
+    # WITH THE FOREIGN KEYS ON (018 B1): the one-atom fault comes through the corruption helper,
+    # whose `replica` setting also switches foreign keys off - so the DELETE under test must not.
     with pytest.raises(IntegrityError) as refused:
-        await _around_the_application(
+        await _driver_statement(
             factory,
             lambda d: f"DELETE FROM debt_reconciliation_results WHERE id = '{_literal(d, hold)}'",
         )
@@ -637,7 +640,7 @@ async def test_step5c_a_payment_prepared_before_the_hold_is_refused_at_commit_be
     equivalents.is_active, equivalents.integrity_hold_result_id`), after the TTL read, and nothing of the
     envelope or of `debts` is written before it.
 
-    MUTATIONS: (1) a separate hold check placed after `debt_operation` opens the envelope - an
+    MUTATIONS: (1) a separate hold check placed after `Book.operation` opens the envelope - an
     `INSERT INTO debt_operations` precedes the refusal, red; (2) the hold read as its own statement
     instead of in the stop statement - the anchor statement no longer carries the hold, red.
     """

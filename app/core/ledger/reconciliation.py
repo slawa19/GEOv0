@@ -73,9 +73,10 @@ conclusive contradiction exists. A database or query failure is an ERROR and pro
 turned into `UNVERIFIABLE`. The result is persisted as its own row (`debt_reconciliation_results`) and
 never enters an integrity checkpoint or an audit row.
 
-POST-BASELINE SEED AND TEST_FIXTURE WRITES ARE REFUSED by the journal at operation completion
-(`app/core/ledger/journal.py`, `Reason.UNVERIFIABLE_WRITER_AFTER_BASELINE`), so they cannot produce a
-`PASSED` over a change nothing can recompute.
+POST-BASELINE SEED AND TEST_FIXTURE WRITES ARE REFUSED by the book at operation completion
+(`app/core/ledger/book.py`, reason `UNVERIFIABLE_WRITER_AFTER_BASELINE`; 018 stage B moved it there from
+the deleted listener journal), so they cannot produce a `PASSED` over a change nothing can recompute.
+This module still imports neither the book nor any writer: the reference reads the tables.
 """
 
 from __future__ import annotations
@@ -327,7 +328,7 @@ def _fault_identity(finding: dict[str, Any]) -> dict[str, Any]:
 class _Entry:
     """One journal row as criterion (b) reads it: atoms, and `amount_before` as recorded (None for I)."""
 
-    flush_ordinal: int
+    ordinal: int
     debtor_id: uuid.UUID
     creditor_id: uuid.UUID
     effect: str
@@ -347,7 +348,7 @@ async def _journal_sums(
             select(
                 entries.id,
                 entries.operation_id,
-                entries.flush_ordinal,
+                entries.ordinal,
                 entries.debtor_id,
                 entries.creditor_id,
                 entries.effect,
@@ -381,7 +382,7 @@ async def _journal_sums(
         sums[edge] = sums.get(edge, 0) + delta
         by_operation.setdefault(row.operation_id, []).append(
             _Entry(
-                flush_ordinal=int(row.flush_ordinal),
+                ordinal=int(row.ordinal),
                 debtor_id=row.debtor_id,
                 creditor_id=row.creditor_id,
                 effect=str(row.effect),
@@ -524,8 +525,8 @@ def _journal_by_edge(entries: list[_Entry]) -> tuple[dict[Edge, int], dict[Edge,
     for entry in entries:
         edge = (entry.debtor_id, entry.creditor_id)
         sums[edge] = sums.get(edge, 0) + entry.delta
-        if edge not in first or entry.flush_ordinal < first[edge][0]:
-            first[edge] = (entry.flush_ordinal, entry.amount_before or 0)
+        if edge not in first or entry.ordinal < first[edge][0]:
+            first[edge] = (entry.ordinal, entry.amount_before or 0)
     return sums, {edge: before for edge, (_ordinal, before) in first.items()}
 
 
@@ -711,7 +712,7 @@ def _inject_subset(op: Any, intent: dict[str, Any], entries: list[_Entry], _equi
         )
 
     findings: list[dict[str, Any]] = []
-    ordered = sorted(entries, key=lambda e: (e.flush_ordinal, e.debtor_id.bytes, e.creditor_id.bytes))
+    ordered = sorted(entries, key=lambda e: (e.ordinal, e.debtor_id.bytes, e.creditor_id.bytes))
     for entry in ordered:
         edge = (entry.debtor_id, entry.creditor_id)
         if entry.effect not in ("I", "U") or entry.delta <= 0:

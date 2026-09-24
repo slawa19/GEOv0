@@ -372,10 +372,10 @@ async def _entries_for_tx(factory, tx_id: str):
     """
     return await stored_rows(
         factory,
-        f"SELECT e.flush_ordinal, e.effect, e.amount_before, e.amount_after, e.delta, "  # noqa: S608
+        f"SELECT e.ordinal, e.effect, e.amount_before, e.amount_after, e.delta, "  # noqa: S608
         f"e.debtor_id, e.creditor_id FROM {ENTRIES_TABLE} e "
         f"JOIN {OPERATIONS_TABLE} o ON o.id = e.operation_id "
-        f"WHERE o.tx_id = :tx_id ORDER BY e.flush_ordinal",
+        f"WHERE o.tx_id = :tx_id ORDER BY e.ordinal",
         {"tx_id": tx_id},
     )
 

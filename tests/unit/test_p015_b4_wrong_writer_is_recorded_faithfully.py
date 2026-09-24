@@ -211,10 +211,10 @@ def _clearing_implied_by_intent(
 async def _entries_for_tx(factory, tx_id: str):
     return await stored_rows(
         factory,
-        f"SELECT e.flush_ordinal, e.effect, e.amount_before, e.amount_after, e.delta, "  # noqa: S608
+        f"SELECT e.ordinal, e.effect, e.amount_before, e.amount_after, e.delta, "  # noqa: S608
         f"e.debtor_id, e.creditor_id FROM {ENTRIES_TABLE} e "
         f"JOIN {OPERATIONS_TABLE} o ON o.id = e.operation_id "
-        f"WHERE o.tx_id = :tx_id ORDER BY e.flush_ordinal",
+        f"WHERE o.tx_id = :tx_id ORDER BY e.ordinal",
         {"tx_id": tx_id},
     )
 
@@ -569,20 +569,28 @@ async def test_c5_the_journal_of_an_honest_payment_equals_the_change_and_the_int
         f"payment actually made is {observed}"
     )
 
-    # The payment made three effects across two flushes, and the FIRST flush is the one that
-    # holds the intermediate value 2. The ordinals are asserted as a grouping rather than as
-    # fixed numbers, because how step 4 numbers flushes that produced no effect is its choice
-    # and not this counterexample's subject.
-    ordinals = [row["flush_ordinal"] for row in entries]
-    by_flush = {ordinal: ordinals.count(ordinal) for ordinal in ordinals}
-    assert len(entries) == 3 and sorted(by_flush.values()) == [1, 2], (
-        f"the payment's effects were not recorded as one flush reducing the reverse debt and a "
-        f"second flush netting the pair: {entries}. The intermediate value the database really "
-        f"held is what a per-operation summary loses."
+    # The payment made three effects, one per changed row, and the FIRST of them holds the
+    # intermediate value 2 - a state the database really held on its way to the netting.
+    #
+    # WHAT LEFT WITH 018 STAGE B1 (manifest `T1808` §6, row `:601`): the grouping "three effects in
+    # two flushes". It was read off the listener's `flush_ordinal`; the database trigger numbers
+    # every ROW from one sequence (`ordinal`), so a flush has no identity left to group by. Order
+    # within the operation is what survives, and it is what the intermediate value needs.
+    ordinals = [row["ordinal"] for row in entries]
+    assert len(entries) == 3 and ordinals == sorted(set(ordinals)), (
+        f"the payment's three effects were not recorded as three entries in strictly increasing "
+        f"order: {entries}. The intermediate value the database really held is what a "
+        f"per-operation summary loses."
     )
-    first = [row for row in entries if row["flush_ordinal"] == min(ordinals)]
-    assert len(first) == 1 and Decimal(str(first[0]["amount_after"])) == Decimal("2"), (
-        f"the first flush did not record `B -> A` passing through 2 on its way to being "
+    first = entries[0]
+    assert (
+        triangle.name(first["debtor_id"]),
+        triangle.name(first["creditor_id"]),
+        first["effect"],
+        Decimal(str(first["amount_before"])),
+        Decimal(str(first["amount_after"])),
+    ) == ("b", "a", "U", Decimal("7"), Decimal("2")), (
+        f"the first effect did not record `B -> A` passing from 7 through 2 on its way to being "
         f"deleted: {entries}"
     )
 

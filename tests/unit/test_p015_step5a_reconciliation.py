@@ -15,8 +15,13 @@ WHAT IT DOES NOT SEE, and one test says so on purpose: a writer that journals a 
 `C6` is that writer; criterion (a) is PASSED on it, and refuting it is criterion (b), step 5b.
 
 TIER. PostgreSQL. Money inside `|v| < 2^26`. Every verdict is read on a new session. The
-changes "around the application" go through `exec_driver_sql`, the one door the write guard documents as
-unseen - which is exactly what an operator's SQL or a partial restore is.
+changes "around the application" go through THE named corruption helper (`tests/ledger_corruption.py`,
+spec 018 `FORK-4`): its own connection and transaction with `SET LOCAL session_replication_role =
+replica`, i.e. a write with the journal's triggers off - which is exactly what an operator's SQL or a
+partial restore is. Since 018 stage B1 the database REFUSES the same statement from the application's
+side (`GE001`, `tests/integration/test_p018_a_write_without_context_is_refused_by_the_database.py`); that
+refusal is the first barrier, and these tests keep the INDEPENDENT one - what criterion (a) and the hold
+make of such a state once it exists (spec 018, Verification plan §2 and "Запрещено").
 
 MUTATIONS. Each test names the mutation that must turn it red; the report of step 5a records the runs.
 
@@ -46,7 +51,7 @@ import pytest_asyncio
 from sqlalchemy import func, select, update
 
 from app.core.integrity import compute_integrity_checkpoint_for_equivalent
-from app.core.ledger.journal import DebtJournalError, Reason, debt_operation
+from app.core.ledger.book import Book, BookError, Refusal, operation_for
 from app.core.ledger.reconciliation import (
     CRITERION_A,
     FAILED,
@@ -68,6 +73,7 @@ from app.db.reconciliation_tables import (
     debt_reconciliation_results,
 )
 from tests.debt_setup import debt_fixture_setup
+from tests.ledger_corruption import corrupt
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: F401 - autouse fixture
 from tests.unit.test_p015_b4_wrong_writer_is_recorded_faithfully import (
     _audit,
@@ -117,8 +123,31 @@ def _literal(dialect: str, value: uuid.UUID) -> str:
     return str(value)
 
 
+def _database_url(factory) -> str:
+    """The URL of the database a sessionmaker is bound to, password included (for the helper)."""
+
+    return factory.kw["bind"].url.render_as_string(hide_password=False)
+
+
 async def _around_the_application(factory, build_statement) -> None:
-    """Run one statement through the driver - no ORM, no flush hook, no write guard - and commit."""
+    """Commit one statement WITH THE JOURNAL'S TRIGGERS OFF, through the named corruption helper.
+
+    018 stage B1: the application's own connection can no longer write `debts` or the journal outside
+    an operation (`GE001`, the guard triggers), so a change "around the application" is modelled the
+    one way it can still arise - an operator or a restore with the triggers switched off
+    (`tests/ledger_corruption.py`). `replica` also switches off foreign keys: a caller that needs one
+    to bite uses `_driver_statement` instead.
+    """
+
+    await corrupt(_database_url(factory), [build_statement("postgresql")])
+
+
+async def _driver_statement(factory, build_statement) -> None:
+    """One statement through the driver with every trigger and foreign key ON, committed.
+
+    For tables the journal's triggers do not guard (the reconciliation results), where the test is
+    about a constraint that must bite.
+    """
 
     async with factory() as session:
         connection = await session.connection()
@@ -431,6 +460,11 @@ async def test_step5a_a_journal_row_contradicting_its_own_arithmetic_is_failed_a
     `chk_debt_journal_entries_delta_arithmetic` (migration 024) and the per-row check "can only fire
     if the constraint is gone" (`app/core/ledger/reconciliation.py`, module docstring). The clone is
     where it is gone (see `clone_without_the_arithmetic_check`); until 017 stage 3 this ran on SQLite.
+
+    BOTH EXCEPTIONS AT ONCE (spec 018 §2, manifest `T1808` 7.C item 3): since stage B1 the guard trigger
+    on `debt_journal_entries` refuses the forging UPDATE on the clone too, so the forgery goes through
+    the corruption helper (`replica`) on the CHECK-less clone. That the ordinary schema refuses such a
+    row by its CHECK is `tests/integration/test_p015_t1530_delta_arithmetic_postgres.py`.
     """
     factory = clone_without_the_arithmetic_check
 
@@ -506,9 +540,10 @@ async def test_step5a_a_duplicated_delta_is_failed(db_session) -> None:
     await _around_the_application(
         factory,
         lambda d: (
-            "INSERT INTO debt_journal_entries (id, operation_id, flush_ordinal, equivalent_id, "
+            "INSERT INTO debt_journal_entries (id, operation_id, ordinal, equivalent_id, "
             "debtor_id, creditor_id, effect, amount_before, amount_after, delta, recorded_at) "
-            f"SELECT '{_literal(d, copy_id)}', operation_id, flush_ordinal + 100, equivalent_id, "
+            f"SELECT '{_literal(d, copy_id)}', operation_id, "
+            "nextval('debt_journal_entries_ordinal_seq'), equivalent_id, "
             "debtor_id, creditor_id, effect, amount_before, amount_after, delta, recorded_at "
             f"FROM debt_journal_entries WHERE id = '{_literal(d, updates[0].id)}'"
         ),
@@ -799,7 +834,7 @@ async def test_step5a_a_seed_or_fixture_write_after_the_baseline_is_refused(db_s
     ANTI-VACUUM: the identical write to an equivalent WITHOUT a baseline still commits, so the refusal
     is about the baseline and not about the write.
 
-    MUTATION: remove the `_PRE_BASELINE_ONLY_KINDS` block from `journal._complete`. The late debt
+    MUTATION: remove the `_PRE_BASELINE_ONLY_KINDS` block from `book._complete`. The late debt
     commits and this test goes red on the refusal and on the stored state.
     """
     from tests.conftest import TestingSessionLocal as factory
@@ -825,19 +860,21 @@ async def test_step5a_a_seed_or_fixture_write_after_the_baseline_is_refused(db_s
                 async with debt_fixture_setup(session, label="after-baseline"):
                     session.add(late)
             else:
-                async with debt_operation(
+                async with Book.operation(
                     session,
-                    kind="SEED",
-                    identity=f"step5a-late-seed/{uuid.uuid4()}",
-                    intent={"probe": "after-baseline"},
-                    scope_equivalent_ids=None,
+                    operation_for(
+                        "SEED",
+                        f"step5a-late-seed/{uuid.uuid4()}",
+                        {"probe": "after-baseline"},
+                        scope_equivalent_ids=None,
+                    ),
                 ):
                     session.add(late)
             await session.commit()
 
-    with pytest.raises(DebtJournalError) as refused:
+    with pytest.raises(BookError) as refused:
         await _write(baselined)
-    assert refused.value.reason == Reason.UNVERIFIABLE_WRITER_AFTER_BASELINE, refused.value
+    assert refused.value.reason == Refusal.UNVERIFIABLE_WRITER_AFTER_BASELINE, refused.value
     assert await _edges(factory, baselined) == before, "the refused write is durable"
     assert len(await _entries(factory, baselined.equivalent.id)) == entries_before
     assert (await _verify(factory, baselined.equivalent.id)).status == PASSED
