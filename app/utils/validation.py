@@ -336,9 +336,10 @@ def parse_amount_decimal(
     return as_decimal
 
 
-#: The reasons `money_storability_violation` answers with, one per predicate. The strings are the
-#: debt journal's own (`app/core/ledger/journal.py::Reason`), so a refusal names the same rule
-#: whichever boundary applied it.
+#: The reasons `money_storability_violation` answers with, one per predicate. The strings keep the
+#: spelling of the deleted listener journal's `Reason` (018 stage B) and are shared by both boundaries
+#: that apply the predicate - `Book` (`BookMoneyError`) and `MoneyNumeric` at bind - so a refusal
+#: names the same rule whichever boundary applied it.
 MONEY_FINITENESS = "money_finiteness"
 MONEY_MAGNITUDE = "money_magnitude"
 MONEY_QUANTIZATION = "money_quantization"

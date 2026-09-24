@@ -27,8 +27,9 @@ class Equivalent(Base):
     # the hold points at it, on either dialect. A delete of it - accidental or maintenance - would
     # otherwise release containment with no later PASSED, no reason and no audit. The only ways a hold
     # ends are the admin clear and deleting the equivalent row itself (whose CASCADE removes its results
-    # and is accepted by both dialects, measured). Test teardown that deletes result rows before
-    # equivalents nulls the hold first (`tests/debt_setup.purge_test_ledger`, `tests/conftest.py`).
+    # and is accepted by both dialects, measured). Tests do not delete result rows in teardown: since
+    # 018 stage B they dispose of their data by dropping a cloned database; a test that must remove a
+    # hold's evidence nulls the hold first (`tests/integration/test_p015_step5c_hold_races_postgres.py`).
     # `use_alter`: the result table already references `equivalents`, so the pair is a cycle; it orders
     # PostgreSQL's `create_all`/`drop_all`, but NOT SQLite's `drop_all` over rows, which still fails with
     # `FOREIGN KEY constraint failed` (measured; `PRAGMA defer_foreign_keys` does not help a RESTRICT).

@@ -293,9 +293,10 @@ debt_journal_entries = Table(
     # movement of `10.00000001 -> 10.00000002, delta 0.00000001` gives a left-hand side of
     # `9.99999905104687e-09`, and `33554431.99999999 -> 33554432.00000001, delta 0.00000002` gives
     # `1.862645149230957e-08`. Installing it on SQLite would refuse real writes, which is the same
-    # defect as admitting false ones. The SQLite tier's guarantee for this class is the in-process
-    # readback of the stored entries (`app/core/ledger/journal.py::_verify_entries`), which compares
-    # scale-8 `Decimal`s reconstructed by the column's own result processor rather than floats.
+    # defect as admitting false ones. The SQLite tier's guarantee for this class was then the
+    # in-process readback of the stored entries by the listener journal (`_verify_entries`); both the
+    # SQLite tier (017) and that journal (018 stage B, deleted with `app/core/ledger/journal.py`) are
+    # gone. Today the entry is built by the database trigger from `OLD`/`NEW`, and this CHECK holds.
     #
     # `Base.metadata.create_all` must produce the SAME constraint as `alembic upgrade head` does,
     # and the two paths are compared by name in
