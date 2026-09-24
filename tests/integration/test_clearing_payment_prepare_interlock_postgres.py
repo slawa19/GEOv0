@@ -8,7 +8,7 @@ import uuid
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import delete, select, text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import (
     AsyncConnection,
     AsyncSession,
@@ -16,7 +16,13 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from tests.debt_setup import debt_fixture_setup, purge_test_ledger
+from tests.debt_setup import debt_fixture_setup
+
+# A test that seeds (`_seed_interlock_case`) commits through several sessions and runs on a disposable
+# clone of the migrated template: `@pytest.mark.usefixtures("tier_on_a_clone")`, and its rows go with
+# the clone's drop (018 B0b; see `tests/tier_on_a_clone.py`). Its own one-connection engine is built
+# over `committed_database.url`. Tests that commit nothing stay on the tier and pay for no clone.
+from tests.tier_on_a_clone import tier_on_a_clone  # noqa: E402,F401 - opt-in fixture
 
 
 
@@ -296,51 +302,8 @@ async def _seed_interlock_case():
     }
 
 
-async def _cleanup_interlock_case(seed) -> None:
-    from app.db.models.audit_log import IntegrityAuditLog
-    from app.db.models.equivalent import Equivalent
-    from app.db.models.participant import Participant
-    from app.db.models.prepare_lock import PrepareLock
-    from app.db.models.transaction import Transaction
-    from app.db.models.trustline import TrustLine
-    from tests.conftest import TestingSessionLocal
-
-    async with TestingSessionLocal() as cleanup:
-        # The debts AND the journal rows that describe them, through the driver and BEFORE the
-        # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
-        # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
-        # envelope still standing would block the transaction delete above it.
-        await purge_test_ledger(cleanup, equivalent_ids=[seed["equivalent_id"]])
-        await cleanup.execute(
-            delete(IntegrityAuditLog).where(
-                IntegrityAuditLog.equivalent_code == seed["equivalent_code"]
-            )
-        )
-        await cleanup.execute(
-            delete(PrepareLock).where(
-                PrepareLock.participant_id.in_(seed["participant_ids"])
-            )
-        )
-        await cleanup.execute(
-            delete(Transaction).where(
-                Transaction.initiator_id.in_(seed["participant_ids"])
-            )
-        )
-        await cleanup.execute(
-            delete(TrustLine).where(
-                TrustLine.equivalent_id == seed["equivalent_id"]
-            )
-        )
-        await cleanup.execute(
-            delete(Participant).where(Participant.id.in_(seed["participant_ids"]))
-        )
-        await cleanup.execute(
-            delete(Equivalent).where(Equivalent.id == seed["equivalent_id"])
-        )
-        await cleanup.commit()
-
-
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("tier_on_a_clone")
 async def test_clearing_owner_blocks_new_reverse_prepare_after_empty_snapshot_postgres(
     db_session,
     monkeypatch,
@@ -507,7 +470,6 @@ async def test_clearing_owner_blocks_new_reverse_prepare_after_empty_snapshot_po
                 if session is not None:
                     await session.rollback()
                     await session.close()
-            await _cleanup_interlock_case(seed)
         except BaseException as teardown_error:
             if primary_error is None:
                 raise
@@ -518,6 +480,7 @@ async def test_clearing_owner_blocks_new_reverse_prepare_after_empty_snapshot_po
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("tier_on_a_clone")
 async def test_uncommitted_reverse_prepare_blocks_clearing_until_visible_postgres(
     db_session,
 ):
@@ -657,7 +620,6 @@ async def test_uncommitted_reverse_prepare_blocks_clearing_until_visible_postgre
                 if session is not None:
                     await session.rollback()
                     await session.close()
-            await _cleanup_interlock_case(seed)
         except BaseException as teardown_error:
             if primary_error is None:
                 raise
@@ -668,19 +630,20 @@ async def test_uncommitted_reverse_prepare_blocks_clearing_until_visible_postgre
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("tier_on_a_clone")
 async def test_clearing_interlock_completes_with_single_connection_pool_postgres(
     db_session,
+    committed_database,
 ):
     """The shared boundary must not require two simultaneous pool connections."""
 
     _require_postgres(db_session)
 
     from app.core.clearing.service import ClearingService
-    from tests.conftest import TEST_DATABASE_URL
 
     seed = await _seed_interlock_case()
     one_connection_engine = create_async_engine(
-        TEST_DATABASE_URL,
+        committed_database.url,
         isolation_level="SERIALIZABLE",
         pool_size=1,
         max_overflow=0,
@@ -706,7 +669,6 @@ async def test_clearing_interlock_completes_with_single_connection_pool_postgres
         await clearing_session.rollback()
         await clearing_session.close()
         await one_connection_engine.dispose()
-        await _cleanup_interlock_case(seed)
 
 
 @pytest.mark.asyncio
@@ -748,8 +710,10 @@ async def test_postgres_clearing_rejects_external_connection_bind_postgres(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("tier_on_a_clone")
 async def test_cancellation_after_interlock_checkout_returns_connection_postgres(
     db_session,
+    committed_database,
     monkeypatch,
 ):
     """Cancellation between checkout and isolation setup must not exhaust the pool."""
@@ -757,11 +721,10 @@ async def test_cancellation_after_interlock_checkout_returns_connection_postgres
     _require_postgres(db_session)
 
     from app.core.clearing.service import ClearingService
-    from tests.conftest import TEST_DATABASE_URL
 
     seed = await _seed_interlock_case()
     one_connection_engine = create_async_engine(
-        TEST_DATABASE_URL,
+        committed_database.url,
         isolation_level="SERIALIZABLE",
         pool_size=1,
         max_overflow=0,
@@ -816,10 +779,10 @@ async def test_cancellation_after_interlock_checkout_returns_connection_postgres
         await clearing_session.rollback()
         await clearing_session.close()
         await one_connection_engine.dispose()
-        await _cleanup_interlock_case(seed)
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("tier_on_a_clone")
 async def test_cancellation_during_interlocked_work_rolls_back_before_unlock_postgres(
     db_session,
     monkeypatch,
@@ -913,7 +876,6 @@ async def test_cancellation_during_interlocked_work_rolls_back_before_unlock_pos
             if session is not None:
                 await session.rollback()
                 await session.close()
-        await _cleanup_interlock_case(seed)
 
 
 @pytest.mark.asyncio
@@ -960,6 +922,7 @@ async def test_cancellation_during_preflight_select_rolls_back_caller_postgres(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("tier_on_a_clone")
 async def test_cancellation_during_interlock_release_preserves_durable_amount_postgres(
     db_session,
     monkeypatch,
@@ -1039,10 +1002,10 @@ async def test_cancellation_during_interlock_release_preserves_durable_amount_po
         if probe_session is not None:
             await probe_session.rollback()
             await probe_session.close()
-        await _cleanup_interlock_case(seed)
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("tier_on_a_clone")
 async def test_interlock_timeout_rolls_back_work_and_releases_owner_postgres(
     db_session,
     monkeypatch,
@@ -1099,4 +1062,3 @@ async def test_interlock_timeout_rolls_back_work_and_releases_owner_postgres(
             if session is not None:
                 await session.rollback()
                 await session.close()
-        await _cleanup_interlock_case(seed)

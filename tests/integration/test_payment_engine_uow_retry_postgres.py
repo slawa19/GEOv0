@@ -4,9 +4,13 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError
-from tests.debt_setup import purge_test_ledger
+
+# Every test here commits through several sessions and runs on a disposable clone of the migrated
+# template; its rows go with the clone's drop and nothing is deleted row by row (018 B0b; see
+# `tests/tier_on_a_clone.py`).
+from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
 
 
 
@@ -180,19 +184,6 @@ async def test_payment_engine_commit_retries_whole_uow_on_serialization_failure_
         assert debt is not None
         assert debt.amount == Decimal("7.00")
 
-    # Cleanup (best-effort) to keep shared Postgres test DB tidy.
-    async with TestingSessionLocal() as cleanup:
-        # The debts AND the journal rows that describe them, through the driver and BEFORE the
-        # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
-        # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
-        # envelope still standing would block the transaction delete above it.
-        await purge_test_ledger(cleanup, equivalent_ids=[eq.id])
-        await cleanup.execute(delete(PrepareLock).where(PrepareLock.tx_id == tx_id))
-        await cleanup.execute(delete(Transaction).where(Transaction.tx_id == tx_id))
-        await cleanup.execute(delete(TrustLine).where(TrustLine.equivalent_id == eq.id))
-        await cleanup.execute(delete(Participant).where(Participant.pid.in_([a.pid, b.pid])))
-        await cleanup.execute(delete(Equivalent).where(Equivalent.code == eq_code))
-        await cleanup.commit()
 
 
 @pytest.mark.asyncio
@@ -406,66 +397,39 @@ async def test_payment_engine_commit_retries_real_concurrent_debt_insert_postgre
     # now counted one attempt earlier.
     assert apply_calls == {"holder": 1, "waiter": 1}, apply_calls
 
-    try:
-        async with TestingSessionLocal() as verify:
-            states = (
-                await verify.execute(
-                    select(Transaction.state)
-                    .where(Transaction.tx_id.in_(tx_ids))
-                    .order_by(Transaction.tx_id)
-                )
-            ).scalars().all()
-            debt_amount = await verify.scalar(
-                select(Debt.amount).where(
-                    Debt.debtor_id == participant_a.id,
-                    Debt.creditor_id == participant_b.id,
-                    Debt.equivalent_id == equivalent.id,
-                )
+    async with TestingSessionLocal() as verify:
+        states = (
+            await verify.execute(
+                select(Transaction.state)
+                .where(Transaction.tx_id.in_(tx_ids))
+                .order_by(Transaction.tx_id)
             )
-            lock_count = await verify.scalar(
-                select(func.count()).select_from(PrepareLock).where(
-                    PrepareLock.tx_id.in_(tx_ids)
-                )
+        ).scalars().all()
+        debt_amount = await verify.scalar(
+            select(Debt.amount).where(
+                Debt.debtor_id == participant_a.id,
+                Debt.creditor_id == participant_b.id,
+                Debt.equivalent_id == equivalent.id,
             )
-            audit_count = await verify.scalar(
-                select(func.count()).select_from(IntegrityAuditLog).where(
-                    IntegrityAuditLog.tx_id.in_(tx_ids),
-                    IntegrityAuditLog.operation_type == "PAYMENT",
-                )
+        )
+        lock_count = await verify.scalar(
+            select(func.count()).select_from(PrepareLock).where(
+                PrepareLock.tx_id.in_(tx_ids)
             )
-            persisted_limit = await verify.scalar(
-                select(TrustLine.limit).where(TrustLine.id == trustline.id)
+        )
+        audit_count = await verify.scalar(
+            select(func.count()).select_from(IntegrityAuditLog).where(
+                IntegrityAuditLog.tx_id.in_(tx_ids),
+                IntegrityAuditLog.operation_type == "PAYMENT",
             )
+        )
+        persisted_limit = await verify.scalar(
+            select(TrustLine.limit).where(TrustLine.id == trustline.id)
+        )
 
-            assert states == ["COMMITTED", "COMMITTED"]
-            assert debt_amount == Decimal("6.00000000")
-            assert lock_count == 0
-            assert audit_count == 2
-            assert persisted_limit == Decimal("100.00000000")
-    finally:
-        async with TestingSessionLocal() as cleanup:
-            # The debts AND the journal rows that describe them, through the driver and BEFORE the
-            # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
-            # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
-            # envelope still standing blocks the transaction delete below it.
-            await purge_test_ledger(
-                cleanup, equivalent_ids=[equivalent.id], tx_ids=tx_ids
-            )
-            await cleanup.execute(
-                delete(IntegrityAuditLog).where(IntegrityAuditLog.tx_id.in_(tx_ids))
-            )
-            await cleanup.execute(delete(PrepareLock).where(PrepareLock.tx_id.in_(tx_ids)))
-            await cleanup.execute(delete(Transaction).where(Transaction.tx_id.in_(tx_ids)))
-            await cleanup.execute(
-                delete(TrustLine).where(TrustLine.equivalent_id == equivalent.id)
-            )
-            await cleanup.execute(
-                delete(Participant).where(
-                    Participant.id.in_([participant_a.id, participant_b.id])
-                )
-            )
-            await cleanup.execute(
-                delete(Equivalent).where(Equivalent.id == equivalent.id)
-            )
-            await cleanup.commit()
+        assert states == ["COMMITTED", "COMMITTED"]
+        assert debt_amount == Decimal("6.00000000")
+        assert lock_count == 0
+        assert audit_count == 2
+        assert persisted_limit == Decimal("100.00000000")
 

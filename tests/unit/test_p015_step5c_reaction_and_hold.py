@@ -54,14 +54,18 @@ from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.integrity_checkpoint import IntegrityCheckpoint
 from app.db.models.participant import Participant
-from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 from app.db.reconciliation_tables import debt_reconciliation_results
 from app.utils.exceptions import ConflictException, RetryablePaymentConflictException
 from tests.conftest import MODE_B, sessionmaker_of
-from tests.debt_setup import debt_fixture_setup, purge_test_ledger
+
+# Every test commits through sessions of its own, so it runs on a disposable clone of the migrated
+# template and leaves its rows to the clone's drop (018 B0b; see `tests/tier_on_a_clone.py`): the two
+# `MODE_B` tests through `db_session`'s clone, every other test through `tier_on_a_clone`, which it
+# opts into by name - never both in one test, since both clone under one name.
+from tests.tier_on_a_clone import tier_on_a_clone  # noqa: E402,F401 - opt-in fixture
+from tests.debt_setup import debt_fixture_setup
 from tests.unit.test_p015_b4_wrong_writer_is_recorded_faithfully import (
-    _drop_triangle,
     _edges,
     _prepare_payment,
     _seed_triangle,
@@ -215,6 +219,7 @@ def _spy_reactions(monkeypatch) -> list[uuid.UUID]:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("tier_on_a_clone")
 async def test_step5c_one_atom_around_the_application_holds_the_equivalent_through_the_scheduled_host(
     db_session, monkeypatch, caplog
 ) -> None:
@@ -233,30 +238,27 @@ async def test_step5c_one_atom_around_the_application_holds_the_equivalent_throu
     factory = _Factory(TestingSessionLocal)
     _tag_the_hold(monkeypatch, factory)
     triangle, _debt = await _faulty_triangle(TestingSessionLocal)
-    try:
-        metric_before = _hold_metric()
-        with caplog.at_level(logging.INFO):
-            await _scheduled_run(monkeypatch, factory)
+    metric_before = _hold_metric()
+    with caplog.at_level(logging.INFO):
+        await _scheduled_run(monkeypatch, factory)
 
-        hold = await _hold_of(TestingSessionLocal, triangle.equivalent.id)
-        rows = await _result_rows(TestingSessionLocal, triangle.equivalent.id)
-        latest_ids = await _latest_result_ids(TestingSessionLocal, triangle.equivalent.id)
-        assert hold is not None, f"a confirmed FAILED did not hold the equivalent: {rows}"
-        assert [row.status for row in rows] == [FAILED], rows
-        assert latest_ids == [hold], "the hold does not point at the latest FAILED row"
-        findings = rows[0].detail if isinstance(rows[0].detail, dict) else json.loads(rows[0].detail)
-        residuals = [f for f in findings["findings"] if f["kind"] == "edge_residual"]
-        assert [f["unexplained"] for f in residuals] == ["0.00000001"], findings
+    hold = await _hold_of(TestingSessionLocal, triangle.equivalent.id)
+    rows = await _result_rows(TestingSessionLocal, triangle.equivalent.id)
+    latest_ids = await _latest_result_ids(TestingSessionLocal, triangle.equivalent.id)
+    assert hold is not None, f"a confirmed FAILED did not hold the equivalent: {rows}"
+    assert [row.status for row in rows] == [FAILED], rows
+    assert latest_ids == [hold], "the hold does not point at the latest FAILED row"
+    findings = rows[0].detail if isinstance(rows[0].detail, dict) else json.loads(rows[0].detail)
+    residuals = [f for f in findings["findings"] if f["kind"] == "edge_residual"]
+    assert [f["unexplained"] for f in residuals] == ["0.00000001"], findings
 
-        logs = _hold_logs(caplog)
-        assert len(logs) == 1 and str(triangle.equivalent.id) in logs[0] and str(hold) in logs[0], logs
-        assert _hold_metric() == metric_before + 1
-        eq = triangle.equivalent.id
-        assert factory.events == [("committed", eq), ("announced", eq)], (
-            f"the log and metric were not emitted strictly after the hold committed: {factory.events}"
-        )
-    finally:
-        await _drop_triangle(TestingSessionLocal, triangle)
+    logs = _hold_logs(caplog)
+    assert len(logs) == 1 and str(triangle.equivalent.id) in logs[0] and str(hold) in logs[0], logs
+    assert _hold_metric() == metric_before + 1
+    eq = triangle.equivalent.id
+    assert factory.events == [("committed", eq), ("announced", eq)], (
+        f"the log and metric were not emitted strictly after the hold committed: {factory.events}"
+    )
 
 
 async def _latest_result_ids(factory, equivalent_id) -> list[uuid.UUID]:
@@ -274,6 +276,7 @@ async def _latest_result_ids(factory, equivalent_id) -> list[uuid.UUID]:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("tier_on_a_clone")
 async def test_step5c_a_hold_whose_commit_fails_persists_nothing_and_emits_no_log_and_no_metric(
     db_session, monkeypatch, caplog
 ) -> None:
@@ -298,30 +301,28 @@ async def test_step5c_a_hold_whose_commit_fails_persists_nothing_and_emits_no_lo
         return await original_react(session_factory, equivalent_id)
 
     monkeypatch.setattr(reconciliation, "react_to_failed", _second_atom_then_react)
-    try:
-        metric_before = _hold_metric()
-        with caplog.at_level(logging.INFO):
-            counts = await run_scheduled_reconciliation(factory, equivalent_ids=[triangle.equivalent.id])
+    metric_before = _hold_metric()
+    with caplog.at_level(logging.INFO):
+        counts = await run_scheduled_reconciliation(factory, equivalent_ids=[triangle.equivalent.id])
 
-        assert factory.events == [("commit_failed", triangle.equivalent.id)], (
-            f"premise: the reaction did not reach its commit with the hold written: {factory.events}"
-        )
-        assert (counts[FAILED], counts["hold_errors"], counts[f"hold_{HOLD_SET}"]) == (1, 1, 0), counts
-        assert await _hold_of(TestingSessionLocal, triangle.equivalent.id) is None
-        rows = await _result_rows(TestingSessionLocal, triangle.equivalent.id)
-        unexplained = [
-            [f["unexplained"] for f in row.detail["findings"] if f["kind"] == "edge_residual"] for row in rows
-        ]
-        assert unexplained == [["0.00000001"]], (
-            f"the reaction's evidence outlived its failed hold transaction: {unexplained}"
-        )
-        assert _hold_logs(caplog) == []
-        assert _hold_metric() == metric_before
-    finally:
-        await _drop_triangle(TestingSessionLocal, triangle)
+    assert factory.events == [("commit_failed", triangle.equivalent.id)], (
+        f"premise: the reaction did not reach its commit with the hold written: {factory.events}"
+    )
+    assert (counts[FAILED], counts["hold_errors"], counts[f"hold_{HOLD_SET}"]) == (1, 1, 0), counts
+    assert await _hold_of(TestingSessionLocal, triangle.equivalent.id) is None
+    rows = await _result_rows(TestingSessionLocal, triangle.equivalent.id)
+    unexplained = [
+        [f["unexplained"] for f in row.detail["findings"] if f["kind"] == "edge_residual"] for row in rows
+    ]
+    assert unexplained == [["0.00000001"]], (
+        f"the reaction's evidence outlived its failed hold transaction: {unexplained}"
+    )
+    assert _hold_logs(caplog) == []
+    assert _hold_metric() == metric_before
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("tier_on_a_clone")
 async def test_step5c_one_equivalent_failing_to_hold_does_not_roll_back_anothers(
     db_session, monkeypatch, caplog
 ) -> None:
@@ -336,24 +337,21 @@ async def test_step5c_one_equivalent_failing_to_hold_does_not_roll_back_anothers
     second, _ = await _faulty_triangle(TestingSessionLocal)
     factory = _Factory(TestingSessionLocal, fail_for={first.equivalent.id})
     _tag_the_hold(monkeypatch, factory)
-    try:
-        with caplog.at_level(logging.INFO):
-            counts = await run_scheduled_reconciliation(
-                factory, equivalent_ids=[first.equivalent.id, second.equivalent.id]
-            )
+    with caplog.at_level(logging.INFO):
+        counts = await run_scheduled_reconciliation(
+            factory, equivalent_ids=[first.equivalent.id, second.equivalent.id]
+        )
 
-        assert (counts[FAILED], counts["hold_errors"], counts[f"hold_{HOLD_SET}"]) == (2, 1, 1), counts
-        assert await _hold_of(TestingSessionLocal, first.equivalent.id) is None
-        assert await _hold_of(TestingSessionLocal, second.equivalent.id) is not None
-        logs = _hold_logs(caplog)
-        assert len(logs) == 1 and str(second.equivalent.id) in logs[0], logs
-        assert ("commit_failed", first.equivalent.id) in factory.events, factory.events
-    finally:
-        await _drop_triangle(TestingSessionLocal, first)
-        await _drop_triangle(TestingSessionLocal, second)
+    assert (counts[FAILED], counts["hold_errors"], counts[f"hold_{HOLD_SET}"]) == (2, 1, 1), counts
+    assert await _hold_of(TestingSessionLocal, first.equivalent.id) is None
+    assert await _hold_of(TestingSessionLocal, second.equivalent.id) is not None
+    logs = _hold_logs(caplog)
+    assert len(logs) == 1 and str(second.equivalent.id) in logs[0], logs
+    assert ("commit_failed", first.equivalent.id) in factory.events, factory.events
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("tier_on_a_clone")
 async def test_step5c_the_re_run_is_the_confirmation_a_fault_gone_by_the_reaction_is_not_held(
     db_session, monkeypatch, caplog
 ) -> None:
@@ -374,21 +372,19 @@ async def test_step5c_the_re_run_is_the_confirmation_a_fault_gone_by_the_reactio
         return await original_react(session_factory, equivalent_id)
 
     monkeypatch.setattr(reconciliation, "react_to_failed", _repair_then_react)
-    try:
-        metric_before = _hold_metric()
-        with caplog.at_level(logging.INFO):
-            counts = await run_scheduled_reconciliation(
-                TestingSessionLocal, equivalent_ids=[triangle.equivalent.id]
-            )
-        assert counts[FAILED] == 1, f"premise: the scheduled verdict was not FAILED: {counts}"
-        assert counts[f"hold_{HOLD_NOT_CONFIRMED}"] == 1, counts
-        assert await _hold_of(TestingSessionLocal, triangle.equivalent.id) is None
-        assert _hold_logs(caplog) == [] and _hold_metric() == metric_before
-    finally:
-        await _drop_triangle(TestingSessionLocal, triangle)
+    metric_before = _hold_metric()
+    with caplog.at_level(logging.INFO):
+        counts = await run_scheduled_reconciliation(
+            TestingSessionLocal, equivalent_ids=[triangle.equivalent.id]
+        )
+    assert counts[FAILED] == 1, f"premise: the scheduled verdict was not FAILED: {counts}"
+    assert counts[f"hold_{HOLD_NOT_CONFIRMED}"] == 1, counts
+    assert await _hold_of(TestingSessionLocal, triangle.equivalent.id) is None
+    assert _hold_logs(caplog) == [] and _hold_metric() == metric_before
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("tier_on_a_clone")
 async def test_step5c_a_repeated_failed_is_idempotent(db_session, caplog) -> None:
     """Three scheduled runs over a persisting fault, the third with a DIFFERENT fault: one hold, never
     re-pointed; one log, one metric; the result rows are only the verdict transitions.
@@ -398,27 +394,25 @@ async def test_step5c_a_repeated_failed_is_idempotent(db_session, caplog) -> Non
     from tests.conftest import TestingSessionLocal as factory
 
     triangle, debt = await _faulty_triangle(factory)
-    try:
-        metric_before = _hold_metric()
-        with caplog.at_level(logging.INFO):
-            first = await run_scheduled_reconciliation(factory, equivalent_ids=[triangle.equivalent.id])
-            hold = await _hold_of(factory, triangle.equivalent.id)
-            second = await run_scheduled_reconciliation(factory, equivalent_ids=[triangle.equivalent.id])
-            await _set_debt(factory, debt, "10.00000003")
-            third = await run_scheduled_reconciliation(factory, equivalent_ids=[triangle.equivalent.id])
+    metric_before = _hold_metric()
+    with caplog.at_level(logging.INFO):
+        first = await run_scheduled_reconciliation(factory, equivalent_ids=[triangle.equivalent.id])
+        hold = await _hold_of(factory, triangle.equivalent.id)
+        second = await run_scheduled_reconciliation(factory, equivalent_ids=[triangle.equivalent.id])
+        await _set_debt(factory, debt, "10.00000003")
+        third = await run_scheduled_reconciliation(factory, equivalent_ids=[triangle.equivalent.id])
 
-        assert first[f"hold_{HOLD_SET}"] == 1 and hold is not None, first
-        assert second[f"hold_{HOLD_ALREADY_HELD}"] == 1 and second["rows_unchanged"] == 1, second
-        assert third[f"hold_{HOLD_ALREADY_HELD}"] == 1 and third["rows_inserted"] == 1, third
-        assert await _hold_of(factory, triangle.equivalent.id) == hold, "the hold was re-pointed"
-        assert len(await _result_rows(factory, triangle.equivalent.id)) == 2
-        assert len(_hold_logs(caplog)) == 1
-        assert _hold_metric() == metric_before + 1
-    finally:
-        await _drop_triangle(factory, triangle)
+    assert first[f"hold_{HOLD_SET}"] == 1 and hold is not None, first
+    assert second[f"hold_{HOLD_ALREADY_HELD}"] == 1 and second["rows_unchanged"] == 1, second
+    assert third[f"hold_{HOLD_ALREADY_HELD}"] == 1 and third["rows_inserted"] == 1, third
+    assert await _hold_of(factory, triangle.equivalent.id) == hold, "the hold was re-pointed"
+    assert len(await _result_rows(factory, triangle.equivalent.id)) == 2
+    assert len(_hold_logs(caplog)) == 1
+    assert _hold_metric() == metric_before + 1
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("tier_on_a_clone")
 async def test_step5c_no_hold_on_unverifiable(db_session, monkeypatch) -> None:
     """No baseline: the same one-atom change is UNVERIFIABLE. No reaction runs, and one called directly
     does not hold either - both gates.
@@ -429,23 +423,21 @@ async def test_step5c_no_hold_on_unverifiable(db_session, monkeypatch) -> None:
     from tests.conftest import TestingSessionLocal as factory
 
     triangle = await _seed_triangle(factory, trustlines=[])
-    try:
-        (debt,) = await _fixture_debts(factory, triangle, [("a", "b", "10")])
-        await _set_debt(factory, debt, "10.00000001")
-        reactions = _spy_reactions(monkeypatch)
+    (debt,) = await _fixture_debts(factory, triangle, [("a", "b", "10")])
+    await _set_debt(factory, debt, "10.00000001")
+    reactions = _spy_reactions(monkeypatch)
 
-        counts = await run_scheduled_reconciliation(factory, equivalent_ids=[triangle.equivalent.id])
-        assert counts[UNVERIFIABLE] == 1, f"premise: {counts}"
-        assert reactions == []
+    counts = await run_scheduled_reconciliation(factory, equivalent_ids=[triangle.equivalent.id])
+    assert counts[UNVERIFIABLE] == 1, f"premise: {counts}"
+    assert reactions == []
 
-        decision = await reconciliation.react_to_failed(factory, triangle.equivalent.id)
-        assert decision.decision == HOLD_NOT_CONFIRMED, decision
-        assert await _hold_of(factory, triangle.equivalent.id) is None
-    finally:
-        await _drop_triangle(factory, triangle)
+    decision = await reconciliation.react_to_failed(factory, triangle.equivalent.id)
+    assert decision.decision == HOLD_NOT_CONFIRMED, decision
+    assert await _hold_of(factory, triangle.equivalent.id) is None
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("tier_on_a_clone")
 async def test_step5c_no_hold_on_a_verifier_error_either_before_or_inside_the_reaction(
     db_session, monkeypatch, caplog
 ) -> None:
@@ -460,33 +452,31 @@ async def test_step5c_no_hold_on_a_verifier_error_either_before_or_inside_the_re
     triangle, _debt = await _faulty_triangle(factory)
     original_verify = reconciliation.verify_journal_equals_change
     calls = {"n": 0}
-    try:
-        async def _always_raises(session, equivalent_id):
-            raise RuntimeError("stand: the verifier failed")
+    async def _always_raises(session, equivalent_id):
+        raise RuntimeError("stand: the verifier failed")
 
-        monkeypatch.setattr(reconciliation, "verify_journal_equals_change", _always_raises)
-        reactions = _spy_reactions(monkeypatch)
+    monkeypatch.setattr(reconciliation, "verify_journal_equals_change", _always_raises)
+    reactions = _spy_reactions(monkeypatch)
+    counts = await run_scheduled_reconciliation(factory, equivalent_ids=[triangle.equivalent.id])
+    assert counts["error"] == 1 and reactions == [], (counts, reactions)
+    assert await _hold_of(factory, triangle.equivalent.id) is None
+
+    async def _raises_on_the_re_run(session, equivalent_id):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return await original_verify(session, equivalent_id)
+        raise RuntimeError("stand: the verifier failed inside the reaction")
+
+    monkeypatch.setattr(reconciliation, "verify_journal_equals_change", _raises_on_the_re_run)
+    with caplog.at_level(logging.INFO):
         counts = await run_scheduled_reconciliation(factory, equivalent_ids=[triangle.equivalent.id])
-        assert counts["error"] == 1 and reactions == [], (counts, reactions)
-        assert await _hold_of(factory, triangle.equivalent.id) is None
-
-        async def _raises_on_the_re_run(session, equivalent_id):
-            calls["n"] += 1
-            if calls["n"] == 1:
-                return await original_verify(session, equivalent_id)
-            raise RuntimeError("stand: the verifier failed inside the reaction")
-
-        monkeypatch.setattr(reconciliation, "verify_journal_equals_change", _raises_on_the_re_run)
-        with caplog.at_level(logging.INFO):
-            counts = await run_scheduled_reconciliation(factory, equivalent_ids=[triangle.equivalent.id])
-        assert (counts[FAILED], counts["hold_errors"], calls["n"]) == (1, 1, 2), (counts, calls)
-        assert await _hold_of(factory, triangle.equivalent.id) is None
-        assert _hold_logs(caplog) == []
-    finally:
-        await _drop_triangle(factory, triangle)
+    assert (counts[FAILED], counts["hold_errors"], calls["n"]) == (1, 1, 2), (counts, calls)
+    assert await _hold_of(factory, triangle.equivalent.id) is None
+    assert _hold_logs(caplog) == []
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("tier_on_a_clone")
 async def test_step5c_no_hold_on_an_inherited_critical_checkpoint(db_session, monkeypatch) -> None:
     """A debt with no trust line makes the integrity checkpoint `critical`; the baseline adopts it and the
     reconciliation is PASSED. The scheduled host must not hold: the hold reads only a confirmed FAILED.
@@ -498,32 +488,30 @@ async def test_step5c_no_hold_on_an_inherited_critical_checkpoint(db_session, mo
     from tests.conftest import TestingSessionLocal as factory
 
     triangle = await _seed_triangle(factory, trustlines=[])
-    try:
-        await _fixture_debts(factory, triangle, [("a", "b", "10")])
-        await _baseline(factory, triangle.equivalent.id)
-        reactions = _spy_reactions(monkeypatch)
+    await _fixture_debts(factory, triangle, [("a", "b", "10")])
+    await _baseline(factory, triangle.equivalent.id)
+    reactions = _spy_reactions(monkeypatch)
 
-        await _scheduled_run(monkeypatch, factory)
+    await _scheduled_run(monkeypatch, factory)
 
-        async with factory() as session:
-            (status,) = (
-                await session.execute(
-                    select(IntegrityCheckpoint.invariants_status).where(
-                        IntegrityCheckpoint.equivalent_id == triangle.equivalent.id
-                    )
+    async with factory() as session:
+        (status,) = (
+            await session.execute(
+                select(IntegrityCheckpoint.invariants_status).where(
+                    IntegrityCheckpoint.equivalent_id == triangle.equivalent.id
                 )
-            ).scalars().all()
-        assert status["passed"] is False and status["status"] == "critical", (
-            f"premise: the checkpoint is not critical: {status}"
-        )
-        assert [row.status for row in await _result_rows(factory, triangle.equivalent.id)] == [PASSED]
-        assert reactions == []
-        assert await _hold_of(factory, triangle.equivalent.id) is None
-    finally:
-        await _drop_triangle(factory, triangle)
+            )
+        ).scalars().all()
+    assert status["passed"] is False and status["status"] == "critical", (
+        f"premise: the checkpoint is not critical: {status}"
+    )
+    assert [row.status for row in await _result_rows(factory, triangle.equivalent.id)] == [PASSED]
+    assert reactions == []
+    assert await _hold_of(factory, triangle.equivalent.id) is None
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("tier_on_a_clone")
 async def test_step5c_the_evidence_of_a_hold_cannot_be_deleted_while_held(db_session) -> None:
     """Deleting the FAILED row a hold points at is refused by the database, and the hold remains.
 
@@ -538,26 +526,23 @@ async def test_step5c_the_evidence_of_a_hold_cannot_be_deleted_while_held(db_ses
     from tests.conftest import TestingSessionLocal as factory
 
     triangle, _debt = await _faulty_triangle(factory)
-    try:
-        counts = await run_scheduled_reconciliation(factory, equivalent_ids=[triangle.equivalent.id])
-        hold = await _hold_of(factory, triangle.equivalent.id)
-        assert counts[f"hold_{HOLD_SET}"] == 1 and hold is not None, f"premise: {counts}"
+    counts = await run_scheduled_reconciliation(factory, equivalent_ids=[triangle.equivalent.id])
+    hold = await _hold_of(factory, triangle.equivalent.id)
+    assert counts[f"hold_{HOLD_SET}"] == 1 and hold is not None, f"premise: {counts}"
 
-        with pytest.raises(IntegrityError) as refused:
-            await _around_the_application(
-                factory,
-                lambda d: f"DELETE FROM debt_reconciliation_results WHERE id = '{_literal(d, hold)}'",
-            )
-        # A FOREIGN KEY refusal, by SQLSTATE 23503 (foreign_key_violation). Until 017 stage 3 this
-        # also accepted SQLite's "FOREIGN KEY constraint failed", which carries no code.
-        orig = refused.value.orig
-        assert (getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)) == "23503", (
-            refused.value
+    with pytest.raises(IntegrityError) as refused:
+        await _around_the_application(
+            factory,
+            lambda d: f"DELETE FROM debt_reconciliation_results WHERE id = '{_literal(d, hold)}'",
         )
-        assert await _hold_of(factory, triangle.equivalent.id) == hold
-        assert await _latest_result_ids(factory, triangle.equivalent.id) == [hold]
-    finally:
-        await _drop_triangle(factory, triangle)
+    # A FOREIGN KEY refusal, by SQLSTATE 23503 (foreign_key_violation). Until 017 stage 3 this
+    # also accepted SQLite's "FOREIGN KEY constraint failed", which carries no code.
+    orig = refused.value.orig
+    assert (getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)) == "23503", (
+        refused.value
+    )
+    assert await _hold_of(factory, triangle.equivalent.id) == hold
+    assert await _latest_result_ids(factory, triangle.equivalent.id) == [hold]
 
 
 # ==============================================================================================
@@ -575,6 +560,7 @@ def _assert_hold_refusal(exc: BaseException, code: str) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("tier_on_a_clone")
 async def test_step5c_a_held_equivalent_refuses_a_new_payment_before_any_transaction_exists(
     db_session,
 ) -> None:
@@ -587,30 +573,27 @@ async def test_step5c_a_held_equivalent_refuses_a_new_payment_before_any_transac
 
     held = await _seed_triangle(factory, trustlines=[("b", "a", "100")])
     free = await _seed_triangle(factory, trustlines=[("b", "a", "100")])
-    try:
-        await hold_directly(factory, held.equivalent.id)
-        tx_id = str(uuid.uuid4())
-        async with factory() as session:
-            with pytest.raises(ConflictException) as refused:
-                await PaymentService(session).create_payment_internal(
-                    held.a.id, to_pid=held.b.pid, equivalent=held.equivalent.code,
-                    amount="1.00", idempotency_key=tx_id,
-                )
-        _assert_hold_refusal(refused.value, held.equivalent.code)
-        assert await _tx_state(factory, tx_id) is None, "the refusal came after a transaction row was written"
-        assert await _edges(factory, held) == {}
-
-        async with factory() as session:
-            result = await PaymentService(session).create_payment_internal(
-                free.a.id, to_pid=free.b.pid, equivalent=free.equivalent.code, amount="1.00",
+    await hold_directly(factory, held.equivalent.id)
+    tx_id = str(uuid.uuid4())
+    async with factory() as session:
+        with pytest.raises(ConflictException) as refused:
+            await PaymentService(session).create_payment_internal(
+                held.a.id, to_pid=held.b.pid, equivalent=held.equivalent.code,
+                amount="1.00", idempotency_key=tx_id,
             )
-        assert result.status == "COMMITTED", result
-    finally:
-        await _drop_triangle(factory, held)
-        await _drop_triangle(factory, free)
+    _assert_hold_refusal(refused.value, held.equivalent.code)
+    assert await _tx_state(factory, tx_id) is None, "the refusal came after a transaction row was written"
+    assert await _edges(factory, held) == {}
+
+    async with factory() as session:
+        result = await PaymentService(session).create_payment_internal(
+            free.a.id, to_pid=free.b.pid, equivalent=free.equivalent.code, amount="1.00",
+        )
+    assert result.status == "COMMITTED", result
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("tier_on_a_clone")
 async def test_step5c_inactive_and_held_is_refused_as_inactive(db_session) -> None:
     """One reason per refusal, at prepare and at the shared helper; the operator stop wins.
 
@@ -620,35 +603,33 @@ async def test_step5c_inactive_and_held_is_refused_as_inactive(db_session) -> No
     from tests.conftest import TestingSessionLocal as factory
 
     triangle = await _seed_triangle(factory, trustlines=[("b", "a", "100")])
-    try:
-        await hold_directly(factory, triangle.equivalent.id)
-        async with factory() as session:
-            await session.execute(
-                update(Equivalent).where(Equivalent.id == triangle.equivalent.id).values(is_active=False)
-            )
-            await session.commit()
+    await hold_directly(factory, triangle.equivalent.id)
+    async with factory() as session:
+        await session.execute(
+            update(Equivalent).where(Equivalent.id == triangle.equivalent.id).values(is_active=False)
+        )
+        await session.commit()
 
-        async with factory() as session:
-            with pytest.raises(ConflictException) as at_prepare:
-                await PaymentService(session).create_payment_internal(
-                    triangle.a.id, to_pid=triangle.b.pid, equivalent=triangle.equivalent.code, amount="1.00",
-                )
-        async with factory() as session:
-            with pytest.raises(ConflictException) as at_helper:
-                await PaymentEngine(session).refuse_inactive_equivalents(
-                    {triangle.equivalent.id}, row_lock=True
-                )
-        for refused in (at_prepare, at_helper):
-            assert refused.value.details["reason"] == PaymentEngine.EQUIVALENT_INACTIVE_REASON, (
-                refused.value.details
+    async with factory() as session:
+        with pytest.raises(ConflictException) as at_prepare:
+            await PaymentService(session).create_payment_internal(
+                triangle.a.id, to_pid=triangle.b.pid, equivalent=triangle.equivalent.code, amount="1.00",
             )
-    finally:
-        await _drop_triangle(factory, triangle)
+    async with factory() as session:
+        with pytest.raises(ConflictException) as at_helper:
+            await PaymentEngine(session).refuse_inactive_equivalents(
+                {triangle.equivalent.id}, row_lock=True
+            )
+    for refused in (at_prepare, at_helper):
+        assert refused.value.details["reason"] == PaymentEngine.EQUIVALENT_INACTIVE_REASON, (
+            refused.value.details
+        )
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("tier_on_a_clone")
 async def test_step5c_a_payment_prepared_before_the_hold_is_refused_at_commit_before_the_envelope(
-    db_session,
+    db_session, committed_database
 ) -> None:
     """The binding check, ANCHORED: prepared, then held by the real scheduled reaction, then committed.
 
@@ -661,46 +642,43 @@ async def test_step5c_a_payment_prepared_before_the_hold_is_refused_at_commit_be
     instead of in the stop statement - the anchor statement no longer carries the hold, red.
     """
     from tests.conftest import TestingSessionLocal as factory
-    from tests.conftest import engine
 
+    engine = committed_database.engine
     triangle = await _seed_triangle(factory, trustlines=[("b", "a", "100")])
     statements: list[str] = []
 
     def _record(conn, cursor, statement, parameters, context, executemany) -> None:
         statements.append(" ".join(str(statement).split()).upper())
 
+    (debt,) = await _fixture_debts(factory, triangle, [("a", "b", "10")])
+    await _baseline(factory, triangle.equivalent.id)
+    tx_id = await _prepare_payment(factory, triangle, ["a", "b"], Decimal("5"))
+    assert await _tx_state(factory, tx_id) == "PREPARED", "premise: the payment is not prepared"
+    await _set_debt(factory, debt, "10.00000001")
+    counts = await run_scheduled_reconciliation(factory, equivalent_ids=[triangle.equivalent.id])
+    assert counts[f"hold_{HOLD_SET}"] == 1, f"premise: the reaction did not hold: {counts}"
+
+    event.listen(engine.sync_engine, "before_cursor_execute", _record)
     try:
-        (debt,) = await _fixture_debts(factory, triangle, [("a", "b", "10")])
-        await _baseline(factory, triangle.equivalent.id)
-        tx_id = await _prepare_payment(factory, triangle, ["a", "b"], Decimal("5"))
-        assert await _tx_state(factory, tx_id) == "PREPARED", "premise: the payment is not prepared"
-        await _set_debt(factory, debt, "10.00000001")
-        counts = await run_scheduled_reconciliation(factory, equivalent_ids=[triangle.equivalent.id])
-        assert counts[f"hold_{HOLD_SET}"] == 1, f"premise: the reaction did not hold: {counts}"
-
-        event.listen(engine.sync_engine, "before_cursor_execute", _record)
-        try:
-            async with factory() as session:
-                with pytest.raises(ConflictException) as refused:
-                    await PaymentEngine(session).commit(tx_id)
-        finally:
-            event.remove(engine.sync_engine, "before_cursor_execute", _record)
-
-        _assert_hold_refusal(refused.value, triangle.equivalent.code)
-        stop = "SELECT EQUIVALENTS.CODE, EQUIVALENTS.IS_ACTIVE, EQUIVALENTS.INTEGRITY_HOLD_RESULT_ID"
-        stops = [i for i, s in enumerate(statements) if s.startswith(stop)]
-        ttl = [i for i, s in enumerate(statements) if "PREPARE_LOCKS.EXPIRES_AT <=" in s]
-        assert len(stops) == 1 and len(ttl) == 1 and ttl[0] < stops[0], (stops, ttl, statements)
-        written = [
-            s for s in statements[: stops[0] + 1]
-            if s.startswith(("INSERT INTO DEBT_OPERATIONS", "INSERT INTO DEBTS", "UPDATE DEBTS", "DELETE FROM DEBTS"))
-        ]
-        assert written == [], f"money or its envelope was written before the hold refused: {written}"
-        assert not [s for s in statements if s.startswith("INSERT INTO DEBT_OPERATIONS")]
-        assert await _tx_state(factory, tx_id) == "ABORTED"
-        assert await _edges(factory, triangle) == {("a", "b"): Decimal("10.00000001")}
+        async with factory() as session:
+            with pytest.raises(ConflictException) as refused:
+                await PaymentEngine(session).commit(tx_id)
     finally:
-        await _drop_triangle(factory, triangle)
+        event.remove(engine.sync_engine, "before_cursor_execute", _record)
+
+    _assert_hold_refusal(refused.value, triangle.equivalent.code)
+    stop = "SELECT EQUIVALENTS.CODE, EQUIVALENTS.IS_ACTIVE, EQUIVALENTS.INTEGRITY_HOLD_RESULT_ID"
+    stops = [i for i, s in enumerate(statements) if s.startswith(stop)]
+    ttl = [i for i, s in enumerate(statements) if "PREPARE_LOCKS.EXPIRES_AT <=" in s]
+    assert len(stops) == 1 and len(ttl) == 1 and ttl[0] < stops[0], (stops, ttl, statements)
+    written = [
+        s for s in statements[: stops[0] + 1]
+        if s.startswith(("INSERT INTO DEBT_OPERATIONS", "INSERT INTO DEBTS", "UPDATE DEBTS", "DELETE FROM DEBTS"))
+    ]
+    assert written == [], f"money or its envelope was written before the hold refused: {written}"
+    assert not [s for s in statements if s.startswith("INSERT INTO DEBT_OPERATIONS")]
+    assert await _tx_state(factory, tx_id) == "ABORTED"
+    assert await _edges(factory, triangle) == {("a", "b"): Decimal("10.00000001")}
 
 
 async def _seed_cycle(factory, tag: str):
@@ -732,23 +710,6 @@ async def _seed_cycle(factory, tag: str):
     return SimpleNamespace(equivalent=equivalent, people=people, debts=debts)
 
 
-async def _drop_cycle(factory, cycle) -> None:
-    async with factory() as session:
-        await purge_test_ledger(session, equivalent_ids=[cycle.equivalent.id])
-        ids = [p.id for p in cycle.people]
-        tx_ids = (
-            await session.execute(select(Transaction.tx_id).where(Transaction.initiator_id.in_(ids)))
-        ).scalars().all()
-        await purge_test_ledger(session, tx_ids=tx_ids)
-        from sqlalchemy import delete
-
-        await session.execute(delete(Transaction).where(Transaction.initiator_id.in_(ids)))
-        await session.execute(delete(TrustLine).where(TrustLine.equivalent_id == cycle.equivalent.id))
-        await session.execute(delete(Participant).where(Participant.id.in_(ids)))
-        await session.execute(delete(Equivalent).where(Equivalent.id == cycle.equivalent.id))
-        await session.commit()
-
-
 async def _cycle_amounts(factory, cycle) -> list[Decimal]:
     async with factory() as session:
         return sorted(
@@ -760,6 +721,7 @@ async def _cycle_amounts(factory, cycle) -> list[Decimal]:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("tier_on_a_clone")
 async def test_step5c_a_held_equivalent_refuses_clearing_and_another_equivalent_still_clears(
     db_session,
 ) -> None:
@@ -772,29 +734,25 @@ async def test_step5c_a_held_equivalent_refuses_clearing_and_another_equivalent_
     tag = uuid.uuid4().hex[:6].upper()
     held = await _seed_cycle(factory, f"H{tag}")
     free = await _seed_cycle(factory, f"F{tag}")
-    try:
-        await _baseline(factory, held.equivalent.id)
-        await _set_debt(factory, held.debts[0], "10.00000001")
-        counts = await run_scheduled_reconciliation(factory, equivalent_ids=[held.equivalent.id])
-        assert counts[f"hold_{HOLD_SET}"] == 1, f"premise: {counts}"
+    await _baseline(factory, held.equivalent.id)
+    await _set_debt(factory, held.debts[0], "10.00000001")
+    counts = await run_scheduled_reconciliation(factory, equivalent_ids=[held.equivalent.id])
+    assert counts[f"hold_{HOLD_SET}"] == 1, f"premise: {counts}"
 
-        async with factory() as session:
-            with pytest.raises(ConflictException) as refused:
-                await ClearingService(session).execute_clearing_with_amount(
-                    [{"debt_id": str(d.id)} for d in held.debts]
-                )
-        _assert_hold_refusal(refused.value, held.equivalent.code)
-        assert await _cycle_amounts(factory, held) == [Decimal("10"), Decimal("10"), Decimal("10.00000001")]
-
-        async with factory() as session:
-            cleared = await ClearingService(session).execute_clearing_with_amount(
-                [{"debt_id": str(d.id)} for d in free.debts]
+    async with factory() as session:
+        with pytest.raises(ConflictException) as refused:
+            await ClearingService(session).execute_clearing_with_amount(
+                [{"debt_id": str(d.id)} for d in held.debts]
             )
-        assert cleared == Decimal("10"), cleared
-        assert await _cycle_amounts(factory, free) == []
-    finally:
-        await _drop_cycle(factory, held)
-        await _drop_cycle(factory, free)
+    _assert_hold_refusal(refused.value, held.equivalent.code)
+    assert await _cycle_amounts(factory, held) == [Decimal("10"), Decimal("10"), Decimal("10.00000001")]
+
+    async with factory() as session:
+        cleared = await ClearingService(session).execute_clearing_with_amount(
+            [{"debt_id": str(d.id)} for d in free.debts]
+        )
+    assert cleared == Decimal("10"), cleared
+    assert await _cycle_amounts(factory, free) == []
 
 
 # MODE B (017 stage 2b, T1702): the world is seeded on `db_session` and the hold is written on a
@@ -909,65 +867,62 @@ async def test_step5c_the_hold_is_cleared_only_explicitly_after_a_later_passed_a
 
     triangle, debt = await _faulty_triangle(factory)
     code = triangle.equivalent.code
-    try:
-        counts = await run_scheduled_reconciliation(factory, equivalent_ids=[triangle.equivalent.id])
-        hold = await _hold_of(factory, triangle.equivalent.id)
-        assert counts[f"hold_{HOLD_SET}"] == 1 and hold is not None, f"premise: {counts}"
+    counts = await run_scheduled_reconciliation(factory, equivalent_ids=[triangle.equivalent.id])
+    hold = await _hold_of(factory, triangle.equivalent.id)
+    assert counts[f"hold_{HOLD_SET}"] == 1 and hold is not None, f"premise: {counts}"
 
-        refused = await _clear(client, code)
-        assert refused.status_code == 409, refused.text
-        assert refused.json()["error"]["details"]["reason"] == "no_later_passed_reconciliation_result"
+    refused = await _clear(client, code)
+    assert refused.status_code == 409, refused.text
+    assert refused.json()["error"]["details"]["reason"] == "no_later_passed_reconciliation_result"
 
-        await _set_debt(factory, debt, "10.00000005")
-        counts = await run_scheduled_reconciliation(factory, equivalent_ids=[triangle.equivalent.id])
-        assert counts[FAILED] == 1 and counts["rows_inserted"] == 1, f"premise: F2 is a new latest: {counts}"
-        refused = await _clear(client, code)
-        assert refused.status_code == 409, refused.text
-        assert await _hold_of(factory, triangle.equivalent.id) == hold
+    await _set_debt(factory, debt, "10.00000005")
+    counts = await run_scheduled_reconciliation(factory, equivalent_ids=[triangle.equivalent.id])
+    assert counts[FAILED] == 1 and counts["rows_inserted"] == 1, f"premise: F2 is a new latest: {counts}"
+    refused = await _clear(client, code)
+    assert refused.status_code == 409, refused.text
+    assert await _hold_of(factory, triangle.equivalent.id) == hold
 
-        await _set_debt(factory, debt, "10")
-        counts = await run_scheduled_reconciliation(factory, equivalent_ids=[triangle.equivalent.id])
-        assert counts[PASSED] == 1, f"premise: the repair did not verify: {counts}"
-        assert await _hold_of(factory, triangle.equivalent.id) == hold, "a PASSED cleared the hold by itself"
-        async with factory() as session:
-            with pytest.raises(ConflictException) as still:
-                await PaymentService(session).create_payment_internal(
-                    triangle.a.id, to_pid=triangle.b.pid, equivalent=code, amount="1.00",
-                )
-        _assert_hold_refusal(still.value, code)
-
-        for missing in (None, ""):
-            resp = await _clear(client, code, reason=missing)
-            assert resp.status_code == 422, resp.text
-        assert await _hold_of(factory, triangle.equivalent.id) == hold
-
-        async with factory() as session:
-            audit_before = (await session.execute(select(func.count()).select_from(AuditLog))).scalar_one()
-        resp = await _clear(client, code, reason="ledger repaired, verified PASSED")
-        assert resp.status_code == 200, resp.text
-        assert resp.json()["code"] == code and "integrity_hold_result_id" not in resp.json(), resp.json()
-        assert await _hold_of(factory, triangle.equivalent.id) is None
-        async with factory() as session:
-            audits = (
-                await session.execute(
-                    select(AuditLog).where(AuditLog.action == "admin.equivalents.integrity_hold.clear")
-                )
-            ).scalars().all()
-            audit_after = (await session.execute(select(func.count()).select_from(AuditLog))).scalar_one()
-        assert audit_after == audit_before + 1 and len(audits) == 1, audits
-        assert audits[0].object_id == code and audits[0].reason == "ledger repaired, verified PASSED"
-        assert audits[0].before_state == {"integrity_hold_result_id": str(hold)}, audits[0].before_state
-        assert audits[0].after_state["integrity_hold_result_id"] is None, audits[0].after_state
-
-        async with factory() as session:
-            paid = await PaymentService(session).create_payment_internal(
+    await _set_debt(factory, debt, "10")
+    counts = await run_scheduled_reconciliation(factory, equivalent_ids=[triangle.equivalent.id])
+    assert counts[PASSED] == 1, f"premise: the repair did not verify: {counts}"
+    assert await _hold_of(factory, triangle.equivalent.id) == hold, "a PASSED cleared the hold by itself"
+    async with factory() as session:
+        with pytest.raises(ConflictException) as still:
+            await PaymentService(session).create_payment_internal(
                 triangle.a.id, to_pid=triangle.b.pid, equivalent=code, amount="1.00",
             )
-        assert paid.status == "COMMITTED", paid
+    _assert_hold_refusal(still.value, code)
 
-        again = await _clear(client, code)
-        assert again.status_code == 409 and again.json()["error"]["details"]["reason"] == "no_integrity_hold"
-        unknown = await _clear(client, "NOSUCH5C")
-        assert unknown.status_code == 404, unknown.text
-    finally:
-        await _drop_triangle(factory, triangle)
+    for missing in (None, ""):
+        resp = await _clear(client, code, reason=missing)
+        assert resp.status_code == 422, resp.text
+    assert await _hold_of(factory, triangle.equivalent.id) == hold
+
+    async with factory() as session:
+        audit_before = (await session.execute(select(func.count()).select_from(AuditLog))).scalar_one()
+    resp = await _clear(client, code, reason="ledger repaired, verified PASSED")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["code"] == code and "integrity_hold_result_id" not in resp.json(), resp.json()
+    assert await _hold_of(factory, triangle.equivalent.id) is None
+    async with factory() as session:
+        audits = (
+            await session.execute(
+                select(AuditLog).where(AuditLog.action == "admin.equivalents.integrity_hold.clear")
+            )
+        ).scalars().all()
+        audit_after = (await session.execute(select(func.count()).select_from(AuditLog))).scalar_one()
+    assert audit_after == audit_before + 1 and len(audits) == 1, audits
+    assert audits[0].object_id == code and audits[0].reason == "ledger repaired, verified PASSED"
+    assert audits[0].before_state == {"integrity_hold_result_id": str(hold)}, audits[0].before_state
+    assert audits[0].after_state["integrity_hold_result_id"] is None, audits[0].after_state
+
+    async with factory() as session:
+        paid = await PaymentService(session).create_payment_internal(
+            triangle.a.id, to_pid=triangle.b.pid, equivalent=code, amount="1.00",
+        )
+    assert paid.status == "COMMITTED", paid
+
+    again = await _clear(client, code)
+    assert again.status_code == 409 and again.json()["error"]["details"]["reason"] == "no_integrity_hold"
+    unknown = await _clear(client, "NOSUCH5C")
+    assert unknown.status_code == 404, unknown.text

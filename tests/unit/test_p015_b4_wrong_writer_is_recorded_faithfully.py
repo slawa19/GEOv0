@@ -40,7 +40,7 @@ import uuid
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import delete, event, select
+from sqlalchemy import event, select
 
 from app.core.clearing.service import ClearingService
 from app.core.payments.engine import PaymentEngine
@@ -51,7 +51,12 @@ from app.db.models.participant import Participant
 from app.db.models.prepare_lock import PrepareLock
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
-from tests.debt_setup import debt_fixture_setup, purge_test_ledger
+from tests.debt_setup import debt_fixture_setup
+
+# Every test here commits through several sessions and runs on a disposable clone of the migrated
+# template; its rows go with the clone's drop and nothing is deleted row by row (018 B0b; see
+# `tests/tier_on_a_clone.py`).
+from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
 from tests.p015_b4_support import (
     ENTRIES_TABLE,
     OPERATIONS_TABLE,
@@ -70,7 +75,12 @@ ATOM = Decimal("0.00000001")
 
 
 class _Triangle:
-    """Participants `a`, `b`, `c` in one equivalent, with a cleanup that is scoped to its own ids."""
+    """Participants `a`, `b`, `c` in one equivalent.
+
+    No cleanup: every test that seeds one runs on a disposable clone of the migrated template, and
+    the clone's drop takes the triangle with it (018 B0b; see `tests/tier_on_a_clone.py`). Until B0b
+    `_drop_triangle` deleted it by id - journal included - and the modules importing it did the same.
+    """
 
     def __init__(self, equivalent, participants: dict[str, Participant]) -> None:
         self.equivalent = equivalent
@@ -118,38 +128,6 @@ async def _seed_triangle(factory, *, trustlines: list[tuple[str, str, str]]) -> 
             )
         await session.commit()
     return _Triangle(equivalent, people)
-
-
-async def _drop_triangle(factory, triangle: _Triangle) -> None:
-    """Remove exactly what this module created, in FK order, by id.
-
-    `transactions.initiator_id` is RESTRICT (`app/db/models/transaction.py:13`) and
-    `prepare_locks.tx_id` references it, so both go before the participants; `debts.equivalent_id`
-    is RESTRICT since T1524, so the debts go before the equivalent. Nothing here leans on a cascade
-    to do its work.
-    """
-    participant_ids = [triangle.a.id, triangle.b.id, triangle.c.id]
-    async with factory() as session:
-        tx_ids = (
-            await session.execute(
-                select(Transaction.tx_id).where(Transaction.initiator_id.in_(participant_ids))
-            )
-        ).scalars().all()
-        # The debts and the journal go through the driver, and BEFORE the transactions: once the
-        # journal is armed, `session.execute(delete(Debt))` is Core DML the write guard refuses, and
-        # `debt_operations.tx_id` is a RESTRICT reference to `transactions.tx_id`, so an envelope
-        # still standing would block the delete above it. See `tests/debt_setup.purge_test_ledger`.
-        await purge_test_ledger(
-            session, equivalent_ids=[triangle.equivalent.id], tx_ids=tx_ids
-        )
-        if tx_ids:
-            await session.execute(delete(PrepareLock).where(PrepareLock.tx_id.in_(tx_ids)))
-            await session.execute(delete(IntegrityAuditLog).where(IntegrityAuditLog.tx_id.in_(tx_ids)))
-            await session.execute(delete(Transaction).where(Transaction.tx_id.in_(tx_ids)))
-        await session.execute(delete(TrustLine).where(TrustLine.equivalent_id == triangle.equivalent.id))
-        await session.execute(delete(Participant).where(Participant.id.in_(participant_ids)))
-        await session.execute(delete(Equivalent).where(Equivalent.id == triangle.equivalent.id))
-        await session.commit()
 
 
 async def _edges(factory, triangle: _Triangle) -> dict[tuple[str, str], Decimal]:
@@ -544,72 +522,69 @@ async def test_c5_the_journal_of_an_honest_payment_equals_the_change_and_the_int
         factory,
         trustlines=[("b", "a", "100"), ("a", "b", "100")],
     )
-    try:
-        async with factory() as session:
-            async with debt_fixture_setup(session, label="mutual-edges"):
-                session.add_all(
-                    [
-                        Debt(id=uuid.uuid4(), debtor_id=triangle.a.id, creditor_id=triangle.b.id,
-                             equivalent_id=triangle.equivalent.id, amount=Decimal("10"), version=0),
-                        Debt(id=uuid.uuid4(), debtor_id=triangle.b.id, creditor_id=triangle.a.id,
-                             equivalent_id=triangle.equivalent.id, amount=Decimal("7"), version=0),
-                    ]
-                )
-            await session.commit()
+    async with factory() as session:
+        async with debt_fixture_setup(session, label="mutual-edges"):
+            session.add_all(
+                [
+                    Debt(id=uuid.uuid4(), debtor_id=triangle.a.id, creditor_id=triangle.b.id,
+                         equivalent_id=triangle.equivalent.id, amount=Decimal("10"), version=0),
+                    Debt(id=uuid.uuid4(), debtor_id=triangle.b.id, creditor_id=triangle.a.id,
+                         equivalent_id=triangle.equivalent.id, amount=Decimal("7"), version=0),
+                ]
+            )
+        await session.commit()
 
-        before = await _edges(factory, triangle)
-        tx_id = await _prepare_payment(factory, triangle, ["a", "b"], Decimal("5"))
-        flows = await _intent_flows(factory, triangle, tx_id)
+    before = await _edges(factory, triangle)
+    tx_id = await _prepare_payment(factory, triangle, ["a", "b"], Decimal("5"))
+    flows = await _intent_flows(factory, triangle, tx_id)
 
-        async with factory() as session:
-            await PaymentEngine(session).commit(tx_id)
+    async with factory() as session:
+        await PaymentEngine(session).commit(tx_id)
 
-        after = await _edges(factory, triangle)
+    after = await _edges(factory, triangle)
 
-        # NON-VACUITY: the payment really ran and really moved money.
-        assert await _tx_state(factory, tx_id) == "COMMITTED", await _tx_state(factory, tx_id)
-        assert before == {("a", "b"): Decimal("10.00000000"), ("b", "a"): Decimal("7.00000000")}, before
-        assert after == {("a", "b"): Decimal("8.00000000")}, (
-            f"stand: the payment did not produce the state design v2 §9 C5 describes: {after}"
-        )
+    # NON-VACUITY: the payment really ran and really moved money.
+    assert await _tx_state(factory, tx_id) == "COMMITTED", await _tx_state(factory, tx_id)
+    assert before == {("a", "b"): Decimal("10.00000000"), ("b", "a"): Decimal("7.00000000")}, before
+    assert after == {("a", "b"): Decimal("8.00000000")}, (
+        f"stand: the payment did not produce the state design v2 §9 C5 describes: {after}"
+    )
 
-        # CRITERION (b), computable today: the intent implies exactly the state that happened.
-        implied = _payment_implied_by_intent(before, flows)
-        assert flows == [("a", "b", Decimal("5.00000000"))], flows
-        assert implied == after, (
-            f"criterion (b) fails on an HONEST payment: the intent {flows} implies {implied} and "
-            f"the database holds {after}. Either the independent algebra in this module is not the "
-            f"rule the engine implements, or the engine has stopped implementing it."
-        )
+    # CRITERION (b), computable today: the intent implies exactly the state that happened.
+    implied = _payment_implied_by_intent(before, flows)
+    assert flows == [("a", "b", Decimal("5.00000000"))], flows
+    assert implied == after, (
+        f"criterion (b) fails on an HONEST payment: the intent {flows} implies {implied} and "
+        f"the database holds {after}. Either the independent algebra in this module is not the "
+        f"rule the engine implements, or the engine has stopped implementing it."
+    )
 
-        # CRITERION (a). RED TODAY.
-        entries = await _entries_for_tx(factory, tx_id)
-        assert entries is not None, missing_journal_tables(entries, ENTRIES_TABLE)
-        observed = _observed_change(before, after)
-        named = _named_totals(triangle, await _journal_totals_per_edge(factory, tx_id))
-        assert named == observed, (
-            f"criterion (a) fails: the journal's deltas per edge are {named} and the change the "
-            f"payment actually made is {observed}"
-        )
+    # CRITERION (a). RED TODAY.
+    entries = await _entries_for_tx(factory, tx_id)
+    assert entries is not None, missing_journal_tables(entries, ENTRIES_TABLE)
+    observed = _observed_change(before, after)
+    named = _named_totals(triangle, await _journal_totals_per_edge(factory, tx_id))
+    assert named == observed, (
+        f"criterion (a) fails: the journal's deltas per edge are {named} and the change the "
+        f"payment actually made is {observed}"
+    )
 
-        # The payment made three effects across two flushes, and the FIRST flush is the one that
-        # holds the intermediate value 2. The ordinals are asserted as a grouping rather than as
-        # fixed numbers, because how step 4 numbers flushes that produced no effect is its choice
-        # and not this counterexample's subject.
-        ordinals = [row["flush_ordinal"] for row in entries]
-        by_flush = {ordinal: ordinals.count(ordinal) for ordinal in ordinals}
-        assert len(entries) == 3 and sorted(by_flush.values()) == [1, 2], (
-            f"the payment's effects were not recorded as one flush reducing the reverse debt and a "
-            f"second flush netting the pair: {entries}. The intermediate value the database really "
-            f"held is what a per-operation summary loses."
-        )
-        first = [row for row in entries if row["flush_ordinal"] == min(ordinals)]
-        assert len(first) == 1 and Decimal(str(first[0]["amount_after"])) == Decimal("2"), (
-            f"the first flush did not record `B -> A` passing through 2 on its way to being "
-            f"deleted: {entries}"
-        )
-    finally:
-        await _drop_triangle(factory, triangle)
+    # The payment made three effects across two flushes, and the FIRST flush is the one that
+    # holds the intermediate value 2. The ordinals are asserted as a grouping rather than as
+    # fixed numbers, because how step 4 numbers flushes that produced no effect is its choice
+    # and not this counterexample's subject.
+    ordinals = [row["flush_ordinal"] for row in entries]
+    by_flush = {ordinal: ordinals.count(ordinal) for ordinal in ordinals}
+    assert len(entries) == 3 and sorted(by_flush.values()) == [1, 2], (
+        f"the payment's effects were not recorded as one flush reducing the reverse debt and a "
+        f"second flush netting the pair: {entries}. The intermediate value the database really "
+        f"held is what a per-operation summary loses."
+    )
+    first = [row for row in entries if row["flush_ordinal"] == min(ordinals)]
+    assert len(first) == 1 and Decimal(str(first[0]["amount_after"])) == Decimal("2"), (
+        f"the first flush did not record `B -> A` passing through 2 on its way to being "
+        f"deleted: {entries}"
+    )
 
 
 # ==============================================================================================
@@ -653,37 +628,34 @@ async def test_c13_a_replayed_payment_commit_leaves_exactly_one_envelope(db_sess
     from tests.conftest import TestingSessionLocal as factory
 
     triangle = await _seed_triangle(factory, trustlines=[("b", "a", "100")])
-    try:
-        tx_id = await _prepare_payment(factory, triangle, ["a", "b"], Decimal("5"))
-        async with factory() as session:
-            await PaymentEngine(session).commit(tx_id)
-        after_first = await _edges(factory, triangle)
+    tx_id = await _prepare_payment(factory, triangle, ["a", "b"], Decimal("5"))
+    async with factory() as session:
+        await PaymentEngine(session).commit(tx_id)
+    after_first = await _edges(factory, triangle)
 
-        async with factory() as session:
-            replayed = await PaymentEngine(session).commit(tx_id)
+    async with factory() as session:
+        replayed = await PaymentEngine(session).commit(tx_id)
 
-        after_replay = await _edges(factory, triangle)
+    after_replay = await _edges(factory, triangle)
 
-        # NON-VACUITY: the replay really ran and really took the early-return path - it returned
-        # True without touching anything. Without this the test would pass for a second call that
-        # raised, which is a different behaviour entirely.
-        assert replayed is True, f"stand: the replayed commit did not return normally: {replayed!r}"
-        assert after_first == {("a", "b"): Decimal("5.00000000")}, after_first
-        assert after_replay == after_first, (
-            f"stand: the replay changed the money ({after_first} -> {after_replay}); this is no "
-            f"longer a test about the journal"
-        )
-        assert await _tx_state(factory, tx_id) == "COMMITTED"
+    # NON-VACUITY: the replay really ran and really took the early-return path - it returned
+    # True without touching anything. Without this the test would pass for a second call that
+    # raised, which is a different behaviour entirely.
+    assert replayed is True, f"stand: the replayed commit did not return normally: {replayed!r}"
+    assert after_first == {("a", "b"): Decimal("5.00000000")}, after_first
+    assert after_replay == after_first, (
+        f"stand: the replay changed the money ({after_first} -> {after_replay}); this is no "
+        f"longer a test about the journal"
+    )
+    assert await _tx_state(factory, tx_id) == "COMMITTED"
 
-        envelopes = await _envelopes_for_tx(factory, tx_id)
-        assert envelopes is not None, missing_journal_tables(envelopes, OPERATIONS_TABLE)
-        assert len(envelopes) == 1, (
-            f"a replayed payment commit left {len(envelopes)} envelopes: {envelopes}. A replay does "
-            f"no work and must record none; `UNIQUE(tx_id)` would otherwise turn an idempotent "
-            f"call into an IntegrityError."
-        )
-    finally:
-        await _drop_triangle(factory, triangle)
+    envelopes = await _envelopes_for_tx(factory, tx_id)
+    assert envelopes is not None, missing_journal_tables(envelopes, OPERATIONS_TABLE)
+    assert len(envelopes) == 1, (
+        f"a replayed payment commit left {len(envelopes)} envelopes: {envelopes}. A replay does "
+        f"no work and must record none; `UNIQUE(tx_id)` would otherwise turn an idempotent "
+        f"call into an IntegrityError."
+    )
 
 
 @pytest.mark.asyncio
@@ -705,65 +677,62 @@ async def test_c13_a_replayed_clearing_leaves_exactly_one_envelope(db_session) -
         factory, trustlines=[("b", "a", "100"), ("c", "b", "100"), ("a", "c", "100")]
     )
     cycle_edges = [("a", "b"), ("b", "c"), ("c", "a")]
-    try:
-        debt_ids = []
-        # Built outside the fixture block, added inside it: a loop is not fixture setup as far as
-        # `fixture_block_violations` is concerned, and the rows and the single flush are unchanged.
-        cycle_debts = [
-            Debt(
-                id=uuid.uuid4(),
-                debtor_id=getattr(triangle, debtor).id,
-                creditor_id=getattr(triangle, creditor).id,
-                equivalent_id=triangle.equivalent.id,
-                amount=Decimal("10"),
-                version=0,
-            )
-            for debtor, creditor in cycle_edges
-        ]
-        debt_ids.extend(str(debt.id) for debt in cycle_debts)
-        async with factory() as session:
-            async with debt_fixture_setup(session, label="cycle"):
-                session.add_all(cycle_debts)
-            await session.commit()
-
-        cycle = [{"debt_id": debt_id} for debt_id in debt_ids]
-        async with factory() as session:
-            first = await ClearingService(session).execute_clearing_with_amount(cycle)
-        async with factory() as session:
-            replayed = await ClearingService(session).execute_clearing_with_amount(cycle)
-
-        after = await _edges(factory, triangle)
-
-        # NON-VACUITY: the replay really was recognised as one - same amount back, nothing written.
-        assert first == Decimal("10"), first
-        assert replayed == Decimal("10"), (
-            f"stand: the replayed clearing returned {replayed!r} instead of the first execution's "
-            f"amount, so it was not recognised as a replay and this test measures something else"
+    debt_ids = []
+    # Built outside the fixture block, added inside it: a loop is not fixture setup as far as
+    # `fixture_block_violations` is concerned, and the rows and the single flush are unchanged.
+    cycle_debts = [
+        Debt(
+            id=uuid.uuid4(),
+            debtor_id=getattr(triangle, debtor).id,
+            creditor_id=getattr(triangle, creditor).id,
+            equivalent_id=triangle.equivalent.id,
+            amount=Decimal("10"),
+            version=0,
         )
-        assert after == {}, f"stand: the cycle did not close: {after}"
+        for debtor, creditor in cycle_edges
+    ]
+    debt_ids.extend(str(debt.id) for debt in cycle_debts)
+    async with factory() as session:
+        async with debt_fixture_setup(session, label="cycle"):
+            session.add_all(cycle_debts)
+        await session.commit()
 
-        async with factory() as fresh:
-            clearing_tx_ids = list(
-                (
-                    await fresh.execute(
-                        select(Transaction.tx_id).where(
-                            Transaction.type == "CLEARING",
-                            Transaction.initiator_id.in_(
-                                [triangle.a.id, triangle.b.id, triangle.c.id]
-                            ),
-                        )
+    cycle = [{"debt_id": debt_id} for debt_id in debt_ids]
+    async with factory() as session:
+        first = await ClearingService(session).execute_clearing_with_amount(cycle)
+    async with factory() as session:
+        replayed = await ClearingService(session).execute_clearing_with_amount(cycle)
+
+    after = await _edges(factory, triangle)
+
+    # NON-VACUITY: the replay really was recognised as one - same amount back, nothing written.
+    assert first == Decimal("10"), first
+    assert replayed == Decimal("10"), (
+        f"stand: the replayed clearing returned {replayed!r} instead of the first execution's "
+        f"amount, so it was not recognised as a replay and this test measures something else"
+    )
+    assert after == {}, f"stand: the cycle did not close: {after}"
+
+    async with factory() as fresh:
+        clearing_tx_ids = list(
+            (
+                await fresh.execute(
+                    select(Transaction.tx_id).where(
+                        Transaction.type == "CLEARING",
+                        Transaction.initiator_id.in_(
+                            [triangle.a.id, triangle.b.id, triangle.c.id]
+                        ),
                     )
-                ).scalars().all()
-            )
-        assert len(clearing_tx_ids) == 1, clearing_tx_ids
-
-        envelopes = await _envelopes_for_tx(factory, clearing_tx_ids[0])
-        assert envelopes is not None, missing_journal_tables(envelopes, OPERATIONS_TABLE)
-        assert len(envelopes) == 1, (
-            f"a replayed clearing left {len(envelopes)} envelopes: {envelopes}"
+                )
+            ).scalars().all()
         )
-    finally:
-        await _drop_triangle(factory, triangle)
+    assert len(clearing_tx_ids) == 1, clearing_tx_ids
+
+    envelopes = await _envelopes_for_tx(factory, clearing_tx_ids[0])
+    assert envelopes is not None, missing_journal_tables(envelopes, OPERATIONS_TABLE)
+    assert len(envelopes) == 1, (
+        f"a replayed clearing left {len(envelopes)} envelopes: {envelopes}"
+    )
 
 
 # ==============================================================================================
@@ -857,108 +826,105 @@ async def test_c6_a_payment_that_writes_the_wrong_edge_passes_every_barrier_toda
             ("c", "a", "100"),
         ],
     )
-    try:
-        before = await _edges(factory, triangle)
-        tx_id = await _prepare_payment(factory, triangle, ["a", "b", "c"], Decimal("5"))
-        flows = await _intent_flows(factory, triangle, tx_id)
+    before = await _edges(factory, triangle)
+    tx_id = await _prepare_payment(factory, triangle, ["a", "b", "c"], Decimal("5"))
+    flows = await _intent_flows(factory, triangle, tx_id)
 
-        calls = _collapse_the_route(monkeypatch, triangle)
-        async with factory() as session:
-            await PaymentEngine(session).commit(tx_id)
+    calls = _collapse_the_route(monkeypatch, triangle)
+    async with factory() as session:
+        await PaymentEngine(session).commit(tx_id)
 
-        after = await _edges(factory, triangle)
-        audit = await _audit(factory, tx_id)
-        state = await _tx_state(factory, tx_id)
+    after = await _edges(factory, triangle)
+    audit = await _audit(factory, tx_id)
+    state = await _tx_state(factory, tx_id)
 
-        # NON-VACUITY: the wrong writer really ran, and `A -> C` was written exactly once.
-        #
-        # SORTED, and measured rather than assumed: `_load_prepare_locks` returns the two segments
-        # in an order this tree does not fix (observed `[('b','c'), ('a','b')]` on 2026-09-12), so
-        # pinning it would make this counterexample fail on an implementation detail it does not
-        # depend on. The wrapper is order-independent by construction - it drops whichever segment
-        # comes first and rewrites the second - so `A -> C` is written exactly once either way,
-        # which is what binding condition 5 requires.
-        assert sorted(calls) == [("a", "b"), ("b", "c")], (
-            f"stand: the engine did not apply the two declared segments exactly once each: {calls}"
-        )
-        assert before == {}, f"stand: the equivalent was not empty before the payment: {before}"
+    # NON-VACUITY: the wrong writer really ran, and `A -> C` was written exactly once.
+    #
+    # SORTED, and measured rather than assumed: `_load_prepare_locks` returns the two segments
+    # in an order this tree does not fix (observed `[('b','c'), ('a','b')]` on 2026-09-12), so
+    # pinning it would make this counterexample fail on an implementation detail it does not
+    # depend on. The wrapper is order-independent by construction - it drops whichever segment
+    # comes first and rewrites the second - so `A -> C` is written exactly once either way,
+    # which is what binding condition 5 requires.
+    assert sorted(calls) == [("a", "b"), ("b", "c")], (
+        f"stand: the engine did not apply the two declared segments exactly once each: {calls}"
+    )
+    assert before == {}, f"stand: the equivalent was not empty before the payment: {before}"
 
-        # THE COMMITTED WRONG STATE, read on a session that is not the writer's.
-        assert after == {("a", "c"): Decimal("5.00000000")}, (
-            f"stand: the collapsed route did not produce a single A -> C obligation: {after}"
-        )
-        assert state == "COMMITTED", f"stand: the wrong payment did not commit: {state}"
-        assert audit == [True], (
-            f"stand: the integrity audit did not record this payment as verified ({audit}), so the "
-            f"counterexample is no longer about a writer that passes every barrier. If this is a "
-            f"real improvement, the barrier that caught it must be named and C6 rewritten around it."
-        )
+    # THE COMMITTED WRONG STATE, read on a session that is not the writer's.
+    assert after == {("a", "c"): Decimal("5.00000000")}, (
+        f"stand: the collapsed route did not produce a single A -> C obligation: {after}"
+    )
+    assert state == "COMMITTED", f"stand: the wrong payment did not commit: {state}"
+    assert audit == [True], (
+        f"stand: the integrity audit did not record this payment as verified ({audit}), so the "
+        f"counterexample is no longer about a writer that passes every barrier. If this is a "
+        f"real improvement, the barrier that caught it must be named and C6 rewritten around it."
+    )
 
-        # THE STAND, and it needs no journal: what the payment DECLARED - captured from the
-        # prepare locks before the commit deleted them - disagrees with what it did. Asserted FIRST
-        # so this test can never pass having measured neither criterion.
-        declared = _payment_implied_by_intent(before, flows)
-        assert sorted(flows) == [
-            ("a", "b", Decimal("5.00000000")),
-            ("b", "c", Decimal("5.00000000")),
-        ], flows
-        assert declared == {
-            ("a", "b"): Decimal("5.00000000"),
-            ("b", "c"): Decimal("5.00000000"),
-        }, declared
-        assert declared != after, (
-            "the declared route and the committed state agree, so this stand cannot tell a wrong "
-            "writer from an honest one and nothing below it means anything"
-        )
+    # THE STAND, and it needs no journal: what the payment DECLARED - captured from the
+    # prepare locks before the commit deleted them - disagrees with what it did. Asserted FIRST
+    # so this test can never pass having measured neither criterion.
+    declared = _payment_implied_by_intent(before, flows)
+    assert sorted(flows) == [
+        ("a", "b", Decimal("5.00000000")),
+        ("b", "c", Decimal("5.00000000")),
+    ], flows
+    assert declared == {
+        ("a", "b"): Decimal("5.00000000"),
+        ("b", "c"): Decimal("5.00000000"),
+    }, declared
+    assert declared != after, (
+        "the declared route and the committed state agree, so this stand cannot tell a wrong "
+        "writer from an honest one and nothing below it means anything"
+    )
 
-        # CRITERION (b), REPLAYED FROM THE INTENT AS THE ENVELOPE STORED IT.
-        envelopes = await _envelope_intents_for_tx(factory, tx_id)
-        assert envelopes is not None, (
-            "a payment routed A -> B -> C committed a single A -> C obligation of 5 and was "
-            "recorded as verified, and there is no envelope to read its declared intent out of. "
-            + missing_journal_tables(envelopes, OPERATIONS_TABLE)
-        )
-        assert len(envelopes) == 1 and envelopes[0]["kind"] == "PAYMENT", (
-            f"the committed payment left {envelopes} instead of exactly one PAYMENT envelope"
-        )
-        assert envelopes[0]["state"] == "COMPLETED", (
-            f"the payment committed with its envelope {envelopes[0]['state']}: {envelopes}"
-        )
-        recorded = _recorded_payment_flows(triangle, envelopes[0]["intent"])
-        assert recorded == sorted(flows), (
-            f"the envelope's intent is not what the payment declared. Stored: {recorded}. The "
-            f"prepare locks, immediately before the commit deleted them: {sorted(flows)}. An intent "
-            f"that is the writer's own result cannot disagree with the result, and being able to "
-            f"disagree is the entire reason it is recorded (design v2 §7)."
-        )
-        implied = _payment_implied_by_intent(before, recorded)
-        assert implied == declared, (
-            f"replaying the STORED intent gives {implied} while the prepared flows give {declared}; "
-            f"criterion (b) is then not a check on the envelope at all"
-        )
-        assert implied != after, (
-            "criterion (b) did not refute the collapsed route: the intent the envelope recorded "
-            "implies exactly the state the wrong writer produced"
-        )
+    # CRITERION (b), REPLAYED FROM THE INTENT AS THE ENVELOPE STORED IT.
+    envelopes = await _envelope_intents_for_tx(factory, tx_id)
+    assert envelopes is not None, (
+        "a payment routed A -> B -> C committed a single A -> C obligation of 5 and was "
+        "recorded as verified, and there is no envelope to read its declared intent out of. "
+        + missing_journal_tables(envelopes, OPERATIONS_TABLE)
+    )
+    assert len(envelopes) == 1 and envelopes[0]["kind"] == "PAYMENT", (
+        f"the committed payment left {envelopes} instead of exactly one PAYMENT envelope"
+    )
+    assert envelopes[0]["state"] == "COMPLETED", (
+        f"the payment committed with its envelope {envelopes[0]['state']}: {envelopes}"
+    )
+    recorded = _recorded_payment_flows(triangle, envelopes[0]["intent"])
+    assert recorded == sorted(flows), (
+        f"the envelope's intent is not what the payment declared. Stored: {recorded}. The "
+        f"prepare locks, immediately before the commit deleted them: {sorted(flows)}. An intent "
+        f"that is the writer's own result cannot disagree with the result, and being able to "
+        f"disagree is the entire reason it is recorded (design v2 §7)."
+    )
+    implied = _payment_implied_by_intent(before, recorded)
+    assert implied == declared, (
+        f"replaying the STORED intent gives {implied} while the prepared flows give {declared}; "
+        f"criterion (b) is then not a check on the envelope at all"
+    )
+    assert implied != after, (
+        "criterion (b) did not refute the collapsed route: the intent the envelope recorded "
+        "implies exactly the state the wrong writer produced"
+    )
 
-        # CRITERION (a). RED TODAY, and this is the counterexample.
-        entries = await _entries_for_tx(factory, tx_id)
-        assert entries is not None, (
-            f"a payment routed A -> B -> C committed a single A -> C obligation of 5, was recorded "
-            f"as verified (verification_passed={audit}), left the transaction {state}, and passed "
-            f"check_payment_delta, check_trust_limits and check_debt_symmetry - because the total "
-            f"is right and only the ROUTE is a lie. The database now holds {after}; the payment "
-            f"declared {implied}. "
-            + missing_journal_tables(entries, ENTRIES_TABLE)
-        )
-        named = _named_totals(triangle, await _journal_totals_per_edge(factory, tx_id))
-        assert named == _observed_change(before, after), (
-            f"criterion (a) fails: the journal must record FAITHFULLY what the writer did, even - "
-            f"especially - when what it did was wrong. Journal says {named}, the database changed "
-            f"by {_observed_change(before, after)}."
-        )
-    finally:
-        await _drop_triangle(factory, triangle)
+    # CRITERION (a). RED TODAY, and this is the counterexample.
+    entries = await _entries_for_tx(factory, tx_id)
+    assert entries is not None, (
+        f"a payment routed A -> B -> C committed a single A -> C obligation of 5, was recorded "
+        f"as verified (verification_passed={audit}), left the transaction {state}, and passed "
+        f"check_payment_delta, check_trust_limits and check_debt_symmetry - because the total "
+        f"is right and only the ROUTE is a lie. The database now holds {after}; the payment "
+        f"declared {implied}. "
+        + missing_journal_tables(entries, ENTRIES_TABLE)
+    )
+    named = _named_totals(triangle, await _journal_totals_per_edge(factory, tx_id))
+    assert named == _observed_change(before, after), (
+        f"criterion (a) fails: the journal must record FAITHFULLY what the writer did, even - "
+        f"especially - when what it did was wrong. Journal says {named}, the database changed "
+        f"by {_observed_change(before, after)}."
+    )
 
 
 @pytest.mark.asyncio
@@ -994,64 +960,61 @@ async def test_c6_control_the_same_payment_without_the_wrapper_satisfies_criteri
     triangle = await _seed_triangle(
         factory, trustlines=[("b", "a", "100"), ("c", "b", "100"), ("c", "a", "100")]
     )
-    try:
-        before = await _edges(factory, triangle)
-        tx_id = await _prepare_payment(factory, triangle, ["a", "b", "c"], Decimal("5"))
-        flows = await _intent_flows(factory, triangle, tx_id)
+    before = await _edges(factory, triangle)
+    tx_id = await _prepare_payment(factory, triangle, ["a", "b", "c"], Decimal("5"))
+    flows = await _intent_flows(factory, triangle, tx_id)
 
-        async with factory() as session:
-            await PaymentEngine(session).commit(tx_id)
+    async with factory() as session:
+        await PaymentEngine(session).commit(tx_id)
 
-        after = await _edges(factory, triangle)
-        assert await _tx_state(factory, tx_id) == "COMMITTED"
+    after = await _edges(factory, triangle)
+    assert await _tx_state(factory, tx_id) == "COMMITTED"
 
-        # NON-VACUITY, FIRST: the payment really committed the two-hop state, so a criterion that
-        # comes out satisfied below was compared against something.
-        assert after == {
-            ("a", "b"): Decimal("5.00000000"),
-            ("b", "c"): Decimal("5.00000000"),
-        }, after
+    # NON-VACUITY, FIRST: the payment really committed the two-hop state, so a criterion that
+    # comes out satisfied below was compared against something.
+    assert after == {
+        ("a", "b"): Decimal("5.00000000"),
+        ("b", "c"): Decimal("5.00000000"),
+    }, after
 
-        # HALF ONE, the snapshot path: this module's algebra is the rule the engine implements.
-        assert _payment_implied_by_intent(before, flows) == after, (
-            f"criterion (b) fails on an honest A -> B -> C payment: intent implies "
-            f"{_payment_implied_by_intent(before, flows)}, database holds {after}. The algebra in "
-            f"this module is not the rule the engine implements, and C6's refutation is worthless."
-        )
+    # HALF ONE, the snapshot path: this module's algebra is the rule the engine implements.
+    assert _payment_implied_by_intent(before, flows) == after, (
+        f"criterion (b) fails on an honest A -> B -> C payment: intent implies "
+        f"{_payment_implied_by_intent(before, flows)}, database holds {after}. The algebra in "
+        f"this module is not the rule the engine implements, and C6's refutation is worthless."
+    )
 
-        # HALF TWO, THE PATH C6 ACTUALLY REFUTES WITH: the envelope's own stored intent, decoded and
-        # replayed by the same two functions the counterexample uses.
-        envelopes = await _envelope_intents_for_tx(factory, tx_id)
-        assert envelopes is not None, (
-            "an honest A -> B -> C payment committed and left no envelope to read its intent out "
-            "of, so C6's refutation cannot be shown to work on an honest payment. "
-            + missing_journal_tables(envelopes, OPERATIONS_TABLE)
-        )
-        assert len(envelopes) == 1 and envelopes[0]["kind"] == "PAYMENT", (
-            f"the honest payment left {envelopes} instead of exactly one PAYMENT envelope"
-        )
-        assert envelopes[0]["state"] == "COMPLETED", (
-            f"the honest payment committed with its envelope {envelopes[0]['state']}: {envelopes}"
-        )
-        recorded = _recorded_payment_flows(triangle, envelopes[0]["intent"])
-        assert recorded, (
-            f"stand: the envelope's intent decoded to no flows at all, so the replay below would "
-            f"trivially return the pre-state: {envelopes[0]['intent']}"
-        )
-        assert recorded == sorted(flows), (
-            f"the envelope's stored intent {recorded} is not what the prepare locks authorised "
-            f"{sorted(flows)} on an HONEST payment. Then the two criteria are measured against two "
-            f"different declarations and C6's gap between them cannot be attributed to the writer."
-        )
-        assert _payment_implied_by_intent(before, recorded) == after, (
-            f"criterion (b) fails on an honest payment when it is replayed from the intent the "
-            f"ENVELOPE stored: implied {_payment_implied_by_intent(before, recorded)}, database "
-            f"holds {after}. C6's refutation of the collapsed route runs through exactly this path, "
-            f"so a failure here makes that refutation an artefact of the path rather than a finding "
-            f"about the writer."
-        )
-    finally:
-        await _drop_triangle(factory, triangle)
+    # HALF TWO, THE PATH C6 ACTUALLY REFUTES WITH: the envelope's own stored intent, decoded and
+    # replayed by the same two functions the counterexample uses.
+    envelopes = await _envelope_intents_for_tx(factory, tx_id)
+    assert envelopes is not None, (
+        "an honest A -> B -> C payment committed and left no envelope to read its intent out "
+        "of, so C6's refutation cannot be shown to work on an honest payment. "
+        + missing_journal_tables(envelopes, OPERATIONS_TABLE)
+    )
+    assert len(envelopes) == 1 and envelopes[0]["kind"] == "PAYMENT", (
+        f"the honest payment left {envelopes} instead of exactly one PAYMENT envelope"
+    )
+    assert envelopes[0]["state"] == "COMPLETED", (
+        f"the honest payment committed with its envelope {envelopes[0]['state']}: {envelopes}"
+    )
+    recorded = _recorded_payment_flows(triangle, envelopes[0]["intent"])
+    assert recorded, (
+        f"stand: the envelope's intent decoded to no flows at all, so the replay below would "
+        f"trivially return the pre-state: {envelopes[0]['intent']}"
+    )
+    assert recorded == sorted(flows), (
+        f"the envelope's stored intent {recorded} is not what the prepare locks authorised "
+        f"{sorted(flows)} on an HONEST payment. Then the two criteria are measured against two "
+        f"different declarations and C6's gap between them cannot be attributed to the writer."
+    )
+    assert _payment_implied_by_intent(before, recorded) == after, (
+        f"criterion (b) fails on an honest payment when it is replayed from the intent the "
+        f"ENVELOPE stored: implied {_payment_implied_by_intent(before, recorded)}, database "
+        f"holds {after}. C6's refutation of the collapsed route runs through exactly this path, "
+        f"so a failure here makes that refutation an artefact of the path rather than a finding "
+        f"about the writer."
+    )
 
 
 # ==============================================================================================
@@ -1143,132 +1106,129 @@ async def test_c6_a_clearing_cycle_that_leaves_one_atom_on_every_edge_is_still_v
         trustlines=[("b", "a", "100"), ("c", "b", "100"), ("a", "c", "100")],
     )
     cycle_edges = [("a", "b"), ("b", "c"), ("c", "a")]
+    debt_ids: list[str] = []
+    # Built outside the fixture block, added inside it: a loop is not fixture setup as far as
+    # `fixture_block_violations` is concerned, and the rows and the single flush are unchanged.
+    cycle_debts = [
+        Debt(
+            id=uuid.uuid4(),
+            debtor_id=getattr(triangle, debtor).id,
+            creditor_id=getattr(triangle, creditor).id,
+            equivalent_id=triangle.equivalent.id,
+            amount=Decimal("10"),
+            version=0,
+        )
+        for debtor, creditor in cycle_edges
+    ]
+    debt_ids.extend(str(debt.id) for debt in cycle_debts)
+    async with factory() as session:
+        async with debt_fixture_setup(session, label="cycle"):
+            session.add_all(cycle_debts)
+        await session.commit()
+
+    before = await _edges(factory, triangle)
+    armed, remove_listener = _under_clear_by_one_atom(monkeypatch)
     try:
-        debt_ids: list[str] = []
-        # Built outside the fixture block, added inside it: a loop is not fixture setup as far as
-        # `fixture_block_violations` is concerned, and the rows and the single flush are unchanged.
-        cycle_debts = [
-            Debt(
-                id=uuid.uuid4(),
-                debtor_id=getattr(triangle, debtor).id,
-                creditor_id=getattr(triangle, creditor).id,
-                equivalent_id=triangle.equivalent.id,
-                amount=Decimal("10"),
-                version=0,
-            )
-            for debtor, creditor in cycle_edges
-        ]
-        debt_ids.extend(str(debt.id) for debt in cycle_debts)
         async with factory() as session:
-            async with debt_fixture_setup(session, label="cycle"):
-                session.add_all(cycle_debts)
-            await session.commit()
-
-        before = await _edges(factory, triangle)
-        armed, remove_listener = _under_clear_by_one_atom(monkeypatch)
-        try:
-            async with factory() as session:
-                cleared = await ClearingService(session).execute_clearing_with_amount(
-                    [{"debt_id": debt_id} for debt_id in debt_ids]
-                )
-        finally:
-            remove_listener()
-
-        after = await _edges(factory, triangle)
-        async with factory() as fresh:
-            clearing_tx = (
-                await fresh.execute(
-                    select(Transaction.tx_id, Transaction.state, Transaction.payload).where(
-                        Transaction.type == "CLEARING",
-                        # Scoped to this triangle. The `db_session` fixture truncates every table
-                        # on SQLite, so an unscoped query would work today - and would silently
-                        # start reading someone else's rows the day this module moves.
-                        Transaction.initiator_id.in_(
-                            [triangle.a.id, triangle.b.id, triangle.c.id]
-                        ),
-                    )
-                )
-            ).all()
-            audit = (
-                await fresh.execute(
-                    select(IntegrityAuditLog.verification_passed).where(
-                        IntegrityAuditLog.operation_type == "CLEARING",
-                        IntegrityAuditLog.equivalent_code == triangle.equivalent.code,
-                    )
-                )
-            ).scalars().all()
-
-        # NON-VACUITY: the skim really fired, once per edge, and the service really ran.
-        assert armed["hits"] == 3, (
-            f"stand: the under-clearing listener fired {armed['hits']} times, not once per edge"
-        )
-        assert cleared == Decimal("10"), f"stand: the service did not clear the cycle: {cleared!r}"
-        assert before == {edge: Decimal("10.00000000") for edge in cycle_edges}, before
-
-        # THE COMMITTED WRONG STATE, read independently.
-        assert after == {edge: ATOM for edge in cycle_edges}, (
-            f"stand: the under-clearing did not leave exactly one atom on every edge: {after}"
-        )
-        assert [row.state for row in clearing_tx] == ["COMMITTED"], clearing_tx
-        assert list(audit) == [True], (
-            f"stand: the clearing was not recorded as verified ({list(audit)}), so this is no "
-            f"longer a writer that passes every barrier"
-        )
-
-        # THE STAND, and it needs no journal: the documented rule applied to the independently
-        # measured pre-state implies an empty equivalent, and the database is not empty.
-        assert _clearing_implied_by_intent(before, cycle_edges) == {}, (
-            f"stand: the documented clearing rule does not close a 10/10/10 cycle in this module's "
-            f"own algebra: {_clearing_implied_by_intent(before, cycle_edges)}"
-        )
-
-        clearing_tx_id = clearing_tx[0].tx_id
-
-        # CRITERION (b), REPLAYED FROM THE INTENT AS THE ENVELOPE STORED IT.
-        envelopes = await _envelope_intents_for_tx(factory, clearing_tx_id)
-        assert envelopes is not None, (
-            f"a 10/10/10 cycle was reported as cleared while leaving {after} behind, and there is "
-            f"no envelope to read the pre-amounts it acted on out of. "
-            + missing_journal_tables(envelopes, OPERATIONS_TABLE)
-        )
-        assert len(envelopes) == 1 and envelopes[0]["kind"] == "CLEARING", (
-            f"the clearing left {envelopes} instead of exactly one CLEARING envelope"
-        )
-        assert envelopes[0]["state"] == "COMPLETED", (
-            f"the clearing committed with its envelope {envelopes[0]['state']}: {envelopes}"
-        )
-        recorded_pre = _recorded_clearing_pre_amounts(triangle, envelopes[0]["intent"])
-        assert recorded_pre == before, (
-            f"the envelope recorded pre-amounts {recorded_pre}, and the cycle this clearing acted "
-            f"on held {before}. The intent must be the state read under FOR UPDATE, not the state "
-            f"the writer left behind - an intent taken from the outcome can only ever agree with "
-            f"the outcome (design v2 §7, `C14`)."
-        )
-        implied = _clearing_implied_by_recorded_cycle(recorded_pre)
-        assert implied == {}, (
-            f"replaying the stored intent does not close the cycle: {implied}"
-        )
-        assert implied != after, (
-            "criterion (b) did not refute the under-clearing: the intent the envelope recorded "
-            "implies exactly the state the wrong writer left"
-        )
-
-        # CRITERION (a). This is the counterexample.
-        entries = await _entries_for_tx(factory, clearing_tx_id)
-        assert entries is not None, (
-            f"a clearing cycle of 10/10/10 was committed, reported as clearing 10, recorded as "
-            f"verified (verification_passed={list(audit)}) and left every participant's net "
-            f"position unchanged - while leaving {after} behind instead of closing the cycle. "
-            f"verify_clearing_neutrality cannot see this, because one atom owed and one atom owed "
-            f"to you net to nothing. " + missing_journal_tables(entries, ENTRIES_TABLE)
-        )
-        named = _named_totals(triangle, await _journal_totals_per_edge(factory, clearing_tx_id))
-        assert named == _observed_change(before, after), (
-            f"criterion (a) fails: journal says {named}, the database changed by "
-            f"{_observed_change(before, after)}"
-        )
+            cleared = await ClearingService(session).execute_clearing_with_amount(
+                [{"debt_id": debt_id} for debt_id in debt_ids]
+            )
     finally:
-        await _drop_triangle(factory, triangle)
+        remove_listener()
+
+    after = await _edges(factory, triangle)
+    async with factory() as fresh:
+        clearing_tx = (
+            await fresh.execute(
+                select(Transaction.tx_id, Transaction.state, Transaction.payload).where(
+                    Transaction.type == "CLEARING",
+                    # Scoped to this triangle. The `db_session` fixture truncates every table
+                    # on SQLite, so an unscoped query would work today - and would silently
+                    # start reading someone else's rows the day this module moves.
+                    Transaction.initiator_id.in_(
+                        [triangle.a.id, triangle.b.id, triangle.c.id]
+                    ),
+                )
+            )
+        ).all()
+        audit = (
+            await fresh.execute(
+                select(IntegrityAuditLog.verification_passed).where(
+                    IntegrityAuditLog.operation_type == "CLEARING",
+                    IntegrityAuditLog.equivalent_code == triangle.equivalent.code,
+                )
+            )
+        ).scalars().all()
+
+    # NON-VACUITY: the skim really fired, once per edge, and the service really ran.
+    assert armed["hits"] == 3, (
+        f"stand: the under-clearing listener fired {armed['hits']} times, not once per edge"
+    )
+    assert cleared == Decimal("10"), f"stand: the service did not clear the cycle: {cleared!r}"
+    assert before == {edge: Decimal("10.00000000") for edge in cycle_edges}, before
+
+    # THE COMMITTED WRONG STATE, read independently.
+    assert after == {edge: ATOM for edge in cycle_edges}, (
+        f"stand: the under-clearing did not leave exactly one atom on every edge: {after}"
+    )
+    assert [row.state for row in clearing_tx] == ["COMMITTED"], clearing_tx
+    assert list(audit) == [True], (
+        f"stand: the clearing was not recorded as verified ({list(audit)}), so this is no "
+        f"longer a writer that passes every barrier"
+    )
+
+    # THE STAND, and it needs no journal: the documented rule applied to the independently
+    # measured pre-state implies an empty equivalent, and the database is not empty.
+    assert _clearing_implied_by_intent(before, cycle_edges) == {}, (
+        f"stand: the documented clearing rule does not close a 10/10/10 cycle in this module's "
+        f"own algebra: {_clearing_implied_by_intent(before, cycle_edges)}"
+    )
+
+    clearing_tx_id = clearing_tx[0].tx_id
+
+    # CRITERION (b), REPLAYED FROM THE INTENT AS THE ENVELOPE STORED IT.
+    envelopes = await _envelope_intents_for_tx(factory, clearing_tx_id)
+    assert envelopes is not None, (
+        f"a 10/10/10 cycle was reported as cleared while leaving {after} behind, and there is "
+        f"no envelope to read the pre-amounts it acted on out of. "
+        + missing_journal_tables(envelopes, OPERATIONS_TABLE)
+    )
+    assert len(envelopes) == 1 and envelopes[0]["kind"] == "CLEARING", (
+        f"the clearing left {envelopes} instead of exactly one CLEARING envelope"
+    )
+    assert envelopes[0]["state"] == "COMPLETED", (
+        f"the clearing committed with its envelope {envelopes[0]['state']}: {envelopes}"
+    )
+    recorded_pre = _recorded_clearing_pre_amounts(triangle, envelopes[0]["intent"])
+    assert recorded_pre == before, (
+        f"the envelope recorded pre-amounts {recorded_pre}, and the cycle this clearing acted "
+        f"on held {before}. The intent must be the state read under FOR UPDATE, not the state "
+        f"the writer left behind - an intent taken from the outcome can only ever agree with "
+        f"the outcome (design v2 §7, `C14`)."
+    )
+    implied = _clearing_implied_by_recorded_cycle(recorded_pre)
+    assert implied == {}, (
+        f"replaying the stored intent does not close the cycle: {implied}"
+    )
+    assert implied != after, (
+        "criterion (b) did not refute the under-clearing: the intent the envelope recorded "
+        "implies exactly the state the wrong writer left"
+    )
+
+    # CRITERION (a). This is the counterexample.
+    entries = await _entries_for_tx(factory, clearing_tx_id)
+    assert entries is not None, (
+        f"a clearing cycle of 10/10/10 was committed, reported as clearing 10, recorded as "
+        f"verified (verification_passed={list(audit)}) and left every participant's net "
+        f"position unchanged - while leaving {after} behind instead of closing the cycle. "
+        f"verify_clearing_neutrality cannot see this, because one atom owed and one atom owed "
+        f"to you net to nothing. " + missing_journal_tables(entries, ENTRIES_TABLE)
+    )
+    named = _named_totals(triangle, await _journal_totals_per_edge(factory, clearing_tx_id))
+    assert named == _observed_change(before, after), (
+        f"criterion (a) fails: journal says {named}, the database changed by "
+        f"{_observed_change(before, after)}"
+    )
 
 
 @pytest.mark.asyncio
@@ -1303,73 +1263,70 @@ async def test_c6_control_the_same_cycle_without_the_listener_satisfies_criterio
         factory, trustlines=[("b", "a", "100"), ("c", "b", "100"), ("a", "c", "100")]
     )
     cycle_edges = [("a", "b"), ("b", "c"), ("c", "a")]
-    try:
-        debt_ids = []
-        # Built outside the fixture block, added inside it: a loop is not fixture setup as far as
-        # `fixture_block_violations` is concerned, and the rows and the single flush are unchanged.
-        cycle_debts = [
-            Debt(
-                id=uuid.uuid4(),
-                debtor_id=getattr(triangle, debtor).id,
-                creditor_id=getattr(triangle, creditor).id,
-                equivalent_id=triangle.equivalent.id,
-                amount=Decimal("10"),
-                version=0,
-            )
-            for debtor, creditor in cycle_edges
-        ]
-        debt_ids.extend(str(debt.id) for debt in cycle_debts)
-        async with factory() as session:
-            async with debt_fixture_setup(session, label="cycle"):
-                session.add_all(cycle_debts)
-            await session.commit()
+    debt_ids = []
+    # Built outside the fixture block, added inside it: a loop is not fixture setup as far as
+    # `fixture_block_violations` is concerned, and the rows and the single flush are unchanged.
+    cycle_debts = [
+        Debt(
+            id=uuid.uuid4(),
+            debtor_id=getattr(triangle, debtor).id,
+            creditor_id=getattr(triangle, creditor).id,
+            equivalent_id=triangle.equivalent.id,
+            amount=Decimal("10"),
+            version=0,
+        )
+        for debtor, creditor in cycle_edges
+    ]
+    debt_ids.extend(str(debt.id) for debt in cycle_debts)
+    async with factory() as session:
+        async with debt_fixture_setup(session, label="cycle"):
+            session.add_all(cycle_debts)
+        await session.commit()
 
-        before = await _edges(factory, triangle)
-        async with factory() as session:
-            cleared = await ClearingService(session).execute_clearing_with_amount(
-                [{"debt_id": debt_id} for debt_id in debt_ids]
-            )
-
-        after = await _edges(factory, triangle)
-
-        # NON-VACUITY, FIRST: there really was a 10/10/10 cycle to close, and it really closed.
-        assert cleared == Decimal("10"), cleared
-        assert before == {
-            ("a", "b"): Decimal("10.00000000"),
-            ("b", "c"): Decimal("10.00000000"),
-            ("c", "a"): Decimal("10.00000000"),
-        }, f"stand: the cycle this control clears is not 10/10/10: {before}"
-
-        # HALF ONE, the test's own read of the pre-state.
-        assert _clearing_implied_by_intent(before, cycle_edges) == after == {}, (
-            f"criterion (b) fails on an honest clearing: implied "
-            f"{_clearing_implied_by_intent(before, cycle_edges)}, database {after}"
+    before = await _edges(factory, triangle)
+    async with factory() as session:
+        cleared = await ClearingService(session).execute_clearing_with_amount(
+            [{"debt_id": debt_id} for debt_id in debt_ids]
         )
 
-        # HALF TWO, THE PATH C6 ACTUALLY REFUTES WITH: the pre-amounts the envelope stored.
-        clearing_tx_id = await _clearing_tx_id(factory, triangle)
-        envelopes = await _envelope_intents_for_tx(factory, clearing_tx_id)
-        assert envelopes is not None, (
-            "an honest 10/10/10 cycle closed and left no envelope to read its pre-amounts out of, "
-            "so C6's refutation cannot be shown to work on an honest clearing. "
-            + missing_journal_tables(envelopes, OPERATIONS_TABLE)
-        )
-        assert len(envelopes) == 1 and envelopes[0]["kind"] == "CLEARING", (
-            f"the honest clearing left {envelopes} instead of exactly one CLEARING envelope"
-        )
-        assert envelopes[0]["state"] == "COMPLETED", (
-            f"the honest clearing committed with its envelope {envelopes[0]['state']}: {envelopes}"
-        )
-        recorded_pre = _recorded_clearing_pre_amounts(triangle, envelopes[0]["intent"])
-        assert recorded_pre == before, (
-            f"the envelope recorded pre-amounts {recorded_pre} while the cycle held {before} on an "
-            f"HONEST clearing. An intent taken from the outcome agrees with the outcome by "
-            f"construction, and C6 (ii) turns on it being able to disagree."
-        )
-        assert _clearing_implied_by_recorded_cycle(recorded_pre) == after == {}, (
-            f"criterion (b) fails on an honest clearing when it is replayed from the pre-amounts "
-            f"the ENVELOPE stored: implied {_clearing_implied_by_recorded_cycle(recorded_pre)}, "
-            f"database {after}. C6 (ii)'s refutation runs through exactly this path."
-        )
-    finally:
-        await _drop_triangle(factory, triangle)
+    after = await _edges(factory, triangle)
+
+    # NON-VACUITY, FIRST: there really was a 10/10/10 cycle to close, and it really closed.
+    assert cleared == Decimal("10"), cleared
+    assert before == {
+        ("a", "b"): Decimal("10.00000000"),
+        ("b", "c"): Decimal("10.00000000"),
+        ("c", "a"): Decimal("10.00000000"),
+    }, f"stand: the cycle this control clears is not 10/10/10: {before}"
+
+    # HALF ONE, the test's own read of the pre-state.
+    assert _clearing_implied_by_intent(before, cycle_edges) == after == {}, (
+        f"criterion (b) fails on an honest clearing: implied "
+        f"{_clearing_implied_by_intent(before, cycle_edges)}, database {after}"
+    )
+
+    # HALF TWO, THE PATH C6 ACTUALLY REFUTES WITH: the pre-amounts the envelope stored.
+    clearing_tx_id = await _clearing_tx_id(factory, triangle)
+    envelopes = await _envelope_intents_for_tx(factory, clearing_tx_id)
+    assert envelopes is not None, (
+        "an honest 10/10/10 cycle closed and left no envelope to read its pre-amounts out of, "
+        "so C6's refutation cannot be shown to work on an honest clearing. "
+        + missing_journal_tables(envelopes, OPERATIONS_TABLE)
+    )
+    assert len(envelopes) == 1 and envelopes[0]["kind"] == "CLEARING", (
+        f"the honest clearing left {envelopes} instead of exactly one CLEARING envelope"
+    )
+    assert envelopes[0]["state"] == "COMPLETED", (
+        f"the honest clearing committed with its envelope {envelopes[0]['state']}: {envelopes}"
+    )
+    recorded_pre = _recorded_clearing_pre_amounts(triangle, envelopes[0]["intent"])
+    assert recorded_pre == before, (
+        f"the envelope recorded pre-amounts {recorded_pre} while the cycle held {before} on an "
+        f"HONEST clearing. An intent taken from the outcome agrees with the outcome by "
+        f"construction, and C6 (ii) turns on it being able to disagree."
+    )
+    assert _clearing_implied_by_recorded_cycle(recorded_pre) == after == {}, (
+        f"criterion (b) fails on an honest clearing when it is replayed from the pre-amounts "
+        f"the ENVELOPE stored: implied {_clearing_implied_by_recorded_cycle(recorded_pre)}, "
+        f"database {after}. C6 (ii)'s refutation runs through exactly this path."
+    )

@@ -8,8 +8,12 @@ import uuid
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import delete, func, select, text
-from tests.debt_setup import purge_test_ledger
+from sqlalchemy import func, select, text
+
+# Every test here commits through several sessions and runs on a disposable clone of the migrated
+# template; its rows go with the clone's drop and nothing is deleted row by row (018 B0b; see
+# `tests/tier_on_a_clone.py`).
+from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
 
 
 
@@ -254,37 +258,6 @@ async def test_concurrent_duplicate_payment_request_never_regresses_terminal_sta
                     if session is not None:
                         await session.rollback()
                         await session.close()
-                async with TestingSessionLocal() as cleanup:
-                    # The debts AND the journal rows that describe them, through the driver and BEFORE the
-                    # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
-                    # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
-                    # envelope still standing would block the transaction delete above it.
-                    await purge_test_ledger(cleanup, equivalent_ids=[equivalent_id])
-                    await cleanup.execute(
-                        delete(IntegrityAuditLog).where(
-                            IntegrityAuditLog.tx_id == tx_id
-                        )
-                    )
-                    await cleanup.execute(
-                        delete(PrepareLock).where(PrepareLock.tx_id == tx_id)
-                    )
-                    await cleanup.execute(
-                        delete(Transaction).where(Transaction.tx_id == tx_id)
-                    )
-                    await cleanup.execute(
-                        delete(TrustLine).where(
-                            TrustLine.equivalent_id == equivalent_id
-                        )
-                    )
-                    await cleanup.execute(
-                        delete(Participant).where(
-                            Participant.id.in_([sender_id, receiver_id])
-                        )
-                    )
-                    await cleanup.execute(
-                        delete(Equivalent).where(Equivalent.id == equivalent_id)
-                    )
-                    await cleanup.commit()
         except BaseException as teardown_error:
             if primary_error is None:
                 raise

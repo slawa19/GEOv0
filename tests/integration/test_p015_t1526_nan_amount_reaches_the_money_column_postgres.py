@@ -62,7 +62,7 @@ from decimal import Decimal
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError, StatementError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -71,21 +71,22 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 
 from tests.debt_setup import debt_fixture_setup
-from tests.debt_setup import purge_test_ledger
 
 
 @pytest_asyncio.fixture
-async def factory():
+async def factory(committed_database):
     """A real pool of its own, never the `db_session` fixture.
 
     `db_session` wraps every test in an outer transaction on one checked-out connection and rolls
     it back, so a row that was really committed and a row that was never written are the same
     observation. These tests commit and then read back on a different session.
-    """
-    from tests.conftest import TEST_DATABASE_URL, _ensure_schema_initialized
 
-    await _ensure_schema_initialized()
-    engine = create_async_engine(TEST_DATABASE_URL, pool_size=4, max_overflow=0, pool_timeout=10)
+    Over this test's disposable clone of the migrated template (018 B0b): the clone's drop is the
+    only disposal of what the test committed.
+    """
+    engine = create_async_engine(
+        committed_database.url, pool_size=4, max_overflow=0, pool_timeout=10
+    )
     session_factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
     try:
         yield session_factory
@@ -137,22 +138,6 @@ async def _seed(session_factory) -> _World:
         return _World(equivalent.id, debtor.id, creditor.id, third.id)
 
 
-async def _cleanup(session_factory, world: _World) -> None:
-    async with session_factory() as session:
-        # The debts AND the journal rows that describe them, through the driver and BEFORE the
-        # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
-        # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
-        # envelope still standing would block the transaction delete above it.
-        await purge_test_ledger(session, equivalent_ids=[world.equivalent_id])
-        await session.execute(
-            delete(Participant).where(
-                Participant.id.in_([world.debtor_id, world.creditor_id, world.third_id])
-            )
-        )
-        await session.execute(delete(Equivalent).where(Equivalent.id == world.equivalent_id))
-        await session.commit()
-
-
 def _refusal_details(exc: DBAPIError) -> tuple[str | None, str | None]:
     """`(sqlstate, constraint_name)` out of a wrapped asyncpg error.
 
@@ -186,71 +171,68 @@ async def _amounts(session_factory, world: _World) -> list[str]:
 async def test_a_an_orm_write_of_nan_must_not_reach_the_money_column(factory):
     """The ordinary path: a `Debt` built in Python and flushed by a session."""
     world = await _seed(factory)
+    # NON-VACUITY: this stand really can store money, so "nothing was stored" below can only
+    # mean the write was refused.
+    assert await _amounts(factory, world) == ["5.00000000"], (
+        "the stand could not store an ordinary debt, so it cannot tell a refusal from a "
+        "broken stand"
+    )
+
+    refusal: BaseException | None = None
+    second = uuid.uuid4()
+    # THE DEBT JOURNAL STANDS DOWN FOR THIS WRITE, and it must. Armed (step 4 slice C), the
+    # journal refuses a non-finite amount by its OWN finiteness predicate, before any SQL - so
+    # `MoneyNumeric` and the column's CHECK, which this module exists to hold in place, would
+    # never be reached and its mutation would leave the test green. A test screened by a second
+    # guard has stopped measuring its subject. Per engine, re-armed immediately.
+    from app.core.ledger import journal
+
+    journal.uninstall_write_guard(factory.kw.get("bind"))
     try:
-        # NON-VACUITY: this stand really can store money, so "nothing was stored" below can only
-        # mean the write was refused.
-        assert await _amounts(factory, world) == ["5.00000000"], (
-            "the stand could not store an ordinary debt, so it cannot tell a refusal from a "
-            "broken stand"
-        )
-
-        refusal: BaseException | None = None
-        second = uuid.uuid4()
-        # THE DEBT JOURNAL STANDS DOWN FOR THIS WRITE, and it must. Armed (step 4 slice C), the
-        # journal refuses a non-finite amount by its OWN finiteness predicate, before any SQL - so
-        # `MoneyNumeric` and the column's CHECK, which this module exists to hold in place, would
-        # never be reached and its mutation would leave the test green. A test screened by a second
-        # guard has stopped measuring its subject. Per engine, re-armed immediately.
-        from app.core.ledger import journal
-
-        journal.uninstall_write_guard(factory.kw.get("bind"))
-        try:
-            async with factory() as session:
-                async with debt_fixture_setup(session, label="setup"):
-                    session.add(
-                        Debt(
-                            id=second,
-                            debtor_id=world.creditor_id,
-                            creditor_id=world.debtor_id,
-                            equivalent_id=world.equivalent_id,
-                            amount=Decimal("NaN"),
-                        )
+        async with factory() as session:
+            async with debt_fixture_setup(session, label="setup"):
+                session.add(
+                    Debt(
+                        id=second,
+                        debtor_id=world.creditor_id,
+                        creditor_id=world.debtor_id,
+                        equivalent_id=world.equivalent_id,
+                        amount=Decimal("NaN"),
                     )
-                try:
-                    await session.commit()
-                except (StatementError, DBAPIError, ValueError) as exc:
-                    refusal = exc
-                    await session.rollback()
-        finally:
-            journal.install_write_guard(factory.kw.get("bind"))
-
-        stored = await _amounts(factory, world)
-        assert stored == ["5.00000000"], (
-            f"a debt whose amount is NOT A NUMBER is in the money column: the database holds "
-            f"{stored!r} for this equivalent. `chk_debt_amount_positive` is CHECK (amount > 0), "
-            f"and PostgreSQL orders NaN above every number, so the positivity check admits it "
-            f"(measured: SELECT 'NaN'::numeric(20,8) > 0 -> t)."
-        )
-        assert refusal is not None, (
-            "the write was not refused; nothing between the application and the column objected "
-            "to an amount that is not a number"
-        )
-        # THE REFUSAL NAMES THE MONEY RULE, and it is `MoneyNumeric`'s (`app/db/types.py`). Carried
-        # over from `tests/unit/test_p015_t1526_nan_amount_is_refused_by_the_wrong_constraint.py`
-        # (017 stage 3), which held this message on the SQLite stand only. On this backend the
-        # column's CHECK would refuse too, one line later and in its own words; this pins that the
-        # refusal comes BEFORE the statement is sent and says what is wrong with the value.
-        message = str(refusal)
-        assert "NOT NULL" not in message, (
-            f"the refusal comes from the WRONG CONSTRAINT: {message!r}. An amount WAS supplied; it "
-            f"is not a number."
-        )
-        assert "non-finite" in message.lower(), (
-            f"the refusal does not say what is wrong with the value: {message!r}. It must name the "
-            f"value's own defect - that it is not a finite number."
-        )
+                )
+            try:
+                await session.commit()
+            except (StatementError, DBAPIError, ValueError) as exc:
+                refusal = exc
+                await session.rollback()
     finally:
-        await _cleanup(factory, world)
+        journal.install_write_guard(factory.kw.get("bind"))
+
+    stored = await _amounts(factory, world)
+    assert stored == ["5.00000000"], (
+        f"a debt whose amount is NOT A NUMBER is in the money column: the database holds "
+        f"{stored!r} for this equivalent. `chk_debt_amount_positive` is CHECK (amount > 0), "
+        f"and PostgreSQL orders NaN above every number, so the positivity check admits it "
+        f"(measured: SELECT 'NaN'::numeric(20,8) > 0 -> t)."
+    )
+    assert refusal is not None, (
+        "the write was not refused; nothing between the application and the column objected "
+        "to an amount that is not a number"
+    )
+    # THE REFUSAL NAMES THE MONEY RULE, and it is `MoneyNumeric`'s (`app/db/types.py`). Carried
+    # over from `tests/unit/test_p015_t1526_nan_amount_is_refused_by_the_wrong_constraint.py`
+    # (017 stage 3), which held this message on the SQLite stand only. On this backend the
+    # column's CHECK would refuse too, one line later and in its own words; this pins that the
+    # refusal comes BEFORE the statement is sent and says what is wrong with the value.
+    message = str(refusal)
+    assert "NOT NULL" not in message, (
+        f"the refusal comes from the WRONG CONSTRAINT: {message!r}. An amount WAS supplied; it "
+        f"is not a number."
+    )
+    assert "non-finite" in message.lower(), (
+        f"the refusal does not say what is wrong with the value: {message!r}. It must name the "
+        f"value's own defect - that it is not a finite number."
+    )
 
 
 @pytest.mark.asyncio
@@ -262,53 +244,50 @@ async def test_b_one_nan_debt_makes_the_sum_of_the_book_stop_being_a_number(fact
     wrong by some amount, but not a number at all, and no reconciliation can ever close it.
     """
     world = await _seed(factory)
+    async with factory() as session:
+        before = (
+            await session.execute(
+                select(func.sum(Debt.amount)).where(Debt.equivalent_id == world.equivalent_id)
+            )
+        ).scalar_one()
+    # NON-VACUITY: the sum is a real number before the NaN attempt.
+    assert str(before) == "5.00000000", f"the seeded book does not sum to 5: {before!r}"
+
+    # Same stand-down, same reason as `test_a`: the subject is the COLUMN, not the journal.
+    from app.core.ledger import journal
+
+    journal.uninstall_write_guard(factory.kw.get("bind"))
     try:
         async with factory() as session:
-            before = (
-                await session.execute(
-                    select(func.sum(Debt.amount)).where(Debt.equivalent_id == world.equivalent_id)
-                )
-            ).scalar_one()
-        # NON-VACUITY: the sum is a real number before the NaN attempt.
-        assert str(before) == "5.00000000", f"the seeded book does not sum to 5: {before!r}"
-
-        # Same stand-down, same reason as `test_a`: the subject is the COLUMN, not the journal.
-        from app.core.ledger import journal
-
-        journal.uninstall_write_guard(factory.kw.get("bind"))
-        try:
-            async with factory() as session:
-                async with debt_fixture_setup(session, label="setup"):
-                    session.add(
-                        Debt(
-                            debtor_id=world.creditor_id,
-                            creditor_id=world.debtor_id,
-                            equivalent_id=world.equivalent_id,
-                            amount=Decimal("NaN"),
-                        )
+            async with debt_fixture_setup(session, label="setup"):
+                session.add(
+                    Debt(
+                        debtor_id=world.creditor_id,
+                        creditor_id=world.debtor_id,
+                        equivalent_id=world.equivalent_id,
+                        amount=Decimal("NaN"),
                     )
-                try:
-                    await session.commit()
-                except (StatementError, DBAPIError, ValueError):
-                    await session.rollback()
-        finally:
-            journal.install_write_guard(factory.kw.get("bind"))
-
-        async with factory() as fresh:
-            after = (
-                await fresh.execute(
-                    select(func.sum(Debt.amount)).where(Debt.equivalent_id == world.equivalent_id)
                 )
-            ).scalar_one()
-
-        assert str(after) == "5.00000000", (
-            f"the sum of this equivalent's debts is {after!r}. One row that is not a number makes "
-            f"every aggregate over the book not a number, so 'the sum of all debts is zero' is not "
-            f"reachable at all - the whole goal of programme 015 - and no audit can name the "
-            f"amount by which the book is wrong."
-        )
+            try:
+                await session.commit()
+            except (StatementError, DBAPIError, ValueError):
+                await session.rollback()
     finally:
-        await _cleanup(factory, world)
+        journal.install_write_guard(factory.kw.get("bind"))
+
+    async with factory() as fresh:
+        after = (
+            await fresh.execute(
+                select(func.sum(Debt.amount)).where(Debt.equivalent_id == world.equivalent_id)
+            )
+        ).scalar_one()
+
+    assert str(after) == "5.00000000", (
+        f"the sum of this equivalent's debts is {after!r}. One row that is not a number makes "
+        f"every aggregate over the book not a number, so 'the sum of all debts is zero' is not "
+        f"reachable at all - the whole goal of programme 015 - and no audit can name the "
+        f"amount by which the book is wrong."
+    )
 
 
 @pytest.mark.asyncio
@@ -320,70 +299,67 @@ async def test_c_the_database_itself_refuses_nan_when_python_is_bypassed(factory
     reach this table, and a database-level guarantee has to hold for the `psql` session too.
     """
     world = await _seed(factory)
-    try:
-        # NON-VACUITY: the same raw statement stores an ordinary amount, so a refusal below is
-        # about the VALUE and not about the statement being malformed.
-        async with factory() as session:
+    # NON-VACUITY: the same raw statement stores an ordinary amount, so a refusal below is
+    # about the VALUE and not about the statement being malformed.
+    async with factory() as session:
+        await session.execute(
+            text(
+                "INSERT INTO debts (id, debtor_id, creditor_id, equivalent_id, amount, version)"
+                " VALUES (:id, :d, :c, :e, 7.00000000, 0)"
+            ),
+            {
+                "id": uuid.uuid4(),
+                "d": world.creditor_id,
+                "c": world.debtor_id,
+                "e": world.equivalent_id,
+            },
+        )
+        await session.commit()
+    assert sorted(await _amounts(factory, world)) == ["5.00000000", "7.00000000"], (
+        "the raw INSERT could not store an ordinary amount, so this stand cannot tell a "
+        "constraint refusal from a broken statement"
+    )
+
+    sqlstate = None
+    constraint = None
+    async with factory() as session:
+        try:
             await session.execute(
                 text(
-                    "INSERT INTO debts (id, debtor_id, creditor_id, equivalent_id, amount, version)"
-                    " VALUES (:id, :d, :c, :e, 7.00000000, 0)"
+                    "INSERT INTO debts (id, debtor_id, creditor_id, equivalent_id, amount,"
+                    " version) VALUES (:id, :d, :c, :e, 'NaN', 0)"
                 ),
                 {
                     "id": uuid.uuid4(),
-                    "d": world.creditor_id,
+                    # An edge of its own: the seeded edge and the 7.00000000 edge are both
+                    # taken, and the unique constraint would refuse this row before the
+                    # amount was looked at.
+                    "d": world.third_id,
                     "c": world.debtor_id,
                     "e": world.equivalent_id,
                 },
             )
             await session.commit()
-        assert sorted(await _amounts(factory, world)) == ["5.00000000", "7.00000000"], (
-            "the raw INSERT could not store an ordinary amount, so this stand cannot tell a "
-            "constraint refusal from a broken statement"
-        )
+        except DBAPIError as exc:
+            await session.rollback()
+            sqlstate, constraint = _refusal_details(exc)
 
-        sqlstate = None
-        constraint = None
-        async with factory() as session:
-            try:
-                await session.execute(
-                    text(
-                        "INSERT INTO debts (id, debtor_id, creditor_id, equivalent_id, amount,"
-                        " version) VALUES (:id, :d, :c, :e, 'NaN', 0)"
-                    ),
-                    {
-                        "id": uuid.uuid4(),
-                        # An edge of its own: the seeded edge and the 7.00000000 edge are both
-                        # taken, and the unique constraint would refuse this row before the
-                        # amount was looked at.
-                        "d": world.third_id,
-                        "c": world.debtor_id,
-                        "e": world.equivalent_id,
-                    },
-                )
-                await session.commit()
-            except DBAPIError as exc:
-                await session.rollback()
-                sqlstate, constraint = _refusal_details(exc)
-
-        stored = sorted(await _amounts(factory, world))
-        assert stored == ["5.00000000", "7.00000000"], (
-            f"raw SQL put NaN into debts.amount and the database kept it: {stored!r}. The only "
-            f"thing standing between a NaN and this column is chk_debt_amount_positive, and "
-            f"CHECK (amount > 0) is TRUE for NaN on PostgreSQL."
-        )
-        assert sqlstate == "23514", (
-            f"the refusal did not come from a CHECK constraint (SQLSTATE {sqlstate!r}, constraint "
-            f"{constraint!r}). 23514 is check_violation; anything else means the value was "
-            f"refused for a reason that is not 'this is not a valid amount'."
-        )
-        assert constraint == "chk_debt_amount_positive", (
-            f"the refusing constraint is {constraint!r}, not the amount-domain check. The guard "
-            f"must be the one that OWNS the meaning of a valid amount, so that the next reader "
-            f"finds the rule where the rule belongs."
-        )
-    finally:
-        await _cleanup(factory, world)
+    stored = sorted(await _amounts(factory, world))
+    assert stored == ["5.00000000", "7.00000000"], (
+        f"raw SQL put NaN into debts.amount and the database kept it: {stored!r}. The only "
+        f"thing standing between a NaN and this column is chk_debt_amount_positive, and "
+        f"CHECK (amount > 0) is TRUE for NaN on PostgreSQL."
+    )
+    assert sqlstate == "23514", (
+        f"the refusal did not come from a CHECK constraint (SQLSTATE {sqlstate!r}, constraint "
+        f"{constraint!r}). 23514 is check_violation; anything else means the value was "
+        f"refused for a reason that is not 'this is not a valid amount'."
+    )
+    assert constraint == "chk_debt_amount_positive", (
+        f"the refusing constraint is {constraint!r}, not the amount-domain check. The guard "
+        f"must be the one that OWNS the meaning of a valid amount, so that the next reader "
+        f"finds the rule where the rule belongs."
+    )
 
 
 @pytest.mark.asyncio
@@ -394,78 +370,69 @@ async def test_d_the_same_hole_in_the_other_money_column_is_closed_too(factory):
     bind-layer guard cannot speak for a statement that does not go through SQLAlchemy's type.
     """
     world = await _seed(factory)
-    try:
-        # NON-VACUITY: an ordinary limit goes in through the same statement.
-        legitimate = uuid.uuid4()
-        async with factory() as session:
+    # NON-VACUITY: an ordinary limit goes in through the same statement.
+    legitimate = uuid.uuid4()
+    async with factory() as session:
+        await session.execute(
+            text(
+                'INSERT INTO trust_lines (id, from_participant_id, to_participant_id,'
+                ' equivalent_id, "limit", policy, status) VALUES (:id, :f, :t, :e,'
+                " 100.00000000, '{}', 'active')"
+            ),
+            {
+                "id": legitimate,
+                "f": world.creditor_id,
+                "t": world.debtor_id,
+                "e": world.equivalent_id,
+            },
+        )
+        await session.commit()
+
+    async with factory() as fresh:
+        stored = (
+            await fresh.execute(
+                text('SELECT "limit" FROM trust_lines WHERE id = :id'), {"id": legitimate}
+            )
+        ).scalar_one()
+    assert str(stored) == "100.00000000", (
+        f"the raw INSERT could not store an ordinary limit ({stored!r}), so this stand cannot "
+        f"tell a constraint refusal from a broken statement"
+    )
+
+    sqlstate = None
+    constraint = None
+    forged = uuid.uuid4()
+    async with factory() as session:
+        try:
             await session.execute(
                 text(
                     'INSERT INTO trust_lines (id, from_participant_id, to_participant_id,'
                     ' equivalent_id, "limit", policy, status) VALUES (:id, :f, :t, :e,'
-                    " 100.00000000, '{}', 'active')"
+                    " 'NaN', '{}', 'active')"
                 ),
                 {
-                    "id": legitimate,
-                    "f": world.creditor_id,
+                    "id": forged,
+                    "f": world.third_id,
                     "t": world.debtor_id,
                     "e": world.equivalent_id,
                 },
             )
             await session.commit()
+        except DBAPIError as exc:
+            await session.rollback()
+            sqlstate, constraint = _refusal_details(exc)
 
-        async with factory() as fresh:
-            stored = (
-                await fresh.execute(
-                    text('SELECT "limit" FROM trust_lines WHERE id = :id'), {"id": legitimate}
-                )
-            ).scalar_one()
-        assert str(stored) == "100.00000000", (
-            f"the raw INSERT could not store an ordinary limit ({stored!r}), so this stand cannot "
-            f"tell a constraint refusal from a broken statement"
-        )
-
-        sqlstate = None
-        constraint = None
-        forged = uuid.uuid4()
-        async with factory() as session:
-            try:
-                await session.execute(
-                    text(
-                        'INSERT INTO trust_lines (id, from_participant_id, to_participant_id,'
-                        ' equivalent_id, "limit", policy, status) VALUES (:id, :f, :t, :e,'
-                        " 'NaN', '{}', 'active')"
-                    ),
-                    {
-                        "id": forged,
-                        "f": world.third_id,
-                        "t": world.debtor_id,
-                        "e": world.equivalent_id,
-                    },
-                )
-                await session.commit()
-            except DBAPIError as exc:
-                await session.rollback()
-                sqlstate, constraint = _refusal_details(exc)
-
-        async with factory() as fresh:
-            kept = (
-                await fresh.execute(
-                    text('SELECT "limit"::text FROM trust_lines WHERE id = :id'), {"id": forged}
-                )
-            ).scalars().all()
-        assert kept == [], (
-            f"a trust limit that is not a number is in the database: {kept!r}. Every capacity "
-            f"computed from that line - and every sum of capacities across the graph - is NaN."
-        )
-        assert sqlstate == "23514" and constraint == "chk_trust_line_limit_positive", (
-            f"the refusal did not come from the limit-domain check (SQLSTATE {sqlstate!r}, "
-            f"constraint {constraint!r})"
-        )
-    finally:
-        async with factory() as session:
-            await session.execute(
-                text("DELETE FROM trust_lines WHERE equivalent_id = :e"),
-                {"e": world.equivalent_id},
+    async with factory() as fresh:
+        kept = (
+            await fresh.execute(
+                text('SELECT "limit"::text FROM trust_lines WHERE id = :id'), {"id": forged}
             )
-            await session.commit()
-        await _cleanup(factory, world)
+        ).scalars().all()
+    assert kept == [], (
+        f"a trust limit that is not a number is in the database: {kept!r}. Every capacity "
+        f"computed from that line - and every sum of capacities across the graph - is NaN."
+    )
+    assert sqlstate == "23514" and constraint == "chk_trust_line_limit_positive", (
+        f"the refusal did not come from the limit-domain check (SQLSTATE {sqlstate!r}, "
+        f"constraint {constraint!r})"
+    )

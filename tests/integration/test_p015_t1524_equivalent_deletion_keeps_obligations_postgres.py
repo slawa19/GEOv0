@@ -27,7 +27,7 @@ import uuid
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 import app.api.v1.admin as admin_api
@@ -38,10 +38,10 @@ from app.db.models.participant import Participant
 from tests.integration.p012_pg_http import make_pg_client_fixture
 
 from tests.debt_setup import debt_fixture_setup
-from tests.debt_setup import purge_test_ledger
 
 # MODE B (017 stage 2c, T1702): every commit of this module lands in a clone dropped after the test,
-# not in the tier database it shares with mode-A tests - see `tests/tier_on_a_clone.py`.
+# not in the tier database it shares with mode-A tests - see `tests/tier_on_a_clone.py`. Since 018 B0b
+# the drop is the only disposal: nothing is deleted row by row.
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
 
 pg_client = make_pg_client_fixture()
@@ -81,20 +81,6 @@ async def _seed(*, with_debt: bool):
         return eq.id, eq.code, debt_id, (debtor.id, creditor.id)
 
 
-async def _cleanup(eq_id, participant_ids) -> None:
-    from tests.conftest import TestingSessionLocal
-
-    async with TestingSessionLocal() as s:
-        # The debts AND the journal rows that describe them, through the driver and BEFORE the
-        # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
-        # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
-        # envelope still standing would block the transaction delete above it.
-        await purge_test_ledger(s, equivalent_ids=[eq_id])
-        await s.execute(delete(Equivalent).where(Equivalent.id == eq_id))
-        await s.execute(delete(Participant).where(Participant.id.in_(participant_ids)))
-        await s.commit()
-
-
 async def _debt_exists(debt_id) -> bool:
     from tests.conftest import TestingSessionLocal
 
@@ -112,24 +98,21 @@ async def test_the_database_refuses_to_delete_an_equivalent_that_carries_debt() 
     from tests.conftest import TestingSessionLocal
 
     eq_id, _code, debt_id, participants = await _seed(with_debt=True)
-    try:
-        refused = False
-        async with TestingSessionLocal() as s:
-            eq = (await s.execute(select(Equivalent).where(Equivalent.id == eq_id))).scalar_one()
-            await s.delete(eq)
-            try:
-                await s.commit()
-            except IntegrityError:
-                refused = True
-                await s.rollback()
+    refused = False
+    async with TestingSessionLocal() as s:
+        eq = (await s.execute(select(Equivalent).where(Equivalent.id == eq_id))).scalar_one()
+        await s.delete(eq)
+        try:
+            await s.commit()
+        except IntegrityError:
+            refused = True
+            await s.rollback()
 
-        assert await _debt_exists(debt_id), (
-            "deleting the equivalent destroyed the debt it carried: the foreign key cascaded an "
-            "obligation away without loading a single Debt row"
-        )
-        assert refused, "the database accepted deleting an equivalent that still carries debt"
-    finally:
-        await _cleanup(eq_id, participants)
+    assert await _debt_exists(debt_id), (
+        "deleting the equivalent destroyed the debt it carried: the foreign key cascaded an "
+        "obligation away without loading a single Debt row"
+    )
+    assert refused, "the database accepted deleting an equivalent that still carries debt"
 
 
 @pytest.mark.asyncio
@@ -146,33 +129,27 @@ async def test_the_route_refuses_when_its_usage_count_misses_a_debt(pg_client, m
         return {"trustlines": 0, "debts": 0, "integrity_checkpoints": 0}
 
     monkeypatch.setattr(admin_api, "_equivalent_usage_counts", _count_that_missed_the_debt)
-    try:
-        resp = await pg_client.request(
-            "DELETE",
-            f"/api/v1/admin/equivalents/{code}",
-            json={"reason": "T1524 race reproducer"},
-            headers=_admin_headers(),
-        )
-        assert await _debt_exists(debt_id), (
-            f"the route answered {resp.status_code} and the debt is gone: a count that missed one "
-            f"obligation let the database cascade it away"
-        )
-        assert resp.status_code == 409, resp.text
-    finally:
-        await _cleanup(eq_id, participants)
+    resp = await pg_client.request(
+        "DELETE",
+        f"/api/v1/admin/equivalents/{code}",
+        json={"reason": "T1524 race reproducer"},
+        headers=_admin_headers(),
+    )
+    assert await _debt_exists(debt_id), (
+        f"the route answered {resp.status_code} and the debt is gone: a count that missed one "
+        f"obligation let the database cascade it away"
+    )
+    assert resp.status_code == 409, resp.text
 
 
 @pytest.mark.asyncio
 async def test_an_unused_equivalent_still_deletes(pg_client) -> None:
     """Control. RESTRICT must not turn every deletion into a refusal."""
     eq_id, code, _debt_id, participants = await _seed(with_debt=False)
-    try:
-        resp = await pg_client.request(
-            "DELETE",
-            f"/api/v1/admin/equivalents/{code}",
-            json={"reason": "T1524 control"},
-            headers=_admin_headers(),
-        )
-        assert resp.status_code == 200, resp.text
-    finally:
-        await _cleanup(eq_id, participants)
+    resp = await pg_client.request(
+        "DELETE",
+        f"/api/v1/admin/equivalents/{code}",
+        json={"reason": "T1524 control"},
+        headers=_admin_headers(),
+    )
+    assert resp.status_code == 200, resp.text

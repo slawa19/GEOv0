@@ -987,6 +987,61 @@ Helpers: `_rewrite_intent` :165-179, `_move_entry_and_debt` :182-197, `_add_entr
 - No direct caller writes through mode A: every one commits through `TestingSessionLocal()` sessions or its own engine on the tier DB (`db_session` is requested only for a dialect check). So ROLLBACK is applicable to none.
 - `pg_locks` is cluster-wide; pid-filtered observers keep working across DBs. Observers filtering `current_database()` (interlock `_no_advisory_lock_is_held`) work once the observer is on the clone.
 
+### B0b as built (2026-09-24, branch `claude/018-b0b-disposal`, commit `48aec47`)
+
+The tables below this subsection are the pre-B0b analysis (anchors on `3a038d3`) and stay as written. This is what B0b actually did. Nothing in `app/` changed; the listener journal is still the only journal writer. No assertion changed, no skip/xfail was added; collected 3036 before and after (3029 passed, 2 skipped, 4 deselected, 1 xfailed in both full runs).
+
+**Two spellings of one rebinding** (`tests/tier_on_a_clone.py`): importing `tier_sessions_on_a_clone` makes the `TestingSessionLocal` rebinding autouse for the module (as before); importing `tier_on_a_clone` makes it an opt-in fixture, `@pytest.mark.usefixtures("tier_on_a_clone")`, for modules where some tests commit nothing, or already use `MODE_B` (which clones under the same name, so a test must never get both). `tests.conftest.engine` is **not** rebound — a test that needs an engine over the clone asks for `committed_database` and uses `.engine`/`.url` by name — and `TEST_DATABASE_URL` is not rebound (scratch naming, `tier_on_a_clone.py:25`). ROLLBACK isolation (fork 5 MIXED): no converted test qualified — each commits through several sessions/connections or reads a commit back on another one; the tests that commit nothing were left where they were (mode A or no rows) and pay for no clone.
+
+| module | tests (clones before → after) | mechanism | why (one line) |
+|---|---|---|---|
+| `test_clearing_commit_replay_postgres.py` | 6 (0 → 6) | CLONE, module autouse; SERIALIZABLE sessions over `committed_database.engine` (was `tests.conftest.engine`) | clearing needs an engine-bound session; several sessions commit and are observed |
+| `test_clearing_payment_prepare_interlock_postgres.py` | 10 (0 → 7) | CLONE opt-in for the 7 seeding tests; their one-connection engines over `committed_database.url` | the T1537 check, the external-bind refusal and the preflight cancellation commit no rows and stay on the tier |
+| `test_clearing_skip_releases_locks_postgres.py` | 6 (0 → 6) | CLONE, module | seeded rows committed and raced through two sessions |
+| `test_concurrent_clearing_payment_lost_update_postgres.py` | 1 (0 → 1) | CLONE, module | clearing + payment + observer sessions |
+| `test_concurrent_prepare_routes_bottleneck_postgres.py` | 2 (0 → 1) | CLONE opt-in for the payment test | the prepare-only test writes no debt or journal row and keeps its own row cleanup on the tier |
+| `test_p012_money_form_and_detector_reach_postgres.py` | 25 (0 → 1) | CLONE opt-in for `test_the_persisted_clearing_payload_...` | clearing refuses a connection-bound session; the other tests are mode A (rollback) already |
+| `test_p012_rt1_...`, `test_p012_rt2_...` | 7, 3 (unchanged) | existing CLONE; row cleanup deleted | purge was redundant on the clone |
+| `test_p015_b4_entries_and_money_postgres.py` | 28 (0 → 28) | CLONE via the stand's engine (`serializable_engine(committed_database)`); pid-filtered observer engine stays on the tier | commit boundaries are the subject; autouse checker removed |
+| `test_p015_b4_wrong_writer_is_recorded_faithfully_postgres.py` | 5 (0 → 5) | CLONE via `serializable_factory(committed_database)` | commits are the subject; autouse checker removed |
+| `test_p015_inject_holds_the_owner_lock_postgres.py` | 2 (0 → 2) | CLONE via `observed_factory(committed_database)` (also used by b4 entries pg, inject retries) | real ticks commit; `_advisory_owner_locks_of` is pid-filtered and stays on the tier engine |
+| `test_p015_p1_money_replay_postgres.py` | 7 (unchanged) | existing CLONE; `_cleanup` → `_forget_the_route_cache` (the process route cache is the only state that outlives a clone) | purge was redundant |
+| `test_p015_t1523_in_progress_and_insert_race_postgres.py` | 2 (0 → 2) | CLONE, module | two sessions race one insert |
+| `test_p015_t1523_restart_after_commit_postgres.py` | 1 (0 → 1) | CLONE, module; both child processes get `committed_database.url` | the test is two processes on one database |
+| `test_p015_t1524_equivalent_deletion_keeps_obligations_postgres.py` | 3 (unchanged) | existing CLONE; cleanup deleted | purge was redundant |
+| `test_p015_t1525_classification_..._postgres.py` | 3 (0 → 3) | CLONE via `serializable_factory(committed_database)` | a genuine 40001 needs two connections; autouse checker removed |
+| `test_p015_t1525_control_postgres.py` | 4 (0 → 4) | CLONE via `serializable_factory(committed_database)`; `_forget_the_route_cache` | real tick/payment commits |
+| `test_p015_t1526_nan_amount_..._postgres.py` | 4 (0 → 4) | CLONE via `factory(committed_database)` | "committed and read back on another session" is the point; the test-d trust-line DELETE went too |
+| `test_p015_t1551_..._postgres.py` | 1 (0 → 1) | CLONE, module | clearing needs an engine-bound session |
+| `test_p1_clearing_run_perimeter_postgres.py` | 3 (0 → 3) | CLONE via `engine_bound_sessions(committed_database)` | interlock path needs an engine-bound session |
+| `test_payment_commit_advisory_locks_postgres.py` | 6 (0 → 6) | CLONE, module; `_forget_the_journal_history` (journal DELETE + `VACUUM` on the tier engine) removed | the shared-statistics hazard it undid cannot exist on a per-test clone |
+| `test_payment_engine_audit_conflict_postgres.py`, `..._uow_retry_...`, `..._idempotency_...`, `..._inverse_multisegment_...` | 1, 2, 1, 2 (0 → all) | CLONE, module | competing sessions commit; uow-retry test 1's cleanup outside `finally` is gone with the rest |
+| `test_payment_staged_multicall_postgres.py` | 3 (0 → 1) | CLONE opt-in for the seeding test | the two owner-lock tests take advisory locks on random ids and commit nothing |
+| `tests/unit/test_p015_b4_wrong_writer_is_recorded_faithfully.py` | 7 (0 → 7) | CLONE, module; `_drop_triangle` deleted | payments/clearings commit through the factory |
+| `tests/unit/test_p015_step5c_reaction_and_hold.py` | 15 (2 → 15) | CLONE opt-in on the 13 non-`MODE_B` tests; `_drop_cycle` deleted; statement recorder on `committed_database.engine` | reaction/hold commits; the 2 `MODE_B` tests keep their own clone |
+| *importers of the deleted helpers* | | | |
+| `tests/unit/test_p015_step5a_reconciliation.py` | 17 (1 → 17) | CLONE, module; `clone_without_the_arithmetic_check` alters the same clone | used `_drop_triangle` |
+| `tests/unit/test_p015_step5b_criterion_b.py` | 23 (5 → 23) | CLONE opt-in on 12 non-`MODE_B` tests; recorder on `committed_database.engine` | used `_drop_triangle` |
+| `test_p015_step5a_reconciliation_postgres.py`, `test_p015_step5b_criterion_b_postgres.py` | 5, 22 (0 → 4, 21) | `factory(tier_on_a_clone)`; the race engines over `committed_database.url` (explicit `url` argument to `_serializable_sessions`); construction-path tests unchanged | used `_drop_triangle`/p1 `_cleanup`; `_advisory_waiter_exists` reads `current_database()` through `TestingSessionLocal`, so it must be rebound too (measured: without it the premise assert failed) |
+| `test_p015_step5c_hold_races_postgres.py`, `test_p015_t1544_operator_stop_races_postgres.py` | 9, 8 (unchanged) | existing CLONE; interlock/p1 cleanups deleted, `_forget_the_route_cache` kept | redundant on the clone |
+| `test_p015_inject_retries_a_serialization_failure_postgres.py` | 1 (0 → 1) | CLONE through `observed_factory` | used inject `_cleanup` |
+
+Clone counts measured by a fixture-setup counter over these 35 modules (245 tests): **45 → 213 clones, +168**.
+
+**Removed:** the three autouse "every seeded row is gone" checkers (`test_p015_b4_entries_and_money_postgres.py`, `test_p015_b4_wrong_writer_..._postgres.py`, `test_p015_t1525_classification_..._postgres.py`) — fixtures, not tests, so the collected count is unchanged; the helpers `_drop_triangle` (unit wrong-writer), `_drop_cycle` (step5c), the `_cleanup`s of inject-holds, p1 money replay (now `_forget_the_route_cache`), t1524, t1525 ×2, t1526, perimeter, b4 entries pg (with `_SEEDED`), wrong-writer pg (with `_SEEDED`), `_cleanup_interlock_case`, `_cleanup_seed` ×3, `Stand.cleanup` (t1523), `_forget_the_journal_history`, and every inline cleanup block.
+
+**Not converted, on purpose — B1 owns them:** `purge_test_ledger` stays for its one caller `p015_b4_support.drop_world`, used only by the listener-mechanism modules B1 deletes or rewrites (`test_p015_b4_write_guard.py`, `test_p015_b4_transaction_contract{,_postgres}.py`, `test_p015_b4_entries_and_money.py`, `test_p015_b4_r4_...`); `p015_b4a_stand.Stand.purge` (listener-mechanism files); `test_p015_t1533_..._postgres.py` raw `DELETE FROM debts` (its setup needs the corruption helper first, finding F5); the mid-test `DELETE FROM debts` in `test_simulator_real_snapshot_db_enrichment.py` (not disposal).
+
+**Timing (local, Windows, PostgreSQL 16.9; the full tier's wall time moves ±90 s between identical runs here, so only same-conditions comparisons are attributable):**
+
+| measurement | before (`df1e849`) | after (`48aec47`) | delta |
+|---|---:|---:|---:|
+| the 35 modules alone, back to back, same selectors | 166.8 s | 257.4 s | **+90.6 s** (setup +62.0, call +15.5, teardown +13.5) |
+| full backend tier, pytest time | 1373.9 s; 1461.3 s (two runs) | 1672.2 s (see the final gate for a second sample) | noise-dominated: the untouched modules' summed durations differed by +103.5 s between the two identical base runs |
+| raw `CREATE DATABASE … TEMPLATE` / `DROP DATABASE` of the 9.5 MB mode-B template, 10 runs | | | 0.240 s / 0.071 s median |
+
+Per new clone locally ≈ 0.54 s (fixture overhead included). CI history: ≈ 0.13 s per clone (`specs/017-postgres-only-engine/spec.md:178`), so +168 clones projects to roughly +22 s on CI before cold-cache effects — **against a measured CI margin of 31–48 s** (`spec 017:167`). Not measured on CI. Levers not taken here (each changes shared test infrastructure and would itself need review): one maintenance connection per clone instead of two (`_mode_b_template` calls `database_exists` every time), and fewer round trips in `cloned_database`.
+
 ### Direct callers of `purge_test_ledger` (28 test modules + 1 helper)
 
 Legend: TSL = `tests.conftest.TestingSessionLocal` on tier DB; "tier" = shared tier DB (leftovers leak). All purge sites are in `finally` or fixture teardown unless flagged.

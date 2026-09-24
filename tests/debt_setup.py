@@ -268,6 +268,14 @@ async def purge_test_ledger(
     and every id is put through `uuid.UUID` first, which is both the injection guard and the reason
     the statements can interpolate rather than bind (paramstyle differs between pysqlite and
     asyncpg, and a teardown helper that worked on one tier only would be worse than none).
+
+    WHO STILL CALLS IT (018 B0b, 2026-09-24): only `tests/p015_b4_support.drop_world`, i.e. the
+    listener-mechanism modules stage B1 deletes or rewrites (`test_p015_b4_write_guard.py`,
+    `test_p015_b4_transaction_contract{,_postgres}.py`, `test_p015_b4_entries_and_money.py`,
+    `test_p015_b4_r4_fixture_migration_is_observably_equivalent.py`). Every other caller moved to a
+    disposable clone of the migrated template (`tests/tier_on_a_clone.py`), whose drop disposes of
+    the journal without deleting a row of it. Do not add a caller: from B1 the database refuses the
+    journal deletes this helper issues, and it leaves with its last caller.
     """
 
     transactions = [str(value) for value in tx_ids]

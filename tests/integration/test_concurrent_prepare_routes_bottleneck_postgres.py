@@ -6,11 +6,17 @@ from decimal import Decimal
 import pytest
 
 from sqlalchemy import select
-from tests.debt_setup import purge_test_ledger
+
+# The first test commits payments (debts and their journal) through several sessions and runs on a
+# disposable clone of the migrated template; its rows go with the clone's drop (018 B0b; see
+# `tests/tier_on_a_clone.py`). The second test only prepares - it writes no debt and no journal row -
+# and keeps its own cleanup on the tier.
+from tests.tier_on_a_clone import tier_on_a_clone  # noqa: E402,F401 - opt-in fixture
 
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("tier_on_a_clone")
 async def test_concurrent_payments_shared_bottleneck_commit_once_postgres(
     db_session,
     monkeypatch,
@@ -24,7 +30,7 @@ async def test_concurrent_payments_shared_bottleneck_commit_once_postgres(
     if dialect not in {"postgresql", "postgres"}:
         pytest.skip("Postgres-only: validates single-route advisory lock serialization")
 
-    from sqlalchemy import delete, text
+    from sqlalchemy import text
 
     from app.core.payments.engine import PaymentEngine
     from app.core.payments.service import PaymentService
@@ -260,36 +266,6 @@ async def test_concurrent_payments_shared_bottleneck_commit_once_postgres(
                 raise AssertionError(
                     f"Payment workers did not stop after cancellation: {pending_names}"
                 )
-            async with asyncio.timeout(5.0):
-                async with TestingSessionLocal() as cleanup:
-                    # The debts AND the journal rows that describe them, through the driver and BEFORE the
-                    # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
-                    # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
-                    # envelope still standing would block the transaction delete above it.
-                    await purge_test_ledger(cleanup, equivalent_ids=[eq.id])
-                    await cleanup.execute(
-                        delete(IntegrityAuditLog).where(
-                            IntegrityAuditLog.tx_id.in_(tx_ids)
-                        )
-                    )
-                    await cleanup.execute(
-                        delete(PrepareLock).where(PrepareLock.tx_id.in_(tx_ids))
-                    )
-                    await cleanup.execute(
-                        delete(Transaction).where(Transaction.tx_id.in_(tx_ids))
-                    )
-                    await cleanup.execute(
-                        delete(TrustLine).where(TrustLine.equivalent_id == eq.id)
-                    )
-                    await cleanup.execute(
-                        delete(Participant).where(
-                            Participant.id.in_(list(id_by_pid.values()))
-                        )
-                    )
-                    await cleanup.execute(
-                        delete(Equivalent).where(Equivalent.id == eq.id)
-                    )
-                    await cleanup.commit()
         except BaseException as teardown_error:
             if primary_error is None:
                 raise

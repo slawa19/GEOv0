@@ -41,9 +41,13 @@ from pathlib import Path
 
 import pytest
 from nacl.signing import SigningKey
-from sqlalchemy import delete, select
+from sqlalchemy import select
 
-from tests.debt_setup import purge_test_ledger
+
+# Every test here commits through several sessions and runs on a disposable clone of the migrated
+# template; its rows go with the clone's drop and nothing is deleted row by row (018 B0b; see
+# `tests/tier_on_a_clone.py`).
+from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
 
 _CHILD = Path(__file__).resolve().parent / "t1523_restart_child.py"
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -141,20 +145,20 @@ async def _run_child(mode: str, *, database_url: str, body_path: Path, sender_id
 
 @pytest.mark.asyncio
 async def test_a_payment_committed_by_a_process_that_died_is_replayed_by_another_postgres(
-    db_session, tmp_path
+    db_session, committed_database, tmp_path
 ):
     from app.core.auth.canonical import canonical_json
     from app.core.auth.crypto import generate_keypair, get_pid_from_public_key
-    from app.db.models.audit_log import IntegrityAuditLog
     from app.db.models.equivalent import Equivalent
     from app.db.models.participant import Participant
     from app.db.models.prepare_lock import PrepareLock
-    from app.db.models.transaction import Transaction
     from app.db.models.trustline import TrustLine
-    from tests.conftest import TEST_DATABASE_URL, TestingSessionLocal
+    from tests.conftest import TestingSessionLocal
 
-    if not TEST_DATABASE_URL.startswith("postgresql"):
-        pytest.skip("Cell 8 needs two processes on one PostgreSQL database")
+    # Both child processes and this test's own sessions talk to ONE database: this test's disposable
+    # clone, whose drop is the only disposal of what they commit (018 B0b). The drop also terminates
+    # a straggling child's connection.
+    database_url = committed_database.url
 
     nonce = uuid.uuid4().hex[:10]
     equivalent_id = uuid.uuid4()
@@ -168,147 +172,130 @@ async def test_a_payment_committed_by_a_process_that_died_is_replayed_by_another
     sender_pid = get_pid_from_public_key(sender_public)
     receiver_pid = get_pid_from_public_key(receiver_public)
 
-    try:
-        # Seeded on its own connection and really committed: two other processes have to see it.
-        async with TestingSessionLocal() as setup:
-            setup.add_all(
-                [
-                    Equivalent(
-                        id=equivalent_id,
-                        code=equivalent_code,
-                        description="T1523 cell 8",
-                        precision=2,
-                    ),
-                    Participant(
-                        id=sender_id,
-                        pid=sender_pid,
-                        display_name="A",
-                        public_key=sender_public,
-                        type="person",
-                        status="active",
-                    ),
-                    Participant(
-                        id=receiver_id,
-                        pid=receiver_pid,
-                        display_name="B",
-                        public_key=receiver_public,
-                        type="person",
-                        status="active",
-                    ),
-                ]
-            )
-            await setup.commit()
-            setup.add(
-                TrustLine(
-                    from_participant_id=receiver_id,
-                    to_participant_id=sender_id,
-                    equivalent_id=equivalent_id,
-                    limit=Decimal("100.00"),
+    # Seeded on its own connection and really committed: two other processes have to see it.
+    async with TestingSessionLocal() as setup:
+        setup.add_all(
+            [
+                Equivalent(
+                    id=equivalent_id,
+                    code=equivalent_code,
+                    description="T1523 cell 8",
+                    precision=2,
+                ),
+                Participant(
+                    id=sender_id,
+                    pid=sender_pid,
+                    display_name="A",
+                    public_key=sender_public,
+                    type="person",
                     status="active",
-                )
-            )
-            await setup.commit()
-
-        message = canonical_json(
-            {
-                "tx_id": tx_id,
-                "to": receiver_pid,
-                "equivalent": equivalent_code,
-                "amount": "10.00",
-            }
+                ),
+                Participant(
+                    id=receiver_id,
+                    pid=receiver_pid,
+                    display_name="B",
+                    public_key=receiver_public,
+                    type="person",
+                    status="active",
+                ),
+            ]
         )
-        body = {
+        await setup.commit()
+        setup.add(
+            TrustLine(
+                from_participant_id=receiver_id,
+                to_participant_id=sender_id,
+                equivalent_id=equivalent_id,
+                limit=Decimal("100.00"),
+                status="active",
+            )
+        )
+        await setup.commit()
+
+    message = canonical_json(
+        {
             "tx_id": tx_id,
             "to": receiver_pid,
             "equivalent": equivalent_code,
             "amount": "10.00",
-            "signature": base64.b64encode(
-                SigningKey(base64.b64decode(sender_private)).sign(message).signature
-            ).decode("utf-8"),
         }
-        body_path = tmp_path / "t1523_cell8_body.json"
-        body_path.write_text(json.dumps(body), encoding="utf-8")
+    )
+    body = {
+        "tx_id": tx_id,
+        "to": receiver_pid,
+        "equivalent": equivalent_code,
+        "amount": "10.00",
+        "signature": base64.b64encode(
+            SigningKey(base64.b64decode(sender_private)).sign(message).signature
+        ).decode("utf-8"),
+    }
+    body_path = tmp_path / "t1523_cell8_body.json"
+    body_path.write_text(json.dumps(body), encoding="utf-8")
 
-        # --- process A: commits, then dies before answering -----------------------------------
-        code_a, pid_a, stdout_a, stderr_a = await _run_child(
-            "die-after-commit",
-            database_url=TEST_DATABASE_URL,
-            body_path=body_path,
-            sender_id=sender_id,
-        )
+    # --- process A: commits, then dies before answering -----------------------------------
+    code_a, pid_a, stdout_a, stderr_a = await _run_child(
+        "die-after-commit",
+        database_url=database_url,
+        body_path=body_path,
+        sender_id=sender_id,
+    )
 
-        assert code_a == EXIT_AFTER_COMMIT, (
-            f"process A exited {code_a}, not at the patched point.\n"
-            f"stdout={stdout_a!r}\nstderr={stderr_a[-3000:]!r}"
-        )
-        assert f"COMMITTED-THEN-EXIT:{tx_id}" in stdout_a, stdout_a
-        assert "RESULT:" not in stdout_a, (
-            f"process A produced a response after all: {stdout_a!r}"
-        )
-        assert "ERROR:" not in stdout_a, stdout_a
+    assert code_a == EXIT_AFTER_COMMIT, (
+        f"process A exited {code_a}, not at the patched point.\n"
+        f"stdout={stdout_a!r}\nstderr={stderr_a[-3000:]!r}"
+    )
+    assert f"COMMITTED-THEN-EXIT:{tx_id}" in stdout_a, stdout_a
+    assert "RESULT:" not in stdout_a, (
+        f"process A produced a response after all: {stdout_a!r}"
+    )
+    assert "ERROR:" not in stdout_a, stdout_a
 
-        # --- the commit is durable, read from a third connection ------------------------------
-        async with TestingSessionLocal() as observer:
-            after_crash = await _effects(observer, tx_id, equivalent_id)
-        assert len(after_crash["transactions"]) == 1, after_crash["transactions"]
-        assert after_crash["transactions"][0][1] == "COMMITTED", after_crash["transactions"]
-        assert after_crash["envelopes"] == [
-            ("COMPLETED", len(after_crash["entries"]))
-        ], after_crash
-        assert len(after_crash["entries"]) > 0, after_crash
-        assert len(after_crash["debts"]) == 1, after_crash["debts"]
-        assert Decimal(after_crash["debts"][0][2]) == Decimal("10.00"), after_crash["debts"]
+    # --- the commit is durable, read from a third connection ------------------------------
+    async with TestingSessionLocal() as observer:
+        after_crash = await _effects(observer, tx_id, equivalent_id)
+    assert len(after_crash["transactions"]) == 1, after_crash["transactions"]
+    assert after_crash["transactions"][0][1] == "COMMITTED", after_crash["transactions"]
+    assert after_crash["envelopes"] == [
+        ("COMPLETED", len(after_crash["entries"]))
+    ], after_crash
+    assert len(after_crash["entries"]) > 0, after_crash
+    assert len(after_crash["debts"]) == 1, after_crash["debts"]
+    assert Decimal(after_crash["debts"][0][2]) == Decimal("10.00"), after_crash["debts"]
 
-        # --- process B: a different process, the same signed request --------------------------
-        code_b, pid_b, stdout_b, stderr_b = await _run_child(
-            "answer",
-            database_url=TEST_DATABASE_URL,
-            body_path=body_path,
-            sender_id=sender_id,
-        )
+    # --- process B: a different process, the same signed request --------------------------
+    code_b, pid_b, stdout_b, stderr_b = await _run_child(
+        "answer",
+        database_url=database_url,
+        body_path=body_path,
+        sender_id=sender_id,
+    )
 
-        assert pid_b != pid_a, (pid_a, pid_b)
-        assert code_b == 0, (
-            f"process B exited {code_b}.\nstdout={stdout_b!r}\nstderr={stderr_b[-3000:]!r}"
-        )
-        result_lines = [
-            line for line in stdout_b.splitlines() if line.startswith("RESULT:")
-        ]
-        assert len(result_lines) == 1, stdout_b
-        answered = json.loads(result_lines[0][len("RESULT:") :])
-        assert answered["tx_id"] == tx_id, answered
-        assert answered["status"] == "COMMITTED", answered
-        assert answered["amount"] == "10.00", answered
+    assert pid_b != pid_a, (pid_a, pid_b)
+    assert code_b == 0, (
+        f"process B exited {code_b}.\nstdout={stdout_b!r}\nstderr={stderr_b[-3000:]!r}"
+    )
+    result_lines = [
+        line for line in stdout_b.splitlines() if line.startswith("RESULT:")
+    ]
+    assert len(result_lines) == 1, stdout_b
+    answered = json.loads(result_lines[0][len("RESULT:") :])
+    assert answered["tx_id"] == tx_id, answered
+    assert answered["status"] == "COMMITTED", answered
+    assert answered["amount"] == "10.00", answered
 
-        async with TestingSessionLocal() as observer:
-            after_replay = await _effects(observer, tx_id, equivalent_id)
-        assert after_replay == after_crash, (
-            "the replay in the new process moved debts, wrote a second transaction row or "
-            f"opened a second envelope: {after_replay!r} != {after_crash!r}"
-        )
+    async with TestingSessionLocal() as observer:
+        after_replay = await _effects(observer, tx_id, equivalent_id)
+    assert after_replay == after_crash, (
+        "the replay in the new process moved debts, wrote a second transaction row or "
+        f"opened a second envelope: {after_replay!r} != {after_crash!r}"
+    )
 
-        # The prepare lock of the dead process is gone with its commit - no leftovers for the
-        # second process to trip over.
-        async with TestingSessionLocal() as observer:
-            leftovers = (
-                await observer.execute(
-                    select(PrepareLock.id).where(PrepareLock.tx_id == tx_id)
-                )
-            ).all()
-        assert leftovers == [], leftovers
-    finally:
-        async with TestingSessionLocal() as cleanup:
-            await purge_test_ledger(cleanup, equivalent_ids=[equivalent_id])
-            await cleanup.execute(
-                delete(IntegrityAuditLog).where(IntegrityAuditLog.tx_id == tx_id)
+    # The prepare lock of the dead process is gone with its commit - no leftovers for the
+    # second process to trip over.
+    async with TestingSessionLocal() as observer:
+        leftovers = (
+            await observer.execute(
+                select(PrepareLock.id).where(PrepareLock.tx_id == tx_id)
             )
-            await cleanup.execute(delete(PrepareLock).where(PrepareLock.tx_id == tx_id))
-            await cleanup.execute(delete(Transaction).where(Transaction.tx_id == tx_id))
-            await cleanup.execute(
-                delete(TrustLine).where(TrustLine.equivalent_id == equivalent_id)
-            )
-            await cleanup.execute(
-                delete(Participant).where(Participant.id.in_([sender_id, receiver_id]))
-            )
-            await cleanup.execute(delete(Equivalent).where(Equivalent.id == equivalent_id))
-            await cleanup.commit()
+        ).all()
+    assert leftovers == [], leftovers

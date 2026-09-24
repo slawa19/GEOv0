@@ -56,14 +56,13 @@ from app.db.models.transaction import Transaction
 from app.db.reconciliation_tables import debt_reconciliation_results
 from app.utils.exceptions import ConflictException, RetryablePaymentConflictException
 from tests.integration.test_clearing_payment_prepare_interlock_postgres import (
-    _cleanup_interlock_case,
     _no_advisory_lock_is_held,
     _seed_interlock_case,
     _use_serializable,
 )
 from tests.integration.test_p015_p1_money_replay_postgres import (  # noqa: F401 - `factory` is a fixture
     _OPENING,
-    _cleanup,
+    _forget_the_route_cache,
     _debts,
     _prepare_locks,
     _seed,
@@ -221,7 +220,7 @@ async def test_step5c_p_a_payment_commit_waiting_behind_the_reaction_is_refused_
         assert await _hold_of(factory, world.equivalent.id) is not None
     finally:
         await _finish(payment, reconcile)
-        await _cleanup(factory, world)
+        _forget_the_route_cache(world)
 
 
 @pytest.mark.asyncio
@@ -283,7 +282,7 @@ async def test_step5c_p_a_reaction_arriving_while_a_payment_holds_its_check_wait
     finally:
         release_payment.set()
         await _finish(payment, reconcile)
-        await _cleanup(factory, world)
+        _forget_the_route_cache(world)
 
 
 @pytest.mark.asyncio
@@ -331,7 +330,7 @@ async def test_step5c_p_the_owner_lock_comes_before_the_authoritative_snapshot(f
         await holder.rollback()
         await holder.close()
         await _finish(reconcile)
-        await _cleanup(factory, world)
+        _forget_the_route_cache(world)
 
 
 # ── clearing <-> hold ──────────────────────────────────────────────────────────────────────────
@@ -391,7 +390,6 @@ async def test_step5c_p_a_clearing_that_waited_behind_the_reaction_refuses_in_it
         await _finish(clearing, reconcile)
         await clearing_session.rollback()
         await clearing_session.close()
-        await _cleanup_interlock_case(seed)
 
 
 @pytest.mark.asyncio
@@ -443,7 +441,6 @@ async def test_step5c_p_a_reaction_waits_for_a_clearing_that_already_read_the_ho
         await _finish(clearing, reconcile)
         await clearing_session.rollback()
         await clearing_session.close()
-        await _cleanup_interlock_case(seed)
 
 
 # ── placement: below the TTL branch ─────────────────────────────────────────────────────────────
@@ -486,7 +483,7 @@ async def test_step5c_p_an_expired_payment_in_a_held_equivalent_is_aborted_as_ex
         )
         assert await _transactions(factory, world) == {tx_id: "ABORTED"}
     finally:
-        await _cleanup(factory, world)
+        _forget_the_route_cache(world)
 
 
 # ── the admin clear, under the owner lock ────────────────────────────────────────────────────────
@@ -539,7 +536,7 @@ async def test_step5c_p_the_admin_clear_waits_for_the_owner_lock(factory, admin_
         await holder.rollback()
         await holder.close()
         await _finish(clear)
-        await _cleanup(factory, world)
+        _forget_the_route_cache(world)
 
 
 # ── the evidence of a hold is RESTRICT ─────────────────────────────────────────────────────────────
@@ -567,7 +564,7 @@ async def test_step5c_p_the_evidence_of_a_hold_cannot_be_deleted_while_held(fact
         assert (getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)) == "23503", repr(orig)
         assert await _hold_of(factory, world.equivalent.id) == hold_id
     finally:
-        await _cleanup(factory, world)
+        _forget_the_route_cache(world)
 
 
 # ── both construction paths, and the downgrade refusal ───────────────────────────────────────────

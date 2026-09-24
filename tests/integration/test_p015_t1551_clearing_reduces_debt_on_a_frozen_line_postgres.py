@@ -13,30 +13,29 @@ fixture that lives in an uncommitted test transaction; the `finally` block remov
 
 from __future__ import annotations
 
-import sys
 import uuid
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import delete, select
+from sqlalchemy import select
 
 from app.core.clearing.service import ClearingService
 from app.core.invariants import InvariantChecker
-from app.db.models.audit_log import IntegrityAuditLog
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
-from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 from app.utils.exceptions import IntegrityViolationException
-from tests.debt_setup import debt_fixture_setup, purge_test_ledger
+from tests.debt_setup import debt_fixture_setup
+
+# Every test here commits through several sessions and runs on a disposable clone of the migrated
+# template; its rows go with the clone's drop and nothing is deleted row by row (018 B0b; see
+# `tests/tier_on_a_clone.py`).
+from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
 
 
 async def test_clearing_reduces_the_over_limit_debt_on_a_frozen_line_postgres() -> None:
-    from tests.conftest import TestingSessionLocal, _ensure_schema_initialized
-
-    # No `db_session` here, so nothing else would build the schema when this test runs alone.
-    await _ensure_schema_initialized()
+    from tests.conftest import TestingSessionLocal
 
     nonce = uuid.uuid4().hex[:8].upper()
     code = f"FZ{nonce}"
@@ -52,106 +51,83 @@ async def test_clearing_reduces_the_over_limit_debt_on_a_frozen_line_postgres() 
         (debt_ids[2], c, a, Decimal("150"), "frozen", Decimal("100")),
     ]
 
-    try:
-        async with TestingSessionLocal() as setup:
-            setup.add(Equivalent(id=equivalent_id, code=code, symbol="FZ", precision=2))
+    async with TestingSessionLocal() as setup:
+        setup.add(Equivalent(id=equivalent_id, code=code, symbol="FZ", precision=2))
+        setup.add_all(
+            [
+                Participant(
+                    id=pid,
+                    pid=f"geo:{label}:{nonce}",
+                    display_name=label,
+                    public_key=uuid.uuid4().hex * 2,
+                    type="person",
+                    status="active",
+                )
+                for pid, label in zip(participant_ids, ("A", "B", "C"), strict=True)
+            ]
+        )
+        setup.add_all(
+            [
+                TrustLine(
+                    from_participant_id=creditor,
+                    to_participant_id=debtor,
+                    equivalent_id=equivalent_id,
+                    limit=limit,
+                    policy={"auto_clearing": True},
+                    status=status,
+                )
+                for _, debtor, creditor, _, status, limit in ring
+            ]
+        )
+        async with debt_fixture_setup(setup, label="setup"):
             setup.add_all(
                 [
-                    Participant(
-                        id=pid,
-                        pid=f"geo:{label}:{nonce}",
-                        display_name=label,
-                        public_key=uuid.uuid4().hex * 2,
-                        type="person",
-                        status="active",
-                    )
-                    for pid, label in zip(participant_ids, ("A", "B", "C"), strict=True)
-                ]
-            )
-            setup.add_all(
-                [
-                    TrustLine(
-                        from_participant_id=creditor,
-                        to_participant_id=debtor,
+                    Debt(
+                        id=debt_id,
+                        debtor_id=debtor,
+                        creditor_id=creditor,
                         equivalent_id=equivalent_id,
-                        limit=limit,
-                        policy={"auto_clearing": True},
-                        status=status,
+                        amount=amount,
                     )
-                    for _, debtor, creditor, _, status, limit in ring
+                    for debt_id, debtor, creditor, amount, _, _ in ring
                 ]
             )
-            async with debt_fixture_setup(setup, label="setup"):
-                setup.add_all(
-                    [
-                        Debt(
-                            id=debt_id,
-                            debtor_id=debtor,
-                            creditor_id=creditor,
-                            equivalent_id=equivalent_id,
-                            amount=amount,
-                        )
-                        for debt_id, debtor, creditor, amount, _, _ in ring
-                    ]
-                )
-            await setup.commit()
+        await setup.commit()
 
-        async with TestingSessionLocal() as before:
-            checker = InvariantChecker(before)
-            positions_before = {
-                pid: await checker._calculate_net_position(pid, equivalent_id)
-                for pid in participant_ids
-            }
-            triangles = await ClearingService(before).find_triangles_sql(equivalent_id)
-        assert frozenset(str(i) for i in debt_ids) in {
-            frozenset(ClearingService._debt_id_key(edge["debt_id"]) for edge in cycle)
-            for cycle in triangles
-        }, "the PostgreSQL triangle query must admit the frozen line"
+    async with TestingSessionLocal() as before:
+        checker = InvariantChecker(before)
+        positions_before = {
+            pid: await checker._calculate_net_position(pid, equivalent_id)
+            for pid in participant_ids
+        }
+        triangles = await ClearingService(before).find_triangles_sql(equivalent_id)
+    assert frozenset(str(i) for i in debt_ids) in {
+        frozenset(ClearingService._debt_id_key(edge["debt_id"]) for edge in cycle)
+        for cycle in triangles
+    }, "the PostgreSQL triangle query must admit the frozen line"
 
-        async with TestingSessionLocal() as worker:
-            cleared = await ClearingService(worker).auto_clear(code, max_depth=3)
-        assert cleared == 1
+    async with TestingSessionLocal() as worker:
+        cleared = await ClearingService(worker).auto_clear(code, max_depth=3)
+    assert cleared == 1
 
-        async with TestingSessionLocal() as verify:
-            checker = InvariantChecker(verify)
-            positions_after = {
-                pid: await checker._calculate_net_position(pid, equivalent_id)
-                for pid in participant_ids
-            }
-            amounts = {
-                debt_id: amount
-                for debt_id, amount in (
-                    await verify.execute(
-                        select(Debt.id, Debt.amount).where(Debt.equivalent_id == equivalent_id)
-                    )
-                ).all()
-            }
-            with pytest.raises(IntegrityViolationException) as exc_info:
-                await checker.check_trust_limits(equivalent_id=equivalent_id)
+    async with TestingSessionLocal() as verify:
+        checker = InvariantChecker(verify)
+        positions_after = {
+            pid: await checker._calculate_net_position(pid, equivalent_id)
+            for pid in participant_ids
+        }
+        amounts = {
+            debt_id: amount
+            for debt_id, amount in (
+                await verify.execute(
+                    select(Debt.id, Debt.amount).where(Debt.equivalent_id == equivalent_id)
+                )
+            ).all()
+        }
+        with pytest.raises(IntegrityViolationException) as exc_info:
+            await checker.check_trust_limits(equivalent_id=equivalent_id)
 
-        assert positions_after == positions_before
-        assert amounts == {debt_ids[2]: Decimal("120")}
-        (violation,) = exc_info.value.details["violations"]
-        assert Decimal(violation["violation_amount"]) == Decimal("20")
-    finally:
-        primary_error = sys.exc_info()[1]
-        try:
-            async with TestingSessionLocal() as cleanup:
-                await purge_test_ledger(cleanup, equivalent_ids=[equivalent_id])
-                await cleanup.execute(
-                    delete(IntegrityAuditLog).where(IntegrityAuditLog.equivalent_code == code)
-                )
-                await cleanup.execute(
-                    delete(Transaction).where(Transaction.initiator_id.in_(participant_ids))
-                )
-                await cleanup.execute(
-                    delete(TrustLine).where(TrustLine.equivalent_id == equivalent_id)
-                )
-                await cleanup.execute(
-                    delete(Participant).where(Participant.id.in_(participant_ids))
-                )
-                await cleanup.execute(delete(Equivalent).where(Equivalent.id == equivalent_id))
-                await cleanup.commit()
-        except Exception:
-            if primary_error is None:
-                raise
+    assert positions_after == positions_before
+    assert amounts == {debt_ids[2]: Decimal("120")}
+    (violation,) = exc_info.value.details["violations"]
+    assert Decimal(violation["violation_amount"]) == Decimal("20")

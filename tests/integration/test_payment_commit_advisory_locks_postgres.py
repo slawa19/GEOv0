@@ -3,7 +3,7 @@ import uuid
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import func, select, text
 
 from app.core.payments.engine import PaymentEngine
 from app.db.journal_tables import debt_operations
@@ -15,7 +15,11 @@ from app.db.models.prepare_lock import PrepareLock
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 from app.utils.exceptions import RoutingException
-from tests.debt_setup import purge_test_ledger
+
+# Every test here commits through several sessions and runs on a disposable clone of the migrated
+# template; its rows go with the clone's drop and nothing is deleted row by row (018 B0b; see
+# `tests/tier_on_a_clone.py`).
+from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
 
 
 
@@ -150,44 +154,11 @@ async def _seed_prepared_payment(
     }
 
 
-async def _cleanup_seed(seed: dict) -> None:
-    from tests.conftest import TestingSessionLocal
-
-    tx_ids = [seed["holder_tx_id"]]
-    if seed["waiter_tx_id"] is not None:
-        tx_ids.append(seed["waiter_tx_id"])
-
-    async with TestingSessionLocal() as cleanup:
-        # The debts AND the journal rows that describe them, through the driver and BEFORE the
-        # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
-        # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
-        # envelope still standing would block the transaction delete above it.
-        await purge_test_ledger(cleanup, equivalent_ids=[seed["equivalent_id"]])
-        await cleanup.execute(
-            delete(IntegrityAuditLog).where(IntegrityAuditLog.tx_id.in_(tx_ids))
-        )
-        await cleanup.execute(delete(PrepareLock).where(PrepareLock.tx_id.in_(tx_ids)))
-        await cleanup.execute(
-            delete(Transaction).where(Transaction.tx_id.in_(tx_ids))
-        )
-        await cleanup.execute(
-            delete(TrustLine).where(
-                TrustLine.equivalent_id == seed["equivalent_id"]
-            )
-        )
-        await cleanup.execute(
-            delete(Participant).where(
-                Participant.id.in_(seed["participant_ids"])
-            )
-        )
-        await cleanup.execute(
-            delete(Equivalent).where(Equivalent.id == seed["equivalent_id"])
-        )
-        await cleanup.commit()
-
-
-#: The identity prefix of the finished operations `_give_the_journal_a_history` writes, and the only
-#: thing `_forget_the_journal_history` deletes by.
+#: The identity prefix of the finished operations `_give_the_journal_a_history` writes.
+#:
+#: They used to be deleted again, with a `VACUUM` to give the table its pages back, because the
+#: planner statistics they leave were SHARED with every later test of the run. Since 018 B0b the test
+#: runs on its own disposable clone, and the rows and the statistics go with the clone's drop.
 _JOURNAL_HISTORY_IDENTITY = "t1529-history-"
 
 #: HOW MANY, AND WHY A NUMBER AT ALL (T1529, measured on PostgreSQL 16.9, 2026-09-13).
@@ -287,34 +258,6 @@ async def _give_the_journal_a_history(rows: int = _JOURNAL_HISTORY_ROWS) -> int:
                 .where(debt_operations.c.identity.like(f"{_JOURNAL_HISTORY_IDENTITY}%"))
             )
         )
-
-
-async def _forget_the_journal_history() -> None:
-    """Remove the filler, and give the table its physical size back.
-
-    THE STATISTICS ARE SHARED STATE, and `DELETE` plus `ANALYZE` is not enough to restore them.
-    Measured 2026-09-13: after the rows are deleted `reltuples` drops to zero but `relpages` does
-    not - PostgreSQL does not give the pages back until a `VACUUM` truncates them - so the planner
-    is left looking at a nought-row, eighty-page table and keeps choosing the index scan. Every
-    later test in the run then measures the `23505` branch of this race whether it meant to or not,
-    and `test_concurrent_same_transaction_commit_applies_effects_once_postgres` silently stops
-    covering the `40001` one. `VACUUM` is the statement that undoes it, and it cannot run inside a
-    transaction block, hence the AUTOCOMMIT connection.
-    """
-
-    from tests.conftest import TestingSessionLocal, engine as test_engine
-
-    async with TestingSessionLocal() as session:
-        connection = await session.connection()
-        await connection.exec_driver_sql(
-            "DELETE FROM debt_operations WHERE kind = 'TEST_FIXTURE' AND identity LIKE "
-            f"'{_JOURNAL_HISTORY_IDENTITY}%'"
-        )
-        await session.commit()
-
-    async with test_engine.connect() as reclaim:
-        await reclaim.execution_options(isolation_level="AUTOCOMMIT")
-        await reclaim.exec_driver_sql("VACUUM (ANALYZE) debt_operations")
 
 
 @pytest.mark.asyncio
@@ -429,46 +372,42 @@ async def test_prepare_reservation_blocks_concurrent_commit_on_same_segment_post
             if not exercise_completed:
                 await waiter_session.rollback()
                 await commit_session.rollback()
-                await _cleanup_seed(seed)
 
-    try:
-        async with TestingSessionLocal() as verify:
-            holder_state = await verify.scalar(
-                select(Transaction.state).where(
-                    Transaction.tx_id == seed["holder_tx_id"]
-                )
+    async with TestingSessionLocal() as verify:
+        holder_state = await verify.scalar(
+            select(Transaction.state).where(
+                Transaction.tx_id == seed["holder_tx_id"]
             )
-            waiter_state = await verify.scalar(
-                select(Transaction.state).where(
-                    Transaction.tx_id == seed["waiter_tx_id"]
-                )
+        )
+        waiter_state = await verify.scalar(
+            select(Transaction.state).where(
+                Transaction.tx_id == seed["waiter_tx_id"]
             )
-            debt_amount = await verify.scalar(
-                select(Debt.amount).where(
-                    Debt.debtor_id == seed["sender_id"],
-                    Debt.creditor_id == seed["receiver_id"],
-                    Debt.equivalent_id == seed["equivalent_id"],
-                )
+        )
+        debt_amount = await verify.scalar(
+            select(Debt.amount).where(
+                Debt.debtor_id == seed["sender_id"],
+                Debt.creditor_id == seed["receiver_id"],
+                Debt.equivalent_id == seed["equivalent_id"],
             )
-            lock_count = len(
-                (
-                    await verify.execute(
-                        select(PrepareLock).where(
-                            PrepareLock.tx_id.in_(
-                                [seed["holder_tx_id"], seed["waiter_tx_id"]]
-                            )
+        )
+        lock_count = len(
+            (
+                await verify.execute(
+                    select(PrepareLock).where(
+                        PrepareLock.tx_id.in_(
+                            [seed["holder_tx_id"], seed["waiter_tx_id"]]
                         )
                     )
                 )
-                .scalars()
-                .all()
             )
-            assert holder_state == "COMMITTED"
-            assert waiter_state == "NEW"
-            assert debt_amount == Decimal("8.00000000")
-            assert lock_count == 0
-    finally:
-        await _cleanup_seed(seed)
+            .scalars()
+            .all()
+        )
+        assert holder_state == "COMMITTED"
+        assert waiter_state == "NEW"
+        assert debt_amount == Decimal("8.00000000")
+        assert lock_count == 0
 
 
 @pytest.mark.asyncio
@@ -643,57 +582,53 @@ async def test_concurrent_same_transaction_commit_applies_effects_once_postgres(
             if not exercise_completed:
                 await holder_session.rollback()
                 await waiter_session.rollback()
-                await _cleanup_seed(seed)
 
-    try:
-        async with TestingSessionLocal() as verify:
-            transaction = await verify.scalar(
-                select(Transaction).where(
-                    Transaction.tx_id == seed["holder_tx_id"]
+    async with TestingSessionLocal() as verify:
+        transaction = await verify.scalar(
+            select(Transaction).where(
+                Transaction.tx_id == seed["holder_tx_id"]
+            )
+        )
+        debt_amount = await verify.scalar(
+            select(Debt.amount).where(
+                Debt.debtor_id == seed["sender_id"],
+                Debt.creditor_id == seed["receiver_id"],
+                Debt.equivalent_id == seed["equivalent_id"],
+            )
+        )
+        remaining_locks = (
+            await verify.execute(
+                select(PrepareLock).where(
+                    PrepareLock.tx_id == seed["holder_tx_id"]
                 )
             )
-            debt_amount = await verify.scalar(
-                select(Debt.amount).where(
-                    Debt.debtor_id == seed["sender_id"],
-                    Debt.creditor_id == seed["receiver_id"],
-                    Debt.equivalent_id == seed["equivalent_id"],
-                )
+        ).scalars().all()
+        reverse_debt = await verify.scalar(
+            select(Debt.amount).where(
+                Debt.debtor_id == seed["receiver_id"],
+                Debt.creditor_id == seed["sender_id"],
+                Debt.equivalent_id == seed["equivalent_id"],
             )
-            remaining_locks = (
-                await verify.execute(
-                    select(PrepareLock).where(
-                        PrepareLock.tx_id == seed["holder_tx_id"]
-                    )
-                )
-            ).scalars().all()
-            reverse_debt = await verify.scalar(
-                select(Debt.amount).where(
-                    Debt.debtor_id == seed["receiver_id"],
-                    Debt.creditor_id == seed["sender_id"],
-                    Debt.equivalent_id == seed["equivalent_id"],
-                )
+        )
+        audit_count = await verify.scalar(
+            select(func.count()).select_from(IntegrityAuditLog).where(
+                IntegrityAuditLog.tx_id == seed["holder_tx_id"],
+                IntegrityAuditLog.operation_type == "PAYMENT",
             )
-            audit_count = await verify.scalar(
-                select(func.count()).select_from(IntegrityAuditLog).where(
-                    IntegrityAuditLog.tx_id == seed["holder_tx_id"],
-                    IntegrityAuditLog.operation_type == "PAYMENT",
-                )
+        )
+        persisted_limit = await verify.scalar(
+            select(TrustLine.limit).where(
+                TrustLine.equivalent_id == seed["equivalent_id"]
             )
-            persisted_limit = await verify.scalar(
-                select(TrustLine.limit).where(
-                    TrustLine.equivalent_id == seed["equivalent_id"]
-                )
-            )
-            assert transaction is not None
-            assert transaction.state == "COMMITTED"
-            assert transaction.error is None
-            assert debt_amount == Decimal("8.00000000")
-            assert reverse_debt is None
-            assert remaining_locks == []
-            assert audit_count == 1
-            assert persisted_limit == Decimal("10.00000000")
-    finally:
-        await _cleanup_seed(seed)
+        )
+        assert transaction is not None
+        assert transaction.state == "COMMITTED"
+        assert transaction.error is None
+        assert debt_amount == Decimal("8.00000000")
+        assert reverse_debt is None
+        assert remaining_locks == []
+        assert audit_count == 1
+        assert persisted_limit == Decimal("10.00000000")
 
 
 @pytest.mark.asyncio
@@ -737,83 +672,80 @@ async def test_concurrent_duplicate_commit_is_idempotent_with_journal_history_po
 
     _require_postgres(db_session)
 
-    try:
-        history_rows = await _give_the_journal_a_history()
-        completion_plan = await _completion_update_plan()
+    history_rows = await _give_the_journal_a_history()
+    completion_plan = await _completion_update_plan()
 
-        assert history_rows == _JOURNAL_HISTORY_ROWS, (
-            f"the stand did not give the journal a history ({history_rows} rows), so the holder's "
-            f"completion UPDATE is still planned as a sequential scan and this test measures the "
-            f"`40001` path the test above already covers"
-        )
-        # THE PRECONDITION, MEASURED AND NOT ASSUMED. The `23505` branch is reachable only while the
-        # holder's completion UPDATE is planned as an index scan: a sequential scan takes a
-        # relation-wide `SIReadLock` on `debt_operations` (measured in `pg_locks`) and PostgreSQL
-        # then cancels the waiter as a pivot every single time. Reading the plan makes a stand that
-        # is not set up say so, instead of reporting a `40001` whose cause the next reader has to
-        # rediscover.
-        assert "Seq Scan on debt_operations" not in completion_plan, (
-            f"the holder's envelope completion UPDATE is still a sequential scan despite "
-            f"{history_rows} history rows, so this race cannot reach the duplicate at all:\n"
-            f"{completion_plan}"
-        )
+    assert history_rows == _JOURNAL_HISTORY_ROWS, (
+        f"the stand did not give the journal a history ({history_rows} rows), so the holder's "
+        f"completion UPDATE is still planned as a sequential scan and this test measures the "
+        f"`40001` path the test above already covers"
+    )
+    # THE PRECONDITION, MEASURED AND NOT ASSUMED. The `23505` branch is reachable only while the
+    # holder's completion UPDATE is planned as an index scan: a sequential scan takes a
+    # relation-wide `SIReadLock` on `debt_operations` (measured in `pg_locks`) and PostgreSQL
+    # then cancels the waiter as a pivot every single time. Reading the plan makes a stand that
+    # is not set up say so, instead of reporting a `40001` whose cause the next reader has to
+    # rediscover.
+    assert "Seq Scan on debt_operations" not in completion_plan, (
+        f"the holder's envelope completion UPDATE is still a sequential scan despite "
+        f"{history_rows} history rows, so this race cannot reach the duplicate at all:\n"
+        f"{completion_plan}"
+    )
 
-        codes: list[str | None] = []
-        race = None
-        for _ in range(_RACE_ATTEMPTS):
-            race = await _one_duplicate_commit_race(monkeypatch)
-            codes.append(race["code"])
-            if race["code"] == "23505":
-                break
+    codes: list[str | None] = []
+    race = None
+    for _ in range(_RACE_ATTEMPTS):
+        race = await _one_duplicate_commit_race(monkeypatch)
+        codes.append(race["code"])
+        if race["code"] == "23505":
+            break
 
-        assert race is not None
-        assert race["waiter_parked"], (
-            "the waiter never waited on the segment advisory lock, so it never resumed on a "
-            "snapshot older than the holder's commit"
-        )
-        assert race["holder_result"] is True, (
-            f"the holder did not commit first ({race['holder_result']!r}); without that there is "
-            f"no committed envelope for the waiter to collide with"
-        )
-        assert race["op"] == "commit", race["op"]
-        assert "INSERT INTO debt_operations" in race["statement"], race["statement"]
-        assert race["code"] == "23505", (
-            f"PostgreSQL rescued every one of {len(codes)} attempts with {codes} instead of "
-            f"reporting the duplicate, so the fail-closed path was NOT exercised. The rescue is SSI "
-            f"seeing the collision; it depends on the predicate-lock granularity of the holder's "
-            f"envelope completion UPDATE, whose plan this stand checked above. A green run here "
-            f"would mean nothing."
-        )
-        assert race["constraint"] in {
-            "uq_debt_operations_kind_identity",
-            "uq_debt_operations_tx_id",
-        }, (
-            f"the duplicate was not the envelope's identity but {race['constraint']}; this is a "
-            f"different collision and must not be retried"
-        )
+    assert race is not None
+    assert race["waiter_parked"], (
+        "the waiter never waited on the segment advisory lock, so it never resumed on a "
+        "snapshot older than the holder's commit"
+    )
+    assert race["holder_result"] is True, (
+        f"the holder did not commit first ({race['holder_result']!r}); without that there is "
+        f"no committed envelope for the waiter to collide with"
+    )
+    assert race["op"] == "commit", race["op"]
+    assert "INSERT INTO debt_operations" in race["statement"], race["statement"]
+    assert race["code"] == "23505", (
+        f"PostgreSQL rescued every one of {len(codes)} attempts with {codes} instead of "
+        f"reporting the duplicate, so the fail-closed path was NOT exercised. The rescue is SSI "
+        f"seeing the collision; it depends on the predicate-lock granularity of the holder's "
+        f"envelope completion UPDATE, whose plan this stand checked above. A green run here "
+        f"would mean nothing."
+    )
+    assert race["constraint"] in {
+        "uq_debt_operations_kind_identity",
+        "uq_debt_operations_tx_id",
+    }, (
+        f"the duplicate was not the envelope's identity but {race['constraint']}; this is a "
+        f"different collision and must not be retried"
+    )
 
-        # --- and only now the property: the duplicate commit is idempotent ----------------------
-        assert race["retryable"] is True, (
-            f"{race['code']} on {race['constraint']} is classified fail-closed, so a concurrent "
-            f"duplicate commit raises instead of returning idempotently"
-        )
-        assert race["waiter_result"] is True, (
-            f"the concurrent duplicate commit was not idempotent: {race['waiter_result']!r}"
-        )
-        assert race["waiter_rollback_calls"] == 1, race["waiter_rollback_calls"]
-        assert race["waiter_preflight_calls"] == 2, race["waiter_preflight_calls"]
+    # --- and only now the property: the duplicate commit is idempotent ----------------------
+    assert race["retryable"] is True, (
+        f"{race['code']} on {race['constraint']} is classified fail-closed, so a concurrent "
+        f"duplicate commit raises instead of returning idempotently"
+    )
+    assert race["waiter_result"] is True, (
+        f"the concurrent duplicate commit was not idempotent: {race['waiter_result']!r}"
+    )
+    assert race["waiter_rollback_calls"] == 1, race["waiter_rollback_calls"]
+    assert race["waiter_preflight_calls"] == 2, race["waiter_preflight_calls"]
 
-        durable = race["durable"]
-        assert durable["transaction_state"] == "COMMITTED", durable
-        assert durable["debt_amount"] == Decimal("8.00000000"), durable
-        assert durable["reverse_debt"] is None, durable
-        assert durable["remaining_locks"] == 0, durable
-        assert durable["audit_count"] == 1, durable
-        # ONE envelope, not two: the duplicate declaration must have gone back with the attempt that
-        # made it, and the retry must not have opened a second one.
-        assert durable["envelopes"] == ["COMPLETED"], durable
-    finally:
-        await _forget_the_journal_history()
+    durable = race["durable"]
+    assert durable["transaction_state"] == "COMMITTED", durable
+    assert durable["debt_amount"] == Decimal("8.00000000"), durable
+    assert durable["reverse_debt"] is None, durable
+    assert durable["remaining_locks"] == 0, durable
+    assert durable["audit_count"] == 1, durable
+    # ONE envelope, not two: the duplicate declaration must have gone back with the attempt that
+    # made it, and the retry must not have opened a second one.
+    assert durable["envelopes"] == ["COMPLETED"], durable
 
 
 async def _one_duplicate_commit_race(monkeypatch) -> dict:
@@ -821,8 +753,8 @@ async def _one_duplicate_commit_race(monkeypatch) -> dict:
 
     Returns rather than asserts, because the caller repeats this until PostgreSQL reports the
     duplicate instead of rescuing the race, and a rescued attempt is not a failure - it is a draw.
-    Each attempt seeds and disposes of its own payment, so attempts cannot borrow each other's
-    state.
+    Each attempt seeds its own payment under fresh ids and reads back only those ids, so attempts
+    cannot borrow each other's state; the rows stay in the test's clone until its drop (018 B0b).
     """
 
     from tests.conftest import TestingSessionLocal
@@ -840,146 +772,143 @@ async def _one_duplicate_commit_race(monkeypatch) -> dict:
     waiter_result: object = None
     waiter_parked = False
 
-    try:
-        async with TestingSessionLocal() as holder_session, TestingSessionLocal() as waiter_session:
-            await _use_serializable(holder_session)
-            await _use_serializable(waiter_session)
-            holder_engine = PaymentEngine(holder_session)
-            waiter_engine = PaymentEngine(waiter_session)
-            holder_engine._retry_base_delay_s = 0.0
-            holder_engine._retry_max_delay_s = 0.0
-            waiter_engine._retry_base_delay_s = 0.0
-            waiter_engine._retry_max_delay_s = 0.0
-            holder_segment_acquire = holder_engine._acquire_segment_advisory_lock_keys
-            waiter_preflight = waiter_engine._preacquire_equivalent_owner_locks_for_tx
-            waiter_retryable = waiter_engine._is_retryable_db_error
-            waiter_rollback = waiter_session.rollback
-            waiter_pid = int(
-                (await waiter_session.execute(text("SELECT pg_backend_pid()"))).scalar_one()
+    async with TestingSessionLocal() as holder_session, TestingSessionLocal() as waiter_session:
+        await _use_serializable(holder_session)
+        await _use_serializable(waiter_session)
+        holder_engine = PaymentEngine(holder_session)
+        waiter_engine = PaymentEngine(waiter_session)
+        holder_engine._retry_base_delay_s = 0.0
+        holder_engine._retry_max_delay_s = 0.0
+        waiter_engine._retry_base_delay_s = 0.0
+        waiter_engine._retry_max_delay_s = 0.0
+        holder_segment_acquire = holder_engine._acquire_segment_advisory_lock_keys
+        waiter_preflight = waiter_engine._preacquire_equivalent_owner_locks_for_tx
+        waiter_retryable = waiter_engine._is_retryable_db_error
+        waiter_rollback = waiter_session.rollback
+        waiter_pid = int(
+            (await waiter_session.execute(text("SELECT pg_backend_pid()"))).scalar_one()
+        )
+
+        async def _hold_before_segment(keys):
+            holder_at_segment.set()
+            await release_holder.wait()
+            await holder_segment_acquire(keys)
+
+        async def _count_waiter_preflight(*args, **kwargs):
+            nonlocal waiter_preflight_calls
+            waiter_preflight_calls += 1
+            waiter_owner_attempted.set()
+            return await waiter_preflight(*args, **kwargs)
+
+        async def _count_waiter_rollback():
+            nonlocal waiter_rollback_calls
+            waiter_rollback_calls += 1
+            return await waiter_rollback()
+
+        def _record_retryable(exc, *, op):
+            verdict = waiter_retryable(exc, op=op)
+            observed.append(
+                (
+                    op,
+                    waiter_engine._get_pgcode(exc),
+                    str(exc.statement or ""),
+                    waiter_engine._get_db_constraint_name(exc),
+                    verdict,
+                )
             )
+            return verdict
 
-            async def _hold_before_segment(keys):
-                holder_at_segment.set()
-                await release_holder.wait()
-                await holder_segment_acquire(keys)
+        monkeypatch.setattr(
+            holder_engine, "_acquire_segment_advisory_lock_keys", _hold_before_segment
+        )
+        monkeypatch.setattr(
+            waiter_engine,
+            "_preacquire_equivalent_owner_locks_for_tx",
+            _count_waiter_preflight,
+        )
+        monkeypatch.setattr(waiter_engine, "_is_retryable_db_error", _record_retryable)
+        monkeypatch.setattr(waiter_session, "rollback", _count_waiter_rollback)
 
-            async def _count_waiter_preflight(*args, **kwargs):
-                nonlocal waiter_preflight_calls
-                waiter_preflight_calls += 1
-                waiter_owner_attempted.set()
-                return await waiter_preflight(*args, **kwargs)
+        try:
+            holder_task = asyncio.create_task(holder_engine.commit(seed["holder_tx_id"]))
+            await asyncio.wait_for(holder_at_segment.wait(), timeout=5.0)
 
-            async def _count_waiter_rollback():
-                nonlocal waiter_rollback_calls
-                waiter_rollback_calls += 1
-                return await waiter_rollback()
+            waiter_task = asyncio.create_task(waiter_engine.commit(seed["holder_tx_id"]))
+            await asyncio.wait_for(waiter_owner_attempted.wait(), timeout=5.0)
+            async with TestingSessionLocal() as observer:
+                waiter_parked = await _wait_for_advisory_wait(
+                    observer, backend_pid=waiter_pid
+                )
 
-            def _record_retryable(exc, *, op):
-                verdict = waiter_retryable(exc, op=op)
-                observed.append(
-                    (
-                        op,
-                        waiter_engine._get_pgcode(exc),
-                        str(exc.statement or ""),
-                        waiter_engine._get_db_constraint_name(exc),
-                        verdict,
+            release_holder.set()
+            holder_result, waiter_result = await asyncio.wait_for(
+                asyncio.gather(holder_task, waiter_task, return_exceptions=True),
+                timeout=15.0,
+            )
+        finally:
+            release_holder.set()
+            tasks = [task for task in (holder_task, waiter_task) if task is not None]
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            # THE ORIGINAL `rollback`, NOT THE COUNTING WRAPPER. A clean-up rollback after a
+            # raising waiter would otherwise be counted as one the retry wrapper took, and the
+            # assertion that the retry rolled back EXACTLY once would be measuring this line.
+            if not isinstance(waiter_result, bool):
+                await waiter_rollback()
+            if not isinstance(holder_result, bool):
+                await holder_session.rollback()
+
+    async with TestingSessionLocal() as verify:
+        durable = {
+            "transaction_state": await verify.scalar(
+                select(Transaction.state).where(
+                    Transaction.tx_id == seed["holder_tx_id"]
+                )
+            ),
+            "debt_amount": await verify.scalar(
+                select(Debt.amount).where(
+                    Debt.debtor_id == seed["sender_id"],
+                    Debt.creditor_id == seed["receiver_id"],
+                    Debt.equivalent_id == seed["equivalent_id"],
+                )
+            ),
+            "reverse_debt": await verify.scalar(
+                select(Debt.amount).where(
+                    Debt.debtor_id == seed["receiver_id"],
+                    Debt.creditor_id == seed["sender_id"],
+                    Debt.equivalent_id == seed["equivalent_id"],
+                )
+            ),
+            "remaining_locks": int(
+                await verify.scalar(
+                    select(func.count())
+                    .select_from(PrepareLock)
+                    .where(PrepareLock.tx_id == seed["holder_tx_id"])
+                )
+            ),
+            "audit_count": int(
+                await verify.scalar(
+                    select(func.count())
+                    .select_from(IntegrityAuditLog)
+                    .where(
+                        IntegrityAuditLog.tx_id == seed["holder_tx_id"],
+                        IntegrityAuditLog.operation_type == "PAYMENT",
                     )
                 )
-                return verdict
-
-            monkeypatch.setattr(
-                holder_engine, "_acquire_segment_advisory_lock_keys", _hold_before_segment
-            )
-            monkeypatch.setattr(
-                waiter_engine,
-                "_preacquire_equivalent_owner_locks_for_tx",
-                _count_waiter_preflight,
-            )
-            monkeypatch.setattr(waiter_engine, "_is_retryable_db_error", _record_retryable)
-            monkeypatch.setattr(waiter_session, "rollback", _count_waiter_rollback)
-
-            try:
-                holder_task = asyncio.create_task(holder_engine.commit(seed["holder_tx_id"]))
-                await asyncio.wait_for(holder_at_segment.wait(), timeout=5.0)
-
-                waiter_task = asyncio.create_task(waiter_engine.commit(seed["holder_tx_id"]))
-                await asyncio.wait_for(waiter_owner_attempted.wait(), timeout=5.0)
-                async with TestingSessionLocal() as observer:
-                    waiter_parked = await _wait_for_advisory_wait(
-                        observer, backend_pid=waiter_pid
+            ),
+            "envelopes": list(
+                (
+                    await verify.execute(
+                        select(debt_operations.c.state).where(
+                            debt_operations.c.kind == "PAYMENT",
+                            debt_operations.c.identity == seed["holder_tx_id"],
+                        )
                     )
-
-                release_holder.set()
-                holder_result, waiter_result = await asyncio.wait_for(
-                    asyncio.gather(holder_task, waiter_task, return_exceptions=True),
-                    timeout=15.0,
                 )
-            finally:
-                release_holder.set()
-                tasks = [task for task in (holder_task, waiter_task) if task is not None]
-                if tasks:
-                    await asyncio.gather(*tasks, return_exceptions=True)
-                # THE ORIGINAL `rollback`, NOT THE COUNTING WRAPPER. A clean-up rollback after a
-                # raising waiter would otherwise be counted as one the retry wrapper took, and the
-                # assertion that the retry rolled back EXACTLY once would be measuring this line.
-                if not isinstance(waiter_result, bool):
-                    await waiter_rollback()
-                if not isinstance(holder_result, bool):
-                    await holder_session.rollback()
-
-        async with TestingSessionLocal() as verify:
-            durable = {
-                "transaction_state": await verify.scalar(
-                    select(Transaction.state).where(
-                        Transaction.tx_id == seed["holder_tx_id"]
-                    )
-                ),
-                "debt_amount": await verify.scalar(
-                    select(Debt.amount).where(
-                        Debt.debtor_id == seed["sender_id"],
-                        Debt.creditor_id == seed["receiver_id"],
-                        Debt.equivalent_id == seed["equivalent_id"],
-                    )
-                ),
-                "reverse_debt": await verify.scalar(
-                    select(Debt.amount).where(
-                        Debt.debtor_id == seed["receiver_id"],
-                        Debt.creditor_id == seed["sender_id"],
-                        Debt.equivalent_id == seed["equivalent_id"],
-                    )
-                ),
-                "remaining_locks": int(
-                    await verify.scalar(
-                        select(func.count())
-                        .select_from(PrepareLock)
-                        .where(PrepareLock.tx_id == seed["holder_tx_id"])
-                    )
-                ),
-                "audit_count": int(
-                    await verify.scalar(
-                        select(func.count())
-                        .select_from(IntegrityAuditLog)
-                        .where(
-                            IntegrityAuditLog.tx_id == seed["holder_tx_id"],
-                            IntegrityAuditLog.operation_type == "PAYMENT",
-                        )
-                    )
-                ),
-                "envelopes": list(
-                    (
-                        await verify.execute(
-                            select(debt_operations.c.state).where(
-                                debt_operations.c.kind == "PAYMENT",
-                                debt_operations.c.identity == seed["holder_tx_id"],
-                            )
-                        )
-                    )
-                    .scalars()
-                    .all()
-                ),
-            }
-    finally:
-        await _cleanup_seed(seed)
+                .scalars()
+                .all()
+            ),
+        }
 
     op, code, statement, constraint, retryable = (
         observed[0] if len(observed) == 1 else (None, None, "", None, False)
@@ -1082,38 +1011,34 @@ async def test_concurrent_commit_and_abort_share_segment_lock_protocol_postgres(
             if not exercise_completed:
                 await commit_session.rollback()
                 await abort_session.rollback()
-                await _cleanup_seed(seed)
 
-    try:
-        async with TestingSessionLocal() as verify:
-            tx = (
-                await verify.execute(
-                    select(Transaction).where(
-                        Transaction.tx_id == seed["holder_tx_id"]
-                    )
-                )
-            ).scalar_one()
-            debt_amount = await verify.scalar(
-                select(Debt.amount).where(
-                    Debt.debtor_id == seed["sender_id"],
-                    Debt.creditor_id == seed["receiver_id"],
-                    Debt.equivalent_id == seed["equivalent_id"],
+    async with TestingSessionLocal() as verify:
+        tx = (
+            await verify.execute(
+                select(Transaction).where(
+                    Transaction.tx_id == seed["holder_tx_id"]
                 )
             )
-            remaining_locks = (
-                await verify.execute(
-                    select(PrepareLock).where(
-                        PrepareLock.tx_id == seed["holder_tx_id"]
-                    )
+        ).scalar_one()
+        debt_amount = await verify.scalar(
+            select(Debt.amount).where(
+                Debt.debtor_id == seed["sender_id"],
+                Debt.creditor_id == seed["receiver_id"],
+                Debt.equivalent_id == seed["equivalent_id"],
+            )
+        )
+        remaining_locks = (
+            await verify.execute(
+                select(PrepareLock).where(
+                    PrepareLock.tx_id == seed["holder_tx_id"]
                 )
-            ).scalars().all()
+            )
+        ).scalars().all()
 
-            assert tx.state == "COMMITTED"
-            assert debt_amount == Decimal("8.00000000")
-            assert tx.error is None
-            assert remaining_locks == []
-    finally:
-        await _cleanup_seed(seed)
+        assert tx.state == "COMMITTED"
+        assert debt_amount == Decimal("8.00000000")
+        assert tx.error is None
+        assert remaining_locks == []
 
 
 @pytest.mark.asyncio
@@ -1214,32 +1139,28 @@ async def test_duplicate_prepare_cannot_resurrect_transaction_during_commit_post
             if not exercise_completed:
                 await duplicate_session.rollback()
                 await commit_session.rollback()
-                await _cleanup_seed(seed)
 
-    try:
-        async with TestingSessionLocal() as verify:
-            tx = await verify.scalar(
-                select(Transaction).where(
-                    Transaction.tx_id == seed["holder_tx_id"]
-                )
+    async with TestingSessionLocal() as verify:
+        tx = await verify.scalar(
+            select(Transaction).where(
+                Transaction.tx_id == seed["holder_tx_id"]
             )
-            debt_amount = await verify.scalar(
-                select(Debt.amount).where(
-                    Debt.debtor_id == seed["sender_id"],
-                    Debt.creditor_id == seed["receiver_id"],
-                    Debt.equivalent_id == seed["equivalent_id"],
-                )
+        )
+        debt_amount = await verify.scalar(
+            select(Debt.amount).where(
+                Debt.debtor_id == seed["sender_id"],
+                Debt.creditor_id == seed["receiver_id"],
+                Debt.equivalent_id == seed["equivalent_id"],
             )
-            remaining_locks = await verify.scalars(
-                select(PrepareLock).where(
-                    PrepareLock.tx_id == seed["holder_tx_id"]
-                )
+        )
+        remaining_locks = await verify.scalars(
+            select(PrepareLock).where(
+                PrepareLock.tx_id == seed["holder_tx_id"]
             )
-            assert tx is not None and tx.state == "COMMITTED"
-            assert debt_amount == Decimal("8.00000000")
-            assert remaining_locks.all() == []
-    finally:
-        await _cleanup_seed(seed)
+        )
+        assert tx is not None and tx.state == "COMMITTED"
+        assert debt_amount == Decimal("8.00000000")
+        assert remaining_locks.all() == []
 
 
 @pytest.mark.asyncio
@@ -1321,28 +1242,24 @@ async def test_new_prepare_cannot_resurrect_transaction_during_abort_postgres(
             if not exercise_completed:
                 await prepare_session.rollback()
                 await abort_session.rollback()
-                await _cleanup_seed(seed)
 
-    try:
-        async with TestingSessionLocal() as verify:
-            tx = await verify.scalar(
-                select(Transaction).where(
-                    Transaction.tx_id == seed["holder_tx_id"]
-                )
+    async with TestingSessionLocal() as verify:
+        tx = await verify.scalar(
+            select(Transaction).where(
+                Transaction.tx_id == seed["holder_tx_id"]
             )
-            debt_count = await verify.scalar(
-                select(func.count()).select_from(Debt).where(
-                    Debt.equivalent_id == seed["equivalent_id"]
-                )
+        )
+        debt_count = await verify.scalar(
+            select(func.count()).select_from(Debt).where(
+                Debt.equivalent_id == seed["equivalent_id"]
             )
-            remaining_locks = await verify.scalars(
-                select(PrepareLock).where(
-                    PrepareLock.tx_id == seed["holder_tx_id"]
-                )
+        )
+        remaining_locks = await verify.scalars(
+            select(PrepareLock).where(
+                PrepareLock.tx_id == seed["holder_tx_id"]
             )
-            assert tx is not None and tx.state == "ABORTED"
-            assert (tx.error or {}).get("message") == "Concurrent abort after prepare"
-            assert debt_count == 0
-            assert remaining_locks.all() == []
-    finally:
-        await _cleanup_seed(seed)
+        )
+        assert tx is not None and tx.state == "ABORTED"
+        assert (tx.error or {}).get("message") == "Concurrent abort after prepare"
+        assert debt_count == 0
+        assert remaining_locks.all() == []

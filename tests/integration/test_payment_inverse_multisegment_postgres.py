@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import func, select, text
 
 from app.core.payments.engine import PaymentEngine
 from app.db.models.audit_log import IntegrityAuditLog
@@ -14,7 +14,11 @@ from app.db.models.participant import Participant
 from app.db.models.prepare_lock import PrepareLock
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
-from tests.debt_setup import purge_test_ledger
+
+# Every test here commits through several sessions and runs on a disposable clone of the migrated
+# template; its rows go with the clone's drop and nothing is deleted row by row (018 B0b; see
+# `tests/tier_on_a_clone.py`).
+from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
 
 
 
@@ -174,35 +178,6 @@ async def _seed_inverse_multisegment_payments() -> dict:
     }
 
 
-async def _cleanup_seed(seed: dict) -> None:
-    from tests.conftest import TestingSessionLocal
-
-    tx_ids = [seed["forward_tx_id"], seed["reverse_tx_id"]]
-    async with TestingSessionLocal() as cleanup:
-        # The debts AND the journal rows that describe them, through the driver and BEFORE the
-        # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
-        # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
-        # envelope still standing would block the transaction delete above it.
-        await purge_test_ledger(cleanup, equivalent_ids=[seed["equivalent_id"]])
-        await cleanup.execute(
-            delete(IntegrityAuditLog).where(IntegrityAuditLog.tx_id.in_(tx_ids))
-        )
-        await cleanup.execute(delete(PrepareLock).where(PrepareLock.tx_id.in_(tx_ids)))
-        await cleanup.execute(delete(Transaction).where(Transaction.tx_id.in_(tx_ids)))
-        await cleanup.execute(
-            delete(TrustLine).where(
-                TrustLine.equivalent_id == seed["equivalent_id"]
-            )
-        )
-        await cleanup.execute(
-            delete(Participant).where(Participant.id.in_(seed["participant_ids"]))
-        )
-        await cleanup.execute(
-            delete(Equivalent).where(Equivalent.id == seed["equivalent_id"])
-        )
-        await cleanup.commit()
-
-
 async def _wait_for_advisory_wait(
     observer,
     *,
@@ -249,151 +224,148 @@ async def test_inverse_multisegment_commits_serialize_and_preserve_invariants_po
     holder_task = None
     waiter_task = None
 
-    try:
-        async with (
-            TestingSessionLocal() as holder_session,
-            TestingSessionLocal() as waiter_session,
-            TestingSessionLocal() as observer_session,
-        ):
-            waiter_pid = int(
-                (await waiter_session.execute(text("SELECT pg_backend_pid()"))).scalar_one()
+    async with (
+        TestingSessionLocal() as holder_session,
+        TestingSessionLocal() as waiter_session,
+        TestingSessionLocal() as observer_session,
+    ):
+        waiter_pid = int(
+            (await waiter_session.execute(text("SELECT pg_backend_pid()"))).scalar_one()
+        )
+        holder_engine = PaymentEngine(holder_session)
+        waiter_engine = PaymentEngine(waiter_session)
+        # THE APPLICATION'S OWN 40001 RETRY STAYS ON (T1549, 2026-09-14). This test used to set
+        # `_retry_attempts = 1` on both engines. At the application's SERIALIZABLE the waiter's
+        # snapshot predates the holder's commit and its first attempt meets a genuine 40001 on the
+        # envelope insert - the application retries that; with the retry disabled the test failed on a
+        # schedule production handles. What the retry could hide - a waiter that bypassed the holder's
+        # pair locks - is asserted BEFORE the holder is released (`waiter_blocked`), so it cannot.
+        holder_acquire = holder_engine._acquire_segment_advisory_lock_keys
+        waiter_acquire = waiter_engine._acquire_segment_advisory_lock_keys
+        waiter_owner_acquire = waiter_engine._acquire_equivalent_owner_locks
+
+        async def _hold_after_acquisition(keys) -> None:
+            await holder_acquire(keys)
+            holder_acquired.set()
+            await release_holder.wait()
+
+        async def _observe_waiter_acquisition(keys) -> None:
+            await waiter_acquire(keys)
+            waiter_acquired.set()
+
+        async def _observe_waiter_owner_acquisition(equivalent_ids) -> None:
+            waiter_attempted.set()
+            await waiter_owner_acquire(equivalent_ids)
+
+        monkeypatch.setattr(
+            holder_engine,
+            "_acquire_segment_advisory_lock_keys",
+            _hold_after_acquisition,
+        )
+        monkeypatch.setattr(
+            waiter_engine,
+            "_acquire_segment_advisory_lock_keys",
+            _observe_waiter_acquisition,
+        )
+        monkeypatch.setattr(
+            waiter_engine,
+            "_acquire_equivalent_owner_locks",
+            _observe_waiter_owner_acquisition,
+        )
+
+        try:
+            holder_task = asyncio.create_task(holder_engine.commit(holder_tx_id))
+            await asyncio.wait_for(holder_acquired.wait(), timeout=5.0)
+
+            waiter_task = asyncio.create_task(waiter_engine.commit(waiter_tx_id))
+            await asyncio.wait_for(waiter_attempted.wait(), timeout=5.0)
+            waiter_blocked = await _wait_for_advisory_wait(
+                observer_session,
+                backend_pid=waiter_pid,
+                waiter_acquired=waiter_acquired,
             )
-            holder_engine = PaymentEngine(holder_session)
-            waiter_engine = PaymentEngine(waiter_session)
-            # THE APPLICATION'S OWN 40001 RETRY STAYS ON (T1549, 2026-09-14). This test used to set
-            # `_retry_attempts = 1` on both engines. At the application's SERIALIZABLE the waiter's
-            # snapshot predates the holder's commit and its first attempt meets a genuine 40001 on the
-            # envelope insert - the application retries that; with the retry disabled the test failed on a
-            # schedule production handles. What the retry could hide - a waiter that bypassed the holder's
-            # pair locks - is asserted BEFORE the holder is released (`waiter_blocked`), so it cannot.
-            holder_acquire = holder_engine._acquire_segment_advisory_lock_keys
-            waiter_acquire = waiter_engine._acquire_segment_advisory_lock_keys
-            waiter_owner_acquire = waiter_engine._acquire_equivalent_owner_locks
+            assert waiter_blocked, "inverse route bypassed the holder's pair locks"
+            assert not waiter_acquired.is_set()
 
-            async def _hold_after_acquisition(keys) -> None:
-                await holder_acquire(keys)
-                holder_acquired.set()
-                await release_holder.wait()
-
-            async def _observe_waiter_acquisition(keys) -> None:
-                await waiter_acquire(keys)
-                waiter_acquired.set()
-
-            async def _observe_waiter_owner_acquisition(equivalent_ids) -> None:
-                waiter_attempted.set()
-                await waiter_owner_acquire(equivalent_ids)
-
-            monkeypatch.setattr(
-                holder_engine,
-                "_acquire_segment_advisory_lock_keys",
-                _hold_after_acquisition,
+            release_holder.set()
+            holder_result, waiter_result = await asyncio.wait_for(
+                asyncio.gather(holder_task, waiter_task),
+                timeout=15.0,
             )
-            monkeypatch.setattr(
-                waiter_engine,
-                "_acquire_segment_advisory_lock_keys",
-                _observe_waiter_acquisition,
-            )
-            monkeypatch.setattr(
-                waiter_engine,
-                "_acquire_equivalent_owner_locks",
-                _observe_waiter_owner_acquisition,
-            )
+            assert holder_result is True
+            assert waiter_result is True
+            assert waiter_acquired.is_set()
+        finally:
+            release_holder.set()
+            tasks = [task for task in (holder_task, waiter_task) if task is not None]
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
 
-            try:
-                holder_task = asyncio.create_task(holder_engine.commit(holder_tx_id))
-                await asyncio.wait_for(holder_acquired.wait(), timeout=5.0)
-
-                waiter_task = asyncio.create_task(waiter_engine.commit(waiter_tx_id))
-                await asyncio.wait_for(waiter_attempted.wait(), timeout=5.0)
-                waiter_blocked = await _wait_for_advisory_wait(
-                    observer_session,
-                    backend_pid=waiter_pid,
-                    waiter_acquired=waiter_acquired,
-                )
-                assert waiter_blocked, "inverse route bypassed the holder's pair locks"
-                assert not waiter_acquired.is_set()
-
-                release_holder.set()
-                holder_result, waiter_result = await asyncio.wait_for(
-                    asyncio.gather(holder_task, waiter_task),
-                    timeout=15.0,
-                )
-                assert holder_result is True
-                assert waiter_result is True
-                assert waiter_acquired.is_set()
-            finally:
-                release_holder.set()
-                tasks = [task for task in (holder_task, waiter_task) if task is not None]
-                if tasks:
-                    await asyncio.gather(*tasks, return_exceptions=True)
-
-        async with TestingSessionLocal() as verify:
-            tx_states = dict(
-                (
-                    await verify.execute(
-                        select(Transaction.tx_id, Transaction.state).where(
-                            Transaction.tx_id.in_(
-                                [seed["forward_tx_id"], seed["reverse_tx_id"]]
-                            )
-                        )
-                    )
-                ).all()
-            )
-            assert tx_states == {
-                seed["forward_tx_id"]: "COMMITTED",
-                seed["reverse_tx_id"]: "COMMITTED",
-            }
-
-            debts = {
-                tuple(row)
-                for row in (
+    async with TestingSessionLocal() as verify:
+        tx_states = dict(
+            (
                 await verify.execute(
-                    select(Debt.debtor_id, Debt.creditor_id, Debt.amount).where(
-                        Debt.equivalent_id == seed["equivalent_id"]
-                    )
-                )
-                ).all()
-            }
-            assert debts == {
-                (
-                    seed["participant_a_id"],
-                    seed["participant_b_id"],
-                    Decimal("1.00000000"),
-                ),
-                (
-                    seed["participant_b_id"],
-                    seed["participant_c_id"],
-                    Decimal("1.00000000"),
-                ),
-            }
-            assert (
-                await verify.scalar(
-                    select(func.count()).select_from(PrepareLock).where(
-                        PrepareLock.tx_id.in_(
+                    select(Transaction.tx_id, Transaction.state).where(
+                        Transaction.tx_id.in_(
                             [seed["forward_tx_id"], seed["reverse_tx_id"]]
                         )
-                    )
-                )
-                == 0
-            )
-            assert (
-                await verify.scalar(
-                    select(func.count()).select_from(IntegrityAuditLog).where(
-                        IntegrityAuditLog.tx_id.in_(
-                            [seed["forward_tx_id"], seed["reverse_tx_id"]]
-                        ),
-                        IntegrityAuditLog.operation_type == "PAYMENT",
-                    )
-                )
-                == 2
-            )
-            limits = (
-                await verify.scalars(
-                    select(TrustLine.limit).where(
-                        TrustLine.id.in_(seed["trustline_ids"])
                     )
                 )
             ).all()
-            assert limits == [Decimal("50.00000000")] * 4
-    finally:
-        await _cleanup_seed(seed)
+        )
+        assert tx_states == {
+            seed["forward_tx_id"]: "COMMITTED",
+            seed["reverse_tx_id"]: "COMMITTED",
+        }
+
+        debts = {
+            tuple(row)
+            for row in (
+            await verify.execute(
+                select(Debt.debtor_id, Debt.creditor_id, Debt.amount).where(
+                    Debt.equivalent_id == seed["equivalent_id"]
+                )
+            )
+            ).all()
+        }
+        assert debts == {
+            (
+                seed["participant_a_id"],
+                seed["participant_b_id"],
+                Decimal("1.00000000"),
+            ),
+            (
+                seed["participant_b_id"],
+                seed["participant_c_id"],
+                Decimal("1.00000000"),
+            ),
+        }
+        assert (
+            await verify.scalar(
+                select(func.count()).select_from(PrepareLock).where(
+                    PrepareLock.tx_id.in_(
+                        [seed["forward_tx_id"], seed["reverse_tx_id"]]
+                    )
+                )
+            )
+            == 0
+        )
+        assert (
+            await verify.scalar(
+                select(func.count()).select_from(IntegrityAuditLog).where(
+                    IntegrityAuditLog.tx_id.in_(
+                        [seed["forward_tx_id"], seed["reverse_tx_id"]]
+                    ),
+                    IntegrityAuditLog.operation_type == "PAYMENT",
+                )
+            )
+            == 2
+        )
+        limits = (
+            await verify.scalars(
+                select(TrustLine.limit).where(
+                    TrustLine.id.in_(seed["trustline_ids"])
+                )
+            )
+        ).all()
+        assert limits == [Decimal("50.00000000")] * 4

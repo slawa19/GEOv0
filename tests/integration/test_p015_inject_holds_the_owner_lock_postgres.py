@@ -44,7 +44,7 @@ from typing import Any
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import delete, event, select, text
+from sqlalchemy import event, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session
 
@@ -55,7 +55,6 @@ from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
-from tests.debt_setup import purge_test_ledger
 
 
 def _utc_now() -> datetime:
@@ -119,12 +118,12 @@ def _observe_debt_writes(sync_session: Session, _flush_context, _instances) -> N
 
 
 @pytest_asyncio.fixture
-async def observed_factory():
-    from tests.conftest import TEST_DATABASE_URL, _ensure_schema_initialized
-
-    await _ensure_schema_initialized()
+async def observed_factory(committed_database):
+    # ON A DISPOSABLE CLONE (018 B0b): the tests commit for real, and the clone's drop is the only
+    # disposal of what they wrote - nothing is deleted row by row. A module that imports this fixture
+    # gets the same `committed_database` its other fixtures ask for.
     eng = create_async_engine(
-        TEST_DATABASE_URL,
+        committed_database.url,
         pool_size=2,
         max_overflow=0,
         pool_timeout=10,
@@ -181,22 +180,6 @@ async def _seed(factory) -> _World:
         await s.commit()
     _observations.clear()  # the seed's own flushes are not under test
     return _World(eqs, creditor, debtor)
-
-
-async def _cleanup(factory, world: _World) -> None:
-    eq_ids = [eq.id for eq in world.equivalents]
-    async with factory() as s:
-        # The debts AND the journal rows that describe them, through the driver and BEFORE the
-        # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
-        # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
-        # envelope still standing would block the transaction delete above it.
-        await purge_test_ledger(s, equivalent_ids=eq_ids)
-        await s.execute(delete(TrustLine).where(TrustLine.equivalent_id.in_(eq_ids)))
-        await s.execute(delete(Equivalent).where(Equivalent.id.in_(eq_ids)))
-        await s.execute(
-            delete(Participant).where(Participant.id.in_([world.creditor.id, world.debtor.id]))
-        )
-        await s.commit()
 
 
 _AMOUNTS = (Decimal("3.00"), Decimal("5.00"))
@@ -340,28 +323,25 @@ async def test_the_due_events_phase_writes_each_injected_debt_under_its_owner_lo
 ) -> None:
     """RED before phase B step 3: nothing in the due-events phase takes the lock at all."""
     world = await _seed(observed_factory)
-    try:
-        scenario = _scenario(world)
-        run = _run(world, "p015-due-events")
-        artifacts = _Artifacts()
-        runner = _runner(run, scenario, artifacts)
+    scenario = _scenario(world)
+    run = _run(world, "p015-due-events")
+    artifacts = _Artifacts()
+    runner = _runner(run, scenario, artifacts)
 
-        async with observed_factory() as session:
-            await runner._apply_due_scenario_events(
-                session, run_id=run.run_id, run=run, scenario=scenario
-            )
-
-        stored = await _stored(observed_factory, world)
-        assert stored == {eq.id: amount for eq, amount in zip(world.equivalents, _AMOUNTS)}, stored
-        assert run._real_fired_scenario_event_indexes == {0, 1}
-        _assert_every_debt_write_was_locked(world)
-
-        pids = {o.backend_pid for o in _observations if o.backend_pid is not None}
-        assert await _advisory_owner_locks_of(observed_factory, pids) == 0, (
-            "an owner lock outlived the inject's transaction: it must be transaction-level"
+    async with observed_factory() as session:
+        await runner._apply_due_scenario_events(
+            session, run_id=run.run_id, run=run, scenario=scenario
         )
-    finally:
-        await _cleanup(observed_factory, world)
+
+    stored = await _stored(observed_factory, world)
+    assert stored == {eq.id: amount for eq, amount in zip(world.equivalents, _AMOUNTS)}, stored
+    assert run._real_fired_scenario_event_indexes == {0, 1}
+    _assert_every_debt_write_was_locked(world)
+
+    pids = {o.backend_pid for o in _observations if o.backend_pid is not None}
+    assert await _advisory_owner_locks_of(observed_factory, pids) == 0, (
+        "an owner lock outlived the inject's transaction: it must be transaction-level"
+    )
 
 
 @pytest.mark.asyncio
@@ -379,47 +359,44 @@ async def test_a_real_tick_keeps_the_owner_lock_boundary_from_inject_to_payments
     import app.db.session as app_db_session
 
     world = await _seed(observed_factory)
-    try:
-        scenario = _scenario(world)
-        run = _run(world, "p015-real-tick")
-        artifacts = _Artifacts()
-        runner = _runner(run, scenario, artifacts)
+    scenario = _scenario(world)
+    run = _run(world, "p015-real-tick")
+    artifacts = _Artifacts()
+    runner = _runner(run, scenario, artifacts)
 
-        async def _noop(*_a, **_kw):
-            return None
+    async def _noop(*_a, **_kw):
+        return None
 
-        for name in ("write_tick_metrics", "write_tick_bottlenecks", "sync_artifacts", "upsert_run"):
-            monkeypatch.setattr(simulator_storage, name, _noop)
-        monkeypatch.setattr(app_db_session, "AsyncSessionLocal", observed_factory)
+    for name in ("write_tick_metrics", "write_tick_bottlenecks", "sync_artifacts", "upsert_run"):
+        monkeypatch.setattr(simulator_storage, name, _noop)
+    monkeypatch.setattr(app_db_session, "AsyncSessionLocal", observed_factory)
 
-        snapshot_locks: list[_Observation] = []
-        original_snapshot = runner._load_debt_snapshot_by_pid
+    snapshot_locks: list[_Observation] = []
+    original_snapshot = runner._load_debt_snapshot_by_pid
 
-        async def _observed_snapshot(session, participants, equivalents):
-            for eq in world.equivalents:
-                pid, held, error = await session.run_sync(lambda s, _id=eq.id: _holds(s, _id))
-                snapshot_locks.append(_Observation("debt snapshot", eq.id, pid, held, error))
-            return await original_snapshot(session, participants, equivalents)
+    async def _observed_snapshot(session, participants, equivalents):
+        for eq in world.equivalents:
+            pid, held, error = await session.run_sync(lambda s, _id=eq.id: _holds(s, _id))
+            snapshot_locks.append(_Observation("debt snapshot", eq.id, pid, held, error))
+        return await original_snapshot(session, participants, equivalents)
 
-        monkeypatch.setattr(runner, "_load_debt_snapshot_by_pid", _observed_snapshot)
+    monkeypatch.setattr(runner, "_load_debt_snapshot_by_pid", _observed_snapshot)
 
-        await runner.tick_real_mode(run.run_id)
+    await runner.tick_real_mode(run.run_id)
 
-        stored = await _stored(observed_factory, world)
-        assert stored == {eq.id: amount for eq, amount in zip(world.equivalents, _AMOUNTS)}, (
-            f"both injects must be applied exactly once by the tick, got {stored}; "
-            f"artifacts: {artifacts.events}"
-        )
-        _assert_every_debt_write_was_locked(world)
+    stored = await _stored(observed_factory, world)
+    assert stored == {eq.id: amount for eq, amount in zip(world.equivalents, _AMOUNTS)}, (
+        f"both injects must be applied exactly once by the tick, got {stored}; "
+        f"artifacts: {artifacts.events}"
+    )
+    _assert_every_debt_write_was_locked(world)
 
-        assert {o.equivalent_id for o in snapshot_locks} == {eq.id for eq in world.equivalents}, (
-            "non-vacuity: the payments phase never read its debt snapshot"
-        )
-        assert not [o for o in snapshot_locks if o.error], snapshot_locks
-        unlocked = [o for o in snapshot_locks if not o.held]
-        assert not unlocked, (
-            "the payments phase read its debt snapshot without the owner lock it plans against: "
-            f"{unlocked}"
-        )
-    finally:
-        await _cleanup(observed_factory, world)
+    assert {o.equivalent_id for o in snapshot_locks} == {eq.id for eq in world.equivalents}, (
+        "non-vacuity: the payments phase never read its debt snapshot"
+    )
+    assert not [o for o in snapshot_locks if o.error], snapshot_locks
+    unlocked = [o for o in snapshot_locks if not o.held]
+    assert not unlocked, (
+        "the payments phase read its debt snapshot without the owner lock it plans against: "
+        f"{unlocked}"
+    )

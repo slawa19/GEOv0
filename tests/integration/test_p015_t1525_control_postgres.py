@@ -43,7 +43,7 @@ from typing import Any
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import delete, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.payments.engine import PaymentEngine
@@ -56,7 +56,6 @@ from app.core.simulator.real_debt_snapshot_loader import RealDebtSnapshotLoader
 from app.core.simulator.real_payments_executor import RealPaymentsExecutor
 from app.core.simulator.real_runner import RealRunner
 from app.core.simulator.real_tick_payments_coordinator import RealTickPaymentsCoordinator
-from app.db.models.audit_log import IntegrityAuditLog
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
@@ -64,7 +63,6 @@ from app.db.models.prepare_lock import PrepareLock
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 from app.utils.exceptions import IntegrityViolationException
-from tests.debt_setup import purge_test_ledger
 
 _PAYMENT = Decimal("7.00")
 
@@ -115,27 +113,13 @@ async def _seed_world(factory) -> _World:
     return _World(eq, sender, receiver)
 
 
-async def _cleanup(factory, world: _World) -> None:
-    ids = [world.sender.id, world.receiver.id]
-    async with factory() as s:
-        # The debts AND the journal rows that describe them, through the driver and BEFORE the
-        # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
-        # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
-        # envelope still standing would block the transaction delete above it.
-        await purge_test_ledger(s, equivalent_ids=[world.equivalent.id])
-        tx_ids = set(world.tx_ids) | set(
-            (
-                await s.execute(select(Transaction.tx_id).where(Transaction.initiator_id.in_(ids)))
-            ).scalars()
-        )
-        if tx_ids:
-            await s.execute(delete(IntegrityAuditLog).where(IntegrityAuditLog.tx_id.in_(tx_ids)))
-            await s.execute(delete(PrepareLock).where(PrepareLock.tx_id.in_(tx_ids)))
-            await s.execute(delete(Transaction).where(Transaction.tx_id.in_(tx_ids)))
-        await s.execute(delete(TrustLine).where(TrustLine.equivalent_id == world.equivalent.id))
-        await s.execute(delete(Participant).where(Participant.id.in_(ids)))
-        await s.execute(delete(Equivalent).where(Equivalent.id == world.equivalent.id))
-        await s.commit()
+def _forget_the_route_cache(world: _World) -> None:
+    """The one piece of state that outlives the clone: this process's route cache for the code.
+
+    Rows need no cleanup: `serializable_factory` is built over this test's disposable clone of the
+    migrated template, and the clone's drop takes them all (018 B0b).
+    """
+
     PaymentRouter.invalidate_cache(world.equivalent.code)
 
 
@@ -583,12 +567,9 @@ def _assert_rolled_back_tick_left_no_payment(outcome: _TickOutcome, *, via_tick:
 
 
 @pytest_asyncio.fixture
-async def serializable_factory():
-    from tests.conftest import TEST_DATABASE_URL, _ensure_schema_initialized
-
-    await _ensure_schema_initialized()
+async def serializable_factory(committed_database):
     eng = create_async_engine(
-        TEST_DATABASE_URL,
+        committed_database.url,
         pool_size=2,
         max_overflow=0,
         pool_timeout=10,
@@ -618,7 +599,7 @@ async def test_postgres_an_aborted_payment_commit_leaves_debts_unchanged(
         )
         _assert_aborted_payment_left_no_debt(outcome, world)
     finally:
-        await _cleanup(serializable_factory, world)
+        _forget_the_route_cache(world)
 
 
 @pytest.mark.asyncio
@@ -632,7 +613,7 @@ async def test_postgres_an_aborted_service_payment_leaves_debts_unchanged(
         )
         _assert_aborted_payment_left_no_debt(outcome, world)
     finally:
-        await _cleanup(serializable_factory, world)
+        _forget_the_route_cache(world)
 
 
 @pytest.mark.asyncio
@@ -646,7 +627,7 @@ async def test_postgres_a_rolled_back_tick_leaves_no_payment_from_the_executor(
         )
         _assert_rolled_back_tick_left_no_payment(outcome, via_tick=False)
     finally:
-        await _cleanup(serializable_factory, world)
+        _forget_the_route_cache(world)
 
 
 @pytest.mark.asyncio
@@ -660,4 +641,4 @@ async def test_postgres_a_real_tick_failing_after_payments_leaves_no_payment(
         )
         _assert_rolled_back_tick_left_no_payment(outcome, via_tick=True)
     finally:
-        await _cleanup(serializable_factory, world)
+        _forget_the_route_cache(world)

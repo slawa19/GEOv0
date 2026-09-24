@@ -85,7 +85,6 @@ else's `UAH` would be measuring that fixture.
 from __future__ import annotations
 
 import inspect
-import sys
 import uuid
 from decimal import Decimal
 
@@ -106,7 +105,12 @@ from app.db.models.participant import Participant
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 
-from tests.debt_setup import debt_fixture_setup, purge_test_ledger
+from tests.debt_setup import debt_fixture_setup
+
+# Only `test_the_persisted_clearing_payload_is_plain_decimal_and_still_replays` commits (clearing refuses a
+# connection-bound session), so only it runs on a disposable clone of the migrated template and leaves
+# its rows to the clone's drop (018 B0b; see `tests/tier_on_a_clone.py`). The others stay mode A.
+from tests.tier_on_a_clone import tier_on_a_clone  # noqa: E402,F401 - opt-in fixture
 
 
 def _route_default(endpoint, name: str) -> int:
@@ -630,6 +634,7 @@ async def test_past_the_sql_reach_the_two_answers_are_merged_and_not_swapped(
 # --------------------------------------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("tier_on_a_clone")
 async def test_the_persisted_clearing_payload_is_plain_decimal_and_still_replays(
     db_session: AsyncSession,
 ) -> None:
@@ -657,134 +662,101 @@ async def test_the_persisted_clearing_payload_is_plain_decimal_and_still_replays
     participant_ids = [uuid.uuid4() for _ in range(3)]
     debt_ids = [uuid.uuid4() for _ in range(3)]
 
-    try:
-        async with TestingSessionLocal() as setup:
-            setup.add(
-                Equivalent(id=equivalent_id, code=code, symbol="PZ", precision=2)
-            )
-            setup.add_all(
-                [
-                    Participant(
-                        id=pid,
-                        pid=f"geo:{label}:{nonce}",
-                        display_name=label,
-                        public_key=uuid.uuid4().hex * 2,
-                        type="person",
-                        status="active",
-                    )
-                    for pid, label in zip(participant_ids, ("A", "B", "C"), strict=True)
-                ]
-            )
-            ring = [
-                (debt_ids[0], participant_ids[0], participant_ids[1]),
-                (debt_ids[1], participant_ids[1], participant_ids[2]),
-                (debt_ids[2], participant_ids[2], participant_ids[0]),
-            ]
-            setup.add_all(
-                [
-                    TrustLine(
-                        from_participant_id=creditor,
-                        to_participant_id=debtor,
-                        equivalent_id=equivalent_id,
-                        limit=Decimal("1000000"),
-                        policy=dict(_OPEN_POLICY),
-                        status="active",
-                    )
-                    for _, debtor, creditor in ring
-                ]
-            )
-            async with debt_fixture_setup(setup, label="setup"):
-                setup.add_all(
-                    [
-                        Debt(
-                            id=debt_id,
-                            debtor_id=debtor,
-                            creditor_id=creditor,
-                            equivalent_id=equivalent_id,
-                            amount=_SMALLEST_STORABLE,
-                        )
-                        for debt_id, debtor, creditor in ring
-                    ]
-                )
-            await setup.commit()
-
-        async with TestingSessionLocal() as worker:
-            service = ClearingService(worker)
-            cycles = await service.find_cycles(code, max_depth=API_DEFAULT_MAX_DEPTH)
-            assert cycles, "precondition: the triangle must be detected before it is cleared"
-            applied = await service.execute_clearing_with_amount(cycles[0])
-
-        assert applied == _SMALLEST_STORABLE, (
-            f"precondition: the whole debt must have cleared, got {applied!r}"
+    async with TestingSessionLocal() as setup:
+        setup.add(
+            Equivalent(id=equivalent_id, code=code, symbol="PZ", precision=2)
         )
-
-        async with TestingSessionLocal() as verify:
-            tx = (
-                await verify.scalars(
-                    select(Transaction).where(
-                        Transaction.type == "CLEARING",
-                        Transaction.initiator_id.in_(participant_ids),
-                    )
+        setup.add_all(
+            [
+                Participant(
+                    id=pid,
+                    pid=f"geo:{label}:{nonce}",
+                    display_name=label,
+                    public_key=uuid.uuid4().hex * 2,
+                    type="person",
+                    status="active",
                 )
-            ).one()
-            audits = (
-                await verify.scalars(
-                    select(IntegrityAuditLog).where(
-                        IntegrityAuditLog.equivalent_code == code
-                    )
-                )
-            ).all()
-
-        payload = tx.payload or {}
-        stored = [str(payload.get("amount"))] + [
-            str(edge.get("amount")) for edge in (payload.get("edges") or [])
+                for pid, label in zip(participant_ids, ("A", "B", "C"), strict=True)
+            ]
+        )
+        ring = [
+            (debt_ids[0], participant_ids[0], participant_ids[1]),
+            (debt_ids[1], participant_ids[1], participant_ids[2]),
+            (debt_ids[2], participant_ids[2], participant_ids[0]),
         ]
-        for audit in audits:
-            stored += [
-                str(edge.get("amount"))
-                for edge in ((audit.affected_participants or {}).get("edges") or [])
+        setup.add_all(
+            [
+                TrustLine(
+                    from_participant_id=creditor,
+                    to_participant_id=debtor,
+                    equivalent_id=equivalent_id,
+                    limit=Decimal("1000000"),
+                    policy=dict(_OPEN_POLICY),
+                    status="active",
+                )
+                for _, debtor, creditor in ring
             ]
+        )
+        async with debt_fixture_setup(setup, label="setup"):
+            setup.add_all(
+                [
+                    Debt(
+                        id=debt_id,
+                        debtor_id=debtor,
+                        creditor_id=creditor,
+                        equivalent_id=equivalent_id,
+                        amount=_SMALLEST_STORABLE,
+                    )
+                    for debt_id, debtor, creditor in ring
+                ]
+            )
+        await setup.commit()
 
-        assert len(stored) >= 4, f"precondition: the payload must carry amounts: {payload}"
-        offenders = [a for a in stored if _is_exponential(a)]
-        assert not offenders, (
-            f"exponential money PERSISTED in transactions.payload / integrity_audit_log: "
-            f"{offenders}. This is the column the T1201 rollout condition audits for "
-            "scale >= 9, and a text-shaped audit reads no fraction digits at all in '1E-8'."
-        )
-        assert {Decimal(a) for a in stored} == {applied}, (
-            f"the payload must replay to the amount that was actually applied ({applied}): "
-            f"{stored}"
-        )
-    finally:
-        primary_error = sys.exc_info()[1]
-        try:
-            async with TestingSessionLocal() as cleanup:
-                # The debts AND the journal rows that describe them, through the driver and BEFORE the
-                # deletes below: `session.execute(delete(Debt))` is Core DML the write guard refuses
-                # (that is `C2`), and `debt_operations.tx_id` RESTRICTs `transactions.tx_id`, so an
-                # envelope still standing would block the transaction delete above it.
-                await purge_test_ledger(cleanup, equivalent_ids=[equivalent_id])
-                await cleanup.execute(
-                    delete(IntegrityAuditLog).where(
-                        IntegrityAuditLog.equivalent_code == code
-                    )
+    async with TestingSessionLocal() as worker:
+        service = ClearingService(worker)
+        cycles = await service.find_cycles(code, max_depth=API_DEFAULT_MAX_DEPTH)
+        assert cycles, "precondition: the triangle must be detected before it is cleared"
+        applied = await service.execute_clearing_with_amount(cycles[0])
+
+    assert applied == _SMALLEST_STORABLE, (
+        f"precondition: the whole debt must have cleared, got {applied!r}"
+    )
+
+    async with TestingSessionLocal() as verify:
+        tx = (
+            await verify.scalars(
+                select(Transaction).where(
+                    Transaction.type == "CLEARING",
+                    Transaction.initiator_id.in_(participant_ids),
                 )
-                await cleanup.execute(
-                    delete(Transaction).where(
-                        Transaction.initiator_id.in_(participant_ids)
-                    )
+            )
+        ).one()
+        audits = (
+            await verify.scalars(
+                select(IntegrityAuditLog).where(
+                    IntegrityAuditLog.equivalent_code == code
                 )
-                await cleanup.execute(
-                    delete(TrustLine).where(TrustLine.equivalent_id == equivalent_id)
-                )
-                await cleanup.execute(
-                    delete(Participant).where(Participant.id.in_(participant_ids))
-                )
-                await cleanup.execute(
-                    delete(Equivalent).where(Equivalent.id == equivalent_id)
-                )
-                await cleanup.commit()
-        except Exception:
-            if primary_error is None:
-                raise
+            )
+        ).all()
+
+    payload = tx.payload or {}
+    stored = [str(payload.get("amount"))] + [
+        str(edge.get("amount")) for edge in (payload.get("edges") or [])
+    ]
+    for audit in audits:
+        stored += [
+            str(edge.get("amount"))
+            for edge in ((audit.affected_participants or {}).get("edges") or [])
+        ]
+
+    assert len(stored) >= 4, f"precondition: the payload must carry amounts: {payload}"
+    offenders = [a for a in stored if _is_exponential(a)]
+    assert not offenders, (
+        f"exponential money PERSISTED in transactions.payload / integrity_audit_log: "
+        f"{offenders}. This is the column the T1201 rollout condition audits for "
+        "scale >= 9, and a text-shaped audit reads no fraction digits at all in '1E-8'."
+    )
+    assert {Decimal(a) for a in stored} == {applied}, (
+        f"the payload must replay to the amount that was actually applied ({applied}): "
+        f"{stored}"
+    )
