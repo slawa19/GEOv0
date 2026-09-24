@@ -22,8 +22,16 @@ side - a write to `debts` outside an operation is `GE001`, and the journal table
 envelope's declaration and no DELETE - so a doctoring is modelled the one way it can still arise, a
 write with the journal's triggers off on a scratch database.
 
-EVERY TEST GETS ITS OWN CLONE of a migrated template, because the seed refuses a database that is
-not empty and the tier database is not.
+EVERY TEST GETS ITS OWN CLONE, because the seed refuses a database that is not empty and the tier
+database is not. Two templates per module, each built ONCE (018 B1 part iii, 2026-09-24, CI budget):
+the migrated template, for the tests that seed something else or nothing; and a SEEDED template - one
+Riverside seed on a clone of the migrated one - for the four tests that need "the database right after
+the Riverside seed". Until then each of those four ran the whole seed itself (about 40 s each on this
+machine, measured with `--durations`: the module took 225 s for 7 tests) and every test ran its own
+`alembic upgrade head` for the migrated template. The seed is the same command on the same empty
+schema every time, and what each test asserts is on its own clone, so one seed per module loses no
+path: the control still asserts that seed's report and still runs the refused second seed on its
+clone.
 """
 
 from __future__ import annotations
@@ -32,7 +40,6 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
-import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
@@ -40,7 +47,16 @@ from sqlalchemy.pool import NullPool
 from app.config import settings
 from scripts.seed_recipe import SeedRefusal, reverify, seed_community
 from tests.ledger_corruption import corrupt
-from tests.migrated_schema import cloned_database, provision_migrated_template
+from tests.migrated_schema import (
+    assert_may_create_databases,
+    cloned_database,
+    create_database,
+    disconnect_everyone_from,
+    drop_database,
+    maintenance_connection,
+    provision_migrated_template,
+    scratch_database_url,
+)
 
 COMMUNITY = "riverside-town-50"
 
@@ -58,10 +74,66 @@ def _postgres_url() -> str:
     return TEST_DATABASE_URL
 
 
-@pytest_asyncio.fixture
-async def template_name() -> str:
-    _, name = await provision_migrated_template(_postgres_url(), suffix="p017t1711tpl")
-    return name
+class _Templates:
+    """The module's two templates: `migrated` (empty schema) and `seeded` (after one Riverside seed)."""
+
+    def __init__(self, migrated: str, seeded: str, report) -> None:
+        self.migrated = migrated
+        self.seeded = seeded
+        self.report = report
+
+
+@pytest.fixture(scope="module")
+def templates():
+    """Build both templates once for the module; drop the seeded one when the module ends.
+
+    On a private loop (`tests.conftest._run_in_fresh_thread`): a module-scoped fixture outlives every
+    per-test loop, and the engine that seeds must live and die on one loop. The migrated template is
+    left standing like every other template of the tier (the next provisioning sweeps it); the seeded
+    one is this module's own and is dropped here.
+    """
+
+    from tests.conftest import _run_in_fresh_thread
+
+    base = _postgres_url()
+    seeded_url, seeded_name = scratch_database_url(base, "p017t1711seeded")
+
+    async def _build():
+        _, migrated = await provision_migrated_template(base, suffix="p017t1711tpl")
+        connection = await maintenance_connection(base)
+        try:
+            await assert_may_create_databases(connection)
+            await drop_database(connection, seeded_name)
+            await disconnect_everyone_from(connection, migrated)
+            await create_database(connection, seeded_name, template=migrated)
+        finally:
+            await connection.close()
+        engine, factory = _factory_for(seeded_url)
+        try:
+            report = await seed_community(
+                factory, community_id=COMMUNITY, env="test", allow_scratch_suffix=True
+            )
+        finally:
+            await engine.dispose()
+        return _Templates(migrated, seeded_name, report)
+
+    async def _drop() -> None:
+        connection = await maintenance_connection(base)
+        try:
+            await drop_database(connection, seeded_name)
+        finally:
+            await connection.close()
+
+    built = _run_in_fresh_thread(_build)
+    try:
+        yield built
+    finally:
+        _run_in_fresh_thread(_drop)
+
+
+@pytest.fixture
+def template_name(templates) -> str:
+    return templates.migrated
 
 
 def _factory_for(url: str):
@@ -120,13 +192,15 @@ async def _rows(factory, sql: str, params: dict | None = None):
 # =================================================================================================
 
 
-async def test_the_recipe_runs_and_every_acceptance_check_passes(template_name):
+async def test_the_recipe_runs_and_every_acceptance_check_passes(templates):
+    # The seed ran once for the module, on a fresh clone of the migrated template (`templates`);
+    # its report is asserted here, and the refused second run happens on this test's own clone.
+    report = templates.report
     async with cloned_database(
-        _postgres_url(), template_name=template_name, suffix="p017t1711ok"
+        _postgres_url(), template_name=templates.seeded, suffix="p017t1711ok"
     ) as clone_url:
         engine, factory = _factory_for(clone_url)
         try:
-            report = await seed_community(factory, community_id=COMMUNITY, env="test", allow_scratch_suffix=True)
 
             assert report.participants == EXPECTED_PARTICIPANTS
             assert report.trustlines == EXPECTED_TRUSTLINES
@@ -303,35 +377,29 @@ async def test_a_command_that_cannot_be_performed_stops_the_seed_and_names_itsel
             await engine.dispose()
 
 
-async def test_the_acceptance_refuses_an_empty_database_instead_of_passing_it(template_name):
+async def test_the_acceptance_refuses_an_empty_database_instead_of_passing_it(templates):
     """The acceptance run against a database that holds NOTHING must not come back green.
 
     A verdict that is true of an empty database is a verdict about nothing, and `reverify` is the
     entry point where that could happen: it takes the `ref -> PID` table of a run and re-checks
-    whatever database it is pointed at. Pointed at an empty one, it has to say so.
+    whatever database it is pointed at. Pointed at an empty one, it has to say so. The `ref -> PID`
+    table is the module seed's (`templates`), a real run's.
     """
 
+    report = templates.report
+    assert report.refs_to_pid, "the module seed recorded no participants; the refusal would be vacuous"
     async with cloned_database(
-        _postgres_url(), template_name=template_name, suffix="p017t1711seed"
-    ) as seeded_url:
-        seeded_engine, seeded_factory = _factory_for(seeded_url)
+        _postgres_url(), template_name=templates.migrated, suffix="p017t1711empty"
+    ) as empty_url:
+        engine, factory = _factory_for(empty_url)
         try:
-            report = await seed_community(seeded_factory, community_id=COMMUNITY, env="test", allow_scratch_suffix=True)
+            with pytest.raises(SeedRefusal) as refusal:
+                await reverify(
+                    factory, community_id=COMMUNITY, refs_to_pid=report.refs_to_pid
+                )
+            assert "not in this database" in str(refusal.value)
         finally:
-            await seeded_engine.dispose()
-
-        async with cloned_database(
-            _postgres_url(), template_name=template_name, suffix="p017t1711empty"
-        ) as empty_url:
-            engine, factory = _factory_for(empty_url)
-            try:
-                with pytest.raises(SeedRefusal) as refusal:
-                    await reverify(
-                        factory, community_id=COMMUNITY, refs_to_pid=report.refs_to_pid
-                    )
-                assert "not in this database" in str(refusal.value)
-            finally:
-                await engine.dispose()
+            await engine.dispose()
 
 
 async def test_an_absent_database_is_a_named_refusal(template_name):
@@ -498,13 +566,13 @@ async def _doctorings(factory, refs_to_pid: dict[str, str]) -> list[tuple[str, l
     ]
 
 
-async def test_every_acceptance_check_reddens_on_the_state_it_exists_to_notice(template_name):
+async def test_every_acceptance_check_reddens_on_the_state_it_exists_to_notice(templates):
+    report = templates.report
     async with cloned_database(
-        _postgres_url(), template_name=template_name, suffix="p017t1711cc"
+        _postgres_url(), template_name=templates.seeded, suffix="p017t1711cc"
     ) as clone_url:
         engine, factory = _factory_for(clone_url)
         try:
-            report = await seed_community(factory, community_id=COMMUNITY, env="test", allow_scratch_suffix=True)
             refs_to_pid = report.refs_to_pid
 
             async def verdicts():
@@ -542,7 +610,7 @@ async def test_every_acceptance_check_reddens_on_the_state_it_exists_to_notice(t
 
 
 async def test_the_launcher_readiness_survives_a_clearing_the_product_ran(
-    template_name, monkeypatch, tmp_path
+    templates, monkeypatch, tmp_path
 ):
     """Clearing is the product's main function; running it must not make the next start refuse.
 
@@ -564,12 +632,12 @@ async def test_the_launcher_readiness_survives_a_clearing_the_product_ran(
     from app.core.clearing.service import ClearingService
     from scripts import dev_database
 
+    report = templates.report
     async with cloned_database(
-        _postgres_url(), template_name=template_name, suffix="p017t1710ready"
+        _postgres_url(), template_name=templates.seeded, suffix="p017t1710ready"
     ) as clone_url:
         engine, factory = _factory_for(clone_url)
         try:
-            report = await seed_community(factory, community_id=COMMUNITY, env="test", allow_scratch_suffix=True)
             table = tmp_path / "participants.json"
             table.write_text(
                 json.dumps(
