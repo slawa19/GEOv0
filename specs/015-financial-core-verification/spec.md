@@ -292,6 +292,8 @@ Payload подписи `TRUST_LINE_UPDATE` без полей и payload `TRUST_L
 
 **Инжект пишет `Debt` в обход ядра.** `:357-387` создаёт или обновляет строку напрямую, тогда как ядро сначала гасит встречный долг и проверяет симметрию (`app/core/payments/engine.py:1404-1461`, `:1248-1255`). Два встречных `Debt` достижимы и нарушают нормативный инвариант `docs/ru/02-protocol-spec.md:1867-1888`.
 
+*2026-09-24 — это проявление закрыто отказом.* `op_inject_debt` (`app/core/simulator/inject_executor.py`) перед записью читает обратный долг той же пары в том же эквиваленте и при сумме `> 0` пропускает эффект (`skipped`), как эффект сверх лимита. Не неттинг: уменьшение долга правило INJECT критерия (б) читает как противоречие (`reconciliation._inject_subset`, `entry_is_not_an_increase`). Перед чтением — `flush`, иначе встречный долг, поставленный предыдущим эффектом того же события, невидим (`autoflush=False`). Репродьюсеры, красные до правки: `tests/integration/test_p015_f01512_inject_refuses_an_opposing_debt_postgres.py::test_an_inject_opposite_to_an_existing_debt_is_refused`, `tests/integration/test_p015_f01512_inject_refuses_an_opposing_debt_postgres.py::test_an_opposing_effect_of_the_same_event_is_refused`. Остальные проявления `F-015-12` этой правкой не затронуты.
+
 **Периметр рана протекает.** *Исправление формулировки:* начальная карта участников ограничена сценарием (`real_scenario_seeder.py:24-47`), утечка не в ней. Реальный путь: `create_trustline` разрешает произвольный PID глобальным поиском и добавляет его в ту же карту (`inject_executor.py:605-638`), после чего `inject_debt` берёт этот внешний UUID (`:319-320`) и меняет общий `Debt`.
 
 **Инжект коммитит чужую сессию и снимает owner-lock.** Owner lock — транзакционный `pg_advisory_xact_lock` (`app/core/payments/engine.py:121-143`), берётся оркестратором до инжекта (`real_tick_orchestrator.py:275-293`). Внутренний `session.commit()` (`inject_executor.py:799-803`) снимает его безусловно; снимок долгов читается (`real_tick_payments_coordinator.py:88-100`) до повторного захвата (`real_payments_executor.py:291-301`). В окно может войти клиринг. Доказана нарушенная граница сериализации; silent lost update без Postgres-репродьюсера не утверждается.
@@ -3821,6 +3823,8 @@ Postgres-гейт покраснел на
 ---
 
 ## Changelog
+
+**2026-09-24 — `F-015-12`, проявление «два встречных `Debt` через инжект», закрыто отказом (§19.5, класс 1).** Инжект пропускает эффект, встречный существующему долгу пары в том же эквиваленте, и считает его в `skipped`; сверка операции INJECT остаётся `PASSED`, удержания нет. Репродьюсеры: `tests/integration/test_p015_f01512_inject_refuses_an_opposing_debt_postgres.py::test_an_inject_opposite_to_an_existing_debt_is_refused`, `tests/integration/test_p015_f01512_inject_refuses_an_opposing_debt_postgres.py::test_an_opposing_effect_of_the_same_event_is_refused`; контрпроверки того же модуля — тот же и новый долг создаются как прежде. Остаток `T1514` в `specs/BACKLOG.md` сужен до PID вне сценария.
 
 **2026-09-21 — программа закрыта обычным закрытием по §19.5. Не принятием риска.**
 
