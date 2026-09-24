@@ -45,9 +45,23 @@ RUNNING IT (PowerShell, and read ``AGENTS.md`` "Postgres gate" first)::
     $env:GEO_TEST_ALLOW_DB_RESET = "1"
     python scripts/measure_clearing_min_amount_plan.py > .local-run/plan.txt
 
-The script TRUNCATEs six tables, so it refuses to start unless the URL is provably a
-disposable test database (``scripts/validate_test_database_url.py``) and the reset flag is
-set explicitly.  SQLite is not accepted: this measures a PostgreSQL query plan.
+WHERE THE GRAPH IS BUILT (018, stage B; manifest ``T1808`` item 14).  Not in the database
+the URL names, but in a scratch database next to it - ``<database>__plan`` - created EMPTY,
+migrated with ``alembic upgrade head`` and dropped when the run ends however it ends
+(``tests/migrated_schema.py::scratch_databases``).  Until 2026-09-24 the script reset the
+named database with ``TRUNCATE ... CASCADE`` over six tables inside ``except Exception: pass``.
+Since migration ``029`` ``debts`` refuses ``TRUNCATE`` (``BEFORE TRUNCATE`` trigger), and on
+PostgreSQL the first refusal aborts the transaction, so every later ``TRUNCATE`` failed too and
+the swallowed refusals left the graph to be built on top of whatever the database held.  A
+freshly migrated database needs no reset at all, and a database that cannot be created,
+migrated or dropped stops the run (``MigratedSchemaError``) - before anything is measured, in
+the first two cases.
+
+The derived name still goes through the test-database guard
+(``scripts/validate_test_database_url.py``), so the script refuses to start unless the URL is
+provably a disposable test database and the reset flag is set explicitly; the named database
+itself is never written, only used to reach the server.  The role needs ``CREATEDB``.  SQLite
+is not accepted: this measures a PostgreSQL query plan.
 """
 
 from __future__ import annotations
@@ -75,6 +89,7 @@ from app.db.models.equivalent import Equivalent  # noqa: E402
 from app.db.models.participant import Participant  # noqa: E402
 from app.db.models.trustline import TrustLine  # noqa: E402
 from scripts.validate_test_database_url import assert_safe_test_database_url  # noqa: E402
+from tests.migrated_schema import run_alembic_upgrade_head, scratch_databases  # noqa: E402
 
 N_PARTICIPANTS = 400
 N_EDGES = 4000
@@ -99,7 +114,7 @@ BOUNDARY_TRIANGLES = 12
 
 def _database_url() -> str:
     # The harness guard is the whole check: it enforces the `geov0_test_*` naming, the
-    # `GEO_TEST_ALLOW_DB_RESET` opt-in that this script's TRUNCATEs require, and - via
+    # `GEO_TEST_ALLOW_DB_RESET` opt-in that dropping the scratch database requires, and - via
     # `required_backend` - that a SQLite URL cannot quietly answer a question about a
     # PostgreSQL query plan.
     url = os.environ.get("TEST_DATABASE_URL", "")
@@ -215,12 +230,18 @@ async def _edge(
 
 
 async def build_graph(session: AsyncSession) -> Equivalent:
-    for table in ("prepare_locks", "transactions", "debts", "trust_lines", "participants", "equivalents"):
-        try:
-            await session.execute(text(f"TRUNCATE {table} CASCADE"))
-        except Exception:
-            pass
-    await session.commit()
+    """Build the graph in the freshly migrated scratch database ``main`` hands in.
+
+    There is no reset step: the database was created empty for this run (module docstring,
+    "WHERE THE GRAPH IS BUILT").  Its emptiness is checked rather than assumed, because a graph
+    built on top of leftovers would measure a different population than the header claims.
+    """
+    leftover = (await session.execute(text("SELECT count(*) FROM debts"))).scalar_one()
+    if leftover:
+        raise SystemExit(
+            f"the scratch database already holds {leftover} debts; it was supposed to be created "
+            f"empty for this run. Nothing is measured."
+        )
 
     equivalent = Equivalent(id=uuid.uuid4(), code="UAH", symbol="U", precision=2, is_active=True)
     session.add(equivalent)
@@ -421,7 +442,20 @@ async def provenance(session: AsyncSession) -> None:
 
 
 async def main() -> None:
-    engine = create_async_engine(_database_url(), poolclass=NullPool)
+    # A scratch database per run instead of a reset of the named one; see the module docstring.
+    # Creation, migration and the final drop each raise on failure, so a database that could not
+    # be prepared stops the measurement instead of being measured.
+    async with scratch_databases(_database_url(), "plan") as (scratch_url,):
+        run_alembic_upgrade_head(scratch_url)
+        engine = create_async_engine(scratch_url, poolclass=NullPool)
+        try:
+            await measure(engine)
+        finally:
+            # Disposed before `scratch_databases` drops the database it is connected to.
+            await engine.dispose()
+
+
+async def measure(engine) -> None:
     session_factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
 
     with_predicate = "AND LEAST(d1.amount, d2.amount, d3.amount) > :min_amount"
@@ -472,8 +506,6 @@ async def main() -> None:
 
         print("\n===== PLAN WITH min_amount =====\n" + plan_with)
         print("\n===== PLAN WITHOUT min_amount =====\n" + plan_without)
-
-    await engine.dispose()
 
 
 if __name__ == "__main__":
