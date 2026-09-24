@@ -156,16 +156,12 @@ CREATE INDEX IF NOT EXISTS idx_simulator_run_artifacts_created_at
 Колонка — `NUMERIC(20, 8)`, а `MetricPoint.v` на проводе — decimal string. Серии
 `total_debt` и `clearing_volume` — деньги, и они **точны только на PostgreSQL**.
 
-**Известное ограничение SQLite.** SQLite не имеет нативного decimal: SQLAlchemy
-проводит `Numeric` через binary float, поэтому `Decimal("12345678901.12345678")`
-читается обратно как `Decimal("12345678901.12345695")`. Провод при этом отдаёт
-decimal string, то есть форму, зарезервированную за точными деньгами. SQLite остаётся
-поддерживаемым бэкендом сознательно — это дефолт `DATABASE_URL` (`app/config.py`) и
-документированный путь локальной разработки без Docker (`README.md`), — но ограничение
-объявлено, а не спрятано: `app/core/simulator/storage.py` пишет **один WARNING за
-прогон** (`simulator.storage.sqlite_money_metrics_are_not_exact`), когда денежная серия
-фактически персистится на SQLite. Ровно так же, как §4 AGENTS.md разводит SQLite и
-Postgres по семантике блокировок: денежные метрики симулятора точны только на Postgres.
+**Точность — PostgreSQL, единственный движок** (программа 017). `NUMERIC(20, 8)` хранит
+денежные серии точно, и decimal string на проводе — точная форма. Пока SQLite был
+бэкендом, `Numeric` шёл там через binary float (`Decimal("12345678901.12345678")`
+читался обратно как `Decimal("12345678901.12345695")`), и `app/core/simulator/storage.py`
+предупреждал об этом (`simulator.storage.sqlite_money_metrics_are_not_exact`); SQLite,
+а с ним и предупреждение, сняты в стадии 3 программы 017.
 
 **Потолок `NUMERIC(20, 8)`** — 12 целых цифр. Значение `total_debt >= 10^12` даёт
 `numeric field overflow`; писатель best-effort, он логирует отказ и откатывает

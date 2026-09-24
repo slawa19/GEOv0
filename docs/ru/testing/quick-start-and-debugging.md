@@ -50,18 +50,19 @@ npm --version
   -BackendSelector tests/unit/test_invariants.py
 ```
 
-## SQLite
+## Локальная dev-база
 
-Локальный default — `.local-run/geov0.db`. Проверка текущей DB:
+С программы 017 SQLite не поддерживается: локальная база — PostgreSQL
+`geov0_dev_<DbSlug>` лаунчера (см. `README.md`). Проверка её готовности (схема на
+head, популяция рецепта, baseline):
 
 ```powershell
 $env:ENV = 'dev'
-.\.venv\Scripts\python.exe scripts/check_sqlite_db.py
+.\scripts\run_local.ps1 check-db
 ```
 
-Существующий `./geov0.db` считается legacy/user data: tooling не переносит и не
-удаляет его автоматически. Для диагностики этого файла задайте явный
-`DATABASE_URL`.
+Прежние `.local-run/geov0.db` и `./geov0.db` — данные пользователя: tooling их не
+читает, не переносит и не удаляет.
 
 ## PostgreSQL
 

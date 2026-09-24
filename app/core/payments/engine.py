@@ -434,9 +434,6 @@ class PaymentEngine:
 
         `row_lock=False` is for clearing, whose read happens in a snapshot taken AFTER its owner
         lock, and for the PATCH lock that makes that sufficient see `admin_update_equivalent`.
-
-        On SQLite `FOR SHARE` renders nothing and the owner lock is a no-op: the race guarantees
-        above belong to PostgreSQL; SQLite gets the plain refusal.
         """
         ids = sorted(set(equivalent_ids), key=str)
         if not ids:

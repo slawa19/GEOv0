@@ -5,9 +5,9 @@ stated per test rather than "for coverage":
 
 * AUTOCOMMIT. The trap is `create_async_engine(url, isolation_level="AUTOCOMMIT")`, which leaves
   `Connection._execution_options` EMPTY - the form the round-2 reviewer showed a check on those
-  options cannot see. SQLite cannot host it at all: every SQLite engine in this repository must
-  carry `install_sqlite_transaction_control`
-  (`tests/unit/test_p015_t1525_every_sqlite_engine_has_transaction_control.py`), and an engine
+  options cannot see. SQLite could not host it at all: every SQLite engine in this repository had
+  to carry `install_sqlite_transaction_control` (the T1525 engine guard; module and guard deleted
+  with SQLite, 017 stage 3 S7), and an engine
   carrying the control is not in AUTOCOMMIT, because the control's `begin` listener sends a real
   `BEGIN`. The two demands are genuinely incompatible and the guard that protects money is the one
   that stays.
@@ -51,10 +51,9 @@ from tests.p015_b4a_stand import Stand, arm_stand, identity
 async def stand():
     """This module's own SERIALIZABLE engine with a real pool, and the journal armed on it.
 
-    THE ENGINE IS BUILT HERE, NEXT TO ITS REFUSAL, and not in `tests/p015_b4a_stand.py`. Every
-    SQLite-capable engine construction in this repository must be paired with
-    `install_sqlite_transaction_control` (T1525,
-    `tests/unit/test_p015_t1525_every_sqlite_engine_has_transaction_control.py`); a construction
+    THE ENGINE IS BUILT HERE, NEXT TO ITS REFUSAL, and not in `tests/p015_b4a_stand.py`. Until 017
+    stage 3 (S7) every SQLite-capable engine construction in this repository had to be paired with
+    `install_sqlite_transaction_control` (T1525, a guard deleted with SQLite); a construction
     that can only ever be PostgreSQL is exempt only where a refusal in the same module says so.
     The `pytest.skip` below is that refusal, and it belongs in a postgres-marked module rather than
     in a shared helper where it would be one indirection away from the thing it protects.

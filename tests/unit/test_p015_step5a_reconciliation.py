@@ -107,9 +107,9 @@ async def clone_without_the_arithmetic_check(committed_database):
 
 
 def _literal(dialect: str, value: uuid.UUID) -> str:
-    """A UUID as this dialect stores it: 32 hex on SQLite, the canonical form on PostgreSQL."""
+    """A UUID as PostgreSQL stores it: the canonical form. (A 32-hex SQLite arm left with SQLite.)"""
 
-    return value.hex if dialect == "sqlite" else str(value)
+    return str(value)
 
 
 async def _around_the_application(factory, build_statement) -> None:

@@ -135,7 +135,7 @@ async def audit_tick_balance(
     expected_delta: dict[str, Decimal] = {}
     tick_volume = Decimal("0")
 
-    # SQLite has a limited max number of SQL variables; chunk to be safe.
+    # Keep each IN-list bounded (drivers cap the number of bind parameters); chunk to be safe.
     chunk_size = 200
     for i in range(0, len(planned_tx_ids), chunk_size):
         chunk = planned_tx_ids[i : i + chunk_size]

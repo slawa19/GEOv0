@@ -277,7 +277,7 @@ environment variable `GEO_DEV_PG_PASSWORD`.
 
 **Leftover `.local-run/*.db` files are yours.** The launchers no longer read, write or delete them:
 removing the SQLite engine did not authorize deleting anybody's data
-(`docs/ru/09-decisions-and-defaults.md:17-19`). If you still need what is in one, open it with any
+(`docs/ru/09-decisions-and-defaults.md:16-17`). If you still need what is in one, open it with any
 SQLite client before you delete it; otherwise delete it yourself when you are ready. Nothing in the
 repository will do it for you.
 

@@ -157,10 +157,14 @@ Optional seed:
 
 ### 7.1b Start backend locally (no Docker)
 
-If Docker is unavailable, you can run the backend locally on SQLite:
+If Docker is unavailable, run the backend against a local PostgreSQL
+([`docs/ru/backend/postgres-local-portable.md`](../../docs/ru/backend/postgres-local-portable.md)); SQLite was
+removed in programme 017 and `DATABASE_URL` must be `postgresql+asyncpg://...`.
+`.\scripts\run_local.ps1 start` creates, migrates and seeds its own database `geov0_dev_<DbSlug>`.
+By hand, with `DATABASE_URL` set:
 
-- Initialize DB schema (creates `.local-run/geov0.db`):
-  - `python scripts/init_sqlite_db.py`
+- Initialize DB schema:
+  - `python -m alembic -c migrations/alembic.ini upgrade head`
 - Seed demo data:
   - Recommended for Admin UI testing (fixtures-like rich dataset): `python scripts/seed_db.py --source fixtures`
   - Choose a full community pack without modifying tracked fixtures (writes to `.local-run/fixture-packs`):
@@ -171,15 +175,13 @@ If Docker is unavailable, you can run the backend locally on SQLite:
   - Legacy small seed set: `python scripts/seed_db.py --source seeds`
 
 Note on Windows terminals:
-- Python code snippets (e.g. SQLite checks) must be run with `python` / `.venv\Scripts\python.exe`.
+- Python code snippets (e.g. DB checks) must be run with `python` / `.venv\Scripts\python.exe`.
 - If you paste Python code into PowerShell, you'll get PowerShell `ParserError` and `The term 'db' is not recognized...` errors.
 
 Quick DB sanity check:
-- From repo root: `.\.venv\Scripts\python.exe scripts\check_sqlite_db.py`
-- Or via the repo runner: `.\scripts\run_local.ps1 check-db`
-- An existing root `geov0.db` is legacy/user data and is used only with an
-  explicit `DATABASE_URL=sqlite+aiosqlite:///./geov0.db`; it is not moved or
-  deleted automatically.
+- Via the repo runner: `.\scripts\run_local.ps1 check-db`
+- An existing root `geov0.db` or `.local-run/geov0.db` is user data from the SQLite era: nothing
+  reads, moves or deletes it.
 - Run API:
   - `python -m uvicorn app.main:app --reload --port 18000`
   - If `18000` is unavailable on Windows, use another port and set `VITE_API_BASE_URL` accordingly.

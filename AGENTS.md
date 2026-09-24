@@ -104,7 +104,7 @@ git grep -n $contractMarker
 
 ## 4. Стек, точки входа и readiness
 
-- Backend: Python 3.11 (target в CI и tooling), FastAPI, Pydantic v2, SQLAlchemy async, Alembic; SQLite для локальной разработки, Postgres для реальной семантики блокировок/изоляции.
+- Backend: Python 3.11 (target в CI и tooling), FastAPI, Pydantic v2, SQLAlchemy async, Alembic; PostgreSQL — единственный движок и для локальной разработки, и для тестов (программа 017, `DATABASE_URL` только `postgresql+asyncpg`).
 - Admin UI: Vue 3, TypeScript, Vite, Pinia, Element Plus; Vitest и Playwright.
 - Simulator UI v2: Vue 3, TypeScript, Vite, Vitest/happy-dom и Playwright. Node 22.12 в CI.
 - Backend app: `app/main.py`. REST schema: `api/openapi.yaml`.
@@ -252,7 +252,7 @@ $taskSlug = "agent_payments_review"
 .\scripts\verify_local.ps1 -TaskSlug $taskSlug -BackendOnly -BackendSelector tests/unit/test_payments_2pc.py
 ```
 
-`-TaskSlug` разводит по `.local-run/test-runs/<slug>/`: `pytest` (basetemp), `cache`, `artifacts` (экспортируется как `GEO_TEST_ARTIFACT_ROOT`) и default `TEST_DATABASE_URL` вида `sqlite+aiosqlite:///./.local-run/test-runs/<slug>/test.db`.
+`-TaskSlug` разводит по `.local-run/test-runs/<slug>/`: `pytest` (basetemp), `cache`, `artifacts` (экспортируется как `GEO_TEST_ARTIFACT_ROOT`) и default `TEST_DATABASE_URL` вида `postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_<slug>` (см. §5).
 
 - Postgres DB name также уникален на agent/task.
 - Для backend/Admin/Simulator/Playwright резервируйте уникальные порты и явно передавайте поддерживаемые env/CLI параметры (`PW_E2E_PORT` для Playwright-smoke; CI использует 41731/41732 — не занимайте их вслепую).
@@ -343,7 +343,7 @@ $taskSlug = "agent_payments_review"
 - Имена событий глобально уникальны и читаются как «что произошло», без синонимов для одного значения (для SSE это ещё и защищённый контракт, §8).
 - **Не логируйте** секреты, токены, полные payload и абсолютные локальные пути; не логируйте в каждой итерации тика симулятора — только счётчики и усечённый превью.
 - **У каждого семейства runtime-артефактов есть TTL и лимит числа**, объявленные константами в единственном модуле политики; чистка вызывается сразу после записи. Runtime-артефакты отделены от версионируемых фикстур, и чистка никогда не трогает фикстуры.
-- **Весь runtime-вывод живёт под `.local-run/`.** У каждого семейства свой поддерево, объявленное кодом, а не привычкой: `.local-run/geov0.db` — локальная dev-DB (`app/config.py`, `scripts/run_local.ps1`), `.local-run/test-runs/<TaskSlug>/` — task-isolated test evidence (`scripts/verify_local.ps1`), `.local-run/playwright/<app>/` — Playwright results и report (`*/playwright.config.ts`), `.local-run/simulator/` — артефакты прогонов симулятора (`app/core/simulator/runtime_utils.py`). Параллельные агенты обязаны переопределять те из них, что не разведены по task slug (§7).
+- **Весь runtime-вывод живёт под `.local-run/`.** У каждого семейства свой поддерево, объявленное кодом, а не привычкой: `.local-run/test-runs/<TaskSlug>/` — task-isolated test evidence (`scripts/verify_local.ps1`), `.local-run/playwright/<app>/` — Playwright results и report (`*/playwright.config.ts`), `.local-run/simulator/` — артефакты прогонов симулятора (`app/core/simulator/runtime_utils.py`). Параллельные агенты обязаны переопределять те из них, что не разведены по task slug (§7).
 - **Корень репозитория не свалка:** `*.db`, `*.log`, `*.pid`, `*.ndjson`, `test-results/` там появляться не должны, даже будучи ignored. **Ignore-правило не превращает мусор в допустимую архитектуру** — оно лишь прячет его от `git status`.
 - Артефакты, которые **не** ignored и **не** tracked, ломают проверку чистого дерева, на которую опираются гейты. `_audit/` и `_audit_xfer/` (дампы внешнего аудита, включая `.tar` с исходниками) находились в таком состоянии с 2026-08-11; **решение владельца 2026-08-12 — оставить локальными: оба каталога добавлены в `.gitignore`**. Они не коммитятся и остаются историческим evidence, а не текущей спецификацией.
 - **Отказ пост-доставочного шага не должен отменять уже доставленный результат.**

@@ -208,22 +208,22 @@ async def writer_operation(
         yield record
 
 
-def _uuid_literals(values: Iterable[Any], dialect: str) -> list[str]:
-    """The values as SQL literals of this dialect's UUID storage, or a loud failure.
+def _uuid_literals(values: Iterable[Any]) -> list[str]:
+    """The values as SQL literals of PostgreSQL's native `uuid`, or a loud failure.
 
     EVERY VALUE GOES THROUGH `uuid.UUID` FIRST, which is what makes the interpolation below safe -
     nothing that is not a UUID can reach the statement.
 
-    AND THE SPELLING IS PER DIALECT, which is not cosmetic. `sqlalchemy.Uuid(as_uuid=True)` stores
-    the 32-character hex WITHOUT dashes on SQLite and a native `uuid` on PostgreSQL, so a purge
-    written with the canonical dashed form matches nothing at all on the default tier - it deletes
+    THE SPELLING WAS PER DIALECT until 017 stage 3, which is not cosmetic. `sqlalchemy.Uuid(as_uuid=True)`
+    stored the 32-character hex WITHOUT dashes on SQLite and a native `uuid` on PostgreSQL, so a purge
+    written with the canonical dashed form matched nothing at all on the SQLite tier - it deletes
     no rows, raises nothing, and the next `DELETE FROM participants` fails on a foreign key whose
     referent the teardown believed it had removed. Measured 2026-09-12 while activating the
     journal, and it is exactly the shape of a cleanup that silently does nothing.
     """
 
     ids = [uuid.UUID(str(value)) for value in values]
-    return [value.hex if dialect == "sqlite" else str(value) for value in ids]
+    return [str(value) for value in ids]
 
 
 def _sql_in(values: Sequence[str]) -> str:
@@ -264,7 +264,7 @@ async def purge_test_ledger(
     connection = session_or_connection
     if not hasattr(connection, "exec_driver_sql"):
         connection = await connection.connection()
-    equivalents = _uuid_literals(equivalent_ids, connection.dialect.name)
+    equivalents = _uuid_literals(equivalent_ids)
 
     conditions: list[str] = []
     if equivalents:
@@ -297,7 +297,7 @@ async def purge_test_ledger(
         ).all()
     ]
     if operation_ids:
-        targets = _sql_in(_uuid_literals(operation_ids, connection.dialect.name))
+        targets = _sql_in(_uuid_literals(operation_ids))
         for statement in (
             f"DELETE FROM debt_journal_entries WHERE operation_id IN ({targets})",
             f"DELETE FROM debt_operation_equivalents WHERE operation_id IN ({targets})",

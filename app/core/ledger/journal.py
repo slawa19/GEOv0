@@ -227,7 +227,6 @@ class Reason:
     MONEY_FINITENESS = "money_finiteness"
     MONEY_MAGNITUDE = "money_magnitude"
     MONEY_QUANTIZATION = "money_quantization"
-    MONEY_ROUND_TRIP = "money_round_trip"
     UNVERIFIED_DEBT_WRITE = "unverified_debt_write"
     VERIFIED_WRITE_MISSING = "verified_write_missing"
     UNRECONCILED_DEBT_ROW = "unreconciled_debt_row"
@@ -477,38 +476,21 @@ def _as_decimal(value: Any) -> Decimal | None:
     return None
 
 
-def _round_trip(value: Decimal, dialect: Any) -> Decimal | None:
-    """What this dialect would store and read back for `value`, or None if it cannot be asked.
+def _check_storable(value: Decimal | None, *, what: str) -> None:
+    """The predicates of design v2 §4 rule 3, in order, each refusing under its own name.
 
-    Built from the column type's own processors so the answer is the dialect's, not this module's
-    opinion of it. On SQLite `Numeric` binds as a float and reads back through a scale-8 decimal
-    processor, which is where values above 2^26 stop round-tripping; on PostgreSQL both processors
-    are the identity.
-    """
+    They are separate and not one list called "storability", because each excludes values the
+    others let through, and a refusal has to name the rule it applied.
 
-    impl = Numeric(20, 8).dialect_impl(dialect)
-    bind = impl.bind_processor(dialect)
-    bound = bind(value) if bind is not None else value
-    try:
-        result = impl.result_processor(dialect, None)
-    except Exception:  # noqa: BLE001
-        # A dialect whose result processor needs the column type of a real result set, which this
-        # has no way to supply. asyncpg is the one in this repository (it raises "Unknown PG
-        # numeric type"), and there the answer is the identity anyway: asyncpg returns `NUMERIC`
-        # as `Decimal` untouched, which the full-width money test measures end to end rather than
-        # assuming here (`tests/integration/test_p015_b4a_journal_postgres.py`).
-        result = None
-    if result is None:
-        return bound if isinstance(bound, Decimal) else _as_decimal(bound)
-    return _as_decimal(result(bound))
-
-
-def _check_storable(value: Decimal | None, dialect: Any, *, what: str) -> None:
-    """The four predicates of design v2 §4 rule 3, in order, each refusing under its own name.
-
-    They are FOUR and not one list called "storability", because two of them pass on values the
-    others refuse: `1E12` and `Infinity` round-trip on SQLite byte for byte, so a round-trip
-    assertion on them proves nothing while looking like proof.
+    THE FOURTH PREDICATE, ROUND TRIP (`money_round_trip`), WAS DELETED in programme 017 stage 3
+    (slice S7), BY MEASUREMENT. It asked the column type's own bind and result processors what the
+    dialect would read back. On `postgresql+asyncpg` - the only driver `app/config.py` accepts - the
+    `Numeric` bind processor is `None` and the result processor cannot be built without a result-set
+    type, so the answer was the value itself, by identity: a probe over 250,015 values (edges of the
+    scale-8 domain and random atoms up to +-10^12) found `_round_trip(v) is v` for every one and the
+    refusal never fired. It could fire only on SQLite, where `Numeric` binds through float. PostgreSQL
+    holding the full `NUMERIC(20, 8)` domain exactly is measured end to end by
+    `tests/unit/test_p015_b4a_journal_mechanism.py::test_a_value_sqlite_would_change_is_exact_money_on_postgresql`.
     """
 
     if value is None:
@@ -531,15 +513,6 @@ def _check_storable(value: Decimal | None, dialect: Any, *, what: str) -> None:
             Reason.MONEY_QUANTIZATION,
             f"{what} is {value}, which does not fit scale 8 without changing it.",
             value=str(value),
-        )
-    stored = _round_trip(value, dialect)
-    if stored != value:
-        raise DebtJournalError(
-            Reason.MONEY_ROUND_TRIP,
-            f"{what} is {value}, and {dialect.name} would read it back as {stored}. The journal "
-            f"will not record a number the database is going to change.",
-            value=str(value),
-            stored=str(stored),
         )
 
 
@@ -1237,10 +1210,16 @@ def _on_release_savepoint(conn: Connection, name: str, context: Any) -> None:
 def _driver_transaction_probe(conn: Connection) -> tuple[bool | None, str]:
     """Does the DRIVER have a transaction open right now, and how do we know? `None` when it will not say.
 
-    PUBLIC DRIVER API ON BOTH TIERS, deliberately, and the two do not share a spelling:
-    `asyncpg.Connection.is_in_transaction()` is a method, `sqlite3.Connection.in_transaction` an
-    attribute (aiosqlite forwards it). Neither is SQLAlchemy's opinion, which is the point - this is
-    asked precisely where SQLAlchemy's bookkeeping and the database have been measured to disagree.
+    PUBLIC DRIVER API, deliberately: `asyncpg.Connection.is_in_transaction()`, which reports the
+    transaction status the server sent with its last ReadyForQuery. It is not SQLAlchemy's opinion,
+    which is the point - this is asked precisely where SQLAlchemy's bookkeeping and the database have
+    been measured to disagree.
+
+    THE `in_transaction` ATTRIBUTE FALLBACK (sqlite3's spelling) WAS DELETED in programme 017 stage 3
+    (slice S7), BY MEASUREMENT: `asyncpg.Connection` (0.29.0) defines `is_in_transaction` as a method
+    on the class and has no `in_transaction` attribute, so the method branch answers on every asyncpg
+    connection and the fallback was unreachable. A driver without the method is now `None`
+    (unmeasured), which the `begin` guard refuses.
 
     THREE ANSWERS AND NOT TWO, and collapsing them was the defect (T1528, review item 4). The old
     body returned `bool(probe())`, which maps a probe answering `None` - or anything else that is not
@@ -1271,14 +1250,7 @@ def _driver_transaction_probe(conn: Connection) -> tuple[bool | None, str]:
         return None, (
             f"{type(driver).__name__}.is_in_transaction() answered {answer!r}, which is not a bool"
         )
-    flag = getattr(driver, "in_transaction", _ABSENT)
-    if isinstance(flag, bool):
-        return flag, f"{type(driver).__name__}.in_transaction"
-    if flag is _ABSENT:
-        return None, (
-            f"{type(driver).__name__} exposes neither `is_in_transaction()` nor `in_transaction`"
-        )
-    return None, f"{type(driver).__name__}.in_transaction is {flag!r}, which is not a bool"
+    return None, f"{type(driver).__name__} exposes no `is_in_transaction()`"
 
 
 def _driver_transaction_is_live(conn: Connection) -> bool | None:
@@ -1762,7 +1734,6 @@ def _signature_of(
 def _effects_of_flush(
     session: Session,
     op: _OpRecord,
-    dialect: Any,
     ordinal: int,
 ) -> tuple[list[_Effect], dict[_Signature, int], list[_RowState]]:
     """Read this flush's Debt movements out of the unit of work, before any SQL is sent.
@@ -1928,10 +1899,10 @@ def _effects_of_flush(
                 )
             after = current
 
-        _check_storable(before, dialect, what=f"Debt {debt_id} amount_before")
-        _check_storable(after, dialect, what=f"Debt {debt_id} amount_after")
+        _check_storable(before, what=f"Debt {debt_id} amount_before")
+        _check_storable(after, what=f"Debt {debt_id} amount_after")
         delta = (after or Decimal(0)) - (before or Decimal(0))
-        _check_storable(delta, dialect, what=f"Debt {debt_id} delta")
+        _check_storable(delta, what=f"Debt {debt_id} delta")
         if delta == 0:
             raise DebtJournalError(
                 Reason.MISSING_HISTORY,
@@ -2010,7 +1981,7 @@ def _before_flush(session: Session, flush_context: Any, instances: Any) -> None:
     try:
         op = _find_operation(session, conn, state)
         ordinal = op.flush_count + 1
-        effects, expected, states = _effects_of_flush(session, op, conn.engine.dialect, ordinal)
+        effects, expected, states = _effects_of_flush(session, op, ordinal)
     except DebtJournalError as exc:
         _poison(state, exc.reason)
         raise
@@ -2083,8 +2054,8 @@ def _bind_as(column: Any, value: Any, dialect: Any) -> Any:
 def _money_out(value: Any, dialect: Any) -> Decimal | None:
     """A money column's RAW DBAPI value as the `Decimal` `conn.execute` would have produced.
 
-    Built from the column type's own result processor for the same reason `_round_trip` is: on SQLite
-    `Numeric` comes back as a `float` and the scale-8 decimal processor is what makes it money again,
+    Built from the column type's own result processor so the answer is the dialect's: on SQLite (a
+    tier until programme 017) `Numeric` came back as a `float` and the scale-8 decimal processor is what makes it money again,
     so reading the raw value and comparing it would compare floats. asyncpg's processor refuses to be
     built without a result-set column type and returns `Decimal` untouched anyway, which is the
     `None` branch here and is measured end to end on the PostgreSQL tier.

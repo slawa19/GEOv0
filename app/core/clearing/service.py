@@ -323,9 +323,9 @@ class ClearingService:
         # Neither loses money - unlike the inject, whose owner would mark the
         # event fired and drop it (`real_runner_impl._is_transient_inject_db_error`). It appeared in
         # no measurement of T1525: two 180 s multi-session simulator runs, four full default tiers
-        # and five multi-session modules ten times each, all with zero busy errors from clearing. If
-        # it ever does, the shared predicate is
-        # `app.db.sqlite_transaction_control.sqlite_busy_error_name`.
+        # and five multi-session modules ten times each, all with zero busy errors from clearing.
+        # HISTORY: the SQLite half of this note no longer applies - SQLite, its busy predicate and
+        # `app/db/sqlite_transaction_control.py` left the application in programme 017 stage 3.
         return bool(cls._postgres_error_codes(exc) & {"40001", "40P01"})
 
     async def _reconcile_committed_execution(
@@ -1803,8 +1803,9 @@ class ClearingService:
             )
 
         if interlocked_equivalent_id is None and debts:
-            # T1544, the path without an interlock (SQLite, and PostgreSQL fallbacks that never took
-            # the owner lock): the equivalent is known only from the rows. Still before any mutation.
+            # T1544, the path without an interlock (PostgreSQL fallbacks that never took the owner
+            # lock; until 017 stage 3 also SQLite): the equivalent is known only from the rows.
+            # Still before any mutation.
             await self._refuse_if_equivalent_inactive({debt.equivalent_id for debt in debts})
 
         # 2026-08-22 / p010 (`F-010-3`).  The authoritative perimeter check, and the only

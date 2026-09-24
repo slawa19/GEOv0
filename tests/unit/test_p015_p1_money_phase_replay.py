@@ -472,8 +472,8 @@ async def test_a_conflict_at_the_commit_replays_only_because_the_rollback_succee
     """A commit that failed and then rolled back cleanly is known not to have landed.
 
     This is the branch that makes a commit-time conflict safe to repeat, and it rests on the
-    rollback, not on the error: `sqlite_busy_error_name` documents that a SQLite busy raised by
-    `commit()` can leave the transaction OPEN with its own rows visible inside it.
+    rollback, not on the error: `sqlite_busy_error_name` (deleted with SQLite, 017 stage 3 S7)
+    documented that a SQLite busy raised by `commit()` can leave the transaction OPEN with its own rows visible inside it.
     """
     run = _run()
     emitter = _Emitter()

@@ -21,8 +21,8 @@ SQLite tier is `tests/unit/test_p015_b4_transaction_contract.py` and
   `RootTransaction` subclass that commits through a different code path
   (`review-round2-codex.md` §2). The AUTOCOMMIT root SQLite cannot host EITHER, for a reason worth
   stating: an `isolation_level="AUTOCOMMIT"` SQLite engine would have to skip
-  `install_sqlite_transaction_control`, which `tests/unit/
-  test_p015_t1525_every_sqlite_engine_has_transaction_control.py` forbids - and a controlled engine
+  `install_sqlite_transaction_control`, which the T1525 engine guard forbade (both deleted with
+  SQLite, 017 stage 3 S7) - and a controlled engine
   is not in AUTOCOMMIT, because the control's `begin` listener sends a real `BEGIN`.
 
 THE STAND. Its own engine with `isolation_level="SERIALIZABLE"` and a real pool, never the
@@ -1186,8 +1186,8 @@ async def test_condition2_p_an_autocommit_root_is_refused_before_the_operation_o
     and no rollback can take any of it back.
 
     WHY IT IS A POSTGRESQL TEST even though condition 2 names no tier. On SQLite a
-    `create_async_engine(url, isolation_level="AUTOCOMMIT")` cannot exist in this repository:
-    `tests/unit/test_p015_t1525_every_sqlite_engine_has_transaction_control.py` requires every SQLite
+    `create_async_engine(url, isolation_level="AUTOCOMMIT")` could not exist in this repository:
+    the T1525 engine guard (deleted with SQLite, 017 stage 3 S7) required every SQLite
     engine construction to be paired with `install_sqlite_transaction_control`, and a controlled
     engine is not in AUTOCOMMIT - the control's `begin` listener sends a real `BEGIN`. Weakening that
     guard to host a counterexample would be trading a live money protection for a test.

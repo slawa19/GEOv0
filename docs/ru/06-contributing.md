@@ -237,9 +237,10 @@ $env:LOG_LEVEL = "DEBUG"
 .\.venv\Scripts\python.exe -m alembic -c migrations/alembic.ini history
 ```
 
-Эти команды работают **только против PostgreSQL**: `migrations/env.py` отказывает на SQLite с
-подсказкой `run: python scripts/init_sqlite_db.py`, и локальная dev-база по умолчанию как раз
-SQLite (`.local-run/geov0.db`). Для неё схема создаётся скриптом, а не Alembic.
+Эти команды работают **только против PostgreSQL**: `migrations/env.py` отказывает на любом
+другом URL, а приложение с программы 017 другого движка и не знает (`DATABASE_URL` — только
+`postgresql+asyncpg`). Собственную базу лаунчера `geov0_dev_<DbSlug>` `scripts/run_local.ps1`
+мигрирует сам.
 
 На **свежей** PostgreSQL-базе первому `upgrade head` нужно предусловие — колонка
 `alembic_version.version_num` шириной `VARCHAR(128)`, иначе переход 010 → 011 падает с

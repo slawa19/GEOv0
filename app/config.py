@@ -51,7 +51,8 @@ _DATABASE_URL_HOW_TO = (
     "see docs/ru/backend/postgres-local-portable.md - and then either run scripts/run_local.ps1 "
     "(it sets DATABASE_URL to its own database, geov0_dev_<DbSlug> on 127.0.0.1) or set "
     "DATABASE_URL=postgresql+asyncpg://<user>:<password>@127.0.0.1:5432/<database> yourself. "
-    "A SQLite file such as .local-run/geov0.db is no longer read; its data is not migrated."
+    "A database file from before programme 017, such as .local-run/geov0.db, is no longer read; "
+    "its data is not migrated."
 )
 
 

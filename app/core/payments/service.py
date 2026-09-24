@@ -64,13 +64,13 @@ def _iter_exception_chain(exc: BaseException):
     is an ordinary shape, and it made the terminal error inherit the conflict's identity: a
     SQLITE_CONSTRAINT_PRIMARYKEY (1555) raised inside a SQLITE_BUSY handler, and equally a
     PostgreSQL 23505 raised inside a 40001 handler, were both classified as retryable and retried
-    although retrying them cannot succeed. The predicate in `sqlite_transaction_control` was
-    narrowed for this reason; until this change the fix was defeated one layer up, because THIS
-    traversal still handed it nodes found through `__context__`.
+    although retrying them cannot succeed. The SQLite busy predicate (deleted with SQLite, 017 stage
+    3) was narrowed for this reason; until this change the fix was defeated one layer up, because
+    THIS traversal still handed it nodes found through `__context__`.
 
     Nothing legitimate is lost. SQLAlchemy raises `DBAPIError` FROM the driver error, so the
     genuine cause is always reachable as `orig` (and as `__cause__`, since `raise ... from` sets
-    it) on PostgreSQL exactly as on SQLite. `__context__` adds only the incidental case, which is
+    it). `__context__` adds only the incidental case, which is
     the masking hazard itself rather than a capability.
     """
 

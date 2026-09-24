@@ -394,7 +394,7 @@ async def lifespan(app: FastAPI):
                 app.state.redis = None
 
         # Ensure DB connections/threads are cleaned up when the app shuts down
-        # (important for pytest TestClient runs on Windows + aiosqlite).
+        # (important for pytest TestClient runs on Windows).
         try:
             await engine.dispose()
         except Exception:

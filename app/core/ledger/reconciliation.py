@@ -122,7 +122,6 @@ __all__ = [
     "PASSED",
     "ReconciliationOutcome",
     "ReconciliationReadError",
-    "ReconciliationSnapshotError",
     "STRUCTURAL_ONLY",
     "SUBSET",
     "UNVERIFIABLE",
@@ -182,10 +181,6 @@ class ReconciliationReadError(RuntimeError):
 
 class BaselineAlreadyTaken(RuntimeError):
     """The equivalent already has its one baseline. Nothing here re-baselines."""
-
-
-class ReconciliationSnapshotError(RuntimeError):
-    """The verification reads cannot be placed in one snapshot. An error, never `UNVERIFIABLE`."""
 
 
 def _atoms(value: Any, *, what: str) -> int:
@@ -940,18 +935,14 @@ async def open_verification_snapshot(session: Any) -> None:
       WAL read snapshot) and the verdict computed was PASSED - but the RESULT WRITE in the same
       transaction failed with SQLITE_BUSY_SNAPSHOT ("database is locked"): a read transaction cannot
       become a write transaction after someone else committed. So the caller ends this transaction
-      before it writes anything. An SQLite engine without the transaction control has no read
-      transaction at all, and is refused.
+      before it writes anything. An SQLite engine without the transaction control had no read
+      transaction at all, and was refused. (History: SQLite left in programme 017, stage 3, and with
+      it this function's dialect dispatch; the PostgreSQL recipe below is the one that was here.)
     """
 
-    bind = session.get_bind()
-    dialect = bind.dialect.name
-    if dialect == "postgresql":
-        await session.connection(
-            execution_options={"isolation_level": "REPEATABLE READ", "postgresql_readonly": True}
-        )
-    else:
-        raise ReconciliationSnapshotError(f"no snapshot recipe for dialect {dialect!r}")
+    await session.connection(
+        execution_options={"isolation_level": "REPEATABLE READ", "postgresql_readonly": True}
+    )
 
 
 @dataclass(frozen=True)
@@ -1053,16 +1044,11 @@ async def _open_reaction_transaction(session: Any) -> None:
     not read-only. PostgreSQL: REPEATABLE READ asked for here rather than leaned on from configuration,
     for the reason recorded on `open_verification_snapshot`; a concurrent update of the equivalent row
     then fails this transaction with 40001, which is an error of this reaction and is retried by the next
-    scheduled run. SQLite: the transaction control's deferred `BEGIN`; without it there is no snapshot
-    and the reaction is refused as the verifier is.
+    scheduled run. (Until programme 017 stage 3 a SQLite arm used the transaction control's deferred
+    `BEGIN` and anything else was refused; that dispatch left with SQLite.)
     """
 
-    bind = session.get_bind()
-    dialect = bind.dialect.name
-    if dialect == "postgresql":
-        await session.connection(execution_options={"isolation_level": "REPEATABLE READ"})
-    else:
-        raise ReconciliationSnapshotError(f"no reaction transaction recipe for dialect {dialect!r}")
+    await session.connection(execution_options={"isolation_level": "REPEATABLE READ"})
 
 
 async def _set_integrity_hold(session: Any, equivalent_id: uuid.UUID, result_id: uuid.UUID) -> None:

@@ -246,8 +246,8 @@ Phase-5 smoke. Наличие этих тестов не превращает в
 - Для тестов, требующих внешние сервисы, использовать маркер `@pytest.mark.e2e` (см. `pytest.ini`).
 
 Окружение (важно):
-- `TEST_DATABASE_URL=...` (SQLite по умолчанию)
-- `GEO_TEST_ALLOW_DB_RESET=1` (только для dedicated test DB, если не SQLite)
+- `TEST_DATABASE_URL` — PostgreSQL `geov0_test_<slug>`; незаданный раннер выводит из `-TaskSlug` (SQLite-URL тир отвергает, программа 017)
+- `GEO_TEST_ALLOW_DB_RESET=1` — только для dedicated test DB; для выведенного URL раннер ставит его сам
 
 ### 7.2 Playwright (simulator-ui)
 - Unit: `npm --prefix simulator-ui/v2 run test:unit`

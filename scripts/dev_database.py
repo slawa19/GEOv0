@@ -143,7 +143,7 @@ def assert_safe_dev_database_url(database_url: str) -> URL:
     if backend != "postgresql":
         raise UnsafeDevDatabaseError(
             f"The launcher database must be PostgreSQL; this URL is {backend or '<missing>'}. "
-            f"Programme 017 removed the SQLite engine from the launcher."
+            f"Since programme 017 PostgreSQL is the only engine the launcher runs on."
         )
 
     if not _is_loopback_host(url.host or ""):
