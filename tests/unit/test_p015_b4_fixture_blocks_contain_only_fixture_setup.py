@@ -34,7 +34,10 @@ WHAT THIS GUARD DOES NOT SEE, so its silence is not mistaken for more than it is
 from __future__ import annotations
 
 import ast
+import textwrap
 from pathlib import Path
+
+import pytest
 
 from tests.debt_setup import fixture_block_violations
 
@@ -114,3 +117,79 @@ def test_the_tree_really_uses_the_context_this_guard_is_about() -> None:
         f"in which case the default tier is about to go red - or the context was renamed and the "
         f"guard above is now checking nothing."
     )
+
+
+# ==============================================================================================
+# C21 - the guard itself, on three hand-written blocks. Moved here VERBATIM from
+# `tests/unit/test_p015_b4_write_guard.py` when 018 stage B1 deleted that module (manifest `T1808`
+# §5, row `:1403`): it depends only on `tests.debt_setup.fixture_block_violations`.
+# ==============================================================================================
+
+
+_FIXTURE_BLOCK_CALLING_APPLICATION_CODE = textwrap.dedent(
+    """
+    async def test_something(db_session):
+        async with debt_fixture_setup(session, label="seed") as op:
+            session.add(Debt(debtor_id=a, creditor_id=b, equivalent_id=e, amount=amount))
+            await PaymentEngine(session).commit(tx_id)
+            await session.flush()
+    """
+)
+
+_FIXTURE_BLOCK_HIDING_THE_CALL_IN_AN_EXPRESSION = textwrap.dedent(
+    """
+    async def test_something(db_session):
+        async with debt_fixture_setup(session, label="seed") as op:
+            debt.amount = (await PaymentEngine(session).quote(tx_id)).amount
+    """
+)
+
+_FIXTURE_BLOCK_THAT_IS_ALLOWED = textwrap.dedent(
+    """
+    async def test_something(db_session):
+        async with debt_fixture_setup(session, label="seed") as op:
+            debt = Debt(debtor_id=a, creditor_id=b, equivalent_id=e, amount=amount)
+            session.add(debt)
+            debt.amount = amount
+            await session.flush()
+    """
+)
+
+
+@pytest.mark.parametrize(
+    "source,expected_rejected",
+    [
+        (_FIXTURE_BLOCK_CALLING_APPLICATION_CODE, True),
+        (_FIXTURE_BLOCK_HIDING_THE_CALL_IN_AN_EXPRESSION, True),
+        (_FIXTURE_BLOCK_THAT_IS_ALLOWED, False),
+    ],
+    ids=["statement call", "call hidden in an expression", "allowed block"],
+)
+def test_c21_the_fixture_block_guard_rejects_application_calls(source, expected_rejected) -> None:
+    """C21. The AST guard over `async with debt_fixture_setup` blocks.
+
+    WHY A STATIC GUARD AND NOT ONLY A RUNTIME ONE. The test-local operation kind exists so tests can
+    put debts in place without pretending to be a payment. Its contract is that the block contains
+    only model construction, `session.add/add_all/delete`, attribute assignment and `flush` - if
+    application code runs inside it, the fixture's envelope claims authorship of effects the
+    application produced. The runtime nesting refusal (`Book`, contract item 2) catches only
+    application code that opens an operation OF ITS OWN; `_apply_flow` under a fixture context is
+    caught by nothing else (design v2 §7).
+
+    THE SECOND CASE is binding condition 7: the whitelist must be recursive over EXPRESSIONS. A
+    statement-level whitelist that allows "attribute assignment on a local" does not by itself
+    forbid an application call on the right-hand side.
+
+    MUTATION: make the whitelist statement-level only; the second case must go green when it should
+    be red.
+    """
+    violations = fixture_block_violations(source)
+    if expected_rejected:
+        assert violations, (
+            f"the guard accepted a fixture block that calls application code:\n{source}"
+        )
+    else:
+        assert not violations, (
+            f"the guard rejected a fixture block that only builds and flushes models: {violations}"
+            f"\n{source}"
+        )

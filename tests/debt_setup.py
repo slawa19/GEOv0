@@ -33,6 +33,11 @@ model construction, `session.add/add_all/delete`, assignment to a local or to an
 local, and `await session.flush()`. Per binding condition 7 the walk is RECURSIVE OVER EXPRESSIONS:
 a whitelist that allows "attribute assignment on a local" does not by itself forbid an application
 call on the right-hand side, and that hidden call is exactly the interesting case.
+
+DISPOSAL (018 stage B1, 2026-09-24). `purge_test_ledger`, which deleted a test's debts and journal rows
+through the driver, left with its last caller (`tests/p015_b4_support.drop_world`): the database now
+refuses every one of those deletes, and a test that commits runs on a disposable clone whose drop is
+the disposal (`tests/tier_on_a_clone.py`, `tests/p018_support.py::module_clone`).
 """
 
 from __future__ import annotations
@@ -51,7 +56,6 @@ __all__ = [
     "debt_fixture_setup",
     "fixture_block_violations",
     "writer_operation",
-    "purge_test_ledger",
 ]
 
 #: The operation kind reserved for fixture setup. `TEST_FIXTURE` and `SEED` are the only kinds the
@@ -178,130 +182,6 @@ async def writer_operation(
         ),
     ) as posting:
         yield posting
-
-
-def _uuid_literals(values: Iterable[Any]) -> list[str]:
-    """The values as SQL literals of PostgreSQL's native `uuid`, or a loud failure.
-
-    EVERY VALUE GOES THROUGH `uuid.UUID` FIRST, which is what makes the interpolation below safe -
-    nothing that is not a UUID can reach the statement.
-
-    THE SPELLING WAS PER DIALECT until 017 stage 3, which is not cosmetic. `sqlalchemy.Uuid(as_uuid=True)`
-    stored the 32-character hex WITHOUT dashes on SQLite and a native `uuid` on PostgreSQL, so a purge
-    written with the canonical dashed form matched nothing at all on the SQLite tier - it deletes
-    no rows, raises nothing, and the next `DELETE FROM participants` fails on a foreign key whose
-    referent the teardown believed it had removed. Measured 2026-09-12 while activating the
-    journal, and it is exactly the shape of a cleanup that silently does nothing.
-    """
-
-    ids = [uuid.UUID(str(value)) for value in values]
-    return [str(value) for value in ids]
-
-
-def _sql_in(values: Sequence[str]) -> str:
-    return ", ".join(f"'{value}'" for value in values)
-
-
-async def purge_test_ledger(
-    session_or_connection: Any,
-    *,
-    equivalent_ids: Iterable[Any] = (),
-    tx_ids: Iterable[str] = (),
-) -> None:
-    """Delete a test's debts AND the journal rows that describe them, through the driver.
-
-    WHY IT EXISTS (design v2 §8 R6). Cleanups across this suite end with
-    `session.execute(delete(Debt).where(...))`. Once the journal is armed that is Core DML against
-    `debts` outside a verified flush, and the write guard refuses it - correctly, because it is
-    indistinguishable from a writer moving money with no record. A teardown is not a money write,
-    so it goes round the guard the only way this module documents as permitted: `exec_driver_sql`,
-    which fires no `before_execute`.
-
-    AND IT DELETES THE JOURNAL ROWS TOO, which the old one-liner had no reason to. The journal's
-    foreign keys are RESTRICT: an entry naming an equivalent keeps that equivalent alive, so a
-    teardown that removed only the debts would leave the next test's `DELETE FROM equivalents`
-    failing on a reference it cannot see. That RESTRICT is deliberate (`C17`) - history must outlive
-    the debts - which is exactly why the disposal has to name the history.
-
-    SCOPED, NEVER "EVERYTHING". Rows are removed by the ids the caller names and by nothing else,
-    and every id is put through `uuid.UUID` first, which is both the injection guard and the reason
-    the statements can interpolate rather than bind (paramstyle differs between pysqlite and
-    asyncpg, and a teardown helper that worked on one tier only would be worse than none).
-
-    WHO STILL CALLS IT (018 B0b, 2026-09-24): only `tests/p015_b4_support.drop_world`, i.e. the
-    listener-mechanism modules stage B1 deletes or rewrites (`test_p015_b4_write_guard.py`,
-    `test_p015_b4_transaction_contract{,_postgres}.py`, `test_p015_b4_entries_and_money.py`,
-    `test_p015_b4_r4_fixture_migration_is_observably_equivalent.py`). Every other caller moved to a
-    disposable clone of the migrated template (`tests/tier_on_a_clone.py`), whose drop disposes of
-    the journal without deleting a row of it. Do not add a caller: from B1 the database refuses the
-    journal deletes this helper issues, and it leaves with its last caller.
-    """
-
-    transactions = [str(value) for value in tx_ids]
-    if not list(equivalent_ids) and not transactions:
-        return
-
-    connection = session_or_connection
-    if not hasattr(connection, "exec_driver_sql"):
-        connection = await connection.connection()
-    equivalents = _uuid_literals(equivalent_ids)
-
-    conditions: list[str] = []
-    if equivalents:
-        conditions.append(
-            f"id IN (SELECT operation_id FROM debt_journal_entries "
-            f"WHERE equivalent_id IN ({_sql_in(equivalents)}))"
-        )
-        conditions.append(
-            f"id IN (SELECT operation_id FROM debt_operation_equivalents "
-            f"WHERE equivalent_id IN ({_sql_in(equivalents)}))"
-        )
-    if transactions:
-        quoted = ", ".join(f"'{value}'" for value in transactions if "'" not in value)
-        if quoted:
-            conditions.append(f"tx_id IN ({quoted})")
-
-    # THE OPERATION IDS ARE RESOLVED FIRST, INTO PYTHON, and that is not a style choice: the filter
-    # below finds an envelope through its entries and its per-equivalent rows, and the first two
-    # statements delete exactly those. A third statement that re-evaluated the same subquery would
-    # match nothing at all, leaving the envelope behind - and an envelope holds a RESTRICT reference
-    # to `transactions.tx_id`, so the caller's next `DELETE FROM transactions` failed on a row the
-    # teardown believed it had removed. Measured 2026-09-12, arming the journal.
-    operation_filter = " OR ".join(conditions)
-    operation_ids = [
-        row[0]
-        for row in (
-            await connection.exec_driver_sql(
-                f"SELECT id FROM debt_operations WHERE {operation_filter}"  # noqa: S608
-            )
-        ).all()
-    ]
-    if operation_ids:
-        targets = _sql_in(_uuid_literals(operation_ids))
-        for statement in (
-            f"DELETE FROM debt_journal_entries WHERE operation_id IN ({targets})",
-            f"DELETE FROM debt_operation_equivalents WHERE operation_id IN ({targets})",
-            f"DELETE FROM debt_operations WHERE id IN ({targets})",
-        ):
-            await connection.exec_driver_sql(statement)
-    if equivalents:
-        # The reconciliation baseline is RESTRICT on the equivalent (step 5a), so it has to be named by
-        # the disposal too; the result rows would cascade, and are removed here so a purge is complete.
-        # STEP 5c: a hold's evidence row is RESTRICT while the hold points at it, so the teardown releases
-        # the hold first. A test-disposal statement, never an application path.
-        await connection.exec_driver_sql(
-            "UPDATE equivalents SET integrity_hold_result_id = NULL "
-            f"WHERE id IN ({_sql_in(equivalents)}) AND integrity_hold_result_id IS NOT NULL"
-        )
-        for statement in (
-            "DELETE FROM debt_reconciliation_baseline_offsets WHERE equivalent_id IN ({ids})",
-            "DELETE FROM debt_reconciliation_baselines WHERE equivalent_id IN ({ids})",
-            "DELETE FROM debt_reconciliation_results WHERE equivalent_id IN ({ids})",
-        ):
-            await connection.exec_driver_sql(statement.format(ids=_sql_in(equivalents)))
-        await connection.exec_driver_sql(
-            f"DELETE FROM debts WHERE equivalent_id IN ({_sql_in(equivalents)})"
-        )
 
 
 async def add_debts(session: Any, debts: Iterable[Any], *, label: str = "setup") -> Sequence[Any]:

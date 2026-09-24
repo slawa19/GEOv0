@@ -42,7 +42,13 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
 
-__all__ = ["CorruptionHelperError", "corrupt", "probe", "require_the_privilege"]
+__all__ = [
+    "CorruptionHelperError",
+    "corrupt",
+    "probe",
+    "probe_statements",
+    "require_the_privilege",
+]
 
 _REPLICA = "SET LOCAL session_replication_role = replica"
 
@@ -95,6 +101,35 @@ async def corrupt(url: str, statements: Sequence[str]) -> None:
                 await connection.exec_driver_sql(_REPLICA)
                 for statement in statements:
                     await connection.exec_driver_sql(statement)
+    finally:
+        await engine.dispose()
+
+
+async def probe_statements(url: str, statements: Sequence[str]) -> DBAPIError | None:
+    """Run `statements` in order with the triggers off and ROLL BACK: the error that refused one, or None.
+
+    `probe` for a forgery that needs more than one row (an entry and the envelope it names), and that
+    must be told apart by WHICH rule refused it - so the whole `DBAPIError` comes back, message and
+    SQLSTATE, not only the code. Nothing is committed; the first refused statement ends the probe.
+    """
+
+    _require_disposable(url)
+    engine = create_async_engine(url, poolclass=NullPool)
+    try:
+        async with engine.connect() as connection:
+            await require_the_privilege(connection)
+            await connection.rollback()
+            transaction = await connection.begin()
+            try:
+                await connection.exec_driver_sql(_REPLICA)
+                for statement in statements:
+                    try:
+                        await connection.exec_driver_sql(statement)
+                    except DBAPIError as exc:
+                        return exc
+                return None
+            finally:
+                await transaction.rollback()
     finally:
         await engine.dispose()
 
