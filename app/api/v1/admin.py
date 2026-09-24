@@ -68,6 +68,7 @@ from app.schemas.trustline import TrustLine as TrustLineSchema
 from app.core.clearing.service import ClearingService
 from app.core.admin.metrics import compute_participant_metrics, is_ratio_below_threshold
 from app.core.trustlines.service import TrustLineService
+from app.core.money_boundary import MoneyBoundary
 from app.core.payments.engine import PaymentEngine
 from sqlalchemy.exc import IntegrityError
 from app.utils.exceptions import (
@@ -1328,8 +1329,8 @@ async def admin_update_equivalent(
         # holding it through the commit below leaves two outcomes only: the clearing commits before
         # this PATCH returns, or this PATCH commits first and the clearing refuses. Payments are
         # bound to the same cutoff by their commit-time `FOR SHARE` read instead (see
-        # `PaymentEngine.refuse_inactive_equivalents`). Same call as the delete path below.
-        await PaymentEngine(db).acquire_staged_equivalent_owner_locks([eq.id])
+        # `MoneyBoundary.refuse_inactive_equivalents`). Same call as the delete path below.
+        await MoneyBoundary(db).acquire_staged_equivalent_owner_locks([eq.id])
 
     before = {
         "symbol": eq.symbol,
@@ -1441,7 +1442,7 @@ async def admin_clear_equivalent_integrity_hold(
     if eq is None:
         raise NotFoundException(f"Equivalent {code} not found")
 
-    await PaymentEngine(db).acquire_staged_equivalent_owner_locks([eq.id])
+    await MoneyBoundary(db).acquire_staged_equivalent_owner_locks([eq.id])
 
     try:
         hold_result_id = (
@@ -1549,7 +1550,7 @@ async def admin_delete_equivalent(
     # delete. Payments and clearing hold the same lock for their whole commit, so neither can create
     # a debt between the usage count below and the commit. The RESTRICT foreign key remains the
     # guarantee; the lock only narrows the window.
-    await PaymentEngine(db).acquire_staged_equivalent_owner_locks([eq.id])
+    await MoneyBoundary(db).acquire_staged_equivalent_owner_locks([eq.id])
 
     if eq.is_active:
         raise ConflictException("Deactivate equivalent before delete")

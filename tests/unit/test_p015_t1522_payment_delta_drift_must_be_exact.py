@@ -1,6 +1,6 @@
 """RT-015-12 / T1522: the payment delta check accepts being wrong by one whole atom.
 
-WHAT THE CHECK IS FOR. `PaymentEngine.check_payment_delta` is the barrier between "the flows we
+WHAT THE CHECK IS FOR. `MoneyBoundary.check_payment_delta` (`app/core/money_boundary.py`) is the barrier between "the flows we
 intended" and "what the ledger actually holds". It recomputes each participant's net position after
 the write and compares the movement against the flows that were applied. It is the only place on
 the payment path that compares an intention with a durable effect - `check_trust_limits` and
@@ -35,7 +35,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.payments.engine import PaymentEngine
+from app.core.money_boundary import MoneyBoundary
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
@@ -90,7 +90,7 @@ async def test_one_quantum_of_drift_is_detected(db_session: AsyncSession) -> Non
     stored = declared + _QUANTUM
     eq, sender, receiver = await _seed(db_session, stored)
 
-    engine = PaymentEngine(db_session)
+    engine = MoneyBoundary(db_session)
 
     with pytest.raises(IntegrityViolationException) as exc:
         await engine.check_payment_delta(
@@ -117,7 +117,7 @@ async def test_an_exact_match_stays_silent(db_session: AsyncSession) -> None:
     declared = Decimal("10.00000000")
     eq, sender, receiver = await _seed(db_session, declared)
 
-    engine = PaymentEngine(db_session)
+    engine = MoneyBoundary(db_session)
     await engine.check_payment_delta(
         equivalent_id=eq.id,
         flows=[(sender.id, receiver.id, declared)],
@@ -139,7 +139,7 @@ async def test_a_drift_the_barrier_already_caught_is_still_caught(
     stored = declared + 2 * _QUANTUM
     eq, sender, receiver = await _seed(db_session, stored)
 
-    engine = PaymentEngine(db_session)
+    engine = MoneyBoundary(db_session)
     with pytest.raises(IntegrityViolationException) as exc:
         await engine.check_payment_delta(
             equivalent_id=eq.id,
@@ -163,7 +163,7 @@ def test_the_barrier_compares_against_zero_and_not_against_a_quantum() -> None:
     012 counter-check patches, and a pin on source text would have gone green the moment the value
     moved out of the function.
     """
-    from app.core.payments.engine import _DELTA_DRIFT_TOLERANCE
+    from app.core.money_boundary import _DELTA_DRIFT_TOLERANCE
 
     assert _DELTA_DRIFT_TOLERANCE == Decimal("0"), (
         "the payment delta barrier must compare against exact zero: on a scale-8 ledger every "

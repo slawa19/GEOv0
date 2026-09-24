@@ -43,6 +43,7 @@ from sqlalchemy import insert, text, update
 from sqlalchemy.exc import IntegrityError
 
 from app.config import settings
+from app.core.money_boundary import MoneyBoundary
 from app.core.payments.engine import PaymentEngine
 from app.core.payments.service import PaymentService
 from app.db.models.equivalent import Equivalent
@@ -346,7 +347,7 @@ async def test_the_api_path_refusal_table_today(api, factory, monkeypatch) -> No
     }, premises
 
     # ── the table ─────────────────────────────────────────────────────────────────────────────
-    inactive, hold = PaymentEngine.EQUIVALENT_INACTIVE_REASON, PaymentEngine.EQUIVALENT_INTEGRITY_HOLD_REASON
+    inactive, hold = MoneyBoundary.EQUIVALENT_INACTIVE_REASON, MoneyBoundary.EQUIVALENT_INTEGRITY_HOLD_REASON
     assert observed == {
         "routing_before_new": {
             "first": (400, "E002", None), "stored": None,
@@ -454,7 +455,7 @@ async def test_the_staged_path_refusal_table_today(factory, monkeypatch) -> None
             "replay": str(replay.result.status),
         }
 
-    inactive, hold = PaymentEngine.EQUIVALENT_INACTIVE_REASON, PaymentEngine.EQUIVALENT_INTEGRITY_HOLD_REASON
+    inactive, hold = MoneyBoundary.EQUIVALENT_INACTIVE_REASON, MoneyBoundary.EQUIVALENT_INTEGRITY_HOLD_REASON
     assert observed == {
         "stop_before_tick": {
             "staged": ("ConflictException", inactive), "tick_committed": 1, "counted": (1, 0),

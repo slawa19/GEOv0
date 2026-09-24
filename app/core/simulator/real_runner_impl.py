@@ -11,7 +11,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 
 from app.core.ledger.book import Book, operation_for
-from app.core.payments.engine import PaymentEngine
+from app.core.money_boundary import MoneyBoundary
 from app.utils.exceptions import ConflictException
 from app.core.simulator.adaptive_clearing_policy import AdaptiveClearingPolicyConfig
 from app.core.simulator.artifacts import ArtifactsManager
@@ -612,8 +612,8 @@ class RealRunnerImpl:
                         session, run=run, scenario=scenario, event=event
                     )
                 # The owner locks open the transaction the event is staged and committed in. A
-                # fresh engine per attempt: its advisory-lock deadline is per unit of work.
-                await PaymentEngine(session).acquire_staged_equivalent_owner_locks(lock_ids)
+                # fresh boundary per attempt: its advisory-lock deadline is per unit of work.
+                await MoneyBoundary(session).acquire_staged_equivalent_owner_locks(lock_ids)
                 intent_equivalent_ids = await self._resolve_inject_debt_equivalent_ids(
                     session, scenario=scenario, event=event
                 )
@@ -634,7 +634,7 @@ class RealRunnerImpl:
                 # retried below on a fresh snapshot; the refusal is a non-retryable
                 # `ConflictException`, which the handler below rolls back and re-raises, with no
                 # envelope ever opened.
-                await PaymentEngine(session).refuse_inactive_equivalents(
+                await MoneyBoundary(session).refuse_inactive_equivalents(
                     intent_equivalent_ids, row_lock=True
                 )
                 # THE OPERATION ENVELOPE (programme 015, phase B step 4). Staging and its flush
@@ -734,7 +734,7 @@ class RealRunnerImpl:
                     if isinstance(exc, ConflictException)
                     else None
                 )
-                if refusal_reason in PaymentEngine.MONEY_STOP_REASONS:
+                if refusal_reason in MoneyBoundary.MONEY_STOP_REASONS:
                     # T1544: the operator's stop refuses THIS inject; it is not an error of the run.
                     # The same rule the payments phase already applies to a refused payment (a 4xx
                     # becomes REJECTED and the tick continues): consumed with a visible note, no
@@ -756,7 +756,7 @@ class RealRunnerImpl:
                         event_time_ms=event_time_ms,
                         description=(
                             "inject refused (equivalent inactive)"
-                            if refusal_reason == PaymentEngine.EQUIVALENT_INACTIVE_REASON
+                            if refusal_reason == MoneyBoundary.EQUIVALENT_INACTIVE_REASON
                             else "inject refused (equivalent integrity hold)"
                         ),
                     )

@@ -48,7 +48,7 @@ from sqlalchemy import event, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session
 
-from app.core.payments.engine import _EQUIVALENT_OWNER_LOCK_NAMESPACE, PaymentEngine
+from app.core.money_boundary import _EQUIVALENT_OWNER_LOCK_NAMESPACE, MoneyBoundary
 from app.core.simulator.models import RunRecord
 from app.core.simulator.real_runner import RealRunner
 from app.db.models.debt import Debt
@@ -77,7 +77,7 @@ _HOLDS_OWNER_LOCK_SQL = text(
 
 
 def _objid(equivalent_id: uuid.UUID) -> int:
-    return PaymentEngine._equivalent_owner_lock_key(equivalent_id) & 0xFFFFFFFF
+    return MoneyBoundary._equivalent_owner_lock_key(equivalent_id) & 0xFFFFFFFF
 
 
 @dataclass

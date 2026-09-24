@@ -156,7 +156,7 @@ async def test_admin_abort_tx_uses_lock_protected_already_aborted_metric(
         await engine.session.flush()
 
     monkeypatch.setattr(
-        'app.core.payments.engine.PaymentEngine._acquire_tx_advisory_lock',
+        'app.core.money_boundary.MoneyBoundary._acquire_tx_advisory_lock',
         _concurrent_abort_wins,
     )
     success_before = _abort_metric_value('success')

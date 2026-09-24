@@ -70,7 +70,7 @@ async def test_concurrent_same_cycle_serializable_resolves_one_durable_occurrenc
         pytest.skip("Postgres-only: SERIALIZABLE clearing reconciliation")
 
     from app.core.clearing.service import ClearingService
-    from app.core.payments.engine import PaymentEngine
+    from app.core.money_boundary import MoneyBoundary
     from app.db.models.audit_log import IntegrityAuditLog
     from app.db.models.debt import Debt
     from app.db.models.equivalent import Equivalent
@@ -160,7 +160,7 @@ async def test_concurrent_same_cycle_serializable_resolves_one_durable_occurrenc
         release_first_owner = asyncio.Event()
         acquisition_count = 0
         acquisition_pids: dict[int, int] = {}
-        original_acquire = PaymentEngine.acquire_session_equivalent_owner_lock
+        original_acquire = MoneyBoundary.acquire_session_equivalent_owner_lock
 
         async def _coordinate_owner_acquisition(engine, equivalent_id):
             nonlocal acquisition_count
@@ -178,7 +178,7 @@ async def test_concurrent_same_cycle_serializable_resolves_one_durable_occurrenc
             return result
 
         monkeypatch.setattr(
-            PaymentEngine,
+            MoneyBoundary,
             "acquire_session_equivalent_owner_lock",
             _coordinate_owner_acquisition,
         )

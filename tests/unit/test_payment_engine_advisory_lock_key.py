@@ -2,7 +2,7 @@ import uuid
 
 import pytest
 
-from app.core.payments.engine import PaymentEngine
+from app.core.money_boundary import MoneyBoundary
 
 
 def test_segment_lock_key_is_deterministic_and_bigint_range():
@@ -12,19 +12,19 @@ def test_segment_lock_key_is_deterministic_and_bigint_range():
     b = uuid.uuid4()
     c = uuid.uuid4()
 
-    k1 = PaymentEngine._segment_lock_key(equivalent_id=eq, from_participant_id=a, to_participant_id=b)
-    k2 = PaymentEngine._segment_lock_key(equivalent_id=eq, from_participant_id=a, to_participant_id=b)
-    reverse = PaymentEngine._segment_lock_key(
+    k1 = MoneyBoundary._segment_lock_key(equivalent_id=eq, from_participant_id=a, to_participant_id=b)
+    k2 = MoneyBoundary._segment_lock_key(equivalent_id=eq, from_participant_id=a, to_participant_id=b)
+    reverse = MoneyBoundary._segment_lock_key(
         equivalent_id=eq,
         from_participant_id=b,
         to_participant_id=a,
     )
-    other_pair = PaymentEngine._segment_lock_key(
+    other_pair = MoneyBoundary._segment_lock_key(
         equivalent_id=eq,
         from_participant_id=a,
         to_participant_id=c,
     )
-    other_equivalent = PaymentEngine._segment_lock_key(
+    other_equivalent = MoneyBoundary._segment_lock_key(
         equivalent_id=other_eq,
         from_participant_id=a,
         to_participant_id=b,
@@ -76,10 +76,10 @@ async def test_acquire_segment_advisory_locks_uses_sorted_key_order(monkeypatch)
         assert equivalent_id == eq_id
         return key_map[(from_participant_id, to_participant_id)]
 
-    monkeypatch.setattr(PaymentEngine, "_segment_lock_key", staticmethod(_fake_segment_lock_key))
+    monkeypatch.setattr(MoneyBoundary, "_segment_lock_key", staticmethod(_fake_segment_lock_key))
 
     session = _Session()
-    engine = PaymentEngine(session)
+    engine = MoneyBoundary(session)
 
     await engine._acquire_segment_advisory_locks(
         equivalent_id=eq_id,

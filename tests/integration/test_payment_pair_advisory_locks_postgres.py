@@ -3,7 +3,7 @@ import uuid
 import pytest
 from sqlalchemy.exc import DBAPIError
 
-from app.core.payments.engine import PaymentEngine
+from app.core.money_boundary import MoneyBoundary
 
 
 
@@ -33,8 +33,8 @@ async def test_reverse_segments_contend_on_one_advisory_resource_postgres(
     reverse_map = {"A": participant_b, "B": participant_a}
 
     async with TestingSessionLocal() as holder, TestingSessionLocal() as waiter:
-        holder_engine = PaymentEngine(holder)
-        waiter_engine = PaymentEngine(waiter)
+        holder_engine = MoneyBoundary(holder)
+        waiter_engine = MoneyBoundary(waiter)
         waiter_engine._advisory_lock_budget_s = 0.2
 
         try:

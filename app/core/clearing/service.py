@@ -23,7 +23,7 @@ from app.utils.error_codes import ErrorCode
 from app.utils.exceptions import ConflictException, GeoException, TimeoutException
 from app.utils.metrics import CLEARING_EVENTS_TOTAL
 from app.utils.money import to_money_str
-from app.core.payments.engine import PaymentEngine
+from app.core.money_boundary import MoneyBoundary
 from app.core.payments.router import PaymentRouter
 from app.core.invariants import InvariantChecker
 from app.core.integrity import compute_integrity_checkpoint_for_equivalent
@@ -97,7 +97,7 @@ class ClearingService:
         PATCH holds the same lock through its commit.
         """
         try:
-            await PaymentEngine(self.session).refuse_inactive_equivalents(
+            await MoneyBoundary(self.session).refuse_inactive_equivalents(
                 equivalent_ids, row_lock=False
             )
         except ConflictException as refusal:
@@ -164,7 +164,7 @@ class ClearingService:
         async def _cleanup() -> None:
             try:
                 await work_session.rollback()
-                unlocked = await PaymentEngine(
+                unlocked = await MoneyBoundary(
                     work_session
                 ).release_session_equivalent_owner_lock(equivalent_id)
                 if lock_was_acquired and not unlocked:
@@ -1621,7 +1621,7 @@ class ClearingService:
         original_session = self.session
         try:
             try:
-                await PaymentEngine(
+                await MoneyBoundary(
                     work_session
                 ).acquire_session_equivalent_owner_lock(equivalent_id)
                 lock_was_acquired = True

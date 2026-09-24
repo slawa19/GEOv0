@@ -16,8 +16,8 @@ class Equivalent(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     # THE INTEGRITY HOLD (programme 015, step 5c, `T1546`). Not NULL = money does not move in this
     # equivalent: payment prepare and commit, clearing and real-simulator writes are refused at the
-    # T1544 boundary (`PaymentEngine.refuse_inactive_equivalents`, which reads this column in the same
-    # statement as `is_active`). Set only by the scheduled reaction to a CONFIRMED `FAILED`
+    # T1544 boundary (`MoneyBoundary.refuse_inactive_equivalents`, `app/core/money_boundary.py`, which reads this
+    # column in the same statement as `is_active`). Set only by the scheduled reaction to a CONFIRMED `FAILED`
     # (`app/core/ledger/reconciliation.py`, `react_to_failed`), pointing at that result row; cleared only
     # by `POST /admin/equivalents/{code}/integrity-hold/clear` after a later `PASSED`. A separate field
     # from `is_active` on purpose: deactivation hides an equivalent and permits its deletion, a hold

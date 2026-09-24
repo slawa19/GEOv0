@@ -28,8 +28,7 @@ import uuid
 import pytest
 from sqlalchemy import text
 
-from app.core.payments import engine as engine_module
-from app.core.payments.engine import PaymentEngine
+from app.core.money_boundary import _EQUIVALENT_OWNER_LOCK_NAMESPACE, MoneyBoundary
 
 _UNSIGNED = 0xFFFFFFFF
 
@@ -61,15 +60,15 @@ async def test_the_owner_lock_is_executed_and_held_on_the_default_tier(db_sessio
     equivalent_ids = [uuid.uuid4(), uuid.uuid4()]
     expected = {
         (
-            engine_module._EQUIVALENT_OWNER_LOCK_NAMESPACE & _UNSIGNED,
-            PaymentEngine._equivalent_owner_lock_key(equivalent_id) & _UNSIGNED,
+            _EQUIVALENT_OWNER_LOCK_NAMESPACE & _UNSIGNED,
+            MoneyBoundary._equivalent_owner_lock_key(equivalent_id) & _UNSIGNED,
         )
         for equivalent_id in equivalent_ids
     }
     before = await _held_owner_locks(db_session)
     assert not (expected & before), f"the owner locks were already held before the call: {before}"
 
-    await PaymentEngine(db_session)._acquire_equivalent_owner_locks(equivalent_ids)
+    await MoneyBoundary(db_session)._acquire_equivalent_owner_locks(equivalent_ids)
 
     held = await _held_owner_locks(db_session)
     assert expected <= held, (
@@ -83,5 +82,5 @@ async def test_an_empty_equivalent_set_takes_no_lock(db_session) -> None:
     """The counter-check: an empty set takes no lock on any engine, so it cannot stand in for one."""
 
     before = await _held_owner_locks(db_session)
-    await PaymentEngine(db_session)._acquire_equivalent_owner_locks([])
+    await MoneyBoundary(db_session)._acquire_equivalent_owner_locks([])
     assert await _held_owner_locks(db_session) == before

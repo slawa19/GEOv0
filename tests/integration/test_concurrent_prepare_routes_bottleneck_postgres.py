@@ -32,7 +32,7 @@ async def test_concurrent_payments_shared_bottleneck_commit_once_postgres(
 
     from sqlalchemy import text
 
-    from app.core.payments.engine import PaymentEngine
+    from app.core.money_boundary import MoneyBoundary
     from app.core.payments.service import PaymentService
     from app.config import settings
     from app.db.models.audit_log import IntegrityAuditLog
@@ -76,7 +76,7 @@ async def test_concurrent_payments_shared_bottleneck_commit_once_postgres(
     id_by_pid = {participant.pid: participant.id for participant in participants}
     a_pid, b_pid, c_pid, d_pid = pids
     tx_ids = [str(uuid.uuid4()), str(uuid.uuid4())]
-    original_acquire = PaymentEngine._acquire_equivalent_owner_locks
+    original_acquire = MoneyBoundary._acquire_equivalent_owner_locks
     acquire_calls = 0
     holder_entered = asyncio.Event()
     holder_acquired = asyncio.Event()
@@ -105,7 +105,7 @@ async def test_concurrent_payments_shared_bottleneck_commit_once_postgres(
         await original_acquire(self, equivalent_ids)
 
     monkeypatch.setattr(
-        PaymentEngine,
+        MoneyBoundary,
         "_acquire_equivalent_owner_locks",
         _synchronized_acquire,
     )

@@ -4,7 +4,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.payments.engine import PaymentEngine
+from app.core.money_boundary import MoneyBoundary
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
@@ -56,7 +56,7 @@ async def test_payment_engine_delta_check_raises_on_drift(db_session: AsyncSessi
         )
     await db_session.commit()
 
-    engine = PaymentEngine(db_session)
+    engine = MoneyBoundary(db_session)
 
     with pytest.raises(IntegrityViolationException) as e:
         await engine.check_payment_delta(

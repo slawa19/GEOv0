@@ -1,6 +1,5 @@
 import logging
 import asyncio
-import hashlib
 import random
 import time
 from dataclasses import dataclass
@@ -9,7 +8,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, List, Tuple, Awaitable, Callable, TypeVar
 from uuid import UUID
 
-from sqlalchemy import select, and_, or_, delete, update, func, text
+from sqlalchemy import select, and_, or_, delete, update, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import DBAPIError
 
@@ -30,6 +29,7 @@ from app.utils.exceptions import (
 from app.utils.metrics import PAYMENT_EVENTS_TOTAL
 
 from app.core.integrity import compute_integrity_checkpoint_for_equivalent
+from app.core.money_boundary import MoneyBoundary
 from app.core.ledger.book import (
     DEBT_OPERATION_IDENTITY_CONSTRAINTS as _DEBT_OPERATION_IDENTITY_CONSTRAINTS,
     Book,
@@ -67,31 +67,9 @@ _T = TypeVar("_T")
 class _EquivalentOwnerPreflightChanged(Exception):
     """Persisted payment flows changed before the tx lock was acquired."""
 
-# EXACT ZERO, and the constant is the subject of T1522 of programme 015.
-#
-# The payment delta barrier compared `abs(drift) > Decimal("0.00000001")` - one whole quantum of
-# `Numeric(20, 8)`, strict. Storage is scale 8 and, since 012/T1201, the money door refuses any
-# amount the column cannot hold unchanged, so every net position and every flow is a scale-8 value
-# and every possible drift is a MULTIPLE of one quantum. There is no sub-quantum drift left for a
-# tolerance to absorb - that was the 012-era phenomenon, when the door took scale 18 and the column
-# rounded underneath it. What the old constant admitted was therefore the SMALLEST corruption that
-# can exist: the ledger moving one atom more, or less, than the payment declared, unreported.
-#
-# Nor was it a concurrency mitigation, though it looks like one: `commit` holds an advisory lock
-# over the WHOLE equivalent for its unit of work, and this check is scoped to one equivalent, so no
-# foreign write lands between the two snapshots. And a race would produce a drift the size of the
-# other payment, not one atom - a mitigation shaped like this absorbs the smallest case and nothing
-# larger, which is a threshold, not a safeguard.
-#
-# It is a module constant rather than a local so that it can be named in a test: the 012
-# counter-check widens it deliberately, to reach the ledger state `F-012-1` is about now that this
-# barrier catches the 1e-9 drift a widened door produces.
-_DELTA_DRIFT_TOLERANCE = Decimal("0")
 
-# PostgreSQL's two-int advisory-lock key space is disjoint from the one-BIGINT
-# key space used by segment locks. The first int is a stable domain tag.
-_TX_ADVISORY_LOCK_NAMESPACE = 0x475458
-_EQUIVALENT_OWNER_LOCK_NAMESPACE = 0x474551
+# `_DELTA_DRIFT_TOLERANCE` (T1522), the owner/transaction lock namespaces and every lock primitive live
+# in `app/core/money_boundary.py` since programme 019 stage 2 (`T1903`).
 
 
 @dataclass(frozen=True)
@@ -108,9 +86,9 @@ class _ValidatedPrepareLock:
     flows: tuple[_PersistedPaymentFlow, ...]
 
 
-class PaymentEngine:
+class PaymentEngine(MoneyBoundary):
     def __init__(self, session: AsyncSession):
-        self.session = session
+        super().__init__(session)
         from app.config import settings
 
         self.lock_ttl_seconds = settings.PREPARE_LOCK_TTL_SECONDS
@@ -121,181 +99,8 @@ class PaymentEngine:
         self._retry_attempts = settings.COMMIT_RETRY_ATTEMPTS
         self._retry_base_delay_s = settings.COMMIT_RETRY_BASE_DELAY_MS / 1000.0
         self._retry_max_delay_s = settings.COMMIT_RETRY_MAX_DELAY_MS / 1000.0
-        total_timeout_s = float(settings.PAYMENT_TOTAL_TIMEOUT_SECONDS or 10)
-        commit_timeout_s = float(settings.COMMIT_TIMEOUT_SECONDS or 5)
-        self._advisory_lock_budget_s = max(
-            0.001,
-            min(total_timeout_s, commit_timeout_s),
-        )
-        self._advisory_lock_timeout_enabled = True
-        self._advisory_lock_deadline: float | None = None
-
-    @staticmethod
-    def _segment_lock_key(
-        *, equivalent_id: UUID, from_participant_id: UUID, to_participant_id: UUID
-    ) -> int:
-        """Compute a stable BIGINT advisory lock key for a reciprocal pair.
-
-        Lock identity is intentionally unordered because both payment directions
-        mutate the same reciprocal Debt resource. Persisted flow direction remains
-        unchanged. The first 8 SHA-256 bytes form a signed Postgres BIGINT.
-        """
-        participant_a, participant_b = sorted(
-            (from_participant_id.bytes, to_participant_id.bytes)
-        )
-        digest = hashlib.sha256(
-            equivalent_id.bytes + participant_a + participant_b
-        ).digest()
-        return int.from_bytes(digest[:8], byteorder="big", signed=True)
-
-    @staticmethod
-    def _tx_lock_key(tx_id: str) -> int:
-        """Compute a stable signed INT key inside the transaction-lock domain."""
-        digest = hashlib.sha256(str(tx_id).encode("utf-8")).digest()
-        return int.from_bytes(digest[:4], byteorder="big", signed=True)
-
-    @staticmethod
-    def _equivalent_owner_lock_key(equivalent_id: UUID) -> int:
-        """Compute a stable signed INT key inside the equivalent-owner domain."""
-        digest = hashlib.sha256(equivalent_id.bytes).digest()
-        return int.from_bytes(digest[:4], byteorder="big", signed=True)
-
-    async def _acquire_equivalent_owner_locks(
-        self,
-        equivalent_ids: set[UUID] | list[UUID] | tuple[UUID, ...],
-    ) -> None:
-        """Acquire the complete equivalent owner set in one global order."""
-        keys = sorted(
-            {
-                self._equivalent_owner_lock_key(equivalent_id)
-                for equivalent_id in equivalent_ids
-            }
-        )
-        for key in keys:
-            await self._set_local_advisory_lock_timeout()
-            await self.session.execute(
-                text("SELECT pg_advisory_xact_lock(:namespace, :key)"),
-                {
-                    "namespace": _EQUIVALENT_OWNER_LOCK_NAMESPACE,
-                    "key": key,
-                },
-            )
-
-    async def acquire_staged_equivalent_owner_locks(
-        self,
-        equivalent_ids: set[UUID] | list[UUID] | tuple[UUID, ...],
-    ) -> None:
-        """Acquire a caller-owned staged batch's complete equivalent set."""
-        previous_lock_timeout = await self.session.scalar(text("SHOW lock_timeout"))
-        acquired = False
-        try:
-            await self._acquire_equivalent_owner_locks(equivalent_ids)
-            acquired = True
-        finally:
-            # Staged callers own a larger outer transaction. The payment owner-lock
-            # deadline must not become the timeout policy for later clearing,
-            # drift or persistence statements in that transaction. If acquisition
-            # itself fails/cancels, the outer owner rolls back the unusable UoW.
-            if acquired:
-                await self.session.execute(
-                    text(
-                        "SELECT set_config('lock_timeout', :lock_timeout, true)"
-                    ),
-                    {"lock_timeout": str(previous_lock_timeout)},
-                )
-
-    async def acquire_session_equivalent_owner_lock(
-        self,
-        equivalent_id: UUID,
-    ) -> None:
-        """Acquire the shared owner identity beyond a transaction rollback.
-
-        Clearing pins the physical connection, rolls back the acquisition
-        transaction to obtain a fresh SERIALIZABLE snapshot, and explicitly
-        releases this session-level lock before returning the connection.
-        """
-        await self._set_local_advisory_lock_timeout()
-        await self.session.execute(
-            text("SELECT pg_advisory_lock(:namespace, :key)"),
-            {
-                "namespace": _EQUIVALENT_OWNER_LOCK_NAMESPACE,
-                "key": self._equivalent_owner_lock_key(equivalent_id),
-            },
-        )
-
-    async def release_session_equivalent_owner_lock(
-        self,
-        equivalent_id: UUID,
-    ) -> bool:
-        """Release one session-level owner lock from a pinned connection."""
-        return bool(
-            await self.session.scalar(
-                text("SELECT pg_advisory_unlock(:namespace, :key)"),
-                {
-                    "namespace": _EQUIVALENT_OWNER_LOCK_NAMESPACE,
-                    "key": self._equivalent_owner_lock_key(equivalent_id),
-                },
-            )
-        )
-
-    async def _acquire_tx_advisory_lock(self, tx_id: str) -> None:
-        """Serialize all state transitions for one tx before authoritative reads."""
-        await self._set_local_advisory_lock_timeout()
-        await self.session.execute(
-            text("SELECT pg_advisory_xact_lock(:namespace, :key)"),
-            {
-                "namespace": _TX_ADVISORY_LOCK_NAMESPACE,
-                "key": self._tx_lock_key(tx_id),
-            },
-        )
-
-    async def _acquire_segment_advisory_locks(
-        self,
-        *,
-        equivalent_id: UUID,
-        routes: List[Tuple[List[str], Decimal]],
-        participant_map: dict[str, UUID],
-    ) -> None:
-        keys: set[int] = set()
-        for path, _route_amount in routes:
-            for i in range(len(path) - 1):
-                sender_id = participant_map[path[i]]
-                receiver_id = participant_map[path[i + 1]]
-                keys.add(
-                    self._segment_lock_key(
-                        equivalent_id=equivalent_id,
-                        from_participant_id=sender_id,
-                        to_participant_id=receiver_id,
-                    )
-                )
-
-        await self._acquire_segment_advisory_lock_keys(keys)
-
-    async def _acquire_segment_advisory_lock_keys(
-        self,
-        keys: set[int] | list[int] | tuple[int, ...],
-    ) -> None:
-        """Acquire unique segment keys in one global deadlock-safe order."""
-        for key in sorted(set(keys)):
-            await self._set_local_advisory_lock_timeout()
-            await self.session.execute(
-                text("SELECT pg_advisory_xact_lock(:key)"),
-                {"key": key},
-            )
-
-    async def _set_local_advisory_lock_timeout(self) -> None:
-        if not self._advisory_lock_timeout_enabled:
-            return
-        now = time.monotonic()
-        if self._advisory_lock_deadline is None:
-            self._advisory_lock_deadline = now + self._advisory_lock_budget_s
-        timeout_ms = max(
-            1,
-            int((self._advisory_lock_deadline - now) * 1000),
-        )
-        await self.session.execute(
-            text(f"SET LOCAL lock_timeout = '{timeout_ms}ms'")
-        )
+        # The advisory-lock budget, its switch and its deadline are `MoneyBoundary`'s
+        # (`app/core/money_boundary.py`, programme 019 stage 2).
 
     @classmethod
     def _parse_persisted_prepare_locks(
@@ -371,82 +176,6 @@ class PaymentEngine:
             for lock in validated_locks
             for flow in lock.flows
         }
-
-    #: `details.reason` of the operator-stop refusal (T1544). A state conflict, and deliberately NOT
-    #: retryable: `details.retryable=true` belongs to the serialization-conflict variant of `E008`,
-    #: and repeating a request against a deactivated equivalent cannot succeed.
-    EQUIVALENT_INACTIVE_REASON = "equivalent_inactive"
-
-    #: `details.reason` of the integrity-hold refusal (programme 015 step 5c, `T1546`). Same status,
-    #: code and non-retryability as the operator stop, and a distinct reason: a hold is set by the
-    #: scheduled reaction to a confirmed reconciliation `FAILED` and lifted only by an admin.
-    EQUIVALENT_INTEGRITY_HOLD_REASON = "equivalent_integrity_hold"
-
-    #: Every reason this boundary refuses with. The simulator classifies each as a REJECTION of the
-    #: one operation, never as an error of the run, and matches on this set (step 5c brief).
-    MONEY_STOP_REASONS = frozenset({EQUIVALENT_INACTIVE_REASON, EQUIVALENT_INTEGRITY_HOLD_REASON})
-
-    @classmethod
-    def inactive_equivalent_conflict(cls, codes: list[str]) -> ConflictException:
-        return ConflictException(
-            f"Equivalent {', '.join(codes)} is not active",
-            details={"reason": cls.EQUIVALENT_INACTIVE_REASON, "equivalents": codes},
-        )
-
-    @classmethod
-    def integrity_hold_conflict(cls, codes: list[str]) -> ConflictException:
-        return ConflictException(
-            f"Equivalent {', '.join(codes)} is under an integrity hold",
-            details={"reason": cls.EQUIVALENT_INTEGRITY_HOLD_REASON, "equivalents": codes},
-        )
-
-    async def refuse_inactive_equivalents(
-        self,
-        equivalent_ids: set[UUID] | list[UUID] | tuple[UUID, ...],
-        *,
-        row_lock: bool,
-    ) -> None:
-        """T1544: money does not move in an equivalent the operator has deactivated - and, since
-        step 5c (`T1546`), in one under an integrity hold.
-
-        ONE STATEMENT READS BOTH: `is_active` and `integrity_hold_result_id` live on the same row, so the
-        hold inherits every guarantee described below unchanged - the same `FOR SHARE`, the same owner
-        lock order, the same fresh post-lock snapshot in clearing. The scheduled reaction that sets a
-        hold holds the owner lock through its commit, exactly like the deactivating PATCH. ONE REASON
-        PER REFUSAL: an equivalent that is both inactive and held is refused as `equivalent_inactive`.
-        Neither refusal is retryable.
-
-        The flag is read as columns, never through an `Equivalent` instance: the payment service
-        loads one before routing, and its cached `is_active` can still say True.
-
-        `row_lock=True` is for the payment COMMIT and renders `FOR SHARE` on PostgreSQL. It is what
-        binds the payment/PATCH race, and the advisory owner lock does not: the application runs at
-        SERIALIZABLE, a commit takes its snapshot before it waits on that lock, and a plain read
-        after the wait still returns the value from before the PATCH committed (measured
-        2026-09-13, `FOR KEY SHARE` equally stale). `FOR SHARE` instead waits for an uncommitted
-        PATCH and then fails with 40001, which the unit-of-work retry turns into a fresh snapshot
-        that sees the stop; and a PATCH arriving after this read waits for the payment's commit.
-        The caller must already hold the equivalent owner lock - owner lock first, row lock second,
-        the same order as the PATCH, or the two can deadlock.
-
-        `row_lock=False` is for clearing, whose read happens in a snapshot taken AFTER its owner
-        lock, and for the PATCH lock that makes that sufficient see `admin_update_equivalent`.
-        """
-        ids = sorted(set(equivalent_ids), key=str)
-        if not ids:
-            return
-        stmt = select(
-            Equivalent.code, Equivalent.is_active, Equivalent.integrity_hold_result_id
-        ).where(Equivalent.id.in_(ids))
-        if row_lock:
-            stmt = stmt.with_for_update(read=True)
-        rows = (await self.session.execute(stmt)).all()
-        inactive = sorted(str(code) for code, is_active, _hold in rows if not is_active)
-        if inactive:
-            raise self.inactive_equivalent_conflict(inactive)
-        held = sorted(str(code) for code, _is_active, hold in rows if hold is not None)
-        if held:
-            raise self.integrity_hold_conflict(held)
 
     async def _read_payment_prestate(
         self,
@@ -1724,131 +1453,6 @@ class PaymentEngine:
         """
         await Book.current(self.session).apply(
             PaymentFlow(from_id=from_id, to_id=to_id, amount=amount, equivalent_id=equivalent_id)
-        )
-
-    async def _snapshot_net_positions(
-        self,
-        *,
-        equivalent_id: UUID,
-        participant_ids: set[UUID],
-    ) -> dict[UUID, Decimal]:
-        """Read net positions for participants (credits - debts) in an equivalent."""
-        if not participant_ids:
-            return {}
-
-        credits_rows = (
-            await self.session.execute(
-                select(Debt.creditor_id, func.sum(Debt.amount).label("total"))
-                .where(
-                    Debt.equivalent_id == equivalent_id,
-                    Debt.creditor_id.in_(participant_ids),
-                )
-                .group_by(Debt.creditor_id)
-            )
-        ).all()
-        debts_rows = (
-            await self.session.execute(
-                select(Debt.debtor_id, func.sum(Debt.amount).label("total"))
-                .where(
-                    Debt.equivalent_id == equivalent_id,
-                    Debt.debtor_id.in_(participant_ids),
-                )
-                .group_by(Debt.debtor_id)
-            )
-        ).all()
-
-        credits = {pid: (total or Decimal("0")) for pid, total in credits_rows}
-        debts = {pid: (total or Decimal("0")) for pid, total in debts_rows}
-
-        out: dict[UUID, Decimal] = {}
-        for pid in participant_ids:
-            out[pid] = Decimal(str(credits.get(pid, Decimal("0")))) - Decimal(
-                str(debts.get(pid, Decimal("0")))
-            )
-        return out
-
-    async def check_payment_delta(
-        self,
-        *,
-        equivalent_id: UUID,
-        flows: list[tuple[UUID, UUID, Decimal]],
-        net_positions_before: dict[UUID, Decimal],
-    ) -> None:
-        """Verify per-participant net position deltas match applied flows."""
-        if not flows:
-            return
-
-        expected_delta: dict[UUID, Decimal] = {}
-        for from_id, to_id, amount in flows:
-            expected_delta[from_id] = expected_delta.get(from_id, Decimal("0")) - Decimal(
-                str(amount)
-            )
-            expected_delta[to_id] = expected_delta.get(to_id, Decimal("0")) + Decimal(
-                str(amount)
-            )
-
-        positions_after = await self._snapshot_net_positions(
-            equivalent_id=equivalent_id,
-            participant_ids=set(expected_delta.keys()),
-        )
-
-        tolerance = _DELTA_DRIFT_TOLERANCE
-        drifts_raw: list[tuple[UUID, Decimal, Decimal, Decimal]] = []
-
-        for pid, expected in expected_delta.items():
-            before = net_positions_before.get(pid, Decimal("0"))
-            after = positions_after.get(pid, Decimal("0"))
-            actual = after - before
-            drift = actual - expected
-            if abs(drift) > tolerance:
-                drifts_raw.append((pid, expected, actual, drift))
-
-        if not drifts_raw:
-            return
-
-        # Best-effort enrichment: participant pids + equivalent code for downstream SSE.
-        pid_rows = (
-            await self.session.execute(
-                select(Participant.id, Participant.pid).where(
-                    Participant.id.in_([pid for pid, *_ in drifts_raw])
-                )
-            )
-        ).all()
-        uuid_to_pid = {row.id: str(row.pid) for row in pid_rows}
-        eq_code = (
-            await self.session.execute(
-                select(Equivalent.code).where(Equivalent.id == equivalent_id)
-            )
-        ).scalar_one_or_none()
-        eq_code_str = str(eq_code or equivalent_id)
-
-        drifts_list: list[dict[str, Any]] = []
-        for pid, expected, actual, drift in drifts_raw:
-            participant_pid = uuid_to_pid.get(pid)
-            drifts_list.append(
-                {
-                    "participant_id": str(participant_pid or pid),
-                    "participant_uuid": str(pid),
-                    "expected_delta": str(expected),
-                    "actual_delta": str(actual),
-                    "drift": str(drift),
-                }
-            )
-
-        total_drift = sum(abs(d) for *_pid, _e, _a, d in drifts_raw) / Decimal("2")
-
-        from app.utils.exceptions import IntegrityViolationException
-
-        raise IntegrityViolationException(
-            "Per-participant delta check failed",
-            details={
-                "invariant": "PAYMENT_DELTA_DRIFT",
-                "source": "delta_check",
-                "equivalent": eq_code_str,
-                "equivalent_id": str(equivalent_id),
-                "total_drift": str(total_drift),
-                "drifts": drifts_list,
-            },
         )
 
     async def _get_debt(

@@ -260,7 +260,7 @@ async def test_the_tick_commits_its_parent_session_before_clearing(
     # must release it. Without that commit clearing waits on the parent and never clears.
     from sqlalchemy import select as _select
 
-    from app.core.payments.engine import PaymentEngine
+    from app.core.money_boundary import MoneyBoundary
 
     async with deadlock_session_factory() as tmp:
         equivalent_id = (
@@ -271,7 +271,7 @@ async def test_the_tick_commits_its_parent_session_before_clearing(
     original_maybe_run_clearing = coordinator.maybe_run_clearing
 
     async def _parent_holds_the_owner_lock_then_clears(**kwargs):
-        await PaymentEngine(kwargs["session"])._acquire_equivalent_owner_locks({equivalent_id})
+        await MoneyBoundary(kwargs["session"])._acquire_equivalent_owner_locks({equivalent_id})
         parent_held_the_owner_lock.append(1)
         return await original_maybe_run_clearing(**kwargs)
 

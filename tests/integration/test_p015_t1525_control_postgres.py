@@ -46,6 +46,7 @@ import pytest_asyncio
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.core.money_boundary import MoneyBoundary
 from app.core.payments.engine import PaymentEngine
 from app.core.payments.router import PaymentRouter
 from app.core.payments.service import PaymentService
@@ -179,7 +180,7 @@ def _patch_delta_check_to_report_drift(monkeypatch, world: _World) -> list[Decim
             },
         )
 
-    monkeypatch.setattr(PaymentEngine, "check_payment_delta", _delta_check_reports_drift)
+    monkeypatch.setattr(MoneyBoundary, "check_payment_delta", _delta_check_reports_drift)
     return observed
 
 

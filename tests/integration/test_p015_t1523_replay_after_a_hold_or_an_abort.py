@@ -41,6 +41,7 @@ from sqlalchemy import func, insert, select, update
 
 from app.config import settings
 from app.core.ledger.reconciliation import FAILED
+from app.core.money_boundary import MoneyBoundary
 from app.core.payments.engine import PaymentEngine
 from app.db.journal_tables import debt_journal_entries, debt_operations
 from app.db.models.debt import Debt
@@ -244,7 +245,7 @@ async def test_a_committed_payment_still_replays_its_result_under_an_integrity_h
     assert fresh.status_code == 409, fresh.text
     error = fresh.json()["error"]
     assert error["code"] == "E008", error
-    assert error["details"]["reason"] == PaymentEngine.EQUIVALENT_INTEGRITY_HOLD_REASON, error
+    assert error["details"]["reason"] == MoneyBoundary.EQUIVALENT_INTEGRITY_HOLD_REASON, error
     assert error["details"]["equivalents"] == [code], error
 
 

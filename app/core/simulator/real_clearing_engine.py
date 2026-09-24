@@ -25,7 +25,7 @@ from app.core.simulator.models import RunRecord
 from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter
 from app.core.simulator.viz_patch_helper import VizPatchHelper
 from app.db.models.participant import Participant
-from app.core.payments.engine import PaymentEngine
+from app.core.money_boundary import MoneyBoundary
 from app.utils.exceptions import ConflictException, GeoException
 
 
@@ -729,7 +729,7 @@ class RealClearingEngine:
                     if isinstance(exc, ConflictException)
                     else None
                 )
-                if refusal_reason in PaymentEngine.MONEY_STOP_REASONS:
+                if refusal_reason in MoneyBoundary.MONEY_STOP_REASONS:
                     # T1544: the operator's stop refuses clearing in THIS equivalent; it is not a
                     # failure of the run. It arrives here unwrapped - `ClearingService` re-raises the
                     # refusal itself, and the loop above re-raises it (at once, or after a partial
