@@ -4,6 +4,8 @@ from urllib.parse import urlsplit
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import ArgumentError
 
 
 def canonicalize_http_origin(value: str) -> str | None:
@@ -41,6 +43,43 @@ def canonicalize_http_origin(value: str) -> str | None:
     return f"{scheme}://{serialized_host}{serialized_port}"
 
 
+#: The only driver the application runs on (programme 017: PostgreSQL is the only engine).
+REQUIRED_DATABASE_DRIVER = "postgresql+asyncpg"
+
+_DATABASE_URL_HOW_TO = (
+    "Start PostgreSQL - `docker compose up -d db` publishes it on 127.0.0.1:5432, or without Docker "
+    "see docs/ru/backend/postgres-local-portable.md - and then either run scripts/run_local.ps1 "
+    "(it sets DATABASE_URL to its own database, geov0_dev_<DbSlug> on 127.0.0.1) or set "
+    "DATABASE_URL=postgresql+asyncpg://<user>:<password>@127.0.0.1:5432/<database> yourself. "
+    "A SQLite file such as .local-run/geov0.db is no longer read; its data is not migrated."
+)
+
+
+def _require_postgresql_database_url(value: str) -> None:
+    """Refuse, at settings construction, any `DATABASE_URL` that is not `postgresql+asyncpg`.
+
+    The messages name the driver and never the URL: it carries the password.
+    """
+    if not value or not value.strip():
+        raise RuntimeError(
+            "DATABASE_URL is not set. The application runs only on PostgreSQL "
+            f"({REQUIRED_DATABASE_DRIVER}) and has no default database. {_DATABASE_URL_HOW_TO}"
+        )
+    try:
+        driver = make_url(value.strip()).drivername
+    except (ArgumentError, ValueError):
+        # `from None`: SQLAlchemy's message quotes the whole string, password included.
+        raise RuntimeError(
+            f"DATABASE_URL is not a valid database URL. {_DATABASE_URL_HOW_TO}"
+        ) from None
+    if driver != REQUIRED_DATABASE_DRIVER:
+        raise RuntimeError(
+            f"DATABASE_URL uses {driver!r}; the application runs only on PostgreSQL through "
+            f"asyncpg, so the URL must start with {REQUIRED_DATABASE_DRIVER}://. "
+            f"{_DATABASE_URL_HOW_TO}"
+        )
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -50,13 +89,14 @@ class Settings(BaseSettings):
         populate_by_name=True,
     )
 
-    # Database
-    DEFAULT_SQLITE_DATABASE_URL: ClassVar[str] = (
-        "sqlite+aiosqlite:///./.local-run/geov0.db"
-    )
-    DATABASE_URL: str = DEFAULT_SQLITE_DATABASE_URL
+    # Database. REQUIRED, and PostgreSQL through asyncpg only (programme 017, T1704): there is no
+    # default and no second engine. Declared with an empty default on purpose so that the refusal is
+    # ours (`_require_postgresql_database_url`, a RuntimeError naming only the driver) rather than
+    # pydantic's "Field required" / "Value error", whose `input_value` would echo the URL - password
+    # included - or, for a missing field, every other setting (AGENTS.md section 12).
+    DATABASE_URL: str = ""
 
-    # Database pool (applies to client/server DBs like Postgres; SQLite uses NullPool)
+    # Database pool
     DB_POOL_PRE_PING: bool = True
     DB_POOL_SIZE: int = 5
     DB_MAX_OVERFLOW: int = 10
@@ -273,6 +313,7 @@ class Settings(BaseSettings):
     def model_post_init(self, __context: Any) -> None:
         # Runs on every Settings() instantiation (including module-level `settings = Settings()`).
         self._resolve_environment_alias()
+        _require_postgresql_database_url(self.DATABASE_URL)
         self._guardrail_default_secrets()
         self._guardrail_simulator_session_secret()
         self._guardrail_csrf_allowlist()

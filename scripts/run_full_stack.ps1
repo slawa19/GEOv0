@@ -563,7 +563,7 @@ function Invoke-DevDatabaseCommand {
         # move is to start it rather than to look at the database. Every other code is a state that
         # a retry will not change, so the two are not reported with one sentence.
         if ($code -eq 4) {
-            throw "PostgreSQL is not reachable at ${PgHost}:${PgPort}, so $DevDatabaseName cannot be prepared. Start the cluster (docs/ru/backend/postgres-local-portable.md section 3) and run this again."
+            throw "PostgreSQL is not reachable at ${PgHost}:${PgPort}, so $DevDatabaseName cannot be prepared. Start it (docker compose up -d db, or without Docker docs/ru/backend/postgres-local-portable.md section 3) and run this again."
         }
         throw "dev_database.py $Command failed with exit code $code."
     }
@@ -615,7 +615,7 @@ function Initialize-LauncherDatabase {
     if ($ready -eq 0) { return }
     if ($ready -ne 3) {
         if ($ready -eq 4) {
-            throw "PostgreSQL stopped answering at ${PgHost}:${PgPort} while $DevDatabaseName was being checked. Start the cluster (docs/ru/backend/postgres-local-portable.md section 3) and run this again."
+            throw "PostgreSQL stopped answering at ${PgHost}:${PgPort} while $DevDatabaseName was being checked. Start it (docker compose up -d db, or without Docker docs/ru/backend/postgres-local-portable.md section 3) and run this again."
         }
         throw "The launcher database $DevDatabaseName is not ready (dev_database.py ready exited $ready); the reason is printed above. It is not safe to start the stack on it."
     }
@@ -717,7 +717,8 @@ function Get-SafeDatabaseDisplayUrl {
 
     $remainder = $displayRemainder
 
-    # Three slashes (for example SQLite) mean there is no authority/userinfo.
+    # Three slashes (for example a PostgreSQL Unix-socket URL, host in the query) mean there is no
+    # authority/userinfo.
     if (-not $remainder.StartsWith('/')) {
         $pathIndex = $remainder.IndexOf('/')
         $authority = if ($pathIndex -ge 0) {

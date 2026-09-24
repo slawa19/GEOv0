@@ -9,7 +9,11 @@ import pytest
 
 
 _ROOT = Path(__file__).resolve().parents[2]
-_MESSAGE = "Alembic migrations support PostgreSQL only."
+# Since 017 T1704 a SQLite URL is refused one step earlier than `migrations/env.py`'s own
+# `_require_postgresql_migration_url`: `env.py` imports `app.config`, whose settings refuse any
+# `DATABASE_URL` that is not `postgresql+asyncpg`. The refusal, the non-zero exit and "no revision
+# ran" are what this test holds; which of the two checks speaks first is not.
+_MESSAGE = "the application runs only on PostgreSQL through asyncpg"
 
 
 def _test_env(*, database_url: str) -> dict[str, str]:

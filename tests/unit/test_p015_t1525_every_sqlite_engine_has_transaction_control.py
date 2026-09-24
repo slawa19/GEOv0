@@ -40,9 +40,9 @@ EXEMPTIONS, each of which must be a refusal that exists in the code:
 
 * a file listed in `_POSTGRESQL_ONLY` together with the refusal that makes it PostgreSQL-only. The
   refusal is part of the entry: if it disappears from the file, the exemption is red.
-* a construction that a POSITIVE `sqlite` EARLY RETURN has already excluded - the shape of
-  `app/db/session.py`, where `if url.startswith("sqlite"): ... return engine` precedes the
-  PostgreSQL construction, so the later one is unreachable for a SQLite URL. An inverted test does
+* a construction that a POSITIVE `sqlite` EARLY RETURN has already excluded - the shape
+  `app/db/session.py` had until 017 T1704, where `if url.startswith("sqlite"): ... return engine`
+  preceded the PostgreSQL construction, so the later one was unreachable for a SQLite URL. An inverted test does
   not exempt anything, and a test whose polarity cannot be read fails closed.
 * a module of the test tier (`tests/`; until 017 stage 2c: a postgres-marked one), but ONLY through
   a refusal that `skip`s or `raise`s under a test
@@ -94,6 +94,15 @@ _INSTALLER = "install_sqlite_transaction_control"
 _POSTGRESQL_ONLY = {
     "migrations/env.py": "_require_postgresql_migration_url(database_url)",
     "scripts/measure_clearing_min_amount_plan.py": 'required_backend="postgresql"',
+    # 017 stage 3, T1704: the application's engine is built from `settings.DATABASE_URL` and nothing
+    # else, and the refusal lives where that value is made - `app/config.py` - not in this file; it is
+    # held by `_REFUSAL_ELSEWHERE` below and asserted behaviourally in `tests/unit/test_settings_guardrails.py`.
+    "app/db/session.py": "settings.DATABASE_URL",
+}
+
+#: Exemptions whose refusal lives in another file: (that file, the refusal's text).
+_REFUSAL_ELSEWHERE = {
+    "app/db/session.py": ("app/config.py", "_require_postgresql_database_url(self.DATABASE_URL)"),
 }
 
 #: A URL name the test session itself guarantees to be PostgreSQL: since 017 stage 2c
@@ -114,9 +123,13 @@ _POSTGRES_GUARANTEED_URL_NAMES = {"TEST_DATABASE_URL"}
 #: pragma tests of the five simulator modules and the tests of the SQLite mechanism were deleted, so
 #: no test builds a SQLite engine any more. What remains is the application's own construction, which
 #: the slices that remove SQLite from `app/` delete together with this guard.
-_KNOWN_SQLITE_CONSTRUCTIONS = {
-    "app/db/session.py",
-}
+#:
+#: `app/db/session.py` LEFT IT ON 2026-09-24 (017 stage 3, slice S6, T1704): its SQLite arm is gone and
+#: `DATABASE_URL` is refused at settings construction unless it is `postgresql+asyncpg`, so it is now a
+#: `_POSTGRESQL_ONLY` entry. The list is empty because the tree builds no SQLite engine any more; the
+#: scan still runs over every construction (`constructions_seen` below), and the planted counter-tests
+#: keep proving it goes red on one. Slice S7 deletes this guard with the mechanism.
+_KNOWN_SQLITE_CONSTRUCTIONS: set[str] = set()
 
 
 # ---------------------------------------------------------------------------
@@ -514,6 +527,12 @@ def test_every_postgresql_only_exemption_still_carries_its_refusal() -> None:
         assert refusal in source, (
             f"{relative} is exempt as PostgreSQL-only because of `{refusal}`, which is gone"
         )
+        if relative in _REFUSAL_ELSEWHERE:
+            owner, owner_refusal = _REFUSAL_ELSEWHERE[relative]
+            assert owner_refusal in (_ROOT / owner).read_text(encoding="utf-8"), (
+                f"{relative} is exempt because {owner} refuses a non-PostgreSQL URL with "
+                f"`{owner_refusal}`, which is gone"
+            )
 
 
 @pytest.mark.parametrize(

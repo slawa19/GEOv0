@@ -241,6 +241,16 @@ Recommended: use the repo runner script (it starts **Backend + Admin UI**, manag
 file-backed fallback. `docker compose up -d db`, or, on a machine without Docker,
 [`docs/ru/backend/postgres-local-portable.md`](docs/ru/backend/postgres-local-portable.md).
 
+**`DATABASE_URL` is required and must be `postgresql+asyncpg://...`.** The application has no default
+database: started without that variable, or with any other driver (SQLite included), it refuses at
+startup and says what to do. From the host there are two URLs, and neither uses the Compose name `db`
+(only containers resolve it) or `localhost` (the local cluster listens on IPv4 only):
+
+| Who | URL | Set by |
+|---|---|---|
+| the running app | `postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_dev_<DbSlug>` | `scripts/run_local.ps1` / `scripts/run_full_stack.ps1` |
+| the test tier | `postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_<TaskSlug>` | `scripts/verify_local.ps1` (as `TEST_DATABASE_URL`) |
+
 ```powershell
 .\scripts\run_local.ps1 start
 ```
@@ -381,9 +391,9 @@ Health endpoints (also available as `/api/v1/*` aliases):
 The canonical required local gate is the root PowerShell verifier. It runs the
 backend pytest tier on PostgreSQL (excluding `slow`), asserts a single Alembic
 head, and runs Admin UI lint/unit/build plus Simulator UI v2
-lint/typecheck/unit/build. The backend tier needs a running PostgreSQL: see
+lint/typecheck/unit/build. The backend tier needs a running PostgreSQL: `docker compose up -d db`, or
 [`docs/ru/backend/postgres-local-portable.md`](docs/ru/backend/postgres-local-portable.md)
-if the machine has none.
+if the machine has no Docker.
 
 ```powershell
 # One-time setup

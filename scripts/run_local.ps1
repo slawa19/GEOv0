@@ -541,9 +541,9 @@ function Undo-RunLocalStartedServices {
 
 function Write-RunLocalBackendStartupFailure {
     param([string]$ErrLogPath)
-    # Programme 015 step 5b: the backend refuses to start on a SQLite database created before migration
-    # 027 (or before the debt journal), and the reason and the reset-db instruction are written to its
-    # stderr log. Without this the launcher said only "launched process exited or changed".
+    # The backend refuses to start when its settings or database are unusable (since 017 T1704 also on
+    # a DATABASE_URL that is not postgresql+asyncpg), and the reason is written to its stderr log.
+    # Without this the launcher said only "launched process exited or changed".
     # THE LOG IS NOT ECHOED: backend stderr is not redacted, and the launcher does not republish it. Only
     # its path is printed. Wrapped so that nothing here can replace the startup exception the caller
     # rethrows.
@@ -924,7 +924,7 @@ function Invoke-DevDatabaseCommand {
         # move is to start it rather than to look at the database. Every other code is a state that
         # a retry will not change, so the two are not reported with one sentence.
         if ($code -eq 4) {
-            throw "PostgreSQL is not reachable at ${PgHost}:${PgPort}, so $DevDatabaseName cannot be prepared. Start the cluster (docs/ru/backend/postgres-local-portable.md section 3) and run this again."
+            throw "PostgreSQL is not reachable at ${PgHost}:${PgPort}, so $DevDatabaseName cannot be prepared. Start it (docker compose up -d db, or without Docker docs/ru/backend/postgres-local-portable.md section 3) and run this again."
         }
         throw "dev_database.py $Command failed with exit code $code."
     }
@@ -1001,7 +1001,7 @@ function Initialize-LauncherDatabase {
     if ($ready -eq 0) { return }
     if ($ready -ne 3) {
         if ($ready -eq 4) {
-            throw "PostgreSQL stopped answering at ${PgHost}:${PgPort} while $DevDatabaseName was being checked. Start the cluster (docs/ru/backend/postgres-local-portable.md section 3) and run this again."
+            throw "PostgreSQL stopped answering at ${PgHost}:${PgPort} while $DevDatabaseName was being checked. Start it (docker compose up -d db, or without Docker docs/ru/backend/postgres-local-portable.md section 3) and run this again."
         }
         throw "The launcher database $DevDatabaseName is not ready (dev_database.py ready exited $ready); the reason is printed above. It is not safe to start the stack on it."
     }
@@ -1145,7 +1145,7 @@ switch ($Action) {
             throw "The launcher database $DevDatabaseName is migrated but empty. Populate it: .\scripts\run_local.ps1 reset-db"
         }
         if ($readyCode -eq 4) {
-            throw "check-db could not run: PostgreSQL is not reachable at ${PgHost}:${PgPort}. Start the cluster (docs/ru/backend/postgres-local-portable.md section 3) and run this again."
+            throw "check-db could not run: PostgreSQL is not reachable at ${PgHost}:${PgPort}. Start it (docker compose up -d db, or without Docker docs/ru/backend/postgres-local-portable.md section 3) and run this again."
         }
         if ($readyCode -ne 0) {
             throw "check-db failed: dev_database.py ready exited $readyCode. The reason is printed above."

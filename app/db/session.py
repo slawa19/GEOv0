@@ -1,82 +1,22 @@
-from pathlib import Path
-
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
-from sqlalchemy import event
-from sqlalchemy.pool import NullPool
-from sqlalchemy.engine.url import make_url
 
 from app.config import settings
-from app.db.sqlite_transaction_control import install_sqlite_transaction_control
-
-
-def _ensure_default_sqlite_parent(url: str) -> None:
-    """Create only the repository-owned parent for the default development DB."""
-
-    if url != settings.DEFAULT_SQLITE_DATABASE_URL:
-        return
-    database = make_url(url).database
-    if database:
-        Path(database).parent.mkdir(parents=True, exist_ok=True)
 
 
 def _create_engine():
-    url = settings.DATABASE_URL
-    common_kwargs = {
-        "echo": settings.DEBUG,
-        "future": True,
-    }
-
-    # SQLite (especially aiosqlite) is not well-served by connection pooling.
-    if url.startswith("sqlite"):
-        _ensure_default_sqlite_parent(url)
-        engine = create_async_engine(
-            url,
-            poolclass=NullPool,
-            # timeout=10: SQLite write-lock wait time before raising "database is locked".
-            # Default is 5s which is too short for simulator clearing (two concurrent
-            # sessions: parent tick + clearing).
-            connect_args={"timeout": 30},
-            **common_kwargs,
-        )
-
-        sqlite_db = make_url(url).database
-        enable_wal = sqlite_db not in {None, "", ":memory:"}
-
-        # Pragmas first, on connect: `journal_mode` cannot change and `foreign_keys` is a no-op
-        # inside a transaction, and from the next statement on every transaction is a real one.
-        @event.listens_for(engine.sync_engine, "connect")
-        def _sqlite_set_pragmas(dbapi_connection, _connection_record):
-            cursor = dbapi_connection.cursor()
-            try:
-                cursor.execute("PRAGMA foreign_keys=ON")
-                cursor.execute("PRAGMA busy_timeout=30000")
-                if enable_wal:
-                    cursor.execute("PRAGMA journal_mode=WAL")
-                    cursor.execute("PRAGMA synchronous=NORMAL")
-            finally:
-                cursor.close()
-
-        # T1525: without this a savepoint opened before the first write is its own transaction
-        # and a root rollback does not undo it - an ABORTED payment kept its debt. See the module.
-        install_sqlite_transaction_control(engine.sync_engine)
-
-        return engine
-
-    # Postgres/MySQL/etc: use pool settings to improve stability under load.
-    backend = make_url(url).get_backend_name()
-    db_kwargs = {}
-    if backend in {"postgresql", "postgres"}:
-        db_kwargs["isolation_level"] = settings.DB_POSTGRES_ISOLATION_LEVEL
-
+    # One engine, one dialect (programme 017, T1704): `settings.DATABASE_URL` is refused at settings
+    # construction unless it is `postgresql+asyncpg` (`app/config.py::_require_postgresql_database_url`),
+    # so this construction has no dialect branch and no SQLite arm to reach.
     return create_async_engine(
-        url,
+        settings.DATABASE_URL,
         pool_pre_ping=settings.DB_POOL_PRE_PING,
         pool_size=settings.DB_POOL_SIZE,
         max_overflow=settings.DB_MAX_OVERFLOW,
         pool_timeout=settings.DB_POOL_TIMEOUT_SECONDS,
         pool_recycle=settings.DB_POOL_RECYCLE_SECONDS,
-        **db_kwargs,
-        **common_kwargs,
+        isolation_level=settings.DB_POSTGRES_ISOLATION_LEVEL,
+        echo=settings.DEBUG,
+        future=True,
     )
 
 
