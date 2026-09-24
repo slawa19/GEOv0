@@ -16,15 +16,13 @@ the migration behaviour-neutral and let both canonical gates keep their exact ba
 the evidence that wrapping ~130 setup sites changed no test's meaning. Slice C armed the journal on
 the `Engine` and `Session` classes (`app/core/ledger/journal.py`, `arm_journal_globally`), and the
 same call sites now open and complete a real `TEST_FIXTURE` operation with no further edit to any
-test. The no-op path below remains, and is not dead: it is what an engine the journal has been
-stood down on still runs (`uninstall_write_guard`), and it is what makes `journal_is_active` an
-honest question rather than a constant.
+test. Since 018 stage B1 the journal is the database's trigger, the listener module and its stand-down
+are gone, and so is the no-op path that served a stood-down engine.
 
 WHAT IT DELIBERATELY DOES NOT DO: it never flushes. Design v2 §8 R2 forbids inserting a flush where
 none existed, because a flush is SQL and SQL is behaviour. The block ends just before whatever
-`flush()`/`commit()` the test already had; when the journal is live, `debt_operation`'s own
-completion flush covers the block's work, and the test's own flush that follows finds nothing
-pending. So the number of round trips is the same before and after activation.
+`flush()`/`commit()` the test already had; `Book.operation`'s own completion flush covers the block's
+work, and the test's own flush that follows finds nothing pending.
 
 THE STATIC GUARD (`fixture_block_violations`). The runtime half of C21 - the journal's refusal to
 nest operations - only catches application code that opens an operation OF ITS OWN. Code like
@@ -53,7 +51,6 @@ __all__ = [
     "debt_fixture_setup",
     "fixture_block_violations",
     "writer_operation",
-    "journal_is_active",
     "purge_test_ledger",
 ]
 
@@ -66,37 +63,6 @@ FIXTURE_OPERATION_KIND = "TEST_FIXTURE"
 # =================================================================================================
 # The runtime half
 # =================================================================================================
-
-
-def _engine_of(session: Any) -> Any:
-    """The `Engine` this session writes through, or `None` if it cannot be determined.
-
-    `None` is not "assume installed": a session with no discoverable bind cannot have the journal's
-    connection-level listeners either, since those live on an engine.
-    """
-
-    sync_session = getattr(session, "sync_session", session)
-    try:
-        bind = sync_session.get_bind()
-    except Exception:  # noqa: BLE001 - an unbound session simply has no engine to inspect
-        return None
-    return getattr(bind, "engine", bind)
-
-
-def journal_is_active(session: Any) -> bool:
-    """Whether the debt journal is armed on this session's engine.
-
-    Registration, not effect - the same question `journal_is_installed` answers, asked of the
-    engine a given session happens to be bound to. Today this is `False` everywhere; slice C makes
-    it `True` and nothing in the migrated tests changes.
-    """
-
-    engine = _engine_of(session)
-    if engine is None:
-        return False
-    from app.core.ledger.journal import journal_is_installed
-
-    return journal_is_installed(engine)
 
 
 def _node_id() -> str:
@@ -116,9 +82,8 @@ def _node_id() -> str:
 async def debt_fixture_setup(session: Any, *, label: str) -> AsyncIterator[Any]:
     """Declare that the debts written in this block are fixture setup, not a payment.
 
-    Yields the book's posting (018 stage A) when the journal is installed, and `None` when it is not.
-    Callers must not depend on the yielded value: it exists so that a test which needs the envelope
-    can reach it once the journal is live, not as part of the setup contract.
+    Yields the book's posting (018 stage A). Callers must not depend on the yielded value: it exists
+    so that a test which needs the envelope can reach it, not as part of the setup contract.
 
     `label` names what the block is setting up. It is part of the operation's identity, so two
     blocks in the same test are distinguishable in the journal; `uuid4` makes the identity unique
@@ -129,12 +94,10 @@ async def debt_fixture_setup(session: Any, *, label: str) -> AsyncIterator[Any]:
     if not label:
         raise ValueError("debt_fixture_setup needs a label naming what this block sets up")
 
-    if not journal_is_active(session):
-        # The clean no-op. Nothing is read, nothing is written, nothing is flushed: a migrated test
-        # executes exactly the statements it executed before this slice.
-        yield None
-        return
-
+    # THERE IS NO NO-OP PATH ANY MORE (018 stage B1). It served an engine the listener journal had
+    # been stood down on; the journal is now the database's trigger, which no engine can stand down,
+    # so every fixture block is a real `TEST_FIXTURE` operation.
+    #
     # THE ENVELOPE IS THE BOOK'S (018 stage A): the fixture operation opens through `Book`, the
     # single writer of `debts`, like every application writer. The rows the test builds inside the
     # block are test code, outside `app/` and `scripts/` and so outside the single-writer guard by
@@ -179,10 +142,6 @@ async def writer_operation(
     write these tests did not make before; it is named here rather than hidden, and none of them
     asserts anything about `transactions`.
     """
-
-    if not journal_is_active(session):
-        yield None
-        return
 
     from app.core.ledger.book import Book, operation_for
     from app.db.journal_tables import OPERATION_KINDS_WITH_TX

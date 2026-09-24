@@ -33,6 +33,7 @@ import uuid
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     CheckConstraint,
     Column,
@@ -61,6 +62,7 @@ __all__ = [
     "PAYMENT_INTENT_ENCODING_VERSION",
     "SCHEMA_VERSION",
     "STORABLE_INTENT_ENCODING_VERSIONS",
+    "STORABLE_SCHEMA_VERSIONS",
     "debt_journal_entries",
     "debt_operation_equivalents",
     "debt_operations",
@@ -77,7 +79,15 @@ OPERATION_KINDS_WITH_TX = ("PAYMENT", "CLEARING")
 #: Bumped when the meaning of a stored row changes. Three separate versions rather than one,
 #: because a change to how money is encoded and a change to how intent is encoded are read back by
 #: different code and can move independently.
-SCHEMA_VERSION = 1
+#:
+#: VERSION 2 (programme 018 stage B, migration 029): the database writes the entries, one per row a
+#: statement changed, and `ordinal` is a value of a sequence - ordered within the operation, NOT
+#: contiguous and NOT in commit order. Version 1 envelopes were written by the listener journal and
+#: their `ordinal` (then `flush_ordinal`) is the flush number. A reader that needs to tell the two
+#: orders apart reads this column; the reconciliation does not need to (it orders within an operation
+#: only). Historical rows keep version 1 and their digests are not recomputed.
+SCHEMA_VERSION = 2
+STORABLE_SCHEMA_VERSIONS = (1, 2)
 MONEY_ENCODING_VERSION = 1
 INTENT_ENCODING_VERSION = 1
 
@@ -137,13 +147,19 @@ debt_operations = Table(
     Column("opened_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     Column("state", String(16), nullable=False),
     Column("completed_at", DateTime(timezone=True), nullable=True),
-    Column("flush_count", Integer, nullable=True),
     Column("effect_count", Integer, nullable=True),
     Column("effect_digest", String(64), nullable=True),
     CheckConstraint("kind IN (" + _KIND_LIST + ")", name="chk_debt_operations_kind"),
     CheckConstraint("length(identity) > 0", name="chk_debt_operations_identity_present"),
     CheckConstraint("length(intent_digest) = 64", name="chk_debt_operations_intent_digest"),
-    CheckConstraint("schema_version IN (1)", name="chk_debt_operations_schema_version"),
+    # Widened by migration 029 (018 stage B): version 1 is the listener's history, version 2 the
+    # trigger's. Both are read; only version 2 is written.
+    CheckConstraint(
+        "schema_version IN ("
+        + ", ".join(str(version) for version in STORABLE_SCHEMA_VERSIONS)
+        + ")",
+        name="chk_debt_operations_schema_version",
+    ),
     CheckConstraint("money_encoding_version IN (1)", name="chk_debt_operations_money_version"),
     # Widened by migration 027 (step 5b) for the version-2 PAYMENT intent; the other two stay `IN (1)`.
     CheckConstraint(
@@ -164,25 +180,20 @@ debt_operations = Table(
     # its counts are NULL is a half-written completion, and a reader cannot tell it from a
     # finished one.
     #
-    # THE COUNTS ARE NOT BOUNDED BY EACH OTHER, and the clause that said they were was removed by
-    # migration 023 (measured when the journal was armed, 2026-09-12). `flush_count <= effect_count`
-    # and the all-or-nothing zero pair both assume every flush leaves an entry. A `StaleDataError`
-    # retry in `PaymentEngine._apply_flow` breaks that on the main payment path: the losing attempt
-    # flushed, so it was counted, and its entries went back with its savepoint. What is true is only
-    # the one-way implication - an entry needs a flush that wrote it - and that is what is written
-    # here now.
+    # `flush_count` AND ITS CLAUSES WENT WITH MIGRATION 029 (018 stage B). It counted the listener's
+    # flushes; the database writes one entry per changed row and has no flushes to count, and no
+    # criterion ever read it. `effect_count` is counted by rows, never from `ordinal` arithmetic.
     CheckConstraint(
         "("
         " state = 'OPEN'"
-        " AND completed_at IS NULL AND flush_count IS NULL"
+        " AND completed_at IS NULL"
         " AND effect_count IS NULL AND effect_digest IS NULL"
         ") OR ("
         " state = 'COMPLETED'"
-        " AND completed_at IS NOT NULL AND flush_count IS NOT NULL"
+        " AND completed_at IS NOT NULL"
         " AND effect_count IS NOT NULL AND effect_digest IS NOT NULL"
         " AND length(effect_digest) = 64"
-        " AND flush_count >= 0 AND effect_count >= 0"
-        " AND (flush_count > 0 OR effect_count = 0)"
+        " AND effect_count >= 0"
         ")",
         name="chk_debt_operations_completion",
     ),
@@ -210,7 +221,11 @@ debt_journal_entries = Table(
         ForeignKey("debt_operations.id", ondelete="RESTRICT"),
         nullable=False,
     ),
-    Column("flush_ordinal", Integer, nullable=False),
+    # THE ORDER WITHIN THE OPERATION, AND ONLY THAT (018 stage B, migration 029). Written by the
+    # `debts` trigger from `debt_journal_entries_ordinal_seq`: increasing within an operation, with
+    # gaps (a rolled-back savepoint keeps its values), unrelated to commit order and never a count.
+    # Version-1 rows keep the flush numbers the listener wrote under the old name `flush_ordinal`.
+    Column("ordinal", BigInteger, nullable=False),
     Column(
         "equivalent_id",
         Uuid(as_uuid=True),
@@ -234,7 +249,7 @@ debt_journal_entries = Table(
     Column("amount_after", MoneyNumeric(20, 8), nullable=True),
     Column("delta", MoneyNumeric(20, 8), nullable=False),
     Column("recorded_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
-    CheckConstraint("flush_ordinal >= 1", name="chk_debt_journal_entries_ordinal"),
+    CheckConstraint("ordinal >= 1", name="chk_debt_journal_entries_ordinal"),
     CheckConstraint("debtor_id <> creditor_id", name="chk_debt_journal_entries_no_self_loop"),
     CheckConstraint("effect IN ('I', 'U', 'D')", name="chk_debt_journal_entries_effect"),
     # The three effects have three shapes, and the shape is what makes a row readable without the
@@ -289,11 +304,11 @@ debt_journal_entries = Table(
     ),
     UniqueConstraint(
         "operation_id",
-        "flush_ordinal",
+        "ordinal",
         "equivalent_id",
         "debtor_id",
         "creditor_id",
-        name="uq_debt_journal_entries_op_flush_edge",
+        name="uq_debt_journal_entries_op_ordinal_edge",
     ),
     Index("ix_debt_journal_entries_edge", "equivalent_id", "debtor_id", "creditor_id"),
     Index("ix_debt_journal_entries_operation", "operation_id"),
