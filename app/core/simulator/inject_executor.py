@@ -524,8 +524,10 @@ class InjectExecutor:
             # below run in the owner's SERIALIZABLE transaction, and every other writer that can
             # create a direction reads the opposite edge too (`PaymentEngine._apply_flow`, and this
             # very check), so the pair of transactions is a read-write cycle that PostgreSQL breaks
-            # with 40001 - retried by the owner on a fresh snapshot, which then sees the reverse
-            # debt and refuses.
+            # with 40001. The owner retries once on a fresh snapshot (which then sees the reverse
+            # debt and refuses); if the retry conflicts again, the owner rolls back and leaves the
+            # event pending - fail-closed, never both directions (`real_runner_impl.py:711-724`,
+            # `:784-797`). Reasoned from SSI, not measured by a concurrent stand.
             await session.flush()
             reverse_amount = (
                 await session.execute(
