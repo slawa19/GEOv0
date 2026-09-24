@@ -74,6 +74,7 @@ from tests.integration.test_p015_t1544_operator_stop_races_postgres import (  # 
     _advisory_waiter_exists,
     admin_api,
 )
+from tests.ledger_corruption import corrupt
 from tests.migrated_schema import REPO_ROOT, run_alembic_upgrade_head, scratch_databases
 from tests.unit.test_p015_step5c_reaction_and_hold import hold_directly
 
@@ -93,6 +94,18 @@ def _barrier_budgets(monkeypatch):
     monkeypatch.setattr(settings, "PAYMENT_TOTAL_TIMEOUT_SECONDS", 60)
 
 
+async def _around_the_application(session_factory, statement: str) -> None:
+    """Commit `statement` with the journal's triggers OFF, through the named corruption helper.
+
+    018 stage B1: the application's connection gets `GE001` for a write to `debts` outside an
+    operation, so the one-atom fault (and its repair) is modelled the way it can still arise - an
+    operator or a restore with the triggers off (`tests/ledger_corruption.py`). The helper takes no
+    advisory lock, which the ordering test below requires of its repair.
+    """
+
+    await corrupt(session_factory.kw["bind"].url.render_as_string(hide_password=False), [statement])
+
+
 async def _baseline_and_one_atom(factory, equivalent_id, *, debt_id=None) -> None:
     async with factory() as session:
         await take_baseline(session, equivalent_id)
@@ -102,11 +115,10 @@ async def _baseline_and_one_atom(factory, equivalent_id, *, debt_id=None) -> Non
             debt_id = (
                 await session.execute(select(Debt.id).where(Debt.equivalent_id == equivalent_id))
             ).scalar_one()
-        connection = await session.connection()
-        await connection.exec_driver_sql(
-            f"UPDATE debts SET amount = amount + 0.00000001 WHERE id = '{uuid.UUID(str(debt_id))}'"
-        )
-        await session.commit()
+    await _around_the_application(
+        factory,
+        f"UPDATE debts SET amount = amount + 0.00000001 WHERE id = '{uuid.UUID(str(debt_id))}'",
+    )
 
 
 async def _hold_of(factory, equivalent_id):
@@ -314,12 +326,10 @@ async def test_step5c_p_the_owner_lock_comes_before_the_authoritative_snapshot(f
             ).scalars().all()
         assert statuses == [FAILED], f"premise: the scheduled verdict was not recorded FAILED first: {statuses}"
 
-        async with factory() as repair:
-            connection = await repair.connection()
-            await connection.exec_driver_sql(
-                f"UPDATE debts SET amount = amount - 0.00000001 WHERE equivalent_id = '{world.equivalent.id}'"
-            )
-            await repair.commit()
+        await _around_the_application(
+            factory,
+            f"UPDATE debts SET amount = amount - 0.00000001 WHERE equivalent_id = '{world.equivalent.id}'",
+        )
         assert not reconcile.done(), "premise: the repair did not land while the reaction waited"
 
         await holder.rollback()

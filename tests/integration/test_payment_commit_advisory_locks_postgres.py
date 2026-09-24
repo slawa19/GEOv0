@@ -205,8 +205,11 @@ async def _completion_update_plan() -> str:
     async with TestingSessionLocal() as session:
         rows = (
             await session.execute(
+                # The book's completion statement (`app/core/ledger/book.py::_complete`), spelled
+                # with its SET list: the WHERE is what the plan - and the SIRead lock - depend on.
                 text(
-                    "EXPLAIN UPDATE debt_operations SET state = 'COMPLETED' "
+                    "EXPLAIN UPDATE debt_operations SET state = 'COMPLETED', completed_at = now(), "
+                    "effect_count = 0, effect_digest = repeat('0', 64) "
                     "WHERE id = :probe AND state = 'OPEN'"
                 ),
                 {"probe": str(uuid.uuid4())},
@@ -218,11 +221,13 @@ async def _completion_update_plan() -> str:
 async def _give_the_journal_a_history(rows: int = _JOURNAL_HISTORY_ROWS) -> int:
     """Put finished operations in `debt_operations` and analyse it, as a live journal would be.
 
-    THROUGH THE DRIVER, like every other teardown and fixture in this suite since the journal was
-    armed: Core DML naming a journal table is refused by the write guard, correctly, because it is
-    indistinguishable from a writer recording work nobody verified (design v2 §8 R6). These rows are
-    not a record of work - they are the table's physical size - so they go round the guard the one
-    way that module documents, `exec_driver_sql`, which fires no `before_execute`.
+    OPEN, THEN COMPLETED, IN ONE TRANSACTION (018 stage B1). The journal tables are guarded by the
+    database: an envelope is inserted only `OPEN`, may move only `OPEN -> COMPLETED` with its
+    declaration unchanged, and a commit that leaves one `OPEN` is refused by the deferred completion
+    check. So the filler inserts its rows `OPEN` and completes them before its commit - the one shape
+    the guard admits - rather than inserting `COMPLETED` rows directly as it did when a Python
+    listener guarded the tables. `schema_version = 2` and no `flush_count`, as every envelope since
+    migration 029. These rows are not a record of work - they are the table's physical size.
 
     `TEST_FIXTURE` and a NULL `tx_id`, because `chk_debt_operations_tx_id_iff_kind` allows a
     transaction id exactly for `PAYMENT` and `CLEARING`; a filler row owns no transaction.
@@ -240,13 +245,20 @@ async def _give_the_journal_a_history(rows: int = _JOURNAL_HISTORY_ROWS) -> int:
         await connection.exec_driver_sql(
             "INSERT INTO debt_operations "
             "(id, kind, identity, tx_id, intent, intent_digest, schema_version, "
-            " money_encoding_version, intent_encoding_version, opened_at, state, "
-            " completed_at, flush_count, effect_count, effect_digest) "
+            " money_encoding_version, intent_encoding_version, opened_at, state) "
             "SELECT gen_random_uuid(), 'TEST_FIXTURE', "
-            f"'{_JOURNAL_HISTORY_IDENTITY}' || g, NULL, '{{}}', repeat('0', 64), 1, 1, 1, "
-            "now(), 'COMPLETED', now(), 1, 1, repeat('0', 64) "
+            f"'{_JOURNAL_HISTORY_IDENTITY}' || g, NULL, '{{}}', repeat('0', 64), 2, 1, 1, "
+            "now(), 'OPEN' "
             f"FROM generate_series(1, {int(rows)}) AS g"
         )
+        await connection.exec_driver_sql(
+            "UPDATE debt_operations SET state = 'COMPLETED', completed_at = now(), "
+            "effect_count = 0, effect_digest = repeat('0', 64) "
+            f"WHERE identity LIKE '{_JOURNAL_HISTORY_IDENTITY}%' AND state = 'OPEN'"
+        )
+        await session.commit()
+    async with TestingSessionLocal() as session:
+        connection = await session.connection()
         await connection.exec_driver_sql("ANALYZE debt_operations")
         await session.commit()
 

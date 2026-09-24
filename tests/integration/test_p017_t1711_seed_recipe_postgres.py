@@ -16,10 +16,11 @@ Programme 017, `T1711`. Three groups, and the last is the one that makes the fir
 
 PostgreSQL and not SQLite: this is the engine programme 017 is moving to, `execute_clearing_with_amount`
 takes its one-connection interlock only here, and the seed's reconciliation is the thing being
-trusted. The doctoring statements go through `exec_driver_sql`, which fires no `before_execute` and
-therefore passes the journal's armed write guard - the same door `tests/conftest.py` uses for its
-test-database reset, and for the same reason: this is the disposal of a scratch database, not a
-money write.
+trusted. The doctoring statements go through THE named corruption helper (`tests/ledger_corruption.py`,
+spec 018 `FORK-4`, a named use): since 018 stage B1 the database refuses them from the application's
+side - a write to `debts` outside an operation is `GE001`, and the journal tables admit no UPDATE of an
+envelope's declaration and no DELETE - so a doctoring is modelled the one way it can still arise, a
+write with the journal's triggers off on a scratch database.
 
 EVERY TEST GETS ITS OWN CLONE of a migrated template, because the seed refuses a database that is
 not empty and the tier database is not.
@@ -38,6 +39,7 @@ from sqlalchemy.pool import NullPool
 
 from app.config import settings
 from scripts.seed_recipe import SeedRefusal, reverify, seed_community
+from tests.ledger_corruption import corrupt
 from tests.migrated_schema import cloned_database, provision_migrated_template
 
 COMMUNITY = "riverside-town-50"
@@ -74,19 +76,17 @@ def _factory_for(url: str):
 
 
 async def _driver_sql(factory, statements: list[str]) -> None:
-    """Statements that go ROUND the journal's write guard, as a database disposal may.
+    """Doctoring statements, committed with the journal's triggers OFF (the named corruption helper).
 
-    No bound parameters, deliberately: `exec_driver_sql` hands the statement to the driver's own
-    paramstyle, and every value written below is a `uuid` or a `numeric` this module just read back
-    out of this same database, rendered by `_literal`. One less thing between the doctoring and what
-    reaches PostgreSQL.
+    No bound parameters, deliberately: the helper hands each statement to the driver as it is, and
+    every value written below is a `uuid` or a `numeric` this module just read back out of this same
+    database, rendered by `_literal`. One less thing between the doctoring and what reaches
+    PostgreSQL. `replica` also switches off foreign keys; every doctoring below writes rows whose
+    references exist, so nothing depends on them.
     """
 
-    async with factory() as session:
-        connection = await session.connection()
-        for sql in statements:
-            await connection.exec_driver_sql(sql)
-        await session.commit()
+    url = factory.kw["bind"].url.render_as_string(hide_password=False)
+    await corrupt(url, statements)
 
 
 def _literal(value) -> str:

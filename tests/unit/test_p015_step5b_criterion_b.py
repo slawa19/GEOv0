@@ -13,12 +13,14 @@ and `app/core/payments/engine.py::_read_payment_prestate`, the one batched read 
 writes that pre-state into the envelope.
 
 THE CORRUPTIONS. "A wrong writer" is a real application writer bent by a wrapper or a listener, as in `C6`:
-it journals faithfully what it did. "Around the application" is `exec_driver_sql`, and every corruption of
-a RECORDED DELTA here is COORDINATED - the entry and the debt move together - so criterion (a) stays silent
+it journals faithfully what it did. "Around the application" is THE named corruption helper
+(`tests/ledger_corruption.py`: a write with the journal's triggers off, which since 018 stage B1 is the
+only way such a state can arise - the application's own connection gets `GE001` or a guard refusal), and
+every corruption of a RECORDED DELTA here is COORDINATED - the entry and the debt move together - so criterion (a) stays silent
 (asserted) and only (b) can see it. A corruption of the INTENT re-digests it, as a coordinated rewrite
 would; the verifier does not recompute the digest at all (review round D1), so the rule is what catches it.
 
-TIER. SQLite, the default tier. Verdicts are read on a new session.
+TIER. PostgreSQL, on disposable clones. Verdicts are read on a new session.
 
 MUTATIONS. Each test names the mutation that must turn it red; the step 5b report records the runs.
 """
@@ -136,7 +138,7 @@ async def _operation_entries(factory, operation_id) -> list[SimpleNamespace]:
             await session.execute(
                 select(
                     columns.id,
-                    columns.flush_ordinal,
+                    columns.ordinal,
                     columns.equivalent_id,
                     columns.debtor_id,
                     columns.creditor_id,
@@ -217,9 +219,10 @@ async def _add_entry_and_debt(factory, operation_id, equivalent_id, debtor_id, c
     await _around_the_application(
         factory,
         lambda d: (
-            "INSERT INTO debt_journal_entries (id, operation_id, flush_ordinal, equivalent_id, debtor_id, "
+            "INSERT INTO debt_journal_entries (id, operation_id, ordinal, equivalent_id, debtor_id, "
             "creditor_id, effect, amount_before, amount_after, delta) VALUES "
-            f"('{_literal(d, entry_id)}', '{_literal(d, operation_id)}', 99, '{_literal(d, equivalent_id)}', "
+            f"('{_literal(d, entry_id)}', '{_literal(d, operation_id)}', "
+            f"nextval('debt_journal_entries_ordinal_seq'), '{_literal(d, equivalent_id)}', "
             f"'{_literal(d, debtor_id)}', '{_literal(d, creditor_id)}', 'I', NULL, '{_text(amount)}', "
             f"'{_text(amount)}')"
         ),
@@ -442,11 +445,20 @@ async def test_step5b_net_neutral_cycle_inflation_on_a_payment_is_failed(db_sess
 
 
 async def _downgrade_to_v1(factory, envelope) -> None:
-    """The envelope as the pre-5b writer left it: the same intent without `prestate`, version 1."""
+    """The envelope as the pre-5b writer left it: the same intent without `prestate`, version 1.
+
+    And `schema_version = 1`: every historical v1 payment predates 018 B1's schema version 2, so an
+    envelope that says intent v1 under schema 2 would be one no writer ever left (manifest `T1808`
+    7.C item 10). The verdict does not read `schema_version`; the stand just stays possible.
+    """
 
     intent = {key: value for key, value in envelope.intent.items() if key != "prestate"}
     assert set(intent) == {"tx_id", "locks"}, intent
     await _rewrite_intent(factory, envelope.id, intent, version=1)
+    await _around_the_application(
+        factory,
+        lambda d: f"UPDATE debt_operations SET schema_version = 1 WHERE id = '{_literal(d, envelope.id)}'",
+    )
 
 
 @pytest.mark.asyncio
@@ -849,9 +861,16 @@ async def test_step5b_an_inject_outside_its_subset_is_failed(db_session, corrupt
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("tier_on_a_clone")
 async def test_step5b_the_version_split_and_the_check_on_the_metadata_path(db_session) -> None:
-    """Only PAYMENT writes intent version 2; the CHECK admits 2 and refuses 3 on the create_all schema.
+    """Only PAYMENT writes intent version 2; the CHECK admits 2 and refuses 3.
 
-    Also: the schema and money versions did not move - a 2 there is refused.
+    Also: the money version did not move - a 2 there is refused. The SCHEMA version did move, once, by
+    018 stage B1 (migration 029): every new envelope is `schema_version = 2` ("ordinal is the sequence
+    order", no `flush_count`), so the CHECK admits 1 and 2 and refuses 3.
+
+    THE PROBE IS ROLLED BACK (018 B1). An envelope INSERT is admitted by the guard trigger only as
+    `OPEN`, the deferred completion check refuses to commit an `OPEN` envelope, and the guard refuses
+    its DELETE - so each probe runs in a transaction of its own that is rolled back, which also leaves
+    nothing to clean up. The CHECK fires on the INSERT itself, inside that transaction.
 
     MUTATION: leave `chk_debt_operations_intent_version` at `IN (1)` in `journal_tables.py` - the payment
     commit itself is refused and this test goes red before its CHECK half.
@@ -875,34 +894,36 @@ async def test_step5b_the_version_split_and_the_check_on_the_metadata_path(db_se
                 )
             ).all()
         }
-    assert versions == {("PAYMENT", 1, 1, 2), ("TEST_FIXTURE", 1, 1, 1), ("CLEARING", 1, 1, 1)}, versions
+    assert versions == {("PAYMENT", 2, 1, 2), ("TEST_FIXTURE", 2, 1, 1), ("CLEARING", 2, 1, 1)}, versions
+
+    engine = factory.kw["bind"]
 
     async def _insert(column: str, value: int) -> str | None:
         operation_id = uuid.uuid4()
-        values = {"schema_version": 1, "money_encoding_version": 1, "intent_encoding_version": 1, column: value}
-        try:
-            await _around_the_application(
-                factory,
-                lambda d: (
+        values = {"schema_version": 2, "money_encoding_version": 1, "intent_encoding_version": 1, column: value}
+        async with engine.connect() as connection:
+            transaction = await connection.begin()
+            try:
+                await connection.exec_driver_sql(
                     "INSERT INTO debt_operations (id, kind, identity, tx_id, intent, intent_digest, "
                     "schema_version, money_encoding_version, intent_encoding_version, opened_at, state) "
-                    f"VALUES ('{_literal(d, operation_id)}', 'TEST_FIXTURE', 'step5b-check-{operation_id}', NULL, "
+                    f"VALUES ('{operation_id}', 'TEST_FIXTURE', 'step5b-check-{operation_id}', NULL, "
                     f"'{{}}', '{'0' * 64}', {values['schema_version']}, {values['money_encoding_version']}, "
                     f"{values['intent_encoding_version']}, '2026-09-14T00:00:00+00:00', 'OPEN')"
-                ),
-            )
-        except IntegrityError as exc:
-            return str(exc.orig)
-        await _around_the_application(
-            factory, lambda d: f"DELETE FROM debt_operations WHERE id = '{_literal(d, operation_id)}'"
-        )
+                )
+            except IntegrityError as exc:
+                return str(exc.orig)
+            finally:
+                await transaction.rollback()
         return None
 
     assert await _insert("intent_encoding_version", 2) is None, "intent version 2 was refused"
     refused = await _insert("intent_encoding_version", 3)
     assert refused is not None and "chk_debt_operations_intent_version" in refused, refused
-    for column in ("schema_version", "money_encoding_version"):
-        refused = await _insert(column, 2)
+    assert await _insert("schema_version", 1) is None, "schema version 1 (history) was refused"
+    assert await _insert("schema_version", 2) is None, "schema version 2 (018 B1) was refused"
+    for column, value in (("schema_version", 3), ("money_encoding_version", 2)):
+        refused = await _insert(column, value)
         assert refused is not None and "CHECK" in refused.upper(), (column, refused)
 
 
@@ -1010,7 +1031,17 @@ async def test_step5b_the_prestate_is_one_read_after_the_operator_stop_and_befor
         + "\n".join(statements)
     )
     assert ttl[0] < stops[0] < envelopes[0], (ttl, stops, envelopes)
-    between = statements[stops[0] + 1 : envelopes[0]]
+    # THE BOOK OPENS ITS ENVELOPE ITSELF (018 stage B1): between the pre-state read and the envelope
+    # INSERT it reads the transaction's `geo.operation_id` (the nesting check) and sends its own
+    # SAVEPOINT. Those two are the book's opening, not reads of the payment, and are named - not
+    # skipped by shape - so a second read of `debts` still counts.
+    book_opening = [
+        s
+        for s in statements[stops[0] + 1 : envelopes[0]]
+        if s.startswith("SAVEPOINT ") or s.startswith("SELECT CURRENT_SETTING('GEO.OPERATION_ID', TRUE)")
+    ]
+    assert len(book_opening) == 2, f"premise: the book's opening was not seen once each: {book_opening}"
+    between = [s for s in statements[stops[0] + 1 : envelopes[0]] if s not in book_opening]
     assert len(between) == 1 and " FROM DEBTS " in f"{between[0]} " and between[0].startswith("SELECT"), (
         f"expected exactly one batched read of debts between the operator stop and the envelope: {between}"
     )

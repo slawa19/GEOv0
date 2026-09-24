@@ -1,4 +1,4 @@
-"""T1533, the SQLite half: deleting a participant must never delete obligations.
+"""T1533, the MODEL half: deleting a participant must never delete obligations.
 
 The full account is in the PostgreSQL half,
 `tests/integration/test_p015_t1533_participant_deletion_keeps_obligations_postgres.py`. In short:
@@ -7,21 +7,24 @@ removed every obligation they owed or were owed inside the database, with no `De
 - no grant, no `_RowState`, no journal entry, nothing for the journal or anything else in the
 application to observe. It is the participant half of what T1524 closed for the equivalent.
 
-WHAT THIS HALF PROVES THAT THE OTHER DOES NOT. This tier builds its schema from `Base.metadata`, so
-it is the MODEL that is under test here; the PostgreSQL half runs with
-`GEO_TEST_USE_MIGRATED_SCHEMA=1` and tests the MIGRATION. The two artefacts are separate and T1540
-records that they have measurably diverged before, so one is not evidence for the other.
-
-AND IT CAN EXIST AT ALL ONLY BECAUSE OF 2026-09-11: until then the SQLite test engine did not set
-`PRAGMA foreign_keys=ON`, so every assertion below would have passed under CASCADE, RESTRICT or no
-constraint whatsoever.
+WHAT THIS HALF PROVES THAT THE OTHER DOES NOT. This half builds its schema from `Base.metadata`
+(`create_all`, on a scratch database of its own), so it is the MODEL that is under test here; the
+PostgreSQL half runs on a clone of the migrated template and tests the MIGRATION. The two artefacts
+are separate and T1540 records that they have measurably diverged before, so one is not evidence for
+the other. (Until 017 stage 3 this half ran on SQLite, whose foreign keys the test engine switched on
+only on 2026-09-11.)
 
 THE DEBT IS SEEDED WITHOUT JOURNAL HISTORY, deliberately - `debt_journal_entries` already RESTRICTs
 both participant columns (`C17`), so a journalled debt would make every refusal below attributable
-to that constraint and the test would be green under CASCADE. `exec_driver_sql` dispatches no
-`before_execute`, so it reaches `debts` past the journal's write guard and leaves no envelope: the
-state of every debt written before migration 022 and of every debt whose history has been disposed
-of.
+to that constraint and the test would be green under CASCADE. That is the state of every debt written
+before migration 022 and of every debt whose history has been disposed of.
+
+SINCE 018 STAGE B1 ONLY THE NAMED CORRUPTION HELPER CAN PRODUCE THAT STATE (spec 018 `FORK-4`, a named
+use; `tests/ledger_corruption.py`). The database now refuses a write to `debts` with no operation named
+in the transaction (`GE001`), and a debt written inside an operation has history. So the row goes in
+on the helper's own connection with the journal's triggers off, in its own committed transaction;
+EVERYTHING THE TESTS THEN DO runs on an ordinary connection with the triggers and the foreign keys ON
+- asserted, not assumed - so the refusal measured is the one a real deletion would meet.
 """
 
 from __future__ import annotations
@@ -30,74 +33,139 @@ import uuid
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.pool import NullPool
 
+from app.db.base import Base
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
+from tests.ledger_corruption import corrupt
 
 #: The amount the PostgreSQL reproducer measured disappearing.
 AMOUNT = Decimal("925.31000000")
 
 
-def _uuid_literal(value, dialect: str) -> str:
-    """A UUID as a SQL literal of this dialect's storage. `uuid.UUID` first, which is the guard.
+@pytest.fixture(scope="module")
+def model_url():
+    """A scratch database next to the tier, built by `Base.metadata.create_all`, for this module.
 
-    `Uuid(as_uuid=True)` stores a native `uuid` on PostgreSQL; the SQLite arm (32-character hex)
-    left with SQLite in 017 stage 3, and `dialect` is kept only so the call sites stay as they were.
-    The measured failure behind the rule is recorded in `tests/debt_setup.py::_uuid_literals`.
+    Built and dropped on a private event loop (`tests.conftest._run_in_fresh_thread`): a module
+    fixture outlives every per-test loop. Its name carries the tier's `__` separator, so it is a
+    database the corruption helper accepts as disposable.
     """
 
-    parsed = uuid.UUID(str(value))
-    return str(parsed)
-
-
-async def _seed(db_session, *, with_debt: bool):
-    nonce = uuid.uuid4().hex[:8]
-    eq = Equivalent(
-        code=("Q" + nonce).upper()[:16], description="T1533", precision=2, is_active=True
+    from tests.conftest import TEST_DATABASE_URL, _run_in_fresh_thread
+    from tests.migrated_schema import (
+        assert_may_create_databases,
+        create_database,
+        drop_database,
+        maintenance_connection,
+        scratch_database_url,
     )
-    debtor = Participant(pid="qd" + nonce, display_name="D", public_key="pkqd-" + nonce)
-    creditor = Participant(pid="qc" + nonce, display_name="C", public_key="pkqc-" + nonce)
-    db_session.add_all([eq, debtor, creditor])
-    await db_session.flush()
+
+    url, name = scratch_database_url(TEST_DATABASE_URL, "p018t1533model")
+
+    async def _create() -> None:
+        connection = await maintenance_connection(TEST_DATABASE_URL)
+        try:
+            await assert_may_create_databases(connection)
+            await drop_database(connection, name)
+            await create_database(connection, name)
+        finally:
+            await connection.close()
+        engine = create_async_engine(url, poolclass=NullPool)
+        try:
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+        finally:
+            await engine.dispose()
+
+    async def _drop() -> None:
+        connection = await maintenance_connection(TEST_DATABASE_URL)
+        try:
+            await drop_database(connection, name)
+        finally:
+            await connection.close()
+
+    _run_in_fresh_thread(_create)
+    try:
+        yield url
+    finally:
+        _run_in_fresh_thread(_drop)
+
+
+async def _seed(url: str, *, with_debt: bool):
+    """An equivalent and two participants, committed; with `with_debt`, ONE DEBT WITHOUT HISTORY."""
+
+    nonce = uuid.uuid4().hex[:8]
+    engine = create_async_engine(url, poolclass=NullPool)
+    try:
+        async with AsyncSession(bind=engine, expire_on_commit=False) as session:
+            eq = Equivalent(
+                code=("Q" + nonce).upper()[:16], description="T1533", precision=2, is_active=True
+            )
+            debtor = Participant(pid="qd" + nonce, display_name="D", public_key="pkqd-" + nonce)
+            creditor = Participant(pid="qc" + nonce, display_name="C", public_key="pkqc-" + nonce)
+            session.add_all([eq, debtor, creditor])
+            await session.commit()
+    finally:
+        await engine.dispose()
     if with_debt:
-        connection = await db_session.connection()
-        dialect = connection.dialect.name
-        await connection.exec_driver_sql(
-            "INSERT INTO debts (id, debtor_id, creditor_id, equivalent_id, amount, version) "
-            f"VALUES ('{_uuid_literal(uuid.uuid4(), dialect)}', "  # noqa: S608 - UUID-parsed above
-            f"'{_uuid_literal(debtor.id, dialect)}', "
-            f"'{_uuid_literal(creditor.id, dialect)}', "
-            f"'{_uuid_literal(eq.id, dialect)}', {AMOUNT}, 0)"
+        await corrupt(
+            url,
+            [
+                "INSERT INTO debts (id, debtor_id, creditor_id, equivalent_id, amount, version) "
+                f"VALUES ('{uuid.uuid4()}', '{uuid.UUID(str(debtor.id))}', "
+                f"'{uuid.UUID(str(creditor.id))}', '{uuid.UUID(str(eq.id))}', {AMOUNT}, 0)"
+            ],
         )
-    await db_session.commit()
-    return eq, debtor, creditor
+    return eq.id, debtor.id, creditor.id
 
 
-async def _debt_sum(db_session, eq_id) -> Decimal:
+async def _session(url: str):
+    """An ordinary session - triggers and foreign keys ON, which is asserted on its connection."""
+
+    engine = create_async_engine(url, poolclass=NullPool)
+    session = AsyncSession(bind=engine, expire_on_commit=False)
+    role = (await session.execute(text("SHOW session_replication_role"))).scalar_one()
+    assert role == "origin", f"stand: the deleting connection runs with triggers {role!r}"
+    return engine, session
+
+
+async def _debt_sum(session, eq_id) -> Decimal:
     amounts = (
-        await db_session.execute(select(Debt.amount).where(Debt.equivalent_id == eq_id))
+        await session.execute(select(Debt.amount).where(Debt.equivalent_id == eq_id))
     ).scalars().all()
     return sum(amounts, Decimal("0"))
 
 
+async def _refused_deletion(url: str, participant_id, eq_id) -> tuple[Decimal, Decimal]:
+    engine, session = await _session(url)
+    try:
+        before = await _debt_sum(session, eq_id)
+        await session.rollback()
+        participant = await session.get(Participant, participant_id)
+        await session.delete(participant)
+        with pytest.raises(IntegrityError):
+            await session.flush()
+        await session.rollback()
+        after = await _debt_sum(session, eq_id)
+        return before, after
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
 @pytest.mark.asyncio
-async def test_the_database_refuses_to_delete_a_debtor_who_still_owes(db_session) -> None:
+async def test_the_database_refuses_to_delete_a_debtor_who_still_owes(model_url) -> None:
     """RED before T1533: the cascade removes the obligation and nothing refuses."""
-    eq, debtor, _creditor = await _seed(db_session, with_debt=True)
-    eq_id = eq.id
+    eq_id, debtor_id, _creditor_id = await _seed(model_url, with_debt=True)
 
-    before = await _debt_sum(db_session, eq_id)
+    before, after = await _refused_deletion(model_url, debtor_id, eq_id)
     assert before == AMOUNT, f"stand: the unjournalled debt was not seeded, sum is {before}"
-
-    await db_session.delete(debtor)
-    with pytest.raises(IntegrityError):
-        await db_session.flush()
-    await db_session.rollback()
-
-    after = await _debt_sum(db_session, eq_id)
     assert after == before, (
         f"deleting the debtor destroyed what they owed: {before - after} cascaded away inside the "
         f"database, with no Debt row ever loaded"
@@ -105,68 +173,68 @@ async def test_the_database_refuses_to_delete_a_debtor_who_still_owes(db_session
 
 
 @pytest.mark.asyncio
-async def test_the_database_refuses_to_delete_a_creditor_who_is_still_owed(db_session) -> None:
+async def test_the_database_refuses_to_delete_a_creditor_who_is_still_owed(model_url) -> None:
     """The second constraint, not a copy of the first: closing one column leaves half the hole."""
-    eq, _debtor, creditor = await _seed(db_session, with_debt=True)
-    eq_id = eq.id
+    eq_id, _debtor_id, creditor_id = await _seed(model_url, with_debt=True)
 
-    before = await _debt_sum(db_session, eq_id)
-
-    await db_session.delete(creditor)
-    with pytest.raises(IntegrityError):
-        await db_session.flush()
-    await db_session.rollback()
-
-    after = await _debt_sum(db_session, eq_id)
+    before, after = await _refused_deletion(model_url, creditor_id, eq_id)
+    assert before == AMOUNT, f"stand: the unjournalled debt was not seeded, sum is {before}"
     assert after == before, (
         f"deleting the creditor destroyed what they were owed: {before - after} cascaded away"
     )
 
 
 @pytest.mark.asyncio
-async def test_no_journal_history_names_these_participants(db_session) -> None:
+async def test_no_journal_history_names_these_participants(model_url) -> None:
     """ANTI-VACUITY. Without it the two tests above could be passing on `C17` instead of on T1533.
 
-    SQLite's foreign key errors carry no constraint name, so this tier cannot attribute a refusal by
-    reading the message the way the PostgreSQL half does. It attributes by construction instead:
-    if no journal row names either participant, the only constraint that can refuse is `debts`'.
+    It attributes by construction: if no journal row names either participant, the only constraint
+    that can refuse is `debts`'. (The PostgreSQL half also names the refusing constraint.)
     """
-    eq, debtor, creditor = await _seed(db_session, with_debt=True)
+    eq_id, debtor_id, creditor_id = await _seed(model_url, with_debt=True)
 
-    connection = await db_session.connection()
-    dialect = connection.dialect.name
-    debtor_literal = _uuid_literal(debtor.id, dialect)
-    creditor_literal = _uuid_literal(creditor.id, dialect)
-    named = (
-        await connection.exec_driver_sql(
-            "SELECT count(*) FROM debt_journal_entries "  # noqa: S608 - UUID-parsed above
-            f"WHERE debtor_id IN ('{debtor_literal}', '{creditor_literal}') "
-            f"OR creditor_id IN ('{debtor_literal}', '{creditor_literal}')"
-        )
-    ).scalar_one()
+    engine, session = await _session(model_url)
+    try:
+        named = (
+            await session.execute(
+                text(
+                    "SELECT count(*) FROM debt_journal_entries "
+                    "WHERE debtor_id IN (:d, :c) OR creditor_id IN (:d, :c)"
+                ),
+                {"d": debtor_id, "c": creditor_id},
+            )
+        ).scalar_one()
+        total = await _debt_sum(session, eq_id)
+    finally:
+        await session.close()
+        await engine.dispose()
 
     assert named == 0, (
         f"{named} journal entries name these participants, so the refusals asserted above are "
         f"C17's RESTRICT and say nothing about debts' own foreign keys"
     )
-    assert await _debt_sum(db_session, eq.id) == AMOUNT, "stand: the debt itself is missing"
+    assert total == AMOUNT, "stand: the debt itself is missing"
 
 
 @pytest.mark.asyncio
-async def test_a_participant_who_owes_nothing_still_deletes(db_session) -> None:
+async def test_a_participant_who_owes_nothing_still_deletes(model_url) -> None:
     """Control. RESTRICT must not turn every participant deletion into a refusal.
 
     A policy that refused everything would satisfy the tests above and break every teardown in this
     suite, which is the same class of defect as the hole itself.
     """
-    _eq, debtor, _creditor = await _seed(db_session, with_debt=False)
-    debtor_id = debtor.id
+    _eq_id, debtor_id, _creditor_id = await _seed(model_url, with_debt=False)
 
-    await db_session.delete(debtor)
-    await db_session.flush()
-    await db_session.commit()
-
-    survived = (
-        await db_session.execute(select(Participant.id).where(Participant.id == debtor_id))
-    ).scalar_one_or_none()
+    engine, session = await _session(model_url)
+    try:
+        await session.rollback()
+        await session.delete(await session.get(Participant, debtor_id))
+        await session.flush()
+        await session.commit()
+        survived = (
+            await session.execute(select(Participant.id).where(Participant.id == debtor_id))
+        ).scalar_one_or_none()
+    finally:
+        await session.close()
+        await engine.dispose()
     assert survived is None, "a participant with no obligations was not deleted"
