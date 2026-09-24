@@ -510,6 +510,42 @@ class InjectExecutor:
                 skipped += 1
                 return False
 
+            # F-015-12: ONE DIRECTION PER PAIR (protocol §11.2.4). A debt the other way round
+            # between the same two participants in the same equivalent refuses this effect: it is
+            # skipped like an effect over the trust limit. Refusal, not netting - netting would
+            # write a decrease, which the INJECT rule of criterion (b) reads as a contradiction
+            # (`reconciliation._inject_subset`, `entry_is_not_an_increase`).
+            #
+            # The flush first: the session runs with `autoflush=False`, so a reverse debt STAGED by
+            # an earlier effect of this same event would be invisible to the read below. A flush
+            # error propagates (`SQLAlchemyError`), as this method's contract requires.
+            #
+            # A reverse debt committed concurrently is not missed either: this read and the write
+            # below run in the owner's SERIALIZABLE transaction, and every other writer that can
+            # create a direction reads the opposite edge too (`PaymentEngine._apply_flow`, and this
+            # very check), so the pair of transactions is a read-write cycle that PostgreSQL breaks
+            # with 40001. The owner retries once on a fresh snapshot (which then sees the reverse
+            # debt and refuses); if the retry conflicts again, the owner rolls back and leaves the
+            # event pending - fail-closed, never both directions (`real_runner_impl.py:711-724`,
+            # `:784-797`). Reasoned from SSI, not measured by a concurrent stand.
+            await session.flush()
+            reverse_amount = (
+                await session.execute(
+                    select(Debt.amount).where(
+                        Debt.debtor_id == creditor_id,
+                        Debt.creditor_id == debtor_id,
+                        Debt.equivalent_id == eq_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if reverse_amount is not None and Decimal(str(reverse_amount)) > 0:
+                self._logger.warning(
+                    "simulator.real.inject.inject_debt.opposing_debt_exists equivalent=%s",
+                    eq,
+                )
+                skipped += 1
+                return False
+
             existing = (
                 await session.execute(
                     select(Debt).where(
