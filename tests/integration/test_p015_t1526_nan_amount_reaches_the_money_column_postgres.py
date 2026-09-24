@@ -70,6 +70,7 @@ from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 
+from app.core.ledger.book import Book, operation_for
 from tests.debt_setup import debt_fixture_setup
 
 
@@ -281,6 +282,12 @@ async def test_b_one_nan_debt_makes_the_sum_of_the_book_stop_being_a_number(fact
     )
 
 
+def _raw_operation(label: str):
+    """A `TEST_FIXTURE` operation of the book for this module's raw statements (018 B1)."""
+
+    return operation_for("TEST_FIXTURE", f"t1526/{label}/{uuid.uuid4()}", {"label": label})
+
+
 @pytest.mark.asyncio
 async def test_c_the_database_itself_refuses_nan_when_python_is_bypassed(factory):
     """RAW SQL. No ORM, no type, no application validation - only the CHECK constraint is left.
@@ -292,14 +299,15 @@ async def test_c_the_database_itself_refuses_nan_when_python_is_bypassed(factory
     world = await _seed(factory)
     # INSIDE AN OPEN OPERATION (018 stage B1). A raw INSERT with no operation named in the transaction
     # is refused by the `debts` trigger (`GE001`) whatever its amount, which would make both halves
-    # below measure the journal instead of the value. Both statements run inside a fixture operation
-    # on the same session, so `geo.operation_id` is set and the only thing left to refuse the NaN is
-    # the column's CHECK (a row CHECK is evaluated before an AFTER-row trigger runs anyway).
+    # below measure the journal instead of the value. Both statements run inside a `TEST_FIXTURE`
+    # operation of the book on the same session - the book's own block, not `debt_fixture_setup`, whose
+    # AST guard admits no raw statement - so `geo.operation_id` is set and the only thing left to
+    # refuse the NaN is the column's CHECK (a row CHECK is evaluated before an AFTER-row trigger).
     #
     # NON-VACUITY: the same raw statement stores an ordinary amount, so a refusal below is
     # about the VALUE and not about the statement being malformed.
     async with factory() as session:
-        async with debt_fixture_setup(session, label="raw-control"):
+        async with Book.operation(session, _raw_operation("raw-control")):
             await session.execute(
                 text(
                     "INSERT INTO debts (id, debtor_id, creditor_id, equivalent_id, amount, version)"
@@ -322,7 +330,7 @@ async def test_c_the_database_itself_refuses_nan_when_python_is_bypassed(factory
     constraint = None
     async with factory() as session:
         try:
-            async with debt_fixture_setup(session, label="raw-nan"):
+            async with Book.operation(session, _raw_operation("raw-nan")):
                 await session.execute(
                     text(
                         "INSERT INTO debts (id, debtor_id, creditor_id, equivalent_id, amount,"

@@ -24,12 +24,14 @@ savepoint. The concurrent writer takes the pool's second connection.
 
 from __future__ import annotations
 
+import uuid
 from decimal import Decimal
 
 import pytest
 from sqlalchemy import update
 from sqlalchemy.exc import DBAPIError
 
+from app.core.ledger.book import Book, operation_for
 from app.db.models.debt import Debt
 from tests.integration.test_p015_inject_holds_the_owner_lock_postgres import (  # noqa: F401
     _Artifacts,
@@ -112,10 +114,18 @@ async def test_a_real_serialization_failure_restarts_the_whole_inject_unit_of_wo
             # listener journal stood down; the journal is now the database's trigger, which refuses
             # a write outside an operation (`GE001`) and cannot be stood down, so the competitor
             # opens a fixture operation on its OWN session and connection - the book's ownership is
-            # per session, so the inject's open operation does not refuse it. What this helper
-            # stands for is "somebody else committed the row", and that is what it still does.
+            # per session, so the inject's open operation does not refuse it. It is the book's own
+            # operation and not a `debt_fixture_setup` block: a Core statement is not fixture setup
+            # (`tests/unit/test_p015_b4_fixture_blocks_contain_only_fixture_setup.py`), it is a
+            # writer. What this helper stands for is "somebody else committed the row", and that is
+            # what it still does.
             async with observed_factory() as other:
-                async with debt_fixture_setup(other, label="concurrent-writer"):
+                async with Book.operation(
+                    other,
+                    operation_for(
+                        "TEST_FIXTURE", f"p015-concurrent-writer/{uuid.uuid4()}", {"competitor": True}
+                    ),
+                ):
                     await other.execute(
                         update(Debt)
                         .where(
