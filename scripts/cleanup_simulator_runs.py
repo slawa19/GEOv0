@@ -85,7 +85,7 @@ async def _apply_db_deletions(*, run_ids: Sequence[str], chunk_size: int = 500) 
     deleted_total = 0
     async with AsyncSessionLocal() as session:
         for batch in _chunks(list(run_ids), chunk_size):
-            # NOTE: There are no FK cascades in the MVP schema (SQLite-friendly),
+            # NOTE: There are no FK cascades in the MVP schema,
             # so we delete dependent tables manually.
             await session.execute(delete(SimulatorRunMetric).where(SimulatorRunMetric.run_id.in_(batch)))
             await session.execute(delete(SimulatorRunBottleneck).where(SimulatorRunBottleneck.run_id.in_(batch)))

@@ -25,7 +25,7 @@ class TrustLine(TrustLineBase):
     @field_validator("created_at", "updated_at")
     @classmethod
     def ensure_utc_for_naive_database_timestamp(cls, value: datetime) -> datetime:
-        # SQLite drops timezone metadata even for DateTime(timezone=True).
+        # A naive server timestamp is interpreted as UTC.
         return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)

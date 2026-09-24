@@ -167,11 +167,23 @@ function Get-FullStackOwnershipMetadata {
     if (-not [int]::TryParse([string]$metadata.pid, [ref]$pidValue) -or $pidValue -le 0) { throw 'invalid pid' }
     $fingerprint = [string]$metadata.process_start_fingerprint
     if ($fingerprint -notmatch '^utc-ticks:\d+$') { throw 'invalid fingerprint' }
+    # Version 2 (2026-09-24) also names the listener, a descendant of the launched PID. Both are
+    # kept: full-stack is active while EITHER is alive (external review 2026-09-24, P2a).
+    $listenerPidValue = $pidValue
+    $listenerFingerprint = $fingerprint
+    if ($metadata.version -eq 2) {
+      $listenerPidValue = 0
+      if (-not [int]::TryParse([string]$metadata.listener_pid, [ref]$listenerPidValue) -or $listenerPidValue -le 0) { throw 'invalid listener pid' }
+      $listenerFingerprint = [string]$metadata.listener_start_fingerprint
+      if ($listenerFingerprint -notmatch '^utc-ticks:\d+$') { throw 'invalid listener fingerprint' }
+    }
     return [pscustomobject]@{
-      Valid = [bool]($metadata.version -eq 1)
+      Valid = [bool]($metadata.version -eq 1 -or $metadata.version -eq 2)
       RepositoryIdentity = [string]$metadata.repository_identity
       Pid = $pidValue
       ProcessStartFingerprint = $fingerprint
+      ListenerPid = $listenerPidValue
+      ListenerProcessStartFingerprint = $listenerFingerprint
       ServiceName = [string]$metadata.service_name
       Port = [int]$metadata.port
     }
@@ -195,8 +207,14 @@ function Assert-NoActiveFullStackOwnership {
       $metadata.ServiceName -ne $serviceName -or $metadata.Port -le 0) {
       throw "$serviceName full-stack ownership metadata is unreadable or invalid; run_real_simulator refused."
     }
+    # Active while EITHER the launched PID or its listener is alive or unreadable (P2a, 2026-09-24).
     $identity = Get-ProcessIdentityObservation -Id $metadata.Pid -ExpectedStartFingerprint $metadata.ProcessStartFingerprint
-    if ($identity.Status -in @('Exact', 'Unreadable')) {
+    $listenerIdentity = if ($metadata.ListenerPid -and $metadata.ListenerPid -ne $metadata.Pid) {
+      Get-ProcessIdentityObservation -Id $metadata.ListenerPid -ExpectedStartFingerprint $metadata.ListenerProcessStartFingerprint
+    } else {
+      $identity
+    }
+    if ($identity.Status -in @('Exact', 'Unreadable') -or $listenerIdentity.Status -in @('Exact', 'Unreadable')) {
       throw "$serviceName full-stack ownership is active or unreadable; run_real_simulator refused."
     }
     $listener = Get-ListeningPid -Port $metadata.Port

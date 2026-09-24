@@ -25,8 +25,7 @@ class StoredEquivalent(BaseModel):
     @field_validator("created_at", "updated_at")
     @classmethod
     def attach_utc_to_naive_database_timestamps(cls, value: datetime) -> datetime:
-        # SQLite drops timezone metadata even for DateTime(timezone=True). The
-        # wire contract is RFC 3339, so interpret those server timestamps as UTC.
+        # The wire contract is RFC 3339, so a naive server timestamp is interpreted as UTC.
         if value.utcoffset() is None:
             return value.replace(tzinfo=timezone.utc)
         return value

@@ -855,6 +855,8 @@ def test_startup_never_adopts_a_listener_other_than_launched_process(
         _AST_SETUP
         + r"""
 Invoke-Expression (Get-LauncherFunctionText -Name 'Wait-ForLaunchedServiceOwnership')
+# The listener's parent chain (2026-09-24) does not reach the launched PID in these cases.
+function Get-FullStackDescendantListener { return $null }
 $script:OwnershipWrites = @()
 $script:StoppedPids = @()
 function Get-ProcessStartTimeFingerprint { param([int]$Id) return 'start-a' }
@@ -900,6 +902,8 @@ def test_startup_timeout_cleans_up_exact_launched_process(powershell: Path) -> N
         _AST_SETUP
         + r"""
 Invoke-Expression (Get-LauncherFunctionText -Name 'Wait-ForLaunchedServiceOwnership')
+# The listener's parent chain (2026-09-24) does not reach the launched PID in these cases.
+function Get-FullStackDescendantListener { return $null }
 $script:StoppedPids = @()
 function Get-ProcessStartTimeFingerprint { param([int]$Id) return 'start-a' }
 function Get-ProcessIdentityObservation {
@@ -941,6 +945,8 @@ def test_startup_child_that_already_exited_is_not_a_cleanup_failure(
         _AST_SETUP
         + r"""
 Invoke-Expression (Get-LauncherFunctionText -Name 'Wait-ForLaunchedServiceOwnership')
+# The listener's parent chain (2026-09-24) does not reach the launched PID in these cases.
+function Get-FullStackDescendantListener { return $null }
 function Get-ProcessStartTimeFingerprint { param([int]$Id) return $null }
 function Get-ProcessIdentityObservation {
     param([int]$Id, [string]$ExpectedStartFingerprint)
@@ -977,6 +983,8 @@ def test_startup_cleanup_failure_preserves_primary_and_cleanup_evidence(
         _AST_SETUP
         + r"""
 Invoke-Expression (Get-LauncherFunctionText -Name 'Wait-ForLaunchedServiceOwnership')
+# The listener's parent chain (2026-09-24) does not reach the launched PID in these cases.
+function Get-FullStackDescendantListener { return $null }
 function Get-ProcessStartTimeFingerprint { param([int]$Id) return 'start-a' }
 function Get-ProcessIdentityObservation {
     param([int]$Id, [string]$ExpectedStartFingerprint)
@@ -1025,6 +1033,8 @@ def test_successful_startup_persists_ownership_without_cleanup(
         _AST_SETUP
         + r"""
 Invoke-Expression (Get-LauncherFunctionText -Name 'Wait-ForLaunchedServiceOwnership')
+# The listener's parent chain (2026-09-24) does not reach the launched PID in these cases.
+function Get-FullStackDescendantListener { return $null }
 $script:OwnershipWrites = @()
 function Get-ProcessStartTimeFingerprint { param([int]$Id) return 'start-a' }
 function Get-ListeningPid { param([int]$Port) return 101 }
@@ -1787,6 +1797,8 @@ function Get-ProcessIdentityObservation {
     return [pscustomobject]@{ Status = 'Exact'; Fingerprint = 'start-a' }
 }
 function Get-ListeningPid { param([int]$Port) return 999 }
+# run_local walks the listener's parents (2026-09-24); 999 is not a descendant of the launched PID.
+function Get-RunLocalDescendantListener { return $null }
 function Stop-ProcessById {
     param([int]$Id, [string]$ExpectedStartFingerprint)
     throw 'cleanup-stop-failed'
@@ -1896,6 +1908,558 @@ if (Test-Path -LiteralPath $service.OwnershipFile) { throw 'Ownership metadata s
         },
     )
     assert result.stdout == "run-local-start-separate-stop-ok"
+
+
+# 2026-09-24: on Windows `.venv\Scripts\python.exe` is a redirector that starts the base interpreter
+# as a CHILD (measured: launched PID 16076, listening interpreter PID 11892), so the backend never
+# listens on the launched PID. run_local accepts a listener that DESCENDS from the launched PID
+# (parent chain, bounded depth, parents never younger than children), records both, and stops both:
+# the listener first, then the launched process unless it has already gone - the redirector and its
+# child share a job, so stopping one ends the other (measured the same day).
+# The process table below is a fake: {pid: start ticks} and {pid: parent pid}.
+_RUN_LOCAL_DESCENDANT_SETUP = r"""
+foreach ($name in @(
+    'Get-LauncherLifecycleLockName', 'Get-RunLocalRepositoryIdentity',
+    'Get-RunLocalOwnershipMetadata', 'Write-RunLocalOwnershipMetadata',
+    'Get-RunLocalOwnershipState', 'Get-RunLocalOwnershipPlan',
+    'Test-RunLocalOwnershipPlansEqual', 'Invoke-RunLocalOwnershipStopPlan',
+    'Get-ProcessStartTimeFingerprint', 'Get-StartFingerprintTicks',
+    'Get-RunLocalDescendantListener', 'Wait-ForRunLocalServiceOwnership',
+    'Stop-ProcessIfStillExact'
+)) {
+    Invoke-Expression (Get-LauncherFunctionText -Name $name)
+}
+$RepoRoot = 'C:\repo-a'
+$script:StartTicks = @{}
+$script:Parents = @{}
+$script:Listener = $null
+$script:Stopped = @()
+$script:RedirectorExitsWithChild = $false
+$script:RedirectorExitsDuringStop = $false
+function Get-ProcessIdentityObservation {
+    param([int]$Id, [string]$ExpectedStartFingerprint)
+    if (-not $script:StartTicks.ContainsKey($Id)) {
+        return [pscustomobject]@{ Status = 'Missing'; Fingerprint = $null }
+    }
+    $fingerprint = "utc-ticks:$($script:StartTicks[$Id])"
+    $status = if (-not $ExpectedStartFingerprint) { 'Observed' }
+        elseif ($fingerprint -eq $ExpectedStartFingerprint) { 'Exact' } else { 'Mismatch' }
+    return [pscustomobject]@{ Status = $status; Fingerprint = $fingerprint }
+}
+function Get-ProcessParentId {
+    param([int]$Id)
+    if ($script:Parents.ContainsKey($Id)) { return $script:Parents[$Id] }
+    return $null
+}
+function Get-ListeningPid { param([int]$Port) return $script:Listener }
+function Stop-ProcessById {
+    param([int]$Id, [string]$ExpectedStartFingerprint)
+    $script:Stopped += "$Id|$ExpectedStartFingerprint"
+    $script:StartTicks.Remove($Id)
+    if ($script:Listener -eq $Id) { $script:Listener = $null }
+    if ($Id -eq 202 -and $script:RedirectorExitsWithChild) { $script:StartTicks.Remove(101) }
+    if ($Id -eq 101 -and $script:RedirectorExitsDuringStop) {
+        throw 'Cannot find a process with the process identifier 101.'
+    }
+}
+function Start-Sleep { param([int]$Milliseconds) }
+$service = [pscustomobject]@{
+    Name = 'Backend'
+    OwnershipFile = $env:PHASE7_OWNERSHIP_PATH
+    LegacyPidFile = "$($env:PHASE7_OWNERSHIP_PATH).legacy"
+    Port = 18000
+}
+"""
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+@pytest.mark.parametrize(
+    ("redirector", "expected_stops"),
+    (
+        ("", "202|utc-ticks:1001,101|utc-ticks:1000"),
+        ("$script:RedirectorExitsWithChild = $true", "202|utc-ticks:1001"),
+        ("$script:RedirectorExitsDuringStop = $true", "202|utc-ticks:1001,101|utc-ticks:1000"),
+    ),
+    ids=("redirector-outlives-child", "redirector-exits-with-child", "redirector-exits-during-stop"),
+)
+def test_run_local_adopts_a_descendant_listener_and_stop_kills_both(
+    powershell: Path,
+    tmp_path: Path,
+    redirector: str,
+    expected_stops: str,
+) -> None:
+    command = (
+        _AST_SETUP
+        + _RUN_LOCAL_DESCENDANT_SETUP
+        + r"""
+$script:StartTicks[101] = 1000
+$script:StartTicks[202] = 1001
+$script:Parents[202] = 101
+$script:Listener = 202
+$started = Wait-ForRunLocalServiceOwnership -Service $service -Process ([pscustomobject]@{ Id = 101 }) -TimeoutSec 1
+if ($started.Pid -ne 101 -or $started.ListenerPid -ne 202 -or
+    $started.ListenerProcessStartFingerprint -ne 'utc-ticks:1001') {
+    throw "Descendant listener was not returned: $($started | Out-String)"
+}
+$raw = Get-Content -LiteralPath $service.OwnershipFile -Raw | ConvertFrom-Json
+if ($raw.version -ne 2 -or $raw.pid -ne 101 -or $raw.listener_pid -ne 202 -or
+    $raw.process_start_fingerprint -ne 'utc-ticks:1000' -or $raw.listener_start_fingerprint -ne 'utc-ticks:1001') {
+    throw 'Both the launched PID and the listener were not recorded'
+}
+$state = Get-RunLocalOwnershipState -Service $service
+if (-not $state.Owned -or $state.Conflict) { throw "Descendant listener is not owned: $($state.Reason)" }
+Invoke-Expression $env:PHASE7_REDIRECTOR
+Invoke-RunLocalOwnershipStopPlan -Services @($service)
+if (($script:Stopped -join ',') -ne $env:PHASE7_EXPECTED_STOPS) {
+    throw "Stop did not kill the listener and then its launcher: $($script:Stopped -join ',')"
+}
+if ($script:StartTicks.ContainsKey(101) -or $script:StartTicks.ContainsKey(202)) {
+    throw 'A process survived the stop'
+}
+if ($script:Listener) { throw 'The port is still held' }
+if (Test-Path -LiteralPath $service.OwnershipFile) { throw 'Ownership metadata survived the stop' }
+[Console]::Out.Write('run-local-descendant-adopted-and-stopped')
+"""
+    )
+    result = _run_powershell(
+        powershell,
+        command,
+        extra_env={
+            "PHASE7_SCRIPT_PATH": str(_RUN_LOCAL),
+            "PHASE7_OWNERSHIP_PATH": str(tmp_path / "backend.owner.json"),
+            "PHASE7_REDIRECTOR": redirector,
+            "PHASE7_EXPECTED_STOPS": expected_stops,
+        },
+    )
+    assert result.stdout == "run-local-descendant-adopted-and-stopped"
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+@pytest.mark.parametrize(
+    "table",
+    (
+        # A foreign listener: its parents never reach the launched PID.
+        "$script:StartTicks[202] = 1001; $script:StartTicks[303] = 900; $script:Parents[202] = 303",
+        # A recycled parent PID: 202 records 101 as its parent, but the 101 alive now started
+        # AFTER 202 - it is the launched process that reused a dead parent's PID, not the parent.
+        "$script:StartTicks[202] = 999; $script:Parents[202] = 101",
+        # Deeper than the bounded walk (four generations): 202 -> 5 -> 4 -> 3 -> 2 -> 101.
+        "$script:StartTicks[202] = 1005; foreach ($p in 2..5) { $script:StartTicks[$p] = 1000 + $p }; "
+        "$script:Parents[202] = 5; $script:Parents[5] = 4; $script:Parents[4] = 3; "
+        "$script:Parents[3] = 2; $script:Parents[2] = 101",
+        # A PID reused MID-WALK (external review 2026-09-24, P1): 202's parent 303 is observed as an
+        # unrelated process started at 1500; by the time 303's own parent is read, 303 has exited and
+        # been reused by a new child of 101. Without re-verifying 303 after that read, 101 (1000, not
+        # younger than the OLD 303) would be adopted as 202's ancestor.
+        "$script:StartTicks[202] = 2000; $script:StartTicks[303] = 1500; $script:Parents[202] = 303; "
+        "$script:Parents[303] = 999; function Get-ProcessParentId { param([int]$Id) "
+        "if ($Id -eq 303) { $script:StartTicks[303] = 2500; return 101 }; "
+        "if ($script:Parents.ContainsKey($Id)) { return $script:Parents[$Id] }; return $null }",
+    ),
+    ids=("foreign", "recycled-parent-pid", "too-deep", "pid-reused-mid-walk"),
+)
+def test_run_local_refuses_a_listener_that_is_not_the_launched_descendant(
+    powershell: Path,
+    tmp_path: Path,
+    table: str,
+) -> None:
+    command = (
+        _AST_SETUP
+        + _RUN_LOCAL_DESCENDANT_SETUP
+        + r"""
+$script:StartTicks[101] = 1000
+$script:Listener = 202
+Invoke-Expression $env:PHASE7_TABLE
+try {
+    Wait-ForRunLocalServiceOwnership -Service $service -Process ([pscustomobject]@{ Id = 101 }) -TimeoutSec 1
+    throw 'Foreign listener was adopted'
+} catch {
+    if ($_.Exception.Message -eq 'Foreign listener was adopted') { throw }
+    if ($_.Exception.Message -notlike '*listener PID 202 is not launched PID 101*') { throw }
+}
+if (Test-Path -LiteralPath $service.OwnershipFile) { throw 'Foreign listener ownership was persisted' }
+if (($script:Stopped -join ',') -ne '101|utc-ticks:1000') {
+    throw "Only the launched process may be cleaned up: $($script:Stopped -join ',')"
+}
+[Console]::Out.Write('run-local-foreign-listener-refused')
+"""
+    )
+    result = _run_powershell(
+        powershell,
+        command,
+        extra_env={
+            "PHASE7_SCRIPT_PATH": str(_RUN_LOCAL),
+            "PHASE7_OWNERSHIP_PATH": str(tmp_path / "backend.owner.json"),
+            "PHASE7_TABLE": table,
+        },
+    )
+    assert result.stdout == "run-local-foreign-listener-refused"
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+def test_run_local_reads_version_1_ownership_and_refuses_a_malformed_version_2(
+    powershell: Path,
+    tmp_path: Path,
+) -> None:
+    command = (
+        _AST_SETUP
+        + _RUN_LOCAL_DESCENDANT_SETUP
+        + r"""
+function New-Record {
+    param([int]$Version)
+    return [ordered]@{
+        version = $Version
+        repository_identity = (Get-RunLocalRepositoryIdentity)
+        service_name = 'Backend'
+        port = 18000
+        pid = 101
+        process_start_fingerprint = 'utc-ticks:1000'
+    } | ConvertTo-Json -Compress
+}
+Set-Content -LiteralPath $service.OwnershipFile -Value (New-Record -Version 1)
+$read = Get-RunLocalOwnershipMetadata -Path $service.OwnershipFile
+if (-not $read.Valid -or $read.ListenerPid -ne 101 -or $read.ListenerProcessStartFingerprint -ne 'utc-ticks:1000') {
+    throw 'A version-1 record did not read as launched PID = listener'
+}
+$script:StartTicks[101] = 1000
+$script:Listener = 101
+if (-not (Get-RunLocalOwnershipState -Service $service).Owned) { throw 'A live version-1 owner was not owned' }
+Set-Content -LiteralPath $service.OwnershipFile -Value (New-Record -Version 2)
+if ((Get-RunLocalOwnershipMetadata -Path $service.OwnershipFile).Valid) {
+    throw 'A version-2 record without a listener was accepted'
+}
+$state = Get-RunLocalOwnershipState -Service $service
+if ($state.Owned -or -not $state.Conflict) { throw 'A malformed record was not a conflict' }
+[Console]::Out.Write('run-local-metadata-versions-ok')
+"""
+    )
+    result = _run_powershell(
+        powershell,
+        command,
+        extra_env={
+            "PHASE7_SCRIPT_PATH": str(_RUN_LOCAL),
+            "PHASE7_OWNERSHIP_PATH": str(tmp_path / "backend.owner.json"),
+        },
+    )
+    assert result.stdout == "run-local-metadata-versions-ok"
+
+
+# The same rule in run_full_stack.ps1, whose helpers mirror run_local's (the launchers share no
+# helper file). Measured 2026-09-24: unmodified, `run_full_stack.ps1 start` failed with "port 18471
+# is owned by a different process" for the same venv redirector.
+_FULL_STACK_DESCENDANT_SETUP = (
+    _RUN_LOCAL_DESCENDANT_SETUP.replace(
+        """    'Get-LauncherLifecycleLockName', 'Get-RunLocalRepositoryIdentity',
+    'Get-RunLocalOwnershipMetadata', 'Write-RunLocalOwnershipMetadata',
+    'Get-RunLocalOwnershipState', 'Get-RunLocalOwnershipPlan',
+    'Test-RunLocalOwnershipPlansEqual', 'Invoke-RunLocalOwnershipStopPlan',
+    'Get-ProcessStartTimeFingerprint', 'Get-StartFingerprintTicks',
+    'Get-RunLocalDescendantListener', 'Wait-ForRunLocalServiceOwnership',
+    'Stop-ProcessIfStillExact'""",
+        """    'Get-LauncherLifecycleLockName', 'Get-FullStackRepositoryIdentity',
+    'Get-ServiceOwnershipMetadata', 'Write-ServiceOwnershipMetadata',
+    'Get-ServiceStopState', 'Get-ServiceStopPlan', 'Test-ServiceStopPlansEqual',
+    'Stop-AllServices', 'Remove-ServicePidFile', 'Remove-StaleServiceOwnershipMetadata',
+    'Get-StartFingerprintTicks', 'Get-FullStackDescendantListener',
+    'Wait-ForLaunchedServiceOwnership', 'Stop-ProcessIfStillExact'""",
+    )
+    + r"""
+function Get-ProcessStartTimeFingerprint {
+    param([int]$Id)
+    if ($script:StartTicks.ContainsKey($Id)) { return "utc-ticks:$($script:StartTicks[$Id])" }
+    return $null
+}
+function Write-Host { }
+$service = [pscustomobject]@{ Name = 'Backend'; Port = 18000; PidFile = $env:PHASE7_OWNERSHIP_PATH }
+"""
+)
+assert "Get-FullStackDescendantListener" in _FULL_STACK_DESCENDANT_SETUP
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+@pytest.mark.parametrize(
+    ("redirector", "expected_stops"),
+    (
+        ("", "202|utc-ticks:1001,101|utc-ticks:1000"),
+        ("$script:RedirectorExitsWithChild = $true", "202|utc-ticks:1001"),
+        ("$script:RedirectorExitsDuringStop = $true", "202|utc-ticks:1001,101|utc-ticks:1000"),
+    ),
+    ids=("redirector-outlives-child", "redirector-exits-with-child", "redirector-exits-during-stop"),
+)
+def test_full_stack_adopts_a_descendant_listener_and_stop_kills_both(
+    powershell: Path,
+    tmp_path: Path,
+    redirector: str,
+    expected_stops: str,
+) -> None:
+    command = (
+        _AST_SETUP
+        + _FULL_STACK_DESCENDANT_SETUP
+        + r"""
+$script:StartTicks[101] = 1000
+$script:StartTicks[202] = 1001
+$script:Parents[202] = 101
+$script:Listener = 202
+$started = Wait-ForLaunchedServiceOwnership -Service $service -Process ([pscustomobject]@{ Id = 101 }) -TimeoutSec 1
+if ($started.Pid -ne 101 -or $started.ListenerPid -ne 202) { throw 'Descendant listener was not returned' }
+$raw = Get-Content -LiteralPath $service.PidFile -Raw | ConvertFrom-Json
+if ($raw.version -ne 2 -or $raw.pid -ne 101 -or $raw.listener_pid -ne 202 -or
+    $raw.listener_start_fingerprint -ne 'utc-ticks:1001') {
+    throw 'Both the launched PID and the listener were not recorded'
+}
+$state = Get-ServiceStopState -Service $service
+if (-not $state.Owned -or $state.Conflict) { throw "Descendant listener is not owned: $($state.Reason)" }
+Invoke-Expression $env:PHASE7_REDIRECTOR
+if (-not (Stop-AllServices -Services @($service) -FailOnConflict)) { throw 'Stop reported failure' }
+if (($script:Stopped -join ',') -ne $env:PHASE7_EXPECTED_STOPS) {
+    throw "Stop did not kill the listener and then its launcher: $($script:Stopped -join ',')"
+}
+if ($script:StartTicks.ContainsKey(101) -or $script:StartTicks.ContainsKey(202)) {
+    throw 'A process survived the stop'
+}
+if (Test-Path -LiteralPath $service.PidFile) { throw 'Ownership metadata survived the stop' }
+[Console]::Out.Write('full-stack-descendant-adopted-and-stopped')
+"""
+    )
+    result = _run_powershell(
+        powershell,
+        command,
+        extra_env={
+            "PHASE7_SCRIPT_PATH": str(_RUN_FULL_STACK),
+            "PHASE7_OWNERSHIP_PATH": str(tmp_path / "backend.owner.json"),
+            "PHASE7_REDIRECTOR": redirector,
+            "PHASE7_EXPECTED_STOPS": expected_stops,
+        },
+    )
+    assert result.stdout == "full-stack-descendant-adopted-and-stopped"
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+@pytest.mark.parametrize(
+    "table",
+    (
+        "$script:StartTicks[202] = 1001; $script:StartTicks[303] = 900; $script:Parents[202] = 303",
+        "$script:StartTicks[202] = 999; $script:Parents[202] = 101",
+        "$script:StartTicks[202] = 1005; foreach ($p in 2..5) { $script:StartTicks[$p] = 1000 + $p }; "
+        "$script:Parents[202] = 5; $script:Parents[5] = 4; $script:Parents[4] = 3; "
+        "$script:Parents[3] = 2; $script:Parents[2] = 101",
+        # A PID reused MID-WALK (external review 2026-09-24, P1): 202's parent 303 is observed as an
+        # unrelated process started at 1500; by the time 303's own parent is read, 303 has exited and
+        # been reused by a new child of 101. Without re-verifying 303 after that read, 101 (1000, not
+        # younger than the OLD 303) would be adopted as 202's ancestor.
+        "$script:StartTicks[202] = 2000; $script:StartTicks[303] = 1500; $script:Parents[202] = 303; "
+        "$script:Parents[303] = 999; function Get-ProcessParentId { param([int]$Id) "
+        "if ($Id -eq 303) { $script:StartTicks[303] = 2500; return 101 }; "
+        "if ($script:Parents.ContainsKey($Id)) { return $script:Parents[$Id] }; return $null }",
+    ),
+    ids=("foreign", "recycled-parent-pid", "too-deep", "pid-reused-mid-walk"),
+)
+def test_full_stack_refuses_a_listener_that_is_not_the_launched_descendant(
+    powershell: Path,
+    tmp_path: Path,
+    table: str,
+) -> None:
+    command = (
+        _AST_SETUP
+        + _FULL_STACK_DESCENDANT_SETUP
+        + r"""
+$script:StartTicks[101] = 1000
+$script:Listener = 202
+Invoke-Expression $env:PHASE7_TABLE
+try {
+    Wait-ForLaunchedServiceOwnership -Service $service -Process ([pscustomobject]@{ Id = 101 }) -TimeoutSec 1
+    throw 'Foreign listener was adopted'
+} catch {
+    if ($_.Exception.Message -eq 'Foreign listener was adopted') { throw }
+    if ($_.Exception.Message -notlike '*port 18000 is owned by a different process*') { throw }
+}
+if (Test-Path -LiteralPath $service.PidFile) { throw 'Foreign listener ownership was persisted' }
+if (($script:Stopped -join ',') -ne '101|utc-ticks:1000') {
+    throw "Only the launched process may be cleaned up: $($script:Stopped -join ',')"
+}
+[Console]::Out.Write('full-stack-foreign-listener-refused')
+"""
+    )
+    result = _run_powershell(
+        powershell,
+        command,
+        extra_env={
+            "PHASE7_SCRIPT_PATH": str(_RUN_FULL_STACK),
+            "PHASE7_OWNERSHIP_PATH": str(tmp_path / "backend.owner.json"),
+            "PHASE7_TABLE": table,
+        },
+    )
+    assert result.stdout == "full-stack-foreign-listener-refused"
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+@pytest.mark.parametrize(
+    ("script_path", "setup", "writer"),
+    (
+        (_RUN_LOCAL, _RUN_LOCAL_DESCENDANT_SETUP, "Write-RunLocalOwnershipMetadata"),
+        (_RUN_FULL_STACK, _FULL_STACK_DESCENDANT_SETUP, "Write-ServiceOwnershipMetadata"),
+    ),
+    ids=("run-local", "full-stack"),
+)
+def test_a_failed_listener_cleanup_still_stops_the_launched_process(
+    powershell: Path,
+    tmp_path: Path,
+    script_path: Path,
+    setup: str,
+    writer: str,
+) -> None:
+    """External review 2026-09-24, P2b: each cleanup stop is attempted whatever the other did."""
+    wait = (
+        "Wait-ForRunLocalServiceOwnership"
+        if script_path == _RUN_LOCAL
+        else "Wait-ForLaunchedServiceOwnership"
+    )
+    command = (
+        _AST_SETUP
+        + setup
+        + r"""
+$script:StartTicks[101] = 1000
+$script:StartTicks[202] = 1001
+$script:Parents[202] = 101
+$script:Listener = 202
+Invoke-Expression "function $($env:PHASE7_WRITER) { throw 'metadata-write-failed' }"
+function Stop-ProcessById {
+    param([int]$Id, [string]$ExpectedStartFingerprint)
+    $script:Stopped += "$Id|$ExpectedStartFingerprint"
+    if ($Id -eq 202) { throw 'listener-stop-failed' }
+    $script:StartTicks.Remove($Id)
+}
+try {
+    & $env:PHASE7_WAIT -Service $service -Process ([pscustomobject]@{ Id = 101 }) -TimeoutSec 1
+    throw 'Startup unexpectedly succeeded'
+} catch {
+    $message = $_.Exception.Message
+    if ($message -eq 'Startup unexpectedly succeeded') { throw }
+    if ($message -notlike '*metadata-write-failed*') { throw "Primary failure was lost: $message" }
+    if ($message -notlike '*Startup cleanup also failed*listener-stop-failed*') {
+        throw "Listener cleanup failure was lost: $message"
+    }
+}
+if (($script:Stopped -join ',') -ne '202|utc-ticks:1001,101|utc-ticks:1000') {
+    throw "The launched process was not stopped after the listener stop failed: $($script:Stopped -join ',')"
+}
+[Console]::Out.Write('cleanup-stops-both-independently')
+"""
+    )
+    result = _run_powershell(
+        powershell,
+        command,
+        extra_env={
+            "PHASE7_SCRIPT_PATH": str(script_path),
+            "PHASE7_OWNERSHIP_PATH": str(tmp_path / "backend.owner.json"),
+            "PHASE7_WRITER": writer,
+            "PHASE7_WAIT": wait,
+        },
+    )
+    assert result.stdout == "cleanup-stops-both-independently"
+
+
+# External review 2026-09-24, P2a: a v2 full-stack record names two processes, and full-stack is
+# active while EITHER is alive or unreadable. Reading only the listener let a live launched process
+# pass as stale, and run_local then deleted the record.
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+@pytest.mark.parametrize("launched_status", ("Exact", "Unreadable"))
+def test_run_local_treats_a_live_launched_full_stack_process_as_active(
+    powershell: Path,
+    launched_status: str,
+) -> None:
+    body = r"""
+$script:FullStackMetadata = New-FullStackMetadata
+$script:FullStackMetadata | Add-Member -NotePropertyName ListenerPid -NotePropertyValue 202
+$script:FullStackMetadata | Add-Member -NotePropertyName ListenerProcessStartFingerprint -NotePropertyValue 'utc-ticks:638903664000000202'
+function Get-ProcessIdentityObservation {
+    param([int]$Id, [string]$ExpectedStartFingerprint)
+    $status = if ($Id -eq 101) { $env:PHASE7_LAUNCHED_STATUS } else { 'Missing' }
+    return [pscustomobject]@{ Status = $status; Fingerprint = $ExpectedStartFingerprint }
+}
+try {
+    Assert-NoActiveFullStackOwnership
+    throw 'run_local unexpectedly accepted full-stack ownership'
+} catch {
+    if ($_.Exception.Message -eq 'run_local unexpectedly accepted full-stack ownership') { throw }
+    if ($_.Exception.Message -notlike '*run_local refused*') { throw }
+}
+if ($script:RemovedOwnershipFiles.Count -ne 0) { throw 'The full-stack record was deleted' }
+[Console]::Out.Write('run-local-launched-full-stack-active')
+"""
+    result = _run_powershell(
+        powershell,
+        _run_local_guard_command(body),
+        extra_env={
+            "PHASE7_SCRIPT_PATH": str(_RUN_LOCAL),
+            "PHASE7_LAUNCHED_STATUS": launched_status,
+        },
+    )
+    assert "run-local-launched-full-stack-active" in result.stdout
+
+
+@pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
+@pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
+@pytest.mark.parametrize("launched_status", ("Exact", "Unreadable"))
+def test_run_real_treats_a_live_launched_full_stack_process_as_active(
+    powershell: Path,
+    tmp_path: Path,
+    launched_status: str,
+) -> None:
+    command = (
+        _AST_SETUP
+        + r"""
+Invoke-Expression (Get-LauncherFunctionText -Name 'Get-LauncherLifecycleLockName')
+Invoke-Expression (Get-LauncherFunctionText -Name 'Get-FullStackOwnershipMetadata')
+Invoke-Expression (Get-LauncherFunctionText -Name 'Assert-NoActiveFullStackOwnership')
+$repoRoot = 'C:\repo-a'
+$fullStackOwnershipDir = $env:PHASE7_DIR
+$record = [ordered]@{
+    version = 2
+    repository_identity = (Get-LauncherLifecycleLockName -RepositoryRoot $repoRoot)
+    service_name = 'Backend'
+    port = 18000
+    pid = 101
+    process_start_fingerprint = 'utc-ticks:1000'
+    listener_pid = 202
+    listener_start_fingerprint = 'utc-ticks:1001'
+} | ConvertTo-Json -Compress
+$file = Join-Path $fullStackOwnershipDir 'backend.owner.json'
+Set-Content -LiteralPath $file -Value $record
+function Get-ProcessIdentityObservation {
+    param([int]$Id, [string]$ExpectedStartFingerprint)
+    $status = if ($Id -eq 101) { $env:PHASE7_LAUNCHED_STATUS } else { 'Missing' }
+    return [pscustomobject]@{ Status = $status; Fingerprint = $ExpectedStartFingerprint }
+}
+function Get-ListeningPid { param([int]$Port) return $null }
+try {
+    Assert-NoActiveFullStackOwnership
+    throw 'run_real unexpectedly accepted full-stack ownership'
+} catch {
+    if ($_.Exception.Message -eq 'run_real unexpectedly accepted full-stack ownership') { throw }
+    if ($_.Exception.Message -notlike '*full-stack ownership is active or unreadable*') { throw }
+}
+if (-not (Test-Path -LiteralPath $file)) { throw 'The full-stack record was deleted' }
+[Console]::Out.Write('run-real-launched-full-stack-active')
+"""
+    )
+    result = _run_powershell(
+        powershell,
+        command,
+        extra_env={
+            "PHASE7_SCRIPT_PATH": str(_RUN_REAL_SIMULATOR),
+            "PHASE7_DIR": str(tmp_path),
+            "PHASE7_LAUNCHED_STATUS": launched_status,
+        },
+    )
+    assert result.stdout == "run-real-launched-full-stack-active"
 
 
 @pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")

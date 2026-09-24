@@ -33,6 +33,10 @@ FOUR KINDS OF FINDING, each counted per file:
   `"sqlite"`, `"asyncpg"`, `"aiosqlite"`, `"postgresql+asyncpg"`), directly or inside a
   set/tuple/list literal, or a `dialect=` keyword with such a literal (`ddl_if(dialect=...)`).
 
+An attribute read spelled `getattr(<expr>, "<literal>")` counts exactly like `<expr>.<literal>`, for
+every attribute and call name above (2026-09-24, closing review of 017 stage 3: the guard missed
+`getattr(engine, "dialect").name`). A `getattr` whose name is not a string literal is not resolved.
+
 THE ALLOW-LIST is exact counts per (file, kind), each with a reason and a date. Not everything that
 reads a dialect is a second dialect: a refusal that enforces the one engine, a wire field, and the
 journal handing the dialect object to SQLAlchemy's own compiler and type processors. An exact count
@@ -61,8 +65,9 @@ _IDENTITY_ATTRS_ON_DIALECT = frozenset({"name", "driver"})
 _BLIND_SPOTS = (
     "WHAT THIS GUARD DOES NOT SEE: non-Python files (`scripts/*.ps1`, `docker/`, workflows, "
     "Dockerfiles, `.env*`), `tests/` (its fixtures spell SQLite URLs as refusal inputs; the tier "
-    "itself is guarded by `tests/conftest.py`), comments and docstrings, names assembled at runtime "
-    "(`getattr(x, 'dia' + 'lect')`, `'sq' + 'lite'`), and a backend name compared through a variable "
+    "itself is guarded by `tests/conftest.py`), comments and docstrings, an attribute named by "
+    "anything but a string literal (`getattr(x, attr_name)`, `getattr(x, 'dia' + 'lect')`, `operator.attrgetter('dialect.name')`), "
+    "names assembled at runtime (`'sq' + 'lite'`), and a backend name compared through a variable "
     "(`b = 'postgresql'; if name == b`). It checks FORM, not truth: green does not prove the code is "
     "correct on PostgreSQL - the backend tier does that."
 )
@@ -196,8 +201,26 @@ def _docstring_nodes(tree: ast.AST) -> set[int]:
     return found
 
 
+def _attribute_read(node: ast.AST) -> tuple[str, ast.AST] | None:
+    """`(name, owner)` for `owner.name` and for `getattr(owner, "name"[, default])`, else None."""
+
+    if isinstance(node, ast.Attribute):
+        return node.attr, node.value
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "getattr"
+        and len(node.args) >= 2
+        and isinstance(node.args[1], ast.Constant)
+        and isinstance(node.args[1].value, str)
+    ):
+        return node.args[1].value, node.args[0]
+    return None
+
+
 def _is_dialect_expr(node: ast.AST) -> bool:
-    return (isinstance(node, ast.Attribute) and node.attr == "dialect") or (
+    read = _attribute_read(node)
+    return (read is not None and read[0] == "dialect") or (
         isinstance(node, ast.Name) and node.id == "dialect"
     )
 
@@ -249,16 +272,19 @@ def scan_source(source: str) -> dict[str, list[int]]:
             add("sqlite", node)
 
         # --- dialect reads
-        if isinstance(node, ast.Attribute):
-            if node.attr == "dialect":
+        read = _attribute_read(node)
+        if read is not None:
+            attr, owner = read
+            if attr == "dialect":
                 add("dialect-object", node)
-            if node.attr in _IDENTITY_ATTRS_ON_DIALECT and _is_dialect_expr(node.value):
+            if attr in _IDENTITY_ATTRS_ON_DIALECT and _is_dialect_expr(owner):
                 add("dialect-identity", node)
-            if node.attr == "drivername":
+            if attr == "drivername":
                 add("dialect-identity", node)
         if isinstance(node, ast.Call):
             func = node.func
-            called = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+            func_read = _attribute_read(func)
+            called = func_read[0] if func_read is not None else getattr(func, "id", None)
             if called in _IDENTITY_CALLS:
                 add("dialect-identity", node)
             for keyword in node.keywords:
@@ -375,6 +401,14 @@ def test_the_scan_is_not_vacuous() -> None:
         # A string that is NOT the first statement is code, however it is quoted.
         ('def f():\n    x = 1\n    """on SQLite this differs"""\n', "sqlite"),
         ('SQL = """SELECT sqlite_version()"""\n', "sqlite"),
+        # `getattr` with a literal name is the attribute read it spells (2026-09-24).
+        ('if getattr(engine, "dialect").name != "postgresql":\n    pass\n', "dialect-identity"),
+        ('if getattr(engine, "dialect").name != "postgresql":\n    pass\n', "dialect-object"),
+        ('x = getattr(getattr(engine, "dialect"), "name")\n', "dialect-identity"),
+        ('x = getattr(engine.dialect, "name")\n', "dialect-identity"),
+        ('x = getattr(conn.dialect, "driver", None)\n', "dialect-identity"),
+        ('x = getattr(url, "drivername")\n', "dialect-identity"),
+        ('x = getattr(url, "get_backend_name")()\n', "dialect-identity"),
     ],
 )
 def test_the_scanner_finds_a_planted_reference(source: str, kind: str) -> None:
@@ -392,6 +426,8 @@ def test_the_scanner_finds_a_planted_reference(source: str, kind: str) -> None:
         'Index("i", c, postgresql_where=text("state = \'OPEN\'"))\n',
         'url = URL.create("postgresql", host="h")\n',
         "participant.name\n",
+        'getattr(participant, "name")\n',
+        'getattr(getattr(x, "participant"), "name")\n',
         'await session.connection(execution_options={"postgresql_readonly": True})\n',
     ],
 )

@@ -290,7 +290,7 @@ py -m venv .venv
 - `.\scripts\verify_local.ps1 -TaskSlug runbook_openapi -BackendOnly -BackendSelector tests/contract/test_openapi_contract.py`
 
 ### 7.3 Postgres-backed тест конкурентности (важно)
-Для проверки семантики блокировок/изоляции нужен Postgres (SQLite не подходит).
+Семантика блокировок/изоляции проверяется на Postgres — единственном движке backend-тира (программа 017).
 
 Паттерн:
 1) Поднять контейнер БД:

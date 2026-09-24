@@ -41,8 +41,7 @@ class InjectOwnerLockSetTooNarrow(Exception):
     Programme 015, phase B step 3. The owner acquires the owner locks before staging, and the
     equivalent set of `freeze_participant` is only known once its incident trustlines are read.
     Raised BEFORE the write is staged, so the owner can roll back, add `missing_equivalent_ids`
-    and restart the unit of work with the wider set. Enforced on every dialect: on SQLite the
-    lock acquisition is a no-op, and the default tier must still see a write outside the set.
+    and restart the unit of work with the wider set.
     """
 
     def __init__(self, missing_equivalent_ids: frozenset[uuid.UUID]) -> None:

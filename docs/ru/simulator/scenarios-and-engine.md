@@ -34,7 +34,7 @@
 
 2) **Real mode**
 - Это режим, где runner делает реальные вызовы в backend (payments/clearing), и события отражают реальные результаты.
-- Для реалистичной проверки (конкурентность, локи, таймауты) предпочтительнее Postgres + Redis, а не SQLite.
+- Для реалистичной проверки (конкурентность, локи, таймауты) предпочтительнее Postgres + Redis.
 
 Подробный runbook: [backend/real-mode-runbook.md](backend/real-mode-runbook.md).
 
@@ -466,7 +466,7 @@ Real mode guardrails:
 sequenceDiagram
   participant RL as RunLifecycle
   participant RR as RealRunner
-  participant DB as DB (Postgres/SQLite)
+  participant DB as DB (Postgres)
   participant Pay as PaymentService
   participant SSE as SSE stream
 
@@ -573,7 +573,7 @@ sequenceDiagram
 **E) `tx.failed.error.code=PAYMENT_TIMEOUT`**
 - Что это: таймаут на уровне платежного стека.
 - Что говорит:
-  - перегрузка/локи/транзакции (особенно заметно на SQLite),
+  - перегрузка/локи/транзакции,
   - проблемы инфраструктуры (Postgres/Redis),
   - слишком высокий `intensity_percent` относительно ресурсов.
 
