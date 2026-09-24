@@ -282,37 +282,60 @@ async def test_two_operations_on_different_connections_run_at_the_same_time(engi
     ("identification as a pivot"). Measured 5 of 5 on `2fb1056` with the LISTENER journal and two
     overlapping `debt_fixture_setup` blocks - so it predates stage B, and the application's answer is
     the unit-of-work retry. The workers here retry the same way; what may not happen is a `BookError`.
+
+    THE RETRY IS SYNCHRONISED, NOT LEFT TO TIMING (2026-09-24, B1 part iii). The first version
+    retried at once, up to five times, with the barrier only on the first attempt; it failed once in
+    a tier run with "worker 0 never committed" - five `40001` in a row for one worker. That run's
+    output was not kept, and 700 isolated iterations here (550 of them with scheduling jitter, 81
+    retries overlapping the sibling's still-open attempt) never cancelled a retry: every time exactly
+    one first attempt lost the pivot and its first retry committed. What the old shape did NOT do was
+    bound the retry: a retry overlapping the sibling's in-flight attempt is a new pair of concurrent
+    SERIALIZABLE transactions, and nothing guarantees which of them the server cancels, so the count
+    of cancellations was a property of the machine's load. Now the overlap is made only where it is
+    the claim - the first attempts, held OPEN together by the barrier - and every retry waits until
+    BOTH first attempts have ended and then runs alone, under a lock. A retry has no concurrent
+    partner in this test, so a `40001` on it is not the pivot and is not retried: it fails the test.
     """
 
     world = await _world(engine, participants=4)
     identities = [f"contract-concurrent-{index}-{uuid.uuid4()}" for index in range(2)]
     both_open = asyncio.Barrier(2)
+    first_attempts_ended = asyncio.Barrier(2)
+    one_retry_at_a_time = asyncio.Lock()
     retried: list[int] = []
 
-    async def one(index: int) -> None:
-        for attempt in range(5):
-            try:
-                async with _session(engine) as session:
-                    async with Book.operation(session, _fixture(identities[index])) as posting:
-                        if attempt == 0:
-                            await both_open.wait()  # both envelopes are OPEN at this point
-                        await posting.apply(
-                            NewDebt(world.p(2 * index), world.p(2 * index + 1), world.eq,
-                                    Decimal("2"))
-                        )
-                    await session.commit()
-                return
-            except DBAPIError as exc:
-                if sqlstate_of(exc) != "40001":
-                    raise
-                retried.append(index)
-        raise AssertionError(f"worker {index} never committed")
+    async def attempt(index: int, *, first: bool) -> None:
+        async with _session(engine) as session:
+            async with Book.operation(session, _fixture(identities[index])) as posting:
+                if first:
+                    await both_open.wait()  # both envelopes are OPEN at this point
+                await posting.apply(
+                    NewDebt(world.p(2 * index), world.p(2 * index + 1), world.eq, Decimal("2"))
+                )
+            await session.commit()
 
-    await asyncio.gather(one(0), one(1))
+    async def one(index: int) -> None:
+        try:
+            await attempt(index, first=True)
+            lost_the_pivot = False
+        except DBAPIError as exc:
+            if sqlstate_of(exc) != "40001":
+                raise
+            lost_the_pivot = True
+            retried.append(index)
+        finally:
+            # Reached however the first attempt ended, so the sibling is never left waiting.
+            await first_attempts_ended.wait()
+        if lost_the_pivot:
+            async with one_retry_at_a_time:
+                await attempt(index, first=False)
+
+    # Bounded: a worker refused before the first barrier would leave its sibling waiting on it.
+    await asyncio.wait_for(asyncio.gather(one(0), one(1)), timeout=60)
     async with engine.connect() as observer:
         for identity in identities:
             assert [row.state for row in await envelopes_named(observer, identity)] == ["COMPLETED"]
-    assert len(retried) <= 4, retried
+    assert len(retried) <= 2, retried
 
 
 @pytest.mark.asyncio
