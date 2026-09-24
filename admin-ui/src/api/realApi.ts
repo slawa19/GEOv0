@@ -10,8 +10,6 @@ import {
   AdminEquivalentUsageResponseSchema,
   AdminFeatureFlagsSchema,
   AdminParticipantActionResponseSchema,
-  IntegrityRepairCapDebtsResponseSchema,
-  IntegrityRepairNetMutualDebtsResponseSchema,
   IntegrityStatusResponseSchema,
   IntegrityVerifyResponseSchema,
   flattenAdminConfig,
@@ -22,8 +20,6 @@ import {
   type AdminEquivalentUsageResponse,
   type AdminFeatureFlags,
   type AdminParticipantActionResponse,
-  type IntegrityRepairCapDebtsResponse,
-  type IntegrityRepairNetMutualDebtsResponse,
   type IntegrityStatusResponse,
   type IntegrityVerifyResponse,
 } from './adminContracts'
@@ -696,24 +692,6 @@ export const realApi = {
       body: {},
       admin: true,
       schema: IntegrityVerifyResponseSchema,
-    })
-  },
-
-  integrityRepairNetMutualDebts(): Promise<ApiEnvelope<IntegrityRepairNetMutualDebtsResponse>> {
-    return requestJson('/api/v1/integrity/repair/net-mutual-debts', {
-      method: 'POST',
-      body: {},
-      admin: true,
-      schema: IntegrityRepairNetMutualDebtsResponseSchema,
-    })
-  },
-
-  integrityRepairCapDebtsToTrustLimits(): Promise<ApiEnvelope<IntegrityRepairCapDebtsResponse>> {
-    return requestJson('/api/v1/integrity/repair/cap-debts-to-trust-limits', {
-      method: 'POST',
-      body: {},
-      admin: true,
-      schema: IntegrityRepairCapDebtsResponseSchema,
     })
   },
 

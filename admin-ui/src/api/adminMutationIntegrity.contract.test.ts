@@ -162,18 +162,6 @@ describe('real Admin mutation and integrity response contracts', () => {
       call: () => realApi.integrityVerify(),
       expected: integrityVerify,
     },
-    {
-      name: 'integrity net repair',
-      data: { ok: true, action: 'net-mutual-debts', netted_pairs: 1, updated: 1, deleted: 1 },
-      call: () => realApi.integrityRepairNetMutualDebts(),
-      expected: { ok: true, action: 'net-mutual-debts', netted_pairs: 1, updated: 1, deleted: 1 },
-    },
-    {
-      name: 'integrity cap repair',
-      data: { ok: true, action: 'cap-debts-to-trust-limits', scanned: 4, updated: 1, deleted: 2 },
-      call: () => realApi.integrityRepairCapDebtsToTrustLimits(),
-      expected: { ok: true, action: 'cap-debts-to-trust-limits', scanned: 4, updated: 1, deleted: 2 },
-    },
   ])('accepts and normalizes valid $name data', async ({ data, call, expected }) => {
     useRealApiResponse(data)
     await expect(call()).resolves.toEqual({ success: true, data: expected })
@@ -245,16 +233,6 @@ describe('real Admin mutation and integrity response contracts', () => {
       },
       call: () => realApi.integrityStatus(),
     },
-    {
-      name: 'integrity net repair extra field',
-      data: { ok: true, action: 'net-mutual-debts', netted_pairs: 0, updated: 0, deleted: 0, debug: true },
-      call: () => realApi.integrityRepairNetMutualDebts(),
-    },
-    {
-      name: 'integrity cap repair extra field',
-      data: { ok: true, action: 'cap-debts-to-trust-limits', scanned: 0, updated: 0, deleted: 0, debug: true },
-      call: () => realApi.integrityRepairCapDebtsToTrustLimits(),
-    },
   ])('rejects malformed $name 2xx data with INVALID_RESPONSE', async ({ data, call }) => {
     useRealApiResponse(data)
     await expect(call()).rejects.toMatchObject({ name: 'ApiException', code: 'INVALID_RESPONSE' })
@@ -303,20 +281,6 @@ describe('mock Admin mutation and integrity response contracts', () => {
       status: 'healthy',
       equivalents: integrityStatus.equivalents,
       alerts: [],
-    })
-    expect(assertSuccess(await mockApi.integrityRepairNetMutualDebts())).toEqual({
-      ok: true,
-      action: 'net-mutual-debts',
-      netted_pairs: 0,
-      updated: 0,
-      deleted: 0,
-    })
-    expect(assertSuccess(await mockApi.integrityRepairCapDebtsToTrustLimits())).toEqual({
-      ok: true,
-      action: 'cap-debts-to-trust-limits',
-      scanned: 0,
-      updated: 0,
-      deleted: 0,
     })
   })
 

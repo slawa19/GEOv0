@@ -63,10 +63,14 @@ PARAMETER_SCHEMA_DRIFT_COUNT = 22
 # generated `required: false` - the class every admin operation already carries here. Measured by
 # collecting the ledger, removing that one key and hashing the rest: the remainder's digest equals the
 # previous `493a3f3d...502a2` and its count 67, so no old entry changed.
+# 2026-09-24 / programme 018 T1806: 68 -> 66, TWO entries leave and none enters: both integrity
+# repair operations (`POST /integrity/repair/net-mutual-debts`, `/cap-debts-to-trust-limits`) are
+# removed from the application and the canon by the owner's decision of that day. Measured on both
+# trees: the previous ledger minus those two keys hashes to the new digest, so no other entry changed.
 TRANSPORT_HEADER_DRIFT_SHA256 = (
-    "a9f8d1302bf9be263546e4a6a2dcce189cab82910e69c0bdbb5976c673220083"
+    "0a077abe825b59ef9e0e33610348332df2854f3ee12cb361d55844c3139059d0"
 )
-TRANSPORT_HEADER_DRIFT_COUNT = 68
+TRANSPORT_HEADER_DRIFT_COUNT = 66
 # 2026-08-23 / p011_t1102, slice 5: count unchanged at 13, digest moves. Describing
 # TrustLine.policy touches the create and update REQUEST bodies too - the same node is
 # declared on all three schemas, and leaving one of the three vague would have been a
@@ -300,10 +304,14 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # as the step 5c brief decides. Its canonical/generated difference is character for character the one
 # `PATCH /admin/equivalents/{code}` already carries (same response schema on both sides). Measured by
 # removing that one key and hashing the rest: digest equals the previous `be0ed394...187c`, count 63.
+# 2026-09-24 / programme 018 T1806: 64 -> 62, TWO entries leave and none enters: both integrity
+# repair operations (`POST /integrity/repair/net-mutual-debts`, `/cap-debts-to-trust-limits`) are
+# removed from the application and the canon by the owner's decision of that day. Measured on both
+# trees: the previous ledger minus those two keys hashes to the new digest, so no other entry changed.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "72d376f2f77c03d97f3c5a7a096b1f44801da5bc0352712336f1119b11bf6d2b"
+    "c1e7e6d357926a705f0c8c381b79b8f465ccdab06ce4fe0044aec67e17f44b05"
 )
-SUCCESS_SCHEMA_DRIFT_COUNT = 64
+SUCCESS_SCHEMA_DRIFT_COUNT = 62
 # 2026-08-11 / T501: public DB health no longer declares exception details;
 # the new admin diagnostic operation matches generated responses, so count stays 84.
 # 2026-08-20 / p007_unblock_f0071: simulator metrics/bottlenecks declare 503 in the
@@ -408,20 +416,29 @@ SUCCESS_SCHEMA_DRIFT_COUNT = 64
 # Measured the same way as the success digest and claimed as narrowly: 53 operations drifting on
 # error responses before this edit and 53 after, computed on both trees, nothing entering or
 # leaving.
+# 2026-09-24 / programme 018 T1806: 53 -> 51, TWO entries leave and none enters: both integrity
+# repair operations (`POST /integrity/repair/net-mutual-debts`, `/cap-debts-to-trust-limits`) are
+# removed from the application and the canon by the owner's decision of that day. Measured on both
+# trees: the previous ledger minus those two keys hashes to the new digest, so no other entry changed.
+# The 2026-08-23 and 2026-09-11 notes above that mention those two operations are history.
 ERROR_RESPONSE_DRIFT_SHA256 = (
-    "c3d5d097269a3182a011af56a55e77650b151aae1cafc82e3598063789be0371"
+    "e21116aab743124b9067875daf007ef230d369007044ce6e98bbcf49c4bf322e"
 )
-ERROR_RESPONSE_DRIFT_COUNT = 53
+ERROR_RESPONSE_DRIFT_COUNT = 51
 # 2026-08-23 / p011_t1101: 59 -> 67, see the note above TRANSPORT_HEADER_DRIFT_SHA256.
 # Missed by the first pass of this task: the error-response assert aborts before this one, so a
 # run that stops there says nothing about security drift. Measured directly instead.
 # 2026-09-14 / programme 015 step 5c: 67 -> 68, ONE entry enters: the new authorised operation
 # `POST /admin/equivalents/{code}/integrity-hold/clear`, with canon `security: []` like every admin
 # operation beside it. Remainder digest equals the previous `7b2c25ac...bb45`, count 67.
+# 2026-09-24 / programme 018 T1806: 68 -> 66, TWO entries leave and none enters: both integrity
+# repair operations (`POST /integrity/repair/net-mutual-debts`, `/cap-debts-to-trust-limits`) are
+# removed from the application and the canon by the owner's decision of that day. Measured on both
+# trees: the previous ledger minus those two keys hashes to the new digest, so no other entry changed.
 SECURITY_DRIFT_SHA256 = (
-    "f4486f7c88a647eac8eed51091b31458382f6172be2f3e25fb1011f65ff58e2f"
+    "7a4ca14f10cafe5fb3a6691a4a268334639e67cafdbe5264f9e16762ffb40b75"
 )
-SECURITY_DRIFT_COUNT = 68
+SECURITY_DRIFT_COUNT = 66
 
 
 def _repo_root() -> Path:
@@ -841,15 +858,15 @@ def test_selected_admin_and_integrity_success_schemas_are_exact() -> None:
         ("get", "/admin/equivalents/{code}/usage"): "AdminEquivalentUsageResponse",
         ("get", "/integrity/status"): "IntegrityStatusResponse",
         ("post", "/integrity/verify"): "IntegrityVerifyResponse",
-        (
-            "post",
-            "/integrity/repair/net-mutual-debts",
-        ): "IntegrityNetMutualDebtsRepairResponse",
-        (
-            "post",
-            "/integrity/repair/cap-debts-to-trust-limits",
-        ): "IntegrityCapDebtsRepairResponse",
     }
+    # 018/T1806: both integrity repair operations are removed, not closed. Neither document may
+    # carry them again; a returning route would reappear in the generated half first.
+    for removed in (
+        "/integrity/repair/net-mutual-debts",
+        "/integrity/repair/cap-debts-to-trust-limits",
+    ):
+        assert removed not in canonical["paths"]
+        assert f"/api/v1{removed}" not in generated["paths"]
     for (method, path), component in operation_refs.items():
         expected_ref = f"#/components/schemas/{component}"
         canonical_schema = canonical["paths"][path][method]["responses"]["200"][
@@ -884,14 +901,6 @@ def test_selected_admin_and_integrity_success_schemas_are_exact() -> None:
             {"status", "checked_at", "equivalents", "alerts"},
             {"status", "checked_at", "equivalents", "alerts"},
         ),
-        "IntegrityNetMutualDebtsRepairResponse": (
-            {"ok", "action", "netted_pairs", "updated", "deleted"},
-            {"ok", "action", "netted_pairs", "updated", "deleted"},
-        ),
-        "IntegrityCapDebtsRepairResponse": (
-            {"ok", "action", "scanned", "updated", "deleted"},
-            {"ok", "action", "scanned", "updated", "deleted"},
-        ),
     }
     for component, (properties, required) in exact_shapes.items():
         _assert_exact_object_schema(
@@ -907,8 +916,6 @@ def test_selected_admin_and_integrity_success_schemas_are_exact() -> None:
         "AdminAbortTxResponse",
         "AdminDeleteResponse",
         "AdminEquivalentUsageResponse",
-        "IntegrityNetMutualDebtsRepairResponse",
-        "IntegrityCapDebtsRepairResponse",
     }
     for component in generated_exact_components:
         properties, required = exact_shapes[component]
@@ -994,12 +1001,6 @@ def test_selected_admin_and_integrity_success_schemas_are_exact() -> None:
     assert schemas["IntegrityVerifyResponse"]["properties"]["status"]["enum"] == (
         health_values
     )
-    assert schemas["IntegrityNetMutualDebtsRepairResponse"]["properties"]["action"][
-        "enum"
-    ] == ["net-mutual-debts"]
-    assert schemas["IntegrityCapDebtsRepairResponse"]["properties"]["action"][
-        "enum"
-    ] == ["cap-debts-to-trust-limits"]
 
 
 def test_run_status_schema_preserves_stop_and_counter_fields() -> None:

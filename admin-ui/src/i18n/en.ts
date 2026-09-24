@@ -30,7 +30,6 @@ export const EN: Record<string, string> = {
   'common.refreshHint': 'If the error is temporary, try refreshing.',
   'validation.thresholdUnitInterval': 'Threshold must be a decimal between 0 and 1.',
   'common.run': 'Run',
-  'common.repair': 'Repair',
   'common.abort': 'Abort',
   'common.save': 'Save',
   'common.saving': 'Saving…',
@@ -393,14 +392,6 @@ export const EN: Record<string, string> = {
   'integrity.verify.confirmText': 'Run integrity verification now? This may take a few seconds.',
   'integrity.verify.confirmTitle': 'Confirm verification',
   'integrity.verify.finished': 'Integrity verification finished',
-  'integrity.readOnlyRepairDisabled': 'Read-only role: repair actions are disabled',
-  'integrity.repair.confirmTitle': 'Confirm repair',
-  'integrity.repair.debtSymmetry.confirmText':
-    'Repair will modify debt records in the database by netting mutual debts (A→B and B→A) into a single directed debt. Continue?',
-  'integrity.repair.debtSymmetry.finished': 'Repair finished: mutual debts were netted',
-  'integrity.repair.trustLimits.confirmText':
-    'Repair will modify debt records in the database by capping or removing debts that exceed trust limits. Continue?',
-  'integrity.repair.trustLimits.finished': 'Repair finished: debts were adjusted to trust limits',
   'integrity.help.title': 'Integrity status: what it means and what to do',
   'integrity.help.healthy': 'All checked invariants pass: no exceeded limits, balanced totals, and no mutual debts.',
   'integrity.help.notHealthy': 'Integrity checks found problems that should be investigated.',
@@ -408,8 +399,7 @@ export const EN: Record<string, string> = {
   'integrity.help.howToRespond': 'How to respond (non-technical)',
   'integrity.help.respond.stepVerify': 'Click Verify to re-check the database right now and refresh the results.',
   'integrity.help.respond.stepAlerts': 'Review Alerts and the table below to see which equivalent is affected.',
-  'integrity.help.respond.stepRepair': 'Try the available Repair action (only for detected issue types) and re-run Verify.',
-  'integrity.help.interpretation': 'Interpretation & fixes (only for detected issues)',
+  'integrity.help.interpretation': 'Interpretation (only for detected issues)',
   'integrity.status.healthy': 'healthy',
   'integrity.status.warning': 'warning',
   'integrity.status.critical': 'critical',
@@ -417,14 +407,9 @@ export const EN: Record<string, string> = {
   'integrity.help.caseDebtSymmetry.text':
     'This means for some participant pairs both debts exist at the same time: A → B and B → A. In a consistent ledger, these should be netted so that only one directed debt remains.',
   'integrity.help.caseDebtSymmetry.step1': 'Identify affected pairs in the Debt symmetry column (violations).',
-  'integrity.help.caseDebtSymmetry.step2': 'Use Repair: net mutual debts to automatically net the pairs into a single directed debt.',
-  'integrity.actions.repairNetMutualDebts': 'Repair: net mutual debts',
   'integrity.help.caseTrustLimits.title': 'Trust limits exceeded',
   'integrity.help.caseTrustLimits.text':
     'Some debts are larger than the allowed trust limit for the same edge. This can break routing and risk controls.',
-  'integrity.help.caseTrustLimits.step1': 'Use Repair: cap debts to trust limits to automatically adjust (or remove) violating debts.',
-  'integrity.help.caseTrustLimits.step2': 'Re-run Verify after repair to confirm the invariant passes.',
-  'integrity.actions.repairCapDebts': 'Repair: cap debts to trust limits',
   'integrity.help.caseZeroSum.title': 'Zero-sum violated',
   'integrity.help.caseZeroSum.text':
     'Total balances are not self-consistent (the overall sum is not zero). This strongly indicates data corruption or missing/duplicated edges.',
