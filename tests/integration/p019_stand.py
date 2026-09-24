@@ -251,19 +251,29 @@ class FreshObservation:
 
 
 async def observe_after_marker(factory, tx_id: str) -> FreshObservation:  # noqa: F811
-    """Commit a marker, then read it and the payment IN ONE snapshot.
+    """Commit a marker transaction, then check it and read the payment IN ONE snapshot.
 
-    Seeing the marker proves the observer's snapshot was taken after the marker's commit - that is,
-    after whatever the caller had established before calling (a barrier reached). Without it an
-    "I saw nothing" could be an observer that looked too early.
+    The marker's transaction id being visible in the observer's snapshot proves that snapshot was
+    taken after the marker's commit - that is, after whatever the caller had established before
+    calling (a barrier reached). Without it an "I saw nothing" could be an observer that looked too
+    early.
+
+    WHY A TRANSACTION ID AND NOT A MARKER ROW (measured 2026-09-25, anti-vacuum run): the first version
+    inserted a marker row into `equivalents`. The payment reads that table, so under SERIALIZABLE the
+    marker became part of a read-write cycle with the payment (payment -rw-> marker -wr-> observer
+    -rw-> payment) and a single-transaction payment was refused with `40001` - the instrument changed
+    the outcome it was measuring. `txid_current()` assigns an id without reading or writing any row, so
+    it can be in no cycle with anything.
     """
 
-    marker = "P19M" + uuid.uuid4().hex[:8].upper()
     async with factory() as s:
-        await s.execute(insert(Equivalent).values(code=marker, precision=2, is_active=True))
+        marker_xid = await s.scalar(text("SELECT txid_current()"))
         await s.commit()
     async with factory() as s:
-        seen = await s.scalar(select(func.count(Equivalent.id)).where(Equivalent.code == marker))
+        seen = await s.scalar(
+            text("SELECT txid_visible_in_snapshot(:xid, txid_current_snapshot())"),
+            {"xid": marker_xid},
+        )
         state = await s.scalar(select(Transaction.state).where(Transaction.tx_id == tx_id))
         locks = await s.scalar(
             select(func.count(PrepareLock.id)).where(PrepareLock.tx_id == tx_id)
