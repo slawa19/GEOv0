@@ -18,6 +18,14 @@ operation's kind, which are PRESERVED per kind and NOT unified:
 * `SEED`, `TEST_FIXTURE` - `NewDebt`: create. The refusal after a baseline stays where it is today,
   in the journal's completion (`journal.py`, `_complete`).
 
+MONEY THE COLUMN CANNOT HOLD IS REFUSED HERE, before any debt changes (018 / FORK-1, slice B0a,
+2026-09-24). Every effect's input amount AND every amount the book calculates - a sum after an
+increase, a difference after a reduction or netting - passes THE storability predicate
+(`app/utils/validation.py::money_storability_violation`) with `debts.amount`'s declared capacity
+before it is assigned, and a failure raises `BookMoneyError` naming the predicate. Checking inputs
+alone would miss a valid increment that overflows an existing debt. `MoneyNumeric` applies the same
+predicate again at bind (`app/db/types.py`) for writes that never came through here.
+
 THE ENVELOPE IN STAGE A is still the journal's `debt_operation` (`app/core/ledger/journal.py`): the
 book opens it, the listener records the effects exactly as before. No second journal, no schema
 change. Stage B replaces the listener with a database trigger and makes the book open the envelope
@@ -53,6 +61,7 @@ from sqlalchemy.orm.exc import StaleDataError
 
 from app.core.ledger.journal import debt_operation
 from app.db.models.debt import Debt
+from app.utils.validation import money_storability_violation
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +83,48 @@ class BookError(Exception):
     These are programming errors of a caller, not business outcomes. A business refusal (an inject
     effect opposite to an existing debt, or over its ceiling) is RETURNED, never raised.
     """
+
+
+class BookMoneyError(BookError):
+    """An amount `debts.amount` cannot hold exactly: an input, or a sum the book calculated.
+
+    `reason` is the predicate that failed - `money_finiteness`, `money_magnitude` or
+    `money_quantization` (`app/utils/validation.py`) - so the refusal names its rule.
+    """
+
+    def __init__(self, reason: str, message: str, *, value: str) -> None:
+        super().__init__(f"{reason}: {message}")
+        self.reason = reason
+        self.value = value
+
+
+_AMOUNT_TYPE = Debt.__table__.c.amount.type
+#: `debts.amount`'s declared capacity, read off the model: the book refuses what the column cannot
+#: hold, not what the money door (`MONEY_MAX_*`) happens to admit.
+_MAX_SCALE = int(_AMOUNT_TYPE.scale)
+_MAX_INTEGER_DIGITS = int(_AMOUNT_TYPE.precision) - _MAX_SCALE
+
+
+def _refuse_unstorable(value: Any, *, what: str) -> None:
+    """The book's one storability enforcement point: raise unless `debts.amount` holds `value`."""
+
+    reason = money_storability_violation(
+        value, max_integer_digits=_MAX_INTEGER_DIGITS, max_scale=_MAX_SCALE
+    )
+    if reason is not None:
+        raise BookMoneyError(
+            reason,
+            f"{what} is {value!r}, which NUMERIC({_MAX_INTEGER_DIGITS + _MAX_SCALE}, {_MAX_SCALE}) "
+            f"cannot hold exactly; no debt is changed",
+            value=str(value),
+        )
+
+
+def _set_amount(debt: Debt, value: Decimal, *, what: str) -> None:
+    """Assign a calculated amount to a debt, after the storability check."""
+
+    _refuse_unstorable(value, what=what)
+    debt.amount = value
 
 
 # =================================================================================================
@@ -204,7 +255,9 @@ async def _apply_payment_flow(session: Any, flow: PaymentFlow) -> str:
 
                 if debt_r_s and debt_r_s.amount > 0:
                     reduction = min(remaining_amount, debt_r_s.amount)
-                    debt_r_s.amount -= reduction
+                    _set_amount(
+                        debt_r_s, debt_r_s.amount - reduction, what="the reduced receiver debt"
+                    )
                     remaining_amount -= reduction
 
                     if debt_r_s.amount == 0:
@@ -224,7 +277,11 @@ async def _apply_payment_flow(session: Any, flow: PaymentFlow) -> str:
                             amount=Decimal("0"),
                         )
 
-                    debt_s_r.amount += remaining_amount
+                    _set_amount(
+                        debt_s_r,
+                        debt_s_r.amount + remaining_amount,
+                        what="the increased sender debt",
+                    )
                     session.add(debt_s_r)
 
                 # NOTE: app sessions may run with autoflush=False. Ensure the DB view is
@@ -241,8 +298,12 @@ async def _apply_payment_flow(session: Any, flow: PaymentFlow) -> str:
                     and debt_reverse.amount > 0
                 ):
                     net = min(debt_forward.amount, debt_reverse.amount)
-                    debt_forward.amount -= net
-                    debt_reverse.amount -= net
+                    _set_amount(
+                        debt_forward, debt_forward.amount - net, what="the netted forward debt"
+                    )
+                    _set_amount(
+                        debt_reverse, debt_reverse.amount - net, what="the netted reverse debt"
+                    )
 
                     if debt_forward.amount == 0:
                         await session.delete(debt_forward)
@@ -287,7 +348,7 @@ async def _apply_clearing_reduction(session: Any, effect: ClearingReduction) -> 
             f"a clearing reduction of {amount} exceeds debt {debt.id} holding {debt.amount}; "
             f"CLEARING only decreases"
         )
-    debt.amount -= amount
+    _set_amount(debt, debt.amount - amount, what="the cleared debt")
     if debt.amount == 0:
         await session.delete(debt)
     else:
@@ -375,7 +436,7 @@ async def _apply_inject_increase(session: Any, effect: InjectIncrease) -> str:
         new_amt = Decimal(str(existing.amount)) + amount
         if new_amt > effect.ceiling:
             return REFUSED_OVER_CEILING
-        existing.amount = new_amt
+        _set_amount(existing, new_amt, what="the increased injected debt")
     return APPLIED
 
 
@@ -422,6 +483,9 @@ class Posting:
                 f"a {self.operation.kind} operation does not take {type(effect).__name__}; it "
                 f"takes {getattr(expected, '__name__', 'nothing')}"
             )
+        # The input first: an amount the column cannot hold is refused before anything is read or
+        # changed. The calculated amounts are checked where they are computed, below.
+        _refuse_unstorable(effect.amount, what=f"the {type(effect).__name__} amount")
         session = self._session
         if isinstance(effect, PaymentFlow):
             return await _apply_payment_flow(session, effect)
@@ -524,6 +588,7 @@ __all__: Sequence[str] = (
     "DEBT_OPERATION_IDENTITY_CONSTRAINTS",
     "Book",
     "BookError",
+    "BookMoneyError",
     "ClearingReduction",
     "Effect",
     "InjectIncrease",

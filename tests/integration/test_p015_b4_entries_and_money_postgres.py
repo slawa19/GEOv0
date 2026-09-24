@@ -448,6 +448,16 @@ async def _round_trip(factory, world: World, value: Decimal):
     # the non-vacuity assertions that say "this database really stores/changes this number" would
     # then be proven by the very rule they exist to justify. Per engine, and re-armed immediately
     # (`app/core/ledger/journal.py`, `uninstall_write_guard`).
+    #
+    # THE BIND CHECK STANDS DOWN TOO, for the same reason (018 FORK-1, slice B0a, 2026-09-24).
+    # `MoneyNumeric` now applies the storability predicate at bind, so without this the measurement
+    # of what PostgreSQL does with `0.123456789` would be MoneyNumeric's refusal instead. Explicit,
+    # scoped to this measurement, restored in `finally`; the bind check itself is held by
+    # `tests/integration/test_p018_b0a_money_the_column_cannot_hold.py`.
+    from app.db.types import MoneyNumeric
+
+    bind_check = MoneyNumeric.__dict__["_refuse_unstorable"]
+    MoneyNumeric._refuse_unstorable = lambda self, value: None
     journal.uninstall_write_guard(engine)
     try:
         try:
@@ -465,6 +475,7 @@ async def _round_trip(factory, world: World, value: Decimal):
             await cleanup.commit()
     finally:
         journal.install_write_guard(engine)
+        MoneyNumeric._refuse_unstorable = bind_check
     return (None if stored is None else Decimal(str(stored))), None
 
 

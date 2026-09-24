@@ -336,43 +336,88 @@ def parse_amount_decimal(
     return as_decimal
 
 
+#: The reasons `money_storability_violation` answers with, one per predicate. The strings are the
+#: debt journal's own (`app/core/ledger/journal.py::Reason`), so a refusal names the same rule
+#: whichever boundary applied it.
+MONEY_FINITENESS = "money_finiteness"
+MONEY_MAGNITUDE = "money_magnitude"
+MONEY_QUANTIZATION = "money_quantization"
+
+
+def money_storability_violation(
+    value: Any,
+    *,
+    max_integer_digits: int | None = None,
+    max_scale: int | None = None,
+) -> str | None:
+    """The predicate that fails for `value`, or None when a `Numeric` column holds it exactly.
+
+    THE ONE STORABILITY RULE (018 / FORK-1, 2026-09-24). Three predicates, applied in order and
+    each answering under its own name, because each excludes values the others let through:
+
+    * `MONEY_FINITENESS` - not a finite number (`NaN`, `Infinity`, or not a number at all);
+    * `MONEY_MAGNITUDE` - `abs(value) >= 10**max_integer_digits`: PostgreSQL raises on overflow;
+    * `MONEY_QUANTIZATION` - more than `max_scale` fraction digits that are not all zero:
+      PostgreSQL ROUNDS them away silently, so the stored value would differ from the one given.
+
+    The capacity is a PARAMETER, and who passes it matters. With no arguments the bounds are the
+    money door's `MONEY_MAX_INTEGER_DIGITS` / `MONEY_MAX_SCALE`, read at call time (the RT1
+    counter-check widens the door by moving them). The storage boundaries - `Book` before a debt
+    moves and `MoneyNumeric` at bind (`app/db/types.py`) - pass the DECLARED capacity of their own
+    column instead, so widening the door does not widen what the column is allowed to receive.
+
+    It is a question about a VALUE, not about how the value was written: `Decimal("0.1")`,
+    `Decimal("0.100000000")` and `Decimal("1E-1")` get the same answer, and trailing zeros past the
+    scale are insignificant.
+    """
+
+    if max_integer_digits is None:
+        max_integer_digits = MONEY_MAX_INTEGER_DIGITS
+    if max_scale is None:
+        max_scale = MONEY_MAX_SCALE
+
+    if not isinstance(value, Decimal):
+        try:
+            value = Decimal(str(value))
+        except (InvalidOperation, ValueError, TypeError):
+            return MONEY_FINITENESS
+    if not value.is_finite():
+        return MONEY_FINITENESS
+
+    # Magnitude first: `quantize` below raises on operands too large for the arithmetic
+    # context, so asking about the fraction before the magnitude would fail for exactly the
+    # values this predicate exists to reject.
+    if abs(value) >= Decimal(10) ** max_integer_digits:
+        return MONEY_MAGNITUDE
+
+    exponent = value.as_tuple().exponent
+    if not isinstance(exponent, int) or exponent >= -max_scale:
+        return None
+    # More fraction digits than the column declares - storable only if they are all zero,
+    # because PostgreSQL would otherwise round rather than truncate.
+    try:
+        if value == value.quantize(Decimal("1E-%d" % max_scale)):
+            return None
+    except InvalidOperation:
+        pass
+    return MONEY_QUANTIZATION
+
+
 def is_storable_money(value: Any) -> bool:
     """True when `value` fits `Numeric(20, 8)` exactly - no rounding, no overflow.
 
-    THE money capacity rule, and the only one.  `parse_money_amount` below is this predicate
-    plus an HTTP-shaped refusal and the wire grammar; the writers that do not answer an HTTP
-    request and therefore cannot raise a 400 (scenario seeding, inject execution: they build
-    `Decimal`s out of arbitrary config and drop rows they cannot use) call it directly, with
-    their own skip-and-log blast radius.
+    THE money capacity rule, and the only one: `money_storability_violation` above, with the
+    door's bounds.  `parse_money_amount` below is this predicate plus an HTTP-shaped refusal and
+    the wire grammar; the writers that do not answer an HTTP request and therefore cannot raise a
+    400 (scenario seeding, inject execution: they build `Decimal`s out of arbitrary config and drop
+    rows they cannot use) call it directly, with their own skip-and-log blast radius.
 
     It is a question about a VALUE, not about how the value was written.  `Decimal("0.1")`,
     `Decimal("0.100000000")` and `Decimal("1E-1")` are the same number and get the same answer,
     because `Numeric(20, 8)` gives them the same answer.
     """
 
-    if not isinstance(value, Decimal):
-        try:
-            value = Decimal(str(value))
-        except (InvalidOperation, ValueError, TypeError):
-            return False
-    if not value.is_finite():
-        return False
-
-    # Magnitude first: `quantize` below raises on operands too large for the arithmetic
-    # context, so asking about the fraction before the magnitude would fail for exactly the
-    # values this predicate exists to reject.
-    if abs(value) >= Decimal(10) ** MONEY_MAX_INTEGER_DIGITS:
-        return False
-
-    exponent = value.as_tuple().exponent
-    if not isinstance(exponent, int) or exponent >= -MONEY_MAX_SCALE:
-        return True
-    # More fraction digits than the column declares - storable only if they are all zero,
-    # because PostgreSQL would otherwise round rather than truncate.
-    try:
-        return value == value.quantize(Decimal("1E-%d" % MONEY_MAX_SCALE))
-    except InvalidOperation:
-        return False
+    return money_storability_violation(value) is None
 
 
 def parse_money_amount(
