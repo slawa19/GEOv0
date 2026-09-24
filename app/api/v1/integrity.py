@@ -1,21 +1,17 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from decimal import Decimal
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import deps
 from app.core.integrity import compute_integrity_checkpoint_for_equivalent
 from app.core.invariants import InvariantChecker
-from app.core.payments.router import PaymentRouter
-from app.db.models.audit_log import AuditLog, IntegrityAuditLog
-from app.db.models.debt import Debt
+from app.db.models.audit_log import IntegrityAuditLog
 from app.db.models.equivalent import Equivalent
 from app.db.models.integrity_checkpoint import IntegrityCheckpoint
-from app.db.models.trustline import TrustLine
 from app.schemas.integrity import (
     EquivalentIntegrityStatus,
     InvariantOutcome,
@@ -23,20 +19,15 @@ from app.schemas.integrity import (
     IntegrityAuditLogItem,
     IntegrityAuditLogResponse,
     IntegrityChecksumResponse,
-    IntegrityCapDebtsRepairResponse,
-    IntegrityNetMutualDebtsRepairResponse,
     IntegrityStatusResponse,
     IntegrityVerifyRequest,
     IntegrityVerifyResponse,
     InvariantResult,
 )
-from app.config import settings
 from app.utils.exceptions import (
-    ConflictException,
     IntegrityViolationException,
     NotFoundException,
 )
-from app.utils.request_id import request_id_var
 from app.utils.validation import validate_equivalent_code
 
 router = APIRouter()
@@ -52,36 +43,6 @@ def _unverified_names(invariants: dict[str, InvariantOutcome]) -> list[str]:
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
-
-
-async def _commit_required_admin_repair_audit(
-    db: AsyncSession,
-    *,
-    request: Request,
-    action: str,
-    before_state: dict,
-    after_state: dict,
-) -> None:
-    try:
-        db.add(
-            AuditLog(
-                actor_id=None,
-                actor_role="admin",
-                action=action,
-                object_type="integrity",
-                object_id=None,
-                reason=None,
-                before_state=before_state,
-                after_state=after_state,
-                request_id=request_id_var.get(),
-                ip_address=request.client.host if request.client else None,
-                user_agent=request.headers.get("user-agent"),
-            )
-        )
-        await db.commit()
-    except BaseException:
-        await db.rollback()
-        raise
 
 
 async def _latest_checkpoint(db: AsyncSession, *, equivalent_id) -> IntegrityCheckpoint | None:
@@ -305,207 +266,6 @@ async def verify_integrity(
         equivalents=equivalents_status,
         alerts=alerts,
     )
-
-
-@router.post(
-    "/repair/net-mutual-debts",
-    response_model=IntegrityNetMutualDebtsRepairResponse,
-)
-async def repair_net_mutual_debts(
-    request: Request,
-    db: AsyncSession = Depends(deps.get_db),
-    _admin=Depends(deps.require_admin),
-) -> dict:
-    """Repair mutual debts by netting A→B and B→A into a single directed debt.
-
-    Admin-only because it mutates persisted debt state.
-
-    CLOSED BY DEFAULT since 2026-09-11 alongside the cap repair - see `INTEGRITY_REPAIRS_ENABLED`
-    in `app/config.py`. This one does not delete on a frozen line, but it shares the other half of
-    `F-015-6`: a global `select(Debt)` with no advisory lock, no `FOR UPDATE` and no filter on
-    active `PrepareLock`, so it can land between a payment's PREPARE and COMMIT.
-    """
-
-    if not bool(getattr(settings, "INTEGRITY_REPAIRS_ENABLED", False)):
-        # Refuse BEFORE reading anything: a repair that is closed must not even report what it
-        # would have changed, because that report would be read as a plan someone can approve.
-        raise ConflictException(
-            "Integrity repairs are closed pending F-015-6 / T1511: the cap repair deletes debt "
-            "on a frozen trustline, and neither repair takes a lock against in-flight payments.",
-            details={"finding": "F-015-6", "task": "T1511", "setting": "INTEGRITY_REPAIRS_ENABLED"},
-        )
-
-    debts = (await db.execute(select(Debt))).scalars().all()
-    equivalent_codes = dict(
-        (await db.execute(select(Equivalent.id, Equivalent.code))).all()
-    )
-    by_key: dict[tuple, Debt] = {(d.equivalent_id, d.debtor_id, d.creditor_id): d for d in debts}
-
-    processed_pairs: set[tuple] = set()
-    affected_equivalent_ids: set = set()
-    updated = 0
-    deleted = 0
-    netted_pairs = 0
-
-    for (eq_id, debtor_id, creditor_id), d_ab in list(by_key.items()):
-        if debtor_id == creditor_id:
-            continue
-
-        # Process undirected pair once.
-        pair = (eq_id, min(debtor_id, creditor_id), max(debtor_id, creditor_id))
-        if pair in processed_pairs:
-            continue
-
-        d_ba = by_key.get((eq_id, creditor_id, debtor_id))
-        if d_ba is None:
-            continue
-
-        processed_pairs.add(pair)
-        affected_equivalent_ids.add(eq_id)
-        netted_pairs += 1
-
-        a = Decimal(str(d_ab.amount))
-        b = Decimal(str(d_ba.amount))
-
-        if a == b:
-            await db.delete(d_ab)
-            await db.delete(d_ba)
-            deleted += 2
-            continue
-
-        if a > b:
-            diff = a - b
-            d_ab.amount = diff
-            updated += 1
-            await db.delete(d_ba)
-            deleted += 1
-        else:
-            diff = b - a
-            d_ba.amount = diff
-            updated += 1
-            await db.delete(d_ab)
-            deleted += 1
-
-    affected_codes = sorted(
-        equivalent_codes[eq_id]
-        for eq_id in affected_equivalent_ids
-        if eq_id in equivalent_codes
-    )
-    await _commit_required_admin_repair_audit(
-        db,
-        request=request,
-        action="admin.integrity.repair.net_mutual_debts",
-        before_state={"debts_scanned": len(debts)},
-        after_state={
-            "affected_equivalents": affected_codes,
-            "netted_pairs": netted_pairs,
-            "updated": updated,
-            "deleted": deleted,
-        },
-    )
-
-    return {
-        "ok": True,
-        "action": "net-mutual-debts",
-        "netted_pairs": netted_pairs,
-        "updated": updated,
-        "deleted": deleted,
-    }
-
-
-@router.post(
-    "/repair/cap-debts-to-trust-limits",
-    response_model=IntegrityCapDebtsRepairResponse,
-)
-async def repair_cap_debts_to_trust_limits(
-    request: Request,
-    db: AsyncSession = Depends(deps.get_db),
-    _admin=Depends(deps.require_admin),
-) -> dict:
-    """Repair debts that violate trust limits by capping to the active trustline limit.
-
-    If a debt has no active trustline (limit treated as 0), the debt is removed.
-    Admin-only because it mutates persisted debt state.
-
-    CLOSED BY DEFAULT since 2026-09-11 - see `INTEGRITY_REPAIRS_ENABLED` in `app/config.py`. The
-    sentence above describes behaviour that destroys real obligations: a FROZEN trustline is not
-    active, and freezing a line over its limit without settling the debt is what the protocol
-    prescribes. `T1511` of programme 015 owns the fix.
-    """
-
-    if not bool(getattr(settings, "INTEGRITY_REPAIRS_ENABLED", False)):
-        # Refuse BEFORE reading anything: a repair that is closed must not even report what it
-        # would have changed, because that report would be read as a plan someone can approve.
-        raise ConflictException(
-            "Integrity repairs are closed pending F-015-6 / T1511: the cap repair deletes debt "
-            "on a frozen trustline, and neither repair takes a lock against in-flight payments.",
-            details={"finding": "F-015-6", "task": "T1511", "setting": "INTEGRITY_REPAIRS_ENABLED"},
-        )
-
-    # Map active trust limits for (equivalent, debtor, creditor).
-    tls = (
-        await db.execute(select(TrustLine).where(TrustLine.status == "active"))
-    ).scalars().all()
-    limit_by_edge: dict[tuple, Decimal] = {}
-    for tl in tls:
-        key = (tl.equivalent_id, tl.to_participant_id, tl.from_participant_id)
-        limit_by_edge[key] = Decimal(str(tl.limit))
-
-    debts = (await db.execute(select(Debt))).scalars().all()
-    equivalent_codes = dict(
-        (await db.execute(select(Equivalent.id, Equivalent.code))).all()
-    )
-    scanned = 0
-    updated = 0
-    deleted = 0
-    affected_equivalent_ids: set = set()
-    tol = Decimal("0.000000001")
-
-    for d in debts:
-        scanned += 1
-        key = (d.equivalent_id, d.debtor_id, d.creditor_id)
-        limit = limit_by_edge.get(key, Decimal("0"))
-
-        amount = Decimal(str(d.amount))
-        if amount <= limit + tol:
-            continue
-
-        affected_equivalent_ids.add(d.equivalent_id)
-        if limit <= tol:
-            await db.delete(d)
-            deleted += 1
-            continue
-
-        d.amount = limit
-        updated += 1
-
-    affected_codes = sorted(
-        equivalent_codes[eq_id]
-        for eq_id in affected_equivalent_ids
-        if eq_id in equivalent_codes
-    )
-    await _commit_required_admin_repair_audit(
-        db,
-        request=request,
-        action="admin.integrity.repair.cap_debts_to_trust_limits",
-        before_state={"debts_scanned": scanned},
-        after_state={
-            "affected_equivalents": affected_codes,
-            "scanned": scanned,
-            "updated": updated,
-            "deleted": deleted,
-        },
-    )
-    for equivalent_code in affected_codes:
-        PaymentRouter.invalidate_cache(equivalent_code)
-
-    return {
-        "ok": True,
-        "action": "cap-debts-to-trust-limits",
-        "scanned": scanned,
-        "updated": updated,
-        "deleted": deleted,
-    }
 
 
 @router.get("/audit-log", response_model=IntegrityAuditLogResponse)

@@ -208,26 +208,6 @@ export const IntegrityVerifyResponseSchema = z
   })
   .strict()
 
-export const IntegrityRepairNetMutualDebtsResponseSchema = z
-  .object({
-    ok: z.literal(true),
-    action: z.literal('net-mutual-debts'),
-    netted_pairs: z.number().int().nonnegative(),
-    updated: z.number().int().nonnegative(),
-    deleted: z.number().int().nonnegative(),
-  })
-  .strict()
-
-export const IntegrityRepairCapDebtsResponseSchema = z
-  .object({
-    ok: z.literal(true),
-    action: z.literal('cap-debts-to-trust-limits'),
-    scanned: z.number().int().nonnegative(),
-    updated: z.number().int().nonnegative(),
-    deleted: z.number().int().nonnegative(),
-  })
-  .strict()
-
 export type AdminConfigResponse = z.infer<typeof AdminConfigResponseSchema>
 export type AdminConfigPatchResponse = z.infer<typeof AdminConfigPatchResponseSchema>
 export type AdminFeatureFlags = z.infer<typeof AdminFeatureFlagsSchema>
@@ -238,8 +218,6 @@ export type AdminEquivalentDeleteResponse = z.infer<typeof AdminEquivalentDelete
 export type AdminEquivalentUsageResponse = z.infer<typeof AdminEquivalentUsageResponseSchema>
 export type IntegrityStatusResponse = z.infer<typeof IntegrityStatusResponseSchema>
 export type IntegrityVerifyResponse = z.infer<typeof IntegrityVerifyResponseSchema>
-export type IntegrityRepairNetMutualDebtsResponse = z.infer<typeof IntegrityRepairNetMutualDebtsResponseSchema>
-export type IntegrityRepairCapDebtsResponse = z.infer<typeof IntegrityRepairCapDebtsResponseSchema>
 
 export function decodeAdminResponse<T>(schema: ZodType<T>, value: unknown, operation: string): T {
   const validated = schema.safeParse(value)

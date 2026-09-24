@@ -434,7 +434,7 @@ def parse_money_amount(
     But a `Decimal` is a value that has already been parsed, and its spelling is Python's, not
     the client's - so a `Decimal` argument is re-spelled plainly (`format(v, "f")`) before the
     grammar runs, and only the capacity rule can refuse it.  That branch now serves INTERNAL
-    callers (the clearing engine, admin repairs); no HTTP entrance feeds this door a `Decimal`
+    callers (the clearing engine); no HTTP entrance feeds this door a `Decimal`
     any more.  `trustlines/service.py` used to: `limit` was typed `Decimal` on the schema, so
     `{"limit": "1e3"}` arrived as `Decimal('1E+3')` and `{"limit": 1e3}` as `Decimal('1000')`,
     the door refused one spelling and admitted the other for the same value, and - worse - the

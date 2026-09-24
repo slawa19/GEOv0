@@ -13,8 +13,6 @@ import {
   AdminEquivalentUsageResponseSchema,
   AdminFeatureFlagsSchema,
   AdminParticipantActionResponseSchema,
-  IntegrityRepairCapDebtsResponseSchema,
-  IntegrityRepairNetMutualDebtsResponseSchema,
   IntegrityStatusResponseSchema,
   IntegrityVerifyResponseSchema,
   decodeAdminResponse,
@@ -24,8 +22,6 @@ import {
   type AdminEquivalentUsageResponse,
   type AdminFeatureFlags,
   type AdminParticipantActionResponse,
-  type IntegrityRepairCapDebtsResponse,
-  type IntegrityRepairNetMutualDebtsResponse,
   type IntegrityStatusResponse,
   type IntegrityVerifyResponse,
 } from './adminContracts'
@@ -944,28 +940,6 @@ export const mockApi = {
         ),
       }
     })
-  },
-
-  async integrityRepairNetMutualDebts(): Promise<ApiEnvelope<IntegrityRepairNetMutualDebtsResponse>> {
-    return withScenario('/api/v1/integrity/repair/net-mutual-debts', async () => ({
-      success: true,
-      data: decodeAdminResponse(
-        IntegrityRepairNetMutualDebtsResponseSchema,
-        { ok: true, action: 'net-mutual-debts', netted_pairs: 0, updated: 0, deleted: 0 },
-        'mock POST /api/v1/integrity/repair/net-mutual-debts',
-      ),
-    }))
-  },
-
-  async integrityRepairCapDebtsToTrustLimits(): Promise<ApiEnvelope<IntegrityRepairCapDebtsResponse>> {
-    return withScenario('/api/v1/integrity/repair/cap-debts-to-trust-limits', async () => ({
-      success: true,
-      data: decodeAdminResponse(
-        IntegrityRepairCapDebtsResponseSchema,
-        { ok: true, action: 'cap-debts-to-trust-limits', scanned: 0, updated: 0, deleted: 0 },
-        'mock POST /api/v1/integrity/repair/cap-debts-to-trust-limits',
-      ),
-    }))
   },
 
   async listParticipants(params: {

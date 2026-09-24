@@ -109,7 +109,7 @@ npm --prefix admin-ui run validate:fixtures
 
 В шапке UI есть переключатель роли (`admin` / `operator` / `auditor`). Это **режим отображения/UX** (хранится в `localStorage` под ключом `admin-ui.role`):
 
-- роль может скрывать/дизейблить некоторые «опасные» действия (например verify/repair в Integrity, freeze/unfreeze),
+- роль может скрывать/дизейблить некоторые «опасные» действия (например verify в Integrity, freeze/unfreeze),
 - **но это не авторизация** и не security boundary.
 
 При работе в `real` режиме права и доступ должны enforce-иться на backend (например через `X-Admin-Token` и серверные проверки), даже если UI что-то «запрещает».

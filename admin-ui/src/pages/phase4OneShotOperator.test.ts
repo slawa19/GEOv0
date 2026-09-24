@@ -16,8 +16,6 @@ const apiMock = vi.hoisted(() => ({
   patchFeatureFlags: vi.fn(),
   integrityStatus: vi.fn(),
   integrityVerify: vi.fn(),
-  integrityRepairNetMutualDebts: vi.fn(),
-  integrityRepairCapDebtsToTrustLimits: vi.fn(),
 }))
 
 vi.mock('../api', () => ({ api: apiMock }))
@@ -192,24 +190,35 @@ describe('Phase 4 Integrity operator workflow', () => {
     wrapper.unmount()
   })
 
-  it('reports a repair failure, resets busy state, and does not claim success', async () => {
-    apiMock.integrityStatus.mockResolvedValue({ success: true, data: debtSymmetryFailure })
-    apiMock.integrityRepairNetMutualDebts.mockRejectedValue(new Error('repair rejected'))
-    vi.spyOn(ElMessageBox, 'confirm').mockResolvedValue('confirm' as never)
-    const success = vi.spyOn(ElMessage, 'success').mockImplementation(() => undefined as never)
-    const error = vi.spyOn(ElMessage, 'error').mockImplementation(() => undefined as never)
+  it('still explains detected issues but offers no repair action (018/T1806)', async () => {
+    apiMock.integrityStatus.mockResolvedValue({
+      success: true,
+      data: {
+        ...debtSymmetryFailure,
+        status: 'critical',
+        equivalents: {
+          UAH: {
+            ...debtSymmetryFailure.equivalents.UAH,
+            status: 'critical',
+            invariants: {
+              debt_symmetry: { passed: false, violations: 1 },
+              trust_limits: { passed: false, violations: 1 },
+            },
+          },
+        },
+      },
+    })
 
     const { wrapper } = await mountPage(IntegrityPage, '/integrity')
-    const repair = wrapper.find('button.el-button--warning')
-    expect(repair.exists()).toBe(true)
-    await repair.trigger('click')
-    await flushPromises()
 
-    expect(apiMock.integrityRepairNetMutualDebts).toHaveBeenCalledTimes(1)
-    expect(apiMock.integrityStatus).toHaveBeenCalledTimes(1)
-    expect(success).not.toHaveBeenCalled()
-    expect(error).toHaveBeenCalledTimes(1)
-    expect(repair.attributes('disabled')).toBeUndefined()
+    // Both detected cases are still interpreted for the operator...
+    expect(wrapper.findAll('.helpCase')).toHaveLength(2)
+    // ...and the only action on the page is Verify: the repair buttons were the warning and
+    // danger buttons inside those cases, and the endpoints behind them no longer exist.
+    expect(wrapper.find('.helpCase button').exists()).toBe(false)
+    expect(wrapper.find('button.el-button--warning').exists()).toBe(false)
+    expect(wrapper.find('button.el-button--danger').exists()).toBe(false)
+    expect(primaryButton(wrapper).exists()).toBe(true)
     wrapper.unmount()
   })
 })

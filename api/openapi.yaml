@@ -3124,68 +3124,6 @@ paths:
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
 
-  /integrity/repair/net-mutual-debts:
-    post:
-      tags: [Integrity]
-      summary: Repair net mutual debts
-      responses:
-        '200':
-          description: Repair result
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/IntegrityNetMutualDebtsRepairResponse'
-        # 011/T1109: no `401` here. Both repair operations are guarded by
-        # `require_admin` alone, which has no Unauthorized branch at all - executed with no
-        # header and with a wrong X-Admin-Token, both answer 403. The canon used to name a
-        # status the service does not return, which is this programme's defect facing the
-        # other way, and the reachability guard is one-directional by design so nothing
-        # caught it.
-        # 015/F-015-6 containment, 2026-09-11: this operation is CLOSED BY DEFAULT and answers
-        # 409 with `E008`. The cap repair deletes debt whose trustline is FROZEN rather than
-        # absent - a state the protocol itself prescribes - and neither repair takes a lock
-        # against a payment between PREPARE and COMMIT. The switch is
-        # `INTEGRITY_REPAIRS_ENABLED` (`app/config.py`), default false; `T1511` of programme 015
-        # owns the fix that reopens it. The 409 is declared here rather than left undeclared,
-        # because an undeclared reachable status is the defect programme 011 exists to remove.
-        '409':
-          $ref: '#/components/responses/Conflict'
-        '429':
-          $ref: '#/components/responses/TooManyRequests'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-
-  /integrity/repair/cap-debts-to-trust-limits:
-    post:
-      tags: [Integrity]
-      summary: Repair cap debts to trust limits
-      responses:
-        '200':
-          description: Repair result
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/IntegrityCapDebtsRepairResponse'
-        # 011/T1109: no `401` here. Both repair operations are guarded by
-        # `require_admin` alone, which has no Unauthorized branch at all - executed with no
-        # header and with a wrong X-Admin-Token, both answer 403. The canon used to name a
-        # status the service does not return, which is this programme's defect facing the
-        # other way, and the reachability guard is one-directional by design so nothing
-        # caught it.
-        # 015/F-015-6 containment, 2026-09-11: this operation is CLOSED BY DEFAULT and answers
-        # 409 with `E008`. The cap repair deletes debt whose trustline is FROZEN rather than
-        # absent - a state the protocol itself prescribes - and neither repair takes a lock
-        # against a payment between PREPARE and COMMIT. The switch is
-        # `INTEGRITY_REPAIRS_ENABLED` (`app/config.py`), default false; `T1511` of programme 015
-        # owns the fix that reopens it. The 409 is declared here rather than left undeclared,
-        # because an undeclared reachable status is the defect programme 011 exists to remove.
-        '409':
-          $ref: '#/components/responses/Conflict'
-        '429':
-          $ref: '#/components/responses/TooManyRequests'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-
   /integrity/audit-log:
     get:
       tags: [Integrity]
@@ -6384,48 +6322,6 @@ components:
           type: array
           items:
             type: string
-      additionalProperties: false
-
-    IntegrityNetMutualDebtsRepairResponse:
-      type: object
-      required: [ok, action, netted_pairs, updated, deleted]
-      properties:
-        ok:
-          type: boolean
-          enum: [true]
-        action:
-          type: string
-          enum: [net-mutual-debts]
-        netted_pairs:
-          type: integer
-          minimum: 0
-        updated:
-          type: integer
-          minimum: 0
-        deleted:
-          type: integer
-          minimum: 0
-      additionalProperties: false
-
-    IntegrityCapDebtsRepairResponse:
-      type: object
-      required: [ok, action, scanned, updated, deleted]
-      properties:
-        ok:
-          type: boolean
-          enum: [true]
-        action:
-          type: string
-          enum: [cap-debts-to-trust-limits]
-        scanned:
-          type: integer
-          minimum: 0
-        updated:
-          type: integer
-          minimum: 0
-        deleted:
-          type: integer
-          minimum: 0
       additionalProperties: false
 
     IntegrityAuditLogItem:

@@ -102,26 +102,6 @@ class IntegrityVerifyResponse(BaseModel):
     alerts: List[str] = Field(default_factory=list)
 
 
-class IntegrityNetMutualDebtsRepairResponse(BaseModel):
-    ok: Literal[True]
-    action: Literal["net-mutual-debts"]
-    netted_pairs: int = Field(ge=0)
-    updated: int = Field(ge=0)
-    deleted: int = Field(ge=0)
-
-    model_config = ConfigDict(extra="forbid")
-
-
-class IntegrityCapDebtsRepairResponse(BaseModel):
-    ok: Literal[True]
-    action: Literal["cap-debts-to-trust-limits"]
-    scanned: int = Field(ge=0)
-    updated: int = Field(ge=0)
-    deleted: int = Field(ge=0)
-
-    model_config = ConfigDict(extra="forbid")
-
-
 class IntegrityAuditLogItem(BaseModel):
     timestamp: datetime
     actor_id: Optional[str] = None

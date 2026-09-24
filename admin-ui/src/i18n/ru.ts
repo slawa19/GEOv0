@@ -30,7 +30,6 @@ export const RU: Record<string, string> = {
   'common.refreshHint': 'Если ошибка временная, попробуйте обновить.',
   'validation.thresholdUnitInterval': 'Порог должен быть десятичным числом от 0 до 1.',
   'common.run': 'Запустить',
-  'common.repair': 'Исправить',
   'common.abort': 'Прервать',
   'common.save': 'Сохранить',
   'common.saving': 'Сохранение…',
@@ -393,14 +392,6 @@ export const RU: Record<string, string> = {
   'integrity.verify.confirmText': 'Запустить проверку целостности? Это может занять несколько секунд.',
   'integrity.verify.confirmTitle': 'Подтвердить проверку',
   'integrity.verify.finished': 'Проверка целостности завершена',
-  'integrity.readOnlyRepairDisabled': 'Роль только чтение: исправления отключены',
-  'integrity.repair.confirmTitle': 'Подтвердить исправление',
-  'integrity.repair.debtSymmetry.confirmText':
-    'Исправление изменит записи долгов в базе, сведя взаимные долги (A→B и B→A) в один направленный долг. Продолжить?',
-  'integrity.repair.debtSymmetry.finished': 'Исправление завершено: взаимные долги сведены',
-  'integrity.repair.trustLimits.confirmText':
-    'Исправление изменит записи долгов, ограничив или удалив долги, которые превышают trust limits. Продолжить?',
-  'integrity.repair.trustLimits.finished': 'Исправление завершено: долги подогнаны под trust limits',
   'integrity.help.title': 'Статус целостности: что означает и что делать',
   'integrity.help.healthy': 'Все инварианты пройдены: нет превышенных лимитов, суммы сбалансированы, взаимных долгов нет.',
   'integrity.help.notHealthy': 'Проверка целостности нашла проблемы — нужно расследование.',
@@ -408,8 +399,7 @@ export const RU: Record<string, string> = {
   'integrity.help.howToRespond': 'Как реагировать (без техники)',
   'integrity.help.respond.stepVerify': 'Нажмите Verify, чтобы перепроверить базу прямо сейчас и обновить результаты.',
   'integrity.help.respond.stepAlerts': 'Посмотрите Alerts и таблицу ниже, чтобы понять какой эквивалент затронут.',
-  'integrity.help.respond.stepRepair': 'Попробуйте Repair (только для найденных типов проблем) и снова запустите Verify.',
-  'integrity.help.interpretation': 'Интерпретация и исправления (только для найденных проблем)',
+  'integrity.help.interpretation': 'Интерпретация (только для найденных проблем)',
   'integrity.status.healthy': 'норма',
   'integrity.status.warning': 'предупреждение',
   'integrity.status.critical': 'критично',
@@ -417,14 +407,9 @@ export const RU: Record<string, string> = {
   'integrity.help.caseDebtSymmetry.text':
     'Это означает, что для некоторых пар участников одновременно существуют долги: A → B и B → A. В корректной книге их нужно свести, оставив только один направленный долг.',
   'integrity.help.caseDebtSymmetry.step1': 'Найдите затронутые пары в колонке Debt symmetry (violations).',
-  'integrity.help.caseDebtSymmetry.step2': 'Используйте Repair: net mutual debts, чтобы автоматически свести пары в один долг.',
-  'integrity.actions.repairNetMutualDebts': 'Repair: свести взаимные долги',
   'integrity.help.caseTrustLimits.title': 'Превышены лимиты доверия',
   'integrity.help.caseTrustLimits.text':
     'Некоторые долги больше разрешённого trust limit для того же ребра. Это может ломать маршрутизацию и риск-контроли.',
-  'integrity.help.caseTrustLimits.step1': 'Используйте Repair: cap debts to trust limits для автоматической корректировки (или удаления) нарушений.',
-  'integrity.help.caseTrustLimits.step2': 'После repair снова запустите Verify и убедитесь, что инвариант проходит.',
-  'integrity.actions.repairCapDebts': 'Repair: ограничить долги лимитами',
   'integrity.help.caseZeroSum.title': 'Нарушен нулевой баланс',
   'integrity.help.caseZeroSum.text':
     'Суммарный баланс не самосогласован (общая сумма не равна нулю). Это сильный сигнал порчи данных или пропущенных/дублированных ребер.',

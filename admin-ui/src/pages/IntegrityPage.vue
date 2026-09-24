@@ -16,7 +16,6 @@ const error = ref<string | null>(null)
 const status = ref<Record<string, unknown> | null>(null)
 
 const verifyLoading = ref(false)
-const repairLoading = ref<null | 'debt_symmetry' | 'trust_limits'>(null)
 
 type IntegrityStatus = 'healthy' | 'warning' | 'critical'
 
@@ -147,70 +146,6 @@ async function verify() {
   }
 }
 
-async function repairDebtSymmetry() {
-  if (authStore.isReadOnly) {
-    ElMessage.error(t('integrity.readOnlyRepairDisabled'))
-    return
-  }
-  try {
-    await ElMessageBox.confirm(
-      t('integrity.repair.debtSymmetry.confirmText'),
-      t('integrity.repair.confirmTitle'),
-      {
-        type: 'warning',
-        confirmButtonText: t('common.repair'),
-        cancelButtonText: t('common.cancel'),
-      },
-    )
-  } catch {
-    return
-  }
-
-  repairLoading.value = 'debt_symmetry'
-  try {
-    assertSuccess(await api.integrityRepairNetMutualDebts())
-    ElMessage.success(t('integrity.repair.debtSymmetry.finished'))
-    await load()
-  } catch (e: unknown) {
-    const f = formatApiError(e)
-    ElMessage.error(f.hint ? `${f.title} — ${f.hint}` : f.title)
-  } finally {
-    repairLoading.value = null
-  }
-}
-
-async function repairTrustLimits() {
-  if (authStore.isReadOnly) {
-    ElMessage.error(t('integrity.readOnlyRepairDisabled'))
-    return
-  }
-  try {
-    await ElMessageBox.confirm(
-      t('integrity.repair.trustLimits.confirmText'),
-      t('integrity.repair.confirmTitle'),
-      {
-        type: 'warning',
-        confirmButtonText: t('common.repair'),
-        cancelButtonText: t('common.cancel'),
-      },
-    )
-  } catch {
-    return
-  }
-
-  repairLoading.value = 'trust_limits'
-  try {
-    assertSuccess(await api.integrityRepairCapDebtsToTrustLimits())
-    ElMessage.success(t('integrity.repair.trustLimits.finished'))
-    await load()
-  } catch (e: unknown) {
-    const f = formatApiError(e)
-    ElMessage.error(f.hint ? `${f.title} — ${f.hint}` : f.title)
-  } finally {
-    repairLoading.value = null
-  }
-}
-
 onMounted(() => void load())
 </script>
 
@@ -301,7 +236,6 @@ onMounted(() => void load())
             <ul class="helpList">
               <li>{{ t('integrity.help.respond.stepVerify') }}</li>
               <li>{{ t('integrity.help.respond.stepAlerts') }}</li>
-              <li>{{ t('integrity.help.respond.stepRepair') }}</li>
             </ul>
           </div>
 
@@ -329,20 +263,7 @@ onMounted(() => void load())
             </div>
             <ul class="helpList">
               <li>{{ t('integrity.help.caseDebtSymmetry.step1') }}</li>
-              <li>{{ t('integrity.help.caseDebtSymmetry.step2') }}</li>
             </ul>
-
-            <div class="actions">
-              <el-button
-                size="small"
-                type="warning"
-                :loading="repairLoading === 'debt_symmetry'"
-                :disabled="authStore.isReadOnly"
-                @click="repairDebtSymmetry"
-              >
-                {{ t('integrity.actions.repairNetMutualDebts') }}
-              </el-button>
-            </div>
           </div>
 
           <div
@@ -357,22 +278,6 @@ onMounted(() => void load())
             </div>
             <div class="helpText">
               {{ t('integrity.help.caseTrustLimits.text') }}
-            </div>
-            <ul class="helpList">
-              <li>{{ t('integrity.help.caseTrustLimits.step1') }}</li>
-              <li>{{ t('integrity.help.caseTrustLimits.step2') }}</li>
-            </ul>
-
-            <div class="actions">
-              <el-button
-                size="small"
-                type="danger"
-                :loading="repairLoading === 'trust_limits'"
-                :disabled="authStore.isReadOnly"
-                @click="repairTrustLimits"
-              >
-                {{ t('integrity.actions.repairCapDebts') }}
-              </el-button>
             </div>
           </div>
 
@@ -560,9 +465,6 @@ onMounted(() => void load())
 }
 .helpCaseName {
   font-weight: 600;
-}
-.actions {
-  margin-top: 8px;
 }
 .helpHdr {
   font-size: var(--geo-font-size-title);
