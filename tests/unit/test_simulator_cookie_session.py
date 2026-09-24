@@ -295,9 +295,10 @@ _ENSURE_URL = "/api/v1/simulator/session/ensure"
 def lifespan_on_the_test_database(monkeypatch):
     """`with TestClient(app)` runs the REAL lifespan, whose SQLite startup probes read `app.main.engine`.
 
-    That engine is bound to the application's default `DATABASE_URL` - the developer's local file - so
-    these tests used to pass or fail on whatever that file happened to be (programme 015 step 5b, review
-    round 3). Point the startup at the suite's own test database instead.
+    That engine used to be bound to the application's default `DATABASE_URL` - the developer's local
+    SQLite file - so these tests passed or failed on whatever that file happened to be (programme 015
+    step 5b, review round 3). Since 017 T1704 there is no default and `tests/conftest.py` hands the app
+    the tier's URL; the startup is still pointed at the suite's own test engine explicitly.
     """
     import app.main as main_module
     from tests.conftest import TEST_DATABASE_URL, engine as test_engine

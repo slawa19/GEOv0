@@ -60,34 +60,93 @@ def test_settings_guardrail_test_allows_default_secrets() -> None:
     )
 
 
-def test_default_database_uses_ignored_runtime_root(monkeypatch) -> None:
+# DATABASE_URL: REQUIRED, POSTGRESQL THROUGH ASYNCPG ONLY (programme 017, T1704).
+#
+# Until T1704 these three tests pinned the opposite: an unset URL resolved to
+# `sqlite+aiosqlite:///./.local-run/geov0.db`, an explicit SQLite URL was kept, and the default file's
+# parent directory was created on first start. Each of those accepted inputs is now asserted REFUSED
+# below - the two URLs the old tests accepted are in the refused list verbatim - so the removed
+# acceptance cannot come back without a red test. The accepted counter-check keeps the refusal from
+# passing vacuously (a Settings that refused every URL would fail it).
+
+_PASSWORD = "s3cr3t-must-not-print"
+
+
+@pytest.mark.parametrize("unset", [None, "", "   "])
+def test_database_url_is_required_and_has_no_default(monkeypatch, unset) -> None:
     from app.config import Settings
 
-    monkeypatch.delenv("DATABASE_URL", raising=False)
-    configured = Settings(_env_file=None, ENV="dev")
+    if unset is None:
+        monkeypatch.delenv("DATABASE_URL", raising=False)
+    else:
+        monkeypatch.setenv("DATABASE_URL", unset)
 
-    assert configured.DATABASE_URL == "sqlite+aiosqlite:///./.local-run/geov0.db"
+    with pytest.raises(RuntimeError, match=r"DATABASE_URL is not set") as refused:
+        Settings(_env_file=None, ENV="dev")
+
+    message = str(refused.value)
+    assert "docker compose up -d db" in message
+    assert "docs/ru/backend/postgres-local-portable.md" in message
+    assert "127.0.0.1" in message
 
 
-def test_explicit_legacy_root_database_override_is_preserved(monkeypatch) -> None:
-    from app.config import Settings
-
-    monkeypatch.setenv("DATABASE_URL", "sqlite+aiosqlite:///./geov0.db")
-    configured = Settings(_env_file=None, ENV="dev")
-
-    assert configured.DATABASE_URL == "sqlite+aiosqlite:///./geov0.db"
-
-
-def test_default_database_parent_is_created_on_clean_bootstrap(
-    tmp_path, monkeypatch
+@pytest.mark.parametrize(
+    ("database_url", "named_driver"),
+    [
+        # The two URLs the pre-T1704 tests accepted: the removed default and a legacy root file.
+        ("sqlite+aiosqlite:///./.local-run/geov0.db", "'sqlite+aiosqlite'"),
+        ("sqlite+aiosqlite:///./geov0.db", "'sqlite+aiosqlite'"),
+        ("sqlite:///:memory:", "'sqlite'"),
+        # PostgreSQL, but not through the driver the application is built on.
+        (f"postgresql://geo:{_PASSWORD}@127.0.0.1:5432/geov0", "'postgresql'"),
+        (f"postgresql+psycopg://geo:{_PASSWORD}@127.0.0.1:5432/geov0", "'postgresql+psycopg'"),
+        (f"mysql+aiomysql://geo:{_PASSWORD}@127.0.0.1:3306/geov0", "'mysql+aiomysql'"),
+    ],
+)
+def test_every_database_url_but_postgresql_asyncpg_is_refused(
+    monkeypatch, database_url: str, named_driver: str
 ) -> None:
     from app.config import Settings
-    from app.db.session import _ensure_default_sqlite_parent
 
-    monkeypatch.chdir(tmp_path)
-    _ensure_default_sqlite_parent(Settings.DEFAULT_SQLITE_DATABASE_URL)
+    monkeypatch.setenv("DATABASE_URL", database_url)
 
-    assert (tmp_path / ".local-run").is_dir()
+    with pytest.raises(RuntimeError, match=r"runs only on PostgreSQL through asyncpg") as refused:
+        Settings(_env_file=None, ENV="dev")
+
+    message = str(refused.value)
+    assert named_driver in message
+    assert "docker compose up -d db" in message
+    assert _PASSWORD not in message
+
+
+@pytest.mark.parametrize(
+    "database_url",
+    ["not a url", f"postgresql+asyncpg://geo:{_PASSWORD}@127.0.0.1:not-a-port/geov0"],
+)
+def test_an_unparseable_database_url_is_refused_without_echoing_it(
+    monkeypatch, database_url: str
+) -> None:
+    from app.config import Settings
+
+    monkeypatch.setenv("DATABASE_URL", database_url)
+
+    with pytest.raises(RuntimeError, match=r"DATABASE_URL is not a valid database URL") as refused:
+        Settings(_env_file=None, ENV="dev")
+
+    assert _PASSWORD not in str(refused.value)
+    # `from None`: SQLAlchemy's own message, which quotes the string, is not chained either.
+    assert refused.value.__cause__ is None
+    assert refused.value.__suppress_context__
+
+
+def test_a_postgresql_asyncpg_url_is_accepted_verbatim(monkeypatch) -> None:
+    """Counter-check: the refusal above is not a refusal of everything."""
+    from app.config import Settings
+
+    url = f"postgresql+asyncpg://geo:{_PASSWORD}@127.0.0.1:5432/geov0_dev_local"
+    monkeypatch.setenv("DATABASE_URL", url)
+
+    assert Settings(_env_file=None, ENV="dev").DATABASE_URL == url
 
 
 @pytest.mark.parametrize(

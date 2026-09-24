@@ -17,12 +17,6 @@ from sqlalchemy.pool import NullPool
 os.environ["ENV"] = "test"
 os.environ["ENVIRONMENT"] = "test"
 
-from app.api.deps import get_db  # noqa: E402
-from app.config import settings  # noqa: E402
-from app.core.auth.canonical import canonical_json  # noqa: E402
-from app.core.auth.crypto import generate_keypair  # noqa: E402
-from app.db.base import Base  # noqa: E402
-from app.main import app  # noqa: E402
 from scripts.validate_test_database_url import assert_safe_test_database_url  # noqa: E402
 from tests.migrated_schema import (  # noqa: E402
     MigratedSchemaError,
@@ -86,6 +80,24 @@ _validated_test_database_url = assert_safe_test_database_url(
     allow_destructive_reset=os.environ.get("GEO_TEST_ALLOW_DB_RESET"),
     repo_root=Path(__file__).resolve().parents[1],
 )
+
+# THE APPLICATION'S OWN ENGINE POINTS AT THE TIER'S DATABASE (017 stage 3, T1704). `app/config.py` has
+# no `DATABASE_URL` default any more and refuses anything but `postgresql+asyncpg`, and it is read when
+# `app.config` is first imported - which is why the `app` imports come only now, after the tier URL
+# has been refused or accepted above: a missing or SQLite `TEST_DATABASE_URL` still ends in the
+# UsageError above, not in an import error. Until T1704 the engine of `app/db/session.py` was bound to
+# the SQLite default (a developer's `.local-run/geov0.db`) on a local run and to the tier's database on
+# CI, which sets both variables to the same URL (`.github/workflows/quality.yml`, `required-backend`);
+# now both runs are the CI one. Assigned, not `setdefault`: a developer's own `DATABASE_URL` in the
+# shell or `.env` must not become the database background work of the suite writes to.
+os.environ["DATABASE_URL"] = TEST_DATABASE_URL
+
+from app.api.deps import get_db  # noqa: E402
+from app.config import settings  # noqa: E402
+from app.core.auth.canonical import canonical_json  # noqa: E402
+from app.core.auth.crypto import generate_keypair  # noqa: E402
+from app.db.base import Base  # noqa: E402
+from app.main import app  # noqa: E402
 
 # Tests should not start background jobs or best-effort throttling.
 settings.RATE_LIMIT_ENABLED = False

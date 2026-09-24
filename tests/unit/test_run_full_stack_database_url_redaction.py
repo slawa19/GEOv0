@@ -247,22 +247,28 @@ try {
 
 @pytest.mark.skipif(not _POWERSHELLS, reason="PowerShell is required")
 @pytest.mark.parametrize("powershell", _POWERSHELLS, ids=_POWERSHELL_IDS)
-def test_database_display_value_handles_sqlite_without_native_arguments(
+def test_database_display_value_handles_a_url_without_authority_without_native_arguments(
     powershell: Path,
 ) -> None:
+    """The no-authority branch of the display (`scheme:///path`), with a secret in the query.
+
+    Until 017 T1704 this used the SQLite default URL. The application now accepts only
+    `postgresql+asyncpg`, and the same shape is still reachable there: a Unix-socket URL names its
+    host and password in the query, not in an authority.
+    """
     command = (
         _AST_SETUP
         + r"""
 Invoke-Expression (Get-LauncherFunctionText -Name 'Get-SafeDatabaseDisplayUrl')
 $display = Get-SafeDatabaseDisplayUrl `
-    -DatabaseUrl 'sqlite+aiosqlite:///./.local-run/geov0.db?token=must-not-print'
+    -DatabaseUrl 'postgresql+asyncpg:///geov0_dev_local?host=/var/run/postgresql&password=must-not-print'
 [Console]::Out.Write($display)
 """
     )
 
     result = _run_powershell(powershell, command)
 
-    assert result.stdout == "sqlite+aiosqlite:///./.local-run/geov0.db"
+    assert result.stdout == "postgresql+asyncpg:///geov0_dev_local"
     assert "must-not-print" not in result.stdout
 
 

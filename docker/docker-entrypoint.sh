@@ -12,7 +12,9 @@ if [ -z "${DATABASE_URL:-}" ]; then
 fi
 
 case "$DATABASE_URL" in
-  postgresql://*|postgresql+asyncpg://*) ;;
+  # The application's own settings accept postgresql+asyncpg only (017 T1704, app/config.py); a
+  # plain postgresql:// would pass here and be refused one step later by the migration entry.
+  postgresql+asyncpg://*) ;;
   *)
     # Print the scheme only: the rest of the URL carries credentials.
     echo "docker-entrypoint.sh: unsupported DATABASE_URL scheme: ${DATABASE_URL%%:*}" >&2
