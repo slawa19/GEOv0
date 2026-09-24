@@ -215,11 +215,26 @@ function Get-ServiceOwnershipMetadata {
         }
         $fingerprint = [string]$metadata.process_start_fingerprint
         if ($fingerprint -notmatch '^utc-ticks:\d+$') { throw 'invalid process fingerprint' }
+        # Version 1 records one PID that was both launched and listening; version 2 records the
+        # launched PID and the listener (its descendant, or itself). Any other version, or a
+        # version 2 without a well-formed listener, is invalid - a conflict, never a guess.
+        $listenerPidValue = $pidValue
+        $listenerFingerprint = $fingerprint
+        if ($metadata.version -eq 2) {
+            $listenerPidValue = 0
+            if (-not [int]::TryParse([string]$metadata.listener_pid, [ref]$listenerPidValue) -or $listenerPidValue -le 0) {
+                throw 'invalid listener pid'
+            }
+            $listenerFingerprint = [string]$metadata.listener_start_fingerprint
+            if ($listenerFingerprint -notmatch '^utc-ticks:\d+$') { throw 'invalid listener fingerprint' }
+        }
         return [pscustomobject]@{
-            Valid = [bool]($metadata.version -eq 1)
+            Valid = [bool]($metadata.version -eq 1 -or $metadata.version -eq 2)
             RepositoryIdentity = [string]$metadata.repository_identity
             Pid = $pidValue
             ProcessStartFingerprint = $fingerprint
+            ListenerPid = $listenerPidValue
+            ListenerProcessStartFingerprint = $listenerFingerprint
             ServiceName = [string]$metadata.service_name
             Port = [int]$metadata.port
         }
@@ -279,18 +294,30 @@ function Get-ProcessIdentityObservation {
 }
 
 function Write-ServiceOwnershipMetadata {
-    param([object]$Service, [int]$Id, [string]$ProcessStartFingerprint)
-    if ($ProcessStartFingerprint -notmatch '^utc-ticks:\d+$') {
+    param(
+        [object]$Service,
+        [int]$Id,
+        [string]$ProcessStartFingerprint,
+        [int]$ListenerId = 0,
+        [string]$ListenerStartFingerprint = ''
+    )
+    if ($ListenerId -le 0) {
+        $ListenerId = $Id
+        $ListenerStartFingerprint = $ProcessStartFingerprint
+    }
+    if ($ProcessStartFingerprint -notmatch '^utc-ticks:\d+$' -or $ListenerStartFingerprint -notmatch '^utc-ticks:\d+$') {
         throw 'Unable to persist service ownership because the process fingerprint is unavailable.'
     }
 
     $metadata = [ordered]@{
-        version = 1
+        version = 2
         repository_identity = Get-FullStackRepositoryIdentity
         service_name = [string]$Service.Name
         port = [int]$Service.Port
         pid = $Id
         process_start_fingerprint = $ProcessStartFingerprint
+        listener_pid = $ListenerId
+        listener_start_fingerprint = $ListenerStartFingerprint
         launcher_pid = $PID
         recorded_at_utc = (Get-Date).ToUniversalTime().ToString('o')
     }
@@ -331,6 +358,78 @@ function Stop-ProcessById {
         Start-Sleep -Milliseconds 100
     }
     throw "Owned process PID $Id did not stop."
+}
+
+function Stop-ProcessIfStillExact {
+    <#
+    Stops $Id only while it is still the recorded instance. Gone already, or gone while being stopped,
+    is not a failure: on Windows the venv redirector and the interpreter it started live in one job,
+    so stopping either ends the other (measured 2026-09-24). An unreadable identity is refused.
+    Mirrors scripts/run_local.ps1.
+    #>
+    param([int]$Id, [string]$ExpectedStartFingerprint, [string]$Label)
+    $observed = Get-ProcessIdentityObservation -Id $Id -ExpectedStartFingerprint $ExpectedStartFingerprint
+    if ($observed.Status -eq 'Unreadable') { throw "$Label PID $Id has an unreadable process identity." }
+    if ($observed.Status -ne 'Exact') { return }
+    try {
+        Stop-ProcessById -Id $Id -ExpectedStartFingerprint $ExpectedStartFingerprint
+    } catch {
+        $after = Get-ProcessIdentityObservation -Id $Id -ExpectedStartFingerprint $ExpectedStartFingerprint
+        if ($after.Status -ne 'Missing') { throw }
+    }
+}
+
+function Get-ProcessParentId {
+    param([int]$Id)
+    try {
+        $row = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $Id" -ErrorAction Stop |
+            Select-Object -First 1
+    } catch {
+        return $null
+    }
+    if ($null -eq $row -or -not $row.ParentProcessId) { return $null }
+    return [int]$row.ParentProcessId
+}
+
+function Get-StartFingerprintTicks {
+    param([string]$Fingerprint)
+    if ($Fingerprint -notmatch '^utc-ticks:(\d+)$') { return $null }
+    return [long]$Matches[1]
+}
+
+function Get-FullStackDescendantListener {
+    <#
+    The listener as a descendant of the launched process, or $null. Mirrors run_local.ps1's
+    Get-RunLocalDescendantListener (2026-09-24): on Windows `.venv\Scripts\python.exe` starts the
+    base interpreter as a CHILD, so the backend never listens on the launched PID. A listener counts
+    as ours when its parent chain reaches the launched PID within $MaxDepth generations, every parent
+    on the way started no later than its child (a recycled parent PID starts after the child), and the
+    launched PID still carries the launched fingerprint.
+    #>
+    param([int]$ListenerPid, [int]$LaunchedPid, [string]$LaunchedFingerprint, [int]$MaxDepth = 4)
+    $listenerIdentity = Get-ProcessIdentityObservation -Id $ListenerPid -ExpectedStartFingerprint ''
+    if ($listenerIdentity.Status -ne 'Observed') { return $null }
+    $childTicks = Get-StartFingerprintTicks -Fingerprint $listenerIdentity.Fingerprint
+    if ($null -eq $childTicks) { return $null }
+    $current = $ListenerPid
+    for ($depth = 0; $depth -lt $MaxDepth; $depth++) {
+        $parent = Get-ProcessParentId -Id $current
+        if (-not $parent -or $parent -le 0 -or $parent -eq $current) { return $null }
+        $parentIdentity = Get-ProcessIdentityObservation -Id $parent -ExpectedStartFingerprint ''
+        if ($parentIdentity.Status -ne 'Observed') { return $null }
+        $parentTicks = Get-StartFingerprintTicks -Fingerprint $parentIdentity.Fingerprint
+        if ($null -eq $parentTicks -or $parentTicks -gt $childTicks) { return $null }
+        if ($parent -eq $LaunchedPid) {
+            if ($parentIdentity.Fingerprint -ne $LaunchedFingerprint) { return $null }
+            return [pscustomobject]@{
+                Pid = $ListenerPid
+                ProcessStartFingerprint = $listenerIdentity.Fingerprint
+            }
+        }
+        $current = $parent
+        $childTicks = $parentTicks
+    }
+    return $null
 }
 
 function Get-ListeningPid {
@@ -766,8 +865,22 @@ function Get-ServiceStopState {
         $unboundStatus = if ($metadataPresent) { 'Unreadable' } else { 'Missing' }
         [pscustomobject]@{ Status = $unboundStatus; Fingerprint = $null }
     }
-    $exactProcess = [bool]($metadataMatchesService -and $identity.Status -eq 'Exact')
-    $owned = [bool]($exactProcess -and $listener -and $metadata.Pid -eq $listener)
+    # The listener holds the port, so ownership is proven on it. A v1 record (or a reader that has no
+    # listener) names the launched PID as the listener, which is the exact-PID rule as before.
+    $savedListenerPid = $null
+    $savedListenerFingerprint = $null
+    if ($metadataMatchesService) {
+        $savedListenerPid = if ($metadata.ListenerPid) { $metadata.ListenerPid } else { $metadata.Pid }
+        $savedListenerFingerprint = if ($metadata.ListenerPid) { $metadata.ListenerProcessStartFingerprint } else { $metadata.ProcessStartFingerprint }
+    }
+    $listenerIdentity = if (-not $metadataMatchesService -or $savedListenerPid -eq $metadata.Pid) {
+        $identity
+    } else {
+        Get-ProcessIdentityObservation -Id $savedListenerPid -ExpectedStartFingerprint $savedListenerFingerprint
+    }
+    $exactProcess = [bool]($metadataMatchesService -and $listenerIdentity.Status -eq 'Exact')
+    $launchedAlive = [bool]($metadataMatchesService -and $identity.Status -eq 'Exact')
+    $owned = [bool]($exactProcess -and $listener -and $savedListenerPid -eq $listener)
     $conflict = $false
     $reason = $null
     $staleOwnershipFile = $false
@@ -778,26 +891,26 @@ function Get-ServiceStopState {
     } elseif ($listener -and -not $metadataMatchesService) {
         $conflict = $true
         $reason = "port $($Service.Port) is listening on PID $listener but ownership metadata is invalid or belongs to another service"
-    } elseif ($listener -and $identity.Status -eq 'Unreadable') {
+    } elseif ($listener -and $listenerIdentity.Status -eq 'Unreadable') {
         $conflict = $true
-        $reason = "port $($Service.Port) is listening on PID $listener but owned PID $($metadata.Pid) identity is unreadable"
-    } elseif ($listener -and $identity.Status -eq 'Missing') {
+        $reason = "port $($Service.Port) is listening on PID $listener but owned PID $savedListenerPid identity is unreadable"
+    } elseif ($listener -and $listenerIdentity.Status -eq 'Missing') {
         $conflict = $true
-        $reason = "port $($Service.Port) is listening on PID $listener but saved PID $($metadata.Pid) is missing"
+        $reason = "port $($Service.Port) is listening on PID $listener but saved PID $savedListenerPid is missing"
     } elseif ($listener -and -not $exactProcess) {
         $conflict = $true
         $reason = "port $($Service.Port) is listening on PID $listener but the saved process fingerprint does not match"
-    } elseif ($listener -and $metadata.Pid -ne $listener) {
+    } elseif ($listener -and $savedListenerPid -ne $listener) {
         $conflict = $true
-        $reason = "port $($Service.Port) is listening on PID $listener but owned PID $($metadata.Pid) was expected"
-    } elseif (-not $listener -and $identity.Status -eq 'Unreadable') {
+        $reason = "port $($Service.Port) is listening on PID $listener but owned PID $savedListenerPid was expected"
+    } elseif (-not $listener -and ($identity.Status -eq 'Unreadable' -or $listenerIdentity.Status -eq 'Unreadable')) {
         $conflict = $true
         $reason = "owned PID $($metadata.Pid) identity is unreadable; metadata was retained"
-    } elseif (-not $listener -and $exactProcess) {
+    } elseif (-not $listener -and ($exactProcess -or $launchedAlive)) {
         $conflict = $true
         $reason = "owned PID $($metadata.Pid) is alive but is not listening on port $($Service.Port)"
     } elseif (-not $listener -and $metadataPresent -and
-        $identity.Status -in @('Missing', 'Mismatch')) {
+        $identity.Status -in @('Missing', 'Mismatch') -and $listenerIdentity.Status -in @('Missing', 'Mismatch')) {
         # It is safe to remove metadata only when it cannot identify the exact
         # currently-live process instance. PID reuse is never a reason to kill.
         $staleOwnershipFile = $true
@@ -811,8 +924,11 @@ function Get-ServiceStopState {
         MetadataMatchesService = $metadataMatchesService
         SavedPid = if ($metadataMatchesService) { $metadata.Pid } else { $null }
         SavedProcessStartFingerprint = if ($metadataMatchesService) { $metadata.ProcessStartFingerprint } else { $null }
+        SavedListenerPid = $savedListenerPid
+        SavedListenerProcessStartFingerprint = $savedListenerFingerprint
         CurrentProcessStartFingerprint = $identity.Fingerprint
         ProcessIdentityStatus = $identity.Status
+        ListenerIdentityStatus = $listenerIdentity.Status
         ListenerPid = $listener
         Owned = [bool]$owned
         Conflict = [bool]$conflict
@@ -848,6 +964,7 @@ function Test-ServiceStopPlansEqual {
         foreach ($property in @(
             'MetadataPresent', 'MetadataValid', 'MetadataMatchesService',
             'SavedPid', 'SavedProcessStartFingerprint', 'CurrentProcessStartFingerprint', 'ProcessIdentityStatus',
+            'SavedListenerPid', 'SavedListenerProcessStartFingerprint', 'ListenerIdentityStatus',
             'ListenerPid', 'Owned', 'Conflict', 'StaleOwnershipFile'
         )) {
             if ($before.$property -ne $after.$property) { return $false }
@@ -869,6 +986,7 @@ function Wait-ForLaunchedServiceOwnership {
 
     $launchedPid = 0
     $launchedFingerprint = $null
+    $ownedListener = $null
     $ownershipPersisted = $false
     $ownershipResult = $null
     $primaryFailure = $null
@@ -891,16 +1009,28 @@ function Wait-ForLaunchedServiceOwnership {
             }
             $listener = Get-ListeningPid -Port $Service.Port
             if ($listener) {
-                if ($listener -ne $launchedPid) {
+                if ($listener -eq $launchedPid) {
+                    $ownedListener = [pscustomobject]@{ Pid = $launchedPid; ProcessStartFingerprint = $launchedFingerprint }
+                } else {
+                    $ownedListener = Get-FullStackDescendantListener `
+                        -ListenerPid $listener -LaunchedPid $launchedPid -LaunchedFingerprint $launchedFingerprint
+                }
+                if ($null -eq $ownedListener) {
                     throw "Unable to start $($Service.Name): port $($Service.Port) is owned by a different process."
                 }
                 $confirmedFingerprint = Get-ProcessStartTimeFingerprint -Id $launchedPid
                 if ($confirmedFingerprint -ne $launchedFingerprint) {
                     throw "Unable to start $($Service.Name): process identity changed before ownership was persisted."
                 }
-                Write-ServiceOwnershipMetadata -Service $Service -Id $launchedPid -ProcessStartFingerprint $launchedFingerprint
+                Write-ServiceOwnershipMetadata -Service $Service -Id $launchedPid -ProcessStartFingerprint $launchedFingerprint `
+                    -ListenerId $ownedListener.Pid -ListenerStartFingerprint $ownedListener.ProcessStartFingerprint
                 $ownershipPersisted = $true
-                $ownershipResult = [pscustomobject]@{ Pid = $launchedPid; ProcessStartFingerprint = $launchedFingerprint }
+                $ownershipResult = [pscustomobject]@{
+                    Pid = $launchedPid
+                    ProcessStartFingerprint = $launchedFingerprint
+                    ListenerPid = $ownedListener.Pid
+                    ListenerProcessStartFingerprint = $ownedListener.ProcessStartFingerprint
+                }
                 break
             }
             Start-Sleep -Milliseconds 500
@@ -934,6 +1064,11 @@ function Wait-ForLaunchedServiceOwnership {
                     if ($cleanupIdentity.Status -ne 'Missing') {
                         throw 'Exact launched process identity was unavailable for startup cleanup.'
                     }
+                } elseif ($null -ne $ownedListener -and $ownedListener.Pid -ne $launchedPid) {
+                    Stop-ProcessIfStillExact -Id $ownedListener.Pid `
+                        -ExpectedStartFingerprint $ownedListener.ProcessStartFingerprint -Label 'Startup cleanup: listener'
+                    Stop-ProcessIfStillExact -Id $launchedPid -ExpectedStartFingerprint $launchedFingerprint `
+                        -Label 'Startup cleanup: launched process'
                 } else {
                     $cleanupIdentity = Get-ProcessIdentityObservation `
                         -Id $launchedPid `
@@ -1025,7 +1160,12 @@ function Stop-AllServices {
         # Stop-ProcessById performs one last exact-instance fingerprint check.
         # A change after the collective preflight is an unavoidable OS race; it
         # fails closed, but an earlier service may already have stopped.
-        Stop-ProcessById -Id $state.SavedPid -ExpectedStartFingerprint $state.SavedProcessStartFingerprint
+        # The listener first; then the launched process, which may already have exited with it.
+        Stop-ProcessById -Id $state.SavedListenerPid -ExpectedStartFingerprint $state.SavedListenerProcessStartFingerprint
+        if ($state.SavedListenerPid -ne $state.SavedPid) {
+            Stop-ProcessIfStillExact -Id $state.SavedPid -ExpectedStartFingerprint $state.SavedProcessStartFingerprint `
+                -Label "$($state.Service.Name): launched process"
+        }
     }
 
     # Retain every ownership file until every owned stop succeeds. This leaves
@@ -1052,15 +1192,24 @@ function Undo-StartedServices {
     for ($index = $StartedServices.Count - 1; $index -ge 0; $index--) {
         $started = $StartedServices[$index]
         try {
-            $identity = Get-ProcessIdentityObservation `
-                -Id $started.Pid `
-                -ExpectedStartFingerprint $started.ProcessStartFingerprint
-            if ($identity.Status -eq 'Exact') {
-                Stop-ProcessById `
+            if ($started.ListenerPid -and $started.ListenerPid -ne $started.Pid) {
+                Stop-ProcessIfStillExact -Id $started.ListenerPid `
+                    -ExpectedStartFingerprint $started.ListenerProcessStartFingerprint `
+                    -Label "Unable to roll back $($started.Service.Name): listener"
+                Stop-ProcessIfStillExact -Id $started.Pid `
+                    -ExpectedStartFingerprint $started.ProcessStartFingerprint `
+                    -Label "Unable to roll back $($started.Service.Name): launched"
+            } else {
+                $identity = Get-ProcessIdentityObservation `
                     -Id $started.Pid `
                     -ExpectedStartFingerprint $started.ProcessStartFingerprint
-            } elseif ($identity.Status -eq 'Unreadable') {
-                throw "Unable to roll back $($started.Service.Name): process identity is unreadable."
+                if ($identity.Status -eq 'Exact') {
+                    Stop-ProcessById `
+                        -Id $started.Pid `
+                        -ExpectedStartFingerprint $started.ProcessStartFingerprint
+                } elseif ($identity.Status -eq 'Unreadable') {
+                    throw "Unable to roll back $($started.Service.Name): process identity is unreadable."
+                }
             }
             # Missing means the child already exited; Mismatch proves PID reuse.
             # Both allow removal of metadata written by this startup attempt.
@@ -1216,13 +1365,15 @@ $StartedThisAttempt += [pscustomobject]@{
     Service = $BackendService
     Pid = $backendOwnership.Pid
     ProcessStartFingerprint = $backendOwnership.ProcessStartFingerprint
+    ListenerPid = $backendOwnership.ListenerPid
+    ListenerProcessStartFingerprint = $backendOwnership.ListenerProcessStartFingerprint
 }
 
 if (-not (Test-HttpEndpoint -Url "http://127.0.0.1:$BackendPort/api/v1/health" -TimeoutSec 60)) {
     throw "Backend failed to start on port $BackendPort"
 }
 
-Write-Host "     Backend PID: $($backendOwnership.Pid)" -ForegroundColor Gray
+Write-Host "     Backend PID: $($backendOwnership.Pid) (listener $($backendOwnership.ListenerPid))" -ForegroundColor Gray
 
 $backendUrl = "http://127.0.0.1:$BackendPort"
 
@@ -1265,6 +1416,8 @@ $StartedThisAttempt += [pscustomobject]@{
     Service = $AdminUiService
     Pid = $adminUiOwnership.Pid
     ProcessStartFingerprint = $adminUiOwnership.ProcessStartFingerprint
+    ListenerPid = $adminUiOwnership.ListenerPid
+    ListenerProcessStartFingerprint = $adminUiOwnership.ListenerProcessStartFingerprint
 }
 Write-Host "     Admin UI PID: $($adminUiOwnership.Pid)" -ForegroundColor Gray
 
@@ -1293,6 +1446,8 @@ $StartedThisAttempt += [pscustomobject]@{
     Service = $SimulatorUiService
     Pid = $simulatorUiOwnership.Pid
     ProcessStartFingerprint = $simulatorUiOwnership.ProcessStartFingerprint
+    ListenerPid = $simulatorUiOwnership.ListenerPid
+    ListenerProcessStartFingerprint = $simulatorUiOwnership.ListenerProcessStartFingerprint
 }
 Write-Host "     Simulator UI PID: $($simulatorUiOwnership.Pid)" -ForegroundColor Gray
 $StartupComplete = $true

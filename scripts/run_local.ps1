@@ -211,6 +211,25 @@ function Stop-ProcessById {
     Stop-Process -Id $Id -Force -ErrorAction Stop
 }
 
+function Stop-ProcessIfStillExact {
+    <#
+    Stops $Id only while it is still the recorded instance. Gone already, or gone while being stopped,
+    is not a failure: on Windows the venv redirector and the interpreter it started live in one job,
+    so stopping either ends the other (measured 2026-09-24: the child was gone immediately after
+    `Stop-Process` on its redirector). An unreadable identity is refused.
+    #>
+    param([int]$Id, [string]$ExpectedStartFingerprint, [string]$Label)
+    $observed = Get-ProcessIdentityObservation -Id $Id -ExpectedStartFingerprint $ExpectedStartFingerprint
+    if ($observed.Status -eq 'Unreadable') { throw "$Label PID $Id has an unreadable process identity." }
+    if ($observed.Status -ne 'Exact') { return }
+    try {
+        Stop-ProcessById -Id $Id -ExpectedStartFingerprint $ExpectedStartFingerprint
+    } catch {
+        $after = Get-ProcessIdentityObservation -Id $Id -ExpectedStartFingerprint $ExpectedStartFingerprint
+        if ($after.Status -ne 'Missing') { throw }
+    }
+}
+
 function Get-ListeningPid {
     param([int]$Port)
     try {
@@ -515,18 +534,13 @@ function Invoke-RunLocalOwnershipStopPlan {
         }
     }
     foreach ($state in $ownedStates) {
-        # Launched process first, then its listening descendant: on Windows stopping the venv
-        # redirector does not stop the interpreter it started, and the redirector exits by itself once
-        # its child is gone - so the other order would race that exit.
-        if ($state.SavedListenerPid -ne $state.SavedPid) {
-            $launched = Get-ProcessIdentityObservation -Id $state.SavedPid -ExpectedStartFingerprint $state.SavedProcessStartFingerprint
-            if ($launched.Status -eq 'Exact') {
-                Stop-ProcessById -Id $state.SavedPid -ExpectedStartFingerprint $state.SavedProcessStartFingerprint
-            } elseif ($launched.Status -eq 'Unreadable') {
-                throw "run_local stop refused: launched PID $($state.SavedPid) of $($state.Service.Name) is unreadable."
-            }
-        }
+        # The listener first - it holds the port and was just proven owned - then the launched
+        # process, which may already have exited with it (see `Stop-ProcessIfStillExact`).
         Stop-ProcessById -Id $state.SavedListenerPid -ExpectedStartFingerprint $state.SavedListenerProcessStartFingerprint
+        if ($state.SavedListenerPid -ne $state.SavedPid) {
+            Stop-ProcessIfStillExact -Id $state.SavedPid -ExpectedStartFingerprint $state.SavedProcessStartFingerprint `
+                -Label "run_local stop: launched $($state.Service.Name)"
+        }
     }
     foreach ($state in $ownedStates) {
         Remove-Item -LiteralPath $state.Service.OwnershipFile -Force -ErrorAction Stop
@@ -593,17 +607,15 @@ function Wait-ForRunLocalServiceOwnership {
             try {
                 if ([string]::IsNullOrWhiteSpace($fingerprint)) {
                     if (-not $Process.HasExited) { $Process.Kill() }
+                } elseif ($null -ne $ownedListener -and $ownedListener.Pid -ne $launchedPid) {
+                    Stop-ProcessIfStillExact -Id $ownedListener.Pid `
+                        -ExpectedStartFingerprint $ownedListener.ProcessStartFingerprint -Label "$($Service.Name) listener"
+                    Stop-ProcessIfStillExact -Id $launchedPid -ExpectedStartFingerprint $fingerprint `
+                        -Label "launched $($Service.Name)"
                 } else {
                     $identity = Get-ProcessIdentityObservation -Id $launchedPid -ExpectedStartFingerprint $fingerprint
                     if ($identity.Status -eq 'Exact') {
                         Stop-ProcessById -Id $launchedPid -ExpectedStartFingerprint $fingerprint
-                    }
-                    if ($null -ne $ownedListener -and $ownedListener.Pid -ne $launchedPid) {
-                        $listenerIdentity = Get-ProcessIdentityObservation `
-                            -Id $ownedListener.Pid -ExpectedStartFingerprint $ownedListener.ProcessStartFingerprint
-                        if ($listenerIdentity.Status -eq 'Exact') {
-                            Stop-ProcessById -Id $ownedListener.Pid -ExpectedStartFingerprint $ownedListener.ProcessStartFingerprint
-                        }
                     }
                 }
             } catch {
@@ -632,26 +644,23 @@ function Undo-RunLocalStartedServices {
     for ($index = $StartedServices.Count - 1; $index -ge 0; $index--) {
         $started = $StartedServices[$index]
         try {
-            $identity = Get-ProcessIdentityObservation `
-                -Id $started.Pid `
-                -ExpectedStartFingerprint $started.ProcessStartFingerprint
-            if ($identity.Status -eq 'Exact') {
-                Stop-ProcessById `
+            if ($started.ListenerPid -and $started.ListenerPid -ne $started.Pid) {
+                Stop-ProcessIfStillExact -Id $started.ListenerPid `
+                    -ExpectedStartFingerprint $started.ListenerProcessStartFingerprint `
+                    -Label "Unable to roll back $($started.Service.Name): listener"
+                Stop-ProcessIfStillExact -Id $started.Pid `
+                    -ExpectedStartFingerprint $started.ProcessStartFingerprint `
+                    -Label "Unable to roll back $($started.Service.Name): launched"
+            } else {
+                $identity = Get-ProcessIdentityObservation `
                     -Id $started.Pid `
                     -ExpectedStartFingerprint $started.ProcessStartFingerprint
-            } elseif ($identity.Status -eq 'Unreadable') {
-                throw "Unable to roll back $($started.Service.Name): process identity is unreadable."
-            }
-            if ($started.ListenerPid -and $started.ListenerPid -ne $started.Pid) {
-                $listenerIdentity = Get-ProcessIdentityObservation `
-                    -Id $started.ListenerPid `
-                    -ExpectedStartFingerprint $started.ListenerProcessStartFingerprint
-                if ($listenerIdentity.Status -eq 'Exact') {
+                if ($identity.Status -eq 'Exact') {
                     Stop-ProcessById `
-                        -Id $started.ListenerPid `
-                        -ExpectedStartFingerprint $started.ListenerProcessStartFingerprint
-                } elseif ($listenerIdentity.Status -eq 'Unreadable') {
-                    throw "Unable to roll back $($started.Service.Name): listener identity is unreadable."
+                        -Id $started.Pid `
+                        -ExpectedStartFingerprint $started.ProcessStartFingerprint
+                } elseif ($identity.Status -eq 'Unreadable') {
+                    throw "Unable to roll back $($started.Service.Name): process identity is unreadable."
                 }
             }
 
@@ -746,8 +755,15 @@ function Get-FullStackOwnershipMetadata {
         }
         $fingerprint = [string]$metadata.process_start_fingerprint
         if ($fingerprint -notmatch '^utc-ticks:\d+$') { throw 'invalid fingerprint' }
+        # Version 2 (2026-09-24) also names the listener, a descendant of the launched PID; the
+        # listener is the process that shows full-stack is running, so it is what is read here.
+        if ($metadata.version -eq 2) {
+            if (-not [int]::TryParse([string]$metadata.listener_pid, [ref]$pidValue) -or $pidValue -le 0) { throw 'invalid listener pid' }
+            $fingerprint = [string]$metadata.listener_start_fingerprint
+            if ($fingerprint -notmatch '^utc-ticks:\d+$') { throw 'invalid listener fingerprint' }
+        }
         return [pscustomobject]@{
-            Valid = [bool]($metadata.version -eq 1)
+            Valid = [bool]($metadata.version -eq 1 -or $metadata.version -eq 2)
             RepositoryIdentity = [string]$metadata.repository_identity
             Pid = $pidValue
             ProcessStartFingerprint = $fingerprint

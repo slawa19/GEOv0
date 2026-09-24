@@ -167,8 +167,15 @@ function Get-FullStackOwnershipMetadata {
     if (-not [int]::TryParse([string]$metadata.pid, [ref]$pidValue) -or $pidValue -le 0) { throw 'invalid pid' }
     $fingerprint = [string]$metadata.process_start_fingerprint
     if ($fingerprint -notmatch '^utc-ticks:\d+$') { throw 'invalid fingerprint' }
+    # Version 2 (2026-09-24) also names the listener, a descendant of the launched PID; the
+    # listener is the process that shows full-stack is running, so it is what is read here.
+    if ($metadata.version -eq 2) {
+      if (-not [int]::TryParse([string]$metadata.listener_pid, [ref]$pidValue) -or $pidValue -le 0) { throw 'invalid listener pid' }
+      $fingerprint = [string]$metadata.listener_start_fingerprint
+      if ($fingerprint -notmatch '^utc-ticks:\d+$') { throw 'invalid listener fingerprint' }
+    }
     return [pscustomobject]@{
-      Valid = [bool]($metadata.version -eq 1)
+      Valid = [bool]($metadata.version -eq 1 -or $metadata.version -eq 2)
       RepositoryIdentity = [string]$metadata.repository_identity
       Pid = $pidValue
       ProcessStartFingerprint = $fingerprint
