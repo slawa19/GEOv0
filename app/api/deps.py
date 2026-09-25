@@ -125,6 +125,19 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async for session in get_db_session():
         yield session
 
+
+def get_payment_session_factory():
+    """Where `POST /payments` opens its sessions: one per attempt of `PaymentService.pay` (019 stage 3).
+
+    The payment is its own transaction - not the request's `get_db` session - because its owner retries
+    it on a fresh snapshot. Read at call time, so an override of `app.db.session.AsyncSessionLocal`
+    reaches it; tests override this dependency directly.
+    """
+
+    from app.db import session as db_session
+
+    return db_session.AsyncSessionLocal
+
 async def get_current_participant(
     db: AsyncSession = Depends(get_db),
     token: str = Depends(reusable_oauth2)

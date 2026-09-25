@@ -15,15 +15,18 @@ THE CONFLICTS ARE REAL, one per phase, and nothing is injected into the driver:
   and inserts Alice's reservations and commits; the subject then reads Alice's reservations from its
   older snapshot and inserts its own. That is a read-write cycle over `prepare_locks`, and PostgreSQL
   refuses the subject with `40001`. One competitor per attempt keeps the contention up until the
-  engine's own retry budget (`COMMIT_RETRY_ATTEMPTS`, default) is spent.
+  retry budget (`COMMIT_RETRY_ATTEMPTS`, default) is spent. Since stage 3 (`T1904`) that budget is
+  `PaymentService.pay`'s: every attempt is the WHOLE payment on a fresh session and snapshot, so the
+  subject's prepare - and the conflict - happen once per attempt.
 * `commit` - the stop guard's `FOR SHARE` on the equivalent row (`engine.py:1442`) after a concurrent
   UPDATE of that row (its `description`, so the stop never becomes true) committed behind the commit
   phase's snapshot: `40001` on every attempt, as in the T1544 boundedness stand.
 
-CONTROLS, asserted normally: the database error behind the engine's failure carries SQLSTATE `40001`;
-the engine logged a `40001` retry for each attempt but the last; every competitor committed (producer
-progress); the client got `409 E008` with `retryable: true`; a fresh `tx_id` afterwards pays, so the
-path is not simply broken.
+CONTROLS, asserted normally: the database error behind every attempt's failure carries SQLSTATE
+`40001`; `pay()` logged a `40001` retry of the whole attempt for each attempt but the last
+(`event=payment.attempt_retry`; before stage 3 the engine retried its own phase,
+`event=payment.uow_retry`); every competitor committed (producer progress); the client got `409 E008`
+with `retryable: true`; a fresh `tx_id` afterwards pays, so the path is not simply broken.
 
 TWO TESTS PER PHASE.
 * `test_today_...` - CHARACTERIZATION of the hypothesis: the row is `ABORTED` with the retryable error,
@@ -200,7 +203,7 @@ async def _conflict_then_resubmit(api, factory, monkeypatch, caplog, phase: str)
         else:
             _install_commit_conflict(patched, factory, world, stand)
         try:
-            with caplog.at_level(logging.WARNING, logger="app.core.payments.engine"):
+            with caplog.at_level(logging.WARNING, logger="app.core.payments.service"):
                 first = await asyncio.wait_for(
                     api.post("/api/v1/payments", json=body, headers=world.alice["headers"]),
                     timeout=60,
@@ -210,16 +213,18 @@ async def _conflict_then_resubmit(api, factory, monkeypatch, caplog, phase: str)
             for t in stand.competitors:
                 await finish(t)
 
-    # ── controls: the conflict was the one this stand builds, and it was spent in the engine ────
+    # ── controls: the conflict was the one this stand builds, and pay() spent its budget on it ──
     budget = int(settings.COMMIT_RETRY_ATTEMPTS)
-    assert budget >= 2, f"premise: the engine retries nothing ({budget})"
-    assert stand.sqlstates == ["40001"], stand.sqlstates
+    assert budget >= 2, f"premise: pay() retries nothing ({budget})"
+    assert stand.sqlstates == ["40001"] * budget, stand.sqlstates
     retries = [
         r.getMessage()
         for r in caplog.records
-        if f"event=payment.uow_retry op={phase} " in r.getMessage()
+        if "event=payment.attempt_retry " in r.getMessage()
     ]
-    assert len(retries) == budget - 1 and all("pgcode=40001" in m for m in retries), retries
+    assert len(retries) == budget - 1 and all(
+        "pgcode=40001" in m and "where=execute" in m for m in retries
+    ), retries
     if phase == "prepare":
         assert competitor_results == ["COMMITTED"] * budget, competitor_results
     else:

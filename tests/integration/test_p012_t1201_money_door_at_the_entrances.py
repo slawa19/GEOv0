@@ -59,6 +59,7 @@ from tests.integration.test_scenarios import (
     _sign_trustline_update_request,
     register_and_login,
 )
+from tests.conftest import MODE_B
 
 EQUIVALENT = "DOOR"
 
@@ -315,6 +316,7 @@ async def test_a_trustline_limit_the_column_cannot_hold_is_refused_before_the_si
     )
 
 
+@MODE_B
 @pytest.mark.asyncio
 @pytest.mark.parametrize("amount", ["1e3", "1E+3", "1E-3", "0.1e1"])
 async def test_the_payment_door_still_refuses_exponent_notation_written_by_a_client(
@@ -358,6 +360,7 @@ async def test_the_payment_door_still_refuses_exponent_notation_written_by_a_cli
     )
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_a_payment_amount_with_trailing_zeros_commits_and_is_not_renormalised(
     client: AsyncClient, db_session

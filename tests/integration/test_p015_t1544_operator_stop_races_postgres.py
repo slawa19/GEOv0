@@ -170,21 +170,27 @@ async def _is_active(factory, equivalent_id) -> bool:
 
 
 @pytest.mark.asyncio
-async def test_a_payment_prepared_before_the_stop_and_waiting_behind_it_is_refused(
-    factory, admin_api, monkeypatch, caplog
+async def test_a_stop_arriving_between_prepare_and_commit_waits_for_the_payment(
+    factory, admin_api, monkeypatch
 ) -> None:
-    """The payment commit takes its snapshot, then waits on the PATCH's owner lock; the PATCH commits.
+    """The payment is between its prepare and its commit phase; the deactivating PATCH arrives.
 
-    RED if the commit read is plain, `FOR KEY SHARE`, or the `Equivalent` instance the service loaded
-    before routing: each of those still sees `is_active=True` and commits money after the PATCH has
-    returned `200`.
+    UNTIL 019 STAGE 3 this was `test_a_payment_prepared_before_the_stop_and_waiting_behind_it_is_refused`:
+    the payment's `PREPARED` was durable and the owner lock released with it, so the PATCH could take
+    the lock between the two phases, and the commit then waited behind the PATCH and was refused
+    through the `FOR SHARE` serialization failure. Since stage 3 (`T1904`) the payment is ONE
+    transaction that holds the owner lock from `prepare` to its commit, so that schedule no longer
+    exists - the spec's "third behaviour change", established by the implemented order. What the T1544
+    contract needs from this schedule still holds and is asserted: the PATCH waits (measured: an
+    advisory waiter while the payment is held), the payment commits BEFORE the PATCH returns, and once
+    the PATCH has returned `200` the stop is in force - the next payment is refused.
+
+    RED if the payment released its owner lock before its commit (the PATCH would return while the
+    payment is held, and the payment would then commit after the stop), or if the PATCH took none.
     """
-    client, gate = admin_api
+    client, _gate = admin_api
     world = await _seed(factory)
     code = world.equivalent.code
-    tx_id = str(uuid.uuid4())
-    # The barriers below hold locks for a moment; the default budgets are seconds and are not what
-    # this control is about.
     monkeypatch.setattr(settings, "COMMIT_TIMEOUT_SECONDS", 30)
     monkeypatch.setattr(settings, "PAYMENT_TOTAL_TIMEOUT_SECONDS", 60)
 
@@ -199,7 +205,7 @@ async def test_a_payment_prepared_before_the_stop_and_waiting_behind_it_is_refus
 
     monkeypatch.setattr(PaymentEngine, "commit", _commit_after_barrier)
 
-    async def _pay():
+    async def _pay(tx_id: str):
         async with factory() as session:
             return await PaymentService(session).create_payment_internal(
                 world.sender.id,
@@ -209,50 +215,45 @@ async def test_a_payment_prepared_before_the_stop_and_waiting_behind_it_is_refus
                 idempotency_key=tx_id,
             )
 
+    tx_id = str(uuid.uuid4())
+    completed: list[str] = []
     payment = patch = None
     try:
-        with caplog.at_level(logging.WARNING):
-            payment = asyncio.create_task(_pay())
-            await asyncio.wait_for(prepared.wait(), timeout=20)
-            assert await _transactions(factory, world) == {tx_id: "PREPARED"}, (
-                "premise: the payment is not durably prepared before the stop"
-            )
+        payment = asyncio.create_task(_pay(tx_id))
+        payment.add_done_callback(lambda _t: completed.append("payment"))
+        await asyncio.wait_for(prepared.wait(), timeout=20)
+        # One transaction: nothing of the payment is visible to anyone else yet.
+        assert await _transactions(factory, world) == {}, "premise: the payment is durable before its commit"
 
-            gate.armed = True
-            patch = asyncio.create_task(_deactivate(client, code))
-            await asyncio.wait_for(gate.reached.wait(), timeout=20)
-
-            release_commit.set()
-            assert await _advisory_waiter_exists(), (
-                "premise: the payment commit did not wait on the PATCH's owner lock"
-            )
-            assert not payment.done()
-
-            gate.release.set()
-            resp = await asyncio.wait_for(patch, timeout=20)
-            assert resp.status_code == 200, resp.text
-
-            with pytest.raises(ConflictException) as refused:
-                await asyncio.wait_for(payment, timeout=30)
-
-        _assert_stop_refusal(refused.value, code)
-        retries = [
-            r.getMessage() for r in caplog.records if "event=payment.uow_retry op=commit" in r.getMessage()
-        ]
-        assert any("pgcode=40001" in m for m in retries), (
-            f"premise: the refusal did not come through the FOR SHARE serialization failure: {retries}"
+        patch = asyncio.create_task(_deactivate(client, code))
+        patch.add_done_callback(lambda _t: completed.append("patch"))
+        assert await _advisory_waiter_exists(), (
+            "the PATCH did not wait on the owner lock the prepared payment holds"
         )
-        assert await _debts(factory, world) == {(world.sender.pid, world.receiver.pid): _OPENING}
-        assert await _transactions(factory, world) == {tx_id: "ABORTED"}
+        assert not patch.done()
+
+        release_commit.set()
+        result = await asyncio.wait_for(payment, timeout=30)
+        resp = await asyncio.wait_for(patch, timeout=20)
+        assert resp.status_code == 200, resp.text
+
+        assert result.status == "COMMITTED", result
+        assert completed == ["payment", "patch"], completed
+        assert await _debts(factory, world) == {
+            (world.sender.pid, world.receiver.pid): _OPENING + Decimal("10.00")
+        }
+        assert await _transactions(factory, world) == {tx_id: "COMMITTED"}
         assert await _prepare_locks(factory, world) == 0
         assert await _is_active(factory, world.equivalent.id) is False
+
+        # After the PATCH returned, the stop is in force.
+        monkeypatch.setattr(PaymentEngine, "commit", original_commit)
+        with pytest.raises(ConflictException) as refused:
+            await _pay(str(uuid.uuid4()))
+        _assert_stop_refusal(refused.value, code)
     finally:
         release_commit.set()
-        gate.release.set()
         for task in (payment, patch):
-            # A released task is let to FINISH first. Cancelling a PATCH that was just let out of its
-            # commit barrier leaves its connection idle in transaction, holding the equivalent row,
-            # and the cleanup below then waits on it forever (seen under a mutation, 2026-09-14).
             if task is not None and not task.done():
                 await asyncio.wait([task], timeout=15)
             if task is not None and not task.done():

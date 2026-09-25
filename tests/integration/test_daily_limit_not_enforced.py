@@ -9,6 +9,7 @@ from sqlalchemy import select
 from app.core.auth.canonical import canonical_json
 from app.core.auth.crypto import generate_keypair
 from app.db.models.equivalent import Equivalent
+from tests.conftest import MODE_B
 
 
 def _sign_trustline_create_request(
@@ -86,6 +87,7 @@ async def _register_and_login(client: AsyncClient, name: str) -> dict:
     }
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_daily_limit_is_informational_only(client: AsyncClient, db_session):
     # Ensure USD exists.

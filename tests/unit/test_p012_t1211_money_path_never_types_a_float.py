@@ -105,6 +105,8 @@ KNOWN_NON_MONEY_FLOAT_ATTRIBUTES = {
         "the cache tuple's first slot is a monotonic timestamp; the amounts in it are Decimal",
     ("app/core/balance/service.py", "_summary_cache"):
         "same shape: a monotonic timestamp beside a summary whose money fields are strings",
+    ("app/core/payments/service.py", "delay_seconds"):
+        "the backoff before `pay()`'s next attempt, in seconds (019 stage 3)",
 }
 
 

@@ -12,8 +12,10 @@ from tests.integration.test_scenarios import (
     _sign_payment_request,
     _sign_trustline_create_request,
 )
+from tests.conftest import MODE_B
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_payment_routing_constraints_avoid_filters_intermediate_pid(
     client: AsyncClient,

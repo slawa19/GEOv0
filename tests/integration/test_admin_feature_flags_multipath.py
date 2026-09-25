@@ -14,6 +14,7 @@ from tests.integration.test_scenarios import (
     _sign_trustline_create_request,
     register_and_login,
 )
+from tests.conftest import MODE_B
 
 
 async def _seed_equivalent(db_session, code: str = "USD") -> None:
@@ -34,6 +35,7 @@ async def _patch_feature_flags(client: AsyncClient, *, updates: dict, reason: st
     return resp.json()
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_feature_flag_multipath_enabled_gates_multi_route_payment(client: AsyncClient, db_session):
     await _seed_equivalent(db_session, "USD")

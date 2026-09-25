@@ -234,7 +234,7 @@ ordering contract и ошибочно отбрасывал бы данные п�
 
 | Уровень | Механизм | Реализация |
 |---|---|---|
-| **L1: Prevention** | Optimistic Locking | Поле `Debt.version` (Integer). При UPDATE проверяется `WHERE version = OLD`. При конфликте (`StaleDataError`) — автоматический retry (до 3 раз) с перечитыванием состояния. |
+| **L1: Prevention** | Optimistic Locking | Поле `Debt.version` (Integer). При UPDATE проверяется `WHERE version = OLD`. ~~При конфликте (`StaleDataError`) — автоматический retry (до 3 раз) с перечитыванием состояния.~~ **Снято 2026-09-25 (019, стадия 3, `FORK-1`):** повтор внутри операции шёл из того же снимка `SERIALIZABLE` и убран; конфликт версии в потоке платежа `Book` поднимает как `DebtVersionConflict`, и он повторяется владельцем всей транзакции на свежей сессии — `PaymentService.pay` для API, повтор денежной фазы для симулятора. Прочие ошибки ORM повтором не становятся. |
 | **L2: Detection** | Post-Tick Audit | В real-mode симулятора после каждого тика сверяется изменение балансов в БД с суммой committed транзакций. При расхождении эмиттится SSE событие `audit.drift` и запись в `IntegrityAuditLog`. |
 | **L3: Invariant** | In-transaction Check | Внутри транзакции платежа (`PaymentEngine.commit`) проверяется дельта балансов до и после операций. При несовпадении (из-за триггеров или side-effects) транзакция откатывается (`IntegrityViolation`). |
 
@@ -250,10 +250,16 @@ ordering contract и ошибочно отбрасывал бы данные п�
 equivalent-owner locks → transaction lock → канонические pair locks. Service, Admin abort и recovery
 входят в этот протокол через `PaymentEngine`. Real tick до денежной работы захватывает полный набор
 configured equivalents, а executor перед staged actions фиксирует полный отсортированный planned set.
-Конфликт внешнего `SERIALIZABLE` snapshot не ретраится внутри savepoint. Engine-owned UoW может
+Конфликт внешнего `SERIALIZABLE` snapshot не ретраится внутри savepoint. ~~Engine-owned UoW может
 целиком повториться после rollback, но staged real tick использует fail-fast: откатывает tick,
 записывает `REAL_MODE_TICK_FAILED` и не переигрывает тот же batch. Следующий heartbeat планирует
-новый tick.
+новый tick.~~ **Уточнено 2026-09-25 (019, стадия 3):** fail-fast тика уже не соответствовал коду —
+владелец денежной фазы тика повторяет её ЦЕЛИКОМ на свежей сессии в ограниченном бюджете
+(`app/core/simulator/money_replay.py`). API-платёж с той же стадии — одна транзакция на попытку
+`PaymentService.pay`: переходные `NEW → PREPARED → COMMITTED` движка идут внутри savepoint'а операции
+и другим транзакциям не видны, а повторяемый конфликт повторяет всю попытку на свежей сессии.
+Порядок локов и вход через `PaymentEngine` не меняются до стадий 4–5
+(`specs/019-payment-one-transaction/spec.md`).
 
 Clearing участвует в том же equivalent-owner domain на одной явно закреплённой физической DB
 connection. После preflight рабочая транзакция завершается; на pinned connection берётся
@@ -351,17 +357,26 @@ dialect, пользователь, host и имя базы в публичный
 После ожидания advisory lock PostgreSQL может представить невидимый конкурентный insert Debt как
 `40001` либо как `23505`. `23505` считается временным конфликтом только для операции `commit`, SQL
 `INSERT INTO debts` и точного constraint `uq_debts_debtor_creditor_equivalent`; любой другой unique
-violation остаётся неретраимым. Это узкое исключение не публикует имя constraint, SQL или детали
+violation остаётся неретраимым. **Уточнено 2026-09-25 (019, стадия 3):** формулировка отставала от
+кода — с `T1529` (2026-09-13) тем же временным конфликтом считается и `23505` вставки конверта
+операции на двух его ограничениях идентичности (`PaymentEngine._is_retryable_db_error`); точный
+разрешитель коллизии `transactions.tx_id` — задача `T1905`. Это узкое исключение не публикует имя constraint, SQL или детали
 драйвера клиенту и не расширяет общий retry-предикат для `prepare`, `abort` или staged savepoint.
 
 Interactive-действие симулятора отвечает code `CONFLICT`, а не `PAYMENT_REJECTED`. В real tick тот
 же конфликт не засчитывается как терминальный отказ отдельного платежа: владелец внешней транзакции
-делает rollback, tick получает `REAL_MODE_TICK_FAILED`, а тот же batch не переигрывается. Следующий
-heartbeat планирует новый tick.
+делает rollback, ~~tick получает `REAL_MODE_TICK_FAILED`, а тот же batch не переигрывается. Следующий
+heartbeat планирует новый tick.~~ **уточнено 2026-09-25 (019, стадия 3):** и повторяет денежную фазу
+целиком на свежей сессии (`money_replay.py`); исчерпанный бюджет засчитывается тиком без прогресса, а
+не ошибкой. API-платёж (`PaymentService.pay`) так же повторяет всю попытку на свежей сессии, в
+пределах `COMMIT_RETRY_ATTEMPTS` и `PAYMENT_TOTAL_TIMEOUT_SECONDS`; исчерпание — `409/E008`.
 
 При timeout или `CancelledError` после возможной записи `Transaction` cleanup доводится до
 terminal result до закрытия session: для commit-path выполняются rollback, read-before-abort и
 идемпотентный abort; staged-path оставляет окончательный rollback владельцу внешней транзакции.
+**Уточнено 2026-09-25 (019, стадия 3):** у API-платежа нет долговечной `Transaction` до его
+единственного коммита; `pay()` откатывает попытку и записывает отказ `ABORTED` отдельной короткой
+транзакцией, а чтение перед терминализацией остаётся для сбоя самого `COMMIT` (исход неизвестен).
 Исходный `CancelledError` сохраняется. Уже наблюдённый `COMMITTED` никогда не переводится в
 `ABORTED`.
 

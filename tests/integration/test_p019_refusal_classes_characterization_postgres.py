@@ -8,17 +8,31 @@ stages that change a row of it change the expected table here, visibly.
 
 Each row is produced by a real schedule, nothing is injected into the driver:
 
-API path (`POST /payments`, three commits - see `test_p019_no_durable_intermediate_state_postgres.py`):
-* `routing_before_new` - the amount exceeds what is left; the router refuses before the `NEW` insert.
-* `recheck_after_new` - the creditor lowers the line (a committed UPDATE) after routing and the `NEW`
-  commit, before prepare; prepare's own transaction sees it and refuses (`engine.py:992`).
+API path (`POST /payments`; since stage 3, `T1904`, ONE transaction per attempt of `PaymentService.pay`,
+which retries a retryable conflict on a fresh snapshot):
+* `routing_before_new` - the amount exceeds what is left; the router refuses before the insert.
+* `recheck_after_new` - the creditor lowers the line (a committed UPDATE) after routing and the insert,
+  before prepare. Before stage 3 prepare ran in its own transaction, saw it and refused (`E002`,
+  stored `ABORTED`). Since stage 3 the payment is one SERIALIZABLE snapshot taken before the UPDATE:
+  prepare re-checks capacity against THAT snapshot and the payment commits - the serial order
+  "payment, then the lowering" - so this is no longer a refusal. The row stays in the table to show it.
 * `stop_before_new` / `hold_before_new` - the operator stop / integrity hold is in force when the
-  request arrives; the service pre-check refuses (`service.py:715`, `:725`) before `NEW`.
-* `stop_at_commit` / `hold_at_commit` - the stop (through the real `PATCH`) / hold lands after the
-  durable `PREPARED`, before the commit phase; the commit guard refuses (`engine.py:1442`).
+  request arrives; the service pre-check refuses before the insert.
+* `stop_at_commit` - the real `PATCH` deactivating the equivalent is started after `prepare`, before
+  the commit phase. Before stage 3 it landed there (the owner lock was released with the durable
+  `PREPARED`) and the commit guard refused. Since stage 3 the payment holds the owner lock from
+  `prepare` to its one commit, so the `PATCH` QUEUES on it (asserted: an advisory waiter exists while
+  the payment is in flight), the payment commits, and the stop applies after it. This is the spec's
+  "third behaviour change" (the disappearing "stop at commit" schedule), established by the
+  implemented order.
+* `hold_at_commit` - the hold is written after `prepare` by a writer that takes no owner lock. The
+  commit guard's `FOR SHARE` meets a row changed behind the payment's snapshot: `40001`, `pay()`
+  retries the whole attempt, and the retry's pre-check refuses the hold BEFORE the insert - no row, and
+  the replay after the hold is lifted executes. Before stage 3 this was a stored `ABORTED`. Keeping a
+  refusal met by a retry as `ABORTED` is the admission of `T1905` (spec, FORK-5).
 * `timeout_confirmed_rollback` - the commit guard's `FOR SHARE` waits on the row lock of an operator's
-  slow `PATCH` of the equivalent's description; the payment times out, the service ROLLS BACK, reads
-  the row back as not committed (`service.py:1247-1270`) and only then writes `ABORTED`.
+  slow `PATCH` of the equivalent's description; the payment times out, `pay()` rolls the attempt back
+  and only then records `ABORTED` in a short transaction of its own.
 Each replay is made after the cause is lifted, so an `ABORTED` answer can only be the stored one, and a
 `COMMITTED` answer shows the `tx_id` was executed afresh.
 
@@ -34,6 +48,7 @@ no row). The retryable conflict is `test_p019_retryable_conflict_is_not_stored_a
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from decimal import Decimal
 from typing import Any
@@ -150,6 +165,22 @@ class _CommitGate:
         session.commit = gated_commit
 
 
+async def _advisory_waiter_exists(factory, *, timeout: float = 10.0) -> bool:  # noqa: F811
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    async with factory() as observer:
+        while True:
+            waiting = await observer.scalar(
+                text("SELECT EXISTS (SELECT 1 FROM pg_locks WHERE NOT granted AND locktype = 'advisory')")
+            )
+            await observer.rollback()
+            if waiting:
+                return True
+            if loop.time() > deadline:
+                return False
+            await asyncio.sleep(0.02)
+
+
 async def _row_lock_waiter_exists(factory, *, timeout: float = 10.0) -> bool:  # noqa: F811
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
@@ -170,12 +201,14 @@ async def _row_lock_waiter_exists(factory, *, timeout: float = 10.0) -> bool:  #
 
 
 @pytest.mark.asyncio
-async def test_the_api_path_refusal_table_today(api, factory, monkeypatch) -> None:  # noqa: F811
+async def test_the_api_path_refusal_table_today(api, factory, monkeypatch, caplog) -> None:  # noqa: F811
     people = await build_api_world(api, factory)
     observed: dict[str, dict[str, Any]] = {}
     premises: dict[str, Any] = {}
 
-    async def run_class(name: str, world: ApiWorld, body: dict, *, cause, lift, amount: str) -> None:
+    async def run_class(
+        name: str, world: ApiWorld, body: dict, *, cause, lift, amount: str, refused: bool = True
+    ) -> None:
         before = await debts(factory, world)
         first = await cause(body)
         stored = await tx_row(factory, body["tx_id"])
@@ -185,7 +218,11 @@ async def test_the_api_path_refusal_table_today(api, factory, monkeypatch) -> No
         after = await debts(factory, world)
         key = (world.alice["pid"], world.bob["pid"])
         moved = after.get(key, Decimal("0")) - mid.get(key, Decimal("0"))
-        assert mid == before, (name, before, mid)  # the refusal itself moved nothing
+        if refused:
+            assert mid == before, (name, before, mid)  # the refusal itself moved nothing
+        else:
+            first_moved = mid.get(key, Decimal("0")) - before.get(key, Decimal("0"))
+            assert first_moved == Decimal(amount), (name, before, mid)  # the payment itself paid
         observed[name] = {
             "first": _answer(first),
             "stored": None if stored is None else (stored[0], (stored[1] or {}).get("code")),
@@ -221,6 +258,7 @@ async def test_the_api_path_refusal_table_today(api, factory, monkeypatch) -> No
             cause=lambda b, w=w: post(w, b),
             lift=lambda w=w: _set_limit(factory, w, "100.00"),
             amount="10.00",
+            refused=False,
         )
     premises["recheck_after_new"] = fired
 
@@ -234,16 +272,35 @@ async def test_the_api_path_refusal_table_today(api, factory, monkeypatch) -> No
     )
 
     # stop_at_commit ──────────────────────────────────────────────────────────────────────────
+    # The PATCH is started from the hook and NOT awaited there: since stage 3 it queues on the owner
+    # lock this payment holds until its commit, and awaiting it inside the payment would deadlock the
+    # stand, not the application.
     w = await build_api_world(api, factory, people=people)
     body = payment_body(w, w.alice, w.bob, "10.00")
-    with monkeypatch.context() as m:
-        fired = _hook_before_engine_call(
-            m, factory, "commit", body["tx_id"], lambda w=w: _set_active(api, w, False)
-        )
-        await run_class(
-            "stop_at_commit", w, body,
-            cause=lambda b, w=w: post(w, b), lift=lambda w=w: _set_active(api, w, True), amount="10.00",
-        )
+    stop_patch: list[asyncio.Task] = []
+
+    async def start_the_stop(w=w) -> None:
+        stop_patch.append(asyncio.create_task(_set_active(api, w, False)))
+        premises["stop_at_commit_queued"] = await _advisory_waiter_exists(factory)
+
+    async def pay_then_let_the_stop_land(b, w=w):
+        resp = await post(w, b)
+        await asyncio.wait_for(stop_patch[0], timeout=20)
+        return resp
+
+    try:
+        with monkeypatch.context() as m:
+            fired = _hook_before_engine_call(m, factory, "commit", body["tx_id"], start_the_stop)
+            await run_class(
+                "stop_at_commit", w, body,
+                cause=pay_then_let_the_stop_land,
+                lift=lambda w=w: _set_active(api, w, True),
+                amount="10.00",
+                refused=False,
+            )
+    finally:
+        for task in stop_patch:
+            await finish(task)
     premises["stop_at_commit"] = fired
 
     # hold_before_new ─────────────────────────────────────────────────────────────────────────
@@ -262,10 +319,17 @@ async def test_the_api_path_refusal_table_today(api, factory, monkeypatch) -> No
         fired = _hook_before_engine_call(
             m, factory, "commit", body["tx_id"], lambda w=w: set_integrity_hold(factory, w.equivalent_id)
         )
-        await run_class(
-            "hold_at_commit", w, body,
-            cause=lambda b, w=w: post(w, b), lift=lambda w=w: _clear_hold(factory, w), amount="10.00",
-        )
+        with caplog.at_level(logging.WARNING, logger="app.core.payments.service"):
+            caplog.clear()
+            await run_class(
+                "hold_at_commit", w, body,
+                cause=lambda b, w=w: post(w, b), lift=lambda w=w: _clear_hold(factory, w), amount="10.00",
+            )
+            premises["hold_at_commit_retried"] = [
+                r.getMessage().split(" pgcode=")[1].split(" ")[0]
+                for r in caplog.records
+                if "event=payment.attempt_retry " in r.getMessage()
+            ]
     premises["hold_at_commit"] = fired
 
     # timeout_confirmed_rollback ──────────────────────────────────────────────────────────────
@@ -337,11 +401,15 @@ async def test_the_api_path_refusal_table_today(api, factory, monkeypatch) -> No
 
     # ── the mechanism of every row was reached ────────────────────────────────────────────────
     assert premises == {
-        # the cause landed once, while the payment was durably NEW (before prepare) ...
-        "recheck_after_new": ["NEW"],
-        # ... or durably PREPARED (before the commit phase)
-        "stop_at_commit": ["PREPARED"],
-        "hold_at_commit": ["PREPARED"],
+        # the cause landed once, between routing and prepare / between prepare and the commit phase,
+        # and - one transaction since stage 3 - another transaction saw no row of the payment then
+        "recheck_after_new": [None],
+        "stop_at_commit": [None],
+        "hold_at_commit": [None],
+        # the deactivating PATCH queued on the owner lock while the payment was in flight
+        "stop_at_commit_queued": True,
+        # the hold behind the snapshot was met as a real 40001, and pay() retried the whole attempt
+        "hold_at_commit_retried": ["40001"],
         # the payment really waited on the PATCH's row lock
         "timeout_confirmed_rollback": True,
     }, premises
@@ -354,24 +422,24 @@ async def test_the_api_path_refusal_table_today(api, factory, monkeypatch) -> No
             "replay": (200, "COMMITTED", None), "replay_moved": True,
         },
         "recheck_after_new": {
-            "first": (400, "E002", None), "stored": ("ABORTED", "E002"),
-            "replay": (200, "ABORTED", "E002"), "replay_moved": False,
+            "first": (200, "COMMITTED", None), "stored": ("COMMITTED", None),
+            "replay": (200, "COMMITTED", None), "replay_moved": False,
         },
         "stop_before_new": {
             "first": (409, "E008", inactive), "stored": None,
             "replay": (200, "COMMITTED", None), "replay_moved": True,
         },
         "stop_at_commit": {
-            "first": (409, "E008", inactive), "stored": ("ABORTED", "E008"),
-            "replay": (200, "ABORTED", "E008"), "replay_moved": False,
+            "first": (200, "COMMITTED", None), "stored": ("COMMITTED", None),
+            "replay": (200, "COMMITTED", None), "replay_moved": False,
         },
         "hold_before_new": {
             "first": (409, "E008", hold), "stored": None,
             "replay": (200, "COMMITTED", None), "replay_moved": True,
         },
         "hold_at_commit": {
-            "first": (409, "E008", hold), "stored": ("ABORTED", "E008"),
-            "replay": (200, "ABORTED", "E008"), "replay_moved": False,
+            "first": (409, "E008", hold), "stored": None,
+            "replay": (200, "COMMITTED", None), "replay_moved": True,
         },
         "timeout_confirmed_rollback": {
             "first": (504, "E007", None), "stored": ("ABORTED", "E007"),

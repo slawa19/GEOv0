@@ -281,7 +281,7 @@ async def _recheck_refusal_in_a_tick(rc_factory, monkeypatch) -> _RecheckOutcome
     lowered: list[int] = []
     inside_after_abort: list[str | None] = []
     original_prepare = PaymentEngine.prepare
-    original_abort = PaymentEngine.abort
+    original_record = PaymentService._record_refusal_in_transaction
 
     async def prepare_after_the_creditor_lowers_the_line(self, tx_id, *args, **kwargs):
         if not lowered:
@@ -300,22 +300,26 @@ async def _recheck_refusal_in_a_tick(rc_factory, monkeypatch) -> _RecheckOutcome
                 await other.commit()
         return await original_prepare(self, tx_id, *args, **kwargs)
 
-    async def abort_and_read_back(self, tx_id, *args, **kwargs):
-        result = await original_abort(self, tx_id, *args, **kwargs)
-        # Read in the TICK's transaction: the row the service wrote before raising.
+    async def record_and_read_back(self, attempt, *args, **kwargs):
+        result = await original_record(self, attempt, *args, **kwargs)
+        # Read in the TICK's transaction: the row the service wrote before raising. Since stage 3
+        # (`T1904`) the refusal is written by `_record_refusal_in_transaction` after the payment
+        # operation's savepoint was rolled back - before it, by `engine.abort(commit=False)`.
         inside_after_abort.append(
-            await self.session.scalar(select(Transaction.state).where(Transaction.tx_id == tx_id))
+            await self.session.scalar(
+                select(Transaction.state).where(Transaction.tx_id == attempt.tx_id)
+            )
         )
         return result
 
     monkeypatch.setattr(PaymentEngine, "prepare", prepare_after_the_creditor_lowers_the_line)
-    monkeypatch.setattr(PaymentEngine, "abort", abort_and_read_back)
+    monkeypatch.setattr(PaymentService, "_record_refusal_in_transaction", record_and_read_back)
     try:
         await asyncio.wait_for(runner.tick_real_mode(run.run_id), 90.0)
     finally:
         _forget_the_route_cache(world)
     monkeypatch.setattr(PaymentEngine, "prepare", original_prepare)
-    monkeypatch.setattr(PaymentEngine, "abort", original_abort)
+    monkeypatch.setattr(PaymentService, "_record_refusal_in_transaction", original_record)
 
     # ── controls ──────────────────────────────────────────────────────────────────────────────
     async with rc_factory() as s:

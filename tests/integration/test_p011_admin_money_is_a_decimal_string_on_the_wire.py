@@ -57,6 +57,7 @@ from tests.integration.test_scenarios import (
     _sign_trustline_create_request,
     register_and_login,
 )
+from tests.conftest import MODE_B
 
 # The near-exhausted edge. 5.25 / 100.50 = 5.22%, comfortably under THRESHOLD, so
 # /admin/trustlines/bottlenecks, summary.top_bottleneck_edges and metrics.capacity.bottlenecks all
@@ -371,6 +372,7 @@ def test_the_admin_wire_checkers_reject_what_they_exist_to_catch() -> None:
 # --------------------------------------------------------------------------------------------
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_admin_trustlines_list_money_is_decimal_text(
     client: AsyncClient, admin_money_scenario
@@ -409,6 +411,7 @@ async def test_admin_trustlines_list_money_is_decimal_text(
 # --------------------------------------------------------------------------------------------
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_admin_audit_log_declares_no_money_and_leaks_none(
     client: AsyncClient, admin_money_scenario
@@ -497,6 +500,7 @@ async def test_admin_audit_log_declares_no_money_and_leaks_none(
 # --------------------------------------------------------------------------------------------
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_admin_bottlenecks_money_is_decimal_text_and_threshold_is_a_number(
     client: AsyncClient, admin_money_scenario
@@ -549,6 +553,7 @@ async def test_admin_bottlenecks_money_is_decimal_text_and_threshold_is_a_number
 # --------------------------------------------------------------------------------------------
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_admin_liquidity_summary_money_is_decimal_text(
     client: AsyncClient, admin_money_scenario
@@ -649,6 +654,7 @@ async def test_admin_liquidity_summary_money_is_decimal_text(
 # --------------------------------------------------------------------------------------------
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_admin_participant_metrics_money_is_decimal_text(
     client: AsyncClient, admin_money_scenario
@@ -810,6 +816,7 @@ async def test_admin_participant_metrics_money_is_decimal_text(
 # --------------------------------------------------------------------------------------------
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_admin_ratio_fields_are_json_numbers_not_strings(
     client: AsyncClient, admin_money_scenario
@@ -859,6 +866,7 @@ async def test_admin_ratio_fields_are_json_numbers_not_strings(
         assert_raw_key_is_unquoted(response.text, key, where="metrics (raw)")
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_one_threshold_parameter_comes_back_as_a_number_twice_and_a_string_once(
     client: AsyncClient, admin_money_scenario
@@ -954,6 +962,7 @@ async def test_one_threshold_parameter_comes_back_as_a_number_twice_and_a_string
     )
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_trustline_updated_at_reaches_the_wire_on_every_admin_route_that_serves_one(
     client: AsyncClient, admin_money_scenario

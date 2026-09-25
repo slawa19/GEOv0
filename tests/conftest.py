@@ -92,7 +92,7 @@ _validated_test_database_url = assert_safe_test_database_url(
 # shell or `.env` must not become the database background work of the suite writes to.
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 
-from app.api.deps import get_db  # noqa: E402
+from app.api.deps import get_db, get_payment_session_factory  # noqa: E402
 from app.config import settings  # noqa: E402
 from app.core.auth.canonical import canonical_json  # noqa: E402
 from app.core.auth.crypto import generate_keypair  # noqa: E402
@@ -578,6 +578,22 @@ def sessionmaker_of(session: AsyncSession):
     return committed.sessionmaker if committed is not None else TestingSessionLocal
 
 
+async def _end_the_transaction(session: AsyncSession) -> None:
+    if not session.in_transaction():
+        return
+    try:
+        await session.commit()
+    except Exception:
+        await session.rollback()
+
+
+def _mode_a_has_no_payment_sessions():
+    raise RuntimeError(
+        "POST /payments opens its own sessions, one per attempt (programme 019 stage 3, FORK-11): "
+        "an HTTP payment test must run in mode B (`MODE_B`, tests/conftest.py)"
+    )
+
+
 @pytest_asyncio.fixture
 async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
     """httpx AsyncClient bound to the FastAPI app with a DB override."""
@@ -594,9 +610,34 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
     )
 
     async def override_get_db():
-        yield db_session
+        # MODE B: EACH REQUEST ON ITS OWN TRANSACTION of the test's session (019 stage 3). Since
+        # `POST /payments` commits on sessions of its own, a request that ran inside a transaction the
+        # test opened earlier would read a SERIALIZABLE snapshot older than the payment it follows, and
+        # a test that read after it through `db_session` would too. Ending the session's transaction
+        # before and after every request gives both a fresh snapshot - as production's one session
+        # per request has - and makes what the test staged visible to the payment's own sessions.
+        # `commit()`, not `rollback()`: the session is `expire_on_commit=False`, so the test's loaded
+        # objects stay readable (a rollback would expire them and a later attribute read would do IO).
+        if committed is not None:
+            await _end_the_transaction(db_session)
+        try:
+            yield db_session
+        finally:
+            if committed is not None:
+                await _end_the_transaction(db_session)
 
     app.dependency_overrides[get_db] = override_get_db
+    # 019 stage 3 (`FORK-11`): `POST /payments` runs as ONE transaction on sessions of its own - one
+    # per attempt of `PaymentService.pay` - never on the request's session. In mode B every attempt
+    # opens a session on the clone the test seeded and commits there for real. In mode A there is no
+    # such session: the seed is uncommitted inside the fixture's rolled-back transaction, a new
+    # session cannot see it, and a payment's commit would escape the rollback. Refusing loudly names
+    # the fix instead of failing as "Sender not found".
+    app.dependency_overrides[get_payment_session_factory] = (
+        (lambda: committed.sessionmaker)
+        if committed is not None
+        else (lambda: _mode_a_has_no_payment_sessions)
+    )
     try:
         # Intentionally do NOT run FastAPI lifespan in tests: it starts background jobs
         # (recovery/integrity) that can interfere with DB isolation.

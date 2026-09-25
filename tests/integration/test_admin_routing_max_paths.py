@@ -9,6 +9,7 @@ from sqlalchemy import select
 from app.config import settings
 from app.db.models.equivalent import Equivalent
 from tests.integration.test_scenarios import register_and_login, _sign_payment_request, _sign_trustline_create_request
+from tests.conftest import MODE_B
 
 
 async def _seed_equivalent(db_session, code: str):
@@ -31,6 +32,7 @@ async def _patch_admin_config(client: AsyncClient, *, updates: dict, reason: str
     assert resp.status_code == 200, resp.text
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_routing_max_paths_limits_multipath_payment(client: AsyncClient, db_session):
     await _seed_equivalent(db_session, "USD")

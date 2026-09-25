@@ -1,13 +1,18 @@
+import logging
 import uuid
 from decimal import Decimal
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.orm.exc import StaleDataError
 
+from app.core.ledger.book import DebtVersionConflict
 from app.core.payments.engine import PaymentEngine
+from app.core.payments.service import _classify_payment_db_error
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
+from app.utils.exceptions import RetryablePaymentConflictException
 
 from tests.conftest import MODE_B, sessionmaker_of
 from tests.debt_setup import debt_fixture_setup, writer_operation
@@ -21,14 +26,22 @@ from tests.debt_setup import debt_fixture_setup, writer_operation
 # there.
 @MODE_B
 @pytest.mark.asyncio
-async def test_apply_flow_retries_on_stale_data(db_session):
-    """Ensures PaymentEngine._apply_flow retries StaleDataError and succeeds.
+async def test_apply_flow_raises_a_stale_version_to_the_owner_of_the_transaction(db_session, caplog):
+    """A stale debt version is RAISED as `DebtVersionConflict`, not retried in place (019 stage 3).
 
     Scenario:
     - Session S_stale loads the debt (version N)
-    - Session S_fresh updates it (version N+1)
-    - S_stale tries to update and must hit StaleDataError
-    - _apply_flow should retry with fresh state and complete
+    - Session S_fresh updates it (version N+1) and commits
+    - S_stale applies a flow over its stale instance and hits `StaleDataError`
+
+    Until 019 stage 3 `_apply_flow` answered by expiring the identity map and retrying inside the SAME
+    transaction, and this test expected the retry to win (`80`). That retry reads from the same
+    snapshot under SERIALIZABLE, so `FORK-1` removed it: the book raises the narrow
+    `DebtVersionConflict` (still a `StaleDataError`), and the owner of the whole transaction - `pay()`,
+    or the simulator's money-phase replay - classifies it as a retryable conflict and starts again on a
+    fresh session (`tests/integration/test_p019_pay_retries_a_debt_version_conflict_postgres.py`).
+
+    MUTATION: put the retry loop back - the flow then wins on the second try and nothing is raised.
     """
 
     nonce = uuid.uuid4().hex[:10]
@@ -84,19 +97,30 @@ async def test_apply_flow_retries_on_stale_data(db_session):
         await db_session.execute(select(Debt).where(Debt.id == debt.id))
     ).scalar_one()
 
+    debt_id = debt.id
     engine = PaymentEngine(db_session)
     # THE WRITER'S OWN OPERATION, not a fixture context (design v2 §8 R5/F7). `_apply_flow` is
     # production code that moves money; called directly it opens no operation, and the journal
     # refuses its flush. Declaring `TEST_FIXTURE` here would journal a payment's effects under the
     # kind reserved for scaffolding, so the real kind is declared instead.
-    async with writer_operation(
-        db_session, kind="PAYMENT", equivalent_ids=[eq.id], initiator_id=sender.id
-    ):
-        await engine._apply_flow(sender.id, receiver.id, Decimal("10"), eq.id)
+    with caplog.at_level(logging.WARNING, logger="app.core.ledger.book"):
+        with pytest.raises(DebtVersionConflict) as raised:
+            async with writer_operation(
+                db_session, kind="PAYMENT", equivalent_ids=[eq.id], initiator_id=sender.id
+            ):
+                await engine._apply_flow(sender.id, receiver.id, Decimal("10"), eq.id)
+    assert isinstance(raised.value, StaleDataError)
+    assert isinstance(raised.value.__cause__, StaleDataError)
+    assert isinstance(_classify_payment_db_error(raised.value), RetryablePaymentConflictException)
+    conflicts = [
+        r for r in caplog.records if "event=apply_flow.debt_version_conflict" in r.getMessage()
+    ]
+    assert len(conflicts) == 1, [r.getMessage() for r in caplog.records]
+    await db_session.rollback()
 
-    updated = (
-        await db_session.execute(select(Debt).where(Debt.id == debt.id))
-    ).scalar_one()
-
-    # After concurrent update (to 90) and applying flow (reduce by 10), expect 80.
-    assert updated.amount == Decimal("80")
+    async with sessionmaker_of(db_session)() as observer:
+        stored = (
+            await observer.execute(select(Debt.amount).where(Debt.id == debt_id))
+        ).scalar_one()
+    # The concurrent writer's value stands; the stale flow moved nothing.
+    assert stored == Decimal("90")

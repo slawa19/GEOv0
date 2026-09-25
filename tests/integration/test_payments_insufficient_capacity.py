@@ -10,8 +10,10 @@ from tests.integration.test_scenarios import (
     _sign_payment_request,
     _sign_trustline_create_request,
 )
+from tests.conftest import MODE_B
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_payment_insufficient_capacity_returns_400_e002(client: AsyncClient, db_session):
     # Seed USD

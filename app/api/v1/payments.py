@@ -62,6 +62,7 @@ async def create_payment(
     current_participant: Participant = Depends(deps.get_current_participant),
     redis_client=Depends(deps.get_redis_client),
     idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+    payment_sessions=Depends(deps.get_payment_session_factory),
 ):
     """
     Create and execute a payment.
@@ -74,8 +75,6 @@ async def create_payment(
             details={"validation": exc.errors()},
         )
 
-    service = PaymentService(session)
-
     lock_key = f"dlock:payment:{current_participant.id}:{payment_req.equivalent}"
     async with redis_distributed_lock(
         redis_client,
@@ -83,7 +82,10 @@ async def create_payment(
         ttl_seconds=15,
         wait_timeout_seconds=2.0,
     ):
-        return await service.create_payment(
+        # 019 stage 3: the payment is ONE transaction on sessions of its own, one per attempt; the
+        # request's session above only authenticated the caller.
+        return await PaymentService.pay(
+            payment_sessions,
             current_participant.id,
             payment_req,
             # Legacy header is accepted but ignored (tx_id is mandatory and signed).

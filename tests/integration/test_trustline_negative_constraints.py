@@ -15,6 +15,7 @@ from tests.integration.test_scenarios import (
     _sign_trustline_update_request,
     register_and_login,
 )
+from tests.conftest import MODE_B
 
 
 async def _seed_equivalent(db_session, code: str = "USD") -> None:
@@ -25,6 +26,7 @@ async def _seed_equivalent(db_session, code: str = "USD") -> None:
         await db_session.commit()
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_trustline_update_rejects_limit_below_used(client: AsyncClient, db_session):
     await _seed_equivalent(db_session, "USD")
@@ -95,6 +97,7 @@ async def test_trustline_update_rejects_limit_below_used(client: AsyncClient, db
     assert Decimal(body["error"]["details"]["used"]) >= Decimal("10.00")
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_trustline_close_rejects_non_zero_debt(client: AsyncClient, db_session):
     await _seed_equivalent(db_session, "USD")

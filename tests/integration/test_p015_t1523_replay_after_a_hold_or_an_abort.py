@@ -53,6 +53,7 @@ from tests.integration.test_scenarios import (
     _sign_trustline_create_request,
     register_and_login,
 )
+from tests.conftest import MODE_B
 
 ADMIN = {"X-Admin-Token": settings.ADMIN_TOKEN}
 
@@ -174,6 +175,7 @@ async def _effects(db_session, code: str, tx_id: str) -> dict[str, object]:
     }
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_a_committed_payment_still_replays_its_result_under_an_integrity_hold(
     client, db_session
@@ -249,6 +251,7 @@ async def test_a_committed_payment_still_replays_its_result_under_an_integrity_h
     assert error["details"]["equivalents"] == [code], error
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_a_tx_id_whose_payment_aborted_replays_the_stored_aborted_result(
     client, db_session, monkeypatch

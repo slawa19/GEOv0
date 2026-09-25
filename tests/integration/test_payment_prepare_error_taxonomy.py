@@ -11,8 +11,9 @@ from decimal import Decimal
 import pytest
 from httpx import AsyncClient
 from nacl.signing import SigningKey
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError, OperationalError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.auth.crypto import generate_keypair, get_pid_from_public_key
@@ -30,6 +31,7 @@ from app.utils.exceptions import (
     RoutingException,
     TimeoutException,
 )
+from tests.conftest import MODE_B
 from tests.integration.test_scenarios import register_and_login, _sign_payment_request
 
 
@@ -145,6 +147,61 @@ async def _build_direct_payment(db_session, *, suffix: str):
     return PaymentService(db_session), sender, request, tx_id
 
 
+def _fail_the_payment_insert(monkeypatch, error_factory) -> list[int]:
+    """Make the flush that inserts the payment's `Transaction` raise; every other flush runs.
+
+    Since 019 stage 3 the payment's row is inserted by a flush inside its one transaction (before it
+    was a commit of its own), on whichever session `pay()` opened - so the seam is the flush of a
+    pending `Transaction`, not a session method of the test's session.
+    """
+
+    calls: list[int] = []
+    original_flush = AsyncSession.flush
+
+    async def flush(self, *args, **kwargs):
+        if any(isinstance(obj, Transaction) and obj.state == "NEW" for obj in self.sync_session.new):
+            calls.append(1)
+            raise error_factory()
+        return await original_flush(self, *args, **kwargs)
+
+    monkeypatch.setattr(AsyncSession, "flush", flush)
+    return calls
+
+
+def _track_the_attempt_end_and_the_record(monkeypatch, service, *, end_fails=False, record_fails=None):
+    """Since 019 stage 3 a failed payment is terminalized in two steps: the attempt's transaction is
+    ENDED (`_end_failed_attempt`: committed when nothing of the payment can be in it, else rolled
+    back), and only then is the refusal RECORDED `ABORTED` in a short transaction of its own
+    (`_record_refusal_durably`). Before stage 3 the same two steps were `session.rollback()` and
+    `engine.abort(commit=True)`. This records their order and the refusal recorded."""
+
+    order: list[str] = []
+    recorded: list[tuple] = []
+    original_end = service._end_failed_attempt
+    original_record = service._record_refusal_durably
+
+    async def end():
+        order.append("end_attempt")
+        if end_fails:
+            async def fail():
+                raise RuntimeError("attempt-end-secret")
+
+            monkeypatch.setattr(service.session, "commit", fail)
+            monkeypatch.setattr(service.session, "rollback", fail)
+        return await original_end()
+
+    async def record(sessions, attempt):
+        order.append("record")
+        recorded.append(tuple(attempt.refusal[:3]))
+        if record_fails is not None:
+            raise RuntimeError(record_fails)
+        return await original_record(sessions, attempt)
+
+    monkeypatch.setattr(service, "_end_failed_attempt", end)
+    monkeypatch.setattr(service, "_record_refusal_durably", record)
+    return order, recorded
+
+
 def _serialization_failure() -> DBAPIError:
     class _DriverSerializationFailure(Exception):
         sqlstate = "40001"
@@ -226,12 +283,9 @@ async def test_insert_serialization_failure_is_typed_before_any_tx_is_persisted(
     def find_flow_routes(from_pid: str, to_pid: str, amount: Decimal, **kwargs):
         return [([from_pid, to_pid], amount)]
 
-    async def fail_insert_commit() -> None:
-        raise _serialization_failure()
-
     monkeypatch.setattr(service.router, "build_graph", build_graph)
     monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
-    monkeypatch.setattr(db_session, "commit", fail_insert_commit)
+    inserts = _fail_the_payment_insert(monkeypatch, _serialization_failure)
 
     with pytest.raises(RetryablePaymentConflictException):
         if entrypoint == "public":
@@ -245,12 +299,15 @@ async def test_insert_serialization_failure_is_typed_before_any_tx_is_persisted(
                 idempotency_key=tx_id,
             )
 
+    # Retried as a whole attempt until the budget was spent (019 stage 3), never recorded.
+    assert len(inserts) == int(settings.COMMIT_RETRY_ATTEMPTS), inserts
     transaction = (
         await db_session.execute(select(Transaction).where(Transaction.tx_id == tx_id))
     ).scalar_one_or_none()
     assert transaction is None
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_http_insert_serialization_failure_returns_declared_conflict(
     client,
@@ -270,12 +327,9 @@ async def test_http_insert_serialization_failure_returns_declared_conflict(
     def find_flow_routes(self, from_pid: str, to_pid: str, amount: Decimal, **kwargs):
         return [([from_pid, to_pid], amount)]
 
-    async def fail_insert_commit() -> None:
-        raise _serialization_failure()
-
     monkeypatch.setattr(PaymentRouter, "build_graph", build_graph)
     monkeypatch.setattr(PaymentRouter, "find_flow_routes", find_flow_routes)
-    monkeypatch.setattr(db_session, "commit", fail_insert_commit)
+    inserts = _fail_the_payment_insert(monkeypatch, _serialization_failure)
 
     response = await client.post(
         "/api/v1/payments",
@@ -283,6 +337,7 @@ async def test_http_insert_serialization_failure_returns_declared_conflict(
         json=_signed_payment_body(sender, receiver, tx_id=tx_id),
     )
 
+    assert inserts, "premise: the payment's insert was never reached"
     assert response.status_code == 409
     assert response.json()["error"] == {
         "code": "E008",
@@ -337,6 +392,7 @@ async def test_staged_insert_serialization_failure_propagates_without_local_roll
     assert db_session.in_transaction()
 
 
+@MODE_B
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("route_count", "error_factory", "expected_status", "expected_code"),
@@ -432,6 +488,7 @@ async def test_prepare_preserves_typed_client_error_in_http_and_transaction(
     assert calls == ["single" if route_count == 1 else "multipath"]
 
 
+@MODE_B
 @pytest.mark.asyncio
 @pytest.mark.parametrize("route_count", [1, 2])
 async def test_operational_prepare_error_is_sanitized_everywhere(
@@ -524,6 +581,7 @@ async def test_operational_prepare_error_is_sanitized_everywhere(
     assert prepare_log.exc_info is None
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_typed_server_prepare_error_is_sanitized(
     client: AsyncClient,
@@ -573,6 +631,8 @@ async def test_public_prepare_failure_rolls_back_session_before_abort(
     db_session,
     monkeypatch,
 ) -> None:
+    """The attempt's transaction is ended BEFORE the refusal is recorded (019 stage 3 form)."""
+
     service, sender, request, tx_id = await _build_direct_payment(
         db_session,
         suffix="cleanup_order",
@@ -587,26 +647,10 @@ async def test_public_prepare_failure_rolls_back_session_before_abort(
     async def fail_prepare(*args, **kwargs):
         raise OperationalError("SELECT private", {}, RuntimeError("driver private"))
 
-    order: list[str] = []
-    abort_call: tuple[tuple, dict] | None = None
-    original_rollback = db_session.rollback
-    original_abort = service.engine.abort
-
-    async def tracked_rollback() -> None:
-        order.append("rollback")
-        await original_rollback()
-
-    async def tracked_abort(*args, **kwargs):
-        nonlocal abort_call
-        order.append("abort")
-        abort_call = (args, kwargs)
-        return await original_abort(*args, **kwargs)
-
     monkeypatch.setattr(service.router, "build_graph", build_graph)
     monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
     monkeypatch.setattr(service.engine, "prepare", fail_prepare)
-    monkeypatch.setattr(service.engine, "abort", tracked_abort)
-    monkeypatch.setattr(db_session, "rollback", tracked_rollback)
+    order, recorded = _track_the_attempt_end_and_the_record(monkeypatch, service)
 
     with pytest.raises(GeoException) as raised:
         await service.create_payment(sender.id, request)
@@ -614,16 +658,8 @@ async def test_public_prepare_failure_rolls_back_session_before_abort(
     assert raised.value.code == "E010"
     assert raised.value.status_code == 500
     assert raised.value.message == "Internal server error"
-    assert order == ["rollback", "abort"]
-    assert abort_call == (
-        (tx_id,),
-        {
-            "reason": "Internal server error",
-            "error_code": "E010",
-            "details": {},
-            "commit": True,
-        },
-    )
+    assert order == ["end_attempt", "record"]
+    assert recorded == [("Internal server error", "E010", {})]
     transaction = (
         await db_session.execute(select(Transaction).where(Transaction.tx_id == tx_id))
     ).scalar_one()
@@ -682,12 +718,14 @@ async def test_prepare_rollback_failure_does_not_abort_poisoned_session(
     db_session,
     monkeypatch,
 ) -> None:
+    """An attempt whose transaction cannot be ended records nothing: safe 500 (019 stage 3 form)."""
+
     service, sender, request, _ = await _build_direct_payment(
         db_session,
         suffix="rollback_failure",
     )
 
-    async def build_graph(equivalent_code: str) -> None:
+    async def build_graph(equivalent_code: str, **kwargs) -> None:
         return None
 
     def find_flow_routes(from_pid: str, to_pid: str, payment_amount: Decimal, **kwargs):
@@ -696,21 +734,11 @@ async def test_prepare_rollback_failure_does_not_abort_poisoned_session(
     async def fail_prepare(*args, **kwargs):
         raise RoutingException("original client error")
 
-    order: list[str] = []
     original_rollback = db_session.rollback
-
-    async def fail_rollback() -> None:
-        order.append("rollback")
-        raise RuntimeError("rollback-secret")
-
-    async def forbidden_abort(*args, **kwargs):
-        order.append("abort")
-
     monkeypatch.setattr(service.router, "build_graph", build_graph)
     monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
     monkeypatch.setattr(service.engine, "prepare", fail_prepare)
-    monkeypatch.setattr(service.engine, "abort", forbidden_abort)
-    monkeypatch.setattr(db_session, "rollback", fail_rollback)
+    order, recorded = _track_the_attempt_end_and_the_record(monkeypatch, service, end_fails=True)
 
     with pytest.raises(GeoException) as raised:
         await service.create_payment(sender.id, request)
@@ -719,8 +747,10 @@ async def test_prepare_rollback_failure_does_not_abort_poisoned_session(
     assert raised.value.status_code == 500
     assert raised.value.message == "Internal server error"
     assert raised.value.details == {}
-    assert "rollback-secret" not in str(raised.value)
-    assert order == ["rollback"]
+    assert "attempt-end-secret" not in str(raised.value)
+    assert order == ["end_attempt"]
+    assert recorded == []
+    monkeypatch.undo()
     await original_rollback()
 
 
@@ -734,7 +764,7 @@ async def test_prepare_abort_failure_replaces_original_client_error_with_safe_50
         suffix="abort_failure",
     )
 
-    async def build_graph(equivalent_code: str) -> None:
+    async def build_graph(equivalent_code: str, **kwargs) -> None:
         return None
 
     def find_flow_routes(from_pid: str, to_pid: str, payment_amount: Decimal, **kwargs):
@@ -743,22 +773,12 @@ async def test_prepare_abort_failure_replaces_original_client_error_with_safe_50
     async def fail_prepare(*args, **kwargs):
         raise RoutingException("original client error")
 
-    order: list[str] = []
-    original_rollback = db_session.rollback
-
-    async def tracked_rollback() -> None:
-        order.append("rollback")
-        await original_rollback()
-
-    async def fail_abort(*args, **kwargs):
-        order.append("abort")
-        raise RuntimeError("abort-secret")
-
     monkeypatch.setattr(service.router, "build_graph", build_graph)
     monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
     monkeypatch.setattr(service.engine, "prepare", fail_prepare)
-    monkeypatch.setattr(service.engine, "abort", fail_abort)
-    monkeypatch.setattr(db_session, "rollback", tracked_rollback)
+    order, recorded = _track_the_attempt_end_and_the_record(
+        monkeypatch, service, record_fails="abort-secret"
+    )
 
     with pytest.raises(GeoException) as raised:
         await service.create_payment(sender.id, request)
@@ -769,9 +789,11 @@ async def test_prepare_abort_failure_replaces_original_client_error_with_safe_50
     assert raised.value.details == {}
     assert "original client error" not in str(raised.value)
     assert "abort-secret" not in str(raised.value)
-    assert order == ["rollback", "abort"]
+    assert order == ["end_attempt", "record"]
+    assert recorded == [("original client error", "E001", {})]
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_operational_commit_error_is_sanitized_in_response_and_transaction(
     client: AsyncClient,
@@ -853,7 +875,7 @@ async def test_typed_commit_error_is_reraised_only_after_durable_abort(
         details={"state": "PREPARED"},
     )
 
-    async def build_graph(equivalent_code: str) -> None:
+    async def build_graph(equivalent_code: str, **kwargs) -> None:
         return None
 
     def find_flow_routes(from_pid: str, to_pid: str, payment_amount: Decimal, **kwargs):
@@ -865,42 +887,18 @@ async def test_typed_commit_error_is_reraised_only_after_durable_abort(
     async def fail_commit(*args, **kwargs) -> None:
         raise original_error
 
-    order: list[str] = []
-    abort_call: tuple[tuple, dict] | None = None
-    original_rollback = db_session.rollback
-    original_abort = service.engine.abort
-
-    async def tracked_rollback() -> None:
-        order.append("rollback")
-        await original_rollback()
-
-    async def tracked_abort(*args, **kwargs):
-        nonlocal abort_call
-        order.append("abort")
-        abort_call = (args, kwargs)
-        return await original_abort(*args, **kwargs)
-
     monkeypatch.setattr(service.router, "build_graph", build_graph)
     monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
     monkeypatch.setattr(service.engine, "prepare", prepare)
     monkeypatch.setattr(service.engine, "commit", fail_commit)
-    monkeypatch.setattr(service.engine, "abort", tracked_abort)
-    monkeypatch.setattr(db_session, "rollback", tracked_rollback)
+    order, recorded = _track_the_attempt_end_and_the_record(monkeypatch, service)
 
     with pytest.raises(ConflictException) as raised:
         await service.create_payment(sender.id, request)
 
     assert raised.value is original_error
-    assert order == ["rollback", "abort"]
-    assert abort_call == (
-        (tx_id,),
-        {
-            "reason": "typed commit conflict",
-            "error_code": "E008",
-            "details": {"state": "PREPARED"},
-            "commit": True,
-        },
-    )
+    assert order == ["end_attempt", "record"]
+    assert recorded == [("typed commit conflict", "E008", {"state": "PREPARED"})]
     transaction = (
         await db_session.execute(select(Transaction).where(Transaction.tx_id == tx_id))
     ).scalar_one()
@@ -941,13 +939,16 @@ async def test_commit_cleanup_failure_is_safe_and_ordered(
     error_kind: str,
     cleanup_failure: str,
 ) -> None:
+    """`rollback` - the attempt's transaction cannot be ended; `abort` - the refusal cannot be
+    recorded (the two cleanup steps since 019 stage 3). Either way a safe 500, in order."""
+
     service, sender, request, tx_id = await _build_direct_payment(
         db_session,
         suffix=f"commit_{error_kind}_{cleanup_failure}",
     )
     commit_error = error_factory()
 
-    async def build_graph(equivalent_code: str) -> None:
+    async def build_graph(equivalent_code: str, **kwargs) -> None:
         return None
 
     def find_flow_routes(from_pid: str, to_pid: str, payment_amount: Decimal, **kwargs):
@@ -959,28 +960,17 @@ async def test_commit_cleanup_failure_is_safe_and_ordered(
     async def fail_commit(*args, **kwargs) -> None:
         raise commit_error
 
-    order: list[str] = []
-    abort_call: tuple[tuple, dict] | None = None
     original_rollback = db_session.rollback
-
-    async def controlled_rollback() -> None:
-        order.append("rollback")
-        if cleanup_failure == "rollback":
-            raise RuntimeError("commit-rollback-secret")
-        await original_rollback()
-
-    async def controlled_abort(*args, **kwargs) -> None:
-        nonlocal abort_call
-        order.append("abort")
-        abort_call = (args, kwargs)
-        raise RuntimeError("commit-abort-secret")
-
     monkeypatch.setattr(service.router, "build_graph", build_graph)
     monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
     monkeypatch.setattr(service.engine, "prepare", prepare)
     monkeypatch.setattr(service.engine, "commit", fail_commit)
-    monkeypatch.setattr(service.engine, "abort", controlled_abort)
-    monkeypatch.setattr(db_session, "rollback", controlled_rollback)
+    order, recorded = _track_the_attempt_end_and_the_record(
+        monkeypatch,
+        service,
+        end_fails=cleanup_failure == "rollback",
+        record_fails="commit-abort-secret" if cleanup_failure == "abort" else None,
+    )
 
     with pytest.raises(GeoException) as raised:
         await service.create_payment(sender.id, request)
@@ -992,26 +982,18 @@ async def test_commit_cleanup_failure_is_safe_and_ordered(
     assert raised.value.details == {}
     assert "secret" not in str(raised.value)
     if cleanup_failure == "rollback":
-        assert order == ["rollback"]
+        assert order == ["end_attempt"]
+        assert recorded == []
+        monkeypatch.undo()
         await original_rollback()
     else:
-        assert order == ["rollback", "abort"]
-        expected_error = (
-            {
-                "reason": "typed commit conflict",
-                "error_code": "E008",
-                "details": {"state": "PREPARED"},
-                "commit": True,
-            }
+        assert order == ["end_attempt", "record"]
+        expected = (
+            ("typed commit conflict", "E008", {"state": "PREPARED"})
             if error_kind == "typed"
-            else {
-                "reason": "Internal server error",
-                "error_code": "E010",
-                "details": {},
-                "commit": True,
-            }
+            else ("Internal server error", "E010", {})
         )
-        assert abort_call == ((tx_id,), expected_error)
+        assert recorded == [expected]
 
 
 @pytest.mark.asyncio
@@ -1073,25 +1055,24 @@ async def test_cancellation_at_other_payment_phases_has_terminal_state(
     monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
 
     if phase == "insert":
-        original_commit = db_session.commit
-        commit_calls = 0
+        # Since 019 stage 3 the insert is a flush inside the payment's transaction: cancel right
+        # after it.
+        original_flush = AsyncSession.flush
+        cancelled: list[int] = []
 
-        async def commit_then_cancel_once() -> None:
-            nonlocal commit_calls
-            commit_calls += 1
-            await original_commit()
-            if commit_calls == 1:
+        async def flush_then_cancel_once(self, *args, **kwargs):
+            inserting = any(
+                isinstance(obj, Transaction) and obj.state == "NEW" for obj in self.sync_session.new
+            )
+            await original_flush(self, *args, **kwargs)
+            if inserting and not cancelled:
+                cancelled.append(1)
                 raise asyncio.CancelledError
 
-        monkeypatch.setattr(db_session, "commit", commit_then_cancel_once)
+        monkeypatch.setattr(AsyncSession, "flush", flush_then_cancel_once)
     else:
-        async def prepare(tx_id_value: str, *args, **kwargs) -> None:
-            await db_session.execute(
-                update(Transaction)
-                .where(Transaction.tx_id == tx_id_value)
-                .values(state="PREPARED")
-            )
-            await db_session.commit()
+        async def prepare(*args, **kwargs) -> None:
+            return None
 
         async def cancel_commit(*args, **kwargs) -> None:
             raise asyncio.CancelledError
@@ -1118,6 +1099,10 @@ async def test_staged_prepare_cancellation_aborts_before_outer_rollback(
     db_session,
     monkeypatch,
 ) -> None:
+    """Staged: the refusal is written into the caller's transaction (since 019 stage 3 after the
+    payment operation's rollback, by `_record_refusal_in_transaction`), and the caller's own
+    savepoint then takes it back."""
+
     service, sender, request, tx_id = await _build_direct_payment(
         db_session,
         suffix="cancel_staged_prepare",
@@ -1133,10 +1118,10 @@ async def test_staged_prepare_cancellation_aborts_before_outer_rollback(
         raise asyncio.CancelledError
 
     observed_states: list[str] = []
-    original_abort = service.engine.abort
+    original_record = service._record_refusal_in_transaction
 
-    async def tracked_abort(*args, **kwargs):
-        result = await original_abort(*args, **kwargs)
+    async def tracked_record(attempt):
+        result = await original_record(attempt)
         state = (
             await db_session.execute(
                 select(Transaction.state).where(Transaction.tx_id == tx_id)
@@ -1148,7 +1133,7 @@ async def test_staged_prepare_cancellation_aborts_before_outer_rollback(
     monkeypatch.setattr(service.router, "build_graph", build_graph)
     monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
     monkeypatch.setattr(service.engine, "prepare", cancel_prepare)
-    monkeypatch.setattr(service.engine, "abort", tracked_abort)
+    monkeypatch.setattr(service, "_record_refusal_in_transaction", tracked_record)
 
     with pytest.raises(asyncio.CancelledError):
         async with db_session.begin_nested():
@@ -1174,6 +1159,12 @@ async def test_repeated_cancellation_during_recovery_read_still_aborts(
     monkeypatch,
     interruption: str,
 ) -> None:
+    """A cancellation that arrives WHILE the refusal is being recorded does not stop the recording.
+
+    Since 019 stage 3 there is no read before terminalizing a payment whose own transaction never
+    committed; the cleanup step a second cancellation can hit is the recording itself.
+    """
+
     service, sender, request, tx_id = await _build_direct_payment(
         db_session,
         suffix=f"recovery_read_{interruption}",
@@ -1191,40 +1182,22 @@ async def test_repeated_cancellation_during_recovery_read_still_aborts(
         prepare_started.set()
         await asyncio.Event().wait()
 
-    original_rollback = db_session.rollback
-    original_execute = db_session.execute
-    recovery_read_started = asyncio.Event()
-    release_recovery_read = asyncio.Event()
-    cleanup_started = False
-    recovery_read_intercepted = False
-    abort_calls = 0
+    record_started = asyncio.Event()
+    release_record = asyncio.Event()
+    record_calls = 0
+    original_record = service._record_refusal_durably
 
-    async def tracked_rollback() -> None:
-        nonlocal cleanup_started
-        await original_rollback()
-        cleanup_started = True
-
-    async def blocking_recovery_read(*args, **kwargs):
-        nonlocal recovery_read_intercepted
-        if cleanup_started and not recovery_read_intercepted:
-            recovery_read_intercepted = True
-            recovery_read_started.set()
-            await release_recovery_read.wait()
-        return await original_execute(*args, **kwargs)
-
-    original_abort = service.engine.abort
-
-    async def tracked_abort(*args, **kwargs):
-        nonlocal abort_calls
-        abort_calls += 1
-        return await original_abort(*args, **kwargs)
+    async def blocking_record(sessions, attempt):
+        nonlocal record_calls
+        record_calls += 1
+        record_started.set()
+        await release_record.wait()
+        return await original_record(sessions, attempt)
 
     monkeypatch.setattr(service.router, "build_graph", build_graph)
     monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
     monkeypatch.setattr(service.engine, "prepare", interrupted_prepare)
-    monkeypatch.setattr(service.engine, "abort", tracked_abort)
-    monkeypatch.setattr(db_session, "rollback", tracked_rollback)
-    monkeypatch.setattr(db_session, "execute", blocking_recovery_read)
+    monkeypatch.setattr(service, "_record_refusal_durably", blocking_record)
 
     if interruption == "timeout":
         monkeypatch.setattr(settings, "PREPARE_TIMEOUT_SECONDS", 0.01, raising=False)
@@ -1234,19 +1207,19 @@ async def test_repeated_cancellation_during_recovery_read_still_aborts(
     if interruption == "cancellation":
         owner.cancel("initial payment cancellation")
 
-    await asyncio.wait_for(recovery_read_started.wait(), timeout=1)
-    owner.cancel("cancellation during recovery read")
+    await asyncio.wait_for(record_started.wait(), timeout=1)
+    owner.cancel("cancellation during the recording")
     await asyncio.sleep(0)
-    release_recovery_read.set()
+    release_record.set()
 
     with pytest.raises(asyncio.CancelledError):
         await owner
 
     transaction = (
-        await original_execute(select(Transaction).where(Transaction.tx_id == tx_id))
+        await db_session.execute(select(Transaction).where(Transaction.tx_id == tx_id))
     ).scalar_one()
     assert transaction.state == "ABORTED"
-    assert abort_calls == 1
+    assert record_calls == 1
 
 
 @pytest.mark.asyncio
@@ -1260,7 +1233,7 @@ async def test_timeout_rollback_failure_is_safe_without_read_or_abort(
     )
     monkeypatch.setattr(settings, "PREPARE_TIMEOUT_SECONDS", 0.01, raising=False)
 
-    async def build_graph(equivalent_code: str) -> None:
+    async def build_graph(equivalent_code: str, **kwargs) -> None:
         return None
 
     def find_flow_routes(from_pid: str, to_pid: str, payment_amount: Decimal, **kwargs):
@@ -1269,33 +1242,11 @@ async def test_timeout_rollback_failure_is_safe_without_read_or_abort(
     async def slow_prepare(*args, **kwargs) -> None:
         await asyncio.sleep(0.05)
 
-    cleanup_started = False
-    order: list[str] = []
     original_rollback = db_session.rollback
-    original_execute = db_session.execute
-
-    async def fail_rollback() -> None:
-        nonlocal cleanup_started
-        cleanup_started = True
-        order.append("rollback")
-        raise RuntimeError("timeout-rollback-secret")
-
-    async def tracked_execute(*args, **kwargs):
-        if cleanup_started:
-            order.append("execute")
-            raise AssertionError("DB read must not follow a failed rollback")
-        return await original_execute(*args, **kwargs)
-
-    async def forbidden_abort(*args, **kwargs) -> None:
-        order.append("abort")
-        raise AssertionError("abort must not follow a failed rollback")
-
     monkeypatch.setattr(service.router, "build_graph", build_graph)
     monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
     monkeypatch.setattr(service.engine, "prepare", slow_prepare)
-    monkeypatch.setattr(service.engine, "abort", forbidden_abort)
-    monkeypatch.setattr(db_session, "execute", tracked_execute)
-    monkeypatch.setattr(db_session, "rollback", fail_rollback)
+    order, recorded = _track_the_attempt_end_and_the_record(monkeypatch, service, end_fails=True)
 
     with pytest.raises(GeoException) as raised:
         await service.create_payment(sender.id, request)
@@ -1304,8 +1255,10 @@ async def test_timeout_rollback_failure_is_safe_without_read_or_abort(
     assert raised.value.status_code == 500
     assert raised.value.message == "Internal server error"
     assert raised.value.details == {}
-    assert "timeout-rollback-secret" not in str(raised.value)
-    assert order == ["rollback"]
+    assert "attempt-end-secret" not in str(raised.value)
+    assert order == ["end_attempt"]
+    assert recorded == []
+    monkeypatch.undo()
     await original_rollback()
 
 
@@ -1315,26 +1268,34 @@ async def test_timeout_recovery_read_failure_is_safe_without_abort(
     monkeypatch,
     caplog,
 ) -> None:
+    """The payment's ONE commit outlives the deadline, and the read that must precede any
+    terminalization fails: safe 500, nothing recorded. Since 019 stage 3 this read belongs to a
+    failed commit only - a timeout before the commit has nothing durable to look for."""
+
     service, sender, request, _ = await _build_direct_payment(
         db_session,
         suffix="timeout_read_failure",
     )
-    monkeypatch.setattr(settings, "PREPARE_TIMEOUT_SECONDS", 0.01, raising=False)
+    monkeypatch.setattr(settings, "PAYMENT_TOTAL_TIMEOUT_SECONDS", 1, raising=False)
     raw_sentinel = "timeout-read-secret"
 
-    async def build_graph(equivalent_code: str) -> None:
+    async def build_graph(equivalent_code: str, **kwargs) -> None:
         return None
 
     def find_flow_routes(from_pid: str, to_pid: str, payment_amount: Decimal, **kwargs):
         return [([from_pid, to_pid], payment_amount)]
 
-    async def slow_prepare(*args, **kwargs) -> None:
-        await asyncio.sleep(0.05)
+    async def instant(*args, **kwargs) -> None:
+        return None
 
     cleanup_started = False
     order: list[str] = []
     original_rollback = db_session.rollback
     original_execute = db_session.execute
+
+    async def hanging_commit() -> None:
+        order.append("commit")
+        await asyncio.Event().wait()
 
     async def tracked_rollback() -> None:
         nonlocal cleanup_started
@@ -1352,15 +1313,14 @@ async def test_timeout_recovery_read_failure_is_safe_without_abort(
             )
         return await original_execute(*args, **kwargs)
 
-    async def forbidden_abort(*args, **kwargs) -> None:
-        order.append("abort")
-
     monkeypatch.setattr(service.router, "build_graph", build_graph)
     monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
-    monkeypatch.setattr(service.engine, "prepare", slow_prepare)
-    monkeypatch.setattr(service.engine, "abort", forbidden_abort)
+    monkeypatch.setattr(service.engine, "prepare", instant)
+    monkeypatch.setattr(service.engine, "commit", instant)
+    monkeypatch.setattr(db_session, "commit", hanging_commit)
     monkeypatch.setattr(db_session, "execute", fail_recovery_read)
     monkeypatch.setattr(db_session, "rollback", tracked_rollback)
+    _order, recorded = _track_the_attempt_end_and_the_record(monkeypatch, service)
     caplog.set_level(logging.ERROR, logger="app.core.payments.service")
 
     with pytest.raises(GeoException) as raised:
@@ -1371,7 +1331,8 @@ async def test_timeout_recovery_read_failure_is_safe_without_abort(
     assert raised.value.message == "Internal server error"
     assert raised.value.details == {}
     assert raw_sentinel not in str(raised.value)
-    assert order == ["rollback", "execute"]
+    assert order[:3] == ["commit", "rollback", "execute"], order
+    assert recorded == []
     read_log = next(
         record
         for record in caplog.records
@@ -1380,6 +1341,8 @@ async def test_timeout_recovery_read_failure_is_safe_without_abort(
     assert "error_type=OperationalError" in read_log.getMessage()
     assert raw_sentinel not in read_log.getMessage()
     assert read_log.exc_info is None
+    monkeypatch.undo()
+    await original_rollback()
 
 
 @pytest.mark.asyncio
@@ -1395,7 +1358,7 @@ async def test_timeout_abort_failure_is_safe_after_recovery_read(
     monkeypatch.setattr(settings, "PREPARE_TIMEOUT_SECONDS", 0.01, raising=False)
     raw_sentinel = "timeout-abort-secret"
 
-    async def build_graph(equivalent_code: str) -> None:
+    async def build_graph(equivalent_code: str, **kwargs) -> None:
         return None
 
     def find_flow_routes(from_pid: str, to_pid: str, payment_amount: Decimal, **kwargs):
@@ -1404,35 +1367,12 @@ async def test_timeout_abort_failure_is_safe_after_recovery_read(
     async def slow_prepare(*args, **kwargs) -> None:
         await asyncio.sleep(0.05)
 
-    cleanup_started = False
-    order: list[str] = []
-    abort_call: tuple[tuple, dict] | None = None
-    original_rollback = db_session.rollback
-    original_execute = db_session.execute
-
-    async def tracked_rollback() -> None:
-        nonlocal cleanup_started
-        order.append("rollback")
-        await original_rollback()
-        cleanup_started = True
-
-    async def tracked_execute(*args, **kwargs):
-        if cleanup_started:
-            order.append("execute")
-        return await original_execute(*args, **kwargs)
-
-    async def fail_abort(*args, **kwargs) -> None:
-        nonlocal abort_call
-        order.append("abort")
-        abort_call = (args, kwargs)
-        raise RuntimeError(raw_sentinel)
-
     monkeypatch.setattr(service.router, "build_graph", build_graph)
     monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
     monkeypatch.setattr(service.engine, "prepare", slow_prepare)
-    monkeypatch.setattr(service.engine, "abort", fail_abort)
-    monkeypatch.setattr(db_session, "execute", tracked_execute)
-    monkeypatch.setattr(db_session, "rollback", tracked_rollback)
+    order, recorded = _track_the_attempt_end_and_the_record(
+        monkeypatch, service, record_fails=raw_sentinel
+    )
     caplog.set_level(logging.ERROR, logger="app.core.payments.service")
 
     with pytest.raises(GeoException) as raised:
@@ -1443,15 +1383,8 @@ async def test_timeout_abort_failure_is_safe_after_recovery_read(
     assert raised.value.message == "Internal server error"
     assert raised.value.details == {}
     assert raw_sentinel not in str(raised.value)
-    assert order == ["rollback", "execute", "abort"]
-    assert abort_call == (
-        (tx_id,),
-        {
-            "reason": "Payment timeout",
-            "commit": True,
-            "error_code": "E007",
-        },
-    )
+    assert order == ["end_attempt", "record"]
+    assert recorded == [("Payment timeout", "E007", {})]
     abort_log = next(
         record
         for record in caplog.records
@@ -1484,13 +1417,21 @@ async def test_staged_timeout_abort_failure_has_symmetric_safe_log(
     async def slow_prepare(*args, **kwargs) -> None:
         await asyncio.sleep(0.05)
 
-    async def fail_abort(*args, **kwargs) -> None:
-        raise RuntimeError(raw_sentinel)
+    # The staged refusal write (since 019 stage 3 an `ABORTED` insert after the operation's
+    # rollback) fails; every other flush runs.
+    original_flush = AsyncSession.flush
+
+    async def fail_the_refusal_write(self, *args, **kwargs):
+        if any(
+            isinstance(obj, Transaction) and obj.state == "ABORTED" for obj in self.sync_session.new
+        ):
+            raise RuntimeError(raw_sentinel)
+        return await original_flush(self, *args, **kwargs)
 
     monkeypatch.setattr(service.router, "build_graph", build_graph)
     monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
     monkeypatch.setattr(service.engine, "prepare", slow_prepare)
-    monkeypatch.setattr(service.engine, "abort", fail_abort)
+    monkeypatch.setattr(AsyncSession, "flush", fail_the_refusal_write)
     caplog.set_level(logging.ERROR, logger="app.core.payments.service")
 
     with pytest.raises(TimeoutException):

@@ -60,6 +60,7 @@ from typing import Any, Awaitable, Callable, Literal
 from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError
 
+from app.core.ledger.book import DebtVersionConflict
 from app.core.simulator.commit_resolution import resolve_commit_under_cancellation
 from app.core.simulator.models import RunRecord
 from app.db.models.transaction import Transaction
@@ -93,6 +94,10 @@ def money_conflict_name(exc: BaseException | None) -> str | None:
     * A raw `DBAPIError` is classified here because the money boundary contains statements the
       payment service never sees - the debt snapshot read and the owner-lock acquisition - and a
       SERIALIZABLE waiter can take a genuine 40001 on either.
+    * `DebtVersionConflict` is the book's optimistic-version conflict on a payment flow (019 stage 3,
+      `FORK-1`). The book no longer retries it from the same snapshot; the owner of the transaction
+      does, and this is that owner. Only that subclass: a bare `StaleDataError` from anywhere else is
+      not a conflict this replay can cure and stays None.
 
     ANTI-VACUUM (AGENTS.md §9). This function excludes, so it owes a counter-check: everything
     that is not one of those two shapes must come back None, including an `IntegrityError` from
@@ -105,6 +110,8 @@ def money_conflict_name(exc: BaseException | None) -> str | None:
         return None
     if isinstance(exc, RetryablePaymentConflictException):
         return "RETRYABLE_PAYMENT_CONFLICT"
+    if isinstance(exc, DebtVersionConflict):
+        return "DEBT_VERSION_CONFLICT"
     if isinstance(exc, DBAPIError):
         orig = getattr(exc, "orig", None)
         sqlstate = (
