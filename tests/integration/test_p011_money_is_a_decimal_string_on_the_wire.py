@@ -48,6 +48,7 @@ from tests.integration.test_scenarios import (
     _sign_trustline_create_request,
     register_and_login,
 )
+from tests.conftest import MODE_B
 
 # Chosen so a float round-trip is observable: 100.50 -> float -> "100.5" loses declared scale.
 TRUSTLINE_LIMIT = "100.50"
@@ -276,6 +277,7 @@ def _assert_trustline_money(item: dict, *, where: str) -> None:
     )
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_trustline_list_money_is_decimal_text(client: AsyncClient, money_scenario) -> None:
     bob, alice = money_scenario["bob"], money_scenario["alice"]
@@ -299,6 +301,7 @@ async def test_trustline_list_money_is_decimal_text(client: AsyncClient, money_s
     _assert_trustline_money(items[0], where="GET /trustlines items[0]")
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_trustline_by_id_money_is_decimal_text(client: AsyncClient, money_scenario) -> None:
     bob, alice = money_scenario["bob"], money_scenario["alice"]
@@ -315,6 +318,7 @@ async def test_trustline_by_id_money_is_decimal_text(client: AsyncClient, money_
     _assert_trustline_money(item, where="GET /trustlines/{id}")
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_trustline_create_money_is_decimal_text(money_scenario) -> None:
     """The 201 body is the same schema and the same fragility, one route earlier.
@@ -358,6 +362,7 @@ def _assert_payment_wire(item: dict, *, where: str, from_pid: str, to_pid: str) 
     )
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_payment_create_money_is_decimal_text(money_scenario) -> None:
     _assert_payment_wire(
@@ -368,6 +373,7 @@ async def test_payment_create_money_is_decimal_text(money_scenario) -> None:
     )
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_payment_by_tx_id_money_is_decimal_text(client: AsyncClient, money_scenario) -> None:
     alice = money_scenario["alice"]
@@ -387,6 +393,7 @@ async def test_payment_by_tx_id_money_is_decimal_text(client: AsyncClient, money
     )
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_payment_list_money_is_decimal_text(client: AsyncClient, money_scenario) -> None:
     alice = money_scenario["alice"]

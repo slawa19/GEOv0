@@ -1,4 +1,12 @@
-"""PostgreSQL request-level payment idempotency races."""
+"""PostgreSQL request-level payment idempotency races.
+
+SINCE 019 STAGE 3 (`T1904`) a payment is ONE transaction: its `Transaction` row is not visible, and
+not committed, before the payment's single commit. So the second of two concurrent requests with the
+same `tx_id` no longer meets a committed `NEW` row and a "payment is in progress" 409 (the test's
+assertion until stage 3): its insert WAITS on the first's uncommitted unique-index entry, and once the
+first commits it gets the first's stored result (spec, "Идентичность tx_id"; §3 (В)). The terminal
+state never regresses, and the effects exist once.
+"""
 
 from __future__ import annotations
 
@@ -15,6 +23,29 @@ from sqlalchemy import func, select, text
 # `tests/tier_on_a_clone.py`).
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
 
+
+
+async def _a_backend_waits_on_a_transaction(*, timeout: float = 5.0) -> bool:
+    """Some backend waits (not granted) on a transaction lock - an insert behind an uncommitted key."""
+
+    from tests.conftest import TestingSessionLocal
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    async with TestingSessionLocal() as observer:
+        while True:
+            waiting = await observer.scalar(
+                text(
+                    "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE NOT granted "
+                    "AND locktype = 'transactionid')"
+                )
+            )
+            await observer.rollback()
+            if waiting:
+                return True
+            if loop.time() > deadline:
+                return False
+            await asyncio.sleep(0.02)
 
 
 @pytest.mark.asyncio
@@ -40,7 +71,6 @@ async def test_concurrent_duplicate_payment_request_never_regresses_terminal_sta
     from app.db.models.transaction import Transaction
     from app.db.models.trustline import TrustLine
     from app.utils.event_bus import event_bus
-    from app.utils.exceptions import ConflictException
     from tests.conftest import TestingSessionLocal
 
     monkeypatch.setattr(settings, "ROUTING_PATH_FINDING_TIMEOUT_MS", 5000)
@@ -66,7 +96,7 @@ async def test_concurrent_duplicate_payment_request_never_regresses_terminal_sta
 
     loser_passed_initial_lookup = asyncio.Event()
     release_loser = asyncio.Event()
-    winner_row_committed = asyncio.Event()
+    winner_row_inserted = asyncio.Event()
     release_winner = asyncio.Event()
     loser_task = None
     winner_task = None
@@ -135,8 +165,9 @@ async def test_concurrent_duplicate_payment_request_never_regresses_terminal_sta
             await release_loser.wait()
             return graph
 
-        async def _hold_winner_after_new_row_commit(*args, **kwargs):
-            winner_row_committed.set()
+        async def _hold_winner_after_its_row_is_inserted(*args, **kwargs):
+            # Since stage 3 the row is inserted - not committed - inside the payment's transaction.
+            winner_row_inserted.set()
             await release_winner.wait()
             return await winner_prepare(*args, **kwargs)
 
@@ -148,7 +179,7 @@ async def test_concurrent_duplicate_payment_request_never_regresses_terminal_sta
         monkeypatch.setattr(
             winner_service.engine,
             "prepare",
-            _hold_winner_after_new_row_commit,
+            _hold_winner_after_its_row_is_inserted,
         )
 
         async def _pay(service: PaymentService):
@@ -170,20 +201,26 @@ async def test_concurrent_duplicate_payment_request_never_regresses_terminal_sta
         )
 
         winner_task = asyncio.create_task(_pay(winner_service))
-        await asyncio.wait_for(winner_row_committed.wait(), timeout=5.0)
+        await asyncio.wait_for(winner_row_inserted.wait(), timeout=5.0)
         assert not winner_task.done()
 
+        # The loser's insert queues on the winner's uncommitted unique-index entry - it is neither
+        # answered "in progress" nor allowed through.
         release_loser.set()
-        loser_result = await asyncio.wait_for(loser_task, timeout=5.0)
-        assert isinstance(loser_result, ConflictException)
-        assert loser_result.code == "E008"
-        assert loser_result.status_code == 409
-        assert "in progress" in loser_result.message
+        assert await _a_backend_waits_on_a_transaction(), (
+            "premise: the second request did not wait on the first one's uncommitted row"
+        )
+        assert not loser_task.done()
 
         release_winner.set()
         winner_result = await asyncio.wait_for(winner_task, timeout=10.0)
-        assert not isinstance(winner_result, Exception)
+        loser_result = await asyncio.wait_for(loser_task, timeout=10.0)
+        assert not isinstance(winner_result, Exception), repr(winner_result)
         assert winner_result.status == "COMMITTED"
+        # The second request is answered with the first one's stored result.
+        assert not isinstance(loser_result, Exception), repr(loser_result)
+        assert loser_result.status == "COMMITTED"
+        assert loser_result.tx_id == winner_result.tx_id == tx_id
 
         async with TestingSessionLocal() as verify:
             transaction_count = await verify.scalar(

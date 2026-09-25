@@ -8,8 +8,9 @@ operation's kind, which are PRESERVED per kind and NOT unified:
 
 * `PAYMENT` - `PaymentFlow`: `PaymentEngine._apply_flow`'s algebra verbatim - reduce the receiver's
   debt to the sender, grow the sender's debt to the receiver, net a mutual pair, delete a zero -
-  including its three-attempt `StaleDataError` loop under `begin_nested`. Removing that loop is an
-  isolation-model decision and belongs to programme 019 (`docs/ru/09-decisions-and-defaults.md:237`).
+  WITHOUT a retry of its own since programme 019 stage 3 (`FORK-1`): a debt whose `version` moved
+  underneath this transaction is raised as `DebtVersionConflict`, and the owner of the whole
+  transaction retries it on a fresh snapshot.
 * `CLEARING` - `ClearingReduction`: decrease or delete only. Growth or a new row is refused.
 * `INJECT` - `InjectIncrease`: increase or refuse. An effect opposite to an existing debt `> 0` is
   REFUSED and returned to the caller as refused (F-015-12, `6a882d2`); so is an effect whose result
@@ -156,6 +157,29 @@ class BookError(Exception):
         super().__init__(message)
         self.reason = reason
         self.context = context
+
+
+class DebtVersionConflict(StaleDataError):
+    """A payment flow's debt was changed by another transaction: its `version` no longer matches.
+
+    Programme 019 stage 3 (`FORK-1`, `specs/019-payment-one-transaction/spec.md`, "Вложенность и
+    владение повторами"). Until then `_apply_payment_flow` answered a `StaleDataError` by expiring the
+    identity map and re-running the flow up to three times INSIDE the same database transaction. That
+    is a retry from the same snapshot: under SERIALIZABLE the rolled-back savepoint does not refresh
+    it, so the retry reads what the first attempt read. The retry now belongs to the owner of the
+    whole transaction - `PaymentService.pay` for the API, the money-phase replay for the simulator -
+    which starts again on a fresh session.
+
+    NARROW ON PURPOSE. Only a `StaleDataError` raised by a payment flow becomes this type, and only
+    this type is classified as a retryable conflict (`app/core/payments/service.py`,
+    `_classify_payment_db_error`; `app/core/simulator/money_replay.py`, `money_conflict_name`). A
+    `StaleDataError` from anywhere else, and every other ORM error, stays what it was and is not
+    retried (negative controls: `tests/unit/test_p019_debt_version_conflict_is_narrow.py`).
+
+    It subclasses `StaleDataError`, so it is still the original ORM failure for anyone who catches that
+    (Book contract item 4: the original exception reaches the caller); the SQLAlchemy exception is its
+    `__cause__`.
+    """
 
 
 class BookMoneyError(BookError):
@@ -316,97 +340,90 @@ async def _apply_payment_flow(session: Any, flow: PaymentFlow) -> str:
         flow.amount,
         flow.equivalent_id,
     )
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            async with session.begin_nested():
-                remaining_amount = amount
+    # 019 stage 3 (`FORK-1`): no retry here. See `DebtVersionConflict`.
+    try:
+        remaining_amount = amount
 
-                # 1. Check if Receiver owes Sender (Debt: debtor=to, creditor=from)
-                debt_r_s = await _get_debt(session, to_id, from_id, equivalent_id)
+        # 1. Check if Receiver owes Sender (Debt: debtor=to, creditor=from)
+        debt_r_s = await _get_debt(session, to_id, from_id, equivalent_id)
 
-                if debt_r_s and debt_r_s.amount > 0:
-                    reduction = min(remaining_amount, debt_r_s.amount)
-                    _set_amount(
-                        debt_r_s, debt_r_s.amount - reduction, what="the reduced receiver debt"
-                    )
-                    remaining_amount -= reduction
-
-                    if debt_r_s.amount == 0:
-                        await session.delete(debt_r_s)
-                    else:
-                        session.add(debt_r_s)
-
-                if remaining_amount > 0:
-                    # 2. Increase Sender's debt to Receiver (Debt: debtor=from, creditor=to)
-                    debt_s_r = await _get_debt(session, from_id, to_id, equivalent_id)
-                    if not debt_s_r:
-                        # Create new debt record
-                        debt_s_r = Debt(
-                            debtor_id=from_id,
-                            creditor_id=to_id,
-                            equivalent_id=equivalent_id,
-                            amount=Decimal("0"),
-                        )
-
-                    _set_amount(
-                        debt_s_r,
-                        debt_s_r.amount + remaining_amount,
-                        what="the increased sender debt",
-                    )
-                    session.add(debt_s_r)
-
-                # NOTE: app sessions may run with autoflush=False. Ensure the DB view is
-                # consistent before the symmetry-netting queries below.
-                await session.flush()
-
-                # Enforce debt symmetry by netting mutual debts, if any.
-                debt_forward = await _get_debt(session, from_id, to_id, equivalent_id)
-                debt_reverse = await _get_debt(session, to_id, from_id, equivalent_id)
-                if (
-                    debt_forward
-                    and debt_reverse
-                    and debt_forward.amount > 0
-                    and debt_reverse.amount > 0
-                ):
-                    net = min(debt_forward.amount, debt_reverse.amount)
-                    _set_amount(
-                        debt_forward, debt_forward.amount - net, what="the netted forward debt"
-                    )
-                    _set_amount(
-                        debt_reverse, debt_reverse.amount - net, what="the netted reverse debt"
-                    )
-
-                    if debt_forward.amount == 0:
-                        await session.delete(debt_forward)
-                    else:
-                        session.add(debt_forward)
-
-                    if debt_reverse.amount == 0:
-                        await session.delete(debt_reverse)
-                    else:
-                        session.add(debt_reverse)
-
-                    # Flush netting effects immediately so later flows / invariant checks
-                    # don't observe a transient mutual-debt state.
-                    await session.flush()
-
-            return APPLIED
-        except StaleDataError:
-            if attempt >= max_retries - 1:
-                raise
-            logger.warning(
-                "event=apply_flow.stale_data retry=%s/%s from=%s to=%s",
-                attempt + 1,
-                max_retries,
-                str(from_id),
-                str(to_id),
+        if debt_r_s and debt_r_s.amount > 0:
+            reduction = min(remaining_amount, debt_r_s.amount)
+            _set_amount(
+                debt_r_s, debt_r_s.amount - reduction, what="the reduced receiver debt"
             )
-            try:
-                session.expire_all()
-            except Exception:
-                pass
-    raise AssertionError("unreachable: the loop returns or raises")  # pragma: no cover
+            remaining_amount -= reduction
+
+            if debt_r_s.amount == 0:
+                await session.delete(debt_r_s)
+            else:
+                session.add(debt_r_s)
+
+        if remaining_amount > 0:
+            # 2. Increase Sender's debt to Receiver (Debt: debtor=from, creditor=to)
+            debt_s_r = await _get_debt(session, from_id, to_id, equivalent_id)
+            if not debt_s_r:
+                # Create new debt record
+                debt_s_r = Debt(
+                    debtor_id=from_id,
+                    creditor_id=to_id,
+                    equivalent_id=equivalent_id,
+                    amount=Decimal("0"),
+                )
+
+            _set_amount(
+                debt_s_r,
+                debt_s_r.amount + remaining_amount,
+                what="the increased sender debt",
+            )
+            session.add(debt_s_r)
+
+        # NOTE: app sessions may run with autoflush=False. Ensure the DB view is
+        # consistent before the symmetry-netting queries below.
+        await session.flush()
+
+        # Enforce debt symmetry by netting mutual debts, if any.
+        debt_forward = await _get_debt(session, from_id, to_id, equivalent_id)
+        debt_reverse = await _get_debt(session, to_id, from_id, equivalent_id)
+        if (
+            debt_forward
+            and debt_reverse
+            and debt_forward.amount > 0
+            and debt_reverse.amount > 0
+        ):
+            net = min(debt_forward.amount, debt_reverse.amount)
+            _set_amount(
+                debt_forward, debt_forward.amount - net, what="the netted forward debt"
+            )
+            _set_amount(
+                debt_reverse, debt_reverse.amount - net, what="the netted reverse debt"
+            )
+
+            if debt_forward.amount == 0:
+                await session.delete(debt_forward)
+            else:
+                session.add(debt_forward)
+
+            if debt_reverse.amount == 0:
+                await session.delete(debt_reverse)
+            else:
+                session.add(debt_reverse)
+
+            # Flush netting effects immediately so later flows / invariant checks
+            # don't observe a transient mutual-debt state.
+            await session.flush()
+    except DebtVersionConflict:
+        raise
+    except StaleDataError as exc:
+        logger.warning(
+            "event=apply_flow.debt_version_conflict from=%s to=%s",
+            str(from_id),
+            str(to_id),
+        )
+        raise DebtVersionConflict(
+            f"a debt of the pair {from_id} -> {to_id} was changed by another transaction"
+        ) from exc
+    return APPLIED
 
 
 async def _apply_clearing_reduction(session: Any, effect: ClearingReduction) -> str:

@@ -269,6 +269,7 @@ async def test_trustlines_crud(client: AsyncClient, db_session):
     # No GET-by-id endpoint in MVP; closing success is sufficient
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_direct_payment(client: AsyncClient, db_session):
     # Seed USD
@@ -362,6 +363,7 @@ async def test_direct_payment(client: AsyncClient, db_session):
     assert resp.json()["can_pay"] is False  # 100 limit - 10 used = 90 remaining
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_multihop_payment(client: AsyncClient, db_session):
     # A -> B -> C
@@ -441,6 +443,7 @@ async def test_multihop_payment(client: AsyncClient, db_session):
     # Check paths logic if possible, but status COMPLETED confirms it worked.
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_multipath_payment(client: AsyncClient, db_session):
     # A pays D using 2 disjoint paths:

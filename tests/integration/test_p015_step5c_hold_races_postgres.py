@@ -23,7 +23,6 @@ where the stale-snapshot races cannot be seen. Barriers are `asyncio.Event`s; wa
 from __future__ import annotations
 
 import asyncio
-import logging
 import subprocess
 import sys
 import uuid
@@ -168,23 +167,29 @@ async def _finish(*tasks) -> None:
 
 
 @pytest.mark.asyncio
-async def test_step5c_p_a_payment_commit_waiting_behind_the_reaction_is_refused_by_the_hold(
-    factory, monkeypatch, caplog
+async def test_step5c_p_a_reaction_arriving_between_prepare_and_commit_waits_for_the_payment(
+    factory, monkeypatch
 ) -> None:
-    """HOLD FIRST. The payment is prepared; the reaction holds the owner lock with the hold written; the
-    commit takes its snapshot and waits on that lock; the hold commits.
+    """The payment is between its prepare and its commit phase; the hold reaction arrives.
 
-    RED if the reaction releases its owner lock before its commit, or if the commit reads the hold without
-    `FOR SHARE` (plainly, or from the `Equivalent` the service loaded): the stale snapshot still says "not
-    held" and 10.00 commits after the hold did.
+    UNTIL 019 STAGE 3 this was `test_step5c_p_a_payment_commit_waiting_behind_the_reaction_is_refused_by_
+    the_hold` ("HOLD FIRST"): the durable `PREPARED` released the owner lock, the reaction took it and
+    wrote the hold, and the payment's commit waited behind it and was refused through the `FOR SHARE`
+    serialization failure. Since stage 3 (`T1904`) the payment holds the owner lock from `prepare` to
+    its one commit, so the reaction cannot come between the two phases: it WAITS (measured) and holds
+    only after the payment committed; the next payment is refused. The sibling below is the same
+    contract with the payment held later, after its commit-time check.
+
+    RED if the payment released its owner lock before its commit, or if the reaction took none: the
+    reaction then holds while the payment is still about to commit.
     """
     world = await _seed(factory)
     code = world.equivalent.code
-    tx_id = str(uuid.uuid4())
     payment = reconcile = None
+    release_commit = asyncio.Event()
     try:
         await _baseline_and_one_atom(factory, world.equivalent.id)
-        prepared, release_commit = asyncio.Event(), asyncio.Event()
+        prepared = asyncio.Event()
         original_commit = PaymentEngine.commit
 
         async def _commit_after_barrier(self, tx_id_arg, *, commit=True):
@@ -193,45 +198,48 @@ async def test_step5c_p_a_payment_commit_waiting_behind_the_reaction_is_refused_
             return await original_commit(self, tx_id_arg, commit=commit)
 
         monkeypatch.setattr(PaymentEngine, "commit", _commit_after_barrier)
-        hold_written, release_hold = _pause_after_the_hold_is_written(monkeypatch)
 
-        async def _pay():
+        async def _pay(tx_id: str):
             async with factory() as session:
                 return await PaymentService(session).create_payment_internal(
                     world.sender.id, to_pid=world.receiver.pid, equivalent=code, amount="10.00",
                     idempotency_key=tx_id,
                 )
 
-        with caplog.at_level(logging.WARNING):
-            payment = asyncio.create_task(_pay())
-            await asyncio.wait_for(prepared.wait(), timeout=20)
-            assert await _transactions(factory, world) == {tx_id: "PREPARED"}, "premise: not prepared"
+        tx_id = str(uuid.uuid4())
+        completed: list[str] = []
+        payment = asyncio.create_task(_pay(tx_id))
+        payment.add_done_callback(lambda _t: completed.append("payment"))
+        await asyncio.wait_for(prepared.wait(), timeout=20)
+        assert await _transactions(factory, world) == {}, "premise: the payment is durable before its commit"
 
-            reconcile = asyncio.create_task(
-                run_scheduled_reconciliation(factory, equivalent_ids=[world.equivalent.id])
-            )
-            await asyncio.wait_for(hold_written.wait(), timeout=30)
-
-            release_commit.set()
-            assert await _advisory_waiter_exists(), "premise: the commit did not wait on the reaction's lock"
-            assert not payment.done()
-
-            release_hold.set()
-            counts = await asyncio.wait_for(reconcile, timeout=30)
-            assert counts[f"hold_{HOLD_SET}"] == 1, counts
-            with pytest.raises(ConflictException) as refused:
-                await asyncio.wait_for(payment, timeout=30)
-
-        _assert_hold_refusal(refused.value, code)
-        retries = [r.getMessage() for r in caplog.records if "event=payment.uow_retry op=commit" in r.getMessage()]
-        assert any("pgcode=40001" in m for m in retries), (
-            f"premise: the refusal did not come through the FOR SHARE serialization failure: {retries}"
+        reconcile = asyncio.create_task(
+            run_scheduled_reconciliation(factory, equivalent_ids=[world.equivalent.id])
         )
-        assert await _debts(factory, world) == {(world.sender.pid, world.receiver.pid): _OPENING + _ATOM}
-        assert await _transactions(factory, world) == {tx_id: "ABORTED"}
+        reconcile.add_done_callback(lambda _t: completed.append("reaction"))
+        assert await _advisory_waiter_exists(), "the reaction did not wait for the prepared payment"
+        assert not reconcile.done()
+        assert await _hold_of(factory, world.equivalent.id) is None
+
+        release_commit.set()
+        result = await asyncio.wait_for(payment, timeout=30)
+        counts = await asyncio.wait_for(reconcile, timeout=30)
+
+        assert result.status == "COMMITTED", result
+        assert (counts[FAILED], counts[f"hold_{HOLD_SET}"]) == (1, 1), counts
+        assert completed == ["payment", "reaction"], completed
+        assert await _debts(factory, world) == {
+            (world.sender.pid, world.receiver.pid): _OPENING + _ATOM + Decimal("10.00")
+        }
+        assert await _transactions(factory, world) == {tx_id: "COMMITTED"}
         assert await _prepare_locks(factory, world) == 0
         assert await _hold_of(factory, world.equivalent.id) is not None
+        monkeypatch.setattr(PaymentEngine, "commit", original_commit)
+        with pytest.raises(ConflictException) as refused:
+            await _pay(str(uuid.uuid4()))
+        _assert_hold_refusal(refused.value, code)
     finally:
+        release_commit.set()
         await _finish(payment, reconcile)
         _forget_the_route_cache(world)
 

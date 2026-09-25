@@ -10,7 +10,11 @@ from typing import Any, Callable, Literal
 from sqlalchemy import select
 
 from app.config import settings
-from app.core.payments.service import PaymentPostCommitEffects, PaymentService
+from app.core.payments.service import (
+    PaymentPostCommitEffects,
+    PaymentService,
+    PaymentTransactionUnusable,
+)
 from app.core.simulator.edge_patch_builder import EdgePatchBuilder
 from app.core.simulator.rejection_codes import map_rejection_code
 from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter
@@ -272,6 +276,44 @@ class RealPaymentsResult:
     staged_tx_ids: frozenset[str] = frozenset()
 
 
+def _classify_refusal(e: BaseException) -> tuple[str | None, str | None, dict[str, Any] | None]:
+    """(status, code, err_details) of a refused staged payment - one rule for a raised refusal and for
+    a refusal returned as a structured `ABORTED` result (`StagedPaymentResult.refusal`, 019 `T1905`).
+
+    `status` REJECTED with `code` None is a business rejection (a 4xx); `code` PAYMENT_TIMEOUT or
+    INTERNAL_ERROR is an error of the run.
+    """
+
+    code: str | None = "INTERNAL_ERROR"
+    status: str | None = None
+    err_details: dict[str, Any] | None = {
+        "exc": type(e).__name__,
+        "message": str(e),
+    }
+
+    if isinstance(e, TimeoutException):
+        code = "PAYMENT_TIMEOUT"
+        err_details = {
+            "exc": type(e).__name__,
+            "geo_code": getattr(e, "code", None),
+            "message": getattr(e, "message", str(e)),
+            "details": getattr(e, "details", None),
+        }
+    elif isinstance(e, GeoException):
+        geo_status = int(getattr(e, "status_code", 500) or 500)
+        if 400 <= geo_status < 500:
+            status = "REJECTED"
+            code = None
+        err_details = {
+            "exc": type(e).__name__,
+            "geo_code": getattr(e, "code", None),
+            "message": getattr(e, "message", str(e)),
+            "details": getattr(e, "details", None),
+            "status_code": geo_status,
+        }
+    return status, code, err_details
+
+
 class RealPaymentsExecutor:
     def __init__(
         self,
@@ -429,12 +471,34 @@ class RealPaymentsExecutor:
                                 idempotency_key=idem,
                             )
                             tx_id = str(getattr(staged.result, "tx_id", "") or "")
-                            if tx_id:
+                            # LANDING EVIDENCE is only a row THIS phase wrote (019 stage-3 review,
+                            # P2 #2): a fresh payment or a refusal recorded here. A stored result
+                            # answered by idempotency or by the identity resolver is a row of an
+                            # EARLIER transaction; counting it let a historical row prove that this
+                            # phase's unknown commit landed.
+                            if tx_id and staged.written_here:
                                 staged_tx_ids.add(tx_id)
 
                     res = staged.result
 
                     status = str(res.status or "")
+                    if staged.refusal is not None:
+                        # A definitive refusal recorded ABORTED in this savepoint (019 `T1905`): durable
+                        # with the tick, and classified exactly as the same refusal raised used to be.
+                        refused_status, refused_code, refused_details = _classify_refusal(staged.refusal)
+                        return (
+                            int(action.seq),
+                            str(action.equivalent),
+                            str(action.sender_pid),
+                            str(action.receiver_pid),
+                            str(getattr(action, "amount", "") or ""),
+                            refused_status,
+                            refused_code,
+                            refused_details,
+                            0.0,
+                            [],
+                            None,
+                        )
 
                     routes = res.routes or []
 
@@ -465,6 +529,15 @@ class RealPaymentsExecutor:
                         route_edges,
                         staged.post_commit_effects,
                     )
+                except PaymentTransactionUnusable as unusable:
+                    # The payment left the TICK'S transaction unusable (019 `T1912`). Nothing of this
+                    # phase may be counted or published from here: the owner of the money phase rolls
+                    # the whole phase back, records the refusal on its own transaction, and then - once
+                    # its outcome is established - publishes this ONE observation of it.
+                    unusable.publish_refusal = self._refusal_publisher(
+                        run_id=run_id, run=run, emitter=emitter, action=action, unusable=unusable
+                    )
+                    raise
                 except RetryablePaymentConflictException:
                     # The outer tick transaction is no longer safe to use: this payment ran inside
                     # the tick's savepoint, and a stale snapshot or serialization failure belongs
@@ -484,33 +557,7 @@ class RealPaymentsExecutor:
                     # progress rather than as an error, and it does not spend the error budget.
                     raise
                 except Exception as e:
-                    code = "INTERNAL_ERROR"
-                    status = None
-                    err_details: dict[str, Any] | None = {
-                        "exc": type(e).__name__,
-                        "message": str(e),
-                    }
-
-                    if isinstance(e, TimeoutException):
-                        code = "PAYMENT_TIMEOUT"
-                        err_details = {
-                            "exc": type(e).__name__,
-                            "geo_code": getattr(e, "code", None),
-                            "message": getattr(e, "message", str(e)),
-                            "details": getattr(e, "details", None),
-                        }
-                    elif isinstance(e, GeoException):
-                        geo_status = int(getattr(e, "status_code", 500) or 500)
-                        if 400 <= geo_status < 500:
-                            status = "REJECTED"
-                            code = None
-                        err_details = {
-                            "exc": type(e).__name__,
-                            "geo_code": getattr(e, "code", None),
-                            "message": getattr(e, "message", str(e)),
-                            "details": getattr(e, "details", None),
-                            "status_code": geo_status,
-                        }
+                    status, code, err_details = _classify_refusal(e)
 
                     return (
                         int(action.seq),
@@ -885,3 +932,54 @@ class RealPaymentsExecutor:
             stop_requested=stop_requested,
             staged_tx_ids=frozenset(staged_tx_ids),
         )
+
+    def _refusal_publisher(
+        self,
+        *,
+        run_id: str,
+        run: RunRecord,
+        emitter: SseEventEmitter,
+        action: Any,
+        unusable: PaymentTransactionUnusable,
+    ) -> Callable[[], bool]:
+        """The one observation of a refusal that left the tick's transaction unusable (`T1912`).
+
+        Built here, where the observation rules live, and published by the money-phase owner - once,
+        and only after the refusal's outcome is established. It is the observation a raised refusal of
+        the same class has always produced: `tx.failed` with the same code and the same run counters.
+        """
+
+        refusal = unusable.refusal
+        cause: BaseException = refusal.public_error if refusal is not None else unusable.cause
+        _status, code, err_details = _classify_refusal(cause)
+        if code is not None:
+            outcome: Literal["committed", "rejected", "error"] = "error"
+            error_code = str(code)
+        else:
+            outcome = "rejected"
+            try:
+                error_code = map_rejection_code(err_details)
+            except Exception:
+                error_code = "PAYMENT_REJECTED"
+        buffer = DeferredRealPaymentEffects(
+            lock=self._lock,
+            emitter=emitter,
+            logger=self._logger,
+            utc_now=self._utc_now,
+            run_id=str(run_id),
+            run=run,
+            items=[
+                _PaymentObservation(
+                    seq=int(action.seq),
+                    outcome=outcome,
+                    equivalent=str(action.equivalent),
+                    sender_pid=str(action.sender_pid),
+                    receiver_pid=str(action.receiver_pid),
+                    amount=str(getattr(action, "amount", "") or ""),
+                    edges=[{"from": str(action.sender_pid), "to": str(action.receiver_pid)}],
+                    error_code=error_code,
+                    error_details=err_details,
+                )
+            ],
+        )
+        return buffer.apply_after_rollback

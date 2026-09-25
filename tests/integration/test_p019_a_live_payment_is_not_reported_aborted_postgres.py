@@ -1,14 +1,13 @@
-"""Programme 019, `T1902`: `GET /payments/{tx_id}` on a payment that is still in flight.
+"""Programme 019, `T1902` / `T1904`: `GET /payments/{tx_id}` on a payment that is still in flight.
 
-TODAY (pinned by the characterization in `test_p019_no_durable_intermediate_state_postgres.py`): the
-live payment, held at `EngineCommitBarrier` after its durable `PREPARED`, is answered `200` with
-`status: ABORTED` - `_tx_to_payment_result` maps every non-terminal state to `ABORTED`
-(`app/core/payments/service.py:1397`) - and a moment later the same payment is `COMMITTED`.
+BEFORE STAGE 3: the live payment, held at `EngineCommitBarrier` after its durable `PREPARED`, was
+answered `200` with `status: ABORTED` - `_tx_to_payment_result` maps every non-terminal state to
+`ABORTED` - and a moment later the same payment was `COMMITTED`.
 
-TARGET (spec, Verification plan §1): before the money commit the payment does not exist for a reader
-(`404`), after it it is `COMMITTED`. Controls first - barrier hit once, the reader's snapshot provably
-later than the barrier, the payment in flight while it was read, then finished with money moved - and
-only then the comparison, as `TargetMismatch`. `xfail(strict)` until stage 3.
+TARGET (spec, Verification plan §1), PASSING SINCE STAGE 3 (`T1904`): before the money commit the
+payment does not exist for a reader (`404`), after it it is `COMMITTED`. Controls first - barrier hit
+once, the reader's snapshot provably later than the barrier, the payment in flight while it was read,
+then finished with money moved - and only then the comparison, as `TargetMismatch`.
 """
 
 from __future__ import annotations
@@ -28,10 +27,9 @@ from tests.integration.p019_stand import (  # noqa: F401 - `api` and `factory` a
     observe_after_marker,
     payment_body,
 )
-from tests.p019_support import require_target, target_xfail
+from tests.p019_support import require_target
 
 
-@target_xfail("stage 3 (T1904)", "GET answers a live payment as ABORTED (service.py:1397)")
 @pytest.mark.asyncio
 async def test_a_live_payment_is_not_found_before_its_commit_and_committed_after(
     api, factory, monkeypatch  # noqa: F811

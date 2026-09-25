@@ -15,6 +15,7 @@ from tests.integration.test_scenarios import (
     _sign_payment_request,
     _sign_trustline_create_request,
 )
+from tests.conftest import MODE_B
 
 
 # ----------------------------------------------------------------------------------------------
@@ -116,6 +117,7 @@ async def _seed_equivalent(db_session, code: str):
     return eq
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_payments_tx_id_returns_same_result(client: AsyncClient, db_session):
     await _seed_equivalent(db_session, "USD")
@@ -185,6 +187,7 @@ async def test_payments_tx_id_returns_same_result(client: AsyncClient, db_sessio
     )
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_payments_tx_id_reuse_with_different_payload_conflicts(client: AsyncClient, db_session):
     await _seed_equivalent(db_session, "USD")

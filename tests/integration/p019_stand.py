@@ -22,7 +22,7 @@ import asyncio
 import base64
 import contextvars
 import uuid
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any, Callable, Iterator
@@ -32,7 +32,7 @@ from httpx import AsyncClient
 from nacl.signing import SigningKey
 from sqlalchemy import func, insert, select, text, update
 
-from app.api.deps import get_db
+from app.api.deps import get_db, get_payment_session_factory
 from app.config import settings
 from app.core.payments.engine import PaymentEngine
 from app.core.payments.router import PaymentRouter
@@ -60,7 +60,13 @@ _request_hook: contextvars.ContextVar[Callable[[Any], None] | None] = contextvar
 
 @pytest_asyncio.fixture
 async def api(factory):  # noqa: F811 - the fixture above, by name
-    """The real app, one `factory` session per request, as `get_db` gives one in production."""
+    """The real app, one `factory` session per request, as `get_db` gives one in production.
+
+    `POST /payments` (019 stage 3) does not run on the request's session: `PaymentService.pay` opens one
+    session per attempt through `get_payment_session_factory`. That factory is `factory` too, and the
+    per-request hook is applied to EVERY session it opens - the payment's own sessions are the ones an
+    instrument has to see.
+    """
 
     async def override_get_db():
         async with factory() as session:
@@ -69,16 +75,28 @@ async def api(factory):  # noqa: F811 - the fixture above, by name
                 hook(session)
             yield session
 
-    previous = app.dependency_overrides.get(get_db)
+    @asynccontextmanager
+    async def payment_session():
+        async with factory() as session:
+            hook = _request_hook.get()
+            if hook is not None:
+                hook(session)
+            yield session
+
+    previous = {
+        dep: app.dependency_overrides.get(dep) for dep in (get_db, get_payment_session_factory)
+    }
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_payment_session_factory] = lambda: payment_session
     try:
         async with AsyncClient(app=app, base_url="http://test") as client:
             yield client
     finally:
-        if previous is None:
-            app.dependency_overrides.pop(get_db, None)
-        else:
-            app.dependency_overrides[get_db] = previous
+        for dep, value in previous.items():
+            if value is None:
+                app.dependency_overrides.pop(dep, None)
+            else:
+                app.dependency_overrides[dep] = value
 
 
 @contextmanager

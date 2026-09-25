@@ -1,20 +1,20 @@
-"""Programme 019, `T1902`: how many times one successful `POST /payments` commits.
+"""Programme 019, `T1902` / `T1904`: how many times one successful `POST /payments` commits.
 
-THE INSTRUMENT. `CommitRecorder` wraps `commit()` of the session the request handler received - the
-service and `PaymentEngine` commit through that same object - and after every REAL commit reads, on a
-new session, what another transaction then sees of the payment.
+THE INSTRUMENT. `CommitRecorder` wraps `commit()` of every session the request opens - the request's
+`get_db` session and, since stage 3, each session `PaymentService.pay` opens for an attempt through
+`get_payment_session_factory` (`tests/integration/p019_stand.py`, `api`) - and after every REAL commit
+reads, on a new session, what another transaction then sees of the payment.
 
-TODAY (pinned by the characterization in `test_p019_no_durable_intermediate_state_postgres.py`): three
-commits, `NEW` (`app/core/payments/service.py:905`), `PREPARED` (`app/core/payments/engine.py:1032`),
-`COMMITTED` (`engine.py:1699`).
+BEFORE STAGE 3: three commits on the request's session, `NEW`, `PREPARED` (with its reservation),
+`COMMITTED`.
 
-TARGET (spec, Verification plan §1): one commit, after which the payment is `COMMITTED`. Controls
-first: the recorder saw at least one commit (an instrument that saw none measured nothing), and the
-payment committed with money moved. `xfail(strict)` until stage 3.
+TARGET (spec, Verification plan §1), PASSING SINCE STAGE 3 (`T1904`): one commit, after which the
+payment is `COMMITTED`. Controls first: the recorder saw at least one commit (an instrument that saw
+none measured nothing - the control that would have caught `pay()` moving to a session the recorder is
+not on), and the payment committed with money moved.
 
-WHAT THE INSTRUMENT DOES NOT SEE: a commit made on a session the request did not receive through
-`get_db`. If stage 3 moves `pay()` onto a session of its own, the "saw at least one commit" control
-fails loudly rather than the target passing - adapt the recorder there, do not delete the control.
+WHAT THE INSTRUMENT DOES NOT SEE: a commit on a session opened outside both dependencies - a raw
+engine connection, say. Nothing in the payment path does that today.
 """
 
 from __future__ import annotations
@@ -33,10 +33,9 @@ from tests.integration.p019_stand import (  # noqa: F401 - `api` and `factory` a
     payment_body,
     with_session_hook,
 )
-from tests.p019_support import require_target, target_xfail
+from tests.p019_support import require_target
 
 
-@target_xfail("stage 3 (T1904)", "a successful API payment commits three times")
 @pytest.mark.asyncio
 async def test_a_successful_api_payment_commits_once(api, factory) -> None:  # noqa: F811
     world = await build_api_world(api, factory)

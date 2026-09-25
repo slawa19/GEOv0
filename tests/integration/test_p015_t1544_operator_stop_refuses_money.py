@@ -49,7 +49,7 @@ from tests.integration.test_scenarios import (
     _sign_trustline_create_request,
     register_and_login,
 )
-from tests.conftest import MODE_B
+from tests.conftest import MODE_B, sessionmaker_of
 
 ADMIN = {"X-Admin-Token": settings.ADMIN_TOKEN}
 
@@ -181,6 +181,7 @@ def _assert_stop_refusal(resp, code: str) -> None:
     )
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_a_payment_in_a_deactivated_equivalent_is_refused_before_any_transaction_exists(
     client, db_session
@@ -217,6 +218,7 @@ async def test_a_payment_in_a_deactivated_equivalent_is_refused_before_any_trans
     assert await _debt_totals(db_session, code) == (1, Decimal("10.00"))
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_an_accepted_payment_still_replays_its_result_after_the_stop(client, db_session) -> None:
     """The check sits after the idempotency decision: a stored result is not a new money operation."""
@@ -259,6 +261,7 @@ async def test_an_accepted_payment_still_replays_its_result_after_the_stop(clien
     _assert_stop_refusal(fresh, code)
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_a_payment_prepared_before_the_stop_is_refused_at_commit(
     client, db_session, monkeypatch
@@ -268,6 +271,15 @@ async def test_a_payment_prepared_before_the_stop_is_refused_at_commit(
     The stop lands between prepare and commit: the payment passed the prepare-time check while the
     equivalent was active. Only the commit check can refuse it now. (The concurrent form of this - the
     stop committing while the commit waits - is PostgreSQL's, see the races module.)
+
+    SINCE 019 STAGE 3 (`T1904`) the payment is one transaction, so the stop is committed by ANOTHER
+    session (before, the stand committed it on the payment's own session, which would now commit the
+    payment half-way). The commit guard's `FOR SHARE` then meets an equivalent row changed behind the
+    payment's snapshot - `40001` - and `pay()` retries the whole attempt, whose pre-check refuses the
+    stop before the payment's row exists. Outcome: the same stop refusal and no money. The first
+    attempt reached the payment operation, so the request was ADMITTED, and `pay()` remembers that for
+    the same identity (spec, FORK-5; `T1905`): the refusal the retry meets is definitive and stored
+    `ABORTED` with the stop's error - as before stage 3; between `T1904` and `T1905` it left no row.
     """
     code = _code()
     await _create_equivalent(client, code)
@@ -279,13 +291,17 @@ async def test_a_payment_prepared_before_the_stop_is_refused_at_commit(
     original_commit = PaymentEngine.commit
 
     async def _stop_between_prepare_and_commit(self, tx_id, *, commit=True):
-        seen["state_at_commit"] = (
-            await self.session.execute(select(Transaction.state).where(Transaction.tx_id == tx_id))
-        ).scalar_one()
-        await self.session.execute(
-            update(Equivalent).where(Equivalent.code == code).values(is_active=False)
-        )
-        await self.session.commit()
+        if "state_at_commit" not in seen:
+            seen["state_at_commit"] = (
+                await self.session.execute(
+                    select(Transaction.state).where(Transaction.tx_id == tx_id)
+                )
+            ).scalar_one()
+            async with sessionmaker_of(db_session)() as operator:
+                await operator.execute(
+                    update(Equivalent).where(Equivalent.code == code).values(is_active=False)
+                )
+                await operator.commit()
         return await original_commit(self, tx_id, commit=commit)
 
     monkeypatch.setattr(PaymentEngine, "commit", _stop_between_prepare_and_commit)
@@ -298,10 +314,13 @@ async def test_a_payment_prepared_before_the_stop_is_refused_at_commit(
     )
     _assert_stop_refusal(resp, code)
     assert await _debt_totals(db_session, code) == (0, Decimal("0"))
-    state = (
-        await db_session.execute(select(Transaction.state).where(Transaction.tx_id == body["tx_id"]))
-    ).scalar_one()
-    assert state == "ABORTED", state
+    stored = (
+        await db_session.execute(
+            select(Transaction.state, Transaction.error).where(Transaction.tx_id == body["tx_id"])
+        )
+    ).one_or_none()
+    assert stored is not None and stored[0] == "ABORTED", stored
+    assert (stored[1] or {}).get("details", {}).get("reason") == "equivalent_inactive", stored
     locks = (
         await db_session.execute(
             select(func.count(PrepareLock.id)).where(PrepareLock.tx_id == body["tx_id"])
