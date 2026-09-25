@@ -11,9 +11,11 @@ Two schedules reach a refusal after the staged insert:
    cancels the statement in flight, which invalidates the tick's connection; the refusal could not be
    written, and the tick's money commit failed as a whole (`REAL_MODE_TICK_FAILED`, "invalid
    transaction"): nothing durable, the whole tick lost, and the same `tx_id` executed afresh later.
-2. READ COMMITTED (`DB_POSTGRES_ISOLATION_LEVEL`, a supported setting until stage 5 refuses it for money
-   writers): the creditor lowers the trust line between the staged payment's routing and its prepare;
-   the prepare re-check refuses (`E002`); the row was written, then rolled back by the savepoint.
+2. READ COMMITTED (a level the application no longer starts at: since 2026-09-25 `app/config.py`
+   refuses any `DB_POSTGRES_ISOLATION_LEVEL` but SERIALIZABLE; the test asks for it on its own
+   connection as a mechanism probe of the staged refusal path, not as an application configuration):
+   the creditor lowers the trust line between the staged payment's routing and its prepare; the
+   prepare re-check refuses (`E002`); the row was written, then rolled back by the savepoint.
 
 THE CONTRACT SINCE STAGE 3 (spec, "Путь записи окончательного отказа" and "Ветка непригодной
 транзакции"), each pinned by a target that was red before it (`056b27b` for `T1912`):

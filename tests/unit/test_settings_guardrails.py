@@ -149,6 +149,59 @@ def test_a_postgresql_asyncpg_url_is_accepted_verbatim(monkeypatch) -> None:
     assert Settings(_env_file=None, ENV="dev").DATABASE_URL == url
 
 
+# DB_POSTGRES_ISOLATION_LEVEL: SERIALIZABLE ONLY (2026-09-25, programme 019 fix-delta P1-A).
+#
+# Until this fence the setting was free. Trust decay, trust growth against a concurrent raise and the
+# trust-line reductions (simulator update, creditor PATCH) read debt without row locks and are correct
+# only because SERIALIZABLE aborts the rw-dependency cycle; below it each schedule commits a limit under
+# debt. Every other level PostgreSQL accepts is asserted REFUSED at settings construction; the accepted
+# counter-check keeps the refusal from passing vacuously.
+
+
+@pytest.mark.parametrize(
+    "level",
+    [
+        "READ COMMITTED",
+        "REPEATABLE READ",
+        "READ UNCOMMITTED",
+        "AUTOCOMMIT",
+        "read committed",
+        "  Repeatable Read  ",
+        "READ_COMMITTED",
+        "",
+        "   ",
+    ],
+)
+def test_every_postgres_isolation_level_but_serializable_is_refused(level: str) -> None:
+    from app.config import Settings
+
+    with pytest.raises(RuntimeError, match=r"DB_POSTGRES_ISOLATION_LEVEL") as refused:
+        Settings(_env_file=None, ENV="dev", DB_POSTGRES_ISOLATION_LEVEL=level)
+
+    message = str(refused.value)
+    assert "SERIALIZABLE" in message
+    assert repr(level) in message
+
+
+def test_an_isolation_level_from_the_environment_is_refused_too(monkeypatch) -> None:
+    from app.config import Settings
+
+    monkeypatch.setenv("DB_POSTGRES_ISOLATION_LEVEL", "READ COMMITTED")
+
+    with pytest.raises(RuntimeError, match=r"DB_POSTGRES_ISOLATION_LEVEL"):
+        Settings(_env_file=None, ENV="dev")
+
+
+@pytest.mark.parametrize("level", ["SERIALIZABLE", "serializable", "  Serializable  ", None])
+def test_serializable_is_accepted_and_normalised(level: str | None) -> None:
+    """Counter-check: the refusal above is not a refusal of everything; the default is SERIALIZABLE."""
+    from app.config import Settings
+
+    overrides = {} if level is None else {"DB_POSTGRES_ISOLATION_LEVEL": level}
+
+    assert Settings(_env_file=None, ENV="dev", **overrides).DB_POSTGRES_ISOLATION_LEVEL == "SERIALIZABLE"
+
+
 @pytest.mark.parametrize(
     ("alias", "canonical"),
     [
