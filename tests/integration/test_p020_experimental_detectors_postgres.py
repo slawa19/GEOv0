@@ -330,3 +330,103 @@ async def test_the_r020_ladder_graph_under_amount_first_auto_clear(db_session, d
     ).scalar_one()
     assert cleared == occurrences == 1
     assert remaining == [(str(debt_uuid(0xB5, 2)), Decimal("10")), (str(debt_uuid(0xB5, 3)), Decimal("10"))]
+
+
+# ------------------------------------------------- review P2-1: amount distributions where the bound is weak
+
+_PALETTES = {
+    # a plateau of one amount holding most edges, some above and some below it
+    "plateau": lambda rnd: "5" if rnd.random() < 0.6 else rnd.choice(["6", "7", "8", "1", "2", "3"]),
+    "narrow": lambda rnd: rnd.choice(["10.00", "10.01", "10.02"]),
+    "allequal": lambda rnd: "4",  # the amount bound never prunes: strict `<` against an equal floor
+}
+
+
+def _g_dense_small(palette: str):
+    def build():
+        rnd = random.Random(f"p2-1:{palette}")
+        pids = [f"s{k:02d}" for k in range(9)]
+        pairs, edges = set(), []
+        while len(edges) < 30:
+            a, b = rnd.choice(pids), rnd.choice(pids)
+            if a == b or (a, b) in pairs or (b, a) in pairs:
+                continue
+            pairs.add((a, b))
+            edges.append(Edge(debt_uuid(0x40, rnd.randrange(1 << 40) * 64 + len(edges)), a, b, _PALETTES[palette](rnd)))
+        return edges, None
+
+    return build
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("palette", sorted(_PALETTES))
+@pytest.mark.parametrize("limit", [1, 5, 17])
+async def test_the_bound_is_exact_on_weak_amount_distributions(db_session, palette, limit) -> None:
+    """Small dense graphs whose amounts are a plateau, a narrow palette or all equal, against the oracle."""
+
+    edges, _ = _g_dense_small(palette)()
+    eq = await seed_graph(db_session, "PZD", edges)
+    eligible = _eligible_oracle(edges, None)
+    for depth in _DEPTHS:
+        expected = _cycle_oracle(edges, eligible, depth, limit)
+        full = _cycle_oracle(edges, eligible, depth, 10_000)
+        if depth >= 6:
+            # Anti-vacuum: the limit binds, and the cutoff sits on a tie spanning it.
+            assert len(full) > limit, f"{palette} d{depth}: only {len(full)} cycles, the limit never binds"
+        got = await detect_dfs(db_session, eq.id, depth, limit=limit)
+        _assert_canonical(got)
+        assert _as_result(got) == expected, f"{palette} limit {limit} depth {depth}: dfs differs from the oracle"
+
+
+def _g_tie_at_cutoff():
+    """Three equal-amount (5) triangles; limit 2. The one with the SMALLEST identity is found LAST.
+
+    DFS starts are taken amount-DESC. Triangles A and B have their minimum-id edge (their start) at amount 9,
+    so they are found first and fill the two places at amount 5 - the floor is now 5. Triangle C has the
+    smallest minimum id of all, but its start edge carries 5, so it is reached last, when the floor is
+    already 5. Its amount EQUALS the floor: a strict `amount < floor` keeps it searchable and it must
+    displace the worse of A and B. A bound written `amount <= floor` prunes it and returns A and B.
+    """
+
+    g = 0x50
+    a = ring(["ta1", "ta2", "ta3"], ["9", "5", "5"], [debt_uuid(g, 30), debt_uuid(g, 31), debt_uuid(g, 32)])
+    b = ring(["tb1", "tb2", "tb3"], ["9", "5", "5"], [debt_uuid(g, 20), debt_uuid(g, 21), debt_uuid(g, 22)])
+    c = ring(["tc1", "tc2", "tc3"], ["5", "9", "9"], [debt_uuid(g, 10), debt_uuid(g, 11), debt_uuid(g, 12)])
+    return a, b, c
+
+
+@pytest.mark.asyncio
+async def test_a_later_equal_amount_candidate_replaces_an_earlier_one_at_the_cutoff(db_session) -> None:
+    a, b, c = _g_tie_at_cutoff()
+    eq = await seed_graph(db_session, "PZT", a + b + c)
+    ident = {k: tuple(sorted(str(e.debt_id) for e in cyc)) for k, cyc in (("a", a), ("b", b), ("c", c))}
+    # Controls: all three tie on amount; C has the smallest identity; C's start edge is the lowest-amount start.
+    assert ident["c"] < ident["b"] < ident["a"]
+    assert min(Decimal(e.amount) for e in c) == min(Decimal(e.amount) for e in a) == Decimal(5)
+
+    got = await detect_dfs(db_session, eq.id, 3, limit=2)
+    assert [x.identity for x in got] == [ident["c"], ident["b"]], (
+        "the equal-amount triangle reached last must displace the worse of the two found first"
+    )
+    assert _as_result(got) == _cycle_oracle(a + b + c, _eligible_oracle(a + b + c, None), 3, 2)
+
+
+@pytest.mark.asyncio
+async def test_the_wrapper_keeps_the_public_find_cycles_form(db_session) -> None:
+    from app.utils.exceptions import GeoException
+    from scripts.p020_experimental_detectors import find_cycles_single_dfs
+
+    edges, _ = _g_t1210_tri_quad()
+    await seed_graph(db_session, "PZF", edges)
+    cycles = await find_cycles_single_dfs(db_session, "PZF", 6)
+    assert sorted(len(c) for c in cycles) == [3, 4]
+    edge = cycles[0][0]
+    assert set(edge) == {"debt_id", "debtor", "creditor", "amount"}
+    assert edge["debtor"] in {"t1", "t2", "t3", "q1", "q2", "q3", "q4"} and edge["amount"] == "10.00"
+    assert str(uuid.UUID(edge["debt_id"])) == edge["debt_id"]
+    assert await find_cycles_single_dfs(db_session, "PZF", 6, allowed_participant_pids=set()) == []
+    assert await find_cycles_single_dfs(db_session, "PZF", 6, allowed_participant_pids={"nobody"}) == []
+    assert len(await find_cycles_single_dfs(db_session, "PZF", 6, allowed_participant_pids={"t1", "t2", "t3"})) == 1
+    assert await find_cycles_single_dfs(db_session, "PZF", 2) == []
+    with pytest.raises(GeoException):
+        await find_cycles_single_dfs(db_session, "NOPE", 6)

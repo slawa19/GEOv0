@@ -320,3 +320,86 @@ async def render_for_find_cycles(session, cycles: Sequence[Cycle], *, precision:
         ]
         for c in cycles
     ]
+
+
+# ===================================================================== the stage-3 wrapper, as it will be called
+
+
+async def find_cycles_single_dfs(
+    session,
+    equivalent_code: str,
+    max_depth: int = 6,
+    *,
+    allowed_participant_pids: AbstractSet[str] | None = None,
+) -> list[list[dict]]:
+    """`ClearingService.find_cycles` rebuilt on the single DFS: the complete public call stage 3 will make.
+
+    What it adds over `detect_dfs` is exactly the work the public method does around the detector, so the
+    measurement times the replacement rather than the bare function (review P2-1): the equivalent is read by
+    code (a missing one raises `GeoException`, as today); the perimeter keeps its three states (`None` - not
+    applied; empty - nobody; pids that resolve to nobody - nobody); the answer is rendered in the wire form
+    (pids, canonical UUID strings, money at the equivalent's precision). A depth below 3 has no cycle to
+    return (the simulator's ladder may ask for `min(depth, 4)` with a configured depth of 1 or 2).
+    No fallback and no partial answer: a failure of any step raises.
+    """
+
+    from app.utils.exceptions import GeoException
+
+    row = (
+        await session.execute(
+            text("SELECT id, precision FROM equivalents WHERE code = :code"), {"code": equivalent_code}
+        )
+    ).first()
+    if row is None:
+        raise GeoException(f"Equivalent {equivalent_code} not found")
+    equivalent_id, precision = row.id, int(row.precision)
+    if int(max_depth) < 3:
+        return []
+    scope_ids = None
+    if allowed_participant_pids is not None:
+        if not allowed_participant_pids:
+            return []
+        scope_ids = {
+            r.id
+            for r in await session.execute(
+                text("SELECT id FROM participants WHERE pid = ANY(CAST(:pids AS text[]))"),
+                {"pids": sorted(allowed_participant_pids)},
+            )
+        }
+        if not scope_ids:
+            return []
+    cycles = await detect_dfs(session, equivalent_id, int(max_depth), scope_ids=scope_ids, limit=DEFAULT_LIMIT)
+    return await render_for_find_cycles(session, cycles, precision=precision)
+
+
+def single_dfs_service_class():
+    """A `ClearingService` whose detection and `auto_clear` follow the stage-3 contract.
+
+    `find_cycles` is `find_cycles_single_dfs`; `auto_clear` asks the FULL requested depth on every detection,
+    tries candidates in order until the first success (through the production `_auto_clear_try_candidates`,
+    so `execute_clearing` and the error envelope are today's), drops the list and detects again; the
+    101-success ceiling is kept. Execution is untouched production code. Built lazily so that importing this
+    module does not import the application.
+    """
+
+    from app.core.clearing.service import ClearingService
+
+    class SingleDfsClearingService(ClearingService):
+        async def find_cycles(self, equivalent_code, max_depth=6, *, allowed_participant_pids=None):
+            return await find_cycles_single_dfs(
+                self.session, equivalent_code, max_depth, allowed_participant_pids=allowed_participant_pids
+            )
+
+        async def auto_clear(self, equivalent_code, *, max_depth=6):
+            count = 0
+            while True:
+                cycles = await self._auto_clear_find(equivalent_code, max_depth, count)
+                if not cycles:
+                    return count
+                if not await self._auto_clear_try_candidates(cycles, equivalent_code, count):
+                    return count
+                count += 1
+                if count > 100:
+                    return count
+
+    return SingleDfsClearingService
