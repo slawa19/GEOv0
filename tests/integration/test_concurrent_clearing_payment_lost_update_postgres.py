@@ -1,4 +1,14 @@
-"""PostgreSQL clearing/payment contention on one trustline."""
+"""PostgreSQL clearing/payment contention on one trustline.
+
+019 stage 5 (`T1909`, `KEEP-EQUIVALENT-LOCK`): the clearing holds the ONE equivalent lock EXCLUSIVELY on its
+pinned connection, a payment takes it SHARED. The schedule parks the clearing inside its money transaction
+(`_cycle_respects_auto_clearing`, cycle rows `FOR UPDATE`, nothing mutated - the removed reservation scan
+was the park point until then) and asserts that the payment's shared acquisition is queued behind that
+exact backend (`pg_locks`: `ShareLock` waiting, `ExclusiveLock` held, `pg_blocking_pids`). The effects
+asserted afterwards - final debts and versions, one clearing, the audits, one publication - are the
+contract and are unchanged. The lock-free variant of the same race (40001 and the retry of both owners)
+is `tests/integration/test_p019_t1908_lock_removal_experiments_postgres.py`.
+"""
 
 from __future__ import annotations
 
@@ -20,7 +30,10 @@ from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - 
 
 
 
-async def _wait_for_matching_advisory_wait(observer, *, waiter_pid: int) -> bool:
+async def _wait_for_matching_advisory_wait(
+    observer, *, waiter_pid: int, holder_pid: int
+) -> bool:
+    """`waiter_pid` is queued SHARED on the advisory lock `holder_pid` holds EXCLUSIVELY, and blocked by it."""
     try:
         async with asyncio.timeout(5.0):
             while True:
@@ -35,13 +48,17 @@ async def _wait_for_matching_advisory_wait(observer, *, waiter_pid: int) -> bool
                         "AND waiter.objid IS NOT DISTINCT FROM holder.objid "
                         "AND waiter.objsubid IS NOT DISTINCT FROM holder.objsubid "
                         "WHERE holder.locktype = 'advisory' AND holder.granted "
+                        "AND holder.mode = 'ExclusiveLock' AND holder.pid = :holder_pid "
                         "AND holder.database = (SELECT oid FROM pg_database "
                         "WHERE datname = current_database()) "
-                        "AND waiter.pid = :waiter_pid AND NOT waiter.granted"
+                        "AND waiter.pid = :waiter_pid AND NOT waiter.granted "
+                        "AND waiter.mode = 'ShareLock' "
+                        "AND :holder_pid = ANY(pg_blocking_pids(waiter.pid))"
                         ")"
                     ),
-                    {"waiter_pid": waiter_pid},
+                    {"waiter_pid": waiter_pid, "holder_pid": holder_pid},
                 )
+                await observer.rollback()
                 if waiting:
                     return True
     except asyncio.TimeoutError:
@@ -68,7 +85,6 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
     from app.db.models.debt import Debt
     from app.db.models.equivalent import Equivalent
     from app.db.models.participant import Participant
-    from app.db.models.prepare_lock import PrepareLock
     from app.db.models.transaction import Transaction
     from app.db.models.trustline import TrustLine
     from app.utils.event_bus import event_bus
@@ -92,7 +108,7 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
 
     monkeypatch.setattr(event_bus, "publish", _capture_publish)
 
-    clearing_lock_scan_done = asyncio.Event()
+    clearing_parked = asyncio.Event()
     release_clearing = asyncio.Event()
     clearing_task = None
     payment_task = None
@@ -190,12 +206,12 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
             ).scalar_one()
             assert str(isolation).lower() == "serializable"  # 019 stage 5 (T1907): the only supported level
         # THE PAYMENT'S OWN TIMEOUTS ARE WIDENED, and the reason is a measurement rather than a
-        # convenience. This test deliberately parks the clearing inside its owner lock and asserts
-        # that the payment WAITS and then succeeds, so the payment's budget has to cover the whole
-        # hold plus the whole clearing. THE ONE THAT ACTUALLY FIRED IS `PREPARE_TIMEOUT_SECONDS`,
-        # measured by widening the others first and watching it fail unchanged: the payment's PREPARE
-        # is what waits on the clearing's owner lock, and its budget is 3 seconds
-        # (`app/config.py`). The clearing's locked section grew when the debt journal was armed
+        # convenience. This test deliberately parks the clearing inside its exclusive equivalent lock
+        # and asserts that the payment WAITS and then succeeds, so the payment's budget has to cover
+        # the whole hold plus the whole clearing. THE ONE THAT ACTUALLY FIRED (measured before 019)
+        # WAS `PREPARE_TIMEOUT_SECONDS`, measured by widening the others first and watching it fail
+        # unchanged: the payment's binding phase is what waits on the clearing's lock, and its
+        # budget was 3 seconds (`app/config.py`). The clearing's locked section grew when the debt journal was armed
         # (step 4 slice C) - an envelope at open, per-edge entries at each flush, and a
         # per-equivalent completion row, all inside it - and three seconds stopped covering it. The
         # commit and total budgets are widened alongside so that the next thing to go over is a real
@@ -213,42 +229,49 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
 
         clearing_service = ClearingService(clearing_session)
         payment_service = PaymentService(payment_session)
-        original_locked_pairs = clearing_service._locked_pairs_for_equivalent
-        original_payment_owner = MoneyBoundary._acquire_equivalent_owner_locks
+        original_policy = clearing_service._cycle_respects_auto_clearing
+        original_payment_shared = MoneyBoundary._acquire_shared_equivalent_locks_in_order
         payment_owner_attempted = asyncio.Event()
         payment_owner_pid: int | None = None
+        clearing_work_pid: int | None = None
 
-        async def _hold_after_lock_scan(current_equivalent_id):
-            locked_pairs = await original_locked_pairs(current_equivalent_id)
-            assert locked_pairs == set()
-            clearing_lock_scan_done.set()
+        async def _park_inside_the_money_transaction(debts):
+            # The execution's call, with the cycle rows it holds `FOR UPDATE`; `self.session` is the
+            # clearing's pinned work session, which holds the exclusive equivalent lock.
+            nonlocal clearing_work_pid
+            clearing_work_pid = int(
+                await clearing_service.session.scalar(text("SELECT pg_backend_pid()"))
+            )
+            allowed = await original_policy(debts)
+            clearing_parked.set()
             await release_clearing.wait()
-            return locked_pairs
+            return allowed
 
         monkeypatch.setattr(
             clearing_service,
-            "_locked_pairs_for_equivalent",
-            _hold_after_lock_scan,
+            "_cycle_respects_auto_clearing",
+            _park_inside_the_money_transaction,
         )
 
-        async def _observe_payment_owner(boundary, equivalent_ids):
+        async def _observe_payment_shared_lock(boundary, equivalent_ids):
             nonlocal payment_owner_pid
             payment_owner_pid = int(
                 await boundary.session.scalar(text("SELECT pg_backend_pid()"))
             )
             payment_owner_attempted.set()
-            return await original_payment_owner(boundary, equivalent_ids)
+            return await original_payment_shared(boundary, equivalent_ids)
 
         monkeypatch.setattr(
             MoneyBoundary,
-            "_acquire_equivalent_owner_locks",
-            _observe_payment_owner,
+            "_acquire_shared_equivalent_locks_in_order",
+            _observe_payment_shared_lock,
         )
 
         clearing_task = asyncio.create_task(
             clearing_service.execute_clearing_with_amount(cycle)
         )
-        await asyncio.wait_for(clearing_lock_scan_done.wait(), timeout=5.0)
+        await asyncio.wait_for(clearing_parked.wait(), timeout=5.0)
+        assert clearing_work_pid is not None
 
         payment_task = asyncio.create_task(
             payment_service.create_payment_internal(
@@ -264,6 +287,7 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
         payment_waiting = await _wait_for_matching_advisory_wait(
             observer_session,
             waiter_pid=payment_owner_pid,
+            holder_pid=clearing_work_pid,
         )
         payment_error = (
             payment_task.exception()
@@ -271,7 +295,7 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
             else None
         )
         assert payment_waiting, (
-            "payment did not wait on clearing owner: "
+            "payment's shared lock did not wait on the clearing's exclusive lock: "
             f"done={payment_task.done()} error={payment_error!r}"
         )
         assert not clearing_task.done()
@@ -279,7 +303,7 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
 
         release_clearing.set()
         # THE BUDGET, not the behaviour. Fifteen seconds stopped being enough when the debt journal
-        # was armed (step 4 slice C): the payment waits on the clearing's owner lock for the whole
+        # was armed (step 4 slice C): the payment waits on the clearing's exclusive lock for the whole
         # clearing, and both units of work now carry an envelope of their own. The payment's own
         # timeouts (`COMMIT_TIMEOUT_SECONDS`, `PAYMENT_TOTAL_TIMEOUT_SECONDS`) are what this test
         # leaves in place to decide the outcome; this number only has to be larger than them, or the
@@ -324,11 +348,6 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
                     )
                 )
             ).all()
-            remaining_locks = (
-                await verify.scalars(
-                    select(PrepareLock).where(PrepareLock.tx_id == payment_tx_id)
-                )
-            ).all()
             audits = (
                 await verify.scalars(
                     select(IntegrityAuditLog).where(
@@ -347,7 +366,6 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
                 debt_ids[2]: (Decimal("10.00000000"), 2),
             }
             assert trust_limits == [Decimal("200.00000000")] * 3
-            assert remaining_locks == []
             assert {
                 (audit.operation_type, audit.tx_id, audit.verification_passed)
                 for audit in audits

@@ -39,6 +39,23 @@ WRITTEN DOWN BEFORE THE COMPARISON (spec, item 5 and Verification plan: the crit
   (min-max) of clearing attempts, clearing conflicts, time to the clearing's outcome, payment throughput
   and payment conflicts.
 
+`T1909` (019 stage 5 part b, 2026-09-25) - THE ACCEPTANCE OF THE RETAINED LOCK, predeclared by the fourth
+consultation (precondition 2) and written here BEFORE the run:
+
+* THE VARIANT MEASURED is the code that ships after `T1909`: ONE equivalent lock, SHARED for payments,
+  EXCLUSIVE (session level, taken before the snapshot) for the clearing, with the `23505` debt-pair retry
+  installed (`is_debt_pair_collision`). `locks_on` below IS that variant (no switch); the budget is the
+  shipped one - 3 attempts, the payment's backoff - and no clearing-specific setting was added.
+* BATCHES. `ACCEPTANCE_BATCHES` (4) batches of `RUNS` (15) runs at the six-payer load, each configuration.
+  CRITERION: at least 90 % of the runs clear in EVERY batch of `locks_on` (14 of 15); a batch below it
+  FAILS THE VARIANT, and batches are never pooled.
+* ALSO REQUIRED: no payment ending otherwise than committed or the typed retryable conflict (so no
+  unexpected `E010`), the executable candidate (no-load control), clearing attempts observed in every
+  run, producer progress in every run, the positive control SEEN to starve (re-run: `CONTROL_BATCHES` x
+  `CONTROL_RUNS`). Reported beside the success: payments/s, clearing latency, payment latency (median and
+  p95 of `pay()` wall time), attempts and conflicts. Everything is recorded before anything is asserted.
+* `locks_off` stays as the comparison (4 x 15) - recorded, not asserted.
+
 Order of the owner-lock queue by itself proves nothing (spec): a transaction that lost a conflict releases
 its locks and retries - so the probe measures outcomes (cleared or exhausted), not queue order.
 """
@@ -76,11 +93,14 @@ pytestmark = [pytest.mark.slow]
 # The load and the run count can be raised for a heavier measurement without editing the file.
 WORKERS = int(os.environ.get("P019_STARVATION_WORKERS", "6"))
 WARMUP_S = 0.4
-RUNS = int(os.environ.get("P019_STARVATION_RUNS", "7"))
+RUNS = int(os.environ.get("P019_STARVATION_RUNS", "15"))
 CONTROL_RUNS = 5
 GAP_S = 0.15
 NO_STARVATION_SHARE = 0.9
 CONTROL_MAX_SHARE = 0.1
+#: `T1909` acceptance (predeclared, see the module docstring): batches per configuration.
+ACCEPTANCE_BATCHES = int(os.environ.get("P019_STARVATION_BATCHES", "4"))
+CONTROL_BATCHES = ACCEPTANCE_BATCHES
 
 
 @pytest_asyncio.fixture
@@ -107,6 +127,7 @@ class Run:
     payment_retries: int = 0
     payments_other: list[str] = field(default_factory=list)
     window_s: float = 0.0
+    payment_latencies_s: list[float] = field(default_factory=list)
 
     @property
     def throughput(self) -> float:
@@ -212,8 +233,10 @@ async def _one_run(stand, counts, *, with_stream: bool) -> Run:
             request = PaymentCreateRequest(
                 tx_id=str(uuid.uuid4()), to=receiver.pid, equivalent=eq.code, amount="1.00", signature="__internal__"
             )
+            began = time.monotonic()
             try:
                 result = await PaymentService.pay(stand, sender.id, request, require_signature=False)
+                run.payment_latencies_s.append(time.monotonic() - began)
                 if result.status == "COMMITTED":
                     run.payments_committed += 1
                 else:
@@ -275,7 +298,19 @@ def _summary(name: str, runs: list[Run]) -> dict:
         "payment_retries": spread([r.payment_retries for r in runs]),
         "payments_conflicted": spread([r.payments_conflicted for r in runs]),
     }
-    _record({**summary, "each_run": [asdict(r) for r in runs]})
+    latencies = sorted(x for r in runs for x in r.payment_latencies_s)
+    if latencies:
+        summary["payment_latency_s"] = {
+            "median": round(statistics.median(latencies), 4),
+            "p95": round(latencies[min(len(latencies) - 1, int(0.95 * len(latencies)))], 4),
+            "n": len(latencies),
+        }
+    each = []
+    for r in runs:
+        row = asdict(r)
+        row.pop("payment_latencies_s")
+        each.append(row)
+    _record({**summary, "each_run": each})
     return summary
 
 
@@ -303,47 +338,63 @@ async def test_d_clearing_starvation_probe(stand, monkeypatch) -> None:
     assert no_load.outcome == "cleared" and no_load.cleared == Decimal("100.00000000"), no_load
     assert no_load.clearing_attempts == 1 and no_load.clearing_conflicts == 0, no_load
 
-    results: dict[str, dict] = {}
+    results: dict[str, list[dict]] = {}
     all_runs: dict[str, list[Run]] = {}
+    switch_calls: dict[str, int] = {}
     configurations = [
-        ("positive_control_locks_off_gap", True, GAP_S, CONTROL_RUNS),
-        ("locks_on", False, 0.0, RUNS),
-        ("locks_off", True, 0.0, RUNS),
+        ("positive_control_locks_off_gap", True, GAP_S, CONTROL_RUNS, CONTROL_BATCHES),
+        ("locks_on", False, 0.0, RUNS, ACCEPTANCE_BATCHES),
+        ("locks_off", True, 0.0, RUNS, ACCEPTANCE_BATCHES),
     ]
-    for name, locks_off, gap_s, runs_n in configurations:
-        with monkeypatch.context() as patch:
-            if locks_off:
-                switch = switch_money_boundary_locks_off(patch)
-            counts = _instrument(patch, gap_s=gap_s)
-            runs = [await _one_run(stand, counts, with_stream=True) for _ in range(runs_n)]
-            if locks_off:
-                assert switch.total > 0, "the lock switch was never on the measured path"
-        results[name] = _summary(name, runs)
-        all_runs[name] = runs
+    for name, locks_off, gap_s, runs_n, batches in configurations:
+        results[name] = []
+        all_runs[name] = []
+        for batch in range(batches):
+            with monkeypatch.context() as patch:
+                if locks_off:
+                    switch = switch_money_boundary_locks_off(patch)
+                counts = _instrument(patch, gap_s=gap_s)
+                runs = [await _one_run(stand, counts, with_stream=True) for _ in range(runs_n)]
+                if locks_off:
+                    switch_calls[name] = switch_calls.get(name, 0) + switch.total
+            results[name].append(_summary(f"{name}#batch{batch + 1}", runs))
+            all_runs[name].extend(runs)
 
-    # Every configuration is recorded before anything is asserted, so one failing producer does not hide
-    # the numbers of the others.
+    # THE VERDICT LINE IS RECORDED BEFORE ANY ASSERTION, so a failure never hides the numbers.
+    def batch_verdict(summary: dict) -> str:
+        passed = summary["cleared"] >= NO_STARVATION_SHARE * summary["runs"]
+        return f"{summary['cleared']}/{summary['runs']} {'PASS' if passed else 'FAIL'}"
+
+    _record(
+        {
+            "verdict": {name: [batch_verdict(one) for one in batches] for name, batches in results.items()},
+            "load": {"workers": WORKERS, "warmup_s": WARMUP_S, "runs_per_batch": RUNS,
+                     "batches": ACCEPTANCE_BATCHES, "control_runs_per_batch": CONTROL_RUNS, "gap_s": GAP_S},
+        }
+    )
+
+    # Now the assertions. The stand first: the switch on its path, producer progress, the positive control.
+    for name in ("positive_control_locks_off_gap", "locks_off"):
+        assert switch_calls.get(name, 0) > 0, f"the lock switch was never on the measured path of {name}"
+
     for runs in all_runs.values():
         _assert_the_producer_progressed(runs)
     control = results["positive_control_locks_off_gap"]
-    assert control["cleared"] <= CONTROL_MAX_SHARE * control["runs"] and control["exhausted"] >= 1, (
+    control_cleared = sum(one["cleared"] for one in control)
+    control_runs = sum(one["runs"] for one in control)
+    control_exhausted = sum(one["exhausted"] for one in control)
+    assert control_cleared <= CONTROL_MAX_SHARE * control_runs and control_exhausted >= 1, (
         f"POSITIVE CONTROL FAILED: the deliberately starving configuration was not seen to starve - the "
-        f"stand cannot detect starvation, and the comparison below means nothing: {control}"
+        f"stand cannot detect starvation, and the acceptance below means nothing: {control}"
     )
+    for r in all_runs["locks_on"]:
+        assert r.clearing_attempts >= 1, f"no clearing attempt was observed: {r}"
     for name in ("locks_on", "locks_off"):
-        assert results[name]["other_outcomes"] == [], results[name]
-    # The verdict per configuration is recorded, not asserted: this is an experiment (spec, T1908).
-    _record(
-        {
-            "verdict": {
-                name: (
-                    "no starvation under this load"
-                    if results[name]["cleared"] >= NO_STARVATION_SHARE * results[name]["runs"]
-                    else "STARVES under this load"
-                )
-                for name in ("locks_on", "locks_off")
-            },
-            "load": {"workers": WORKERS, "warmup_s": WARMUP_S, "runs": RUNS, "control_runs": CONTROL_RUNS,
-                     "gap_s": GAP_S},
-        }
+        for one in results[name]:
+            assert one["other_outcomes"] == [], one
+    # THE ACCEPTANCE (`T1909`, precondition 2): EVERY batch of the retained variant, never pooled.
+    verdicts = [batch_verdict(one) for one in results["locks_on"]]
+    assert all(v.endswith("PASS") for v in verdicts), (
+        f"THE RETAINED-LOCK VARIANT FAILED ITS PREDECLARED CRITERION (>= 90 % cleared in every batch): "
+        f"{verdicts}. Stop: do not relax or pool the criterion."
     )

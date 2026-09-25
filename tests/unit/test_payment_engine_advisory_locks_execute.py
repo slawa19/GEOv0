@@ -1,25 +1,36 @@
-"""The lock primitives of `MoneyBoundary` as they execute, and the order the payment's binding phase takes them.
+"""The lock primitives of `MoneyBoundary` as they execute, and where the payment's binding phase takes its lock.
 
-019 STAGE 4 (`T1906`; manifest `t1901-manifest.md` 5.1). `PaymentEngine` is deleted. The tests of the
-primitives themselves (pair, transaction and owner keys; the one decreasing budget) were already on
-`MoneyBoundary` since stage 2 and stay until stage 5 removes the locks. DROPPED with the engine, each
-checking a removed contract:
+019 STAGE 5 (`T1909`, decision `KEEP-EQUIVALENT-LOCK` of the fourth consultation, 2026-09-25). ONE advisory
+identity per equivalent remains, in two modes; the statements each primitive sends are pinned here on a
+recording session:
 
-* `test_tx_preflight_acquires_every_persisted_equivalent_before_tx_lock`,
-  `test_abort_preflight_does_not_invent_owner_for_empty_or_malformed_locks` - the owner preflight derived
-  from PERSISTED reservations of an engine transition; no transition reads reservations any more;
-* `test_abort_reacquires_preheld_tx_lock_only_after_outer_rollback_retry` - the engine abort's lock
-  re-acquisition across its own unit-of-work retry; the retry owner is `pay()` on a fresh transaction;
-* `test_persisted_prepare_lock_parser_and_keys_share_validated_flows`,
-  `test_persisted_prepare_lock_parser_fails_closed` - the parser of persisted reservation effects;
-* `test_commit_acquires_keys_derived_from_loaded_prepare_locks` - the engine commit's owner -> tx -> pair
-  order derived from loaded reservations: its order SURVIVES, on the declared routes, in
-  `test_the_binding_phase_takes_the_pair_locks_after_owner_and_tx_and_before_capacity` below.
+* SHARED, transaction level - `_acquire_shared_equivalent_locks_in_order`: one
+  `pg_advisory_xact_lock_shared(:namespace, :key)` per UNIQUE equivalent, in SORTED key order, each preceded
+  by the remaining budget as `SET LOCAL lock_timeout` (one decreasing budget per `MoneyBoundary`);
+* SHARED, staged entry - `acquire_shared_equivalent_locks`: reads `lock_timeout`, takes the set as above and
+  restores the caller's `lock_timeout` for the rest of the caller's transaction;
+* EXCLUSIVE, session level - `acquire_exclusive_equivalent_session_lock` (`pg_advisory_lock`, the clearing
+  only) and `release_exclusive_equivalent_session_lock` (`pg_advisory_unlock`, whose answer is returned).
 
-`test_all_payment_transitions_acquire_owner_before_tx_and_first_tx_read` (four engine transitions, a
-flagged assertion: "owner before any row") is REWRITTEN IN PLACE for the one payment path that is left,
-`PaymentService._bind_payment`; the real races of the same contract are
-`tests/integration/test_p019_owner_before_row_races_postgres.py`.
+What these do NOT show - that the modes really exclude or admit each other in PostgreSQL - is the real
+concurrency of `tests/integration/test_p019_equivalent_lock_modes_postgres.py`.
+
+DROPPED at stage 5, each with its removed contract (the primitives no longer exist):
+
+* `test_acquire_segment_advisory_locks_executes_pg_advisory_xact_lock_for_each_unique_segment`,
+  `test_acquire_segment_advisory_lock_keys_deduplicates_and_sorts_globally` - the pair locks;
+* `test_tx_lock_key_is_stable_and_uses_domain_separate_from_segment_keys` - the transaction lock and its
+  namespace;
+* `test_the_binding_phase_takes_the_pair_locks_after_owner_and_tx_and_before_capacity` - the pair locks'
+  place in the binding phase; what is left of its order (the lock before the participant lookup and the
+  capacity reads) is `test_the_binding_phase_takes_the_shared_equivalent_lock_before_the_first_row_read`.
+
+REWRITTEN IN PLACE: the owner-lock dedupe/sort/namespace test (now the shared mode, `_EQUIVALENT_OWNER_LOCK_NAMESPACE`
+is the one namespace left), the one-decreasing-budget test (it ran over pair keys; now over two equivalents),
+and the binding-phase order (owner -> tx -> row is now shared -> row).
+
+(Stage 4 history: the engine's transitions and persisted-reservation parsers were dropped with
+`PaymentEngine`, see `specs/019-payment-one-transaction/spec.md`, stage 4 changelog.)
 """
 
 import uuid
@@ -28,7 +39,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.core.money_boundary import MoneyBoundary
+from app.core.money_boundary import _EQUIVALENT_OWNER_LOCK_NAMESPACE, MoneyBoundary
 from app.core.payments.service import PaymentService
 
 
@@ -41,83 +52,34 @@ class _Bind:
 
 
 class _Session:
+    """Records every statement; `scalar` answers from `scalars` in order."""
+
     bind = _Bind()
 
-    def __init__(self):
+    def __init__(self, scalars=()):
         self.executed = []
+        self._scalars = list(scalars)
 
     async def execute(self, stmt, params=None):
         self.executed.append((str(stmt), dict(params or {})))
 
+    async def scalar(self, stmt, params=None):
+        self.executed.append((str(stmt), dict(params or {})))
+        return self._scalars.pop(0)
 
-@pytest.mark.asyncio
-async def test_acquire_segment_advisory_locks_executes_pg_advisory_xact_lock_for_each_unique_segment():
-    session = _Session()
-    engine = MoneyBoundary(session)
 
-    eq = uuid.uuid4()
-    a, b, c, d = uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
-
-    participant_map = {"A": a, "B": b, "C": c, "D": d}
-
-    routes = [
-        (["A", "B", "D"], Decimal("5")),
-        (["A", "C", "D"], Decimal("5")),
-    ]
-
-    await engine._acquire_segment_advisory_locks(
-        equivalent_id=eq,
-        routes=routes,
-        participant_map=participant_map,
-    )
-
-    # The remaining transaction budget is applied before every unique lock.
-    assert len(session.executed) == 8
-    timeout_calls = session.executed[0::2]
-    lock_calls = session.executed[1::2]
-    assert all("SET LOCAL lock_timeout" in sql for sql, _params in timeout_calls)
-    assert all("pg_advisory_xact_lock" in sql for sql, _params in lock_calls)
-    assert all("key" in params for _sql, params in lock_calls)
+def _lock_statements(executed):
+    return [(sql, params) for sql, params in executed if "pg_advisory" in sql]
 
 
 @pytest.mark.asyncio
-async def test_acquire_segment_advisory_lock_keys_deduplicates_and_sorts_globally():
-    session = _Session()
-    engine = MoneyBoundary(session)
+async def test_shared_equivalent_locks_are_deduplicated_sorted_and_in_the_one_namespace():
+    """One shared transaction-level lock per UNIQUE equivalent, sorted by key, each after its timeout.
 
-    await engine._acquire_segment_advisory_lock_keys([9, -4, 9, 2, -4])
+    RED if a key is taken twice, out of order (two staged batches over {a, b} and {b, a} would then be
+    able to interleave with a clearing's exclusive request into a deadlock), in another mode or namespace.
+    """
 
-    assert all(
-        "SET LOCAL lock_timeout" in sql
-        for sql, _params in session.executed[0::2]
-    )
-    assert [params["key"] for _sql, params in session.executed[1::2]] == [-4, 2, 9]
-
-
-@pytest.mark.asyncio
-async def test_tx_lock_key_is_stable_and_uses_domain_separate_from_segment_keys():
-    session = _Session()
-    engine = MoneyBoundary(session)
-    tx_id = str(uuid.uuid4())
-
-    assert engine._tx_lock_key(tx_id) == engine._tx_lock_key(tx_id)
-    assert -(2**31) <= engine._tx_lock_key(tx_id) < 2**31
-
-    await engine._acquire_tx_advisory_lock(tx_id)
-    await engine._acquire_segment_advisory_lock_keys([17])
-
-    tx_sql, tx_params = session.executed[1]
-    segment_sql, segment_params = session.executed[3]
-    assert "SET LOCAL lock_timeout" in session.executed[0][0]
-    assert "SET LOCAL lock_timeout" in session.executed[2][0]
-    assert "pg_advisory_xact_lock" in tx_sql
-    assert set(tx_params) == {"namespace", "key"}
-    assert "pg_advisory_xact_lock" in segment_sql
-    assert segment_params == {"key": 17}
-
-
-@pytest.mark.asyncio
-async def test_equivalent_owner_locks_are_deduplicated_sorted_and_domain_separated():
     session = _Session()
     engine = MoneyBoundary(session)
     equivalent_a = uuid.uuid4()
@@ -129,20 +91,74 @@ async def test_equivalent_owner_locks_are_deduplicated_sorted_and_domain_separat
     assert key_a != key_b
     assert -(2**31) <= key_a < 2**31
 
-    await engine._acquire_equivalent_owner_locks(
-        [equivalent_b, equivalent_a, equivalent_b]
-    )
-    await engine._acquire_tx_advisory_lock("tx-owner-domain")
+    await engine._acquire_shared_equivalent_locks_in_order([equivalent_b, equivalent_a, equivalent_b])
 
-    owner_calls = session.executed[1:4:2]
-    tx_call = session.executed[5]
-    assert [params["key"] for _sql, params in owner_calls] == sorted({key_a, key_b})
-    assert len({params["namespace"] for _sql, params in owner_calls}) == 1
-    assert owner_calls[0][1]["namespace"] != tx_call[1]["namespace"]
+    assert len(session.executed) == 4, session.executed
+    assert all("SET LOCAL lock_timeout" in sql for sql, _params in session.executed[0::2])
+    lock_calls = session.executed[1::2]
+    assert all("pg_advisory_xact_lock_shared(:namespace, :key)" in sql for sql, _params in lock_calls)
+    assert [params["key"] for _sql, params in lock_calls] == sorted({key_a, key_b})
+    assert {params["namespace"] for _sql, params in lock_calls} == {_EQUIVALENT_OWNER_LOCK_NAMESPACE}
 
 
 @pytest.mark.asyncio
-async def test_segment_lock_timeout_uses_one_decreasing_commit_budget(
+async def test_the_staged_entry_takes_the_shared_set_and_restores_the_callers_lock_timeout():
+    """`acquire_shared_equivalent_locks`: `SHOW lock_timeout`, the shared set, then the caller's value back.
+
+    The lock budget is a `SET LOCAL`, which would otherwise outlive the lock and become the timeout policy
+    of every later statement of the caller's (the tick's, the inject's) transaction. RED if the restore is
+    missing, restores another value, or comes before the locks.
+    """
+
+    session = _Session(scalars=["1234ms"])
+    engine = MoneyBoundary(session)
+    equivalent_a, equivalent_b = uuid.uuid4(), uuid.uuid4()
+
+    await engine.acquire_shared_equivalent_locks([equivalent_a, equivalent_b])
+
+    sqls = [sql for sql, _params in session.executed]
+    assert sqls[0] == "SHOW lock_timeout", sqls
+    locks = _lock_statements(session.executed)
+    assert [params["key"] for _sql, params in locks] == sorted(
+        {engine._equivalent_owner_lock_key(equivalent_a), engine._equivalent_owner_lock_key(equivalent_b)}
+    )
+    assert all("pg_advisory_xact_lock_shared" in sql for sql, _params in locks)
+    restore_sql, restore_params = session.executed[-1]
+    assert "set_config('lock_timeout', :lock_timeout, true)" in restore_sql, session.executed
+    assert restore_params == {"lock_timeout": "1234ms"}
+    assert sqls.index(restore_sql) > max(sqls.index(sql) for sql, _params in locks)
+
+
+@pytest.mark.asyncio
+async def test_the_exclusive_session_lock_and_its_release_use_the_same_identity():
+    """The clearing's lock: `pg_advisory_lock` (SESSION level, exclusive) after its timeout; the release is
+    `pg_advisory_unlock` on the same namespace and key and returns PostgreSQL's answer - False is what makes
+    the clearing invalidate its connection instead of pooling it with the lock."""
+
+    equivalent = uuid.uuid4()
+    session = _Session(scalars=[True, False])
+    engine = MoneyBoundary(session)
+    identity = {
+        "namespace": _EQUIVALENT_OWNER_LOCK_NAMESPACE,
+        "key": engine._equivalent_owner_lock_key(equivalent),
+    }
+
+    await engine.acquire_exclusive_equivalent_session_lock(equivalent)
+    assert "SET LOCAL lock_timeout" in session.executed[0][0]
+    lock_sql, lock_params = session.executed[1]
+    assert "pg_advisory_lock(:namespace, :key)" in lock_sql
+    assert "xact" not in lock_sql and "shared" not in lock_sql
+    assert lock_params == identity
+
+    assert await engine.release_exclusive_equivalent_session_lock(equivalent) is True
+    assert await engine.release_exclusive_equivalent_session_lock(equivalent) is False
+    unlocks = session.executed[2:]
+    assert all("pg_advisory_unlock(:namespace, :key)" in sql for sql, _params in unlocks), unlocks
+    assert all(params == identity for _sql, params in unlocks)
+
+
+@pytest.mark.asyncio
+async def test_advisory_lock_timeout_uses_one_decreasing_commit_budget(
     monkeypatch,
 ):
     from app.config import settings
@@ -159,7 +175,7 @@ async def test_segment_lock_timeout_uses_one_decreasing_commit_budget(
     session = _Session()
     engine = MoneyBoundary(session)
 
-    await engine._acquire_segment_advisory_lock_keys([1, 2])
+    await engine._acquire_shared_equivalent_locks_in_order([uuid.uuid4(), uuid.uuid4()])
 
     assert "5000ms" in session.executed[0][0]
     assert "4000ms" in session.executed[2][0]
@@ -180,81 +196,43 @@ class _StopAtRead(RuntimeError):
     pass
 
 
-class _Rows:
-    def __init__(self, rows):
-        self.rows = rows
-
-    def all(self):
-        return self.rows
-
-
 class _BindingSession:
-    """Records each statement of the binding phase as a row read; answers the participant read, then stops."""
+    """Records each statement of the binding phase as a row read, and stops at the first."""
 
     bind = None
 
-    def __init__(self, events, participants):
+    def __init__(self, events):
         self.events = events
-        self.participants = participants
-        self.reads = 0
 
     async def execute(self, _stmt, params=None):
-        self.reads += 1
         self.events.append("row-read")
-        if self.reads == 1 and self.participants is not None:
-            return _Rows(self.participants)
         raise _StopAtRead
 
 
-def _binding_service(monkeypatch, events, participants=None) -> PaymentService:
-    service = PaymentService(_BindingSession(events, participants))
-    boundary = service._boundary
-    assert type(boundary) is MoneyBoundary
-
-    async def _owner(equivalent_ids):
-        events.append("owner-key")
-
-    async def _tx(_tx_id):
-        events.append("tx-key")
-
-    async def _pairs(*, equivalent_id, routes, participant_map):
-        events.append("pair-keys")
-
-    monkeypatch.setattr(boundary, "_acquire_equivalent_owner_locks", _owner)
-    monkeypatch.setattr(boundary, "_acquire_tx_advisory_lock", _tx)
-    monkeypatch.setattr(boundary, "_acquire_segment_advisory_locks", _pairs)
-    return service
-
-
 @pytest.mark.asyncio
-async def test_the_binding_phase_acquires_owner_before_tx_and_first_row_read(monkeypatch):
-    """"Owner before any row": the equivalent owner lock, then the transaction lock, then the first read.
+async def test_the_binding_phase_takes_the_shared_equivalent_lock_before_the_first_row_read(monkeypatch):
+    """"The lock before any row": the payment's shared equivalent lock, for its equivalent, then the first read.
 
-    Until 019 stage 4 this was `test_all_payment_transitions_acquire_owner_before_tx_and_first_tx_read`
-    over the engine's `prepare`, `prepare_routes`, `commit` and `abort`; the payment's one binding phase
-    is what is left of all four. RED if a row is read before the owner lock, or the transaction lock is
-    taken first.
+    Until 019 stage 5 this was owner -> tx -> row; the transaction lock is gone. RED if a row is read before
+    the lock (a clearing holding the exclusive lock would then not keep this payment's reads out), or if the
+    lock is taken for another equivalent.
     """
 
     events: list[str] = []
-    service = _binding_service(monkeypatch, events)
+    service = PaymentService(_BindingSession(events))
+    boundary = service._boundary
+    assert type(boundary) is MoneyBoundary
+    equivalent_id = uuid.uuid4()
+    locked: list[list[uuid.UUID]] = []
+
+    async def _shared(equivalent_ids):
+        locked.append(list(equivalent_ids))
+        events.append("shared-equivalent-lock")
+
+    monkeypatch.setattr(boundary, "_acquire_shared_equivalent_locks_in_order", _shared)
 
     with pytest.raises(_StopAtRead):
-        await service._bind_payment("tx", [(["A", "B"], Decimal("1"))], uuid.uuid4())
+        await service._bind_payment("tx", [(["A", "B"], Decimal("1"))], equivalent_id)
 
-    assert events == ["owner-key", "tx-key", "row-read"]
-
-
-@pytest.mark.asyncio
-async def test_the_binding_phase_takes_the_pair_locks_after_owner_and_tx_and_before_capacity(monkeypatch):
-    """The pair locks come after the owner and transaction locks and the participant lookup their keys
-    need, and before the first capacity read (the trust line of the first segment). RED if the capacity
-    is read before the pair locks."""
-
-    events: list[str] = []
-    service = _binding_service(monkeypatch, events, participants=[(uuid.uuid4(), "A"), (uuid.uuid4(), "B")])
-
-    with pytest.raises(_StopAtRead):
-        await service._bind_payment("tx", [(["A", "B"], Decimal("1"))], uuid.uuid4())
-
-    assert events == ["owner-key", "tx-key", "row-read", "pair-keys", "row-read"]
+    assert events == ["shared-equivalent-lock", "row-read"]
+    assert locked == [[equivalent_id]]

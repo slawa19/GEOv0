@@ -130,7 +130,7 @@ async def test_a_stopping_writer_waits_for_a_clearing_that_already_read_the_flag
 
     # Controls: the switch was on the clearing's path, the clearing was parked after its stop read and
     # then ran to its commit, and the writer itself succeeded.
-    assert switch.calls["session_owner"] >= 1, switch.calls
+    assert switch.calls["exclusive_session"] >= 1, switch.calls
     assert len(clearing_pid) == 1
     assert amount == Decimal("30.00000000"), "premise: the clearing did not run to its commit"
     if writer == "patch_deactivate":

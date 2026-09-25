@@ -256,7 +256,8 @@ async def test_the_tick_commits_its_parent_session_before_clearing(
     # early commit REMOVED, on SQLite at 8e55455 and on PostgreSQL alike (measured by that very
     # mutation). The invariant is still the tick's: whatever the parent holds when clearing is due
     # must be released first. So the stand puts the parent in Bug X's shape - an open transaction
-    # holding the equivalent's owner lock, which clearing takes too - and the early commit is what
+    # holding the equivalent lock (shared since 019 stage 5, `T1909`), which blocks the clearing's exclusive
+    # one - and the early commit is what
     # must release it. Without that commit clearing waits on the parent and never clears.
     from sqlalchemy import select as _select
 
@@ -271,7 +272,7 @@ async def test_the_tick_commits_its_parent_session_before_clearing(
     original_maybe_run_clearing = coordinator.maybe_run_clearing
 
     async def _parent_holds_the_owner_lock_then_clears(**kwargs):
-        await MoneyBoundary(kwargs["session"])._acquire_equivalent_owner_locks({equivalent_id})
+        await MoneyBoundary(kwargs["session"])._acquire_shared_equivalent_locks_in_order({equivalent_id})
         parent_held_the_owner_lock.append(1)
         return await original_maybe_run_clearing(**kwargs)
 

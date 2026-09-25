@@ -511,8 +511,8 @@ async def test_step5b_p_an_unwidened_version_check_refuses_the_payment_and_the_s
     error, not a 4xx rejection - rolls back, finds the transaction still PREPARED, ABORTS it and raises a
     5xx `GeoException` caused by the 23514. No debt moved, the prepare locks are released, no envelope.
     (Since 019 stage 4 there is no `PREPARED` and no engine: the refusal rolls the payment operation back
-    and `pay()` records the admitted request `ABORTED`. The `_prepare_locks == 0` read below is a
-    SYNTHETIC COMPATIBILITY check until stage 5 removes the table - the payment path writes no reservation,
+    and `pay()` records the admitted request `ABORTED`. The `_prepare_locks == 0` read that stood here
+    went with the table at stage 5, `T1909` - the payment path wrote no reservation since stage 4,
     so it can only be zero.)
     (The simulator's real payments phase calls the same service with `commit=False` and records a
     non-4xx failure as `INTERNAL_ERROR`, not `REJECTED` - read in `real_payments_executor.py`, not run here.)
@@ -523,7 +523,6 @@ async def test_step5b_p_an_unwidened_version_check_refuses_the_payment_and_the_s
         _OPENING,
         _debts,
         _forget_the_route_cache,
-        _prepare_locks,
         _seed,
         _transactions,
     )
@@ -564,7 +563,6 @@ async def test_step5b_p_an_unwidened_version_check_refuses_the_payment_and_the_s
         states = await _transactions(sessions, world)
         assert list(states.values()) == ["ABORTED"], states
         assert await _debts(sessions, world) == {(world.sender.pid, world.receiver.pid): _OPENING}
-        assert await _prepare_locks(sessions, world) == 0
         async with factory() as session:
             envelopes = (
                 await session.execute(

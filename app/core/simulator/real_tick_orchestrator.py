@@ -301,7 +301,7 @@ class RealTickOrchestrator:
             # SERIALIZABLE waiter can still receive 40001 here - and now there is something
             # that restarts at this outer owner, which is what the old comment promised and
             # nothing delivered: `app/core/simulator/money_replay.py`.
-            await owner_service.acquire_staged_equivalent_owner_locks(equivalents)
+            await owner_service.acquire_shared_equivalent_locks(equivalents)
 
             return await rr._real_tick_payments_coordinator.run_payments_phase(
                 session=session,

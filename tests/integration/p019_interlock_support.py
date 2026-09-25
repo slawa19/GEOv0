@@ -17,9 +17,9 @@ EXPORTS AND THEIR IMPORTERS (`git grep -n p019_interlock_support -- tests/`):
 * `_use_serializable(session)` - pins the session's transaction to SERIALIZABLE, asserts it, and
   returns the backend pid.
 * `_no_advisory_lock_is_held(caplog)` - no advisory lock is held on THIS database (T1537: `pg_locks`
-  is the whole server), and clearing's cleanup did not invalidate its connection. Becomes true by
-  construction when stage 5 removes the advisory locks - that stage replaces or deletes it (manifest
-  section 3, "Стадия 5 обязана также").
+  is the whole server), and clearing's cleanup did not invalidate its connection. Still meaningful after
+  stage 5 (`T1909`, `KEEP-EQUIVALENT-LOCK`): the clearing keeps its session-level exclusive lock on a
+  pinned connection, so a leaked lock remains possible and this still reads for it.
 """
 
 from __future__ import annotations

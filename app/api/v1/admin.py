@@ -1214,14 +1214,13 @@ async def admin_update_equivalent(
                 },
             )
 
-    if body.is_active is False:
-        # T1544: the operator's stop must have an observable cutoff. Clearing holds this owner lock
-        # from its fresh-snapshot read of `is_active` through its commit, so taking it here and
-        # holding it through the commit below leaves two outcomes only: the clearing commits before
-        # this PATCH returns, or this PATCH commits first and the clearing refuses. Payments are
-        # bound to the same cutoff by their commit-time `FOR SHARE` read instead (see
-        # `MoneyBoundary.refuse_inactive_equivalents`). Same call as the delete path below.
-        await MoneyBoundary(db).acquire_staged_equivalent_owner_locks([eq.id])
+    # T1544: the operator's stop has an observable cutoff through the ROW: every money writer - payment,
+    # tick, inject and, since 019 stage 5 (`T1907`), the clearing in every attempt - reads this row
+    # `FOR SHARE` and holds it through its commit (`MoneyBoundary.refuse_inactive_equivalents`), so the
+    # `UPDATE` below waits for a writer that has already read `active`, and a writer that reads after it
+    # committed meets 40001 and refuses on its retry. Two outcomes only: the writer commits before this
+    # PATCH returns, or this PATCH commits first and the writer refuses. No advisory lock since 019 stage 5
+    # (`T1909`): the row lock is the whole protocol.
 
     before = {
         "symbol": eq.symbol,
@@ -1335,8 +1334,8 @@ async def admin_clear_equivalent_integrity_hold(
     if eq is None:
         raise NotFoundException(f"Equivalent {code} not found")
 
-    await MoneyBoundary(db).acquire_staged_equivalent_owner_locks([eq.id])
-
+    # The row lock below is the whole protocol with money writers (019 stage 5, `T1909`): they hold this
+    # row `FOR SHARE` through their commits.
     try:
         hold_result_id = (
             await db.execute(
@@ -1441,11 +1440,11 @@ async def admin_delete_equivalent(
     if eq is None:
         raise NotFoundException(f"Equivalent {normalized} not found")
 
-    # T1524: take the equivalent's owner lock BEFORE the authoritative checks and hold it through the
-    # delete. Payments and clearing hold the same lock for their whole commit, so neither can create
-    # a debt between the usage count below and the commit. The RESTRICT foreign key remains the
-    # guarantee; the lock only narrows the window.
-    await MoneyBoundary(db).acquire_staged_equivalent_owner_locks([eq.id])
+    # T1524: the RESTRICT foreign key is the guarantee that no debt outlives its equivalent. Since 019
+    # stage 5 (`T1909`) no advisory lock narrows the window: the `DELETE` of the row waits for every money
+    # writer holding it `FOR SHARE`, and a writer that reads it afterwards meets 40001 and, on its retry,
+    # an equivalent that no longer exists. (A deletable equivalent is already inactive, so writers refuse
+    # it anyway.)
 
     if eq.is_active:
         raise ConflictException("Deactivate equivalent before delete")

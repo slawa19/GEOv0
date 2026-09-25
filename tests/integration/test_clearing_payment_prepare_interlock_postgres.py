@@ -5,6 +5,14 @@ payment is one transaction through `PaymentService`. The clearing-first schedule
 reverse payment against the clearing; the payment-first schedule of an uncommitted `prepare` holding a
 reservation is gone with its contract (see the note where it stood). The seed and the session helpers
 live in `tests/integration/p019_interlock_support.py`, which other race suites import too.
+
+019 STAGE 5 (`T1909`, decision `KEEP-EQUIVALENT-LOCK`). The equivalent lock stays as ONE identity in two
+modes: payments (and staged phases, the inject) take it SHARED, the clearing takes it EXCLUSIVE on its
+pinned connection before its snapshot. There are no reservations, transaction or pair locks. The
+schedules below therefore park the clearing at a point that still exists inside its money transaction
+(`_cycle_respects_auto_clearing`, after the cycle rows are locked `FOR UPDATE` and before any mutation)
+instead of the removed reservation scan, and the waits they assert are the shared/exclusive waits of the
+one lock, read from `pg_locks` with their MODE and their blocker (`pg_blocking_pids`).
 """
 
 from __future__ import annotations
@@ -43,23 +51,43 @@ def _require_postgres(db_session) -> None:
         pytest.skip("Postgres-only: clearing/payment advisory interlock")
 
 
-async def _wait_for_advisory_wait(observer, *, backend_pid: int) -> bool:
+async def _wait_for_advisory_waiter(
+    observer,
+    *,
+    holder_pid: int,
+    mode: str,
+    waiter_pid: int | None = None,
+) -> int | None:
+    """The pid of a backend of THIS database queued on an advisory lock in `mode` behind `holder_pid`.
+
+    `mode` is `pg_locks.mode`: `ShareLock` for `pg_advisory_xact_lock_shared` (a payment), `ExclusiveLock`
+    for `pg_advisory_lock` (the clearing). The blocker is read from `pg_blocking_pids`, so "some advisory
+    waiter exists" is not enough: the waiter must wait on the named holder, in the named mode.
+    """
+
     try:
         async with asyncio.timeout(3.0):
             while True:
-                waiting = await observer.scalar(
-                    text(
-                        "SELECT EXISTS ("
-                        "SELECT 1 FROM pg_locks "
-                        "WHERE pid = :pid AND locktype = 'advisory' AND NOT granted"
-                        ")"
-                    ),
-                    {"pid": backend_pid},
-                )
-                if waiting:
-                    return True
+                rows = (
+                    await observer.execute(
+                        text(
+                            "SELECT l.pid FROM pg_locks l "
+                            "WHERE l.locktype = 'advisory' AND NOT l.granted AND l.mode = :mode "
+                            "AND l.database = (SELECT oid FROM pg_database "
+                            "WHERE datname = current_database()) "
+                            "AND :holder = ANY(pg_blocking_pids(l.pid))"
+                        ),
+                        {"mode": mode, "holder": holder_pid},
+                    )
+                ).scalars().all()
+                await observer.rollback()
+                matching = [
+                    int(pid) for pid in rows if waiter_pid is None or int(pid) == waiter_pid
+                ]
+                if matching:
+                    return matching[0]
     except asyncio.TimeoutError:
-        return False
+        return None
 
 
 async def _wait_for_exact_blocker(
@@ -133,11 +161,19 @@ async def test_no_advisory_lock_check_ignores_other_databases_postgres(db_sessio
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("tier_on_a_clone")
-async def test_clearing_owner_blocks_a_reverse_payment_after_empty_snapshot_postgres(
+async def test_clearing_exclusive_lock_blocks_a_reverse_payment_postgres(
     db_session,
     monkeypatch,
 ):
-    """Clearing-first: a reverse payment cannot cross an already-empty conflict decision.
+    """Clearing-first: a reverse payment queues behind the clearing's EXCLUSIVE equivalent lock.
+
+    019 STAGE 5 (`T1909`): renamed from `..._owner_blocks_a_reverse_payment_after_empty_snapshot_...`.
+    The clearing is parked inside its money transaction (cycle rows `FOR UPDATE`, before any mutation);
+    the payment's SHARED acquisition must be queued behind the clearing's pinned connection - `pg_locks`
+    `advisory`, mode `ShareLock`, not granted, blocked by that backend. Then the clearing commits 30 and
+    the payment commits after it; the money and audit assertions below are unchanged.
+
+    The history of this schedule, kept for its reasoning:
 
     UNTIL 019 STAGE 4 this was `test_clearing_owner_blocks_new_reverse_prepare_after_empty_snapshot_postgres`
     and raced `PaymentEngine.prepare` (a durable `PREPARED` plus a reservation row) against the clearing.
@@ -148,8 +184,8 @@ async def test_clearing_owner_blocks_a_reverse_payment_after_empty_snapshot_post
     clearing's writes (a serialization failure `pay()` retries; not asserted, it is the product's to
     choose). Expected state: the clearing's cycle cleared, the payment's 5.00 netted on A -> B after it.
 
-    RED if the payment took no owner lock or clearing released it before its commit: the payment would
-    not queue behind the clearing.
+    RED if the payment took no shared lock, or the clearing held its lock in a mode that admits a shared
+    holder, or released it before its commit: the payment would not queue behind the clearing.
     """
 
     _require_postgres(db_session)
@@ -179,8 +215,9 @@ async def test_clearing_owner_blocks_a_reverse_payment_after_empty_snapshot_post
     observer_session = None
     clearing_task = None
     payment_task = None
-    empty_snapshot_seen = asyncio.Event()
+    clearing_parked = asyncio.Event()
     release_clearing = asyncio.Event()
+    clearing_work_pid: int | None = None
 
     try:
         clearing_session = TestingSessionLocal()
@@ -190,29 +227,47 @@ async def test_clearing_owner_blocks_a_reverse_payment_after_empty_snapshot_post
         payment_pid = await _use_serializable(payment_session)
 
         clearing_service = ClearingService(clearing_session)
-        original_locked_pairs = clearing_service._locked_pairs_for_equivalent
+        original_policy = clearing_service._cycle_respects_auto_clearing
 
-        async def _pause_after_empty_snapshot(equivalent_id):
+        async def _park_inside_the_money_transaction(debts):
+            # Called by the execution with the cycle rows it holds `FOR UPDATE`; `self.session` is the
+            # clearing's pinned work session at this point.
+            nonlocal clearing_work_pid
             isolation = await clearing_service.session.scalar(
                 text("SHOW transaction_isolation")
             )
             assert str(isolation).lower() == "serializable"
-            locked_pairs = await original_locked_pairs(equivalent_id)
-            assert locked_pairs == set()
-            empty_snapshot_seen.set()
+            clearing_work_pid = int(
+                await clearing_service.session.scalar(text("SELECT pg_backend_pid()"))
+            )
+            allowed = await original_policy(debts)
+            clearing_parked.set()
             await release_clearing.wait()
-            return locked_pairs
+            return allowed
 
         monkeypatch.setattr(
             clearing_service,
-            "_locked_pairs_for_equivalent",
-            _pause_after_empty_snapshot,
+            "_cycle_respects_auto_clearing",
+            _park_inside_the_money_transaction,
         )
         clearing_task = asyncio.create_task(
             clearing_service.execute_clearing_with_amount(seed["cycle"]),
-            name="clearing-first-owner",
+            name="clearing-first-exclusive",
         )
-        await asyncio.wait_for(empty_snapshot_seen.wait(), timeout=5.0)
+        await asyncio.wait_for(clearing_parked.wait(), timeout=5.0)
+        assert clearing_work_pid is not None
+        # PREMISE: the parked clearing holds the equivalent lock EXCLUSIVELY on its pinned connection.
+        held_modes = (
+            await observer_session.execute(
+                text(
+                    "SELECT mode FROM pg_locks "
+                    "WHERE pid = :pid AND locktype = 'advisory' AND granted"
+                ),
+                {"pid": clearing_work_pid},
+            )
+        ).scalars().all()
+        await observer_session.rollback()
+        assert held_modes == ["ExclusiveLock"], held_modes
 
         payment_task = asyncio.create_task(
             PaymentService(payment_session).create_payment_internal(
@@ -224,11 +279,17 @@ async def test_clearing_owner_blocks_a_reverse_payment_after_empty_snapshot_post
             ),
             name="reverse-payment-waiter",
         )
-        assert await _wait_for_advisory_wait(
-            observer_session,
-            backend_pid=payment_pid,
-        ), "the reverse payment crossed clearing's empty conflict decision"
+        assert (
+            await _wait_for_advisory_waiter(
+                observer_session,
+                holder_pid=clearing_work_pid,
+                mode="ShareLock",
+                waiter_pid=payment_pid,
+            )
+            == payment_pid
+        ), "the reverse payment's shared lock did not queue behind the clearing's exclusive lock"
         assert not payment_task.done()
+        assert not clearing_task.done()
 
         release_clearing.set()
         cleared_amount, payment_result = await asyncio.wait_for(
@@ -329,17 +390,18 @@ async def test_clearing_owner_blocks_a_reverse_payment_after_empty_snapshot_post
             )
 
 
-# `test_uncommitted_reverse_prepare_blocks_clearing_until_visible_postgres` (payment-first) is DROPPED by
+# `test_uncommitted_reverse_prepare_blocks_clearing_until_visible_postgres` (payment-first) was DROPPED by
 # 019 stage 4 (manifest `t1901-manifest.md` 5.3, rows :520-521, :537-538, :596-606): it held an
 # UNCOMMITTED `PaymentEngine.prepare(commit=False)` and asserted that clearing, after waiting, skipped
 # the cycle because a committed reservation became visible, and that the payment stayed `PREPARED` with
 # one reservation. Both contracts are removed - there is no `prepare` and no durable reservation a
 # payment could leave. Its remaining premise - clearing waits on a payment's owner lock, `:529-533` - is
-# a stage-5 contract with a named replacement (`T1908`: payment-first/clearing interleaving under
-# SERIALIZABLE, 40001 + retry counters). UNTIL THEN THE PAYMENT-FIRST ORDER AGAINST CLEARING HAS NO
-# SCHEDULE OF ITS OWN in the tier; the payment-first order against the admin paths is raced by
+# a stage-5 contract. Since stage 5 (`T1909`) the payment-first order against clearing is held by
+# `test_interlock_timeout_rolls_back_work_and_releases_owner_postgres` below: a SHARED holder makes the
+# clearing's EXCLUSIVE acquisition wait (asserted in `pg_locks` with its mode and blocker) and time out;
+# the payment-first order against the admin paths is raced by
 # `tests/integration/test_p019_owner_before_row_races_postgres.py`, and payment and clearing on one
-# trust line (clearing first) by `test_concurrent_clearing_payment_lost_update_postgres.py`.
+# trust line by `test_concurrent_clearing_payment_lost_update_postgres.py`.
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("tier_on_a_clone")
@@ -516,17 +578,19 @@ async def test_cancellation_during_interlocked_work_rolls_back_before_unlock_pos
     work_entered = asyncio.Event()
     never_release = asyncio.Event()
     service = ClearingService(clearing_session)
-    original_locked_pairs = service._locked_pairs_for_equivalent
+    original_policy = service._cycle_respects_auto_clearing
 
-    async def _pause_inside_money_uow(equivalent_id):
-        locked_pairs = await original_locked_pairs(equivalent_id)
+    # 019 stage 5 (`T1909`): the pause point moved from the removed reservation scan to the policy read
+    # of the execution - still inside the money transaction, cycle rows `FOR UPDATE`, nothing mutated.
+    async def _pause_inside_money_uow(debts):
+        allowed = await original_policy(debts)
         work_entered.set()
         await never_release.wait()
-        return locked_pairs
+        return allowed
 
     monkeypatch.setattr(
         service,
-        "_locked_pairs_for_equivalent",
+        "_cycle_respects_auto_clearing",
         _pause_inside_money_uow,
     )
     try:
@@ -574,7 +638,7 @@ async def test_cancellation_during_interlocked_work_rolls_back_before_unlock_pos
         await _no_advisory_lock_is_held(caplog)
         probe_session = TestingSessionLocal()
         await asyncio.wait_for(
-            MoneyBoundary(probe_session).acquire_staged_equivalent_owner_locks(
+            MoneyBoundary(probe_session).acquire_shared_equivalent_locks(
                 [seed["equivalent_id"]]
             ),
             timeout=_PROBE_TIMEOUT,
@@ -699,7 +763,7 @@ async def test_cancellation_during_interlock_release_preserves_durable_amount_po
         await _no_advisory_lock_is_held(caplog)
         probe_session = TestingSessionLocal()
         await asyncio.wait_for(
-            MoneyBoundary(probe_session).acquire_staged_equivalent_owner_locks(
+            MoneyBoundary(probe_session).acquire_shared_equivalent_locks(
                 [seed["equivalent_id"]]
             ),
             timeout=_PROBE_TIMEOUT,
@@ -723,31 +787,83 @@ async def test_interlock_timeout_rolls_back_work_and_releases_owner_postgres(
     monkeypatch,
     caplog,
 ):
+    """Payment-first: a SHARED holder makes the clearing's EXCLUSIVE acquisition wait and time out.
+
+    019 stage 5 (`T1909`): the holder takes the lock the way a payment, a staged phase or an inject does
+    (shared). The clearing's wait is asserted in `pg_locks` - `advisory`, mode `ExclusiveLock`, not
+    granted, blocked by the holder - and the timeout must be THAT wait (SQLSTATE `55P03`, lock_timeout),
+    not the connection checkout that shares its budget. Nothing is cleared; after the holder ends, no
+    advisory lock is left and the same cycle clears 30.
+    """
+
     _require_postgres(db_session)
 
     from app.config import settings
     from app.core.clearing.service import ClearingService
     from app.core.money_boundary import MoneyBoundary
+    from app.db.models.debt import Debt
+    from app.db.models.transaction import Transaction
     from app.utils.exceptions import TimeoutException
     from tests.conftest import TestingSessionLocal
 
     seed = await _seed_interlock_case()
     holder_session = TestingSessionLocal()
     clearing_session = TestingSessionLocal()
+    observer_session = TestingSessionLocal()
     retry_session = None
+    clearing_task = None
     original_commit_timeout = settings.COMMIT_TIMEOUT_SECONDS
     original_total_timeout = settings.PAYMENT_TOTAL_TIMEOUT_SECONDS
-    monkeypatch.setattr(settings, "COMMIT_TIMEOUT_SECONDS", 0.05)
-    monkeypatch.setattr(settings, "PAYMENT_TOTAL_TIMEOUT_SECONDS", 0.05)
+    # Long enough for a fresh NullPool checkout and for the observer to see the wait (the checkout
+    # shares this budget, and at 0.05 s it could time out before the lock was ever requested); short
+    # enough for a test. The lock budget is `min(COMMIT_TIMEOUT_SECONDS, PAYMENT_TOTAL_TIMEOUT_SECONDS)`.
+    monkeypatch.setattr(settings, "COMMIT_TIMEOUT_SECONDS", 2.0)
+    monkeypatch.setattr(settings, "PAYMENT_TOTAL_TIMEOUT_SECONDS", 2.0)
     try:
-        await MoneyBoundary(holder_session).acquire_staged_equivalent_owner_locks(
+        holder_pid = await _use_serializable(holder_session)
+        await MoneyBoundary(holder_session).acquire_shared_equivalent_locks(
             [seed["equivalent_id"]]
         )
-        with pytest.raises(TimeoutException):
-            await ClearingService(clearing_session).execute_clearing_with_amount(
+        clearing_task = asyncio.create_task(
+            ClearingService(clearing_session).execute_clearing_with_amount(
                 seed["cycle"]
             )
+        )
+        assert (
+            await _wait_for_advisory_waiter(
+                observer_session, holder_pid=holder_pid, mode="ExclusiveLock"
+            )
+            is not None
+        ), "the clearing's exclusive acquisition did not queue behind the shared holder"
+        with pytest.raises(TimeoutException) as timed_out:
+            await asyncio.wait_for(clearing_task, timeout=10.0)
+        assert "55P03" in ClearingService._postgres_error_codes(
+            timed_out.value.__cause__
+        ), f"the timeout was not the lock wait: {timed_out.value.__cause__!r}"
         assert not clearing_session.in_transaction()
+        async with TestingSessionLocal() as verify:
+            cleared = (
+                await verify.scalars(
+                    select(Transaction).where(
+                        Transaction.type == "CLEARING",
+                        Transaction.initiator_id.in_(seed["participant_ids"]),
+                    )
+                )
+            ).all()
+            untouched = {
+                debt.id: (debt.amount, debt.version)
+                for debt in (
+                    await verify.scalars(
+                        select(Debt).where(Debt.equivalent_id == seed["equivalent_id"])
+                    )
+                ).all()
+            }
+        assert cleared == []
+        assert untouched == {
+            seed["debt_ids"][0]: (Decimal("100.00000000"), 1),
+            seed["debt_ids"][1]: (Decimal("30.00000000"), 1),
+            seed["debt_ids"][2]: (Decimal("40.00000000"), 1),
+        }
 
         await holder_session.rollback()
         monkeypatch.setattr(
@@ -770,7 +886,10 @@ async def test_interlock_timeout_rolls_back_work_and_releases_owner_postgres(
         )
         assert amount == Decimal("30.00000000")
     finally:
-        for session in (holder_session, clearing_session, retry_session):
+        if clearing_task is not None and not clearing_task.done():
+            clearing_task.cancel()
+            await asyncio.wait([clearing_task], timeout=2.0)
+        for session in (holder_session, clearing_session, observer_session, retry_session):
             if session is not None:
                 await session.rollback()
                 await session.close()

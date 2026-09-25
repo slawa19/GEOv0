@@ -624,7 +624,7 @@ class RealRunnerImpl:
                 await MoneyBoundary.require_serializable(session, writer="inject")
                 # The owner locks open the transaction the event is staged and committed in. A
                 # fresh boundary per attempt: its advisory-lock deadline is per unit of work.
-                await MoneyBoundary(session).acquire_staged_equivalent_owner_locks(lock_ids)
+                await MoneyBoundary(session).acquire_shared_equivalent_locks(lock_ids)
                 intent_equivalent_ids = await self._resolve_inject_debt_equivalent_ids(
                     session, scenario=scenario, event=event
                 )
@@ -733,8 +733,10 @@ class RealRunnerImpl:
                     if transient_retries_left <= 0:
                         raise
                     transient_retries_left -= 1
-                    # No sleep: the retry opens with the owner locks, so it waits behind any
-                    # lock-holding writer it conflicted with instead of racing it again.
+                    # No sleep: the conflict is reported once the other writer has committed (or
+                    # rolled back), so the retry's fresh snapshot already sees its outcome. Since 019
+                    # stage 5 the equivalent lock is SHARED here and does not order the inject behind
+                    # a payment; a clearing still holds it exclusively and is waited for.
                     self._logger.warning(
                         "simulator.real.inject.transient_retry event_index=%s stage=staging",
                         event_index,

@@ -4,9 +4,10 @@ Written 2026-09-11 for the SQLite tier, whose test engine did not set `PRAGMA fo
 the application engine did: every foreign key was unenforced there, and a CASCADE that destroys a
 debt, a RESTRICT that protects one and a reference to a row that does not exist all looked identical.
 Since 017 the tier runs only on PostgreSQL, where enforcement is not a switch, but the property the
-module holds - the schema the tier tests against refuses a dangling reference, including the bare
-`PrepareLock.tx_id` foreign key that carries no ORM insert ordering - is still the one the money
-tests rely on. Renamed from `test_sqlite_test_engine_enforces_foreign_keys.py` in 017 stage 3, slice S3.
+module holds - the schema the tier tests against refuses a dangling reference, including a bare
+foreign key that carries no ORM insert ordering - is still the one the money tests rely on. The bare
+example was `PrepareLock.tx_id` until programme 019 stage 5 (T1909) removed reservations; it is now
+`debt_operations.tx_id -> transactions.tx_id` (RESTRICT), a Core table with no ORM relationship. Renamed from `test_sqlite_test_engine_enforces_foreign_keys.py` in 017 stage 3, slice S3.
 
 It is written as a counter-proof rather than as a reading of the setting: it performs an insert that
 violates a foreign key and requires the database to refuse.
@@ -15,12 +16,11 @@ violates a foreign key and requires the database to refuse.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
-
 import pytest
+from sqlalchemy import insert, select
 from sqlalchemy.exc import IntegrityError
 
-from app.db.models.prepare_lock import PrepareLock
+from app.db.journal_tables import debt_operations
 from app.db.models.transaction import Transaction
 
 
@@ -55,18 +55,30 @@ async def test_a_dangling_reference_is_refused(db_session) -> None:
 async def test_a_child_written_before_its_parent_is_refused(db_session) -> None:
     """The second failure form found when enforcement was switched on.
 
-    `PrepareLock.tx_id` is a bare ForeignKey with no ORM relationship, so SQLAlchemy gives it no
-    insert ordering relative to `transactions`. A lock whose transaction does not exist yet must be
-    refused rather than stored.
+    `debt_operations.tx_id` is a bare ForeignKey on a Core table with no ORM relationship, so
+    nothing orders its insert relative to `transactions`. An envelope whose transaction does not
+    exist yet must be refused rather than stored.
+
+    The envelope is otherwise valid (OPEN, a kind that owns a tx_id, a 64-character digest), so the
+    only thing that can refuse it is the foreign key; the SQLSTATE and the message pin that.
     """
-    db_session.add(
-        PrepareLock(
-            tx_id=str(uuid.uuid4()),  # no such transaction
-            participant_id=uuid.uuid4(),
-            effects={"flows": []},
-            expires_at=datetime.now(timezone.utc) + timedelta(minutes=1),
+    missing_tx_id = str(uuid.uuid4())  # no such transaction
+    assert (
+        await db_session.execute(select(Transaction.id).where(Transaction.tx_id == missing_tx_id))
+    ).first() is None
+
+    with pytest.raises(IntegrityError) as refused:
+        await db_session.execute(
+            insert(debt_operations).values(
+                id=uuid.uuid4(),
+                kind="PAYMENT",
+                identity=missing_tx_id,
+                tx_id=missing_tx_id,
+                intent={},
+                intent_digest="0" * 64,
+                state="OPEN",
+            )
         )
-    )
-    with pytest.raises(IntegrityError):
-        await db_session.flush()
     await db_session.rollback()
+    assert getattr(refused.value.orig, "sqlstate", None) == "23503", refused.value
+    assert 'is not present in table "transactions"' in str(refused.value), refused.value

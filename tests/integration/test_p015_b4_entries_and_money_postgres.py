@@ -73,7 +73,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
-from app.db.models.prepare_lock import PrepareLock
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 from tests.debt_setup import debt_fixture_setup
@@ -588,16 +587,8 @@ async def test_c8_a_real_40001_leaves_one_envelope_and_only_the_successful_attem
                 )
             )
         ).scalars().all()
-        # SYNTHETIC COMPATIBILITY until 019 stage 5 removes the table (manifest `T1901` 5.4, row
-        # `:632`): nothing writes `prepare_locks` since stage 4, so this half can only be empty; the
-        # `transactions == []` half is the one that measures.
-        locks = (
-            await fresh.execute(
-                select(PrepareLock.tx_id).where(
-                    PrepareLock.participant_id.in_(world.participant_ids)
-                )
-            )
-        ).scalars().all()
+        # (The `prepare_locks` half of this read went with the table, 019 stage 5, `T1909`; it could
+        # only be empty since stage 4. The `transactions == []` half is the one that measures.)
 
     # NON-VACUITY, FIRST.
     assert entries is not None, missing_journal_tables(entries, ENTRIES_TABLE)
@@ -632,9 +623,9 @@ async def test_c8_a_real_40001_leaves_one_envelope_and_only_the_successful_attem
         f"session had loaded before losing the race"
     )
     assert _atom_column(entries, "delta") == [1300000000], entries
-    assert list(transactions) == [] and list(locks) == [], (
-        f"the retried operation invented payment state: transactions={list(transactions)}, "
-        f"prepare_locks={list(locks)}. A TEST_FIXTURE operation owns neither."
+    assert list(transactions) == [], (
+        f"the retried operation invented payment state: transactions={list(transactions)}. "
+        f"A TEST_FIXTURE operation owns none."
     )
     equivalents = await stored_rows(
         serializable_factory,
@@ -796,11 +787,6 @@ async def test_c8_the_payment_owners_own_retry_leaves_one_envelope_and_the_winni
         "SELECT state FROM transactions WHERE tx_id = :tx_id",
         {"tx_id": tx_id},
     )
-    surviving_locks = await stored_rows(
-        serializable_factory,
-        "SELECT id FROM prepare_locks WHERE tx_id = :tx_id",
-        {"tx_id": tx_id},
-    )
 
     # NON-VACUITY, FIRST.
     assert envelopes is not None, missing_journal_tables(envelopes, OPERATIONS_TABLE)
@@ -826,11 +812,7 @@ async def test_c8_the_payment_owners_own_retry_leaves_one_envelope_and_the_winni
         f"and silently discarded the concurrent write."
     )
     assert [row["state"] for row in tx_state or []] == ["COMMITTED"], tx_state
-    # SYNTHETIC COMPATIBILITY until 019 stage 5 removes the table (manifest row `:800`): the payment
-    # path writes no reservation since stage 4, so this can only hold.
-    assert surviving_locks == [], (
-        f"stand: the prepare locks outlived the committed payment: {surviving_locks}"
-    )
+    # (A `prepare_locks` read stood here - synthetic since stage 4; it went with the table, `T1909`.)
 
     # VERDICT.
     assert len(envelopes) == 1, (
@@ -1891,25 +1873,68 @@ async def test_c17_p_deleting_an_equivalent_whose_only_debt_was_cleared_is_refus
     )
 
 
+@pytest_asyncio.fixture
+async def row_wait_observer():
+    """`(pid, blocker_pid) -> bool`: `pid` is queued on a lock (row, tuple or transaction) `blocker_pid` holds.
+
+    Its own engine, like `observer`, so the watched sessions cannot starve it. Since 019 stage 5 (`T1909`)
+    the admin delete takes no advisory lock, so the C17 order is forced by a ROW gate and this reads the
+    actual wait from `pg_locks`/`pg_blocking_pids` - not "some advisory waiter exists".
+    """
+    from tests.conftest import TEST_DATABASE_URL
+
+    engine = create_async_engine(TEST_DATABASE_URL, pool_size=1, max_overflow=0, pool_timeout=10)
+
+    async def _queued_behind(backend_pid: int, blocker_pid: int) -> bool:
+        async with engine.connect() as connection:
+            return bool(
+                await connection.scalar(
+                    text(
+                        "SELECT EXISTS (SELECT 1 FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid "
+                        "WHERE l.pid = :pid AND NOT l.granted AND l.locktype <> 'advisory' "
+                        "AND a.wait_event_type = 'Lock' AND :blocker = ANY(pg_blocking_pids(l.pid)))"
+                    ),
+                    {"pid": backend_pid, "blocker": blocker_pid},
+                )
+            )
+
+    try:
+        yield _queued_behind
+    finally:
+        await engine.dispose()
+
+
 @pytest.mark.parametrize("order", ["payment first", "delete first"])
 @pytest.mark.asyncio
 async def test_c17_p_the_owner_lock_race_never_leaves_an_equivalent_gone_with_its_history(
-    serializable_factory, observer, order
+    serializable_factory, row_wait_observer, order
 ):
     """§10.1 case (2), API-SHAPED for the envelope, DEFECT-SHAPED for what the race really does.
 
-    THE RACE, WITH BOTH ORDERS FORCED. A payment takes the equivalent's owner lock at the start of its
-    binding phase (`PaymentService._bind_payment`; `PaymentEngine.commit` until 019 stage 4) and writes
-    its debts and its envelope under it. The admin delete takes the SAME lock (`app/api/v1/admin.py:1428`). One of them
-    therefore waits for the other, and design v2 §10.1 requires both orders to be exercised.
+    THE RACE, WITH BOTH ORDERS FORCED - BY THE ROW SINCE 019 STAGE 5 (`T1909`; manifest `T1901`, row
+    `:1997`). Until stage 5 the payment and the admin delete took the SAME equivalent owner lock and an
+    advisory gate queued them. Now the payment holds the equivalent lock SHARED and binds on the
+    equivalent ROW (`FOR SHARE`, `MoneyBoundary.refuse_inactive_equivalents`); the admin delete takes no
+    advisory lock and - with a trustline still denominated in the equivalent - refuses on its usage count
+    before its `DELETE` statement, so it takes no lock the payment could queue on either.
 
-    HOW THE ORDER IS FORCED, WITHOUT PATCHING EITHER OWNER. A third session takes the same advisory
-    lock first and holds it. The participant that must go FIRST is started and observed, in
-    `pg_locks`, actually WAITING on an advisory lock it has not been granted; only then is the second
-    started and observed waiting too; only then is the gate released. PostgreSQL grants advisory
-    locks in request order, so the observed queue IS the order - and both observations are asserted,
-    so a run in which the gate was never contended fails as a stand rather than passing as a race.
-    No sleeps, no patched methods, and neither owner knows it is in a test.
+    HOW THE ORDER IS FORCED, WITHOUT PATCHING EITHER OWNER. A third session - the gate - IS the
+    deactivation: it `UPDATE`s the equivalent row to inactive and holds that change UNCOMMITTED. The
+    payment is started and observed, in `pg_locks`, QUEUED on a row/transaction lock that the gate's
+    backend holds (`pg_blocking_pids`) - asserted, so a run in which the payment never waited fails as a
+    stand. "payment first": the gate commits, the payment completes (refused), then the delete runs on the
+    now inactive equivalent. "delete first": the delete runs to completion WHILE the payment is still
+    queued (asserted) - it still reads the equivalent ACTIVE, the deactivation being uncommitted, and
+    refuses "deactivate before delete" - then the gate commits. No sleeps, no patched owners, and neither
+    knows it is in a test.
+
+    WHY THE GATE MUST BE THE UNCOMMITTED DEACTIVATION (measured 2026-09-25, `T1909`). Until then the gate
+    was a `FOR UPDATE` of the row taken AFTER a committed deactivation. Under SERIALIZABLE the payment's
+    `FOR SHARE` of a row changed and committed after its snapshot fails with 40001 AT ONCE, without
+    queueing; only a retry on a fresh snapshot could queue, and whether the retry of
+    `create_payment_internal` (one borrowed session for every attempt) even reaches its binding depends on
+    whether its best-effort pre-check reads the stale ORM instance - observed both ways (the BACKLOG entry
+    of `T1909`). A row change still UNCOMMITTED is the one thing the first attempt's `FOR SHARE` waits on.
 
     TWO THINGS DESIGN V2 §10.1 ASKS FOR THAT THIS ROUTE CANNOT GIVE, reported rather than papered
     over:
@@ -1956,14 +1981,13 @@ async def test_c17_p_the_owner_lock_race_never_leaves_an_equivalent_gone_with_it
     survives either way.
     """
     from app.api.v1.admin import admin_delete_equivalent
-    from app.core.money_boundary import _EQUIVALENT_OWNER_LOCK_NAMESPACE, MoneyBoundary
+    from app.core.money_boundary import MoneyBoundary
     from app.core.payments.service import PaymentService
     from app.schemas.admin import AdminEquivalentDeleteRequest
     from app.utils.exceptions import ConflictException
 
     seeded = await _seed(serializable_factory)
     world = seeded.world
-    lock_key = MoneyBoundary._equivalent_owner_lock_key(world.equivalent.id)
     tx_id = await _seed_payment(serializable_factory, seeded)
 
     bound: list[int] = []
@@ -1983,14 +2007,13 @@ async def test_c17_p_the_owner_lock_race_never_leaves_an_equivalent_gone_with_it
         active_in_snapshot = await payment_session.scalar(
             select(Equivalent.is_active).where(Equivalent.id == world.equivalent.id)
         )
-        await _deactivate(serializable_factory, world)
-        admin_pid = int(await admin_session.scalar(text("SELECT pg_backend_pid()")))
-
-        # The gate: the same advisory lock, held in its own transaction, so both real owners
-        # have to queue behind it in the order they ask.
+        # The gate: the deactivation itself, held UNCOMMITTED in its own transaction; the payment's
+        # `FOR SHARE` of the equivalent row queues behind it (see the docstring).
+        gate_pid = int(await gate.scalar(text("SELECT pg_backend_pid()")))
         await gate.execute(
-            text("SELECT pg_advisory_xact_lock(:ns, :key)"),
-            {"ns": _EQUIVALENT_OWNER_LOCK_NAMESPACE, "key": lock_key},
+            Equivalent.__table__.update()
+            .where(Equivalent.id == world.equivalent.id)
+            .values(is_active=False)
         )
 
         async def _run_payment():
@@ -2018,36 +2041,31 @@ async def test_c17_p_the_owner_lock_race_never_leaves_an_equivalent_gone_with_it
                     db=admin_session,
                 )
             finally:
-                # THE REQUEST'S SESSION ENDS WHEN THE REQUEST DOES, and here that is not
-                # decoration - it is what releases the owner lock. The route raises its
-                # usage-count `ConflictException` BEFORE the `try` that rolls back
-                # (`app/api/v1/admin.py:1435-1437`), so the transaction-scoped advisory lock it
-                # took at `:1428` is still held when the exception leaves the function. In
-                # production `get_db_session` (`app/db/session.py:92-94`) closes the session as
-                # the request unwinds and the lock goes with it. Measured without this line: the
-                # payment queued behind the delete never got the lock and failed with "Payment
-                # advisory lock timed out" after its five-second budget - a stand artefact that
-                # would have read as a property failure.
+                # THE REQUEST'S SESSION ENDS WHEN THE REQUEST DOES: the route raises its usage-count
+                # `ConflictException` before any rollback of its own; in production `get_db_session`
+                # closes the session as the request unwinds.
                 await admin_session.rollback()
 
+        async def _outcome(coroutine):
+            try:
+                return await coroutine
+            except Exception as exc:  # noqa: BLE001 - compared below
+                return exc
+
+        payment_task = asyncio.create_task(_outcome(_run_payment()))
+        payment_queued = await _until(lambda: row_wait_observer(payment_pid, gate_pid))
+        delete_ran_while_payment_queued = None
         if order == "payment first":
-            first, first_pid, second, second_pid = (
-                _run_payment, payment_pid, _run_delete, admin_pid,
-            )
+            await gate.commit()
+            payment_outcome = await asyncio.wait_for(payment_task, timeout=60)
+            delete_outcome = await _outcome(_run_delete())
         else:
-            first, first_pid, second, second_pid = (
-                _run_delete, admin_pid, _run_payment, payment_pid,
+            delete_outcome = await asyncio.wait_for(_outcome(_run_delete()), timeout=60)
+            delete_ran_while_payment_queued = not payment_task.done() and await row_wait_observer(
+                payment_pid, gate_pid
             )
-
-        first_task = asyncio.create_task(first())
-        first_queued = await _until(lambda: observer(first_pid))
-        second_task = asyncio.create_task(second())
-        second_queued = await _until(lambda: observer(second_pid))
-
-        await gate.rollback()
-        outcomes = await asyncio.wait_for(
-            asyncio.gather(first_task, second_task, return_exceptions=True), timeout=60
-        )
+            await gate.commit()
+            payment_outcome = await asyncio.wait_for(payment_task, timeout=60)
     finally:
         for session in (gate, admin_session, payment_session):
             try:
@@ -2055,9 +2073,6 @@ async def test_c17_p_the_owner_lock_race_never_leaves_an_equivalent_gone_with_it
             finally:
                 await session.close()
 
-    payment_outcome, delete_outcome = (
-        outcomes if order == "payment first" else tuple(reversed(outcomes))
-    )
     envelopes = await _envelopes_with_intent(serializable_factory, tx_id=tx_id)
     entries = await stored_rows(
         serializable_factory,
@@ -2075,14 +2090,17 @@ async def test_c17_p_the_owner_lock_race_never_leaves_an_equivalent_gone_with_it
     # NON-VACUITY, FIRST.
     assert envelopes is not None, missing_journal_tables(envelopes, OPERATIONS_TABLE)
 
-    # NON-VACUITY: the race really happened in the intended order, and both participants really
-    # contended for the SAME lock. Without these two observations the gather below would be
-    # measuring whatever the scheduler happened to do.
-    assert first_queued and second_queued, (
-        f"stand: the two owners did not both queue on the equivalent owner lock before the gate "
-        f"released it (first={first_queued}, second={second_queued}); the order '{order}' was "
-        f"not forced and this run measured no race"
+    # NON-VACUITY: the payment really queued on the row gate, and in "delete first" the delete really
+    # completed while the payment was still queued. Without these the outcomes below would be measuring
+    # whatever the scheduler happened to do.
+    assert payment_queued, (
+        f"stand: the payment never queued on a row/transaction lock held by the gate (order '{order}'); "
+        f"the order was not forced and this run measured no race"
     )
+    if order == "delete first":
+        assert delete_ran_while_payment_queued, (
+            "stand: the delete did not complete while the payment was still queued on the gate"
+        )
     assert active_in_snapshot is True and len(bound) in (1, 2), (
         f"stand: the payment did not pass its stop pre-check on a snapshot older than the deactivation "
         f"and enter its binding phase (active={active_in_snapshot}, binding entries={len(bound)}), so "

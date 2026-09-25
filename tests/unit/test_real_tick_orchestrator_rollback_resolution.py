@@ -306,7 +306,7 @@ def _bind_session(monkeypatch, session: _Session) -> None:
     # explicitly. Owner locks are measured on PostgreSQL elsewhere, not by this module.
     monkeypatch.setattr(
         orchestrator_module.PaymentService,
-        "acquire_staged_equivalent_owner_locks",
+        "acquire_shared_equivalent_locks",
         _no_owner_locks,
     )
 

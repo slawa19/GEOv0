@@ -1,20 +1,29 @@
 """Step 5c on PostgreSQL: the integrity hold binds at the T1544 boundary, measured at SERIALIZABLE.
 
 Only two outcomes are allowed for money racing the reaction that sets a hold: the money commits BEFORE the
-hold's transaction commits, or the hold commits first and the money is refused. The reaction holds the
-equivalent owner lock through its commit, like the deactivating PATCH, so:
+hold's transaction commits, or the hold commits first and the money is refused. Since 019 stage 5
+(`T1909`) the reaction takes NO advisory lock: the hold is one `UPDATE` of the equivalent row, and every
+money writer - payment, tick, inject, the clearing in every attempt - reads that row `FOR SHARE` (the hold
+in the same statement as `is_active`) and holds it through its commit. So, for payment and clearing alike:
 
-| race                    | what binds it                                                                   |
-|-------------------------|---------------------------------------------------------------------------------|
-| payment commit <-> hold | `FOR SHARE` on the equivalent row at payment commit (reads the hold in the same |
-|                         | statement as `is_active`), after the owner lock, against the hold's UPDATE      |
-| clearing <-> hold       | the reaction's owner lock through its commit; clearing reads the hold in its    |
-|                         | fresh post-lock snapshot                                                        |
+* the writer has read the row: the hold's `UPDATE` queues on the WRITER'S transaction (measured in
+  `pg_locks`, `transactionid`/`tuple`, blocker named by `pg_blocking_pids`) and commits after the money;
+* the hold's `UPDATE` holds the row uncommitted: the writer's `FOR SHARE` queues on the REACTION'S
+  transaction, meets 40001 when it commits, and the writer's retry owner refuses on a fresh snapshot;
+* the writer's snapshot predates the hold but it has not read the row yet: it holds nothing the reaction
+  needs, the hold commits first, and the writer's `FOR SHARE` meets 40001 and its retry refuses.
 
-Plus the reaction's own ordering - the owner lock BEFORE the authoritative snapshot - and the admin clear
-under the same lock; and both schema construction paths with the migration's downgrade refusal. (The
-placement of the hold below the payment TTL branch was a contract of `PaymentEngine.commit` over a durable
-`PREPARED` payment; 019 stage 4 removed both - see the note where that test stood.)
+Until `T1909` the reaction held the equivalent owner lock through its commit and these races asserted "some
+backend waits on an advisory lock"; those probes are replaced by the probe of the ACTUAL wait (spec,
+"Изоляция, писатели и клиринг", item 6) plus the mechanism of the one lock order: the waiting WRITER
+already holds its equivalent advisory lock (shared for a payment, exclusive for the clearing) while it
+waits on the row, and the reaction / admin clear hold none.
+
+Plus the reaction's confirmation in its OWN snapshot (the re-run is the confirmation, not the scheduled
+verdict), the admin clear against a holder of the row, and both schema construction paths with the
+migration's downgrade refusal. (The placement of the hold below the payment TTL branch was a contract of
+`PaymentEngine.commit` over a durable `PREPARED` payment; 019 stage 4 removed both - see the note where
+that test stood.)
 
 THE STAND. The P1 stand's SERIALIZABLE engine (`factory`) - the shared test engine runs READ COMMITTED,
 where the stale-snapshot races cannot be seen. Barriers are `asyncio.Event`s; waits are observed in
@@ -24,6 +33,7 @@ where the stale-snapshot races cannot be seen. Barriers are `asyncio.Event`s; wa
 from __future__ import annotations
 
 import asyncio
+import logging
 import subprocess
 import sys
 import uuid
@@ -63,14 +73,17 @@ from tests.integration.test_p015_p1_money_replay_postgres import (  # noqa: F401
     _OPENING,
     _forget_the_route_cache,
     _debts,
-    _prepare_locks,
     _seed,
     _transactions,
     factory,
 )
 from tests.integration.test_p015_t1544_operator_stop_races_postgres import (  # noqa: F401 - fixture
     ADMIN,
-    _advisory_waiter_exists,
+    _advisory_modes,
+    _assert_row_wait,
+    _clearing_transactions,
+    _retries_on_40001,
+    _waiters_behind,
     admin_api,
 )
 from tests.ledger_corruption import corrupt
@@ -129,19 +142,37 @@ async def _hold_of(factory, equivalent_id):
         ).scalar_one()
 
 
-def _pause_after_the_hold_is_written(monkeypatch) -> tuple[asyncio.Event, asyncio.Event]:
-    """The reaction stops with the hold UPDATE executed, its owner lock held, and nothing committed."""
+def _pause_after_the_hold_is_written(monkeypatch) -> tuple[asyncio.Event, asyncio.Event, list[int]]:
+    """The reaction stops with the hold UPDATE executed (the row lock held) and nothing committed; the
+    list receives the reaction's backend pid, the blocker a waiting writer must name."""
 
     reached, release = asyncio.Event(), asyncio.Event()
+    pid: list[int] = []
     original = reconciliation._set_integrity_hold
 
     async def _set_then_wait(session, equivalent_id, result_id):
         await original(session, equivalent_id, result_id)
+        pid.append(int(await session.scalar(text("SELECT pg_backend_pid()"))))
         reached.set()
         await release.wait()
 
     monkeypatch.setattr(reconciliation, "_set_integrity_hold", _set_then_wait)
-    return reached, release
+    return reached, release, pid
+
+
+def _observe_commits_when_the_hold_is_written(monkeypatch, probe) -> list:
+    """After the reaction's hold `UPDATE` returns (i.e. once it got the row), record `await probe()` - what
+    another session sees committed at that moment. The order of COMMITS, which task completion is not."""
+
+    seen: list = []
+    original = reconciliation._set_integrity_hold
+
+    async def _set_then_look(session, equivalent_id, result_id):
+        await original(session, equivalent_id, result_id)
+        seen.append(await probe())
+
+    monkeypatch.setattr(reconciliation, "_set_integrity_hold", _set_then_look)
+    return seen
 
 
 def _assert_hold_refusal(exc: BaseException, code: str) -> None:
@@ -166,21 +197,23 @@ async def _finish(*tasks) -> None:
 
 
 @pytest.mark.asyncio
-async def test_step5c_p_a_reaction_arriving_between_prepare_and_commit_waits_for_the_payment(
-    factory, monkeypatch
+async def test_step5c_p_a_reaction_arriving_between_the_binding_and_the_money_phase_holds_first_and_the_payment_is_refused(
+    factory, monkeypatch, caplog
 ) -> None:
-    """The payment is between its prepare and its commit phase; the hold reaction arrives.
+    """The payment has bound (holds the equivalent lock SHARED) but not yet read the hold; the reaction arrives.
 
-    UNTIL 019 STAGE 3 this was `test_step5c_p_a_payment_commit_waiting_behind_the_reaction_is_refused_by_
-    the_hold` ("HOLD FIRST"): the durable `PREPARED` released the owner lock, the reaction took it and
-    wrote the hold, and the payment's commit waited behind it and was refused through the `FOR SHARE`
-    serialization failure. Since stage 3 (`T1904`) the payment holds the owner lock from `prepare` to
-    its one commit, so the reaction cannot come between the two phases: it WAITS (measured) and holds
-    only after the payment committed; the next payment is refused. The sibling below is the same
-    contract with the payment held later, after its commit-time check.
+    HISTORY OF THIS SCHEDULE. Until 019 stage 3 it was `test_step5c_p_a_payment_commit_waiting_behind_the_
+    reaction_is_refused_by_the_hold` ("HOLD FIRST"). Stages 3-4 held the owner lock exclusively from the
+    binding phase to the commit and the reaction took it too, so the reaction waited and held only after
+    the payment committed (`..._waits_for_the_payment`). Since stage 5 (`T1909`) the payment holds the
+    equivalent lock SHARED and the reaction takes none: until its `FOR SHARE` read of the row the payment
+    holds nothing the reaction needs, so the reaction HOLDS FIRST (while the payment is parked) and the
+    payment is REFUSED by the hold - the other outcome T1546 allows. The payment's snapshot predates the
+    hold, its `FOR SHARE` meets 40001, `pay()` retries on a fresh snapshot, and the hold refuses the
+    admitted payment (stored `ABORTED`). The sibling below is the payment-first outcome.
 
-    RED if the payment released its owner lock before its commit, or if the reaction took none: the
-    reaction then holds while the payment is still about to commit.
+    RED if the money phase read the hold without `FOR SHARE` (its stale snapshot says "not held" and it
+    commits after the hold), or if the reaction waited on the payment's shared lock.
     """
     world = await _seed(factory)
     code = world.equivalent.code
@@ -189,13 +222,16 @@ async def test_step5c_p_a_reaction_arriving_between_prepare_and_commit_waits_for
     try:
         await _baseline_and_one_atom(factory, world.equivalent.id)
         prepared = asyncio.Event()
+        payment_pid: list[int] = []
         original_commit = PaymentService._apply_payment
 
-        # 019 stage 4: the barrier stands at the entry of the payment's money phase (after the binding
-        # phase took the owner lock), where `PaymentEngine.commit` was entered before direct execution.
+        # The barrier stands at the entry of the payment's money phase: the binding phase has taken the
+        # equivalent lock (shared); the hold has not been read yet. The retry passes through.
         async def _commit_after_barrier(self, declaration, **kwargs):
-            prepared.set()
-            await release_commit.wait()
+            if not prepared.is_set():
+                payment_pid.append(int(await self.session.scalar(text("SELECT pg_backend_pid()"))))
+                prepared.set()
+                await release_commit.wait()
             return await original_commit(self, declaration, **kwargs)
 
         monkeypatch.setattr(PaymentService, "_apply_payment", _commit_after_barrier)
@@ -209,31 +245,36 @@ async def test_step5c_p_a_reaction_arriving_between_prepare_and_commit_waits_for
 
         tx_id = str(uuid.uuid4())
         completed: list[str] = []
-        payment = asyncio.create_task(_pay(tx_id))
-        payment.add_done_callback(lambda _t: completed.append("payment"))
-        await asyncio.wait_for(prepared.wait(), timeout=20)
-        assert await _transactions(factory, world) == {}, "premise: the payment is durable before its commit"
+        with caplog.at_level(logging.WARNING):
+            payment = asyncio.create_task(_pay(tx_id))
+            payment.add_done_callback(lambda _t: completed.append("payment"))
+            await asyncio.wait_for(prepared.wait(), timeout=20)
+            assert await _transactions(factory, world) == {}, "premise: the payment is durable before its commit"
+            assert await _advisory_modes(payment_pid[0], world.equivalent.id) == ["ShareLock"], (
+                "premise: the parked payment does not hold the equivalent lock shared"
+            )
 
-        reconcile = asyncio.create_task(
-            run_scheduled_reconciliation(factory, equivalent_ids=[world.equivalent.id])
+            reconcile = asyncio.create_task(
+                run_scheduled_reconciliation(factory, equivalent_ids=[world.equivalent.id])
+            )
+            reconcile.add_done_callback(lambda _t: completed.append("reaction"))
+            counts = await asyncio.wait_for(reconcile, timeout=30)
+            assert (counts[FAILED], counts[f"hold_{HOLD_SET}"]) == (1, 1), counts
+            assert not payment.done(), "premise: the payment was not parked while the reaction held"
+            assert completed == ["reaction"], completed
+            assert await _hold_of(factory, world.equivalent.id) is not None
+
+            release_commit.set()
+            with pytest.raises(ConflictException) as refused_first:
+                await asyncio.wait_for(payment, timeout=30)
+
+        _assert_hold_refusal(refused_first.value, code)
+        retries = _retries_on_40001(caplog, "payment.attempt_retry")
+        assert len(retries) == 1, (
+            f"premise: the refusal did not come through the payment's FOR SHARE 40001 and one retry: {retries}"
         )
-        reconcile.add_done_callback(lambda _t: completed.append("reaction"))
-        assert await _advisory_waiter_exists(), "the reaction did not wait for the prepared payment"
-        assert not reconcile.done()
-        assert await _hold_of(factory, world.equivalent.id) is None
-
-        release_commit.set()
-        result = await asyncio.wait_for(payment, timeout=30)
-        counts = await asyncio.wait_for(reconcile, timeout=30)
-
-        assert result.status == "COMMITTED", result
-        assert (counts[FAILED], counts[f"hold_{HOLD_SET}"]) == (1, 1), counts
-        assert completed == ["payment", "reaction"], completed
-        assert await _debts(factory, world) == {
-            (world.sender.pid, world.receiver.pid): _OPENING + _ATOM + Decimal("10.00")
-        }
-        assert await _transactions(factory, world) == {tx_id: "COMMITTED"}
-        assert await _prepare_locks(factory, world) == 0
+        assert await _debts(factory, world) == {(world.sender.pid, world.receiver.pid): _OPENING + _ATOM}
+        assert await _transactions(factory, world) == {tx_id: "ABORTED"}
         assert await _hold_of(factory, world.equivalent.id) is not None
         monkeypatch.setattr(PaymentService, "_apply_payment", original_commit)
         with pytest.raises(ConflictException) as refused:
@@ -249,10 +290,14 @@ async def test_step5c_p_a_reaction_arriving_between_prepare_and_commit_waits_for
 async def test_step5c_p_a_reaction_arriving_while_a_payment_holds_its_check_waits_and_holds_after(
     factory, monkeypatch
 ) -> None:
-    """PAYMENT FIRST. The payment has passed its commit check and holds its locks; the reaction must wait
-    on the owner lock - measured - and hold only after the payment committed; the next payment is refused.
+    """PAYMENT FIRST. The payment has passed its commit check `FOR SHARE` and holds it; the reaction's hold
+    `UPDATE` must queue on the PAYMENT'S transaction - measured: `pg_locks` `transactionid`/`tuple`, blocker
+    = the payment's backend, the reaction holding no advisory lock - and hold only after the payment
+    committed (read when the hold `UPDATE` gets the row: the payment is already committed); the next
+    payment is refused.
 
-    RED if the reaction takes no owner lock: it holds while the payment is still about to commit.
+    RED if the payment's check read without `FOR SHARE` or released the row before its commit: the hold
+    then commits while the payment is still about to commit.
     """
     world = await _seed(factory)
     code = world.equivalent.code
@@ -260,11 +305,13 @@ async def test_step5c_p_a_reaction_arriving_while_a_payment_holds_its_check_wait
     try:
         await _baseline_and_one_atom(factory, world.equivalent.id)
         checked, release_payment = asyncio.Event(), asyncio.Event()
+        payment_pid: list[int] = []
         original_check = MoneyBoundary.refuse_inactive_equivalents
 
         async def _check_then_wait(self, equivalent_ids, *, row_lock):
             await original_check(self, equivalent_ids, row_lock=row_lock)
             if row_lock and not checked.is_set():
+                payment_pid.append(int(await self.session.scalar(text("SELECT pg_backend_pid()"))))
                 checked.set()
                 await release_payment.wait()
 
@@ -277,14 +324,28 @@ async def test_step5c_p_a_reaction_arriving_while_a_payment_holds_its_check_wait
                     idempotency_key=tx_id,
                 )
 
+        tx_id = str(uuid.uuid4())
+        seen_at_hold = _observe_commits_when_the_hold_is_written(
+            monkeypatch, lambda: _transactions(factory, world)
+        )
         completed: list[str] = []
-        payment = asyncio.create_task(_pay(str(uuid.uuid4())))
+        payment = asyncio.create_task(_pay(tx_id))
         payment.add_done_callback(lambda _t: completed.append("payment"))
         await asyncio.wait_for(checked.wait(), timeout=20)
+        assert await _advisory_modes(payment_pid[0], world.equivalent.id) == ["ShareLock"], (
+            "premise: the parked payment does not hold the equivalent lock shared"
+        )
 
         reconcile = asyncio.create_task(run_scheduled_reconciliation(factory, equivalent_ids=[world.equivalent.id]))
         reconcile.add_done_callback(lambda _t: completed.append("reaction"))
-        assert await _advisory_waiter_exists(), "the reaction did not wait for the payment that passed its check"
+        reaction_pid = _assert_row_wait(
+            await _waiters_behind(payment_pid[0], timeout=30.0),
+            what="the reaction's hold",
+            behind="the payment that passed its check",
+        )
+        assert await _advisory_modes(reaction_pid, world.equivalent.id) == [], (
+            "the reaction holds the equivalent advisory lock: since T1909 it takes none"
+        )
         assert not reconcile.done()
         assert await _hold_of(factory, world.equivalent.id) is None
 
@@ -294,6 +355,9 @@ async def test_step5c_p_a_reaction_arriving_while_a_payment_holds_its_check_wait
 
         assert result.status == "COMMITTED", result
         assert (counts[FAILED], counts[f"hold_{HOLD_SET}"]) == (1, 1), counts
+        assert seen_at_hold == [{tx_id: "COMMITTED"}], (
+            f"the hold got the row before the payment's commit was visible: {seen_at_hold}"
+        )
         assert completed == ["payment", "reaction"], completed
         assert await _debts(factory, world) == {
             (world.sender.pid, world.receiver.pid): _OPENING + _ATOM + Decimal("10.00")
@@ -308,23 +372,45 @@ async def test_step5c_p_a_reaction_arriving_while_a_payment_holds_its_check_wait
 
 
 @pytest.mark.asyncio
-async def test_step5c_p_the_owner_lock_comes_before_the_authoritative_snapshot(factory) -> None:
-    """The scheduled verdict is FAILED; the reaction waits on the owner lock; the fault is repaired and
-    committed while it waits; the reaction's snapshot must be taken AFTER the lock and see the repair.
+async def test_step5c_p_the_reaction_confirms_in_its_own_snapshot_taken_after_the_verdict(
+    factory, monkeypatch
+) -> None:
+    """The scheduled verdict is FAILED and published; the fault is repaired and committed before the
+    reaction's transaction has run its first statement; the reaction's re-run must see the repair and NOT
+    hold (`HOLD_NOT_CONFIRMED`).
 
-    RED if the reaction takes the owner lock in its work transaction (the snapshot is then taken at that
-    transaction's first statement, before the wait) or reads anything before the lock: it re-verifies the
-    stale state and holds an equivalent whose ledger is already consistent.
+    UNTIL 019 STAGE 5 this was `test_step5c_p_the_owner_lock_comes_before_the_authoritative_snapshot`: the
+    reaction waited on the equivalent owner lock on a session of its own, and its snapshot had to be
+    taken AFTER that wait. `T1909` removed the reaction's lock, and with it the wait this schedule parked
+    in; what survives of the contract is its point - the confirmation is a FULL RE-RUN in the reaction's
+    own snapshot (`react_to_failed` step 3), never the scheduled verdict re-used. The stand parks the
+    reaction at the opening of its transaction, before any statement of it (`_open_reaction_transaction`),
+    commits the repair there, and then lets it run.
+
+    RED if the reaction held on the scheduled verdict without re-running, or took its snapshot before the
+    park (it would re-verify the stale state and hold an equivalent whose ledger is already consistent).
     """
     world = await _seed(factory)
-    holder = factory()
     reconcile = None
+    opened, release_open = asyncio.Event(), asyncio.Event()
+    in_transaction_at_park: list[bool] = []
+    original_open = reconciliation._open_reaction_transaction
+
+    async def _park_then_open(session):
+        in_transaction_at_park.append(bool(session.in_transaction()))
+        opened.set()
+        await release_open.wait()
+        await original_open(session)
+
+    monkeypatch.setattr(reconciliation, "_open_reaction_transaction", _park_then_open)
     try:
         await _baseline_and_one_atom(factory, world.equivalent.id)
-        await MoneyBoundary(holder).acquire_staged_equivalent_owner_locks([world.equivalent.id])
 
         reconcile = asyncio.create_task(run_scheduled_reconciliation(factory, equivalent_ids=[world.equivalent.id]))
-        assert await _advisory_waiter_exists(), "premise: the reaction did not wait on the owner lock"
+        await asyncio.wait_for(opened.wait(), timeout=30)
+        assert in_transaction_at_park == [False], (
+            "premise: the reaction's work session had already begun (and so taken a snapshot) at the park"
+        )
         assert not reconcile.done()
         async with factory() as observer:
             statuses = (
@@ -340,15 +426,14 @@ async def test_step5c_p_the_owner_lock_comes_before_the_authoritative_snapshot(f
             factory,
             f"UPDATE debts SET amount = amount - 0.00000001 WHERE equivalent_id = '{world.equivalent.id}'",
         )
-        assert not reconcile.done(), "premise: the repair did not land while the reaction waited"
+        assert not reconcile.done(), "premise: the repair did not land while the reaction was parked"
 
-        await holder.rollback()
+        release_open.set()
         counts = await asyncio.wait_for(reconcile, timeout=30)
         assert counts[f"hold_{HOLD_NOT_CONFIRMED}"] == 1, counts
         assert await _hold_of(factory, world.equivalent.id) is None
     finally:
-        await holder.rollback()
-        await holder.close()
+        release_open.set()
         await _finish(reconcile)
         _forget_the_route_cache(world)
 
@@ -360,10 +445,14 @@ async def test_step5c_p_the_owner_lock_comes_before_the_authoritative_snapshot(f
 async def test_step5c_p_a_clearing_that_waited_behind_the_reaction_refuses_in_its_fresh_snapshot(
     factory, monkeypatch, caplog
 ) -> None:
-    """HOLD FIRST. The reaction holds the owner lock with the hold written; clearing waits on it; the hold
-    commits; clearing, rolled back to a fresh snapshot after its lock, reads the hold and refuses.
+    """HOLD FIRST. The reaction holds the row with the hold written, uncommitted; the clearing takes its
+    exclusive equivalent lock and queues with its `FOR SHARE` on the REACTION'S transaction (measured:
+    `pg_locks` `transactionid`/`tuple`, blocker = the reaction's backend, the waiter holding the exclusive
+    lock, the reaction none); the hold commits; the clearing's read meets 40001, its retry owner runs a
+    fresh attempt, which reads the hold and refuses.
 
-    RED if the reaction releases its lock before its commit: clearing then reads "not held" and clears.
+    RED if the clearing read the hold without `FOR SHARE` (it reads "not held" from its stale snapshot and
+    clears after the hold committed).
     """
     from tests.conftest import TestingSessionLocal
 
@@ -372,21 +461,37 @@ async def test_step5c_p_a_clearing_that_waited_behind_the_reaction_refuses_in_it
     clearing = reconcile = None
     try:
         await _baseline_and_one_atom(factory, seed["equivalent_id"], debt_id=seed["debt_ids"][0])
-        hold_written, release_hold = _pause_after_the_hold_is_written(monkeypatch)
-        reconcile = asyncio.create_task(run_scheduled_reconciliation(factory, equivalent_ids=[seed["equivalent_id"]]))
-        await asyncio.wait_for(hold_written.wait(), timeout=30)
+        hold_written, release_hold, reaction_pid = _pause_after_the_hold_is_written(monkeypatch)
+        with caplog.at_level(logging.WARNING):
+            reconcile = asyncio.create_task(
+                run_scheduled_reconciliation(factory, equivalent_ids=[seed["equivalent_id"]])
+            )
+            await asyncio.wait_for(hold_written.wait(), timeout=30)
 
-        await _use_serializable(clearing_session)
-        clearing = asyncio.create_task(ClearingService(clearing_session).execute_clearing_with_amount(seed["cycle"]))
-        assert await _advisory_waiter_exists(), "premise: the clearing did not wait on the reaction's lock"
-        assert not clearing.done()
+            await _use_serializable(clearing_session)
+            clearing = asyncio.create_task(
+                ClearingService(clearing_session).execute_clearing_with_amount(seed["cycle"])
+            )
+            clearing_pid = _assert_row_wait(
+                await _waiters_behind(reaction_pid[0]), what="the clearing", behind="the reaction's hold"
+            )
+            assert await _advisory_modes(clearing_pid, seed["equivalent_id"]) == ["ExclusiveLock"], (
+                "the backend queued on the hold's row does not hold the clearing's exclusive lock"
+            )
+            assert await _advisory_modes(reaction_pid[0], seed["equivalent_id"]) == [], (
+                "the reaction holds the equivalent advisory lock: since T1909 it takes none"
+            )
+            assert not clearing.done()
 
-        release_hold.set()
-        counts = await asyncio.wait_for(reconcile, timeout=30)
-        assert counts[f"hold_{HOLD_SET}"] == 1, counts
-        with pytest.raises(ConflictException) as refused:
-            await asyncio.wait_for(clearing, timeout=30)
+            release_hold.set()
+            counts = await asyncio.wait_for(reconcile, timeout=30)
+            assert counts[f"hold_{HOLD_SET}"] == 1, counts
+            with pytest.raises(ConflictException) as refused:
+                await asyncio.wait_for(clearing, timeout=30)
         _assert_hold_refusal(refused.value, seed["equivalent_code"])
+        assert _retries_on_40001(caplog, "clearing.attempt_retry"), (
+            "premise: the refusal did not come through the clearing's FOR SHARE 40001 and a fresh attempt"
+        )
 
         async with factory() as verify:
             debts = {
@@ -405,6 +510,8 @@ async def test_step5c_p_a_clearing_that_waited_behind_the_reaction_refuses_in_it
         }, debts
         assert clearings == 0
         assert not clearing_session.in_transaction()
+        # Not vacuous: the clearing held its exclusive session lock while it waited (asserted above); this
+        # is its release by the cleanup, without invalidating the connection.
         await _no_advisory_lock_is_held(caplog)
     finally:
         await _finish(clearing, reconcile)
@@ -414,38 +521,62 @@ async def test_step5c_p_a_clearing_that_waited_behind_the_reaction_refuses_in_it
 
 @pytest.mark.asyncio
 async def test_step5c_p_a_reaction_waits_for_a_clearing_that_already_read_the_hold(factory, monkeypatch) -> None:
-    """CLEARING FIRST. Clearing holds its owner lock, has read "not held", and pauses before mutating; the
-    reaction must wait - measured - and hold only after the clearing committed.
+    """CLEARING FIRST. The clearing holds its exclusive equivalent lock, has read "not held" `FOR SHARE`,
+    locked its cycle rows, and pauses before mutating (at its auto-clearing policy check, after the cycle's
+    `FOR UPDATE`); the reaction's hold `UPDATE` must queue on the CLEARING'S transaction - measured:
+    `pg_locks` `transactionid`/`tuple`, blocker = the clearing's backend, the reaction holding no advisory
+    lock - and hold only after the clearing committed.
 
-    RED if the reaction takes no owner lock: the hold commits while the clearing is still about to commit.
+    THE ORDER `["clearing", "reaction"]` is the order of COMMITS, read when the hold `UPDATE` gets the row:
+    the clearing's transaction is already visible then. (Until `T1909` it was read from task completion;
+    the clearing now lets the reaction go at its commit and still releases its pinned connection after,
+    so task order no longer means commit order.)
+
+    RED if the clearing read the hold without `FOR SHARE` or released the row before its commit: the hold
+    then commits while the clearing is still about to commit.
     """
     from tests.conftest import TestingSessionLocal
 
     seed = await _seed_interlock_case()
     clearing_session = TestingSessionLocal()
-    completed: list[str] = []
     paused, release_clearing = asyncio.Event(), asyncio.Event()
+    clearing_pid: list[int] = []
     clearing = reconcile = None
     try:
         await _baseline_and_one_atom(factory, seed["equivalent_id"], debt_id=seed["debt_ids"][0])
         await _use_serializable(clearing_session)
         service = ClearingService(clearing_session)
-        original_locked_pairs = service._locked_pairs_for_equivalent
+        original_policy = service._cycle_respects_auto_clearing
 
-        async def _pause_before_mutation(equivalent_id):
-            pairs = await original_locked_pairs(equivalent_id)
-            paused.set()
-            await release_clearing.wait()
-            return pairs
+        # Execution only: this stand calls `execute_clearing_with_amount` directly, so detection (the
+        # other caller of the policy check) never runs here.
+        async def _pause_before_mutation(debts):
+            respects = await original_policy(debts)
+            if not paused.is_set():
+                clearing_pid.append(int(await service.session.scalar(text("SELECT pg_backend_pid()"))))
+                paused.set()
+                await release_clearing.wait()
+            return respects
 
-        monkeypatch.setattr(service, "_locked_pairs_for_equivalent", _pause_before_mutation)
+        monkeypatch.setattr(service, "_cycle_respects_auto_clearing", _pause_before_mutation)
+        seen_at_hold = _observe_commits_when_the_hold_is_written(
+            monkeypatch, lambda: _clearing_transactions(factory, seed)
+        )
         clearing = asyncio.create_task(service.execute_clearing_with_amount(seed["cycle"]))
-        clearing.add_done_callback(lambda _t: completed.append("clearing"))
         await asyncio.wait_for(paused.wait(), timeout=20)
+        assert await _advisory_modes(clearing_pid[0], seed["equivalent_id"]) == ["ExclusiveLock"], (
+            "premise: the parked clearing does not hold its exclusive equivalent lock"
+        )
 
         reconcile = asyncio.create_task(run_scheduled_reconciliation(factory, equivalent_ids=[seed["equivalent_id"]]))
-        reconcile.add_done_callback(lambda _t: completed.append("reaction"))
-        assert await _advisory_waiter_exists(), "the reaction did not wait on the clearing's owner lock"
+        reaction_pid = _assert_row_wait(
+            await _waiters_behind(clearing_pid[0], timeout=30.0),
+            what="the reaction's hold",
+            behind="the clearing that read the hold",
+        )
+        assert await _advisory_modes(reaction_pid, seed["equivalent_id"]) == [], (
+            "the reaction holds the equivalent advisory lock: since T1909 it takes none"
+        )
         assert not reconcile.done()
 
         release_clearing.set()
@@ -454,7 +585,10 @@ async def test_step5c_p_a_reaction_waits_for_a_clearing_that_already_read_the_ho
 
         assert amount == Decimal("30.00000000"), "premise: the clearing did not run to its commit"
         assert (counts[FAILED], counts[f"hold_{HOLD_SET}"]) == (1, 1), counts
-        assert completed == ["clearing", "reaction"], completed
+        order = ["clearing", "reaction"] if seen_at_hold == [1] else ["reaction", "clearing"]
+        assert order == ["clearing", "reaction"], (
+            f"the hold got the row before the clearing's commit was visible: {seen_at_hold}"
+        )
         assert await _hold_of(factory, seed["equivalent_id"]) is not None
     finally:
         release_clearing.set()
@@ -471,20 +605,29 @@ async def test_step5c_p_a_reaction_waits_for_a_clearing_that_already_read_the_ho
 # `t1901-manifest.md` 5.4, rows :490-494). The contract is removed, not moved: there is no durable
 # `PREPARED` (CHECK `030` refuses the seed itself), no reservation TTL and no `PaymentEngine.commit`; a
 # payment's hold check is the only refusal between its admission and its commit. What stays is the hold
-# refusal itself: `test_step5c_p_a_reaction_arriving_between_prepare_and_commit_waits_for_the_payment` and
+# refusal itself: `test_step5c_p_a_reaction_arriving_between_the_binding_and_the_money_phase_holds_first_and_
+# the_payment_is_refused` and
 # its sibling (next payment refused by the hold, `_assert_hold_refusal`), and
 # `tests/integration/test_p015_t1523_replay_after_a_hold_or_an_abort.py` (the stored hold refusal replays).
 
 
-# ── the admin clear, under the owner lock ────────────────────────────────────────────────────────
+# ── the admin clear, against a holder of the row ─────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_step5c_p_the_admin_clear_waits_for_the_owner_lock(factory, admin_api) -> None:
-    """A held equivalent with a later PASSED; a holder of the owner lock; the clear must wait - measured -
-    and succeed only after the holder is gone.
+async def test_step5c_p_the_admin_clear_waits_for_a_holder_of_the_row(factory, admin_api) -> None:
+    """A held equivalent with a later PASSED; a holder of the equivalent row `FOR SHARE` - the lock every
+    money writer holds through its commit; the clear must wait - measured: its `FOR UPDATE` queues on the
+    holder's transaction (`pg_locks` `transactionid`/`tuple`), and it holds no advisory lock - and succeed
+    only after the holder is gone.
 
-    RED if the clear takes no owner lock: it returns while the lock holder is still inside.
+    UNTIL 019 STAGE 5 this was `test_step5c_p_the_admin_clear_waits_for_the_owner_lock`, with a holder of
+    the equivalent owner lock. `T1909` removed the clear's advisory lock (manifest `t1901-manifest.md` 5.4,
+    rows :538-:544: the owner-lock wait DROPPED, "clear returns 200, hold cleared" kept); the row is now the
+    whole protocol between the clear and money, so the holder here holds the row. Against real money the
+    clear is raced in `tests/integration/test_p019_owner_before_row_races_postgres.py` (`hold_clear`).
+
+    RED if the clear read the hold without `FOR UPDATE`: it returns while the row holder is still inside.
     """
     client, _gate = admin_api
     world = await _seed(factory)
@@ -507,15 +650,23 @@ async def test_step5c_p_the_admin_clear_waits_for_the_owner_lock(factory, admin_
             )
             await session.commit()
 
-        await MoneyBoundary(holder).acquire_staged_equivalent_owner_locks([world.equivalent.id])
+        await holder.execute(
+            select(Equivalent.id).where(Equivalent.id == world.equivalent.id).with_for_update(read=True)
+        )
+        holder_pid = int(await holder.scalar(text("SELECT pg_backend_pid()")))
         clear = asyncio.create_task(
             client.post(
                 f"/api/v1/admin/equivalents/{world.equivalent.code}/integrity-hold/clear",
-                json={"reason": "s5c clear under the owner lock"},
+                json={"reason": "s5c clear against a row holder"},
                 headers=ADMIN,
             )
         )
-        assert await _advisory_waiter_exists(), "the clear did not wait on the owner lock"
+        clear_pid = _assert_row_wait(
+            await _waiters_behind(holder_pid), what="the clear", behind="the holder of the row"
+        )
+        assert await _advisory_modes(clear_pid, world.equivalent.id) == [], (
+            "the clear holds the equivalent advisory lock: since T1909 the row is its whole protocol"
+        )
         assert not clear.done()
 
         await holder.rollback()

@@ -46,7 +46,7 @@ from typing import Any
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.money_boundary import MoneyBoundary
@@ -62,7 +62,6 @@ from app.core.simulator.real_tick_payments_coordinator import RealTickPaymentsCo
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
-from app.db.models.prepare_lock import PrepareLock
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 from app.utils.exceptions import IntegrityViolationException
@@ -201,7 +200,6 @@ class _CommitOutcome:
     debts_before: dict[tuple[str, str], Decimal]
     debts_after: dict[tuple[str, str], Decimal]
     transactions: dict[str, str]
-    prepare_locks_left: int
 
 
 async def _scenario_service_payment_violates_after_flows(factory, world, monkeypatch) -> _CommitOutcome:
@@ -226,19 +224,13 @@ async def _scenario_service_payment_violates_after_flows(factory, world, monkeyp
 
 
 async def _commit_outcome(factory, world, raised, observed, debts_before, tx_id) -> _CommitOutcome:
-    async with factory() as fresh:
-        locks_left = int(
-            await fresh.scalar(
-                select(func.count()).select_from(PrepareLock).where(PrepareLock.tx_id == tx_id)
-            )
-        )
+    # (A `prepare_locks` count stood here; it went with the table, 019 stage 5, `T1909`.)
     return _CommitOutcome(
         raised=raised,
         observed_in_commit=observed,
         debts_before=debts_before,
         debts_after=await _stored_debts(factory, world),
         transactions=await _stored_transactions(factory, world),
-        prepare_locks_left=locks_left,
     )
 
 
@@ -250,7 +242,6 @@ def _assert_aborted_payment_left_no_debt(outcome: _CommitOutcome, world: _World)
         f"committing session: {outcome.observed_in_commit}"
     )
     assert list(outcome.transactions.values()) == ["ABORTED"], outcome.transactions
-    assert outcome.prepare_locks_left == 0
     # Verdict: an ABORTED payment must not have moved money.
     assert outcome.debts_after == outcome.debts_before, (
         f"the payment is ABORTED but its debt is stored: before={outcome.debts_before} "

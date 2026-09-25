@@ -1,6 +1,7 @@
 """019 `T1903` (review of stage 2, P2): one `PaymentService` has ONE advisory-lock deadline.
 
-BEFORE STAGE 2, `PaymentService.acquire_staged_equivalent_owner_locks` called the service's own engine,
+BEFORE STAGE 2, `PaymentService.acquire_staged_equivalent_owner_locks` (since 019 stage 5, `T1909`,
+`acquire_shared_equivalent_locks`) called the service's own engine,
 so the owner-lock budget started at the first staged acquisition and was shared by every later staged
 acquisition on the same service and by the engine's later non-savepoint unit of work, which takes
 `min(previous deadline, fresh budget)` (`PaymentEngine._run_uow_with_retry`). The first stage-2 cut built a
@@ -64,13 +65,13 @@ async def test_staged_acquisitions_share_the_service_boundarys_one_deadline(monk
     session = _Session(uuid.uuid4(), "T1903")
     service = PaymentService(session)
 
-    await service.acquire_staged_equivalent_owner_locks(["T1903"])
+    await service.acquire_shared_equivalent_locks(["T1903"])
     assert service._boundary._advisory_lock_deadline == 105.0, (
         "the staged acquisition did not start the service boundary's deadline: it ran on a boundary of "
         "its own, so later locks of this service get a fresh budget"
     )
     clock.now = 101.0
-    await service.acquire_staged_equivalent_owner_locks(["T1903"])
+    await service.acquire_shared_equivalent_locks(["T1903"])
     assert service._boundary._advisory_lock_deadline == 105.0
     lock_timeouts = [sql for sql in session.timeouts if "SET LOCAL" in sql]
     assert lock_timeouts == [

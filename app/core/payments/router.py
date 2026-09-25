@@ -8,13 +8,12 @@ from uuid import UUID
 
 from app.utils.observability import log_duration
 
-from sqlalchemy import select, and_, func
+from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.trustline import TrustLine
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
-from app.db.models.prepare_lock import PrepareLock
 from app.schemas.payment import CapacityResponse, MaxFlowResponse, MaxFlowPath
 from app.config import settings
 from app.utils.metrics import ROUTING_FAILURES_TOTAL
@@ -209,11 +208,6 @@ class PaymentRouter:
         result = await self.session.execute(stmt)
         debts = result.scalars().all()
 
-        # 3b. Load all active PrepareLocks (to account for reserved capacity)
-        lock_stmt = select(PrepareLock).where(PrepareLock.expires_at > func.now())
-        lock_result = await self.session.execute(lock_stmt)
-        active_locks = lock_result.scalars().all()
-        
         # Helper to map UUID -> PID
         # We can't easily join efficiently without loading participants.
         # Let's collect all needed participant IDs and fetch them in batch or rely on lazy loading (slow).
@@ -230,16 +224,6 @@ class PaymentRouter:
         for d in debts:
             all_participant_ids.add(d.debtor_id)
             all_participant_ids.add(d.creditor_id)
-
-        # Locks might include participants not present in current trustlines/debts lists.
-        for lock in active_locks:
-            all_participant_ids.add(lock.participant_id)
-            for flow in (lock.effects or {}).get('flows', []):
-                try:
-                    all_participant_ids.add(UUID(flow['from']))
-                    all_participant_ids.add(UUID(flow['to']))
-                except Exception:
-                    continue
 
         if not all_participant_ids:
             self.graph = {}
@@ -263,29 +247,8 @@ class PaymentRouter:
         for d in debts:
             debt_map[(d.debtor_id, d.creditor_id)] = d.amount
 
-        # 5. Build reserved capacity map from active locks: (from_pid, to_pid) -> reserved_amount
-        reserved_map: Dict[Tuple[str, str], Decimal] = {}
-        for lock in active_locks:
-            for flow in (lock.effects or {}).get('flows', []):
-                try:
-                    eq_id = UUID(flow['equivalent'])
-                    if eq_id != equivalent.id:
-                        continue
-                    from_id = UUID(flow['from'])
-                    to_id = UUID(flow['to'])
-                    amt = Decimal(str(flow['amount']))
-                except Exception:
-                    continue
-
-                from_pid = self.pids.get(from_id)
-                to_pid = self.pids.get(to_id)
-                if not from_pid or not to_pid:
-                    continue
-
-                key = (from_pid, to_pid)
-                reserved_map[key] = reserved_map.get(key, Decimal('0')) + amt
-
-        # 6. Build edges
+        # 5. Build edges. No reservations are subtracted: REST payments hold none (programme 019 stage 5,
+        # `T1909`; `prepare_locks` and every reader of it are gone - protocol §7.6.1).
         # Payment flow direction is Sender -> Receiver.
         # A payment S -> R increases S's debt to R.
         # Therefore, the credit limit that enables S -> R is the TrustLine R -> S
@@ -327,9 +290,6 @@ class PaymentRouter:
             # - can create more debt up to (limit - current_debt)
             # - can also offset reverse debt (creditor owes debtor)
             cap = (limit - debt_debtor_owes_creditor) + debt_creditor_owes_debtor
-
-            # Subtract reserved capacity due to other prepared transactions.
-            cap -= reserved_map.get((debtor_pid, creditor_pid), Decimal('0'))
             if cap > 0:
                 self._add_capacity(debtor_pid, creditor_pid, cap)
                 self._set_edge_policy(debtor_pid, creditor_pid, can_be_intermediate)

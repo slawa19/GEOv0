@@ -28,7 +28,7 @@ THE OPERATIONS, one each, each on its own freshly seeded world in one mode-B clo
 * `inject_event` - the mixed inject event of 018 (`_apply_due_scenario_events`): staged owner locks and
   the inject's `FOR SHARE`;
 * `admin_patch`, `admin_hold_clear`, `admin_delete` - the three admin paths through the real routes;
-* `staged_owner_locks` - `PaymentService.acquire_staged_equivalent_owner_locks` (the tick's entry);
+* `staged_owner_locks` - `PaymentService.acquire_shared_equivalent_locks` (the tick's entry);
 * `reconciliation_baseline`, `reconciliation_reaction` - `take_baseline` and the hold reaction.
 
 WHAT IT DOES NOT SEE: statements sent outside SQLAlchemy (the corruption helper's raw asyncpg), timing,
@@ -374,7 +374,7 @@ async def _staged_owner_locks(url: str, recorder: _Recorder) -> list[str]:
 
         async def operation() -> None:
             async with factory() as session:
-                await PaymentService(session).acquire_staged_equivalent_owner_locks([code])
+                await PaymentService(session).acquire_shared_equivalent_locks([code])
                 await session.rollback()
 
         return await _record(recorder, operation)
@@ -442,17 +442,35 @@ _OPERATIONS: dict[str, Callable[[str, _Recorder], Awaitable[list[str]]]] = {
 }
 
 # Anti-vacuum: the lock statement each operation exists to show. An operation whose recording lacks
-# its marker did not run the path this probe claims to compare.
+# its marker did not run the path this probe claims to compare. Since 019 stage 5 (`T1909`) the markers
+# are the retained shape - ONE equivalent lock, shared for payment/inject/staged, exclusive at session
+# level for the clearing - and `_ABSENT` names what must no longer appear: an exclusive transaction-level
+# lock (the old owner/tx locks), the one-argument pair lock, any advisory lock on the admin and
+# reconciliation paths, and any read of `prepare_locks`. (Until `T1909` the markers were the owner, tx
+# and pair locks on every path.)
+_SHARED = "pg_advisory_xact_lock_shared($1, $2)"
 _MARKERS = {
-    "payment_api": ["pg_advisory_xact_lock($1, $2)", "pg_advisory_xact_lock($1)", "FOR SHARE"],
-    "clearing": ["pg_advisory_lock($1, $2)", "pg_advisory_unlock($1, $2)"],
-    "inject_event": ["pg_advisory_xact_lock($1, $2)", "FOR SHARE"],
-    "admin_patch": ["pg_advisory_xact_lock($1, $2)"],
-    "admin_hold_clear": ["pg_advisory_xact_lock($1, $2)", "FOR UPDATE"],
-    "admin_delete": ["pg_advisory_xact_lock($1, $2)", "DELETE FROM equivalents"],
-    "staged_owner_locks": ["pg_advisory_xact_lock($1, $2)"],
-    "reconciliation_baseline": ["pg_advisory_xact_lock($1, $2)"],
-    "reconciliation_reaction": ["pg_advisory_xact_lock($1, $2)"],
+    "payment_api": [_SHARED, "FOR SHARE"],
+    "clearing": ["pg_advisory_lock($1, $2)", "pg_advisory_unlock($1, $2)", "FOR SHARE"],
+    "inject_event": [_SHARED, "FOR SHARE"],
+    "admin_patch": ["UPDATE equivalents"],
+    "admin_hold_clear": ["FOR UPDATE"],
+    "admin_delete": ["DELETE FROM equivalents"],
+    "staged_owner_locks": [_SHARED],
+    "reconciliation_baseline": ["reconciliation"],
+    "reconciliation_reaction": ["UPDATE equivalents"],
+}
+_NO_ADVISORY = ("pg_advisory",)
+_ABSENT = {
+    "payment_api": ("pg_advisory_xact_lock(", "prepare_locks"),
+    "clearing": ("pg_advisory_xact_lock(", "prepare_locks"),
+    "inject_event": ("pg_advisory_xact_lock(", "prepare_locks"),
+    "staged_owner_locks": ("pg_advisory_xact_lock(",),
+    "admin_patch": _NO_ADVISORY,
+    "admin_hold_clear": _NO_ADVISORY,
+    "admin_delete": _NO_ADVISORY,
+    "reconciliation_baseline": _NO_ADVISORY,
+    "reconciliation_reaction": _NO_ADVISORY,
 }
 
 
@@ -466,14 +484,17 @@ async def test_t1903_statement_sequence(committed_database) -> None:
     finally:
         event.remove(Engine, "before_cursor_execute", recorder)
 
-    for name, statements in report.items():
-        text = "\n".join(statements)
-        missing = [marker for marker in _MARKERS[name] if marker not in text]
-        assert statements and not missing, (name, missing, statements)
-
+    # The recording first, so a failed marker never hides the numbers.
     root = Path(os.environ.get("GEO_TEST_ARTIFACT_ROOT", ".local-run/test-runs/t1903/artifacts"))
     root.mkdir(parents=True, exist_ok=True)
     name = os.environ.get("T1903_PROBE_NAME", "p019_t1903_statements")
     (root / f"{name}.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+
+    for name, statements in report.items():
+        text = "\n".join(statements)
+        missing = [marker for marker in _MARKERS[name] if marker not in text]
+        present = [marker for marker in _ABSENT[name] if marker in text]
+        assert statements and not missing and not present, (name, missing, present, statements)
+
     for op, statements in report.items():
         print(op, len(statements))

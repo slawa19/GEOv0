@@ -1,22 +1,25 @@
-"""Two multi-segment payments over the same pairs in OPPOSITE directions serialize and keep the invariants.
+"""Two multi-segment payments over the same pairs in OPPOSITE directions both commit and keep the invariants.
 
-A -> B -> C 3.00 and C -> B -> A 2.00 share both pairs. Whichever goes first holds its locks through its
-commit (paused right after it took its pair locks); the other must queue on an advisory lock before it
-takes its own, both commit, and the debts net to A -> B 1 and B -> C 1.
+A -> B -> C 3.00 and C -> B -> A 2.00 share both pairs; the debts must net to A -> B 1 and B -> C 1.
 
 019 STAGE 4 (`T1906`; manifest `t1901-manifest.md` 5.1). Until then both payments were seeded durable
-`PREPARED` with hand-written `PrepareLock` rows and `PaymentEngine.commit` was raced. Both now run the real
-path end to end - `PaymentService.create_payment_internal`, one transaction each - from a world of trust
-lines only: routing finds A-B-C and C-B-A, the binding phase takes the owner, transaction and pair locks
-(`app/core/money_boundary.py`), the money phase writes. The waiter queues on the EQUIVALENT OWNER lock the
-holder took first (both payments are in one equivalent), before it reaches any pair lock - the premise
-asserts only that it waits on an advisory lock of the holder while the holder is paused after its pair
-locks, as it did before. Stage 5 replaces that premise with SERIALIZABLE conflict evidence (`T1908`).
+`PREPARED` with hand-written reservation rows and the engine's commit was raced. Both run the real path end to
+end - `PaymentService.create_payment_internal`, one transaction each - from a world of trust lines only.
 
-THE APPLICATION'S OWN 40001 RETRY STAYS ON (T1549, 2026-09-14). At the application's SERIALIZABLE the
-waiter's snapshot predates the holder's commit and its first attempt may meet a genuine serialization
-failure; `pay()` retries that on a fresh snapshot. What the retry could hide - a waiter that bypassed the
-holder's locks - is asserted BEFORE the holder is released (`waiter_blocked`), so it cannot.
+019 STAGE 5 (`T1909`, `KEEP-EQUIVALENT-LOCK`; manifest 5.1 row `:282-288`). There is no pair or transaction
+lock any more: a payment takes its equivalent's lock SHARED, so the two payments no longer queue on each
+other. The premise "the waiter queued on an advisory lock of the holder" is REPLACED by the SERIALIZABLE
+evidence that now decides the race (`T1908`):
+
+* the holder is parked in its money phase after its pre-state read - both directions of both pairs read,
+  nothing written - and, while it is parked, BOTH payments hold the equivalent lock (`ShareLock`, granted,
+  read from `pg_locks`) and the waiter runs to its commit: nothing serialises them any more;
+* the holder, released, has read rows the waiter then wrote and must not commit on that snapshot: SSI
+  refuses it with `40001`, counted by the retry owner (`PaymentService.pay` -> `_retry_or_none`), and the
+  holder's whole attempt runs again on a fresh snapshot (its pre-state read twice).
+
+The result assertions are the stage-4 ones unchanged: both `COMMITTED`, debts 1/1, two `PAYMENT` audit rows,
+all four limits intact. The reservation count (vacuous since stage 4) went with the table (migration `031`).
 """
 
 import asyncio
@@ -27,13 +30,13 @@ import pytest
 from sqlalchemy import func, select, text
 
 from app.config import settings
-from app.core.money_boundary import MoneyBoundary
+from app.core.money_boundary import _EQUIVALENT_OWNER_LOCK_NAMESPACE, MoneyBoundary
+from app.core.payments import service as payment_service_module
 from app.core.payments.service import PaymentService
 from app.db.models.audit_log import IntegrityAuditLog
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
-from app.db.models.prepare_lock import PrepareLock
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 
@@ -108,29 +111,24 @@ async def _seed_inverse_multisegment_world() -> dict:
     }
 
 
-async def _wait_for_advisory_wait(
-    observer,
-    *,
-    backend_pid: int,
-    waiter_acquired: asyncio.Event,
-) -> bool:
-    for _ in range(500):
-        waiting = await observer.scalar(
+async def _share_holders(observer, equivalent_id) -> set[int]:
+    """Backends holding THIS equivalent's lock granted in shared mode, on this database."""
+
+    rows = (
+        await observer.execute(
             text(
-                "SELECT EXISTS ("
-                "SELECT 1 FROM pg_locks "
-                "WHERE pid = :pid AND locktype = 'advisory' AND NOT granted"
-                ")"
+                "SELECT pid FROM pg_locks WHERE locktype = 'advisory' AND granted AND mode = 'ShareLock' "
+                "AND objsubid = 2 AND classid::bigint = :namespace AND objid::bigint = :key "
+                "AND database = (SELECT oid FROM pg_database WHERE datname = current_database())"
             ),
-            {"pid": backend_pid},
+            {
+                "namespace": _EQUIVALENT_OWNER_LOCK_NAMESPACE & 0xFFFFFFFF,
+                "key": MoneyBoundary._equivalent_owner_lock_key(equivalent_id) & 0xFFFFFFFF,
+            },
         )
-        await observer.rollback()
-        if waiting:
-            return True
-        if waiter_acquired.is_set():
-            return False
-        await asyncio.sleep(0.01)
-    return False
+    ).all()
+    await observer.rollback()
+    return {int(pid) for (pid,) in rows}
 
 
 @pytest.mark.asyncio
@@ -144,55 +142,63 @@ async def test_inverse_multisegment_commits_serialize_and_preserve_invariants_po
 
     from tests.conftest import TestingSessionLocal
 
-    # The holder is paused inside its binding phase (`PREPARE_TIMEOUT_SECONDS`) while the waiter queues;
-    # the budgets are not what this schedule is about.
+    # The holder is parked inside its money phase (`COMMIT_TIMEOUT_SECONDS`) while the waiter runs; the
+    # budgets are not what this schedule is about.
     monkeypatch.setattr(settings, "PREPARE_TIMEOUT_SECONDS", 30)
     monkeypatch.setattr(settings, "COMMIT_TIMEOUT_SECONDS", 30)
     monkeypatch.setattr(settings, "PAYMENT_TOTAL_TIMEOUT_SECONDS", 60)
 
     seed = await _seed_inverse_multisegment_world()
+    a_id, b_id, c_id = seed["participant_a_id"], seed["participant_b_id"], seed["participant_c_id"]
     payments = {
         # A -> B -> C 3.00 and C -> B -> A 2.00: the only routes in this world.
-        "forward": (seed["participant_a_id"], seed["participant_c_pid"], "3.00", str(uuid.uuid4())),
-        "reverse": (seed["participant_c_id"], seed["participant_a_pid"], "2.00", str(uuid.uuid4())),
+        "forward": (a_id, seed["participant_c_pid"], "3.00", str(uuid.uuid4())),
+        "reverse": (c_id, seed["participant_a_pid"], "2.00", str(uuid.uuid4())),
+    }
+    flows_of = {
+        "forward": {(a_id, b_id), (b_id, c_id)},
+        "reverse": {(c_id, b_id), (b_id, a_id)},
     }
     waiter_direction = "reverse" if holder_direction == "forward" else "forward"
-    holder_acquired = asyncio.Event()
+    holder_parked = asyncio.Event()
     release_holder = asyncio.Event()
-    waiter_attempted = asyncio.Event()
-    waiter_acquired = asyncio.Event()
-    holder_pair_locks: list[int] = []
-    waiter_pair_locks: list[int] = []
+    waiter_read = asyncio.Event()
+    release_waiter = asyncio.Event()
+    prestate_reads: dict[str, list[int]] = {"forward": [], "reverse": []}
+    conflicts: list[str] = []
     holder_task = None
     waiter_task = None
+
+    original_prestate = payment_service_module._read_payment_prestate
+
+    async def prestate(session, declared_flows):
+        result = await original_prestate(session, declared_flows)
+        pairs = {(flow.from_id, flow.to_id) for flow in declared_flows}
+        direction = next(d for d, flows in flows_of.items() if flows == pairs)
+        prestate_reads[direction].append(int(await session.scalar(text("SELECT pg_backend_pid()"))))
+        if len(prestate_reads[direction]) == 1:
+            if direction == holder_direction:
+                holder_parked.set()
+                await release_holder.wait()
+            else:
+                waiter_read.set()
+                await release_waiter.wait()
+        return result
+
+    original_retry = PaymentService._retry_or_none
+
+    def retry_or_none(self, exc, **kwargs):
+        conflicts.append(payment_service_module._conflict_cause(exc))
+        return original_retry(self, exc, **kwargs)
+
+    monkeypatch.setattr(payment_service_module, "_read_payment_prestate", prestate)
+    monkeypatch.setattr(PaymentService, "_retry_or_none", retry_or_none)
 
     async with (
         TestingSessionLocal() as holder_session,
         TestingSessionLocal() as waiter_session,
         TestingSessionLocal() as observer_session,
     ):
-        original_pair_locks = MoneyBoundary._acquire_segment_advisory_lock_keys
-        original_owner_locks = MoneyBoundary._acquire_equivalent_owner_locks
-        waiter_pids: list[int] = []
-
-        async def _pair_locks(self, keys) -> None:
-            await original_pair_locks(self, keys)
-            if self.session is holder_session and not holder_pair_locks:
-                holder_pair_locks.append(len(set(keys)))
-                holder_acquired.set()
-                await release_holder.wait()
-            elif self.session is waiter_session:
-                waiter_pair_locks.append(len(set(keys)))
-                waiter_acquired.set()
-
-        async def _owner_locks(self, equivalent_ids) -> None:
-            if self.session is waiter_session and not waiter_attempted.is_set():
-                waiter_pids.append(int(await self.session.scalar(text("SELECT pg_backend_pid()"))))
-                waiter_attempted.set()
-            await original_owner_locks(self, equivalent_ids)
-
-        monkeypatch.setattr(MoneyBoundary, "_acquire_segment_advisory_lock_keys", _pair_locks)
-        monkeypatch.setattr(MoneyBoundary, "_acquire_equivalent_owner_locks", _owner_locks)
 
         async def _pay(session, direction):
             sender_id, to_pid, amount, tx_id = payments[direction]
@@ -206,34 +212,37 @@ async def test_inverse_multisegment_commits_serialize_and_preserve_invariants_po
 
         try:
             holder_task = asyncio.create_task(_pay(holder_session, holder_direction))
-            await asyncio.wait_for(holder_acquired.wait(), timeout=20.0)
-            # Premise: the holder is paused AFTER its pair locks, and they cover both segments.
-            assert holder_pair_locks == [2], holder_pair_locks
+            await asyncio.wait_for(holder_parked.wait(), timeout=20.0)
 
             waiter_task = asyncio.create_task(_pay(waiter_session, waiter_direction))
-            await asyncio.wait_for(waiter_attempted.wait(), timeout=20.0)
-            waiter_blocked = await _wait_for_advisory_wait(
-                observer_session,
-                backend_pid=waiter_pids[0],
-                waiter_acquired=waiter_acquired,
-            )
-            assert waiter_blocked, "the inverse route did not queue behind the holder's locks"
-            assert not waiter_acquired.is_set()
+            try:
+                await asyncio.wait_for(waiter_read.wait(), timeout=20.0)
+            except asyncio.TimeoutError:
+                pytest.fail("the inverse route did not reach its money phase while the holder was parked in its own")
+            # Premise 1: both are past their equivalent lock at once - shared, nothing queued on the other.
+            holders = await _share_holders(observer_session, seed["equivalent_id"])
+            assert holders == {prestate_reads[holder_direction][0], prestate_reads[waiter_direction][0]}, holders
+            release_waiter.set()
+            waiter_result = await asyncio.wait_for(waiter_task, timeout=20.0)
+            assert waiter_result.status == "COMMITTED", waiter_result
+            assert not holder_task.done(), "the holder must still be parked when the waiter commits"
+            assert conflicts == [], f"the waiter met a conflict before the holder wrote anything: {conflicts}"
 
             release_holder.set()
-            holder_result, waiter_result = await asyncio.wait_for(
-                asyncio.gather(holder_task, waiter_task),
-                timeout=30.0,
-            )
+            holder_result = await asyncio.wait_for(holder_task, timeout=30.0)
             assert holder_result.status == "COMMITTED", holder_result
-            assert waiter_result.status == "COMMITTED", waiter_result
-            assert waiter_acquired.is_set()
-            assert waiter_pair_locks and set(waiter_pair_locks) == {2}, waiter_pair_locks
         finally:
             release_holder.set()
+            release_waiter.set()
             tasks = [task for task in (holder_task, waiter_task) if task is not None]
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)
+
+    # Premise 2: SERIALIZABLE, not a lock, decided the race - the holder's stale attempt was refused with a
+    # real 40001 and the retry owner ran the whole attempt again (its pre-state read on a fresh snapshot).
+    assert conflicts and set(conflicts) == {"40001"}, conflicts
+    assert len(prestate_reads[holder_direction]) == len(conflicts) + 1, (prestate_reads, conflicts)
+    assert len(prestate_reads[waiter_direction]) == 1, prestate_reads
 
     tx_ids = [payments["forward"][3], payments["reverse"][3]]
     async with TestingSessionLocal() as verify:
@@ -273,15 +282,6 @@ async def test_inverse_multisegment_commits_serialize_and_preserve_invariants_po
                 Decimal("1.00000000"),
             ),
         }
-        # Vacuous since stage 4 (no payment path writes a reservation); it goes with the table at stage 5.
-        assert (
-            await verify.scalar(
-                select(func.count()).select_from(PrepareLock).where(
-                    PrepareLock.tx_id.in_(tx_ids)
-                )
-            )
-            == 0
-        )
         assert (
             await verify.scalar(
                 select(func.count()).select_from(IntegrityAuditLog).where(

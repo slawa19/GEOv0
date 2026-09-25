@@ -20,11 +20,11 @@ THE LOAD, in one equivalent of one mode-B clone at the application's isolation (
   while payments run: it takes the owner lock, finds no hold and answers 409 - a real owner-lock
   contender that changes nothing.
 
-THE INSTRUMENT. `MoneyBoundary._acquire_equivalent_owner_locks`, `acquire_staged_equivalent_owner_locks`
-and `acquire_session_equivalent_owner_lock` are wrapped: the call's start is the request, its return
+THE INSTRUMENT. `MoneyBoundary._acquire_shared_equivalent_locks_in_order`, `acquire_shared_equivalent_locks`
+and `acquire_exclusive_equivalent_session_lock` are wrapped: the call's start is the request, its return
 the grant. A transaction-level lock is released when its transaction ends, observed by the sync
 session's `after_commit` / `after_rollback` events; the clearing's session-level lock at
-`release_session_equivalent_owner_lock`. A re-entrant acquisition inside a transaction that already
+`release_exclusive_equivalent_session_lock`. A re-entrant acquisition inside a transaction that already
 holds the lock is not a new hold and is not counted. Each hold is attributed to the driver that
 caused it (payment / clearing / admin) through a context variable.
 
@@ -101,7 +101,7 @@ class _Recorder:
 
 
 def _install(monkeypatch, recorder: _Recorder) -> None:
-    for name in ("_acquire_equivalent_owner_locks", "acquire_staged_equivalent_owner_locks"):
+    for name in ("_acquire_shared_equivalent_locks_in_order", "acquire_shared_equivalent_locks"):
         original = getattr(MoneyBoundary, name)
 
         def make(original):
@@ -117,8 +117,8 @@ def _install(monkeypatch, recorder: _Recorder) -> None:
 
         monkeypatch.setattr(MoneyBoundary, name, make(original))
 
-    original_session_lock = MoneyBoundary.acquire_session_equivalent_owner_lock
-    original_session_release = MoneyBoundary.release_session_equivalent_owner_lock
+    original_session_lock = MoneyBoundary.acquire_exclusive_equivalent_session_lock
+    original_session_release = MoneyBoundary.release_exclusive_equivalent_session_lock
     session_holds: dict[int, dict[str, Any]] = {}
 
     # Keyed by the equivalent: the clearing releases through a NEW `MoneyBoundary` over its work session.
@@ -141,8 +141,8 @@ def _install(monkeypatch, recorder: _Recorder) -> None:
                 record["hold"] = time.perf_counter() - record.pop("granted")
                 recorder.holds.append(record)
 
-    monkeypatch.setattr(MoneyBoundary, "acquire_session_equivalent_owner_lock", session_lock)
-    monkeypatch.setattr(MoneyBoundary, "release_session_equivalent_owner_lock", session_release)
+    monkeypatch.setattr(MoneyBoundary, "acquire_exclusive_equivalent_session_lock", session_lock)
+    monkeypatch.setattr(MoneyBoundary, "release_exclusive_equivalent_session_lock", session_release)
 
     def end(sync_session, *args) -> None:
         recorder.released(sync_session)

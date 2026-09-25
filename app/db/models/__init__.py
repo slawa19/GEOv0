@@ -15,7 +15,6 @@ from .participant import Participant
 from .trustline import TrustLine
 from .debt import Debt
 from .transaction import Transaction
-from .prepare_lock import PrepareLock
 from .auth_challenge import AuthChallenge
 from .audit_log import AuditLog
 from .integrity_checkpoint import IntegrityCheckpoint
@@ -37,7 +36,6 @@ __all__ = [
     "TrustLine",
     "Debt",
     "Transaction",
-    "PrepareLock",
     "AuthChallenge",
     "AuditLog",
     "IntegrityCheckpoint",

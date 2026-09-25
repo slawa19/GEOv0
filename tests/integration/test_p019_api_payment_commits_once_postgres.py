@@ -46,7 +46,7 @@ async def test_a_successful_api_payment_commits_once(api, factory) -> None:  # n
 
     assert resp.status_code == 200 and resp.json()["status"] == "COMMITTED", resp.text
     assert recorder.commits, "the recorder saw no commit at all: it is not on the payment's session"
-    assert recorder.commits[-1] == ("COMMITTED", 0), recorder.commits
+    assert recorder.commits[-1] == "COMMITTED", recorder.commits
     assert await debts(factory, world) == {
         (world.alice["pid"], world.bob["pid"]): Decimal("10.00")
     }
@@ -54,6 +54,6 @@ async def test_a_successful_api_payment_commits_once(api, factory) -> None:  # n
     assert env_state == "COMPLETED" and declared == entries > 0
 
     require_target(
-        recorder.commits == [("COMMITTED", 0)],
+        recorder.commits == ["COMMITTED"],
         f"the payment's session committed {len(recorder.commits)} times: {recorder.commits}",
     )

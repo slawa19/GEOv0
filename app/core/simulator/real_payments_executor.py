@@ -370,7 +370,7 @@ class RealPaymentsExecutor:
             }
         )
         if planned_equivalents:
-            await PaymentService(session).acquire_staged_equivalent_owner_locks(
+            await PaymentService(session).acquire_shared_equivalent_locks(
                 planned_equivalents
             )
 

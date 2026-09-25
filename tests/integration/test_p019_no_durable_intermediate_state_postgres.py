@@ -95,9 +95,8 @@ async def test_no_intermediate_state_is_visible_before_the_money_commit(
     assert recorder.commits, "the recorder saw no commit at all: it is not on the payment's session"
     require_target(
         seen.state is None
-        and seen.prepare_locks == 0
-        and recorder.commits == [("COMMITTED", 0)],
-        f"another transaction saw state={seen.state!r} and {seen.prepare_locks} prepare lock(s) "
+        and recorder.commits == ["COMMITTED"],
+        f"another transaction saw state={seen.state!r} "
         f"of tx {body['tx_id']} before its money commit; the payment's sessions committed "
         f"{recorder.commits}",
     )

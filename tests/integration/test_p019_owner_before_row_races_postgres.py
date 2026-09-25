@@ -1,35 +1,54 @@
-"""019 `T1903`: one lock order - the equivalent owner lock BEFORE any row - raced for real, three admin paths apart.
+"""019 `T1903` -> `T1909`: ONE lock order, raced for real - payment and clearing against three admin paths.
 
-THE CONTRACT (`app/core/money_boundary.py`, module docstring; 019 spec, "Один порядок локов"). Payment,
-clearing and admin all take the equivalent owner lock before they lock or change a row of that
-equivalent. The reverse order in any one of them is a reachable deadlock: a payment holds the owner lock
-and `FOR SHARE` on the equivalent row, an admin path that updated the row first then waits for the owner
-lock, and each waits on the other. A deadlock retry does not replace the order.
+THE CONTRACT SINCE 019 STAGE 5 (`T1909`, decision `KEEP-EQUIVALENT-LOCK` of the fourth consultation;
+`app/core/money_boundary.py`, module docstring; spec, "Один порядок локов"). There is ONE equivalent
+advisory lock, in two modes: a payment (and a tick's money phase, an inject) holds it SHARED, the clearing
+holds it EXCLUSIVE on its pinned connection. A money writer takes it BEFORE it touches a row of the
+equivalent - the equivalent row `FOR SHARE` (held through its commit), then the debt rows. The admin paths
+take NO advisory lock at all: `PATCH` and the hold clear change the equivalent row, the `DELETE` deletes
+it, and that row is their whole protocol with money.
 
-WHAT EACH RACE OBSERVES, in `pg_locks` and `pg_stat_activity`, while one side holds the owner lock
-paused at a barrier AFTER it has read/locked its rows:
+So there is one order - equivalent lock -> row - among the paths that take the lock, and the admin paths
+cannot invert it because they hold no advisory lock anyone could wait for. Until `T1909` the admin paths
+took the (then exclusive) owner lock before the row, and this module asserted that every waiter queued on
+the ADVISORY lock. What each schedule asserts now, in `pg_locks` / `pg_stat_activity` (via
+`pg_blocking_pids`), while one side is parked at a barrier AFTER it has read/locked its rows:
 
-* the other side waits on an ADVISORY lock (`wait_event = 'advisory'`), never on a row or a transaction,
-  and `pg_blocking_pids` names exactly the paused holder - so it has not touched the row yet;
-* the holder waits on nothing;
-* when released, the holder completes first, the waiter completes after it with the outcome its path owes,
-  no `40P01` reaches either outcome or the log, and no advisory lock is left behind (session-level
-  release included, for clearing's pinned connection).
+* MONEY FIRST (the money holds its equivalent lock - `ShareLock` for the payment, `ExclusiveLock` for the
+  clearing, asserted - and the row `FOR SHARE`): `PATCH` and the hold clear queue on a ROW or TRANSACTION
+  lock of the money's backend, holding no advisory lock themselves; the money commits before the admin
+  answers (read AT the answer from another session, not from task completion). The `DELETE` of an ACTIVE
+  equivalent touches no locked row: it answers `409 Deactivate equivalent before delete` while the money is
+  still parked, and nobody queues behind the money.
+* ADMIN FIRST (the admin holds its row change uncommitted, or - `DELETE` - its usage read, and no advisory
+  lock, asserted): money queues on the admin's transaction with its `FOR SHARE`, ALREADY HOLDING its
+  equivalent lock (the order equivalent lock -> row, measured on the waiter), meets 40001 when the admin
+  commits, and its retry owner finishes with the outcome the admin change implies - refused after a stop,
+  run after a lifted hold. Where the money met a COMMITTED change of the row first (the deactivation
+  before a `DELETE`; the hold before a clear, for a payment admitted before it), it is refused on its
+  retry while the admin is still parked, and nobody queues behind the admin.
+* EVERY SCHEDULE: no `40P01` reaches either outcome or the log, and no advisory lock is left behind -
+  not vacuous: each schedule first asserted that the money held its lock (the clearing's is session-level
+  and released by its cleanup).
 
-THE THREE ADMIN PATHS, raced separately against payment and against clearing, in both orders:
-`PATCH` deactivation (`admin.py`, owner -> UPDATE), the integrity-hold clear (owner -> `FOR UPDATE`
--> UPDATE), and the equivalent `DELETE` (owner -> usage count -> delete). A DELETE that could delete
-would need an unused equivalent, where no money can run; so its admin-first race pauses it after its
-authoritative read under the lock and it answers the usage `409` - the order is what is raced.
+THE THREE ADMIN PATHS, raced separately against payment and against clearing, in both orders (12
+schedules, the same twelve as `T1903`): `PATCH` deactivation (`admin.py`, UPDATE of the row), the
+integrity-hold clear (`FOR UPDATE` of the row -> UPDATE), and the equivalent `DELETE` (usage count ->
+delete). A DELETE that could delete would need an unused equivalent, where no money can run; so its
+admin-first race pauses it after its usage read and it answers the usage `409`, and its money-first race
+meets an active equivalent and answers the `409` that precedes any lock.
 
 THE STAND. The P1 SERIALIZABLE engine on a mode-B clone (`factory`), the real admin routes through
-`admin_api` (its gate holds one request at its session commit), the interlock world for both money
-operations (a three-edge cycle for clearing, the A -> B line for a payment). No sleeps on the clock:
-waits are observed in `pg_locks`.
+`admin_api` (its gate holds one request at its session commit and records its backend pid), the interlock
+world for both money operations (a three-edge cycle for clearing, the A -> B line for a payment). No
+sleeps on the clock: waits are observed in `pg_locks`. The clearing is parked at its auto-clearing policy
+check (`_cycle_respects_auto_clearing`), the first step after its cycle's `FOR UPDATE` and before any
+mutation; this stand calls `execute_clearing_with_amount` directly, so detection - the other caller of
+that check - never runs here.
 
-WHAT IT DOES NOT PROVE: that no OTHER interleaving deadlocks; that the order holds for writers not
-listed here (inject, reconciliation - they take the same `acquire_staged_equivalent_owner_locks` entry,
-covered by their own suites); anything at stage 5, when the owner lock is to be replaced.
+WHAT IT DOES NOT PROVE: that no OTHER interleaving deadlocks; the order for writers not listed here
+(tick, inject - their row waits against the PATCH are in `test_p015_t1544_operator_stop_races_postgres.py`;
+the reaction's in `test_p015_step5c_hold_races_postgres.py`).
 """
 
 from __future__ import annotations
@@ -37,7 +56,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -48,12 +66,13 @@ from app.api.v1 import admin as admin_module
 from app.config import settings
 from app.core.clearing.service import ClearingService
 from app.core.ledger.reconciliation import PASSED
-from app.core.money_boundary import _EQUIVALENT_OWNER_LOCK_NAMESPACE, MoneyBoundary
+from app.core.money_boundary import MoneyBoundary
 from app.core.payments.router import PaymentRouter
 from app.core.payments.service import PaymentService
 from app.db.models.equivalent import Equivalent
 from app.db.models.transaction import Transaction
 from app.db.reconciliation_tables import debt_reconciliation_results
+from app.schemas.payment import PaymentCreateRequest
 from app.utils.exceptions import ConflictException
 from tests.integration.p019_interlock_support import (
     _no_advisory_lock_is_held,
@@ -62,6 +81,11 @@ from tests.integration.p019_interlock_support import (
 from tests.integration.test_p015_p1_money_replay_postgres import factory  # noqa: F401 - fixture
 from tests.integration.test_p015_t1544_operator_stop_races_postgres import (  # noqa: F401 - fixture
     ADMIN,
+    _advisory_modes,
+    _assert_row_wait,
+    _clearing_transactions,
+    _retries_on_40001,
+    _waiters_behind,
     admin_api,
 )
 from tests.unit.test_p015_step5c_reaction_and_hold import hold_directly
@@ -72,104 +96,19 @@ from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - 
 ADMIN_PATHS = ("patch", "hold_clear", "delete")
 MONEY = ("payment", "clearing")
 _CYCLE_AMOUNT = Decimal("30.00000000")
-
-_QUEUE_SQL = text(
-    """
-    SELECT l.pid, l.granted, a.wait_event_type, a.wait_event, pg_blocking_pids(l.pid) AS blockers
-    FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
-    WHERE l.locktype = 'advisory'
-      AND l.database = (SELECT oid FROM pg_database WHERE datname = current_database())
-      AND l.classid = :namespace AND l.objid = :objid AND l.objsubid = 2
-    ORDER BY l.granted DESC, l.pid
-    """
-)
+#: The mode of the equivalent advisory lock each money operation holds (`pg_locks.mode`).
+_MONEY_MODE = {"payment": ["ShareLock"], "clearing": ["ExclusiveLock"]}
+_RETRY_EVENT = {"payment": "payment.attempt_retry", "clearing": "clearing.attempt_retry"}
 
 
 @pytest.fixture(autouse=True)
 def _barrier_budgets(monkeypatch):
-    # The barriers hold the owner lock for a moment; the default lock budget is seconds and is not
-    # what these races are about. A payment held before its owner lock waits inside its binding phase,
-    # which runs under `PREPARE_TIMEOUT_SECONDS`.
+    # The barriers hold locks for a moment; the default lock budget is seconds and is not what these
+    # races are about. A payment held before its equivalent lock waits inside its binding phase, which
+    # runs under `PREPARE_TIMEOUT_SECONDS`.
     monkeypatch.setattr(settings, "PREPARE_TIMEOUT_SECONDS", 30)
     monkeypatch.setattr(settings, "COMMIT_TIMEOUT_SECONDS", 30)
     monkeypatch.setattr(settings, "PAYMENT_TOTAL_TIMEOUT_SECONDS", 60)
-
-
-@dataclass
-class _Queue:
-    holder: int
-    waiter: int
-    waiter_event: tuple[str | None, str | None]
-    waiter_blockers: list[int]
-    holder_event: tuple[str | None, str | None]
-
-
-async def _owner_queue(equivalent_id: uuid.UUID, *, timeout: float = 10.0) -> _Queue | None:
-    """The owner lock's queue once it has one holder and one waiter, observed on its own connection."""
-
-    from tests.conftest import TestingSessionLocal
-
-    params = {
-        "namespace": _EQUIVALENT_OWNER_LOCK_NAMESPACE,
-        "objid": MoneyBoundary._equivalent_owner_lock_key(equivalent_id) & 0xFFFFFFFF,
-    }
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout
-    async with TestingSessionLocal() as observer:
-        while True:
-            rows = (await observer.execute(_QUEUE_SQL, params)).all()
-            await observer.rollback()
-            holders = [r for r in rows if r.granted]
-            waiters = [r for r in rows if not r.granted]
-            if holders and waiters:
-                assert len(holders) == 1 and len(waiters) == 1, rows
-                holder, waiter = holders[0], waiters[0]
-                return _Queue(
-                    holder=int(holder.pid),
-                    waiter=int(waiter.pid),
-                    waiter_event=(waiter.wait_event_type, waiter.wait_event),
-                    waiter_blockers=[int(p) for p in waiter.blockers],
-                    holder_event=(holder.wait_event_type, holder.wait_event),
-                )
-            if loop.time() > deadline:
-                return None
-            await asyncio.sleep(0.02)
-
-
-async def _owner_holder(equivalent_id: uuid.UUID, *, timeout: float = 10.0) -> int | None:
-    from tests.conftest import TestingSessionLocal
-
-    params = {
-        "namespace": _EQUIVALENT_OWNER_LOCK_NAMESPACE,
-        "objid": MoneyBoundary._equivalent_owner_lock_key(equivalent_id) & 0xFFFFFFFF,
-    }
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout
-    async with TestingSessionLocal() as observer:
-        while True:
-            rows = (await observer.execute(_QUEUE_SQL, params)).all()
-            await observer.rollback()
-            granted = [int(r.pid) for r in rows if r.granted]
-            if granted:
-                return granted[0]
-            if loop.time() > deadline:
-                return None
-            await asyncio.sleep(0.02)
-
-
-def _assert_waits_behind(queue: _Queue | None, *, holder: int | None, what: str) -> None:
-    assert queue is not None, f"premise: {what} never queued on the owner lock behind the holder"
-    if holder is not None:
-        assert queue.holder == holder, (queue, holder)
-    assert queue.waiter != queue.holder, queue
-    assert queue.waiter_event == ("Lock", "advisory"), (
-        f"{what} waits on {queue.waiter_event}, not on the owner lock: it touched a row before the "
-        f"owner lock - the inverted order the contract forbids"
-    )
-    assert queue.waiter_blockers == [queue.holder], (
-        f"{what} is blocked by {queue.waiter_blockers}, expected only the owner-lock holder {queue.holder}"
-    )
-    assert queue.holder_event[0] != "Lock", f"the holder itself waits on {queue.holder_event}"
 
 
 def _no_deadlock(outcomes, caplog) -> None:
@@ -248,25 +187,34 @@ async def _state(factory, tx_id: str) -> str | None:  # noqa: F811
         return await session.scalar(select(Transaction.state).where(Transaction.tx_id == tx_id))
 
 
-# ── money first: the money operation holds the owner lock and its rows; the admin path arrives ────────
+async def _pid(session) -> int:
+    return int(await session.scalar(text("SELECT pg_backend_pid()")))
+
+
+# ── money first: the money operation holds its equivalent lock and its rows; the admin path arrives ─
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("admin_path", ADMIN_PATHS)
 @pytest.mark.parametrize("money", MONEY)
-async def test_an_admin_path_arriving_while_money_holds_its_rows_waits_on_the_owner_lock(
+async def test_an_admin_path_arriving_while_money_holds_its_rows(
     factory, admin_api, monkeypatch, caplog, money, admin_path  # noqa: F811 - fixtures
 ) -> None:
-    """Money has taken the owner lock and read/locked its rows (payment: the commit's `FOR SHARE` on the
-    equivalent; clearing: its stop read and debt rows); the admin request must queue on the OWNER lock.
+    """Money has taken its equivalent lock and read/locked its rows (payment: the commit-time `FOR SHARE`
+    on the equivalent; clearing: its `FOR SHARE` stop read and the cycle's `FOR UPDATE`).
 
-    RED if the admin path touches the equivalent row before the owner lock: it then waits on the payment's
-    row lock (`wait_event` is not `advisory`), and with a payment still to lock the owner that is the
-    deadlock of the inverted order.
+    `PATCH` / hold clear: the admin request must queue on the MONEY'S row/transaction lock, holding no
+    advisory lock, and answer only after the money committed. `DELETE`: the equivalent is active, so it
+    answers its `409` without touching a locked row - while the money is still parked.
+
+    RED if the admin path took the equivalent advisory lock (it would wait on `advisory`, or hold one), if
+    the money read its stop without `FOR SHARE` (the admin would not queue and would answer before the
+    money commits), or if the two waited on each other (`40P01`).
     """
     client, _gate = admin_api
     seed = await _seed_interlock_case()
     code, equivalent_id = seed["equivalent_code"], seed["equivalent_id"]
+    tx_id = str(uuid.uuid4())
     paused, release = asyncio.Event(), asyncio.Event()
     holder_pid: list[int] = []
     completed: list[str] = []
@@ -278,7 +226,7 @@ async def test_an_admin_path_arriving_while_money_holds_its_rows_waits_on_the_ow
         async def _guard_then_hold(self, equivalent_ids, *, row_lock):
             await original_guard(self, equivalent_ids, row_lock=row_lock)
             if row_lock and not paused.is_set():
-                holder_pid.append(int(await self.session.scalar(text("SELECT pg_backend_pid()"))))
+                holder_pid.append(await _pid(self.session))
                 paused.set()
                 await release.wait()
 
@@ -291,21 +239,25 @@ async def test_an_admin_path_arriving_while_money_holds_its_rows_waits_on_the_ow
                     to_pid=seed["participant_pids"][1],
                     equivalent=code,
                     amount="5.00",
-                    idempotency_key=str(uuid.uuid4()),
+                    idempotency_key=tx_id,
                 )
+
+        async def _money_committed():
+            return await _state(factory, tx_id) == "COMMITTED"
     else:
         clearing_session = factory()
         service = ClearingService(clearing_session)
-        original_pairs = service._locked_pairs_for_equivalent
+        original_policy = service._cycle_respects_auto_clearing
 
-        async def _pairs_then_hold(current_equivalent_id):
-            pairs = await original_pairs(current_equivalent_id)
-            holder_pid.append(int(await service.session.scalar(text("SELECT pg_backend_pid()"))))
-            paused.set()
-            await release.wait()
-            return pairs
+        async def _policy_then_hold(debts):
+            respects = await original_policy(debts)
+            if not paused.is_set():
+                holder_pid.append(await _pid(service.session))
+                paused.set()
+                await release.wait()
+            return respects
 
-        monkeypatch.setattr(service, "_locked_pairs_for_equivalent", _pairs_then_hold)
+        monkeypatch.setattr(service, "_cycle_respects_auto_clearing", _policy_then_hold)
 
         async def _money():
             try:
@@ -313,26 +265,49 @@ async def test_an_admin_path_arriving_while_money_holds_its_rows_waits_on_the_ow
             finally:
                 await clearing_session.close()
 
+        async def _money_committed():
+            return await _clearing_transactions(factory, seed) == 1
+
+    async def _admin_then_look():
+        response = await _admin_call(client, admin_path, code)
+        return response, await _money_committed()
+
     try:
         with caplog.at_level(logging.INFO):
             money_task = asyncio.create_task(_money())
             money_task.add_done_callback(lambda _t: completed.append("money"))
             await asyncio.wait_for(paused.wait(), timeout=20)
+            assert await _advisory_modes(holder_pid[0], equivalent_id) == _MONEY_MODE[money], (
+                f"premise: the parked {money} does not hold its equivalent lock ({_MONEY_MODE[money]})"
+            )
 
-            admin_task = asyncio.create_task(_admin_call(client, admin_path, code))
+            admin_task = asyncio.create_task(_admin_then_look())
             admin_task.add_done_callback(lambda _t: completed.append("admin"))
-            queue = await _owner_queue(equivalent_id)
-            _assert_waits_behind(queue, holder=holder_pid[0], what=f"the admin {admin_path}")
-            assert not admin_task.done()
+            if admin_path == "delete":
+                # The active equivalent is refused before any lock: the DELETE answers while money is parked.
+                await asyncio.wait_for(asyncio.shield(admin_task), timeout=20)
+                assert not money_task.done(), "premise: the money was not parked while the DELETE answered"
+                assert await _waiters_behind(holder_pid[0], timeout=0) == [], (
+                    "something queued behind the parked money after the DELETE answered"
+                )
+            else:
+                admin_pid = _assert_row_wait(
+                    await _waiters_behind(holder_pid[0]), what=f"the admin {admin_path}", behind=f"the {money}"
+                )
+                assert await _advisory_modes(admin_pid, equivalent_id) == [], (
+                    f"the admin {admin_path} holds the equivalent advisory lock: since T1909 it takes none"
+                )
+                assert not admin_task.done()
 
             release.set()
             outcomes = await asyncio.wait_for(
                 asyncio.gather(money_task, admin_task, return_exceptions=True), timeout=60
             )
 
-        money_outcome, response = outcomes
+        money_outcome, admin_outcome = outcomes
         _no_deadlock(outcomes, caplog)
-        assert completed == ["money", "admin"], completed
+        assert not isinstance(admin_outcome, BaseException), repr(admin_outcome)
+        response, money_committed_at_answer = admin_outcome
         if money == "payment":
             assert getattr(money_outcome, "status", None) == "COMMITTED", money_outcome
         else:
@@ -343,6 +318,16 @@ async def test_an_admin_path_arriving_while_money_holds_its_rows_waits_on_the_ow
             assert response.json()["error"]["details"]["reason"] == "no_integrity_hold", response.text
         if admin_path == "delete":
             assert "Deactivate equivalent before delete" in response.text, response.text
+            assert completed == ["admin", "money"], completed
+            assert money_committed_at_answer is False
+        else:
+            # THE ORDER: the money's commit is visible when the admin answers (another session, read at the
+            # answer); for the payment, task completion says the same.
+            assert money_committed_at_answer is True, (
+                f"the admin {admin_path} answered before the {money}'s commit was visible"
+            )
+            if money == "payment":
+                assert completed == ["money", "admin"], completed
         await _no_advisory_lock_is_held(caplog)
     finally:
         release.set()
@@ -350,34 +335,48 @@ async def test_an_admin_path_arriving_while_money_holds_its_rows_waits_on_the_ow
         PaymentRouter.invalidate_cache(code)
 
 
-# ── admin first: the admin path holds the owner lock and its row; money arrives ─────────────────────
+# ── admin first: the admin path holds its row change (or its usage read); money arrives ─────────────
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("admin_path", ADMIN_PATHS)
 @pytest.mark.parametrize("money", MONEY)
-async def test_money_arriving_while_an_admin_path_holds_its_row_waits_on_the_owner_lock(
+async def test_money_arriving_while_an_admin_path_holds_its_row(
     factory, admin_api, monkeypatch, caplog, money, admin_path  # noqa: F811 - fixtures
 ) -> None:
-    """The admin path has the owner lock and has changed or read its row under it (PATCH: the UPDATE;
-    hold clear: `FOR UPDATE` and the UPDATE; DELETE: the usage count); money must queue on the OWNER lock,
-    then finish with what that admin outcome implies: refused after a stop, run after a lifted hold.
+    """The admin path holds its row change uncommitted (PATCH: the UPDATE; hold clear: `FOR UPDATE` and the
+    UPDATE) or, `DELETE`, stands after its usage count on an equivalent deactivated before; it holds no
+    advisory lock (asserted). Money then arrives.
 
-    THE PAYMENT SIDE SINCE 019 STAGE 4 (`T1906`). Until then a payment was prepared (durable `PREPARED`)
-    before the race and `PaymentEngine.commit` was the waiter. A payment is now one transaction through
-    `PaymentService`, so the real payment runs: it is ADMITTED (routing and the stop/hold pre-check pass
-    while the equivalent is active and not held) and held at the entry of its binding phase
-    (`PaymentService._bind_payment`), i.e. before its owner lock. Only then is the admin precondition
-    committed (held with a later PASS; deactivated for DELETE) and the admin path started; once the admin
-    holds the owner lock the payment is released into it and must queue. Setting the precondition before
-    the payment started would make its pre-check refuse it before admission, and it would never reach the
-    lock - the premise this race needs. After the admin commits, the payment's `FOR SHARE` on the changed
-    equivalent row meets a serialization failure and `pay()` retries it on a fresh snapshot, where the stop
-    refuses the admitted payment (stored `ABORTED`) or the lifted hold lets it commit.
+    QUEUES ON THE ADMIN'S ROW (PATCH against both; hold clear against the clearing): money queues with its
+    `FOR SHARE` on the ADMIN'S transaction, already holding its equivalent lock (`ShareLock` /
+    `ExclusiveLock` on the waiter: the order equivalent lock -> row), meets 40001 when the admin commits,
+    and finishes on its retry with what the admin outcome implies: refused after a stop, run after a lifted
+    hold.
 
-    RED if money locks the equivalent row before the owner lock: it waits on the admin's row
-    (`wait_event` is not `advisory`) while holding nothing the admin needs - and a money path that
-    reads the row first and then asks for the owner lock is the deadlock of the inverted order.
+    FINISHES WHILE THE ADMIN IS PARKED (`DELETE` against both; hold clear against the payment): the money
+    meets a COMMITTED change of the row first - the deactivation before the DELETE, the hold before the
+    clear, both committed after the admitted payment's snapshot - so its first `FOR SHARE` fails with 40001
+    at once, and its retry re-checks on a fresh snapshot while the admin is still uncommitted: the stop,
+    or the hold still in force, refuses it. Nothing the parked admin holds is waited for (nobody queues
+    behind it). This is the T1544/T1546 "change first, money refused" outcome; the hold clear's "run after
+    a lifted hold" is the clearing's schedule here, whose snapshot is taken after the hold.
+
+    THE PAYMENT SIDE. A payment is one transaction per attempt through `PaymentService.pay()` - here the
+    API entry, with a FRESH session per attempt from `factory`. (Not `create_payment_internal`: it lends
+    ONE session to every attempt (`_borrowed_session`), and its retry's best-effort stop/hold pre-check was
+    measured, 2026-09-25, to read the hold sometimes from the ORM state of the previous attempt and
+    sometimes afresh - an outcome that decides whether this schedule queues, so it cannot be the stand.)
+    The payment is ADMITTED (routing and the stop/hold pre-check pass while the equivalent is active and
+    not held) and held at the entry of its binding phase (`PaymentService._bind_payment`), i.e. before its
+    equivalent lock. Only then is the admin precondition committed (held with a later PASS; deactivated
+    for DELETE) and the admin path started; then the payment is released. Setting the precondition before
+    the payment started would make its pre-check refuse it before admission. An admitted payment refused
+    later is stored `ABORTED`.
+
+    RED if money read the row before its equivalent lock (the waiter would hold no advisory lock), if it
+    read the stop without `FOR SHARE` (its stale snapshot runs money after the stop), or if an admin path
+    took the advisory lock (it would hold one, and money would queue on `advisory`).
     """
     client, gate = admin_api
     seed = await _seed_interlock_case()
@@ -386,17 +385,20 @@ async def test_money_arriving_while_an_admin_path_holds_its_row_waits_on_the_own
     completed: list[str] = []
     money_task = admin_task = None
     delete_paused, delete_release = asyncio.Event(), asyncio.Event()
+    delete_pid: list[int] = []
     bind_reached, bind_release = asyncio.Event(), asyncio.Event()
     bind_hits: list[str] = []
+    payment_pid: list[int] = []
 
     if money == "payment":
         original_bind = PaymentService._bind_payment
 
         async def _bind_after_barrier(self, bound_tx_id, routes, bound_equivalent_id):
-            # The first attempt of THIS payment waits here, admitted and before its owner lock; a retry
-            # of the same payment passes straight through.
+            # The first attempt of THIS payment waits here, admitted and before its equivalent lock; a
+            # retry of the same payment passes straight through.
             if bound_tx_id == tx_id and not bind_hits:
                 bind_hits.append(bound_tx_id)
+                payment_pid.append(await _pid(self.session))
                 bind_reached.set()
                 await bind_release.wait()
             return await original_bind(self, bound_tx_id, routes, bound_equivalent_id)
@@ -418,6 +420,7 @@ async def test_money_arriving_while_an_admin_path_holds_its_row_waits_on_the_own
 
         async def _counts_then_hold(db, *, equivalent_id):
             counts = await original_counts(db, equivalent_id=equivalent_id)
+            delete_pid.append(await _pid(db))
             delete_paused.set()
             await delete_release.wait()
             return counts
@@ -428,43 +431,76 @@ async def test_money_arriving_while_an_admin_path_holds_its_row_waits_on_the_own
 
     async def _money():
         if money == "payment":
-            async with factory() as session:
-                return await PaymentService(session).create_payment_internal(
-                    seed["participant_ids"][0],
-                    to_pid=seed["participant_pids"][1],
+            return await PaymentService.pay(
+                factory,
+                seed["participant_ids"][0],
+                PaymentCreateRequest(
+                    tx_id=tx_id,
+                    to=seed["participant_pids"][1],
                     equivalent=code,
                     amount="5.00",
-                    idempotency_key=tx_id,
-                )
+                    signature="__internal__",
+                ),
+                idempotency_key=tx_id,
+                require_signature=False,
+            )
         async with factory() as session:
             return await ClearingService(session).execute_clearing_with_amount(seed["cycle"])
+
+    # Which schedules finish money while the admin is still parked (see the docstring).
+    money_finishes_first = admin_path == "delete" or (admin_path == "hold_clear" and money == "payment")
 
     try:
         with caplog.at_level(logging.INFO):
             if money == "payment":
-                # The payment is admitted first and held before its owner lock (see the docstring).
+                # The payment is admitted first and held before its equivalent lock (see the docstring).
                 money_task = asyncio.create_task(_money())
                 money_task.add_done_callback(lambda _t: completed.append("money"))
                 await asyncio.wait_for(bind_reached.wait(), timeout=20)
                 assert await _state(factory, tx_id) is None, "premise: the held payment is visible"
+                assert await _advisory_modes(payment_pid[0], equivalent_id) == [], (
+                    "premise: the payment held at its binding entry already holds the equivalent lock"
+                )
             await _admin_precondition()
             admin_task = asyncio.create_task(_admin_call(client, admin_path, code))
             admin_task.add_done_callback(lambda _t: completed.append("admin"))
             if admin_path == "delete":
                 await asyncio.wait_for(delete_paused.wait(), timeout=20)
+                admin_pid = delete_pid[0]
             else:
                 await asyncio.wait_for(gate.reached.wait(), timeout=20)
-            admin_pid = await _owner_holder(equivalent_id)
-            assert admin_pid is not None, "premise: the admin path does not hold the owner lock"
+                admin_pid = gate.pid
+            assert admin_pid is not None
+            assert await _advisory_modes(admin_pid, equivalent_id) == [], (
+                f"the admin {admin_path} holds the equivalent advisory lock: since T1909 it takes none"
+            )
 
             if money == "payment":
                 bind_release.set()
             else:
                 money_task = asyncio.create_task(_money())
                 money_task.add_done_callback(lambda _t: completed.append("money"))
-            queue = await _owner_queue(equivalent_id)
-            _assert_waits_behind(queue, holder=admin_pid, what=f"the {money}")
-            assert not money_task.done()
+
+            if money_finishes_first:
+                # Money meets the committed change first and is refused on its re-check; nothing the parked
+                # admin holds is waited for.
+                await asyncio.wait_for(asyncio.wait([money_task]), timeout=30)
+                assert money_task.done(), f"the money did not finish while the admin {admin_path} was parked"
+                assert not admin_task.done()
+                assert await _waiters_behind(admin_pid, timeout=0) == [], (
+                    f"something queued behind the parked admin {admin_path}"
+                )
+            else:
+                money_pid = _assert_row_wait(
+                    await _waiters_behind(admin_pid), what=f"the {money}", behind=f"the admin {admin_path}"
+                )
+                if money == "payment":
+                    assert money_pid == payment_pid[0], (money_pid, payment_pid)
+                assert await _advisory_modes(money_pid, equivalent_id) == _MONEY_MODE[money], (
+                    f"the {money} queued on the admin's row without holding its equivalent lock "
+                    f"({_MONEY_MODE[money]}): it touched the row before the lock"
+                )
+                assert not money_task.done()
 
             gate.release.set()
             delete_release.set()
@@ -474,18 +510,24 @@ async def test_money_arriving_while_an_admin_path_holds_its_row_waits_on_the_own
 
         response, money_outcome = outcomes
         _no_deadlock(outcomes, caplog)
-        assert completed == ["admin", "money"], completed
+        expected_order = ["money", "admin"] if money_finishes_first else ["admin", "money"]
+        assert completed == expected_order, completed
         expected_admin = {"patch": 200, "hold_clear": 200, "delete": 409}[admin_path]
         assert response.status_code == expected_admin, response.text
         if admin_path == "delete":
             assert response.json()["error"]["details"]["trustlines"] > 0, response.text
 
         if admin_path == "hold_clear":
-            # The hold is lifted before money runs: money runs.
             if money == "payment":
-                assert getattr(money_outcome, "status", None) == "COMMITTED", money_outcome
-                assert await _state(factory, tx_id) == "COMMITTED"
+                # The hold was still in force when the payment re-checked: refused by it, stored ABORTED;
+                # the clear answered after, and nothing of the payment moved.
+                assert isinstance(money_outcome, ConflictException), repr(money_outcome)
+                assert money_outcome.details.get("reason") == MoneyBoundary.EQUIVALENT_INTEGRITY_HOLD_REASON, (
+                    money_outcome.details
+                )
+                assert await _state(factory, tx_id) == "ABORTED"
             else:
+                # The hold is lifted before the clearing's retry runs: the clearing runs.
                 assert money_outcome == _CYCLE_AMOUNT, money_outcome
             assert (await _equivalent_row(factory, equivalent_id)).integrity_hold_result_id is None
         else:
@@ -496,6 +538,12 @@ async def test_money_arriving_while_an_admin_path_holds_its_row_waits_on_the_own
             )
             if money == "payment":
                 assert await _state(factory, tx_id) == "ABORTED"
+        if admin_path != "delete" or money == "payment":
+            # The waiter's snapshot predates the admin change it met: the outcome came through 40001 and
+            # the retry owner (a clearing started after a committed deactivation reads it on its first try).
+            assert _retries_on_40001(caplog, _RETRY_EVENT[money]), (
+                f"premise: the {money} did not meet 40001 on the changed row and retry"
+            )
         await _no_advisory_lock_is_held(caplog)
         if money == "payment":
             assert bind_hits == [tx_id], f"premise: the payment's barrier was not reached once: {bind_hits}"
