@@ -10,7 +10,7 @@ from typing import AbstractSet, Any, Awaitable, Callable, List, Literal
 
 from sqlalchemy import select, and_, or_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from app.core.ledger.book import DebtVersionConflict
@@ -224,15 +224,54 @@ def _borrowed_session(session: AsyncSession):
     return borrow
 
 
+#: The uniqueness a concurrent insert of the same `tx_id` meets first (`T1902`: by the migrated
+#: schema's catalogue and by a real duplicate insert). The identity resolver matches exactly this one
+#: constraint; any other `23505` is not an identity collision and is not resolved or retried here.
+TX_ID_UNIQUE_CONSTRAINT = "transactions_tx_id_key"
+
+#: SQLSTATE classes a server answers a failed `COMMIT` with AFTER rolling the transaction back: an
+#: integrity violation found at commit (deferred constraints and triggers, class 23), a transaction
+#: rollback (class 40, incl. 40001/40P01), a raised exception of a deferred trigger (class P0). Every
+#: other failure of a `COMMIT` - no SQLSTATE at all (a lost connection, a timeout, a cancellation), a
+#: connection exception (08), an operator intervention (57) - leaves the outcome UNKNOWN: the commit
+#: may have landed, and nothing may be terminalized before the identity is read.
+_COMMIT_REFUSED_SQLSTATE_CLASSES = frozenset({"23", "40", "P0"})
+
+
+def _constraint_name(exc: BaseException) -> str | None:
+    """The constraint a DBAPI error names, across asyncpg (`constraint_name`) and psycopg (`diag`)."""
+
+    for current in _iter_exception_chain(exc):
+        direct = getattr(current, "constraint_name", None)
+        if direct:
+            return str(direct)
+        diagnostic = getattr(getattr(current, "diag", None), "constraint_name", None)
+        if diagnostic:
+            return str(diagnostic)
+    return None
+
+
+def _is_tx_id_collision(exc: BaseException) -> bool:
+    """A `23505` on `transactions_tx_id_key` and nothing else (spec, "Идентичность `tx_id`")."""
+
+    return (
+        isinstance(exc, IntegrityError)
+        and _payment_db_sqlstate(exc) == "23505"
+        and _constraint_name(exc) == TX_ID_UNIQUE_CONSTRAINT
+    )
+
+
 @dataclass
 class _PaymentAttempt:
     """What one `execute()` established, for the owner of its transaction to act on (019 stage 3).
 
-    `inserted` - the payment's row was added to the session (before stage 3 it was then durable, and
-    every later failure terminalized it). `refusal` - (reason, code, details, log event prefix) the
-    payment is terminalized with when the attempt fails after `inserted`; the prefix keeps the log
-    event names of the code this replaces. `insert_conflict` - the insert itself met an existing
-    `tx_id`.
+    `admitted` - the request passed its applicability checks (routing, the stop/hold pre-check) and
+    the payment operation began (spec, "Допуск", `FORK-5`); from here on a definitive failure is
+    recorded `ABORTED`. `refusal` - (reason, code, details, log event prefix) of a failure inside the
+    operation, when the operation named it; the prefix keeps the log event names of the code this
+    replaces. `identity_collision` - the insert met a concurrent row of the same `tx_id` on
+    `transactions_tx_id_key`. `operation_left_unrolled` - the operation's savepoint could not be rolled
+    back and the transaction is unusable.
     """
 
     tx_id: str | None = None
@@ -240,17 +279,145 @@ class _PaymentAttempt:
     sender_id: uuid.UUID | None = None
     allowed_participant_pids: "AbstractSet[str] | None" = None
     row: dict[str, Any] | None = None
-    inserted: bool = False
-    insert_conflict: bool = False
+    admitted: bool = False
+    identity_collision: bool = False
     refusal: tuple[str, str, dict[str, Any], str] | None = None
     operation_left_unrolled: bool = False
 
 
 @dataclass(frozen=True)
+class _Admission:
+    """`pay()`'s in-process memory that THIS request was admitted by an earlier attempt (`FORK-5`).
+
+    Keyed by the request identity - `tx_id`, initiator and fingerprint; the type is always `PAYMENT`
+    on this path - and held only by the owner of the retries for the life of one `pay()` call. It is
+    never durable and never handed to another request: the simulator has none, because its replay
+    re-plans the load and a re-planned action is a different request (spec, "Допуск").
+    """
+
+    tx_id: str
+    sender_id: uuid.UUID
+    fingerprint: str
+    row: dict[str, Any]
+
+    @classmethod
+    def of(cls, attempt: "_PaymentAttempt") -> "_Admission | None":
+        if not attempt.admitted or attempt.row is None or attempt.tx_id is None:
+            return None
+        return cls(str(attempt.tx_id), attempt.sender_id, str(attempt.fingerprint), dict(attempt.row))  # type: ignore[arg-type]
+
+    def covers(self, attempt: "_PaymentAttempt") -> bool:
+        return (
+            attempt.tx_id == self.tx_id
+            and attempt.sender_id == self.sender_id
+            and attempt.fingerprint == self.fingerprint
+        )
+
+
+@dataclass(frozen=True)
+class DefinitiveRefusal:
+    """A definitive refusal of an ADMITTED payment, as it is recorded `ABORTED` (Q1, `FORK-4`).
+
+    `row` - the `Transaction` values (identity, payload) the `ABORTED` row is written with; `error` - the
+    stored `error`; `public_error` - what the caller is answered; `event_prefix` - the log event names of
+    a recording that fails (`event=payment.<prefix>_failed`), those of the code this replaces.
+    """
+
+    tx_id: str
+    sender_id: uuid.UUID
+    fingerprint: str
+    allowed_participant_pids: "AbstractSet[str] | None"
+    row: dict[str, Any]
+    error: dict[str, Any]
+    public_error: GeoException
+    event_prefix: str
+
+
+class PaymentTransactionUnusable(Exception):
+    """A staged payment failed and left the CALLER'S transaction unusable (spec, "Ветка непригодной
+    транзакции", `T1912`).
+
+    Raised by `execute()` in staged mode instead of recording anything: a structured refusal needs a
+    usable transaction, and this one is not - the payment operation's savepoint could not be rolled back
+    (a statement cancelled in flight by a timeout leaves the connection invalidated), or the refusal
+    could not be written into it. The owner of the transaction - the simulator's money phase - rolls
+    back and closes the WHOLE phase, positively establishes that rollback, and only then records
+    `refusal` (when there is one) in a short transaction of its own (`record_definitive_refusal`).
+
+    `publish_refusal` is attached by the staged executor: the one observation of this refusal
+    (`tx.failed`), which the owner publishes once, after the refusal's outcome is established.
+
+    Deliberately NOT a `GeoException` and not a retryable conflict: nothing may count it as a refused
+    payment of a usable transaction, and a replay of the phase must not be its answer.
+    """
+
+    def __init__(self, refusal: DefinitiveRefusal | None, cause: BaseException) -> None:
+        super().__init__(
+            f"the payment's transaction is unusable after {type(cause).__name__}"
+            + (f" (tx_id={refusal.tx_id})" if refusal is not None else "")
+        )
+        self.refusal = refusal
+        self.cause = cause
+        self.publish_refusal: Callable[[], Any] | None = None
+
+
+def _definitive_refusal(
+    attempt: "_PaymentAttempt",
+    exc: BaseException,
+    admission: "_Admission | None" = None,
+) -> DefinitiveRefusal | None:
+    """The refusal to record for a failed attempt, or None - classified by CAUSE, not by code.
+
+    None when the request was not admitted (by this attempt, or by an earlier attempt of the same
+    identity, `admission`): a refusal before admission leaves no row, and a later submission may still
+    execute. None for a transaction-level conflict - `40001`, `40P01`, the book's
+    `DebtVersionConflict`, the engine's changed owner set - including one that exhausted the retry
+    budget (it answers `409/E008` with `retryable: true`), and for an identity collision (the identity
+    resolver answers it). Otherwise - a capacity, stop or hold refusal, a non-retryable internal
+    failure, a terminal timeout or a cancellation - a definitive refusal with the existing public
+    classification of the error. Whether the attempt's rollback is CONFIRMED is the caller's to
+    establish before recording it.
+    """
+
+    admitted = attempt.admitted or (admission is not None and admission.covers(attempt))
+    if not admitted or attempt.identity_collision:
+        return None
+    row = attempt.row if attempt.row is not None else (admission.row if admission is not None else None)
+    if row is None or attempt.tx_id is None:
+        return None
+
+    if isinstance(exc, asyncio.CancelledError):
+        public: GeoException = TimeoutException("Payment cancelled")
+        reason, code, details, prefix = "Payment cancelled", ErrorCode.E007.value, {}, "cancellation_cleanup"
+    elif isinstance(exc, asyncio.TimeoutError):
+        public = TimeoutException("Payment timed out")
+        reason, code, details, prefix = "Payment timeout", ErrorCode.E007.value, {}, "timeout_abort"
+    else:
+        public = exc if isinstance(exc, GeoException) else _classify_payment_db_error(exc)
+        if isinstance(public, RetryablePaymentConflictException):
+            return None
+        if attempt.refusal is not None:
+            reason, code, details, prefix = attempt.refusal
+        else:
+            reason, code, details, prefix = str(public.message), str(public.code), dict(public.details or {}), "abort"
+    return DefinitiveRefusal(
+        tx_id=str(attempt.tx_id),
+        sender_id=attempt.sender_id,  # type: ignore[arg-type]
+        fingerprint=str(attempt.fingerprint),
+        allowed_participant_pids=attempt.allowed_participant_pids,
+        row=dict(row),
+        error=_refusal_error_payload(reason, code, details),
+        public_error=public,
+        event_prefix=prefix,
+    )
+
+
+@dataclass(frozen=True)
 class _RetryAttempt:
-    """`pay()`: discard this attempt and start another after `delay_seconds`."""
+    """`pay()`: discard this attempt and start another after `delay_seconds`, remembering `admission`."""
 
     delay_seconds: float
+    admission: "_Admission | None" = None
 
 
 @dataclass
@@ -316,8 +483,16 @@ class PaymentPostCommitEffects:
 
 @dataclass(frozen=True)
 class StagedPaymentResult:
+    """What a staged payment returns into the caller's transaction.
+
+    `refusal` - set when `result` is a definitive refusal recorded `ABORTED` in that transaction (019
+    stage 3, `T1905`): the public error the refusal carries, so a caller classifies it exactly as it
+    classified the exception the staged path raised before (the executor: rejected, timeout or internal).
+    """
+
     result: PaymentResult
     post_commit_effects: PaymentPostCommitEffects | None
+    refusal: GeoException | None = None
 
 
 class PaymentService:
@@ -330,8 +505,8 @@ class PaymentService:
         self._boundary: MoneyBoundary = self.engine
         self.router = PaymentRouter(session)
 
+    @staticmethod
     def _resolve_existing_payment(
-        self,
         existing_tx: Transaction,
         *,
         sender_id: uuid.UUID,
@@ -461,7 +636,7 @@ class PaymentService:
             PAYMENT_EVENTS_TOTAL.labels(event="create", result="idempotent_hit").inc()
         except Exception:
             pass
-        return self._tx_to_payment_result(existing_tx)
+        return PaymentService._tx_to_payment_result(existing_tx)
 
     async def create_payment(
         self,
@@ -688,9 +863,12 @@ class PaymentService:
         rollback does not refresh a SERIALIZABLE snapshot, so only the owner of the whole transaction
         can retry it - `pay()` for the API, the money-phase replay for the simulator.
 
-        `record_refusal` (the staged default) writes a refused payment as `ABORTED` into the caller's
-        transaction after the operation is rolled back, as the staged path did before stage 3; `pay()`
-        turns it off and records the refusal durably itself after rolling the attempt back.
+        `record_refusal` (the staged default): a failure is settled here, for a caller that owns the
+        transaction (`_settle_staged_failure`) - a definitive refusal after admission is written
+        `ABORTED` into the caller's transaction and RETURNED as a structured result, an identity
+        collision is resolved, a transaction left unusable raises `PaymentTransactionUnusable` (019
+        `T1905`, `T1912`). `pay()` turns it off: every failure is raised with `self._attempt` describing
+        it, and `pay()` settles it after rolling the attempt back.
         `deadline` (an event-loop time) bounds the call instead of `PAYMENT_TOTAL_TIMEOUT_SECONDS`.
 
         Returns the result and the post-commit effects, which only the caller may apply, once, after
@@ -1041,6 +1219,10 @@ class PaymentService:
                         },
                     },
                 }
+                # ADMISSION (spec, "Допуск", `FORK-5`): routing and the stop/hold pre-check passed and
+                # the binding phase begins. From here on a definitive failure of this request is
+                # recorded `ABORTED`; before it, a refusal leaves no row.
+                attempt.admitted = True
                 operation = await self._open_operation_savepoint()
                 try:
                     await self._run_payment_operation(
@@ -1055,46 +1237,15 @@ class PaymentService:
                 except BaseException as exc:
                     await self._abandon_operation(operation, exc)
                     raise
-        except asyncio.CancelledError:
-            if attempt.inserted:
-                attempt.refusal = ("Payment cancelled", ErrorCode.E007.value, {}, "cancellation_cleanup")
-            if attempt.inserted and record_refusal:
-                await self._record_refusal_in_transaction(attempt)
-            raise
-        except asyncio.TimeoutError:
-            if attempt.inserted:
-                attempt.refusal = ("Payment timeout", ErrorCode.E007.value, {}, "timeout_abort")
-                if record_refusal:
-                    await self._record_refusal_in_transaction(attempt)
-            raise TimeoutException("Payment timed out")
-        except IntegrityError:
-            if not attempt.insert_conflict:
-                raise
-            # The `Transaction` insert collided with an existing `tx_id` and the operation savepoint
-            # is rolled back, so this transaction is usable again. The row that won is looked up in
-            # THIS transaction's snapshot, as before stage 3; under SERIALIZABLE a concurrently
-            # committed winner is not visible here, and the error is raised for the owner of the
-            # transaction to resolve on a fresh one (`pay()` does; the exact identity resolver is
-            # `T1905`).
-            existing_tx = (
-                await self.session.execute(
-                    select(Transaction).where(Transaction.tx_id == tx_id_str)
-                )
-            ).scalar_one_or_none()
-            if existing_tx is not None:
-                return StagedPaymentResult(
-                    result=self._resolve_existing_payment(
-                        existing_tx,
-                        sender_id=sender_id,
-                        request_fingerprint=request_fingerprint,
-                        allowed_participant_pids=allowed_participant_pids,
-                    ),
-                    post_commit_effects=None,
-                )
-            raise
-        except BaseException:
-            if attempt.refusal is not None and record_refusal:
-                await self._record_refusal_in_transaction(attempt)
+        except BaseException as exc:
+            if record_refusal:
+                # Staged: the caller owns the transaction, and the outcome goes back through its
+                # savepoint as a RESULT (`_settle_staged_failure`).
+                return await self._settle_staged_failure(attempt, exc)
+            if isinstance(exc, asyncio.TimeoutError):
+                if attempt.admitted:
+                    attempt.refusal = ("Payment timeout", ErrorCode.E007.value, {}, "timeout_abort")
+                raise TimeoutException("Payment timed out") from exc
             raise
 
         # Fetch server timestamps (created_at/updated_at) explicitly.
@@ -1227,18 +1378,17 @@ class PaymentService:
 
         tx_id_str = str(attempt.tx_id)
         new_tx = Transaction(**attempt.row, state="NEW")
-        attempt.inserted = True
         self.session.add(new_tx)
         try:
             await self.session.flush()
-        except IntegrityError:
-            # tx_id is globally unique. The operation savepoint is rolled back by the caller; the
-            # existing row is looked up after that, on a usable transaction (`execute`).
-            attempt.inserted = False
-            attempt.insert_conflict = True
+        except IntegrityError as exc:
+            # A concurrent request inserted the same `tx_id` and committed first: THE identity
+            # collision, answered by the identity resolver after the operation savepoint is rolled back
+            # (`pay()` / `_settle_staged_failure`). Only `transactions_tx_id_key` is that collision; any
+            # other integrity error of this insert is an ordinary failure (spec: no broad 23505 retry).
+            attempt.identity_collision = _is_tx_id_collision(exc)
             raise
         except DBAPIError as exc:
-            attempt.inserted = False
             public_error = _classify_payment_db_error(exc)
             if not isinstance(public_error, RetryablePaymentConflictException):
                 raise
@@ -1289,12 +1439,13 @@ class PaymentService:
                 getattr(e, "status_code", 500) or 500
             ) < 500
             public_error = e if is_client_error else _classify_payment_db_error(e)
-            attempt.refusal = (
-                str(public_error.message),
-                str(getattr(public_error, "code", ErrorCode.E010.value)),
-                getattr(public_error, "details", None) or {},
-                "prepare_nested_abort",
-            )
+            if not isinstance(public_error, RetryablePaymentConflictException):
+                attempt.refusal = (
+                    str(public_error.message),
+                    str(getattr(public_error, "code", ErrorCode.E010.value)),
+                    getattr(public_error, "details", None) or {},
+                    "prepare_nested_abort",
+                )
             if is_client_error:
                 raise
             raise public_error from e
@@ -1325,62 +1476,179 @@ class PaymentService:
             if isinstance(e, GeoException) and 400 <= int(
                 getattr(e, "status_code", 500) or 500
             ) < 500:
-                attempt.refusal = (
-                    str(e.message),
-                    str(e.code),
-                    e.details or {},
-                    "commit_nested_abort",
-                )
+                if not isinstance(e, RetryablePaymentConflictException):
+                    attempt.refusal = (
+                        str(e.message),
+                        str(e.code),
+                        e.details or {},
+                        "commit_nested_abort",
+                    )
                 raise
             public_error = _classify_payment_db_error(e)
-            attempt.refusal = (
-                str(public_error.message),
-                str(public_error.code),
-                public_error.details or {},
-                "commit_nested_abort",
-            )
+            if not isinstance(public_error, RetryablePaymentConflictException):
+                attempt.refusal = (
+                    str(public_error.message),
+                    str(public_error.code),
+                    public_error.details or {},
+                    "commit_nested_abort",
+                )
             raise public_error from e
 
-    async def _record_refusal_in_transaction(self, attempt: "_PaymentAttempt") -> None:
-        """Terminalize a staged payment as ABORTED in the caller's transaction, as before stage 3.
+    # ── staged: the caller owns the transaction ──────────────────────────────────────────────────
 
-        The operation savepoint is already rolled back, so the refusal is written as a new
-        `ABORTED` row in a savepoint of its own. Best effort, exactly as the staged
-        `engine.abort(commit=False)` it replaces: a failure is logged under the same event names and
-        the original exception is what the caller sees. Whether the row survives the caller's own
-        savepoint is the caller's affair - the executor's rolls it back; making a staged refusal
-        durable is `T1905`.
+    async def _settle_staged_failure(
+        self, attempt: "_PaymentAttempt", exc: BaseException
+    ) -> StagedPaymentResult:
+        """What a failed STAGED payment hands back through the caller's savepoint (019 stage 3, `T1905`).
+
+        The caller - the simulator's executor, `real_payments_executor.py` - runs each payment inside a
+        savepoint of its own and catches exceptions OUTSIDE it, so anything written before raising is
+        rolled back with that savepoint. Hence, by cause:
+
+        * refused before admission - raised, no row (the executor counts a rejection);
+        * a transaction-level conflict - raised as `RetryablePaymentConflictException` for the owner's
+          whole-phase replay (a savepoint rollback does not refresh a SERIALIZABLE snapshot);
+        * an identity collision on `transactions_tx_id_key` - the identity resolver (`_resolve_identity`):
+          the winner's stored result, a `409`, or - no winner to read - a retryable conflict;
+        * a definitive refusal after admission, transaction usable - the `ABORTED` row is written into
+          the caller's transaction and RETURNED as a structured result (`StagedPaymentResult.refusal`),
+          so the caller's savepoint keeps it and the tick's commit makes it durable;
+        * a definitive refusal that finds the transaction unusable - `PaymentTransactionUnusable`, for
+          the owner of the transaction to roll back and record (`T1912`);
+        * a cancellation - still propagated; the refusal is written first when the transaction is usable,
+          as before stage 3 (whether it survives is the caller's affair).
         """
 
-        reason, code, details, event_prefix = attempt.refusal  # type: ignore[misc]
+        if isinstance(exc, asyncio.CancelledError):
+            refusal = _definitive_refusal(attempt, exc)
+            if refusal is not None and not attempt.operation_left_unrolled:
+                try:
+                    await self._record_refusal_in_transaction(refusal)
+                except asyncio.CancelledError:
+                    raise
+                except BaseException:  # noqa: BLE001 - logged by the writer; the signal wins
+                    pass
+            raise exc
 
-        async def write() -> None:
+        if attempt.identity_collision:
+            return await self._resolve_identity(attempt, exc)
+
+        refusal = _definitive_refusal(attempt, exc)
+        if refusal is None:
+            if isinstance(exc, asyncio.TimeoutError):
+                raise TimeoutException("Payment timed out") from exc
+            if not isinstance(exc, GeoException):
+                classified = _classify_payment_db_error(exc)
+                if isinstance(classified, RetryablePaymentConflictException):
+                    raise classified from exc
+            raise exc
+        if attempt.operation_left_unrolled:
+            raise PaymentTransactionUnusable(refusal, exc) from exc
+        try:
+            row = await self._record_refusal_in_transaction(refusal)
+        except asyncio.CancelledError:
+            raise
+        except BaseException as failure:  # noqa: BLE001 - classified below
+            classified = (
+                failure if isinstance(failure, GeoException) else _classify_payment_db_error(failure)
+            )
+            if isinstance(classified, RetryablePaymentConflictException):
+                # SERIALIZABLE refused the write (a concurrent row of this `tx_id` behind the snapshot):
+                # a conflict of the whole transaction, for its owner to replay.
+                raise classified from failure
+            raise PaymentTransactionUnusable(refusal, failure) from exc
+        if row is None:
+            # A visible row of this `tx_id` already exists: whoever wrote it, the resolver answers.
+            attempt.identity_collision = True
+            return await self._resolve_identity(attempt, exc)
+        return StagedPaymentResult(
+            result=PaymentService._tx_to_payment_result(row),
+            post_commit_effects=None,
+            refusal=refusal.public_error,
+        )
+
+    async def _record_refusal_in_transaction(self, refusal: DefinitiveRefusal) -> Transaction | None:
+        """Write `refusal` as an `ABORTED` row into the CALLER's transaction, in a savepoint of its own.
+
+        The payment operation's savepoint is already rolled back, so this is a new row. Returns it, or
+        None when a visible row of the `tx_id` already exists (nothing is overwritten). A failure is
+        logged under the event names of the `engine.abort(commit=False)` this replaces
+        (`event=payment.<phase>_failed`) and raised: the caller decides what an unrecorded refusal is.
+        """
+
+        async def write() -> Transaction | None:
             nested = await self.session.begin_nested()
             try:
-                self.session.add(
-                    Transaction(
-                        **attempt.row,
-                        state="ABORTED",
-                        error=_refusal_error_payload(reason, code, details),
+                row_id = (
+                    await self.session.execute(
+                        pg_insert(Transaction)
+                        .values(**refusal.row, state="ABORTED", error=refusal.error, signatures=[])
+                        .on_conflict_do_nothing(index_elements=[Transaction.tx_id])
+                        .returning(Transaction.id)
                     )
-                )
-                await self.session.flush()
+                ).scalar_one_or_none()
             except BaseException:
                 if nested.is_active:
                     await nested.rollback()
                 raise
             await nested.commit()
+            if row_id is None:
+                return None
+            return (
+                await self.session.execute(
+                    select(Transaction)
+                    .where(Transaction.id == row_id)
+                    .execution_options(populate_existing=True)
+                )
+            ).scalar_one()
 
-        failure = await _drain_payment_cleanup(write)
+        row, failure = await _drain_call(write)
         if failure is not None:
             logger.error(
                 "event=payment.%s_failed tx_id=%s error_type=%s",
-                event_prefix,
-                str(attempt.tx_id),
+                refusal.event_prefix,
+                refusal.tx_id,
                 type(failure).__name__,
             )
-            if isinstance(failure, asyncio.CancelledError):
-                raise failure
+            raise failure
+        return row
+
+    async def _resolve_identity(
+        self, attempt: "_PaymentAttempt", exc: BaseException
+    ) -> StagedPaymentResult:
+        """The exact identity resolver of the staged path (spec, "Идентичность `tx_id`").
+
+        The caller's own snapshot cannot see a winner that committed after it began, so the winner is
+        read on a FRESH transaction of another connection and compared - type, initiator, fingerprint,
+        and the run perimeter - by `_resolve_existing_payment`: its stored result, or a `409`. No row
+        there (the winner is gone) is answered as a retryable conflict: the owner's next attempt is the
+        "one new attempt" the spec allows, on a fresh snapshot.
+        """
+
+        def resolve(existing_tx: Transaction | None) -> PaymentResult:
+            if existing_tx is None:
+                raise RetryablePaymentConflictException() from exc
+            return PaymentService._resolve_existing_payment(
+                existing_tx,
+                sender_id=attempt.sender_id,
+                request_fingerprint=str(attempt.fingerprint),
+                allowed_participant_pids=attempt.allowed_participant_pids,
+            )
+
+        statement = select(Transaction).where(Transaction.tx_id == attempt.tx_id)
+        bind = self.session.bind
+        if isinstance(bind, AsyncEngine):
+            fresh = async_sessionmaker(bind=bind, expire_on_commit=False, autoflush=False)
+            async with fresh() as reader:
+                try:
+                    result = resolve((await reader.execute(statement)).scalar_one_or_none())
+                finally:
+                    await reader.rollback()
+        else:
+            # A session bound to one connection (a test's outer transaction) has no other connection
+            # to read from; its own snapshot is all there is.
+            result = resolve((await self.session.execute(statement)).scalar_one_or_none())
+        return StagedPaymentResult(result=result, post_commit_effects=None)
 
     # ── pay(): the API wrapper - one transaction per attempt, the owner of its retries ──────────
 
@@ -1406,11 +1674,22 @@ class PaymentService:
         and the `PAYMENT_TOTAL_TIMEOUT_SECONDS` deadline. A savepoint rollback is never a retry: it
         does not refresh a SERIALIZABLE snapshot.
 
-        OUTCOMES ARE THOSE OF THE API BEFORE STAGE 3 (T1904 changes the transaction, not the
-        outcome table - that is `T1905`): a refusal after the payment's row would have existed is
-        recorded `ABORTED` with its error, in a short transaction of its own after the attempt's
-        rollback; an exhausted retryable conflict is recorded `ABORTED`/`E008` the same way; a
-        timeout `ABORTED`/`E007`.
+        OUTCOMES BY CAUSE (spec, "Окончательный отказ…", the seven-row table; `T1905`):
+
+        * refused BEFORE admission (routing, stop/hold pre-check) - no row; a later submission may run;
+        * refused AFTER admission - by this attempt, or by an earlier one of the same request
+          (`_Admission`, in-process memory of this call) - a capacity, stop, hold, non-retryable
+          internal or terminal-timeout refusal: recorded `ABORTED` with its error, after the attempt's
+          rollback is confirmed, in a short transaction of its own; the same identity replays it;
+        * a transaction-level conflict, including an exhausted retry budget on prepare or commit -
+          nothing recorded, `409/E008` with `retryable: true`;
+        * an identity collision on `transactions_tx_id_key` - the winner read on a new transaction:
+          its stored result or a `409`; no winner - one more attempt within the budget;
+        * a COMMIT whose outcome is unknown - neither recorded nor retried: the identity is read, a
+          stored row answers, and no row answers with the error (the client's resubmission of the same
+          `tx_id` resolves it);
+        * a cancellation - propagated; an admitted request whose rollback is confirmed is recorded
+          `ABORTED/E007` first; after a confirmed commit it is `COMMITTED` and nothing is recorded.
 
         Post-commit effects - the SSE event, the route-cache invalidation and the `create`/`commit`
         success metrics - are applied once, after the commit is confirmed, never per attempt and
@@ -1424,6 +1703,7 @@ class PaymentService:
         deadline = loop.time() + total_timeout_s
         attempts = max(1, int(getattr(settings, "COMMIT_RETRY_ATTEMPTS", 1) or 1))
         attempt_no = 0
+        admission: _Admission | None = None
         while True:
             attempt_no += 1
             async with sessions() as session:
@@ -1438,8 +1718,10 @@ class PaymentService:
                     deadline=deadline,
                     attempt_no=attempt_no,
                     attempts=attempts,
+                    admission=admission,
                 )
             if isinstance(outcome, _RetryAttempt):
+                admission = outcome.admission or admission
                 await asyncio.sleep(outcome.delay_seconds)
                 continue
             return outcome
@@ -1456,6 +1738,7 @@ class PaymentService:
         deadline: float,
         attempt_no: int,
         attempts: int,
+        admission: "_Admission | None" = None,
     ) -> "PaymentResult | _RetryAttempt":
         try:
             staged = await self.execute(
@@ -1479,6 +1762,7 @@ class PaymentService:
                 deadline=deadline,
                 attempt_no=attempt_no,
                 attempts=attempts,
+                admission=admission,
             )
 
         # THE ONE COMMIT of the payment.
@@ -1499,7 +1783,14 @@ class PaymentService:
         return staged.result
 
     def _retry_or_none(
-        self, exc: BaseException, *, where: str, deadline: float, attempt_no: int, attempts: int
+        self,
+        exc: BaseException,
+        *,
+        where: str,
+        deadline: float,
+        attempt_no: int,
+        attempts: int,
+        admission: "_Admission | None" = None,
     ) -> "_RetryAttempt | None":
         """Another attempt, if the budget has one; the attempt's rollback is the caller's to do first."""
 
@@ -1519,7 +1810,7 @@ class PaymentService:
             _conflict_cause(exc),
             where,
         )
-        return _RetryAttempt(delay)
+        return _RetryAttempt(delay, admission)
 
     async def _rollback_attempt(self) -> None:
         """Roll the attempt's transaction back, to completion even under cancellation."""
@@ -1542,6 +1833,11 @@ class PaymentService:
         off; a rollback would expire them) and keeps whatever its caller had staged - and rolled back
         when it cannot (an aborted or invalidated transaction). Either way the next statement opens a
         new snapshot.
+
+        RETURNING NORMALLY IS THE CONFIRMATION that the attempt's effects cannot land: its operation was
+        rolled back (or its connection invalidated) and its transaction has ended without them. When
+        even the rollback fails this raises, and nothing is recorded for the attempt (spec: a refusal is
+        recorded only after a confirmed rollback).
         """
 
         if getattr(getattr(self, "_attempt", None), "operation_left_unrolled", False):
@@ -1562,39 +1858,52 @@ class PaymentService:
         deadline: float,
         attempt_no: int,
         attempts: int,
+        admission: "_Admission | None" = None,
     ) -> "PaymentResult | _RetryAttempt":
         attempt: _PaymentAttempt = getattr(self, "_attempt", None) or _PaymentAttempt()
         await self._end_failed_attempt()
+        admission = _Admission.of(attempt) or admission
 
         if isinstance(exc, asyncio.CancelledError):
-            if attempt.inserted and attempt.refusal is not None:
-                await self._record_refusal(sessions, attempt, cancelled=exc)
+            refusal = _definitive_refusal(attempt, exc, admission)
+            if refusal is not None:
+                await self._record_refusal(sessions, refusal, cancelled=exc)
             raise exc
+
+        if attempt.identity_collision:
+            # THE EXACT IDENTITY RESOLVER (spec, "Идентичность `tx_id`"): the winner is read on a new
+            # transaction and compared - type, initiator, fingerprint; its stored result or a 409.
+            existing = await self._read_existing(sessions, str(attempt.tx_id))
+            if existing is not None:
+                return existing
+            # No winner to read (it rolled back): one more attempt within the budget.
+            retry = self._retry_or_none(
+                exc, where="identity", deadline=deadline, attempt_no=attempt_no,
+                attempts=attempts, admission=admission,
+            )
+            if retry is not None:
+                return retry
+            raise RetryablePaymentConflictException() from exc
 
         public_error = exc if isinstance(exc, GeoException) else _classify_payment_db_error(exc)
         if isinstance(public_error, RetryablePaymentConflictException):
             retry = self._retry_or_none(
-                exc, where=where, deadline=deadline, attempt_no=attempt_no, attempts=attempts
+                exc, where=where, deadline=deadline, attempt_no=attempt_no,
+                attempts=attempts, admission=admission,
             )
             if retry is not None:
                 return retry
+            # EXHAUSTED: still a conflict, never a definitive refusal - nothing is recorded, and the
+            # client's resubmission of the same tx_id executes (`FORK-4`).
+            if exc is public_error:
+                raise exc
+            raise public_error from exc
 
-        if attempt.insert_conflict:
-            # The same shape as before stage 3: after the rollback, read the row that won on a new
-            # transaction and apply the idempotency policy to it.
-            existing = await self._read_existing(sessions, str(attempt.tx_id))
-            if existing is not None:
-                return existing
-            raise exc
-
-        if attempt.refusal is not None:
-            stored = await self._record_refusal(sessions, attempt)
+        refusal = _definitive_refusal(attempt, exc, admission)
+        if refusal is not None:
+            stored = await self._record_refusal(sessions, refusal)
             if stored is not None:
                 return stored
-        if not isinstance(exc, GeoException) and isinstance(
-            public_error, RetryablePaymentConflictException
-        ):
-            raise public_error from exc
         raise exc
 
     async def _settle_failed_commit(
@@ -1610,27 +1919,30 @@ class PaymentService:
         sqlstate = _payment_db_sqlstate(exc) if isinstance(exc, DBAPIError) else None
         await self._rollback_attempt()
 
-        if sqlstate in _RETRYABLE_PAYMENT_SQLSTATES:
-            # PostgreSQL refused the COMMIT and rolled the transaction back: nothing landed.
-            retry = self._retry_or_none(
-                exc, where="commit", deadline=deadline, attempt_no=attempt_no, attempts=attempts
-            )
-            if retry is not None:
-                return retry
-            public_error = RetryablePaymentConflictException()
-            attempt.refusal = (
-                str(public_error.message),
-                str(public_error.code),
-                dict(public_error.details),
-                "commit_abort",
-            )
-            stored = await self._record_refusal(sessions, attempt)
-            if stored is not None:
-                return stored
-            raise public_error from exc
+        if sqlstate is not None and sqlstate[:2] in _COMMIT_REFUSED_SQLSTATE_CLASSES:
+            # The server ANSWERED the COMMIT with an error: it rolled the transaction back, nothing
+            # landed - the rollback is confirmed.
+            if sqlstate in _RETRYABLE_PAYMENT_SQLSTATES:
+                retry = self._retry_or_none(
+                    exc, where="commit", deadline=deadline, attempt_no=attempt_no,
+                    attempts=attempts, admission=_Admission.of(attempt),
+                )
+                if retry is not None:
+                    return retry
+                # Exhausted on the commit: a conflict, never recorded (`FORK-4`).
+                raise RetryablePaymentConflictException() from exc
+            refusal = _definitive_refusal(attempt, exc)
+            if refusal is not None:
+                stored = await self._record_refusal(sessions, refusal)
+                if stored is not None:
+                    return stored
+            raise _classify_payment_db_error(exc) from exc
 
         # Any other failure of the COMMIT - a timeout, a lost connection, a cancellation - leaves its
-        # outcome unknown: the commit may have landed. Read before terminalizing, as before stage 3.
+        # outcome UNKNOWN: the commit may have landed, and a successful rollback afterwards does not
+        # refute it. The identity is read; a stored row answers. No row does NOT prove the rollback (a
+        # commit in flight may still land), so nothing is terminalized and nothing is retried: the
+        # caller gets the error, and a resubmission of the same tx_id reads whichever outcome it was.
         existing, read_error = await _drain_call(
             lambda: self._read_existing(sessions, str(attempt.tx_id))
         )
@@ -1649,22 +1961,17 @@ class PaymentService:
                 raise read_error
             raise GeoException() from read_error
         if isinstance(exc, asyncio.CancelledError):
-            if existing is None:
-                attempt.refusal = ("Payment cancelled", ErrorCode.E007.value, {}, "cancellation_cleanup")
-                await self._record_refusal(sessions, attempt, cancelled=exc)
             raise exc
         if existing is not None:
             return existing
+        logger.warning(
+            "event=payment.commit_outcome_unresolved tx_id=%s error_type=%s",
+            str(attempt.tx_id),
+            type(exc).__name__,
+        )
         if isinstance(exc, asyncio.TimeoutError):
-            attempt.refusal = ("Payment timeout", ErrorCode.E007.value, {}, "timeout_abort")
-            public: GeoException = TimeoutException("Payment timed out")
-        else:
-            public = _classify_payment_db_error(exc)
-            attempt.refusal = (str(public.message), str(public.code), public.details or {}, "commit_abort")
-        stored = await self._record_refusal(sessions, attempt)
-        if stored is not None:
-            return stored
-        raise public from exc
+            raise TimeoutException("Payment timed out") from exc
+        raise GeoException() from exc
 
     async def _read_existing(self, sessions, tx_id: str) -> PaymentResult | None:
         """The stored row of `tx_id` on a NEW transaction, through the idempotency policy."""
@@ -1690,83 +1997,14 @@ class PaymentService:
             finally:
                 await session.rollback()
 
-    async def _record_refusal_durably(
-        self, sessions, attempt: "_PaymentAttempt"
-    ) -> PaymentResult | None:
-        """Record `attempt.refusal` as an `ABORTED` row in a short transaction of its own.
-
-        Called only after the attempt's own transaction was rolled back. The insert yields to a row
-        that already exists (a concurrent request of the same `tx_id` may have finished first):
-        nothing is overwritten, and when that row is COMMITTED its result is returned instead -
-        COMMITTED always wins, as it did in `engine.abort`. Returns None when the refusal was
-        recorded (or yielded to an ABORTED row).
-        """
-
-        reason, code, details, _event_prefix = attempt.refusal  # type: ignore[misc]
-        values = dict(attempt.row or {})
-        values.update(
-            state="ABORTED",
-            error=_refusal_error_payload(reason, code, details),
-            signatures=[],
-        )
-        tries = max(1, int(getattr(settings, "COMMIT_RETRY_ATTEMPTS", 1) or 1))
-        last_error: BaseException | None = None
-        for _ in range(tries):
-            async with sessions() as session:
-                try:
-                    inserted = (
-                        await session.execute(
-                            pg_insert(Transaction)
-                            .values(**values)
-                            .on_conflict_do_nothing(index_elements=[Transaction.tx_id])
-                            .returning(Transaction.id)
-                        )
-                    ).scalar_one_or_none()
-                    existing = None
-                    if inserted is None:
-                        existing = (
-                            await session.execute(
-                                select(Transaction)
-                                .where(Transaction.tx_id == attempt.tx_id)
-                                .execution_options(populate_existing=True)
-                            )
-                        ).scalar_one_or_none()
-                    await session.commit()
-                except DBAPIError as exc:
-                    last_error = exc
-                    await session.rollback()
-                    if _payment_db_sqlstate(exc) in _RETRYABLE_PAYMENT_SQLSTATES:
-                        continue
-                    break
-                except BaseException:
-                    await session.rollback()
-                    raise
-            if inserted is not None:
-                try:
-                    from app.utils.metrics import PAYMENT_EVENTS_TOTAL
-
-                    PAYMENT_EVENTS_TOTAL.labels(event="abort", result="success").inc()
-                except Exception:
-                    pass
-                return None
-            if existing is not None and existing.state == "COMMITTED":
-                return self._resolve_existing_payment(
-                    existing,
-                    sender_id=attempt.sender_id,
-                    request_fingerprint=str(attempt.fingerprint),
-                    allowed_participant_pids=attempt.allowed_participant_pids,
-                )
-            return None
-        raise last_error if last_error is not None else GeoException()
-
     async def _record_refusal(
         self,
         sessions,
-        attempt: "_PaymentAttempt",
+        refusal: DefinitiveRefusal,
         *,
         cancelled: asyncio.CancelledError | None = None,
     ) -> PaymentResult | None:
-        """`_record_refusal_durably`, run to its end even under the caller's cancellation.
+        """`record_definitive_refusal`, run to its end even under the caller's cancellation.
 
         A recording that fails is logged (`event=payment.<phase>_abort_failed`, the names the code
         before stage 3 used for its `engine.abort`) and answered with a safe 500 - the original error
@@ -1775,20 +2013,22 @@ class PaymentService:
         re-raised once the recording has finished.
         """
 
-        stored, failure = await _drain_call(lambda: self._record_refusal_durably(sessions, attempt))
+        stored, failure = await _drain_call(lambda: record_definitive_refusal(sessions, refusal))
         if failure is None:
             return stored
         if isinstance(failure, asyncio.CancelledError):
             raise failure
-        event_prefix = attempt.refusal[3].replace("_nested", "") if attempt.refusal else "abort"
         logger.error(
             "event=payment.%s_failed tx_id=%s error_type=%s",
-            event_prefix,
-            str(attempt.tx_id),
+            refusal.event_prefix.replace("_nested", ""),
+            refusal.tx_id,
             type(failure).__name__,
         )
         if cancelled is not None:
             raise cancelled
+        if isinstance(failure, GeoException) and 400 <= failure.status_code < 500:
+            # The identity check on the row that won: another request owns this tx_id.
+            raise failure
         raise GeoException() from failure
 
     async def get_payment(self, tx_id: str) -> PaymentResult:
@@ -1827,7 +2067,8 @@ class PaymentService:
 
         return self._tx_to_payment_result(tx)
 
-    def _tx_to_payment_result(self, tx: Transaction) -> PaymentResult:
+    @staticmethod
+    def _tx_to_payment_result(tx: Transaction) -> PaymentResult:
         payload = tx.payload or {}
         routes_payload = payload.get("routes")
         routes = None
@@ -1928,3 +2169,73 @@ class PaymentService:
 
         txs = (await self.session.execute(stmt)).scalars().all()
         return [self._tx_to_payment_result(tx) for tx in txs]
+
+
+async def record_definitive_refusal(sessions, refusal: DefinitiveRefusal) -> PaymentResult | None:
+    """Record `refusal` as an `ABORTED` row in a SHORT TRANSACTION OF ITS OWN (019 stage 3, `T1905`).
+
+    Called only after the refused attempt's own transaction is confirmed rolled back: by `pay()` for
+    the API, and by the simulator's money-phase owner for a staged payment that left the tick's
+    transaction unusable (`T1912`). `sessions` is a session factory whose call returns an async context
+    manager yielding a session.
+
+    RESOLVES A CONCURRENT WINNER, NEVER OVERWRITES. The insert yields to a row of the same `tx_id` that
+    already exists (`ON CONFLICT DO NOTHING`); that row is then read and its identity checked - type,
+    initiator, fingerprint (`_resolve_existing_payment`, a `409` for another request). A `COMMITTED`
+    winner of the same request is returned - it always wins, as it did in `engine.abort`. Returns None
+    when the refusal was recorded, or when an `ABORTED` row of the same request already stood.
+    """
+
+    values = dict(refusal.row)
+    values.update(state="ABORTED", error=refusal.error, signatures=[])
+    tries = max(1, int(getattr(settings, "COMMIT_RETRY_ATTEMPTS", 1) or 1))
+    last_error: BaseException | None = None
+    for _ in range(tries):
+        async with sessions() as session:
+            try:
+                inserted = (
+                    await session.execute(
+                        pg_insert(Transaction)
+                        .values(**values)
+                        .on_conflict_do_nothing(index_elements=[Transaction.tx_id])
+                        .returning(Transaction.id)
+                    )
+                ).scalar_one_or_none()
+                existing = None
+                if inserted is None:
+                    existing = (
+                        await session.execute(
+                            select(Transaction)
+                            .where(Transaction.tx_id == refusal.tx_id)
+                            .execution_options(populate_existing=True)
+                        )
+                    ).scalar_one_or_none()
+                await session.commit()
+            except DBAPIError as exc:
+                last_error = exc
+                await session.rollback()
+                if _payment_db_sqlstate(exc) in _RETRYABLE_PAYMENT_SQLSTATES:
+                    continue
+                break
+            except BaseException:
+                await session.rollback()
+                raise
+        if inserted is not None:
+            try:
+                from app.utils.metrics import PAYMENT_EVENTS_TOTAL
+
+                PAYMENT_EVENTS_TOTAL.labels(event="abort", result="success").inc()
+            except Exception:
+                pass
+            return None
+        if existing is None:
+            # Yielded to a row that is gone again: nothing to resolve against, try the insert again.
+            continue
+        resolved = PaymentService._resolve_existing_payment(
+            existing,
+            sender_id=refusal.sender_id,
+            request_fingerprint=refusal.fingerprint,
+            allowed_participant_pids=refusal.allowed_participant_pids,
+        )
+        return resolved if resolved.status == "COMMITTED" else None
+    raise last_error if last_error is not None else GeoException()

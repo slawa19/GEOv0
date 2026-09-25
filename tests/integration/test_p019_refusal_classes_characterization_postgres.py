@@ -27,9 +27,12 @@ which retries a retryable conflict on a fresh snapshot):
   implemented order.
 * `hold_at_commit` - the hold is written after `prepare` by a writer that takes no owner lock. The
   commit guard's `FOR SHARE` meets a row changed behind the payment's snapshot: `40001`, `pay()`
-  retries the whole attempt, and the retry's pre-check refuses the hold BEFORE the insert - no row, and
-  the replay after the hold is lifted executes. Before stage 3 this was a stored `ABORTED`. Keeping a
-  refusal met by a retry as `ABORTED` is the admission of `T1905` (spec, FORK-5).
+  retries the whole attempt, and the retry's pre-check refuses the hold BEFORE its insert. The request
+  was ADMITTED by the first attempt (it reached the payment operation), and `pay()` remembers that for
+  the same identity (spec, "Допуск", FORK-5; `T1905`): the refusal is definitive - stored `ABORTED` with
+  the hold's error, and the replay after the hold is lifted answers it. Between `T1904` and `T1905`
+  this row was "no row, the replay executes"; before stage 3 it was a stored `ABORTED` from the commit
+  guard itself.
 * `timeout_confirmed_rollback` - the commit guard's `FOR SHARE` waits on the row lock of an operator's
   slow `PATCH` of the equivalent's description; the payment times out, `pay()` rolls the attempt back
   and only then records `ABORTED` in a short transaction of its own.
@@ -201,7 +204,7 @@ async def _row_lock_waiter_exists(factory, *, timeout: float = 10.0) -> bool:  #
 
 
 @pytest.mark.asyncio
-async def test_the_api_path_refusal_table_today(api, factory, monkeypatch, caplog) -> None:  # noqa: F811
+async def test_the_api_path_refusal_table(api, factory, monkeypatch, caplog) -> None:  # noqa: F811
     people = await build_api_world(api, factory)
     observed: dict[str, dict[str, Any]] = {}
     premises: dict[str, Any] = {}
@@ -438,8 +441,8 @@ async def test_the_api_path_refusal_table_today(api, factory, monkeypatch, caplo
             "replay": (200, "COMMITTED", None), "replay_moved": True,
         },
         "hold_at_commit": {
-            "first": (409, "E008", hold), "stored": None,
-            "replay": (200, "COMMITTED", None), "replay_moved": True,
+            "first": (409, "E008", hold), "stored": ("ABORTED", "E008"),
+            "replay": (200, "ABORTED", "E008"), "replay_moved": False,
         },
         "timeout_confirmed_rollback": {
             "first": (504, "E007", None), "stored": ("ABORTED", "E007"),
@@ -449,7 +452,7 @@ async def test_the_api_path_refusal_table_today(api, factory, monkeypatch, caplo
 
 
 @pytest.mark.asyncio
-async def test_the_staged_path_refusal_table_today(factory, monkeypatch) -> None:  # noqa: F811
+async def test_the_staged_path_refusal_table(factory, monkeypatch) -> None:  # noqa: F811
     """Stop / hold in force when the tick runs: rejected before `NEW`, no row, executes once lifted."""
 
     observed: dict[str, dict[str, Any]] = {}

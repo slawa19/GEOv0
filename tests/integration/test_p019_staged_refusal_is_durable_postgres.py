@@ -1,46 +1,40 @@
-"""Programme 019, `T1902`, hypothesis (b): a DEFINITIVE refusal of a staged (simulator) payment is
-rolled back by the executor's savepoint, so it is not durable.
+"""Programme 019: a DEFINITIVE refusal of a staged (simulator) payment is durable (`T1905`), and a staged
+failure that leaves the tick's transaction unusable is recorded by the owner of the money phase (`T1912`).
 
-THE HYPOTHESIS (spec, "Окончательный отказ..."; read from `app/core/payments/service.py:1043`/`:1057`,
-`:1122`/`:1135`, and `app/core/simulator/real_payments_executor.py:421`, `:486`): in staged mode the
-service writes `ABORTED` into the caller's transaction and then RAISES; the executor runs every payment
-inside `session.begin_nested()` and catches the exception OUTSIDE it, so the savepoint - with the
-`ABORTED` row in it - is rolled back before the tick commits.
+WHAT `T1902` FOUND (2026-09-25), before stage 3's refusal contract. In staged mode the service wrote
+`ABORTED` into the caller's transaction and then RAISED; the executor runs every payment inside
+`session.begin_nested()` (`real_payments_executor.py:421`) and catches the exception OUTSIDE it
+(`:486`), so the savepoint - with the `ABORTED` row in it - was rolled back before the tick committed.
+Two schedules reach a refusal after the staged insert:
 
-WHAT EXECUTION SHOWED (2026-09-25), and it is why there are two schedules here, not one.
+1. SERIALIZABLE (the application's isolation): the terminal TIMEOUT on a real lock wait. The timeout
+   cancels the statement in flight, which invalidates the tick's connection; the refusal could not be
+   written, and the tick's money commit failed as a whole (`REAL_MODE_TICK_FAILED`, "invalid
+   transaction"): nothing durable, the whole tick lost, and the same `tx_id` executed afresh later.
+2. READ COMMITTED (`DB_POSTGRES_ISOLATION_LEVEL`, a supported setting until stage 5 refuses it for money
+   writers): the creditor lowers the trust line between the staged payment's routing and its prepare;
+   the prepare re-check refuses (`E002`); the row was written, then rolled back by the savepoint.
 
-1. Under the application's isolation, SERIALIZABLE, no definitive BUSINESS refusal reaches the staged
-   path after its `NEW` flush. The money phase is one snapshot: routing and the prepare capacity
-   re-check read the same rows (`router.py:212`, `engine.py:801`); an operator stop or integrity hold
-   committed behind the snapshot meets the commit guard as `40001`, the money phase is replayed, and
-   the service's pre-check refuses it BEFORE `NEW` (pinned by
-   `test_p015_t1544_operator_stop_races_postgres.py::test_a_tick_that_waited_behind_the_patch_...`);
-   the owner lock the tick holds keeps every other money writer out. The one definitive class that IS
-   reachable after the staged `NEW` is the terminal TIMEOUT on a real lock wait - and it does NOT reach
-   the executor's savepoint as a refusal: the timeout cancels the statement in flight, which
-   invalidates the tick's connection; `engine.abort(commit=False)` then fails
-   (`event=payment.timeout_abort_failed error_type=PendingRollbackError`), and the tick's money commit
-   fails as a whole (`REAL_MODE_TICK_FAILED`). Nothing is durable - but because the whole tick is
-   lost, not because of the savepoint. `test_today_a_staged_timeout_...` pins that.
+THE CONTRACT SINCE STAGE 3 (spec, "Путь записи окончательного отказа" and "Ветка непригодной
+транзакции"), each pinned by a target that was red before it (`056b27b` for `T1912`):
 
-2. The savepoint mechanism itself is reached by a business refusal only where the snapshot is not
-   shared: under READ COMMITTED (`DB_POSTGRES_ISOLATION_LEVEL`, a supported setting today; stage 5 is
-   to refuse it for money writers). The creditor lowers the trust line between the staged payment's
-   routing and its prepare; the prepare re-check refuses (`E002`); the service writes `ABORTED` - read
-   back INSIDE the tick's transaction - and raises; the executor's savepoint rolls the row back; the
-   tick commits. `test_today_a_staged_capacity_refusal_...` pins that, and the TARGET is built on it.
+* schedule (2) - the refusal is RETURNED as a structured `ABORTED` result through the caller's savepoint
+  (`StagedPaymentResult.refusal`): durable with the tick, `tx.failed` once, the replay of the same
+  `tx_id` answers it (`test_a_staged_definitive_refusal_is_durable_and_replays_the_same_refusal`);
+* schedule (1), with a second payment of the same phase that already moved money - `execute()` raises
+  `PaymentTransactionUnusable`; the money-phase owner rolls the whole phase back, establishes the
+  rollback, records `ABORTED/E007` in a short transaction of its own, discards the phase's other money
+  and observations, and publishes the failure once
+  (`test_a_staged_timeout_that_leaves_the_tick_unusable_is_recorded_after_the_phase_rolls_back`); no
+  established rollback - nothing recorded (`test_the_owner_records_nothing_when_...`); a COMMITTED
+  winner of the same `tx_id` - yielded to, never overwritten (`test_the_owner_yields_to_...`).
 
-THE SCHEDULES ARE REAL. (1) An operator's `PATCH /admin/equivalents/{code}` of the DESCRIPTION holds its
-row lock through a slow commit (`admin.py:1325` takes the owner lock only for `is_active=false`); the
-staged commit guard's `FOR SHARE` (`engine.py:1442`) waits on it until `COMMIT_TIMEOUT_SECONDS` (set
-short) ends it. (2) A committed UPDATE of the trust line's limit by another session between routing and
-prepare. Neither injects an exception.
-
-TARGET (Q1, FORK-4; spec Verification plan §1): on schedule (2), `ABORTED` after the tick commit,
-`tx.failed` published once, and the replay of the same `tx_id` answers the stored refusal. Stage 3
-removes the marker; stage 5 moves the stand off READ COMMITTED when it refuses that level. Schedule (1)
-has no target here: what a staged timeout that has invalidated the caller's transaction should leave
-behind is a stage-3 design question the spec does not settle (reported with `T1902`).
+THE SCHEDULES ARE REAL. An operator's `PATCH /admin/equivalents/{code}` of the DESCRIPTION holds its row
+lock through a slow commit (`admin.py` takes the owner lock only for `is_active=false`); the staged
+commit guard's `FOR SHARE` waits on it until `COMMIT_TIMEOUT_SECONDS` (set short) ends it. A committed
+UPDATE of the trust line's limit by another session between routing and prepare. Neither injects an
+exception; the `T1912` plan is fixed (two payments, two equivalents) so the timeout meets a phase that
+already staged money.
 """
 
 from __future__ import annotations
@@ -58,9 +52,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.config import settings
 from app.core.payments.engine import PaymentEngine
-from app.core.payments.service import PaymentService
+from app.core.payments.service import PaymentService, PaymentTransactionUnusable
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
+from app.utils.exceptions import RetryablePaymentConflictException
 from tests.integration.p019_stand import (  # noqa: F401 - `api` and `factory` are fixtures
     ADMIN,
     api,
@@ -80,7 +75,7 @@ from tests.integration.test_p015_p1_money_replay_postgres import (
     _scenario,
     _seed,
 )
-from tests.p019_support import require_target, target_xfail
+from tests.p019_support import require_target
 
 
 @pytest_asyncio.fixture
@@ -186,72 +181,6 @@ async def _replay_staged(session_factory, world, call: dict[str, Any]) -> tuple[
     assert replay.result.tx_id == call["idempotency_key"], replay.result
     return str(replay.result.status), replay.result.error
 
-
-# ── schedule (1): SERIALIZABLE, terminal timeout on a real row-lock wait ──────────────────────
-
-
-@pytest.mark.asyncio
-async def test_today_a_staged_timeout_fails_the_whole_tick_and_leaves_no_row(
-    api, factory, monkeypatch  # noqa: F811
-) -> None:
-    """CHARACTERIZATION (default isolation). Stage 3 decides what replaces it."""
-
-    world = await _seed(factory)
-    sse = _Sse()
-    run = _run_record(world, f"p019-staged-t-{uuid.uuid4().hex[:8]}")
-    runner = _runner(run, _scenario(world), sse)
-    _install(monkeypatch, factory)
-    staged = _StagedCalls()
-    staged.install(monkeypatch)
-    monkeypatch.setattr(settings, "COMMIT_TIMEOUT_SECONDS", 0.5)
-
-    gate = _CommitGate()
-    patch = tick = None
-    try:
-        with with_session_hook(gate):
-            patch = asyncio.create_task(
-                api.patch(
-                    f"/api/v1/admin/equivalents/{world.equivalent.code}",
-                    json={"description": "p019 slow operator edit", "reason": "p019 t1902"},
-                    headers=ADMIN,
-                )
-            )
-        await asyncio.wait_for(gate.reached.wait(), timeout=20)
-        tick = asyncio.create_task(asyncio.wait_for(runner.tick_real_mode(run.run_id), 90.0))
-        assert await _row_lock_waiter_exists(factory), (
-            "premise: the staged payment never waited on the PATCH's row lock"
-        )
-        await tick
-        gate.release.set()
-        resp = await asyncio.wait_for(patch, timeout=20)
-        assert resp.status_code == 200, resp.text
-    finally:
-        gate.release.set()
-        await finish(tick)
-        await finish(patch)
-        _forget_the_route_cache(world)
-
-    # The one staged payment timed out while waiting (controls).
-    [call] = staged.calls
-    assert call.get("raised") == "TimeoutException", call
-    assert run.timeouts_total == 1, run.timeouts_total
-
-    # TODAY: not a refusal of one payment - the tick's transaction is lost with it.
-    assert run._real_money_committed_ticks_total == 0, "the tick's money phase committed"
-    assert run._real_consec_tick_failures == 1
-    assert run.last_error["code"] == "REAL_MODE_TICK_FAILED", run.last_error
-    assert "invalid transaction" in run.last_error["message"], run.last_error
-    failed = [e for e in sse.events if e.get("type") == "tx.failed"]
-    assert [(e.get("error") or {}).get("code") for e in failed] == ["PAYMENT_TIMEOUT"], sse.events
-    assert await tx_row(factory, str(call["idempotency_key"])) is None
-    assert await _debts(factory, world) == {(world.sender.pid, world.receiver.pid): _OPENING}
-
-    # ...and the same tx_id, submitted again, executes afresh: nothing records the refusal.
-    status, error = await _replay_staged(factory, world, call)
-    assert status == "COMMITTED", (status, error)
-    assert await _debts(factory, world) == {
-        (world.sender.pid, world.receiver.pid): _OPENING + Decimal(str(call["amount"]))
-    }
 
 
 # ── T1912: the unusable-transaction branch, on the production SERIALIZABLE ─────────────────────
@@ -367,7 +296,6 @@ def _forget_routes(t: _TwoEquivalentTick) -> None:
     PaymentRouter.invalidate_cache(t.second.code)
 
 
-@target_xfail("stage 3 (T1912)", "a staged timeout that leaves the tick unusable fails the tick and records nothing")
 @pytest.mark.asyncio
 async def test_a_staged_timeout_that_leaves_the_tick_unusable_is_recorded_after_the_phase_rolls_back(
     api, factory, monkeypatch  # noqa: F811
@@ -416,6 +344,104 @@ async def test_a_staged_timeout_that_leaves_the_tick_unusable_is_recorded_after_
         f"seq 1 row {second_row!r}, tx.failed {failed!r}, replay {replay!r}, "
         f"second-equivalent debts {second_debts!r}",
     )
+    # Since T1912 the branch that did it is named: the staged call raised the unusable-transaction
+    # condition, not an ordinary timeout the executor would have counted and gone on from.
+    assert second.get("raised") == "PaymentTransactionUnusable", second
+
+
+@pytest.mark.asyncio
+async def test_the_owner_records_nothing_when_the_phase_rollback_is_not_established(
+    api, factory, monkeypatch  # noqa: F811
+) -> None:
+    """T1912, the other half of "only after a confirmed rollback": the phase session's rollback AND its
+    connection invalidation fail, so the rollback is not established - nothing is recorded, nothing is
+    published, and the tick fails. (Mutation: terminalize without the established rollback -> red.)"""
+
+    t = await _two_equivalent_tick(factory, monkeypatch)
+    original = PaymentService.create_payment_internal_staged
+    broken: list[str] = []
+
+    async def the_phase_cannot_be_rolled_back(self_, sender_id, **kwargs):
+        try:
+            return await original(self_, sender_id, **kwargs)
+        except PaymentTransactionUnusable:
+            session = self_.session
+
+            def failing(name):
+                async def fail(*_a, **_kw):
+                    broken.append(name)
+                    raise RuntimeError(f"p019 t1912: {name} cannot be established")
+
+                return fail
+
+            session.rollback = failing("rollback")
+            session.invalidate = failing("invalidate")
+            raise
+
+    monkeypatch.setattr(PaymentService, "create_payment_internal_staged", the_phase_cannot_be_rolled_back)
+    queued = await _run_the_tick_behind_a_slow_edit(api, factory, t)
+
+    assert queued, "premise: the second payment never waited on the edit's row lock"
+    # The owner tried to end the phase both ways, and both were refused.
+    assert "rollback" in broken and "invalidate" in broken, broken
+    assert t.run.last_error["code"] == "REAL_MODE_TICK_FAILED", t.run.last_error
+    tx_ids = [str(c["idempotency_key"]) for c in t.calls]
+    assert [await tx_row(factory, tx) for tx in tx_ids] == [None, None]
+    assert [e for e in t.sse.events if e.get("type") in ("tx.failed", "tx.updated")] == []
+    assert await _debt_rows(factory, t.second.id) == []
+
+
+@pytest.mark.asyncio
+async def test_the_owner_yields_to_a_committed_winner_of_the_same_tx_id(
+    api, factory, monkeypatch  # noqa: F811
+) -> None:
+    """T1912: between the phase rollback and the recording, the same request is executed and committed
+    by another transaction. The recording yields to it (identity checked), never overwrites COMMITTED,
+    and publishes no failure for a payment that did not fail."""
+
+    import app.core.simulator.money_replay as money_replay
+
+    t = await _two_equivalent_tick(factory, monkeypatch)
+    original_record = money_replay.record_definitive_refusal
+    winners: list[str] = []
+
+    async def a_winner_commits_first(sessions, refusal):
+        t.gate.release.set()  # the slow edit may finish; the winner's commit guard then proceeds
+        call = t.calls[1]
+        # The winner is its own transaction's owner: a conflict with the edit that is finishing now
+        # (40001 on its commit guard) is retried on a fresh transaction, as any owner does.
+        for _ in range(10):
+            try:
+                async with factory() as session:
+                    async with session.begin_nested():
+                        won = await original_create(
+                            PaymentService(session),
+                            call["sender_id"],
+                            to_pid=call["to_pid"],
+                            equivalent=call["equivalent"],
+                            amount=call["amount"],
+                            allowed_participant_pids=call.get("allowed_participant_pids"),
+                            idempotency_key=call["idempotency_key"],
+                        )
+                    await session.commit()
+                break
+            except RetryablePaymentConflictException:
+                await asyncio.sleep(0.05)
+        winners.append(won.result.status)
+        return await original_record(sessions, refusal)
+
+    original_create = PaymentService.create_payment_internal_staged
+    monkeypatch.setattr(money_replay, "record_definitive_refusal", a_winner_commits_first)
+    queued = await _run_the_tick_behind_a_slow_edit(api, factory, t)
+
+    assert queued, "premise: the second payment never waited on the edit's row lock"
+    assert winners == ["COMMITTED"], winners
+    assert t.calls[1].get("raised") == "PaymentTransactionUnusable", t.calls[1]
+    assert await tx_row(factory, str(t.calls[1]["idempotency_key"])) == ("COMMITTED", None)
+    assert await _debt_rows(factory, t.second.id) == [
+        (t.world.sender.id, t.world.receiver.id, Decimal("1.00"))
+    ]
+    assert [e for e in t.sse.events if e.get("type") == "tx.failed"] == []
 
 
 # ── schedule (2): READ COMMITTED, the prepare re-check refuses after the staged NEW ───────────
@@ -516,24 +542,6 @@ async def _recheck_refusal_in_a_tick(rc_factory, monkeypatch) -> _RecheckOutcome
     )
 
 
-@pytest.mark.asyncio
-async def test_today_a_staged_capacity_refusal_is_written_aborted_then_rolled_back_by_the_savepoint(
-    rc_factory, monkeypatch
-) -> None:
-    """CHARACTERIZATION - hypothesis (b)'s mechanism, on the schedule that reaches it. Stage 3 rewrites it."""
-
-    out = await _recheck_refusal_in_a_tick(rc_factory, monkeypatch)
-    assert out.call.get("raised") == "RoutingException", out.call
-    # The service DID write ABORTED into the tick's transaction before raising...
-    assert out.inside_after_abort == ["ABORTED"], out.inside_after_abort
-    # ...and after the tick committed there is no row: the executor's savepoint took it back.
-    assert out.row_after_tick is None, out.row_after_tick
-    # The replay of the same tx_id is refused afresh - by routing, before any row - not answered.
-    assert out.replay[0] == "raised:RoutingException", out.replay
-    assert out.debts_after_replay == out.debts_after_tick
-
-
-@target_xfail("stage 3 (T1905)", "a staged definitive refusal is rolled back by the executor savepoint")
 @pytest.mark.asyncio
 async def test_a_staged_definitive_refusal_is_durable_and_replays_the_same_refusal(
     rc_factory, monkeypatch

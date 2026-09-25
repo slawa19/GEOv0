@@ -12,9 +12,10 @@ FRESH transaction - B's own SERIALIZABLE snapshot cannot see a row committed aft
 compares type, initiator and fingerprint: the same request gets the winner's stored result; any other
 identity gets a `409`. B's caller transaction stays usable and commits; nothing is written twice.
 
-BEFORE THE RESOLVER (b43e55f): the operation savepoint was rolled back and the winner was looked up in
-B's own snapshot, where it is invisible, so the raw `IntegrityError` reached the caller (before stage 3,
-`InvalidRequestError`; `specs/BACKLOG.md`, "Staged-ветка гонки вставки…").
+BEFORE THE RESOLVER (b43e55f, red there: 4 x `TargetMismatch`, `056b27b`): the operation savepoint was
+rolled back and the winner was looked up in B's own snapshot, where it is invisible, so the raw
+`IntegrityError` reached the caller (before stage 3, `InvalidRequestError`; `specs/BACKLOG.md`,
+"Staged-ветка гонки вставки…"). The resolver is `PaymentService._resolve_identity` (`T1905`).
 
 CONTROLS, asserted before the comparison: B really queued on A's insert; A committed; exactly one row of
 the `tx_id` exists afterwards, and it is A's; the money moved once.
@@ -44,7 +45,7 @@ from tests.integration.test_p015_p1_money_replay_postgres import (  # noqa: F401
     _seed,
     factory,
 )
-from tests.p019_support import require_target, target_xfail
+from tests.p019_support import require_target
 
 
 async def _transactionid_waiter_exists(factory, *, timeout: float = 10.0) -> bool:  # noqa: F811
@@ -166,7 +167,6 @@ def _raw_winner(world, *, type_: str, initiator_id, fingerprint_amount: str):
     return winner
 
 
-@target_xfail("stage 3 (T1905)", "the staged insert race reaches the caller as a raw IntegrityError")
 @pytest.mark.asyncio
 async def test_the_same_request_racing_its_own_insert_gets_the_winners_result(factory) -> None:  # noqa: F811
     world = await _seed(factory)
@@ -188,7 +188,6 @@ async def test_the_same_request_racing_its_own_insert_gets_the_winners_result(fa
     )
 
 
-@target_xfail("stage 3 (T1905)", "the staged insert race reaches the caller as a raw IntegrityError")
 @pytest.mark.asyncio
 @pytest.mark.parametrize("identity", ["fingerprint", "initiator", "type"])
 async def test_another_identity_racing_the_insert_is_a_declared_conflict(

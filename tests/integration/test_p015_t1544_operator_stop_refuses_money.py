@@ -276,9 +276,10 @@ async def test_a_payment_prepared_before_the_stop_is_refused_at_commit(
     session (before, the stand committed it on the payment's own session, which would now commit the
     payment half-way). The commit guard's `FOR SHARE` then meets an equivalent row changed behind the
     payment's snapshot - `40001` - and `pay()` retries the whole attempt, whose pre-check refuses the
-    stop before the payment's row exists. Outcome: the same stop refusal and no money, but no stored
-    row (before stage 3: `ABORTED`). Keeping a refusal that a retry meets as `ABORTED` is the admission
-    of `T1905` (spec, FORK-5), which changes the last assertion back.
+    stop before the payment's row exists. Outcome: the same stop refusal and no money. The first
+    attempt reached the payment operation, so the request was ADMITTED, and `pay()` remembers that for
+    the same identity (spec, FORK-5; `T1905`): the refusal the retry meets is definitive and stored
+    `ABORTED` with the stop's error - as before stage 3; between `T1904` and `T1905` it left no row.
     """
     code = _code()
     await _create_equivalent(client, code)
@@ -313,10 +314,13 @@ async def test_a_payment_prepared_before_the_stop_is_refused_at_commit(
     )
     _assert_stop_refusal(resp, code)
     assert await _debt_totals(db_session, code) == (0, Decimal("0"))
-    state = (
-        await db_session.execute(select(Transaction.state).where(Transaction.tx_id == body["tx_id"]))
-    ).scalar_one_or_none()
-    assert state is None, state
+    stored = (
+        await db_session.execute(
+            select(Transaction.state, Transaction.error).where(Transaction.tx_id == body["tx_id"])
+        )
+    ).one_or_none()
+    assert stored is not None and stored[0] == "ABORTED", stored
+    assert (stored[1] or {}).get("details", {}).get("reason") == "equivalent_inactive", stored
     locks = (
         await db_session.execute(
             select(func.count(PrepareLock.id)).where(PrepareLock.tx_id == body["tx_id"])

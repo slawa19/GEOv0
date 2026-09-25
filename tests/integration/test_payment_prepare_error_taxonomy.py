@@ -19,7 +19,8 @@ from app.config import settings
 from app.core.auth.crypto import generate_keypair, get_pid_from_public_key
 from app.core.payments.engine import PaymentEngine
 from app.core.payments.router import PaymentRouter
-from app.core.payments.service import PaymentService
+import app.core.payments.service as payment_service_module
+from app.core.payments.service import PaymentService, PaymentTransactionUnusable
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.transaction import Transaction
@@ -172,13 +173,13 @@ def _track_the_attempt_end_and_the_record(monkeypatch, service, *, end_fails=Fal
     """Since 019 stage 3 a failed payment is terminalized in two steps: the attempt's transaction is
     ENDED (`_end_failed_attempt`: committed when nothing of the payment can be in it, else rolled
     back), and only then is the refusal RECORDED `ABORTED` in a short transaction of its own
-    (`_record_refusal_durably`). Before stage 3 the same two steps were `session.rollback()` and
+    (`record_definitive_refusal`). Before stage 3 the same two steps were `session.rollback()` and
     `engine.abort(commit=True)`. This records their order and the refusal recorded."""
 
     order: list[str] = []
     recorded: list[tuple] = []
     original_end = service._end_failed_attempt
-    original_record = service._record_refusal_durably
+    original_record = payment_service_module.record_definitive_refusal
 
     async def end():
         order.append("end_attempt")
@@ -190,15 +191,15 @@ def _track_the_attempt_end_and_the_record(monkeypatch, service, *, end_fails=Fal
             monkeypatch.setattr(service.session, "rollback", fail)
         return await original_end()
 
-    async def record(sessions, attempt):
+    async def record(sessions, refusal):
         order.append("record")
-        recorded.append(tuple(attempt.refusal[:3]))
+        recorded.append((refusal.error["message"], refusal.error["code"], refusal.error["details"]))
         if record_fails is not None:
             raise RuntimeError(record_fails)
-        return await original_record(sessions, attempt)
+        return await original_record(sessions, refusal)
 
     monkeypatch.setattr(service, "_end_failed_attempt", end)
-    monkeypatch.setattr(service, "_record_refusal_durably", record)
+    monkeypatch.setattr(payment_service_module, "record_definitive_refusal", record)
     return order, recorded
 
 
@@ -254,15 +255,13 @@ async def test_retryable_database_failure_uses_e008_at_service_boundary(
         "retryable": True,
         "conflict_kind": "database_concurrency",
     }
+    # 019 `T1905` (FORK-4): an exhausted retryable conflict is a conflict, never a definitive refusal -
+    # nothing is recorded, so the client's resubmission of the same tx_id executes. Until `T1905` this
+    # pinned a stored `ABORTED` with the retryable error.
     transaction = (
         await db_session.execute(select(Transaction).where(Transaction.tx_id == tx_id))
-    ).scalar_one()
-    assert transaction.state == "ABORTED"
-    assert transaction.error == {
-        "code": "E008",
-        "message": "State conflict",
-        "details": raised.value.details,
-    }
+    ).scalar_one_or_none()
+    assert transaction is None, (transaction.state, transaction.error)
 
 
 @pytest.mark.asyncio
@@ -1185,19 +1184,19 @@ async def test_repeated_cancellation_during_recovery_read_still_aborts(
     record_started = asyncio.Event()
     release_record = asyncio.Event()
     record_calls = 0
-    original_record = service._record_refusal_durably
+    original_record = payment_service_module.record_definitive_refusal
 
-    async def blocking_record(sessions, attempt):
+    async def blocking_record(sessions, refusal):
         nonlocal record_calls
         record_calls += 1
         record_started.set()
         await release_record.wait()
-        return await original_record(sessions, attempt)
+        return await original_record(sessions, refusal)
 
     monkeypatch.setattr(service.router, "build_graph", build_graph)
     monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
     monkeypatch.setattr(service.engine, "prepare", interrupted_prepare)
-    monkeypatch.setattr(service, "_record_refusal_durably", blocking_record)
+    monkeypatch.setattr(payment_service_module, "record_definitive_refusal", blocking_record)
 
     if interruption == "timeout":
         monkeypatch.setattr(settings, "PREPARE_TIMEOUT_SECONDS", 0.01, raising=False)
@@ -1346,6 +1345,58 @@ async def test_timeout_recovery_read_failure_is_safe_without_abort(
 
 
 @pytest.mark.asyncio
+async def test_an_unresolved_commit_with_no_row_found_is_not_terminalized(
+    db_session,
+    monkeypatch,
+) -> None:
+    """019 `T1905` (the seven-row table, "Неразрешённый коммит"): the payment's ONE commit outlives the
+    deadline, so its outcome is unknown; the read that follows finds no row. No row does NOT prove the
+    rollback - a commit in flight may still land - so nothing is recorded and nothing is retried: the
+    caller gets the timeout, and a resubmission of the same tx_id will read whichever outcome it was.
+    Until `T1905` this recorded `ABORTED/E007` after the empty read."""
+
+    service, sender, request, tx_id = await _build_direct_payment(
+        db_session,
+        suffix="unresolved_commit",
+    )
+    monkeypatch.setattr(settings, "PAYMENT_TOTAL_TIMEOUT_SECONDS", 1, raising=False)
+
+    async def build_graph(equivalent_code: str, **kwargs) -> None:
+        return None
+
+    def find_flow_routes(from_pid: str, to_pid: str, payment_amount: Decimal, **kwargs):
+        return [([from_pid, to_pid], payment_amount)]
+
+    async def instant(*args, **kwargs) -> None:
+        return None
+
+    commits: list[str] = []
+
+    async def hanging_commit() -> None:
+        commits.append("commit")
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(service.router, "build_graph", build_graph)
+    monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
+    monkeypatch.setattr(service.engine, "prepare", instant)
+    monkeypatch.setattr(service.engine, "commit", instant)
+    monkeypatch.setattr(db_session, "commit", hanging_commit)
+    _order, recorded = _track_the_attempt_end_and_the_record(monkeypatch, service)
+
+    with pytest.raises(TimeoutException) as raised:
+        await service.create_payment(sender.id, request)
+
+    assert commits == ["commit"], commits  # the one commit was attempted, and its outcome is unknown
+    assert raised.value.code == "E007" and raised.value.status_code == 504
+    assert recorded == []
+    monkeypatch.undo()
+    transaction = (
+        await db_session.execute(select(Transaction).where(Transaction.tx_id == tx_id))
+    ).scalar_one_or_none()
+    assert transaction is None
+
+
+@pytest.mark.asyncio
 async def test_timeout_abort_failure_is_safe_after_recovery_read(
     db_session,
     monkeypatch,
@@ -1418,23 +1469,24 @@ async def test_staged_timeout_abort_failure_has_symmetric_safe_log(
         await asyncio.sleep(0.05)
 
     # The staged refusal write (since 019 stage 3 an `ABORTED` insert after the operation's
-    # rollback) fails; every other flush runs.
-    original_flush = AsyncSession.flush
+    # rollback) fails; every other statement runs. Since `T1905` a refusal that cannot be written into
+    # the caller's transaction is handed to the transaction's owner as `PaymentTransactionUnusable`
+    # (it records the refusal on its own transaction after rolling back, `T1912`) - no longer an
+    # ordinary timeout the caller would count and carry on from.
+    original_execute = AsyncSession.execute
 
-    async def fail_the_refusal_write(self, *args, **kwargs):
-        if any(
-            isinstance(obj, Transaction) and obj.state == "ABORTED" for obj in self.sync_session.new
-        ):
+    async def fail_the_refusal_write(self, statement, *args, **kwargs):
+        if getattr(statement, "is_insert", False) and getattr(getattr(statement, "table", None), "name", None) == "transactions":
             raise RuntimeError(raw_sentinel)
-        return await original_flush(self, *args, **kwargs)
+        return await original_execute(self, statement, *args, **kwargs)
 
     monkeypatch.setattr(service.router, "build_graph", build_graph)
     monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
     monkeypatch.setattr(service.engine, "prepare", slow_prepare)
-    monkeypatch.setattr(AsyncSession, "flush", fail_the_refusal_write)
+    monkeypatch.setattr(AsyncSession, "execute", fail_the_refusal_write)
     caplog.set_level(logging.ERROR, logger="app.core.payments.service")
 
-    with pytest.raises(TimeoutException):
+    with pytest.raises(PaymentTransactionUnusable) as raised:
         async with db_session.begin_nested():
             await service.create_payment_internal_staged(
                 sender.id,
@@ -1444,6 +1496,8 @@ async def test_staged_timeout_abort_failure_has_symmetric_safe_log(
                 idempotency_key=tx_id,
             )
 
+    assert raised.value.refusal is not None and raised.value.refusal.error["code"] == "E007"
+    assert raw_sentinel not in str(raised.value)
     abort_log = next(
         record
         for record in caplog.records
@@ -1498,19 +1552,25 @@ async def test_staged_generic_prepare_failure_is_safe_without_session_commit_or_
     monkeypatch.setattr(db_session, "rollback", forbidden_rollback)
     monkeypatch.setattr(db_session, "commit", forbidden_commit)
 
-    with pytest.raises(GeoException) as raised:
-        await service.create_payment_internal_staged(
-            sender.id,
-            to_pid=request.to,
-            equivalent=request.equivalent,
-            amount=request.amount,
-            idempotency_key=tx_id,
-        )
+    # Since 019 `T1905` a definitive refusal after admission is RETURNED as a structured `ABORTED`
+    # result through the caller's savepoint (spec, "Путь записи окончательного отказа"), carrying the
+    # public error the executor classifies it by; before, the same error was raised.
+    staged = await service.create_payment_internal_staged(
+        sender.id,
+        to_pid=request.to,
+        equivalent=request.equivalent,
+        amount=request.amount,
+        idempotency_key=tx_id,
+    )
 
-    assert raised.value.code == "E010"
-    assert raised.value.status_code == 500
-    assert raised.value.message == "Internal server error"
-    assert raised.value.details == {}
+    assert staged.post_commit_effects is None
+    assert staged.result.status == "ABORTED"
+    assert staged.result.error is not None and staged.result.error.code == "E010"
+    assert staged.refusal is not None
+    assert staged.refusal.code == "E010"
+    assert staged.refusal.status_code == 500
+    assert staged.refusal.message == "Internal server error"
+    assert staged.refusal.details == {}
     assert session_calls == []
     assert db_session.in_transaction()
     transaction = (

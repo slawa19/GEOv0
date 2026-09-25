@@ -36,7 +36,8 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 import app.core.ledger.book as book_module
-from app.core.payments.service import PaymentService
+from app.config import settings
+from app.core.payments.service import PaymentService, _payment_db_sqlstate
 from app.db.journal_tables import debt_operations
 from app.db.models.audit_log import IntegrityAuditLog
 from app.db.models.debt import Debt
@@ -252,3 +253,80 @@ async def test_a_commit_refused_by_ssi_is_retried_and_counted_once(
     }
     assert [p["event"] for p in publications] == ["payment.received"], publications
     assert after - before == 1, (before, after)
+
+
+@pytest.mark.asyncio
+async def test_a_commit_refused_by_ssi_with_no_budget_left_records_nothing(
+    serializable_factory, monkeypatch, caplog
+) -> None:
+    """019 `T1905` (FORK-4): the same real `40001` on the payment's one COMMIT, with no attempt left
+    (`COMMIT_RETRY_ATTEMPTS = 1`). An exhausted conflict is still a conflict: `409/E008` with
+    `retryable: true`, NO `ABORTED` row, and the resubmission of the same `tx_id` executes. Until
+    `T1905` the exhausted commit conflict was recorded `ABORTED/E008` and the resubmission answered it
+    (`T1902`, confirmed on prepare and commit)."""
+
+    from app.db.models.trustline import TrustLine
+    from app.utils.exceptions import RetryablePaymentConflictException
+
+    factory = serializable_factory
+    world = await _seed(factory)
+    competed: list[int] = []
+
+    real_commit = AsyncSession.commit
+    real_execute = PaymentService.execute
+
+    async def marking_execute(self, *args, **kwargs):
+        staged = await real_execute(self, *args, **kwargs)
+        self.session.info["p019_payment_executed"] = True
+        return staged
+
+    async def commit_after_a_competitor(self):
+        if not competed and self.info.pop("p019_payment_executed", False):
+            competed.append(1)
+            async with factory() as other:
+                await other.execute(select(Debt.amount).where(Debt.equivalent_id == world.equivalent.id))
+                await other.execute(
+                    update(TrustLine)
+                    .where(
+                        TrustLine.from_participant_id == world.receiver.id,
+                        TrustLine.to_participant_id == world.sender.id,
+                        TrustLine.equivalent_id == world.equivalent.id,
+                    )
+                    .values(limit=TrustLine.limit)
+                )
+                await other.commit()
+        return await real_commit(self)
+
+    monkeypatch.setattr(settings, "COMMIT_RETRY_ATTEMPTS", 1)
+    monkeypatch.setattr(AsyncSession, "commit", commit_after_a_competitor)
+    monkeypatch.setattr(PaymentService, "execute", marking_execute)
+
+    tx_id = str(uuid.uuid4())
+    request = PaymentCreateRequest(
+        tx_id=tx_id,
+        to=world.receiver.pid,
+        equivalent=world.equivalent.code,
+        amount="10.00",
+        signature="__internal__",
+    )
+    try:
+        with pytest.raises(RetryablePaymentConflictException) as refused:
+            await PaymentService.pay(factory, world.sender.id, request, require_signature=False)
+        async with factory() as s:
+            stored = (
+                await s.execute(select(Transaction.state).where(Transaction.tx_id == tx_id))
+            ).scalars().all()
+        debts_after_conflict = await _debts(factory, world)
+        resubmitted = await PaymentService.pay(factory, world.sender.id, request, require_signature=False)
+    finally:
+        _forget_the_route_cache(world)
+
+    assert competed == [1], "premise: the competitor never ran before the payment's commit"
+    assert refused.value.details == {"retryable": True, "conflict_kind": "database_concurrency"}
+    assert _payment_db_sqlstate(refused.value.__cause__) == "40001", refused.value.__cause__
+    assert debts_after_conflict == {(world.sender.pid, world.receiver.pid): _OPENING}
+    assert stored == [], stored
+    assert resubmitted.status == "COMMITTED", resubmitted
+    assert await _debts(factory, world) == {
+        (world.sender.pid, world.receiver.pid): _OPENING + Decimal("10.00")
+    }

@@ -44,6 +44,14 @@ read on a NEW session - before deciding anything. Only an outcome established as
 may be replayed; an outcome that stays unknown raises `MoneyCommitOutcomeUnknown`, which is
 deliberately NOT a transient conflict, so the orchestrator counts it and can stop the run.
 
+A TRANSACTION A PAYMENT LEFT UNUSABLE IS NEVER REPLAYED OR COMMITTED (019 `T1912`). A staged payment
+whose failure left the phase's transaction unusable - a timeout that cancelled a statement in flight -
+raises `PaymentTransactionUnusable` instead of a refusal. This owner then rolls the WHOLE phase back,
+establishes that rollback, and only then records the admitted refusal (`ABORTED`, a timeout `E007`) on a
+short transaction of its own, yielding to a concurrent row of the same `tx_id` and never overwriting
+`COMMITTED`; the refusal is published once, and the phase's other staged payments and observations are
+discarded with the rollback. The tick fails under control (`_settle_unusable_phase`).
+
 A BOUNDED REPEAT PROMISES NOTHING UNDER PERMANENT CONTENTION. When the budget runs out the
 conflict leaves this module unchanged, and the orchestrator records a tick that made no progress
 instead of a programmatic error. The stop criterion is that absence of progress, never a SQLSTATE.
@@ -61,6 +69,11 @@ from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError
 
 from app.core.ledger.book import DebtVersionConflict
+from app.core.payments.service import (
+    PaymentTransactionUnusable,
+    _drain_call,
+    record_definitive_refusal,
+)
 from app.core.simulator.commit_resolution import resolve_commit_under_cancellation
 from app.core.simulator.models import RunRecord
 from app.db.models.transaction import Transaction
@@ -300,6 +313,112 @@ async def _attempt_landed(
     return bool(rows)
 
 
+async def _roll_back_the_phase(session: Any, logger: logging.Logger, *, run_id: str) -> bool:
+    """End the phase's transaction and say whether its rollback is POSITIVELY established.
+
+    The owner has sent no `COMMIT` on this transaction - the unusable branch is entered from inside
+    the attempt, before `_commit_money` - so once the transaction has ended nothing of it can land.
+    It has ended when `rollback()` returns (a live connection is sent `ROLLBACK`; one the payment
+    service already invalidated is discarded, and the server aborts its transaction with it), or, when
+    the rollback itself fails, when the connection is invalidated - closed, so the server aborts the
+    transaction and no `COMMIT` can ever reach it. Anything else is NOT established: the transaction
+    may still be open on the server, and the refusal must not be recorded beside it.
+    """
+
+    if session is None:
+        return False
+    try:
+        await session.rollback()
+        return True
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.warning(
+            "simulator.real.unusable_phase_rollback_failed run_id=%s", str(run_id), exc_info=True
+        )
+    try:
+        await session.invalidate()
+        return True
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.error(
+            "simulator.real.unusable_phase_rollback_unconfirmed run_id=%s", str(run_id), exc_info=True
+        )
+        return False
+
+
+async def _settle_unusable_phase(
+    error: PaymentTransactionUnusable,
+    *,
+    session: Any,
+    open_session: Callable[[], Any],
+    logger: logging.Logger,
+    run_id: str,
+) -> None:
+    """The money-phase owner's half of the unusable-transaction branch (019 `T1912`).
+
+    1. Roll the WHOLE phase back and establish it (`_roll_back_the_phase`). Every staged payment of
+       the phase goes with it - the ones that succeeded before the failure too - and their observations
+       are never published: the buffer that held them was never returned to this owner.
+    2. Only then record the admitted refusal, `ABORTED` with its error (for a timeout `E007`), in a
+       short transaction of its own (`record_definitive_refusal`): it yields to a concurrent row of the
+       same `tx_id`, resolves its identity, and never overwrites `COMMITTED`.
+    3. Publish the refusal's one observation (`tx.failed`) once its outcome is established - recorded,
+       or an `ABORTED` of the same request already standing. A `COMMITTED` winner publishes nothing
+       here: that payment did not fail.
+
+    An unestablished rollback, a failed recording or a refusal-less error records and publishes
+    nothing; the caller raises the error either way, and the tick fails under control.
+    """
+
+    established = await _roll_back_the_phase(session, logger, run_id=run_id)
+    refusal = error.refusal
+    if not established:
+        logger.error(
+            "simulator.real.staged_refusal_not_recorded run_id=%s tx_id=%s reason=rollback_unconfirmed",
+            str(run_id),
+            getattr(refusal, "tx_id", None),
+        )
+        return
+    if refusal is None:
+        return
+    stored, failure = await _drain_call(lambda: record_definitive_refusal(open_session, refusal))
+    if failure is not None:
+        logger.error(
+            "simulator.real.staged_refusal_record_failed run_id=%s tx_id=%s error_type=%s",
+            str(run_id),
+            refusal.tx_id,
+            type(failure).__name__,
+        )
+        if isinstance(failure, asyncio.CancelledError):
+            raise failure
+        return
+    if stored is not None and stored.status == "COMMITTED":
+        logger.warning(
+            "simulator.real.staged_refusal_yielded_to_committed run_id=%s tx_id=%s",
+            str(run_id),
+            refusal.tx_id,
+        )
+        return
+    logger.warning(
+        "simulator.real.staged_refusal_recorded_after_rollback run_id=%s tx_id=%s code=%s",
+        str(run_id),
+        refusal.tx_id,
+        refusal.error.get("code"),
+    )
+    if error.publish_refusal is not None:
+        try:
+            error.publish_refusal()
+        except Exception:
+            logger.warning(
+                "simulator.real.staged_refusal_publish_failed run_id=%s tx_id=%s",
+                str(run_id),
+                refusal.tx_id,
+                exc_info=True,
+            )
+
+
 def _resolve_non_replayed(phase: Any, state: str) -> None:
     """Resolve an attempt that will NOT be replayed, the way a failed tick always has.
 
@@ -343,6 +462,7 @@ async def run_money_phase_with_bounded_replay(
         before = _AttemptRunState.capture(run, lock)
 
         stack = AsyncExitStack()
+        session: Any = None
         phase: Any = None
         error: BaseException | None = None
         landed: bool | None = False
@@ -443,6 +563,14 @@ async def run_money_phase_with_bounded_replay(
             conflicts += 1
             with lock:
                 run._real_money_conflicts_total += 1
+
+        if isinstance(error, PaymentTransactionUnusable):
+            # A staged payment left THIS transaction unusable (019 `T1912`). It is not a conflict and
+            # is never replayed: the phase is rolled back whole, and the admitted refusal is recorded
+            # on a transaction of its own only once that rollback is established.
+            await _settle_unusable_phase(
+                error, session=session, open_session=open_session, logger=logger, run_id=run_id
+            )
 
         if landed is None:
             # An unknown outcome that its own identifiers could not settle. No replay, ever.

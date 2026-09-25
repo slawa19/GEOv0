@@ -27,7 +27,7 @@ WHY IT IS NOT VACUOUS. Three assertions carry it, and each fails on its own:
 1. the premise - exactly one COMPLETED envelope whose `effect_count` equals its entry rows, and a
    debt of the paid amount - so "the effects are there once" is not green on a payment that wrote
    nothing (the defect this module exists to remove);
-2. the refusal recorder (`PaymentService._record_refusal_durably`; before stage 3 `engine.abort`) is
+2. the refusal recorder (`record_definitive_refusal` in `app/core/payments/service.py`; before stage 3 `engine.abort`) is
    recorded, not executed, and must never have been called - that is the mechanism behind the
    absence of a reversal, asserted directly. Delete the read-before-terminalizing in the service and
    this goes red even though the money is still in place at the end;
@@ -55,6 +55,7 @@ from app.config import settings
 from app.core.auth.canonical import canonical_json
 from app.core.auth.crypto import generate_keypair, get_pid_from_public_key
 from app.core.payments.router import PaymentRouter
+import app.core.payments.service as payment_service_module
 from app.core.payments.service import PaymentService
 from app.db.journal_tables import debt_journal_entries, debt_operations
 from app.db.models.debt import Debt
@@ -222,7 +223,7 @@ async def test_a_commit_that_landed_and_then_timed_out_answers_committed_once(
         refusal_records.append((args, kwargs))
 
     monkeypatch.setattr(db_session, "commit", _real_commit_then_fail)
-    monkeypatch.setattr(PaymentService, "_record_refusal_durably", _record_refusal)
+    monkeypatch.setattr(payment_service_module, "record_definitive_refusal", _record_refusal)
 
     result = await service.create_payment(sender.id, request)
 
@@ -279,7 +280,7 @@ async def test_a_commit_that_landed_and_then_raised_a_db_error_answers_committed
         refusal_records.append((args, kwargs))
 
     monkeypatch.setattr(db_session, "commit", _real_commit_then_fail)
-    monkeypatch.setattr(PaymentService, "_record_refusal_durably", _record_refusal)
+    monkeypatch.setattr(payment_service_module, "record_definitive_refusal", _record_refusal)
 
     result = await service.create_payment(sender.id, request)
 

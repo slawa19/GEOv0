@@ -28,11 +28,11 @@ CONTROLS, asserted normally: the database error behind every attempt's failure c
 `event=payment.uow_retry`); every competitor committed (producer progress); the client got `409 E008`
 with `retryable: true`; a fresh `tx_id` afterwards pays, so the path is not simply broken.
 
-TWO TESTS PER PHASE.
-* `test_today_...` - CHARACTERIZATION of the hypothesis: the row is `ABORTED` with the retryable error,
-  and the resubmission returns it without executing. Stage 3 rewrites it.
-* `test_a_retryable_...` - TARGET: no row after the conflict, the resubmission executes and commits.
-  `TargetMismatch` after the controls; `xfail(strict)` until stage 3.
+THE TARGET (FORK-4), PASSING SINCE `T1905`: no row after the exhausted conflict, and the resubmission
+executes and commits. `TargetMismatch` after the controls. Until `T1905` a characterization pinned the
+hypothesis - the row `ABORTED` with the retryable error, replayed without executing - on prepare AND on
+commit (confirmed by `T1902`); it was removed with the behaviour it pinned, and the mutation "record an
+exhausted conflict `ABORTED` again" turns this target red (`T1905` changelog).
 """
 
 from __future__ import annotations
@@ -62,7 +62,7 @@ from tests.integration.p019_stand import (  # noqa: F401 - `api` and `factory` a
     payment_body,
     tx_row,
 )
-from tests.p019_support import require_target, target_xfail
+from tests.p019_support import require_target
 
 PHASES = ["prepare", "commit"]
 
@@ -254,30 +254,6 @@ async def _conflict_then_resubmit(api, factory, monkeypatch, caplog, phase: str)
     return _Outcome(world, body, first, row_after_conflict, resubmission)
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("phase", PHASES)
-async def test_today_a_retryable_conflict_is_stored_aborted_and_replayed(
-    api, factory, monkeypatch, caplog, phase: str  # noqa: F811
-) -> None:
-    """CHARACTERIZATION - hypothesis (a) as the current tree behaves. Stage 3 rewrites it."""
-
-    out = await _conflict_then_resubmit(api, factory, monkeypatch, caplog, phase)
-    retryable_error = {
-        "code": "E008",
-        "message": "State conflict",
-        "details": {"retryable": True, "conflict_kind": "database_concurrency"},
-    }
-    assert out.row_after_conflict == ("ABORTED", retryable_error), out.row_after_conflict
-    stored = out.resubmission.json()
-    assert stored["status"] == "ABORTED", stored
-    assert stored["error"] == retryable_error, stored
-    # The resubmission executed nothing: Alice owes Bob only the fresh control payment.
-    assert (await debts(factory, out.world)).get(
-        (out.world.alice["pid"], out.world.bob["pid"])
-    ) == Decimal("1.00")
-
-
-@target_xfail("stage 3 (T1905)", "a retryable conflict is stored ABORTED (service.py:1003-1031)")
 @pytest.mark.asyncio
 @pytest.mark.parametrize("phase", PHASES)
 async def test_a_retryable_conflict_leaves_no_row_and_the_resubmission_executes(
