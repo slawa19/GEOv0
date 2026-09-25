@@ -9,7 +9,6 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
-from app.config import settings
 from app.db.models.audit_log import AuditLog
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
@@ -645,28 +644,9 @@ async def _compute_activity(
             if ts2 >= cutoff_days(w):
                 participant_ops[w] += 1
 
-    # Incidents: "stuck" payment tx by initiator, created_at within window.
-    sla_seconds = int(getattr(settings, "PAYMENT_TX_STUCK_TIMEOUT_SECONDS", 120) or 120)
-    cutoff = now - timedelta(seconds=sla_seconds)
-
-    stuck = (
-        await db.execute(
-            select(Transaction.created_at)
-            .where(
-                Transaction.type == "PAYMENT",
-                Transaction.initiator_id == participant_id,
-                Transaction.state.in_({"NEW", "ROUTED", "PREPARE_IN_PROGRESS", "PREPARED", "PROPOSED", "WAITING"}),
-                Transaction.updated_at < cutoff,
-            )
-        )
-    ).all()
-    for (created_at,) in stuck:
-        if not isinstance(created_at, datetime):
-            continue
-        ca = created_at if created_at.tzinfo else created_at.replace(tzinfo=timezone.utc)
-        for w in windows:
-            if ca >= cutoff_days(w):
-                incident_count[w] += 1
+    # Incidents ("stuck" payments by initiator): none exists since programme 019, stage 4 - the hub
+    # inserts a payment COMMITTED or ABORTED and migration 030 refuses any other PAYMENT state. The
+    # counts stay zero on the wire, a compatibility surface until П4 (`T1911`).
 
     # Committed tx activity.
     tx_rows = (

@@ -165,10 +165,11 @@ class Settings(BaseSettings):
     # Challenge
     AUTH_CHALLENGE_EXPIRE_SECONDS: int = 300
 
-    # Payment Engine
-    PREPARE_LOCK_TTL_SECONDS: int = 30
-
-    # Recovery (startup + periodic cleanup)
+    # Recovery of stuck payments - INERT since programme 019, stage 4. The hub executes a payment as
+    # one transaction and persists no intermediate state (migration 030), so the recovery loop and
+    # its reservation TTL (`PREPARE_LOCK_TTL_SECONDS`, removed) are gone. The three keys stay readable
+    # and writable through `/admin/config` only because the admin UI's config contract names them;
+    # nothing reads them. Their fate is decided with the incidents screen after 019 (П4, `T1911`).
     RECOVERY_ENABLED: bool = True
     RECOVERY_INTERVAL_SECONDS: int = 60
     PAYMENT_TX_STUCK_TIMEOUT_SECONDS: int = 120

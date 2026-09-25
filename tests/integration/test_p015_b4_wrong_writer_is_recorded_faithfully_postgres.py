@@ -59,16 +59,15 @@ from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.clearing.service import ClearingService
-from app.core.payments.engine import PaymentEngine
 from app.db.models.audit_log import IntegrityAuditLog
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
-from app.db.models.prepare_lock import PrepareLock
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 from tests.debt_setup import debt_fixture_setup
 from tests.p015_b4_support import ENTRIES_TABLE, OPERATIONS_TABLE, missing_journal_tables, stored_rows
+from tests.unit.test_p015_b4_wrong_writer_is_recorded_faithfully import _routed_over
 
 #: One scale-8 atom. The clearing half of `C6` is wrong by exactly this much on every edge.
 ATOM = Decimal("0.00000001")
@@ -401,68 +400,60 @@ async def _journal_totals_per_edge(factory, triangle: _Triangle, tx_id: str):
 # ==============================================================================================
 
 
-async def _prepare_payment(factory, triangle: _Triangle, path: list[str], amount: Decimal) -> str:
-    """Create the transaction and run a REAL `PaymentEngine.prepare` over `path`.
+async def _pay_over(
+    factory, triangle: _Triangle, path: list[str], amount: Decimal
+) -> tuple[str, list[tuple[str, str, int]]]:
+    """ONE WHOLE PAYMENT over the explicit route `path` through `PaymentService`; returns its tx id and
+    its DECLARED flows in atoms, sorted.
 
-    Nothing is hand-written into `prepare_locks`: those rows ARE the operation's intent, and
-    criterion (b) checked against a hand-built fixture would be checking this test's opinion of the
-    payment instead of the system's.
+    019 stage 4 (`T1906`, `FORK-8`). The payment executes directly - no `NEW`, no `PREPARED`, no
+    `prepare_locks` (CHECK `030`) - so the declaration is no longer read from reservations between a
+    prepare and a commit. It is taken UPSTREAM: `path` is handed to the ordinary execution path as the
+    router's result under test control (`_routed_over`), and the declared flows are that route's segments
+    times the amount the router was asked for - never read back from the envelope under test. The service
+    still validates every segment's capacity under its locks; only the choice of route is the test's.
+
+    SORTED, and the limit is worth naming: each edge of the scenarios here is touched by at most one flow
+    and no flow's input depends on another's output, so criterion (b) is order-independent HERE; the honest
+    control below goes red if that changes.
     """
+
+    from app.core.payments.service import PaymentService
+
     tx_id = str(uuid.uuid4())
-    async with factory() as session:
-        session.add(
-            Transaction(
-                id=uuid.uuid4(),
-                tx_id=tx_id,
-                type="PAYMENT",
-                initiator_id=getattr(triangle, path[0]).id,
-                payload={
-                    "routes": [
-                        {
-                            "path": [getattr(triangle, name).pid for name in path],
-                            "amount": str(amount),
-                        }
-                    ]
-                },
-                state="NEW",
+    with _routed_over(triangle, path) as handed:
+        async with factory() as session:
+            result = await PaymentService(session).create_payment_internal(
+                getattr(triangle, path[0]).id,
+                to_pid=getattr(triangle, path[-1]).pid,
+                equivalent=triangle.equivalent_code,
+                amount=str(amount),
+                idempotency_key=tx_id,
             )
-        )
-        await session.commit()
-    async with factory() as session:
-        await PaymentEngine(session).prepare(
-            tx_id,
-            [getattr(triangle, name).pid for name in path],
-            amount,
-            triangle.equivalent_id,
-        )
-    return tx_id
+    assert handed, f"stand: the service never asked the router for a route: {result!r}"
+    assert result.status == "COMMITTED" and result.tx_id == tx_id, (
+        f"stand: the payment over {path} did not commit: {result!r}"
+    )
+    by_pid = {getattr(triangle, name).pid: name for name in ("a", "b", "c")}
+    route, routed_amount = handed[-1]
+    declared = sorted(
+        (by_pid[sender], by_pid[receiver], _atoms(routed_amount))
+        for sender, receiver in zip(route, route[1:])
+    )
+    return tx_id, declared
 
 
-async def _intent_flows(factory, triangle: _Triangle, tx_id: str) -> list[tuple[str, str, int]]:
-    """The payment's declared flows in atoms, read from `prepare_locks` BEFORE the commit deletes them.
+async def _prepare_payment(factory, triangle: _Triangle, path: list[str], amount: Decimal) -> str:
+    """ONE WHOLE PAYMENT over `path`, committed; returns its tx id. THE NAME IS HISTORICAL.
 
-    This is the snapshot design v2 §7 says the envelope's intent will carry ("validated flows per
-    lock as exact scale-8 strings"). Until the envelope exists it has to be captured here.
-
-    SORTED, and the limit is worth naming: the engine applies flows in the order its locks come
-    back, which this tree does not fix, so criterion (b) is only order-independent for scenarios
-    where it is. Both scenarios here are - each edge is touched by at most one flow and no flow's
-    input depends on another's output - and the honest control below goes red if that changes.
+    Until 019 stage 4 this left a durable `PREPARED` payment from a real `PaymentEngine.prepare` for the
+    caller to commit. No such state exists any more (CHECK `030`); the name is kept for the out-of-tier
+    probes that import it (`tests/p018_t1809_operation_cost_probe.py`,
+    `tests/p019_t1903_statement_sequence_probe.py`).
     """
-    async with factory() as fresh:
-        locks = (
-            await fresh.execute(select(PrepareLock.effects).where(PrepareLock.tx_id == tx_id))
-        ).scalars().all()
-    flows = [
-        (
-            triangle.name(uuid.UUID(flow["from"])),
-            triangle.name(uuid.UUID(flow["to"])),
-            _atoms(flow["amount"]),
-        )
-        for effects in locks
-        for flow in (effects or {}).get("flows", [])
-    ]
-    return sorted(flows)
+
+    tx_id, _declared = await _pay_over(factory, triangle, path, amount)
+    return tx_id
 
 
 async def _audit(factory, tx_id: str) -> list[bool]:
@@ -486,27 +477,40 @@ async def _tx_state(factory, tx_id: str) -> str | None:
 
 
 def _collapse_the_route(monkeypatch, triangle: _Triangle) -> list[tuple[str, str]]:
-    """Make the engine write ONE `A -> C` obligation for a payment routed `A -> B -> C`.
+    """Make the book write ONE `A -> C` obligation for a payment routed `A -> B -> C`.
 
     The smallest wrong writer that gets past every barrier: the first segment is dropped and the
     second writes `A -> C` for the same amount, so `A -> C` is written EXACTLY ONCE (binding
-    condition 5). It is order-independent by construction, because the order the two locks come
-    back in is not fixed by this tree.
+    condition 5). It is order-independent by construction.
 
-    Deliberately NOT a bug in `_apply_flow`'s arithmetic: the point is a writer whose individual
+    Deliberately NOT a bug in the flow algebra's arithmetic: the point is a writer whose individual
     writes are all well-formed and whose TOTAL is right, because that is the writer no existing
     check can see.
+
+    THE SEAM (019 stage 4, `FORK-8`): `app.core.ledger.book._apply_payment_flow`, where a payment flow is
+    applied, BELOW the place the service computes the intent - so the corruption cannot touch the
+    declaration the envelope records. Until stage 4 it was `PaymentEngine._apply_flow`.
     """
-    original = PaymentEngine._apply_flow
+    from app.core.ledger import book
+
+    original = book._apply_payment_flow
     calls: list[tuple[str, str]] = []
 
-    async def _wrapper(self, from_id, to_id, amount, equivalent_id):
-        calls.append((triangle.name(from_id), triangle.name(to_id)))
+    async def _wrapper(session, flow):
+        calls.append((triangle.name(flow.from_id), triangle.name(flow.to_id)))
         if len(calls) == 1:
-            return None
-        return await original(self, triangle.a.id, triangle.c.id, amount, equivalent_id)
+            return book.APPLIED
+        return await original(
+            session,
+            book.PaymentFlow(
+                from_id=triangle.a.id,
+                to_id=triangle.c.id,
+                amount=flow.amount,
+                equivalent_id=flow.equivalent_id,
+            ),
+        )
 
-    monkeypatch.setattr(PaymentEngine, "_apply_flow", _wrapper)
+    monkeypatch.setattr(book, "_apply_payment_flow", _wrapper)
     return calls
 
 
@@ -599,11 +603,9 @@ async def test_c5_p_the_journal_of_an_honest_payment_is_exact_at_full_money_size
         await session.commit()
 
     before = await _edges(serializable_factory, triangle)
-    tx_id = await _prepare_payment(serializable_factory, triangle, ["a", "b"], payment)
-    flows = await _intent_flows(serializable_factory, triangle, tx_id)
-
-    async with serializable_factory() as session:
-        await PaymentEngine(session).commit(tx_id)
+    # 019 stage 4: through the payment service; the declaration is the explicit route the router was
+    # made to hand over, taken upstream of the service (`_pay_over`).
+    tx_id, flows = await _pay_over(serializable_factory, triangle, ["a", "b"], payment)
 
     after = await _edges(serializable_factory, triangle)
 
@@ -698,12 +700,10 @@ async def test_c6_p_a_payment_that_writes_the_wrong_edge_passes_every_barrier_to
         ],
     )
     before = await _edges(serializable_factory, triangle)
-    tx_id = await _prepare_payment(serializable_factory, triangle, ["a", "b", "c"], FULL_SIZE)
-    flows = await _intent_flows(serializable_factory, triangle, tx_id)
-
+    # 019 stage 4: the wrong writer is armed BEFORE the payment, which is one transaction; the route
+    # A -> B -> C is handed over as the router's result (the natural router would take C -> A directly).
     calls = _collapse_the_route(monkeypatch, triangle)
-    async with serializable_factory() as session:
-        await PaymentEngine(session).commit(tx_id)
+    tx_id, flows = await _pay_over(serializable_factory, triangle, ["a", "b", "c"], FULL_SIZE)
 
     after = await _edges(serializable_factory, triangle)
     audit = await _audit(serializable_factory, tx_id)
@@ -711,7 +711,7 @@ async def test_c6_p_a_payment_that_writes_the_wrong_edge_passes_every_barrier_to
 
     # NON-VACUITY: the wrong writer really ran, and `A -> C` was written exactly once.
     assert sorted(calls) == [("a", "b"), ("b", "c")], (
-        f"stand: the engine did not apply the two declared segments exactly once each: {calls}"
+        f"stand: the book did not apply the two declared segments exactly once each: {calls}"
     )
     assert before == {}, f"stand: the equivalent was not empty before the payment: {before}"
 
@@ -726,8 +726,9 @@ async def test_c6_p_a_payment_that_writes_the_wrong_edge_passes_every_barrier_to
         f"real improvement, the barrier that caught it must be named and C6 rewritten around it."
     )
 
-    # THE STAND, and it needs no journal: what the payment DECLARED - captured from the prepare
-    # locks before the commit deleted them - disagrees with what it did. Asserted FIRST so this
+    # THE STAND, and it needs no journal: what the payment DECLARED - the route the router handed the
+    # service, taken upstream (until 019 stage 4: captured from the prepare locks before the commit
+    # deleted them) - disagrees with what it did. Asserted FIRST so this
     # test can never pass having measured neither criterion.
     declared = _payment_implied_by_intent(before, flows)
     assert flows == [
@@ -757,13 +758,13 @@ async def test_c6_p_a_payment_that_writes_the_wrong_edge_passes_every_barrier_to
     recorded = _recorded_payment_flows(triangle, envelopes[0]["intent"])
     assert recorded == flows, (
         f"the envelope's intent is not what the payment declared. Stored, in atoms: {recorded}. "
-        f"The prepare locks, immediately before the commit deleted them: {flows}. An intent that "
+        f"The route the service was handed, taken upstream: {flows}. An intent that "
         f"is the writer's own result cannot disagree with the result, and being able to disagree "
         f"is the entire reason it is recorded (design v2 §7)."
     )
     implied = _payment_implied_by_intent(before, recorded)
     assert implied == declared, (
-        f"replaying the STORED intent gives {implied} while the prepared flows give {declared}; "
+        f"replaying the STORED intent gives {implied} while the declared flows give {declared}; "
         f"criterion (b) is then not a check on the envelope at all"
     )
     assert implied != after, (
@@ -807,7 +808,8 @@ async def test_c6_p_control_the_same_payment_without_the_wrapper_satisfies_crite
     had the same defect at the same place. A positive control over the snapshot path says nothing
     about whether the stored-intent path recognises an honest payment, which is what "the refutation
     is not an artefact of the replay" has to mean. Both paths are asserted now, and the stored intent
-    is required to agree with the prepare locks.
+    is required to agree with the upstream declaration - since 019 stage 4 the route the router was made
+    to hand over (`_pay_over`), until then the prepare locks.
 
     COVERAGE LIMIT: see `_recorded_payment_flows` - the equivalent and the lock ids are projected
     away, so this is evidence for a single-equivalent route at full money size.
@@ -821,11 +823,7 @@ async def test_c6_p_control_the_same_payment_without_the_wrapper_satisfies_crite
         trustlines=[("b", "a", FULL_SIZE), ("c", "b", FULL_SIZE), ("c", "a", FULL_SIZE)],
     )
     before = await _edges(serializable_factory, triangle)
-    tx_id = await _prepare_payment(serializable_factory, triangle, ["a", "b", "c"], FULL_SIZE)
-    flows = await _intent_flows(serializable_factory, triangle, tx_id)
-
-    async with serializable_factory() as session:
-        await PaymentEngine(session).commit(tx_id)
+    tx_id, flows = await _pay_over(serializable_factory, triangle, ["a", "b", "c"], FULL_SIZE)
 
     after = await _edges(serializable_factory, triangle)
     assert await _tx_state(serializable_factory, tx_id) == "COMMITTED"
@@ -861,7 +859,7 @@ async def test_c6_p_control_the_same_payment_without_the_wrapper_satisfies_crite
         f"trivially return the pre-state: {envelopes[0]['intent']}"
     )
     assert recorded == sorted(flows), (
-        f"the envelope's stored intent {recorded} is not what the prepare locks authorised "
+        f"the envelope's stored intent {recorded} is not the route the service was handed "
         f"{sorted(flows)} on an HONEST payment, so the two criteria are measured against two "
         f"different declarations."
     )

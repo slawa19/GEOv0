@@ -71,10 +71,10 @@ TWO SHAPES OF USE:
   collecting them at one end or posting them as separate operations would change the outcome.
 * `await Book.post(session, op, effects)` - the shorthand for an operation made of debt effects only.
 
-`Book.current(session)` returns the posting open on a session. It exists for the one writer whose
-signature tests pin (`PaymentEngine._apply_flow`, kept as a forwarding method so that tests which
-perturb it still execute the perturbation) and for the inject executor, which runs inside the
-envelope its owner opened.
+`Book.current(session)` returns the posting open on a session. It exists for the inject executor,
+which runs inside the envelope its owner opened (until programme 019, stage 4 also for the payment
+engine's forwarding `_apply_flow`; the engine is gone, and the payment path's perturbation seam is
+`_apply_payment_flow` below).
 """
 
 from __future__ import annotations

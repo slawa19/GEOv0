@@ -31,11 +31,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from app.core.ledger.book import Book, operation_for
-from tests.migrated_schema import REPO_ROOT
+from tests.migrated_schema import REPO_ROOT, repository_head
 from tests.p018_support import seed_world, serializable_engine
 
 _BEFORE = "028_equivalent_integrity_hold"
-_AFTER = "029_debt_journal_by_the_database"
 
 
 def _alembic(url: str, *args: str) -> subprocess.CompletedProcess:
@@ -190,4 +189,6 @@ async def test_t1803_the_migration_keeps_history_refuses_open_and_goes_back_only
     blocked = _alembic(url, "downgrade", _BEFORE)
     assert blocked.returncode != 0
     assert "carry schema_version 2" in blocked.stderr
-    assert await _read(url, "SELECT version_num FROM alembic_version") == [(_AFTER,)]
+    # One alembic transaction: the refused step rolls back every step of the same downgrade, so the
+    # database stays at the head it started from (030 since programme 019, stage 4).
+    assert await _read(url, "SELECT version_num FROM alembic_version") == [(repository_head(),)]

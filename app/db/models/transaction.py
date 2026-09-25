@@ -23,5 +23,11 @@ class Transaction(Base):
     __table_args__ = (
         CheckConstraint("type IN ('TRUST_LINE_CREATE', 'TRUST_LINE_UPDATE', 'TRUST_LINE_CLOSE', 'PAYMENT', 'CLEARING', 'COMPENSATION', 'COMMODITY_REDEMPTION')", name='chk_transaction_type'),
         CheckConstraint("state IN ('NEW', 'ROUTED', 'PREPARE_IN_PROGRESS', 'PREPARED', 'COMMITTED', 'ABORTED', 'PROPOSED', 'WAITING', 'REJECTED')", name='chk_transaction_state'),
+        # The legacy payment-write fence of migration 030 (programme 019, stage 4): a PAYMENT row is
+        # terminal. The hub executes a payment as one transaction and inserts it COMMITTED or ABORTED;
+        # a pre-019 binary's NEW insert is refused here. CLEARING and the other types stay outside.
+        # Same text as the migration, so create_all and alembic build the same table
+        # (tests/integration/test_p019_migration_030_postgres.py).
+        CheckConstraint("type <> 'PAYMENT' OR state IN ('COMMITTED', 'ABORTED')", name='chk_transaction_payment_terminal'),
         UniqueConstraint('initiator_id', 'type', 'idempotency_key', name='uq_transactions_initiator_type_idempotency'),
     )

@@ -61,7 +61,6 @@ from app.core.ledger.reconciliation import (
     take_baseline,
     verify_journal_equals_change,
 )
-from app.core.payments.engine import PaymentEngine
 from app.db.journal_tables import debt_journal_entries
 from app.db.models.audit_log import IntegrityAuditLog
 from app.db.models.debt import Debt
@@ -187,10 +186,11 @@ async def _verify(factory, equivalent_id):
 
 
 async def _pay(factory, triangle, path: list[str], amount: str) -> str:
-    tx_id = await _prepare_payment(factory, triangle, path, Decimal(amount))
-    async with factory() as session:
-        await PaymentEngine(session).commit(tx_id)
-    return tx_id
+    """One whole payment over the explicit route `path`, committed. Since 019 stage 4 (`T1906`) a payment
+    is one transaction through `PaymentService`, so this is `_prepare_payment` itself (whose name is
+    historical); until then it was a durable `PaymentEngine.prepare` followed by `PaymentEngine.commit`."""
+
+    return await _prepare_payment(factory, triangle, path, Decimal(amount))
 
 
 async def _entries(factory, equivalent_id) -> list[SimpleNamespace]:
@@ -253,6 +253,10 @@ async def _scheduled_run(monkeypatch, factory) -> None:
 async def interleave_a_payment_between_the_verifiers_reads(factory, monkeypatch) -> dict:
     """Pause the scheduled verifier after its journal read, commit a real payment, resume.
 
+    019 stage 4 (`T1906`): the WHOLE payment runs during the pause. Before, it was prepared before the
+    pause and only committed during it; the prepare-before-pause was never load-bearing - what the
+    premises below pin is that the payment's money COMMITTED while the verifier sat between its reads.
+
     The pause is an `asyncio.Event` barrier in a patched `_current_debts`, never a sleep. Returns the
     premises and the verdict for the calling test to assert: what the journal read saw, what a THIRD
     session saw while the verifier was paused, what the run counted and what it stored.
@@ -265,7 +269,6 @@ async def interleave_a_payment_between_the_verifiers_reads(factory, monkeypatch)
     triangle = await _seed_triangle(factory, trustlines=[("b", "a", "100")])
     await _fixture_debts(factory, triangle, [("a", "b", "10")])
     await _baseline(factory, triangle.equivalent.id)
-    tx_id = await _prepare_payment(factory, triangle, ["a", "b"], Decimal("5"))
 
     paused, resume = asyncio.Event(), asyncio.Event()
     seen: dict = {"triangle": triangle}
@@ -300,8 +303,7 @@ async def interleave_a_payment_between_the_verifiers_reads(factory, monkeypatch)
     )
     try:
         await asyncio.wait_for(paused.wait(), timeout=60)
-        async with factory() as session:
-            await PaymentEngine(session).commit(tx_id)
+        tx_id = await _prepare_payment(factory, triangle, ["a", "b"], Decimal("5"))
         seen["third_session_edges"] = await _edges(factory, triangle)
         seen["tx_state"] = await _tx_state(factory, tx_id)
     finally:
@@ -976,10 +978,10 @@ async def test_step5a_c6_still_commits_verified_and_criterion_a_is_blind_to_it_u
         factory, trustlines=[("b", "a", "100"), ("c", "b", "100"), ("c", "a", "100")]
     )
     await _baseline(factory, triangle.equivalent.id)
-    tx_id = await _prepare_payment(factory, triangle, ["a", "b", "c"], Decimal("5"))
+    # 019 stage 4: the wrong writer is armed BEFORE the payment (it is one transaction now), on the book
+    # seam `book._apply_payment_flow`; the explicit route A -> B -> C is the router's result.
     _collapse_the_route(monkeypatch, triangle)
-    async with factory() as session:
-        await PaymentEngine(session).commit(tx_id)
+    tx_id = await _prepare_payment(factory, triangle, ["a", "b", "c"], Decimal("5"))
 
     assert await _edges(factory, triangle) == {("a", "c"): Decimal("5.00000000")}
     assert await _tx_state(factory, tx_id) == "COMMITTED"

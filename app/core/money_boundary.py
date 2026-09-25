@@ -84,8 +84,9 @@ class MoneyBoundary:
 
     One instance carries one advisory-lock deadline: the budget starts at the first lock this instance
     takes and is shared by every later lock it takes (`_set_local_advisory_lock_timeout`). A caller
-    that wants a fresh budget per unit of work takes a fresh instance. `PaymentEngine` is a
-    `MoneyBoundary`, so the engine's own locks and deadline are these, unchanged.
+    that wants a fresh budget per unit of work takes a fresh instance. (Until programme 019, stage 4
+    the payment engine was a `MoneyBoundary`; the engine is gone, the primitives stay here until
+    stage 5.)
     """
 
     def __init__(self, session: AsyncSession):

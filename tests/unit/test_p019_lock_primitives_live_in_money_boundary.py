@@ -1,6 +1,6 @@
 """019 `T1903`: every lock primitive lives in `app/core/money_boundary.py`, and nobody reaches it through the engine.
 
-WHY. Stage 4 of 019 deletes `app/core/payments/engine.py`. The lock primitives (owner, staged owner,
+WHY. Stage 4 of 019 deleted `app/core/payments/engine.py` (`T1906`). The lock primitives (owner, staged owner,
 session owner, transaction and pair locks, their keys and namespaces), the stop/hold guard with its refusal
 constants and factories, and the payment delta check moved to `MoneyBoundary` in stage 2 so that the
 deletion cannot silently drop the coordination clearing, admin, the inject, the tick and reconciliation
@@ -16,12 +16,16 @@ primitives on evidence:
    no `PaymentEngine.X`, no `PaymentEngine(session).X`, no `engine_module.X`, no
    `engine_module.PaymentEngine.X` / `engine_module.PaymentEngine(s).X`, no `setattr(PaymentEngine,
    "X", ...)` and no dotted patch string `"app.core.payments.engine[.PaymentEngine].X"` for a moved `X`.
+3. **No import of the deleted module** (since stage 4): `import app.core.payments.engine`,
+   `from app.core.payments import engine`, `from app.core.payments.engine import ...` - any name. The
+   module does not exist, so such an import is a module that no longer collects or loads; a reference
+   to a moved name through it is ALSO reported by rule 2. The payment path holds a `MoneyBoundary` itself
+   (`PaymentService._boundary`), which is what makes a patch of `MoneyBoundary.<primitive>` reach it.
 
-WHAT IT DOES NOT SEE - its silence is not proof of these: access through an engine INSTANCE held in a
-variable (`engine = PaymentEngine(s); engine._acquire_tx_advisory_lock(...)` - legal today, the instance
-IS a `MoneyBoundary`, and those engine-behaviour tests go with the engine at stage 4); `getattr` with a
-computed name; a namespace tag computed rather than written; raw SQL that takes an advisory lock with its
-own numbers; prose in comments and docstrings. What decides whether a move changed behaviour is the
+WHAT IT DOES NOT SEE - its silence is not proof of these: `importlib.import_module` or `__import__` with
+the module name as a string (a patch STRING of a moved name is still seen by rule 2); access through an
+object held in a variable; `getattr` with a computed name; a namespace tag computed rather than written;
+raw SQL that takes an advisory lock with its own numbers; prose in comments and docstrings. What decides whether a move changed behaviour is the
 statement-sequence probe `tests/p019_t1903_statement_sequence_probe.py` and the tier, not this file.
 """
 
@@ -38,7 +42,6 @@ from app.core.money_boundary import (
     _TX_ADVISORY_LOCK_NAMESPACE,
     MoneyBoundary,
 )
-from app.core.payments.engine import PaymentEngine
 
 REPO = Path(__file__).resolve().parents[2]
 HOME = "app/core/money_boundary.py"
@@ -86,6 +89,9 @@ ALLOWED_METHODS = {
 }
 
 _PATCH_STRING = re.compile(r"app\.core\.payments\.engine\.(?:PaymentEngine\.)?(\w+)")
+#: The marker of a rule-3 finding (an import of the deleted engine module), so the legal-shape
+#: counter-checks of rule 2 can set it aside - rule 3 has counter-checks of its own.
+DELETED_IMPORT = f"imports the deleted module `{ENGINE_MODULE}`"
 
 
 def findings_for(source: str, relative: str) -> list[str]:
@@ -98,14 +104,20 @@ def findings_for(source: str, relative: str) -> list[str]:
 
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and node.module == ENGINE_MODULE:
+            found.append(f"{relative}:{node.lineno}: {DELETED_IMPORT}")
             for alias in node.names:
                 if alias.name in MOVED:
                     found.append(f"{relative}:{node.lineno}: imports `{alias.name}` from the engine")
                 if alias.name == "PaymentEngine":
                     engine_classes.add(alias.asname or alias.name)
         elif isinstance(node, ast.ImportFrom) and node.module == "app.core.payments":
-            engine_modules.update(a.asname or a.name for a in node.names if a.name == "engine")
+            engine_aliases = [a.asname or a.name for a in node.names if a.name == "engine"]
+            if engine_aliases:
+                found.append(f"{relative}:{node.lineno}: {DELETED_IMPORT}")
+            engine_modules.update(engine_aliases)
         elif isinstance(node, ast.Import):
+            if any(a.name == ENGINE_MODULE for a in node.names):
+                found.append(f"{relative}:{node.lineno}: {DELETED_IMPORT}")
             engine_modules.update(a.asname for a in node.names if a.name == ENGINE_MODULE and a.asname)
 
     def is_engine_class(expr: ast.AST) -> bool:
@@ -203,10 +215,12 @@ def test_no_lock_primitive_has_a_second_home_or_is_reached_through_the_engine() 
     found = _tree_findings()
     assert not found, (
         "A lock primitive, stop/hold constant or the delta check is defined outside "
-        f"{HOME} or reached through `app.core.payments.engine`:\n  "
+        f"{HOME}, reached through `app.core.payments.engine`, or the deleted engine is imported:\n  "
         + "\n  ".join(found)
         + "\n\nImport it from `app.core.money_boundary` (`MoneyBoundary.<name>`, or the module constant) "
-        "and patch `MoneyBoundary`, not `PaymentEngine`. This guard checks FORM only - see the module "
+        "and patch `MoneyBoundary`; the engine was deleted by 019 stage 4 - a payment runs through "
+        "`PaymentService` (`pay()`, `create_payment_internal[_staged]`, the phases `_bind_payment` / "
+        "`_apply_payment`). This guard checks FORM only - see the module "
         "docstring for what it cannot see; whether a move changed behaviour is decided by "
         "`tests/p019_t1903_statement_sequence_probe.py` and the tier."
     )
@@ -219,7 +233,7 @@ def test_the_scan_is_not_vacuous() -> None:
     assert len(files) > 400, f"only {len(files)} files scanned under {SCANNED_ROOTS}"
     for expected in (
         HOME,
-        "app/core/payments/engine.py",
+        "app/core/payments/service.py",
         "app/core/clearing/service.py",
         "app/api/v1/admin.py",
         "tests/integration/test_p015_inject_holds_the_owner_lock_postgres.py",
@@ -257,12 +271,30 @@ def test_the_scan_is_not_vacuous() -> None:
         assert "MoneyBoundary" in (REPO / consumer).read_text(encoding="utf-8"), consumer
 
 
-def test_the_engine_inherits_the_primitives_and_overrides_none() -> None:
-    """A patch of `MoneyBoundary.<primitive>` must reach the payment path: the engine may not shadow it."""
+def test_the_engine_is_gone_and_the_payment_path_holds_money_boundary_itself() -> None:
+    """A patch of `MoneyBoundary.<primitive>` must reach the payment path.
 
-    assert issubclass(PaymentEngine, MoneyBoundary)
-    shadowed = sorted(name for name in MOVED if name in vars(PaymentEngine))
-    assert not shadowed, f"PaymentEngine shadows moved primitives: {shadowed}"
+    Until 019 stage 4 this read `test_the_engine_inherits_the_primitives_and_overrides_none`: the engine
+    was a `MoneyBoundary` subclass and could shadow a primitive. The engine is deleted; the payment path
+    is `PaymentService`, which holds a `MoneyBoundary` - of exactly that class, so no subclass between
+    them can shadow what a test patches - and defines none of the moved names but the listed wrapper
+    (rule 1 over `app/`).
+    """
+
+    import importlib.util
+
+    assert importlib.util.find_spec(ENGINE_MODULE) is None, f"{ENGINE_MODULE} is importable again"
+    assert not (REPO / "app/core/payments/engine.py").exists()
+
+    from app.core.payments.service import PaymentService
+
+    assert type(PaymentService(object())._boundary) is MoneyBoundary
+    redefined = sorted(
+        name
+        for name in MOVED & set(vars(PaymentService))
+        if ("app/core/payments/service.py", "PaymentService", name) not in ALLOWED_METHODS
+    )
+    assert not redefined, f"PaymentService redefines moved primitives: {redefined}"
 
 
 # --- counter-checks: the rules fire on each shape they claim, and stay quiet on the legal ones ---------
@@ -292,6 +324,10 @@ _VIOLATIONS = {
     "constant-redefined": "_EQUIVALENT_OWNER_LOCK_NAMESPACE = 1\n",
     "key-function-redefined": "def _equivalent_owner_lock_key(equivalent_id):\n    return 1\n",
     "namespace-literal": "text('SELECT pg_advisory_xact_lock(:n, :k)'), {'n': 0x475458}\n",
+    "import-deleted-module": "import app.core.payments.engine\n",
+    "import-deleted-module-aliased": "import app.core.payments.engine as em\n",
+    "from-package-import-deleted-module": "from app.core.payments import engine\n",
+    "from-deleted-module-import-any-name": "from app.core.payments.engine import PaymentEngine\n",
 }
 
 _LEGAL = {
@@ -305,7 +341,12 @@ _LEGAL = {
         "monkeypatch.setattr(em, 'time', clock)\n"
     ),
     "unrelated-alias-same-name": "import other.module as em\nem.PaymentEngine.MONEY_STOP_REASONS\n",
+    "sibling-module-import": "from app.core.payments import service\nimport app.core.payments.router\n",
 }
+
+#: Legal shapes for rule 2 that must still import the engine module to exist at all: the import itself
+#: is a rule-3 finding (one per import line), and nothing else may be found.
+_LEGAL_RULE_2_WITH_AN_ENGINE_IMPORT = {"module-alias-non-moved": 1}
 
 
 @pytest.mark.parametrize("name", sorted(_VIOLATIONS))
@@ -324,7 +365,25 @@ def test_counter_check_an_override_in_the_engine_is_found() -> None:
 
 @pytest.mark.parametrize("name", sorted(_LEGAL))
 def test_counter_check_legal_shapes_are_not_found(name: str) -> None:
-    assert findings_for(_LEGAL[name], "tests/unit/synthetic.py") == [], name
+    found = findings_for(_LEGAL[name], "tests/unit/synthetic.py")
+    rule_3 = [f for f in found if DELETED_IMPORT in f]
+    assert [f for f in found if DELETED_IMPORT not in f] == [], name
+    assert len(rule_3) == _LEGAL_RULE_2_WITH_AN_ENGINE_IMPORT.get(name, 0), (name, rule_3)
+
+
+def test_counter_check_every_import_shape_of_the_deleted_module_is_rule_3() -> None:
+    """Rule 3 fires on each import shape, with its own marker, once per import statement."""
+
+    for name in (
+        "import-deleted-module",
+        "import-deleted-module-aliased",
+        "from-package-import-deleted-module",
+        "from-deleted-module-import-any-name",
+    ):
+        found = findings_for(_VIOLATIONS[name], "tests/unit/synthetic.py")
+        assert [f for f in found if DELETED_IMPORT in f] == [
+            f"tests/unit/synthetic.py:1: {DELETED_IMPORT}"
+        ], (name, found)
 
 
 def test_counter_check_the_listed_wrapper_is_allowed_and_only_where_listed() -> None:

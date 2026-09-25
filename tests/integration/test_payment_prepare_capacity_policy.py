@@ -1,3 +1,19 @@
+"""The capacity of a payment segment and the reservations it still honours (AGENTS §8 routing).
+
+The capacity formula is protected: `limit(receiver -> sender) - debt(sender -> receiver) + debt(receiver
+-> sender)`, and several routes of ONE payment over one segment are summed against it. Until programme
+019 stage 4 this was measured on the engine's private `_get_segment_capacity_and_reserved_usage` and its
+`prepare`/`prepare_routes`; since stage 4 the payment path computes it in `PaymentService._bind_payment`
+(`_segment_capacity`), and this module measures it there (manifest t1901, 5.1, rows of this file). The
+single-route and multi-route entries are one function now, so the old "the two entries give identical
+details" comparison has no second entry to compare with; each refusal's details are asserted directly.
+
+THE RESERVATION BELOW IS SYNTHETIC. Since stage 4 no payment path writes `prepare_locks`; the reader
+still honours a live reservation however it got there until stage 5 removes the table and its readers
+(`T1909`). The row is written by hand and anchored on a terminal (`ABORTED`) payment only because
+`prepare_locks.tx_id` must reference a transaction - it does not describe any reachable payment.
+"""
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -6,7 +22,7 @@ import uuid
 
 import pytest
 
-from app.core.payments.engine import PaymentEngine
+from app.core.payments.service import PaymentService
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
@@ -24,7 +40,8 @@ def _payment_transaction(*, tx_id: str, initiator_id: uuid.UUID) -> Transaction:
         type="PAYMENT",
         initiator_id=initiator_id,
         payload={"from": "CAP-S", "to": "CAP-R", "amount": "74", "equivalent": "CAP"},
-        state="ROUTED",
+        # The FK anchor of the synthetic reservation: terminal, as every PAYMENT row is since 030.
+        state="ABORTED",
     )
 
 
@@ -137,81 +154,56 @@ async def test_segment_capacity_policy_counts_only_matching_valid_reservations(
 ):
     sender_id, receiver_id, equivalent_id = await _seed_capacity_policy_case(db_session)
 
-    available, reserved = await PaymentEngine(
-        db_session
-    )._get_segment_capacity_and_reserved_usage(
+    available, reserved = await PaymentService(db_session)._segment_capacity(
         tx_id=f"candidate-{uuid.uuid4()}",
         sender_id=sender_id,
         receiver_id=receiver_id,
         equivalent_id=equivalent_id,
     )
 
+    # 100 - 30 + 10: the limit, less what the sender owes, plus what the receiver owes back.
     assert available == Decimal("80")
+    # Only the same-equivalent, same-direction, well-formed flow of the (synthetic) reservation.
     assert reserved == Decimal("7")
 
 
 @pytest.mark.asyncio
-async def test_single_and_multipath_prepare_apply_the_same_persisted_reservation_policy(
+async def test_a_single_route_refusal_reports_the_capacity_the_need_and_the_reservation(
     db_session,
 ):
-    sender_id, _receiver_id, equivalent_id = await _seed_capacity_policy_case(
-        db_session
-    )
-    single_tx_id = f"single-{uuid.uuid4()}"
-    multipath_tx_id = f"multipath-{uuid.uuid4()}"
-    db_session.add_all(
-        [
-            _payment_transaction(tx_id=single_tx_id, initiator_id=sender_id),
-            _payment_transaction(tx_id=multipath_tx_id, initiator_id=sender_id),
-        ]
-    )
-    await db_session.commit()
+    _sender_id, _receiver_id, equivalent_id = await _seed_capacity_policy_case(db_session)
 
-    engine = PaymentEngine(db_session)
-    with pytest.raises(RoutingException) as single_error:
-        await engine.prepare(
-            single_tx_id,
-            ["CAP-S", "CAP-R"],
-            Decimal("74"),
-            equivalent_id,
-            commit=False,
-        )
-    with pytest.raises(RoutingException) as multipath_error:
-        await engine.prepare_routes(
-            multipath_tx_id,
+    with pytest.raises(RoutingException) as error:
+        await PaymentService(db_session)._bind_payment(
+            f"single-{uuid.uuid4()}",
             [(["CAP-S", "CAP-R"], Decimal("74"))],
             equivalent_id,
-            commit=False,
         )
 
-    assert single_error.value.details == multipath_error.value.details
-    assert Decimal(single_error.value.details["available"]) == Decimal("80")
-    assert Decimal(single_error.value.details["needed"]) == Decimal("74")
-    assert Decimal(single_error.value.details["reserved"]) == Decimal("7")
+    assert Decimal(error.value.details["available"]) == Decimal("80")
+    assert Decimal(error.value.details["needed"]) == Decimal("74")
+    assert Decimal(error.value.details["reserved"]) == Decimal("7")
+    assert (error.value.details["from"], error.value.details["to"]) == ("CAP-S", "CAP-R")
 
 
 @pytest.mark.asyncio
-async def test_multipath_prepare_keeps_local_reservations_in_addition_to_persisted_ones(
+async def test_multipath_keeps_its_own_routes_in_addition_to_persisted_reservations(
     db_session,
 ):
-    sender_id, _receiver_id, equivalent_id = await _seed_capacity_policy_case(
-        db_session
-    )
-    tx_id = f"local-reservation-{uuid.uuid4()}"
-    db_session.add(_payment_transaction(tx_id=tx_id, initiator_id=sender_id))
-    await db_session.commit()
+    _sender_id, _receiver_id, equivalent_id = await _seed_capacity_policy_case(db_session)
 
     with pytest.raises(RoutingException) as error:
-        await PaymentEngine(db_session).prepare_routes(
-            tx_id,
+        await PaymentService(db_session)._bind_payment(
+            f"local-reservation-{uuid.uuid4()}",
             [
                 (["CAP-S", "CAP-R"], Decimal("40")),
                 (["CAP-S", "CAP-R"], Decimal("40")),
             ],
             equivalent_id,
-            commit=False,
         )
 
+    # The second route of the SAME payment counts the first one (40) on top of the reservation (7):
+    # routing may not spend more capacity than the segment has (AGENTS §8).
     assert Decimal(error.value.details["available"]) == Decimal("80")
     assert Decimal(error.value.details["needed"]) == Decimal("40")
     assert Decimal(error.value.details["reserved"]) == Decimal("47")

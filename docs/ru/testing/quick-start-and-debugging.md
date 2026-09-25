@@ -17,7 +17,7 @@ basetemp, cache и failure artifacts окажутся в
 
 ```powershell
 .\scripts\verify_local.ps1 -TaskSlug payment_debug -BackendOnly `
-  -BackendSelector tests/unit/test_payments_2pc.py
+  -BackendSelector tests/integration/test_payments_idempotency.py
 ```
 
 При изменении REST schema/serialization отдельно запускайте контракт:

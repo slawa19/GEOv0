@@ -1,4 +1,11 @@
-"""018 `T1809`: what one payment commit, one clearing and one mixed inject event cost - a re-runnable probe.
+"""018 `T1809`: what one payment, one clearing and one mixed inject event cost - a re-runnable probe.
+
+019 STAGE 4 (`T1906`; manifest `T1901` 5.2, row `:198`): THE PAYMENT IS NOW THE WHOLE PAYMENT. Until then
+the probe measured `PaymentEngine.commit` of a payment prepared durably beforehand (unmeasured); that
+split no longer exists - a payment is one transaction through `PaymentService` (routing, the binding and
+money phases, one COMMIT), and CHECK `030` refuses a prepared row. So the measured operation is the whole
+`create_payment_internal` over the explicit route `a -> b`, and the result key is `payment`, not
+`payment_commit`: its numbers are NOT comparable with the `payment_commit` samples of the 018 runs.
 
 NOT PART OF THE TIER. The file name does not match `python_files = test_*.py`, so the tier never
 collects it; pytest collects it only when it is named explicitly. It is a MEASUREMENT, run on purpose,
@@ -51,7 +58,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import NullPool
 
 from app.core.clearing.service import ClearingService
-from app.core.payments.engine import PaymentEngine
 from app.db.models.debt import Debt
 from tests.debt_setup import debt_fixture_setup
 from tests.integration.test_p015_b4_wrong_writer_is_recorded_faithfully_postgres import (
@@ -162,7 +168,11 @@ def _factory(url: str, **pool: Any):
 
 
 async def _payment(url: str, statements: _Statements) -> dict:
-    """A pays B 5.00 over a direct line while A already owes B 2.00: one `U` on a stored edge."""
+    """A pays B 5.00 over a direct line while A already owes B 2.00: one `U` on a stored edge.
+
+    The whole payment is measured (019 stage 4): `_prepare_payment` - whose name is historical - runs it
+    through `PaymentService.create_payment_internal` over the explicit route `a -> b`.
+    """
 
     engine, factory = _factory(url)
     try:
@@ -180,22 +190,20 @@ async def _payment(url: str, statements: _Statements) -> dict:
                     )
                 )
             await session.commit()
-        tx_id = await _prepare_payment(factory, triangle, ["a", "b"], Decimal("5.00"))
     finally:
         await engine.dispose()
 
     engine, factory = _factory(url)
 
     async def operation() -> None:
-        async with factory() as session:
-            await PaymentEngine(session).commit(tx_id)
+        await _prepare_payment(factory, triangle, ["a", "b"], Decimal("5.00"))
 
     try:
         measured = await _measure(url, statements, operation)
         edges = await _edges(factory, triangle)
     finally:
         await engine.dispose()
-    assert edges == {("a", "b"): 700_000_000}, edges  # 7.00 in atoms: the commit really wrote
+    assert edges == {("a", "b"): 700_000_000}, edges  # 7.00 in atoms: the payment really wrote
     return measured
 
 
@@ -372,13 +380,13 @@ async def test_t1809_operation_cost(committed_database) -> None:
     try:
         results: dict[str, list[dict]] = {
             "connect_control": [],
-            "payment_commit": [],
+            "payment": [],
             "clearing": [],
             "inject_event": [],
         }
         for _ in range(REPS):
             results["connect_control"].append(await _control(url, statements))
-            results["payment_commit"].append(await _payment(url, statements))
+            results["payment"].append(await _payment(url, statements))
             results["clearing"].append(await _clearing(url, statements))
             results["inject_event"].append(await _inject(url, statements))
     finally:

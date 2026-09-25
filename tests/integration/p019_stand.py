@@ -34,7 +34,6 @@ from sqlalchemy import func, insert, select, text, update
 
 from app.api.deps import get_db, get_payment_session_factory
 from app.config import settings
-from app.core.payments.engine import PaymentEngine
 from app.core.payments.router import PaymentRouter
 from app.db.journal_tables import debt_journal_entries, debt_operations
 from app.db.models.debt import Debt
@@ -329,9 +328,10 @@ class CommitRecorder:
 
 
 class EngineCommitBarrier:
-    """Holds ONE payment at the entry of `PaymentEngine.commit` - after `prepare` returned, before any
-    money is written. On the current tree that is after the durable `PREPARED` commit
-    (`engine.py:1032`); on any tree it is after routing, the `Transaction` insert and prepare."""
+    """Holds ONE payment at the entry of its MONEY phase - after the binding phase (locks, capacity),
+    before any money is written. Until 019 stage 4 that was the entry of `PaymentEngine.commit`; since
+    the direct execution of stage 4 it is `PaymentService._apply_payment` - on any tree, after routing,
+    the `Transaction` insert and the binding checks."""
 
     def __init__(self, tx_id: str) -> None:
         self.tx_id = tx_id
@@ -340,17 +340,19 @@ class EngineCommitBarrier:
         self.release = asyncio.Event()
 
     def install(self, monkeypatch) -> None:
-        original = PaymentEngine.commit
+        from app.core.payments.service import PaymentService
+
+        original = PaymentService._apply_payment
         barrier = self
 
-        async def commit_behind_barrier(engine_self, tx_id, *args, **kwargs):
-            if tx_id == barrier.tx_id and barrier.hits == 0:
+        async def commit_behind_barrier(service_self, declaration, *args, **kwargs):
+            if declaration.tx_id == barrier.tx_id and barrier.hits == 0:
                 barrier.hits += 1
                 barrier.reached.set()
                 await barrier.release.wait()
-            return await original(engine_self, tx_id, *args, **kwargs)
+            return await original(service_self, declaration, *args, **kwargs)
 
-        monkeypatch.setattr(PaymentEngine, "commit", commit_behind_barrier)
+        monkeypatch.setattr(PaymentService, "_apply_payment", commit_behind_barrier)
 
 
 async def finish(task: asyncio.Task | None, *, timeout: float = 30) -> None:

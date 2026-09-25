@@ -176,7 +176,9 @@ Runner действует как «виртуальный клиент»:
 - Mixed-version payment/clearing workers не поддерживаются. При upgrade и rollback оператор
   останавливает API payment writers, clearing workers, real ticks, Admin abort и recovery,
   дожидается завершения/отката DB-транзакций и освобождения advisory locks, разворачивает одну версию
-  на всех owner surfaces и только затем возобновляет работу.
+  на всех owner surfaces и только затем возобновляет работу. С 2026-09-25 (программа 019, стадия 4)
+  recovery удалён, а переход на миграцию `030` требует ещё и осушения старой версией
+  (`docs/ru/05-deployment.md`).
 
 ---
 

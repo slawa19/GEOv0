@@ -1353,3 +1353,8 @@ Ledger промежуточного внешнего ревью волн 1–2 (
 - ~~**Проза в настоящем времени о SQLite** осталась в `app/api/v1/admin.py:1332,1431,1551`, `app/core/clearing/service.py:97,909,972`, `app/core/ledger/reconciliation.py:965,1134`, `app/core/simulator/inject_executor.py:44`, `app/db/models/simulator_storage.py:14,68,96,123`, `app/schemas/equivalents.py:28`, `app/schemas/trustline.py:28`, `scripts/cleanup_simulator_runs.py:88` и в части `docs/ru` (`runbook-dev-wsl2…:293`, `network-economy-analyzer-spec.md`, `simulator/scenarios-and-engine.md:37,468,575`). Поведения не меняет; правится попутно при следующем касании файла.~~ — закрыто 2026-09-24, коммит `chore(017): close the stage-3 review remainder` (ветка `claude/017-polish`): перечисленные места приведены к текущему коду.
 - **Половина `T1541` — bootstrap entrypoint'а — не тронута** (записано при закрытии стадии 2): префлайт `docker-entrypoint.sh` строит схему отдельно от тира; число прогонов `upgrade head` за сессию не мерено.
 - **Замер времени CI с промахом кэша зависимостей** не сделан — за стадию промаха не случилось (бюджет `T1706`).
+
+## Остаток ревью стадии 4 программы 019 — 2026-09-25
+
+- **Повтор `pay()` на заимствованной сессии видит устаревший `Equivalent` в предварительной проверке остановки/удержания** (класс 2, P3). `app/core/payments/service.py:~1189` выбирает ORM-объект без обновления атрибутов, проверка читает их на `:~1269-1279`, очистка неудачной попытки может закоммитить без expire (`:~2377-2399`). Исход верный: связывающее чтение `FOR SHARE` (`:~1913`) отказывает до записи долга (ABORTED, денег не двинуто); лишний проход маршрутизации и связывания. Правка при следующем касании: `populate_existing` / expire перед повтором.
+

@@ -62,8 +62,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.config import settings
 from app.core.money_boundary import MoneyBoundary
-from app.core.payments.engine import PaymentEngine
-from app.core.payments.service import PaymentService
+from app.core.payments.service import PaymentService, _constraint_name
 from app.db.models.equivalent import Equivalent
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
@@ -135,20 +134,26 @@ async def _clear_hold(factory, world: ApiWorld) -> None:  # noqa: F811
 def _hook_before_engine_call(
     monkeypatch, factory, method: str, tx_id: str, action  # noqa: F811
 ) -> list[str | None]:
-    """Run `action()` once, right before `PaymentEngine.<method>` for `tx_id`; record the durable
-    state of the payment at that moment as another transaction sees it."""
+    """Run `action()` once, right before the payment's `method` phase for `tx_id`; record the durable
+    state of the payment at that moment as another transaction sees it.
 
-    original = getattr(PaymentEngine, method)
+    Since 019 stage 4 the phases are the direct execution's: `prepare` is the binding phase
+    (`PaymentService._bind_payment`, first argument the tx id), `commit` the money phase
+    (`PaymentService._apply_payment`, first argument the declaration) - where the engine's `prepare`
+    and `commit` were entered before."""
+
+    target = {"prepare": "_bind_payment", "commit": "_apply_payment"}[method]
+    original = getattr(PaymentService, target)
     fired: list[str | None] = []
 
-    async def hooked(self, tx_id_arg, *args, **kwargs):
-        if tx_id_arg == tx_id and not fired:
+    async def hooked(self, first, *args, **kwargs):
+        if getattr(first, "tx_id", first) == tx_id and not fired:
             row = await tx_row(factory, tx_id)
             fired.append(None if row is None else row[0])
             await action()
-        return await original(self, tx_id_arg, *args, **kwargs)
+        return await original(self, first, *args, **kwargs)
 
-    monkeypatch.setattr(PaymentEngine, method, hooked)
+    monkeypatch.setattr(PaymentService, target, hooked)
     return fired
 
 
@@ -394,12 +399,14 @@ async def test_the_api_path_refusal_table(api, factory, monkeypatch, caplog) -> 
                     type="PAYMENT",
                     initiator_id=w.ids[w.alice["pid"]],
                     payload={},
-                    state="NEW",
+                    # Terminal: migration 030's CHECK is evaluated before the unique index, so a NEW
+                    # payment would be refused by the fence (23514), not by the identity (23505).
+                    state="ABORTED",
                 )
             )
         await s.rollback()
     assert catalogued == "transactions_tx_id_key", catalogued
-    assert PaymentEngine._get_db_constraint_name(duplicate.value) == catalogued
+    assert _constraint_name(duplicate.value) == catalogued
     assert getattr(duplicate.value.orig, "sqlstate", None) == "23505"
 
     # ── the mechanism of every row was reached ────────────────────────────────────────────────

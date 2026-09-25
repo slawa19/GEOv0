@@ -175,7 +175,7 @@ Canonical local entrypoint — `scripts/verify_local.ps1`. Он же испол�
 ### Cheap gates — после каждого безопасного micro-batch
 
 ```powershell
-.\scripts\verify_local.ps1 -TaskSlug agent_payments_review -BackendOnly -BackendSelector tests/unit/test_payments_2pc.py
+.\scripts\verify_local.ps1 -TaskSlug agent_payments_review -BackendOnly -BackendSelector tests/integration/test_payments_idempotency.py
 .\scripts\verify_local.ps1 -TaskSlug agent_payments_review -BackendOnly -BackendSelector tests/contract/test_openapi_contract.py
 ```
 
@@ -208,7 +208,7 @@ $taskSlug = "agent_payments_review"
 $env:TEST_DATABASE_URL = "postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_$taskSlug"
 $env:GEO_TEST_ALLOW_DB_RESET = "1"
 .\scripts\verify_local.ps1 -TaskSlug $taskSlug -BackendOnly `
-  -BackendSelector tests/integration/test_payment_engine_uow_retry_postgres.py
+  -BackendSelector tests/integration/test_payment_audit_serialization_failure_postgres.py
 ```
 
 **Хост — `127.0.0.1`, а не `localhost`** (исправлено 2026-09-13, `T1550`). Локальный PostgreSQL слушает только IPv4, а `localhost` сначала пробует `::1` и получает отказ примерно через 2 s — на **каждое** соединение: замерено 0.13–0.14 s против 2.16–2.19 s. Тесты открывают новое соединение на каждую сессию, поэтому гейт через `localhost` шёл около 30 минут вместо 3. Страж URL хост не проверяет, так что оба адреса ему равны; разница только во времени.
@@ -249,7 +249,7 @@ npm --prefix simulator-ui/v2 run test:e2e
 
 ```powershell
 $taskSlug = "agent_payments_review"
-.\scripts\verify_local.ps1 -TaskSlug $taskSlug -BackendOnly -BackendSelector tests/unit/test_payments_2pc.py
+.\scripts\verify_local.ps1 -TaskSlug $taskSlug -BackendOnly -BackendSelector tests/integration/test_payments_idempotency.py
 ```
 
 `-TaskSlug` разводит по `.local-run/test-runs/<slug>/`: `pytest` (basetemp), `cache`, `artifacts` (экспортируется как `GEO_TEST_ARTIFACT_ROOT`) и default `TEST_DATABASE_URL` вида `postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_<slug>` (см. §5).

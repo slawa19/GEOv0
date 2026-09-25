@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import sys
 import uuid
-from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -20,9 +19,15 @@ from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - 
 
 
 
+# The `locked` branch (a cycle skipped because a live payment reservation covers one of its pairs) is
+# DROPPED by 019 stage 4 (manifest `t1901-manifest.md` 5.3, rows :119-148, :171-173, :201): it seeded a
+# `PREPARED` `PAYMENT` with a `PrepareLock`, which CHECK `030` refuses, and after stage 4 no payment path
+# produces a reservation for clearing to skip on - the contract is removed, not moved. What the branch
+# also proved, that a skip ends the service-owned transaction, is proved below by the four remaining
+# branches (`result is None`, `not session.in_transaction()`), with the `policy` branch's witness.
 @pytest.mark.parametrize(
     "skip_branch",
-    ["empty", "malformed", "missing", "locked", "policy"],
+    ["empty", "malformed", "missing", "policy"],
 )
 @pytest.mark.asyncio
 async def test_skip_ends_service_owned_transaction_postgres(
@@ -40,8 +45,6 @@ async def test_skip_ends_service_owned_transaction_postgres(
     from app.db.models.debt import Debt
     from app.db.models.equivalent import Equivalent
     from app.db.models.participant import Participant
-    from app.db.models.prepare_lock import PrepareLock
-    from app.db.models.transaction import Transaction
     from app.db.models.trustline import TrustLine
     from tests.conftest import TestingSessionLocal
 
@@ -116,37 +119,6 @@ async def test_skip_ends_service_owned_transaction_postgres(
             ]
         )
 
-    if skip_branch == "locked":
-        tx_id = str(uuid.uuid4())
-        session.add(
-            Transaction(
-                id=uuid.uuid4(),
-                tx_id=tx_id,
-                type="PAYMENT",
-                initiator_id=a_id,
-                payload={"from": str(a_id), "to": str(b_id)},
-                state="PREPARED",
-            )
-        )
-        await session.flush()
-        session.add(
-            PrepareLock(
-                tx_id=tx_id,
-                participant_id=a_id,
-                effects={
-                    "flows": [
-                        {
-                            "from": str(a_id),
-                            "to": str(b_id),
-                            "amount": "5.00",
-                            "equivalent": str(equivalent_id),
-                        }
-                    ]
-                },
-                expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
-            )
-        )
-
     await session.commit()
 
     try:
@@ -162,22 +134,7 @@ async def test_skip_ends_service_owned_transaction_postgres(
 
         service = ClearingService(session)
         branch_witness = False
-        if skip_branch == "locked":
-            original_locked_pairs = service._locked_pairs_for_equivalent
-
-            async def _witness_locked(equivalent):
-                nonlocal branch_witness
-                pairs = await original_locked_pairs(equivalent)
-                assert pairs
-                branch_witness = True
-                return pairs
-
-            monkeypatch.setattr(
-                service,
-                "_locked_pairs_for_equivalent",
-                _witness_locked,
-            )
-        elif skip_branch == "policy":
+        if skip_branch == "policy":
             original_policy = service._cycle_respects_auto_clearing
 
             async def _witness_policy(debts):
@@ -197,7 +154,7 @@ async def test_skip_ends_service_owned_transaction_postgres(
 
         assert result is None
         assert not session.in_transaction(), f"skip_branch={skip_branch}"
-        if skip_branch in {"locked", "policy"}:
+        if skip_branch == "policy":
             assert branch_witness, f"skip_branch={skip_branch} was not reached"
     finally:
         await session.rollback()

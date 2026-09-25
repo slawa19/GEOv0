@@ -53,7 +53,6 @@ from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import settings
-from app.core.payments.engine import PaymentEngine
 from app.core.payments.service import PaymentService, PaymentTransactionUnusable
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
@@ -472,7 +471,7 @@ async def _recheck_refusal_in_a_tick(rc_factory, monkeypatch) -> _RecheckOutcome
 
     lowered: list[int] = []
     inside_after_abort: list[str | None] = []
-    original_prepare = PaymentEngine.prepare
+    original_prepare = PaymentService._bind_payment  # the binding phase (019 stage 4; the engine's prepare before)
     original_record = PaymentService._record_refusal_in_transaction
 
     async def prepare_after_the_creditor_lowers_the_line(self, tx_id, *args, **kwargs):
@@ -504,13 +503,13 @@ async def _recheck_refusal_in_a_tick(rc_factory, monkeypatch) -> _RecheckOutcome
         )
         return result
 
-    monkeypatch.setattr(PaymentEngine, "prepare", prepare_after_the_creditor_lowers_the_line)
+    monkeypatch.setattr(PaymentService, "_bind_payment", prepare_after_the_creditor_lowers_the_line)
     monkeypatch.setattr(PaymentService, "_record_refusal_in_transaction", record_and_read_back)
     try:
         await asyncio.wait_for(runner.tick_real_mode(run.run_id), 90.0)
     finally:
         _forget_the_route_cache(world)
-    monkeypatch.setattr(PaymentEngine, "prepare", original_prepare)
+    monkeypatch.setattr(PaymentService, "_bind_payment", original_prepare)
     monkeypatch.setattr(PaymentService, "_record_refusal_in_transaction", original_record)
 
     # ── controls ──────────────────────────────────────────────────────────────────────────────

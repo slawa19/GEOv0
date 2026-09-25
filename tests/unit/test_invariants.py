@@ -1,5 +1,4 @@
 import uuid
-from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -8,18 +7,18 @@ from sqlalchemy import select
 from app.core.clearing.service import ClearingService
 from app.core.integrity import compute_integrity_checkpoint_for_equivalent
 from app.core.invariants import InvariantChecker
-from app.core.payments.engine import PaymentEngine
+from app.core.payments.router import PaymentRouter
+from app.core.payments.service import PaymentService
 from app.db.models.audit_log import IntegrityAuditLog
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
-from app.db.models.prepare_lock import PrepareLock
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 from app.utils.exceptions import IntegrityViolationException
 
 from tests.debt_setup import debt_fixture_setup, writer_operation
-from tests.conftest import MODE_B
+from tests.conftest import MODE_B, sessionmaker_of
 
 
 @pytest.mark.asyncio
@@ -98,121 +97,13 @@ async def test_trust_limit_violation_detected(db_session):
     assert exc_info.value.details.get("invariant") == "TRUST_LIMIT_VIOLATION"
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("commit_changes", "expected_tx_lock_already_held"),
-    [(True, False), (False, True)],
-)
-async def test_payment_commit_aborts_on_trust_limit_violation(
-    db_session,
-    monkeypatch,
-    commit_changes,
-    expected_tx_lock_already_held,
-):
-    nonce = uuid.uuid4().hex[:10]
-    eq = Equivalent(code=("T" + nonce[:15]).upper(), symbol="T", description=None, precision=2, metadata_={}, is_active=True)
-    a = Participant(pid="A" + nonce, display_name="A", public_key="pkA-" + nonce, type="person", status="active", profile={})
-    b = Participant(pid="B" + nonce, display_name="B", public_key="pkB-" + nonce, type="person", status="active", profile={})
-    db_session.add_all([eq, a, b])
-    await db_session.flush()
-
-    # Debt(A->B) is controlled by trustline(B->A)
-    db_session.add(
-        TrustLine(
-            from_participant_id=b.id,
-            to_participant_id=a.id,
-            equivalent_id=eq.id,
-            limit=Decimal("10"),
-            status="active",
-        )
-    )
-
-    tx_id = "tx-" + uuid.uuid4().hex
-    db_session.add(
-        Transaction(
-            tx_id=tx_id,
-            type="PAYMENT",
-            initiator_id=a.id,
-            payload={},
-            signatures=[],
-            state="PREPARED",
-        )
-    )
-    # prepare_locks.tx_id references transactions.tx_id with no ORM relationship, so the
-    # flush does not order the two inserts; write the transaction first.
-    await db_session.flush()
-    db_session.add(
-        PrepareLock(
-            tx_id=tx_id,
-            participant_id=a.id,
-            effects={
-                "flows": [
-                    {
-                        "from": str(a.id),
-                        "to": str(b.id),
-                        "amount": "20",
-                        "equivalent": str(eq.id),
-                    }
-                ]
-            },
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
-        )
-    )
-    await db_session.flush()
-
-    engine = PaymentEngine(db_session)
-
-    abort_called = {
-        "called": False,
-        "tx_lock_already_held": False,
-        "equivalent_owner_locks_already_held": False,
-    }
-
-    async def _abort_noop(
-        _tx_id: str,
-        reason: str = "Aborted",
-        *,
-        commit: bool = True,
-        error_code: str | None = None,
-        details: dict | None = None,
-        _tx_lock_already_held: bool = False,
-        _equivalent_owner_locks_already_held: bool = False,
-    ):
-        abort_called["called"] = True
-        abort_called["tx_lock_already_held"] = _tx_lock_already_held
-        abort_called["equivalent_owner_locks_already_held"] = (
-            _equivalent_owner_locks_already_held
-        )
-        return True
-
-    async def _rollback_noop():
-        return None
-
-    async def _no_commit_with_retry():
-        await db_session.flush()
-
-    # P0.1: commit-only retry was removed; keep the test deterministic by
-    # bypassing the whole-uow retry wrapper.
-    async def _run_uow_no_retry(*, op: str, fn, use_savepoint: bool = False):
-        return await fn()
-
-    monkeypatch.setattr(engine, "_run_uow_with_retry", _run_uow_no_retry)
-    monkeypatch.setattr(engine, "abort", _abort_noop)
-    monkeypatch.setattr(db_session, "rollback", _rollback_noop)
-
-    with pytest.raises(IntegrityViolationException) as exc_info:
-        await engine.commit(tx_id, commit=commit_changes)
-
-    assert exc_info.value.code == "E008"
-    assert exc_info.value.details.get("invariant") == "TRUST_LIMIT_VIOLATION"
-    assert abort_called["called"] is True
-    assert (
-        abort_called["tx_lock_already_held"] is expected_tx_lock_already_held
-    )
-    assert (
-        abort_called["equivalent_owner_locks_already_held"]
-        is expected_tx_lock_already_held
-    )
+# `test_payment_commit_aborts_on_trust_limit_violation` drove `PaymentEngine.commit` over a hand-seeded
+# PREPARED payment and a reservation (both refused by migration 030 since programme 019 stage 4) and
+# asserted the engine's abort call shape. The engine is gone; the effect - a payment whose debts end
+# over the creditor's limit is refused with E008 TRUST_LIMIT_VIOLATION and nothing of it lands - is held
+# on the real payment path by `tests/integration/test_p019_direct_execution_effects_postgres.py::
+# test_a_payment_that_ends_over_a_limit_is_refused_and_leaves_nothing_but_its_refusal` (manifest t1901,
+# 5.2, rows of this file). The checker's own refusal stays above (`test_trust_limit_violation_detected`).
 
 
 @pytest.mark.asyncio
@@ -431,11 +322,24 @@ async def test_integrity_checkpoint_status_warning_for_debt_symmetry(db_session)
     assert checks.get("debt_symmetry", {}).get("passed") is False
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_payment_commit_writes_integrity_audit_log_on_success(
     db_session,
     monkeypatch,
 ):
+    """FIX-014 on the real payment path: one passed `IntegrityAuditLog` row naming the route's participants.
+
+    Since programme 019 stage 4 the payment executes directly (`PaymentService._apply_payment`) - no
+    engine commit of a seeded PREPARED payment. THE PERTURBATION is kept: after the book applies the
+    flow, every ORM object of the session is expired, so the audit write must not depend on state the
+    flow left loaded (in an async session a lazy load there raises). It is only evidence if the payment
+    really goes through the perturbed seam - once per flow.
+    """
+
+    import app.core.ledger.book as book_module
+    from app.schemas.payment import PaymentCreateRequest
+
     nonce = uuid.uuid4().hex[:10]
     eq = Equivalent(
         code=("T" + nonce[:15]).upper(),
@@ -474,79 +378,48 @@ async def test_payment_commit_writes_integrity_audit_log_on_success(
             status="active",
         )
     )
-
-    tx_id = "tx-" + uuid.uuid4().hex
-    db_session.add(
-        Transaction(
-            tx_id=tx_id,
-            type="PAYMENT",
-            initiator_id=a.id,
-            payload={
-                "from": a.pid,
-                "to": b.pid,
-                "amount": "1",
-                "equivalent": eq.code,
-                "path": [a.pid, b.pid],
-            },
-            signatures=[],
-            state="PREPARED",
-        )
-    )
-    await db_session.flush()
-    db_session.add(
-        PrepareLock(
-            tx_id=tx_id,
-            participant_id=a.id,
-            effects={
-                "flows": [
-                    {
-                        "from": str(a.id),
-                        "to": str(b.id),
-                        "amount": "1",
-                        "equivalent": str(eq.id),
-                    }
-                ]
-            },
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
-        )
-    )
     await db_session.commit()
     expected_audit_participants = sorted([a.pid, b.pid])
 
-    engine = PaymentEngine(db_session)
-    original_apply_flow = engine._apply_flow
-    perturbed: list[tuple] = []
+    original_apply_payment_flow = book_module._apply_payment_flow
+    perturbed: list[object] = []
 
-    async def _apply_flow_and_expire(*args, **kwargs):
-        await original_apply_flow(*args, **kwargs)
-        db_session.expire_all()
-        perturbed.append(args)
+    async def _apply_flow_and_expire(session, flow):
+        result = await original_apply_payment_flow(session, flow)
+        session.expire_all()
+        perturbed.append(flow)
+        return result
 
-    monkeypatch.setattr(engine, "_apply_flow", _apply_flow_and_expire)
-    assert await engine.commit(tx_id) is True
-    # 018 stage A: the flow's algebra moved into the book and `_apply_flow` forwards to it; the
-    # perturbation is only evidence if the commit still goes through it - once per flow.
+    monkeypatch.setattr(book_module, "_apply_payment_flow", _apply_flow_and_expire)
+    request = PaymentCreateRequest(
+        tx_id="tx-" + uuid.uuid4().hex,
+        to=b.pid,
+        equivalent=eq.code,
+        amount="1",
+        signature="__internal__",
+    )
+    try:
+        result = await PaymentService.pay(
+            sessionmaker_of(db_session), a.id, request, require_signature=False
+        )
+    finally:
+        PaymentRouter.invalidate_cache(eq.code)
+    assert result.status == "COMMITTED", result
     assert len(perturbed) == 1, perturbed
 
-    log = (
-        await db_session.execute(
-            select(IntegrityAuditLog).where(
-                IntegrityAuditLog.operation_type == "PAYMENT",
-                IntegrityAuditLog.tx_id == tx_id,
+    async with sessionmaker_of(db_session)() as observer:
+        log = (
+            await observer.execute(
+                select(IntegrityAuditLog).where(
+                    IntegrityAuditLog.operation_type == "PAYMENT",
+                    IntegrityAuditLog.tx_id == request.tx_id,
+                )
             )
-        )
-    ).scalar_one()
+        ).scalar_one()
     assert log.verification_passed is True
     assert log.affected_participants == {
         "participants": expected_audit_participants,
     }
-
-    locks = (
-        (await db_session.execute(select(PrepareLock).where(PrepareLock.tx_id == tx_id)))
-        .scalars()
-        .all()
-    )
-    assert locks == []
 
 
 @MODE_B

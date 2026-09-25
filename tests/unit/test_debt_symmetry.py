@@ -5,7 +5,7 @@ import pytest
 from sqlalchemy import select
 
 from app.core.invariants import InvariantChecker
-from app.core.payments.engine import PaymentEngine
+from app.core.ledger.book import Book, PaymentFlow
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
@@ -59,8 +59,7 @@ async def test_apply_flow_nets_mutual_debts(db_session):
         )
     await db_session.flush()
 
-    engine = PaymentEngine(db_session)
-    # THE WRITER'S OWN OPERATION, not a fixture context (design v2 §8 R5/F7). `_apply_flow` is
+    # THE WRITER'S OWN OPERATION, not a fixture context (design v2 §8 R5/F7). A payment flow is
     # production code that moves money; called directly it opens no operation, and the journal
     # refuses its flush. Declaring `TEST_FIXTURE` here would journal a payment's effects under the
     # kind reserved for scaffolding, so the real kind is declared instead.
@@ -68,7 +67,11 @@ async def test_apply_flow_nets_mutual_debts(db_session):
     async with writer_operation(
         db_session, kind="PAYMENT", equivalent_ids=[eq.id], initiator_id=a.id
     ):
-        await engine._apply_flow(a.id, b.id, Decimal("0"), eq.id)
+        # The payment path's flow, as `PaymentService._apply_payment` applies it since 019 stage 4 (the
+        # engine's `_apply_flow` forwarder is gone).
+        await Book.current(db_session).apply(
+            PaymentFlow(from_id=a.id, to_id=b.id, amount=Decimal("0"), equivalent_id=eq.id)
+        )
         await db_session.flush()
 
     debts = (

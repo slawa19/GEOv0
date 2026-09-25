@@ -35,6 +35,7 @@ names in its docstring the mutation that must turn it red again.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import uuid
 from decimal import Decimal
@@ -43,12 +44,10 @@ import pytest
 from sqlalchemy import event, select
 
 from app.core.clearing.service import ClearingService
-from app.core.payments.engine import PaymentEngine
 from app.db.models.audit_log import IntegrityAuditLog
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
-from app.db.models.prepare_lock import PrepareLock
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 from tests.debt_setup import debt_fixture_setup
@@ -406,65 +405,143 @@ def _observed_change(
 # ==============================================================================================
 
 
-async def _prepare_payment(factory, triangle: _Triangle, path: list[str], amount: Decimal) -> str:
-    """Create the transaction and run a REAL `PaymentEngine.prepare` over `path`.
+@contextlib.contextmanager
+def _routed_over(triangle: _Triangle, path: list[str]):
+    """While open, the router answers every payment with `path` - the test's explicit route.
 
-    Nothing is hand-written into `prepare_locks`: the locks - which are the operation's INTENT and
-    the only record of what the payment said it would do - must be produced by the application, or
-    criterion (b) would be checked against a fixture instead of against the system.
+    019 stage 4 (`FORK-8`): an explicit route is handed to the ORDINARY execution path as the router's
+    result under test control - no parallel money algorithm, no public route field. The service still
+    loads the equivalent, runs the stop/hold pre-check, builds its graph and, under its locks,
+    validates the capacity of every segment of this route: only the choice of route is the test's.
+
+    A context manager and not `monkeypatch`, because its callers - five modules and an out-of-tier
+    probe - call `_prepare_payment` without one. It restores the router on the way out, raise or not.
+    Yields the list of routes actually handed out: EMPTY means the service never asked the router
+    (answered from idempotency, refused before routing), and callers assert on it.
     """
+
+    from app.core.payments.router import PaymentRouter
+
+    route = [getattr(triangle, name).pid for name in path]
+    handed: list[tuple[list[str], Decimal]] = []
+    original = PaymentRouter.find_flow_routes
+
+    def find_flow_routes(self, from_pid, to_pid, amount, **_kwargs):
+        assert (from_pid, to_pid) == (route[0], route[-1]), (
+            f"stand: the payment asked for a route {from_pid} -> {to_pid}, the explicit route is {route}"
+        )
+        handed.append((list(route), Decimal(str(amount))))
+        return [(list(route), Decimal(str(amount)))]
+
+    PaymentRouter.find_flow_routes = find_flow_routes
+    try:
+        yield handed
+    finally:
+        PaymentRouter.find_flow_routes = original
+
+
+async def _prepare_payment(factory, triangle: _Triangle, path: list[str], amount: Decimal) -> str:
+    """ONE WHOLE PAYMENT over the explicit route `path`, through the payment service. Returns its tx id.
+
+    THE NAME IS HISTORICAL (019 stage 4, `T1906`). Until stage 4 this created a `NEW` row and ran a real
+    `PaymentEngine.prepare`, leaving a durable `PREPARED` payment and its `prepare_locks` for the caller
+    to commit. Neither exists any more: CHECK `030` refuses any non-terminal `PAYMENT` row and the
+    payment executes in one transaction (`PaymentService._run_payment_operation`). The name is kept
+    because five test modules and two out-of-tier probes import it (manifest `T1901`, section 3,
+    "Стадия 4 обязана также"); what it does now is the whole payment, committed.
+
+    Nothing is hand-written: the envelope's intent, the entries and the audit row are the
+    application's. A caller that used to act BETWEEN prepare and commit - a wrong writer
+    (`_collapse_the_route`), a barrier on the pre-state read - now arms its seam BEFORE calling this.
+    """
+
+    from app.core.payments.service import PaymentService
+
     tx_id = str(uuid.uuid4())
-    async with factory() as session:
-        session.add(
-            Transaction(
-                id=uuid.uuid4(),
-                tx_id=tx_id,
-                type="PAYMENT",
-                initiator_id=getattr(triangle, path[0]).id,
-                payload={"routes": [{"path": [getattr(triangle, n).pid for n in path],
-                                     "amount": str(amount)}]},
-                state="NEW",
+    with _routed_over(triangle, path) as handed:
+        async with factory() as session:
+            result = await PaymentService(session).create_payment_internal(
+                getattr(triangle, path[0]).id,
+                to_pid=getattr(triangle, path[-1]).pid,
+                equivalent=triangle.equivalent.code,
+                amount=str(amount),
+                idempotency_key=tx_id,
             )
-        )
-        await session.commit()
-    async with factory() as session:
-        await PaymentEngine(session).prepare(
-            tx_id,
-            [getattr(triangle, name).pid for name in path],
-            amount,
-            triangle.equivalent.id,
-        )
+    assert handed, f"stand: the service never asked the router for a route: {result!r}"
+    assert result.status == "COMMITTED" and result.tx_id == tx_id, (
+        f"stand: the payment over {path} did not commit: {result!r}"
+    )
     return tx_id
 
 
-async def _intent_flows(factory, triangle: _Triangle, tx_id: str) -> list[tuple[str, str, Decimal]]:
-    """The payment's declared flows, read from `prepare_locks` BEFORE the commit deletes them.
+# ==============================================================================================
+# Driving a real payment THROUGH THE PAYMENT SERVICE (019 stage 4, `FORK-8`)
+# ==============================================================================================
+#
+# Since 019 stage 4 a payment executes directly (`PaymentService._run_payment_operation`): no
+# `prepare_locks` row ever holds its declaration, so the declaration a test compares the envelope
+# with is taken UPSTREAM - a copy of the router's result, captured before the service turns it into
+# the intent - and NEVER from the envelope under test. A route the natural router would not choose
+# (C6: `A -> B -> C` while an active `C -> A` line offers the direct route) is handed to the ORDINARY
+# execution path as a test-controlled router result; there is no parallel money algorithm and no
+# public route field.
 
-    This is the snapshot design v2 §7 says the envelope's intent will carry ("intent tx_id +
-    validated flows per lock as exact scale-8 strings"). Until the envelope exists it has to be
-    captured here, and `C14` on the PostgreSQL tier is the counterexample that ties the two together.
-    """
-    async with factory() as fresh:
-        locks = (
-            await fresh.execute(
-                select(PrepareLock.effects).where(PrepareLock.tx_id == tx_id)
-            )
-        ).scalars().all()
-    flows: list[tuple[str, str, Decimal]] = []
-    for effects in locks:
-        for flow in (effects or {}).get("flows", []):
-            flows.append(
-                (
-                    triangle.name(uuid.UUID(flow["from"])),
-                    triangle.name(uuid.UUID(flow["to"])),
-                    Decimal(flow["amount"]),
-                )
-            )
-    # Sorted, and the limit is worth naming: the engine applies flows in the order its locks come
-    # back, so criterion (b) is only order-independent for scenarios where it is. Both scenarios in
-    # this module are - each edge is touched by at most one flow and no flow's input depends on
-    # another's output - and the `C6` control below would go red if that stopped being true.
-    return sorted(flows)
+
+class _RouterResult:
+    """What the router handed the service, copied before the service could touch it."""
+
+    def __init__(self) -> None:
+        self.routes: list[tuple[list[str], Decimal]] = []
+
+    def declared_flows(self, triangle: _Triangle) -> list[tuple[str, str, Decimal]]:
+        by_pid = {triangle.a.pid: "a", triangle.b.pid: "b", triangle.c.pid: "c"}
+        return sorted(
+            (by_pid[sender], by_pid[receiver], Decimal(str(amount)).quantize(Decimal("1E-8")))
+            for path, amount in self.routes
+            for sender, receiver in zip(path, path[1:])
+        )
+
+
+def _control_the_router(monkeypatch, triangle: _Triangle, forced: list[str] | None = None) -> _RouterResult:
+    """Capture the router's result - or, with `forced`, return that route instead of searching.
+
+    `forced` is a list of triangle names; the amount is the payment's own. The service still builds
+    its graph, checks the perimeter and validates every segment's capacity under its locks: only the
+    choice of route is the test's."""
+
+    from app.core.payments.router import PaymentRouter
+
+    captured = _RouterResult()
+    original = PaymentRouter.find_flow_routes
+
+    def find_flow_routes(self, from_pid, to_pid, amount, **kwargs):
+        if forced is not None:
+            result = [([getattr(triangle, name).pid for name in forced], Decimal(amount))]
+        else:
+            result = original(self, from_pid, to_pid, amount, **kwargs)
+        captured.routes = [(list(path), Decimal(str(route_amount))) for path, route_amount in result]
+        return result
+
+    monkeypatch.setattr(PaymentRouter, "find_flow_routes", find_flow_routes)
+    return captured
+
+
+async def _pay(factory, triangle: _Triangle, *, sender: str, receiver: str, amount: Decimal) -> str:
+    """One payment through the service's ordinary path (`pay()` on the session): returns its tx_id."""
+
+    from app.core.payments.service import PaymentService
+
+    tx_id = str(uuid.uuid4())
+    async with factory() as session:
+        result = await PaymentService(session).create_payment_internal(
+            getattr(triangle, sender).id,
+            to_pid=getattr(triangle, receiver).pid,
+            equivalent=triangle.equivalent.code,
+            amount=str(amount),
+            idempotency_key=tx_id,
+        )
+    assert result.status == "COMMITTED", f"stand: the payment did not commit: {result}"
+    return tx_id
 
 
 async def _audit(factory, tx_id: str) -> list[bool]:
@@ -494,7 +571,7 @@ async def _tx_state(factory, tx_id: str) -> str | None:
 
 @pytest.mark.asyncio
 async def test_c5_the_journal_of_an_honest_payment_equals_the_change_and_the_intent(
-    db_session,
+    db_session, monkeypatch
 ) -> None:
     """C5, API-SHAPED. Both criteria on a payment that does exactly what it said.
 
@@ -535,11 +612,10 @@ async def test_c5_the_journal_of_an_honest_payment_equals_the_change_and_the_int
         await session.commit()
 
     before = await _edges(factory, triangle)
-    tx_id = await _prepare_payment(factory, triangle, ["a", "b"], Decimal("5"))
-    flows = await _intent_flows(factory, triangle, tx_id)
-
-    async with factory() as session:
-        await PaymentEngine(session).commit(tx_id)
+    # 019 stage 4: through the payment service; the declaration is the router's result, upstream.
+    router = _control_the_router(monkeypatch, triangle)
+    tx_id = await _pay(factory, triangle, sender="a", receiver="b", amount=Decimal("5"))
+    flows = router.declared_flows(triangle)
 
     after = await _edges(factory, triangle)
 
@@ -621,6 +697,10 @@ async def test_c13_a_replayed_payment_commit_leaves_exactly_one_envelope(db_sess
     duplicate OPENING is `tests/unit/test_p015_b4_entries_and_money.py`'s
     `test_c13_a_second_operation_with_a_spent_identity_is_refused`; this is the real replay.
 
+    Since 019 stage 4 the engine is not on the payment path: the replay is the same request sent
+    again, and `PaymentService.execute` answers it from the stored row by idempotency before the
+    payment operation - and so the envelope - could open.
+
     So the requirement is not a refusal. It is that a replay changes NOTHING: one envelope, still
     exactly one after the second call, the same effects, the same transaction state. A journal that
     opened an operation on the early-return path would write a second envelope recording an
@@ -635,21 +715,31 @@ async def test_c13_a_replayed_payment_commit_leaves_exactly_one_envelope(db_sess
     """
     from tests.conftest import TestingSessionLocal as factory
 
+    # 019 stage 4: the replay is the payment service's own - the same signed request again, which
+    # idempotency answers with the stored result before any operation could open.
+    from app.core.payments.service import PaymentService
+
     triangle = await _seed_triangle(factory, trustlines=[("b", "a", "100")])
-    tx_id = await _prepare_payment(factory, triangle, ["a", "b"], Decimal("5"))
-    async with factory() as session:
-        await PaymentEngine(session).commit(tx_id)
+    tx_id = await _pay(factory, triangle, sender="a", receiver="b", amount=Decimal("5"))
     after_first = await _edges(factory, triangle)
 
     async with factory() as session:
-        replayed = await PaymentEngine(session).commit(tx_id)
+        replayed = await PaymentService(session).create_payment_internal(
+            triangle.a.id,
+            to_pid=triangle.b.pid,
+            equivalent=triangle.equivalent.code,
+            amount="5",
+            idempotency_key=tx_id,
+        )
 
     after_replay = await _edges(factory, triangle)
 
-    # NON-VACUITY: the replay really ran and really took the early-return path - it returned
-    # True without touching anything. Without this the test would pass for a second call that
-    # raised, which is a different behaviour entirely.
-    assert replayed is True, f"stand: the replayed commit did not return normally: {replayed!r}"
+    # NON-VACUITY: the replay really ran and really took the early-return path - it answered the
+    # stored result without touching anything. Without this the test would pass for a second call
+    # that raised, which is a different behaviour entirely.
+    assert replayed.status == "COMMITTED" and replayed.tx_id == tx_id, (
+        f"stand: the replayed payment did not answer the stored result: {replayed!r}"
+    )
     assert after_first == {("a", "b"): Decimal("5.00000000")}, after_first
     assert after_replay == after_first, (
         f"stand: the replay changed the money ({after_first} -> {after_replay}); this is no "
@@ -749,24 +839,39 @@ async def test_c13_a_replayed_clearing_leaves_exactly_one_envelope(db_session) -
 
 
 def _collapse_the_route(monkeypatch, triangle: _Triangle) -> list[tuple[str, str]]:
-    """Make the engine write ONE `A -> C` obligation for a payment routed `A -> B -> C`.
+    """Make the book write ONE `A -> C` obligation for a payment routed `A -> B -> C`.
 
     The wrapper is the smallest wrong writer that gets past every barrier this system has: the
     first segment is dropped, and the second writes `A -> C` for the same amount, so
     `A -> C` is written EXACTLY ONCE (binding condition 5). It is deliberately NOT a bug injected
-    into `_apply_flow`'s own arithmetic: the point is a writer whose individual writes are all
+    into the flow algebra's own arithmetic: the point is a writer whose individual writes are all
     well-formed and whose TOTAL is right, because that is the writer no existing check can see.
+
+    THE SEAM (019 stage 4, `FORK-8`): `app.core.ledger.book._apply_payment_flow`, the one point where
+    a payment flow is applied, BELOW the place the intent is computed. Every payment path reaches it
+    through `Posting.apply` - the service's direct execution, and until it is deleted the engine's
+    `_apply_flow` - so the corruption cannot touch the declaration the envelope records.
     """
-    original = PaymentEngine._apply_flow
+    from app.core.ledger import book
+
+    original = book._apply_payment_flow
     calls: list[tuple[str, str]] = []
 
-    async def _wrapper(self, from_id, to_id, amount, equivalent_id):
-        calls.append((triangle.name(from_id), triangle.name(to_id)))
+    async def _wrapper(session, flow):
+        calls.append((triangle.name(flow.from_id), triangle.name(flow.to_id)))
         if len(calls) == 1:
-            return None
-        return await original(self, triangle.a.id, triangle.c.id, amount, equivalent_id)
+            return book.APPLIED
+        return await original(
+            session,
+            book.PaymentFlow(
+                from_id=triangle.a.id,
+                to_id=triangle.c.id,
+                amount=flow.amount,
+                equivalent_id=flow.equivalent_id,
+            ),
+        )
 
-    monkeypatch.setattr(PaymentEngine, "_apply_flow", _wrapper)
+    monkeypatch.setattr(book, "_apply_payment_flow", _wrapper)
     return calls
 
 
@@ -805,8 +910,12 @@ async def test_c6_a_payment_that_writes_the_wrong_edge_passes_every_barrier_toda
     journal that stored the writer's own RESULT as the operation's intent would have left this
     counterexample green, and the thing step 4 adds was the only thing not being read. (b) is now
     replayed from `debt_operations.intent`, and the snapshot is kept as the cross-check that makes
-    the stored intent falsifiable: the envelope must record what the payment DECLARED, which is what
-    the prepare locks held immediately before the commit deleted them.
+    the stored intent falsifiable: the envelope must record what the payment DECLARED.
+
+    WHERE THE DECLARATION IS TAKEN FROM, since 019 stage 4 (`FORK-8`). No `prepare_locks` row holds
+    it any more: the payment executes directly. The route is handed to the ordinary path as a
+    test-controlled router result, and that result - copied before the service turns it into the
+    intent - is the declaration. It is taken UPSTREAM, never from the envelope this test checks.
 
     RED BEFORE STEP 4 BECAUSE: there is no envelope and no entries, so neither criterion can be
     evaluated at all. The refutation that needs no journal - the declared flows disagree with the
@@ -816,7 +925,7 @@ async def test_c6_a_payment_that_writes_the_wrong_edge_passes_every_barrier_toda
       flows rather than from the flush plan) - criterion (a) then passes for a state that never
       existed;
     * store the writer's RESULT as the intent (overwrite `debt_operations.intent` with what the
-      flush actually did) - the cross-check against the prepare-lock snapshot goes red, and so does
+      flush actually did) - the cross-check against the upstream declaration goes red, and so does
       (b), because an intent read back from the outcome cannot disagree with it. Measured
       2026-09-13: with the pre-correction assertions this mutation left the test green.
     """
@@ -835,12 +944,13 @@ async def test_c6_a_payment_that_writes_the_wrong_edge_passes_every_barrier_toda
         ],
     )
     before = await _edges(factory, triangle)
-    tx_id = await _prepare_payment(factory, triangle, ["a", "b", "c"], Decimal("5"))
-    flows = await _intent_flows(factory, triangle, tx_id)
-
+    # 019 stage 4 (`FORK-8`): the route A -> B -> C is handed to the ordinary execution path as a
+    # test-controlled router result (the natural router would take the direct C -> A line), and the
+    # declaration compared below is THAT result, captured upstream - never the envelope under test.
+    router = _control_the_router(monkeypatch, triangle, forced=["a", "b", "c"])
     calls = _collapse_the_route(monkeypatch, triangle)
-    async with factory() as session:
-        await PaymentEngine(session).commit(tx_id)
+    tx_id = await _pay(factory, triangle, sender="a", receiver="c", amount=Decimal("5"))
+    flows = router.declared_flows(triangle)
 
     after = await _edges(factory, triangle)
     audit = await _audit(factory, tx_id)
@@ -870,8 +980,8 @@ async def test_c6_a_payment_that_writes_the_wrong_edge_passes_every_barrier_toda
         f"real improvement, the barrier that caught it must be named and C6 rewritten around it."
     )
 
-    # THE STAND, and it needs no journal: what the payment DECLARED - captured from the
-    # prepare locks before the commit deleted them - disagrees with what it did. Asserted FIRST
+    # THE STAND, and it needs no journal: what the payment DECLARED - the router's result, captured
+    # upstream of the service - disagrees with what it did. Asserted FIRST
     # so this test can never pass having measured neither criterion.
     declared = _payment_implied_by_intent(before, flows)
     assert sorted(flows) == [
@@ -903,7 +1013,7 @@ async def test_c6_a_payment_that_writes_the_wrong_edge_passes_every_barrier_toda
     recorded = _recorded_payment_flows(triangle, envelopes[0]["intent"])
     assert recorded == sorted(flows), (
         f"the envelope's intent is not what the payment declared. Stored: {recorded}. The "
-        f"prepare locks, immediately before the commit deleted them: {sorted(flows)}. An intent "
+        f"route the service was handed, captured upstream: {sorted(flows)}. An intent "
         f"that is the writer's own result cannot disagree with the result, and being able to "
         f"disagree is the entire reason it is recorded (design v2 §7)."
     )
@@ -937,7 +1047,7 @@ async def test_c6_a_payment_that_writes_the_wrong_edge_passes_every_barrier_toda
 
 @pytest.mark.asyncio
 async def test_c6_control_the_same_payment_without_the_wrapper_satisfies_criterion_b(
-    db_session,
+    db_session, monkeypatch
 ) -> None:
     """C6, anti-vacuum control. GREEN today and after step 4.
 
@@ -953,13 +1063,15 @@ async def test_c6_control_the_same_payment_without_the_wrapper_satisfies_criteri
     snapshot path says nothing about whether the stored-intent path can recognise an honest payment,
     so "the refutation is not an artefact of the replay" was being claimed from a measurement that
     never touched the replay. Both paths are now asserted, and the envelope's intent is additionally
-    required to AGREE with the prepare-lock snapshot - which is the statement that ties the two.
+    required to AGREE with the upstream declaration - which is the statement that ties the two.
+    Since 019 stage 4 that declaration is the router's result captured before the service (the
+    `_intent_flows` read of `prepare_locks` has no row to read on the payment path).
 
     WHAT IT COVERS AND WHAT IT DOES NOT: see `_recorded_payment_flows` - the decoder projects the
     equivalent and the lock ids away, so this is evidence for a single-equivalent route.
 
-    MUTATION, MEASURED 2026-09-13: store the payment intent with `"flows": []`
-    (`app/core/payments/engine.py:1322`). The stored-intent half below goes red - the replay then
+    MUTATION, MEASURED 2026-09-13: store the payment intent with `"flows": []` (then in the engine;
+    since 019 stage 4 `PaymentDeclaration.intent`, `app/core/payments/service.py`). The stored-intent half below goes red - the replay then
     implies the pre-state instead of the committed one - while the `_intent_flows` half stays green,
     which is precisely the gap that existed before this was added.
     """
@@ -969,11 +1081,9 @@ async def test_c6_control_the_same_payment_without_the_wrapper_satisfies_criteri
         factory, trustlines=[("b", "a", "100"), ("c", "b", "100"), ("c", "a", "100")]
     )
     before = await _edges(factory, triangle)
-    tx_id = await _prepare_payment(factory, triangle, ["a", "b", "c"], Decimal("5"))
-    flows = await _intent_flows(factory, triangle, tx_id)
-
-    async with factory() as session:
-        await PaymentEngine(session).commit(tx_id)
+    router = _control_the_router(monkeypatch, triangle, forced=["a", "b", "c"])
+    tx_id = await _pay(factory, triangle, sender="a", receiver="c", amount=Decimal("5"))
+    flows = router.declared_flows(triangle)
 
     after = await _edges(factory, triangle)
     assert await _tx_state(factory, tx_id) == "COMMITTED"
@@ -1012,7 +1122,7 @@ async def test_c6_control_the_same_payment_without_the_wrapper_satisfies_criteri
         f"trivially return the pre-state: {envelopes[0]['intent']}"
     )
     assert recorded == sorted(flows), (
-        f"the envelope's stored intent {recorded} is not what the prepare locks authorised "
+        f"the envelope's stored intent {recorded} is not the route the service was handed "
         f"{sorted(flows)} on an HONEST payment. Then the two criteria are measured against two "
         f"different declarations and C6's gap between them cannot be attributed to the writer."
     )

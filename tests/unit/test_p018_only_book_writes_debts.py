@@ -294,7 +294,8 @@ def test_the_scan_is_not_vacuous() -> None:
     files = {p.relative_to(_ROOT).as_posix() for p in _scanned_files(_ROOT)}
     assert len(files) > 100, f"only {len(files)} files scanned under {_SCANNED_ROOTS}"
     for expected in (
-        "app/core/payments/engine.py",
+        # The payment writer: `engine.py` until 019 stage 4 deleted it, the service since.
+        "app/core/payments/service.py",
         "app/core/clearing/service.py",
         "app/core/simulator/inject_executor.py",
         "scripts/seed_db.py",

@@ -490,7 +490,7 @@ async def _seed_from_admin_fixtures_datasets(
                     debts_seeded += 1
                 await session.flush()
 
-            # --- Transactions (subset, plus a few "stuck" ones for Incidents dashboard) ---
+            # --- Transactions (subset) ---
             existing_tx_ids = set((await session.execute(select(Transaction.id))).scalars().all())
             tx_models: list[Transaction] = []
             for item in _iter_slice(transactions_data or [], max_transactions):
@@ -511,6 +511,14 @@ async def _seed_from_admin_fixtures_datasets(
                 except Exception:
                     tx_uuid = uuid.uuid5(uuid.NAMESPACE_URL, f"tx:{tx_id}")
 
+                # 019 stage 4 (migration 030): a PAYMENT row is COMMITTED or ABORTED only - the hub no
+                # longer persists intermediate payment states, and the CHECK refuses them. A fixture row
+                # in any other state (or with no state) is not imported.
+                tx_type = str(item.get("type") or "PAYMENT")
+                tx_state = str(item.get("state") or "")
+                if tx_type == "PAYMENT" and tx_state not in ("COMMITTED", "ABORTED"):
+                    continue
+
                 if tx_uuid in existing_tx_ids:
                     continue
 
@@ -519,83 +527,20 @@ async def _seed_from_admin_fixtures_datasets(
                         id=tx_uuid,
                         tx_id=tx_id,
                         idempotency_key=item.get("idempotency_key"),
-                        type=str(item.get("type") or "PAYMENT"),
+                        type=tx_type,
                         initiator_id=initiator.id,
                         payload=item.get("payload") or {},
                         signatures=item.get("signatures") or [],
-                        state=str(item.get("state") or "NEW"),
+                        state=tx_state or "NEW",
                         error=item.get("error"),
                         created_at=created_at,
                         updated_at=updated_at,
                     )
                 )
 
-            # Add deterministic stuck transactions for /admin/incidents.
-            # Do not hardcode PIDs (fixtures packs differ); pick stable PIDs from the pack.
-            def _seed_stuck(tx_id: str, initiator_pid: str, equivalent: str, *, created: str, updated: str) -> None:
-                initiator = p_by_pid.get(initiator_pid)
-                eq_code = str(equivalent).strip().upper()
-                if not initiator or eq_code not in eq_by_code:
-                    return
-
-                stuck_uuid = uuid.uuid5(uuid.NAMESPACE_URL, f"stuck:{tx_id}")
-                if stuck_uuid in existing_tx_ids:
-                    return
-
-                tx_models.append(
-                    Transaction(
-                        id=stuck_uuid,
-                        tx_id=tx_id,
-                        idempotency_key=None,
-                        type="PAYMENT",
-                        initiator_id=initiator.id,
-                        payload={
-                            "from": initiator_pid,
-                            "to": initiator_pid,
-                            "amount": "1.00",
-                            "equivalent": eq_code,
-                            "routes": [],
-                            "idempotency": None,
-                        },
-                        signatures=[],
-                        state="PREPARE_IN_PROGRESS",
-                        error=None,
-                        created_at=_parse_dt(created),
-                        updated_at=_parse_dt(updated),
-                    )
-                )
-
-            pids_sorted = sorted(p_by_pid.keys())
-            if pids_sorted:
-                pid_a = pids_sorted[0]
-                pid_b = pids_sorted[len(pids_sorted) // 2]
-                pid_c = pids_sorted[-1]
-                eq_codes = sorted(eq_by_code.keys())
-                eq_a = eq_codes[0] if eq_codes else "UAH"
-                eq_b = eq_codes[1] if len(eq_codes) > 1 else eq_a
-                eq_c = eq_codes[2] if len(eq_codes) > 2 else eq_a
-
-                _seed_stuck(
-                    f"TX_STUCK_{label}_0001",
-                    pid_a,
-                    eq_a,
-                    created="2026-01-10T21:10:00Z",
-                    updated="2026-01-10T21:40:00Z",
-                )
-                _seed_stuck(
-                    f"TX_STUCK_{label}_0002",
-                    pid_b,
-                    eq_b,
-                    created="2026-01-10T23:30:00Z",
-                    updated="2026-01-10T23:55:00Z",
-                )
-                _seed_stuck(
-                    f"TX_STUCK_{label}_0003",
-                    pid_c,
-                    eq_c,
-                    created="2026-01-10T20:55:00Z",
-                    updated="2026-01-10T21:25:00Z",
-                )
+            # No "stuck" payments: since 019 stage 4 a payment is one transaction and the hub persists
+            # no intermediate state (migration 030 refuses it), so /admin/incidents is empty by
+            # construction until the incidents screen is decided (019 P4).
 
             session.add_all(tx_models)
             await session.flush()

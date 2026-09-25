@@ -441,7 +441,7 @@ tests/
 
 # Конкретный модуль через canonical selector
 .\scripts\verify_local.ps1 -TaskSlug contributor_payments -BackendOnly `
-  -BackendSelector tests/unit/test_payments_2pc.py
+  -BackendSelector tests/integration/test_payments_idempotency.py
 
 # Явный slow milestone; postgres по-прежнему исключён
 .\scripts\verify_local.ps1 -TaskSlug contributor_super_smoke -BackendOnly `

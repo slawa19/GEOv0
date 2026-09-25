@@ -17,7 +17,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.auth.crypto import generate_keypair, get_pid_from_public_key
-from app.core.payments.engine import PaymentEngine
 from app.core.payments.router import PaymentRouter
 import app.core.payments.service as payment_service_module
 from app.core.payments.service import PaymentService, PaymentTransactionUnusable
@@ -85,18 +84,15 @@ def _install_routes_and_prepare_failure(
         per_route = amount / Decimal(route_count)
         return [([from_pid, to_pid], per_route) for _ in range(route_count)]
 
-    async def fail_single(self, *args, **kwargs):
-        calls.append("single")
-        raise error
-
-    async def fail_multipath(self, *args, **kwargs):
-        calls.append("multipath")
+    async def fail_binding(self, tx_id, routes, equivalent_id):
+        # 019 stage 4: the binding phase of the direct execution replaced the engine's
+        # `prepare` (one route) and `prepare_routes` (several); the route count still tells them apart.
+        calls.append("single" if len(routes) == 1 else "multipath")
         raise error
 
     monkeypatch.setattr(PaymentRouter, "build_graph", build_graph)
     monkeypatch.setattr(PaymentRouter, "find_flow_routes", find_flow_routes)
-    monkeypatch.setattr(PaymentEngine, "prepare", fail_single)
-    monkeypatch.setattr(PaymentEngine, "prepare_routes", fail_multipath)
+    monkeypatch.setattr(PaymentService, "_bind_payment", fail_binding)
     return calls
 
 
@@ -160,7 +156,7 @@ def _fail_the_payment_insert(monkeypatch, error_factory) -> list[int]:
     original_flush = AsyncSession.flush
 
     async def flush(self, *args, **kwargs):
-        if any(isinstance(obj, Transaction) and obj.state == "NEW" for obj in self.sync_session.new):
+        if any(isinstance(obj, Transaction) and obj.type == "PAYMENT" for obj in self.sync_session.new):
             calls.append(1)
             raise error_factory()
         return await original_flush(self, *args, **kwargs)
@@ -243,8 +239,8 @@ async def test_retryable_database_failure_uses_e008_at_service_boundary(
 
     monkeypatch.setattr(service.router, "build_graph", build_graph)
     monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
-    monkeypatch.setattr(service.engine, "prepare", prepare)
-    monkeypatch.setattr(service.engine, "commit", commit)
+    monkeypatch.setattr(service, "_bind_payment", prepare)
+    monkeypatch.setattr(service, "_apply_payment", commit)
 
     with pytest.raises(RetryablePaymentConflictException) as raised:
         await service.create_payment(sender.id, request)
@@ -648,7 +644,7 @@ async def test_public_prepare_failure_rolls_back_session_before_abort(
 
     monkeypatch.setattr(service.router, "build_graph", build_graph)
     monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
-    monkeypatch.setattr(service.engine, "prepare", fail_prepare)
+    monkeypatch.setattr(service, "_bind_payment", fail_prepare)
     order, recorded = _track_the_attempt_end_and_the_record(monkeypatch, service)
 
     with pytest.raises(GeoException) as raised:
@@ -695,7 +691,7 @@ async def test_direct_prepare_reraises_same_typed_error_after_durable_abort(
 
     monkeypatch.setattr(service.router, "build_graph", build_graph)
     monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
-    monkeypatch.setattr(service.engine, "prepare", fail_prepare)
+    monkeypatch.setattr(service, "_bind_payment", fail_prepare)
 
     with pytest.raises(ConflictException) as raised:
         await service.create_payment(sender.id, request)
@@ -736,7 +732,7 @@ async def test_prepare_rollback_failure_does_not_abort_poisoned_session(
     original_rollback = db_session.rollback
     monkeypatch.setattr(service.router, "build_graph", build_graph)
     monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
-    monkeypatch.setattr(service.engine, "prepare", fail_prepare)
+    monkeypatch.setattr(service, "_bind_payment", fail_prepare)
     order, recorded = _track_the_attempt_end_and_the_record(monkeypatch, service, end_fails=True)
 
     with pytest.raises(GeoException) as raised:
@@ -774,7 +770,7 @@ async def test_prepare_abort_failure_replaces_original_client_error_with_safe_50
 
     monkeypatch.setattr(service.router, "build_graph", build_graph)
     monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
-    monkeypatch.setattr(service.engine, "prepare", fail_prepare)
+    monkeypatch.setattr(service, "_bind_payment", fail_prepare)
     order, recorded = _track_the_attempt_end_and_the_record(
         monkeypatch, service, record_fails="abort-secret"
     )
@@ -825,8 +821,8 @@ async def test_operational_commit_error_is_sanitized_in_response_and_transaction
 
     monkeypatch.setattr(PaymentRouter, "build_graph", build_graph)
     monkeypatch.setattr(PaymentRouter, "find_flow_routes", find_flow_routes)
-    monkeypatch.setattr(PaymentEngine, "prepare", prepare)
-    monkeypatch.setattr(PaymentEngine, "commit", fail_commit)
+    monkeypatch.setattr(PaymentService, "_bind_payment", prepare)
+    monkeypatch.setattr(PaymentService, "_apply_payment", fail_commit)
     caplog.set_level(logging.ERROR, logger="app.core.payments.service")
 
     tx_id = str(uuid.uuid4())
@@ -888,8 +884,8 @@ async def test_typed_commit_error_is_reraised_only_after_durable_abort(
 
     monkeypatch.setattr(service.router, "build_graph", build_graph)
     monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
-    monkeypatch.setattr(service.engine, "prepare", prepare)
-    monkeypatch.setattr(service.engine, "commit", fail_commit)
+    monkeypatch.setattr(service, "_bind_payment", prepare)
+    monkeypatch.setattr(service, "_apply_payment", fail_commit)
     order, recorded = _track_the_attempt_end_and_the_record(monkeypatch, service)
 
     with pytest.raises(ConflictException) as raised:
@@ -962,8 +958,8 @@ async def test_commit_cleanup_failure_is_safe_and_ordered(
     original_rollback = db_session.rollback
     monkeypatch.setattr(service.router, "build_graph", build_graph)
     monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
-    monkeypatch.setattr(service.engine, "prepare", prepare)
-    monkeypatch.setattr(service.engine, "commit", fail_commit)
+    monkeypatch.setattr(service, "_bind_payment", prepare)
+    monkeypatch.setattr(service, "_apply_payment", fail_commit)
     order, recorded = _track_the_attempt_end_and_the_record(
         monkeypatch,
         service,
@@ -1016,7 +1012,7 @@ async def test_prepare_cancellation_preserves_cancel_and_durably_aborts(
 
     monkeypatch.setattr(service.router, "build_graph", build_graph)
     monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
-    monkeypatch.setattr(service.engine, "prepare", cancel_prepare)
+    monkeypatch.setattr(service, "_bind_payment", cancel_prepare)
 
     with pytest.raises(asyncio.CancelledError):
         await service.create_payment(sender.id, request)
@@ -1061,7 +1057,7 @@ async def test_cancellation_at_other_payment_phases_has_terminal_state(
 
         async def flush_then_cancel_once(self, *args, **kwargs):
             inserting = any(
-                isinstance(obj, Transaction) and obj.state == "NEW" for obj in self.sync_session.new
+                isinstance(obj, Transaction) and obj.type == "PAYMENT" for obj in self.sync_session.new
             )
             await original_flush(self, *args, **kwargs)
             if inserting and not cancelled:
@@ -1076,8 +1072,8 @@ async def test_cancellation_at_other_payment_phases_has_terminal_state(
         async def cancel_commit(*args, **kwargs) -> None:
             raise asyncio.CancelledError
 
-        monkeypatch.setattr(service.engine, "prepare", prepare)
-        monkeypatch.setattr(service.engine, "commit", cancel_commit)
+        monkeypatch.setattr(service, "_bind_payment", prepare)
+        monkeypatch.setattr(service, "_apply_payment", cancel_commit)
 
     with pytest.raises(asyncio.CancelledError):
         await service.create_payment(sender.id, request)
@@ -1131,7 +1127,7 @@ async def test_staged_prepare_cancellation_aborts_before_outer_rollback(
 
     monkeypatch.setattr(service.router, "build_graph", build_graph)
     monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
-    monkeypatch.setattr(service.engine, "prepare", cancel_prepare)
+    monkeypatch.setattr(service, "_bind_payment", cancel_prepare)
     monkeypatch.setattr(service, "_record_refusal_in_transaction", tracked_record)
 
     with pytest.raises(asyncio.CancelledError):
@@ -1195,7 +1191,7 @@ async def test_repeated_cancellation_during_recovery_read_still_aborts(
 
     monkeypatch.setattr(service.router, "build_graph", build_graph)
     monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
-    monkeypatch.setattr(service.engine, "prepare", interrupted_prepare)
+    monkeypatch.setattr(service, "_bind_payment", interrupted_prepare)
     monkeypatch.setattr(payment_service_module, "record_definitive_refusal", blocking_record)
 
     if interruption == "timeout":
@@ -1244,7 +1240,7 @@ async def test_timeout_rollback_failure_is_safe_without_read_or_abort(
     original_rollback = db_session.rollback
     monkeypatch.setattr(service.router, "build_graph", build_graph)
     monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
-    monkeypatch.setattr(service.engine, "prepare", slow_prepare)
+    monkeypatch.setattr(service, "_bind_payment", slow_prepare)
     order, recorded = _track_the_attempt_end_and_the_record(monkeypatch, service, end_fails=True)
 
     with pytest.raises(GeoException) as raised:
@@ -1314,8 +1310,8 @@ async def test_timeout_recovery_read_failure_is_safe_without_abort(
 
     monkeypatch.setattr(service.router, "build_graph", build_graph)
     monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
-    monkeypatch.setattr(service.engine, "prepare", instant)
-    monkeypatch.setattr(service.engine, "commit", instant)
+    monkeypatch.setattr(service, "_bind_payment", instant)
+    monkeypatch.setattr(service, "_apply_payment", instant)
     monkeypatch.setattr(db_session, "commit", hanging_commit)
     monkeypatch.setattr(db_session, "execute", fail_recovery_read)
     monkeypatch.setattr(db_session, "rollback", tracked_rollback)
@@ -1382,8 +1378,8 @@ async def test_an_unresolved_commit_with_no_row_found_is_not_terminalized(
 
     monkeypatch.setattr(service.router, "build_graph", build_graph)
     monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
-    monkeypatch.setattr(service.engine, "prepare", instant)
-    monkeypatch.setattr(service.engine, "commit", instant)
+    monkeypatch.setattr(service, "_bind_payment", instant)
+    monkeypatch.setattr(service, "_apply_payment", instant)
     monkeypatch.setattr(db_session, "commit", hanging_commit)
     _order, recorded = _track_the_attempt_end_and_the_record(monkeypatch, service)
 
@@ -1424,7 +1420,7 @@ async def test_timeout_abort_failure_is_safe_after_recovery_read(
 
     monkeypatch.setattr(service.router, "build_graph", build_graph)
     monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
-    monkeypatch.setattr(service.engine, "prepare", slow_prepare)
+    monkeypatch.setattr(service, "_bind_payment", slow_prepare)
     order, recorded = _track_the_attempt_end_and_the_record(
         monkeypatch, service, record_fails=raw_sentinel
     )
@@ -1486,7 +1482,7 @@ async def test_staged_timeout_abort_failure_has_symmetric_safe_log(
 
     monkeypatch.setattr(service.router, "build_graph", build_graph)
     monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
-    monkeypatch.setattr(service.engine, "prepare", slow_prepare)
+    monkeypatch.setattr(service, "_bind_payment", slow_prepare)
     monkeypatch.setattr(AsyncSession, "execute", fail_the_refusal_write)
     caplog.set_level(logging.ERROR, logger="app.core.payments.service")
 
@@ -1552,7 +1548,7 @@ async def test_staged_generic_prepare_failure_is_safe_without_session_commit_or_
 
     monkeypatch.setattr(service.router, "build_graph", build_graph)
     monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
-    monkeypatch.setattr(service.engine, "prepare", fail_prepare)
+    monkeypatch.setattr(service, "_bind_payment", fail_prepare)
     monkeypatch.setattr(db_session, "rollback", forbidden_rollback)
     monkeypatch.setattr(db_session, "commit", forbidden_commit)
 

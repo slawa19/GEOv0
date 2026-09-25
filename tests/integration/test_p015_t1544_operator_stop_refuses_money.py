@@ -34,7 +34,7 @@ from sqlalchemy import func, select, update
 
 from app.config import settings
 from app.core.money_boundary import MoneyBoundary
-from app.core.payments.engine import PaymentEngine
+from app.core.payments.service import PaymentService
 from app.core.simulator.models import RunRecord
 from app.db.journal_tables import debt_journal_entries, debt_operations
 from app.db.models.debt import Debt
@@ -288,13 +288,15 @@ async def test_a_payment_prepared_before_the_stop_is_refused_at_commit(
     await _trust(client, bob, alice, code)
 
     seen: dict[str, str] = {}
-    original_commit = PaymentEngine.commit
+    original_commit = PaymentService._apply_payment
 
-    async def _stop_between_prepare_and_commit(self, tx_id, *, commit=True):
+    # 019 stage 4: "between prepare and commit" is the entry of the money phase of the direct
+    # execution - after the binding phase, before the stop's `FOR SHARE`.
+    async def _stop_between_prepare_and_commit(self, declaration, **kwargs):
         if "state_at_commit" not in seen:
             seen["state_at_commit"] = (
                 await self.session.execute(
-                    select(Transaction.state).where(Transaction.tx_id == tx_id)
+                    select(Transaction.state).where(Transaction.tx_id == declaration.tx_id)
                 )
             ).scalar_one()
             async with sessionmaker_of(db_session)() as operator:
@@ -302,15 +304,17 @@ async def test_a_payment_prepared_before_the_stop_is_refused_at_commit(
                     update(Equivalent).where(Equivalent.code == code).values(is_active=False)
                 )
                 await operator.commit()
-        return await original_commit(self, tx_id, commit=commit)
+        return await original_commit(self, declaration, **kwargs)
 
-    monkeypatch.setattr(PaymentEngine, "commit", _stop_between_prepare_and_commit)
+    monkeypatch.setattr(PaymentService, "_apply_payment", _stop_between_prepare_and_commit)
 
     body = _payment_body(alice, bob, code, "10.00")
     resp = await client.post("/api/v1/payments", json=body, headers=alice["headers"])
 
-    assert seen.get("state_at_commit") == "PREPARED", (
-        f"premise: the payment did not reach commit prepared: {seen}"
+    # Since 019 stage 4 the row is inserted `COMMITTED` inside the payment's operation (uncommitted,
+    # invisible to others); before it, the engine had it `PREPARED` here.
+    assert seen.get("state_at_commit") == "COMMITTED", (
+        f"premise: the payment did not reach its money phase with its row inserted: {seen}"
     )
     _assert_stop_refusal(resp, code)
     assert await _debt_totals(db_session, code) == (0, Decimal("0"))

@@ -588,6 +588,9 @@ async def test_c8_a_real_40001_leaves_one_envelope_and_only_the_successful_attem
                 )
             )
         ).scalars().all()
+        # SYNTHETIC COMPATIBILITY until 019 stage 5 removes the table (manifest `T1901` 5.4, row
+        # `:632`): nothing writes `prepare_locks` since stage 4, so this half can only be empty; the
+        # `transactions == []` half is the one that measures.
         locks = (
             await fresh.execute(
                 select(PrepareLock.tx_id).where(
@@ -660,9 +663,12 @@ def _a_competitor_commits_before_the_first_flow(factory, seeded: _Seeded, amount
     WHAT IS REAL AND WHAT IS ONLY SEQUENCED. The `40001` is produced by PostgreSQL, not injected:
     two SERIALIZABLE transactions, the payment's snapshot already taken, a committed change to a row
     the payment then writes. What this helper does is decide WHEN the competitor commits - after the
-    payment's snapshot and before its first `_apply_flow` - because a conflict that depends on
+    payment's snapshot and before its first flow is applied - because a conflict that depends on
     scheduling would make the counterexample flaky rather than absent. Nothing here raises anything,
-    and `_is_retryable_db_error` is the predicate under test rather than a thing being bypassed.
+    and the retry owner's classification is under test rather than a thing being bypassed.
+
+    THE SEAM (019 stage 4, `T1906`): `app.core.ledger.book._apply_payment_flow`, called by its global name
+    for every payment flow (`Posting.apply`); until stage 4 it was `PaymentEngine._apply_flow`.
 
     THE COMPETITOR WRITES THROUGH THE ORM, inside a declared fixture operation. A Core
     `update(Debt)` would be refused by the write guard (`C2`), correctly - and a competitor that had
@@ -670,10 +676,10 @@ def _a_competitor_commits_before_the_first_flow(factory, seeded: _Seeded, amount
     not the scenario.
     """
 
-    from app.core.payments.engine import PaymentEngine
+    from app.core.ledger import book
 
     world = seeded.world
-    real_apply_flow = PaymentEngine._apply_flow
+    real_apply_flow = book._apply_payment_flow
     calls: list[tuple] = []
     sqlstates: list[str | None] = []
 
@@ -686,15 +692,15 @@ def _a_competitor_commits_before_the_first_flow(factory, seeded: _Seeded, amount
                 debt.amount = amount
             await other.commit()
 
-    async def _wrapper(self, *args, **kwargs):
-        # The signature is not restated: `_apply_flow(self, from_id, to_id, amount, equivalent_id)`
-        # is the engine's, and a wrapper that spelled it out would have to be edited the day it
-        # changes - silently passing the wrong argument in the meantime.
-        calls.append((args, tuple(sorted(kwargs))))
+    async def _wrapper(*args, **kwargs):
+        # The signature is not restated: `_apply_payment_flow(session, flow)` is the book's, and a
+        # wrapper that spelled it out would have to be edited the day it changes - silently passing
+        # the wrong argument in the meantime.
+        calls.append((len(args), tuple(sorted(kwargs))))
         if len(calls) == 1:
             await _competitor()
         try:
-            return await real_apply_flow(self, *args, **kwargs)
+            return await real_apply_flow(*args, **kwargs)
         except DBAPIError as exc:
             sqlstates.append(
                 getattr(exc.orig, "sqlstate", None) or getattr(exc.orig, "pgcode", None)
@@ -708,7 +714,14 @@ def _a_competitor_commits_before_the_first_flow(factory, seeded: _Seeded, amount
 async def test_c8_the_payment_owners_own_retry_leaves_one_envelope_and_the_winning_entries(
     serializable_factory, monkeypatch
 ):
-    """C8, payment owner, API-SHAPED. `PaymentEngine.commit`'s OWN retry loop, on a real `40001`.
+    """C8, payment owner, API-SHAPED. The payment's OWN retry owner, on a real `40001`.
+
+    SINCE 019 STAGE 4 (`T1906`; manifest `T1901` 5.4, rows `:783`-`:828`) the owner is `pay()`: the
+    payment is one transaction and a transaction-level conflict is retried as a WHOLE new attempt on a
+    fresh session and snapshot (the stage-3 retry owner); the engine's `_run_uow_with_retry` described
+    below is gone with the engine. The `40001` is raised at the payment's own debt write in the book
+    (`book._apply_payment_flow`), and the attempts are counted at `PaymentService.execute`. What must hold
+    is unchanged.
 
     WHY THIS EXISTS SEPARATELY FROM THE TEST ABOVE (external review, 2026-09-13). That one writes
     its retry out by hand - "read, open, write, commit; on 40001 rollback and do it all again" - and
@@ -719,14 +732,15 @@ async def test_c8_the_payment_owners_own_retry_leaves_one_envelope_and_the_winni
     that only survived a retry the test wrote itself would be worth nothing.
 
     WHAT MUST HOLD, and every number is read on a session that is not the writer's:
-    * exactly ONE `40001`, raised by PostgreSQL at the payment's own `_apply_flow` write;
-    * the whole unit of work ran twice - `_apply_flow` is called once per attempt;
+    * exactly ONE `40001`, raised by PostgreSQL at the payment's own debt write;
+    * the whole unit of work ran twice - `execute` twice, the flow once per attempt;
     * exactly ONE COMPLETED envelope for this `tx_id`. `UNIQUE(tx_id)` is what would have made a
       second envelope an IntegrityError instead of a duplicate record, so the envelope of the losing
       attempt has to have gone back with its rollback;
     * the entries describe only the attempt that reached the database: one `U`, whose
       `amount_before` is the COMPETITOR's value and not the one this session had loaded;
-    * `prepare_locks` are gone, the transaction is COMMITTED, and the equivalents row is written once.
+    * the transaction is COMMITTED and the equivalents row is written once (`prepare_locks` are
+      trivially empty since stage 4; that read goes with the table at stage 5).
 
     RED BEFORE STEP 4 BECAUSE: `debt_journal_entries` does not exist, so the non-vacuity assertion
     placed FIRST fails naming the missing table.
@@ -734,7 +748,8 @@ async def test_c8_the_payment_owners_own_retry_leaves_one_envelope_and_the_winni
     got the `40001` leaves one behind; or complete the envelope without the `state = 'OPEN'`
     predicate, so the retry's completion updates the losing attempt's row.
     """
-    from app.core.payments.engine import PaymentEngine
+    from app.core.ledger import book
+    from app.core.payments.service import PaymentService
 
     competitor_amount = Decimal("31.00000000")
     starting = Decimal("10.00000000")
@@ -751,14 +766,27 @@ async def test_c8_the_payment_owners_own_retry_leaves_one_envelope_and_the_winni
             setup.add(starting_edge)
         await setup.commit()
 
-    tx_id = await _seed_payment(serializable_factory, seeded, amount=str(paid))
+    tx_id = await _seed_payment(serializable_factory, seeded)
 
     wrapper, calls, sqlstates = _a_competitor_commits_before_the_first_flow(
         serializable_factory, seeded, competitor_amount
     )
-    monkeypatch.setattr(PaymentEngine, "_apply_flow", wrapper)
-    async with serializable_factory() as commit_session:
-        await PaymentEngine(commit_session).commit(tx_id)
+    monkeypatch.setattr(book, "_apply_payment_flow", wrapper)
+    attempts: list[int] = []
+    original_execute = PaymentService.execute
+
+    async def _counted_execute(self, *args, **kwargs):
+        attempts.append(1)
+        return await original_execute(self, *args, **kwargs)
+
+    monkeypatch.setattr(PaymentService, "execute", _counted_execute)
+    # `pay()` with a session FACTORY: every attempt on a new session, as the HTTP endpoint runs it.
+    result = await PaymentService.pay(
+        serializable_factory,
+        world.debtor.id,
+        _payment_request(world, tx_id, paid),
+        require_signature=False,
+    )
 
     entries = await stored_entries(serializable_factory, tx_id)
     envelopes = await _envelopes_with_intent(serializable_factory, tx_id=tx_id)
@@ -780,14 +808,15 @@ async def test_c8_the_payment_owners_own_retry_leaves_one_envelope_and_the_winni
     # NON-VACUITY: the conflict was real, it was a serialization failure, and the OWNER retried.
     # A stand that produced a lock wait, or that never conflicted at all, would measure an
     # ordinary payment and say nothing about C8.
+    assert result.status == "COMMITTED" and result.tx_id == tx_id, result
     assert sqlstates == ["40001"], (
         f"stand: the payment's own write was not refused with exactly one genuine serialization "
-        f"failure (observed {sqlstates}). Without a real 40001 at `_apply_flow` this test "
+        f"failure (observed {sqlstates}). Without a real 40001 at the debt write this test "
         f"observes an ordinary commit."
     )
-    assert len(calls) == 2, (
-        f"stand: `_apply_flow` ran {len(calls)} time(s), so `_run_uow_with_retry` did not re-run "
-        f"the whole unit of work and this is not the owner's retry"
+    assert len(attempts) == 2 and len(calls) == 2, (
+        f"stand: `execute` ran {len(attempts)} time(s) and the flow {len(calls)} time(s), so `pay()` "
+        f"did not re-run the whole payment on a fresh attempt and this is not the owner's retry"
     )
     assert after == {
         ("debtor", "creditor", "eq"): competitor_amount + paid
@@ -797,6 +826,8 @@ async def test_c8_the_payment_owners_own_retry_leaves_one_envelope_and_the_winni
         f"and silently discarded the concurrent write."
     )
     assert [row["state"] for row in tx_state or []] == ["COMMITTED"], tx_state
+    # SYNTHETIC COMPATIBILITY until 019 stage 5 removes the table (manifest row `:800`): the payment
+    # path writes no reservation since stage 4, so this can only hold.
     assert surviving_locks == [], (
         f"stand: the prepare locks outlived the committed payment: {surviving_locks}"
     )
@@ -1328,21 +1359,24 @@ async def test_c13_p_two_concurrent_openers_of_one_identity_and_the_database_ref
 
 
 # ==============================================================================================
-# C14 - the real owners: PaymentEngine.prepare/.commit and ClearingService
+# C14 - the real owners: PaymentService (PaymentEngine.prepare/.commit until 019 stage 4) and ClearingService
 # ==============================================================================================
 
 
-async def _seed_payment(factory, seeded: _Seeded, *, amount: str, limit: str = "500.00"):
-    """A trustline, a NEW transaction and a real `PaymentEngine.prepare`. Returns the tx id.
+async def _seed_payment(factory, seeded: _Seeded, *, limit: str = "500.00") -> str:
+    """The trustline a debtor -> creditor payment needs, and the tx id the payment will be SENT under.
 
     The trustline runs CREDITOR -> DEBTOR (`AGENTS.md` §8): the receiver's line to the sender is what
-    limits how much the sender may come to owe, and `_get_segment_capacity_and_reserved_usage`
-    (`app/core/payments/engine.py:640-661`) reads exactly that pair.
-    """
-    from app.core.payments.engine import PaymentEngine
+    limits how much the sender may come to owe, and the binding phase's segment capacity
+    (`PaymentService._segment_capacity`) reads exactly that pair.
 
+    019 stage 4 (`T1906`): until then this also inserted a `NEW` transaction and ran a real
+    `PaymentEngine.prepare`, leaving a durable `PREPARED` payment for the caller to commit. CHECK `030`
+    refuses any non-terminal `PAYMENT` row and the payment is one transaction, so the caller now SENDS the
+    payment under this tx id (`_payment_request`) through `PaymentService`. The helper survives because
+    its callers still need the world a payment runs in (manifest `T1901`, section 3).
+    """
     world = seeded.world
-    tx_id = str(uuid.uuid4())
     async with factory() as setup:
         setup.add(
             TrustLine(
@@ -1354,59 +1388,61 @@ async def _seed_payment(factory, seeded: _Seeded, *, amount: str, limit: str = "
                 status="active",
             )
         )
-        setup.add(
-            Transaction(
-                id=uuid.UUID(tx_id),
-                tx_id=tx_id,
-                type="PAYMENT",
-                initiator_id=world.debtor.id,
-                payload={},
-                state="NEW",
-            )
-        )
         await setup.commit()
-
-    async with factory() as prepare_session:
-        await PaymentEngine(prepare_session).prepare(
-            tx_id,
-            [world.debtor.pid, world.creditor.pid],
-            Decimal(amount),
-            world.equivalent.id,
-        )
-    return tx_id
+    return str(uuid.uuid4())
 
 
-class _PrepareLockDeleteWatcher:
-    """Reads the journal's envelope table ON THE CONNECTION that is deleting the prepare locks.
+def _payment_request(world: World, tx_id: str, amount: Decimal | str):
+    """The internal debtor -> creditor payment request under `tx_id` (`create_payment_internal`'s shape)."""
 
-    WHY THIS SHAPE AND NOT A READ AFTERWARDS. Design v2 §7 requires the payment's envelope to be
-    "flushed at open i.e. before delete(PrepareLock)". After the commit, both statements are equally
-    durable and their order is gone. The only place the order is observable is inside the
-    transaction, on the connection doing the work - so this listener fires on the `DELETE FROM
-    prepare_locks` and asks that same connection whether the envelope row is already there.
+    from app.schemas.payment import PaymentCreateRequest
+
+    return PaymentCreateRequest(
+        tx_id=tx_id,
+        to=world.creditor.pid,
+        equivalent=world.equivalent.code,
+        amount=str(amount),
+        signature="__internal__",
+    )
+
+
+class _FirstDebtWriteWatcher:
+    """Reads the journal's envelope table ON THE CONNECTION that writes the payment's FIRST debt.
+
+    WHY THIS SHAPE AND NOT A READ AFTERWARDS. Since 019 stage 4 (`FORK-8`) the payment's envelope must
+    be on its connection before the first write to `debts`: the envelope carries the declaration and
+    the pre-state, and a debt written before it is money moved with no statement of what it was for.
+    After the commit both are equally durable and their order is gone. The only place the order is
+    observable is inside the transaction, on the connection doing the work - so this listener fires on
+    the first `INSERT`/`UPDATE`/`DELETE` against `debts` and asks that same connection whether the
+    envelope row is already there. (Until stage 4 the obligation was "before `DELETE FROM
+    prepare_locks`"; the payment path writes no reservations any more.)
 
     `to_regclass` is asked first and answers NULL for a table that does not exist, instead of
-    raising. That matters on PostgreSQL: a failed statement aborts the surrounding transaction, so a
-    probe that raised would destroy the very payment it is observing and this counterexample would
-    be red for a reason of its own making.
+    raising: a failed statement aborts the surrounding PostgreSQL transaction, so a probe that raised
+    would destroy the very payment it is observing.
     """
 
     def __init__(self, tx_id: str) -> None:
         self.tx_id = tx_id
-        self.deletes = 0
+        self.debt_writes = 0
         self.table_present: bool | None = None
         self.envelopes_visible: int | None = None
         self._busy = False
 
     def __call__(self, conn, clauseelement, _multiparams, _params, _options) -> None:
         table = getattr(getattr(clauseelement, "table", None), "name", None)
-        if table != "prepare_locks" or not getattr(clauseelement, "is_delete", False):
+        if table != "debts" or not any(
+            getattr(clauseelement, flag, False) for flag in ("is_insert", "is_update", "is_delete")
+        ):
             return
         if self._busy:
             return
         self._busy = True
         try:
-            self.deletes += 1
+            self.debt_writes += 1
+            if self.debt_writes > 1:
+                return
             present = conn.exec_driver_sql(
                 f"SELECT to_regclass('{OPERATIONS_TABLE}')"  # noqa: S608
             ).scalar()
@@ -1421,56 +1457,71 @@ class _PrepareLockDeleteWatcher:
 
 
 @pytest.mark.asyncio
-async def test_c14_the_payment_envelope_is_written_before_its_prepare_locks_are_deleted(
-    serializable_factory, serializable_engine
+async def test_c14_the_payment_envelope_is_written_before_its_first_debt_write(
+    serializable_factory, serializable_engine, monkeypatch
 ):
-    """C14, payment half, API-SHAPED. Driven by the REAL owner, not by a bare session.
+    """C14, payment half, API-SHAPED, since 019 stage 4 (`T1906`, `FORK-8`). Driven by the REAL owner.
 
-    WHAT IS REAL HERE. `PaymentEngine.prepare` writes the `PrepareLock` rows and
-    `PaymentEngine.commit` consumes them, applies the flows, writes the integrity audit row, deletes
-    the locks and marks the transaction COMMITTED (`app/core/payments/engine.py:1069`, `:1437-1447`).
-    Nothing is simulated. That is the whole point of C14: every other counterexample in this
-    programme opens its own operation, and a journal that worked only for operations opened by tests
-    would be worth nothing.
+    WHAT IS REAL HERE. `PaymentService` executes the payment directly - the owner, tx and pair locks,
+    the capacity, the operator stop, the pre-state, the envelope, the book's flows, the checks and the
+    audit row - through its ordinary path (`create_payment_internal` -> `pay()`). Nothing is
+    simulated. Every other counterexample in this programme opens its own operation; a journal that
+    worked only for operations opened by tests would be worth nothing.
 
-    THE THREE OBLIGATIONS, and why each needs where it is read from named:
+    THE THREE OBLIGATIONS, and where each is read from:
 
-    1. The envelope is COMPLETED, read on an INDEPENDENT connection after the commit - never through
-       the session under test, whose identity map answers from memory.
-    2. The recorded intent equals a `PrepareLock.effects` snapshot captured BEFORE the commit. The
-       snapshot has to be taken first because `commit` deletes the locks: an intent compared against
-       what survives the commit could be compared against nothing at all and still look right.
-    3. The ORDER: a listener on `DELETE FROM prepare_locks` must see the envelope row ALREADY
-       PRESENT on that same connection. Design v2 §7 puts the envelope flush at open, before the
-       delete, and after the commit the two statements are indistinguishable - so this is the only
-       moment at which the requirement is observable at all.
+    1. The envelope is COMPLETED, read on an INDEPENDENT connection after the commit.
+    2. The recorded intent equals the DECLARATION taken UPSTREAM: the router's result, captured before
+       the service turns it into the intent - never the envelope under test. (Until stage 4 it was a
+       `prepare_locks.effects` snapshot; no reservation is written any more.)
+    3. The ORDER: a listener on the first write to `debts` must see the envelope row ALREADY PRESENT
+       on that same connection.
 
-    RED TODAY BECAUSE: `debt_operations` does not exist. The non-vacuity assertion placed FIRST says
-    so, and the listener's own measurement - which runs today and reports `table_present=False` -
-    is what will carry the ordering requirement once it does.
-    MUTATION once step 4 exists: open the payment's operation AFTER the flows are applied, or flush
-    the envelope lazily at completion instead of at open. Both leave assertions 1 and 2 green and
-    turn assertion 3 red, which is exactly the asymmetry this test is built to catch.
+    MUTATION: open the payment's operation AFTER the flows are applied (or write the envelope lazily at
+    completion) - obligations 1 and 2 stay green and obligation 3 goes red, which is the asymmetry this
+    test is built to catch.
     """
-    from app.core.payments.engine import PaymentEngine
+    from app.core.payments.router import PaymentRouter
+    from app.core.payments.service import PaymentService
 
     seeded = await _seed(serializable_factory)
     world = seeded.world
-    tx_id = await _seed_payment(serializable_factory, seeded, amount="8.00")
+    async with serializable_factory() as setup:
+        setup.add(
+            TrustLine(
+                from_participant_id=world.creditor.id,
+                to_participant_id=world.debtor.id,
+                equivalent_id=world.equivalent.id,
+                limit=Decimal("500.00"),
+                policy={"auto_clearing": True},
+                status="active",
+            )
+        )
+        await setup.commit()
 
-    # The snapshot BEFORE the commit, on its own session: `commit` is about to delete these rows.
-    snapshot = await stored_rows(
-        serializable_factory,
-        "SELECT participant_id::text AS participant_id, effects FROM prepare_locks "
-        "WHERE tx_id = :tx_id ORDER BY participant_id",
-        {"tx_id": tx_id},
-    )
+    # The declaration, UPSTREAM: a copy of what the router hands the service.
+    routed: list[list[tuple[list[str], Decimal]]] = []
+    original_find = PaymentRouter.find_flow_routes
 
-    watcher = _PrepareLockDeleteWatcher(tx_id)
+    def find_flow_routes(self, *args, **kwargs):
+        result = original_find(self, *args, **kwargs)
+        routed.append([(list(path), Decimal(str(amount))) for path, amount in result])
+        return result
+
+    monkeypatch.setattr(PaymentRouter, "find_flow_routes", find_flow_routes)
+
+    tx_id = str(uuid.uuid4())
+    watcher = _FirstDebtWriteWatcher(tx_id)
     event.listen(serializable_engine.sync_engine, "before_execute", watcher)
     try:
-        async with serializable_factory() as commit_session:
-            await PaymentEngine(commit_session).commit(tx_id)
+        async with serializable_factory() as session:
+            result = await PaymentService(session).create_payment_internal(
+                world.debtor.id,
+                to_pid=world.creditor.pid,
+                equivalent=world.equivalent.code,
+                amount="8.00",
+                idempotency_key=tx_id,
+            )
     finally:
         event.remove(serializable_engine.sync_engine, "before_execute", watcher)
 
@@ -1481,25 +1532,20 @@ async def test_c14_the_payment_envelope_is_written_before_its_prepare_locks_are_
         "SELECT state FROM transactions WHERE tx_id = :tx_id",
         {"tx_id": tx_id},
     )
-    surviving_locks = await stored_rows(
-        serializable_factory,
-        "SELECT id FROM prepare_locks WHERE tx_id = :tx_id",
-        {"tx_id": tx_id},
-    )
 
     # NON-VACUITY, FIRST.
     assert envelopes is not None, missing_journal_tables(envelopes, OPERATIONS_TABLE)
 
-    # NON-VACUITY: the real owner really ran, really deleted its locks, and really moved money.
-    assert snapshot, f"stand: `prepare` wrote no PrepareLock for {tx_id}, so there was nothing to delete"
-    assert watcher.deletes == 1, (
-        f"stand: the listener saw {watcher.deletes} DELETE(s) against `prepare_locks` during the "
-        f"commit; the ordering requirement below has nothing to attach to"
+    # NON-VACUITY: the real owner really ran, was really routed, and really moved money.
+    assert result.status == "COMMITTED", result
+    assert len(routed) == 1 and routed[0], f"stand: the router was not consulted exactly once: {routed}"
+    assert watcher.debt_writes >= 1, (
+        "stand: the listener saw no write to `debts` during the payment; the ordering requirement "
+        "below has nothing to attach to"
     )
-    assert surviving_locks == [], f"stand: the prepare locks outlived the commit: {surviving_locks}"
     assert [row["state"] for row in tx_state or []] == ["COMMITTED"], tx_state
     assert after == {("debtor", "creditor", "eq"): Decimal("8.00000000")}, (
-        f"stand: the real payment did not move the money it was prepared for: {after}"
+        f"stand: the real payment did not move the money it was routed for: {after}"
     )
 
     # VERDICT.
@@ -1508,21 +1554,23 @@ async def test_c14_the_payment_envelope_is_written_before_its_prepare_locks_are_
         f"tx_id={tx_id}"
     )
     assert envelopes[0]["kind"] == "PAYMENT", envelopes
+    ids = {world.debtor.pid: str(world.debtor.id), world.creditor.pid: str(world.creditor.id)}
+    declared = [
+        {"from": ids[sender], "to": ids[receiver], "amount": str(amount), "equivalent": str(world.equivalent.id)}
+        for path, amount in routed[0]
+        for sender, receiver in zip(path, path[1:])
+    ]
     recorded = _decoded_intent(envelopes[0])
-    expected_flows = [_decoded_json(row["effects"]) for row in snapshot]
-    assert _flows_of(recorded) == _flows_of({"flows": expected_flows}), (
-        f"the envelope's intent does not describe the prepared effects it committed. Recorded: "
-        f"{recorded}. The locks held, immediately before the commit deleted them: "
-        f"{expected_flows}. Design v2 §7 requires the intent to be the validated flows per lock, "
-        f"as exact scale-8 strings, so step 6 can recompute the payment from the envelope alone."
+    assert _flows_of(recorded) == _flows_of({"flows": declared}), (
+        f"the envelope's intent does not describe the route the payment was handed. Recorded: "
+        f"{recorded}. The router's result, captured upstream: {declared}."
     )
     assert watcher.table_present is True and watcher.envelopes_visible == 1, (
-        f"at the moment the commit deleted the prepare locks, the connection doing the deleting "
-        f"could see {watcher.envelopes_visible!r} envelope row(s) for this payment "
-        f"(table_present={watcher.table_present!r}). Design v2 §7 flushes the envelope AT OPEN, "
-        f"before `delete(PrepareLock)`: an envelope written later is an envelope that a crash "
-        f"between the two statements would lose, leaving a payment whose locks are gone and "
-        f"whose journal never began."
+        f"at the moment the payment first wrote `debts`, the connection doing the writing could see "
+        f"{watcher.envelopes_visible!r} envelope row(s) for this payment "
+        f"(table_present={watcher.table_present!r}). The envelope is written BEFORE the first debt "
+        f"write (019 stage 4, `FORK-8`): money moved before it would be money with no statement of "
+        f"what it was for."
     )
 
 
@@ -1850,10 +1898,9 @@ async def test_c17_p_the_owner_lock_race_never_leaves_an_equivalent_gone_with_it
 ):
     """§10.1 case (2), API-SHAPED for the envelope, DEFECT-SHAPED for what the race really does.
 
-    THE RACE, WITH BOTH ORDERS FORCED. A payment commit takes the equivalent's owner lock
-    (`app/core/payments/engine.py:414`, reached from `commit` via
-    `_preacquire_equivalent_owner_locks_for_tx` at `:1083`) and writes its debts and its envelope
-    under it. The admin delete takes the SAME lock (`app/api/v1/admin.py:1428`). One of them
+    THE RACE, WITH BOTH ORDERS FORCED. A payment takes the equivalent's owner lock at the start of its
+    binding phase (`PaymentService._bind_payment`; `PaymentEngine.commit` until 019 stage 4) and writes
+    its debts and its envelope under it. The admin delete takes the SAME lock (`app/api/v1/admin.py:1428`). One of them
     therefore waits for the other, and design v2 §10.1 requires both orders to be exercised.
 
     HOW THE ORDER IS FORCED, WITHOUT PATCHING EITHER OWNER. A third session takes the same advisory
@@ -1883,6 +1930,20 @@ async def test_c17_p_the_owner_lock_race_never_leaves_an_equivalent_gone_with_it
       that was waiting behind it then succeeds. The raw-DELETE case below is where an equivalent
       really does disappear under the lock.
 
+    THE PAYMENT'S SNAPSHOT PRECEDES THE DEACTIVATION (019 stage 4, manifest `T1901` section 3, "Предпосылка
+    C17"). Until stage 4 the payment was durably `PREPARED` before the deactivation and only its commit
+    queued. A payment is one transaction now, and a FRESH payment into an already inactive equivalent is
+    refused by the pre-check before any lock - it would never queue. So the payment's transaction takes
+    its snapshot (and reads the equivalent ACTIVE) before the deactivation commits: its pre-check passes,
+    it is admitted and it queues on the owner lock at its binding phase (asserted: `_bind_payment` entered).
+    Its binding `FOR SHARE` then meets the deactivation as a serialization failure, and `pay()`'s fresh
+    attempt refuses the stop - once more in both orders. MEASURED 2026-09-25: on this borrowed session the
+    retry's best-effort pre-check still passes (`_end_failed_attempt` keeps a borrowed session's objects loaded, so its
+    `SELECT equivalents` returns the instance loaded before the stop/hold, unrefreshed), so the
+    retry binds a second time and its binding read refuses; a pre-check refusal would bind once. Either is
+    accepted - at most two binding entries, at least one. Ordering by row locks
+    instead of the owner lock is stage 5's (manifest row `:1997`).
+
     So what this test asserts is the invariant §10.1 states universally and that IS reachable: the
     equivalent is never gone while debts or journal rows denominated in it remain - plus, for the
     payment, what T1544 now requires: the operator-stop refusal, no debt and no envelope (see the
@@ -1896,21 +1957,33 @@ async def test_c17_p_the_owner_lock_race_never_leaves_an_equivalent_gone_with_it
     """
     from app.api.v1.admin import admin_delete_equivalent
     from app.core.money_boundary import _EQUIVALENT_OWNER_LOCK_NAMESPACE, MoneyBoundary
-    from app.core.payments.engine import PaymentEngine
+    from app.core.payments.service import PaymentService
     from app.schemas.admin import AdminEquivalentDeleteRequest
     from app.utils.exceptions import ConflictException
 
     seeded = await _seed(serializable_factory)
     world = seeded.world
     lock_key = MoneyBoundary._equivalent_owner_lock_key(world.equivalent.id)
-    tx_id = await _seed_payment(serializable_factory, seeded, amount="9.00")
-    await _deactivate(serializable_factory, world)
+    tx_id = await _seed_payment(serializable_factory, seeded)
+
+    bound: list[int] = []
+    original_bind = PaymentService._bind_payment
+
+    async def _counted_bind(self, *args, **kwargs):
+        bound.append(1)
+        return await original_bind(self, *args, **kwargs)
 
     payment_session = serializable_factory()
     admin_session = serializable_factory()
     gate = serializable_factory()
     try:
+        # The payment's transaction starts - and takes its SERIALIZABLE snapshot - BEFORE the
+        # deactivation, so its stop pre-check reads the equivalent active (see the docstring).
         payment_pid = int(await payment_session.scalar(text("SELECT pg_backend_pid()")))
+        active_in_snapshot = await payment_session.scalar(
+            select(Equivalent.is_active).where(Equivalent.id == world.equivalent.id)
+        )
+        await _deactivate(serializable_factory, world)
         admin_pid = int(await admin_session.scalar(text("SELECT pg_backend_pid()")))
 
         # The gate: the same advisory lock, held in its own transaction, so both real owners
@@ -1921,7 +1994,20 @@ async def test_c17_p_the_owner_lock_race_never_leaves_an_equivalent_gone_with_it
         )
 
         async def _run_payment():
-            return await PaymentEngine(payment_session).commit(tx_id)
+            # `create_payment_internal` runs `pay()` on THIS session: the first attempt in the
+            # transaction opened above, a retry in a new one.
+            original = PaymentService._bind_payment
+            PaymentService._bind_payment = _counted_bind
+            try:
+                return await PaymentService(payment_session).create_payment_internal(
+                    world.debtor.id,
+                    to_pid=world.creditor.pid,
+                    equivalent=world.equivalent.code,
+                    amount="9.00",
+                    idempotency_key=tx_id,
+                )
+            finally:
+                PaymentService._bind_payment = original
 
         async def _run_delete():
             try:
@@ -1997,6 +2083,11 @@ async def test_c17_p_the_owner_lock_race_never_leaves_an_equivalent_gone_with_it
         f"released it (first={first_queued}, second={second_queued}); the order '{order}' was "
         f"not forced and this run measured no race"
     )
+    assert active_in_snapshot is True and len(bound) in (1, 2), (
+        f"stand: the payment did not pass its stop pre-check on a snapshot older than the deactivation "
+        f"and enter its binding phase (active={active_in_snapshot}, binding entries={len(bound)}), so "
+        f"it did not queue as an admitted payment"
+    )
 
     # VERDICT - the invariant §10.1 states, and the one outcome that is reachable through the
     # real route in both orders.
@@ -2012,7 +2103,7 @@ async def test_c17_p_the_owner_lock_race_never_leaves_an_equivalent_gone_with_it
     )
     # T1544, 2026-09-14: THE PAYMENT HALF OF THIS RACE IS CLOSED. The delete requires an INACTIVE
     # equivalent (`admin_delete_equivalent`) and a payment requires an ACTIVE one
-    # (`PaymentEngine.refuse_inactive_equivalents`, read at commit under the owner lock), so the
+    # (`MoneyBoundary.refuse_inactive_equivalents`, read at the money phase under the owner lock), so the
     # premise this stand used to force - a payment committing into an equivalent deactivated for
     # deletion - is refused in BOTH orders. The invariant assertions above are unchanged; only the
     # payment's expected outcome changed, from "commits 9.00 with one COMPLETED envelope" to the

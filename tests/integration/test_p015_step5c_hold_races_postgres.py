@@ -12,8 +12,9 @@ equivalent owner lock through its commit, like the deactivating PATCH, so:
 |                         | fresh post-lock snapshot                                                        |
 
 Plus the reaction's own ordering - the owner lock BEFORE the authoritative snapshot - and the admin clear
-under the same lock; the placement of the hold below the payment TTL branch; and both schema construction
-paths with the migration's downgrade refusal.
+under the same lock; and both schema construction paths with the migration's downgrade refusal. (The
+placement of the hold below the payment TTL branch was a contract of `PaymentEngine.commit` over a durable
+`PREPARED` payment; 019 stage 4 removed both - see the note where that test stood.)
 
 THE STAND. The P1 stand's SERIALIZABLE engine (`factory`) - the shared test engine runs READ COMMITTED,
 where the stale-snapshot races cannot be seen. Barriers are `asyncio.Event`s; waits are observed in
@@ -46,16 +47,14 @@ from app.core.ledger.reconciliation import (
     take_baseline,
 )
 from app.core.money_boundary import MoneyBoundary
-from app.core.payments.engine import PaymentEngine
 from app.core.payments.service import PaymentService
 from app.db.base import Base
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
-from app.db.models.prepare_lock import PrepareLock
 from app.db.models.transaction import Transaction
 from app.db.reconciliation_tables import debt_reconciliation_results
 from app.utils.exceptions import ConflictException, RetryablePaymentConflictException
-from tests.integration.test_clearing_payment_prepare_interlock_postgres import (
+from tests.integration.p019_interlock_support import (
     _no_advisory_lock_is_held,
     _seed_interlock_case,
     _use_serializable,
@@ -190,14 +189,16 @@ async def test_step5c_p_a_reaction_arriving_between_prepare_and_commit_waits_for
     try:
         await _baseline_and_one_atom(factory, world.equivalent.id)
         prepared = asyncio.Event()
-        original_commit = PaymentEngine.commit
+        original_commit = PaymentService._apply_payment
 
-        async def _commit_after_barrier(self, tx_id_arg, *, commit=True):
+        # 019 stage 4: the barrier stands at the entry of the payment's money phase (after the binding
+        # phase took the owner lock), where `PaymentEngine.commit` was entered before direct execution.
+        async def _commit_after_barrier(self, declaration, **kwargs):
             prepared.set()
             await release_commit.wait()
-            return await original_commit(self, tx_id_arg, commit=commit)
+            return await original_commit(self, declaration, **kwargs)
 
-        monkeypatch.setattr(PaymentEngine, "commit", _commit_after_barrier)
+        monkeypatch.setattr(PaymentService, "_apply_payment", _commit_after_barrier)
 
         async def _pay(tx_id: str):
             async with factory() as session:
@@ -234,7 +235,7 @@ async def test_step5c_p_a_reaction_arriving_between_prepare_and_commit_waits_for
         assert await _transactions(factory, world) == {tx_id: "COMMITTED"}
         assert await _prepare_locks(factory, world) == 0
         assert await _hold_of(factory, world.equivalent.id) is not None
-        monkeypatch.setattr(PaymentEngine, "commit", original_commit)
+        monkeypatch.setattr(PaymentService, "_apply_payment", original_commit)
         with pytest.raises(ConflictException) as refused:
             await _pay(str(uuid.uuid4()))
         _assert_hold_refusal(refused.value, code)
@@ -462,47 +463,17 @@ async def test_step5c_p_a_reaction_waits_for_a_clearing_that_already_read_the_ho
         await clearing_session.close()
 
 
-# ── placement: below the TTL branch ─────────────────────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_step5c_p_an_expired_payment_in_a_held_equivalent_is_aborted_as_expired(factory) -> None:
-    """Precedence. RED if a hold check is placed above the TTL branch of the payment commit."""
-    from datetime import timedelta
-
-    world = await _seed(factory)
-    tx_id = str(uuid.uuid4())
-    try:
-        async with factory() as setup:
-            setup.add(
-                Transaction(id=uuid.uuid4(), tx_id=tx_id, type="PAYMENT", initiator_id=world.sender.id,
-                            payload={"from": world.sender.pid, "to": world.receiver.pid}, state="PREPARED")
-            )
-            await setup.flush()
-            setup.add(
-                PrepareLock(
-                    tx_id=tx_id,
-                    participant_id=world.sender.id,
-                    effects={"flows": [{"from": str(world.sender.id), "to": str(world.receiver.id),
-                                        "amount": "7.00", "equivalent": str(world.equivalent.id)}]},
-                    expires_at=datetime.now(timezone.utc) - timedelta(minutes=5),
-                )
-            )
-            await setup.commit()
-        await hold_directly(factory, world.equivalent.id)
-        assert await _hold_of(factory, world.equivalent.id) is not None, "premise: not held"
-
-        async with factory() as session:
-            with pytest.raises(ConflictException) as refused:
-                await PaymentEngine(session).commit(tx_id)
-
-        assert "expired before commit" in refused.value.message, refused.value.message
-        assert (refused.value.details or {}).get("reason") != HOLD, (
-            "an expired payment was refused as held: the hold check sits above the TTL branch"
-        )
-        assert await _transactions(factory, world) == {tx_id: "ABORTED"}
-    finally:
-        _forget_the_route_cache(world)
+# ── placement: below the TTL branch - DROPPED by 019 stage 4 ─────────────────────────────────────────
+#
+# `test_step5c_p_an_expired_payment_in_a_held_equivalent_is_aborted_as_expired` seeded a durable `PREPARED`
+# payment with an expired `PrepareLock` in a held equivalent and called `PaymentEngine.commit`, asserting that
+# the engine's TTL branch refused it as "expired before commit", above the hold check (manifest
+# `t1901-manifest.md` 5.4, rows :490-494). The contract is removed, not moved: there is no durable
+# `PREPARED` (CHECK `030` refuses the seed itself), no reservation TTL and no `PaymentEngine.commit`; a
+# payment's hold check is the only refusal between its admission and its commit. What stays is the hold
+# refusal itself: `test_step5c_p_a_reaction_arriving_between_prepare_and_commit_waits_for_the_payment` and
+# its sibling (next payment refused by the hold, `_assert_hold_refusal`), and
+# `tests/integration/test_p015_t1523_replay_after_a_hold_or_an_abort.py` (the stored hold refusal replays).
 
 
 # ── the admin clear, under the owner lock ────────────────────────────────────────────────────────

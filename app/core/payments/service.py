@@ -7,19 +7,24 @@ import random
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import AbstractSet, Any, Awaitable, Callable, List, Literal
+from decimal import Decimal
+from typing import AbstractSet, Any, Awaitable, Callable, List, Literal, NoReturn
 
-from sqlalchemy import select, and_, or_, text
+from sqlalchemy import select, and_, func, or_, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
-from app.core.ledger.book import DebtVersionConflict
+from app.core.integrity import compute_integrity_checkpoint_for_equivalent
+from app.core.ledger.book import Book, DebtVersionConflict, PaymentFlow, operation_for
 from app.core.money_boundary import MoneyBoundary
-from app.core.payments.engine import PaymentEngine
 from app.core.payments.router import PaymentRouter
 from app.config import settings
+from app.db.models.audit_log import IntegrityAuditLog
+from app.db.models.debt import Debt
+from app.db.models.prepare_lock import PrepareLock
 from app.db.models.transaction import Transaction
+from app.db.models.trustline import TrustLine
 from app.db.models.participant import Participant
 from app.db.models.equivalent import Equivalent
 from app.schemas.payment import (
@@ -202,7 +207,7 @@ def _payment_deadline(deadline: float | None, total_timeout_s: float):
 
 
 def _refusal_error_payload(reason: str | None, code: str | None, details: dict | None) -> dict:
-    """The stored `error` of a refused payment, normalized as `PaymentEngine.abort` normalizes it."""
+    """The stored `error` of a refused payment, normalized as the removed `PaymentEngine.abort` did."""
 
     try:
         normalized = ErrorCode(str(code)) if code is not None else ErrorCode.E010
@@ -437,7 +442,7 @@ def _definitive_refusal(
     None when the request was not admitted (by this attempt, or by an earlier attempt of the same
     identity, `admission`): a refusal before admission leaves no row, and a later submission may still
     execute. None for a transaction-level conflict - `40001`, `40P01`, the book's
-    `DebtVersionConflict`, the engine's changed owner set - including one that exhausted the retry
+    `DebtVersionConflict` - including one that exhausted the retry
     budget (it answers `409/E008` with `retryable: true`), and for an identity collision (the identity
     resolver answers it). Otherwise - a capacity, stop or hold refusal, a non-retryable internal
     failure, a terminal timeout or a cancellation - a definitive refusal with the existing public
@@ -529,7 +534,9 @@ class PaymentPostCommitEffects:
 
             PAYMENT_EVENTS_TOTAL.labels(event="create", result="success").inc()
             if self.include_engine_success_metrics:
-                PAYMENT_EVENTS_TOTAL.labels(event="prepare", result="success").inc()
+                # The commit's success, once per confirmed commit (019 stage 3, `FORK-9`). The
+                # `prepare` success that stood here is removed with the prepare phase (stage 4): a
+                # payment no longer has a durable prepare to succeed.
                 PAYMENT_EVENTS_TOTAL.labels(event="commit", result="success").inc()
         except Exception:
             pass
@@ -569,14 +576,167 @@ class StagedPaymentResult:
     written_here: bool = False
 
 
+#: Scale 8, the scale every money column in this repository carries.
+_MONEY_QUANTUM = Decimal("1E-8")
+
+
+def _scale8_money(amount: Decimal) -> str:
+    """A payment flow amount as the exact scale-8 string the operation intent records.
+
+    `"8.00"` and `"8.00000000"` are the same money, and an intent recording whichever spelling a route
+    happened to carry would give two identical payments two different digests. The amounts reaching
+    here passed the storage door (`parse_money_amount`) and carry scale 8 or less, so `quantize` widens
+    and never rounds; were one ever to carry more, the journal's own quantization predicate refuses the
+    debt write that follows, so the operation fails loudly instead of recording a rounded intent.
+    """
+
+    return f"{Decimal(amount).quantize(_MONEY_QUANTUM):f}"
+
+
+@dataclass(frozen=True)
+class DeclaredFlow:
+    """One validated segment of a declared route: `from_id` pays `to_id` `amount` in `equivalent_id`."""
+
+    from_id: uuid.UUID
+    to_id: uuid.UUID
+    amount: Decimal
+    equivalent_id: uuid.UUID
+
+    def as_intent(self) -> dict[str, str]:
+        return {
+            "from": str(self.from_id),
+            "to": str(self.to_id),
+            "amount": _scale8_money(self.amount),
+            "equivalent": str(self.equivalent_id),
+        }
+
+
+@dataclass(frozen=True)
+class PaymentDeclaration:
+    """THE INTENT of one payment (019 stage 4, `FORK-8`): its validated routes, segment by segment, in order.
+
+    Immutable, and built ONLY from the routes the binding phase validated (`_bind_payment`) - never from
+    applied effects, journal entries or resulting debts. It replaces `prepare_locks.effects` as the
+    authoritative statement of what the payment is about to do; nothing stores it but the operation
+    envelope (no table of its own). The flows are applied exactly in this order.
+    """
+
+    tx_id: str
+    routes: tuple[tuple[DeclaredFlow, ...], ...]
+
+    def flows(self) -> tuple[DeclaredFlow, ...]:
+        return tuple(flow for route in self.routes for flow in route)
+
+    def equivalent_ids(self) -> set[uuid.UUID]:
+        return {flow.equivalent_id for flow in self.flows()}
+
+    def intent(self, prestate: list[dict[str, str]]) -> dict[str, Any]:
+        """The envelope's intent, encoding version 2, in its existing shape: `tx_id`, `locks: [{flows}]`
+        - one container per declared route, its segments in path order - and `prestate`. The verifier
+        requires the container and reads no identity inside it (`reconciliation.py`, `_payment_flows`),
+        so no synthetic reservation id is recorded."""
+
+        return {
+            "tx_id": self.tx_id,
+            "locks": [{"flows": [flow.as_intent() for flow in route]} for route in self.routes],
+            "prestate": prestate,
+        }
+
+
+async def _read_payment_prestate(
+    session: AsyncSession,
+    declared_flows: "tuple[DeclaredFlow, ...] | list[DeclaredFlow]",
+) -> list[dict[str, str]]:
+    """The amounts on BOTH directions of every declared flow pair, before any flow runs, in ONE read.
+
+    WHAT IT IS FOR. A payment flow first reduces the receiver's debt to the sender and nets a mutual
+    pair (`app/core/ledger/book.py`, `_apply_payment_flow`), so what a flow does to `debts` depends on
+    both directions of its pair - and neither is in the flows. Recorded in the payment envelope (intent
+    encoding version 2), they let the scheduled verifier recompute the netted deltas from the envelope
+    alone (`app/core/ledger/reconciliation.py`, criterion (b)).
+
+    WHERE IT RUNS (019 stage 4, `FORK-8`; moved here from the engine): once per attempt, after every
+    lock of the payment and the operator-stop `FOR SHARE`, immediately before the envelope that records
+    it, in the transaction that applies the flows. A retry is a fresh attempt on a fresh snapshot and
+    reads again.
+
+    COST: one SELECT per payment, whatever the number of flows, pairs and equivalents.
+
+    Every direction is written, zero included: an absent entry and a zero amount must not be two
+    spellings of one fact a reader has to agree on.
+    """
+
+    edges = sorted(
+        {
+            (flow.equivalent_id, debtor_id, creditor_id)
+            for flow in declared_flows
+            for debtor_id, creditor_id in ((flow.from_id, flow.to_id), (flow.to_id, flow.from_id))
+        },
+        key=lambda edge: (str(edge[0]), str(edge[1]), str(edge[2])),
+    )
+    if not edges:
+        return []
+    rows = (
+        await session.execute(
+            select(Debt.equivalent_id, Debt.debtor_id, Debt.creditor_id, Debt.amount).where(
+                or_(
+                    *(
+                        and_(
+                            Debt.equivalent_id == equivalent_id,
+                            Debt.debtor_id == debtor_id,
+                            Debt.creditor_id == creditor_id,
+                        )
+                        for equivalent_id, debtor_id, creditor_id in edges
+                    )
+                )
+            )
+        )
+    ).all()
+    held = {
+        (equivalent_id, debtor_id, creditor_id): Decimal(str(amount))
+        for equivalent_id, debtor_id, creditor_id, amount in rows
+    }
+    return [
+        {
+            "equivalent": str(equivalent_id),
+            "debtor": str(debtor_id),
+            "creditor": str(creditor_id),
+            "amount": _scale8_money(held.get((equivalent_id, debtor_id, creditor_id), Decimal("0"))),
+        }
+        for equivalent_id, debtor_id, creditor_id in edges
+    ]
+
+
+def _refuse_attempt(attempt: "_PaymentAttempt", error: Exception, prefix: str) -> "NoReturn":
+    """Name the refusal a failure inside the payment operation would be terminalized with, and raise.
+
+    A client-level `GeoException` (4xx) is raised as it is - the simulator classifies it as a
+    rejection rather than an internal error; anything else is raised as its public classification. A
+    retryable conflict names no refusal: it belongs to the owner of the transaction's retries."""
+
+    is_client_error = isinstance(error, GeoException) and 400 <= int(
+        getattr(error, "status_code", 500) or 500
+    ) < 500
+    public_error = error if is_client_error else _classify_payment_db_error(error)
+    if not isinstance(public_error, RetryablePaymentConflictException):
+        attempt.refusal = (
+            str(public_error.message),
+            str(getattr(public_error, "code", ErrorCode.E010.value)),
+            getattr(public_error, "details", None) or {},
+            prefix,
+        )
+    if is_client_error:
+        raise error
+    raise public_error from error
+
+
 class PaymentService:
     def __init__(self, session: AsyncSession):
         self.session = session
-        self.engine = PaymentEngine(session)
-        # ONE money boundary for the service's lifetime, and it IS the engine: the advisory-lock
-        # deadline starts at the first lock this service takes and is shared by every later staged
-        # acquisition and by the engine's own units of work (019 stage 2 review, P2).
-        self._boundary: MoneyBoundary = self.engine
+        # ONE money boundary for the service's lifetime: the advisory-lock deadline starts at the first
+        # lock this service takes and is shared by every later staged acquisition (019 stage 2 review,
+        # P2). Since stage 4 the payment itself executes here, through `Book` - no engine.
+        self._boundary: MoneyBoundary = MoneyBoundary(session)
         self.router = PaymentRouter(session)
 
     @staticmethod
@@ -901,7 +1061,7 @@ class PaymentService:
                 resolved_ids
             )
         except DBAPIError as exc:
-            if self.engine._get_pgcode(exc) == "55P03":
+            if _payment_db_sqlstate(exc) == "55P03":
                 raise asyncio.TimeoutError(
                     "Payment equivalent owner lock timed out"
                 ) from exc
@@ -922,17 +1082,18 @@ class PaymentService:
     ) -> StagedPaymentResult:
         """Execute a payment INSIDE THE CALLER'S TRANSACTION; never commit or roll it back.
 
-        Programme 019 stage 3 (`specs/019-payment-one-transaction/spec.md`, "Контракт исполнения").
+        Programme 019 stages 3-4 (`specs/019-payment-one-transaction/spec.md`, "Контракт исполнения").
         Steps: validation and idempotency (a stored row answers with its stored result or a 409),
-        the best-effort stop/hold pre-check, routing, and then THE PAYMENT OPERATION - one savepoint
-        opened before the `Transaction` is added, around the insert, the engine's transient
-        `NEW -> PREPARED -> COMMITTED` (`prepare(commit=False)`, `commit(commit=False)`: the owner,
-        tx and pair locks, the reservations, the book with its own savepoint, `check_payment_delta`,
-        the trust-limit and symmetry checks, the integrity audit row). Nothing of it is visible to
-        another transaction before the caller commits, and a failure inside it rolls ALL of it back.
+        the best-effort stop/hold pre-check, routing, ADMISSION, and then THE PAYMENT OPERATION - one
+        savepoint opened before the `Transaction` is added, around DIRECT EXECUTION (stage 4,
+        `_run_payment_operation`): the row inserted `COMMITTED`, the owner, tx and pair locks, the
+        capacity of every segment, the stop/hold `FOR SHARE`, the pre-state, the envelope with the
+        declared intent, the book with its own savepoint, `check_payment_delta`, the trust-limit and
+        symmetry checks, the integrity audit row. No intermediate payment state is written. Nothing of
+        it is visible to another transaction before the caller commits, and a failure inside it rolls
+        ALL of it back.
 
-        Nesting: caller's transaction -> payment operation savepoint -> the engine's savepoints ->
-        the book's savepoint. A transaction-level conflict (40001, 40P01, the book's
+        Nesting: caller's transaction -> payment operation savepoint -> the book's savepoint. A transaction-level conflict (40001, 40P01, the book's
         `DebtVersionConflict`) is PROPAGATED as `RetryablePaymentConflictException`: a savepoint
         rollback does not refresh a SERIALIZABLE snapshot, so only the owner of the whole transaction
         can retry it - `pay()` for the API, the money-phase replay for the simulator.
@@ -1037,8 +1198,7 @@ class PaymentService:
                 pass
             raise NotFoundException(f"Equivalent {request.equivalent} not found")
 
-        # Payment engine retries may expire the session identity map after an
-        # optimistic-lock conflict. Keep the validated wire identifiers as plain
+        # A rolled-back savepoint may expire the session identity map. Keep the validated wire identifiers as plain
         # values so result construction never triggers implicit async ORM IO.
         sender_pid = str(sender.pid)
         receiver_pid = str(receiver.pid)
@@ -1270,13 +1430,12 @@ class PaymentService:
                     for path, route_amount in routes_found
                 ]
 
-                # 3-5. THE PAYMENT OPERATION (019 stage 3). The `Transaction` insert, the engine's
-                # transient NEW -> PREPARED -> COMMITTED, the book and `check_payment_delta` run
-                # inside ONE savepoint of the caller's transaction, opened BEFORE the row is added to
-                # the session (see `_open_operation_savepoint`). A failure anywhere in it rolls the
-                # whole operation back - no NEW, PREPARED or COMMITTED row, reservation or debt of
-                # this attempt survives in the caller's transaction - and only then is the refusal
-                # recorded, if this call records refusals (`record_refusal`).
+                # 3-5. THE PAYMENT OPERATION (019 stages 3-4). The `Transaction` insert (`COMMITTED`),
+                # the locks, the capacity, the envelope, the book and the checks run inside ONE
+                # savepoint of the caller's transaction, opened BEFORE the row is added to the session
+                # (see `_open_operation_savepoint`). A failure anywhere in it rolls the whole operation
+                # back - no row or debt of this attempt survives in the caller's transaction - and only
+                # then is the refusal recorded, if this call records refusals (`record_refusal`).
                 attempt.row = {
                     "id": tx_uuid,
                     "tx_id": tx_id_str,
@@ -1295,9 +1454,12 @@ class PaymentService:
                         },
                     },
                 }
-                # ADMISSION (spec, "Допуск", `FORK-5`): routing and the stop/hold pre-check passed and
-                # the binding phase begins. From here on a definitive failure of this request is
-                # recorded `ABORTED`; before it, a refusal leaves no row.
+                # THE LOGICAL ADMISSION POINT (spec, "Допуск", `FORK-5`): routing and the stop/hold
+                # pre-check passed and the binding phase begins. From here on a definitive failure of
+                # this request is recorded `ABORTED`; before it, a refusal leaves no row. Since stage 4
+                # there is no `NEW` row to mark it and none is needed: admission is this flag, carried
+                # across `pay()`'s attempts by `_Admission` (same identity), never durable - where the
+                # `INSERT` stands relative to it decides nothing.
                 attempt.admitted = True
                 operation = await self._open_operation_savepoint()
                 try:
@@ -1447,13 +1609,28 @@ class PaymentService:
         prepare_timeout_s: float,
         commit_timeout_s: float,
     ) -> None:
-        """Insert the `Transaction` and run the engine's NEW -> PREPARED -> COMMITTED, all inside
-        the operation savepoint the caller opened. A refusal sets `attempt.refusal` - what the
-        payment would be terminalized with - and raises; it never writes here, because whatever it
-        wrote would be rolled back with the operation."""
+        """DIRECT EXECUTION (019 stage 4, `T1906`), all inside the operation savepoint the caller opened.
+
+        The `Transaction` row is inserted `COMMITTED` - there is no intermediate payment state any more,
+        neither written nor visible: the row exists only inside this savepoint, and a failure anywhere
+        below rolls it back together with the money, so a `COMMITTED` row without its money never reaches
+        the caller's commit. Then, in this order:
+
+        1. THE BINDING PHASE (`_bind_payment`, log/metric phase name `prepare`): the equivalent owner
+           lock, the transaction lock, the pair locks, the capacity of every segment - yielding the
+           DECLARATION, the immutable intent (validated ordered route segments and amounts).
+        2. THE MONEY (`_apply_payment`, phase name `commit`): the operator stop/hold `FOR SHARE`, the
+           authoritative pre-state of both directions of every pair (`_read_payment_prestate`), the v2
+           envelope carrying the declaration and the pre-state - BEFORE the first debt write - the book's
+           flows, and inside the same rollback boundary `check_payment_delta`, `check_trust_limits`,
+           `check_debt_symmetry` and the integrity audit row.
+
+        A refusal sets `attempt.refusal` - what the payment would be terminalized with - and raises; it
+        never writes here, because whatever it wrote would be rolled back with the operation.
+        """
 
         tx_id_str = str(attempt.tx_id)
-        new_tx = Transaction(**attempt.row, state="NEW")
+        new_tx = Transaction(**attempt.row, state="COMMITTED")
         self.session.add(new_tx)
         try:
             await self.session.flush()
@@ -1473,102 +1650,391 @@ class PaymentService:
             # simulator).
             raise public_error from exc
 
-        # 4. Engine Prepare
+        if len(routes_found) == 1:
+            routes = [(list(routes_found[0][0]), amount)]
+        else:
+            routes = [(list(path), route_amount) for path, route_amount in routes_found]
+
+        # The advisory-lock waits inside the operation are bounded by the payment's own deadline, not by
+        # `SET LOCAL lock_timeout`, which would outlive this savepoint and become the timeout policy of
+        # the caller's later statements (the engine's `commit=False` units of work did the same).
+        boundary = self._boundary
+        previous_timeout = (
+            boundary._advisory_lock_timeout_enabled,
+            boundary._advisory_lock_deadline,
+        )
+        boundary._advisory_lock_timeout_enabled = False
+        boundary._advisory_lock_deadline = None
         try:
-            if len(routes_found) == 1:
-                await asyncio.wait_for(
-                    self.engine.prepare(
-                        tx_id_str,
-                        routes_found[0][0],
-                        amount,
-                        equivalent_id,
-                        commit=False,
-                    ),
-                    timeout=prepare_timeout_s,
-                )
-            else:
-                await asyncio.wait_for(
-                    self.engine.prepare_routes(
-                        tx_id_str,
-                        routes_found,
-                        equivalent_id,
-                        commit=False,
-                    ),
-                    timeout=prepare_timeout_s,
-                )
-        except asyncio.TimeoutError:
-            raise
-        except Exception as e:
-            logger.error(
-                "event=payment.prepare_failed tx_id=%s error_type=%s",
-                tx_id_str,
-                type(e).__name__,
-            )
+            # 1. The binding phase.
             try:
-                from app.utils.metrics import PAYMENT_EVENTS_TOTAL
-
-                PAYMENT_EVENTS_TOTAL.labels(event="prepare", result="error").inc()
-            except Exception:
-                pass
-
-            is_client_error = isinstance(e, GeoException) and 400 <= int(
-                getattr(e, "status_code", 500) or 500
-            ) < 500
-            public_error = e if is_client_error else _classify_payment_db_error(e)
-            if not isinstance(public_error, RetryablePaymentConflictException):
-                attempt.refusal = (
-                    str(public_error.message),
-                    str(getattr(public_error, "code", ErrorCode.E010.value)),
-                    getattr(public_error, "details", None) or {},
-                    "prepare_nested_abort",
+                declaration = await asyncio.wait_for(
+                    self._bind_payment(tx_id_str, routes, equivalent_id),
+                    timeout=prepare_timeout_s,
                 )
-            if is_client_error:
+            except asyncio.TimeoutError:
                 raise
-            raise public_error from e
+            except Exception as e:
+                logger.error(
+                    "event=payment.prepare_failed tx_id=%s error_type=%s",
+                    tx_id_str,
+                    type(e).__name__,
+                )
+                try:
+                    from app.utils.metrics import PAYMENT_EVENTS_TOTAL
 
-        # 5. Engine Commit
-        try:
-            await asyncio.wait_for(
-                self.engine.commit(tx_id_str, commit=False),
-                timeout=commit_timeout_s,
-            )
-        except asyncio.TimeoutError:
-            raise
-        except Exception as e:
-            logger.error(
-                "event=payment.commit_failed tx_id=%s error_type=%s",
-                tx_id_str,
-                type(e).__name__,
-            )
+                    PAYMENT_EVENTS_TOTAL.labels(event="prepare", result="error").inc()
+                except Exception:
+                    pass
+                _refuse_attempt(attempt, e, "prepare_nested_abort")
+
+            # 2. The money.
             try:
-                from app.utils.metrics import PAYMENT_EVENTS_TOTAL
+                await asyncio.wait_for(
+                    self._apply_payment(declaration, payload=dict(attempt.row["payload"])),
+                    timeout=commit_timeout_s,
+                )
+            except asyncio.TimeoutError:
+                raise
+            except Exception as e:
+                logger.error(
+                    "event=payment.commit_failed tx_id=%s error_type=%s",
+                    tx_id_str,
+                    type(e).__name__,
+                )
+                try:
+                    from app.utils.metrics import PAYMENT_EVENTS_TOTAL
 
-                PAYMENT_EVENTS_TOTAL.labels(event="commit", result="error").inc()
-            except Exception:
-                pass
+                    PAYMENT_EVENTS_TOTAL.labels(event="commit", result="error").inc()
+                except Exception:
+                    pass
+                _refuse_attempt(attempt, e, "commit_nested_abort")
+        finally:
+            boundary._advisory_lock_timeout_enabled, boundary._advisory_lock_deadline = (
+                previous_timeout
+            )
 
-            # A user-level GeoException (4xx) is preserved, so simulator real-mode can classify it
-            # as REJECTED instead of INTERNAL_ERROR.
-            if isinstance(e, GeoException) and 400 <= int(
-                getattr(e, "status_code", 500) or 500
-            ) < 500:
-                if not isinstance(e, RetryablePaymentConflictException):
-                    attempt.refusal = (
-                        str(e.message),
-                        str(e.code),
-                        e.details or {},
-                        "commit_nested_abort",
+    async def _bind_payment(
+        self,
+        tx_id: str,
+        routes: "list[tuple[list[str], Decimal]]",
+        equivalent_id: uuid.UUID,
+    ) -> "PaymentDeclaration":
+        """The binding phase: locks, then the capacity of every segment; returns the declaration.
+
+        Lock order (`app/core/money_boundary.py`): the equivalent owner lock, the transaction lock, the
+        pair locks in their one global order - and only then the rows. The capacity of each segment is
+        read here, in this attempt's snapshot, after the locks: the limit of the receiver's active line
+        to the sender, both directions of the pair's debt, and the flows other transactions still hold
+        reserved in `prepare_locks` (nothing writes reservations since stage 4; the table and every
+        reader of it go in stage 5, `T1909` - until then a reservation, however it got there, is
+        honoured). Several routes over one segment are summed (`local_reserved`).
+
+        Refused with `RoutingException` (`E002`, `details` with `available`, `needed`, `reserved`) when a
+        segment cannot carry its amount - after admission, so a definitive refusal (spec, "Допуск").
+        """
+
+        boundary = self._boundary
+        await boundary._acquire_equivalent_owner_locks([equivalent_id])
+        await boundary._acquire_tx_advisory_lock(tx_id)
+
+        pids: set[str] = set()
+        for path, route_amount in routes:
+            if route_amount <= 0:
+                raise GeoException("Route amount must be positive")
+            if len(path) < 2:
+                raise GeoException("Route path must include at least 2 participants")
+            pids.update(path)
+        participants = {
+            str(pid): participant_id
+            for participant_id, pid in (
+                await self.session.execute(
+                    select(Participant.id, Participant.pid).where(Participant.pid.in_(pids))
+                )
+            ).all()
+        }
+        if len(participants) != len(pids):
+            raise GeoException(f"Participants not found: {pids - set(participants)}")
+
+        await boundary._acquire_segment_advisory_locks(
+            equivalent_id=equivalent_id,
+            routes=routes,
+            participant_map=participants,
+        )
+
+        local_reserved: dict[tuple[uuid.UUID, uuid.UUID], Decimal] = {}
+        declared_routes: list[tuple[DeclaredFlow, ...]] = []
+        for path, route_amount in routes:
+            segments: list[DeclaredFlow] = []
+            for sender_pid, receiver_pid in zip(path, path[1:]):
+                sender_id = participants[sender_pid]
+                receiver_id = participants[receiver_pid]
+                available, reserved = await self._segment_capacity(
+                    tx_id=tx_id,
+                    sender_id=sender_id,
+                    receiver_id=receiver_id,
+                    equivalent_id=equivalent_id,
+                )
+                reserved += local_reserved.get((sender_id, receiver_id), Decimal("0"))
+                if available < (route_amount + reserved):
+                    raise RoutingException(
+                        f"Insufficient capacity between {sender_pid} and {receiver_pid}. "
+                        f"Available: {available}, Needed: {route_amount}, Reserved: {reserved}",
+                        insufficient_capacity=True,
+                        details={
+                            "available": str(available),
+                            "needed": str(route_amount),
+                            "reserved": str(reserved),
+                            "from": sender_pid,
+                            "to": receiver_pid,
+                        },
                     )
-                raise
-            public_error = _classify_payment_db_error(e)
-            if not isinstance(public_error, RetryablePaymentConflictException):
-                attempt.refusal = (
-                    str(public_error.message),
-                    str(public_error.code),
-                    public_error.details or {},
-                    "commit_nested_abort",
+                local_reserved[(sender_id, receiver_id)] = (
+                    local_reserved.get((sender_id, receiver_id), Decimal("0")) + route_amount
                 )
-            raise public_error from e
+                segments.append(
+                    DeclaredFlow(
+                        from_id=sender_id,
+                        to_id=receiver_id,
+                        amount=Decimal(route_amount),
+                        equivalent_id=equivalent_id,
+                    )
+                )
+            declared_routes.append(tuple(segments))
+        return PaymentDeclaration(tx_id=tx_id, routes=tuple(declared_routes))
+
+    async def _segment_capacity(
+        self,
+        *,
+        tx_id: str,
+        sender_id: uuid.UUID,
+        receiver_id: uuid.UUID,
+        equivalent_id: uuid.UUID,
+    ) -> "tuple[Decimal, Decimal]":
+        """(available capacity, capacity other transactions hold reserved) of one flow edge."""
+
+        line = (
+            await self.session.execute(
+                select(TrustLine.limit).where(
+                    TrustLine.from_participant_id == receiver_id,
+                    TrustLine.to_participant_id == sender_id,
+                    TrustLine.equivalent_id == equivalent_id,
+                    TrustLine.status == "active",
+                )
+            )
+        ).scalar_one_or_none()
+        limit = line if line is not None else Decimal("0")
+        receiver_owes = await self._debt_amount(receiver_id, sender_id, equivalent_id)
+        sender_owes = await self._debt_amount(sender_id, receiver_id, equivalent_id)
+
+        reserved = Decimal("0")
+        for lock_tx_id, effects in (
+            await self.session.execute(
+                select(PrepareLock.tx_id, PrepareLock.effects).where(
+                    PrepareLock.participant_id == sender_id,
+                    PrepareLock.expires_at > func.now(),
+                )
+            )
+        ).all():
+            if lock_tx_id == tx_id:
+                continue
+            for flow in (effects or {}).get("flows", []):
+                try:
+                    if uuid.UUID(flow["equivalent"]) != equivalent_id:
+                        continue
+                    flow_from = uuid.UUID(flow["from"])
+                    flow_to = uuid.UUID(flow["to"])
+                    flow_amount = Decimal(str(flow["amount"]))
+                except Exception:
+                    continue
+                if flow_from == sender_id and flow_to == receiver_id:
+                    reserved += flow_amount
+        return limit - sender_owes + receiver_owes, reserved
+
+    async def _debt_amount(
+        self, debtor_id: uuid.UUID, creditor_id: uuid.UUID, equivalent_id: uuid.UUID
+    ) -> Decimal:
+        value = (
+            await self.session.execute(
+                select(Debt.amount).where(
+                    Debt.debtor_id == debtor_id,
+                    Debt.creditor_id == creditor_id,
+                    Debt.equivalent_id == equivalent_id,
+                )
+            )
+        ).scalar_one_or_none()
+        return value if value is not None else Decimal("0")
+
+    async def _apply_payment(self, declaration: "PaymentDeclaration", *, payload: dict) -> None:
+        """The money: stop/hold, pre-state, the envelope BEFORE the first debt write, the flows, the checks.
+
+        WHERE THE STOP IS READ. After every lock of the binding phase and immediately before the
+        pre-state and the envelope - the place the engine's commit read it. `FOR SHARE` holds through
+        the caller's commit, so a deactivating PATCH either waits for this payment or makes this read
+        fail with 40001 and the owner's next attempt refuse (`MoneyBoundary.refuse_inactive_equivalents`).
+
+        THE ENVELOPE AND ITS INTENT (`FORK-8`). `Book.operation` INSERTs and flushes the envelope at open,
+        so it is on this connection before `Book` writes the first debt: a payment's statement of what it
+        is about to do exists before it does any of it. The intent is the DECLARATION - built by
+        `_bind_payment` from the validated routes, never from applied effects, journal entries or final
+        debts - plus the pre-state read here. An intent read back from the result could not disagree
+        with it, and being able to disagree is the entire reason it is recorded (criterion (b)).
+
+        THE CHECKS (`FORK-9`), after the writes and a flush, inside the operation's rollback boundary:
+        `check_payment_delta` against the declared flows, `check_trust_limits` and `check_debt_symmetry`
+        over the affected pairs (`Book.post` replaces none of them). Their refusal raises and the
+        operation savepoint rolls everything back, the `COMMITTED` row included. Then the integrity audit
+        row per equivalent, TRANSACTIONALLY: a database error writing it propagates; any other failure of
+        the audit is best-effort, as before.
+        """
+
+        session = self.session
+        tx_id = declaration.tx_id
+        equivalent_ids = declaration.equivalent_ids()
+
+        # FIX-014: integrity checksums before the flows.
+        checkpoints_before: dict[uuid.UUID, object] = {}
+        for eq_id in sorted(equivalent_ids, key=str):
+            try:
+                checkpoints_before[eq_id] = await compute_integrity_checkpoint_for_equivalent(
+                    session, equivalent_id=eq_id
+                )
+            except DBAPIError:
+                # PostgreSQL aborts the transaction after a database error: the owner of the retries
+                # must see the original SQLSTATE, not a misleading 25P02 later.
+                raise
+            except Exception as exc:
+                logger.warning(
+                    "event=payment.audit_checkpoint_before_failed tx_id=%s error_type=%s",
+                    tx_id,
+                    type(exc).__name__,
+                )
+
+        await self._boundary.refuse_inactive_equivalents(equivalent_ids, row_lock=True)
+
+        prestate = await _read_payment_prestate(session, declaration.flows())
+
+        async with Book.operation(
+            session,
+            operation_for(
+                "PAYMENT",
+                tx_id,
+                tx_id=tx_id,
+                intent=declaration.intent(prestate),
+                scope_equivalent_ids=equivalent_ids,
+                intent_equivalent_ids=equivalent_ids,
+            ),
+        ) as posting:
+            participants_by_equivalent: dict[uuid.UUID, set[uuid.UUID]] = {}
+            pairs_by_equivalent: dict[uuid.UUID, set[tuple[uuid.UUID, uuid.UUID]]] = {}
+            flows_by_equivalent: dict[uuid.UUID, list[tuple[uuid.UUID, uuid.UUID, Decimal]]] = {}
+            for flow in declaration.flows():
+                participants_by_equivalent.setdefault(flow.equivalent_id, set()).update(
+                    (flow.from_id, flow.to_id)
+                )
+                pairs_by_equivalent.setdefault(flow.equivalent_id, set()).update(
+                    ((flow.from_id, flow.to_id), (flow.to_id, flow.from_id))
+                )
+                flows_by_equivalent.setdefault(flow.equivalent_id, []).append(
+                    (flow.from_id, flow.to_id, flow.amount)
+                )
+
+            net_positions_before = {
+                eq_id: await self._boundary._snapshot_net_positions(
+                    equivalent_id=eq_id, participant_ids=participant_ids
+                )
+                for eq_id, participant_ids in participants_by_equivalent.items()
+            }
+
+            for flow in declaration.flows():
+                await posting.apply(
+                    PaymentFlow(
+                        from_id=flow.from_id,
+                        to_id=flow.to_id,
+                        amount=flow.amount,
+                        equivalent_id=flow.equivalent_id,
+                    )
+                )
+            await session.flush()
+
+            # The zero-sum call that once stood among these checks was removed by T1402 of programme
+            # 014 (it could not fail); nothing replaces it here - the replacement invariant is 015's.
+            from app.core.invariants import InvariantChecker
+
+            checker = InvariantChecker(session)
+            for eq_id, pairs in pairs_by_equivalent.items():
+                await checker.check_trust_limits(equivalent_id=eq_id, participant_pairs=list(pairs))
+                await checker.check_debt_symmetry(equivalent_id=eq_id, participant_pairs=list(pairs))
+                await self._boundary.check_payment_delta(
+                    equivalent_id=eq_id,
+                    flows=flows_by_equivalent.get(eq_id, []),
+                    net_positions_before=net_positions_before.get(eq_id, {}),
+                )
+
+            await self._write_integrity_audit(
+                tx_id,
+                payload=payload,
+                equivalent_ids=list(pairs_by_equivalent),
+                checkpoints_before=checkpoints_before,
+            )
+
+    async def _write_integrity_audit(
+        self,
+        tx_id: str,
+        *,
+        payload: dict,
+        equivalent_ids: "list[uuid.UUID]",
+        checkpoints_before: dict,
+    ) -> None:
+        """FIX-014: one `IntegrityAuditLog` row per equivalent, in THIS transaction.
+
+        A database error propagates - swallowed, it would poison the live transaction and hide the
+        SQLSTATE from the owner of the retries. Any other failure of one equivalent's audit is logged and
+        skipped (best-effort, unchanged)."""
+
+        participant_pids: set[str] = set()
+        for key in ("from", "to"):
+            value = payload.get(key)
+            if isinstance(value, str) and value:
+                participant_pids.add(value)
+        for route in payload.get("routes") or []:
+            if not isinstance(route, dict) or not isinstance(route.get("path"), list):
+                continue
+            participant_pids.update(pid for pid in route["path"] if isinstance(pid, str) and pid)
+
+        for eq_id in equivalent_ids:
+            try:
+                eq_code = (
+                    await self.session.execute(select(Equivalent.code).where(Equivalent.id == eq_id))
+                ).scalar_one_or_none()
+                before_sum = getattr(checkpoints_before.get(eq_id), "checksum", "") or ""
+                cp_after = await compute_integrity_checkpoint_for_equivalent(
+                    self.session, equivalent_id=eq_id
+                )
+                after_sum = getattr(cp_after, "checksum", before_sum) or before_sum
+                invariants_status = getattr(cp_after, "invariants_status", {}) or {}
+                passed = bool(invariants_status.get("passed", False))
+                self.session.add(
+                    IntegrityAuditLog(
+                        operation_type="PAYMENT",
+                        tx_id=tx_id,
+                        equivalent_code=str(eq_code or eq_id),
+                        state_checksum_before=before_sum,
+                        state_checksum_after=after_sum,
+                        affected_participants={"participants": sorted(participant_pids)},
+                        invariants_checked=invariants_status.get("checks") or invariants_status,
+                        verification_passed=passed,
+                        error_details=None if passed else invariants_status,
+                    )
+                )
+            except DBAPIError:
+                raise
+            except Exception as exc:
+                logger.warning(
+                    "event=payment.audit_log_failed tx_id=%s error_type=%s",
+                    tx_id,
+                    type(exc).__name__,
+                )
 
     # ── staged: the caller owns the transaction ──────────────────────────────────────────────────
 

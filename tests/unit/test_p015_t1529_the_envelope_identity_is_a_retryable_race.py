@@ -1,32 +1,51 @@
-"""Programme 015, T1529: a duplicate operation envelope is a race, not a logic error.
+"""Programme 015, T1529, after programme 019 stage 4: a `23505` is never retried by its SQLSTATE.
 
-WHAT IS MEASURED HERE. The classifier `PaymentEngine._is_retryable_db_error` is a pure function of
-an exception, an operation name and the engine's backend, so its whole truth table is measurable
-without a database. What is NOT measurable here is that PostgreSQL actually produces this exception
-on the concurrent-commit schedule - that is
-`tests/integration/test_payment_commit_advisory_locks_postgres.py`, which runs the real race at
-SERIALIZABLE, and without it every assertion below would be a statement about an error nobody has
-seen.
+HISTORY. T1529 found that a concurrent duplicate COMMIT of one payment collided on the operation
+envelope's identity (`uq_debt_operations_kind_identity` / `uq_debt_operations_tx_id`) and the engine
+raised instead of re-reading; the engine's classifier `PaymentEngine._is_retryable_db_error` was widened
+to retry exactly that `23505` in its commit phase. Programme 019 removed the phase and then the engine
+(stage 4, `T1906`): a payment is one transaction whose FIRST write is the `transactions` row, so two
+requests of one `tx_id` collide on `transactions_tx_id_key` before either can open an envelope, and that
+collision goes to the EXACT identity resolver (spec, "Идентичность `tx_id`";
+`tests/integration/test_p019_staged_tx_id_race_is_a_declared_conflict_postgres.py`,
+`tests/integration/test_p015_t1523_in_progress_and_insert_race_postgres.py`). The envelope race is
+unreachable on the payment path (manifest `t1901`, 5.1, rows of this file and of
+`test_payment_commit_advisory_locks_postgres.py`).
 
-WHY THE PREDICATE IS PINNED THIS TIGHTLY. A `23505` means "somebody already wrote this". Retrying
-one is only ever safe when the second attempt can READ what that somebody wrote and decide from it,
-which `_run_uow_with_retry` arranges by rolling back first and refusing to retry when the rollback
-fails. Every row of the table below is a way for that reading not to happen: a different table, a
-different constraint, a caller-owned transaction whose snapshot survives the rollback.
+WHAT IS MEASURED HERE, without a database - the truth table of the two surviving owners of retries,
+`PaymentService.pay()`'s `_classify_payment_db_error` and the money phase's `money_conflict_name`, plus
+the resolver's own recognizer `_is_tx_id_collision`:
+
+* a `23505` on ANY constraint - the envelope identity, the envelope primary key, a look-alike table, the
+  debt business key - is NOT a retryable conflict by SQLSTATE (spec §2 counter-check: "`23505` на
+  неименованном ограничении остаётся неповторяемым"; spec §4 caps the predicate, it does not oblige a
+  widening);
+* the resolver recognizes `transactions_tx_id_key` and nothing else, so the one `23505` the payment
+  path does handle cannot be reached through a different constraint;
+* positive controls: `40001` and `40P01` ARE retryable at both owners - the table is not vacuously
+  "nothing is retryable".
+
+The anti-drift test of the identity set is unchanged: the set is the envelope's declared identity and is
+the input of the rows above.
 """
 
 from __future__ import annotations
 
 import pytest
 from sqlalchemy import UniqueConstraint
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 
-# 018 stage A: the set moved to the book, which owns the envelope; the engine imports it from there.
 from app.core.ledger.book import (
     DEBT_OPERATION_IDENTITY_CONSTRAINTS as _DEBT_OPERATION_IDENTITY_CONSTRAINTS,
 )
-from app.core.payments.engine import PaymentEngine
+from app.core.payments.service import (
+    TX_ID_UNIQUE_CONSTRAINT,
+    _classify_payment_db_error,
+    _is_tx_id_collision,
+)
+from app.core.simulator.money_replay import money_conflict_name
 from app.db.journal_tables import debt_operations
+from app.utils.exceptions import RetryablePaymentConflictException
 
 ENVELOPE_INSERT = (
     "INSERT INTO debt_operations (id, kind, identity, tx_id, intent, intent_digest, "
@@ -34,77 +53,27 @@ ENVELOPE_INSERT = (
     "VALUES ($1::UUID, $2::VARCHAR, $3::VARCHAR, $4::VARCHAR, $5::JSON, $6::VARCHAR, "
     "$7::INTEGER, $8::INTEGER, $9::INTEGER, $10::TIMESTAMP WITH TIME ZONE, $11::VARCHAR)"
 )
+TRANSACTION_INSERT = "INSERT INTO transactions (id, tx_id, type, initiator_id, payload, state) VALUES ($1, $2, $3, $4, $5, $6)"
+DEBT_INSERT = "INSERT INTO debts (id, debtor_id, creditor_id, equivalent_id, amount, version) VALUES ($1, $2, $3, $4, $5, $6)"
 
 
-class _FakeSession:
-    """Just enough session for the retry wrapper: it counts its own rollbacks."""
+def _driver_error(sqlstate: str, constraint: str | None = None):
+    """A driver exception shaped as asyncpg delivers one: the SQLSTATE and the constraint name."""
 
-    def __init__(self) -> None:
-        self.rollback_calls = 0
-
-    async def rollback(self) -> None:
-        self.rollback_calls += 1
-
-    async def execute(self, *args, **kwargs):  # pragma: no cover - never reached here
-        raise AssertionError("this unit test issues no SQL")
+    return type(
+        "FakeDriverError", (Exception,), {"sqlstate": sqlstate, "constraint_name": constraint}
+    )("driver error")
 
 
-def _unique_violation(statement: str, constraint: str) -> DBAPIError:
-    """A `DBAPIError` shaped exactly as asyncpg's wrapper delivers one.
-
-    The SQLSTATE and the constraint name are the two fields the classifier reads, and asyncpg
-    carries both on the driver exception - see the gate log quoted in T1529.
-    """
-
-    orig = type(
-        "FakeUniqueViolationError",
-        (Exception,),
-        {"sqlstate": "23505", "constraint_name": constraint},
-    )("duplicate key value violates unique constraint")
-    return DBAPIError(
-        statement=statement,
-        params=None,
-        orig=orig,
-        connection_invalidated=False,
-    )
-
-
-def _engine(monkeypatch, session=None) -> PaymentEngine:
-    engine = PaymentEngine(session or _FakeSession())  # type: ignore[arg-type]
-    return engine
-
-
-@pytest.mark.parametrize("constraint", sorted(_DEBT_OPERATION_IDENTITY_CONSTRAINTS))
-def test_t1529_an_envelope_identity_collision_during_commit_is_retryable(
-    monkeypatch, constraint: str
-) -> None:
-    """The finding itself: this exact error used to be classified "fail closed".
-
-    MUTATION that must redden it: drop the `is_envelope_insert` branch from
-    `_is_retryable_db_error` - which is the code as it stood at `7ba41d4`, where the PostgreSQL
-    gate met this error and the commit raised `IntegrityError` instead of returning idempotently.
-    """
-
-    engine = _engine(monkeypatch)
-    error = _unique_violation(ENVELOPE_INSERT, constraint)
-
-    assert engine._is_retryable_db_error(error, op="commit") is True, (
-        f"a concurrent duplicate commit collided on {constraint} and the engine refuses to "
-        f"re-read: the payment raises instead of being idempotent"
-    )
+def _wrapped(statement: str, sqlstate: str, constraint: str | None = None, *, cls=DBAPIError):
+    return cls(statement=statement, params=None, orig=_driver_error(sqlstate, constraint))
 
 
 def test_t1529_the_identity_set_is_the_envelope_identity_the_schema_declares() -> None:
     """ANTI-DRIFT, and the reason the constant is a literal rather than a comprehension.
 
-    Reading the names off `debt_operations.constraints` would make the retry predicate widen by
-    itself the day somebody adds a unique constraint to that table - a policy change nobody
-    decided. So the names are written out, and this is what stops them drifting: renaming one, or
-    adding a third, reddens here and forces the decision to be made on purpose.
-
     MUTATION that must redden it: rename either constraint in `app/db/journal_tables.py`, or add a
-    `UniqueConstraint` to `debt_operations`, without touching
-    `_DEBT_OPERATION_IDENTITY_CONSTRAINTS`.
+    `UniqueConstraint` to `debt_operations`, without touching `DEBT_OPERATION_IDENTITY_CONSTRAINTS`.
     """
 
     declared = {
@@ -114,139 +83,60 @@ def test_t1529_the_identity_set_is_the_envelope_identity_the_schema_declares() -
     }
 
     assert declared == set(_DEBT_OPERATION_IDENTITY_CONSTRAINTS), (
-        f"the retry predicate names {sorted(_DEBT_OPERATION_IDENTITY_CONSTRAINTS)} while "
+        f"the envelope identity names {sorted(_DEBT_OPERATION_IDENTITY_CONSTRAINTS)} while "
         f"`debt_operations` declares {sorted(declared)}. Decide which of them means \"this "
-        f"operation was already opened\" - a retry predicate pointing at a constraint that no "
-        f"longer exists is a guard that passes vacuously."
+        f"operation was already opened\"."
     )
 
 
-@pytest.mark.parametrize(
-    ("statement", "constraint", "op", "why"),
-    [
-        pytest.param(
-            ENVELOPE_INSERT,
-            "pk_debt_operations",
-            "commit",
-            "a primary-key collision on a freshly generated uuid4 is not a race, it is a defect",
-            id="other_constraint_on_the_same_table",
-        ),
-        pytest.param(
-            "INSERT INTO debt_operations_archive (id, kind, identity) VALUES ($1, $2, $3)",
-            "uq_debt_operations_kind_identity",
-            "commit",
-            "a table whose name merely BEGINS with the envelope's must not match. No such table "
-            "exists today - which is the point of testing the rule rather than the corpus: the "
-            "word boundary is what stops one from joining this predicate by being named well",
-            id="table_name_extends_the_envelope_table",
-        ),
-        pytest.param(
-            ENVELOPE_INSERT,
-            "uq_debt_operations_kind_identity",
-            "commit_nocommit",
-            "the caller owns the transaction: a savepoint rollback keeps the stale snapshot, so "
-            "the second attempt would collide again - the outer owner must restart",
-            id="caller_owned_unit_of_work",
-        ),
-        pytest.param(
-            ENVELOPE_INSERT,
-            "uq_debt_operations_kind_identity",
-            "prepare",
-            "prepare opens no envelope; a duplicate there is a different question",
-            id="wrong_operation",
-        ),
-        pytest.param(
-            ENVELOPE_INSERT,
-            "uq_debt_operations_kind_identity",
-            "abort",
-            "abort opens no envelope either",
-            id="abort",
-        ),
+_UNIQUE_VIOLATIONS = [
+    *[
+        pytest.param(ENVELOPE_INSERT, name, id=f"envelope_identity:{name}")
+        for name in sorted(_DEBT_OPERATION_IDENTITY_CONSTRAINTS)
     ],
-)
-def test_t1529_everything_else_still_fails_closed(
-    monkeypatch, statement: str, constraint: str, op: str, why: str
-) -> None:
-    """ANTI-VACUUM for the widening above: it must admit the race and nothing else.
+    pytest.param(ENVELOPE_INSERT, "pk_debt_operations", id="envelope_primary_key"),
+    pytest.param(
+        "INSERT INTO debt_operations_archive (id, kind, identity) VALUES ($1, $2, $3)",
+        "uq_debt_operations_kind_identity",
+        id="table_name_extends_the_envelope_table",
+    ),
+    pytest.param(DEBT_INSERT, "uq_debts_debtor_creditor_equivalent", id="debt_business_key"),
+    pytest.param(TRANSACTION_INSERT, TX_ID_UNIQUE_CONSTRAINT, id="transaction_identity"),
+]
 
-    MUTATION that must redden it: key the new branch on the SQLSTATE alone (drop the statement and
-    constraint tests), or drop the `op == "commit"` test, or match the table name by
-    `startswith("INSERT INTO DEBT_OPERATIONS")` without requiring a following space or `(`.
+
+@pytest.mark.parametrize(("statement", "constraint"), _UNIQUE_VIOLATIONS)
+def test_t1529_no_unique_violation_is_a_retryable_conflict_by_its_sqlstate(statement: str, constraint: str) -> None:
+    """ANTI-VACUUM for the owners' predicates: a `23505` is not cured by a blind re-run.
+
+    MUTATION that must redden it: add "23505" to `_RETRYABLE_PAYMENT_SQLSTATES` (service) or to
+    `_TRANSIENT_SQLSTATES` (money replay).
     """
 
-    engine = _engine(monkeypatch)
+    for cls in (DBAPIError, IntegrityError):
+        error = _wrapped(statement, "23505", constraint, cls=cls)
+        assert not isinstance(_classify_payment_db_error(error), RetryablePaymentConflictException), (
+            f"pay() would re-run a 23505 on {constraint} as a transient conflict"
+        )
+        assert money_conflict_name(error) is None, (
+            f"the money phase would replay a 23505 on {constraint} as a transient conflict"
+        )
 
-    assert (
-        engine._is_retryable_db_error(_unique_violation(statement, constraint), op=op) is False
-    ), why
 
+@pytest.mark.parametrize(("statement", "constraint"), _UNIQUE_VIOLATIONS)
+def test_t1529_only_the_transaction_identity_reaches_the_identity_resolver(statement: str, constraint: str) -> None:
+    """The one `23505` the payment path handles is `transactions_tx_id_key`, through the exact resolver.
 
-@pytest.mark.asyncio
-async def test_t1529_the_retry_rolls_back_once_and_re_runs_the_unit_of_work(monkeypatch) -> None:
-    """The half that makes the retry SAFE rather than merely permitted.
-
-    A rollback before the second attempt is what gives it a fresh snapshot to read the other
-    writer's outcome from; without it the retry would re-run on a transaction PostgreSQL has
-    already aborted. This measures that the wrapper actually takes it for this error.
-
-    MUTATION that must redden it: remove the `await self.session.rollback()` call from the
-    non-savepoint branch of `_run_uow_with_retry`, or make the new classifier branch return False.
+    MUTATION that must redden it: key `_is_tx_id_collision` on the SQLSTATE alone.
     """
 
-    session = _FakeSession()
-    engine = _engine(monkeypatch, session)
-    engine._retry_attempts = 3
-    engine._retry_base_delay_s = 0.0
-    engine._retry_max_delay_s = 0.0
-
-    attempts: list[int] = []
-
-    async def _uow() -> str:
-        attempts.append(len(attempts) + 1)
-        if len(attempts) == 1:
-            raise _unique_violation(ENVELOPE_INSERT, "uq_debt_operations_kind_identity")
-        return "already committed"
-
-    result = await engine._run_uow_with_retry(op="commit", fn=_uow)
-
-    assert result == "already committed"
-    assert attempts == [1, 2], attempts
-    assert session.rollback_calls == 1, (
-        "the second attempt must run on a rolled-back transaction; without that rollback it reads "
-        "nothing and PostgreSQL refuses every further statement"
-    )
+    error = _wrapped(statement, "23505", constraint, cls=IntegrityError)
+    assert _is_tx_id_collision(error) is (constraint == TX_ID_UNIQUE_CONSTRAINT), constraint
 
 
-@pytest.mark.asyncio
-async def test_t1529_a_bounded_budget_keeps_a_permanent_duplicate_from_looping(monkeypatch) -> None:
-    """The refusal case the widening must not swallow.
-
-    An envelope row becomes visible only in the same database transaction that sets
-    `transactions.state = 'COMMITTED'`, so a permanently colliding identity on a transaction that
-    never commits is unreachable by construction. "Unreachable by construction" is an argument, and
-    arguments are what this programme keeps finding wrong, so the behaviour if it happened anyway
-    is measured instead of asserted away: the attempt budget runs out and the ORIGINAL 23505 is
-    re-raised.
-
-    MUTATION that must redden it: `continue` unconditionally instead of honouring
-    `attempt >= self._retry_attempts`.
-    """
-
-    session = _FakeSession()
-    engine = _engine(monkeypatch, session)
-    engine._retry_attempts = 3
-    engine._retry_base_delay_s = 0.0
-    engine._retry_max_delay_s = 0.0
-
-    attempts: list[int] = []
-
-    async def _always_duplicate() -> str:
-        attempts.append(len(attempts) + 1)
-        raise _unique_violation(ENVELOPE_INSERT, "uq_debt_operations_kind_identity")
-
-    with pytest.raises(DBAPIError) as raised:
-        await engine._run_uow_with_retry(op="commit", fn=_always_duplicate)
-
-    assert getattr(raised.value.orig, "sqlstate", None) == "23505"
-    assert len(attempts) == 3, attempts
-    assert session.rollback_calls == 2, session.rollback_calls
+@pytest.mark.parametrize("sqlstate", ["40001", "40P01"])
+def test_t1529_the_positive_controls_are_retryable_at_both_owners(sqlstate: str) -> None:
+    error = _wrapped(ENVELOPE_INSERT, sqlstate)
+    assert isinstance(_classify_payment_db_error(error), RetryablePaymentConflictException)
+    assert money_conflict_name(error) == sqlstate
+    assert _is_tx_id_collision(_wrapped(TRANSACTION_INSERT, sqlstate, TX_ID_UNIQUE_CONSTRAINT, cls=IntegrityError)) is False

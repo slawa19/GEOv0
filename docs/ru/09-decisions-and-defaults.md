@@ -86,6 +86,8 @@
 
 **Допустимые internal-состояния (ограничение в БД):** `NEW`, `ROUTED`, `PREPARE_IN_PROGRESS`, `PREPARED`, `COMMITTED`, `ABORTED`, `PROPOSED`, `WAITING`, `REJECTED`.
 
+**Уточнено 2026-09-25 (019, стадия 4, миграция `030`):** для `PAYMENT` допустимы только `COMMITTED` и `ABORTED` — ограничение `chk_transaction_payment_terminal` (`type <> 'PAYMENT' OR state IN ('COMMITTED','ABORTED')`). Хаб исполняет платёж одной транзакцией и промежуточных состояний платежа не хранит; остальные типы (в том числе `CLEARING` со своим `NEW`) — вне ограничения. Перевод — с осушением старой версией (`docs/ru/05-deployment.md`).
+
 #### 1.7.1. Таблица: `Transaction.type` → states → финальные → internal-only
 
 Важно: в текущей реализации **не все** значения `Transaction.type`, присутствующие в CHECK constraints, реально используются как записи в таблице `transactions`. Часть типов зарезервирована под будущее расширение.
@@ -121,7 +123,7 @@
 | `COMMITTED` | Клиринг успешно применён |
 | `ABORTED` | Терминальный сбой |
 
-**Recovery (MVP):** транзакции, застрявшие в «активных» internal-состояниях дольше заданного времени, переводятся в `ABORTED`, а связанные блокировки очищаются.
+~~**Recovery (MVP):** транзакции, застрявшие в «активных» internal-состояниях дольше заданного времени, переводятся в `ABORTED`, а связанные блокировки очищаются.~~ **Снято 2026-09-25 (019, стадия 4):** застрявших платежей больше нет — платёж одна транзакция, а миграция `030` запрещает нетерминальный `PAYMENT`. Цикл восстановления и жнец резервов (`app/core/recovery.py`) и их запуск удалены. Настройки `RECOVERY_ENABLED`, `RECOVERY_INTERVAL_SECONDS`, `PAYMENT_TX_STUCK_TIMEOUT_SECONDS` инертны (оставлены только ради конфиг-контракта admin UI), `PREPARE_LOCK_TTL_SECONDS` удалена; списки «застрявших» в admin API и их счётчики отдают пустое/ноль — поверхность совместимости до П4 (`T1911`). Метрика `RECOVERY_EVENTS_TOTAL` остаётся: её использует hold сверки.
 
 **Публичный статус платежа:** `PaymentResult.status` — это финальный результат и возвращает только `COMMITTED` или `ABORTED`.
 
@@ -236,7 +238,7 @@ ordering contract и ошибочно отбрасывал бы данные п�
 |---|---|---|
 | **L1: Prevention** | Optimistic Locking | Поле `Debt.version` (Integer). При UPDATE проверяется `WHERE version = OLD`. ~~При конфликте (`StaleDataError`) — автоматический retry (до 3 раз) с перечитыванием состояния.~~ **Снято 2026-09-25 (019, стадия 3, `FORK-1`):** повтор внутри операции шёл из того же снимка `SERIALIZABLE` и убран; конфликт версии в потоке платежа `Book` поднимает как `DebtVersionConflict`, и он повторяется владельцем всей транзакции на свежей сессии — `PaymentService.pay` для API, повтор денежной фазы для симулятора. Прочие ошибки ORM повтором не становятся. |
 | **L2: Detection** | Post-Tick Audit | В real-mode симулятора после каждого тика сверяется изменение балансов в БД с суммой committed транзакций. При расхождении эмиттится SSE событие `audit.drift` и запись в `IntegrityAuditLog`. |
-| **L3: Invariant** | In-transaction Check | Внутри транзакции платежа (`PaymentEngine.commit`) проверяется дельта балансов до и после операций. При несовпадении (из-за триггеров или side-effects) транзакция откатывается (`IntegrityViolation`). |
+| **L3: Invariant** | In-transaction Check | Внутри транзакции платежа (до 2026-09-25 — `PaymentEngine.commit`; с 019, стадии 4 — денежная фаза `PaymentService._apply_payment`, внутри savepoint'а операции) проверяется дельта балансов до и после операций. При несовпадении (из-за триггеров или side-effects) транзакция откатывается (`IntegrityViolation`). |
 
 Управление фоновыми задачами клиринга:
 - `asyncio.shield` запрещён для длинных операций в `RealTickOrchestrator`.
@@ -259,7 +261,11 @@ configured equivalents, а executor перед staged actions фиксирует
 `PaymentService.pay`: переходные `NEW → PREPARED → COMMITTED` движка идут внутри savepoint'а операции
 и другим транзакциям не видны, а повторяемый конфликт повторяет всю попытку на свежей сессии.
 Порядок локов и вход через `PaymentEngine` не меняются до стадий 4–5
-(`specs/019-payment-one-transaction/spec.md`).
+(`specs/019-payment-one-transaction/spec.md`). **Уточнено 2026-09-25 (019, стадия 4):** `PaymentEngine`
+и recovery удалены. Платёж берёт тот же порядок (owner → transaction → pair) примитивами
+`app/core/money_boundary.py` в фазе связывания `PaymentService._bind_payment` и вставляет строку сразу
+`COMMITTED`/`ABORTED`; admin abort стал поверхностью совместимости без денежного эффекта и без локов
+(`404`/`409`/идемпотентный `aborted`, Q2). Сами локи и резервы снимаются только на стадии 5.
 
 Clearing участвует в том же equivalent-owner domain на одной явно закреплённой физической DB
 connection. После preflight рабочая транзакция завершается; на pinned connection берётся
@@ -278,7 +284,9 @@ connection, а не возврату её в pool. Поэтому уже под�
 остановить API payment writers, clearing workers, real ticks, Admin abort и recovery; дождаться
 завершения или отката их DB-транзакций и освобождения advisory locks; развернуть одну версию на всех
 owner surfaces; затем возобновить writers. Одновременная работа старого directional/неinterlocked и
-нового общего протоколов не поддерживается.
+нового общего протоколов не поддерживается. Переход на миграцию `030` (019, стадия 4, 2026-09-25)
+добавляет к этой остановке осушение: старая версия доводит все платежи до терминальных состояний и
+опустошает `prepare_locks`, и только затем применяется `030` (пять шагов — `docs/ru/05-deployment.md`).
 
 #### 1.12.1. Владение и подтверждение транзакции клиринга
 
@@ -296,8 +304,10 @@ Commit дренируется до terminal result. Если cancellation при
 `ClearingCommittedAfterCancellation` несёт `tx_id` и фактическую сумму: Real/Interact publisher
 сначала учитывает результат и выпускает partial `clearing.done`, затем сохраняет cancellation.
 Candidate amount не является источником accounting; aggregate, per-edge trust growth и SSE получают
-только фактическую сумму сервиса. Очисткой `PrepareLock` для terminal payment abort целиком владеет
-`PaymentEngine`; recovery не повторяет его DELETE/commit.
+только фактическую сумму сервиса. ~~Очисткой `PrepareLock` для terminal payment abort целиком владеет
+`PaymentEngine`; recovery не повторяет его DELETE/commit.~~ **Снято 2026-09-25 (019, стадия 4):** платёж
+резервов не пишет, `PaymentEngine` и recovery удалены; таблицу `prepare_locks` и её читателей снимает
+стадия 5 (`T1909`, миграция `031`).
 
 ### 1.13. Simulator (prod demo): анонимные посетители через cookie (per-owner runs)
 
@@ -360,7 +370,11 @@ dialect, пользователь, host и имя базы в публичный
 violation остаётся неретраимым. **Уточнено 2026-09-25 (019, стадия 3):** формулировка отставала от
 кода — с `T1529` (2026-09-13) тем же временным конфликтом считается и `23505` вставки конверта
 операции на двух его ограничениях идентичности (`PaymentEngine._is_retryable_db_error`); точный
-разрешитель коллизии `transactions.tx_id` — задача `T1905`. Это узкое исключение не публикует имя constraint, SQL или детали
+разрешитель коллизии `transactions.tx_id` — задача `T1905`. **Уточнено 2026-09-25 (019, стадия 4):**
+движок удалён; первая запись платежа — строка `transactions`, поэтому гонка конверта на пути платежа
+недостижима, и владельцы повторов (`PaymentService.pay`, повтор денежной фазы) не повторяют `23505`
+по SQLSTATE вовсе: единственный обрабатываемый `23505` — `transactions_tx_id_key`, через точный
+разрешитель идентичности (`tests/unit/test_p015_t1529_the_envelope_identity_is_a_retryable_race.py`). Это узкое исключение не публикует имя constraint, SQL или детали
 драйвера клиенту и не расширяет общий retry-предикат для `prepare`, `abort` или staged savepoint.
 
 Interactive-действие симулятора отвечает code `CONFLICT`, а не `PAYMENT_REJECTED`. В real tick тот

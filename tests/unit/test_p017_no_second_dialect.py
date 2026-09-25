@@ -367,7 +367,8 @@ def test_the_scan_is_not_vacuous() -> None:
 
     files = _scanned_files()
     assert len(files) >= 100, f"only {len(files)} files scanned; the scan roots are wrong"
-    assert any(path.as_posix().endswith("app/core/payments/engine.py") for path in files)
+    # The payment path (the engine until 019 stage 4 deleted it; the service since).
+    assert any(path.as_posix().endswith("app/core/payments/service.py") for path in files)
     findings = _repository_findings()
     for entry in ALLOWED:
         assert len(findings.get((entry.path, entry.kind), [])) == entry.count, (
