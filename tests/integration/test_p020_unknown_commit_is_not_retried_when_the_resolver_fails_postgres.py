@@ -49,7 +49,7 @@ from sqlalchemy import select, text
 from app.core.clearing.service import ClearingService
 from app.core.payments.router import PaymentRouter
 from tests.integration.p019_interlock_support import _seed_interlock_case, _use_serializable
-from tests.p019_support import require_target
+from tests.p019_support import TargetMismatch, require_target
 
 # MODE B: every commit lands in a clone dropped after the test (`tests/tier_on_a_clone.py`).
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
@@ -63,13 +63,23 @@ def _pg_codes(exc: BaseException) -> list[str]:
     return sorted(ClearingService._postgres_error_codes(exc) & {"40001", "40P01"})
 
 
-def _stand(commit_mode: str, *, seed: dict, deadlock_the_resolver: bool = False):
+def _stand(
+    commit_mode: str,
+    *,
+    seed: dict,
+    deadlock_the_resolver: bool = False,
+    fail_the_earlier_reads: bool = False,
+):
     """A `ClearingService` whose FIRST commit ends as `commit_mode`, and that records what happened.
 
     `commit_mode`:
     * `unknown_not_committed` - rolled back, reported as `ConnectionError` (fault injection, see module doc);
     * `unknown_committed` - committed for real, reported as `ConnectionError` (fault injection);
     * `real_rollback` - a concurrent transaction makes PostgreSQL refuse the COMMIT with 40001 (real).
+
+    `fail_the_earlier_reads`: the first resolution's reads 1 and 2 raise an INJECTED `RuntimeError`, so an
+    occurrence that is durable cannot answer them; only its third read - the one whose error the resolver
+    surfaces - is PostgreSQL's deadlock. Needed only when the commit really landed.
     """
 
     from tests.conftest import TestingSessionLocal
@@ -105,6 +115,8 @@ def _stand(commit_mode: str, *, seed: dict, deadlock_the_resolver: bool = False)
         async def _read_committed_execution_amount(session, tx_id, *, allowed_participant_pids=None):
             if state["armed"]:
                 state["reads_after_commit"] += 1
+                if fail_the_earlier_reads and state["reads_after_commit"] < _RESOLVER_READ_THAT_DEADLOCKS:
+                    raise RuntimeError("injected: an earlier read of the first resolution failed")
                 if deadlock_the_resolver and state["reads_after_commit"] == _RESOLVER_READ_THAT_DEADLOCKS:
                     try:
                         state["resolver_pid"] = int(await session.scalar(text("SELECT pg_backend_pid()")))
@@ -224,21 +236,22 @@ async def _deadlocks() -> int:
     return int(value or 0)
 
 
-@pytest.mark.asyncio
-async def test_an_unknown_commit_whose_resolver_deadlocks_is_not_retried(monkeypatch) -> None:
-    from app.config import settings
+async def _create_barriers() -> None:
     from tests.conftest import TestingSessionLocal
 
-    monkeypatch.setattr(settings, "COMMIT_RETRY_ATTEMPTS", 3, raising=False)
-    monkeypatch.setattr(settings, "PAYMENT_TOTAL_TIMEOUT_SECONDS", 60, raising=False)
-
-    seed = await _seed_interlock_case()
     async with TestingSessionLocal() as setup:
         await setup.execute(text(f"CREATE TABLE {BARRIER_HELD} (id int)"))
         await setup.execute(text(f"CREATE TABLE {BARRIER_WAITED} (id int)"))
         await setup.commit()
-    stand_cls, state = _stand("unknown_not_committed", seed=seed, deadlock_the_resolver=True)
-    deadlocks_before = await _deadlocks()
+
+
+async def _run_with_the_first_resolution_deadlocked(stand_cls, state: dict, seed: dict):
+    """Run the clearing while the first resolution's third read is made PostgreSQL's deadlock victim.
+
+    Returns `(outcome, blocker_waited)`; the caller asserts the controls.
+    """
+
+    from tests.conftest import TestingSessionLocal
 
     blocker = TestingSessionLocal()
     observer = TestingSessionLocal()
@@ -294,13 +307,34 @@ async def test_an_unknown_commit_whose_resolver_deadlocks_is_not_retried(monkeyp
             if task is not None and not task.done():
                 task.cancel()
 
-    # Controls: the original commit is the injected unknown one; the resolver really deadlocked.
+    return outcome, blocker_waited
+
+
+def _assert_the_first_resolution_deadlocked(state: dict, blocker_waited) -> None:
     assert [type(e).__name__ for e in state["commit_errors"]] == ["ConnectionError"], state["commit_errors"]
     assert blocker_waited, "the blocker never queued on the resolver: no deadlock was formed"
     assert [_pg_codes(e) for e in state["resolver_errors"]] == [["40P01"]], state["resolver_errors"]
     # The schedule: the first complete invocation failed with 40P01, every later one ran untouched.
     assert state["reconciliations"][:1] == [("raised", ["40P01"])], state["reconciliations"]
     assert all(kind == "returned" for kind, _ in state["reconciliations"][1:]), state["reconciliations"]
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_commit_whose_resolver_deadlocks_is_not_retried(monkeypatch) -> None:
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "COMMIT_RETRY_ATTEMPTS", 3, raising=False)
+    monkeypatch.setattr(settings, "PAYMENT_TOTAL_TIMEOUT_SECONDS", 60, raising=False)
+
+    seed = await _seed_interlock_case()
+    await _create_barriers()
+    stand_cls, state = _stand("unknown_not_committed", seed=seed, deadlock_the_resolver=True)
+    deadlocks_before = await _deadlocks()
+
+    outcome, blocker_waited = await _run_with_the_first_resolution_deadlocked(stand_cls, state, seed)
+
+    # Controls: the original commit is the injected unknown one; the resolver really deadlocked.
+    _assert_the_first_resolution_deadlocked(state, blocker_waited)
 
     async def counted() -> bool:
         return await _deadlocks() > deadlocks_before
@@ -371,3 +405,52 @@ async def test_control_c_an_unresolved_unknown_commit_is_the_sanitized_error_wit
     assert getattr(outcome, "code", None) == "E010", outcome
     assert transactions == [] and debts == _untouched(seed), (transactions, debts)
 
+
+@pytest.mark.asyncio
+@pytest.mark.xfail(
+    raises=TargetMismatch,
+    strict=True,
+    reason="020 target, fixed by stage 1 narrowing: a failed first resolution is followed by one more",
+)
+async def test_control_d_a_durable_commit_whose_first_resolution_deadlocks_returns_its_amount(
+    monkeypatch,
+) -> None:
+    """The committed half of the same schedule: the money is durable, so the clearing must say so.
+
+    The commit really lands and `ConnectionError` is injected; the first complete resolution fails (its
+    reads 1-2 by injection, its surfaced third read by PostgreSQL's deadlock); the next one runs untouched
+    and finds the occurrence. A durable clearing is never reported as not having happened.
+    """
+
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "COMMIT_RETRY_ATTEMPTS", 3, raising=False)
+    monkeypatch.setattr(settings, "PAYMENT_TOTAL_TIMEOUT_SECONDS", 60, raising=False)
+
+    seed = await _seed_interlock_case()
+    await _create_barriers()
+    stand_cls, state = _stand(
+        "unknown_committed", seed=seed, deadlock_the_resolver=True, fail_the_earlier_reads=True
+    )
+    deadlocks_before = await _deadlocks()
+
+    outcome, blocker_waited = await _run_with_the_first_resolution_deadlocked(stand_cls, state, seed)
+
+    _assert_the_first_resolution_deadlocked(state, blocker_waited)
+
+    async def counted() -> bool:
+        return await _deadlocks() > deadlocks_before
+
+    assert await _poll(counted, timeout=10.0), "PostgreSQL counted no deadlock"
+    transactions, debts = await _evidence(seed)
+    # Premise: the money is durable whatever the clearing reports.
+    assert transactions == [("COMMITTED", Decimal("30.00"))], transactions
+    assert debts == _cleared(seed), debts
+
+    require_target(
+        state["attempts"] == 1
+        and outcome == Decimal("30.00")
+        and state["reconciliations"] == [("raised", ["40P01"]), ("returned", Decimal("30.00"))],
+        f"a durable clearing whose first resolution deadlocked began {state['attempts']} attempt(s) and "
+        f"ended as {outcome!r}; reconciliations {state['reconciliations']}",
+    )
