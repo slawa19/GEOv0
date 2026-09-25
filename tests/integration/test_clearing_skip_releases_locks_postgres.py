@@ -304,12 +304,12 @@ async def test_policy_skip_releases_debt_rows_before_concurrent_payment_postgres
             payment_session,
         ):
             await session.connection(
-                execution_options={"isolation_level": "READ COMMITTED"}
+                execution_options={"isolation_level": "SERIALIZABLE"}
             )
             isolation = (
                 await session.execute(text("SHOW transaction_isolation"))
             ).scalar_one()
-            assert str(isolation).lower() == "read committed"
+            assert str(isolation).lower() == "serializable"  # 019 stage 5 (T1907): the only supported level
 
         skipped_amount = await ClearingService(
             clearing_session

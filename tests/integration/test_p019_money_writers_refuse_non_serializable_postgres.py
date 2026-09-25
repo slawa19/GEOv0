@@ -43,13 +43,12 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 from tests.integration.p019_interlock_support import _seed_interlock_case
-from tests.p019_support import require_target, target_xfail
+from tests.p019_support import require_target
 
 # MODE B: every commit lands in a clone dropped after the test (`tests/tier_on_a_clone.py`).
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
 
 _REASON = "isolation_not_serializable"
-_FIXED_BY = "stage 5 (T1907)"
 
 
 @pytest.fixture
@@ -254,7 +253,6 @@ _WRITERS = [
 ]
 
 
-@target_xfail(_FIXED_BY, "a money writer on a non-SERIALIZABLE transaction refuses before its first write")
 @pytest.mark.asyncio
 @pytest.mark.parametrize("writer", _WRITERS)
 async def test_a_money_writer_refuses_a_read_committed_transaction(
@@ -286,7 +284,6 @@ async def test_a_money_writer_refuses_a_read_committed_transaction(
         )
 
 
-@target_xfail(_FIXED_BY, "pay() handed a READ COMMITTED session factory refuses and records nothing")
 @pytest.mark.asyncio
 async def test_the_api_pay_refuses_a_read_committed_session_factory(read_committed, committed_database) -> None:
     """`pay()` opens its own sessions; handed a READ COMMITTED factory it refuses and records nothing."""

@@ -45,6 +45,7 @@ from app.db.models.transaction import Transaction
 from app.schemas.payment import PaymentCreateRequest
 from app.utils.event_bus import event_bus
 from app.utils.metrics import PAYMENT_EVENTS_TOTAL
+from tests.p019_support import allow_below_serializable_for_a_diagnostic
 from tests.debt_setup import debt_fixture_setup
 from tests.integration.test_p015_p1_money_replay_postgres import (
     _OPENING,
@@ -55,7 +56,9 @@ from tests.integration.test_p015_p1_money_replay_postgres import (
 
 
 @pytest_asyncio.fixture
-async def rc_factory(committed_database):
+async def rc_factory(committed_database, monkeypatch):
+    # 019 stage 5 (`T1907`): READ COMMITTED here is a named diagnostic below the supported level.
+    allow_below_serializable_for_a_diagnostic(monkeypatch)
     engine = create_async_engine(
         committed_database.url, pool_size=5, max_overflow=0, isolation_level="READ COMMITTED"
     )

@@ -147,12 +147,12 @@ async def test_concurrent_duplicate_payment_request_never_regresses_terminal_sta
         winner_session = TestingSessionLocal()
         for session in (loser_session, winner_session):
             await session.connection(
-                execution_options={"isolation_level": "READ COMMITTED"}
+                execution_options={"isolation_level": "SERIALIZABLE"}
             )
             isolation = (
                 await session.execute(text("SHOW transaction_isolation"))
             ).scalar_one()
-            assert str(isolation).lower() == "read committed"
+            assert str(isolation).lower() == "serializable"  # 019 stage 5 (T1907): the only supported level
 
         loser_service = PaymentService(loser_session)
         winner_service = PaymentService(winner_session)

@@ -43,7 +43,7 @@ from tests.integration.test_p015_t1544_operator_stop_races_postgres import (  # 
     admin_api,
 )
 from tests.p019_locks_off import advisory_locks_held, blocked_by, switch_money_boundary_locks_off
-from tests.p019_support import require_target, target_xfail
+from tests.p019_support import require_target
 from tests.unit.test_p015_step5c_reaction_and_hold import hold_directly
 
 # MODE B: every commit lands in a clone dropped after the test (`tests/tier_on_a_clone.py`).
@@ -61,7 +61,6 @@ async def _equivalent_state(factory, equivalent_id):  # noqa: F811
         ).one()
 
 
-@target_xfail("stage 5 (T1907)", "the clearing's FOR SHARE stop/hold read makes the stopping writer wait for its commit")
 @pytest.mark.asyncio
 @pytest.mark.parametrize("writer", ["patch_deactivate", "hold_set"])
 async def test_a_stopping_writer_waits_for_a_clearing_that_already_read_the_flag_without_the_owner_lock(
@@ -139,11 +138,16 @@ async def test_a_stopping_writer_waits_for_a_clearing_that_already_read_the_flag
     is_active, hold = await _equivalent_state(factory, seed["equivalent_id"])
     assert (is_active is False) if writer == "patch_deactivate" else (hold is not None)
 
+    # THE TARGET is the writer's UPDATE queued on the CLEARING'S transaction while the clearing is
+    # parked: a `transactionid`/`tuple` wait whose blocker is the clearing's backend ends only when that
+    # transaction ends, so the writer cannot commit before the clearing's money does. (The order in
+    # which the two TASKS finish is not that order: the clearing's task still releases its pinned
+    # connection after its commit, while the unblocked writer may already be done.)
     require_target(
-        not writer_finished_while_parked and completed == ["clearing", writer],
+        not writer_finished_while_parked and bool(waiting),
         f"the {writer} completed while the clearing that had read the flag was still to commit: "
-        f"order {completed}, waiting={waiting}",
+        f"task order {completed}, waiting={waiting}",
     )
-    assert waiting and {locktype for _pid, locktype in waiting} <= {"transactionid", "tuple"}, (
+    assert {locktype for _pid, locktype in waiting} <= {"transactionid", "tuple"}, (
         f"the {writer} waited, but not on a row/transaction lock of the clearing: {waiting}"
     )

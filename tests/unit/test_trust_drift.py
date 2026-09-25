@@ -200,6 +200,9 @@ def _make_growth_session(
     session = AsyncMock()
     session.execute = _execute
     session.commit = AsyncMock()
+    # 019 stage 5 (`T1907`): drift checks the isolation of its transaction before its first write
+    # (`SHOW transaction_isolation`); the stub answers as the application's engine does.
+    session.scalar = AsyncMock(return_value="serializable")
     return session
 
 
@@ -226,6 +229,9 @@ def _make_decay_session(
     session = AsyncMock()
     session.execute = _execute
     session.commit = AsyncMock()
+    # 019 stage 5 (`T1907`): drift checks the isolation of its transaction before its first write
+    # (`SHOW transaction_isolation`); the stub answers as the application's engine does.
+    session.scalar = AsyncMock(return_value="serializable")
     return session
 
 

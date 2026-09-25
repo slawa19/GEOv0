@@ -41,3 +41,27 @@ def require_target(condition: bool, message: str) -> None:
 
     if not condition:
         raise TargetMismatch(message)
+
+
+def allow_below_serializable_for_a_diagnostic(monkeypatch) -> list[str]:
+    """A NAMED DIAGNOSTIC CONTROL below the supported isolation (019 stage 5, `T1907`, item 7).
+
+    Since `T1907` every money writer refuses a transaction that does not run SERIALIZABLE
+    (`MoneyBoundary.require_serializable`). A few stands run a writer at READ COMMITTED ON PURPOSE - to
+    reach a path that exists only there (a `StaleDataError` instead of 40001, a re-check refusal after the
+    row insert) or to show that a verifier DOES detect the disagreement such a level allows (the positive
+    control of criterion (b)). They switch the check off for their own test only, through this function,
+    so every such stand is findable by one name and none of them is evidence that the application runs
+    below SERIALIZABLE; the production refusal is `test_p019_money_writers_refuse_non_serializable_postgres.py`.
+    Returns the writers whose check was skipped, so a stand can show it was on its path.
+    """
+
+    from app.core.money_boundary import MoneyBoundary
+
+    skipped: list[str] = []
+
+    async def skip(session, *, writer: str) -> None:
+        skipped.append(writer)
+
+    monkeypatch.setattr(MoneyBoundary, "require_serializable", staticmethod(skip))
+    return skipped

@@ -42,7 +42,9 @@ from tests.debt_setup import debt_fixture_setup
 async def engine_bound_sessions(committed_database):
     # Over this test's disposable clone of the migrated template: the clone's drop is the only
     # disposal of what the test commits (018 B0b).
-    engine = create_async_engine(committed_database.url)
+    # 019 stage 5 (T1907, FORK-2): money writers refuse any level but SERIALIZABLE, so the stand asks for
+    # it; before, this engine ran the server default READ COMMITTED and the clearing inherited it.
+    engine = create_async_engine(committed_database.url, isolation_level="SERIALIZABLE")
     try:
         yield async_sessionmaker(engine, expire_on_commit=False)
     finally:

@@ -39,6 +39,7 @@ which is also why a one-argument `pg_advisory_*` next to a two-argument one is n
 from __future__ import annotations
 
 import hashlib
+import logging
 import time
 from decimal import Decimal
 from typing import Any, List, Tuple
@@ -50,7 +51,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
-from app.utils.exceptions import ConflictException
+from app.utils.exceptions import ConflictException, GeoException
+
+logger = logging.getLogger(__name__)
 
 # EXACT ZERO, and the constant is the subject of T1522 of programme 015.
 #
@@ -77,6 +80,26 @@ _DELTA_DRIFT_TOLERANCE = Decimal("0")
 # key space used by segment locks. The first int is a stable domain tag.
 _TX_ADVISORY_LOCK_NAMESPACE = 0x475458
 _EQUIVALENT_OWNER_LOCK_NAMESPACE = 0x474551
+
+#: `details.reason` of the isolation refusal (019 stage 5, `T1907`, `FORK-2`).
+ISOLATION_NOT_SERIALIZABLE_REASON = "isolation_not_serializable"
+
+
+class IsolationNotSerializable(GeoException):
+    """A money writer was handed a transaction that does not run SERIALIZABLE; nothing was written.
+
+    An internal error (`E010`, 500) and deliberately not a conflict: no retry of the same request on the
+    same kind of session can succeed, and the caller that supplied the session is the defect.
+    """
+
+    def __init__(self, *, writer: str, isolation: str):
+        super().__init__(
+            details={
+                "reason": ISOLATION_NOT_SERIALIZABLE_REASON,
+                "writer": writer,
+                "isolation": isolation,
+            }
+        )
 
 
 class MoneyBoundary:
@@ -269,6 +292,36 @@ class MoneyBoundary:
             text(f"SET LOCAL lock_timeout = '{timeout_ms}ms'")
         )
 
+    @staticmethod
+    async def require_serializable(session: AsyncSession, *, writer: str) -> None:
+        """Refuse, before the first write, a work transaction that does not run SERIALIZABLE.
+
+        019 stage 5 (`T1907`, `FORK-2`): the invariants that stage 5 stops protecting with advisory
+        locks - the capacity read of a payment, the one-direction-per-pair check of the inject, the
+        clearing's re-read of its cycle, the floor of the trust decay - hold under concurrency only
+        when EVERY writer taking part runs SERIALIZABLE; SSI in one participant does not make a mixed
+        load serializable. The application's own engine is fenced to SERIALIZABLE (`app/config.py`,
+        2026-09-25), so this guards a session HANDED IN by a caller at another level.
+
+        It reads the ACTUAL level of the transaction the writer is about to write in (`SHOW
+        transaction_isolation`, which opens that transaction if it has not begun - at the level it
+        will run at), so it must be called on the session that writes, in the transaction that writes.
+        It never commits, rolls back or re-levels the caller's transaction: a transaction that has
+        already read cannot be upgraded honestly (`SET TRANSACTION` after a read is refused, and a
+        rollback would discard the caller's work) - the only safe answer is to refuse.
+
+        Blind spot, named: a writer that is not routed through a caller of this function is not
+        covered by it; the callers are listed in `specs/019-payment-one-transaction/spec.md`
+        (`T1907`, per-boundary table).
+        """
+
+        level = str(await session.scalar(text("SHOW transaction_isolation")) or "").strip().lower()
+        if level != "serializable":
+            logger.error(
+                "event=money.isolation_refused writer=%s isolation=%s", writer, level
+            )
+            raise IsolationNotSerializable(writer=writer, isolation=level)
+
     #: `details.reason` of the operator-stop refusal (T1544). A state conflict, and deliberately NOT
     #: retryable: `details.retryable=true` belongs to the serialization-conflict variant of `E008`,
     #: and repeating a request against a deactivated equivalent cannot succeed.
@@ -326,8 +379,10 @@ class MoneyBoundary:
         The caller must already hold the equivalent owner lock - owner lock first, row lock second,
         the same order as the PATCH, or the two can deadlock.
 
-        `row_lock=False` is for clearing, whose read happens in a snapshot taken AFTER its owner
-        lock, and for the PATCH lock that makes that sufficient see `admin_update_equivalent`.
+        Since 019 stage 5 (`T1907`, `FORK-7`) the clearing reads with `row_lock=True` too, in every
+        attempt, and holds the row lock through its commit (`ClearingService._refuse_if_equivalent_inactive`):
+        until then it read with `row_lock=False` in a snapshot taken after its owner lock and relied on
+        the PATCH taking the same lock. `row_lock=False` has no caller left in the application.
         """
         ids = sorted(set(equivalent_ids), key=str)
         if not ids:

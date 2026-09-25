@@ -12,7 +12,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker
 
 from tests.debt_setup import debt_fixture_setup
-from tests.p019_support import require_target, target_xfail
+from tests.p019_support import require_target
 
 # Every test here commits through several sessions, so each runs on a disposable clone of the migrated
 # template and its rows go with the clone's drop - nothing is deleted row by row (018 B0b; see
@@ -369,12 +369,14 @@ def _conflicting_clearing_service(debt_id, writes: list[Decimal], observed_sqlst
             type(self).attempts += 1
             assert amount is None, "premise: no occurrence is committed when an attempt starts"
             if type(self).attempts <= len(writes):
+                attempt_no = type(self).attempts
+                next_amount = writes[attempt_no - 1]
                 async with TestingSessionLocal() as writer:
                     debt = await writer.get(Debt, debt_id)
                     assert debt is not None
                     # Declared: the journal asks every movement of money to name its operation.
-                    async with debt_fixture_setup(writer, label=f"concurrent-writer-{type(self).attempts}"):
-                        debt.amount = writes[type(self).attempts - 1]
+                    async with debt_fixture_setup(writer, label=f"concurrent-writer-{attempt_no}"):
+                        debt.amount = next_amount
                     await writer.commit()
             return amount
 
@@ -452,7 +454,6 @@ async def _run_owner(service_cls, cycle):
         await owner_session.close()
 
 
-@target_xfail("stage 5 (T1907)", "a clearing that meets a real 40001 retries the whole execution afresh")
 @pytest.mark.asyncio
 async def test_a_serializable_conflict_retries_the_whole_clearing_on_a_fresh_snapshot_postgres(
     db_session,
@@ -507,7 +508,6 @@ async def test_a_serializable_conflict_retries_the_whole_clearing_on_a_fresh_sna
     }
 
 
-@target_xfail("stage 5 (T1907)", "a persistent conflict exhausts a bounded budget with a typed retryable refusal")
 @pytest.mark.asyncio
 async def test_a_persistent_conflict_exhausts_the_clearing_budget_with_a_retryable_refusal_postgres(
     db_session,
