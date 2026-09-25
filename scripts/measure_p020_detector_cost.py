@@ -172,26 +172,43 @@ def database_url(server_url: str, name: str) -> str:
     return make_url(server_url).set(database=checked_bench_name(name)).render_as_string(hide_password=False)
 
 
-async def create_db(server_url: str, name: str, *, template: str | None = None) -> None:
-    from tests.migrated_schema import create_database, drop_database, maintenance_connection
+async def _maintenance(server_url: str):
+    from tests.migrated_schema import maintenance_connection
 
-    checked_bench_name(name)
-    if template is not None:
-        checked_bench_name(template)
-    conn = await maintenance_connection(server_url)
+    return await maintenance_connection(server_url)
+
+
+async def _drop(conn, name: str) -> None:
+    # The shared helpers of `tests/migrated_schema.py` accept geov0_test_* names only; the bench names are
+    # checked here instead, against their own pattern, immediately before the DDL they go into.
+    name = checked_bench_name(name)
+    await conn.execute(
+        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()",
+        name,
+    )
+    await conn.execute(f'DROP DATABASE IF EXISTS "{name}"')
+
+
+async def create_db(server_url: str, name: str, *, template: str | None = None) -> None:
+    conn = await _maintenance(server_url)
     try:
-        await drop_database(conn, checked_bench_name(name))
-        await create_database(conn, checked_bench_name(name), template=template)
+        await _drop(conn, name)
+        statement = f'CREATE DATABASE "{checked_bench_name(name)}"'
+        if template is not None:
+            await conn.execute(
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()",
+                checked_bench_name(template),
+            )
+            statement += f' TEMPLATE "{checked_bench_name(template)}"'
+        await conn.execute(statement)
     finally:
         await conn.close()
 
 
 async def drop_db(server_url: str, name: str) -> None:
-    from tests.migrated_schema import drop_database, maintenance_connection
-
-    conn = await maintenance_connection(server_url)
+    conn = await _maintenance(server_url)
     try:
-        await drop_database(conn, checked_bench_name(name))
+        await _drop(conn, name)
     finally:
         await conn.close()
 
@@ -775,9 +792,9 @@ def compare(rows: list[dict]) -> list[dict]:
     return out
 
 
-async def _prepare(server_url: str, out_dir: Path) -> dict:
+async def _prepare(server_url: str, out_dir: Path, families: list[str]) -> dict:
     graphs = {}
-    for family in FAMILIES:
+    for family in families:
         graph = generate(family)
         name = checked_bench_name(f"geov0_bench_p020s2_{family}")
         t0 = time.perf_counter()
@@ -816,8 +833,8 @@ def main() -> None:
         "warmup": WARMUP, "call_timeout_s": CALL_TIMEOUT_S, "p95_ms_small": P95_MS_SMALL,
         "p95_ms_large": P95_MS_LARGE, "max_call_s": MAX_CALL_S, "limit": LIMIT}}
     try:
-        graphs = asyncio.run(_prepare(args.server_url, out_dir))
-        created += [f"geov0_bench_p020s2_{f}" for f in graphs]
+        created += [f"geov0_bench_p020s2_{f}" for f in families]
+        graphs = asyncio.run(_prepare(args.server_url, out_dir, families))
         results["manifest"] = {f: g["manifest"] for f, g in graphs.items()}
 
         rows = []
