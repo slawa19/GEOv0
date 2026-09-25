@@ -190,14 +190,16 @@ async def test_step5c_p_a_reaction_arriving_between_prepare_and_commit_waits_for
     try:
         await _baseline_and_one_atom(factory, world.equivalent.id)
         prepared = asyncio.Event()
-        original_commit = PaymentEngine.commit
+        original_commit = PaymentService._apply_payment
 
-        async def _commit_after_barrier(self, tx_id_arg, *, commit=True):
+        # 019 stage 4: the barrier stands at the entry of the payment's money phase (after the binding
+        # phase took the owner lock), where `PaymentEngine.commit` was entered before direct execution.
+        async def _commit_after_barrier(self, declaration, **kwargs):
             prepared.set()
             await release_commit.wait()
-            return await original_commit(self, tx_id_arg, commit=commit)
+            return await original_commit(self, declaration, **kwargs)
 
-        monkeypatch.setattr(PaymentEngine, "commit", _commit_after_barrier)
+        monkeypatch.setattr(PaymentService, "_apply_payment", _commit_after_barrier)
 
         async def _pay(tx_id: str):
             async with factory() as session:
@@ -234,7 +236,7 @@ async def test_step5c_p_a_reaction_arriving_between_prepare_and_commit_waits_for
         assert await _transactions(factory, world) == {tx_id: "COMMITTED"}
         assert await _prepare_locks(factory, world) == 0
         assert await _hold_of(factory, world.equivalent.id) is not None
-        monkeypatch.setattr(PaymentEngine, "commit", original_commit)
+        monkeypatch.setattr(PaymentService, "_apply_payment", original_commit)
         with pytest.raises(ConflictException) as refused:
             await _pay(str(uuid.uuid4()))
         _assert_hold_refusal(refused.value, code)

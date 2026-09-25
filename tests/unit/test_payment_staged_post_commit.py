@@ -119,10 +119,6 @@ async def test_staged_payment_effects_apply_once_after_outer_commit(
     monkeypatch.setattr(settings, "ROUTING_GRAPH_CACHE_TTL_SECONDS", 60)
     metric_recorder = _MetricRecorder()
     monkeypatch.setattr(
-        "app.core.payments.engine.PAYMENT_EVENTS_TOTAL",
-        metric_recorder,
-    )
-    monkeypatch.setattr(
         "app.utils.metrics.PAYMENT_EVENTS_TOTAL",
         metric_recorder,
     )
@@ -171,7 +167,7 @@ async def test_staged_payment_effects_apply_once_after_outer_commit(
             record for record in metric_recorder.records if record.get("result") == "success"
         ] == [
             {"event": "create", "result": "success"},
-            {"event": "prepare", "result": "success"},
+            # 019 stage 4: the obsolete `prepare` success emission is removed with the prepare phase.
             {"event": "commit", "result": "success"},
         ]
         tx_count = await db_session.scalar(
@@ -206,14 +202,14 @@ async def test_committed_payment_result_does_not_read_expired_participants(
     suffix = uuid.uuid4().hex[:8]
     sender, receiver, equivalent = await _seed_direct_route(db_session, suffix)
     service = PaymentService(db_session)
-    original_commit = service.engine.commit
+    original_commit = service._apply_payment  # the money phase (019 stage 4)
 
     async def _commit_and_expire(*args, **kwargs):
         result = await original_commit(*args, **kwargs)
         db_session.expire_all()
         return result
 
-    monkeypatch.setattr(service.engine, "commit", _commit_and_expire)
+    monkeypatch.setattr(service, "_apply_payment", _commit_and_expire)
 
     result = await service.create_payment_internal(
         sender.id,

@@ -184,9 +184,11 @@ def test_the_scan_reads_the_real_tree():
 # ── the targets ──────────────────────────────────────────────────────────────────────────────────
 
 
-@target_xfail("019 stage 4, part a (T1906)", "the payment service still runs the engine's NEW -> PREPARED")
 def test_no_module_outside_the_part_b_set_writes_an_intermediate_payment_state_or_uses_the_engine():
     """Stage 4, part a: the payment path executes directly - no NEW/PREPARED and no `PaymentEngine`.
+
+    Red (`TargetMismatch`) on `7e16dd5`: `app/core/payments/service.py` inserted `NEW` and imported the
+    engine. Green since the direct execution of stage 4, part a.
 
     The modules part b deletes or rewrites (`STAGE_4B_MODULES`) are outside this node and inside the
     next one, which stays a strict expectation until they are gone."""

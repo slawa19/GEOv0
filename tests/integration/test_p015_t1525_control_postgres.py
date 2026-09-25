@@ -166,7 +166,10 @@ def _patch_delta_check_to_report_drift(monkeypatch, world: _World) -> list[Decim
     observed: list[Decimal | None] = []
 
     async def _delta_check_reports_drift(self, *, equivalent_id, flows, net_positions_before):
-        debt = await self._get_debt(world.sender.id, world.receiver.id, equivalent_id)
+        # `self` is the money boundary (since 019 stage 4 the service's own, not the engine).
+        from app.core.ledger.book import _get_debt
+
+        debt = await _get_debt(self.session, world.sender.id, world.receiver.id, equivalent_id)
         observed.append(None if debt is None else Decimal(str(debt.amount)))
         raise IntegrityViolationException(
             "Per-participant delta check failed",

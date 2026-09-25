@@ -157,7 +157,7 @@ async def test_concurrent_duplicate_payment_request_never_regresses_terminal_sta
         loser_service = PaymentService(loser_session)
         winner_service = PaymentService(winner_session)
         loser_build_graph = loser_service.router.build_graph
-        winner_prepare = winner_service.engine.prepare
+        winner_prepare = winner_service._bind_payment  # the binding phase (019 stage 4)
 
         async def _hold_loser_after_initial_lookup(*args, **kwargs):
             graph = await loser_build_graph(*args, **kwargs)
@@ -177,8 +177,8 @@ async def test_concurrent_duplicate_payment_request_never_regresses_terminal_sta
             _hold_loser_after_initial_lookup,
         )
         monkeypatch.setattr(
-            winner_service.engine,
-            "prepare",
+            winner_service,
+            "_bind_payment",
             _hold_winner_after_its_row_is_inserted,
         )
 

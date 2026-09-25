@@ -42,7 +42,7 @@ from sqlalchemy import func, insert, select, update
 from app.config import settings
 from app.core.ledger.reconciliation import FAILED
 from app.core.money_boundary import MoneyBoundary
-from app.core.payments.engine import PaymentEngine
+from app.core.payments.service import PaymentService
 from app.db.journal_tables import debt_journal_entries, debt_operations
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
@@ -269,7 +269,9 @@ async def test_a_tx_id_whose_payment_aborted_replays_the_stored_aborted_result(
     bob = await register_and_login(client, "B_" + code)
     await _trust(client, bob, alice, code)
 
-    original_prepare = PaymentEngine.prepare
+    # 019 stage 4: the binding phase of the direct execution (the engine's prepare before), still bounded
+    # by `PREPARE_TIMEOUT_SECONDS`.
+    original_prepare = PaymentService._bind_payment
     slow = {"on": True}
 
     async def _prepare_slowly(self, *args, **kwargs):
@@ -278,7 +280,7 @@ async def test_a_tx_id_whose_payment_aborted_replays_the_stored_aborted_result(
         return await original_prepare(self, *args, **kwargs)
 
     original_prepare_timeout = settings.PREPARE_TIMEOUT_SECONDS
-    monkeypatch.setattr(PaymentEngine, "prepare", _prepare_slowly)
+    monkeypatch.setattr(PaymentService, "_bind_payment", _prepare_slowly)
     monkeypatch.setattr(settings, "PREPARE_TIMEOUT_SECONDS", 0.01, raising=False)
 
     body = _payment_body(alice, bob, code, "10.00")

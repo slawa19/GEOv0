@@ -93,7 +93,7 @@ async def test_payment_prepare_timeout_aborts_transaction(db_session, monkeypatc
 
     monkeypatch.setattr(service.router, "build_graph", _build_graph)
     monkeypatch.setattr(service.router, "find_flow_routes", _find_flow_routes)
-    monkeypatch.setattr(service.engine, "prepare", _slow_prepare)
+    monkeypatch.setattr(service, "_bind_payment", _slow_prepare)
 
     with pytest.raises(GeoException) as exc:
         await service.create_payment(sender.id, req)
@@ -183,24 +183,21 @@ async def test_payment_commit_timeout_returns_committed_when_tx_already_committe
     async def _fast_prepare(*_args, **_kwargs):
         return None
 
-    async def _commit_then_hang(tx_id_str: str, *_, **__):
-        # Commit the tx quickly, then block long enough to exceed COMMIT_TIMEOUT_SECONDS.
+    async def _commit_then_hang(_declaration, *_, **__):
+        # Commit the tx quickly, then block long enough to exceed COMMIT_TIMEOUT_SECONDS. (019 stage 4:
+        # the money phase of the direct execution, which receives the payment's declaration.)
         await db_session.execute(
             update(Transaction)
-            .where(Transaction.tx_id == tx_id_str)
+            .where(Transaction.tx_id == tx_id)
             .values(state="COMMITTED")
         )
         await db_session.commit()
         await asyncio.sleep(0.2)
 
-    async def _abort_should_not_be_called(*_args, **_kwargs):
-        raise AssertionError("abort must not be called for an already COMMITTED tx")
-
     monkeypatch.setattr(service.router, "build_graph", _build_graph)
     monkeypatch.setattr(service.router, "find_flow_routes", _find_flow_routes)
-    monkeypatch.setattr(service.engine, "prepare", _fast_prepare)
-    monkeypatch.setattr(service.engine, "commit", _commit_then_hang)
-    monkeypatch.setattr(service.engine, "abort", _abort_should_not_be_called)
+    monkeypatch.setattr(service, "_bind_payment", _fast_prepare)
+    monkeypatch.setattr(service, "_apply_payment", _commit_then_hang)
 
     result = await service.create_payment(sender.id, req)
     assert result.status == "COMMITTED"

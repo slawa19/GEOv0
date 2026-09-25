@@ -14,7 +14,9 @@ THE CONFLICTS ARE REAL, one per phase, and nothing is injected into the driver:
   owner lock behind a competing payment (Alice -> Carol) that holds it; the competitor's prepare reads
   and inserts Alice's reservations and commits; the subject then reads Alice's reservations from its
   older snapshot and inserts its own. That is a read-write cycle over `prepare_locks`, and PostgreSQL
-  refuses the subject with `40001`. One competitor per attempt keeps the contention up until the
+  refuses the subject with `40001`. Since 019 stage 4 no reservation is written: the cycle closes over the
+  competitor's committed debt against the subject's reads of Alice's positions in its money phase -
+  still a real `40001` of the same schedule, recorded wherever in the payment operation it surfaces. One competitor per attempt keeps the contention up until the
   retry budget (`COMMIT_RETRY_ATTEMPTS`, default) is spent. Since stage 3 (`T1904`) that budget is
   `PaymentService.pay`'s: every attempt is the WHOLE payment on a fresh session and snapshot, so the
   subject's prepare - and the conflict - happen once per attempt.
@@ -48,7 +50,6 @@ from sqlalchemy import text, update
 
 from app.config import settings
 from app.core.money_boundary import MoneyBoundary
-from app.core.payments.engine import PaymentEngine
 from app.core.payments.service import PaymentService, _payment_db_sqlstate
 from app.db.models.equivalent import Equivalent
 from tests.integration.p019_stand import (  # noqa: F401 - `api` and `factory` are fixtures
@@ -80,21 +81,35 @@ def _install_prepare_conflict(monkeypatch, factory, world: ApiWorld, stand: _Sta
     """One competing payment Alice -> Carol per attempt of the subject's prepare (see docstring)."""
 
     gates: dict[str, tuple[asyncio.Event, asyncio.Event]] = {}
-    original_prepare = PaymentEngine.prepare
+    # 019 stage 4: the binding phase of the direct execution (the engine's prepare before); the flag
+    # goes on the service's money boundary, whose lock primitives the stand wraps.
+    original_prepare = PaymentService._bind_payment
     original_owner = MoneyBoundary._acquire_equivalent_owner_locks
     original_tx_lock = MoneyBoundary._acquire_tx_advisory_lock
 
     async def prepare(self, tx_id, *args, **kwargs):
         if tx_id != stand.subject_tx:
             return await original_prepare(self, tx_id, *args, **kwargs)
-        self._p019_subject_prepare = True
+        self._boundary._p019_subject_prepare = True
         try:
             return await original_prepare(self, tx_id, *args, **kwargs)
-        except BaseException as exc:
-            stand.sqlstates.append(_payment_db_sqlstate(exc))
-            raise
         finally:
-            self._p019_subject_prepare = False
+            self._boundary._p019_subject_prepare = False
+
+    # Since 019 stage 4 the subject's binding phase writes no reservation, so the read-write cycle no
+    # longer closes over `prepare_locks` inside it: it closes over the DEBTS - the competitor's
+    # committed Alice -> Carol debt against the subject's reads of Alice's positions from its older
+    # snapshot (the net-position snapshot and the integrity checkpoint of its money phase). The
+    # conflict is recorded where it now surfaces: anywhere in the subject's payment operation.
+    original_operation = PaymentService._run_payment_operation
+
+    async def operation(self, attempt, **kwargs):
+        try:
+            return await original_operation(self, attempt, **kwargs)
+        except BaseException as exc:
+            if attempt.tx_id == stand.subject_tx:
+                stand.sqlstates.append(_payment_db_sqlstate(exc))
+            raise
 
     async def competitor_pays(tx_id: str) -> str:
         async with factory() as session:
@@ -145,7 +160,8 @@ def _install_prepare_conflict(monkeypatch, factory, world: ApiWorld, stand: _Sta
             await asyncio.wait_for(release.wait(), timeout=20)
         return await original_tx_lock(self, tx_id)
 
-    monkeypatch.setattr(PaymentEngine, "prepare", prepare)
+    monkeypatch.setattr(PaymentService, "_bind_payment", prepare)
+    monkeypatch.setattr(PaymentService, "_run_payment_operation", operation)
     monkeypatch.setattr(MoneyBoundary, "_acquire_equivalent_owner_locks", owner_locks)
     monkeypatch.setattr(MoneyBoundary, "_acquire_tx_advisory_lock", tx_lock)
 
@@ -153,20 +169,20 @@ def _install_prepare_conflict(monkeypatch, factory, world: ApiWorld, stand: _Sta
 def _install_commit_conflict(monkeypatch, factory, world: ApiWorld, stand: _Stand) -> None:  # noqa: F811
     """A concurrent UPDATE of the equivalent row behind each commit attempt's snapshot."""
 
-    original_commit = PaymentEngine.commit
+    original_commit = PaymentService._apply_payment  # the money phase (019 stage 4)
     original_guard = MoneyBoundary.refuse_inactive_equivalents
 
-    async def commit(self, tx_id, *args, **kwargs):
-        if tx_id != stand.subject_tx:
-            return await original_commit(self, tx_id, *args, **kwargs)
-        self._p019_subject_commit = True
+    async def commit(self, declaration, *args, **kwargs):
+        if declaration.tx_id != stand.subject_tx:
+            return await original_commit(self, declaration, *args, **kwargs)
+        self._boundary._p019_subject_commit = True
         try:
-            return await original_commit(self, tx_id, *args, **kwargs)
+            return await original_commit(self, declaration, *args, **kwargs)
         except BaseException as exc:
             stand.sqlstates.append(_payment_db_sqlstate(exc))
             raise
         finally:
-            self._p019_subject_commit = False
+            self._boundary._p019_subject_commit = False
 
     async def guard(self, equivalent_ids, *, row_lock):
         if row_lock and getattr(self, "_p019_subject_commit", False):
@@ -180,7 +196,7 @@ def _install_commit_conflict(monkeypatch, factory, world: ApiWorld, stand: _Stan
                 await other.commit()
         return await original_guard(self, equivalent_ids, row_lock=row_lock)
 
-    monkeypatch.setattr(PaymentEngine, "commit", commit)
+    monkeypatch.setattr(PaymentService, "_apply_payment", commit)
     monkeypatch.setattr(MoneyBoundary, "refuse_inactive_equivalents", guard)
 
 

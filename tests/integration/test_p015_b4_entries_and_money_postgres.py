@@ -1376,37 +1376,43 @@ async def _seed_payment(factory, seeded: _Seeded, *, amount: str, limit: str = "
     return tx_id
 
 
-class _PrepareLockDeleteWatcher:
-    """Reads the journal's envelope table ON THE CONNECTION that is deleting the prepare locks.
+class _FirstDebtWriteWatcher:
+    """Reads the journal's envelope table ON THE CONNECTION that writes the payment's FIRST debt.
 
-    WHY THIS SHAPE AND NOT A READ AFTERWARDS. Design v2 §7 requires the payment's envelope to be
-    "flushed at open i.e. before delete(PrepareLock)". After the commit, both statements are equally
-    durable and their order is gone. The only place the order is observable is inside the
-    transaction, on the connection doing the work - so this listener fires on the `DELETE FROM
-    prepare_locks` and asks that same connection whether the envelope row is already there.
+    WHY THIS SHAPE AND NOT A READ AFTERWARDS. Since 019 stage 4 (`FORK-8`) the payment's envelope must
+    be on its connection before the first write to `debts`: the envelope carries the declaration and
+    the pre-state, and a debt written before it is money moved with no statement of what it was for.
+    After the commit both are equally durable and their order is gone. The only place the order is
+    observable is inside the transaction, on the connection doing the work - so this listener fires on
+    the first `INSERT`/`UPDATE`/`DELETE` against `debts` and asks that same connection whether the
+    envelope row is already there. (Until stage 4 the obligation was "before `DELETE FROM
+    prepare_locks`"; the payment path writes no reservations any more.)
 
     `to_regclass` is asked first and answers NULL for a table that does not exist, instead of
-    raising. That matters on PostgreSQL: a failed statement aborts the surrounding transaction, so a
-    probe that raised would destroy the very payment it is observing and this counterexample would
-    be red for a reason of its own making.
+    raising: a failed statement aborts the surrounding PostgreSQL transaction, so a probe that raised
+    would destroy the very payment it is observing.
     """
 
     def __init__(self, tx_id: str) -> None:
         self.tx_id = tx_id
-        self.deletes = 0
+        self.debt_writes = 0
         self.table_present: bool | None = None
         self.envelopes_visible: int | None = None
         self._busy = False
 
     def __call__(self, conn, clauseelement, _multiparams, _params, _options) -> None:
         table = getattr(getattr(clauseelement, "table", None), "name", None)
-        if table != "prepare_locks" or not getattr(clauseelement, "is_delete", False):
+        if table != "debts" or not any(
+            getattr(clauseelement, flag, False) for flag in ("is_insert", "is_update", "is_delete")
+        ):
             return
         if self._busy:
             return
         self._busy = True
         try:
-            self.deletes += 1
+            self.debt_writes += 1
+            if self.debt_writes > 1:
+                return
             present = conn.exec_driver_sql(
                 f"SELECT to_regclass('{OPERATIONS_TABLE}')"  # noqa: S608
             ).scalar()
@@ -1421,56 +1427,71 @@ class _PrepareLockDeleteWatcher:
 
 
 @pytest.mark.asyncio
-async def test_c14_the_payment_envelope_is_written_before_its_prepare_locks_are_deleted(
-    serializable_factory, serializable_engine
+async def test_c14_the_payment_envelope_is_written_before_its_first_debt_write(
+    serializable_factory, serializable_engine, monkeypatch
 ):
-    """C14, payment half, API-SHAPED. Driven by the REAL owner, not by a bare session.
+    """C14, payment half, API-SHAPED, since 019 stage 4 (`T1906`, `FORK-8`). Driven by the REAL owner.
 
-    WHAT IS REAL HERE. `PaymentEngine.prepare` writes the `PrepareLock` rows and
-    `PaymentEngine.commit` consumes them, applies the flows, writes the integrity audit row, deletes
-    the locks and marks the transaction COMMITTED (`app/core/payments/engine.py:1069`, `:1437-1447`).
-    Nothing is simulated. That is the whole point of C14: every other counterexample in this
-    programme opens its own operation, and a journal that worked only for operations opened by tests
-    would be worth nothing.
+    WHAT IS REAL HERE. `PaymentService` executes the payment directly - the owner, tx and pair locks,
+    the capacity, the operator stop, the pre-state, the envelope, the book's flows, the checks and the
+    audit row - through its ordinary path (`create_payment_internal` -> `pay()`). Nothing is
+    simulated. Every other counterexample in this programme opens its own operation; a journal that
+    worked only for operations opened by tests would be worth nothing.
 
-    THE THREE OBLIGATIONS, and why each needs where it is read from named:
+    THE THREE OBLIGATIONS, and where each is read from:
 
-    1. The envelope is COMPLETED, read on an INDEPENDENT connection after the commit - never through
-       the session under test, whose identity map answers from memory.
-    2. The recorded intent equals a `PrepareLock.effects` snapshot captured BEFORE the commit. The
-       snapshot has to be taken first because `commit` deletes the locks: an intent compared against
-       what survives the commit could be compared against nothing at all and still look right.
-    3. The ORDER: a listener on `DELETE FROM prepare_locks` must see the envelope row ALREADY
-       PRESENT on that same connection. Design v2 §7 puts the envelope flush at open, before the
-       delete, and after the commit the two statements are indistinguishable - so this is the only
-       moment at which the requirement is observable at all.
+    1. The envelope is COMPLETED, read on an INDEPENDENT connection after the commit.
+    2. The recorded intent equals the DECLARATION taken UPSTREAM: the router's result, captured before
+       the service turns it into the intent - never the envelope under test. (Until stage 4 it was a
+       `prepare_locks.effects` snapshot; no reservation is written any more.)
+    3. The ORDER: a listener on the first write to `debts` must see the envelope row ALREADY PRESENT
+       on that same connection.
 
-    RED TODAY BECAUSE: `debt_operations` does not exist. The non-vacuity assertion placed FIRST says
-    so, and the listener's own measurement - which runs today and reports `table_present=False` -
-    is what will carry the ordering requirement once it does.
-    MUTATION once step 4 exists: open the payment's operation AFTER the flows are applied, or flush
-    the envelope lazily at completion instead of at open. Both leave assertions 1 and 2 green and
-    turn assertion 3 red, which is exactly the asymmetry this test is built to catch.
+    MUTATION: open the payment's operation AFTER the flows are applied (or write the envelope lazily at
+    completion) - obligations 1 and 2 stay green and obligation 3 goes red, which is the asymmetry this
+    test is built to catch.
     """
-    from app.core.payments.engine import PaymentEngine
+    from app.core.payments.router import PaymentRouter
+    from app.core.payments.service import PaymentService
 
     seeded = await _seed(serializable_factory)
     world = seeded.world
-    tx_id = await _seed_payment(serializable_factory, seeded, amount="8.00")
+    async with serializable_factory() as setup:
+        setup.add(
+            TrustLine(
+                from_participant_id=world.creditor.id,
+                to_participant_id=world.debtor.id,
+                equivalent_id=world.equivalent.id,
+                limit=Decimal("500.00"),
+                policy={"auto_clearing": True},
+                status="active",
+            )
+        )
+        await setup.commit()
 
-    # The snapshot BEFORE the commit, on its own session: `commit` is about to delete these rows.
-    snapshot = await stored_rows(
-        serializable_factory,
-        "SELECT participant_id::text AS participant_id, effects FROM prepare_locks "
-        "WHERE tx_id = :tx_id ORDER BY participant_id",
-        {"tx_id": tx_id},
-    )
+    # The declaration, UPSTREAM: a copy of what the router hands the service.
+    routed: list[list[tuple[list[str], Decimal]]] = []
+    original_find = PaymentRouter.find_flow_routes
 
-    watcher = _PrepareLockDeleteWatcher(tx_id)
+    def find_flow_routes(self, *args, **kwargs):
+        result = original_find(self, *args, **kwargs)
+        routed.append([(list(path), Decimal(str(amount))) for path, amount in result])
+        return result
+
+    monkeypatch.setattr(PaymentRouter, "find_flow_routes", find_flow_routes)
+
+    tx_id = str(uuid.uuid4())
+    watcher = _FirstDebtWriteWatcher(tx_id)
     event.listen(serializable_engine.sync_engine, "before_execute", watcher)
     try:
-        async with serializable_factory() as commit_session:
-            await PaymentEngine(commit_session).commit(tx_id)
+        async with serializable_factory() as session:
+            result = await PaymentService(session).create_payment_internal(
+                world.debtor.id,
+                to_pid=world.creditor.pid,
+                equivalent=world.equivalent.code,
+                amount="8.00",
+                idempotency_key=tx_id,
+            )
     finally:
         event.remove(serializable_engine.sync_engine, "before_execute", watcher)
 
@@ -1481,25 +1502,20 @@ async def test_c14_the_payment_envelope_is_written_before_its_prepare_locks_are_
         "SELECT state FROM transactions WHERE tx_id = :tx_id",
         {"tx_id": tx_id},
     )
-    surviving_locks = await stored_rows(
-        serializable_factory,
-        "SELECT id FROM prepare_locks WHERE tx_id = :tx_id",
-        {"tx_id": tx_id},
-    )
 
     # NON-VACUITY, FIRST.
     assert envelopes is not None, missing_journal_tables(envelopes, OPERATIONS_TABLE)
 
-    # NON-VACUITY: the real owner really ran, really deleted its locks, and really moved money.
-    assert snapshot, f"stand: `prepare` wrote no PrepareLock for {tx_id}, so there was nothing to delete"
-    assert watcher.deletes == 1, (
-        f"stand: the listener saw {watcher.deletes} DELETE(s) against `prepare_locks` during the "
-        f"commit; the ordering requirement below has nothing to attach to"
+    # NON-VACUITY: the real owner really ran, was really routed, and really moved money.
+    assert result.status == "COMMITTED", result
+    assert len(routed) == 1 and routed[0], f"stand: the router was not consulted exactly once: {routed}"
+    assert watcher.debt_writes >= 1, (
+        "stand: the listener saw no write to `debts` during the payment; the ordering requirement "
+        "below has nothing to attach to"
     )
-    assert surviving_locks == [], f"stand: the prepare locks outlived the commit: {surviving_locks}"
     assert [row["state"] for row in tx_state or []] == ["COMMITTED"], tx_state
     assert after == {("debtor", "creditor", "eq"): Decimal("8.00000000")}, (
-        f"stand: the real payment did not move the money it was prepared for: {after}"
+        f"stand: the real payment did not move the money it was routed for: {after}"
     )
 
     # VERDICT.
@@ -1508,21 +1524,23 @@ async def test_c14_the_payment_envelope_is_written_before_its_prepare_locks_are_
         f"tx_id={tx_id}"
     )
     assert envelopes[0]["kind"] == "PAYMENT", envelopes
+    ids = {world.debtor.pid: str(world.debtor.id), world.creditor.pid: str(world.creditor.id)}
+    declared = [
+        {"from": ids[sender], "to": ids[receiver], "amount": str(amount), "equivalent": str(world.equivalent.id)}
+        for path, amount in routed[0]
+        for sender, receiver in zip(path, path[1:])
+    ]
     recorded = _decoded_intent(envelopes[0])
-    expected_flows = [_decoded_json(row["effects"]) for row in snapshot]
-    assert _flows_of(recorded) == _flows_of({"flows": expected_flows}), (
-        f"the envelope's intent does not describe the prepared effects it committed. Recorded: "
-        f"{recorded}. The locks held, immediately before the commit deleted them: "
-        f"{expected_flows}. Design v2 §7 requires the intent to be the validated flows per lock, "
-        f"as exact scale-8 strings, so step 6 can recompute the payment from the envelope alone."
+    assert _flows_of(recorded) == _flows_of({"flows": declared}), (
+        f"the envelope's intent does not describe the route the payment was handed. Recorded: "
+        f"{recorded}. The router's result, captured upstream: {declared}."
     )
     assert watcher.table_present is True and watcher.envelopes_visible == 1, (
-        f"at the moment the commit deleted the prepare locks, the connection doing the deleting "
-        f"could see {watcher.envelopes_visible!r} envelope row(s) for this payment "
-        f"(table_present={watcher.table_present!r}). Design v2 §7 flushes the envelope AT OPEN, "
-        f"before `delete(PrepareLock)`: an envelope written later is an envelope that a crash "
-        f"between the two statements would lose, leaving a payment whose locks are gone and "
-        f"whose journal never began."
+        f"at the moment the payment first wrote `debts`, the connection doing the writing could see "
+        f"{watcher.envelopes_visible!r} envelope row(s) for this payment "
+        f"(table_present={watcher.table_present!r}). The envelope is written BEFORE the first debt "
+        f"write (019 stage 4, `FORK-8`): money moved before it would be money with no statement of "
+        f"what it was for."
     )
 
 

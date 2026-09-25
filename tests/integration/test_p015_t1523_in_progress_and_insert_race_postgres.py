@@ -251,14 +251,15 @@ async def test_a_concurrent_duplicate_waits_for_the_first_and_gets_its_result_po
         second_session = await stand.session_at_application_isolation()
 
         winner_service = PaymentService(winner_session)
-        original_commit = winner_service.engine.commit
+        original_commit = winner_service._apply_payment
 
-        async def _hold_after_prepare(tx_id_str, *, commit=True):
+        # 019 stage 4: held at the entry of the winner's money phase (the engine's commit before).
+        async def _hold_after_prepare(declaration, **kwargs):
             reached_commit.set()
             await release_commit.wait()
-            return await original_commit(tx_id_str, commit=commit)
+            return await original_commit(declaration, **kwargs)
 
-        monkeypatch.setattr(winner_service.engine, "commit", _hold_after_prepare)
+        monkeypatch.setattr(winner_service, "_apply_payment", _hold_after_prepare)
 
         async def _pay(service):
             try:

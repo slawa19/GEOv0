@@ -29,7 +29,6 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select
 
-from app.core.payments.engine import PaymentEngine
 from app.core.payments.router import PaymentRouter
 from app.core.payments.service import PaymentService
 from app.core.simulator.models import EdgeClearingHistory, RunRecord, TrustDriftConfig
@@ -94,16 +93,16 @@ async def test_a_decay_from_a_stale_snapshot_never_leaves_debt_above_the_limit(f
     engine = TrustDriftEngine(sse=None, utc_now=None, logger=logging.getLogger("tests.p019.decay"), get_scenario_raw=lambda _s: scenario)
 
     reached, release, hits = asyncio.Event(), asyncio.Event(), []
-    original_commit = PaymentEngine.commit
+    original_commit = PaymentService._apply_payment  # the money phase (019 stage 4)
 
-    async def held_commit(self, tx_id, *args, **kwargs):
+    async def held_commit(self, declaration, *args, **kwargs):
         if not hits:
-            hits.append(tx_id)
+            hits.append(declaration.tx_id)
             reached.set()
             await release.wait()
-        return await original_commit(self, tx_id, *args, **kwargs)
+        return await original_commit(self, declaration, *args, **kwargs)
 
-    monkeypatch.setattr(PaymentEngine, "commit", held_commit)
+    monkeypatch.setattr(PaymentService, "_apply_payment", held_commit)
     request = PaymentCreateRequest(
         tx_id=str(uuid.uuid4()), to=receiver.pid, equivalent=eq.code, amount="10.00", signature="__internal__"
     )
