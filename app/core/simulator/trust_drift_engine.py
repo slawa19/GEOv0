@@ -306,7 +306,14 @@ class TrustDriftEngine:
                 (original_limit * max_growth),
             ).quantize(_LEDGER_QUANTUM, rounding=ROUND_DOWN)
 
-            if new_limit != current_limit:
+            # 019 stage-3 fix-delta review (P1-B, class 1): GROWTH ONLY RAISES. `max_growth` is a
+            # ceiling on growth ("Макс. кратность роста от original_limit",
+            # `fixtures/simulator/scenario.schema.json`), not a target to normalise to. A limit set
+            # above `original * max_growth` - the simulator's `trustline-update` does that and keeps
+            # `original_limit` - made the `min` above smaller than the current limit, and `!=`
+            # wrote it: a lower limit, below debt the line already secured. A step that only raises
+            # cannot move a limit below any debt.
+            if new_limit > current_limit:
                 await clearing_session.execute(
                     update(TrustLine)
                     .where(
