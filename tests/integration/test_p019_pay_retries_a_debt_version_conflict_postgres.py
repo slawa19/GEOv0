@@ -32,7 +32,7 @@ from decimal import Decimal
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 import app.core.ledger.book as book_module
@@ -159,3 +159,96 @@ async def test_pay_retries_a_debt_version_conflict_on_a_fresh_attempt_and_counts
     # ── the commit metric: once per confirmed commit, not per attempt, not on the replay ──────
     assert after_payment - before == 1, (before, after_payment)
     assert after_replay == after_payment, (after_payment, after_replay)
+
+
+@pytest_asyncio.fixture
+async def serializable_factory(committed_database):
+    engine = create_async_engine(
+        committed_database.url, pool_size=5, max_overflow=0, isolation_level="SERIALIZABLE"
+    )
+    try:
+        yield async_sessionmaker(
+            bind=engine, class_=AsyncSession, expire_on_commit=False, autoflush=False
+        )
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_a_commit_refused_by_ssi_is_retried_and_counted_once(
+    serializable_factory, monkeypatch, caplog
+) -> None:
+    """The payment's execute() SUCCEEDS and its one COMMIT is refused with a real `40001`.
+
+    THE SCHEDULE. Right before the first attempt's COMMIT another SERIALIZABLE transaction reads the
+    pair's debt row (the old version - the payment's write is not visible to it) and rewrites the trust
+    line the payment's routing and capacity re-check read, and commits. The payment now has a
+    read-write dependency in both directions with a committed transaction; PostgreSQL refuses its
+    COMMIT (`40001`), and nothing of it landed. `pay()` retries the whole attempt, which commits.
+
+    WHAT IT CATCHES that the conflict inside `execute()` cannot: effects applied between a successful
+    `execute()` and a confirmed commit. Applying them there counts `commit,success` (and publishes
+    `payment.received`) for the refused attempt as well - two instead of one.
+    """
+
+    from app.db.models.trustline import TrustLine
+
+    factory = serializable_factory
+    world = await _seed(factory)
+    competed: list[int] = []
+
+    real_commit = AsyncSession.commit
+    real_execute = PaymentService.execute
+
+    async def marking_execute(self, *args, **kwargs):
+        staged = await real_execute(self, *args, **kwargs)
+        self.session.info["p019_payment_executed"] = True
+        return staged
+
+    async def commit_after_a_competitor(self):
+        if not competed and self.info.pop("p019_payment_executed", False):
+            competed.append(1)
+            async with factory() as other:
+                await other.execute(select(Debt.amount).where(Debt.equivalent_id == world.equivalent.id))
+                await other.execute(
+                    update(TrustLine)
+                    .where(
+                        TrustLine.from_participant_id == world.receiver.id,
+                        TrustLine.to_participant_id == world.sender.id,
+                        TrustLine.equivalent_id == world.equivalent.id,
+                    )
+                    .values(limit=TrustLine.limit)
+                )
+                await other.commit()
+        return await real_commit(self)
+
+    publications: list[dict] = []
+    monkeypatch.setattr(event_bus, "publish", lambda **kw: publications.append(dict(kw)))
+    monkeypatch.setattr(AsyncSession, "commit", commit_after_a_competitor)
+    monkeypatch.setattr(PaymentService, "execute", marking_execute)
+
+    tx_id = str(uuid.uuid4())
+    request = PaymentCreateRequest(
+        tx_id=tx_id,
+        to=world.receiver.pid,
+        equivalent=world.equivalent.code,
+        amount="10.00",
+        signature="__internal__",
+    )
+    before = _commit_success()
+    try:
+        with caplog.at_level(logging.WARNING):
+            result = await PaymentService.pay(factory, world.sender.id, request, require_signature=False)
+    finally:
+        _forget_the_route_cache(world)
+    after = _commit_success()
+
+    retries = [r.getMessage() for r in caplog.records if "event=payment.attempt_retry " in r.getMessage()]
+    assert competed == [1], "premise: the competitor never ran before the payment's commit"
+    assert len(retries) == 1 and "pgcode=40001" in retries[0] and "where=commit" in retries[0], retries
+    assert result.status == "COMMITTED", result
+    assert await _debts(factory, world) == {
+        (world.sender.pid, world.receiver.pid): _OPENING + Decimal("10.00")
+    }
+    assert [p["event"] for p in publications] == ["payment.received"], publications
+    assert after - before == 1, (before, after)
