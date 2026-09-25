@@ -1,0 +1,5484 @@
+{
+  "started": "20260925T162932Z",
+  "frozen": {
+    "seed": 20200925,
+    "families": {
+      "u2k": {
+        "title": "uniform 200/2000",
+        "vertices": 200,
+        "edges": 2000,
+        "hubs": 0,
+        "hub_share": 0.0
+      },
+      "h4k": {
+        "title": "historic 400/4000",
+        "vertices": 400,
+        "edges": 4000,
+        "hubs": 0,
+        "hub_share": 0.0
+      },
+      "s2k": {
+        "title": "skewed 200/2000, 10 hubs carry 50% of edges",
+        "vertices": 200,
+        "edges": 2000,
+        "hubs": 10,
+        "hub_share": 0.5
+      },
+      "d8k": {
+        "title": "dense stress 200/8000",
+        "vertices": 200,
+        "edges": 8000,
+        "hubs": 0,
+        "hub_share": 0.0
+      }
+    },
+    "depths": [
+      3,
+      4,
+      6,
+      7,
+      10
+    ],
+    "scopes": [
+      "global",
+      "perimeter"
+    ],
+    "samples": 20,
+    "warmup": 2,
+    "call_timeout_s": 10.0,
+    "p95_ms_small": 500.0,
+    "p95_ms_large": 2000.0,
+    "max_call_s": 10.0,
+    "limit": 100
+  },
+  "manifest": {
+    "u2k": {
+      "family": "u2k",
+      "title": "uniform 200/2000",
+      "seed": 20200925,
+      "random_vertices": 200,
+      "random_edges": 2000,
+      "planted_vertices": 89,
+      "planted_edges": 110,
+      "vertices_total": 289,
+      "edges_total": 2110,
+      "eligible_edges": 1942,
+      "excluded_edges": {
+        "closed_line": 76,
+        "consent_refused": 92
+      },
+      "out_degree_random": {
+        "min": 3,
+        "p50": 10,
+        "p95": 16,
+        "max": 19,
+        "mean": 10.0
+      },
+      "in_degree_random": {
+        "min": 3,
+        "p50": 10,
+        "p95": 15,
+        "max": 19,
+        "mean": 10.0
+      },
+      "perimeter_vertices": 188,
+      "planted": [
+        "eligible_ring_10",
+        "eligible_ring_3",
+        "eligible_ring_4",
+        "eligible_ring_5",
+        "eligible_ring_6",
+        "eligible_ring_7",
+        "eligible_ring_8",
+        "eligible_ring_9",
+        "excluded_closed_line",
+        "excluded_in_perimeter_crossing",
+        "excluded_no_consent",
+        "layered_no_short_cycles",
+        "shared_five",
+        "shared_triangle"
+      ],
+      "hubs": [],
+      "graph_sha256": "d69cb2b2be0a24e74b0dc43df657d61c3d7cf7113c5eac9161bee8d649b719cc",
+      "build_s": 2.0
+    },
+    "h4k": {
+      "family": "h4k",
+      "title": "historic 400/4000",
+      "seed": 20200925,
+      "random_vertices": 400,
+      "random_edges": 4000,
+      "planted_vertices": 89,
+      "planted_edges": 110,
+      "vertices_total": 489,
+      "edges_total": 4110,
+      "eligible_edges": 3793,
+      "excluded_edges": {
+        "closed_line": 159,
+        "consent_refused": 158
+      },
+      "out_degree_random": {
+        "min": 3,
+        "p50": 10,
+        "p95": 15,
+        "max": 21,
+        "mean": 10.0
+      },
+      "in_degree_random": {
+        "min": 3,
+        "p50": 10,
+        "p95": 16,
+        "max": 21,
+        "mean": 10.0
+      },
+      "perimeter_vertices": 288,
+      "planted": [
+        "eligible_ring_10",
+        "eligible_ring_3",
+        "eligible_ring_4",
+        "eligible_ring_5",
+        "eligible_ring_6",
+        "eligible_ring_7",
+        "eligible_ring_8",
+        "eligible_ring_9",
+        "excluded_closed_line",
+        "excluded_in_perimeter_crossing",
+        "excluded_no_consent",
+        "layered_no_short_cycles",
+        "shared_five",
+        "shared_triangle"
+      ],
+      "hubs": [],
+      "graph_sha256": "e2ed24ffdaaab8107a014d16607d4576167581ce486aab9cdea750b651f74206",
+      "build_s": 2.6
+    },
+    "s2k": {
+      "family": "s2k",
+      "title": "skewed 200/2000, 10 hubs carry 50% of edges",
+      "seed": 20200925,
+      "random_vertices": 200,
+      "random_edges": 2000,
+      "planted_vertices": 89,
+      "planted_edges": 110,
+      "vertices_total": 289,
+      "edges_total": 2110,
+      "eligible_edges": 1966,
+      "excluded_edges": {
+        "closed_line": 74,
+        "consent_refused": 70
+      },
+      "out_degree_random": {
+        "min": 2,
+        "p50": 8,
+        "p95": 17,
+        "max": 62,
+        "mean": 10.0
+      },
+      "in_degree_random": {
+        "min": 3,
+        "p50": 8,
+        "p95": 18,
+        "max": 50,
+        "mean": 10.0
+      },
+      "perimeter_vertices": 188,
+      "planted": [
+        "eligible_ring_10",
+        "eligible_ring_3",
+        "eligible_ring_4",
+        "eligible_ring_5",
+        "eligible_ring_6",
+        "eligible_ring_7",
+        "eligible_ring_8",
+        "eligible_ring_9",
+        "excluded_closed_line",
+        "excluded_in_perimeter_crossing",
+        "excluded_no_consent",
+        "layered_no_short_cycles",
+        "shared_five",
+        "shared_triangle"
+      ],
+      "hubs": [
+        "s2kv000",
+        "s2kv001",
+        "s2kv002",
+        "s2kv003",
+        "s2kv004",
+        "s2kv005",
+        "s2kv006",
+        "s2kv007",
+        "s2kv008",
+        "s2kv009"
+      ],
+      "graph_sha256": "88b5e3b6897dd3e5ed1ec2545bc7fdce4ce9ecbf53ba8a24446b685359eabdde",
+      "build_s": 2.2
+    },
+    "d8k": {
+      "family": "d8k",
+      "title": "dense stress 200/8000",
+      "seed": 20200925,
+      "random_vertices": 200,
+      "random_edges": 8000,
+      "planted_vertices": 89,
+      "planted_edges": 110,
+      "vertices_total": 289,
+      "edges_total": 8110,
+      "eligible_edges": 7453,
+      "excluded_edges": {
+        "closed_line": 349,
+        "consent_refused": 308
+      },
+      "out_degree_random": {
+        "min": 25,
+        "p50": 40,
+        "p95": 49,
+        "max": 58,
+        "mean": 40.0
+      },
+      "in_degree_random": {
+        "min": 22,
+        "p50": 40,
+        "p95": 49,
+        "max": 53,
+        "mean": 40.0
+      },
+      "perimeter_vertices": 188,
+      "planted": [
+        "eligible_ring_10",
+        "eligible_ring_3",
+        "eligible_ring_4",
+        "eligible_ring_5",
+        "eligible_ring_6",
+        "eligible_ring_7",
+        "eligible_ring_8",
+        "eligible_ring_9",
+        "excluded_closed_line",
+        "excluded_in_perimeter_crossing",
+        "excluded_no_consent",
+        "layered_no_short_cycles",
+        "shared_five",
+        "shared_triangle"
+      ],
+      "hubs": [],
+      "graph_sha256": "a7781cbba0fbb0e547d43e910b9afb2d734cc25df547399c2ed6c2c7b135f1e9",
+      "build_s": 3.5
+    }
+  },
+  "comparison": [
+    {
+      "family": "d8k",
+      "depth": 3,
+      "scope": "global",
+      "cte_vs_dfs": "identical",
+      "cte_vs_dfs_exhaustive": "identical",
+      "cte_vs_current": "differ: 100 vs 34 cycles, overlap 34, same order True",
+      "current_lengths": [
+        3
+      ]
+    },
+    {
+      "family": "d8k",
+      "depth": 3,
+      "scope": "perimeter",
+      "cte_vs_dfs": "identical",
+      "cte_vs_dfs_exhaustive": "identical",
+      "cte_vs_current": "differ: 100 vs 34 cycles, overlap 34, same order True",
+      "current_lengths": [
+        3
+      ]
+    },
+    {
+      "family": "d8k",
+      "depth": 4,
+      "scope": "global",
+      "cte_vs_dfs": "not comparable (a side failed)",
+      "cte_vs_dfs_exhaustive": "not comparable (a side failed)",
+      "dfs_vs_current": "differ: 100 vs 47 cycles, overlap 33",
+      "current_lengths": [
+        3,
+        4
+      ]
+    },
+    {
+      "family": "d8k",
+      "depth": 4,
+      "scope": "perimeter",
+      "cte_vs_dfs": "identical",
+      "cte_vs_dfs_exhaustive": "identical",
+      "cte_vs_current": "differ: 100 vs 47 cycles, overlap 43, same order False",
+      "current_lengths": [
+        3,
+        4
+      ]
+    },
+    {
+      "family": "d8k",
+      "depth": 6,
+      "scope": "global",
+      "cte_vs_dfs": "not comparable (a side failed)",
+      "cte_vs_dfs_exhaustive": "not comparable (a side failed)",
+      "cte_vs_current": "not comparable (a side failed)"
+    },
+    {
+      "family": "d8k",
+      "depth": 6,
+      "scope": "perimeter",
+      "cte_vs_dfs": "not comparable (a side failed)",
+      "cte_vs_dfs_exhaustive": "not comparable (a side failed)",
+      "cte_vs_current": "not comparable (a side failed)"
+    },
+    {
+      "family": "d8k",
+      "depth": 7,
+      "scope": "global",
+      "cte_vs_dfs": "not comparable (a side failed)",
+      "cte_vs_dfs_exhaustive": "not comparable (a side failed)",
+      "cte_vs_current": "not comparable (a side failed)"
+    },
+    {
+      "family": "d8k",
+      "depth": 7,
+      "scope": "perimeter",
+      "cte_vs_dfs": "not comparable (a side failed)",
+      "cte_vs_dfs_exhaustive": "not comparable (a side failed)",
+      "cte_vs_current": "not comparable (a side failed)"
+    },
+    {
+      "family": "d8k",
+      "depth": 10,
+      "scope": "global",
+      "cte_vs_dfs": "not comparable (a side failed)",
+      "cte_vs_dfs_exhaustive": "not comparable (a side failed)",
+      "cte_vs_current": "not comparable (a side failed)"
+    },
+    {
+      "family": "d8k",
+      "depth": 10,
+      "scope": "perimeter",
+      "cte_vs_dfs": "not comparable (a side failed)",
+      "cte_vs_dfs_exhaustive": "not comparable (a side failed)",
+      "cte_vs_current": "not comparable (a side failed)"
+    },
+    {
+      "family": "h4k",
+      "depth": 3,
+      "scope": "global",
+      "cte_vs_dfs": "identical",
+      "cte_vs_dfs_exhaustive": "identical",
+      "cte_vs_current": "differ: 100 vs 34 cycles, overlap 34, same order True",
+      "current_lengths": [
+        3
+      ]
+    },
+    {
+      "family": "h4k",
+      "depth": 3,
+      "scope": "perimeter",
+      "cte_vs_dfs": "identical",
+      "cte_vs_dfs_exhaustive": "identical",
+      "cte_vs_current": "identical",
+      "current_lengths": [
+        3
+      ]
+    },
+    {
+      "family": "h4k",
+      "depth": 4,
+      "scope": "global",
+      "cte_vs_dfs": "identical",
+      "cte_vs_dfs_exhaustive": "identical",
+      "cte_vs_current": "differ: 100 vs 47 cycles, overlap 37, same order False",
+      "current_lengths": [
+        3,
+        4
+      ]
+    },
+    {
+      "family": "h4k",
+      "depth": 4,
+      "scope": "perimeter",
+      "cte_vs_dfs": "identical",
+      "cte_vs_dfs_exhaustive": "identical",
+      "cte_vs_current": "differ: 100 vs 43 cycles, overlap 36, same order False",
+      "current_lengths": [
+        3,
+        4
+      ]
+    },
+    {
+      "family": "h4k",
+      "depth": 6,
+      "scope": "global",
+      "cte_vs_dfs": "not comparable (a side failed)",
+      "dfs_vs_dfs_exhaustive": "identical",
+      "dfs_vs_current": "differ: 100 vs 1622 cycles, overlap 18",
+      "current_lengths": [
+        3,
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "family": "h4k",
+      "depth": 6,
+      "scope": "perimeter",
+      "cte_vs_dfs": "identical",
+      "cte_vs_dfs_exhaustive": "identical",
+      "cte_vs_current": "differ: 100 vs 105 cycles, overlap 25, same order False",
+      "current_lengths": [
+        3,
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "family": "h4k",
+      "depth": 7,
+      "scope": "global",
+      "cte_vs_dfs": "not comparable (a side failed)",
+      "cte_vs_dfs_exhaustive": "not comparable (a side failed)",
+      "cte_vs_current": "not comparable (a side failed)"
+    },
+    {
+      "family": "h4k",
+      "depth": 7,
+      "scope": "perimeter",
+      "cte_vs_dfs": "identical",
+      "cte_vs_dfs_exhaustive": "identical",
+      "cte_vs_current": "differ: 100 vs 334 cycles, overlap 17, same order False",
+      "current_lengths": [
+        3,
+        4,
+        5,
+        6,
+        7
+      ]
+    },
+    {
+      "family": "h4k",
+      "depth": 10,
+      "scope": "global",
+      "cte_vs_dfs": "not comparable (a side failed)",
+      "cte_vs_dfs_exhaustive": "not comparable (a side failed)",
+      "cte_vs_current": "not comparable (a side failed)"
+    },
+    {
+      "family": "h4k",
+      "depth": 10,
+      "scope": "perimeter",
+      "cte_vs_dfs": "not comparable (a side failed)",
+      "cte_vs_dfs_exhaustive": "not comparable (a side failed)",
+      "cte_vs_current": "not comparable (a side failed)"
+    },
+    {
+      "family": "s2k",
+      "depth": 3,
+      "scope": "global",
+      "cte_vs_dfs": "identical",
+      "cte_vs_dfs_exhaustive": "identical",
+      "cte_vs_current": "differ: 100 vs 34 cycles, overlap 34, same order True",
+      "current_lengths": [
+        3
+      ]
+    },
+    {
+      "family": "s2k",
+      "depth": 3,
+      "scope": "perimeter",
+      "cte_vs_dfs": "identical",
+      "cte_vs_dfs_exhaustive": "identical",
+      "cte_vs_current": "differ: 99 vs 33 cycles, overlap 33, same order True",
+      "current_lengths": [
+        3
+      ]
+    },
+    {
+      "family": "s2k",
+      "depth": 4,
+      "scope": "global",
+      "cte_vs_dfs": "identical",
+      "cte_vs_dfs_exhaustive": "identical",
+      "cte_vs_current": "differ: 100 vs 47 cycles, overlap 44, same order False",
+      "current_lengths": [
+        3,
+        4
+      ]
+    },
+    {
+      "family": "s2k",
+      "depth": 4,
+      "scope": "perimeter",
+      "cte_vs_dfs": "identical",
+      "cte_vs_dfs_exhaustive": "identical",
+      "cte_vs_current": "differ: 100 vs 46 cycles, overlap 40, same order False",
+      "current_lengths": [
+        3,
+        4
+      ]
+    },
+    {
+      "family": "s2k",
+      "depth": 6,
+      "scope": "global",
+      "cte_vs_dfs": "not comparable (a side failed)",
+      "cte_vs_dfs_exhaustive": "not comparable (a side failed)",
+      "dfs_vs_current": "differ: 100 vs 9577 cycles, overlap 28",
+      "current_lengths": [
+        3,
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "family": "s2k",
+      "depth": 6,
+      "scope": "perimeter",
+      "cte_vs_dfs": "identical",
+      "cte_vs_dfs_exhaustive": "identical",
+      "cte_vs_current": "differ: 100 vs 611 cycles, overlap 22, same order False",
+      "current_lengths": [
+        3,
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "family": "s2k",
+      "depth": 7,
+      "scope": "global",
+      "cte_vs_dfs": "not comparable (a side failed)",
+      "cte_vs_dfs_exhaustive": "not comparable (a side failed)",
+      "cte_vs_current": "not comparable (a side failed)"
+    },
+    {
+      "family": "s2k",
+      "depth": 7,
+      "scope": "perimeter",
+      "cte_vs_dfs": "identical",
+      "cte_vs_dfs_exhaustive": "identical",
+      "cte_vs_current": "differ: 100 vs 2915 cycles, overlap 17, same order False",
+      "current_lengths": [
+        3,
+        4,
+        5,
+        6,
+        7
+      ]
+    },
+    {
+      "family": "s2k",
+      "depth": 10,
+      "scope": "global",
+      "cte_vs_dfs": "not comparable (a side failed)",
+      "cte_vs_dfs_exhaustive": "not comparable (a side failed)",
+      "cte_vs_current": "not comparable (a side failed)"
+    },
+    {
+      "family": "s2k",
+      "depth": 10,
+      "scope": "perimeter",
+      "cte_vs_dfs": "not comparable (a side failed)",
+      "cte_vs_dfs_exhaustive": "not comparable (a side failed)",
+      "cte_vs_current": "not comparable (a side failed)"
+    },
+    {
+      "family": "u2k",
+      "depth": 3,
+      "scope": "global",
+      "cte_vs_dfs": "identical",
+      "cte_vs_dfs_exhaustive": "identical",
+      "cte_vs_current": "differ: 100 vs 33 cycles, overlap 33, same order True",
+      "current_lengths": [
+        3
+      ]
+    },
+    {
+      "family": "u2k",
+      "depth": 3,
+      "scope": "perimeter",
+      "cte_vs_dfs": "identical",
+      "cte_vs_dfs_exhaustive": "identical",
+      "cte_vs_current": "differ: 38 vs 33 cycles, overlap 33, same order True",
+      "current_lengths": [
+        3
+      ]
+    },
+    {
+      "family": "u2k",
+      "depth": 4,
+      "scope": "global",
+      "cte_vs_dfs": "identical",
+      "cte_vs_dfs_exhaustive": "identical",
+      "cte_vs_current": "differ: 100 vs 45 cycles, overlap 45, same order False",
+      "current_lengths": [
+        3,
+        4
+      ]
+    },
+    {
+      "family": "u2k",
+      "depth": 4,
+      "scope": "perimeter",
+      "cte_vs_dfs": "identical",
+      "cte_vs_dfs_exhaustive": "identical",
+      "cte_vs_current": "differ: 100 vs 47 cycles, overlap 47, same order False",
+      "current_lengths": [
+        3,
+        4
+      ]
+    },
+    {
+      "family": "u2k",
+      "depth": 6,
+      "scope": "global",
+      "cte_vs_dfs": "identical",
+      "cte_vs_dfs_exhaustive": "identical",
+      "cte_vs_current": "differ: 100 vs 6434 cycles, overlap 23, same order False",
+      "current_lengths": [
+        3,
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "family": "u2k",
+      "depth": 6,
+      "scope": "perimeter",
+      "cte_vs_dfs": "identical",
+      "cte_vs_dfs_exhaustive": "identical",
+      "cte_vs_current": "differ: 100 vs 173 cycles, overlap 27, same order False",
+      "current_lengths": [
+        3,
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "family": "u2k",
+      "depth": 7,
+      "scope": "global",
+      "cte_vs_dfs": "not comparable (a side failed)",
+      "cte_vs_dfs_exhaustive": "not comparable (a side failed)",
+      "cte_vs_current": "not comparable (a side failed)"
+    },
+    {
+      "family": "u2k",
+      "depth": 7,
+      "scope": "perimeter",
+      "cte_vs_dfs": "identical",
+      "cte_vs_dfs_exhaustive": "identical",
+      "cte_vs_current": "differ: 100 vs 518 cycles, overlap 20, same order False",
+      "current_lengths": [
+        3,
+        4,
+        5,
+        6,
+        7
+      ]
+    },
+    {
+      "family": "u2k",
+      "depth": 10,
+      "scope": "global",
+      "cte_vs_dfs": "not comparable (a side failed)",
+      "cte_vs_dfs_exhaustive": "not comparable (a side failed)",
+      "cte_vs_current": "not comparable (a side failed)"
+    },
+    {
+      "family": "u2k",
+      "depth": 10,
+      "scope": "perimeter",
+      "cte_vs_dfs": "not comparable (a side failed)",
+      "dfs_vs_dfs_exhaustive": "identical",
+      "cte_vs_current": "not comparable (a side failed)"
+    }
+  ],
+  "cells": [
+    {
+      "family": "u2k",
+      "impl": "cte",
+      "depth": 3,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 150.3,
+      "p50_ms": 22.3,
+      "p95_ms": 23.6,
+      "max_ms": 150.3,
+      "statements_per_call": [
+        2
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3
+      ],
+      "identities_sha": "74b0e16287a6e47d",
+      "plan": {
+        "execution_ms": 21.273,
+        "planning_ms": 0.475,
+        "shared_hit_blocks": 6287,
+        "shared_read_blocks": 0,
+        "temp_read_blocks": 0,
+        "temp_written_blocks": 0,
+        "recursive_union_rows": 10614
+      },
+      "p95_bar_ms": 500.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "u2k",
+      "impl": "dfs",
+      "depth": 3,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 142.8,
+      "p50_ms": 21.7,
+      "p95_ms": 35.5,
+      "max_ms": 142.8,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3
+      ],
+      "identities_sha": "74b0e16287a6e47d",
+      "p95_bar_ms": 500.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "u2k",
+      "impl": "current",
+      "depth": 3,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 187.4,
+      "p50_ms": 30.5,
+      "p95_ms": 56.3,
+      "max_ms": 187.4,
+      "statements_per_call": [
+        38
+      ],
+      "failure": null,
+      "cycles": 33,
+      "lengths": [
+        3
+      ],
+      "identities_sha": "d09fecb4101cf320",
+      "verdict": "reported"
+    },
+    {
+      "family": "u2k",
+      "impl": "dfs_exhaustive",
+      "depth": 3,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 143.1,
+      "p50_ms": 23.7,
+      "p95_ms": 38.8,
+      "max_ms": 143.1,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3
+      ],
+      "identities_sha": "74b0e16287a6e47d",
+      "verdict": "reported"
+    },
+    {
+      "family": "u2k",
+      "impl": "cte",
+      "depth": 4,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 255.1,
+      "p50_ms": 131.1,
+      "p95_ms": 135.3,
+      "max_ms": 255.1,
+      "statements_per_call": [
+        2
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4
+      ],
+      "identities_sha": "e63d844d08e3f83a",
+      "plan": {
+        "execution_ms": 133.346,
+        "planning_ms": 0.415,
+        "shared_hit_blocks": 6287,
+        "shared_read_blocks": 0,
+        "temp_read_blocks": 1430,
+        "temp_written_blocks": 3157,
+        "recursive_union_rows": 62772
+      },
+      "p95_bar_ms": 500.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "u2k",
+      "impl": "dfs",
+      "depth": 4,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 156.6,
+      "p50_ms": 34.6,
+      "p95_ms": 48.4,
+      "max_ms": 156.6,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4
+      ],
+      "identities_sha": "e63d844d08e3f83a",
+      "p95_bar_ms": 500.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "u2k",
+      "impl": "current",
+      "depth": 4,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 772.2,
+      "p50_ms": 234.4,
+      "p95_ms": 648.7,
+      "max_ms": 772.2,
+      "statements_per_call": [
+        52
+      ],
+      "failure": null,
+      "cycles": 45,
+      "lengths": [
+        3,
+        4
+      ],
+      "identities_sha": "3be32afa05add173",
+      "verdict": "reported"
+    },
+    {
+      "family": "u2k",
+      "impl": "dfs_exhaustive",
+      "depth": 4,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 218.3,
+      "p50_ms": 97.5,
+      "p95_ms": 109.4,
+      "max_ms": 218.3,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4
+      ],
+      "identities_sha": "e63d844d08e3f83a",
+      "verdict": "reported"
+    },
+    {
+      "family": "u2k",
+      "impl": "cte",
+      "depth": 6,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 6726.5,
+      "p50_ms": 6627.8,
+      "p95_ms": 6679.1,
+      "max_ms": 6726.5,
+      "statements_per_call": [
+        2
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4,
+        5,
+        6
+      ],
+      "identities_sha": "953aad9f884e3c58",
+      "plan": {
+        "execution_ms": 6784.663,
+        "planning_ms": 0.512,
+        "shared_hit_blocks": 6287,
+        "shared_read_blocks": 0,
+        "temp_read_blocks": 103090,
+        "temp_written_blocks": 206420,
+        "recursive_union_rows": 2910965
+      },
+      "p95_bar_ms": 500.0,
+      "verdict": "FAIL"
+    },
+    {
+      "family": "u2k",
+      "impl": "dfs",
+      "depth": 6,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 190.3,
+      "p50_ms": 68.0,
+      "p95_ms": 80.0,
+      "max_ms": 190.3,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4,
+        5,
+        6
+      ],
+      "identities_sha": "953aad9f884e3c58",
+      "p95_bar_ms": 500.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "u2k",
+      "impl": "current",
+      "depth": 6,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 6335.9,
+      "p50_ms": 5802.6,
+      "p95_ms": 6229.2,
+      "max_ms": 6335.9,
+      "statements_per_call": [
+        9765
+      ],
+      "failure": null,
+      "cycles": 6434,
+      "lengths": [
+        3,
+        4,
+        5,
+        6
+      ],
+      "identities_sha": "c05a991ef2b21cae",
+      "verdict": "reported"
+    },
+    {
+      "family": "u2k",
+      "impl": "dfs_exhaustive",
+      "depth": 6,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 4309.3,
+      "p50_ms": 4240.6,
+      "p95_ms": 4300.3,
+      "max_ms": 4311.0,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4,
+        5,
+        6
+      ],
+      "identities_sha": "953aad9f884e3c58",
+      "verdict": "reported"
+    },
+    {
+      "family": "u2k",
+      "impl": "cte",
+      "depth": 7,
+      "scope": "global",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: DBAPIError: (sqlalchemy.dialects.postgresql.asyncpg.Error) <class 'asyncpg.exceptions.QueryCanceledError'>: canceling statement due to statement timeout\n[SQL: \nWITH RECURSIVE e AS MATERIALIZED (\n        SELECT d.id, d.debtor_id AS src, d.creditor_id AS dst, d.amount\n        FROM debts d\n        JOIN trust_lines t ON t.from_participant_id = d.creditor_id\n                          AND t.to_participant_id = d.debtor_id\n                          AND t.equivalent_id = d.equivalent_id\n                ",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "p95_bar_ms": 2000.0,
+      "verdict": "FAIL"
+    },
+    {
+      "family": "u2k",
+      "impl": "dfs",
+      "depth": 7,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 207.7,
+      "p50_ms": 87.9,
+      "p95_ms": 101.4,
+      "max_ms": 207.7,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "identities_sha": "9a334439717cdd50",
+      "p95_bar_ms": 2000.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "u2k",
+      "impl": "current",
+      "depth": 7,
+      "scope": "global",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: killed: silent for 15 s",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "verdict": "reported"
+    },
+    {
+      "family": "u2k",
+      "impl": "dfs_exhaustive",
+      "depth": 7,
+      "scope": "global",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: DetectorTimeout: ",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "verdict": "reported"
+    },
+    {
+      "family": "u2k",
+      "impl": "cte",
+      "depth": 10,
+      "scope": "global",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: DBAPIError: (sqlalchemy.dialects.postgresql.asyncpg.Error) <class 'asyncpg.exceptions.QueryCanceledError'>: canceling statement due to statement timeout\n[SQL: \nWITH RECURSIVE e AS MATERIALIZED (\n        SELECT d.id, d.debtor_id AS src, d.creditor_id AS dst, d.amount\n        FROM debts d\n        JOIN trust_lines t ON t.from_participant_id = d.creditor_id\n                          AND t.to_participant_id = d.debtor_id\n                          AND t.equivalent_id = d.equivalent_id\n                ",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "p95_bar_ms": 2000.0,
+      "verdict": "FAIL"
+    },
+    {
+      "family": "u2k",
+      "impl": "dfs",
+      "depth": 10,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 137.0,
+      "p50_ms": 12.9,
+      "p95_ms": 26.9,
+      "max_ms": 137.0,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "identities_sha": "1745071420968d18",
+      "p95_bar_ms": 2000.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "u2k",
+      "impl": "current",
+      "depth": 10,
+      "scope": "global",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: killed: silent for 15 s",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "verdict": "reported"
+    },
+    {
+      "family": "u2k",
+      "impl": "dfs_exhaustive",
+      "depth": 10,
+      "scope": "global",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: DetectorTimeout: ",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "verdict": "reported"
+    },
+    {
+      "family": "u2k",
+      "impl": "cte",
+      "depth": 3,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 133.2,
+      "p50_ms": 4.7,
+      "p95_ms": 5.6,
+      "max_ms": 133.2,
+      "statements_per_call": [
+        2
+      ],
+      "failure": null,
+      "cycles": 38,
+      "lengths": [
+        3
+      ],
+      "identities_sha": "350a8fad3600867f",
+      "plan": {
+        "execution_ms": 3.316,
+        "planning_ms": 0.693,
+        "shared_hit_blocks": 1769,
+        "shared_read_blocks": 0,
+        "temp_read_blocks": 0,
+        "temp_written_blocks": 0,
+        "recursive_union_rows": 1591
+      },
+      "p95_bar_ms": 500.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "u2k",
+      "impl": "dfs",
+      "depth": 3,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 135.6,
+      "p50_ms": 4.7,
+      "p95_ms": 5.9,
+      "max_ms": 135.6,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 38,
+      "lengths": [
+        3
+      ],
+      "identities_sha": "350a8fad3600867f",
+      "p95_bar_ms": 500.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "u2k",
+      "impl": "current",
+      "depth": 3,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 189.6,
+      "p50_ms": 50.2,
+      "p95_ms": 63.6,
+      "max_ms": 189.6,
+      "statements_per_call": [
+        39
+      ],
+      "failure": null,
+      "cycles": 33,
+      "lengths": [
+        3
+      ],
+      "identities_sha": "41d0c2a82cdd1b7b",
+      "verdict": "reported"
+    },
+    {
+      "family": "u2k",
+      "impl": "dfs_exhaustive",
+      "depth": 3,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 131.6,
+      "p50_ms": 4.5,
+      "p95_ms": 5.4,
+      "max_ms": 131.6,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 38,
+      "lengths": [
+        3
+      ],
+      "identities_sha": "350a8fad3600867f",
+      "verdict": "reported"
+    },
+    {
+      "family": "u2k",
+      "impl": "cte",
+      "depth": 4,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 139.4,
+      "p50_ms": 9.0,
+      "p95_ms": 9.8,
+      "max_ms": 139.4,
+      "statements_per_call": [
+        2
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4
+      ],
+      "identities_sha": "10b5df7a654c2d42",
+      "plan": {
+        "execution_ms": 7.263,
+        "planning_ms": 0.878,
+        "shared_hit_blocks": 1769,
+        "shared_read_blocks": 0,
+        "temp_read_blocks": 0,
+        "temp_written_blocks": 0,
+        "recursive_union_rows": 4369
+      },
+      "p95_bar_ms": 500.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "u2k",
+      "impl": "dfs",
+      "depth": 4,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 132.9,
+      "p50_ms": 7.4,
+      "p95_ms": 8.5,
+      "max_ms": 132.9,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4
+      ],
+      "identities_sha": "10b5df7a654c2d42",
+      "p95_bar_ms": 500.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "u2k",
+      "impl": "current",
+      "depth": 4,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 545.3,
+      "p50_ms": 413.5,
+      "p95_ms": 425.1,
+      "max_ms": 768.4,
+      "statements_per_call": [
+        54
+      ],
+      "failure": null,
+      "cycles": 47,
+      "lengths": [
+        3,
+        4
+      ],
+      "identities_sha": "1170443723183051",
+      "verdict": "reported"
+    },
+    {
+      "family": "u2k",
+      "impl": "dfs_exhaustive",
+      "depth": 4,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 137.0,
+      "p50_ms": 7.0,
+      "p95_ms": 8.2,
+      "max_ms": 137.0,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4
+      ],
+      "identities_sha": "10b5df7a654c2d42",
+      "verdict": "reported"
+    },
+    {
+      "family": "u2k",
+      "impl": "cte",
+      "depth": 6,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 230.7,
+      "p50_ms": 94.5,
+      "p95_ms": 111.8,
+      "max_ms": 230.7,
+      "statements_per_call": [
+        2
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4,
+        5,
+        6
+      ],
+      "identities_sha": "a348f8628d4cff9d",
+      "plan": {
+        "execution_ms": 94.623,
+        "planning_ms": 0.916,
+        "shared_hit_blocks": 1769,
+        "shared_read_blocks": 0,
+        "temp_read_blocks": 1239,
+        "temp_written_blocks": 2628,
+        "recursive_union_rows": 40550
+      },
+      "p95_bar_ms": 500.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "u2k",
+      "impl": "dfs",
+      "depth": 6,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 141.5,
+      "p50_ms": 17.1,
+      "p95_ms": 18.8,
+      "max_ms": 141.5,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4,
+        5,
+        6
+      ],
+      "identities_sha": "a348f8628d4cff9d",
+      "p95_bar_ms": 500.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "u2k",
+      "impl": "current",
+      "depth": 6,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 676.3,
+      "p50_ms": 537.4,
+      "p95_ms": 565.1,
+      "max_ms": 887.9,
+      "statements_per_call": [
+        268
+      ],
+      "failure": null,
+      "cycles": 173,
+      "lengths": [
+        3,
+        4,
+        5,
+        6
+      ],
+      "identities_sha": "d12b1b50582db812",
+      "verdict": "reported"
+    },
+    {
+      "family": "u2k",
+      "impl": "dfs_exhaustive",
+      "depth": 6,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 163.0,
+      "p50_ms": 36.6,
+      "p95_ms": 38.3,
+      "max_ms": 163.0,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4,
+        5,
+        6
+      ],
+      "identities_sha": "a348f8628d4cff9d",
+      "verdict": "reported"
+    },
+    {
+      "family": "u2k",
+      "impl": "cte",
+      "depth": 7,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 402.6,
+      "p50_ms": 285.0,
+      "p95_ms": 291.3,
+      "max_ms": 402.6,
+      "statements_per_call": [
+        2
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "identities_sha": "c7fc20068d8875ff",
+      "plan": {
+        "execution_ms": 290.332,
+        "planning_ms": 0.948,
+        "shared_hit_blocks": 1769,
+        "shared_read_blocks": 0,
+        "temp_read_blocks": 4857,
+        "temp_written_blocks": 9971,
+        "recursive_union_rows": 133544
+      },
+      "p95_bar_ms": 2000.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "u2k",
+      "impl": "dfs",
+      "depth": 7,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 153.7,
+      "p50_ms": 22.3,
+      "p95_ms": 23.6,
+      "max_ms": 153.7,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "identities_sha": "c7fc20068d8875ff",
+      "p95_bar_ms": 2000.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "u2k",
+      "impl": "current",
+      "depth": 7,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 1214.7,
+      "p50_ms": 965.5,
+      "p95_ms": 1073.9,
+      "max_ms": 1298.5,
+      "statements_per_call": [
+        1014
+      ],
+      "failure": null,
+      "cycles": 518,
+      "lengths": [
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "identities_sha": "9293c114c9afa3f4",
+      "verdict": "reported"
+    },
+    {
+      "family": "u2k",
+      "impl": "dfs_exhaustive",
+      "depth": 7,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 244.7,
+      "p50_ms": 114.5,
+      "p95_ms": 116.6,
+      "max_ms": 244.7,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "identities_sha": "c7fc20068d8875ff",
+      "verdict": "reported"
+    },
+    {
+      "family": "u2k",
+      "impl": "cte",
+      "depth": 10,
+      "scope": "perimeter",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: DBAPIError: (sqlalchemy.dialects.postgresql.asyncpg.Error) <class 'asyncpg.exceptions.QueryCanceledError'>: canceling statement due to statement timeout\n[SQL: \nWITH RECURSIVE e AS MATERIALIZED (\n        SELECT d.id, d.debtor_id AS src, d.creditor_id AS dst, d.amount\n        FROM debts d\n        JOIN trust_lines t ON t.from_participant_id = d.creditor_id\n                          AND t.to_participant_id = d.debtor_id\n                          AND t.equivalent_id = d.equivalent_id\n                ",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "p95_bar_ms": 2000.0,
+      "verdict": "FAIL"
+    },
+    {
+      "family": "u2k",
+      "impl": "dfs",
+      "depth": 10,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 135.9,
+      "p50_ms": 6.8,
+      "p95_ms": 7.6,
+      "max_ms": 135.9,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "identities_sha": "d5c2b57a403f3b1c",
+      "p95_bar_ms": 2000.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "u2k",
+      "impl": "current",
+      "depth": 10,
+      "scope": "perimeter",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: killed: silent for 15 s",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "verdict": "reported"
+    },
+    {
+      "family": "u2k",
+      "impl": "dfs_exhaustive",
+      "depth": 10,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 4585.1,
+      "p50_ms": 4500.5,
+      "p95_ms": 4614.3,
+      "max_ms": 4626.6,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "identities_sha": "d5c2b57a403f3b1c",
+      "verdict": "reported"
+    },
+    {
+      "family": "h4k",
+      "impl": "cte",
+      "depth": 3,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 184.2,
+      "p50_ms": 53.8,
+      "p95_ms": 55.8,
+      "max_ms": 184.2,
+      "statements_per_call": [
+        2
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3
+      ],
+      "identities_sha": "50bf196451d10f58",
+      "plan": {
+        "execution_ms": 53.358,
+        "planning_ms": 0.506,
+        "shared_hit_blocks": 12235,
+        "shared_read_blocks": 0,
+        "temp_read_blocks": 414,
+        "temp_written_blocks": 910,
+        "recursive_union_rows": 21091
+      },
+      "p95_bar_ms": 2000.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "h4k",
+      "impl": "dfs",
+      "depth": 3,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 164.7,
+      "p50_ms": 42.4,
+      "p95_ms": 60.6,
+      "max_ms": 164.7,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3
+      ],
+      "identities_sha": "50bf196451d10f58",
+      "p95_bar_ms": 2000.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "h4k",
+      "impl": "current",
+      "depth": 3,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 204.2,
+      "p50_ms": 39.7,
+      "p95_ms": 63.2,
+      "max_ms": 204.2,
+      "statements_per_call": [
+        38
+      ],
+      "failure": null,
+      "cycles": 34,
+      "lengths": [
+        3
+      ],
+      "identities_sha": "0bafc0946e8079f8",
+      "verdict": "reported"
+    },
+    {
+      "family": "h4k",
+      "impl": "dfs_exhaustive",
+      "depth": 3,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 169.4,
+      "p50_ms": 48.0,
+      "p95_ms": 63.6,
+      "max_ms": 169.4,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3
+      ],
+      "identities_sha": "50bf196451d10f58",
+      "verdict": "reported"
+    },
+    {
+      "family": "h4k",
+      "impl": "cte",
+      "depth": 4,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 394.1,
+      "p50_ms": 266.6,
+      "p95_ms": 272.1,
+      "max_ms": 394.1,
+      "statements_per_call": [
+        2
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4
+      ],
+      "identities_sha": "80cd711ec2495511",
+      "plan": {
+        "execution_ms": 277.722,
+        "planning_ms": 0.548,
+        "shared_hit_blocks": 12235,
+        "shared_read_blocks": 0,
+        "temp_read_blocks": 3364,
+        "temp_written_blocks": 6860,
+        "recursive_union_rows": 127242
+      },
+      "p95_bar_ms": 2000.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "h4k",
+      "impl": "dfs",
+      "depth": 4,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 192.9,
+      "p50_ms": 69.4,
+      "p95_ms": 86.6,
+      "max_ms": 192.9,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4
+      ],
+      "identities_sha": "80cd711ec2495511",
+      "p95_bar_ms": 2000.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "h4k",
+      "impl": "current",
+      "depth": 4,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 938.3,
+      "p50_ms": 404.9,
+      "p95_ms": 798.9,
+      "max_ms": 938.3,
+      "statements_per_call": [
+        52
+      ],
+      "failure": null,
+      "cycles": 47,
+      "lengths": [
+        3,
+        4
+      ],
+      "identities_sha": "7cdca7182f453ac9",
+      "verdict": "reported"
+    },
+    {
+      "family": "h4k",
+      "impl": "dfs_exhaustive",
+      "depth": 4,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 331.0,
+      "p50_ms": 209.7,
+      "p95_ms": 230.4,
+      "max_ms": 331.0,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4
+      ],
+      "identities_sha": "80cd711ec2495511",
+      "verdict": "reported"
+    },
+    {
+      "family": "h4k",
+      "impl": "cte",
+      "depth": 6,
+      "scope": "global",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: DBAPIError: (sqlalchemy.dialects.postgresql.asyncpg.Error) <class 'asyncpg.exceptions.QueryCanceledError'>: canceling statement due to statement timeout\n[SQL: \nWITH RECURSIVE e AS MATERIALIZED (\n        SELECT d.id, d.debtor_id AS src, d.creditor_id AS dst, d.amount\n        FROM debts d\n        JOIN trust_lines t ON t.from_participant_id = d.creditor_id\n                          AND t.to_participant_id = d.debtor_id\n                          AND t.equivalent_id = d.equivalent_id\n                ",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "p95_bar_ms": 2000.0,
+      "verdict": "FAIL"
+    },
+    {
+      "family": "h4k",
+      "impl": "dfs",
+      "depth": 6,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 279.1,
+      "p50_ms": 154.7,
+      "p95_ms": 170.8,
+      "max_ms": 279.1,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4,
+        5,
+        6
+      ],
+      "identities_sha": "aa170eb13f081f87",
+      "p95_bar_ms": 2000.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "h4k",
+      "impl": "current",
+      "depth": 6,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 3075.2,
+      "p50_ms": 2578.7,
+      "p95_ms": 2941.3,
+      "max_ms": 3075.2,
+      "statements_per_call": [
+        2865
+      ],
+      "failure": null,
+      "cycles": 1622,
+      "lengths": [
+        3,
+        4,
+        5,
+        6
+      ],
+      "identities_sha": "b870a66b4bff820d",
+      "verdict": "reported"
+    },
+    {
+      "family": "h4k",
+      "impl": "dfs_exhaustive",
+      "depth": 6,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 9753.3,
+      "p50_ms": 9693.6,
+      "p95_ms": 9768.9,
+      "max_ms": 9773.2,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4,
+        5,
+        6
+      ],
+      "identities_sha": "aa170eb13f081f87",
+      "verdict": "reported"
+    },
+    {
+      "family": "h4k",
+      "impl": "cte",
+      "depth": 7,
+      "scope": "global",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: DBAPIError: (sqlalchemy.dialects.postgresql.asyncpg.Error) <class 'asyncpg.exceptions.QueryCanceledError'>: canceling statement due to statement timeout\n[SQL: \nWITH RECURSIVE e AS MATERIALIZED (\n        SELECT d.id, d.debtor_id AS src, d.creditor_id AS dst, d.amount\n        FROM debts d\n        JOIN trust_lines t ON t.from_participant_id = d.creditor_id\n                          AND t.to_participant_id = d.debtor_id\n                          AND t.equivalent_id = d.equivalent_id\n                ",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "p95_bar_ms": 2000.0,
+      "verdict": "FAIL"
+    },
+    {
+      "family": "h4k",
+      "impl": "dfs",
+      "depth": 7,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 341.5,
+      "p50_ms": 221.1,
+      "p95_ms": 237.5,
+      "max_ms": 341.5,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "identities_sha": "3db382a8dc27ecb4",
+      "p95_bar_ms": 2000.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "h4k",
+      "impl": "current",
+      "depth": 7,
+      "scope": "global",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: killed: silent for 15 s",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "verdict": "reported"
+    },
+    {
+      "family": "h4k",
+      "impl": "dfs_exhaustive",
+      "depth": 7,
+      "scope": "global",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: DetectorTimeout: ",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "verdict": "reported"
+    },
+    {
+      "family": "h4k",
+      "impl": "cte",
+      "depth": 10,
+      "scope": "global",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: DBAPIError: (sqlalchemy.dialects.postgresql.asyncpg.Error) <class 'asyncpg.exceptions.QueryCanceledError'>: canceling statement due to statement timeout\n[SQL: \nWITH RECURSIVE e AS MATERIALIZED (\n        SELECT d.id, d.debtor_id AS src, d.creditor_id AS dst, d.amount\n        FROM debts d\n        JOIN trust_lines t ON t.from_participant_id = d.creditor_id\n                          AND t.to_participant_id = d.debtor_id\n                          AND t.equivalent_id = d.equivalent_id\n                ",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "p95_bar_ms": 2000.0,
+      "verdict": "FAIL"
+    },
+    {
+      "family": "h4k",
+      "impl": "dfs",
+      "depth": 10,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 143.8,
+      "p50_ms": 21.3,
+      "p95_ms": 36.5,
+      "max_ms": 143.8,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "identities_sha": "3ed6967d95278578",
+      "p95_bar_ms": 2000.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "h4k",
+      "impl": "current",
+      "depth": 10,
+      "scope": "global",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: killed: silent for 15 s",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "verdict": "reported"
+    },
+    {
+      "family": "h4k",
+      "impl": "dfs_exhaustive",
+      "depth": 10,
+      "scope": "global",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: DetectorTimeout: ",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "verdict": "reported"
+    },
+    {
+      "family": "h4k",
+      "impl": "cte",
+      "depth": 3,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 136.3,
+      "p50_ms": 7.8,
+      "p95_ms": 9.0,
+      "max_ms": 136.3,
+      "statements_per_call": [
+        2
+      ],
+      "failure": null,
+      "cycles": 31,
+      "lengths": [
+        3
+      ],
+      "identities_sha": "6448e07a6cb0c0c8",
+      "plan": {
+        "execution_ms": 7.056,
+        "planning_ms": 1.152,
+        "shared_hit_blocks": 3356,
+        "shared_read_blocks": 0,
+        "temp_read_blocks": 0,
+        "temp_written_blocks": 0,
+        "recursive_union_rows": 3302
+      },
+      "p95_bar_ms": 2000.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "h4k",
+      "impl": "dfs",
+      "depth": 3,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 140.8,
+      "p50_ms": 8.9,
+      "p95_ms": 10.8,
+      "max_ms": 140.8,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 31,
+      "lengths": [
+        3
+      ],
+      "identities_sha": "6448e07a6cb0c0c8",
+      "p95_bar_ms": 2000.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "h4k",
+      "impl": "current",
+      "depth": 3,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 189.4,
+      "p50_ms": 53.0,
+      "p95_ms": 68.1,
+      "max_ms": 189.4,
+      "statements_per_call": [
+        36
+      ],
+      "failure": null,
+      "cycles": 31,
+      "lengths": [
+        3
+      ],
+      "identities_sha": "6448e07a6cb0c0c8",
+      "verdict": "reported"
+    },
+    {
+      "family": "h4k",
+      "impl": "dfs_exhaustive",
+      "depth": 3,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 141.3,
+      "p50_ms": 8.7,
+      "p95_ms": 10.3,
+      "max_ms": 141.3,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 31,
+      "lengths": [
+        3
+      ],
+      "identities_sha": "6448e07a6cb0c0c8",
+      "verdict": "reported"
+    },
+    {
+      "family": "h4k",
+      "impl": "cte",
+      "depth": 4,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 146.5,
+      "p50_ms": 17.9,
+      "p95_ms": 19.9,
+      "max_ms": 146.5,
+      "statements_per_call": [
+        2
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4
+      ],
+      "identities_sha": "931efb3088681c46",
+      "plan": {
+        "execution_ms": 16.688,
+        "planning_ms": 1.041,
+        "shared_hit_blocks": 3356,
+        "shared_read_blocks": 0,
+        "temp_read_blocks": 0,
+        "temp_written_blocks": 0,
+        "recursive_union_rows": 10283
+      },
+      "p95_bar_ms": 2000.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "h4k",
+      "impl": "dfs",
+      "depth": 4,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 139.9,
+      "p50_ms": 14.9,
+      "p95_ms": 16.6,
+      "max_ms": 139.9,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4
+      ],
+      "identities_sha": "931efb3088681c46",
+      "p95_bar_ms": 2000.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "h4k",
+      "impl": "current",
+      "depth": 4,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 554.3,
+      "p50_ms": 416.4,
+      "p95_ms": 442.1,
+      "max_ms": 762.0,
+      "statements_per_call": [
+        50
+      ],
+      "failure": null,
+      "cycles": 43,
+      "lengths": [
+        3,
+        4
+      ],
+      "identities_sha": "29ae69d9670dbe49",
+      "verdict": "reported"
+    },
+    {
+      "family": "h4k",
+      "impl": "dfs_exhaustive",
+      "depth": 4,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 144.8,
+      "p50_ms": 14.8,
+      "p95_ms": 17.2,
+      "max_ms": 144.8,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4
+      ],
+      "identities_sha": "931efb3088681c46",
+      "verdict": "reported"
+    },
+    {
+      "family": "h4k",
+      "impl": "cte",
+      "depth": 6,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 357.2,
+      "p50_ms": 230.5,
+      "p95_ms": 244.2,
+      "max_ms": 357.2,
+      "statements_per_call": [
+        2
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4,
+        5,
+        6
+      ],
+      "identities_sha": "cf3c423dc56f9ce8",
+      "plan": {
+        "execution_ms": 238.835,
+        "planning_ms": 0.968,
+        "shared_hit_blocks": 3356,
+        "shared_read_blocks": 0,
+        "temp_read_blocks": 3906,
+        "temp_written_blocks": 8147,
+        "recursive_union_rows": 122884
+      },
+      "p95_bar_ms": 2000.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "h4k",
+      "impl": "dfs",
+      "depth": 6,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 163.7,
+      "p50_ms": 35.7,
+      "p95_ms": 36.9,
+      "max_ms": 163.7,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4,
+        5,
+        6
+      ],
+      "identities_sha": "cf3c423dc56f9ce8",
+      "p95_bar_ms": 2000.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "h4k",
+      "impl": "current",
+      "depth": 6,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 637.8,
+      "p50_ms": 523.7,
+      "p95_ms": 541.8,
+      "max_ms": 842.8,
+      "statements_per_call": [
+        156
+      ],
+      "failure": null,
+      "cycles": 105,
+      "lengths": [
+        3,
+        4,
+        5,
+        6
+      ],
+      "identities_sha": "122734e85bb181de",
+      "verdict": "reported"
+    },
+    {
+      "family": "h4k",
+      "impl": "dfs_exhaustive",
+      "depth": 6,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 242.6,
+      "p50_ms": 117.6,
+      "p95_ms": 122.1,
+      "max_ms": 358.4,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4,
+        5,
+        6
+      ],
+      "identities_sha": "cf3c423dc56f9ce8",
+      "verdict": "reported"
+    },
+    {
+      "family": "h4k",
+      "impl": "cte",
+      "depth": 7,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 1076.9,
+      "p50_ms": 907.5,
+      "p95_ms": 953.9,
+      "max_ms": 1076.9,
+      "statements_per_call": [
+        2
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "identities_sha": "f384b99f9e58f97a",
+      "plan": {
+        "execution_ms": 953.192,
+        "planning_ms": 1.111,
+        "shared_hit_blocks": 3356,
+        "shared_read_blocks": 0,
+        "temp_read_blocks": 17104,
+        "temp_written_blocks": 34764,
+        "recursive_union_rows": 458409
+      },
+      "p95_bar_ms": 2000.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "h4k",
+      "impl": "dfs",
+      "depth": 7,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 179.7,
+      "p50_ms": 48.9,
+      "p95_ms": 51.1,
+      "max_ms": 179.7,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "identities_sha": "f384b99f9e58f97a",
+      "p95_bar_ms": 2000.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "h4k",
+      "impl": "current",
+      "depth": 7,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 888.2,
+      "p50_ms": 748.1,
+      "p95_ms": 777.1,
+      "max_ms": 1098.8,
+      "statements_per_call": [
+        547
+      ],
+      "failure": null,
+      "cycles": 334,
+      "lengths": [
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "identities_sha": "11135c437a1bdc0c",
+      "verdict": "reported"
+    },
+    {
+      "family": "h4k",
+      "impl": "dfs_exhaustive",
+      "depth": 7,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 545.9,
+      "p50_ms": 412.5,
+      "p95_ms": 425.4,
+      "max_ms": 545.9,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "identities_sha": "f384b99f9e58f97a",
+      "verdict": "reported"
+    },
+    {
+      "family": "h4k",
+      "impl": "cte",
+      "depth": 10,
+      "scope": "perimeter",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: DBAPIError: (sqlalchemy.dialects.postgresql.asyncpg.Error) <class 'asyncpg.exceptions.QueryCanceledError'>: canceling statement due to statement timeout\n[SQL: \nWITH RECURSIVE e AS MATERIALIZED (\n        SELECT d.id, d.debtor_id AS src, d.creditor_id AS dst, d.amount\n        FROM debts d\n        JOIN trust_lines t ON t.from_participant_id = d.creditor_id\n                          AND t.to_participant_id = d.debtor_id\n                          AND t.equivalent_id = d.equivalent_id\n                ",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "p95_bar_ms": 2000.0,
+      "verdict": "FAIL"
+    },
+    {
+      "family": "h4k",
+      "impl": "dfs",
+      "depth": 10,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 136.4,
+      "p50_ms": 9.4,
+      "p95_ms": 10.9,
+      "max_ms": 136.4,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "identities_sha": "245d8909a3875955",
+      "p95_bar_ms": 2000.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "h4k",
+      "impl": "current",
+      "depth": 10,
+      "scope": "perimeter",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: killed: silent for 15 s",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "verdict": "reported"
+    },
+    {
+      "family": "h4k",
+      "impl": "dfs_exhaustive",
+      "depth": 10,
+      "scope": "perimeter",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: DetectorTimeout: ",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "verdict": "reported"
+    },
+    {
+      "family": "s2k",
+      "impl": "cte",
+      "depth": 3,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 173.1,
+      "p50_ms": 45.9,
+      "p95_ms": 47.9,
+      "max_ms": 173.1,
+      "statements_per_call": [
+        2
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3
+      ],
+      "identities_sha": "c5b5095388844ad5",
+      "plan": {
+        "execution_ms": 41.932,
+        "planning_ms": 0.482,
+        "shared_hit_blocks": 6289,
+        "shared_read_blocks": 0,
+        "temp_read_blocks": 0,
+        "temp_written_blocks": 433,
+        "recursive_union_rows": 18094
+      },
+      "p95_bar_ms": 500.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "s2k",
+      "impl": "dfs",
+      "depth": 3,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 147.3,
+      "p50_ms": 25.3,
+      "p95_ms": 39.7,
+      "max_ms": 147.3,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3
+      ],
+      "identities_sha": "c5b5095388844ad5",
+      "p95_bar_ms": 500.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "s2k",
+      "impl": "current",
+      "depth": 3,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 194.9,
+      "p50_ms": 31.8,
+      "p95_ms": 61.7,
+      "max_ms": 194.9,
+      "statements_per_call": [
+        38
+      ],
+      "failure": null,
+      "cycles": 34,
+      "lengths": [
+        3
+      ],
+      "identities_sha": "401357dcefdd323b",
+      "verdict": "reported"
+    },
+    {
+      "family": "s2k",
+      "impl": "dfs_exhaustive",
+      "depth": 3,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 160.4,
+      "p50_ms": 40.6,
+      "p95_ms": 55.1,
+      "max_ms": 160.4,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3
+      ],
+      "identities_sha": "c5b5095388844ad5",
+      "verdict": "reported"
+    },
+    {
+      "family": "s2k",
+      "impl": "cte",
+      "depth": 4,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 477.8,
+      "p50_ms": 358.7,
+      "p95_ms": 364.0,
+      "max_ms": 477.8,
+      "statements_per_call": [
+        2
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4
+      ],
+      "identities_sha": "bbdbb611cc42c969",
+      "plan": {
+        "execution_ms": 366.093,
+        "planning_ms": 0.494,
+        "shared_hit_blocks": 6289,
+        "shared_read_blocks": 0,
+        "temp_read_blocks": 3787,
+        "temp_written_blocks": 7984,
+        "recursive_union_rows": 150410
+      },
+      "p95_bar_ms": 500.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "s2k",
+      "impl": "dfs",
+      "depth": 4,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 168.5,
+      "p50_ms": 44.4,
+      "p95_ms": 57.1,
+      "max_ms": 168.5,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4
+      ],
+      "identities_sha": "bbdbb611cc42c969",
+      "p95_bar_ms": 500.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "s2k",
+      "impl": "current",
+      "depth": 4,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 737.2,
+      "p50_ms": 184.7,
+      "p95_ms": 602.2,
+      "max_ms": 737.2,
+      "statements_per_call": [
+        52
+      ],
+      "failure": null,
+      "cycles": 47,
+      "lengths": [
+        3,
+        4
+      ],
+      "identities_sha": "7c5aa78f3de6e903",
+      "verdict": "reported"
+    },
+    {
+      "family": "s2k",
+      "impl": "dfs_exhaustive",
+      "depth": 4,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 412.5,
+      "p50_ms": 291.0,
+      "p95_ms": 299.8,
+      "max_ms": 412.5,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4
+      ],
+      "identities_sha": "bbdbb611cc42c969",
+      "verdict": "reported"
+    },
+    {
+      "family": "s2k",
+      "impl": "cte",
+      "depth": 6,
+      "scope": "global",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: DBAPIError: (sqlalchemy.dialects.postgresql.asyncpg.Error) <class 'asyncpg.exceptions.QueryCanceledError'>: canceling statement due to statement timeout\n[SQL: \nWITH RECURSIVE e AS MATERIALIZED (\n        SELECT d.id, d.debtor_id AS src, d.creditor_id AS dst, d.amount\n        FROM debts d\n        JOIN trust_lines t ON t.from_participant_id = d.creditor_id\n                          AND t.to_participant_id = d.debtor_id\n                          AND t.equivalent_id = d.equivalent_id\n                ",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "p95_bar_ms": 500.0,
+      "verdict": "FAIL"
+    },
+    {
+      "family": "s2k",
+      "impl": "dfs",
+      "depth": 6,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 203.7,
+      "p50_ms": 84.3,
+      "p95_ms": 97.2,
+      "max_ms": 203.7,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4,
+        5,
+        6
+      ],
+      "identities_sha": "90c40ee55da967ff",
+      "p95_bar_ms": 500.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "s2k",
+      "impl": "current",
+      "depth": 6,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 12634.5,
+      "p50_ms": 12607.0,
+      "p95_ms": 12905.4,
+      "max_ms": 13044.6,
+      "statements_per_call": [
+        13309
+      ],
+      "failure": null,
+      "cycles": 9577,
+      "lengths": [
+        3,
+        4,
+        5,
+        6
+      ],
+      "identities_sha": "0b68be811a378da8",
+      "verdict": "reported"
+    },
+    {
+      "family": "s2k",
+      "impl": "dfs_exhaustive",
+      "depth": 6,
+      "scope": "global",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: DetectorTimeout: ",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "verdict": "reported"
+    },
+    {
+      "family": "s2k",
+      "impl": "cte",
+      "depth": 7,
+      "scope": "global",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: DBAPIError: (sqlalchemy.dialects.postgresql.asyncpg.Error) <class 'asyncpg.exceptions.QueryCanceledError'>: canceling statement due to statement timeout\n[SQL: \nWITH RECURSIVE e AS MATERIALIZED (\n        SELECT d.id, d.debtor_id AS src, d.creditor_id AS dst, d.amount\n        FROM debts d\n        JOIN trust_lines t ON t.from_participant_id = d.creditor_id\n                          AND t.to_participant_id = d.debtor_id\n                          AND t.equivalent_id = d.equivalent_id\n                ",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "p95_bar_ms": 2000.0,
+      "verdict": "FAIL"
+    },
+    {
+      "family": "s2k",
+      "impl": "dfs",
+      "depth": 7,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 270.9,
+      "p50_ms": 151.8,
+      "p95_ms": 167.1,
+      "max_ms": 270.9,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "identities_sha": "c68ae504dace3e3f",
+      "p95_bar_ms": 2000.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "s2k",
+      "impl": "current",
+      "depth": 7,
+      "scope": "global",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: killed: silent for 15 s",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "verdict": "reported"
+    },
+    {
+      "family": "s2k",
+      "impl": "dfs_exhaustive",
+      "depth": 7,
+      "scope": "global",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: DetectorTimeout: ",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "verdict": "reported"
+    },
+    {
+      "family": "s2k",
+      "impl": "cte",
+      "depth": 10,
+      "scope": "global",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: DBAPIError: (sqlalchemy.dialects.postgresql.asyncpg.Error) <class 'asyncpg.exceptions.QueryCanceledError'>: canceling statement due to statement timeout\n[SQL: \nWITH RECURSIVE e AS MATERIALIZED (\n        SELECT d.id, d.debtor_id AS src, d.creditor_id AS dst, d.amount\n        FROM debts d\n        JOIN trust_lines t ON t.from_participant_id = d.creditor_id\n                          AND t.to_participant_id = d.debtor_id\n                          AND t.equivalent_id = d.equivalent_id\n                ",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "p95_bar_ms": 2000.0,
+      "verdict": "FAIL"
+    },
+    {
+      "family": "s2k",
+      "impl": "dfs",
+      "depth": 10,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 137.8,
+      "p50_ms": 13.2,
+      "p95_ms": 25.3,
+      "max_ms": 137.8,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "identities_sha": "741fd09a437711ae",
+      "p95_bar_ms": 2000.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "s2k",
+      "impl": "current",
+      "depth": 10,
+      "scope": "global",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: killed: silent for 15 s",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "verdict": "reported"
+    },
+    {
+      "family": "s2k",
+      "impl": "dfs_exhaustive",
+      "depth": 10,
+      "scope": "global",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: DetectorTimeout: ",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "verdict": "reported"
+    },
+    {
+      "family": "s2k",
+      "impl": "cte",
+      "depth": 3,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 139.2,
+      "p50_ms": 7.2,
+      "p95_ms": 8.1,
+      "max_ms": 139.2,
+      "statements_per_call": [
+        2
+      ],
+      "failure": null,
+      "cycles": 99,
+      "lengths": [
+        3
+      ],
+      "identities_sha": "c54e0ecb4e4efea0",
+      "plan": {
+        "execution_ms": 5.166,
+        "planning_ms": 0.885,
+        "shared_hit_blocks": 1881,
+        "shared_read_blocks": 0,
+        "temp_read_blocks": 0,
+        "temp_written_blocks": 0,
+        "recursive_union_rows": 2556
+      },
+      "p95_bar_ms": 500.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "s2k",
+      "impl": "dfs",
+      "depth": 3,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 134.6,
+      "p50_ms": 6.9,
+      "p95_ms": 7.6,
+      "max_ms": 134.6,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 99,
+      "lengths": [
+        3
+      ],
+      "identities_sha": "c54e0ecb4e4efea0",
+      "p95_bar_ms": 500.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "s2k",
+      "impl": "current",
+      "depth": 3,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 191.6,
+      "p50_ms": 54.8,
+      "p95_ms": 71.3,
+      "max_ms": 191.6,
+      "statements_per_call": [
+        39
+      ],
+      "failure": null,
+      "cycles": 33,
+      "lengths": [
+        3
+      ],
+      "identities_sha": "229b2759bb087f8c",
+      "verdict": "reported"
+    },
+    {
+      "family": "s2k",
+      "impl": "dfs_exhaustive",
+      "depth": 3,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 136.4,
+      "p50_ms": 6.4,
+      "p95_ms": 7.4,
+      "max_ms": 136.4,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 99,
+      "lengths": [
+        3
+      ],
+      "identities_sha": "c54e0ecb4e4efea0",
+      "verdict": "reported"
+    },
+    {
+      "family": "s2k",
+      "impl": "cte",
+      "depth": 4,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 153.7,
+      "p50_ms": 19.2,
+      "p95_ms": 20.2,
+      "max_ms": 153.7,
+      "statements_per_call": [
+        2
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4
+      ],
+      "identities_sha": "4afb84342f5e3ed0",
+      "plan": {
+        "execution_ms": 18.532,
+        "planning_ms": 0.888,
+        "shared_hit_blocks": 1881,
+        "shared_read_blocks": 0,
+        "temp_read_blocks": 0,
+        "temp_written_blocks": 0,
+        "recursive_union_rows": 10900
+      },
+      "p95_bar_ms": 500.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "s2k",
+      "impl": "dfs",
+      "depth": 4,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 142.5,
+      "p50_ms": 11.4,
+      "p95_ms": 12.7,
+      "max_ms": 142.5,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4
+      ],
+      "identities_sha": "4afb84342f5e3ed0",
+      "p95_bar_ms": 500.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "s2k",
+      "impl": "current",
+      "depth": 4,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 580.4,
+      "p50_ms": 441.7,
+      "p95_ms": 457.4,
+      "max_ms": 843.1,
+      "statements_per_call": [
+        53
+      ],
+      "failure": null,
+      "cycles": 46,
+      "lengths": [
+        3,
+        4
+      ],
+      "identities_sha": "37e505ca8862a7ad",
+      "verdict": "reported"
+    },
+    {
+      "family": "s2k",
+      "impl": "dfs_exhaustive",
+      "depth": 4,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 143.5,
+      "p50_ms": 15.0,
+      "p95_ms": 15.7,
+      "max_ms": 143.5,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4
+      ],
+      "identities_sha": "4afb84342f5e3ed0",
+      "verdict": "reported"
+    },
+    {
+      "family": "s2k",
+      "impl": "cte",
+      "depth": 6,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 568.2,
+      "p50_ms": 448.4,
+      "p95_ms": 464.0,
+      "max_ms": 568.2,
+      "statements_per_call": [
+        2
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4,
+        5,
+        6
+      ],
+      "identities_sha": "5fb5a14fe055f679",
+      "plan": {
+        "execution_ms": 476.873,
+        "planning_ms": 0.916,
+        "shared_hit_blocks": 1881,
+        "shared_read_blocks": 0,
+        "temp_read_blocks": 7419,
+        "temp_written_blocks": 15117,
+        "recursive_union_rows": 219070
+      },
+      "p95_bar_ms": 500.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "s2k",
+      "impl": "dfs",
+      "depth": 6,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 149.1,
+      "p50_ms": 20.1,
+      "p95_ms": 21.4,
+      "max_ms": 149.1,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4,
+        5,
+        6
+      ],
+      "identities_sha": "5fb5a14fe055f679",
+      "p95_bar_ms": 500.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "s2k",
+      "impl": "current",
+      "depth": 6,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 1018.7,
+      "p50_ms": 872.8,
+      "p95_ms": 893.1,
+      "max_ms": 1290.9,
+      "statements_per_call": [
+        762
+      ],
+      "failure": null,
+      "cycles": 611,
+      "lengths": [
+        3,
+        4,
+        5,
+        6
+      ],
+      "identities_sha": "c3791d467609bb3e",
+      "verdict": "reported"
+    },
+    {
+      "family": "s2k",
+      "impl": "dfs_exhaustive",
+      "depth": 6,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 358.0,
+      "p50_ms": 230.2,
+      "p95_ms": 234.5,
+      "max_ms": 358.0,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4,
+        5,
+        6
+      ],
+      "identities_sha": "5fb5a14fe055f679",
+      "verdict": "reported"
+    },
+    {
+      "family": "s2k",
+      "impl": "cte",
+      "depth": 7,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 2263.5,
+      "p50_ms": 2159.3,
+      "p95_ms": 2209.6,
+      "max_ms": 2263.5,
+      "statements_per_call": [
+        2
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "identities_sha": "c453e60bbff54761",
+      "plan": {
+        "execution_ms": 2277.357,
+        "planning_ms": 0.944,
+        "shared_hit_blocks": 1881,
+        "shared_read_blocks": 0,
+        "temp_read_blocks": 39024,
+        "temp_written_blocks": 78327,
+        "recursive_union_rows": 1006093
+      },
+      "p95_bar_ms": 2000.0,
+      "verdict": "FAIL"
+    },
+    {
+      "family": "s2k",
+      "impl": "dfs",
+      "depth": 7,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 160.3,
+      "p50_ms": 29.3,
+      "p95_ms": 30.3,
+      "max_ms": 160.3,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "identities_sha": "c453e60bbff54761",
+      "p95_bar_ms": 2000.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "s2k",
+      "impl": "current",
+      "depth": 7,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 2966.6,
+      "p50_ms": 2875.5,
+      "p95_ms": 2938.6,
+      "max_ms": 3270.6,
+      "statements_per_call": [
+        3988
+      ],
+      "failure": null,
+      "cycles": 2915,
+      "lengths": [
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "identities_sha": "71373778fc903e15",
+      "verdict": "reported"
+    },
+    {
+      "family": "s2k",
+      "impl": "dfs_exhaustive",
+      "depth": 7,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 1158.2,
+      "p50_ms": 1036.1,
+      "p95_ms": 1065.3,
+      "max_ms": 1158.2,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "identities_sha": "c453e60bbff54761",
+      "verdict": "reported"
+    },
+    {
+      "family": "s2k",
+      "impl": "cte",
+      "depth": 10,
+      "scope": "perimeter",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: DBAPIError: (sqlalchemy.dialects.postgresql.asyncpg.Error) <class 'asyncpg.exceptions.QueryCanceledError'>: canceling statement due to statement timeout\n[SQL: \nWITH RECURSIVE e AS MATERIALIZED (\n        SELECT d.id, d.debtor_id AS src, d.creditor_id AS dst, d.amount\n        FROM debts d\n        JOIN trust_lines t ON t.from_participant_id = d.creditor_id\n                          AND t.to_participant_id = d.debtor_id\n                          AND t.equivalent_id = d.equivalent_id\n                ",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "p95_bar_ms": 2000.0,
+      "verdict": "FAIL"
+    },
+    {
+      "family": "s2k",
+      "impl": "dfs",
+      "depth": 10,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 137.3,
+      "p50_ms": 7.1,
+      "p95_ms": 8.0,
+      "max_ms": 137.3,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "identities_sha": "18af9bff629aa99c",
+      "p95_bar_ms": 2000.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "s2k",
+      "impl": "current",
+      "depth": 10,
+      "scope": "perimeter",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: killed: silent for 15 s",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "verdict": "reported"
+    },
+    {
+      "family": "s2k",
+      "impl": "dfs_exhaustive",
+      "depth": 10,
+      "scope": "perimeter",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: DetectorTimeout: ",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "verdict": "reported"
+    },
+    {
+      "family": "d8k",
+      "impl": "cte",
+      "depth": 3,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 769.8,
+      "p50_ms": 627.2,
+      "p95_ms": 644.8,
+      "max_ms": 769.8,
+      "statements_per_call": [
+        2
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3
+      ],
+      "identities_sha": "c5c1c748789346d1",
+      "plan": {
+        "execution_ms": 641.983,
+        "planning_ms": 0.447,
+        "shared_hit_blocks": 24106,
+        "shared_read_blocks": 0,
+        "temp_read_blocks": 3731,
+        "temp_written_blocks": 7609,
+        "recursive_union_rows": 158354
+      },
+      "p95_bar_ms": 2000.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "d8k",
+      "impl": "dfs",
+      "depth": 3,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 222.1,
+      "p50_ms": 99.7,
+      "p95_ms": 123.0,
+      "max_ms": 222.1,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3
+      ],
+      "identities_sha": "c5c1c748789346d1",
+      "p95_bar_ms": 2000.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "d8k",
+      "impl": "current",
+      "depth": 3,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 346.2,
+      "p50_ms": 184.2,
+      "p95_ms": 211.3,
+      "max_ms": 346.2,
+      "statements_per_call": [
+        38
+      ],
+      "failure": null,
+      "cycles": 34,
+      "lengths": [
+        3
+      ],
+      "identities_sha": "a8ab15c236711783",
+      "verdict": "reported"
+    },
+    {
+      "family": "d8k",
+      "impl": "dfs_exhaustive",
+      "depth": 3,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 881.2,
+      "p50_ms": 758.9,
+      "p95_ms": 776.8,
+      "max_ms": 881.2,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3
+      ],
+      "identities_sha": "c5c1c748789346d1",
+      "verdict": "reported"
+    },
+    {
+      "family": "d8k",
+      "impl": "cte",
+      "depth": 4,
+      "scope": "global",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: DBAPIError: (sqlalchemy.dialects.postgresql.asyncpg.Error) <class 'asyncpg.exceptions.QueryCanceledError'>: canceling statement due to statement timeout\n[SQL: \nWITH RECURSIVE e AS MATERIALIZED (\n        SELECT d.id, d.debtor_id AS src, d.creditor_id AS dst, d.amount\n        FROM debts d\n        JOIN trust_lines t ON t.from_participant_id = d.creditor_id\n                          AND t.to_participant_id = d.debtor_id\n                          AND t.equivalent_id = d.equivalent_id\n                ",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "p95_bar_ms": 2000.0,
+      "verdict": "FAIL"
+    },
+    {
+      "family": "d8k",
+      "impl": "dfs",
+      "depth": 4,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 271.9,
+      "p50_ms": 156.9,
+      "p95_ms": 180.5,
+      "max_ms": 271.9,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4
+      ],
+      "identities_sha": "7e001c79551a1ff1",
+      "p95_bar_ms": 2000.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "d8k",
+      "impl": "current",
+      "depth": 4,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 7267.3,
+      "p50_ms": 6646.9,
+      "p95_ms": 7102.3,
+      "max_ms": 7267.3,
+      "statements_per_call": [
+        52
+      ],
+      "failure": null,
+      "cycles": 47,
+      "lengths": [
+        3,
+        4
+      ],
+      "identities_sha": "6298c6172d805bb6",
+      "verdict": "reported"
+    },
+    {
+      "family": "d8k",
+      "impl": "dfs_exhaustive",
+      "depth": 4,
+      "scope": "global",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: DetectorTimeout: ",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "verdict": "reported"
+    },
+    {
+      "family": "d8k",
+      "impl": "cte",
+      "depth": 6,
+      "scope": "global",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: DBAPIError: (sqlalchemy.dialects.postgresql.asyncpg.Error) <class 'asyncpg.exceptions.QueryCanceledError'>: canceling statement due to statement timeout\n[SQL: \nWITH RECURSIVE e AS MATERIALIZED (\n        SELECT d.id, d.debtor_id AS src, d.creditor_id AS dst, d.amount\n        FROM debts d\n        JOIN trust_lines t ON t.from_participant_id = d.creditor_id\n                          AND t.to_participant_id = d.debtor_id\n                          AND t.equivalent_id = d.equivalent_id\n                ",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "p95_bar_ms": 2000.0,
+      "verdict": "FAIL"
+    },
+    {
+      "family": "d8k",
+      "impl": "dfs",
+      "depth": 6,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 426.1,
+      "p50_ms": 278.9,
+      "p95_ms": 306.5,
+      "max_ms": 426.1,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4,
+        5,
+        6
+      ],
+      "identities_sha": "730defed9396d04b",
+      "p95_bar_ms": 2000.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "d8k",
+      "impl": "current",
+      "depth": 6,
+      "scope": "global",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: killed: silent for 15 s",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "verdict": "reported"
+    },
+    {
+      "family": "d8k",
+      "impl": "dfs_exhaustive",
+      "depth": 6,
+      "scope": "global",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: DetectorTimeout: ",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "verdict": "reported"
+    },
+    {
+      "family": "d8k",
+      "impl": "cte",
+      "depth": 7,
+      "scope": "global",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: DBAPIError: (sqlalchemy.dialects.postgresql.asyncpg.Error) <class 'asyncpg.exceptions.QueryCanceledError'>: canceling statement due to statement timeout\n[SQL: \nWITH RECURSIVE e AS MATERIALIZED (\n        SELECT d.id, d.debtor_id AS src, d.creditor_id AS dst, d.amount\n        FROM debts d\n        JOIN trust_lines t ON t.from_participant_id = d.creditor_id\n                          AND t.to_participant_id = d.debtor_id\n                          AND t.equivalent_id = d.equivalent_id\n                ",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "p95_bar_ms": 2000.0,
+      "verdict": "FAIL"
+    },
+    {
+      "family": "d8k",
+      "impl": "dfs",
+      "depth": 7,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 471.7,
+      "p50_ms": 354.1,
+      "p95_ms": 372.6,
+      "max_ms": 471.7,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "identities_sha": "1f89017b179711dd",
+      "p95_bar_ms": 2000.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "d8k",
+      "impl": "current",
+      "depth": 7,
+      "scope": "global",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: killed: silent for 15 s",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "verdict": "reported"
+    },
+    {
+      "family": "d8k",
+      "impl": "dfs_exhaustive",
+      "depth": 7,
+      "scope": "global",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: DetectorTimeout: ",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "verdict": "reported"
+    },
+    {
+      "family": "d8k",
+      "impl": "cte",
+      "depth": 10,
+      "scope": "global",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: DBAPIError: (sqlalchemy.dialects.postgresql.asyncpg.Error) <class 'asyncpg.exceptions.QueryCanceledError'>: canceling statement due to statement timeout\n[SQL: \nWITH RECURSIVE e AS MATERIALIZED (\n        SELECT d.id, d.debtor_id AS src, d.creditor_id AS dst, d.amount\n        FROM debts d\n        JOIN trust_lines t ON t.from_participant_id = d.creditor_id\n                          AND t.to_participant_id = d.debtor_id\n                          AND t.equivalent_id = d.equivalent_id\n                ",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "p95_bar_ms": 2000.0,
+      "verdict": "FAIL"
+    },
+    {
+      "family": "d8k",
+      "impl": "dfs",
+      "depth": 10,
+      "scope": "global",
+      "samples": 20,
+      "cold_ms": 166.6,
+      "p50_ms": 40.6,
+      "p95_ms": 61.0,
+      "max_ms": 166.6,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "identities_sha": "6a25fb7293a642ed",
+      "p95_bar_ms": 2000.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "d8k",
+      "impl": "current",
+      "depth": 10,
+      "scope": "global",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: killed: silent for 15 s",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "verdict": "reported"
+    },
+    {
+      "family": "d8k",
+      "impl": "dfs_exhaustive",
+      "depth": 10,
+      "scope": "global",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: DetectorTimeout: ",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "verdict": "reported"
+    },
+    {
+      "family": "d8k",
+      "impl": "cte",
+      "depth": 3,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 190.6,
+      "p50_ms": 62.6,
+      "p95_ms": 65.3,
+      "max_ms": 190.6,
+      "statements_per_call": [
+        2
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3
+      ],
+      "identities_sha": "1e833f14394a3f3e",
+      "plan": {
+        "execution_ms": 61.436,
+        "planning_ms": 0.795,
+        "shared_hit_blocks": 6333,
+        "shared_read_blocks": 0,
+        "temp_read_blocks": 397,
+        "temp_written_blocks": 887,
+        "recursive_union_rows": 20213
+      },
+      "p95_bar_ms": 2000.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "d8k",
+      "impl": "dfs",
+      "depth": 3,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 149.8,
+      "p50_ms": 22.9,
+      "p95_ms": 37.6,
+      "max_ms": 149.8,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3
+      ],
+      "identities_sha": "1e833f14394a3f3e",
+      "p95_bar_ms": 2000.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "d8k",
+      "impl": "current",
+      "depth": 3,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 215.4,
+      "p50_ms": 80.0,
+      "p95_ms": 92.5,
+      "max_ms": 215.4,
+      "statements_per_call": [
+        39
+      ],
+      "failure": null,
+      "cycles": 34,
+      "lengths": [
+        3
+      ],
+      "identities_sha": "6b80165b10eda893",
+      "verdict": "reported"
+    },
+    {
+      "family": "d8k",
+      "impl": "dfs_exhaustive",
+      "depth": 3,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 185.1,
+      "p50_ms": 55.1,
+      "p95_ms": 68.1,
+      "max_ms": 185.1,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3
+      ],
+      "identities_sha": "1e833f14394a3f3e",
+      "verdict": "reported"
+    },
+    {
+      "family": "d8k",
+      "impl": "cte",
+      "depth": 4,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 764.1,
+      "p50_ms": 658.1,
+      "p95_ms": 667.2,
+      "max_ms": 764.1,
+      "statements_per_call": [
+        2
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4
+      ],
+      "identities_sha": "7aef90f776cd6d3e",
+      "plan": {
+        "execution_ms": 680.815,
+        "planning_ms": 0.942,
+        "shared_hit_blocks": 6333,
+        "shared_read_blocks": 0,
+        "temp_read_blocks": 6668,
+        "temp_written_blocks": 13372,
+        "recursive_union_rows": 236943
+      },
+      "p95_bar_ms": 2000.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "d8k",
+      "impl": "dfs",
+      "depth": 4,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 167.1,
+      "p50_ms": 39.0,
+      "p95_ms": 52.3,
+      "max_ms": 167.1,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4
+      ],
+      "identities_sha": "7aef90f776cd6d3e",
+      "p95_bar_ms": 2000.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "d8k",
+      "impl": "current",
+      "depth": 4,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 930.5,
+      "p50_ms": 796.9,
+      "p95_ms": 809.6,
+      "max_ms": 1172.7,
+      "statements_per_call": [
+        53
+      ],
+      "failure": null,
+      "cycles": 47,
+      "lengths": [
+        3,
+        4
+      ],
+      "identities_sha": "7c0ec1e135f29fbf",
+      "verdict": "reported"
+    },
+    {
+      "family": "d8k",
+      "impl": "dfs_exhaustive",
+      "depth": 4,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 679.6,
+      "p50_ms": 552.5,
+      "p95_ms": 564.0,
+      "max_ms": 679.6,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4
+      ],
+      "identities_sha": "7aef90f776cd6d3e",
+      "verdict": "reported"
+    },
+    {
+      "family": "d8k",
+      "impl": "cte",
+      "depth": 6,
+      "scope": "perimeter",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: DBAPIError: (sqlalchemy.dialects.postgresql.asyncpg.Error) <class 'asyncpg.exceptions.QueryCanceledError'>: canceling statement due to statement timeout\n[SQL: \nWITH RECURSIVE e AS MATERIALIZED (\n        SELECT d.id, d.debtor_id AS src, d.creditor_id AS dst, d.amount\n        FROM debts d\n        JOIN trust_lines t ON t.from_participant_id = d.creditor_id\n                          AND t.to_participant_id = d.debtor_id\n                          AND t.equivalent_id = d.equivalent_id\n                ",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "p95_bar_ms": 2000.0,
+      "verdict": "FAIL"
+    },
+    {
+      "family": "d8k",
+      "impl": "dfs",
+      "depth": 6,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 214.5,
+      "p50_ms": 83.3,
+      "p95_ms": 96.6,
+      "max_ms": 214.5,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4,
+        5,
+        6
+      ],
+      "identities_sha": "372b906347306ed6",
+      "p95_bar_ms": 2000.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "d8k",
+      "impl": "current",
+      "depth": 6,
+      "scope": "perimeter",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: killed: silent for 15 s",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "verdict": "reported"
+    },
+    {
+      "family": "d8k",
+      "impl": "dfs_exhaustive",
+      "depth": 6,
+      "scope": "perimeter",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: DetectorTimeout: ",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "verdict": "reported"
+    },
+    {
+      "family": "d8k",
+      "impl": "cte",
+      "depth": 7,
+      "scope": "perimeter",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: DBAPIError: (sqlalchemy.dialects.postgresql.asyncpg.Error) <class 'asyncpg.exceptions.QueryCanceledError'>: canceling statement due to statement timeout\n[SQL: \nWITH RECURSIVE e AS MATERIALIZED (\n        SELECT d.id, d.debtor_id AS src, d.creditor_id AS dst, d.amount\n        FROM debts d\n        JOIN trust_lines t ON t.from_participant_id = d.creditor_id\n                          AND t.to_participant_id = d.debtor_id\n                          AND t.equivalent_id = d.equivalent_id\n                ",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "p95_bar_ms": 2000.0,
+      "verdict": "FAIL"
+    },
+    {
+      "family": "d8k",
+      "impl": "dfs",
+      "depth": 7,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 255.7,
+      "p50_ms": 117.6,
+      "p95_ms": 134.6,
+      "max_ms": 255.7,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "identities_sha": "f9ee083756823c93",
+      "p95_bar_ms": 2000.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "d8k",
+      "impl": "current",
+      "depth": 7,
+      "scope": "perimeter",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: killed: silent for 15 s",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "verdict": "reported"
+    },
+    {
+      "family": "d8k",
+      "impl": "dfs_exhaustive",
+      "depth": 7,
+      "scope": "perimeter",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: DetectorTimeout: ",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "verdict": "reported"
+    },
+    {
+      "family": "d8k",
+      "impl": "cte",
+      "depth": 10,
+      "scope": "perimeter",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: DBAPIError: (sqlalchemy.dialects.postgresql.asyncpg.Error) <class 'asyncpg.exceptions.QueryCanceledError'>: canceling statement due to statement timeout\n[SQL: \nWITH RECURSIVE e AS MATERIALIZED (\n        SELECT d.id, d.debtor_id AS src, d.creditor_id AS dst, d.amount\n        FROM debts d\n        JOIN trust_lines t ON t.from_participant_id = d.creditor_id\n                          AND t.to_participant_id = d.debtor_id\n                          AND t.equivalent_id = d.equivalent_id\n                ",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "p95_bar_ms": 2000.0,
+      "verdict": "FAIL"
+    },
+    {
+      "family": "d8k",
+      "impl": "dfs",
+      "depth": 10,
+      "scope": "perimeter",
+      "samples": 20,
+      "cold_ms": 141.1,
+      "p50_ms": 12.8,
+      "p95_ms": 26.7,
+      "max_ms": 141.1,
+      "statements_per_call": [
+        1
+      ],
+      "failure": null,
+      "cycles": 100,
+      "lengths": [
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "identities_sha": "15df495ab6bb27e6",
+      "p95_bar_ms": 2000.0,
+      "verdict": "PASS"
+    },
+    {
+      "family": "d8k",
+      "impl": "current",
+      "depth": 10,
+      "scope": "perimeter",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: killed: silent for 15 s",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "verdict": "reported"
+    },
+    {
+      "family": "d8k",
+      "impl": "dfs_exhaustive",
+      "depth": 10,
+      "scope": "perimeter",
+      "samples": 0,
+      "cold_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "statements_per_call": [],
+      "failure": "TIMEOUT: DetectorTimeout: ",
+      "cycles": null,
+      "lengths": null,
+      "identities_sha": null,
+      "verdict": "reported"
+    }
+  ],
+  "repeated": [
+    {
+      "family": "u2k",
+      "detector": "cte",
+      "run": 0,
+      "kind": "timeout",
+      "error": "killed: silent for 300 s",
+      "exceeds_redis_lease": false
+    },
+    {
+      "family": "u2k",
+      "detector": "cte",
+      "run": 1,
+      "kind": "timeout",
+      "error": "killed: silent for 300 s",
+      "exceeds_redis_lease": false
+    },
+    {
+      "family": "u2k",
+      "detector": "cte",
+      "run": 2,
+      "kind": "timeout",
+      "error": "killed: silent for 300 s",
+      "exceeds_redis_lease": false
+    },
+    {
+      "family": "u2k",
+      "detector": "dfs",
+      "run": 0,
+      "kind": "result",
+      "cleared": 101,
+      "total_ms": 13793.304099992383,
+      "detections": 101,
+      "detection_ms": 8331.720399961341,
+      "detection_statements": 202,
+      "total_statements": 5954,
+      "exceeds_redis_lease": false
+    },
+    {
+      "family": "u2k",
+      "detector": "dfs",
+      "run": 1,
+      "kind": "result",
+      "cleared": 101,
+      "total_ms": 13952.53299997421,
+      "detections": 101,
+      "detection_ms": 8406.563399999868,
+      "detection_statements": 202,
+      "total_statements": 5954,
+      "exceeds_redis_lease": false
+    },
+    {
+      "family": "u2k",
+      "detector": "dfs",
+      "run": 2,
+      "kind": "result",
+      "cleared": 101,
+      "total_ms": 13999.626500008162,
+      "detections": 101,
+      "detection_ms": 8391.713099728804,
+      "detection_statements": 202,
+      "total_statements": 5954,
+      "exceeds_redis_lease": false
+    },
+    {
+      "family": "u2k",
+      "detector": "current",
+      "run": 0,
+      "kind": "result",
+      "cleared": 101,
+      "total_ms": 28959.56530002877,
+      "detections": 101,
+      "detection_ms": 23876.47400033893,
+      "detection_statements": 5256,
+      "total_statements": 10003,
+      "exceeds_redis_lease": false
+    },
+    {
+      "family": "u2k",
+      "detector": "current",
+      "run": 1,
+      "kind": "result",
+      "cleared": 101,
+      "total_ms": 29130.43319998542,
+      "detections": 101,
+      "detection_ms": 23871.330200403463,
+      "detection_statements": 5256,
+      "total_statements": 10003,
+      "exceeds_redis_lease": false
+    },
+    {
+      "family": "u2k",
+      "detector": "current",
+      "run": 2,
+      "kind": "result",
+      "cleared": 101,
+      "total_ms": 28973.401299968828,
+      "detections": 101,
+      "detection_ms": 23867.483900219668,
+      "detection_statements": 5256,
+      "total_statements": 10003,
+      "exceeds_redis_lease": false
+    },
+    {
+      "family": "h4k",
+      "detector": "cte",
+      "run": 0,
+      "kind": "timeout",
+      "error": "DBAPIError: (sqlalchemy.dialects.postgresql.asyncpg.Error) <class 'asyncpg.exceptions.QueryCanceledError'>: canceling statement due to statement timeout\n[SQL: \nWITH RECURSIVE e AS MATERIALIZED (\n        SELECT d.id, d.debtor_id AS src, d.creditor_id AS dst, d.amount\n        FROM debts d\n        JOIN trust_lines t ON t.from_participant_id = d.creditor_id\n                          AND t.to_participant_id = d.debtor_id\n                          AND t.equivalent_id = d.equivalent_id\n                ",
+      "total_ms": 10295.200299995486,
+      "detections": 0,
+      "detection_ms": 0.0,
+      "detection_statements": 0,
+      "total_statements": 1,
+      "exceeds_redis_lease": false
+    },
+    {
+      "family": "h4k",
+      "detector": "cte",
+      "run": 1,
+      "kind": "timeout",
+      "error": "DBAPIError: (sqlalchemy.dialects.postgresql.asyncpg.Error) <class 'asyncpg.exceptions.QueryCanceledError'>: canceling statement due to statement timeout\n[SQL: \nWITH RECURSIVE e AS MATERIALIZED (\n        SELECT d.id, d.debtor_id AS src, d.creditor_id AS dst, d.amount\n        FROM debts d\n        JOIN trust_lines t ON t.from_participant_id = d.creditor_id\n                          AND t.to_participant_id = d.debtor_id\n                          AND t.equivalent_id = d.equivalent_id\n                ",
+      "total_ms": 10290.464100020472,
+      "detections": 0,
+      "detection_ms": 0.0,
+      "detection_statements": 0,
+      "total_statements": 1,
+      "exceeds_redis_lease": false
+    },
+    {
+      "family": "h4k",
+      "detector": "cte",
+      "run": 2,
+      "kind": "timeout",
+      "error": "DBAPIError: (sqlalchemy.dialects.postgresql.asyncpg.Error) <class 'asyncpg.exceptions.QueryCanceledError'>: canceling statement due to statement timeout\n[SQL: \nWITH RECURSIVE e AS MATERIALIZED (\n        SELECT d.id, d.debtor_id AS src, d.creditor_id AS dst, d.amount\n        FROM debts d\n        JOIN trust_lines t ON t.from_participant_id = d.creditor_id\n                          AND t.to_participant_id = d.debtor_id\n                          AND t.equivalent_id = d.equivalent_id\n                ",
+      "total_ms": 10286.88470000634,
+      "detections": 0,
+      "detection_ms": 0.0,
+      "detection_statements": 0,
+      "total_statements": 1,
+      "exceeds_redis_lease": false
+    },
+    {
+      "family": "h4k",
+      "detector": "dfs",
+      "run": 0,
+      "kind": "result",
+      "cleared": 101,
+      "total_ms": 27330.240199982654,
+      "detections": 101,
+      "detection_ms": 18010.532600281294,
+      "detection_statements": 202,
+      "total_statements": 6034,
+      "exceeds_redis_lease": false
+    },
+    {
+      "family": "h4k",
+      "detector": "dfs",
+      "run": 1,
+      "kind": "result",
+      "cleared": 101,
+      "total_ms": 27399.258899968117,
+      "detections": 101,
+      "detection_ms": 18092.53969992278,
+      "detection_statements": 202,
+      "total_statements": 6034,
+      "exceeds_redis_lease": false
+    },
+    {
+      "family": "h4k",
+      "detector": "dfs",
+      "run": 2,
+      "kind": "result",
+      "cleared": 101,
+      "total_ms": 27100.823200016748,
+      "detections": 101,
+      "detection_ms": 17953.764800389763,
+      "detection_statements": 202,
+      "total_statements": 6034,
+      "exceeds_redis_lease": false
+    },
+    {
+      "family": "h4k",
+      "detector": "current",
+      "run": 0,
+      "kind": "result",
+      "cleared": 101,
+      "total_ms": 51199.81120002922,
+      "detections": 101,
+      "detection_ms": 42704.65840009274,
+      "detection_statements": 5252,
+      "total_statements": 9999,
+      "exceeds_redis_lease": true
+    },
+    {
+      "family": "h4k",
+      "detector": "current",
+      "run": 1,
+      "kind": "result",
+      "cleared": 101,
+      "total_ms": 51436.288799974136,
+      "detections": 101,
+      "detection_ms": 42784.650699817576,
+      "detection_statements": 5252,
+      "total_statements": 9999,
+      "exceeds_redis_lease": true
+    },
+    {
+      "family": "h4k",
+      "detector": "current",
+      "run": 2,
+      "kind": "result",
+      "cleared": 101,
+      "total_ms": 51112.46510001365,
+      "detections": 101,
+      "detection_ms": 42564.57250012318,
+      "detection_statements": 5252,
+      "total_statements": 9999,
+      "exceeds_redis_lease": true
+    },
+    {
+      "family": "s2k",
+      "detector": "cte",
+      "run": 0,
+      "kind": "timeout",
+      "error": "DBAPIError: (sqlalchemy.dialects.postgresql.asyncpg.Error) <class 'asyncpg.exceptions.QueryCanceledError'>: canceling statement due to statement timeout\n[SQL: \nWITH RECURSIVE e AS MATERIALIZED (\n        SELECT d.id, d.debtor_id AS src, d.creditor_id AS dst, d.amount\n        FROM debts d\n        JOIN trust_lines t ON t.from_participant_id = d.creditor_id\n                          AND t.to_participant_id = d.debtor_id\n                          AND t.equivalent_id = d.equivalent_id\n                ",
+      "total_ms": 10428.253299964126,
+      "detections": 0,
+      "detection_ms": 0.0,
+      "detection_statements": 0,
+      "total_statements": 1,
+      "exceeds_redis_lease": false
+    },
+    {
+      "family": "s2k",
+      "detector": "cte",
+      "run": 1,
+      "kind": "timeout",
+      "error": "DBAPIError: (sqlalchemy.dialects.postgresql.asyncpg.Error) <class 'asyncpg.exceptions.QueryCanceledError'>: canceling statement due to statement timeout\n[SQL: \nWITH RECURSIVE e AS MATERIALIZED (\n        SELECT d.id, d.debtor_id AS src, d.creditor_id AS dst, d.amount\n        FROM debts d\n        JOIN trust_lines t ON t.from_participant_id = d.creditor_id\n                          AND t.to_participant_id = d.debtor_id\n                          AND t.equivalent_id = d.equivalent_id\n                ",
+      "total_ms": 10752.107399981469,
+      "detections": 0,
+      "detection_ms": 0.0,
+      "detection_statements": 0,
+      "total_statements": 1,
+      "exceeds_redis_lease": false
+    },
+    {
+      "family": "s2k",
+      "detector": "cte",
+      "run": 2,
+      "kind": "timeout",
+      "error": "DBAPIError: (sqlalchemy.dialects.postgresql.asyncpg.Error) <class 'asyncpg.exceptions.QueryCanceledError'>: canceling statement due to statement timeout\n[SQL: \nWITH RECURSIVE e AS MATERIALIZED (\n        SELECT d.id, d.debtor_id AS src, d.creditor_id AS dst, d.amount\n        FROM debts d\n        JOIN trust_lines t ON t.from_participant_id = d.creditor_id\n                          AND t.to_participant_id = d.debtor_id\n                          AND t.equivalent_id = d.equivalent_id\n                ",
+      "total_ms": 10624.142199987546,
+      "detections": 0,
+      "detection_ms": 0.0,
+      "detection_statements": 0,
+      "total_statements": 1,
+      "exceeds_redis_lease": false
+    },
+    {
+      "family": "s2k",
+      "detector": "dfs",
+      "run": 0,
+      "kind": "result",
+      "cleared": 101,
+      "total_ms": 15404.667700000573,
+      "detections": 101,
+      "detection_ms": 9901.88179985853,
+      "detection_statements": 202,
+      "total_statements": 5834,
+      "exceeds_redis_lease": false
+    },
+    {
+      "family": "s2k",
+      "detector": "dfs",
+      "run": 1,
+      "kind": "result",
+      "cleared": 101,
+      "total_ms": 15652.277300017886,
+      "detections": 101,
+      "detection_ms": 10105.487699445803,
+      "detection_statements": 202,
+      "total_statements": 5834,
+      "exceeds_redis_lease": false
+    },
+    {
+      "family": "s2k",
+      "detector": "dfs",
+      "run": 2,
+      "kind": "result",
+      "cleared": 101,
+      "total_ms": 15354.680399992503,
+      "detections": 101,
+      "detection_ms": 9880.292900372297,
+      "detection_statements": 202,
+      "total_statements": 5834,
+      "exceeds_redis_lease": false
+    },
+    {
+      "family": "s2k",
+      "detector": "current",
+      "run": 0,
+      "kind": "result",
+      "cleared": 101,
+      "total_ms": 24554.87379996339,
+      "detections": 101,
+      "detection_ms": 19510.58399962494,
+      "detection_statements": 5265,
+      "total_statements": 10012,
+      "exceeds_redis_lease": false
+    },
+    {
+      "family": "s2k",
+      "detector": "current",
+      "run": 1,
+      "kind": "result",
+      "cleared": 101,
+      "total_ms": 24527.79800002463,
+      "detections": 101,
+      "detection_ms": 19568.2828000281,
+      "detection_statements": 5265,
+      "total_statements": 10012,
+      "exceeds_redis_lease": false
+    },
+    {
+      "family": "s2k",
+      "detector": "current",
+      "run": 2,
+      "kind": "result",
+      "cleared": 101,
+      "total_ms": 24783.158999984153,
+      "detections": 101,
+      "detection_ms": 19683.836299693212,
+      "detection_statements": 5265,
+      "total_statements": 10012,
+      "exceeds_redis_lease": false
+    },
+    {
+      "family": "d8k",
+      "detector": "cte",
+      "run": 0,
+      "kind": "timeout",
+      "error": "DBAPIError: (sqlalchemy.dialects.postgresql.asyncpg.Error) <class 'asyncpg.exceptions.QueryCanceledError'>: canceling statement due to statement timeout\n[SQL: \nWITH RECURSIVE e AS MATERIALIZED (\n        SELECT d.id, d.debtor_id AS src, d.creditor_id AS dst, d.amount\n        FROM debts d\n        JOIN trust_lines t ON t.from_participant_id = d.creditor_id\n                          AND t.to_participant_id = d.debtor_id\n                          AND t.equivalent_id = d.equivalent_id\n                ",
+      "total_ms": 10335.40499996161,
+      "detections": 0,
+      "detection_ms": 0.0,
+      "detection_statements": 0,
+      "total_statements": 1,
+      "exceeds_redis_lease": false
+    },
+    {
+      "family": "d8k",
+      "detector": "cte",
+      "run": 1,
+      "kind": "timeout",
+      "error": "DBAPIError: (sqlalchemy.dialects.postgresql.asyncpg.Error) <class 'asyncpg.exceptions.QueryCanceledError'>: canceling statement due to statement timeout\n[SQL: \nWITH RECURSIVE e AS MATERIALIZED (\n        SELECT d.id, d.debtor_id AS src, d.creditor_id AS dst, d.amount\n        FROM debts d\n        JOIN trust_lines t ON t.from_participant_id = d.creditor_id\n                          AND t.to_participant_id = d.debtor_id\n                          AND t.equivalent_id = d.equivalent_id\n                ",
+      "total_ms": 10471.691599988844,
+      "detections": 0,
+      "detection_ms": 0.0,
+      "detection_statements": 0,
+      "total_statements": 1,
+      "exceeds_redis_lease": false
+    },
+    {
+      "family": "d8k",
+      "detector": "cte",
+      "run": 2,
+      "kind": "timeout",
+      "error": "DBAPIError: (sqlalchemy.dialects.postgresql.asyncpg.Error) <class 'asyncpg.exceptions.QueryCanceledError'>: canceling statement due to statement timeout\n[SQL: \nWITH RECURSIVE e AS MATERIALIZED (\n        SELECT d.id, d.debtor_id AS src, d.creditor_id AS dst, d.amount\n        FROM debts d\n        JOIN trust_lines t ON t.from_participant_id = d.creditor_id\n                          AND t.to_participant_id = d.debtor_id\n                          AND t.equivalent_id = d.equivalent_id\n                ",
+      "total_ms": 10354.164500022307,
+      "detections": 0,
+      "detection_ms": 0.0,
+      "detection_statements": 0,
+      "total_statements": 1,
+      "exceeds_redis_lease": false
+    },
+    {
+      "family": "d8k",
+      "detector": "dfs",
+      "run": 0,
+      "kind": "result",
+      "cleared": 101,
+      "total_ms": 49467.960500041954,
+      "detections": 101,
+      "detection_ms": 33130.33660023939,
+      "detection_statements": 202,
+      "total_statements": 6039,
+      "exceeds_redis_lease": true
+    },
+    {
+      "family": "d8k",
+      "detector": "dfs",
+      "run": 1,
+      "kind": "result",
+      "cleared": 101,
+      "total_ms": 49337.83129998483,
+      "detections": 101,
+      "detection_ms": 33046.06770013925,
+      "detection_statements": 202,
+      "total_statements": 6039,
+      "exceeds_redis_lease": true
+    },
+    {
+      "family": "d8k",
+      "detector": "dfs",
+      "run": 2,
+      "kind": "result",
+      "cleared": 101,
+      "total_ms": 49160.13600002043,
+      "detections": 101,
+      "detection_ms": 32950.05799992941,
+      "detection_statements": 202,
+      "total_statements": 6039,
+      "exceeds_redis_lease": true
+    },
+    {
+      "family": "d8k",
+      "detector": "current",
+      "run": 0,
+      "kind": "timeout",
+      "error": "killed: silent for 300 s",
+      "exceeds_redis_lease": false
+    },
+    {
+      "family": "d8k",
+      "detector": "current",
+      "run": 1,
+      "kind": "timeout",
+      "error": "killed: silent for 300 s",
+      "exceeds_redis_lease": false
+    },
+    {
+      "family": "d8k",
+      "detector": "current",
+      "run": 2,
+      "kind": "timeout",
+      "error": "killed: silent for 300 s",
+      "exceeds_redis_lease": false
+    }
+  ],
+  "simulator": [
+    {
+      "family": "u2k",
+      "detector": "cte",
+      "kind": "tick",
+      "tick": 0,
+      "preflight_ms": 172.22539999056607,
+      "loop_ms": 257.67680001445115,
+      "over_budget_ms": 7.676800014451146,
+      "cleared": 2,
+      "detections": 2,
+      "statements": 127
+    },
+    {
+      "family": "u2k",
+      "detector": "cte",
+      "kind": "tick",
+      "tick": 1,
+      "preflight_ms": 100.63149995403364,
+      "loop_ms": 372.9890999966301,
+      "over_budget_ms": 122.9890999966301,
+      "cleared": 3,
+      "detections": 3,
+      "statements": 168
+    },
+    {
+      "family": "u2k",
+      "detector": "cte",
+      "kind": "tick",
+      "tick": 2,
+      "preflight_ms": 97.60159999132156,
+      "loop_ms": 363.95779997110367,
+      "over_budget_ms": 113.95779997110367,
+      "cleared": 3,
+      "detections": 3,
+      "statements": 173
+    },
+    {
+      "family": "u2k",
+      "detector": "cte",
+      "kind": "tick",
+      "tick": 3,
+      "preflight_ms": 132.0679999771528,
+      "loop_ms": 327.1736000315286,
+      "over_budget_ms": 77.17360003152862,
+      "cleared": 3,
+      "detections": 3,
+      "statements": 173
+    },
+    {
+      "family": "u2k",
+      "detector": "cte",
+      "kind": "tick",
+      "tick": 4,
+      "preflight_ms": 74.67859995085746,
+      "loop_ms": 314.9264000239782,
+      "over_budget_ms": 64.9264000239782,
+      "cleared": 3,
+      "detections": 3,
+      "statements": 193
+    },
+    {
+      "family": "u2k",
+      "detector": "dfs",
+      "kind": "tick",
+      "tick": 0,
+      "preflight_ms": 92.15949999634176,
+      "loop_ms": 275.0732999993488,
+      "over_budget_ms": 25.07329999934882,
+      "cleared": 3,
+      "detections": 3,
+      "statements": 180
+    },
+    {
+      "family": "u2k",
+      "detector": "dfs",
+      "kind": "tick",
+      "tick": 1,
+      "preflight_ms": 19.26090003689751,
+      "loop_ms": 278.3814999856986,
+      "over_budget_ms": 28.38149998569861,
+      "cleared": 4,
+      "detections": 4,
+      "statements": 220
+    },
+    {
+      "family": "u2k",
+      "detector": "dfs",
+      "kind": "tick",
+      "tick": 2,
+      "preflight_ms": 19.791600003372878,
+      "loop_ms": 281.7929000011645,
+      "over_budget_ms": 31.792900001164526,
+      "cleared": 4,
+      "detections": 4,
+      "statements": 230
+    },
+    {
+      "family": "u2k",
+      "detector": "dfs",
+      "kind": "tick",
+      "tick": 3,
+      "preflight_ms": 18.777600023895502,
+      "loop_ms": 276.781199965626,
+      "over_budget_ms": 26.781199965626,
+      "cleared": 4,
+      "detections": 4,
+      "statements": 250
+    },
+    {
+      "family": "u2k",
+      "detector": "dfs",
+      "kind": "tick",
+      "tick": 4,
+      "preflight_ms": 19.929900008719414,
+      "loop_ms": 266.8178000021726,
+      "over_budget_ms": 16.81780000217259,
+      "cleared": 4,
+      "detections": 4,
+      "statements": 240
+    },
+    {
+      "family": "u2k",
+      "detector": "current",
+      "kind": "tick",
+      "tick": 0,
+      "preflight_ms": 521.1988000082783,
+      "loop_ms": 561.5797999780625,
+      "over_budget_ms": 311.5797999780625,
+      "cleared": 2,
+      "detections": 2,
+      "statements": 208
+    },
+    {
+      "family": "u2k",
+      "detector": "current",
+      "kind": "tick",
+      "tick": 1,
+      "preflight_ms": 426.113199966494,
+      "loop_ms": 531.9978999905288,
+      "over_budget_ms": 281.9978999905288,
+      "cleared": 2,
+      "detections": 2,
+      "statements": 208
+    },
+    {
+      "family": "u2k",
+      "detector": "current",
+      "kind": "tick",
+      "tick": 2,
+      "preflight_ms": 422.85510001238436,
+      "loop_ms": 885.0188999786042,
+      "over_budget_ms": 635.0188999786042,
+      "cleared": 2,
+      "detections": 2,
+      "statements": 202
+    },
+    {
+      "family": "u2k",
+      "detector": "current",
+      "kind": "tick",
+      "tick": 3,
+      "preflight_ms": 418.2102999766357,
+      "loop_ms": 521.141599980183,
+      "over_budget_ms": 271.14159998018295,
+      "cleared": 2,
+      "detections": 2,
+      "statements": 202
+    },
+    {
+      "family": "u2k",
+      "detector": "current",
+      "kind": "tick",
+      "tick": 4,
+      "preflight_ms": 421.67130002053455,
+      "loop_ms": 522.0399999525398,
+      "over_budget_ms": 272.0399999525398,
+      "cleared": 2,
+      "detections": 2,
+      "statements": 199
+    },
+    {
+      "family": "h4k",
+      "detector": "cte",
+      "kind": "tick",
+      "tick": 0,
+      "preflight_ms": 310.9501999570057,
+      "loop_ms": 480.4941000184044,
+      "over_budget_ms": 230.49410001840442,
+      "cleared": 2,
+      "detections": 2,
+      "statements": 122
+    },
+    {
+      "family": "h4k",
+      "detector": "cte",
+      "kind": "tick",
+      "tick": 1,
+      "preflight_ms": 249.13450004532933,
+      "loop_ms": 425.45000003883615,
+      "over_budget_ms": 175.45000003883615,
+      "cleared": 2,
+      "detections": 2,
+      "statements": 117
+    },
+    {
+      "family": "h4k",
+      "detector": "cte",
+      "kind": "tick",
+      "tick": 2,
+      "preflight_ms": 268.12810002593324,
+      "loop_ms": 405.9088999638334,
+      "over_budget_ms": 155.9088999638334,
+      "cleared": 2,
+      "detections": 2,
+      "statements": 117
+    },
+    {
+      "family": "h4k",
+      "detector": "cte",
+      "kind": "tick",
+      "tick": 3,
+      "preflight_ms": 233.87349996482953,
+      "loop_ms": 403.9290000218898,
+      "over_budget_ms": 153.9290000218898,
+      "cleared": 2,
+      "detections": 2,
+      "statements": 117
+    },
+    {
+      "family": "h4k",
+      "detector": "cte",
+      "kind": "tick",
+      "tick": 4,
+      "preflight_ms": 258.0424000043422,
+      "loop_ms": 450.12880000285804,
+      "over_budget_ms": 200.12880000285804,
+      "cleared": 2,
+      "detections": 2,
+      "statements": 107
+    },
+    {
+      "family": "h4k",
+      "detector": "dfs",
+      "kind": "tick",
+      "tick": 0,
+      "preflight_ms": 121.3751999894157,
+      "loop_ms": 254.10620000911877,
+      "over_budget_ms": 4.106200009118766,
+      "cleared": 2,
+      "detections": 2,
+      "statements": 120
+    },
+    {
+      "family": "h4k",
+      "detector": "dfs",
+      "kind": "tick",
+      "tick": 1,
+      "preflight_ms": 56.38249998446554,
+      "loop_ms": 344.9986000196077,
+      "over_budget_ms": 94.9986000196077,
+      "cleared": 3,
+      "detections": 3,
+      "statements": 170
+    },
+    {
+      "family": "h4k",
+      "detector": "dfs",
+      "kind": "tick",
+      "tick": 2,
+      "preflight_ms": 38.94810000201687,
+      "loop_ms": 352.63420001138,
+      "over_budget_ms": 102.63420001138002,
+      "cleared": 3,
+      "detections": 3,
+      "statements": 175
+    },
+    {
+      "family": "h4k",
+      "detector": "dfs",
+      "kind": "tick",
+      "tick": 3,
+      "preflight_ms": 39.44510000292212,
+      "loop_ms": 344.5853000157513,
+      "over_budget_ms": 94.58530001575127,
+      "cleared": 3,
+      "detections": 3,
+      "statements": 155
+    },
+    {
+      "family": "h4k",
+      "detector": "dfs",
+      "kind": "tick",
+      "tick": 4,
+      "preflight_ms": 36.85540001606569,
+      "loop_ms": 329.3341000098735,
+      "over_budget_ms": 79.33410000987351,
+      "cleared": 3,
+      "detections": 3,
+      "statements": 165
+    },
+    {
+      "family": "h4k",
+      "detector": "current",
+      "kind": "tick",
+      "tick": 0,
+      "preflight_ms": 513.3566999575123,
+      "loop_ms": 635.6030000024475,
+      "over_budget_ms": 385.6030000024475,
+      "cleared": 2,
+      "detections": 2,
+      "statements": 206
+    },
+    {
+      "family": "h4k",
+      "detector": "current",
+      "kind": "tick",
+      "tick": 1,
+      "preflight_ms": 441.4505999884568,
+      "loop_ms": 596.2108999956399,
+      "over_budget_ms": 346.2108999956399,
+      "cleared": 2,
+      "detections": 2,
+      "statements": 194
+    },
+    {
+      "family": "h4k",
+      "detector": "current",
+      "kind": "tick",
+      "tick": 2,
+      "preflight_ms": 421.5200000326149,
+      "loop_ms": 970.6291999900714,
+      "over_budget_ms": 720.6291999900714,
+      "cleared": 2,
+      "detections": 2,
+      "statements": 194
+    },
+    {
+      "family": "h4k",
+      "detector": "current",
+      "kind": "tick",
+      "tick": 3,
+      "preflight_ms": 442.827999999281,
+      "loop_ms": 604.7546999761835,
+      "over_budget_ms": 354.7546999761835,
+      "cleared": 2,
+      "detections": 2,
+      "statements": 198
+    },
+    {
+      "family": "h4k",
+      "detector": "current",
+      "kind": "tick",
+      "tick": 4,
+      "preflight_ms": 423.3935000374913,
+      "loop_ms": 603.9015999995172,
+      "over_budget_ms": 353.9015999995172,
+      "cleared": 2,
+      "detections": 2,
+      "statements": 185
+    },
+    {
+      "family": "s2k",
+      "detector": "cte",
+      "kind": "tick",
+      "tick": 0,
+      "preflight_ms": 529.8625999712385,
+      "loop_ms": 590.5272000236437,
+      "over_budget_ms": 340.5272000236437,
+      "cleared": 2,
+      "detections": 2,
+      "statements": 127
+    },
+    {
+      "family": "s2k",
+      "detector": "cte",
+      "kind": "tick",
+      "tick": 1,
+      "preflight_ms": 471.42700001131743,
+      "loop_ms": 601.4085999922827,
+      "over_budget_ms": 351.4085999922827,
+      "cleared": 2,
+      "detections": 2,
+      "statements": 107
+    },
+    {
+      "family": "s2k",
+      "detector": "cte",
+      "kind": "tick",
+      "tick": 2,
+      "preflight_ms": 474.62929994799197,
+      "loop_ms": 601.8674000515603,
+      "over_budget_ms": 351.86740005156025,
+      "cleared": 2,
+      "detections": 2,
+      "statements": 112
+    },
+    {
+      "family": "s2k",
+      "detector": "cte",
+      "kind": "tick",
+      "tick": 3,
+      "preflight_ms": 450.4094999865629,
+      "loop_ms": 551.1231999844313,
+      "over_budget_ms": 301.12319998443127,
+      "cleared": 2,
+      "detections": 2,
+      "statements": 117
+    },
+    {
+      "family": "s2k",
+      "detector": "cte",
+      "kind": "tick",
+      "tick": 4,
+      "preflight_ms": 438.41830000746995,
+      "loop_ms": 534.760800015647,
+      "over_budget_ms": 284.76080001564696,
+      "cleared": 2,
+      "detections": 2,
+      "statements": 102
+    },
+    {
+      "family": "s2k",
+      "detector": "dfs",
+      "kind": "tick",
+      "tick": 0,
+      "preflight_ms": 97.7590000256896,
+      "loop_ms": 254.86649997765198,
+      "over_budget_ms": 4.8664999776519835,
+      "cleared": 3,
+      "detections": 3,
+      "statements": 175
+    },
+    {
+      "family": "s2k",
+      "detector": "dfs",
+      "kind": "tick",
+      "tick": 1,
+      "preflight_ms": 22.095499967690557,
+      "loop_ms": 274.3553000036627,
+      "over_budget_ms": 24.355300003662705,
+      "cleared": 4,
+      "detections": 4,
+      "statements": 225
+    },
+    {
+      "family": "s2k",
+      "detector": "dfs",
+      "kind": "tick",
+      "tick": 2,
+      "preflight_ms": 24.519399972632527,
+      "loop_ms": 283.3498000400141,
+      "over_budget_ms": 33.34980004001409,
+      "cleared": 4,
+      "detections": 4,
+      "statements": 215
+    },
+    {
+      "family": "s2k",
+      "detector": "dfs",
+      "kind": "tick",
+      "tick": 3,
+      "preflight_ms": 29.06610001809895,
+      "loop_ms": 293.77950000343844,
+      "over_budget_ms": 43.77950000343844,
+      "cleared": 4,
+      "detections": 4,
+      "statements": 240
+    },
+    {
+      "family": "s2k",
+      "detector": "dfs",
+      "kind": "tick",
+      "tick": 4,
+      "preflight_ms": 26.691399980336428,
+      "loop_ms": 282.32409997144714,
+      "over_budget_ms": 32.32409997144714,
+      "cleared": 4,
+      "detections": 4,
+      "statements": 235
+    },
+    {
+      "family": "s2k",
+      "detector": "current",
+      "kind": "tick",
+      "tick": 0,
+      "preflight_ms": 531.3991999719292,
+      "loop_ms": 577.5254999753088,
+      "over_budget_ms": 327.5254999753088,
+      "cleared": 2,
+      "detections": 2,
+      "statements": 207
+    },
+    {
+      "family": "s2k",
+      "detector": "current",
+      "kind": "tick",
+      "tick": 1,
+      "preflight_ms": 446.2321999599226,
+      "loop_ms": 547.3677000263706,
+      "over_budget_ms": 297.3677000263706,
+      "cleared": 2,
+      "detections": 2,
+      "statements": 212
+    },
+    {
+      "family": "s2k",
+      "detector": "current",
+      "kind": "tick",
+      "tick": 2,
+      "preflight_ms": 457.92950002942234,
+      "loop_ms": 946.9984999741428,
+      "over_budget_ms": 696.9984999741428,
+      "cleared": 2,
+      "detections": 2,
+      "statements": 202
+    },
+    {
+      "family": "s2k",
+      "detector": "current",
+      "kind": "tick",
+      "tick": 3,
+      "preflight_ms": 439.17109997710213,
+      "loop_ms": 547.8050999809057,
+      "over_budget_ms": 297.80509998090565,
+      "cleared": 2,
+      "detections": 2,
+      "statements": 202
+    },
+    {
+      "family": "s2k",
+      "detector": "current",
+      "kind": "tick",
+      "tick": 4,
+      "preflight_ms": 443.3316999929957,
+      "loop_ms": 553.6233999882825,
+      "over_budget_ms": 303.6233999882825,
+      "cleared": 2,
+      "detections": 2,
+      "statements": 207
+    },
+    {
+      "family": "d8k",
+      "detector": "cte",
+      "kind": "timeout",
+      "error": "DBAPIError: (sqlalchemy.dialects.postgresql.asyncpg.Error) <class 'asyncpg.exceptions.QueryCanceledError'>: canceling statement due to statement timeout\n[SQL: \nWITH RECURSIVE e AS MATERIALIZED (\n        SELECT d.id, d.debtor_id AS src, d.creditor_id AS dst, d.amount\n        FROM debts d\n        JOIN trust_lines t ON t.from_participant_id = d.creditor_id\n                          AND t.to_participant_id = d.debtor_id\n                          AND t.equivalent_id = d.equivalent_id\n                "
+    },
+    {
+      "family": "d8k",
+      "detector": "dfs",
+      "kind": "tick",
+      "tick": 0,
+      "preflight_ms": 165.28610000386834,
+      "loop_ms": 472.39309997530654,
+      "over_budget_ms": 222.39309997530654,
+      "cleared": 2,
+      "detections": 2,
+      "statements": 125
+    },
+    {
+      "family": "d8k",
+      "detector": "dfs",
+      "kind": "tick",
+      "tick": 1,
+      "preflight_ms": 89.29079998051748,
+      "loop_ms": 406.2593000126071,
+      "over_budget_ms": 156.25930001260713,
+      "cleared": 2,
+      "detections": 2,
+      "statements": 110
+    },
+    {
+      "family": "d8k",
+      "detector": "dfs",
+      "kind": "tick",
+      "tick": 2,
+      "preflight_ms": 90.6587999779731,
+      "loop_ms": 387.9276000079699,
+      "over_budget_ms": 137.9276000079699,
+      "cleared": 2,
+      "detections": 2,
+      "statements": 115
+    },
+    {
+      "family": "d8k",
+      "detector": "dfs",
+      "kind": "tick",
+      "tick": 3,
+      "preflight_ms": 90.83760000066832,
+      "loop_ms": 384.2920999741182,
+      "over_budget_ms": 134.29209997411817,
+      "cleared": 2,
+      "detections": 2,
+      "statements": 105
+    },
+    {
+      "family": "d8k",
+      "detector": "dfs",
+      "kind": "tick",
+      "tick": 4,
+      "preflight_ms": 90.09339998010546,
+      "loop_ms": 381.2035000300966,
+      "over_budget_ms": 131.20350003009662,
+      "cleared": 2,
+      "detections": 2,
+      "statements": 115
+    },
+    {
+      "family": "d8k",
+      "detector": "current",
+      "kind": "tick",
+      "tick": 0,
+      "preflight_ms": 903.3531000022776,
+      "loop_ms": 1145.4549999907613,
+      "over_budget_ms": 895.4549999907613,
+      "cleared": 2,
+      "detections": 2,
+      "statements": 202
+    },
+    {
+      "family": "d8k",
+      "detector": "current",
+      "kind": "tick",
+      "tick": 1,
+      "preflight_ms": 792.6795000093989,
+      "loop_ms": 1071.4449999504723,
+      "over_budget_ms": 821.4449999504723,
+      "cleared": 2,
+      "detections": 2,
+      "statements": 207
+    },
+    {
+      "family": "d8k",
+      "detector": "current",
+      "kind": "tick",
+      "tick": 2,
+      "preflight_ms": 784.5480000250973,
+      "loop_ms": 1450.0289999996312,
+      "over_budget_ms": 1200.0289999996312,
+      "cleared": 2,
+      "detections": 2,
+      "statements": 202
+    },
+    {
+      "family": "d8k",
+      "detector": "current",
+      "kind": "tick",
+      "tick": 3,
+      "preflight_ms": 794.4894999964163,
+      "loop_ms": 1078.5256999661215,
+      "over_budget_ms": 828.5256999661215,
+      "cleared": 2,
+      "detections": 2,
+      "statements": 202
+    },
+    {
+      "family": "d8k",
+      "detector": "current",
+      "kind": "tick",
+      "tick": 4,
+      "preflight_ms": 792.2662000055425,
+      "loop_ms": 1101.761300000362,
+      "over_budget_ms": 851.7613000003621,
+      "cleared": 2,
+      "detections": 2,
+      "statements": 203
+    }
+  ]
+}
