@@ -217,11 +217,20 @@ def detect_dfs_in_memory(
     *,
     limit: int = DEFAULT_LIMIT,
     bounded: bool = True,
+    rank_bound: bool = True,
     deadline: float | None = None,
 ) -> list[Cycle]:
-    """The DFS over an already filtered edge list. Pure Python, no I/O."""
+    """The DFS over an already filtered edge list. Pure Python, no I/O.
+
+    `bounded=True, rank_bound=True` (the default since 2026-09-26) is the single experiment the consultation
+    after the supplement authorised: branch-and-bound on the COMPLETE ranking key (`_detect_rank_bound`).
+    `rank_bound=False` is the amount-only bound measured in Verification plan 7/7a, kept so that evidence
+    stays reproducible; `bounded=False` is the unbounded enumeration (measurement only).
+    """
 
     _check_depth(max_depth)
+    if bounded and rank_bound:
+        return _detect_rank_bound(edge_rows, max_depth, limit=limit, deadline=deadline)
     by_src: dict = {}
     for row in edge_rows:
         by_src.setdefault(row[1], []).append(row)
@@ -279,6 +288,183 @@ def detect_dfs_in_memory(
         # canonical rotation: the start edge is the smallest id by construction
         out.append(Cycle(-neg_amount, tuple((e[0], e[1], e[2], e[3]) for e in cycle)))
     return out
+
+
+def _detect_rank_bound(
+    edge_rows: Sequence[tuple], max_depth: int, *, limit: int, deadline: float | None
+) -> list[Cycle]:
+    """Canonical-root DFS with branch-and-bound on the complete ranking key (consultation 2026-09-26).
+
+    THE KEY. A cycle's key is `(-amount, identity)`, identity = the sorted tuple of all its debt ids as
+    canonical strings; smaller is better; the answer is the `limit` smallest keys. Keys of distinct cycles
+    differ (distinct edge sets have distinct identities). While fewer than `limit` cycles are retained,
+    nothing is pruned. Once `limit` are retained, the worst retained key is `W = (-A, T)`; a new cycle
+    matters only if its key is < W. W only ever decreases, so a branch that cannot beat W now can never
+    beat a later W either: pruning is never undone.
+
+    THE ROOT. Every cycle is enumerated once, from its smallest debt id `r` (its root); every other edge has
+    an id > r. So `identity[0] == str(r)` for every cycle under root r.
+
+    THE BRANCH. A branch is a simple path P (root first, k edges) ending at a vertex v other than the root's
+    start; `U` = the smallest amount on P. Every completion C (the edges that close P into a cycle) has
+    `amount(P + C) <= U`. Three prune rules, each applied only when `limit` cycles are retained:
+
+    1. `U < A`: every completion has amount < A, so key > W. (The pre-existing amount bound; strict `<`.)
+    2. `U == A` and `r > T[0]` (string order): a completion has amount <= A; if < A it loses on amount; if
+       == A, its identity starts with r > T[0], so identity > T. Either way key > W.
+    3. `U == A` and `r == T[0]`: a completion wins only with amount == A and identity < T. Let S be a
+       SUPERSET of the edges that can appear in a completion: id > r, not on P, amount >= A (a lower edge
+       would make the cycle amount < A), source not a vertex of P other than v, destination not a vertex of
+       P other than the start, and destination able to reach the start within the remaining hops over edges
+       with id > r (a reverse-BFS distance computed once per root, lazily; ignoring whether the edge is
+       reachable from v keeps S a superset). A completion of m edges has identity `sorted(P + X)` with X a
+       subset of S of size m, m from max(1, 3 - k) to max_depth - k. For a fixed m, X = the m smallest ids
+       of S gives the lexicographically smallest such tuple (replacing a member by a smaller non-member
+       never raises a sorted tuple, element by element). The minimum of those tuples over the permitted m
+       is a lower bound LB on the identity of every completion; if S holds fewer ids than the smallest m, no
+       completion exists. Prune when `not LB < T`: every completion's identity is then >= T, and == T is the
+       already retained cycle, which a path not yet explored cannot produce again.
+    (`r < T[0]` with `U == A`: identity[0] < T[0], a completion can win - nothing is pruned.)
+
+    Rule 2 also cuts at the root: roots are taken in `(-root amount, id)` order, and a root's own amount
+    bounds its cycles, so once a root has amount < A, or amount == A and id > T[0], every later root is
+    below A or has a larger id with amount <= A - the loop stops.
+
+    NOT done, on purpose (the consultation forbids it): no "sort the adjacency and stop after the first
+    `limit` finds" (traversal order is not identity order), and the amount bound stays strict `<`
+    (equal-amount contenders keep being searched; `test_a_later_equal_amount_candidate_replaces_...`).
+    Exactness says nothing about time: whether this meets the frozen thresholds is a measurement.
+    """
+
+    rows = list(edge_rows)
+    by_src: dict = {}
+    for row in rows:
+        by_src.setdefault(row[1], []).append(row)
+    for out in by_src.values():
+        out.sort(key=lambda e: (-e[3], str(e[0])))  # amount DESC, then small ids first: good keys early
+    by_id = sorted(rows, key=lambda e: str(e[0]))
+    ids_sorted = [str(e[0]) for e in by_id]
+
+    best: list[tuple] = []  # sorted list of (key, cycle)
+    ticks = 0
+
+    def cutoff():
+        return best[-1][0] if len(best) >= limit else None
+
+    starts = sorted(rows, key=lambda e: (-e[3], str(e[0])))
+    for start in starts:
+        w = cutoff()
+        root = str(start[0])
+        if w is not None:
+            a0, t0 = -w[0], w[1]
+            if start[3] < a0 or (start[3] == a0 and root > t0[0]):
+                break  # rules 1 and 2 at the root; every later root is no better (see docstring)
+        start_id, start_node = start[0], start[1]
+        path = [start]
+        path_ids = [root]
+        on_path_set = {start[1], start[2]}
+        dist_cache: dict = {}
+
+        def dist_to_start(root=root, start_node=start_node, dist_cache=dist_cache):
+            if "d" not in dist_cache:
+                rev: dict = {}
+                for e in rows:
+                    if str(e[0]) > root:
+                        rev.setdefault(e[2], []).append(e[1])
+                dist = {start_node: 0}
+                frontier = [start_node]
+                hop = 0
+                while frontier and hop < max_depth - 1:
+                    hop += 1
+                    nxt_frontier = []
+                    for node in frontier:
+                        for prev in rev.get(node, ()):
+                            if prev not in dist:
+                                dist[prev] = hop
+                                nxt_frontier.append(prev)
+                    frontier = nxt_frontier
+                dist_cache["d"] = dist
+            return dist_cache["d"]
+
+        def identity_bound_prunes(v, a, t, k_after, ids_after, root=root, start_node=start_node,
+                                  on_path_set=on_path_set, dist_to_start=dist_to_start) -> bool:
+            """Rule 3 for the branch whose path has `k_after` edges and ends at `v` (v != start)."""
+            m_lo, m_hi = max(1, 3 - k_after), max_depth - k_after
+            if m_hi < m_lo:
+                return True
+            dist = dist_to_start()
+            path_id_set = set(ids_after)
+            taken: list[str] = []
+            pos = bisect.bisect_right(ids_sorted, root)
+            while pos < len(by_id) and len(taken) < m_hi:
+                e, eid = by_id[pos], ids_sorted[pos]
+                pos += 1
+                if eid in path_id_set or e[3] < a:
+                    continue
+                if e[1] in on_path_set and e[1] != v:
+                    continue
+                if e[2] in on_path_set and e[2] != start_node:
+                    continue
+                d = dist.get(e[2])
+                if d is None or d > m_hi - 1:
+                    continue
+                taken.append(eid)
+            if len(taken) < m_lo:
+                return True  # no completion of any permitted length can exist
+            lb = min(tuple(sorted(ids_after + taken[:m])) for m in range(m_lo, len(taken) + 1))
+            return not lb < t
+
+        def extend(node, running: Decimal, root=root, start_id=start_id, start_node=start_node,
+                   path=path, path_ids=path_ids, on_path_set=on_path_set,
+                   identity_bound_prunes=identity_bound_prunes) -> None:
+            nonlocal ticks
+            ticks += 1
+            if deadline is not None and ticks % 4096 == 0 and time.monotonic() > deadline:
+                raise DetectorTimeout()
+            for nxt in by_src.get(node, ()):
+                if nxt[0] <= start_id:
+                    continue
+                amount = min(running, nxt[3])
+                w = cutoff()
+                a = t = None
+                if w is not None:
+                    a, t = -w[0], w[1]
+                    if amount < a:
+                        continue  # rule 1 (strict)
+                    if amount == a and root > t[0]:
+                        continue  # rule 2
+                if nxt[2] == start_node:
+                    if len(path) + 1 >= 3:
+                        key = (-amount, tuple(sorted(path_ids + [str(nxt[0])])))
+                        if len(best) < limit or key < best[-1][0]:
+                            bisect.insort(best, (key, tuple(path + [nxt])))
+                            if len(best) > limit:
+                                best.pop()
+                    continue
+                if nxt[2] in on_path_set or len(path) + 1 >= max_depth:
+                    continue
+                if w is not None and amount == a and root == t[0]:
+                    on_path_set.add(nxt[2])
+                    try:
+                        pruned = identity_bound_prunes(nxt[2], a, t, len(path) + 1, path_ids + [str(nxt[0])])
+                    finally:
+                        on_path_set.discard(nxt[2])
+                    if pruned:
+                        continue  # rule 3
+                path.append(nxt)
+                path_ids.append(str(nxt[0]))
+                on_path_set.add(nxt[2])
+                extend(nxt[2], amount)
+                on_path_set.discard(nxt[2])
+                path_ids.pop()
+                path.pop()
+
+        extend(start[2], start[3])
+
+    return [
+        Cycle(-neg_amount, tuple((e[0], e[1], e[2], e[3]) for e in cycle))
+        for (neg_amount, _identity), cycle in best
+    ]
 
 
 async def detect_dfs(
