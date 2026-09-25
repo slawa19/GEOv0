@@ -88,10 +88,12 @@ REQUIRED_POSTGRES_ISOLATION_LEVEL = "SERIALIZABLE"
 def _require_serializable_isolation(value: str) -> str:
     """Refuse, at settings construction, any `DB_POSTGRES_ISOLATION_LEVEL` other than SERIALIZABLE.
 
-    Returns the canonical spelling. Several money writers read debt without row locks and are correct
-    only because SERIALIZABLE aborts the read-write dependency cycle: trust decay, trust growth against
-    a concurrent raise, and the trust-line reductions (simulator trustline update, creditor PATCH).
-    Below SERIALIZABLE each of those schedules commits a trust limit under the debt it secures.
+    Returns the canonical spelling. Several trust-limit writers are correct only at SERIALIZABLE: trust
+    decay and the trust-line reductions (simulator trustline update, creditor PATCH) read debt without
+    row locks and rely on SERIALIZABLE aborting the read-write dependency cycle with a payment; trust
+    growth never reads debt - it reads and rewrites the same trust-line row, and a concurrent raise is
+    stopped by the concurrent-update serialization failure (which REPEATABLE READ would also give).
+    Below SERIALIZABLE the first two schedules commit a trust limit under the debt it secures.
     """
     normalised = " ".join(str(value or "").split()).upper()
     if normalised != REQUIRED_POSTGRES_ISOLATION_LEVEL:
