@@ -181,6 +181,23 @@ def _instrument(monkeypatch, *, gap_s: float):
     return counts
 
 
+def _describe(exc: BaseException) -> str:
+    """The failure and the database error under it: SQLSTATE and constraint, when there is one."""
+
+    from app.core.payments.service import _iter_exception_chain, _payment_db_sqlstate
+
+    parts = [repr(exc)[:120]]
+    for current in _iter_exception_chain(exc):
+        orig = getattr(current, "orig", None)
+        if orig is not None:
+            constraint = getattr(getattr(orig, "__cause__", None), "constraint_name", None) or getattr(
+                orig, "constraint_name", None
+            )
+            parts.append(f"sqlstate={_payment_db_sqlstate(current)} constraint={constraint} {str(orig)[:160]}")
+            break
+    return " | ".join(parts)
+
+
 async def _one_run(stand, counts, *, with_stream: bool) -> Run:
     for key in counts:
         counts[key] = 0
@@ -204,7 +221,7 @@ async def _one_run(stand, counts, *, with_stream: bool) -> Run:
             except RetryablePaymentConflictException:
                 run.payments_conflicted += 1
             except Exception as exc:  # noqa: BLE001 - recorded and asserted empty
-                run.payments_other.append(repr(exc)[:120])
+                run.payments_other.append(_describe(exc))
 
     workers = [asyncio.create_task(payer(i)) for i in range(WORKERS)] if with_stream else []
     started = time.monotonic()
@@ -287,6 +304,7 @@ async def test_d_clearing_starvation_probe(stand, monkeypatch) -> None:
     assert no_load.clearing_attempts == 1 and no_load.clearing_conflicts == 0, no_load
 
     results: dict[str, dict] = {}
+    all_runs: dict[str, list[Run]] = {}
     configurations = [
         ("positive_control_locks_off_gap", True, GAP_S, CONTROL_RUNS),
         ("locks_on", False, 0.0, RUNS),
@@ -300,9 +318,13 @@ async def test_d_clearing_starvation_probe(stand, monkeypatch) -> None:
             runs = [await _one_run(stand, counts, with_stream=True) for _ in range(runs_n)]
             if locks_off:
                 assert switch.total > 0, "the lock switch was never on the measured path"
-        _assert_the_producer_progressed(runs)
         results[name] = _summary(name, runs)
+        all_runs[name] = runs
 
+    # Every configuration is recorded before anything is asserted, so one failing producer does not hide
+    # the numbers of the others.
+    for runs in all_runs.values():
+        _assert_the_producer_progressed(runs)
     control = results["positive_control_locks_off_gap"]
     assert control["cleared"] <= CONTROL_MAX_SHARE * control["runs"] and control["exhausted"] >= 1, (
         f"POSITIVE CONTROL FAILED: the deliberately starving configuration was not seen to starve - the "
