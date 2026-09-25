@@ -2215,17 +2215,36 @@ class ClearingService:
                     )
                     reconciled_amount = reconciliation_task.result()
                 except Exception:
-                    # 020 stage 1: a failed resolution verifies nothing, so the COMMIT's own
-                    # error keeps precedence - an unknown commit ends unretried (`E010`), and
-                    # only a rollback PostgreSQL reported on COMMIT reaches the retry owner.
-                    # The resolver's error must not: its 40001/40P01 is not the commit's.
+                    # 020 stage 1: a resolver error is never classified as the attempt's
+                    # conflict - its 40001/40P01 is not the COMMIT's. One more complete
+                    # resolution, so a durable occurrence is still reported as the success it
+                    # is; if that one finds nothing or fails too, the COMMIT's own error keeps
+                    # precedence below: an unknown commit ends unretried (`E010`), and only a
+                    # rollback PostgreSQL reported on COMMIT reaches the retry owner.
                     logger.warning(
-                        "event=clearing.commit_resolution_failed tx_id=%s",
+                        "event=clearing.commit_resolution_failed tx_id=%s resolution=1",
                         tx_id_str,
                         exc_info=True,
                     )
-                    reconciliation_cancellation = None
-                    reconciled_amount = None
+                    second_resolution = asyncio.create_task(
+                        self._reconcile_committed_execution(
+                            tx_id_str,
+                            allowed_participant_pids=allowed_participant_pids,
+                        )
+                    )
+                    try:
+                        reconciliation_cancellation = await self._drain_task(
+                            second_resolution
+                        )
+                        reconciled_amount = second_resolution.result()
+                    except Exception:
+                        logger.warning(
+                            "event=clearing.commit_resolution_failed tx_id=%s resolution=2",
+                            tx_id_str,
+                            exc_info=True,
+                        )
+                        reconciliation_cancellation = None
+                        reconciled_amount = None
                 if (
                     commit_cancellation is None
                     and reconciliation_cancellation is not None

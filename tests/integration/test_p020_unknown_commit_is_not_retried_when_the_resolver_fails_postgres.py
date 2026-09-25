@@ -49,7 +49,7 @@ from sqlalchemy import select, text
 from app.core.clearing.service import ClearingService
 from app.core.payments.router import PaymentRouter
 from tests.integration.p019_interlock_support import _seed_interlock_case, _use_serializable
-from tests.p019_support import TargetMismatch, require_target
+from tests.p019_support import require_target
 
 # MODE B: every commit lands in a clone dropped after the test (`tests/tier_on_a_clone.py`).
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
@@ -407,11 +407,6 @@ async def test_control_c_an_unresolved_unknown_commit_is_the_sanitized_error_wit
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-    raises=TargetMismatch,
-    strict=True,
-    reason="020 target, fixed by stage 1 narrowing: a failed first resolution is followed by one more",
-)
 async def test_control_d_a_durable_commit_whose_first_resolution_deadlocks_returns_its_amount(
     monkeypatch,
 ) -> None:
