@@ -49,7 +49,7 @@ from sqlalchemy import select, text
 from app.core.clearing.service import ClearingService
 from app.core.payments.router import PaymentRouter
 from tests.integration.p019_interlock_support import _seed_interlock_case, _use_serializable
-from tests.p019_support import require_target
+from tests.p019_support import TargetMismatch, require_target
 
 # MODE B: every commit lands in a clone dropped after the test (`tests/tier_on_a_clone.py`).
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
@@ -69,6 +69,7 @@ def _stand(
     seed: dict,
     deadlock_the_resolver: bool = False,
     fail_the_earlier_reads: bool = False,
+    cancel_during_the_second_resolution: dict | None = None,
 ):
     """A `ClearingService` whose FIRST commit ends as `commit_mode`, and that records what happened.
 
@@ -80,6 +81,11 @@ def _stand(
     `fail_the_earlier_reads`: the first resolution's reads 1 and 2 raise an INJECTED `RuntimeError`, so an
     occurrence that is durable cannot answer them; only its third read - the one whose error the resolver
     surfaces - is PostgreSQL's deadlock. Needed only when the commit really landed.
+
+    `cancel_during_the_second_resolution` (`{"second_started": Event, "release": Event}`): the first two
+    resolution invocations run for real and then raise an INJECTED `RuntimeError`; the second one first
+    sets `second_started` and waits for `release`, so the test can cancel the caller while it runs.
+    Later invocations are untouched.
     """
 
     from tests.conftest import TestingSessionLocal
@@ -101,10 +107,17 @@ def _stand(
             return await super()._execute_clearing_with_amount(cycle, **kwargs)
 
         async def _reconcile_committed_execution(self, tx_id, *, allowed_participant_pids=None):
+            invocation = len(state["reconciliations"]) + 1
+            script = cancel_during_the_second_resolution
             try:
+                if script is not None and invocation == 2:
+                    script["second_started"].set()
+                    await script["release"].wait()
                 amount = await super()._reconcile_committed_execution(
                     tx_id, allowed_participant_pids=allowed_participant_pids
                 )
+                if script is not None and invocation <= 2:
+                    raise RuntimeError(f"injected: resolution {invocation} failed")
             except Exception as exc:
                 state["reconciliations"].append(("raised", _pg_codes(exc)))
                 raise
@@ -448,4 +461,103 @@ async def test_control_d_a_durable_commit_whose_first_resolution_deadlocks_retur
         and state["reconciliations"] == [("raised", ["40P01"]), ("returned", Decimal("30.00"))],
         f"a durable clearing whose first resolution deadlocked began {state['attempts']} attempt(s) and "
         f"ended as {outcome!r}; reconciliations {state['reconciliations']}",
+    )
+
+
+async def _cancel_while_the_second_resolution_runs(commit_mode: str):
+    """Unknown or refused COMMIT; resolution 1 fails; the caller cancels during resolution 2, which fails.
+
+    FAULT INJECTION: both resolution failures are injected (`RuntimeError` after a real resolution); the
+    cancellation is a real `Task.cancel()` of the caller, delivered while resolution 2 is still waiting.
+    """
+
+    seed = await _seed_interlock_case()
+    script = {"second_started": asyncio.Event(), "release": asyncio.Event()}
+    stand_cls, state = _stand(commit_mode, seed=seed, cancel_during_the_second_resolution=script)
+
+    from tests.conftest import TestingSessionLocal
+
+    owner = TestingSessionLocal()
+    clearing_task = None
+    try:
+        await _use_serializable(owner)
+        clearing_task = asyncio.create_task(stand_cls(owner).execute_clearing_with_amount(seed["cycle"]))
+        await asyncio.wait_for(script["second_started"].wait(), timeout=30)
+        assert not clearing_task.done(), "premise: the caller is still waiting on resolution 2"
+        clearing_task.cancel()
+        script["release"].set()
+        try:
+            outcome: object = await asyncio.wait_for(asyncio.shield(clearing_task), timeout=60)
+        except asyncio.CancelledError as cancelled:
+            outcome = cancelled
+        except Exception as exc:  # noqa: BLE001 - compared by the caller
+            outcome = exc
+    finally:
+        script["release"].set()
+        if clearing_task is not None and not clearing_task.done():
+            clearing_task.cancel()
+        await owner.rollback()
+        await owner.close()
+        PaymentRouter.invalidate_cache(seed["equivalent_code"])
+    transactions, debts = await _evidence(seed)
+    return seed, state, outcome, transactions, debts
+
+
+@pytest.mark.asyncio
+@pytest.mark.xfail(
+    raises=TargetMismatch,
+    strict=True,
+    reason="020 target, fixed by the stage 1 fix-delta: a pulse drained by a failing resolution is kept",
+)
+async def test_a_cancellation_during_a_failing_second_resolution_propagates(monkeypatch) -> None:
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "COMMIT_RETRY_ATTEMPTS", 3, raising=False)
+    monkeypatch.setattr(settings, "PAYMENT_TOTAL_TIMEOUT_SECONDS", 60, raising=False)
+
+    seed, state, outcome, transactions, debts = await _cancel_while_the_second_resolution_runs(
+        "unknown_not_committed"
+    )
+
+    # Controls: the unknown commit was the injected one, and both scripted resolutions failed.
+    assert [type(e).__name__ for e in state["commit_errors"]] == ["ConnectionError"], state["commit_errors"]
+    assert state["reconciliations"][:2] == [("raised", []), ("raised", [])], state["reconciliations"]
+
+    require_target(
+        isinstance(outcome, asyncio.CancelledError)
+        and state["attempts"] == 1
+        and transactions == []
+        and debts == _untouched(seed),
+        f"a caller cancelled during a failing resolution got {outcome!r} after {state['attempts']} "
+        f"attempt(s); transactions {transactions}, reconciliations {state['reconciliations']}",
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.xfail(
+    raises=TargetMismatch,
+    strict=True,
+    reason="020 target, fixed by the stage 1 fix-delta: no retry after a cancellation lost in a resolution",
+)
+async def test_a_cancellation_during_a_failing_resolution_after_a_refused_commit_is_not_retried(
+    monkeypatch,
+) -> None:
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "COMMIT_RETRY_ATTEMPTS", 3, raising=False)
+    monkeypatch.setattr(settings, "PAYMENT_TOTAL_TIMEOUT_SECONDS", 60, raising=False)
+
+    seed, state, outcome, transactions, debts = await _cancel_while_the_second_resolution_runs("real_rollback")
+
+    # Controls: PostgreSQL really refused the COMMIT, and both scripted resolutions failed.
+    assert [_pg_codes(e) for e in state["commit_errors"]] == [["40001"]], state["commit_errors"]
+    assert state["reconciliations"][:2] == [("raised", []), ("raised", [])], state["reconciliations"]
+
+    require_target(
+        isinstance(outcome, asyncio.CancelledError)
+        and state["attempts"] == 1
+        and transactions == []
+        and debts == _untouched(seed),
+        f"a caller cancelled during a failing resolution after a refused COMMIT got {outcome!r} after "
+        f"{state['attempts']} attempt(s); transactions {transactions}, reconciliations {state['reconciliations']}",
     )
