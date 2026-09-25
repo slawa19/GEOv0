@@ -9,19 +9,26 @@ which classified it as a transaction conflict, resolved once more, found nothing
 a secondary read. Intended (019, precondition 3): an unknown commit is never retried; only a rollback that
 PostgreSQL reported on COMMIT may be; a verified committed occurrence answers with its durable amount.
 
-WHAT IS REAL AND WHAT IS INSTRUMENTED, named so no reader takes one for the other:
+THIS IS FAULT INJECTION, NOT A REAL CONNECTION-LOSS SCHEDULE. What is injected and what is PostgreSQL's:
 
-* the unknown COMMIT is INSTRUMENTED. `_commit_to_terminal` is overridden for the first attempt only: it
+* the unknown COMMIT is INJECTED. `_commit_to_terminal` is overridden for the first attempt only: it
   either rolls the transaction back or commits it for real, and in both cases reports
   `ConnectionError` - the service is told what a lost connection tells it, and the test knows what
   actually happened. The classification boundary is this method's return value, so that is where the
-  instrument sits;
-* the resolver's failure is REAL: its third read (the resolver reads up to three times and surfaces the
-  last error) is made to take `ACCESS SHARE` on one barrier table and then wait on a second one held by a
-  blocker, which then asks for the first. PostgreSQL detects the deadlock in the resolver's backend (the
-  blocker's own check is pushed to 30 s) and raises `40P01`. Controls: the resolver was seen waiting on
-  the blocker, the blocker on the resolver, `pg_stat_database.deadlocks` counted it, and the resolver's
-  recorded error carries `40P01`;
+  fault sits;
+* THE FAULT SCHEDULE (binding, Codex round 2 on 020, P2-3): the FIRST COMPLETE reconciliation invocation
+  fails, and every later one runs untouched. A single failed read would not do - the resolver reads up
+  to three times and swallows an earlier failure - and a resolver that always fails would also fail the
+  classifier's second reconciliation (`_end_attempt_on_error`), ending in `E010` without a second money
+  attempt on the baseline too: a false pass. So the invocation's LAST read (its third) is the one that
+  fails, and the failure itself is PostgreSQL's: that read takes `ACCESS SHARE` on one barrier table and
+  then waits on a second one held by a blocker, which then asks for the first; PostgreSQL detects the
+  deadlock in the resolver's backend (the blocker's own check is pushed to 30 s) and raises `40P01`.
+  Controls: the resolver was seen waiting on the blocker, the blocker on the resolver,
+  `pg_stat_database.deadlocks` counted it, the first invocation raised `40P01`, and no later invocation
+  raised. The retry budget is set to 3 attempts and a 60 s deadline, so the baseline CAN reach a second
+  attempt (it does: `_end_attempt_on_error` -> `_ClearingAttemptConflict` -> `_run_attempts`);
+* attempts are counted at entry into `_execute_clearing_with_amount`, the one attempt body;
 * the confirmed rollback of control (a) is REAL: a concurrent SERIALIZABLE transaction reads the debts the
   clearing has written (uncommitted) and updates a participant row the clearing has read, then commits
   first; PostgreSQL dooms the clearing and its COMMIT fails with 40001. Control: the recorded commit error
@@ -49,7 +56,8 @@ from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - 
 
 BARRIER_HELD = "p020_s1_resolver_holds"
 BARRIER_WAITED = "p020_s1_resolver_waits"
-_RESOLVER_READ_THAT_DEADLOCKS = 3  # the resolver's last read: its error is the one it surfaces
+_RESOLVER_READ_THAT_DEADLOCKS = 3  # the first invocation's last read: its error is the one it surfaces
+
 
 def _pg_codes(exc: BaseException) -> list[str]:
     return sorted(ClearingService._postgres_error_codes(exc) & {"40001", "40P01"})
@@ -59,8 +67,8 @@ def _stand(commit_mode: str, *, seed: dict, deadlock_the_resolver: bool = False)
     """A `ClearingService` whose FIRST commit ends as `commit_mode`, and that records what happened.
 
     `commit_mode`:
-    * `unknown_not_committed` - rolled back, reported as `ConnectionError` (instrumented, see module doc);
-    * `unknown_committed` - committed for real, reported as `ConnectionError` (instrumented);
+    * `unknown_not_committed` - rolled back, reported as `ConnectionError` (fault injection, see module doc);
+    * `unknown_committed` - committed for real, reported as `ConnectionError` (fault injection);
     * `real_rollback` - a concurrent transaction makes PostgreSQL refuse the COMMIT with 40001 (real).
     """
 
@@ -73,15 +81,25 @@ def _stand(commit_mode: str, *, seed: dict, deadlock_the_resolver: bool = False)
         "commit_errors": [],
         "resolver_errors": [],
         "resolver_pid": None,
+        "reconciliations": [],
     }
 
     class _Stand(ClearingService):
-        async def _committed_execution_amount(self, tx_id, *, allowed_participant_pids=None):
-            # The committed-occurrence read opens every attempt: counting it counts the attempts.
+        async def _execute_clearing_with_amount(self, cycle, **kwargs):
+            # The one attempt body: every entry is one money attempt.
             state["attempts"] += 1
-            return await super()._committed_execution_amount(
-                tx_id, allowed_participant_pids=allowed_participant_pids
-            )
+            return await super()._execute_clearing_with_amount(cycle, **kwargs)
+
+        async def _reconcile_committed_execution(self, tx_id, *, allowed_participant_pids=None):
+            try:
+                amount = await super()._reconcile_committed_execution(
+                    tx_id, allowed_participant_pids=allowed_participant_pids
+                )
+            except Exception as exc:
+                state["reconciliations"].append(("raised", _pg_codes(exc)))
+                raise
+            state["reconciliations"].append(("returned", amount))
+            return amount
 
         @staticmethod
         async def _read_committed_execution_amount(session, tx_id, *, allowed_participant_pids=None):
@@ -105,11 +123,11 @@ def _stand(commit_mode: str, *, seed: dict, deadlock_the_resolver: bool = False)
             state["armed"] = True
             if commit_mode == "unknown_not_committed":
                 await self.session.rollback()
-                error: BaseException = ConnectionError("instrumented: connection lost during COMMIT")
+                error: BaseException = ConnectionError("injected: connection lost during COMMIT")
             elif commit_mode == "unknown_committed":
                 cancellation, error = await super()._commit_to_terminal()
-                assert (cancellation, error) == (None, None), "premise: the instrumented commit is durable"
-                error = ConnectionError("instrumented: acknowledgement of a durable COMMIT lost")
+                assert (cancellation, error) == (None, None), "premise: the injected commit is durable"
+                error = ConnectionError("injected: acknowledgement of a durable COMMIT lost")
             elif commit_mode == "real_rollback":
                 a_id = seed["participant_ids"][0]
                 async with TestingSessionLocal() as other:
@@ -207,8 +225,12 @@ async def _deadlocks() -> int:
 
 
 @pytest.mark.asyncio
-async def test_an_unknown_commit_whose_resolver_deadlocks_is_not_retried() -> None:
+async def test_an_unknown_commit_whose_resolver_deadlocks_is_not_retried(monkeypatch) -> None:
+    from app.config import settings
     from tests.conftest import TestingSessionLocal
+
+    monkeypatch.setattr(settings, "COMMIT_RETRY_ATTEMPTS", 3, raising=False)
+    monkeypatch.setattr(settings, "PAYMENT_TOTAL_TIMEOUT_SECONDS", 60, raising=False)
 
     seed = await _seed_interlock_case()
     async with TestingSessionLocal() as setup:
@@ -272,10 +294,13 @@ async def test_an_unknown_commit_whose_resolver_deadlocks_is_not_retried() -> No
             if task is not None and not task.done():
                 task.cancel()
 
-    # Controls: the original commit is the instrumented unknown one; the resolver really deadlocked.
+    # Controls: the original commit is the injected unknown one; the resolver really deadlocked.
     assert [type(e).__name__ for e in state["commit_errors"]] == ["ConnectionError"], state["commit_errors"]
     assert blocker_waited, "the blocker never queued on the resolver: no deadlock was formed"
     assert [_pg_codes(e) for e in state["resolver_errors"]] == [["40P01"]], state["resolver_errors"]
+    # The schedule: the first complete invocation failed with 40P01, every later one ran untouched.
+    assert state["reconciliations"][:1] == [("raised", ["40P01"])], state["reconciliations"]
+    assert all(kind == "returned" for kind, _ in state["reconciliations"][1:]), state["reconciliations"]
 
     async def counted() -> bool:
         return await _deadlocks() > deadlocks_before
@@ -289,12 +314,17 @@ async def test_an_unknown_commit_whose_resolver_deadlocks_is_not_retried() -> No
         and transactions == []
         and debts == _untouched(seed),
         f"an unknown commit whose resolver deadlocked began {state['attempts']} attempt(s) and ended as "
-        f"{outcome!r}; transactions {transactions}, debts {debts}",
+        f"{outcome!r}; transactions {transactions}, debts {debts}, "
+        f"reconciliations {state['reconciliations']}",
     )
 
 
 @pytest.mark.asyncio
-async def test_control_a_rollback_postgres_reported_on_commit_is_still_retried() -> None:
+async def test_control_a_rollback_postgres_reported_on_commit_is_still_retried(monkeypatch) -> None:
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "COMMIT_RETRY_ATTEMPTS", 3, raising=False)
+    monkeypatch.setattr(settings, "PAYMENT_TOTAL_TIMEOUT_SECONDS", 60, raising=False)
     seed = await _seed_interlock_case()
     stand_cls, state = _stand("real_rollback", seed=seed)
 
@@ -314,6 +344,8 @@ async def test_control_b_a_verified_committed_occurrence_returns_its_durable_amo
     stand_cls, state = _stand("unknown_committed", seed=seed)
 
     outcome = await _run(stand_cls, seed)
+
+    assert state["reconciliations"] == [("returned", Decimal("30.00"))], state["reconciliations"]
 
     assert [type(e).__name__ for e in state["commit_errors"]] == ["ConnectionError"], state["commit_errors"]
     transactions, debts = await _evidence(seed)
