@@ -300,6 +300,21 @@ Occurrence имеет стабильный UUIDv5 от каноническог�
 поглощается replay-защитой. Это внутренний протокол; новый HTTP idempotency contract для
 `POST /clearing/auto` не вводится.
 
+**Уточнено 2026-09-25 (019, стадия 5, `T1907`, `FORK-4`):** у исполнения есть владелец повторов
+(`ClearingService._run_attempts`). Конфликт уровня транзакции (`40001`, `40P01`), на который не отвечает
+закоммиченная occurrence, откатывает попытку, и **всё** исполнение повторяется в новой транзакции со
+свежим снимком — occurrence, стоп/hold и строки цикла с суммами перечитываются; откат savepoint'а повтором
+не считается. Бюджет — платёжный (`COMMIT_RETRY_ATTEMPTS`, тот же backoff, дедлайн
+`PAYMENT_TOTAL_TIMEOUT_SECONDS`); исчерпание — типизированный повторяемый отказ
+`RetryableClearingConflictException` (`409/E008`, `details.retryable`) без occurrence и частичных эффектов,
+а не `E010`. Неразрешённый коммит не повторяется; `ClearingCommittedAfterCancellation` сохраняется.
+Стоп/hold клиринг читает `FOR SHARE` в каждой попытке и держит до коммита (`FORK-7`), поэтому
+деактивирующий `PATCH` и установка hold ждут коммита клиринга, прочитавшего флаг. Каждый писатель долга
+(платёж, клиринг, инжект), дрейф доверия и admin `PATCH`/`DELETE` эквивалента и снятие hold проверяют
+**фактический** уровень своей рабочей транзакции и отказывают вне `SERIALIZABLE` до первой записи
+(`MoneyBoundary.require_serializable`, `E010`, `details.reason = isolation_not_serializable`); транзакцию
+вызывающего ради повышения уровня не коммитят и не откатывают (`FORK-2`).
+
 Commit дренируется до terminal result. Если cancellation пришла после durable commit, внутренний
 `ClearingCommittedAfterCancellation` несёт `tx_id` и фактическую сумму: Real/Interact publisher
 сначала учитывает результат и выпускает partial `clearing.done`, затем сохраняет cancellation.

@@ -119,12 +119,12 @@ async def test_concurrent_payments_shared_bottleneck_commit_once_postgres(
     async def _pay(sender_id, tx_id: str):
         async with TestingSessionLocal() as session:
             await session.connection(
-                execution_options={"isolation_level": "READ COMMITTED"}
+                execution_options={"isolation_level": "SERIALIZABLE"}
             )
             isolation = (
                 await session.execute(text("SHOW transaction_isolation"))
             ).scalar_one()
-            assert str(isolation).lower() == "read committed"
+            assert str(isolation).lower() == "serializable"  # 019 stage 5 (T1907): the only supported level
             try:
                 return await PaymentService(session).create_payment_internal(
                     sender_id,

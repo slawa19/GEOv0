@@ -41,6 +41,7 @@ from app.core.clearing.service import ClearingService
 from app.core.payments import service as payment_service
 from app.db.base import Base
 from app.db.models.debt import Debt
+from tests.p019_support import allow_below_serializable_for_a_diagnostic
 from tests.debt_setup import debt_fixture_setup
 from tests.integration.test_p015_step5a_reconciliation_postgres import _sqlstates
 from tests.integration.test_p015_t1544_operator_stop_races_postgres import _advisory_waiter_exists
@@ -360,7 +361,14 @@ async def test_step5b_p_stand_control_at_read_committed_the_same_race_does_make_
         async with read_committed() as probe:
             level = (await probe.execute(text("SHOW transaction_isolation"))).scalar_one()
         assert str(level).lower() == "read committed", f"stand: the counter-probe is not at READ COMMITTED: {level}"
+        # 019 stage 5 (`T1907`, item 7): the payment now REFUSES READ COMMITTED, so this meter is kept as the
+        # named diagnostic control below the supported level - the check is switched off for this test only
+        # (`allow_below_serializable_for_a_diagnostic`) - and it is no evidence that the application runs
+        # there. The production path at SERIALIZABLE is the test above; the refusal is
+        # `test_p019_money_writers_refuse_non_serializable_postgres.py`.
+        skipped = allow_below_serializable_for_a_diagnostic(monkeypatch)
         seen = await _race_a_writer_into_the_prestate_window(factory, monkeypatch, read_committed)
+        assert "payment" in skipped, "the diagnostic switch was not on the payment's path"
         assert seen["error"] is None and seen["tx_state"] == "COMMITTED", seen
         assert len(seen["reads"]) == 1 and seen["reads"][0][("b", "a")] == "3.00000000", seen["reads"]
         assert seen["edges"] == {("a", "b"): Decimal("1.00000000")}, seen["edges"]

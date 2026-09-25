@@ -1138,6 +1138,12 @@ class PaymentService:
         # Mandatory idempotency key (client-generated).
         tx_id_str = validate_tx_id(request.tx_id)
 
+        # 019 stage 5 (`T1907`, `FORK-2`): the capacity read and the one-direction rule of the flows
+        # below hold under concurrency only at SERIALIZABLE. The FIRST statement of the payment in this
+        # transaction, so a refusal comes before admission and before any write (no row, nothing to
+        # record) and the caller's transaction is left as it was.
+        await MoneyBoundary.require_serializable(self.session, writer="payment")
+
         # 1. Validation
         sender = await self.session.get(Participant, sender_id)
         if not sender:

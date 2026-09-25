@@ -611,6 +611,13 @@ class RealRunnerImpl:
                     lock_ids = await self._resolve_inject_owner_lock_ids(
                         session, run=run, scenario=scenario, event=event
                     )
+                # 019 stage 5 (`T1907`, `FORK-2`): the one-direction-per-pair check of
+                # `inject_debt` (`book.py`, `_apply_inject_increase`) holds against a concurrent
+                # writer only at SERIALIZABLE. Read on the unit of work's transaction before its
+                # owner locks and its first write (on the first attempt the lock-set resolution
+                # above has already read in it); the refusal is neither transient nor a stop, so it
+                # propagates and the event stays pending.
+                await MoneyBoundary.require_serializable(session, writer="inject")
                 # The owner locks open the transaction the event is staged and committed in. A
                 # fresh boundary per attempt: its advisory-lock deadline is per unit of work.
                 await MoneyBoundary(session).acquire_staged_equivalent_owner_locks(lock_ids)

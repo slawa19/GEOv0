@@ -183,12 +183,12 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
         observer_session = TestingSessionLocal()
         for session in (clearing_session, payment_session):
             await session.connection(
-                execution_options={"isolation_level": "READ COMMITTED"}
+                execution_options={"isolation_level": "SERIALIZABLE"}
             )
             isolation = (
                 await session.execute(text("SHOW transaction_isolation"))
             ).scalar_one()
-            assert str(isolation).lower() == "read committed"
+            assert str(isolation).lower() == "serializable"  # 019 stage 5 (T1907): the only supported level
         # THE PAYMENT'S OWN TIMEOUTS ARE WIDENED, and the reason is a measurement rather than a
         # convenience. This test deliberately parks the clearing inside its owner lock and asserts
         # that the payment WAITS and then succeeds, so the payment's budget has to cover the whole

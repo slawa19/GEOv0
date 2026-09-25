@@ -35,6 +35,7 @@ from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.reconciliation_tables import BASELINE_COMMENT
+from tests.p019_support import allow_below_serializable_for_a_diagnostic
 from tests.debt_setup import debt_fixture_setup
 from tests.migrated_schema import run_alembic_upgrade_head, scratch_databases
 from tests.tier_on_a_clone import tier_on_a_clone  # noqa: F401 - fixture, requested by `factory`
@@ -336,7 +337,12 @@ async def test_step5a_p_a_payment_committed_between_the_verifiers_reads_is_still
         async with read_committed() as probe:
             level = (await probe.execute(text("SHOW transaction_isolation"))).scalar_one()
         assert str(level).lower() == "read committed", f"stand: the counter-probe is not at READ COMMITTED: {level}"
+        # 019 stage 5 (`T1907`, item 7): the payment refuses READ COMMITTED; this stand is about the
+        # VERIFIER's own snapshot, so the payment's check is switched off for this test only - a named
+        # diagnostic below the supported level (`allow_below_serializable_for_a_diagnostic`).
+        skipped = allow_below_serializable_for_a_diagnostic(monkeypatch)
         seen = await interleave_a_payment_between_the_verifiers_reads(read_committed, monkeypatch)
+        assert "payment" in skipped, "the diagnostic switch was not on the payment's path"
         _assert_interleave(seen)
     finally:
         await engine.dispose()

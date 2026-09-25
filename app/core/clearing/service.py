@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import random
 import uuid
 from decimal import Decimal, InvalidOperation
 from typing import AbstractSet, Dict, List, Set
@@ -23,7 +24,7 @@ from app.utils.error_codes import ErrorCode
 from app.utils.exceptions import ConflictException, GeoException, TimeoutException
 from app.utils.metrics import CLEARING_EVENTS_TOTAL
 from app.utils.money import to_money_str
-from app.core.money_boundary import MoneyBoundary
+from app.core.money_boundary import IsolationNotSerializable, MoneyBoundary
 from app.core.payments.router import PaymentRouter
 from app.core.invariants import InvariantChecker
 from app.core.integrity import compute_integrity_checkpoint_for_equivalent
@@ -61,6 +62,38 @@ class ClearingCommittedAfterCancellation(asyncio.CancelledError):
         self.cleared_amount = cleared_amount
 
 
+class RetryableClearingConflictException(ConflictException):
+    """The clearing's retry budget was spent on transaction-level conflicts; nothing was committed.
+
+    019 stage 5 (`T1907`, `FORK-4`): the typed retryable refusal of an exhausted clearing - the same public
+    shape as a payment's (`409/E008`, `details.retryable`), so a caller can tell "try again" from an
+    internal error. No occurrence, envelope, journal entry or audit row of the clearing exists.
+    """
+
+    def __init__(self, message: str | None = None):
+        super().__init__(
+            message or "Clearing conflicted with concurrent money writers; retry",
+            details={
+                "retryable": True,
+                "conflict_kind": "database_concurrency",
+                "operation": "clearing",
+            },
+        )
+
+
+class _ClearingAttemptConflict(Exception):
+    """One attempt met a transaction-level conflict and no committed occurrence answers it.
+
+    Internal to `ClearingService`: raised only after the attempt's transaction has been rolled back (by
+    `_reconcile_committed_execution` or `_rollback_skipped_execution`), caught only by the retry owner
+    `_run_attempts`; it never leaves `execute_clearing_with_amount`.
+    """
+
+    def __init__(self, cause: BaseException):
+        super().__init__(f"{type(cause).__name__}: {cause}")
+        self.cause = cause
+
+
 class ClearingService:
     def __init__(self, session: AsyncSession):
         self.session = session
@@ -87,18 +120,26 @@ class ClearingService:
             raise GeoException() from exc
 
     async def _refuse_if_equivalent_inactive(self, equivalent_ids: Set[uuid.UUID]) -> None:
-        """T1544: clearing does not run in an equivalent the operator has deactivated.
+        """T1544: clearing does not run in an equivalent the operator has deactivated (and, T1546, not
+        in one under an integrity hold).
 
         A refusal, not a skip: `None` would let the caller finish with a successful zero result and
         hide the stop. It ends the attempt first, like a skip, and surfaces `409/E008`.
 
-        A plain read is binding only where it is taken in a snapshot newer than the owner lock -
-        the PostgreSQL interlock path, which rolls back after acquiring it - because a deactivating
-        PATCH holds the same lock through its commit.
+        THE READ IS `FOR SHARE` (019 stage 5, `T1907`, `FORK-7`), in every attempt, and the row lock is
+        held through the clearing's commit. That is what makes the cutoff observable: a deactivating
+        `PATCH` or the reaction setting a hold `UPDATE`s this row, so it waits for a clearing that has
+        already read `active`; and a clearing that reads after such an update committed meets a row
+        changed since its snapshot - 40001 - and its retry (`_run_attempts`) reads the stop afresh and
+        refuses. Until stage 5 this was a plain read bound by the equivalent owner lock the PATCH also
+        took; the owner lock is what stage 5 may remove, and SERIALIZABLE alone does not give this
+        order of completion (it may serialise "the clearing read `active` -> the PATCH answered -> the
+        clearing committed"). Order: the session owner lock (while it exists) -> this row -> the debt
+        rows, the same as the payment's.
         """
         try:
             await MoneyBoundary(self.session).refuse_inactive_equivalents(
-                equivalent_ids, row_lock=False
+                equivalent_ids, row_lock=True
             )
         except ConflictException as refusal:
             # Step 5c: the same helper also refuses an integrity hold; the reason names which.
@@ -106,6 +147,10 @@ class ClearingService:
             await self._rollback_skipped_execution()
             raise
         except Exception as exc:
+            if self._is_retryable_concurrency_error(exc):
+                # A stop or hold committed after this attempt's snapshot: the next attempt reads it.
+                await self._rollback_skipped_execution()
+                raise _ClearingAttemptConflict(exc) from exc
             await self._raise_unexpected_execution(exc)
 
     @staticmethod
@@ -1450,6 +1495,65 @@ class ClearingService:
             )
         return final_cycles
 
+    async def _run_attempts(self, cycle: List[Dict], **attempt_kwargs) -> Decimal | None:
+        """THE RETRY OWNER of one clearing execution (019 stage 5, `T1907`, `FORK-4`).
+
+        Runs `_execute_clearing_with_amount` and, when an attempt meets a transaction-level conflict
+        (40001/40P01) that no committed occurrence answers, runs the WHOLE execution again in a new
+        transaction: the attempt has already been rolled back, its ORM state is dropped here
+        (`expunge_all`), and the next attempt re-reads the committed-occurrence row, the stop/hold, the
+        cycle rows `FOR UPDATE` and their amounts - never a savepoint rollback, which would keep the
+        stale SERIALIZABLE snapshot. On the PostgreSQL interlock path the attempts share the pinned
+        connection and its session lock (stage 5, part b, `T1909`, decides that lock); each attempt is
+        still its own transaction and snapshot.
+
+        THE BUDGET is the one a payment has (no new setting): at most `COMMIT_RETRY_ATTEMPTS` attempts,
+        with the same exponential backoff and jitter (`COMMIT_RETRY_BASE_DELAY_MS`,
+        `COMMIT_RETRY_MAX_DELAY_MS`), and no new attempt that would start after
+        `PAYMENT_TOTAL_TIMEOUT_SECONDS` from the first. Exhausted: `RetryableClearingConflictException`
+        (`409/E008`, retryable) - no occurrence and no partial effect, since every attempt was rolled
+        back. Outcomes that are NOT conflicts keep their paths unchanged: a committed occurrence found
+        by the resolver is returned as the success it is, an unresolved commit error stays an error
+        (never retried - a retry is safe only after a rollback PostgreSQL reported, which is what 40001
+        and 40P01 are), and `ClearingCommittedAfterCancellation` carries the committed amount out.
+        """
+
+        from app.config import settings
+
+        attempts = max(1, int(settings.COMMIT_RETRY_ATTEMPTS or 1))
+        base_seconds = max(0.0, settings.COMMIT_RETRY_BASE_DELAY_MS / 1000.0)
+        cap_seconds = max(base_seconds, settings.COMMIT_RETRY_MAX_DELAY_MS / 1000.0)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + (settings.PAYMENT_TOTAL_TIMEOUT_SECONDS or 10)
+        attempt_no = 0
+        while True:
+            attempt_no += 1
+            try:
+                return await self._execute_clearing_with_amount(cycle, **attempt_kwargs)
+            except _ClearingAttemptConflict as conflict:
+                cause = conflict.cause
+            self.session.expunge_all()
+            codes = sorted(self._postgres_error_codes(cause) & {"40001", "40P01"})
+            delay = min(cap_seconds, base_seconds * (2 ** (attempt_no - 1)))
+            delay *= 1.0 + 0.25 * random.random()
+            if attempt_no >= attempts or loop.time() + delay >= deadline:
+                logger.warning(
+                    "event=clearing.retry_exhausted attempts=%s pgcode=%s", attempt_no, codes
+                )
+                try:
+                    CLEARING_EVENTS_TOTAL.labels(event="execute", result="conflict").inc()
+                except Exception:
+                    pass
+                raise RetryableClearingConflictException() from cause
+            logger.warning(
+                "event=clearing.attempt_retry attempt=%s/%s delay_s=%.3f pgcode=%s",
+                attempt_no,
+                attempts,
+                delay,
+                codes,
+            )
+            await asyncio.sleep(delay)
+
     async def execute_clearing(
         self,
         cycle: List[Dict],
@@ -1509,7 +1613,7 @@ class ClearingService:
         try:
             debt_ids = [uuid.UUID(str(edge["debt_id"])) for edge in cycle]
         except Exception:
-            return await self._execute_clearing_with_amount(
+            return await self._run_attempts(
                 cycle,
                 allowed_participant_ids=allowed_ids,
                 allowed_participant_pids=allowed_participant_pids,
@@ -1542,7 +1646,7 @@ class ClearingService:
                 await self._raise_unexpected_execution(exc)
             if replay_amount is not None:
                 return replay_amount
-            return await self._execute_clearing_with_amount(
+            return await self._run_attempts(
                 cycle,
                 allowed_participant_ids=allowed_ids,
                 allowed_participant_pids=allowed_participant_pids,
@@ -1636,7 +1740,8 @@ class ClearingService:
             await self._rollback_before_interlock(work_session)
             self.session = work_session
             try:
-                result = await self._execute_clearing_with_amount(
+                # 019 stage 5 (`T1907`): the retry owner runs every attempt on this pinned connection.
+                result = await self._run_attempts(
                     cycle,
                     interlocked_equivalent_id=equivalent_id,
                     allowed_participant_ids=allowed_ids,
@@ -1742,10 +1847,24 @@ class ClearingService:
                     await self._raise_unexpected_execution(reconciliation_error)
                 if replay_amount is not None:
                     return replay_amount
+                # No committed occurrence answers the conflict: the attempt is rolled back (by the
+                # resolver) and the retry owner runs the whole execution again (`_run_attempts`).
+                raise _ClearingAttemptConflict(exc) from exc
             await self._raise_unexpected_execution(exc)
         if replay_amount is not None:
             await self._rollback_skipped_execution()
             return replay_amount
+
+        # 019 stage 5 (`T1907`, `FORK-2`): the re-read of the cycle below holds against concurrent
+        # money writers only at SERIALIZABLE. Checked on THIS attempt's transaction, before its first
+        # lock and its first write; the clearing ends the attempt, as it ends every attempt.
+        try:
+            await MoneyBoundary.require_serializable(self.session, writer="clearing")
+        except IsolationNotSerializable:
+            await self._rollback_skipped_execution()
+            raise
+        except Exception as exc:
+            await self._raise_unexpected_execution(exc)
 
         if interlocked_equivalent_id is not None:
             # T1544, the binding read: this session rolled back after taking the owner lock, so its
@@ -1775,6 +1894,9 @@ class ClearingService:
                     await self._raise_unexpected_execution(reconciliation_error)
                 if replay_amount is not None:
                     return replay_amount
+                # No committed occurrence answers the conflict: the attempt is rolled back (by the
+                # resolver) and the retry owner runs the whole execution again (`_run_attempts`).
+                raise _ClearingAttemptConflict(exc) from exc
             await self._raise_unexpected_execution(exc)
 
         if len(debts) != len(debt_ids):
@@ -2191,6 +2313,9 @@ class ClearingService:
                     await self._raise_unexpected_execution(reconciliation_error)
                 if replay_amount is not None:
                     return replay_amount
+                # No committed occurrence answers the conflict: the attempt is rolled back (by the
+                # resolver) and the retry owner runs the whole execution again (`_run_attempts`).
+                raise _ClearingAttemptConflict(exc) from exc
             await self._raise_unexpected_execution(exc)
 
     async def auto_clear(self, equivalent_code: str, *, max_depth: int = 6) -> int:

@@ -7,6 +7,7 @@ from typing import Any, Callable
 
 from sqlalchemy import select, update
 
+from app.core.money_boundary import MoneyBoundary
 from app.core.payments.router import PaymentRouter
 from app.core.simulator.commit_resolution import resolve_commit_under_cancellation
 from app.utils.validation import MONEY_MAX_SCALE
@@ -236,6 +237,7 @@ class TrustDriftEngine:
             return TrustDriftResult(updated_count=0)
 
         updated = 0
+        isolation_checked = False
         updated_edges: set[tuple[str, str]] = set()
         committed_limit_updates: list[TrustDriftLimitUpdate] = []
         scenario = getattr(run, "_scenario_raw", None) or self._get_scenario_raw(
@@ -314,6 +316,10 @@ class TrustDriftEngine:
             # wrote it: a lower limit, below debt the line already secured. A step that only raises
             # cannot move a limit below any debt.
             if new_limit > current_limit:
+                if not isolation_checked:
+                    # 019 stage 5 (`T1907`, `FORK-2`): before the first write of this unit of work.
+                    await MoneyBoundary.require_serializable(clearing_session, writer="trust_growth")
+                    isolation_checked = True
                 await clearing_session.execute(
                     update(TrustLine)
                     .where(
@@ -391,6 +397,7 @@ class TrustDriftEngine:
 
         eq_id_cache: dict[str, uuid.UUID] = {}
         updated = 0
+        isolation_checked = False
         touched_eq_codes: set[str] = set()
         touched_edges_by_eq: dict[str, set[tuple[str, str]]] = {}
         committed_limit_updates: list[TrustDriftLimitUpdate] = []
@@ -514,6 +521,12 @@ class TrustDriftEngine:
             if new_limit == current_limit:
                 continue
 
+            if not isolation_checked:
+                # 019 stage 5 (`T1907`, `FORK-2`): the floor above is a read of the debt row that
+                # holds against a concurrent payment only at SERIALIZABLE (the read-write cycle
+                # below); refused before the first write of this call.
+                await MoneyBoundary.require_serializable(session, writer="trust_decay")
+                isolation_checked = True
             await session.execute(
                 update(TrustLine)
                 .where(

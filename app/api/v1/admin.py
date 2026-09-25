@@ -1180,6 +1180,9 @@ async def admin_update_equivalent(
     request: Request,
     db: AsyncSession = Depends(deps.get_db),
 ) -> EquivalentSchema:
+    # 019 stage 5 (`T1907`, `FORK-2`): the operator stop is a money boundary; refused before the first
+    # write on a transaction that does not run SERIALIZABLE.
+    await MoneyBoundary.require_serializable(db, writer="admin.equivalents.patch")
     eq = (
         await db.execute(select(EquivalentModel).where(EquivalentModel.code == code))
     ).scalar_one_or_none()
@@ -1324,6 +1327,8 @@ async def admin_clear_equivalent_integrity_hold(
     from app.core.ledger.reconciliation import PASSED
     from app.db.reconciliation_tables import debt_reconciliation_results
 
+    # 019 stage 5 (`T1907`, `FORK-2`): see `admin_update_equivalent`.
+    await MoneyBoundary.require_serializable(db, writer="admin.equivalents.integrity_hold.clear")
     eq = (
         await db.execute(select(EquivalentModel).where(EquivalentModel.code == code))
     ).scalar_one_or_none()
@@ -1428,6 +1433,8 @@ async def admin_delete_equivalent(
     normalized = str(code or "").strip().upper()
     validate_equivalent_code(normalized)
 
+    # 019 stage 5 (`T1907`, `FORK-2`): see `admin_update_equivalent`.
+    await MoneyBoundary.require_serializable(db, writer="admin.equivalents.delete")
     eq = (
         await db.execute(select(EquivalentModel).where(EquivalentModel.code == normalized))
     ).scalar_one_or_none()

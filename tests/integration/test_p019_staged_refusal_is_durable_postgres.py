@@ -57,6 +57,7 @@ from app.core.payments.service import PaymentService, PaymentTransactionUnusable
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 from app.utils.exceptions import RetryablePaymentConflictException
+from tests.p019_support import allow_below_serializable_for_a_diagnostic
 from tests.integration.p019_stand import (  # noqa: F401 - `api` and `factory` are fixtures
     ADMIN,
     api,
@@ -80,8 +81,11 @@ from tests.p019_support import require_target
 
 
 @pytest_asyncio.fixture
-async def rc_factory(committed_database):
+async def rc_factory(committed_database, monkeypatch):
     """The same clone at READ COMMITTED - the one schedule that reaches the savepoint (docstring, 2)."""
+
+    # 019 stage 5 (`T1907`): READ COMMITTED here is a named diagnostic below the supported level.
+    allow_below_serializable_for_a_diagnostic(monkeypatch)
 
     engine = create_async_engine(
         committed_database.url, pool_size=5, max_overflow=0, isolation_level="READ COMMITTED"
