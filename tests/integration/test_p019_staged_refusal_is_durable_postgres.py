@@ -254,6 +254,170 @@ async def test_today_a_staged_timeout_fails_the_whole_tick_and_leaves_no_row(
     }
 
 
+# ── T1912: the unusable-transaction branch, on the production SERIALIZABLE ─────────────────────
+
+
+@dataclass
+class _TwoEquivalentTick:
+    """One tick, two staged payments: seq 0 in the first equivalent, seq 1 in a second one whose row
+    an operator's slow description edit holds. Seq 0 commits inside the tick's transaction; seq 1's
+    commit guard (`FOR SHARE`) waits on the edit's row lock until `COMMIT_TIMEOUT_SECONDS` ends it."""
+
+    world: Any
+    second: Any
+    run: Any
+    sse: Any
+    runner: Any
+    calls: list[dict[str, Any]]
+    gate: Any
+
+
+async def _second_equivalent(factory, world):  # noqa: F811
+    from app.db.models.equivalent import Equivalent
+
+    async with factory() as s:
+        eq = Equivalent(code=f"P19T{uuid.uuid4().hex[:8].upper()}"[:16], precision=2, is_active=True)
+        s.add(eq)
+        await s.flush()
+        s.add(
+            TrustLine(
+                from_participant_id=world.receiver.id,
+                to_participant_id=world.sender.id,
+                equivalent_id=eq.id,
+                limit=Decimal("1000.00"),
+                status="active",
+            )
+        )
+        await s.commit()
+    return eq
+
+
+async def _debt_rows(factory, equivalent_id) -> list[tuple[Any, Any, Decimal]]:  # noqa: F811
+    from app.db.models.debt import Debt
+
+    async with factory() as s:
+        rows = (
+            await s.execute(
+                select(Debt.debtor_id, Debt.creditor_id, Debt.amount).where(
+                    Debt.equivalent_id == equivalent_id
+                )
+            )
+        ).all()
+    return sorted((d, c, Decimal(str(a))) for d, c, a in rows)
+
+
+async def _two_equivalent_tick(factory, monkeypatch) -> _TwoEquivalentTick:  # noqa: F811
+    from app.core.simulator.real_payment_action import _RealPaymentAction
+
+    world = await _seed(factory)
+    second = await _second_equivalent(factory, world)
+    sse = _Sse()
+    run = _run_record(world, f"p019-t1912-{uuid.uuid4().hex[:8]}")
+    run._real_equivalents = [world.equivalent.code, second.code]
+    scenario = _scenario(world)
+    scenario["equivalents"] = [world.equivalent.code, second.code]
+    runner = _runner(run, scenario, sse, actions_per_tick_max=2)
+    plan = [
+        _RealPaymentAction(0, world.equivalent.code, world.sender.pid, world.receiver.pid, "1.00"),
+        _RealPaymentAction(1, second.code, world.sender.pid, world.receiver.pid, "1.00"),
+    ]
+    # The plan is fixed, not generated: the subject is what the money-phase owner does with a timeout
+    # AFTER another payment of the same phase already moved money inside the phase's transaction.
+    monkeypatch.setattr(runner, "_plan_real_payments", lambda *_a, **_kw: list(plan))
+    _install(monkeypatch, factory)
+    staged = _StagedCalls()
+    staged.install(monkeypatch)
+    monkeypatch.setattr(settings, "COMMIT_TIMEOUT_SECONDS", 0.5)
+    return _TwoEquivalentTick(world, second, run, sse, runner, staged.calls, _CommitGate())
+
+
+async def _run_the_tick_behind_a_slow_edit(api, factory, t: _TwoEquivalentTick) -> bool:  # noqa: F811
+    """Start the operator's slow edit of the SECOND equivalent, run the tick, then release the edit.
+    Returns whether a row-lock waiter was observed while the tick ran (the premise)."""
+
+    patch = tick = None
+    try:
+        with with_session_hook(t.gate):
+            patch = asyncio.create_task(
+                api.patch(
+                    f"/api/v1/admin/equivalents/{t.second.code}",
+                    json={"description": "p019 slow operator edit", "reason": "p019 t1912"},
+                    headers=ADMIN,
+                )
+            )
+        await asyncio.wait_for(t.gate.reached.wait(), timeout=20)
+        tick = asyncio.create_task(asyncio.wait_for(t.runner.tick_real_mode(t.run.run_id), 90.0))
+        queued = await _row_lock_waiter_exists(factory)
+        await tick
+        t.gate.release.set()
+        resp = await asyncio.wait_for(patch, timeout=20)
+        assert resp.status_code == 200, resp.text
+        return queued
+    finally:
+        t.gate.release.set()
+        await finish(tick)
+        await finish(patch)
+        _forget_routes(t)
+
+
+def _forget_routes(t: _TwoEquivalentTick) -> None:
+    from app.core.payments.router import PaymentRouter
+
+    PaymentRouter.invalidate_cache(t.world.equivalent.code)
+    PaymentRouter.invalidate_cache(t.second.code)
+
+
+@target_xfail("stage 3 (T1912)", "a staged timeout that leaves the tick unusable fails the tick and records nothing")
+@pytest.mark.asyncio
+async def test_a_staged_timeout_that_leaves_the_tick_unusable_is_recorded_after_the_phase_rolls_back(
+    api, factory, monkeypatch  # noqa: F811
+) -> None:
+    """TARGET (T1912, production SERIALIZABLE): the owner of the money phase rolls the WHOLE phase back,
+    then records the admitted timeout as `ABORTED/E007` in a short transaction of its own; the money
+    seq 0 moved inside the phase is discarded with it, and the failure is published once."""
+
+    t = await _two_equivalent_tick(factory, monkeypatch)
+    queued = await _run_the_tick_behind_a_slow_edit(api, factory, t)
+
+    # ── controls ──────────────────────────────────────────────────────────────────────────────
+    async with factory() as s:
+        level = str((await s.execute(text("SHOW transaction_isolation"))).scalar_one())
+    assert level == "serializable", level
+    assert queued, "premise: the second payment never waited on the edit's row lock"
+    first, second = t.calls
+    assert first.get("status") == "COMMITTED" and "raised" not in first, first
+    assert "raised" in second, second  # the second one timed out on the lock wait
+    assert t.run._real_money_committed_ticks_total == 0, "the phase committed"
+    assert t.run.last_error["code"] == "REAL_MODE_TICK_FAILED", t.run.last_error
+
+    first_row = await tx_row(factory, str(first["idempotency_key"]))
+    second_row = await tx_row(factory, str(second["idempotency_key"]))
+    updated = [e for e in t.sse.events if e.get("type") == "tx.updated"]
+    failed = [(e.get("error") or {}).get("code") for e in t.sse.events if e.get("type") == "tx.failed"]
+    first_debts = await _debt_rows(factory, t.world.equivalent.id)
+    second_debts = await _debt_rows(factory, t.second.id)
+    replay = await _replay_staged(
+        factory, t.world, {**second, "to_pid": t.world.receiver.pid}
+    )
+    _forget_routes(t)
+
+    require_target(
+        first_row is None
+        and first_debts == [(t.world.sender.id, t.world.receiver.id, _OPENING)]
+        and updated == []
+        and second_row is not None
+        and second_row[0] == "ABORTED"
+        and (second_row[1] or {}).get("code") == "E007"
+        and failed == ["PAYMENT_TIMEOUT"]
+        and replay == ("ABORTED", replay[1])
+        and (replay[1] is not None and replay[1].code == "E007")
+        and second_debts == [],
+        f"seq 0 row {first_row!r}, first-equivalent debts {first_debts!r}, tx.updated {len(updated)}; "
+        f"seq 1 row {second_row!r}, tx.failed {failed!r}, replay {replay!r}, "
+        f"second-equivalent debts {second_debts!r}",
+    )
+
+
 # ── schedule (2): READ COMMITTED, the prepare re-check refuses after the staged NEW ───────────
 
 
