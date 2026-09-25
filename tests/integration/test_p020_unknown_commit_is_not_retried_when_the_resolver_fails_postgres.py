@@ -49,7 +49,7 @@ from sqlalchemy import select, text
 from app.core.clearing.service import ClearingService
 from app.core.payments.router import PaymentRouter
 from tests.integration.p019_interlock_support import _seed_interlock_case, _use_serializable
-from tests.p019_support import TargetMismatch, require_target
+from tests.p019_support import require_target
 
 # MODE B: every commit lands in a clone dropped after the test (`tests/tier_on_a_clone.py`).
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
@@ -504,11 +504,6 @@ async def _cancel_while_the_second_resolution_runs(commit_mode: str):
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-    raises=TargetMismatch,
-    strict=True,
-    reason="020 target, fixed by the stage 1 fix-delta: a pulse drained by a failing resolution is kept",
-)
 async def test_a_cancellation_during_a_failing_second_resolution_propagates(monkeypatch) -> None:
     from app.config import settings
 
@@ -534,11 +529,6 @@ async def test_a_cancellation_during_a_failing_second_resolution_propagates(monk
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-    raises=TargetMismatch,
-    strict=True,
-    reason="020 target, fixed by the stage 1 fix-delta: no retry after a cancellation lost in a resolution",
-)
 async def test_a_cancellation_during_a_failing_resolution_after_a_refused_commit_is_not_retried(
     monkeypatch,
 ) -> None:
