@@ -102,7 +102,10 @@ async def test_concurrent_payments_shared_bottleneck_commit_once_postgres(
         prestate_calls += 1
         if prestate_calls <= 2:
             parked_pids.append(int(await session.scalar(text("SELECT pg_backend_pid()"))))
-            if prestate_calls == 2:
+            # Set on the second RECORDED pid, not the second call: the counter moves before the pid
+            # read awaits, so the second call could otherwise signal before the first recorded its
+            # pid (CI, PR #56: `parked_pids == [471]`).
+            if len(parked_pids) == 2:
                 both_parked.set()
             await release_both.wait()
         return result
