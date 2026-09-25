@@ -273,6 +273,8 @@ class RoutingService:
 
 #### PaymentEngine
 
+*Историческая схема.* С 2026-09-25 (программа 019, стадия 4) `PaymentEngine` с фазами `prepare`/`commit`/`abort` удалён: платёж исполняет `PaymentService.execute` (обёртка API — `PaymentService.pay`) одной транзакцией БД через `Book`, строка вставляется сразу `COMMITTED`/`ABORTED`; примитивы локов живут в `app/core/money_boundary.py` (`specs/019-payment-one-transaction/spec.md`).
+
 ```python
 class PaymentEngine:
     """Исполнение платежей"""

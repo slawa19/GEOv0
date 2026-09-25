@@ -107,7 +107,8 @@ async def test_admin_graph_snapshot_include_extras_smoke(client, db_session, mon
         initiator_id=alice.id,
         payload={"equivalent": "UAH"},
         signatures=[],
-        state="PREPARED",
+        # A PAYMENT row is terminal since migration 030 (019 stage 4).
+        state="COMMITTED",
         error=None,
         created_at=stuck_at,
         updated_at=stuck_at,
@@ -152,6 +153,8 @@ async def test_admin_graph_snapshot_include_extras_smoke(client, db_session, mon
     assert isinstance(payload.get("audit_log"), list)
     assert isinstance(payload.get("transactions"), list)
 
-    assert len(payload["incidents"]) >= 1
+    # No stuck payment exists since migration 030: the incidents extra is empty (compatibility
+    # until П4), even with an old terminal payment present.
+    assert payload["incidents"] == []
     assert len(payload["audit_log"]) >= 1
     assert len(payload["transactions"]) >= 1

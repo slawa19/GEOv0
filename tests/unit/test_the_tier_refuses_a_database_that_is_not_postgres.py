@@ -25,7 +25,7 @@ import sys
 
 
 _ROOT = Path(__file__).resolve().parents[2]
-_SELECTOR = "tests/integration/test_payment_engine_uow_retry_postgres.py"
+_SELECTOR = "tests/integration/test_p017_pay_retry_after_a_real_40001_postgres.py"
 _HOW_TO = "docs/ru/backend/postgres-local-portable.md"
 
 

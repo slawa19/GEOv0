@@ -45,15 +45,13 @@ from app.api.deps import get_db
 from app.config import settings
 from app.core.clearing.service import ClearingService
 from app.core.money_boundary import MoneyBoundary
-from app.core.payments.engine import PaymentEngine
 from app.core.payments.service import PaymentService
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
-from app.db.models.prepare_lock import PrepareLock
 from app.db.models.transaction import Transaction
 from app.main import app
 from app.utils.exceptions import ConflictException, RetryablePaymentConflictException
-from tests.integration.test_clearing_payment_prepare_interlock_postgres import (
+from tests.integration.p019_interlock_support import (
     _no_advisory_lock_is_held,
     _seed_interlock_case,
     _use_serializable,
@@ -574,81 +572,16 @@ async def test_a_commit_guard_conflict_on_every_attempt_exhausts_the_budget_with
         _forget_the_route_cache(world)
 
 
-# ── placement: the payment guard sits below the TTL branch, immediately before the envelope ──────
-
-
-@pytest.mark.asyncio
-async def test_an_expired_payment_in_a_deactivated_equivalent_is_aborted_as_expired(factory) -> None:
-    """Precedence. RED if the guard drifts back above the TTL branch.
-
-    Both conditions hold at once: the prepare lock has expired AND the equivalent is deactivated. The
-    TTL branch is older and says what actually happened to the payment; the operator stop is checked
-    only for a payment that could otherwise still commit.
-    """
-    from datetime import datetime, timedelta, timezone
-
-    world = await _seed(factory)
-    tx_id = str(uuid.uuid4())
-    try:
-        async with factory() as setup:
-            setup.add(
-                Transaction(
-                    id=uuid.uuid4(),
-                    tx_id=tx_id,
-                    type="PAYMENT",
-                    initiator_id=world.sender.id,
-                    payload={"from": world.sender.pid, "to": world.receiver.pid},
-                    state="PREPARED",
-                )
-            )
-            await setup.flush()
-            setup.add(
-                PrepareLock(
-                    tx_id=tx_id,
-                    participant_id=world.sender.id,
-                    effects={
-                        "flows": [
-                            {
-                                "from": str(world.sender.id),
-                                "to": str(world.receiver.id),
-                                "amount": "7.00",
-                                "equivalent": str(world.equivalent.id),
-                            }
-                        ]
-                    },
-                    expires_at=datetime.now(timezone.utc) - timedelta(minutes=5),
-                )
-            )
-            await setup.execute(
-                update(Equivalent)
-                .where(Equivalent.id == world.equivalent.id)
-                .values(is_active=False)
-            )
-            await setup.commit()
-
-        async with factory() as premise:
-            expired = await premise.scalar(
-                select(func.count(PrepareLock.id)).where(
-                    PrepareLock.tx_id == tx_id, PrepareLock.expires_at <= func.now()
-                )
-            )
-        assert expired == 1, "premise: the prepare lock is not expired"
-        assert await _is_active(factory, world.equivalent.id) is False, (
-            "premise: the equivalent is not deactivated"
-        )
-
-        async with factory() as session:
-            with pytest.raises(ConflictException) as refused:
-                await PaymentEngine(session).commit(tx_id)
-
-        assert "expired before commit" in refused.value.message, refused.value.message
-        assert (refused.value.details or {}).get("reason") != MoneyBoundary.EQUIVALENT_INACTIVE_REASON, (
-            "an expired payment was refused as an operator stop: the guard sits above the TTL branch"
-        )
-        assert await _transactions(factory, world) == {tx_id: "ABORTED"}
-        assert await _debts(factory, world) == {(world.sender.pid, world.receiver.pid): _OPENING}
-    finally:
-        _forget_the_route_cache(world)
+# ── placement: the payment guard below the TTL branch - DROPPED by 019 stage 4 ──────────────────────────
+#
+# `test_an_expired_payment_in_a_deactivated_equivalent_is_aborted_as_expired` seeded a durable `PREPARED`
+# payment with an expired `PrepareLock` in a deactivated equivalent and called `PaymentEngine.commit`,
+# asserting that the engine's TTL branch ("expired before commit") ran above the T1544 guard, and that the
+# expired payment was ABORTED with the debts unchanged (manifest `t1901-manifest.md` 5.5, rows :590-634,
+# :636-643, :644-645). All three contracts are removed with the engine, the reservation TTL and
+# `app/core/recovery.py`: CHECK `030` refuses the seed itself, and a payment's stop guard is the only
+# refusal between its admission and its commit. The stop refusal it guarded stays asserted by every race
+# here (`_assert_stop_refusal`) and by `tests/integration/test_p015_t1544_operator_stop_refuses_money.py`.
 
 
 @pytest.mark.asyncio

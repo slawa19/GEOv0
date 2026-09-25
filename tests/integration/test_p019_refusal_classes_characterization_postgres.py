@@ -399,7 +399,9 @@ async def test_the_api_path_refusal_table(api, factory, monkeypatch, caplog) -> 
                     type="PAYMENT",
                     initiator_id=w.ids[w.alice["pid"]],
                     payload={},
-                    state="NEW",
+                    # Terminal: migration 030's CHECK is evaluated before the unique index, so a NEW
+                    # payment would be refused by the fence (23514), not by the identity (23505).
+                    state="ABORTED",
                 )
             )
         await s.rollback()

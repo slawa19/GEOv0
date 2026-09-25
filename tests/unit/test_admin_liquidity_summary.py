@@ -75,7 +75,8 @@ async def test_admin_liquidity_summary_smoke(client, db_session, monkeypatch):
             initiator_id=alice.id,
             payload={"equivalent": "UAH"},
             signatures=[],
-            state="PREPARED",
+            # A PAYMENT row is terminal since migration 030 (019 stage 4): an old one is not "stuck".
+            state="COMMITTED",
             error=None,
             created_at=old,
             updated_at=old,
@@ -98,7 +99,8 @@ async def test_admin_liquidity_summary_smoke(client, db_session, monkeypatch):
     assert payload["equivalent"] == "UAH"
     assert payload["active_trustlines"] == 2
     assert payload["bottlenecks"] == 1
-    assert payload["incidents_over_sla"] == 1
+    # No stuck payment exists since migration 030: compatibility zero until П4 (019 stage 4).
+    assert payload["incidents_over_sla"] == 0
 
     assert Decimal(payload["total_limit"]) == Decimal("200.00")
     assert Decimal(payload["total_used"]) == Decimal("96.00")

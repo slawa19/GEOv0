@@ -22,7 +22,8 @@ it and becomes visible only with its single commit. The two cells collapse into 
   initiator / fingerprint compared; no row - one new attempt) and its staged variant (§1 №5).
 
 WHAT THE CELL DOES NOT CLAIM. It measures the request-level idempotency path. The engine-level
-duplicate commit is covered at `test_payment_commit_advisory_locks_postgres.py` and is not touched here.
+duplicate commit was covered by `test_payment_commit_advisory_locks_postgres.py` until programme 019
+stage 4 removed the engine; that race is unreachable since the first collision is `transactions.tx_id`.
 """
 
 from __future__ import annotations

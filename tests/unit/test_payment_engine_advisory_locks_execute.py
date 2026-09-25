@@ -1,3 +1,27 @@
+"""The lock primitives of `MoneyBoundary` as they execute, and the order the payment's binding phase takes them.
+
+019 STAGE 4 (`T1906`; manifest `t1901-manifest.md` 5.1). `PaymentEngine` is deleted. The tests of the
+primitives themselves (pair, transaction and owner keys; the one decreasing budget) were already on
+`MoneyBoundary` since stage 2 and stay until stage 5 removes the locks. DROPPED with the engine, each
+checking a removed contract:
+
+* `test_tx_preflight_acquires_every_persisted_equivalent_before_tx_lock`,
+  `test_abort_preflight_does_not_invent_owner_for_empty_or_malformed_locks` - the owner preflight derived
+  from PERSISTED reservations of an engine transition; no transition reads reservations any more;
+* `test_abort_reacquires_preheld_tx_lock_only_after_outer_rollback_retry` - the engine abort's lock
+  re-acquisition across its own unit-of-work retry; the retry owner is `pay()` on a fresh transaction;
+* `test_persisted_prepare_lock_parser_and_keys_share_validated_flows`,
+  `test_persisted_prepare_lock_parser_fails_closed` - the parser of persisted reservation effects;
+* `test_commit_acquires_keys_derived_from_loaded_prepare_locks` - the engine commit's owner -> tx -> pair
+  order derived from loaded reservations: its order SURVIVES, on the declared routes, in
+  `test_the_binding_phase_takes_the_pair_locks_after_owner_and_tx_and_before_capacity` below.
+
+`test_all_payment_transitions_acquire_owner_before_tx_and_first_tx_read` (four engine transitions, a
+flagged assertion: "owner before any row") is REWRITTEN IN PLACE for the one payment path that is left,
+`PaymentService._bind_payment`; the real races of the same contract are
+`tests/integration/test_p019_owner_before_row_races_postgres.py`.
+"""
+
 import uuid
 from decimal import Decimal
 from types import SimpleNamespace
@@ -5,8 +29,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.money_boundary import MoneyBoundary
-from app.core.payments.engine import PaymentEngine
-from app.utils.exceptions import GeoException
+from app.core.payments.service import PaymentService
 
 
 class _Dialect:
@@ -25,41 +48,6 @@ class _Session:
 
     async def execute(self, stmt, params=None):
         self.executed.append((str(stmt), dict(params or {})))
-
-
-class _ScalarResult:
-    def __init__(self, value):
-        self.value = value
-
-    def scalar_one_or_none(self):
-        return self.value
-
-
-class _Scalars:
-    def __init__(self, values):
-        self.values = values
-
-    def all(self):
-        return self.values
-
-
-class _ScalarsResult:
-    def __init__(self, values):
-        self.values = values
-
-    def scalars(self):
-        return _Scalars(self.values)
-
-
-class _CommitSession:
-    bind = None
-
-    def __init__(self, tx, locks):
-        self.responses = [_ScalarResult(tx), _ScalarsResult(locks)]
-
-    async def execute(self, _stmt, params=None):
-        assert params is None
-        return self.responses.pop(0)
 
 
 @pytest.mark.asyncio
@@ -154,86 +142,6 @@ async def test_equivalent_owner_locks_are_deduplicated_sorted_and_domain_separat
 
 
 @pytest.mark.asyncio
-async def test_tx_preflight_acquires_every_persisted_equivalent_before_tx_lock(
-    monkeypatch,
-):
-    equivalent_a = uuid.uuid4()
-    equivalent_b = uuid.uuid4()
-    lock = SimpleNamespace(
-        id=uuid.uuid4(),
-        effects={
-            "flows": [
-                {
-                    "equivalent": str(equivalent_b),
-                    "from": str(uuid.uuid4()),
-                    "to": str(uuid.uuid4()),
-                    "amount": "1.00",
-                },
-                {
-                    "equivalent": str(equivalent_a),
-                    "from": str(uuid.uuid4()),
-                    "to": str(uuid.uuid4()),
-                    "amount": "2.00",
-                },
-            ]
-        },
-    )
-    engine = PaymentEngine(SimpleNamespace(bind=_Bind()))
-    acquired: list[set[uuid.UUID]] = []
-
-    async def _load(_tx_id):
-        return [lock]
-
-    async def _acquire(equivalent_ids):
-        acquired.append(set(equivalent_ids))
-
-    monkeypatch.setattr(engine, "_load_prepare_locks", _load)
-    monkeypatch.setattr(engine, "_acquire_equivalent_owner_locks", _acquire)
-
-    validated, malformed = await engine._preacquire_equivalent_owner_locks_for_tx(
-        "tx-multi-equivalent",
-        allow_malformed=False,
-    )
-
-    assert malformed is False
-    assert len(validated) == 1
-    assert acquired == [{equivalent_a, equivalent_b}]
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("locks", "expected"),
-    [([], ((), False)), ([SimpleNamespace(id=uuid.uuid4(), effects={})], ((), True))],
-)
-async def test_abort_preflight_does_not_invent_owner_for_empty_or_malformed_locks(
-    monkeypatch,
-    locks,
-    expected,
-):
-    engine = PaymentEngine(SimpleNamespace(bind=_Bind()))
-    acquisitions = 0
-
-    async def _load(_tx_id):
-        return locks
-
-    async def _acquire(_equivalent_ids):
-        nonlocal acquisitions
-        acquisitions += 1
-
-    monkeypatch.setattr(engine, "_load_prepare_locks", _load)
-    monkeypatch.setattr(engine, "_acquire_equivalent_owner_locks", _acquire)
-
-    assert (
-        await engine._preacquire_equivalent_owner_locks_for_tx(
-            "tx-non-monetary",
-            allow_malformed=True,
-        )
-        == expected
-    )
-    assert acquisitions == 0
-
-
-@pytest.mark.asyncio
 async def test_segment_lock_timeout_uses_one_decreasing_commit_budget(
     monkeypatch,
 ):
@@ -268,286 +176,85 @@ def test_advisory_lock_budget_matches_service_zero_default(monkeypatch):
     assert engine._advisory_lock_budget_s == 5.0
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("operation", ["prepare", "prepare_routes", "commit", "abort"])
-async def test_all_payment_transitions_acquire_owner_before_tx_and_first_tx_read(
-    monkeypatch,
-    operation,
-):
-    engine = PaymentEngine(SimpleNamespace(bind=None))
-    events: list[str] = []
+class _StopAtRead(RuntimeError):
+    pass
 
-    class _StopAtRead(RuntimeError):
-        pass
 
-    async def _acquire_tx(_tx_id):
-        events.append("tx-key")
+class _Rows:
+    def __init__(self, rows):
+        self.rows = rows
 
-    async def _acquire_owner(_equivalent_ids):
-        events.append("owner-key")
+    def all(self):
+        return self.rows
 
-    async def _preacquire_owner(_tx_id, *, allow_malformed):
-        assert allow_malformed is (operation == "abort")
-        events.append("owner-key")
-        return None
 
-    async def _get_tx(_tx_id):
-        events.append("tx-read")
+class _BindingSession:
+    """Records each statement of the binding phase as a row read; answers the participant read, then stops."""
+
+    bind = None
+
+    def __init__(self, events, participants):
+        self.events = events
+        self.participants = participants
+        self.reads = 0
+
+    async def execute(self, _stmt, params=None):
+        self.reads += 1
+        self.events.append("row-read")
+        if self.reads == 1 and self.participants is not None:
+            return _Rows(self.participants)
         raise _StopAtRead
 
-    monkeypatch.setattr(engine, "_acquire_tx_advisory_lock", _acquire_tx)
-    monkeypatch.setattr(
-        engine,
-        "_acquire_equivalent_owner_locks",
-        _acquire_owner,
-    )
-    monkeypatch.setattr(
-        engine,
-        "_preacquire_equivalent_owner_locks_for_tx",
-        _preacquire_owner,
-    )
-    monkeypatch.setattr(engine, "_get_tx", _get_tx)
+
+def _binding_service(monkeypatch, events, participants=None) -> PaymentService:
+    service = PaymentService(_BindingSession(events, participants))
+    boundary = service._boundary
+    assert type(boundary) is MoneyBoundary
+
+    async def _owner(equivalent_ids):
+        events.append("owner-key")
+
+    async def _tx(_tx_id):
+        events.append("tx-key")
+
+    async def _pairs(*, equivalent_id, routes, participant_map):
+        events.append("pair-keys")
+
+    monkeypatch.setattr(boundary, "_acquire_equivalent_owner_locks", _owner)
+    monkeypatch.setattr(boundary, "_acquire_tx_advisory_lock", _tx)
+    monkeypatch.setattr(boundary, "_acquire_segment_advisory_locks", _pairs)
+    return service
+
+
+@pytest.mark.asyncio
+async def test_the_binding_phase_acquires_owner_before_tx_and_first_row_read(monkeypatch):
+    """"Owner before any row": the equivalent owner lock, then the transaction lock, then the first read.
+
+    Until 019 stage 4 this was `test_all_payment_transitions_acquire_owner_before_tx_and_first_tx_read`
+    over the engine's `prepare`, `prepare_routes`, `commit` and `abort`; the payment's one binding phase
+    is what is left of all four. RED if a row is read before the owner lock, or the transaction lock is
+    taken first.
+    """
+
+    events: list[str] = []
+    service = _binding_service(monkeypatch, events)
 
     with pytest.raises(_StopAtRead):
-        if operation == "prepare":
-            await engine.prepare("tx", ["A", "B"], Decimal("1"), uuid.uuid4())
-        elif operation == "prepare_routes":
-            await engine.prepare_routes(
-                "tx",
-                [(["A", "B"], Decimal("1"))],
-                uuid.uuid4(),
-            )
-        elif operation == "commit":
-            await engine.commit("tx")
-        else:
-            await engine.abort("tx")
+        await service._bind_payment("tx", [(["A", "B"], Decimal("1"))], uuid.uuid4())
 
-    assert events == ["owner-key", "tx-key", "tx-read"]
+    assert events == ["owner-key", "tx-key", "row-read"]
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("commit", "expected_reacquires"),
-    [(True, 1), (False, 0)],
-)
-async def test_abort_reacquires_preheld_tx_lock_only_after_outer_rollback_retry(
-    monkeypatch,
-    commit,
-    expected_reacquires,
-):
-    engine = PaymentEngine(SimpleNamespace(bind=None))
-    reacquires: list[str] = []
-    owner_reacquires: list[str] = []
-    attempts = 0
+async def test_the_binding_phase_takes_the_pair_locks_after_owner_and_tx_and_before_capacity(monkeypatch):
+    """The pair locks come after the owner and transaction locks and the participant lookup their keys
+    need, and before the first capacity read (the trust line of the first segment). RED if the capacity
+    is read before the pair locks."""
 
-    class _Retry(RuntimeError):
-        pass
+    events: list[str] = []
+    service = _binding_service(monkeypatch, events, participants=[(uuid.uuid4(), "A"), (uuid.uuid4(), "B")])
 
-    class _Stop(RuntimeError):
-        pass
+    with pytest.raises(_StopAtRead):
+        await service._bind_payment("tx", [(["A", "B"], Decimal("1"))], uuid.uuid4())
 
-    async def _acquire_tx(tx_id):
-        reacquires.append(tx_id)
-
-    async def _preacquire_owner(tx_id, *, allow_malformed):
-        assert allow_malformed is True
-        owner_reacquires.append(tx_id)
-        return None
-
-    async def _get_tx(_tx_id):
-        nonlocal attempts
-        attempts += 1
-        if attempts == 1:
-            raise _Retry
-        raise _Stop
-
-    async def _run_twice(*, op, fn, use_savepoint=False):
-        assert op == ("abort" if commit else "abort_nocommit")
-        assert use_savepoint is (not commit)
-        with pytest.raises(_Retry):
-            await fn()
-        return await fn()
-
-    monkeypatch.setattr(engine, "_acquire_tx_advisory_lock", _acquire_tx)
-    monkeypatch.setattr(
-        engine,
-        "_preacquire_equivalent_owner_locks_for_tx",
-        _preacquire_owner,
-    )
-    monkeypatch.setattr(engine, "_get_tx", _get_tx)
-    monkeypatch.setattr(engine, "_run_uow_with_retry", _run_twice)
-
-    with pytest.raises(_Stop):
-        await engine.abort(
-            "tx-retry",
-            commit=commit,
-            _tx_lock_already_held=True,
-            _equivalent_owner_locks_already_held=True,
-        )
-
-    assert reacquires == ["tx-retry"] * expected_reacquires
-    assert owner_reacquires == ["tx-retry"] * expected_reacquires
-
-
-def test_persisted_prepare_lock_parser_and_keys_share_validated_flows(monkeypatch):
-    equivalent_id = uuid.uuid4()
-    from_id = uuid.uuid4()
-    to_id = uuid.uuid4()
-    other_to_id = uuid.uuid4()
-    seen: list[tuple[uuid.UUID, uuid.UUID, uuid.UUID]] = []
-
-    def _fake_segment_lock_key(
-        *,
-        equivalent_id,
-        from_participant_id,
-        to_participant_id,
-    ) -> int:
-        seen.append((equivalent_id, from_participant_id, to_participant_id))
-        return 3 if to_participant_id == to_id else 7
-
-    monkeypatch.setattr(
-        MoneyBoundary,
-        "_segment_lock_key",
-        staticmethod(_fake_segment_lock_key),
-    )
-    valid_flow = {
-        "equivalent": str(equivalent_id),
-        "from": str(from_id),
-        "to": str(to_id),
-        "amount": "8.00",
-    }
-    locks = [
-        SimpleNamespace(
-            id=uuid.uuid4(),
-            effects={
-                "flows": [
-                    valid_flow,
-                    dict(valid_flow),
-                    {
-                        "equivalent": str(equivalent_id),
-                        "from": str(from_id),
-                        "to": str(other_to_id),
-                        "amount": "2.00",
-                    },
-                ]
-            },
-        )
-    ]
-
-    validated = PaymentEngine._parse_persisted_prepare_locks(locks)
-    keys = PaymentEngine._segment_lock_keys_from_validated_flows(validated)
-
-    assert keys == {3, 7}
-    assert seen == [
-        (equivalent_id, from_id, to_id),
-        (equivalent_id, from_id, to_id),
-        (equivalent_id, from_id, other_to_id),
-    ]
-
-
-@pytest.mark.parametrize(
-    "effects",
-    [
-        None,
-        {},
-        {"flows": "not-a-list"},
-        {"flows": []},
-        {"flows": ["not-a-flow"]},
-        {"flows": [{"from": str(uuid.uuid4()), "to": str(uuid.uuid4()), "amount": "1"}]},
-        {
-            "flows": [
-                {
-                    "equivalent": "not-a-uuid",
-                    "from": str(uuid.uuid4()),
-                    "to": str(uuid.uuid4()),
-                    "amount": "1",
-                }
-            ]
-        },
-        {
-            "flows": [
-                {
-                    "equivalent": str(uuid.uuid4()),
-                    "from": str(uuid.uuid4()),
-                    "to": str(uuid.uuid4()),
-                    "amount": "NaN",
-                }
-            ]
-        },
-        {
-            "flows": [
-                {
-                    "equivalent": str(uuid.uuid4()),
-                    "from": str(uuid.uuid4()),
-                    "to": str(uuid.uuid4()),
-                    "amount": "0",
-                }
-            ]
-        },
-    ],
-)
-def test_persisted_prepare_lock_parser_fails_closed(effects):
-    lock = SimpleNamespace(id=uuid.uuid4(), effects=effects)
-
-    with pytest.raises(GeoException) as raised:
-        PaymentEngine._parse_persisted_prepare_locks([lock])
-
-    assert raised.value.code == "E010"
-
-
-@pytest.mark.asyncio
-async def test_commit_acquires_keys_derived_from_loaded_prepare_locks(monkeypatch):
-    equivalent_id = uuid.uuid4()
-    from_id = uuid.uuid4()
-    to_id = uuid.uuid4()
-    tx_id = str(uuid.uuid4())
-    lock = SimpleNamespace(
-        id=uuid.uuid4(),
-        effects={
-            "flows": [
-                {
-                    "equivalent": str(equivalent_id),
-                    "from": str(from_id),
-                    "to": str(to_id),
-                    "amount": "8.00",
-                }
-            ]
-        }
-    )
-    session = _CommitSession(SimpleNamespace(state="PREPARED"), [lock])
-    # The owner preflight reads the locks before the tx lock (017 stage 3, S5: it used to be
-    # skipped here because this fake has no PostgreSQL bind).
-    session.responses.insert(0, _ScalarsResult([lock]))
-    engine = PaymentEngine(session)
-    expected_key = MoneyBoundary._segment_lock_key(
-        equivalent_id=equivalent_id,
-        from_participant_id=from_id,
-        to_participant_id=to_id,
-    )
-    acquired: list[tuple[str, set[int] | None]] = []
-
-    class _StopAfterAcquire(RuntimeError):
-        pass
-
-    async def _capture_owner_acquire(equivalent_ids):
-        acquired.append(("owner", set(equivalent_ids)))
-
-    async def _capture_tx_acquire(_tx_id):
-        acquired.append(("tx", None))
-
-    async def _capture_acquire(keys):
-        acquired.append(("segment", set(keys)))
-        raise _StopAfterAcquire
-
-    monkeypatch.setattr(engine, "_acquire_equivalent_owner_locks", _capture_owner_acquire)
-    monkeypatch.setattr(engine, "_acquire_tx_advisory_lock", _capture_tx_acquire)
-    monkeypatch.setattr(engine, "_acquire_segment_advisory_lock_keys", _capture_acquire)
-
-    with pytest.raises(_StopAfterAcquire):
-        await engine.commit(tx_id)
-
-    assert acquired == [
-        ("owner", {equivalent_id}),
-        ("tx", None),
-        ("segment", {expected_key}),
-    ]
+    assert events == ["owner-key", "tx-key", "row-read", "pair-keys", "row-read"]

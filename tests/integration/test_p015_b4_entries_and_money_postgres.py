@@ -588,6 +588,9 @@ async def test_c8_a_real_40001_leaves_one_envelope_and_only_the_successful_attem
                 )
             )
         ).scalars().all()
+        # SYNTHETIC COMPATIBILITY until 019 stage 5 removes the table (manifest `T1901` 5.4, row
+        # `:632`): nothing writes `prepare_locks` since stage 4, so this half can only be empty; the
+        # `transactions == []` half is the one that measures.
         locks = (
             await fresh.execute(
                 select(PrepareLock.tx_id).where(
@@ -660,9 +663,12 @@ def _a_competitor_commits_before_the_first_flow(factory, seeded: _Seeded, amount
     WHAT IS REAL AND WHAT IS ONLY SEQUENCED. The `40001` is produced by PostgreSQL, not injected:
     two SERIALIZABLE transactions, the payment's snapshot already taken, a committed change to a row
     the payment then writes. What this helper does is decide WHEN the competitor commits - after the
-    payment's snapshot and before its first `_apply_flow` - because a conflict that depends on
+    payment's snapshot and before its first flow is applied - because a conflict that depends on
     scheduling would make the counterexample flaky rather than absent. Nothing here raises anything,
-    and `_is_retryable_db_error` is the predicate under test rather than a thing being bypassed.
+    and the retry owner's classification is under test rather than a thing being bypassed.
+
+    THE SEAM (019 stage 4, `T1906`): `app.core.ledger.book._apply_payment_flow`, called by its global name
+    for every payment flow (`Posting.apply`); until stage 4 it was `PaymentEngine._apply_flow`.
 
     THE COMPETITOR WRITES THROUGH THE ORM, inside a declared fixture operation. A Core
     `update(Debt)` would be refused by the write guard (`C2`), correctly - and a competitor that had
@@ -670,10 +676,10 @@ def _a_competitor_commits_before_the_first_flow(factory, seeded: _Seeded, amount
     not the scenario.
     """
 
-    from app.core.payments.engine import PaymentEngine
+    from app.core.ledger import book
 
     world = seeded.world
-    real_apply_flow = PaymentEngine._apply_flow
+    real_apply_flow = book._apply_payment_flow
     calls: list[tuple] = []
     sqlstates: list[str | None] = []
 
@@ -686,15 +692,15 @@ def _a_competitor_commits_before_the_first_flow(factory, seeded: _Seeded, amount
                 debt.amount = amount
             await other.commit()
 
-    async def _wrapper(self, *args, **kwargs):
-        # The signature is not restated: `_apply_flow(self, from_id, to_id, amount, equivalent_id)`
-        # is the engine's, and a wrapper that spelled it out would have to be edited the day it
-        # changes - silently passing the wrong argument in the meantime.
-        calls.append((args, tuple(sorted(kwargs))))
+    async def _wrapper(*args, **kwargs):
+        # The signature is not restated: `_apply_payment_flow(session, flow)` is the book's, and a
+        # wrapper that spelled it out would have to be edited the day it changes - silently passing
+        # the wrong argument in the meantime.
+        calls.append((len(args), tuple(sorted(kwargs))))
         if len(calls) == 1:
             await _competitor()
         try:
-            return await real_apply_flow(self, *args, **kwargs)
+            return await real_apply_flow(*args, **kwargs)
         except DBAPIError as exc:
             sqlstates.append(
                 getattr(exc.orig, "sqlstate", None) or getattr(exc.orig, "pgcode", None)
@@ -708,7 +714,14 @@ def _a_competitor_commits_before_the_first_flow(factory, seeded: _Seeded, amount
 async def test_c8_the_payment_owners_own_retry_leaves_one_envelope_and_the_winning_entries(
     serializable_factory, monkeypatch
 ):
-    """C8, payment owner, API-SHAPED. `PaymentEngine.commit`'s OWN retry loop, on a real `40001`.
+    """C8, payment owner, API-SHAPED. The payment's OWN retry owner, on a real `40001`.
+
+    SINCE 019 STAGE 4 (`T1906`; manifest `T1901` 5.4, rows `:783`-`:828`) the owner is `pay()`: the
+    payment is one transaction and a transaction-level conflict is retried as a WHOLE new attempt on a
+    fresh session and snapshot (the stage-3 retry owner); the engine's `_run_uow_with_retry` described
+    below is gone with the engine. The `40001` is raised at the payment's own debt write in the book
+    (`book._apply_payment_flow`), and the attempts are counted at `PaymentService.execute`. What must hold
+    is unchanged.
 
     WHY THIS EXISTS SEPARATELY FROM THE TEST ABOVE (external review, 2026-09-13). That one writes
     its retry out by hand - "read, open, write, commit; on 40001 rollback and do it all again" - and
@@ -719,14 +732,15 @@ async def test_c8_the_payment_owners_own_retry_leaves_one_envelope_and_the_winni
     that only survived a retry the test wrote itself would be worth nothing.
 
     WHAT MUST HOLD, and every number is read on a session that is not the writer's:
-    * exactly ONE `40001`, raised by PostgreSQL at the payment's own `_apply_flow` write;
-    * the whole unit of work ran twice - `_apply_flow` is called once per attempt;
+    * exactly ONE `40001`, raised by PostgreSQL at the payment's own debt write;
+    * the whole unit of work ran twice - `execute` twice, the flow once per attempt;
     * exactly ONE COMPLETED envelope for this `tx_id`. `UNIQUE(tx_id)` is what would have made a
       second envelope an IntegrityError instead of a duplicate record, so the envelope of the losing
       attempt has to have gone back with its rollback;
     * the entries describe only the attempt that reached the database: one `U`, whose
       `amount_before` is the COMPETITOR's value and not the one this session had loaded;
-    * `prepare_locks` are gone, the transaction is COMMITTED, and the equivalents row is written once.
+    * the transaction is COMMITTED and the equivalents row is written once (`prepare_locks` are
+      trivially empty since stage 4; that read goes with the table at stage 5).
 
     RED BEFORE STEP 4 BECAUSE: `debt_journal_entries` does not exist, so the non-vacuity assertion
     placed FIRST fails naming the missing table.
@@ -734,7 +748,8 @@ async def test_c8_the_payment_owners_own_retry_leaves_one_envelope_and_the_winni
     got the `40001` leaves one behind; or complete the envelope without the `state = 'OPEN'`
     predicate, so the retry's completion updates the losing attempt's row.
     """
-    from app.core.payments.engine import PaymentEngine
+    from app.core.ledger import book
+    from app.core.payments.service import PaymentService
 
     competitor_amount = Decimal("31.00000000")
     starting = Decimal("10.00000000")
@@ -751,14 +766,27 @@ async def test_c8_the_payment_owners_own_retry_leaves_one_envelope_and_the_winni
             setup.add(starting_edge)
         await setup.commit()
 
-    tx_id = await _seed_payment(serializable_factory, seeded, amount=str(paid))
+    tx_id = await _seed_payment(serializable_factory, seeded)
 
     wrapper, calls, sqlstates = _a_competitor_commits_before_the_first_flow(
         serializable_factory, seeded, competitor_amount
     )
-    monkeypatch.setattr(PaymentEngine, "_apply_flow", wrapper)
-    async with serializable_factory() as commit_session:
-        await PaymentEngine(commit_session).commit(tx_id)
+    monkeypatch.setattr(book, "_apply_payment_flow", wrapper)
+    attempts: list[int] = []
+    original_execute = PaymentService.execute
+
+    async def _counted_execute(self, *args, **kwargs):
+        attempts.append(1)
+        return await original_execute(self, *args, **kwargs)
+
+    monkeypatch.setattr(PaymentService, "execute", _counted_execute)
+    # `pay()` with a session FACTORY: every attempt on a new session, as the HTTP endpoint runs it.
+    result = await PaymentService.pay(
+        serializable_factory,
+        world.debtor.id,
+        _payment_request(world, tx_id, paid),
+        require_signature=False,
+    )
 
     entries = await stored_entries(serializable_factory, tx_id)
     envelopes = await _envelopes_with_intent(serializable_factory, tx_id=tx_id)
@@ -780,14 +808,15 @@ async def test_c8_the_payment_owners_own_retry_leaves_one_envelope_and_the_winni
     # NON-VACUITY: the conflict was real, it was a serialization failure, and the OWNER retried.
     # A stand that produced a lock wait, or that never conflicted at all, would measure an
     # ordinary payment and say nothing about C8.
+    assert result.status == "COMMITTED" and result.tx_id == tx_id, result
     assert sqlstates == ["40001"], (
         f"stand: the payment's own write was not refused with exactly one genuine serialization "
-        f"failure (observed {sqlstates}). Without a real 40001 at `_apply_flow` this test "
+        f"failure (observed {sqlstates}). Without a real 40001 at the debt write this test "
         f"observes an ordinary commit."
     )
-    assert len(calls) == 2, (
-        f"stand: `_apply_flow` ran {len(calls)} time(s), so `_run_uow_with_retry` did not re-run "
-        f"the whole unit of work and this is not the owner's retry"
+    assert len(attempts) == 2 and len(calls) == 2, (
+        f"stand: `execute` ran {len(attempts)} time(s) and the flow {len(calls)} time(s), so `pay()` "
+        f"did not re-run the whole payment on a fresh attempt and this is not the owner's retry"
     )
     assert after == {
         ("debtor", "creditor", "eq"): competitor_amount + paid
@@ -797,6 +826,8 @@ async def test_c8_the_payment_owners_own_retry_leaves_one_envelope_and_the_winni
         f"and silently discarded the concurrent write."
     )
     assert [row["state"] for row in tx_state or []] == ["COMMITTED"], tx_state
+    # SYNTHETIC COMPATIBILITY until 019 stage 5 removes the table (manifest row `:800`): the payment
+    # path writes no reservation since stage 4, so this can only hold.
     assert surviving_locks == [], (
         f"stand: the prepare locks outlived the committed payment: {surviving_locks}"
     )
@@ -1328,21 +1359,24 @@ async def test_c13_p_two_concurrent_openers_of_one_identity_and_the_database_ref
 
 
 # ==============================================================================================
-# C14 - the real owners: PaymentEngine.prepare/.commit and ClearingService
+# C14 - the real owners: PaymentService (PaymentEngine.prepare/.commit until 019 stage 4) and ClearingService
 # ==============================================================================================
 
 
-async def _seed_payment(factory, seeded: _Seeded, *, amount: str, limit: str = "500.00"):
-    """A trustline, a NEW transaction and a real `PaymentEngine.prepare`. Returns the tx id.
+async def _seed_payment(factory, seeded: _Seeded, *, limit: str = "500.00") -> str:
+    """The trustline a debtor -> creditor payment needs, and the tx id the payment will be SENT under.
 
     The trustline runs CREDITOR -> DEBTOR (`AGENTS.md` §8): the receiver's line to the sender is what
-    limits how much the sender may come to owe, and `_get_segment_capacity_and_reserved_usage`
-    (`app/core/payments/engine.py:640-661`) reads exactly that pair.
-    """
-    from app.core.payments.engine import PaymentEngine
+    limits how much the sender may come to owe, and the binding phase's segment capacity
+    (`PaymentService._segment_capacity`) reads exactly that pair.
 
+    019 stage 4 (`T1906`): until then this also inserted a `NEW` transaction and ran a real
+    `PaymentEngine.prepare`, leaving a durable `PREPARED` payment for the caller to commit. CHECK `030`
+    refuses any non-terminal `PAYMENT` row and the payment is one transaction, so the caller now SENDS the
+    payment under this tx id (`_payment_request`) through `PaymentService`. The helper survives because
+    its callers still need the world a payment runs in (manifest `T1901`, section 3).
+    """
     world = seeded.world
-    tx_id = str(uuid.uuid4())
     async with factory() as setup:
         setup.add(
             TrustLine(
@@ -1354,26 +1388,22 @@ async def _seed_payment(factory, seeded: _Seeded, *, amount: str, limit: str = "
                 status="active",
             )
         )
-        setup.add(
-            Transaction(
-                id=uuid.UUID(tx_id),
-                tx_id=tx_id,
-                type="PAYMENT",
-                initiator_id=world.debtor.id,
-                payload={},
-                state="NEW",
-            )
-        )
         await setup.commit()
+    return str(uuid.uuid4())
 
-    async with factory() as prepare_session:
-        await PaymentEngine(prepare_session).prepare(
-            tx_id,
-            [world.debtor.pid, world.creditor.pid],
-            Decimal(amount),
-            world.equivalent.id,
-        )
-    return tx_id
+
+def _payment_request(world: World, tx_id: str, amount: Decimal | str):
+    """The internal debtor -> creditor payment request under `tx_id` (`create_payment_internal`'s shape)."""
+
+    from app.schemas.payment import PaymentCreateRequest
+
+    return PaymentCreateRequest(
+        tx_id=tx_id,
+        to=world.creditor.pid,
+        equivalent=world.equivalent.code,
+        amount=str(amount),
+        signature="__internal__",
+    )
 
 
 class _FirstDebtWriteWatcher:
@@ -1868,10 +1898,9 @@ async def test_c17_p_the_owner_lock_race_never_leaves_an_equivalent_gone_with_it
 ):
     """§10.1 case (2), API-SHAPED for the envelope, DEFECT-SHAPED for what the race really does.
 
-    THE RACE, WITH BOTH ORDERS FORCED. A payment commit takes the equivalent's owner lock
-    (`app/core/payments/engine.py:414`, reached from `commit` via
-    `_preacquire_equivalent_owner_locks_for_tx` at `:1083`) and writes its debts and its envelope
-    under it. The admin delete takes the SAME lock (`app/api/v1/admin.py:1428`). One of them
+    THE RACE, WITH BOTH ORDERS FORCED. A payment takes the equivalent's owner lock at the start of its
+    binding phase (`PaymentService._bind_payment`; `PaymentEngine.commit` until 019 stage 4) and writes
+    its debts and its envelope under it. The admin delete takes the SAME lock (`app/api/v1/admin.py:1428`). One of them
     therefore waits for the other, and design v2 §10.1 requires both orders to be exercised.
 
     HOW THE ORDER IS FORCED, WITHOUT PATCHING EITHER OWNER. A third session takes the same advisory
@@ -1901,6 +1930,20 @@ async def test_c17_p_the_owner_lock_race_never_leaves_an_equivalent_gone_with_it
       that was waiting behind it then succeeds. The raw-DELETE case below is where an equivalent
       really does disappear under the lock.
 
+    THE PAYMENT'S SNAPSHOT PRECEDES THE DEACTIVATION (019 stage 4, manifest `T1901` section 3, "Предпосылка
+    C17"). Until stage 4 the payment was durably `PREPARED` before the deactivation and only its commit
+    queued. A payment is one transaction now, and a FRESH payment into an already inactive equivalent is
+    refused by the pre-check before any lock - it would never queue. So the payment's transaction takes
+    its snapshot (and reads the equivalent ACTIVE) before the deactivation commits: its pre-check passes,
+    it is admitted and it queues on the owner lock at its binding phase (asserted: `_bind_payment` entered).
+    Its binding `FOR SHARE` then meets the deactivation as a serialization failure, and `pay()`'s fresh
+    attempt refuses the stop - once more in both orders. MEASURED 2026-09-25: on this borrowed session the
+    retry's best-effort pre-check still passes (`_end_failed_attempt` keeps a borrowed session's objects loaded, so its
+    `SELECT equivalents` returns the instance loaded before the stop/hold, unrefreshed), so the
+    retry binds a second time and its binding read refuses; a pre-check refusal would bind once. Either is
+    accepted - at most two binding entries, at least one. Ordering by row locks
+    instead of the owner lock is stage 5's (manifest row `:1997`).
+
     So what this test asserts is the invariant §10.1 states universally and that IS reachable: the
     equivalent is never gone while debts or journal rows denominated in it remain - plus, for the
     payment, what T1544 now requires: the operator-stop refusal, no debt and no envelope (see the
@@ -1914,21 +1957,33 @@ async def test_c17_p_the_owner_lock_race_never_leaves_an_equivalent_gone_with_it
     """
     from app.api.v1.admin import admin_delete_equivalent
     from app.core.money_boundary import _EQUIVALENT_OWNER_LOCK_NAMESPACE, MoneyBoundary
-    from app.core.payments.engine import PaymentEngine
+    from app.core.payments.service import PaymentService
     from app.schemas.admin import AdminEquivalentDeleteRequest
     from app.utils.exceptions import ConflictException
 
     seeded = await _seed(serializable_factory)
     world = seeded.world
     lock_key = MoneyBoundary._equivalent_owner_lock_key(world.equivalent.id)
-    tx_id = await _seed_payment(serializable_factory, seeded, amount="9.00")
-    await _deactivate(serializable_factory, world)
+    tx_id = await _seed_payment(serializable_factory, seeded)
+
+    bound: list[int] = []
+    original_bind = PaymentService._bind_payment
+
+    async def _counted_bind(self, *args, **kwargs):
+        bound.append(1)
+        return await original_bind(self, *args, **kwargs)
 
     payment_session = serializable_factory()
     admin_session = serializable_factory()
     gate = serializable_factory()
     try:
+        # The payment's transaction starts - and takes its SERIALIZABLE snapshot - BEFORE the
+        # deactivation, so its stop pre-check reads the equivalent active (see the docstring).
         payment_pid = int(await payment_session.scalar(text("SELECT pg_backend_pid()")))
+        active_in_snapshot = await payment_session.scalar(
+            select(Equivalent.is_active).where(Equivalent.id == world.equivalent.id)
+        )
+        await _deactivate(serializable_factory, world)
         admin_pid = int(await admin_session.scalar(text("SELECT pg_backend_pid()")))
 
         # The gate: the same advisory lock, held in its own transaction, so both real owners
@@ -1939,7 +1994,20 @@ async def test_c17_p_the_owner_lock_race_never_leaves_an_equivalent_gone_with_it
         )
 
         async def _run_payment():
-            return await PaymentEngine(payment_session).commit(tx_id)
+            # `create_payment_internal` runs `pay()` on THIS session: the first attempt in the
+            # transaction opened above, a retry in a new one.
+            original = PaymentService._bind_payment
+            PaymentService._bind_payment = _counted_bind
+            try:
+                return await PaymentService(payment_session).create_payment_internal(
+                    world.debtor.id,
+                    to_pid=world.creditor.pid,
+                    equivalent=world.equivalent.code,
+                    amount="9.00",
+                    idempotency_key=tx_id,
+                )
+            finally:
+                PaymentService._bind_payment = original
 
         async def _run_delete():
             try:
@@ -2015,6 +2083,11 @@ async def test_c17_p_the_owner_lock_race_never_leaves_an_equivalent_gone_with_it
         f"released it (first={first_queued}, second={second_queued}); the order '{order}' was "
         f"not forced and this run measured no race"
     )
+    assert active_in_snapshot is True and len(bound) in (1, 2), (
+        f"stand: the payment did not pass its stop pre-check on a snapshot older than the deactivation "
+        f"and enter its binding phase (active={active_in_snapshot}, binding entries={len(bound)}), so "
+        f"it did not queue as an admitted payment"
+    )
 
     # VERDICT - the invariant §10.1 states, and the one outcome that is reachable through the
     # real route in both orders.
@@ -2030,7 +2103,7 @@ async def test_c17_p_the_owner_lock_race_never_leaves_an_equivalent_gone_with_it
     )
     # T1544, 2026-09-14: THE PAYMENT HALF OF THIS RACE IS CLOSED. The delete requires an INACTIVE
     # equivalent (`admin_delete_equivalent`) and a payment requires an ACTIVE one
-    # (`PaymentEngine.refuse_inactive_equivalents`, read at commit under the owner lock), so the
+    # (`MoneyBoundary.refuse_inactive_equivalents`, read at the money phase under the owner lock), so the
     # premise this stand used to force - a payment committing into an equivalent deactivated for
     # deletion - is refused in BOTH orders. The invariant assertions above are unchanged; only the
     # payment's expected outcome changed, from "commits 9.00 with one COMPLETED envelope" to the

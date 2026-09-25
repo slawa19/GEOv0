@@ -8,10 +8,11 @@ an AST scan of `app/` for
   default is `NEW`), an `.values(state=...)` of an insert/update, an assignment `<x>.state = ...`;
 * an import of `PaymentEngine` (the two-phase engine) and of `PrepareLock` (the reservations).
 
-Expected: nothing, outside the explicitly listed allowed set. The allowed set is not a hiding place:
-each entry names the stage that removes it, and the nodes that still have entries are strict
-`TargetMismatch` expectations of that stage (`tests/p019_support.py`) - they go red the moment the stage
-has done its job and forgot to take the marker off, and red if the stage leaves a write behind.
+Expected: nothing. Since stage 4, part b (`T1906`) the whole tree is held: the engine and recovery are
+deleted and admin abort no longer uses the engine, so the part-b allowed set that stage 4, part a kept
+is gone and the whole-tree node is an ordinary green assertion (its `xfail` taken off). What is still
+allowed is the reservations' readers, a strict `TargetMismatch` expectation of stage 5 (`T1909`,
+`tests/p019_support.py`) - red the moment stage 5 has done its job and forgot to take the marker off.
 
 WHAT THIS DOES NOT SEE, and why it is only a guard of FORM: raw SQL text (`text("UPDATE transactions
 SET state = 'NEW'")`), `setattr(tx, "state", ...)`, a state carried in a dict that is unpacked into a
@@ -35,16 +36,7 @@ INTERMEDIATE_STATES = frozenset(
     {"NEW", "ROUTED", "PREPARE_IN_PROGRESS", "PREPARED", "PROPOSED", "WAITING"}
 )
 
-#: Modules that still write or import what this scan forbids, each with the stage that removes it.
-#: Part b of stage 4 deletes the engine and recovery and rewrites admin abort as the Q2 compatibility
-#: surface without the engine; stage 5 removes the reservations table and its readers.
-STAGE_4B_MODULES = frozenset(
-    {
-        "app/core/payments/engine.py",  # deleted (T1906, part b)
-        "app/core/recovery.py",  # deleted with its start-up (T1906, part b)
-        "app/api/v1/admin.py",  # admin abort without PaymentEngine (Q2, T1906, part b)
-    }
-)
+#: The reservations' own model modules - not readers; stage 5 deletes them with the table.
 PREPARE_LOCK_MODEL_MODULES = frozenset(
     {"app/db/models/prepare_lock.py", "app/db/models/__init__.py"}
 )
@@ -184,29 +176,15 @@ def test_the_scan_reads_the_real_tree():
 # ── the targets ──────────────────────────────────────────────────────────────────────────────────
 
 
-def test_no_module_outside_the_part_b_set_writes_an_intermediate_payment_state_or_uses_the_engine():
-    """Stage 4, part a: the payment path executes directly - no NEW/PREPARED and no `PaymentEngine`.
-
-    Red (`TargetMismatch`) on `7e16dd5`: `app/core/payments/service.py` inserted `NEW` and imported the
-    engine. Green since the direct execution of stage 4, part a.
-
-    The modules part b deletes or rewrites (`STAGE_4B_MODULES`) are outside this node and inside the
-    next one, which stays a strict expectation until they are gone."""
-
-    writes, imports, _ = _scan_app()
-    live_writes = [f for f in writes if f.path not in STAGE_4B_MODULES]
-    live_engine = [f for f in imports if _is_engine_import(f) and f.path not in STAGE_4B_MODULES]
-    require_target(
-        not live_writes and not live_engine,
-        "intermediate PAYMENT state writes or PaymentEngine imports outside the part-b set: "
-        + "; ".join(map(str, live_writes + live_engine))
-        + ". "
-        + _BLIND,
-    )
-
-
-@target_xfail("019 stage 4, part b (T1906)", "engine.py, recovery.py and admin abort's engine use remain")
 def test_no_application_module_writes_an_intermediate_payment_state_or_uses_the_engine():
+    """Stage 4: no module of `app/` writes a non-terminal PAYMENT state or uses the payment engine.
+
+    Red (`TargetMismatch`) on `7e16dd5` for `app/core/payments/service.py` (it inserted `NEW` and
+    imported the engine) - green since stage 4, part a (`82cd214`) for every module outside the part-b
+    set; the part-b set (`engine.py`, `recovery.py`, admin abort's engine use) kept this whole-tree
+    node a strict `xfail` until stage 4, part b removed them. A regression is now an ordinary failure.
+    """
+
     writes, imports, _ = _scan_app()
     engine = [f for f in imports if _is_engine_import(f)]
     require_target(

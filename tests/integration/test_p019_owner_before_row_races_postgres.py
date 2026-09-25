@@ -49,14 +49,13 @@ from app.config import settings
 from app.core.clearing.service import ClearingService
 from app.core.ledger.reconciliation import PASSED
 from app.core.money_boundary import _EQUIVALENT_OWNER_LOCK_NAMESPACE, MoneyBoundary
-from app.core.payments.engine import PaymentEngine
 from app.core.payments.router import PaymentRouter
 from app.core.payments.service import PaymentService
 from app.db.models.equivalent import Equivalent
 from app.db.models.transaction import Transaction
 from app.db.reconciliation_tables import debt_reconciliation_results
 from app.utils.exceptions import ConflictException
-from tests.integration.test_clearing_payment_prepare_interlock_postgres import (
+from tests.integration.p019_interlock_support import (
     _no_advisory_lock_is_held,
     _seed_interlock_case,
 )
@@ -89,7 +88,9 @@ _QUEUE_SQL = text(
 @pytest.fixture(autouse=True)
 def _barrier_budgets(monkeypatch):
     # The barriers hold the owner lock for a moment; the default lock budget is seconds and is not
-    # what these races are about.
+    # what these races are about. A payment held before its owner lock waits inside its binding phase,
+    # which runs under `PREPARE_TIMEOUT_SECONDS`.
+    monkeypatch.setattr(settings, "PREPARE_TIMEOUT_SECONDS", 30)
     monkeypatch.setattr(settings, "COMMIT_TIMEOUT_SECONDS", 30)
     monkeypatch.setattr(settings, "PAYMENT_TOTAL_TIMEOUT_SECONDS", 60)
 
@@ -362,6 +363,18 @@ async def test_money_arriving_while_an_admin_path_holds_its_row_waits_on_the_own
     hold clear: `FOR UPDATE` and the UPDATE; DELETE: the usage count); money must queue on the OWNER lock,
     then finish with what that admin outcome implies: refused after a stop, run after a lifted hold.
 
+    THE PAYMENT SIDE SINCE 019 STAGE 4 (`T1906`). Until then a payment was prepared (durable `PREPARED`)
+    before the race and `PaymentEngine.commit` was the waiter. A payment is now one transaction through
+    `PaymentService`, so the real payment runs: it is ADMITTED (routing and the stop/hold pre-check pass
+    while the equivalent is active and not held) and held at the entry of its binding phase
+    (`PaymentService._bind_payment`), i.e. before its owner lock. Only then is the admin precondition
+    committed (held with a later PASS; deactivated for DELETE) and the admin path started; once the admin
+    holds the owner lock the payment is released into it and must queue. Setting the precondition before
+    the payment started would make its pre-check refuse it before admission, and it would never reach the
+    lock - the premise this race needs. After the admin commits, the payment's `FOR SHARE` on the changed
+    equivalent row meets a serialization failure and `pay()` retries it on a fresh snapshot, where the stop
+    refuses the admitted payment (stored `ABORTED`) or the lifted hold lets it commit.
+
     RED if money locks the equivalent row before the owner lock: it waits on the admin's row
     (`wait_event` is not `advisory`) while holding nothing the admin needs - and a money path that
     reads the row first and then asks for the owner lock is the deadlock of the inverted order.
@@ -369,25 +382,38 @@ async def test_money_arriving_while_an_admin_path_holds_its_row_waits_on_the_own
     client, gate = admin_api
     seed = await _seed_interlock_case()
     code, equivalent_id = seed["equivalent_code"], seed["equivalent_id"]
-    tx_id = seed["payment_tx_id"]
+    tx_id = str(uuid.uuid4())
     completed: list[str] = []
     money_task = admin_task = None
     delete_paused, delete_release = asyncio.Event(), asyncio.Event()
+    bind_reached, bind_release = asyncio.Event(), asyncio.Event()
+    bind_hits: list[str] = []
 
     if money == "payment":
-        async with factory() as session:
-            await PaymentEngine(session).prepare(
-                tx_id, seed["participant_pids"][:2], Decimal("5.00"), equivalent_id, commit=True
-            )
-        assert await _state(factory, tx_id) == "PREPARED", "premise: the payment is not prepared"
-    if admin_path == "hold_clear":
-        await _set_held_with_a_later_pass(factory, equivalent_id)
+        original_bind = PaymentService._bind_payment
+
+        async def _bind_after_barrier(self, bound_tx_id, routes, bound_equivalent_id):
+            # The first attempt of THIS payment waits here, admitted and before its owner lock; a retry
+            # of the same payment passes straight through.
+            if bound_tx_id == tx_id and not bind_hits:
+                bind_hits.append(bound_tx_id)
+                bind_reached.set()
+                await bind_release.wait()
+            return await original_bind(self, bound_tx_id, routes, bound_equivalent_id)
+
+        monkeypatch.setattr(PaymentService, "_bind_payment", _bind_after_barrier)
+
+    async def _admin_precondition() -> None:
+        if admin_path == "hold_clear":
+            await _set_held_with_a_later_pass(factory, equivalent_id)
+        if admin_path == "delete":
+            async with factory() as session:
+                await session.execute(
+                    update(Equivalent).where(Equivalent.id == equivalent_id).values(is_active=False)
+                )
+                await session.commit()
+
     if admin_path == "delete":
-        async with factory() as session:
-            await session.execute(
-                update(Equivalent).where(Equivalent.id == equivalent_id).values(is_active=False)
-            )
-            await session.commit()
         original_counts = admin_module._equivalent_usage_counts
 
         async def _counts_then_hold(db, *, equivalent_id):
@@ -403,12 +429,25 @@ async def test_money_arriving_while_an_admin_path_holds_its_row_waits_on_the_own
     async def _money():
         if money == "payment":
             async with factory() as session:
-                return await PaymentEngine(session).commit(tx_id)
+                return await PaymentService(session).create_payment_internal(
+                    seed["participant_ids"][0],
+                    to_pid=seed["participant_pids"][1],
+                    equivalent=code,
+                    amount="5.00",
+                    idempotency_key=tx_id,
+                )
         async with factory() as session:
             return await ClearingService(session).execute_clearing_with_amount(seed["cycle"])
 
     try:
         with caplog.at_level(logging.INFO):
+            if money == "payment":
+                # The payment is admitted first and held before its owner lock (see the docstring).
+                money_task = asyncio.create_task(_money())
+                money_task.add_done_callback(lambda _t: completed.append("money"))
+                await asyncio.wait_for(bind_reached.wait(), timeout=20)
+                assert await _state(factory, tx_id) is None, "premise: the held payment is visible"
+            await _admin_precondition()
             admin_task = asyncio.create_task(_admin_call(client, admin_path, code))
             admin_task.add_done_callback(lambda _t: completed.append("admin"))
             if admin_path == "delete":
@@ -418,8 +457,11 @@ async def test_money_arriving_while_an_admin_path_holds_its_row_waits_on_the_own
             admin_pid = await _owner_holder(equivalent_id)
             assert admin_pid is not None, "premise: the admin path does not hold the owner lock"
 
-            money_task = asyncio.create_task(_money())
-            money_task.add_done_callback(lambda _t: completed.append("money"))
+            if money == "payment":
+                bind_release.set()
+            else:
+                money_task = asyncio.create_task(_money())
+                money_task.add_done_callback(lambda _t: completed.append("money"))
             queue = await _owner_queue(equivalent_id)
             _assert_waits_behind(queue, holder=admin_pid, what=f"the {money}")
             assert not money_task.done()
@@ -441,7 +483,7 @@ async def test_money_arriving_while_an_admin_path_holds_its_row_waits_on_the_own
         if admin_path == "hold_clear":
             # The hold is lifted before money runs: money runs.
             if money == "payment":
-                assert money_outcome is True, money_outcome
+                assert getattr(money_outcome, "status", None) == "COMMITTED", money_outcome
                 assert await _state(factory, tx_id) == "COMMITTED"
             else:
                 assert money_outcome == _CYCLE_AMOUNT, money_outcome
@@ -455,8 +497,11 @@ async def test_money_arriving_while_an_admin_path_holds_its_row_waits_on_the_own
             if money == "payment":
                 assert await _state(factory, tx_id) == "ABORTED"
         await _no_advisory_lock_is_held(caplog)
+        if money == "payment":
+            assert bind_hits == [tx_id], f"premise: the payment's barrier was not reached once: {bind_hits}"
     finally:
         gate.release.set()
         delete_release.set()
+        bind_release.set()
         await _finish(admin_task, money_task)
         PaymentRouter.invalidate_cache(code)

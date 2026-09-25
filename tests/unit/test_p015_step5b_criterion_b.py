@@ -9,8 +9,8 @@ RECORDED INTENT - inside the 5a verifier, in the same outcome and fingerprint as
     INJECT              the honest subset its intent supports
     SEED, TEST_FIXTURE  not examined (5a refuses them after the baseline)
 
-and `app/core/payments/engine.py::_read_payment_prestate`, the one batched read after the owner lock that
-writes that pre-state into the envelope.
+and `app/core/payments/service.py::_read_payment_prestate` (the engine's until 019 stage 4), the one
+batched read after the owner lock that writes that pre-state into the envelope.
 
 THE CORRUPTIONS. "A wrong writer" is a real application writer bent by a wrapper or a listener, as in `C6`:
 it journals faithfully what it did. "Around the application" is THE named corruption helper
@@ -46,7 +46,6 @@ from app.core.ledger.reconciliation import (
     FAILED,
     PASSED,
 )
-from app.core.payments.engine import PaymentEngine
 from app.db.journal_tables import (
     PAYMENT_INTENT_ENCODING_VERSION,
     debt_journal_entries,
@@ -312,10 +311,9 @@ async def test_step5b_the_c6_wrong_route_is_failed_by_b_while_a_stays_blind(db_s
     )
     try:
         await _baseline(factory, triangle.equivalent.id)
-        tx_id = await _prepare_payment(factory, triangle, ["a", "b", "c"], Decimal("5"))
+        # 019 stage 4: the payment is one transaction, so the wrong writer is armed BEFORE it.
         _collapse_the_route(patch, triangle)
-        async with factory() as session:
-            await PaymentEngine(session).commit(tx_id)
+        tx_id = await _prepare_payment(factory, triangle, ["a", "b", "c"], Decimal("5"))
         patch.undo()
         assert await _edges(factory, triangle) == {("a", "c"): Decimal("5.00000000")}
         assert await _audit(factory, tx_id) == [True], "stand: C6 is no longer a writer every barrier passes"
@@ -521,10 +519,9 @@ async def test_step5b_a_v1_payment_with_an_edge_outside_its_flow_pairs_is_failed
         factory, trustlines=[("b", "a", "100"), ("c", "b", "100"), ("c", "a", "100")]
     )
     try:
-        tx_id = await _prepare_payment(factory, triangle, ["a", "b", "c"], Decimal("5"))
+        # 019 stage 4: the payment is one transaction, so the wrong writer is armed BEFORE it.
         _collapse_the_route(patch, triangle)
-        async with factory() as session:
-            await PaymentEngine(session).commit(tx_id)
+        await _prepare_payment(factory, triangle, ["a", "b", "c"], Decimal("5"))
         patch.undo()
         await _downgrade_to_v1(factory, await _operation(factory, equivalent_id=triangle.equivalent.id, kind="PAYMENT"))
 
@@ -944,10 +941,9 @@ async def test_step5b_a_b_finding_is_stored_in_the_same_row_and_fingerprint_and_
         factory, trustlines=[("b", "a", "100"), ("c", "b", "100"), ("c", "a", "100")]
     )
     await _baseline(factory, triangle.equivalent.id)
-    tx_id = await _prepare_payment(factory, triangle, ["a", "b", "c"], Decimal("5"))
+    # 019 stage 4: the payment is one transaction, so the wrong writer is armed BEFORE it.
     _collapse_the_route(monkeypatch, triangle)
-    async with factory() as session:
-        await PaymentEngine(session).commit(tx_id)
+    tx_id = await _prepare_payment(factory, triangle, ["a", "b", "c"], Decimal("5"))
     monkeypatch.undo()
 
     # STEP 5c CHANGED THE STAND, NOT THE CLAIM (2026-09-14): the scheduled FAILED would now hold the
@@ -999,10 +995,21 @@ async def test_step5b_the_prestate_is_one_read_after_the_operator_stop_and_befor
 ) -> None:
     """ANCHORED, not merely present. On a two-hop payment (two pairs, four directions), the statements
     sent between the operator-stop read of `equivalents` and `INSERT INTO debt_operations` are EXACTLY one,
-    and it reads `debts`. The TTL read of `prepare_locks` precedes the stop, as T1544 fixed it.
+    and it reads `debts`.
 
-    MUTATIONS: (1) move `_read_payment_prestate` above the TTL branch - nothing between the anchors, red;
-    (2) read each direction with its own SELECT - four statements, red.
+    RE-ANCHORED ON THE STAGE-4 ORDER (019 `T1906`; manifest `T1901` section 3, "Шов TTL"). Until stage 4
+    the recorder covered `PaymentEngine.commit` of a durable `PREPARED` payment, and a third anchor pinned
+    the TTL read of `prepare_locks` BEFORE the stop (T1544's precedence). That branch is gone with the
+    durable `PREPARED` state (CHECK `030`, no TTL); its place in the order is taken by what the direct
+    execution does first: the payment's own row, inserted `COMMITTED` inside the operation savepoint, and
+    the binding phase (locks, capacity) precede the stop; the envelope precedes the FIRST write to `debts`.
+    The recorder now covers the whole payment - the stop pre-check before routing loads the whole
+    `equivalents` row and is not the anchor statement, so the anchor is still seen once. No statement reads
+    the TTL (`expires_at <=`) any more; that is asserted, so a revived expiry branch is seen.
+
+    MUTATIONS: (1) read the pre-state in the binding phase, before the stop - nothing between the anchors,
+    red; (2) read each direction with its own SELECT - four statements, red; (3) open the envelope after
+    the flows - the envelope follows the first debt write, red.
     """
     from tests.conftest import TestingSessionLocal as factory
 
@@ -1013,24 +1020,26 @@ async def test_step5b_the_prestate_is_one_read_after_the_operator_stop_and_befor
     def _record(conn, cursor, statement, parameters, context, executemany) -> None:
         statements.append(" ".join(str(statement).split()).upper())
 
-    tx_id = await _prepare_payment(factory, triangle, ["a", "b", "c"], Decimal("5"))
     event.listen(engine.sync_engine, "before_cursor_execute", _record)
     try:
-        async with factory() as session:
-            await PaymentEngine(session).commit(tx_id)
+        tx_id = await _prepare_payment(factory, triangle, ["a", "b", "c"], Decimal("5"))
     finally:
         event.remove(engine.sync_engine, "before_cursor_execute", _record)
     assert await _tx_state(factory, tx_id) == "COMMITTED"
 
+    inserts = [i for i, s in enumerate(statements) if s.startswith("INSERT INTO TRANSACTIONS")]
     stops = [i for i, s in enumerate(statements) if s.startswith("SELECT EQUIVALENTS.CODE, EQUIVALENTS.IS_ACTIVE")]
     envelopes = [i for i, s in enumerate(statements) if s.startswith("INSERT INTO DEBT_OPERATIONS")]
-    # The TTL branch's own read: the only statement comparing `expires_at` with the database clock.
-    ttl = [i for i, s in enumerate(statements) if "PREPARE_LOCKS.EXPIRES_AT <=" in s]
-    assert len(stops) == 1 and len(envelopes) == 1 and len(ttl) == 1, (
-        f"premise: the anchors were not each seen once: stop={stops} envelope={envelopes} ttl={ttl}\n"
-        + "\n".join(statements)
+    debt_writes = [
+        i for i, s in enumerate(statements) if s.startswith(("INSERT INTO DEBTS", "UPDATE DEBTS", "DELETE FROM DEBTS"))
+    ]
+    assert len(inserts) == 1 and len(stops) == 1 and len(envelopes) == 1 and debt_writes, (
+        f"premise: the anchors were not each seen once: transaction={inserts} stop={stops} "
+        f"envelope={envelopes} debt writes={debt_writes}\n" + "\n".join(statements)
     )
-    assert ttl[0] < stops[0] < envelopes[0], (ttl, stops, envelopes)
+    assert inserts[0] < stops[0] < envelopes[0] < debt_writes[0], (inserts, stops, envelopes, debt_writes)
+    ttl = [s for s in statements if "PREPARE_LOCKS.EXPIRES_AT <=" in s]
+    assert ttl == [], f"a payment read the expiry of a reservation, a branch that no longer exists: {ttl}"
     # THE BOOK OPENS ITS ENVELOPE ITSELF (018 stage B1): between the pre-state read and the envelope
     # INSERT it reads the transaction's `geo.operation_id` (the nesting check) and sends its own
     # SAVEPOINT. Those two are the book's opening, not reads of the payment, and are named - not

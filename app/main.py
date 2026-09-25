@@ -252,21 +252,6 @@ async def _run_integrity_checkpoints_once(app: FastAPI, *, reason: str) -> bool:
     return True
 
 
-def _record_recovery_iteration(
-    app: FastAPI,
-    reason: str,
-    error: BaseException | None,
-) -> None:
-    succeeded = error is None
-    _record_background_job_event(
-        app,
-        name="recovery",
-        status="running" if succeeded else "failed",
-        event=f"{reason}_{'success' if succeeded else 'error'}",
-        error=error,
-    )
-
-
 async def _integrity_loop(app: FastAPI) -> None:
     interval = int(
         getattr(settings, "INTEGRITY_CHECKPOINT_INTERVAL_SECONDS", 300) or 300
@@ -282,34 +267,9 @@ async def _integrity_loop(app: FastAPI) -> None:
 
 
 def _start_configured_background_tasks(app: FastAPI) -> None:
-    if getattr(settings, "RECOVERY_ENABLED", True):
-        try:
-            from app.core.recovery import recovery_loop
-            from app.db.session import AsyncSessionLocal
-        except Exception as error:
-            _record_background_job_event(
-                app,
-                name="recovery",
-                status="failed",
-                event="start_failed",
-                error=error,
-            )
-            logger.exception("background_job.start_failed name=recovery")
-        else:
-            _start_supervised_background_task(
-                app,
-                name="recovery",
-                coroutine_factory=lambda: recovery_loop(
-                    session_factory=AsyncSessionLocal,
-                    stop_event=app.state._bg_stop_event,
-                    on_iteration=lambda reason, error: _record_recovery_iteration(
-                        app,
-                        reason,
-                        error,
-                    ),
-                ),
-            )
-
+    # No payment recovery loop since programme 019, stage 4: the hub executes a payment as one
+    # transaction and persists no intermediate state for it to finish (migration 030). The
+    # `RECOVERY_*` settings are inert until П4 decides their fate with the incidents screen.
     if getattr(settings, "INTEGRITY_CHECKPOINT_ENABLED", True):
         _start_supervised_background_task(
             app,

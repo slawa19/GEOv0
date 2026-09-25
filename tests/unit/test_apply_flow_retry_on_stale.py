@@ -6,8 +6,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm.exc import StaleDataError
 
-from app.core.ledger.book import DebtVersionConflict
-from app.core.payments.engine import PaymentEngine
+from app.core.ledger.book import Book, DebtVersionConflict, PaymentFlow
 from app.core.payments.service import _classify_payment_db_error
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
@@ -98,17 +97,20 @@ async def test_apply_flow_raises_a_stale_version_to_the_owner_of_the_transaction
     ).scalar_one()
 
     debt_id = debt.id
-    engine = PaymentEngine(db_session)
-    # THE WRITER'S OWN OPERATION, not a fixture context (design v2 §8 R5/F7). `_apply_flow` is
-    # production code that moves money; called directly it opens no operation, and the journal
+    # THE WRITER'S OWN OPERATION, not a fixture context (design v2 §8 R5/F7). A payment flow is
+    # production code that moves money; applied directly it opens no operation, and the journal
     # refuses its flush. Declaring `TEST_FIXTURE` here would journal a payment's effects under the
-    # kind reserved for scaffolding, so the real kind is declared instead.
+    # kind reserved for scaffolding, so the real kind is declared instead. Since 019 stage 4 the flow
+    # is applied as the payment path applies it - `posting.apply(PaymentFlow(...))` on the open book
+    # posting - not through the removed `PaymentEngine._apply_flow` forwarder.
     with caplog.at_level(logging.WARNING, logger="app.core.ledger.book"):
         with pytest.raises(DebtVersionConflict) as raised:
             async with writer_operation(
                 db_session, kind="PAYMENT", equivalent_ids=[eq.id], initiator_id=sender.id
             ):
-                await engine._apply_flow(sender.id, receiver.id, Decimal("10"), eq.id)
+                await Book.current(db_session).apply(
+                    PaymentFlow(from_id=sender.id, to_id=receiver.id, amount=Decimal("10"), equivalent_id=eq.id)
+                )
     assert isinstance(raised.value, StaleDataError)
     assert isinstance(raised.value.__cause__, StaleDataError)
     assert isinstance(_classify_payment_db_error(raised.value), RetryablePaymentConflictException)

@@ -201,11 +201,13 @@ async def test_the_refusal_does_not_depend_on_the_stored_state(db_session):
 
     Ordering matters for a reason the caller can feel: `PREPARE_IN_PROGRESS` used to answer
     "Payment with same tx_id is in progress", which invites a retry, for a row that is not
-    known to be this request at all.
+    known to be this request at all. Since programme 019 stage 4 migration 030 refuses a
+    non-terminal PAYMENT row, so the sweep covers the two states a stored payment can hold; the
+    in-progress branch it was ordered against has no reachable row any more.
     """
 
     _eq, people = await _seed(db_session)
-    for state in ("NEW", "ROUTED", "PREPARE_IN_PROGRESS", "PREPARED", "COMMITTED", "ABORTED"):
+    for state in ("COMMITTED", "ABORTED"):
         tx_id = f"t1548-state-{state.lower()}-" + uuid.uuid4().hex[:8]
         db_session.add(_legacy_row(people, tx_id=tx_id, idempotency=None, state=state))
         await db_session.commit()

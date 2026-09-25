@@ -1,27 +1,44 @@
+"""The staged payment path: a caller-owned transaction with several payments, and the staged owner lock.
+
+019 STAGE 4 (`T1906`; manifest `t1901-manifest.md` 5.1). The first test of this module,
+`test_staged_multicall_batches_do_not_exhaust_retry_on_retained_locks_postgres`, is DROPPED: it seeded four
+durable `PREPARED` payments with hand-written `PrepareLock` rows (CHECK `030` refuses the seed) and staged
+them through `PaymentEngine.commit(commit=False)` (removed). Its assertions, by manifest row:
+
+* both calls of a batch succeed (:239, :245) - removed with `PaymentEngine.commit`;
+* exactly one batch fails with a real 40001, its retry in a fresh outer transaction succeeds, all four are
+  COMMITTED with debts A->B 4, B->C 4 (:273-280, :289-311) - SURVIVE, stronger, in
+  `tests/integration/test_p015_p1_money_replay_postgres.py::`
+  `test_a_real_serialization_failure_replays_the_money_phase_and_commits_once` (a real 40001 on the
+  staged path of a real tick, one replay, one commit, the debts);
+* no `prepare_locks` left (:312-319) - vacuous since stage 4, the table goes at stage 5;
+* one PAYMENT audit row per payment and the trust limits untouched (:320-336) - the staged path had no
+  other assertion of these, so the first test below is new and asserts them on the direct execution.
+
+The other two tests are the staged owner-lock invariant (`MoneyBoundary`), unchanged by stage 4.
+"""
+
 import asyncio
 import uuid
-from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import func, select, text
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy import select, text
 
 from app.core.money_boundary import MoneyBoundary
-from app.core.payments.engine import PaymentEngine
+from app.core.payments.service import PaymentService
 from app.db.models.audit_log import IntegrityAuditLog
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
-from app.db.models.prepare_lock import PrepareLock
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 
 from tests.debt_setup import debt_fixture_setup
 
-# The first test seeds and commits payments through several sessions and runs on a disposable clone
-# of the migrated template; its rows go with the clone's drop (018 B0b; see `tests/tier_on_a_clone.py`).
-# The other two only take advisory locks on random ids, commit no row, and stay on the tier.
+# The first test commits payments through several sessions and runs on a disposable clone of the migrated
+# template; its rows go with the clone's drop (018 B0b; see `tests/tier_on_a_clone.py`). The other two
+# only take advisory locks on random ids, commit no row, and stay on the tier.
 from tests.tier_on_a_clone import tier_on_a_clone  # noqa: E402,F401 - opt-in fixture
 
 
@@ -32,36 +49,9 @@ def _require_postgres(db_session) -> None:
         pytest.skip("Postgres-only: validates staged transaction advisory locks")
 
 
-def _sqlstate(exc: BaseException) -> str | None:
-    if not isinstance(exc, DBAPIError):
-        return None
-    orig = getattr(exc, "orig", None)
-    return (
-        getattr(orig, "sqlstate", None)
-        or getattr(orig, "pgcode", None)
-        or getattr(orig, "code", None)
-    )
+async def _seed_staged_world() -> dict:
+    """A, B, C; B trusts A and C trusts B for 50.00; opening debts A->B 1 and B->C 1. No payment."""
 
-
-def _payment_lock(*, tx_id, participant_id, from_id, to_id, equivalent_id, amount):
-    return PrepareLock(
-        tx_id=tx_id,
-        participant_id=participant_id,
-        effects={
-            "flows": [
-                {
-                    "from": str(from_id),
-                    "to": str(to_id),
-                    "amount": str(amount),
-                    "equivalent": str(equivalent_id),
-                }
-            ]
-        },
-        expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
-    )
-
-
-async def _seed_staged_batches() -> dict:
     from tests.conftest import TestingSessionLocal
 
     nonce = uuid.uuid4().hex[:8]
@@ -115,179 +105,94 @@ async def _seed_staged_batches() -> dict:
                     ),
                 ]
             )
-
-        transactions = {}
-        for name, initiator in (
-            ("left_ab", participant_a),
-            ("left_bc", participant_b),
-            ("right_bc", participant_b),
-            ("right_ab", participant_a),
-        ):
-            tx = Transaction(
-                tx_id=str(uuid.uuid4()),
-                type="PAYMENT",
-                initiator_id=initiator.id,
-                payload={},
-                state="PREPARED",
-            )
-            transactions[name] = tx
-            setup.add(tx)
-        # PrepareLock has no ORM relationship to Transaction; flush parent rows first.
-        await setup.flush()
-
-        setup.add_all(
-            [
-                _payment_lock(
-                    tx_id=transactions["left_ab"].tx_id,
-                    participant_id=participant_a.id,
-                    from_id=participant_a.id,
-                    to_id=participant_b.id,
-                    equivalent_id=equivalent.id,
-                    amount=Decimal("1.00"),
-                ),
-                _payment_lock(
-                    tx_id=transactions["left_bc"].tx_id,
-                    participant_id=participant_b.id,
-                    from_id=participant_b.id,
-                    to_id=participant_c.id,
-                    equivalent_id=equivalent.id,
-                    amount=Decimal("1.00"),
-                ),
-                _payment_lock(
-                    tx_id=transactions["right_bc"].tx_id,
-                    participant_id=participant_b.id,
-                    from_id=participant_b.id,
-                    to_id=participant_c.id,
-                    equivalent_id=equivalent.id,
-                    amount=Decimal("2.00"),
-                ),
-                _payment_lock(
-                    tx_id=transactions["right_ab"].tx_id,
-                    participant_id=participant_a.id,
-                    from_id=participant_a.id,
-                    to_id=participant_b.id,
-                    equivalent_id=equivalent.id,
-                    amount=Decimal("2.00"),
-                ),
-            ]
-        )
         await setup.commit()
 
     return {
         "equivalent_id": equivalent.id,
-        "participant_ids": [participant_a.id, participant_b.id, participant_c.id],
+        "equivalent_code": equivalent.code,
         "participant_a_id": participant_a.id,
         "participant_b_id": participant_b.id,
         "participant_c_id": participant_c.id,
-        "tx_ids": {name: tx.tx_id for name, tx in transactions.items()},
+        "participant_b_pid": participant_b.pid,
+        "participant_c_pid": participant_c.pid,
     }
 
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("tier_on_a_clone")
-async def test_staged_multicall_batches_do_not_exhaust_retry_on_retained_locks_postgres(
+async def test_a_staged_batch_writes_one_payment_audit_row_per_committed_payment_and_keeps_the_limits_postgres(
     db_session,
 ) -> None:
+    """Two staged payments in ONE caller-owned transaction, the way the simulator tick stages them: the
+    batch's owner set first (`acquire_staged_equivalent_owner_locks`), then each payment through
+    `create_payment_internal_staged`, then the caller's one commit.
+
+    After the commit, each payment is `COMMITTED` with exactly ONE `IntegrityAuditLog` row of type
+    `PAYMENT` for its equivalent, verified; the debts moved by exactly the two amounts; no trust line
+    changed. (Manifest 5.1, `test_payment_staged_multicall_postgres.py` :320-336, TO WRITE at stage 4.)
+
+    MUTATIONS: drop `_write_integrity_audit` from `PaymentService._apply_payment` - no audit row, red;
+    write it twice - two rows for a payment, red.
+    """
+
     _require_postgres(db_session)
 
     from tests.conftest import TestingSessionLocal
 
-    seed = await _seed_staged_batches()
-    first_calls_ready = asyncio.Event()
-    first_calls_count = 0
-    first_calls_guard = asyncio.Lock()
-    owner_attempts = 0
-
-    async def _release_barrier_for_current_or_coarse_owner(observer) -> None:
-        for _ in range(2000):
-            async with first_calls_guard:
-                ready_count = first_calls_count
-                attempts = owner_attempts
-            if ready_count == 2:
-                first_calls_ready.set()
-                return
-            if ready_count == 1 and attempts == 2:
-                owner_waiting = await observer.scalar(
-                    text(
-                        "SELECT EXISTS ("
-                        "SELECT 1 FROM pg_locks "
-                        "WHERE locktype = 'advisory' AND NOT granted"
-                        ")"
-                    )
-                )
-                if owner_waiting:
-                    first_calls_ready.set()
-                    return
-            await asyncio.sleep(0.01)
-        raise AssertionError("staged barrier did not observe a safe release condition")
-
-    async def _run_batch(first_tx_id: str, second_tx_id: str) -> bool:
-        nonlocal first_calls_count, owner_attempts
-        async with TestingSessionLocal() as session:
-            await session.connection(
-                execution_options={"isolation_level": "SERIALIZABLE"}
-            )
-            engine = PaymentEngine(session)
-            async with first_calls_guard:
-                owner_attempts += 1
-            await engine.acquire_staged_equivalent_owner_locks(
-                [seed["equivalent_id"]]
-            )
-            assert engine._retry_attempts == 3
-            engine._retry_base_delay_s = 0.0
-            engine._retry_max_delay_s = 0.0
-            try:
-                assert await engine.commit(first_tx_id, commit=False) is True
-                async with first_calls_guard:
-                    first_calls_count += 1
-                    if first_calls_count == 2:
-                        first_calls_ready.set()
-                await asyncio.wait_for(first_calls_ready.wait(), timeout=5.0)
-                assert await engine.commit(second_tx_id, commit=False) is True
-                await session.commit()
-                return True
-            except BaseException:
-                await session.rollback()
-                raise
-
-    batches = [
-        (seed["tx_ids"]["left_ab"], seed["tx_ids"]["left_bc"]),
-        (seed["tx_ids"]["right_bc"], seed["tx_ids"]["right_ab"]),
+    seed = await _seed_staged_world()
+    batch = [
+        (seed["participant_a_id"], seed["participant_b_pid"], "1.00", str(uuid.uuid4())),
+        (seed["participant_b_id"], seed["participant_c_pid"], "2.00", str(uuid.uuid4())),
     ]
-    async with TestingSessionLocal() as observer:
-        barrier_task = asyncio.create_task(
-            _release_barrier_for_current_or_coarse_owner(observer)
-        )
-        results = await asyncio.wait_for(
-            asyncio.gather(
-                *(_run_batch(*batch) for batch in batches),
-                return_exceptions=True,
-            ),
-            timeout=20.0,
-        )
-        await barrier_task
-    failure_indexes = [
-        index
-        for index, result in enumerate(results)
-        if isinstance(result, BaseException)
-    ]
-    assert len(failure_indexes) == 1
-    failed_index = failure_indexes[0]
-    assert _sqlstate(results[failed_index]) == "40001"
-
-    # The serialization snapshot belongs to the whole staged owner, not the
-    # savepoint. Retry the failed batch in a fresh outer transaction.
-    results[failed_index] = await _run_batch(*batches[failed_index])
-    assert results == [True, True]
+    tx_ids = [tx_id for *_rest, tx_id in batch]
 
     async with TestingSessionLocal() as verify:
-        tx_ids = list(seed["tx_ids"].values())
-        states = (
-            await verify.scalars(
-                select(Transaction.state).where(Transaction.tx_id.in_(tx_ids))
+        limits_before = sorted(
+            (
+                await verify.execute(
+                    select(TrustLine.id, TrustLine.limit, TrustLine.status).where(
+                        TrustLine.equivalent_id == seed["equivalent_id"]
+                    )
+                )
+            ).all()
+        )
+
+    async with TestingSessionLocal() as session:
+        service = PaymentService(session)
+        await service.acquire_staged_equivalent_owner_locks([seed["equivalent_code"]])
+        staged = []
+        for sender_id, to_pid, amount, tx_id in batch:
+            staged.append(
+                await service.create_payment_internal_staged(
+                    sender_id,
+                    to_pid=to_pid,
+                    equivalent=seed["equivalent_code"],
+                    amount=amount,
+                    idempotency_key=tx_id,
+                )
+            )
+        # Premise: both were staged as payments of this transaction, not refused into a result.
+        assert [item.result.status for item in staged] == ["COMMITTED", "COMMITTED"], staged
+        await session.commit()
+
+    async with TestingSessionLocal() as verify:
+        states = dict(
+            (
+                await verify.execute(
+                    select(Transaction.tx_id, Transaction.state).where(Transaction.tx_id.in_(tx_ids))
+                )
+            ).all()
+        )
+        audits = (
+            await verify.execute(
+                select(
+                    IntegrityAuditLog.tx_id,
+                    IntegrityAuditLog.operation_type,
+                    IntegrityAuditLog.equivalent_code,
+                    IntegrityAuditLog.verification_passed,
+                ).where(IntegrityAuditLog.tx_id.in_(tx_ids))
             )
         ).all()
-        assert states == ["COMMITTED"] * 4
         debts = {
             tuple(row)
             for row in (
@@ -298,43 +203,26 @@ async def test_staged_multicall_batches_do_not_exhaust_retry_on_retained_locks_p
                 )
             ).all()
         }
-        assert debts == {
+        limits_after = sorted(
             (
-                seed["participant_a_id"],
-                seed["participant_b_id"],
-                Decimal("4.00000000"),
-            ),
-            (
-                seed["participant_b_id"],
-                seed["participant_c_id"],
-                Decimal("4.00000000"),
-            ),
-        }
-        assert (
-            await verify.scalar(
-                select(func.count()).select_from(PrepareLock).where(
-                    PrepareLock.tx_id.in_(tx_ids)
+                await verify.execute(
+                    select(TrustLine.id, TrustLine.limit, TrustLine.status).where(
+                        TrustLine.equivalent_id == seed["equivalent_id"]
+                    )
                 )
-            )
-            == 0
+            ).all()
         )
-        assert (
-            await verify.scalar(
-                select(func.count()).select_from(IntegrityAuditLog).where(
-                    IntegrityAuditLog.tx_id.in_(tx_ids),
-                    IntegrityAuditLog.operation_type == "PAYMENT",
-                )
-            )
-            == 4
-        )
-        limits = (
-            await verify.scalars(
-                select(TrustLine.limit).where(
-                    TrustLine.equivalent_id == seed["equivalent_id"]
-                )
-            )
-        ).all()
-        assert limits == [Decimal("50.00000000")] * 2
+
+    assert states == {tx_id: "COMMITTED" for tx_id in tx_ids}, states
+    assert sorted(audits) == sorted(
+        (tx_id, "PAYMENT", seed["equivalent_code"], True) for tx_id in tx_ids
+    ), audits
+    assert debts == {
+        (seed["participant_a_id"], seed["participant_b_id"], Decimal("2.00000000")),
+        (seed["participant_b_id"], seed["participant_c_id"], Decimal("3.00000000")),
+    }, debts
+    assert len(limits_before) == 2, limits_before
+    assert limits_after == limits_before
 
 
 @pytest.mark.asyncio

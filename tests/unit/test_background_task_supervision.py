@@ -8,7 +8,6 @@ from fastapi import FastAPI
 from httpx import AsyncClient
 
 import app.core.integrity as integrity_module
-import app.core.recovery as recovery_module
 import app.db.session as db_session_module
 import app.main as main_module
 from app.utils.background_jobs import background_jobs_degraded
@@ -35,14 +34,14 @@ async def test_task_factory_failure_marks_job_degraded(caplog) -> None:
     with caplog.at_level(logging.ERROR):
         task = main_module._start_supervised_background_task(
             app,
-            name="recovery",
+            name="integrity",
             coroutine_factory=broken_factory,
         )
 
     assert task is None
-    assert app.state.background_jobs["recovery"]["status"] == "failed"
+    assert app.state.background_jobs["integrity"]["status"] == "failed"
     assert background_jobs_degraded(app) is True
-    assert "background_job.start_failed name=recovery" in caplog.text
+    assert "background_job.start_failed name=integrity" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -60,14 +59,14 @@ async def test_task_creation_failure_marks_job_degraded(monkeypatch, caplog) -> 
     with caplog.at_level(logging.ERROR):
         task = main_module._start_supervised_background_task(
             app,
-            name="recovery",
+            name="integrity",
             coroutine_factory=worker,
         )
 
     assert task is None
-    assert app.state.background_jobs["recovery"]["status"] == "failed"
-    assert app.state.background_jobs["recovery"]["event"] == "start_failed"
-    assert "background_job.start_failed name=recovery" in caplog.text
+    assert app.state.background_jobs["integrity"]["status"] == "failed"
+    assert app.state.background_jobs["integrity"]["event"] == "start_failed"
+    assert "background_job.start_failed name=integrity" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -80,16 +79,16 @@ async def test_unexpected_task_exception_is_observable(caplog) -> None:
     with caplog.at_level(logging.ERROR):
         task = main_module._start_supervised_background_task(
             app,
-            name="recovery",
+            name="integrity",
             coroutine_factory=fail_unexpectedly,
         )
         assert task is not None
         await asyncio.gather(task, return_exceptions=True)
         await asyncio.sleep(0)
 
-    assert app.state.background_jobs["recovery"]["status"] == "failed"
-    assert app.state.background_jobs["recovery"]["event"] == "unexpected_exit"
-    assert "background_job.unexpected_exit name=recovery" in caplog.text
+    assert app.state.background_jobs["integrity"]["status"] == "failed"
+    assert app.state.background_jobs["integrity"]["event"] == "unexpected_exit"
+    assert "background_job.unexpected_exit name=integrity" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -103,7 +102,7 @@ async def test_shutdown_cancellation_is_not_reported_as_failure() -> None:
 
     task = main_module._start_supervised_background_task(
         app,
-        name="recovery",
+        name="integrity",
         coroutine_factory=wait_forever,
     )
     assert task is not None
@@ -114,7 +113,7 @@ async def test_shutdown_cancellation_is_not_reported_as_failure() -> None:
     await asyncio.gather(task, return_exceptions=True)
     await asyncio.sleep(0)
 
-    assert app.state.background_jobs["recovery"]["status"] == "stopped"
+    assert app.state.background_jobs["integrity"]["status"] == "stopped"
     assert background_jobs_degraded(app) is False
 
 
@@ -292,78 +291,9 @@ async def test_root_and_versioned_health_report_background_degradation(
     assert versioned_liveness.json() == {"status": "ok"}
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("iteration_results", "expected_statuses", "expected_events"),
-    [
-        ([False, True], ["failed", "running"], ["startup_error", "periodic_success"]),
-        ([True, False], ["running", "failed"], ["startup_success", "periodic_error"]),
-    ],
-)
-async def test_recovery_loop_reports_each_iteration_and_can_recover(
-    monkeypatch,
-    iteration_results,
-    expected_statuses,
-    expected_events,
-) -> None:
-    app = _test_app()
-    stop_event = app.state._bg_stop_event
-    run_once = AsyncMock(side_effect=iteration_results)
-    monkeypatch.setattr(recovery_module, "run_recovery_once", run_once)
-
-    class SessionContext:
-        async def __aenter__(self):
-            return object()
-
-        async def __aexit__(self, exc_type, exc, traceback) -> None:
-            return None
-
-    async def advance_to_periodic(waitable, timeout):
-        del timeout
-        waitable.close()
-        raise asyncio.TimeoutError
-
-    monkeypatch.setattr(recovery_module.asyncio, "wait_for", advance_to_periodic)
-
-    transitions: list[dict[str, str]] = []
-
-    def observe(reason: str, error: BaseException | None) -> None:
-        main_module._record_recovery_iteration(app, reason, error)
-        transitions.append(dict(app.state.background_jobs["recovery"]))
-        if len(transitions) == 2:
-            stop_event.set()
-
-    await recovery_module.recovery_loop(
-        session_factory=SessionContext,
-        stop_event=stop_event,
-        on_iteration=observe,
-    )
-
-    assert [transition["status"] for transition in transitions] == expected_statuses
-    assert [transition["event"] for transition in transitions] == expected_events
-    assert run_once.await_count == 2
-
-
-@pytest.mark.asyncio
-async def test_recovery_iteration_cancellation_is_not_reported_as_failure(
-    monkeypatch,
-) -> None:
-    class SessionContext:
-        async def __aenter__(self):
-            return object()
-
-        async def __aexit__(self, exc_type, exc, traceback) -> None:
-            return None
-
-    run_once = AsyncMock(side_effect=asyncio.CancelledError)
-    monkeypatch.setattr(recovery_module, "run_recovery_once", run_once)
-    observed: list[tuple[str, BaseException | None]] = []
-
-    with pytest.raises(asyncio.CancelledError):
-        await recovery_module._run_recovery_iteration(
-            session_factory=SessionContext,
-            reason="periodic",
-            on_iteration=lambda reason, error: observed.append((reason, error)),
-        )
-
-    assert observed == []
+# The payment recovery loop and `main._record_recovery_iteration` were removed by programme 019 stage 4
+# (no payment is persisted in an intermediate state any more; migration 030). Its two tests went with it
+# (manifest t1901, 5.2): per-iteration reporting and recovery are held generically by
+# `test_integrity_failure_degrades_and_later_success_recovers`, and cancellation-is-not-failure by
+# `test_shutdown_cancellation_is_not_reported_as_failure`. The supervisor tests above used the name
+# "recovery" only as a label; they now use "integrity", a job that exists.

@@ -207,7 +207,7 @@ def _payment_deadline(deadline: float | None, total_timeout_s: float):
 
 
 def _refusal_error_payload(reason: str | None, code: str | None, details: dict | None) -> dict:
-    """The stored `error` of a refused payment, normalized as `PaymentEngine.abort` normalizes it."""
+    """The stored `error` of a refused payment, normalized as the removed `PaymentEngine.abort` did."""
 
     try:
         normalized = ErrorCode(str(code)) if code is not None else ErrorCode.E010

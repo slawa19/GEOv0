@@ -135,7 +135,7 @@ async def writer_operation(
     """The operation a WRITER would have opened, for a test that drives the writer's internals.
 
     WHY IT IS NOT `debt_fixture_setup` (design v2 §8 R5/F7). A test that calls
-    `PaymentEngine._apply_flow` or `InjectExecutor.stage_inject_event` directly is exercising a
+    the book's payment flow or `InjectExecutor.stage_inject_event` directly is exercising a
     production writer, not setting up a fixture. Wrapping those calls in a `TEST_FIXTURE` context
     would journal a payment's effects under the kind reserved for scaffolding, and `C21`'s runtime
     half - the journal's refusal to nest operations - only catches application code that opens an
@@ -162,13 +162,15 @@ async def writer_operation(
                 type="PAYMENT" if kind == "PAYMENT" else "CLEARING",
                 initiator_id=initiator_id,
                 payload={},
-                state="NEW",
+                # A PAYMENT row is terminal since programme 019 stage 4 (migration 030's CHECK
+                # refuses any other state even uncommitted); a CLEARING row may still be NEW.
+                state="COMMITTED" if kind == "PAYMENT" else "NEW",
             )
         )
         await session.flush()
 
     # THE BOOK'S OPERATION (018 stage A). The writer internals these tests drive
-    # (`PaymentEngine._apply_flow`, `InjectExecutor.stage_inject_event`) apply their effects through
+    # (the book's payment flow, `InjectExecutor.stage_inject_event`) apply their effects through
     # `Book.current(session)`, so the operation they run under has to be a `Book` posting.
     equivalent_ids = set(equivalent_ids)
     async with Book.operation(

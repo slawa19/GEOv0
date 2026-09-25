@@ -200,8 +200,9 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
         # per-equivalent completion row, all inside it - and three seconds stopped covering it. The
         # commit and total budgets are widened alongside so that the next thing to go over is a real
         # result and not the next constant in the same line; they are read per call, while
-        # `PaymentEngine.__init__` reads its advisory-lock budget ONCE, which is why all of this
-        # sits above the services.
+        # `MoneyBoundary.__init__` reads its advisory-lock budget ONCE - and `PaymentService.__init__`
+        # builds its boundary (until 019 stage 4 it was `PaymentEngine.__init__`, a `MoneyBoundary`) -
+        # which is why all of this sits above the services.
         #
         # That the locked section is now longer is a real consequence and is recorded as one; what it
         # is NOT is the subject of this test, which is that neither writer loses the other's effects.
@@ -230,13 +231,13 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
             _hold_after_lock_scan,
         )
 
-        async def _observe_payment_owner(engine, equivalent_ids):
+        async def _observe_payment_owner(boundary, equivalent_ids):
             nonlocal payment_owner_pid
             payment_owner_pid = int(
-                await engine.session.scalar(text("SELECT pg_backend_pid()"))
+                await boundary.session.scalar(text("SELECT pg_backend_pid()"))
             )
             payment_owner_attempted.set()
-            return await original_payment_owner(engine, equivalent_ids)
+            return await original_payment_owner(boundary, equivalent_ids)
 
         monkeypatch.setattr(
             MoneyBoundary,

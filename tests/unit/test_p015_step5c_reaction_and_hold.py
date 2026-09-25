@@ -48,13 +48,13 @@ from app.core.ledger.reconciliation import (
     run_scheduled_reconciliation,
 )
 from app.core.money_boundary import MoneyBoundary
-from app.core.payments.engine import PaymentEngine
 from app.core.payments.service import PaymentService
 from app.db.models.audit_log import AuditLog
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.integrity_checkpoint import IntegrityCheckpoint
 from app.db.models.participant import Participant
+from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 from app.db.reconciliation_tables import debt_reconciliation_results
 from app.utils.exceptions import ConflictException, RetryablePaymentConflictException
@@ -68,7 +68,6 @@ from tests.tier_on_a_clone import tier_on_a_clone  # noqa: E402,F401 - opt-in fi
 from tests.debt_setup import debt_fixture_setup
 from tests.unit.test_p015_b4_wrong_writer_is_recorded_faithfully import (
     _edges,
-    _prepare_payment,
     _seed_triangle,
     _tx_state,
 )
@@ -633,17 +632,39 @@ async def test_step5c_inactive_and_held_is_refused_as_inactive(db_session) -> No
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("tier_on_a_clone")
 async def test_step5c_a_payment_prepared_before_the_hold_is_refused_at_commit_before_the_envelope(
-    db_session, committed_database
+    db_session, committed_database, monkeypatch
 ) -> None:
-    """The binding check, ANCHORED: prepared, then held by the real scheduled reaction, then committed.
+    """The binding check, ANCHORED: past the pre-check, then held by the real scheduled reaction, then
+    refused before its envelope.
 
-    The refusal reads the hold in the SAME statement as the operator stop (one `SELECT equivalents.code,
-    equivalents.is_active, equivalents.integrity_hold_result_id`), after the TTL read, and nothing of the
-    envelope or of `debts` is written before it.
+    The binding read takes the hold in the SAME statement as the operator stop (one `SELECT equivalents.code,
+    equivalents.is_active, equivalents.integrity_hold_result_id ... FOR SHARE`), and nothing of the envelope
+    or of `debts` is written before it.
 
-    MUTATIONS: (1) a separate hold check placed after `Book.operation` opens the envelope - an
-    `INSERT INTO debt_operations` precedes the refusal, red; (2) the hold read as its own statement
-    instead of in the stop statement - the anchor statement no longer carries the hold, red.
+    THE STAND ON THE STAGE-4 ORDER (019 `T1906`; manifest `T1901` 5.5, rows `:655-659`, `:664-670`,
+    `:671-673`, `:681`). Until stage 4 the payment was durably `PREPARED`, the reaction held the equivalent,
+    and a separate `PaymentEngine.commit` met the hold. No durable `PREPARED` exists any more (CHECK `030`):
+    the payment is one transaction. So the hold is committed INSIDE the payment - after the best-effort
+    pre-check passed with no hold, at the entry of the binding phase (`PaymentService._bind_payment`), where
+    the payment's row is inserted `COMMITTED` in its uncommitted operation and the payment holds no owner
+    lock yet (the real reaction takes that lock itself, so it could not run any later in this process).
+    The hold then lands behind the payment's SERIALIZABLE snapshot, and the binding `FOR SHARE` meets it as
+    a serialization failure (`40001`, asserted): nothing of the envelope or of `debts` was written. `pay()`
+    runs the request again on a fresh snapshot. MEASURED 2026-09-25: on this borrowed session the retry's
+    best-effort pre-check still passes (`_end_failed_attempt` keeps a borrowed session's objects loaded, so its
+    `SELECT equivalents` returns the instance loaded before the stop/hold, unrefreshed), so the
+    retry binds again and its binding read - the same one statement - refuses the hold; were the pre-check
+    to see the hold, the retry would refuse there with no second binding, and both forms are accepted
+    below, the first 40001 being required. The first attempt had ADMITTED the request, so the refusal is
+    recorded `ABORTED` with the hold's error (spec, `FORK-5`). The TTL anchor of the old stand
+    (`ttl < stop`) is dropped with the TTL branch; in its place each attempt's row insert precedes its
+    binding read.
+
+    MUTATIONS: (1) take the binding stop/hold read without `FOR SHARE` - the premise that the binding read
+    met the hold as a 40001 goes red (whether the attempt then commits over the hold is not measured here);
+    (2) read the hold as its own statement instead of in the stop statement - the anchor statement no longer
+    carries the hold, red. The old mutation "a separate hold check after `Book.operation`" has no observable
+    effect at SERIALIZABLE on this order: the stop row's `FOR SHARE` fails first either way.
     """
     from tests.conftest import TestingSessionLocal as factory
 
@@ -651,38 +672,103 @@ async def test_step5c_a_payment_prepared_before_the_hold_is_refused_at_commit_be
     triangle = await _seed_triangle(factory, trustlines=[("b", "a", "100")])
     statements: list[str] = []
 
+    seen: dict = {"bind_entries": 0, "binding_reads": [], "reacting": False}
+
     def _record(conn, cursor, statement, parameters, context, executemany) -> None:
-        statements.append(" ".join(str(statement).split()).upper())
+        # The stand's own corruption and reaction, run INSIDE the payment, are not the payment's.
+        if not seen["reacting"]:
+            statements.append(" ".join(str(statement).split()).upper())
 
     (debt,) = await _fixture_debts(factory, triangle, [("a", "b", "10")])
     await _baseline(factory, triangle.equivalent.id)
-    tx_id = await _prepare_payment(factory, triangle, ["a", "b"], Decimal("5"))
-    assert await _tx_state(factory, tx_id) == "PREPARED", "premise: the payment is not prepared"
-    await _set_debt(factory, debt, "10.00000001")
-    counts = await run_scheduled_reconciliation(factory, equivalent_ids=[triangle.equivalent.id])
-    assert counts[f"hold_{HOLD_SET}"] == 1, f"premise: the reaction did not hold: {counts}"
 
+    original_bind = PaymentService._bind_payment
+    original_refuse = MoneyBoundary.refuse_inactive_equivalents
+
+    async def _held_at_the_binding_phase(self, tx_id, *args, **kwargs):
+        seen["bind_entries"] += 1
+        if seen["bind_entries"] == 1:
+            seen["own_row"] = (
+                await self.session.execute(select(Transaction.state).where(Transaction.tx_id == tx_id))
+            ).scalar_one()
+            seen["reacting"] = True
+            try:
+                await _set_debt(factory, debt, "10.00000001")
+                seen["reaction"] = await run_scheduled_reconciliation(
+                    factory, equivalent_ids=[triangle.equivalent.id]
+                )
+            finally:
+                seen["reacting"] = False
+        return await original_bind(self, tx_id, *args, **kwargs)
+
+    async def _binding_read(self, equivalent_ids, *, row_lock):
+        try:
+            return await original_refuse(self, equivalent_ids, row_lock=row_lock)
+        except Exception as exc:
+            if row_lock:
+                seen["binding_reads"].append(_sqlstate(exc) or type(exc).__name__)
+            raise
+
+    monkeypatch.setattr(PaymentService, "_bind_payment", _held_at_the_binding_phase)
+    monkeypatch.setattr(MoneyBoundary, "refuse_inactive_equivalents", _binding_read)
+
+    tx_id = str(uuid.uuid4())
     event.listen(engine.sync_engine, "before_cursor_execute", _record)
     try:
         async with factory() as session:
             with pytest.raises(ConflictException) as refused:
-                await PaymentEngine(session).commit(tx_id)
+                await PaymentService(session).create_payment_internal(
+                    triangle.a.id, to_pid=triangle.b.pid, equivalent=triangle.equivalent.code,
+                    amount="5", idempotency_key=tx_id,
+                )
     finally:
         event.remove(engine.sync_engine, "before_cursor_execute", _record)
+
+    # PREMISES: the payment passed the pre-check and reached its binding phase with its row inserted
+    # (uncommitted); the REAL scheduled reaction set the hold there; the binding read met it as 40001;
+    # the retry, if it bound again, was refused by that same binding read (see the docstring).
+    assert seen.get("own_row") == "COMMITTED", seen
+    assert seen["reaction"][f"hold_{HOLD_SET}"] == 1, f"premise: the reaction did not hold: {seen}"
+    assert seen["binding_reads"][:1] == ["40001"], (
+        f"premise: the binding stop/hold read did not meet the hold as a serialization failure: {seen}"
+    )
+    assert seen["binding_reads"][1:] in ([], ["ConflictException"]) and (
+        len(seen["binding_reads"]) == seen["bind_entries"]
+    ), f"the retry was not refused by the hold before or at its binding read: {seen}"
 
     _assert_hold_refusal(refused.value, triangle.equivalent.code)
     stop = "SELECT EQUIVALENTS.CODE, EQUIVALENTS.IS_ACTIVE, EQUIVALENTS.INTEGRITY_HOLD_RESULT_ID"
     stops = [i for i, s in enumerate(statements) if s.startswith(stop)]
-    ttl = [i for i, s in enumerate(statements) if "PREPARE_LOCKS.EXPIRES_AT <=" in s]
-    assert len(stops) == 1 and len(ttl) == 1 and ttl[0] < stops[0], (stops, ttl, statements)
+    # Each attempt's own row: the `COMMITTED` insert of its operation (the `ABORTED` record comes last).
+    inserts = [
+        i for i, s in enumerate(statements) if s.startswith("INSERT INTO TRANSACTIONS") and ", ERROR)" not in s
+    ]
+    assert len(stops) == seen["bind_entries"] == len(inserts) and all(
+        insert < stop_at for insert, stop_at in zip(inserts, stops)
+    ), (stops, inserts, statements)
+    assert all("FOR SHARE" in statements[i] for i in stops), [statements[i] for i in stops]
     written = [
-        s for s in statements[: stops[0] + 1]
+        s for s in statements
         if s.startswith(("INSERT INTO DEBT_OPERATIONS", "INSERT INTO DEBTS", "UPDATE DEBTS", "DELETE FROM DEBTS"))
     ]
-    assert written == [], f"money or its envelope was written before the hold refused: {written}"
-    assert not [s for s in statements if s.startswith("INSERT INTO DEBT_OPERATIONS")]
+    assert written == [], f"money or its envelope was written by a payment the hold refused: {written}"
     assert await _tx_state(factory, tx_id) == "ABORTED"
     assert await _edges(factory, triangle) == {("a", "b"): Decimal("10.00000001")}
+
+
+def _sqlstate(exc: BaseException) -> str | None:
+    """The SQLSTATE anywhere in the exception chain (the service may re-raise a classified conflict)."""
+
+    seen_ids: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen_ids:
+        seen_ids.add(id(current))
+        orig = getattr(current, "orig", None)
+        code = getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)
+        if code:
+            return str(code)
+        current = current.__cause__ or current.__context__
+    return None
 
 
 async def _seed_cycle(factory, tag: str):

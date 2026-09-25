@@ -17,7 +17,7 @@ THE RULE, decided by the Codex plan review of 2026-09-13 against `docs/ru/02-pro
 * `closed`, or no live line at all - the permitted debt is zero.
 
 Freezing means the line offers no NEW routing capacity; that is routing's job
-(`app/core/payments/router.py`, `PaymentEngine._get_segment_capacity_and_reserved_usage`), not the
+(`app/core/payments/router.py`, `PaymentService._bind_payment`'s segment capacity), not the
 invariant's. The controls below keep the rule from sliding into its two wrong neighbours: excluding
 frozen lines from the check would hide the very breach §11.5.2 froze the line for, and counting a
 closed line at its stored limit would let history authorise debt.
@@ -26,7 +26,6 @@ closed line at its stored limit would let history authorise debt.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -34,15 +33,17 @@ from sqlalchemy import select
 
 from app.core.integrity import compute_integrity_checkpoint_for_equivalent
 from app.core.invariants import InvariantChecker
-from app.core.payments.engine import PaymentEngine
+import app.core.ledger.book as book_module
+from app.core.payments.router import PaymentRouter
+from app.core.payments.service import PaymentService
 from app.db.models.audit_log import IntegrityAuditLog
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
-from app.db.models.prepare_lock import PrepareLock
-from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
+from app.schemas.payment import PaymentCreateRequest
 from app.utils.exceptions import IntegrityViolationException
+from tests.conftest import MODE_B, sessionmaker_of
 from tests.debt_setup import debt_fixture_setup
 
 
@@ -132,72 +133,50 @@ async def test_a_frozen_line_within_its_limit_leaves_the_checkpoint_healthy(db_s
     assert cp.invariants_status["passed"] is True
 
 
-async def _prepared_payment(
+async def _pay_with_the_flow_perturbed(
     db_session,
+    monkeypatch,
     *,
-    eq: Equivalent,
-    sender: Participant,
-    receiver: Participant,
+    eq_code: str,
+    sender_id,
+    receiver_pid: str,
     amount: str,
-) -> str:
-    tx_id = "tx-" + uuid.uuid4().hex
-    db_session.add(
-        Transaction(
-            tx_id=tx_id,
-            type="PAYMENT",
-            initiator_id=sender.id,
-            payload={
-                "from": sender.pid,
-                "to": receiver.pid,
-                "amount": amount,
-                "equivalent": eq.code,
-                "path": [sender.pid, receiver.pid],
-            },
-            signatures=[],
-            state="PREPARED",
-        )
+) -> tuple[object, str, list]:
+    """A REAL payment on the direct path (`PaymentService.pay`, programme 019 stage 4).
+
+    Until stage 4 these tests committed a hand-seeded PREPARED payment through `PaymentEngine.commit`;
+    migration 030 refuses that seed and the engine is gone. The harness is kept: after the book applies
+    each flow the session's identity map is expired - what a stale-data re-run does - and the audit and
+    invariant path must survive it. The perturbation is evidence only if it ran (returned, asserted).
+    """
+
+    original = book_module._apply_payment_flow
+    perturbed: list = []
+
+    async def _apply_flow_and_expire(session, flow):
+        result = await original(session, flow)
+        session.expire_all()
+        perturbed.append(flow)
+        return result
+
+    monkeypatch.setattr(book_module, "_apply_payment_flow", _apply_flow_and_expire)
+    request = PaymentCreateRequest(
+        tx_id="tx-" + uuid.uuid4().hex,
+        to=receiver_pid,
+        equivalent=eq_code,
+        amount=amount,
+        signature="__internal__",
     )
-    # prepare_locks.tx_id references transactions.tx_id with no ORM relationship, so the flush
-    # does not order the two inserts; write the transaction first.
-    await db_session.flush()
-    db_session.add(
-        PrepareLock(
-            tx_id=tx_id,
-            participant_id=sender.id,
-            effects={
-                "flows": [
-                    {
-                        "from": str(sender.id),
-                        "to": str(receiver.id),
-                        "amount": amount,
-                        "equivalent": str(eq.id),
-                    }
-                ]
-            },
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+    try:
+        result = await PaymentService.pay(
+            sessionmaker_of(db_session), sender_id, request, require_signature=False
         )
-    )
-    await db_session.commit()
-    return tx_id
+    finally:
+        PaymentRouter.invalidate_cache(eq_code)
+    return result, request.tx_id, perturbed
 
 
-def _engine_that_survives_flow_retries(db_session, monkeypatch) -> PaymentEngine:
-    # Same harness as `test_payment_commit_writes_integrity_audit_log_on_success` in
-    # tests/unit/test_invariants.py: expiring the identity map after each flow is what a
-    # stale-data retry does, and the audit path must survive it.
-    engine = PaymentEngine(db_session)
-    original_apply_flow = engine._apply_flow
-    engine.perturbed_flows = []  # 018 stage A: proof the perturbation ran, asserted by the callers
-
-    async def _apply_flow_and_expire(*args, **kwargs):
-        await original_apply_flow(*args, **kwargs)
-        db_session.expire_all()
-        engine.perturbed_flows.append(args)
-
-    monkeypatch.setattr(engine, "_apply_flow", _apply_flow_and_expire)
-    return engine
-
-
+@MODE_B
 @pytest.mark.asyncio
 async def test_a_payment_beside_a_frozen_line_is_recorded_as_verified(db_session, monkeypatch):
     # A frozen line with debt inside its limit, in the SAME equivalent as the payment but on an
@@ -222,52 +201,71 @@ async def test_a_payment_beside_a_frozen_line_is_recorded_as_verified(db_session
         )
     )
     await db_session.commit()
-    tx_id = await _prepared_payment(db_session, eq=eq, sender=a, receiver=b, amount="1")
 
-    engine = _engine_that_survives_flow_retries(db_session, monkeypatch)
-    assert await engine.commit(tx_id) is True
-    assert len(engine.perturbed_flows) == 1, engine.perturbed_flows
+    result, tx_id, perturbed = await _pay_with_the_flow_perturbed(
+        db_session, monkeypatch, eq_code=eq.code, sender_id=a.id, receiver_pid=b.pid, amount="1"
+    )
+    assert result.status == "COMMITTED", result
+    assert len(perturbed) == 1, perturbed
 
-    log = (
-        await db_session.execute(
-            select(IntegrityAuditLog).where(
-                IntegrityAuditLog.operation_type == "PAYMENT",
-                IntegrityAuditLog.tx_id == tx_id,
+    async with sessionmaker_of(db_session)() as observer:
+        log = (
+            await observer.execute(
+                select(IntegrityAuditLog).where(
+                    IntegrityAuditLog.operation_type == "PAYMENT",
+                    IntegrityAuditLog.tx_id == tx_id,
+                )
             )
-        )
-    ).scalar_one()
+        ).scalar_one()
     assert log.verification_passed is True, log.error_details
     assert log.error_details is None
 
 
+@MODE_B
 @pytest.mark.asyncio
 async def test_a_partial_repayment_of_debt_on_a_frozen_line_commits(db_session, monkeypatch):
     # The creditor pays the debtor 10 against a debt of 42 on the frozen line the creditor
-    # extended: `_apply_flow` reduces the debt to 32. Before the fix the commit-time check read the
+    # extended: the flow reduces the debt to 32. Before the fix the commit-time check read the
     # remaining 32 against a limit of zero and ABORTED the payment - so a debt on a frozen line
     # could only be reduced by paying all of it in one payment.
     eq, creditor, debtor = await _line_with_debt(
         db_session, status="frozen", limit="100", debt="42"
     )
-    # Plain values: the harness expires the identity map during commit.
-    eq_id, creditor_id, debtor_id = eq.id, creditor.id, debtor.id
-    tx_id = await _prepared_payment(
-        db_session, eq=eq, sender=creditor, receiver=debtor, amount="10"
-    )
-
-    engine = _engine_that_survives_flow_retries(db_session, monkeypatch)
-    assert await engine.commit(tx_id) is True
-    assert len(engine.perturbed_flows) == 1, engine.perturbed_flows
-
-    remaining = (
-        await db_session.execute(
-            select(Debt.amount).where(
-                Debt.debtor_id == debtor_id,
-                Debt.creditor_id == creditor_id,
-                Debt.equivalent_id == eq_id,
-            )
+    # Plain values: the harness expires the identity map during the payment.
+    eq_id, eq_code, creditor_id, debtor_id, debtor_pid = eq.id, eq.code, creditor.id, debtor.id, debtor.pid
+    # A REAL payment needs a route: the frozen line offers no routing capacity (that is its point), so
+    # the debtor trusts the creditor on a small active line of its own. The segment creditor->debtor
+    # then has capacity 1 + the reverse debt 42; the payment of 10 only REDUCES the debt on the frozen
+    # line (the flow nets it first), and the commit-time check reads the remaining 32 against the frozen
+    # line's stored limit of 100. Measured 2026-09-25: without this line the router refuses (E002),
+    # which is routing's rule for a frozen line and not the defect this test pins.
+    db_session.add(
+        TrustLine(
+            from_participant_id=debtor_id,
+            to_participant_id=creditor_id,
+            equivalent_id=eq_id,
+            limit=Decimal("1"),
+            status="active",
         )
-    ).scalar_one()
+    )
+    await db_session.commit()
+
+    result, _tx_id, perturbed = await _pay_with_the_flow_perturbed(
+        db_session, monkeypatch, eq_code=eq_code, sender_id=creditor_id, receiver_pid=debtor_pid, amount="10"
+    )
+    assert result.status == "COMMITTED", result
+    assert len(perturbed) == 1, perturbed
+
+    async with sessionmaker_of(db_session)() as observer:
+        remaining = (
+            await observer.execute(
+                select(Debt.amount).where(
+                    Debt.debtor_id == debtor_id,
+                    Debt.creditor_id == creditor_id,
+                    Debt.equivalent_id == eq_id,
+                )
+            )
+        ).scalar_one()
     assert Decimal(str(remaining)) == Decimal("32")
 
 

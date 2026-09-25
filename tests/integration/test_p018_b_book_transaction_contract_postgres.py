@@ -514,8 +514,9 @@ async def test_an_out_of_scope_effect_is_refused_before_it_writes_and_a_raw_one_
     async with _session(engine) as session:
         tx_ids = [f"SCOPE-{uuid.uuid4()}" for _ in range(2)]
         session.add_all(
+            # The envelopes' tx_id anchors; terminal since migration 030 (019 stage 4).
             Transaction(tx_id=tx_id, type="PAYMENT", initiator_id=world.p(0), payload={},
-                        state="NEW")
+                        state="COMMITTED")
             for tx_id in tx_ids
         )
         await session.commit()

@@ -3,9 +3,12 @@
 WHAT IS UNDER TEST. Two money paths apply their effects inside a SAVEPOINT and rely on the root
 transaction's rollback to undo them when something fails afterwards:
 
-* `PaymentEngine.commit` applies each flow inside `_apply_flow`'s `begin_nested()`. When an invariant
-  check after the flows fails, the engine rolls back and aborts: an ABORTED payment must leave every
-  debt exactly as it was.
+* A payment (`PaymentService`, direct execution since 019 stage 4) applies its flows through the book
+  inside its operation savepoint, and checks `check_payment_delta` after them. When that check fails,
+  the operation is rolled back and the admitted payment is recorded ABORTED: an ABORTED payment must
+  leave every debt exactly as it was. (Until 019 stage 4 the same property was also run against
+  `PaymentEngine.commit` on a fresh session over a durable `PREPARED` payment; that path is gone - see
+  the note where its test stood.)
 * The simulator tick's payments phase executes each staged payment inside `RealPaymentsExecutor`'s
   per-action `begin_nested()`. When the tick rolls back, no staged payment may remain in the database.
 
@@ -47,7 +50,6 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.money_boundary import MoneyBoundary
-from app.core.payments.engine import PaymentEngine
 from app.core.payments.router import PaymentRouter
 from app.core.payments.service import PaymentService
 from app.core.simulator.commit_resolution import resolve_rollback_under_cancellation
@@ -154,11 +156,11 @@ async def _stored_transactions(factory, world: _World) -> dict[str, str]:
 
 
 def _patch_delta_check_to_report_drift(monkeypatch, world: _World) -> list[Decimal | None]:
-    """Make the engine's own delta barrier fail, and record what the flows had written by then.
+    """Make the payment's own delta barrier fail, and record what the flows had written by then.
 
-    A real drift cannot be produced without a real bug, so the barrier is replaced - but with the
-    engine's own exception and its own details shape, raised from the engine's own call site, which
-    runs after every `_apply_flow` of the payment. The replacement first reads, in the committing
+    A real drift cannot be produced without a real bug, so the barrier is replaced - but with its own
+    exception and its own details shape, raised from its own call site (`MoneyBoundary.check_payment_delta`
+    in `PaymentService._apply_payment`), which runs after every flow of the payment. The replacement first reads, in the committing
     session, the debt the flow should have written: that is the stand's proof that the violation
     comes AFTER the money moved, not before.
     """
@@ -188,7 +190,7 @@ def _patch_delta_check_to_report_drift(monkeypatch, world: _World) -> list[Decim
 
 
 # --------------------------------------------------------------------------------------------
-# (b) PaymentEngine.commit with an invariant violation after the flows.
+# (b) A payment with an invariant violation after the flows.
 # --------------------------------------------------------------------------------------------
 
 
@@ -218,55 +220,6 @@ async def _scenario_service_payment_violates_after_flows(factory, world, monkeyp
                 amount=str(_PAYMENT),
                 idempotency_key=tx_id,
             )
-        except IntegrityViolationException as exc:
-            raised = exc
-    return await _commit_outcome(factory, world, raised, observed, debts_before, tx_id)
-
-
-async def _scenario_engine_commit_violates_after_flows(factory, world, monkeypatch) -> _CommitOutcome:
-    """`PaymentEngine.commit` called on a fresh session for a payment the engine itself prepared.
-
-    The NEW transaction row is built exactly as `PaymentService._create_payment_impl` builds it
-    (step 3) and `PaymentEngine.prepare` writes the locks and the PREPARED state, so the commit sees
-    state the application produces. The commit runs on its own session, as a separate request does.
-    """
-    debts_before = await _stored_debts(factory, world)
-    tx_id = f"t1525-eng-{uuid.uuid4().hex[:12]}"
-    world.tx_ids.add(tx_id)
-    async with factory() as s:
-        s.add(
-            Transaction(
-                id=uuid.uuid4(),
-                tx_id=tx_id,
-                idempotency_key=None,
-                type="PAYMENT",
-                initiator_id=world.sender.id,
-                payload={
-                    "from": world.sender.pid,
-                    "to": world.receiver.pid,
-                    "amount": str(_PAYMENT),
-                    "equivalent": world.equivalent.code,
-                    "routes": [
-                        {"path": [world.sender.pid, world.receiver.pid], "amount": str(_PAYMENT)}
-                    ],
-                    "idempotency": {"key": tx_id, "fingerprint": "t1525"},
-                },
-                state="NEW",
-            )
-        )
-        await s.commit()
-        await PaymentEngine(s).prepare(
-            tx_id, [world.sender.pid, world.receiver.pid], _PAYMENT, world.equivalent.id
-        )
-    async with factory() as s:
-        prepared = await s.scalar(select(Transaction.state).where(Transaction.tx_id == tx_id))
-        assert prepared == "PREPARED", f"stand: the engine did not prepare the payment ({prepared})"
-
-    observed = _patch_delta_check_to_report_drift(monkeypatch, world)
-    raised: BaseException | None = None
-    async with factory() as s:
-        try:
-            await PaymentEngine(s).commit(tx_id)
         except IntegrityViolationException as exc:
             raised = exc
     return await _commit_outcome(factory, world, raised, observed, debts_before, tx_id)
@@ -592,18 +545,13 @@ async def serializable_factory(committed_database):
         await eng.dispose()
 
 
-@pytest.mark.asyncio
-async def test_postgres_an_aborted_payment_commit_leaves_debts_unchanged(
-    serializable_factory, monkeypatch
-) -> None:
-    world = await _seed_world(serializable_factory)
-    try:
-        outcome = await _scenario_engine_commit_violates_after_flows(
-            serializable_factory, world, monkeypatch
-        )
-        _assert_aborted_payment_left_no_debt(outcome, world)
-    finally:
-        _forget_the_route_cache(world)
+# `test_postgres_an_aborted_payment_commit_leaves_debts_unchanged` is DROPPED by 019 stage 4 (manifest
+# `t1901-manifest.md` 5.4, row :259): it prepared a payment to a durable `PREPARED` with
+# `PaymentEngine.prepare` and committed it with `PaymentEngine.commit` on a fresh session - a path that no
+# longer exists (no engine, no intermediate state; CHECK `030` refuses the `NEW` row it seeded). Its
+# assertion - an integrity violation raised after the flow wrote the debt leaves the payment ABORTED and
+# every debt unchanged (`_assert_aborted_payment_left_no_debt`, T1525) - SURVIVES unchanged, through the
+# same helper, in `test_postgres_an_aborted_service_payment_leaves_debts_unchanged` below.
 
 
 @pytest.mark.asyncio

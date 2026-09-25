@@ -38,7 +38,7 @@ from sqlalchemy.pool import NullPool
 
 import tests.unit.test_p015_step5b_criterion_b as unit
 from app.core.clearing.service import ClearingService
-from app.core.payments.engine import PaymentEngine
+from app.core.payments import service as payment_service
 from app.db.base import Base
 from app.db.models.debt import Debt
 from tests.debt_setup import debt_fixture_setup
@@ -191,10 +191,17 @@ async def test_step5b_p_both_construction_paths_widen_only_the_intent_version_an
 async def test_step5b_p_the_prestate_read_follows_every_advisory_lock_and_the_for_share(
     factory, committed_database
 ) -> None:
-    """On PostgreSQL the anchors are real locks: every `pg_advisory_xact_lock` of the commit, then the
+    """On PostgreSQL the anchors are real locks: every `pg_advisory_xact_lock` of the payment, then the
     operator-stop `FOR SHARE`, then EXACTLY ONE statement - the batched read of `debts` - then the envelope.
 
-    MUTATION: move `_read_payment_prestate` above `_acquire_segment_advisory_lock_keys` - it now precedes
+    019 stage 4 (`T1906`): the recorder covers the WHOLE payment through `PaymentService` (until then
+    `PaymentEngine.commit` of a durable `PREPARED` payment, which CHECK `030` no longer admits). In the
+    direct execution the binding phase (owner, tx and pair locks, capacity) precedes the money phase, so
+    the window between the stop and the envelope holds the same statements it held under the engine: the
+    pre-state read and the book's opening. The stop pre-check before routing loads the whole `equivalents`
+    row, not the anchor statement, so the anchor is still seen once.
+
+    MUTATION: move `_read_payment_prestate` into the binding phase, before the pair locks - it now precedes
     an advisory lock and nothing sits between the stop and the envelope, red.
     """
     engine = committed_database.engine
@@ -204,11 +211,9 @@ async def test_step5b_p_the_prestate_read_follows_every_advisory_lock_and_the_fo
     def _record(conn, cursor, statement, parameters, context, executemany) -> None:
         statements.append(" ".join(str(statement).split()).upper())
 
-    tx_id = await _prepare_payment(factory, triangle, ["a", "b", "c"], Decimal("5"))
     event.listen(engine.sync_engine, "before_cursor_execute", _record)
     try:
-        async with factory() as session:
-            await PaymentEngine(session).commit(tx_id)
+        tx_id = await _prepare_payment(factory, triangle, ["a", "b", "c"], Decimal("5"))
     finally:
         event.remove(engine.sync_engine, "before_cursor_execute", _record)
     assert await _tx_state(factory, tx_id) == "COMMITTED"
@@ -238,30 +243,34 @@ async def test_step5b_p_the_prestate_read_follows_every_advisory_lock_and_the_fo
 
 
 async def _race_a_writer_into_the_prestate_window(factory, monkeypatch, payment_sessions) -> dict:
-    """Pause a payment commit right after its pre-state read; move a reverse debt 3 -> 4 from a TEST_FIXTURE
-    operation (no owner lock) and commit it; resume. Returns what the commit recorded and did."""
+    """Pause a payment right after its pre-state read; move a reverse debt 3 -> 4 from a TEST_FIXTURE
+    operation (no owner lock) and commit it; resume. Returns what the payment recorded and did.
+
+    019 stage 4 (`T1906`): the seam is the service's `_read_payment_prestate` (the engine's until then),
+    called by its module-global name from `PaymentService._apply_payment`, once per attempt; the whole
+    payment runs on `payment_sessions`, and its retry owner is `pay()` - a new attempt on a fresh snapshot.
+    """
 
     triangle = await _seed_triangle(factory, trustlines=[("b", "a", "100"), ("a", "b", "100")])
     (reverse,) = await _fixture_debts(factory, triangle, [("b", "a", "3")])
-    tx_id = await _prepare_payment(factory, triangle, ["a", "b"], Decimal("5"))
 
     paused, resume = asyncio.Event(), asyncio.Event()
     reads: list[list[dict]] = []
-    original = PaymentEngine._read_payment_prestate
+    original = payment_service._read_payment_prestate
 
-    async def _read(self, validated_locks):
-        result = await original(self, validated_locks)
+    async def _read(session, declared_flows):
+        result = await original(session, declared_flows)
         reads.append(result)
         if len(reads) == 1:
             paused.set()
             await asyncio.wait_for(resume.wait(), timeout=60)
         return result
 
-    monkeypatch.setattr(PaymentEngine, "_read_payment_prestate", _read)
+    monkeypatch.setattr(payment_service, "_read_payment_prestate", _read)
+    paid: list[str] = []
 
     async def _commit() -> None:
-        async with payment_sessions() as session:
-            await PaymentEngine(session).commit(tx_id)
+        paid.append(await _prepare_payment(payment_sessions, triangle, ["a", "b"], Decimal("5")))
 
     task = asyncio.create_task(_commit())
     error: BaseException | None = None
@@ -289,7 +298,7 @@ async def _race_a_writer_into_the_prestate_window(factory, monkeypatch, payment_
     return {
         "triangle": triangle,
         "error": error,
-        "tx_state": await _tx_state(factory, tx_id),
+        "tx_state": await _tx_state(factory, paid[0]) if paid else None,
         "reads": [_recorded(read) for read in reads],
         "edges": await _edges(factory, triangle),
         "outcome": await _verify(factory, triangle.equivalent.id),
@@ -301,8 +310,9 @@ async def test_step5b_p_at_serializable_a_writer_outside_the_owner_lock_cannot_m
     factory, committed_database, monkeypatch
 ) -> None:
     """The application's isolation. The payment read B -> A = 3 and paused; a fixture moved it to 4 and
-    committed. MEASURED: the commit's own update of that row fails with 40001, the unit of work retries,
-    the pre-state is READ AGAIN (4), and what is recorded is what is applied: no criterion (b) finding.
+    committed. MEASURED: the payment's own update of that row fails with 40001, the retry owner (`pay()`
+    since 019 stage 3, the engine's unit of work before) runs a new attempt, the pre-state is READ AGAIN (4),
+    and what is recorded is what is applied: no criterion (b) finding.
 
     MUTATION: read the pre-state once, outside the retried unit of work (cache it across attempts) - the
     retry applies to 4 what the record says was 3, criterion (b) FAILS, red.
@@ -377,22 +387,25 @@ async def test_step5b_p_an_application_writer_waits_on_the_owner_lock_through_th
     )
     try:
         debts = await _fixture_debts(factory, triangle, [("a", "b", "10"), ("b", "c", "10"), ("c", "a", "10")])
-        tx_id = await _prepare_payment(factory, triangle, ["b", "a"], Decimal("3"))
 
         paused, resume = asyncio.Event(), asyncio.Event()
-        original = PaymentEngine._read_payment_prestate
+        original = payment_service._read_payment_prestate
+        reads: list[int] = []
 
-        async def _read(self, validated_locks):
-            result = await original(self, validated_locks)
+        # 019 stage 4: the service's pre-state read (the engine's until then) is the pause point; the
+        # whole payment runs in the task.
+        async def _read(session, declared_flows):
+            result = await original(session, declared_flows)
+            reads.append(1)
             paused.set()
             await asyncio.wait_for(resume.wait(), timeout=60)
             return result
 
-        monkeypatch.setattr(PaymentEngine, "_read_payment_prestate", _read)
+        monkeypatch.setattr(payment_service, "_read_payment_prestate", _read)
+        paid: list[str] = []
 
         async def _commit() -> None:
-            async with factory() as session:
-                await PaymentEngine(session).commit(tx_id)
+            paid.append(await _prepare_payment(factory, triangle, ["b", "a"], Decimal("3")))
 
         async def _clear():
             async with factory() as session:
@@ -413,7 +426,8 @@ async def test_step5b_p_an_application_writer_waits_on_the_owner_lock_through_th
         cleared = await asyncio.wait_for(clearing, timeout=60)
         monkeypatch.undo()
 
-        assert await _tx_state(factory, tx_id) == "COMMITTED"
+        assert reads == [1], f"premise: the payment did not pause exactly once at its pre-state read: {reads}"
+        assert await _tx_state(factory, paid[0]) == "COMMITTED"
         assert cleared == Decimal("7"), f"the clearing did not run on the state the payment left: {cleared!r}"
         assert await _edges(factory, triangle) == {
             ("b", "c"): Decimal("3.00000000"),
@@ -488,6 +502,10 @@ async def test_step5b_p_an_unwidened_version_check_refuses_the_payment_and_the_s
     does not retry it (not a serialization class); the service's commit handler treats it as an internal
     error, not a 4xx rejection - rolls back, finds the transaction still PREPARED, ABORTS it and raises a
     5xx `GeoException` caused by the 23514. No debt moved, the prepare locks are released, no envelope.
+    (Since 019 stage 4 there is no `PREPARED` and no engine: the refusal rolls the payment operation back
+    and `pay()` records the admitted request `ABORTED`. The `_prepare_locks == 0` read below is a
+    SYNTHETIC COMPATIBILITY check until stage 5 removes the table - the payment path writes no reservation,
+    so it can only be zero.)
     (The simulator's real payments phase calls the same service with `commit=False` and records a
     non-4xx failure as `INTERNAL_ERROR`, not `REJECTED` - read in `real_payments_executor.py`, not run here.)
     """

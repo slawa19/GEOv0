@@ -1,10 +1,21 @@
+"""Admin abort as the COMPATIBILITY SURFACE of programme 019 stage 4 (owner decision Q2).
+
+There is no active payment work to abort since stage 4: a payment is one transaction inserted
+`COMMITTED`/`ABORTED`, and migration 030 refuses any other `PAYMENT` state. The endpoint stays, without
+the payment engine and without any money effect: unknown `tx_id` - 404; `COMMITTED` - 409; `ABORTED` -
+the former idempotent answer `aborted`, an audit row, the metric `abort/already_aborted`, and the stored
+error kept as it is (the payer's replay of a stored refusal, T1523 cell 2, is not rewritten by an
+operator); any other state - only a non-`PAYMENT` type can hold one - 409 and nothing changes.
+
+Removed with the live-payment abort (manifest t1901, 5.2, rows of this file): aborting a `WAITING`
+payment, the tx-advisory-lock race between two aborts, and the bounded wait on the engine's owner locks
+- none has a subject once no payment can be live.
+"""
+
 from __future__ import annotations
 
-import asyncio
-from datetime import datetime, timedelta, timezone
-
 import pytest
-from sqlalchemy import event, update
+from sqlalchemy import event
 
 from app.config import settings
 from app.db.models.audit_log import AuditLog
@@ -30,58 +41,53 @@ async def test_admin_abort_tx_404(client, db_session):
     assert r.status_code == 404
 
 
-@pytest.mark.asyncio
-async def test_admin_abort_tx_aborts_and_audits(client, db_session):
-    alice = Participant(pid='alice', display_name='Alice', public_key='A' * 64, type='person', status='active')
-    db_session.add(alice)
-    await db_session.flush()
-
-    now = datetime.now(timezone.utc)
-    tx = Transaction(
-        tx_id='TX_ABORT_ME',
-        type='PAYMENT',
-        initiator_id=alice.id,
-        payload={'from': 'alice', 'to': 'bob', 'amount': '1.00', 'equivalent': 'UAH', 'routes': []},
-        state='WAITING',
-        created_at=now - timedelta(minutes=10),
-        updated_at=now - timedelta(minutes=10),
-    )
-    db_session.add(tx)
-    await db_session.commit()
-
-    headers = {'X-Admin-Token': settings.ADMIN_TOKEN}
-    success_before = _abort_metric_value('success')
-    already_aborted_before = _abort_metric_value('already_aborted')
-
-    reason = 'manual abort in test'
-    r = await client.post(
-        '/api/v1/admin/transactions/TX_ABORT_ME/abort',
-        headers=headers,
-        json={'reason': reason},
-    )
-    assert r.status_code == 200
-    payload = r.json()
-    assert payload == {'tx_id': 'TX_ABORT_ME', 'status': 'aborted'}
-    assert _abort_metric_value('success') - success_before == 1
-    assert _abort_metric_value('already_aborted') == already_aborted_before
-
-    # Transaction is aborted
-    await db_session.refresh(tx)
-    assert tx.state == 'ABORTED'
-    assert isinstance(tx.error, dict)
-    assert tx.error.get('message') == reason
-
-    # Audit entry exists
-    row = (
+async def _audit_rows(db_session, tx_id: str):
+    return (
         await db_session.execute(
             AuditLog.__table__.select().where(
                 AuditLog.action == 'admin.transactions.abort',
                 AuditLog.object_type == 'transaction',
-                AuditLog.object_id == 'TX_ABORT_ME',
+                AuditLog.object_id == tx_id,
             )
         )
-    ).first()
-    assert row is not None
+    ).all()
+
+
+@pytest.mark.asyncio
+async def test_admin_abort_tx_refuses_a_non_terminal_transaction_of_another_type(client, db_session):
+    """No type filter used to exist: a non-terminal CLEARING was aborted through the payment engine.
+
+    After stage 4 the endpoint never terminalises another writer's transaction: 409, row unchanged, no
+    audit, no metric. (A non-terminal PAYMENT cannot be seeded at all - migration 030.)
+    """
+
+    alice = Participant(pid='abort-clearing-alice', display_name='Alice', public_key='W' * 64, type='person', status='active')
+    db_session.add(alice)
+    await db_session.flush()
+    tx = Transaction(
+        tx_id='TX_CLEARING_NEW',
+        type='CLEARING',
+        initiator_id=alice.id,
+        payload={'cycle': [], 'amount': '1.00', 'equivalent': 'UAH', 'edges': []},
+        state='NEW',
+    )
+    db_session.add(tx)
+    await db_session.commit()
+    success_before = _abort_metric_value('success')
+    already_aborted_before = _abort_metric_value('already_aborted')
+
+    response = await client.post(
+        '/api/v1/admin/transactions/TX_CLEARING_NEW/abort',
+        headers={'X-Admin-Token': settings.ADMIN_TOKEN},
+        json={'reason': 'not a payment'},
+    )
+
+    assert response.status_code == 409
+    await db_session.refresh(tx)
+    assert (tx.state, tx.error) == ('NEW', None)
+    assert _abort_metric_value('success') == success_before
+    assert _abort_metric_value('already_aborted') == already_aborted_before
+    assert await _audit_rows(db_session, 'TX_CLEARING_NEW') == []
 
 
 @pytest.mark.asyncio
@@ -117,127 +123,50 @@ async def test_admin_abort_tx_repeats_aborted_transaction_idempotently(
     assert _abort_metric_value('already_aborted') - already_aborted_before == 1
     await db_session.refresh(tx)
     assert tx.state == 'ABORTED'
-    assert tx.error == {
-        'code': 'E010',
-        'message': 'repeat abort',
-        'details': {},
-    }
-
-
-@pytest.mark.asyncio
-async def test_admin_abort_tx_uses_lock_protected_already_aborted_metric(
-    client,
-    db_session,
-    monkeypatch,
-):
-    alice = Participant(pid='abort-race-alice', display_name='Alice', public_key='R' * 64, type='person', status='active')
-    db_session.add(alice)
-    await db_session.flush()
-
-    tx = Transaction(
-        tx_id='TX_ABORT_RACE',
-        type='PAYMENT',
-        initiator_id=alice.id,
-        payload={'from': 'alice', 'to': 'bob', 'amount': '1.00', 'equivalent': 'UAH', 'routes': []},
-        state='WAITING',
-    )
-    db_session.add(tx)
-    await db_session.commit()
-
-    pre_lock_states = []
-
-    async def _concurrent_abort_wins(engine, tx_id):
-        pre_lock_states.append(tx.state)
-        await engine.session.execute(
-            update(Transaction)
-            .where(Transaction.tx_id == tx_id)
-            .values(state='ABORTED')
-        )
-        await engine.session.flush()
-
-    monkeypatch.setattr(
-        'app.core.money_boundary.MoneyBoundary._acquire_tx_advisory_lock',
-        _concurrent_abort_wins,
-    )
-    success_before = _abort_metric_value('success')
-    already_aborted_before = _abort_metric_value('already_aborted')
-
-    response = await client.post(
-        '/api/v1/admin/transactions/TX_ABORT_RACE/abort',
-        headers={'X-Admin-Token': settings.ADMIN_TOKEN},
-        json={'reason': 'race loser observes abort'},
-    )
-
-    assert pre_lock_states == ['WAITING']
-    assert response.status_code == 200
-    assert response.json() == {'tx_id': 'TX_ABORT_RACE', 'status': 'aborted'}
-    assert _abort_metric_value('success') == success_before
-    assert _abort_metric_value('already_aborted') - already_aborted_before == 1
-    await db_session.refresh(tx)
-    assert tx.state == 'ABORTED'
-
-
-@pytest.mark.asyncio
-async def test_admin_abort_tx_bounds_staged_owner_wait_and_rolls_back(
-    client,
-    db_session,
-    monkeypatch,
-):
-    alice = Participant(
-        pid='abort-timeout-alice',
-        display_name='Alice',
-        public_key='T' * 64,
-        type='person',
-        status='active',
-    )
-    db_session.add(alice)
-    await db_session.flush()
-    tx = Transaction(
-        tx_id='TX_ABORT_OWNER_TIMEOUT',
-        type='PAYMENT',
-        initiator_id=alice.id,
-        payload={'from': 'alice', 'to': 'bob', 'amount': '1.00', 'equivalent': 'UAH', 'routes': []},
-        state='WAITING',
-    )
-    db_session.add(tx)
-    await db_session.commit()
-
-    abort_cancelled = asyncio.Event()
-
-    async def _block_abort(*_args, **_kwargs):
-        try:
-            await asyncio.Event().wait()
-        finally:
-            abort_cancelled.set()
-
-    monkeypatch.setattr(
-        'app.api.v1.admin.PaymentEngine.abort',
-        _block_abort,
-    )
-    monkeypatch.setattr(settings, 'PAYMENT_TOTAL_TIMEOUT_SECONDS', 0.02)
-    monkeypatch.setattr(settings, 'COMMIT_TIMEOUT_SECONDS', 0.01)
-
-    response = await client.post(
-        '/api/v1/admin/transactions/TX_ABORT_OWNER_TIMEOUT/abort',
-        headers={'X-Admin-Token': settings.ADMIN_TOKEN},
-        json={'reason': 'bounded owner wait'},
-    )
-
-    assert response.status_code == 504
-    assert response.json()['error']['code'] == 'E007'
-    assert abort_cancelled.is_set()
-    await db_session.refresh(tx)
-    assert tx.state == 'WAITING'
+    # Since stage 4 the compatibility answer writes nothing to the row: the engine used to fill a
+    # missing error with `{E010, <operator reason>}`; now the row stays as it was.
     assert tx.error is None
-    row = (
-        await db_session.execute(
-            AuditLog.__table__.select().where(
-                AuditLog.action == 'admin.transactions.abort',
-                AuditLog.object_id == 'TX_ABORT_OWNER_TIMEOUT',
-            )
-        )
-    ).first()
-    assert row is None
+    rows = await _audit_rows(db_session, 'TX_ALREADY_ABORTED')
+    assert len(rows) == 1, rows
+    assert rows[0].reason == 'repeat abort'
+    assert rows[0].before_state == rows[0].after_state == {'state': 'ABORTED', 'error': None}
+
+
+@pytest.mark.asyncio
+async def test_admin_abort_tx_keeps_the_stored_refusal_of_an_aborted_payment(client, db_session):
+    """The payer's stored refusal (here the terminal timeout) survives an operator's abort byte for byte.
+
+    A replay of the same `tx_id` answers the stored `ABORTED` with its error (T1523 cell 2,
+    `test_p015_t1523_replay_after_a_hold_or_an_abort.py`); an operator's click must not rewrite it.
+    """
+
+    alice = Participant(pid='abort-stored-alice', display_name='Alice', public_key='S' * 64, type='person', status='active')
+    db_session.add(alice)
+    await db_session.flush()
+    stored_error = {'code': 'E007', 'message': 'Payment timeout', 'details': {'phase': 'commit'}}
+    tx = Transaction(
+        tx_id='TX_STORED_REFUSAL',
+        type='PAYMENT',
+        initiator_id=alice.id,
+        payload={'from': 'alice', 'to': 'bob', 'amount': '1.00', 'equivalent': 'UAH', 'routes': []},
+        state='ABORTED',
+        error=stored_error,
+    )
+    db_session.add(tx)
+    await db_session.commit()
+
+    response = await client.post(
+        '/api/v1/admin/transactions/TX_STORED_REFUSAL/abort',
+        headers={'X-Admin-Token': settings.ADMIN_TOKEN},
+        json={'reason': 'operator abort after the fact'},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {'tx_id': 'TX_STORED_REFUSAL', 'status': 'aborted'}
+    await db_session.refresh(tx)
+    assert (tx.state, tx.error) == ('ABORTED', stored_error)
+    rows = await _audit_rows(db_session, 'TX_STORED_REFUSAL')
+    assert len(rows) == 1 and rows[0].after_state == {'state': 'ABORTED', 'error': stored_error}, rows
 
 
 @pytest.mark.asyncio
@@ -293,7 +222,7 @@ async def test_admin_abort_tx_rolls_back_when_audit_flush_fails(
         type='PAYMENT',
         initiator_id=alice.id,
         payload={'from': 'alice', 'to': 'bob', 'amount': '1.00', 'equivalent': 'UAH', 'routes': []},
-        state='WAITING',
+        state='ABORTED',
     )
     db_session.add(tx)
     await db_session.commit()
@@ -314,7 +243,7 @@ async def test_admin_abort_tx_rolls_back_when_audit_flush_fails(
         event.remove(db_session.sync_session, 'before_flush', fail_when_audit_is_flushed)
 
     await db_session.refresh(tx)
-    assert tx.state == 'WAITING'
+    assert tx.state == 'ABORTED'
     assert tx.error is None
     row = (
         await db_session.execute(
@@ -331,7 +260,7 @@ async def test_admin_abort_tx_rolls_back_when_audit_flush_fails(
 @pytest.mark.parametrize(
     ('initial_state', 'tx_id'),
     [
-        ('WAITING', 'TX_ABORT_COMMIT_FAILURE'),
+        # The WAITING case left with the live-payment abort (migration 030 refuses the seed).
         ('ABORTED', 'TX_ABORTED_COMMIT_FAILURE'),
     ],
 )

@@ -19,9 +19,10 @@ one space. Parameters are never recorded - they carry fresh UUIDs and codes per 
 
 THE OPERATIONS, one each, each on its own freshly seeded world in one mode-B clone:
 
-* `payment_api` - `PaymentService.create_payment_internal`: idempotency, prepare and commit through the
-  engine (owner, transaction and pair locks, the commit-time `FOR SHARE`, the delta check);
-* `payment_commit` - `PaymentEngine.commit` of an already prepared payment (the 018 `T1809` operation);
+* `payment_api` - `PaymentService.create_payment_internal`: idempotency, then (since 019 stage 4) the
+  direct execution - owner, transaction and pair locks, the money phase's `FOR SHARE`, the delta check;
+* (`payment_commit` - `PaymentEngine.commit` of an already prepared payment - was an operation here until
+  019 stage 4 deleted the engine; a prepared payment no longer exists, so the operation has no subject);
 * `clearing` - `ClearingService.execute_clearing_with_amount` on an engine-bound session: the pinned
   connection's session-level owner lock, its release, and the plain stop/hold read;
 * `inject_event` - the mixed inject event of 018 (`_apply_due_scenario_events`): staged owner locks and
@@ -57,7 +58,6 @@ from app.api.deps import get_db
 from app.config import settings
 from app.core.clearing.service import ClearingService
 from app.core.ledger.reconciliation import HOLD_SET, PASSED, run_scheduled_reconciliation, take_baseline
-from app.core.payments.engine import PaymentEngine
 from app.core.payments.service import PaymentService
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
@@ -65,7 +65,6 @@ from app.db.reconciliation_tables import debt_reconciliation_results
 from app.main import app
 from tests.debt_setup import debt_fixture_setup
 from tests.integration.test_p015_b4_wrong_writer_is_recorded_faithfully_postgres import (
-    _prepare_payment,
     _seed_triangle,
 )
 from tests.integration.test_p015_f01512_inject_refuses_an_opposing_debt_postgres import (
@@ -176,22 +175,6 @@ async def _payment_api(url: str, recorder: _Recorder) -> list[str]:
                     idempotency_key=str(uuid.uuid4()),
                 )
             assert result.status == "COMMITTED", result
-
-        return await _record(recorder, operation)
-    finally:
-        await engine.dispose()
-
-
-async def _payment_commit(url: str, recorder: _Recorder) -> list[str]:
-    engine, factory = _factory(url)
-    try:
-        triangle = await _seed_triangle(factory, trustlines=[("b", "a", LIMIT)])
-        await _debt(factory, triangle, "a", "b", "2.00", "t1903-payment-commit")
-        tx_id = await _prepare_payment(factory, triangle, ["a", "b"], Decimal("5.00"))
-
-        async def operation() -> None:
-            async with factory() as session:
-                await PaymentEngine(session).commit(tx_id)
 
         return await _record(recorder, operation)
     finally:
@@ -448,7 +431,6 @@ async def _reconciliation_reaction(url: str, recorder: _Recorder) -> list[str]:
 
 _OPERATIONS: dict[str, Callable[[str, _Recorder], Awaitable[list[str]]]] = {
     "payment_api": _payment_api,
-    "payment_commit": _payment_commit,
     "clearing": _clearing,
     "inject_event": _inject_event,
     "admin_patch": _admin_patch,
@@ -463,7 +445,6 @@ _OPERATIONS: dict[str, Callable[[str, _Recorder], Awaitable[list[str]]]] = {
 # its marker did not run the path this probe claims to compare.
 _MARKERS = {
     "payment_api": ["pg_advisory_xact_lock($1, $2)", "pg_advisory_xact_lock($1)", "FOR SHARE"],
-    "payment_commit": ["pg_advisory_xact_lock($1, $2)", "pg_advisory_xact_lock($1)", "FOR SHARE"],
     "clearing": ["pg_advisory_lock($1, $2)", "pg_advisory_unlock($1, $2)"],
     "inject_event": ["pg_advisory_xact_lock($1, $2)", "FOR SHARE"],
     "admin_patch": ["pg_advisory_xact_lock($1, $2)"],

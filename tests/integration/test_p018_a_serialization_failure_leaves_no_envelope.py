@@ -11,8 +11,9 @@ THE RACE. Debt p0 -> p1 of 10 is committed. The LOSER begins at SERIALIZABLE and
 snapshot saw at 10, and PostgreSQL refuses: "could not serialize access due to concurrent update",
 SQLSTATE 40001, raised inside `Book.post` (the flush of the payment flow).
 
-WHAT IS ASSERTED: the exception reaching the caller carries 40001 and `PaymentEngine`'s own retry
-predicate classifies it as retryable (the book did not replace it, e.g. with a failed cleanup); the
+WHAT IS ASSERTED: the exception reaching the caller carries 40001 and the payment retry owner's
+predicate (`pay()`'s `_classify_payment_db_error` since programme 019 stage 4; until then
+`PaymentEngine`'s) classifies it as retryable (the book did not replace it, e.g. with a failed cleanup); the
 context is empty after the book's savepoint rollback; after the loser's rollback there is no envelope
 of its identity and no entry of it; the retry on a fresh snapshot completes with exactly one envelope
 and one entry, and the debt is 12.
@@ -29,7 +30,8 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.ledger.book import Book, NewDebt, PaymentFlow, operation_for
-from app.core.payments.engine import PaymentEngine
+from app.core.payments.service import _classify_payment_db_error
+from app.utils.exceptions import RetryablePaymentConflictException
 from app.db.models.transaction import Transaction
 from tests.p018_support import (
     SERIALIZATION_FAILURE,
@@ -67,8 +69,9 @@ async def test_t1801_a_serialization_failure_inside_the_book_leaves_no_envelope_
         async with session() as setup:
             world = await seed_world(setup)
             setup.add_all(
+                # Placeholders for the envelopes' tx_id reference; terminal since migration 030.
                 Transaction(tx_id=tx_id, type="PAYMENT", initiator_id=world.p(0), payload={},
-                            state="NEW")
+                            state="COMMITTED")
                 for tx_id in (winner_tx, loser_tx)
             )
             await Book.post(
@@ -96,7 +99,11 @@ async def test_t1801_a_serialization_failure_inside_the_book_leaves_no_envelope_
             with pytest.raises(DBAPIError) as caught:
                 await Book.post(loser, _payment(loser_tx, world.eq), [flow])
             assert sqlstate_of(caught.value) == SERIALIZATION_FAILURE, caught.value
-            assert PaymentEngine(loser)._is_retryable_db_error(caught.value, op="commit")
+            # The owner of the payment retries since 019 stage 4 is `pay()`: its classifier must
+            # accept the ORIGINAL error the book raised (the engine's predicate is gone with it).
+            assert isinstance(
+                _classify_payment_db_error(caught.value), RetryablePaymentConflictException
+            )
             assert not hasattr(caught.value, "book_rollback_error")
             assert await context_of(await loser.connection()) in (None, "")
             await loser.rollback()

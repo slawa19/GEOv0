@@ -35,6 +35,7 @@ names in its docstring the mutation that must turn it red again.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import uuid
 from decimal import Decimal
@@ -43,12 +44,10 @@ import pytest
 from sqlalchemy import event, select
 
 from app.core.clearing.service import ClearingService
-from app.core.payments.engine import PaymentEngine
 from app.db.models.audit_log import IntegrityAuditLog
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
-from app.db.models.prepare_lock import PrepareLock
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 from tests.debt_setup import debt_fixture_setup
@@ -406,65 +405,73 @@ def _observed_change(
 # ==============================================================================================
 
 
+@contextlib.contextmanager
+def _routed_over(triangle: _Triangle, path: list[str]):
+    """While open, the router answers every payment with `path` - the test's explicit route.
+
+    019 stage 4 (`FORK-8`): an explicit route is handed to the ORDINARY execution path as the router's
+    result under test control - no parallel money algorithm, no public route field. The service still
+    loads the equivalent, runs the stop/hold pre-check, builds its graph and, under its locks,
+    validates the capacity of every segment of this route: only the choice of route is the test's.
+
+    A context manager and not `monkeypatch`, because its callers - five modules and an out-of-tier
+    probe - call `_prepare_payment` without one. It restores the router on the way out, raise or not.
+    Yields the list of routes actually handed out: EMPTY means the service never asked the router
+    (answered from idempotency, refused before routing), and callers assert on it.
+    """
+
+    from app.core.payments.router import PaymentRouter
+
+    route = [getattr(triangle, name).pid for name in path]
+    handed: list[tuple[list[str], Decimal]] = []
+    original = PaymentRouter.find_flow_routes
+
+    def find_flow_routes(self, from_pid, to_pid, amount, **_kwargs):
+        assert (from_pid, to_pid) == (route[0], route[-1]), (
+            f"stand: the payment asked for a route {from_pid} -> {to_pid}, the explicit route is {route}"
+        )
+        handed.append((list(route), Decimal(str(amount))))
+        return [(list(route), Decimal(str(amount)))]
+
+    PaymentRouter.find_flow_routes = find_flow_routes
+    try:
+        yield handed
+    finally:
+        PaymentRouter.find_flow_routes = original
+
+
 async def _prepare_payment(factory, triangle: _Triangle, path: list[str], amount: Decimal) -> str:
-    """Create the transaction and run a REAL `PaymentEngine.prepare` over `path`.
+    """ONE WHOLE PAYMENT over the explicit route `path`, through the payment service. Returns its tx id.
 
-    Nothing is hand-written into `prepare_locks`: the locks - which are the operation's INTENT and
-    the only record of what the payment said it would do - must be produced by the application, or
-    criterion (b) would be checked against a fixture instead of against the system.
+    THE NAME IS HISTORICAL (019 stage 4, `T1906`). Until stage 4 this created a `NEW` row and ran a real
+    `PaymentEngine.prepare`, leaving a durable `PREPARED` payment and its `prepare_locks` for the caller
+    to commit. Neither exists any more: CHECK `030` refuses any non-terminal `PAYMENT` row and the
+    payment executes in one transaction (`PaymentService._run_payment_operation`). The name is kept
+    because five test modules and two out-of-tier probes import it (manifest `T1901`, section 3,
+    "Стадия 4 обязана также"); what it does now is the whole payment, committed.
+
+    Nothing is hand-written: the envelope's intent, the entries and the audit row are the
+    application's. A caller that used to act BETWEEN prepare and commit - a wrong writer
+    (`_collapse_the_route`), a barrier on the pre-state read - now arms its seam BEFORE calling this.
     """
+
+    from app.core.payments.service import PaymentService
+
     tx_id = str(uuid.uuid4())
-    async with factory() as session:
-        session.add(
-            Transaction(
-                id=uuid.uuid4(),
-                tx_id=tx_id,
-                type="PAYMENT",
-                initiator_id=getattr(triangle, path[0]).id,
-                payload={"routes": [{"path": [getattr(triangle, n).pid for n in path],
-                                     "amount": str(amount)}]},
-                state="NEW",
+    with _routed_over(triangle, path) as handed:
+        async with factory() as session:
+            result = await PaymentService(session).create_payment_internal(
+                getattr(triangle, path[0]).id,
+                to_pid=getattr(triangle, path[-1]).pid,
+                equivalent=triangle.equivalent.code,
+                amount=str(amount),
+                idempotency_key=tx_id,
             )
-        )
-        await session.commit()
-    async with factory() as session:
-        await PaymentEngine(session).prepare(
-            tx_id,
-            [getattr(triangle, name).pid for name in path],
-            amount,
-            triangle.equivalent.id,
-        )
+    assert handed, f"stand: the service never asked the router for a route: {result!r}"
+    assert result.status == "COMMITTED" and result.tx_id == tx_id, (
+        f"stand: the payment over {path} did not commit: {result!r}"
+    )
     return tx_id
-
-
-async def _intent_flows(factory, triangle: _Triangle, tx_id: str) -> list[tuple[str, str, Decimal]]:
-    """The payment's declared flows, read from `prepare_locks` BEFORE the commit deletes them.
-
-    This is the snapshot design v2 §7 says the envelope's intent will carry ("intent tx_id +
-    validated flows per lock as exact scale-8 strings"). Until the envelope exists it has to be
-    captured here, and `C14` on the PostgreSQL tier is the counterexample that ties the two together.
-    """
-    async with factory() as fresh:
-        locks = (
-            await fresh.execute(
-                select(PrepareLock.effects).where(PrepareLock.tx_id == tx_id)
-            )
-        ).scalars().all()
-    flows: list[tuple[str, str, Decimal]] = []
-    for effects in locks:
-        for flow in (effects or {}).get("flows", []):
-            flows.append(
-                (
-                    triangle.name(uuid.UUID(flow["from"])),
-                    triangle.name(uuid.UUID(flow["to"])),
-                    Decimal(flow["amount"]),
-                )
-            )
-    # Sorted, and the limit is worth naming: the engine applies flows in the order its locks come
-    # back, so criterion (b) is only order-independent for scenarios where it is. Both scenarios in
-    # this module are - each edge is touched by at most one flow and no flow's input depends on
-    # another's output - and the `C6` control below would go red if that stopped being true.
-    return sorted(flows)
 
 
 # ==============================================================================================

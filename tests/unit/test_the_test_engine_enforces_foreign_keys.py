@@ -39,12 +39,16 @@ async def test_a_dangling_reference_is_refused(db_session) -> None:
             type="PAYMENT",
             initiator_id=uuid.uuid4(),  # no such participant
             payload={},
-            state="NEW",
+            # Terminal on purpose: since migration 030 (019 stage 4) a NEW payment is refused by the
+            # payment-state CHECK with the SAME exception class, and this test would pass without any
+            # foreign key at all. The SQLSTATE below pins the refusal to the foreign key.
+            state="COMMITTED",
         )
     )
-    with pytest.raises(IntegrityError):
+    with pytest.raises(IntegrityError) as refused:
         await db_session.flush()
     await db_session.rollback()
+    assert getattr(refused.value.orig, "sqlstate", None) == "23503", refused.value
 
 
 @pytest.mark.asyncio

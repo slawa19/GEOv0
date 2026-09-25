@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from decimal import Decimal, ROUND_HALF_UP
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -69,13 +69,11 @@ from app.core.clearing.service import ClearingService
 from app.core.admin.metrics import compute_participant_metrics, is_ratio_below_threshold
 from app.core.trustlines.service import TrustLineService
 from app.core.money_boundary import MoneyBoundary
-from app.core.payments.engine import PaymentEngine
 from sqlalchemy.exc import IntegrityError
 from app.utils.exceptions import (
     BadRequestException,
     ConflictException,
     NotFoundException,
-    TimeoutException,
 )
 from app.utils.metrics import PAYMENT_EVENTS_TOTAL
 from app.utils.request_id import new_request_id, request_id_var, validate_request_id
@@ -114,14 +112,13 @@ router = APIRouter(prefix="/admin", dependencies=[Depends(deps.require_admin)])
 _runtime_config_lock = asyncio.Lock()
 
 
-_ACTIVE_PAYMENT_TX_STATES: set[str] = {
-    "NEW",
-    "ROUTED",
-    "PREPARE_IN_PROGRESS",
-    "PREPARED",
-    "PROPOSED",
-    "WAITING",
-}
+#: THE "STUCK PAYMENT" READERS ARE A COMPATIBILITY SURFACE (programme 019, stage 4; owner decision Q2).
+#: A stuck payment was a durable `NEW`/`PREPARED` row between the payment's commits. Since stage 4 the
+#: hub executes a payment as one transaction and inserts it `COMMITTED` or `ABORTED`, and migration 030
+#: refuses any other `PAYMENT` state (`chk_transaction_payment_terminal`). So the three readers - the
+#: incidents list, the liquidity summary's `incidents_over_sla` and the graph's `include=incidents` - have
+#: nothing to find and answer empty/zero without reading. They stay on the wire, unchanged in shape,
+#: until the fate of the incidents screen and admin abort is decided after 019 (П4, `T1911`).
 
 _DecimalThreshold = Annotated[
     Decimal,
@@ -242,47 +239,8 @@ async def _graph_optional_collections(
 
 
 async def _graph_fetch_incidents(db: AsyncSession, *, limit: int) -> list[dict[str, Any]]:
-    limit = max(0, int(limit))
-    if limit <= 0:
-        return []
-
-    sla_seconds = int(getattr(settings, "PAYMENT_TX_STUCK_TIMEOUT_SECONDS", 120) or 120)
-    cutoff = _utc_now() - timedelta(seconds=sla_seconds)
-
-    stmt = (
-        select(Transaction, Participant.pid)
-        .join(Participant, Transaction.initiator_id == Participant.id)
-        .where(
-            Transaction.type == "PAYMENT",
-            Transaction.state.in_(_ACTIVE_PAYMENT_TX_STATES),
-            Transaction.updated_at < cutoff,
-        )
-        .order_by(Transaction.updated_at.asc())
-        .limit(limit)
-    )
-
-    rows = (await db.execute(stmt)).all()
-    now = _utc_now()
-    items: list[dict[str, Any]] = []
-    for tx, initiator_pid in rows:
-        payload = tx.payload or {}
-        equivalent = str(payload.get("equivalent") or "")
-        anchor = (tx.updated_at or tx.created_at) or now
-        if anchor.tzinfo is None:
-            anchor = anchor.replace(tzinfo=timezone.utc)
-        age_seconds = max(0, int((now - anchor).total_seconds()))
-        items.append(
-            {
-                "tx_id": tx.tx_id,
-                "state": tx.state,
-                "initiator_pid": str(initiator_pid),
-                "equivalent": equivalent,
-                "age_seconds": age_seconds,
-                "sla_seconds": sla_seconds,
-                "created_at": tx.created_at,
-            }
-        )
-    return items
+    # No stuck payment exists since migration 030; compatibility until П4 (see the note above).
+    return []
 
 
 async def _graph_fetch_audit_log(db: AsyncSession, *, limit: int) -> list[dict[str, Any]]:
@@ -848,27 +806,8 @@ async def admin_liquidity_summary(
     total_used = totals.total_used
     total_available = totals.total_available
 
-    # Incidents over SLA ("stuck" payments). Filter by equivalent in Python to keep it portable.
-    sla_seconds = int(getattr(settings, "PAYMENT_TX_STUCK_TIMEOUT_SECONDS", 120) or 120)
-    cutoff = now - timedelta(seconds=sla_seconds)
-    inc_payloads = (
-        await db.execute(
-            select(Transaction.payload)
-            .where(
-                Transaction.type == "PAYMENT",
-                Transaction.state.in_(_ACTIVE_PAYMENT_TX_STATES),
-                Transaction.updated_at < cutoff,
-            )
-        )
-    ).scalars().all()
-    if eq_code:
-        incidents_over_sla = sum(
-            1
-            for p in inc_payloads
-            if str((p or {}).get("equivalent") or "").strip().upper() == eq_code
-        )
-    else:
-        incidents_over_sla = len(inc_payloads)
+    # Incidents over SLA ("stuck" payments): none exists since migration 030; compatibility until П4.
+    incidents_over_sla = 0
 
     # Net positions (Debt direction: debtor -> creditor).
     debt_base = (
@@ -1102,53 +1041,13 @@ async def list_incidents(
     per_page: int = Query(20, ge=1, le=200),
     db: AsyncSession = Depends(deps.get_db),
 ) -> AdminIncidentsListResponse:
-    """List "stuck" payment transactions (over SLA) for operator intervention."""
+    """The "stuck" payments list - always empty since programme 019, stage 4 (compatibility until П4).
 
-    sla_seconds = int(getattr(settings, "PAYMENT_TX_STUCK_TIMEOUT_SECONDS", 120) or 120)
-    cutoff = _utc_now() - timedelta(seconds=sla_seconds)
+    A stuck payment was a durable `NEW`/`PREPARED` row; migration 030 refuses one. The route and its
+    paginated shape stay for the incidents screen until its fate is decided (`T1911`).
+    """
 
-    base = (
-        select(Transaction, Participant.pid)
-        .join(Participant, Transaction.initiator_id == Participant.id)
-        .where(
-            Transaction.type == "PAYMENT",
-            Transaction.state.in_(_ACTIVE_PAYMENT_TX_STATES),
-            Transaction.updated_at < cutoff,
-        )
-    )
-
-    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
-
-    stmt = (
-        base.order_by(Transaction.updated_at.asc())
-        .limit(per_page)
-        .offset((page - 1) * per_page)
-    )
-    rows = (await db.execute(stmt)).all()
-
-    now = _utc_now()
-    items: list[dict[str, Any]] = []
-    for tx, initiator_pid in rows:
-        payload = tx.payload or {}
-        equivalent = str(payload.get("equivalent") or "")
-        # Prefer updated_at for "stuck" age; fall back to created_at.
-        anchor = (tx.updated_at or tx.created_at) or now
-        if anchor.tzinfo is None:
-            anchor = anchor.replace(tzinfo=timezone.utc)
-        age_seconds = max(0, int((now - anchor).total_seconds()))
-        items.append(
-            {
-                "tx_id": tx.tx_id,
-                "state": tx.state,
-                "initiator_pid": str(initiator_pid),
-                "equivalent": equivalent,
-                "age_seconds": age_seconds,
-                "sla_seconds": sla_seconds,
-                "created_at": tx.created_at,
-            }
-        )
-
-    return AdminIncidentsListResponse(items=items, page=page, per_page=per_page, total=int(total))
+    return AdminIncidentsListResponse(items=[], page=page, per_page=per_page, total=0)
 
 
 @router.post("/transactions/{tx_id}/abort", response_model=AdminAbortTxResponse)
@@ -1158,70 +1057,59 @@ async def abort_transaction(
     request: Request,
     db: AsyncSession = Depends(deps.get_db),
 ) -> AdminAbortTxResponse:
+    """Admin abort - a COMPATIBILITY SURFACE since programme 019, stage 4 (owner decision Q2).
+
+    There is no active payment work left to abort: the hub executes a payment as one transaction, and
+    migration 030 refuses a `PAYMENT` row that is not `COMMITTED`/`ABORTED`. So, with no money effect
+    and without the removed payment engine:
+
+    * unknown `tx_id` - `404`;
+    * `COMMITTED` - `409` (as before);
+    * `ABORTED` - the former idempotent answer `aborted`: an audit row is written, the metric
+      `abort/already_aborted` counts it, and the STORED error is kept as it is (a replay of the same
+      `tx_id` keeps answering the refusal it was given);
+    * any other state (only a non-`PAYMENT` type can hold one, and none of them is ever durable in a
+      non-terminal state on the supported path) - `409`, nothing is changed: this endpoint never
+      terminalises another writer's transaction.
+
+    A stale row selected on the incidents screen gets one of these answers. The endpoint's fate is
+    decided with the screen after 019 (П4, `T1911`).
+    """
+
     tx = (
         await db.execute(select(Transaction).where(Transaction.tx_id == tx_id))
     ).scalar_one_or_none()
     if tx is None:
         raise NotFoundException(f"Transaction {tx_id} not found")
-    if tx.state == "COMMITTED":
+    state = tx.state  # read before a rollback expires the row
+    if state == "COMMITTED":
         await db.rollback()
         raise ConflictException("Transaction is already committed")
+    if state != "ABORTED":
+        await db.rollback()
+        raise ConflictException(
+            f"Transaction is {state}; there is no active payment work to abort"
+        )
 
-    before = {"state": tx.state, "error": tx.error}
-
-    engine = PaymentEngine(db)
+    stored = {"state": tx.state, "error": tx.error}
     try:
-        audit_entry = _add_audit_entry(
+        _add_audit_entry(
             db,
             request=request,
             action="admin.transactions.abort",
             object_type="transaction",
             object_id=tx_id,
             reason=body.reason,
-            before_state=before,
-            after_state=None,
+            before_state=stored,
+            after_state=stored,
         )
-        # Establish the outer transaction before PaymentEngine opens its retry
-        # savepoint; neither the staged abort nor this audit is durable yet.
-        await db.flush()
-        abort_timeout_s = max(
-            0.001,
-            min(
-                float(settings.PAYMENT_TOTAL_TIMEOUT_SECONDS or 10),
-                float(settings.COMMIT_TIMEOUT_SECONDS or 5),
-            ),
-        )
-        try:
-            abort_outcome = await asyncio.wait_for(
-                engine.abort(
-                    tx_id,
-                    reason=body.reason,
-                    commit=False,
-                    return_outcome=True,
-                ),
-                timeout=abort_timeout_s,
-            )
-        except asyncio.TimeoutError as exc:
-            raise TimeoutException("Admin transaction abort timed out") from exc
-
-        tx2 = (
-            await db.execute(
-                select(Transaction)
-                .where(Transaction.tx_id == tx_id)
-                .execution_options(populate_existing=True)
-            )
-        ).scalar_one()
-        if tx2.state == "COMMITTED":
-            raise ConflictException("Transaction is already committed")
-
-        audit_entry.after_state = {"state": tx2.state, "error": tx2.error}
         await db.commit()
     except BaseException:
         await db.rollback()
         raise
 
     try:
-        PAYMENT_EVENTS_TOTAL.labels(event="abort", result=abort_outcome).inc()
+        PAYMENT_EVENTS_TOTAL.labels(event="abort", result="already_aborted").inc()
     except Exception:
         pass
 
