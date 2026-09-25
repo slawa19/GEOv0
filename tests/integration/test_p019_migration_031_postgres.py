@@ -163,11 +163,12 @@ async def test_031_drops_the_reservations_refuses_an_undrained_database_and_rest
     try:
         async with AsyncSession(bind=engine, expire_on_commit=False, autoflush=False) as session:
             world = await seed_world(session, label="m031")
+            history_debt = Debt(
+                debtor_id=world.p(0), creditor_id=world.p(1), equivalent_id=world.equivalent.id,
+                amount=Decimal("12.34"),
+            )
             async with debt_fixture_setup(session, label="m031-history"):
-                session.add(
-                    Debt(debtor_id=world.p(0), creditor_id=world.p(1), equivalent_id=world.equivalent.id,
-                         amount=Decimal("12.34"))
-                )
+                session.add(history_debt)
             await session.commit()
     finally:
         await engine.dispose()
