@@ -186,8 +186,15 @@ class ClearingService:
         raise AssertionError("unreachable")  # pragma: no cover - the call above always raises
 
     @staticmethod
-    async def _drain_task(task: asyncio.Task) -> asyncio.CancelledError | None:
-        """Wait through repeated caller cancellation and return its first pulse."""
+    async def _drain_task(
+        task: asyncio.Task, *, surface_result: bool = True
+    ) -> asyncio.CancelledError | None:
+        """Wait through repeated caller cancellation and return its first pulse.
+
+        `surface_result=False` (020 stage 1, the commit-resolution block only): return the pulse
+        WITHOUT reading the task's result, so a task that failed cannot take the caller's
+        cancellation down with its error; the caller reads `task.result()` itself.
+        """
 
         caller_cancellation: asyncio.CancelledError | None = None
         while not task.done():
@@ -199,7 +206,8 @@ class ClearingService:
             except Exception:
                 # The task is terminal; surface its exact result below.
                 pass
-        task.result()
+        if surface_result:
+            task.result()
         return caller_cancellation
 
     @classmethod
@@ -2209,10 +2217,46 @@ class ClearingService:
                         allowed_participant_pids=allowed_participant_pids,
                     )
                 )
+                # Both resolutions are drained with `surface_result=False`: a pulse the caller
+                # sent while one ran is kept even if that resolution then fails, and is raised
+                # below (or carried by `ClearingCommittedAfterCancellation`) - never retried.
                 reconciliation_cancellation = await self._drain_task(
-                    reconciliation_task
+                    reconciliation_task, surface_result=False
                 )
-                reconciled_amount = reconciliation_task.result()
+                try:
+                    reconciled_amount = reconciliation_task.result()
+                except Exception:
+                    # 020 stage 1: a resolver error is never classified as the attempt's
+                    # conflict - its 40001/40P01 is not the COMMIT's. One more complete
+                    # resolution, so a durable occurrence is still reported as the success it
+                    # is; if that one finds nothing or fails too, the COMMIT's own error keeps
+                    # precedence below: an unknown commit ends unretried (`E010`), and only a
+                    # rollback PostgreSQL reported on COMMIT reaches the retry owner.
+                    logger.warning(
+                        "event=clearing.commit_resolution_failed tx_id=%s resolution=1",
+                        tx_id_str,
+                        exc_info=True,
+                    )
+                    second_resolution = asyncio.create_task(
+                        self._reconcile_committed_execution(
+                            tx_id_str,
+                            allowed_participant_pids=allowed_participant_pids,
+                        )
+                    )
+                    second_cancellation = await self._drain_task(
+                        second_resolution, surface_result=False
+                    )
+                    if reconciliation_cancellation is None:
+                        reconciliation_cancellation = second_cancellation
+                    try:
+                        reconciled_amount = second_resolution.result()
+                    except Exception:
+                        logger.warning(
+                            "event=clearing.commit_resolution_failed tx_id=%s resolution=2",
+                            tx_id_str,
+                            exc_info=True,
+                        )
+                        reconciled_amount = None
                 if (
                     commit_cancellation is None
                     and reconciliation_cancellation is not None
