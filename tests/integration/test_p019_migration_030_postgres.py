@@ -116,8 +116,10 @@ async def test_030_fences_legacy_payment_writes_refuses_an_undrained_database_an
 
     url = committed_database.url
     await committed_database.engine.dispose()
-    assert repository_head() == _AFTER, "this module pins migration 030 as the head it tests"
-    assert await _version(url) == [(_AFTER,)]
+    # PINNED TO 030 EXPLICITLY (019 stage 5, `T1909`): 030 is no longer the head (`031` drops
+    # `prepare_locks`), so every step below names its revision instead of `head`; the database starts at
+    # the head the template was migrated to.
+    assert await _version(url) == [(repository_head(),)]
 
     # 0. Both construction paths build the same CHECK constraints on `transactions`.
     async with scratch_databases(TEST_DATABASE_URL, "p019m030meta") as (metadata_url,):
@@ -161,7 +163,7 @@ async def test_030_fences_legacy_payment_writes_refuses_an_undrained_database_an
         await _exec(url, _INSERT_TX, id=uuid.uuid4(), tx_id=tx_ids[name], type=tx_type,
                     initiator=world.p(0), state=state)
 
-    refused = _alembic(url, "upgrade", "head")
+    refused = _alembic(url, "upgrade", _AFTER)
     assert refused.returncode != 0, "030 applied over a non-terminal PAYMENT row"
     assert "refusing to apply 030 on an undrained database" in refused.stderr, refused.stderr
     assert "1 PAYMENT transaction(s) are not terminal (NEW: 1)" in refused.stderr, refused.stderr
@@ -176,7 +178,7 @@ async def test_030_fences_legacy_payment_writes_refuses_an_undrained_database_an
         "VALUES (:id, :tx_id, :participant, 'PAYMENT', '{}', now() + interval '1 minute')",
         id=uuid.uuid4(), tx_id=tx_ids["planted"], participant=world.p(0),
     )
-    refused = _alembic(url, "upgrade", "head")
+    refused = _alembic(url, "upgrade", _AFTER)
     assert refused.returncode != 0, "030 applied over a live reservation"
     assert "0 PAYMENT transaction(s) are not terminal (none) and 1 prepare_locks row(s)" in refused.stderr, (
         refused.stderr
@@ -190,7 +192,7 @@ async def test_030_fences_legacy_payment_writes_refuses_an_undrained_database_an
             ids=list(tx_ids.values()),
         )
     )
-    up = _alembic(url, "upgrade", "head")
+    up = _alembic(url, "upgrade", _AFTER)
     assert up.returncode == 0, up.stderr
     assert await _version(url) == [(_AFTER,)]
     after = sorted(
