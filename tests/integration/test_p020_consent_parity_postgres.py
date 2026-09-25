@@ -21,13 +21,8 @@ import pytest
 
 from app.core.clearing.service import ClearingService
 from scripts.p020_experimental_detectors import detect_dfs, load_eligible_edges
-from tests.p019_support import TargetMismatch
 from tests.p020_support import Edge, debt_uuid, participant_uuid, require_target, ring, seed_graph
 
-# RED FIRST: removed by the commit that makes the relation parse consent with the production parser.
-pytestmark = pytest.mark.xfail(
-    raises=TargetMismatch, strict=True, reason="020 review P2-2: SQL consent trim is narrower than str.strip()"
-)
 
 _SQL_TRIM = " \t\n\r\f\v"
 _PY_ONLY_WHITESPACE = [c for c in map(chr, range(0x110000)) if c.isspace() and c not in _SQL_TRIM]

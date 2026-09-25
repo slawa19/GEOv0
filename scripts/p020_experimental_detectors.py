@@ -37,6 +37,7 @@ exhaustive enumeration yields. `bounded=False` switches the bound off, for measu
 from __future__ import annotations
 
 import bisect
+import json
 import time
 import uuid
 from dataclasses import dataclass
@@ -80,8 +81,15 @@ def _consent_sql(policy: str) -> str:
     )
 
 
-def eligible_edges_sql(*, scoped: bool) -> str:
-    """The ONE eligibility relation. `scoped` adds the both-endpoints perimeter predicate."""
+def eligible_edges_sql(*, scoped: bool, consent_in_sql: bool = True) -> str:
+    """The eligibility relation. `scoped` adds the both-endpoints perimeter predicate.
+
+    `consent_in_sql=False` (the DFS path, and the stage-3 contract) leaves consent OUT of the SQL and returns
+    the raw `policy` as text; `load_eligible_edges` then applies the production parser to every row BEFORE
+    anything is enumerated or limited. `consent_in_sql=True` is kept only for the rejected CTE, so that the
+    recorded stage-2 measurement stays reproducible; its SQL predicate carries the review's P2-2 gap
+    (ASCII-only trim) and is NOT maintained.
+    """
 
     statuses = ", ".join(f"'{s}'" for s in CLEARABLE_STATUSES)
     scope = (
@@ -89,8 +97,10 @@ def eligible_edges_sql(*, scoped: bool) -> str:
         if scoped
         else ""
     )
+    consent = f"AND {_consent_sql('t.policy')}" if consent_in_sql else ""
+    policy = "" if consent_in_sql else ", t.policy::text AS policy"
     return f"""
-        SELECT d.id, d.debtor_id AS src, d.creditor_id AS dst, d.amount
+        SELECT d.id, d.debtor_id AS src, d.creditor_id AS dst, d.amount{policy}
         FROM debts d
         JOIN trust_lines t ON t.from_participant_id = d.creditor_id
                           AND t.to_participant_id = d.debtor_id
@@ -98,7 +108,7 @@ def eligible_edges_sql(*, scoped: bool) -> str:
                           AND t.status IN ({statuses})
         WHERE d.equivalent_id = :equivalent_id
           AND d.amount > 0
-          AND {_consent_sql('t.policy')}
+          {consent}
           {scope}
     """
 
@@ -152,10 +162,25 @@ async def load_eligible_edges(session, equivalent_id, *, scope_ids=None):
     if scope_ids is not None and not scope_ids:
         return []
     rows = await session.execute(
-        text(eligible_edges_sql(scoped=scope_ids is not None)),
+        text(eligible_edges_sql(scoped=scope_ids is not None, consent_in_sql=False)),
         _params(equivalent_id, 3, scope_ids),
     )
-    return [(r.id, r.src, r.dst, Decimal(r.amount)) for r in rows]
+    # CONSENT IS DECIDED BY THE PRODUCTION PARSER ITSELF (review P2-2, 2026-09-25). A SQL re-statement of
+    # `_policy_flag` has to agree with Python on `str.strip()`'s Unicode whitespace set, on `lower()` and on
+    # JSON number truthiness; the ASCII trim it had admitted " false ". Parsing the stored JSON
+    # here and asking `_policy_flag` makes the parity hold by construction, and it happens before any
+    # enumeration or limit, so a refused line never takes a place in the top 100.
+    return [
+        (r.id, r.src, r.dst, Decimal(r.amount))
+        for r in rows
+        if _consents(None if r.policy is None else json.loads(r.policy))
+    ]
+
+
+def _consents(policy) -> bool:
+    from app.core.clearing.service import ClearingService
+
+    return ClearingService._policy_flag(policy, "auto_clearing", default=True)
 
 
 async def detect_cte(
