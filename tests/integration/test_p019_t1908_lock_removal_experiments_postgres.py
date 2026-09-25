@@ -92,6 +92,14 @@ class Conflicts:
     def total(self) -> int:
         return len(self.payment) + len(self.clearing) + len(self.inject)
 
+    @property
+    def serialization_failures(self) -> int:
+        """Conflicts whose SQLSTATE was 40001 - SSI intervening - by any owner (019 `T1909`, 5a review P3).
+
+        `total` counts every retried conflict, including a book `DebtVersionConflict`, a 40P01 or the
+        debt-pair `23505`; an assertion that SSI intervened must count 40001 and nothing else."""
+        return sum("40001" in entry.split(",") for entry in (*self.payment, *self.clearing, *self.inject))
+
 
 def count_conflicts(monkeypatch) -> Conflicts:
     conflicts = Conflicts()
@@ -305,8 +313,9 @@ async def test_a_lost_update_payment_vs_clearing(mode, parked, stand, monkeypatc
     # Mechanism: the race really happened.
     if switch is not None:
         assert switch.total > 0, "the lock switch was never on the measured path"
-        assert conflicts.total > 0, (
-            "no 40001 was counted: the two writers did not actually race, so 'no lost update' is vacuous"
+        assert conflicts.serialization_failures > 0, (
+            f"no 40001 was counted ({conflicts}): the two writers did not actually race, so 'no lost "
+            f"update' is vacuous"
         )
     # The serial result, and everything that goes with it.
     assert paid.status == "COMMITTED", paid
@@ -478,7 +487,9 @@ async def test_b_opposing_directions_on_one_pair(mode, pair, stand, monkeypatch)
     if switch is not None:
         assert switch.total > 0, "the lock switch was never on the measured path"
         assert barrier.met.is_set(), "both writers must have read the opposite edge before either wrote"
-        assert conflicts.total > 0, "no 40001 was counted: SSI never had to intervene, the race is vacuous"
+        assert conflicts.serialization_failures > 0, (
+            f"no 40001 was counted ({conflicts}): SSI never had to intervene, the race is vacuous"
+        )
     assert invariants["both_directions"] == [], f"both directions of one pair exist: {invariants['debts']}"
     assert invariants["over_limit"] == {}, invariants["over_limit"]
     # The result is one of the SERIAL results, and the writers that ran are accounted for.

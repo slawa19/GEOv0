@@ -189,18 +189,17 @@ class RealClearingEngine:
                     #
                     # WHY empty-only HERE while `auto_clear` also widens on all-candidates-
                     # failed: every failure-without-exception path of the execution -
-                    # exactly six, `_execute_clearing_with_amount` returns None at
-                    # :1651 (empty cycle), :1676 (invalid debt ids), :1736 (Debt rows gone),
-                    # :1774 (amount <= 0), :1804 (locked pair), :1823 (auto_clearing policy)
-                    # - is either unreachable from detector output or filtered from the NEXT
-                    # `find_cycles` answer by the same predicate (locks: the same
-                    # `_locked_pairs_for_equivalent`; policy: the find-side filter calls the
-                    # execution's own `_cycle_respects_auto_clearing`).  So a PERSISTENT
+                    # exactly five since 019 stage 5 removed the locked-pair skip with
+                    # `prepare_locks` - `_execute_clearing_with_amount` returns None for an empty
+                    # cycle, invalid debt ids, Debt rows gone, amount <= 0, and the auto_clearing
+                    # policy - is either unreachable from detector output or filtered from the NEXT
+                    # `find_cycles` answer by the same predicate (policy: the find-side filter calls
+                    # the execution's own `_cycle_respects_auto_clearing`).  So a PERSISTENT
                     # cause empties the short rung by the next tick and the wide rung fires;
                     # a TRANSIENT one costs at most this tick, and the next tick retries by
                     # design (per-tick time budget is why this ladder exists).  `auto_clear`
                     # has no next tick - its one call must widen in-place.  THIS REASONING
-                    # LEANS ON THOSE SIX PATHS: adding a seventh None-return to the
+                    # LEANS ON THOSE FIVE PATHS: adding a sixth None-return to the
                     # execution breaks it, and whoever adds one must revisit this ladder.
                     #
                     # One ladder for the preflight AND the execution loop below: the first

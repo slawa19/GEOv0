@@ -10,9 +10,9 @@ an AST scan of `app/` for
 
 Expected: nothing. Since stage 4, part b (`T1906`) the whole tree is held: the engine and recovery are
 deleted and admin abort no longer uses the engine, so the part-b allowed set that stage 4, part a kept
-is gone and the whole-tree node is an ordinary green assertion (its `xfail` taken off). What is still
-allowed is the reservations' readers, a strict `TargetMismatch` expectation of stage 5 (`T1909`,
-`tests/p019_support.py`) - red the moment stage 5 has done its job and forgot to take the marker off.
+is gone and the whole-tree node is an ordinary green assertion (its `xfail` taken off). Since stage 5 (`T1909`) the reservations'
+node is green too: the `PrepareLock` model, its module and every reader are deleted (migration `031`
+drops the table), and the node's strict `TargetMismatch` expectation is taken off.
 
 WHAT THIS DOES NOT SEE, and why it is only a guard of FORM: raw SQL text (`text("UPDATE transactions
 SET state = 'NEW'")`), `setattr(tx, "state", ...)`, a state carried in a dict that is unpacked into a
@@ -27,7 +27,7 @@ import ast
 from dataclasses import dataclass
 from pathlib import Path
 
-from tests.p019_support import require_target, target_xfail
+from tests.p019_support import require_target
 
 _ROOT = Path(__file__).resolve().parents[2]
 _APP = _ROOT / "app"
@@ -36,10 +36,6 @@ INTERMEDIATE_STATES = frozenset(
     {"NEW", "ROUTED", "PREPARE_IN_PROGRESS", "PREPARED", "PROPOSED", "WAITING"}
 )
 
-#: The reservations' own model modules - not readers; stage 5 deletes them with the table.
-PREPARE_LOCK_MODEL_MODULES = frozenset(
-    {"app/db/models/prepare_lock.py", "app/db/models/__init__.py"}
-)
 
 
 @dataclass(frozen=True)
@@ -196,10 +192,13 @@ def test_no_application_module_writes_an_intermediate_payment_state_or_uses_the_
     )
 
 
-@target_xfail("019 stage 5 (T1909)", "the reservations table and its readers remain until stage 5")
 def test_no_application_module_uses_the_reservations():
+    """Stage 5 (`T1909`): the reservations are gone - no model module, no import of it anywhere in `app/`.
+
+    A strict `xfail` (`TargetMismatch`) until stage 5; its model module and every reader are deleted now.
+    """
+
+    assert not (_APP / "db" / "models" / "prepare_lock.py").exists(), "the PrepareLock model module is back"
     _writes, imports, _ = _scan_app()
-    readers = [
-        f for f in imports if _is_prepare_lock_import(f) and f.path not in PREPARE_LOCK_MODEL_MODULES
-    ]
+    readers = [f for f in imports if _is_prepare_lock_import(f)]
     require_target(not readers, "PrepareLock readers: " + "; ".join(map(str, readers)) + ". " + _BLIND)

@@ -12,6 +12,7 @@ from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 
 from app.core.ledger.book import Book, operation_for
 from app.core.money_boundary import MoneyBoundary
+from app.core.payments.service import is_debt_pair_collision
 from app.utils.exceptions import ConflictException
 from app.core.simulator.adaptive_clearing_policy import AdaptiveClearingPolicyConfig
 from app.core.simulator.artifacts import ArtifactsManager
@@ -70,7 +71,9 @@ def _is_transient_inject_db_error(exc: BaseException) -> bool:
     orig = getattr(exc, "orig", None)
     # asyncpg's adapted error carries `sqlstate`, psycopg's `pgcode`.
     sqlstate = getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)
-    return sqlstate in _INJECT_TRANSIENT_SQLSTATES
+    # 019 stage 5 (`T1909`, precondition 1): a concurrent writer inserted the same new debt row - a
+    # `23505` on exactly `uq_debts_debtor_creditor_equivalent`, transient like 40001; no other 23505.
+    return sqlstate in _INJECT_TRANSIENT_SQLSTATES or is_debt_pair_collision(exc)
 
 
 class RealRunnerImpl:
@@ -333,7 +336,8 @@ class RealRunnerImpl:
           commit; then publish (caches, SSE, note) and end publish's read transaction.
         - Staging that reaches an equivalent outside the set rolls back and restarts once with
           the missing equivalents added. A 40001/40P01/55P03 before or at commit rolls back and
-          restarts once; a second one propagates, the event stays pending and nothing after it
+          restarts once (as does a 23505 on exactly `uq_debts_debtor_creditor_equivalent`, 019 `T1909`);
+          a second one propagates, the event stays pending and nothing after it
           runs. Any other database error before commit - including one raised by flushing the
           staged writes, which happens explicitly before the commit - is recorded as "inject
           failed (db error)" and the event is fired. A non-transient failure OF the commit
@@ -620,7 +624,7 @@ class RealRunnerImpl:
                 await MoneyBoundary.require_serializable(session, writer="inject")
                 # The owner locks open the transaction the event is staged and committed in. A
                 # fresh boundary per attempt: its advisory-lock deadline is per unit of work.
-                await MoneyBoundary(session).acquire_staged_equivalent_owner_locks(lock_ids)
+                await MoneyBoundary(session).acquire_shared_equivalent_locks(lock_ids)
                 intent_equivalent_ids = await self._resolve_inject_debt_equivalent_ids(
                     session, scenario=scenario, event=event
                 )
@@ -729,8 +733,10 @@ class RealRunnerImpl:
                     if transient_retries_left <= 0:
                         raise
                     transient_retries_left -= 1
-                    # No sleep: the retry opens with the owner locks, so it waits behind any
-                    # lock-holding writer it conflicted with instead of racing it again.
+                    # No sleep: the conflict is reported once the other writer has committed (or
+                    # rolled back), so the retry's fresh snapshot already sees its outcome. Since 019
+                    # stage 5 the equivalent lock is SHARED here and does not order the inject behind
+                    # a payment; a clearing still holds it exclusively and is waited for.
                     self._logger.warning(
                         "simulator.real.inject.transient_retry event_index=%s stage=staging",
                         event_index,

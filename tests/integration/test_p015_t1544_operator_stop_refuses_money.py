@@ -40,7 +40,6 @@ from app.db.journal_tables import debt_journal_entries, debt_operations
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
-from app.db.models.prepare_lock import PrepareLock
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 from tests.debt_setup import debt_fixture_setup
@@ -325,12 +324,6 @@ async def test_a_payment_prepared_before_the_stop_is_refused_at_commit(
     ).one_or_none()
     assert stored is not None and stored[0] == "ABORTED", stored
     assert (stored[1] or {}).get("details", {}).get("reason") == "equivalent_inactive", stored
-    locks = (
-        await db_session.execute(
-            select(func.count(PrepareLock.id)).where(PrepareLock.tx_id == body["tx_id"])
-        )
-    ).scalar_one()
-    assert locks == 0
 
 
 @MODE_B

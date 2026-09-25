@@ -72,7 +72,6 @@ from app.core.simulator.real_runner import RealRunner
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
-from app.db.models.prepare_lock import PrepareLock
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 from app.utils.exceptions import RetryablePaymentConflictException
@@ -490,28 +489,6 @@ async def _transactions(session_factory, world: _World) -> dict[str, str]:
     return {str(tx_id): str(state) for tx_id, state in rows}
 
 
-async def _prepare_locks(session_factory, world: _World) -> int:
-    async with session_factory() as fresh:
-        tx_ids = list(
-            (
-                await fresh.execute(
-                    select(Transaction.tx_id).where(
-                        Transaction.initiator_id.in_([world.sender.id, world.receiver.id])
-                    )
-                )
-            ).scalars()
-        )
-        if not tx_ids:
-            return 0
-        return len(
-            (
-                await fresh.execute(
-                    select(PrepareLock.tx_id).where(PrepareLock.tx_id.in_(tx_ids))
-                )
-            ).all()
-        )
-
-
 @pytest.mark.asyncio
 async def test_the_stand_is_serializable(factory) -> None:
     """The stand must be able to SEE a serialization failure, or its verdicts mean nothing.
@@ -590,7 +567,6 @@ async def test_a_real_serialization_failure_replays_the_money_phase_and_commits_
         assert len(transactions) == 1, (
             f"the discarded attempt left a transaction behind: {transactions}"
         )
-        assert await _prepare_locks(factory, world) == 0
 
         # ── Published once, counted once ──────────────────────────────────────────────
         assert sse.published("tx.updated") == 1
@@ -668,7 +644,6 @@ async def test_a_genuine_40001_is_raised_by_the_staged_write_on_this_backend(
         assert len(transactions) == 1, (
             f"the discarded attempt left a transaction behind: {transactions}"
         )
-        assert await _prepare_locks(factory, world) == 0
         assert sse.published("tx.updated") == 1
         assert run.committed_total == 1
         assert run.errors_total == 0
@@ -740,7 +715,6 @@ async def test_the_staged_prefix_of_a_conflicted_attempt_is_rolled_back(
             f"attempt; got {transactions}"
         )
         assert set(transactions.values()) == {"COMMITTED"}, transactions
-        assert await _prepare_locks(factory, world) == 0
         assert sse.published("tx.updated") == len(plans[1])
         assert run.committed_total == len(plans[1])
     finally:

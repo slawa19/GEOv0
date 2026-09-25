@@ -1,21 +1,21 @@
-"""The test-only switch of programme 019 stage 5 (`T1907`, `T1908`): the money-boundary locks as no-ops.
+"""The test-only switch of programme 019 stage 5 (`T1907`, `T1908`, `T1909`): the equivalent lock as a no-op.
 
-NOT a test module, and NEVER app code. Stage 5 may remove the advisory coordination only on evidence
-that the system keeps its invariants without it (`specs/019-payment-one-transaction/spec.md`, "Изоляция,
-писатели и клиринг", items 1-7). That evidence has to be MEASURED with the locks absent while the rest of
-the code is the code that will ship, so the switch replaces exactly the lock primitives of
-`app/core/money_boundary.py` - and nothing else - for the duration of one test, through `monkeypatch`:
+NOT a test module, and NEVER app code. Stage 5 decided the coordination on MEASUREMENT with the lock absent
+while the rest of the code is the code that ships, so the switch replaces exactly the lock primitives of
+`app/core/money_boundary.py` - and nothing else - for the duration of one test, through `monkeypatch`.
+Since `T1909` there is ONE equivalent lock in two modes, and the switch covers both:
 
-* `_acquire_equivalent_owner_locks` - the payment's owner lock (and the one every staged entry reaches);
-* `acquire_staged_equivalent_owner_locks` - the tick, the inject, admin and reconciliation;
-* `acquire_session_equivalent_owner_lock` / `release_session_equivalent_owner_lock` - the clearing
-  interlock on its pinned connection (the release answers `True`, "released", so the clearing's cleanup
-  does not invalidate a connection that never held anything);
-* `_acquire_tx_advisory_lock` and `_acquire_segment_advisory_lock_keys` - the payment's transaction and
-  pair locks.
+* `_acquire_shared_equivalent_locks_in_order` - the payment's shared lock (and the one the staged entry
+  reaches);
+* `acquire_shared_equivalent_locks` - the tick's money phase and the inject;
+* `acquire_exclusive_equivalent_session_lock` / `release_exclusive_equivalent_session_lock` - the
+  clearing's exclusive session lock on its pinned connection (the release answers `True`, "released", so
+  the clearing's cleanup does not invalidate a connection that never held anything).
 
-What stays: the stop/hold guard, the row locks (`FOR SHARE`/`FOR UPDATE`), SERIALIZABLE, every retry
-owner. The clearing still pins its connection; only the session lock on it is gone.
+(Until `T1909` it also replaced the transaction and pair locks; they no longer exist.) What stays: the
+stop/hold guard, the row locks (`FOR SHARE`/`FOR UPDATE`), SERIALIZABLE, every retry owner. The clearing
+still pins its connection; only the lock on it is gone. Its use since `T1909` is the POSITIVE CONTROL of
+the starvation probe: the stand must be able to see starvation with the lock off.
 
 AGAINST A SILENT SWITCH. `LocksOff.calls` counts each replaced primitive, so a caller can assert that the
 switch was actually on the path it measures (a primitive nobody called proves nothing about removing it),
@@ -47,31 +47,23 @@ def switch_money_boundary_locks_off(monkeypatch) -> LocksOff:
 
     switch = LocksOff()
 
-    async def owner(self, equivalent_ids):
-        switch.calls["owner"] += 1
+    async def shared_in_order(self, equivalent_ids):
+        switch.calls["shared"] += 1
 
-    async def staged(self, equivalent_ids):
-        switch.calls["staged_owner"] += 1
+    async def shared_staged(self, equivalent_ids):
+        switch.calls["shared_staged"] += 1
 
-    async def session_owner(self, equivalent_id):
-        switch.calls["session_owner"] += 1
+    async def exclusive_session(self, equivalent_id):
+        switch.calls["exclusive_session"] += 1
 
-    async def release_session_owner(self, equivalent_id):
-        switch.calls["session_owner_release"] += 1
+    async def release_exclusive_session(self, equivalent_id):
+        switch.calls["exclusive_session_release"] += 1
         return True
 
-    async def tx(self, tx_id):
-        switch.calls["tx"] += 1
-
-    async def pairs(self, keys):
-        switch.calls["pair"] += 1
-
-    monkeypatch.setattr(MoneyBoundary, "_acquire_equivalent_owner_locks", owner)
-    monkeypatch.setattr(MoneyBoundary, "acquire_staged_equivalent_owner_locks", staged)
-    monkeypatch.setattr(MoneyBoundary, "acquire_session_equivalent_owner_lock", session_owner)
-    monkeypatch.setattr(MoneyBoundary, "release_session_equivalent_owner_lock", release_session_owner)
-    monkeypatch.setattr(MoneyBoundary, "_acquire_tx_advisory_lock", tx)
-    monkeypatch.setattr(MoneyBoundary, "_acquire_segment_advisory_lock_keys", pairs)
+    monkeypatch.setattr(MoneyBoundary, "_acquire_shared_equivalent_locks_in_order", shared_in_order)
+    monkeypatch.setattr(MoneyBoundary, "acquire_shared_equivalent_locks", shared_staged)
+    monkeypatch.setattr(MoneyBoundary, "acquire_exclusive_equivalent_session_lock", exclusive_session)
+    monkeypatch.setattr(MoneyBoundary, "release_exclusive_equivalent_session_lock", release_exclusive_session)
     return switch
 
 

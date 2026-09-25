@@ -67,7 +67,6 @@ async def test_concurrent_duplicate_payment_request_never_regresses_terminal_sta
     from app.db.models.debt import Debt
     from app.db.models.equivalent import Equivalent
     from app.db.models.participant import Participant
-    from app.db.models.prepare_lock import PrepareLock
     from app.db.models.transaction import Transaction
     from app.db.models.trustline import TrustLine
     from app.utils.event_bus import event_bus
@@ -238,11 +237,6 @@ async def test_concurrent_duplicate_payment_request_never_regresses_terminal_sta
                     Debt.equivalent_id == equivalent_id,
                 )
             )
-            remaining_locks = (
-                await verify.scalars(
-                    select(PrepareLock).where(PrepareLock.tx_id == tx_id)
-                )
-            ).all()
             audits = (
                 await verify.scalars(
                     select(IntegrityAuditLog).where(
@@ -255,7 +249,6 @@ async def test_concurrent_duplicate_payment_request_never_regresses_terminal_sta
             assert transaction_count == 1
             assert transaction is not None and transaction.state == "COMMITTED"
             assert debt_amount == Decimal("10.00000000")
-            assert remaining_locks == []
             assert len(audits) == 1
             assert audits[0].verification_passed is True
 

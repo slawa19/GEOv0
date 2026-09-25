@@ -18,13 +18,15 @@ which retries a retryable conflict on a fresh snapshot):
   "payment, then the lowering" - so this is no longer a refusal. The row stays in the table to show it.
 * `stop_before_new` / `hold_before_new` - the operator stop / integrity hold is in force when the
   request arrives; the service pre-check refuses before the insert.
-* `stop_at_commit` - the real `PATCH` deactivating the equivalent is started after `prepare`, before
+* `stop_at_commit` - the real `PATCH` deactivating the equivalent is run after `prepare`, before
   the commit phase. Before stage 3 it landed there (the owner lock was released with the durable
-  `PREPARED`) and the commit guard refused. Since stage 3 the payment holds the owner lock from
-  `prepare` to its one commit, so the `PATCH` QUEUES on it (asserted: an advisory waiter exists while
-  the payment is in flight), the payment commits, and the stop applies after it. This is the spec's
-  "third behaviour change" (the disappearing "stop at commit" schedule), established by the
-  implemented order.
+  `PREPARED`) and the commit guard refused. Stages 3-4: the payment held the owner lock exclusively
+  from `prepare` to its one commit and the `PATCH` queued on it, so the payment committed first. Since
+  stage 5 (`T1909`) the payment holds the equivalent lock SHARED and the `PATCH` takes none: the
+  `PATCH` ANSWERS while the payment is in flight (asserted: 200 from inside the hook), the commit
+  guard's `FOR SHARE` meets the changed row (`40001`, asserted from the retry log), `pay()` retries,
+  and the admitted request is refused by the stop - stored `ABORTED`, like `hold_at_commit`. Both are
+  outcomes T1544 allows (spec 019, Verification plan §3 (В)).
 * `hold_at_commit` - the hold is written after `prepare` by a writer that takes no owner lock. The
   commit guard's `FOR SHARE` meets a row changed behind the payment's snapshot: `40001`, `pay()`
   retries the whole attempt, and the retry's pre-check refuses the hold BEFORE its insert. The request
@@ -173,22 +175,6 @@ class _CommitGate:
         session.commit = gated_commit
 
 
-async def _advisory_waiter_exists(factory, *, timeout: float = 10.0) -> bool:  # noqa: F811
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout
-    async with factory() as observer:
-        while True:
-            waiting = await observer.scalar(
-                text("SELECT EXISTS (SELECT 1 FROM pg_locks WHERE NOT granted AND locktype = 'advisory')")
-            )
-            await observer.rollback()
-            if waiting:
-                return True
-            if loop.time() > deadline:
-                return False
-            await asyncio.sleep(0.02)
-
-
 async def _row_lock_waiter_exists(factory, *, timeout: float = 10.0) -> bool:  # noqa: F811
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
@@ -280,35 +266,31 @@ async def test_the_api_path_refusal_table(api, factory, monkeypatch, caplog) -> 
     )
 
     # stop_at_commit ──────────────────────────────────────────────────────────────────────────
-    # The PATCH is started from the hook and NOT awaited there: since stage 3 it queues on the owner
-    # lock this payment holds until its commit, and awaiting it inside the payment would deadlock the
-    # stand, not the application.
+    # The PATCH is AWAITED inside the hook: since stage 5 (`T1909`) the payment holds nothing the PATCH
+    # needs (its equivalent lock is shared, the PATCH takes none), so it answers while the payment is
+    # parked; a wait here would be a regression and would time out.
     w = await build_api_world(api, factory, people=people)
     body = payment_body(w, w.alice, w.bob, "10.00")
-    stop_patch: list[asyncio.Task] = []
 
-    async def start_the_stop(w=w) -> None:
-        stop_patch.append(asyncio.create_task(_set_active(api, w, False)))
-        premises["stop_at_commit_queued"] = await _advisory_waiter_exists(factory)
+    async def run_the_stop(w=w) -> None:
+        await asyncio.wait_for(_set_active(api, w, False), timeout=20)  # asserts 200
+        premises["stop_at_commit_patch_answered_in_flight"] = 200
 
-    async def pay_then_let_the_stop_land(b, w=w):
-        resp = await post(w, b)
-        await asyncio.wait_for(stop_patch[0], timeout=20)
-        return resp
-
-    try:
-        with monkeypatch.context() as m:
-            fired = _hook_before_engine_call(m, factory, "commit", body["tx_id"], start_the_stop)
+    with monkeypatch.context() as m:
+        fired = _hook_before_engine_call(m, factory, "commit", body["tx_id"], run_the_stop)
+        with caplog.at_level(logging.WARNING, logger="app.core.payments.service"):
+            caplog.clear()
             await run_class(
                 "stop_at_commit", w, body,
-                cause=pay_then_let_the_stop_land,
+                cause=lambda b, w=w: post(w, b),
                 lift=lambda w=w: _set_active(api, w, True),
                 amount="10.00",
-                refused=False,
             )
-    finally:
-        for task in stop_patch:
-            await finish(task)
+            premises["stop_at_commit_retried"] = [
+                r.getMessage().split(" pgcode=")[1].split(" ")[0]
+                for r in caplog.records
+                if "event=payment.attempt_retry " in r.getMessage()
+            ]
     premises["stop_at_commit"] = fired
 
     # hold_before_new ─────────────────────────────────────────────────────────────────────────
@@ -416,8 +398,10 @@ async def test_the_api_path_refusal_table(api, factory, monkeypatch, caplog) -> 
         "recheck_after_new": [None],
         "stop_at_commit": [None],
         "hold_at_commit": [None],
-        # the deactivating PATCH queued on the owner lock while the payment was in flight
-        "stop_at_commit_queued": True,
+        # the deactivating PATCH answered while the payment was in flight (019 stage 5: no owner lock),
+        # and its change was met by the payment's `FOR SHARE` as a real 40001 that pay() retried
+        "stop_at_commit_patch_answered_in_flight": 200,
+        "stop_at_commit_retried": ["40001"],
         # the hold behind the snapshot was met as a real 40001, and pay() retried the whole attempt
         "hold_at_commit_retried": ["40001"],
         # the payment really waited on the PATCH's row lock
@@ -440,8 +424,8 @@ async def test_the_api_path_refusal_table(api, factory, monkeypatch, caplog) -> 
             "replay": (200, "COMMITTED", None), "replay_moved": True,
         },
         "stop_at_commit": {
-            "first": (200, "COMMITTED", None), "stored": ("COMMITTED", None),
-            "replay": (200, "COMMITTED", None), "replay_moved": False,
+            "first": (409, "E008", inactive), "stored": ("ABORTED", "E008"),
+            "replay": (200, "ABORTED", "E008"), "replay_moved": False,
         },
         "hold_before_new": {
             "first": (409, "E008", hold), "stored": None,

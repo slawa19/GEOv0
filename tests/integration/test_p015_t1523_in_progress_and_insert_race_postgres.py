@@ -34,7 +34,7 @@ import uuid
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import func, select, text
+from sqlalchemy import select, text
 
 
 # Every test here commits through several sessions and runs on a disposable clone of the migrated
@@ -312,16 +312,7 @@ async def test_a_concurrent_duplicate_waits_for_the_first_and_gets_its_result_po
             _assert_one_committed_payment(
                 await _effects(observer, stand.tx_id, stand.equivalent_id), "10.00"
             )
-            from app.db.models.prepare_lock import PrepareLock
-
-            remaining_locks = (
-                await observer.execute(
-                    select(func.count())
-                    .select_from(PrepareLock)
-                    .where(PrepareLock.tx_id == stand.tx_id)
-                )
-            ).scalar_one()
-        assert remaining_locks == 0, remaining_locks
+        # (The `prepare_locks` count that stood here went with the table, 019 stage 5, `T1909`.)
     finally:
         primary_error = sys.exc_info()[1]
         try:

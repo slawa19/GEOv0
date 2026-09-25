@@ -1,39 +1,43 @@
-"""The money boundary: the stop/hold guard, the payment delta check and EVERY equivalent lock primitive.
+"""The money boundary: the stop/hold guard, the payment delta check and THE ONE equivalent lock.
 
-Programme 019 stage 2 (`T1903`, third consultation `FORK-2`): moved here from
-`app/core/payments/engine.py` WITHOUT a change of semantics, so that stage 4 can delete the engine without
-silently dropping the coordination clearing, admin, the inject, the tick and reconciliation rely on. The
-primitives live here until stage 5, which removes them only on the evidence of `T1907`/`T1908`.
+Programme 019 stage 2 (`T1903`, `FORK-2`) moved every lock primitive here from the payment engine without
+a change of semantics. Stage 5 (`T1909`, decision `KEEP-EQUIVALENT-LOCK` of the fourth consultation,
+2026-09-25) reduced them to ONE advisory identity per equivalent (`_EQUIVALENT_OWNER_LOCK_NAMESPACE`, key
+`_equivalent_owner_lock_key`) in TWO MODES:
 
-THE ONE LOCK ORDER - payment, clearing, admin, inject and reconciliation alike:
+* **shared** - `acquire_shared_equivalent_locks` / `_acquire_shared_equivalent_locks_in_order`
+  (`pg_advisory_xact_lock_shared`): a payment, a staged money phase of the tick, an inject. Shared holders
+  do not wait for one another; SERIALIZABLE and the whole-transaction retry of each owner keep their
+  concurrent debt writes correct (`T1908`: lost update, opposite directions and the bottleneck reach the
+  serial result through 40001 and a retry; a concurrent insert of one new debt row is the `23505` the
+  owners retry, `is_debt_pair_collision`);
+* **exclusive** - `acquire_exclusive_equivalent_session_lock` (`pg_advisory_lock`, session level): the
+  clearing only, on a PINNED connection, taken BEFORE its authoritative snapshot and held through its
+  commit resolution and every permitted retry. It waits for the shared holders in flight and keeps new
+  ones out, which is what gives the clearing liveness under continuous payment load (`T1908` (d): without
+  it three of four predeclared batches missed the 90 % criterion).
 
-1. **The equivalent owner set, complete and sorted** (`_acquire_equivalent_owner_locks` - the one
-   function every entry below goes through), BEFORE any row of the equivalent or its debts is read
-   under a lock (`FOR SHARE`/`FOR UPDATE` of the equivalent, debt rows). Admin already takes it that
-   way: `PATCH`, the hold clear and the equivalent `DELETE` take the owner lock, then touch the row.
-   The reverse order is a reachable deadlock, and a deadlock retry does not replace it.
-2. Then, for a payment, the transaction lock (`_acquire_tx_advisory_lock`), then the pair locks in one
-   global sorted order (`_acquire_segment_advisory_lock_keys`), then rows - with the stop/hold guard
-   `refuse_inactive_equivalents(row_lock=True)` reading the equivalent `FOR SHARE` only after the owner
-   lock (its docstring says why a plain read is not binding for a payment).
+There are no transaction or pair advisory locks and no reservations any more (`prepare_locks` is dropped by
+migration `031`). Admin stop/hold and the equivalent `DELETE` take NO advisory lock: they `UPDATE`/`DELETE`
+the equivalent row, which every money writer reads `FOR SHARE` through its commit
+(`refuse_inactive_equivalents(row_lock=True)`); reconciliation reads at its chosen isolation and sets a hold
+the same way.
+
+THE ONE LOCK ORDER: the equivalent lock (a staged caller takes its COMPLETE set, sorted by key, before any
+protected write) -> the equivalent row `FOR SHARE` -> the debt rows. The reverse order is a reachable
+deadlock, and a deadlock retry does not replace it.
 
 TWO LIFETIMES, deliberately different:
 
-* **transaction-level** - owner (`pg_advisory_xact_lock(ns, key)`), transaction and pair locks are
-  released by the end of the transaction that took them, whatever ends it;
-* **session-level** - the clearing interlock takes the owner key with `pg_advisory_lock(ns, key)` on a
-  PINNED connection (`acquire_session_equivalent_owner_lock`) and rolls back to get a fresh snapshot;
-  the lock survives every transaction on that connection and lives until the explicit
-  `release_session_equivalent_owner_lock`, which the clearing calls before returning the connection.
+* **transaction-level** - the shared lock is released by the end of the transaction that took it,
+  whatever ends it;
+* **session-level** - the clearing's exclusive lock survives the rollback that gives it a fresh snapshot
+  and every attempt's transaction on that connection, and lives until the explicit
+  `release_exclusive_equivalent_session_lock`; a connection whose release is not confirmed is invalidated,
+  never returned to the pool (`ClearingService._release_interlock_session`).
 
-`acquire_staged_equivalent_owner_locks` is the entry for callers that own a larger outer transaction
-(the tick, the inject, admin, reconciliation): the same sorted owner set, after which the transaction's
-previous `lock_timeout` is restored so the owner-lock deadline does not become the timeout policy of the
-caller's later statements.
-
-KEY SPACES. Owner and transaction locks use PostgreSQL's two-int key space with a stable domain tag as
-the first int; pair locks use the one-BIGINT key space. The two spaces never conflict with each other -
-which is also why a one-argument `pg_advisory_*` next to a two-argument one is never the same lock.
+KEY SPACE. PostgreSQL's two-int key space with a stable domain tag as the first int. A one-argument
+`pg_advisory_*` is a different key space and never the same lock.
 """
 
 from __future__ import annotations
@@ -42,7 +46,7 @@ import hashlib
 import logging
 import time
 from decimal import Decimal
-from typing import Any, List, Tuple
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import func, select, text
@@ -65,9 +69,10 @@ logger = logging.getLogger(__name__)
 # rounded underneath it. What the old constant admitted was therefore the SMALLEST corruption that
 # can exist: the ledger moving one atom more, or less, than the payment declared, unreported.
 #
-# Nor was it a concurrency mitigation, though it looks like one: `commit` holds an advisory lock
-# over the WHOLE equivalent for its unit of work, and this check is scoped to one equivalent, so no
-# foreign write lands between the two snapshots. And a race would produce a drift the size of the
+# Nor was it a concurrency mitigation, though it looks like one: both reads of the net positions are
+# made in ONE SERIALIZABLE transaction, whose snapshot is fixed at its first statement, so no foreign
+# write lands between them (until 019 stage 5 an exclusive advisory lock over the whole equivalent
+# said the same; payments now hold it shared, and the snapshot is what holds). And a race would produce a drift the size of the
 # other payment, not one atom - a mitigation shaped like this absorbs the smallest case and nothing
 # larger, which is a threshold, not a safeguard.
 #
@@ -76,9 +81,9 @@ logger = logging.getLogger(__name__)
 # barrier catches the 1e-9 drift a widened door produces.
 _DELTA_DRIFT_TOLERANCE = Decimal("0")
 
-# PostgreSQL's two-int advisory-lock key space is disjoint from the one-BIGINT
-# key space used by segment locks. The first int is a stable domain tag.
-_TX_ADVISORY_LOCK_NAMESPACE = 0x475458
+# PostgreSQL's two-int advisory-lock key space; the first int is a stable domain tag. The name keeps its
+# historical "owner" (019 stage 5 retained this ONE identity; the transaction-lock domain 0x475458 and the
+# one-BIGINT pair-lock space are gone).
 _EQUIVALENT_OWNER_LOCK_NAMESPACE = 0x474551
 
 #: `details.reason` of the isolation refusal (019 stage 5, `T1907`, `FORK-2`).
@@ -103,13 +108,11 @@ class IsolationNotSerializable(GeoException):
 
 
 class MoneyBoundary:
-    """The lock primitives, the stop/hold guard and the delta check over one session.
+    """The equivalent lock, the stop/hold guard and the delta check over one session.
 
     One instance carries one advisory-lock deadline: the budget starts at the first lock this instance
     takes and is shared by every later lock it takes (`_set_local_advisory_lock_timeout`). A caller
-    that wants a fresh budget per unit of work takes a fresh instance. (Until programme 019, stage 4
-    the payment engine was a `MoneyBoundary`; the engine is gone, the primitives stay here until
-    stage 5.)
+    that wants a fresh budget per unit of work takes a fresh instance.
     """
 
     def __init__(self, session: AsyncSession):
@@ -126,40 +129,16 @@ class MoneyBoundary:
         self._advisory_lock_deadline: float | None = None
 
     @staticmethod
-    def _segment_lock_key(
-        *, equivalent_id: UUID, from_participant_id: UUID, to_participant_id: UUID
-    ) -> int:
-        """Compute a stable BIGINT advisory lock key for a reciprocal pair.
-
-        Lock identity is intentionally unordered because both payment directions
-        mutate the same reciprocal Debt resource. Persisted flow direction remains
-        unchanged. The first 8 SHA-256 bytes form a signed Postgres BIGINT.
-        """
-        participant_a, participant_b = sorted(
-            (from_participant_id.bytes, to_participant_id.bytes)
-        )
-        digest = hashlib.sha256(
-            equivalent_id.bytes + participant_a + participant_b
-        ).digest()
-        return int.from_bytes(digest[:8], byteorder="big", signed=True)
-
-    @staticmethod
-    def _tx_lock_key(tx_id: str) -> int:
-        """Compute a stable signed INT key inside the transaction-lock domain."""
-        digest = hashlib.sha256(str(tx_id).encode("utf-8")).digest()
-        return int.from_bytes(digest[:4], byteorder="big", signed=True)
-
-    @staticmethod
     def _equivalent_owner_lock_key(equivalent_id: UUID) -> int:
-        """Compute a stable signed INT key inside the equivalent-owner domain."""
+        """Compute a stable signed INT key inside the equivalent-lock domain."""
         digest = hashlib.sha256(equivalent_id.bytes).digest()
         return int.from_bytes(digest[:4], byteorder="big", signed=True)
 
-    async def _acquire_equivalent_owner_locks(
+    async def _acquire_shared_equivalent_locks_in_order(
         self,
         equivalent_ids: set[UUID] | list[UUID] | tuple[UUID, ...],
     ) -> None:
-        """Acquire the complete equivalent owner set in one global order."""
+        """The equivalent lock in SHARED mode for the complete set, in one global (sorted-key) order."""
         keys = sorted(
             {
                 self._equivalent_owner_lock_key(equivalent_id)
@@ -169,28 +148,28 @@ class MoneyBoundary:
         for key in keys:
             await self._set_local_advisory_lock_timeout()
             await self.session.execute(
-                text("SELECT pg_advisory_xact_lock(:namespace, :key)"),
+                text("SELECT pg_advisory_xact_lock_shared(:namespace, :key)"),
                 {
                     "namespace": _EQUIVALENT_OWNER_LOCK_NAMESPACE,
                     "key": key,
                 },
             )
 
-    async def acquire_staged_equivalent_owner_locks(
+    async def acquire_shared_equivalent_locks(
         self,
         equivalent_ids: set[UUID] | list[UUID] | tuple[UUID, ...],
     ) -> None:
-        """Acquire a caller-owned staged batch's complete equivalent set."""
+        """A caller-owned staged batch's (the tick's money phase, an inject) complete equivalent set, shared."""
         previous_lock_timeout = await self.session.scalar(text("SHOW lock_timeout"))
         acquired = False
         try:
-            await self._acquire_equivalent_owner_locks(equivalent_ids)
+            await self._acquire_shared_equivalent_locks_in_order(equivalent_ids)
             acquired = True
         finally:
-            # Staged callers own a larger outer transaction. The payment owner-lock
-            # deadline must not become the timeout policy for later clearing,
-            # drift or persistence statements in that transaction. If acquisition
-            # itself fails/cancels, the outer owner rolls back the unusable UoW.
+            # Staged callers own a larger outer transaction. The lock deadline must
+            # not become the timeout policy for later statements in that
+            # transaction. If acquisition itself fails/cancels, the outer owner
+            # rolls back the unusable UoW.
             if acquired:
                 await self.session.execute(
                     text(
@@ -199,15 +178,15 @@ class MoneyBoundary:
                     {"lock_timeout": str(previous_lock_timeout)},
                 )
 
-    async def acquire_session_equivalent_owner_lock(
+    async def acquire_exclusive_equivalent_session_lock(
         self,
         equivalent_id: UUID,
     ) -> None:
-        """Acquire the shared owner identity beyond a transaction rollback.
+        """The clearing's EXCLUSIVE equivalent lock, at SESSION level, beyond a transaction rollback.
 
-        Clearing pins the physical connection, rolls back the acquisition
-        transaction to obtain a fresh SERIALIZABLE snapshot, and explicitly
-        releases this session-level lock before returning the connection.
+        The clearing pins the physical connection, takes this lock (it waits for every shared holder in
+        flight), rolls the acquisition transaction back to obtain a snapshot newer than whatever it waited
+        for, and explicitly releases the lock before returning the connection.
         """
         await self._set_local_advisory_lock_timeout()
         await self.session.execute(
@@ -218,11 +197,11 @@ class MoneyBoundary:
             },
         )
 
-    async def release_session_equivalent_owner_lock(
+    async def release_exclusive_equivalent_session_lock(
         self,
         equivalent_id: UUID,
     ) -> bool:
-        """Release one session-level owner lock from a pinned connection."""
+        """Release the clearing's session-level exclusive lock; True only when PostgreSQL confirms it."""
         return bool(
             await self.session.scalar(
                 text("SELECT pg_advisory_unlock(:namespace, :key)"),
@@ -232,51 +211,6 @@ class MoneyBoundary:
                 },
             )
         )
-
-    async def _acquire_tx_advisory_lock(self, tx_id: str) -> None:
-        """Serialize all state transitions for one tx before authoritative reads."""
-        await self._set_local_advisory_lock_timeout()
-        await self.session.execute(
-            text("SELECT pg_advisory_xact_lock(:namespace, :key)"),
-            {
-                "namespace": _TX_ADVISORY_LOCK_NAMESPACE,
-                "key": self._tx_lock_key(tx_id),
-            },
-        )
-
-    async def _acquire_segment_advisory_locks(
-        self,
-        *,
-        equivalent_id: UUID,
-        routes: List[Tuple[List[str], Decimal]],
-        participant_map: dict[str, UUID],
-    ) -> None:
-        keys: set[int] = set()
-        for path, _route_amount in routes:
-            for i in range(len(path) - 1):
-                sender_id = participant_map[path[i]]
-                receiver_id = participant_map[path[i + 1]]
-                keys.add(
-                    self._segment_lock_key(
-                        equivalent_id=equivalent_id,
-                        from_participant_id=sender_id,
-                        to_participant_id=receiver_id,
-                    )
-                )
-
-        await self._acquire_segment_advisory_lock_keys(keys)
-
-    async def _acquire_segment_advisory_lock_keys(
-        self,
-        keys: set[int] | list[int] | tuple[int, ...],
-    ) -> None:
-        """Acquire unique segment keys in one global deadlock-safe order."""
-        for key in sorted(set(keys)):
-            await self._set_local_advisory_lock_timeout()
-            await self.session.execute(
-                text("SELECT pg_advisory_xact_lock(:key)"),
-                {"key": key},
-            )
 
     async def _set_local_advisory_lock_timeout(self) -> None:
         if not self._advisory_lock_timeout_enabled:
@@ -360,29 +294,26 @@ class MoneyBoundary:
         step 5c (`T1546`), in one under an integrity hold.
 
         ONE STATEMENT READS BOTH: `is_active` and `integrity_hold_result_id` live on the same row, so the
-        hold inherits every guarantee described below unchanged - the same `FOR SHARE`, the same owner
-        lock order, the same fresh post-lock snapshot in clearing. The scheduled reaction that sets a
-        hold holds the owner lock through its commit, exactly like the deactivating PATCH. ONE REASON
-        PER REFUSAL: an equivalent that is both inactive and held is refused as `equivalent_inactive`.
-        Neither refusal is retryable.
+        hold inherits every guarantee described below unchanged. The scheduled reaction that sets a hold
+        `UPDATE`s this row, exactly like the deactivating PATCH. ONE REASON PER REFUSAL: an equivalent
+        that is both inactive and held is refused as `equivalent_inactive`. Neither refusal is retryable.
 
         The flag is read as columns, never through an `Equivalent` instance: the payment service
         loads one before routing, and its cached `is_active` can still say True.
 
-        `row_lock=True` is for the payment COMMIT and renders `FOR SHARE` on PostgreSQL. It is what
-        binds the payment/PATCH race, and the advisory owner lock does not: the application runs at
-        SERIALIZABLE, a commit takes its snapshot before it waits on that lock, and a plain read
-        after the wait still returns the value from before the PATCH committed (measured
-        2026-09-13, `FOR KEY SHARE` equally stale). `FOR SHARE` instead waits for an uncommitted
-        PATCH and then fails with 40001, which the unit-of-work retry turns into a fresh snapshot
-        that sees the stop; and a PATCH arriving after this read waits for the payment's commit.
-        The caller must already hold the equivalent owner lock - owner lock first, row lock second,
-        the same order as the PATCH, or the two can deadlock.
+        `row_lock=True` renders `FOR SHARE` on PostgreSQL, and IT is what binds a money writer to the
+        stop: SERIALIZABLE takes its snapshot before any lock wait, and a plain read after the wait
+        still returns the value from before the PATCH committed (measured 2026-09-13, `FOR KEY SHARE`
+        equally stale). `FOR SHARE` instead waits for an uncommitted PATCH and then fails with 40001,
+        which the owner's retry turns into a fresh snapshot that sees the stop; and a PATCH arriving
+        after this read waits for the writer's commit. Since 019 stage 5 (`T1909`) the PATCH, the hold
+        clear, the reaction and the equivalent `DELETE` take no advisory lock at all - this row lock is
+        the whole protocol. Order: the equivalent advisory lock the writer holds (shared, or the
+        clearing's exclusive) first, this row second, the debt rows after.
 
         Since 019 stage 5 (`T1907`, `FORK-7`) the clearing reads with `row_lock=True` too, in every
-        attempt, and holds the row lock through its commit (`ClearingService._refuse_if_equivalent_inactive`):
-        until then it read with `row_lock=False` in a snapshot taken after its owner lock and relied on
-        the PATCH taking the same lock. `row_lock=False` has no caller left in the application.
+        attempt, and holds the row lock through its commit (`ClearingService._refuse_if_equivalent_inactive`).
+        `row_lock=False` has no caller left in the application.
         """
         ids = sorted(set(equivalent_ids), key=str)
         if not ids:

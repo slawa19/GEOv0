@@ -63,7 +63,7 @@ tables.
 It is DETECTION, not tamper protection, and nothing downstream may call it more.
 
 THE REACTION (step 5c, `T1516`/`T1546`, `react_to_failed`): a scheduled `FAILED`, confirmed by a full
-re-run under the equivalent's owner lock, sets the equivalent's integrity hold, which stops money at the
+re-run in one snapshot (until 019 stage 5 under the equivalent's owner lock), sets the equivalent's integrity hold, which stops money at the
 T1544 boundary. Nothing else: no notification subsystem, no checkpoint search, no report, no repair, and
 never an automatic clear - an admin clears it after a later `PASSED`.
 
@@ -865,7 +865,7 @@ async def record_outcome(session: Any, outcome: ReconciliationOutcome) -> str:
       previous run COMPLETES, and the next run then takes as long as the checkpoints and this verifier
       over every equivalent take. A stale verdict is replaced when that next run publishes, because the
       persisting state recomputes a different fingerprint from the stale one and is stored as a
-      transition; and step 5c re-verifies under the owner lock before it holds anything.
+      transition; and step 5c re-verifies in one snapshot before it holds anything.
     * THE REDIS LOCK IS NOT RENEWED. `redis_distributed_lock` sets its key once with a TTL
       (`INTEGRITY_CHECKPOINT_LOCK_TTL_SECONDS`, by default `max(30, interval)`, `app/main.py`) and never
       extends it, so a run longer than the TTL could overlap a second Redis-backed process. Acceptable
@@ -956,22 +956,19 @@ class BaselineTaken:
 
 
 async def take_baseline(session: Any, equivalent_id: uuid.UUID) -> BaselineTaken:
-    """Take THE baseline of one equivalent inside the caller's transaction, under its owner lock.
+    """Take THE baseline of one equivalent inside the caller's transaction.
 
     The caller commits; one equivalent is one transaction. Run it after seeding and before ordinary
     money operations, or - on an upgrade - as an explicit cutover on a quiet system
     (`scripts/take_reconciliation_baseline.py`). It adopts whatever the journal does not explain and
     certifies none of it.
 
-    THE OWNER LOCK serialises this with payments and clearing. Under `SERIALIZABLE` the snapshot is taken at the lock statement, before
-    any wait, so a money operation that commits while this waits is invisible here - and that is still
-    consistent, because such an operation changed `debts` and wrote the matching entries in the same
-    commit: its edges keep `debt - sum(delta)` unchanged.
+    ONE SNAPSHOT, NO LOCK (019 stage 5, `T1909`: the equivalent owner lock this took until then is gone).
+    The journal sums and the current debts are read in one snapshot, and every money operation changes
+    `debts` and writes the matching entries in the same commit, so an operation is either wholly in that
+    snapshot or wholly outside it: its edges keep `debt - sum(delta)` unchanged either way. Taking the
+    baseline on a live system is still not the documented procedure - the cutover is on a quiet system.
     """
-
-    from app.core.money_boundary import MoneyBoundary
-
-    await MoneyBoundary(session).acquire_staged_equivalent_owner_locks([equivalent_id])
 
     if await _has_baseline(session, equivalent_id):
         raise BaselineAlreadyTaken(
@@ -1062,7 +1059,7 @@ async def _set_integrity_hold(session: Any, equivalent_id: uuid.UUID, result_id:
 
 
 async def _confirm_and_hold(session: Any, equivalent_id: uuid.UUID) -> HoldDecision:
-    """Inside the reaction's transaction, under the owner lock: re-verify, and hold only on FAILED."""
+    """Inside the reaction's transaction: re-verify, and hold only on FAILED."""
 
     row = (
         await session.execute(
@@ -1076,7 +1073,7 @@ async def _confirm_and_hold(session: Any, equivalent_id: uuid.UUID) -> HoldDecis
         return HoldDecision(HOLD_ALREADY_HELD, result_id=row[0])
 
     # THE RE-RUN IS THE CONFIRMATION, not a formality: the verdict that triggered this reaction was
-    # computed without the owner lock and published in another transaction, and `record_outcome` leaves
+    # computed in another transaction and published there, and `record_outcome` leaves
     # a stale publication open on the grounds that this re-run happens. Full criteria (a) and (b).
     outcome = await verify_journal_equals_change(session, equivalent_id)
     if outcome.status != FAILED:
@@ -1114,26 +1111,27 @@ def _announce_hold(equivalent_id: uuid.UUID, decision: HoldDecision) -> None:
 
 
 async def react_to_failed(session_factory: Callable[[], Any], equivalent_id: uuid.UUID) -> HoldDecision:
-    """React to ONE scheduled `FAILED`: confirm it under the owner lock and hold the equivalent.
+    """React to ONE scheduled `FAILED`: confirm it in one snapshot and hold the equivalent.
 
     Decisions: step 5c brief and spec.md "Ключевое ревью шага 5", reaction paragraph. The order is the
     point, and each step is load-bearing:
 
     1. A FRESH TRANSACTION FOR THIS EQUIVALENT ALONE, so a hold that fails to commit cannot roll back a
        neighbour's.
-    2. THE OWNER LOCK BEFORE THE AUTHORITATIVE SNAPSHOT. It is taken on a session of its own and held
-       until the work transaction has committed, and the work transaction's first statement comes after
-       it is granted. Under SERIALIZABLE or REPEATABLE READ a snapshot is taken at a transaction's first
-       statement - before any wait on a lock in that transaction (T1544, measured) - so a lock taken in
-       the work transaction itself would verify a state from before whatever it waited for.
+    2. ONE SNAPSHOT (REPEATABLE READ, `_open_reaction_transaction`), and no advisory lock (019 stage 5,
+       `T1909`: the equivalent owner lock this took on a session of its own, before the snapshot, is
+       gone). Every money operation changes debts and writes its journal entries in one commit, so the
+       snapshot holds each operation wholly or not at all, and a corruption it finds does not disappear
+       with a later commit.
     3. THE FULL VERIFIER RE-RUN inside it (`_confirm_and_hold`).
     4. IF STILL FAILED: the evidence (`record_outcome`) and the hold, in that one transaction; COMMIT.
     5. ONLY THEN the structured log and the metric. Emitted before the commit they would report a hold
        that rolled back.
 
-    WHAT THE LOCK BINDS: a payment commit reads the hold with `FOR SHARE` after its own owner
-    lock, so it either commits before this hold or meets 40001 and refuses on the retry; a clearing
-    reads it in its fresh post-lock snapshot, so it either commits before this hold or refuses.
+    WHAT BINDS THE HOLD: every money writer - payment, tick, inject, clearing in every attempt - reads
+    the equivalent row `FOR SHARE` through its commit, so the hold's `UPDATE` waits for a writer that
+    already read "not held", and a writer reading after the hold committed meets 40001 and refuses on its
+    retry. Either it commits before this hold or it refuses.
 
     Any exception propagates to the caller, which records it as an error of this reaction; nothing is
     announced.
@@ -1143,21 +1141,13 @@ async def react_to_failed(session_factory: Callable[[], Any], equivalent_id: uui
     later runs then return `already_held` without announcing it; no money moves and no false hold results.
     """
 
-    from app.core.money_boundary import MoneyBoundary
-
-    async with session_factory() as lock_session:
-        try:
-            await MoneyBoundary(lock_session).acquire_staged_equivalent_owner_locks([equivalent_id])
-            async with session_factory() as work:
-                await _open_reaction_transaction(work)
-                decision = await _confirm_and_hold(work, equivalent_id)
-                if decision.decision == HOLD_SET:
-                    await work.commit()
-                else:
-                    await work.rollback()
-        finally:
-            # Releases the transaction-scoped owner lock - after the work transaction has ended.
-            await lock_session.rollback()
+    async with session_factory() as work:
+        await _open_reaction_transaction(work)
+        decision = await _confirm_and_hold(work, equivalent_id)
+        if decision.decision == HOLD_SET:
+            await work.commit()
+        else:
+            await work.rollback()
 
     if decision.decision == HOLD_SET:
         _announce_hold(equivalent_id, decision)

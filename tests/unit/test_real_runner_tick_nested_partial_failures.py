@@ -229,7 +229,7 @@ async def test_real_runner_tick_real_mode_uses_nested_tx_and_survives_one_action
 
     monkeypatch.setattr(
         PaymentService,
-        "acquire_staged_equivalent_owner_locks",
+        "acquire_shared_equivalent_locks",
         _no_owner_locks,
         raising=True,
     )

@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import AbstractSet, Any, Awaitable, Callable, List, Literal, NoReturn
 
-from sqlalchemy import select, and_, func, or_, text
+from sqlalchemy import select, and_, or_, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from sqlalchemy.exc import DBAPIError, IntegrityError
@@ -22,7 +22,6 @@ from app.core.payments.router import PaymentRouter
 from app.config import settings
 from app.db.models.audit_log import IntegrityAuditLog
 from app.db.models.debt import Debt
-from app.db.models.prepare_lock import PrepareLock
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 from app.db.models.participant import Participant
@@ -133,7 +132,9 @@ def _classify_payment_db_error(exc: BaseException) -> GeoException:
     Retryable: a DBAPI error carrying 40001/40P01, and - 019 stage 3, `FORK-1` - the book's
     `DebtVersionConflict` (a payment flow's debt changed underneath this transaction; the book no
     longer retries it from the same snapshot). Only that subclass: any other `StaleDataError`, and
-    every other ORM error, is not a conflict a fresh attempt is known to cure.
+    every other ORM error, is not a conflict a fresh attempt is known to cure. And - 019 stage 5,
+    `T1909`, precondition 1 - a `23505` on `uq_debts_debtor_creditor_equivalent` and on no other
+    constraint (`is_debt_pair_collision`).
     """
 
     for current in _iter_exception_chain(exc):
@@ -142,6 +143,8 @@ def _classify_payment_db_error(exc: BaseException) -> GeoException:
         if not isinstance(current, DBAPIError):
             continue
         if _payment_db_sqlstate(current) in _RETRYABLE_PAYMENT_SQLSTATES:
+            return RetryablePaymentConflictException()
+        if is_debt_pair_collision(current):
             return RetryablePaymentConflictException()
     return GeoException()
 
@@ -279,6 +282,35 @@ def _is_tx_id_collision(exc: BaseException) -> bool:
         and _payment_db_sqlstate(exc) == "23505"
         and _constraint_name(exc) == TX_ID_UNIQUE_CONSTRAINT
     )
+
+
+#: The one debt uniqueness a concurrent money writer can meet (019 stage 5, `T1909`, precondition 1).
+DEBT_PAIR_UNIQUE_CONSTRAINT = "uq_debts_debtor_creditor_equivalent"
+
+
+def is_debt_pair_collision(exc: BaseException) -> bool:
+    """A `23505` on `uq_debts_debtor_creditor_equivalent` - two writers inserted the same new debt row.
+
+    Without pair locks two transactions can both find no row for a pair and both insert it; the loser's
+    insert meets the winner's committed row. When no read-write cycle is attributable, PostgreSQL reports
+    that as `23505`, not `40001` (`T1908`, `sqlstate=23505 constraint=uq_debts_debtor_creditor_equivalent`).
+    It is transient in the same sense as 40001: nothing of the loser landed, and a fresh snapshot reads
+    the winner's row and updates it. So it is a retryable conflict for the three owners of whole-
+    transaction retries - `pay()`, the money-phase replay, the inject.
+
+    NARROW ON PURPOSE: read from the structured constraint name of the FIRST integrity error on the
+    deliberate chain (`orig`/`__cause__`, never `__context__`), and only this constraint. A `23505` on any
+    other constraint - `transactions_tx_id_key` belongs to the identity resolver, the envelope identities
+    to the book - or without a constraint name stays what it was (spec, Verification plan §4).
+    """
+
+    for current in _iter_exception_chain(exc):
+        if isinstance(current, IntegrityError):
+            return (
+                _payment_db_sqlstate(current) == "23505"
+                and _constraint_name(current) == DEBT_PAIR_UNIQUE_CONSTRAINT
+            )
+    return False
 
 
 @dataclass
@@ -1025,11 +1057,11 @@ class PaymentService:
             allowed_participant_pids=allowed_participant_pids,
         )
 
-    async def acquire_staged_equivalent_owner_locks(
+    async def acquire_shared_equivalent_locks(
         self,
         equivalent_codes: list[str] | tuple[str, ...] | set[str],
     ) -> None:
-        """Pre-acquire one sorted owner set for a caller-owned staged batch."""
+        """Pre-acquire a caller-owned staged batch's complete equivalent set, SHARED, in one global order."""
         codes = sorted(
             {
                 str(code).strip().upper()
@@ -1057,13 +1089,11 @@ class PaymentService:
             return
 
         try:
-            await self._boundary.acquire_staged_equivalent_owner_locks(
-                resolved_ids
-            )
+            await self._boundary.acquire_shared_equivalent_locks(resolved_ids)
         except DBAPIError as exc:
             if _payment_db_sqlstate(exc) == "55P03":
                 raise asyncio.TimeoutError(
-                    "Payment equivalent owner lock timed out"
+                    "Payment equivalent lock timed out"
                 ) from exc
             raise _classify_payment_db_error(exc) from exc
 
@@ -1086,7 +1116,7 @@ class PaymentService:
         Steps: validation and idempotency (a stored row answers with its stored result or a 409),
         the best-effort stop/hold pre-check, routing, ADMISSION, and then THE PAYMENT OPERATION - one
         savepoint opened before the `Transaction` is added, around DIRECT EXECUTION (stage 4,
-        `_run_payment_operation`): the row inserted `COMMITTED`, the owner, tx and pair locks, the
+        `_run_payment_operation`): the row inserted `COMMITTED`, the equivalent lock (shared), the
         capacity of every segment, the stop/hold `FOR SHARE`, the pre-state, the envelope with the
         declared intent, the book with its own savepoint, `check_payment_delta`, the trust-limit and
         symmetry checks, the integrity audit row. No intermediate payment state is written. Nothing of
@@ -1269,7 +1299,7 @@ class PaymentService:
         # T1544: a deactivated equivalent takes no new payment. Best effort, on the row loaded above
         # and AFTER the idempotency decision, so a replay of an already-accepted tx_id still answers
         # with its stored result. It is not the binding check - that one is at commit, under the
-        # owner lock and `FOR SHARE` (`MoneyBoundary.refuse_inactive_equivalents`) - and it
+        # shared equivalent lock and `FOR SHARE` (`MoneyBoundary.refuse_inactive_equivalents`) - and it
         # deliberately does not lock: forbidding a new PREPARED state after the PATCH returns would
         # be a stronger rule than this task's.
         if not equivalent.is_active:
@@ -1622,8 +1652,8 @@ class PaymentService:
         below rolls it back together with the money, so a `COMMITTED` row without its money never reaches
         the caller's commit. Then, in this order:
 
-        1. THE BINDING PHASE (`_bind_payment`, log/metric phase name `prepare`): the equivalent owner
-           lock, the transaction lock, the pair locks, the capacity of every segment - yielding the
+        1. THE BINDING PHASE (`_bind_payment`, log/metric phase name `prepare`): the equivalent lock
+           (shared), the capacity of every segment - yielding the
            DECLARATION, the immutable intent (validated ordered route segments and amounts).
         2. THE MONEY (`_apply_payment`, phase name `commit`): the operator stop/hold `FOR SHARE`, the
            authoritative pre-state of both directions of every pair (`_read_payment_prestate`), the v2
@@ -1726,23 +1756,22 @@ class PaymentService:
         routes: "list[tuple[list[str], Decimal]]",
         equivalent_id: uuid.UUID,
     ) -> "PaymentDeclaration":
-        """The binding phase: locks, then the capacity of every segment; returns the declaration.
+        """The binding phase: the equivalent lock, then the capacity of every segment; returns the declaration.
 
-        Lock order (`app/core/money_boundary.py`): the equivalent owner lock, the transaction lock, the
-        pair locks in their one global order - and only then the rows. The capacity of each segment is
-        read here, in this attempt's snapshot, after the locks: the limit of the receiver's active line
-        to the sender, both directions of the pair's debt, and the flows other transactions still hold
-        reserved in `prepare_locks` (nothing writes reservations since stage 4; the table and every
-        reader of it go in stage 5, `T1909` - until then a reservation, however it got there, is
-        honoured). Several routes over one segment are summed (`local_reserved`).
+        Lock order (`app/core/money_boundary.py`): the equivalent lock in SHARED mode - it keeps the
+        clearing's exclusive hold out and lets other payments in (019 stage 5, `T1909`; no transaction or
+        pair lock) - and only then the rows. The capacity of each segment is read here, in this attempt's
+        snapshot: the limit of the receiver's active line to the sender and both directions of the pair's
+        debt. A concurrent payment over the same pair is resolved by SERIALIZABLE and the owner's
+        whole-transaction retry (40001, or the `23505` of a concurrent insert of the same new debt row),
+        never by a reservation. Several routes of THIS payment over one segment are summed
+        (`local_reserved`).
 
         Refused with `RoutingException` (`E002`, `details` with `available`, `needed`, `reserved`) when a
         segment cannot carry its amount - after admission, so a definitive refusal (spec, "Допуск").
         """
 
-        boundary = self._boundary
-        await boundary._acquire_equivalent_owner_locks([equivalent_id])
-        await boundary._acquire_tx_advisory_lock(tx_id)
+        await self._boundary._acquire_shared_equivalent_locks_in_order([equivalent_id])
 
         pids: set[str] = set()
         for path, route_amount in routes:
@@ -1762,12 +1791,8 @@ class PaymentService:
         if len(participants) != len(pids):
             raise GeoException(f"Participants not found: {pids - set(participants)}")
 
-        await boundary._acquire_segment_advisory_locks(
-            equivalent_id=equivalent_id,
-            routes=routes,
-            participant_map=participants,
-        )
-
+        # `reserved` is what EARLIER ROUTES OF THIS PAYMENT already claim on a segment (multipath over one
+        # edge); no other transaction reserves anything (019 stage 5, `T1909`).
         local_reserved: dict[tuple[uuid.UUID, uuid.UUID], Decimal] = {}
         declared_routes: list[tuple[DeclaredFlow, ...]] = []
         for path, route_amount in routes:
@@ -1775,13 +1800,12 @@ class PaymentService:
             for sender_pid, receiver_pid in zip(path, path[1:]):
                 sender_id = participants[sender_pid]
                 receiver_id = participants[receiver_pid]
-                available, reserved = await self._segment_capacity(
-                    tx_id=tx_id,
+                available = await self._segment_capacity(
                     sender_id=sender_id,
                     receiver_id=receiver_id,
                     equivalent_id=equivalent_id,
                 )
-                reserved += local_reserved.get((sender_id, receiver_id), Decimal("0"))
+                reserved = local_reserved.get((sender_id, receiver_id), Decimal("0"))
                 if available < (route_amount + reserved):
                     raise RoutingException(
                         f"Insufficient capacity between {sender_pid} and {receiver_pid}. "
@@ -1812,12 +1836,11 @@ class PaymentService:
     async def _segment_capacity(
         self,
         *,
-        tx_id: str,
         sender_id: uuid.UUID,
         receiver_id: uuid.UUID,
         equivalent_id: uuid.UUID,
-    ) -> "tuple[Decimal, Decimal]":
-        """(available capacity, capacity other transactions hold reserved) of one flow edge."""
+    ) -> Decimal:
+        """The available capacity of one flow edge, read in this attempt's snapshot."""
 
         line = (
             await self.session.execute(
@@ -1832,30 +1855,7 @@ class PaymentService:
         limit = line if line is not None else Decimal("0")
         receiver_owes = await self._debt_amount(receiver_id, sender_id, equivalent_id)
         sender_owes = await self._debt_amount(sender_id, receiver_id, equivalent_id)
-
-        reserved = Decimal("0")
-        for lock_tx_id, effects in (
-            await self.session.execute(
-                select(PrepareLock.tx_id, PrepareLock.effects).where(
-                    PrepareLock.participant_id == sender_id,
-                    PrepareLock.expires_at > func.now(),
-                )
-            )
-        ).all():
-            if lock_tx_id == tx_id:
-                continue
-            for flow in (effects or {}).get("flows", []):
-                try:
-                    if uuid.UUID(flow["equivalent"]) != equivalent_id:
-                        continue
-                    flow_from = uuid.UUID(flow["from"])
-                    flow_to = uuid.UUID(flow["to"])
-                    flow_amount = Decimal(str(flow["amount"]))
-                except Exception:
-                    continue
-                if flow_from == sender_id and flow_to == receiver_id:
-                    reserved += flow_amount
-        return limit - sender_owes + receiver_owes, reserved
+        return limit - sender_owes + receiver_owes
 
     async def _debt_amount(
         self, debtor_id: uuid.UUID, creditor_id: uuid.UUID, equivalent_id: uuid.UUID

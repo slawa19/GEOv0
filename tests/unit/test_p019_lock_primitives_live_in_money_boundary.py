@@ -1,11 +1,12 @@
-"""019 `T1903`: every lock primitive lives in `app/core/money_boundary.py`, and nobody reaches it through the engine.
+"""019 `T1903`/`T1909`: the one equivalent lock lives in `app/core/money_boundary.py`; the removed ones stay removed.
 
 WHY. Stage 4 of 019 deleted `app/core/payments/engine.py` (`T1906`). The lock primitives (owner, staged owner,
 session owner, transaction and pair locks, their keys and namespaces), the stop/hold guard with its refusal
 constants and factories, and the payment delta check moved to `MoneyBoundary` in stage 2 so that the
 deletion cannot silently drop the coordination clearing, admin, the inject, the tick and reconciliation
-depend on (third consultation, `FORK-2`). This guard keeps it that way until stage 5 removes the
-primitives on evidence:
+depend on (third consultation, `FORK-2`). Stage 5 (`T1909`, fourth consultation `KEEP-EQUIVALENT-LOCK`)
+removed the transaction and pair locks and kept ONE equivalent identity in two modes - shared for payments,
+staged phases and injects, exclusive (session level) for the clearing. This guard keeps that shape:
 
 1. **No second home.** No module other than `money_boundary.py` defines the lock namespaces, the drift
    tolerance or a lock-key function, nor spells a namespace tag (`0x474551`, `0x475458`) as a literal.
@@ -39,7 +40,6 @@ import pytest
 
 from app.core.money_boundary import (
     _EQUIVALENT_OWNER_LOCK_NAMESPACE,
-    _TX_ADVISORY_LOCK_NAMESPACE,
     MoneyBoundary,
 )
 
@@ -48,22 +48,17 @@ HOME = "app/core/money_boundary.py"
 ENGINE_MODULE = "app.core.payments.engine"
 SCANNED_ROOTS = ("app", "tests", "scripts")
 
-#: Every name stage 2 moved out of the engine (019 spec, "Дом примитивов локов"; manifest §3).
+#: Every name that lives in the home (019 spec, "Дом примитивов локов"; manifest §3; the lock names as
+#: renamed by stage 5, `T1909`).
 MOVED = frozenset(
     {
         "_EQUIVALENT_OWNER_LOCK_NAMESPACE",
-        "_TX_ADVISORY_LOCK_NAMESPACE",
         "_DELTA_DRIFT_TOLERANCE",
-        "_segment_lock_key",
-        "_tx_lock_key",
         "_equivalent_owner_lock_key",
-        "_acquire_equivalent_owner_locks",
-        "acquire_staged_equivalent_owner_locks",
-        "acquire_session_equivalent_owner_lock",
-        "release_session_equivalent_owner_lock",
-        "_acquire_tx_advisory_lock",
-        "_acquire_segment_advisory_locks",
-        "_acquire_segment_advisory_lock_keys",
+        "_acquire_shared_equivalent_locks_in_order",
+        "acquire_shared_equivalent_locks",
+        "acquire_exclusive_equivalent_session_lock",
+        "release_exclusive_equivalent_session_lock",
         "_set_local_advisory_lock_timeout",
         "EQUIVALENT_INACTIVE_REASON",
         "EQUIVALENT_INTEGRITY_HOLD_REASON",
@@ -75,17 +70,41 @@ MOVED = frozenset(
         "_snapshot_net_positions",
     }
 )
-MODULE_CONSTANTS = frozenset(
-    {"_EQUIVALENT_OWNER_LOCK_NAMESPACE", "_TX_ADVISORY_LOCK_NAMESPACE", "_DELTA_DRIFT_TOLERANCE"}
-)
-KEY_FUNCTIONS = frozenset({"_segment_lock_key", "_tx_lock_key", "_equivalent_owner_lock_key"})
+MODULE_CONSTANTS = frozenset({"_EQUIVALENT_OWNER_LOCK_NAMESPACE", "_DELTA_DRIFT_TOLERANCE"})
+KEY_FUNCTIONS = frozenset({"_equivalent_owner_lock_key"})
 #: Read from the home, never spelled here - a literal in this file would be the very finding it looks for.
-NAMESPACE_TAGS = frozenset({_EQUIVALENT_OWNER_LOCK_NAMESPACE, _TX_ADVISORY_LOCK_NAMESPACE})
+#: The transaction-lock tag (`0x475458`) left with its lock and is found by `REMOVED_NAMES`/the SQL rule.
+NAMESPACE_TAGS = frozenset({_EQUIVALENT_OWNER_LOCK_NAMESPACE})
+
+#: The names stage 5 REMOVED (`T1909`): the transaction and pair locks, their keys and namespace, the old
+#: exclusive owner entries. None of them may be defined or referenced again anywhere in `app/`, `tests/`,
+#: `scripts/` - a test patching a removed name would patch nothing, which is a silent green.
+REMOVED_NAMES = frozenset(
+    {
+        "_TX_ADVISORY_LOCK_NAMESPACE",
+        "_segment_lock_key",
+        "_tx_lock_key",
+        "_acquire_tx_advisory_lock",
+        "_acquire_segment_advisory_locks",
+        "_acquire_segment_advisory_lock_keys",
+        "_acquire_equivalent_owner_locks",
+        "acquire_staged_equivalent_owner_locks",
+        "acquire_session_equivalent_owner_lock",
+        "release_session_equivalent_owner_lock",
+        "_locked_pairs_for_equivalent",
+        "PrepareLock",
+    }
+)
+
+#: The advisory SQL functions `app/` may spell, and only in the home: the shared transaction-level lock of
+#: payments/staged phases/injects, and the clearing's session-level exclusive lock and its release.
+ALLOWED_ADVISORY_FUNCTIONS = frozenset({"pg_advisory_xact_lock_shared", "pg_advisory_lock", "pg_advisory_unlock"})
+_ADVISORY_CALL = re.compile(r"\b(pg_(?:try_)?advisory_\w+)\s*\(")
 
 #: A method in `app/` that shares a moved name and is NOT a second primitive, with the reason.
 ALLOWED_METHODS = {
-    ("app/core/payments/service.py", "PaymentService", "acquire_staged_equivalent_owner_locks"):
-        "resolves equivalent CODES to ids and calls MoneyBoundary.acquire_staged_equivalent_owner_locks",
+    ("app/core/payments/service.py", "PaymentService", "acquire_shared_equivalent_locks"):
+        "resolves equivalent CODES to ids and calls MoneyBoundary.acquire_shared_equivalent_locks",
 }
 
 _PATCH_STRING = re.compile(r"app\.core\.payments\.engine\.(?:PaymentEngine\.)?(\w+)")
@@ -263,7 +282,6 @@ def test_the_scan_is_not_vacuous() -> None:
         "app/api/v1/admin.py",
         "app/api/v1/simulator.py",
         "app/core/clearing/service.py",
-        "app/core/ledger/reconciliation.py",
         "app/core/payments/service.py",
         "app/core/simulator/real_runner_impl.py",
         "app/core/simulator/real_clearing_engine.py",
@@ -308,8 +326,8 @@ _VIOLATIONS = {
         "import app.core.payments.engine as em\nmonkeypatch.setattr(em, '_DELTA_DRIFT_TOLERANCE', 1)\n"
     ),
     "class-setattr": "monkeypatch.setattr(PaymentEngine, 'refuse_inactive_equivalents', f)\n",
-    "patch-string": "monkeypatch.setattr('app.core.payments.engine.PaymentEngine._acquire_tx_advisory_lock', f)\n",
-    "instance-call": "async def f(s):\n    await PaymentEngine(s).acquire_staged_equivalent_owner_locks([1])\n",
+    "patch-string": "monkeypatch.setattr('app.core.payments.engine.PaymentEngine._set_local_advisory_lock_timeout', f)\n",
+    "instance-call": "async def f(s):\n    await PaymentEngine(s).acquire_shared_equivalent_locks([1])\n",
     "dotted-module": "import app.core.payments.engine\napp.core.payments.engine.PaymentEngine.check_payment_delta\n",
     "module-alias-class-attribute": (
         "from app.core.payments import engine as em\nem.PaymentEngine.MONEY_STOP_REASONS\n"
@@ -319,11 +337,11 @@ _VIOLATIONS = {
         "monkeypatch.setattr(em.PaymentEngine, 'refuse_inactive_equivalents', f)\n"
     ),
     "module-alias-instance-call": (
-        "from app.core.payments import engine as em\nem.PaymentEngine(s)._acquire_tx_advisory_lock('t')\n"
+        "from app.core.payments import engine as em\nem.PaymentEngine(s)._set_local_advisory_lock_timeout()\n"
     ),
     "constant-redefined": "_EQUIVALENT_OWNER_LOCK_NAMESPACE = 1\n",
     "key-function-redefined": "def _equivalent_owner_lock_key(equivalent_id):\n    return 1\n",
-    "namespace-literal": "text('SELECT pg_advisory_xact_lock(:n, :k)'), {'n': 0x475458}\n",
+    "namespace-literal": "text('SELECT pg_advisory_xact_lock_shared(:n, :k)'), {'n': 0x474551}\n",
     "import-deleted-module": "import app.core.payments.engine\n",
     "import-deleted-module-aliased": "import app.core.payments.engine as em\n",
     "from-package-import-deleted-module": "from app.core.payments import engine\n",
@@ -357,7 +375,7 @@ def test_counter_check_each_violation_shape_is_found(name: str) -> None:
 def test_counter_check_an_override_in_the_engine_is_found() -> None:
     source = (
         "class PaymentEngine(MoneyBoundary):\n"
-        "    async def _acquire_equivalent_owner_locks(self, ids):\n"
+        "    async def _acquire_shared_equivalent_locks_in_order(self, ids):\n"
         "        return None\n"
     )
     assert findings_for(source, "app/core/payments/engine.py")
@@ -387,6 +405,112 @@ def test_counter_check_every_import_shape_of_the_deleted_module_is_rule_3() -> N
 
 
 def test_counter_check_the_listed_wrapper_is_allowed_and_only_where_listed() -> None:
-    source = "class PaymentService:\n    async def acquire_staged_equivalent_owner_locks(self, codes):\n        pass\n"
+    source = "class PaymentService:\n    async def acquire_shared_equivalent_locks(self, codes):\n        pass\n"
     assert findings_for(source, "app/core/payments/service.py") == []
     assert findings_for(source, "app/core/payments/other.py")
+
+
+# --- stage 5 (`T1909`): the removed coordination stays removed, and the retained lock has its two modes ---
+
+
+def removed_name_findings(source: str, relative: str) -> list[str]:
+    """Every identifier, import, attribute or exact patch string that names a REMOVED primitive.
+
+    Prose is not scanned: a docstring or comment that mentions a removed name historically is not a use.
+    A string constant counts only when it IS the name (a `monkeypatch.setattr(obj, "<name>", ...)` target)
+    or a dotted path ending in it.
+    """
+
+    found: list[str] = []
+    for node in ast.walk(ast.parse(source)):
+        name = None
+        if isinstance(node, ast.Name):
+            name = node.id
+        elif isinstance(node, ast.Attribute):
+            name = node.attr
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            name = node.name
+        elif isinstance(node, ast.alias):
+            name = node.name.rsplit(".", 1)[-1]
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            name = node.value.rsplit(".", 1)[-1] if re.fullmatch(r"[\w.]+", node.value) else None
+        if name in REMOVED_NAMES:
+            found.append(f"{relative}:{getattr(node, 'lineno', 0)}: `{name}` was removed by 019 stage 5 (T1909)")
+    return found
+
+
+def advisory_sql_findings(source: str, relative: str) -> list[str]:
+    """An advisory-lock SQL function spelled in `app/`: only the home may, and only the retained ones."""
+
+    found: list[str] = []
+    for match in _ADVISORY_CALL.finditer(source):
+        function = match.group(1)
+        line = source.count("\n", 0, match.start()) + 1
+        if relative != HOME:
+            found.append(f"{relative}:{line}: `{function}(` outside {HOME}")
+        elif function not in ALLOWED_ADVISORY_FUNCTIONS:
+            found.append(f"{relative}:{line}: `{function}(` is not the retained shared/exclusive lock")
+    return found
+
+
+def test_the_removed_locks_and_reservations_stay_removed() -> None:
+    """019 stage 5 (`T1909`): no transaction lock, no pair lock, no old exclusive owner entry, no reservation.
+
+    MUTATION that must redden it: restore `_acquire_tx_advisory_lock` in `money_boundary.py`, or a test
+    patching `_locked_pairs_for_equivalent`, or an `import PrepareLock` anywhere.
+    """
+
+    # The guards of the removed names spell them on purpose.
+    guards = {
+        Path(__file__).resolve(),
+        (REPO / "tests/unit/test_p019_no_intermediate_payment_state_is_written.py").resolve(),
+    }
+    found: list[str] = []
+    for path in _scanned_files():
+        if path.resolve() in guards:
+            continue
+        found.extend(removed_name_findings(path.read_text(encoding="utf-8"), path.relative_to(REPO).as_posix()))
+    assert not found, (
+        "A primitive or reservation reader that 019 stage 5 removed is defined or referenced again:\n  "
+        + "\n  ".join(found)
+        + "\n\nThe retained coordination is ONE equivalent lock: shared "
+        "(`_acquire_shared_equivalent_locks_in_order`, `acquire_shared_equivalent_locks`) and the clearing's "
+        "exclusive session lock (`acquire_exclusive_equivalent_session_lock`). Form only: a name built at "
+        "run time is not seen; whether coordination holds is decided by the concurrency tests "
+        "(`tests/integration/test_p019_equivalent_lock_modes_postgres.py`) and the tier."
+    )
+
+
+def test_app_takes_advisory_locks_only_in_the_home_and_only_in_the_two_retained_modes() -> None:
+    found: list[str] = []
+    for path in sorted((REPO / "app").rglob("*.py")):
+        found.extend(advisory_sql_findings(path.read_text(encoding="utf-8"), path.relative_to(REPO).as_posix()))
+    assert not found, (
+        "An advisory-lock SQL function outside the retained shape (shared transaction lock, the clearing's "
+        "session lock and its unlock, all in the home):\n  " + "\n  ".join(found)
+        + "\n\nForm only: SQL assembled at run time is not seen."
+    )
+    home = (REPO / HOME).read_text(encoding="utf-8")
+    spelled = {m.group(1) for m in _ADVISORY_CALL.finditer(home)}
+    assert spelled == ALLOWED_ADVISORY_FUNCTIONS, f"the home spells {sorted(spelled)}"
+
+
+def test_counter_check_the_stage_5_rules_fire_on_each_shape() -> None:
+    for source in (
+        "await MoneyBoundary(s)._acquire_tx_advisory_lock('t')\n",
+        "monkeypatch.setattr(ClearingService, '_locked_pairs_for_equivalent', f)\n",
+        "from app.db.models.prepare_lock import PrepareLock\n",
+        "monkeypatch.setattr('app.core.money_boundary.MoneyBoundary.acquire_staged_equivalent_owner_locks', f)\n",
+        "def _segment_lock_key(**kw):\n    return 1\n",
+    ):
+        assert removed_name_findings(source, "tests/unit/synthetic.py"), source
+    for source in (
+        '"""The old `_acquire_tx_advisory_lock` is gone."""\n',
+        "await MoneyBoundary(s).acquire_shared_equivalent_locks([1])\n",
+    ):
+        assert removed_name_findings(source, "tests/unit/synthetic.py") == [], source
+    assert advisory_sql_findings("text('SELECT pg_advisory_xact_lock(:k)')", HOME)
+    assert advisory_sql_findings("text('SELECT pg_try_advisory_lock(1, 2)')", HOME)
+    assert advisory_sql_findings("text('SELECT pg_advisory_xact_lock_shared(1, 2)')", "app/core/other.py")
+    assert advisory_sql_findings("text('SELECT pg_advisory_xact_lock_shared(1, 2)')", HOME) == []
+    assert advisory_sql_findings("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory'", "app/x.py") == []

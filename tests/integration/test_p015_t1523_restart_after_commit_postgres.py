@@ -151,7 +151,6 @@ async def test_a_payment_committed_by_a_process_that_died_is_replayed_by_another
     from app.core.auth.crypto import generate_keypair, get_pid_from_public_key
     from app.db.models.equivalent import Equivalent
     from app.db.models.participant import Participant
-    from app.db.models.prepare_lock import PrepareLock
     from app.db.models.trustline import TrustLine
     from tests.conftest import TestingSessionLocal
 
@@ -290,12 +289,4 @@ async def test_a_payment_committed_by_a_process_that_died_is_replayed_by_another
         f"opened a second envelope: {after_replay!r} != {after_crash!r}"
     )
 
-    # The prepare lock of the dead process is gone with its commit - no leftovers for the
-    # second process to trip over.
-    async with TestingSessionLocal() as observer:
-        leftovers = (
-            await observer.execute(
-                select(PrepareLock.id).where(PrepareLock.tx_id == tx_id)
-            )
-        ).all()
-    assert leftovers == [], leftovers
+    # (The leftover-reservation read that stood here went with `prepare_locks`, 019 stage 5, `T1909`.)

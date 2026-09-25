@@ -14,7 +14,8 @@ precondition of activating the journal.
 HOW THE STAND SEES IT. A `before_flush` listener on the writing session asks `pg_locks`, through that
 session's own connection, whether the backend holds the owner lock of each debt's equivalent: the
 exact key (`classid` = namespace, `objid` = key as unsigned, `objsubid` = 2 for the two-argument
-form), `ExclusiveLock`, granted. Observations are recorded and asserted AFTER the call returns: an
+form), `ShareLock` since 019 stage 5 (`T1909`: the inject holds the ONE equivalent lock SHARED; the
+clearing is the only exclusive holder - `ExclusiveLock` until then), granted. Observations are recorded and asserted AFTER the call returns: an
 assertion raised inside a commit would be swallowed by the inject's own error handling and read as
 "inject failed", which is the kind of green this programme exists to remove.
 
@@ -70,7 +71,7 @@ _HOLDS_OWNER_LOCK_SQL = text(
       AND classid = :namespace
       AND objid = :objid
       AND objsubid = 2
-      AND mode = 'ExclusiveLock'
+      AND mode = 'ShareLock'
       AND granted
     """
 )

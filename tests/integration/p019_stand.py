@@ -39,7 +39,6 @@ from app.db.journal_tables import debt_journal_entries, debt_operations
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
-from app.db.models.prepare_lock import PrepareLock
 from app.db.models.transaction import Transaction
 from app.main import app
 from tests.integration.test_p015_p1_money_replay_postgres import factory  # noqa: F401 - fixture
@@ -216,13 +215,6 @@ async def tx_row(factory, tx_id: str) -> tuple[str, dict | None] | None:  # noqa
     return None if row is None else (str(row[0]), row[1])
 
 
-async def prepare_lock_count(factory, tx_id: str) -> int:  # noqa: F811
-    async with factory() as s:
-        return int(
-            await s.scalar(select(func.count(PrepareLock.id)).where(PrepareLock.tx_id == tx_id))
-        )
-
-
 async def debts(factory, world: ApiWorld) -> dict[tuple[str, str], Decimal]:  # noqa: F811
     async with factory() as s:
         rows = (
@@ -264,7 +256,6 @@ class FreshObservation:
 
     marker_seen: bool
     state: str | None
-    prepare_locks: int
 
 
 async def observe_after_marker(factory, tx_id: str) -> FreshObservation:  # noqa: F811
@@ -292,11 +283,8 @@ async def observe_after_marker(factory, tx_id: str) -> FreshObservation:  # noqa
             {"xid": marker_xid},
         )
         state = await s.scalar(select(Transaction.state).where(Transaction.tx_id == tx_id))
-        locks = await s.scalar(
-            select(func.count(PrepareLock.id)).where(PrepareLock.tx_id == tx_id)
-        )
         await s.rollback()
-    return FreshObservation(bool(seen), None if state is None else str(state), int(locks))
+    return FreshObservation(bool(seen), None if state is None else str(state))
 
 
 # ── instruments ───────────────────────────────────────────────────────────────────────────────
@@ -304,7 +292,7 @@ async def observe_after_marker(factory, tx_id: str) -> FreshObservation:  # noqa
 
 class CommitRecorder:
     """Wraps `commit()` of ONE request's session and records, after each REAL commit, what another
-    transaction then sees of `tx_id`: `(state or None, prepare lock rows)`.
+    transaction then sees of `tx_id`: its state, or None (the reservation count left with `prepare_locks`, 019 `T1909`).
 
     It wraps the AsyncSession instance the request handler received, so every commit made through it
     is seen - the service's and the engine's alike (`PaymentEngine` holds the same session object).
@@ -313,7 +301,7 @@ class CommitRecorder:
     def __init__(self, factory, tx_id: str) -> None:  # noqa: F811
         self._factory = factory
         self.tx_id = tx_id
-        self.commits: list[tuple[str | None, int]] = []
+        self.commits: list[str | None] = []
 
     def __call__(self, session) -> None:
         original = session.commit
@@ -321,8 +309,7 @@ class CommitRecorder:
         async def recording_commit():
             await original()
             row = await tx_row(self._factory, self.tx_id)
-            locks = await prepare_lock_count(self._factory, self.tx_id)
-            self.commits.append((None if row is None else row[0], locks))
+            self.commits.append(None if row is None else row[0])
 
         session.commit = recording_commit
 

@@ -74,6 +74,7 @@ from app.core.payments.service import (
     PaymentTransactionUnusable,
     _drain_call,
     collect_admitted_refusals,
+    is_debt_pair_collision,
     record_definitive_refusal,
 )
 from app.core.simulator.commit_resolution import resolve_commit_under_cancellation
@@ -108,7 +109,8 @@ def money_conflict_name(exc: BaseException | None) -> str | None:
       what a staged payment propagates.
     * A raw `DBAPIError` is classified here because the money boundary contains statements the
       payment service never sees - the debt snapshot read and the owner-lock acquisition - and a
-      SERIALIZABLE waiter can take a genuine 40001 on either.
+      SERIALIZABLE waiter can take a genuine 40001 on either. Since 019 stage 5 (`T1909`) also a `23505`
+      on exactly `uq_debts_debtor_creditor_equivalent` (`is_debt_pair_collision`), named `"23505"`.
     * `DebtVersionConflict` is the book's optimistic-version conflict on a payment flow (019 stage 3,
       `FORK-1`). The book no longer retries it from the same snapshot; the owner of the transaction
       does, and this is that owner. Only that subclass: a bare `StaleDataError` from anywhere else is
@@ -136,6 +138,10 @@ def money_conflict_name(exc: BaseException | None) -> str | None:
         )
         if sqlstate in _TRANSIENT_SQLSTATES:
             return str(sqlstate)
+        if is_debt_pair_collision(exc):
+            # 019 stage 5 (`T1909`, precondition 1): two writers inserted the same new debt row; the
+            # constraint is named, and no other 23505 passes (`is_debt_pair_collision`).
+            return "23505"
     return None
 
 

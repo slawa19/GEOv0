@@ -164,7 +164,16 @@ async def test_skip_ends_service_owned_transaction_postgres(
 @pytest.mark.asyncio
 async def test_policy_skip_releases_debt_rows_before_concurrent_payment_postgres(
     db_session,
+    monkeypatch,
 ):
+    """A policy skip releases the cycle's Debt row locks AND the clearing's exclusive equivalent lock.
+
+    019 stage 5 (`T1909`): the `prepare_locks` assertion this test ended with went with the table (the
+    payment path writes no reservation, so it was vacuous since stage 4). In its place: the clearing
+    really took its exclusive equivalent session lock (counted), and after the skip no advisory lock is
+    held on this database - a skip that kept it would make the payment's shared acquisition wait and time
+    out, exactly like a retained row lock.
+    """
     dialect = None
     try:
         dialect = db_session.get_bind().dialect.name
@@ -174,17 +183,18 @@ async def test_policy_skip_releases_debt_rows_before_concurrent_payment_postgres
         pytest.skip("Postgres-only: clearing skip-path row-lock ownership")
 
     from app.core.clearing.service import ClearingService
+    from app.core.money_boundary import MoneyBoundary
     from app.core.payments.router import PaymentRouter
     from app.core.payments.service import PaymentService
     from app.db.models.debt import Debt
     from app.db.models.equivalent import Equivalent
     from app.db.models.participant import Participant
-    from app.db.models.prepare_lock import PrepareLock
     from app.db.models.transaction import Transaction
     from app.db.models.trustline import TrustLine
     from app.schemas.payment import PaymentConstraints
     from app.utils.exceptions import TimeoutException
     from tests.conftest import TestingSessionLocal
+    from tests.p019_locks_off import advisory_locks_held
 
     nonce = uuid.uuid4().hex[:10]
     equivalent_id = uuid.uuid4()
@@ -311,10 +321,27 @@ async def test_policy_skip_releases_debt_rows_before_concurrent_payment_postgres
             ).scalar_one()
             assert str(isolation).lower() == "serializable"  # 019 stage 5 (T1907): the only supported level
 
+        exclusive_acquired: list[uuid.UUID] = []
+        original_exclusive = MoneyBoundary.acquire_exclusive_equivalent_session_lock
+
+        async def _count_exclusive(self, locked_equivalent_id):
+            await original_exclusive(self, locked_equivalent_id)
+            exclusive_acquired.append(locked_equivalent_id)
+
+        monkeypatch.setattr(
+            MoneyBoundary, "acquire_exclusive_equivalent_session_lock", _count_exclusive
+        )
         skipped_amount = await ClearingService(
             clearing_session
         ).execute_clearing_with_amount(cycle)
+        monkeypatch.setattr(
+            MoneyBoundary, "acquire_exclusive_equivalent_session_lock", original_exclusive
+        )
         assert skipped_amount is None
+        # The skip happened UNDER the clearing's exclusive lock, and left no advisory lock behind.
+        assert exclusive_acquired == [equivalent_id]
+        async with TestingSessionLocal() as observer:
+            assert await advisory_locks_held(observer) == 0
 
         payment_service = PaymentService(payment_session)
         payment_task = asyncio.create_task(
@@ -347,13 +374,6 @@ async def test_policy_skip_releases_debt_rows_before_concurrent_payment_postgres
                     )
                 ).all()
             }
-            remaining_prepare_locks = (
-                await verify.scalars(
-                    select(PrepareLock).where(
-                        PrepareLock.tx_id.in_(payment_tx_ids)
-                    )
-                )
-            ).all()
             shared_debt = await verify.scalar(
                 select(Debt.amount).where(Debt.id == debt_ids[0])
             )
@@ -365,7 +385,6 @@ async def test_policy_skip_releases_debt_rows_before_concurrent_payment_postgres
         )
         assert payment_result is not None and payment_result.status == "COMMITTED"
         assert payment_transactions[blocked_payment_tx_id].state == "COMMITTED"
-        assert remaining_prepare_locks == []
         # Anti-vacuum: this is a real routed payment effect, not an empty waiter.
         assert shared_debt == Decimal("105.00000000")
     finally:

@@ -161,7 +161,7 @@ async def test_concurrent_same_cycle_serializable_resolves_one_durable_occurrenc
         release_first_owner = asyncio.Event()
         acquisition_count = 0
         acquisition_pids: dict[int, int] = {}
-        original_acquire = MoneyBoundary.acquire_session_equivalent_owner_lock
+        original_acquire = MoneyBoundary.acquire_exclusive_equivalent_session_lock
 
         async def _coordinate_owner_acquisition(engine, equivalent_id):
             nonlocal acquisition_count
@@ -180,7 +180,7 @@ async def test_concurrent_same_cycle_serializable_resolves_one_durable_occurrenc
 
         monkeypatch.setattr(
             MoneyBoundary,
-            "acquire_session_equivalent_owner_lock",
+            "acquire_exclusive_equivalent_session_lock",
             _coordinate_owner_acquisition,
         )
 

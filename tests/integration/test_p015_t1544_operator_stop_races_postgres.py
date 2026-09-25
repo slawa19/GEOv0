@@ -4,29 +4,38 @@ After `PATCH /admin/equivalents/{code}` with `is_active=false` returns, no money
 equivalent. Only two outcomes are allowed for anything racing it: the money commits BEFORE the PATCH
 returns, or the PATCH commits first and the money is refused.
 
-THREE RACES, THREE MECHANISMS - and the reason there are three is measured, not designed:
+ONE MECHANISM SINCE 019 STAGE 5 (`T1909`): THE ROW. Every money writer - payment, tick, inject and, since
+`T1907`, the clearing in every attempt - reads the equivalent row `FOR SHARE` and holds it through its
+commit (`MoneyBoundary.refuse_inactive_equivalents(row_lock=True)`); the PATCH takes no advisory lock and
+simply `UPDATE`s the row. So:
 
-| race                | what binds it                                                            |
-|---------------------|--------------------------------------------------------------------------|
-| payment <-> PATCH   | `FOR SHARE` on the equivalent row at payment COMMIT, against the PATCH's |
-|                     | UPDATE                                                                   |
-| clearing <-> PATCH  | the PATCH holds the equivalent owner advisory lock through its commit;   |
-|                     | clearing reads the flag in its fresh post-lock snapshot                  |
-| payment <-> clearing| the existing owner lock, unchanged                                       |
+* a writer that has already read the row waits for nothing and the PATCH's `UPDATE` queues on the
+  writer's transaction (`pg_locks` `transactionid`/`tuple`, `pg_blocking_pids` = the writer): the money
+  commits before the PATCH can answer;
+* a writer that reaches the row while the PATCH holds it uncommitted queues on the PATCH's transaction,
+  then meets 40001 (its snapshot predates the PATCH's commit) and its owner's retry refuses it;
+* a writer whose snapshot predates the PATCH but that has not yet read the row does not hold anything the
+  PATCH needs - the equivalent advisory lock it holds shared is not the PATCH's business any more - so the
+  PATCH answers first, and the writer's `FOR SHARE` then meets 40001 and its retry refuses it.
 
-WHY THE OWNER LOCK ALONE DOES NOT BIND A PAYMENT. The application runs SERIALIZABLE, and a payment
-commit takes its snapshot BEFORE it waits on the owner lock. Probed 2026-09-13 on raw connections: after
-the lock is granted, a plain read of `is_active` still returns the value from before the PATCH
-committed, and so does `FOR KEY SHARE`; only `FOR SHARE` fails with 40001, which the unit-of-work retry
-turns into a fresh snapshot that sees the stop. Clearing is different because it rolls back after
-taking its lock (`clearing/service.py`, `_rollback_before_interlock(work_session)`), so its plain read
-is fresh - and that is exactly why the PATCH's advisory lock is load-bearing for clearing.
+Until `T1909` the PATCH also held the equivalent owner advisory lock through its commit, and every race
+here asserted "some backend waits on an advisory lock". Those probes are replaced by the probe of the
+ACTUAL wait (spec, "Изоляция, писатели и клиринг", item 6): which backend waits, on which lock type, and
+behind whom - and, as the mechanism of the one lock order, which advisory lock the waiting WRITER already
+holds (shared for payment/tick/inject, exclusive for the clearing) while it waits on the row.
+
+WHY `FOR SHARE` AND NOT A PLAIN READ. The application runs SERIALIZABLE, and a transaction takes its
+snapshot at its first statement, before any lock wait. Probed 2026-09-13 on raw connections: after a wait,
+a plain read of `is_active` still returns the value from before the PATCH committed, and so does
+`FOR KEY SHARE`; only `FOR SHARE` fails with 40001, which the owner's retry turns into a fresh snapshot
+that sees the stop.
 
 THE STAND. Its own SERIALIZABLE engine (`factory`, from the P1 stand - the shared test engine runs READ
 COMMITTED, where none of these races can be seen). The PATCH goes through the real route; a barrier on
-its session's commit holds it with `is_active=false` flushed, the owner lock held, and nothing committed.
-Every control asserts its own premise - that the waiter really waited on an advisory lock, that the
-retry really was a 40001 - so none of them can pass by never having raced.
+its session's commit holds it with `is_active=false` flushed (the row lock held) and nothing committed,
+and records its backend pid. Every control asserts its own premise - that the waiter really waited on a
+row/transaction lock of the named backend, that the retry really was a 40001 - so none of them can pass
+by never having raced.
 """
 
 from __future__ import annotations
@@ -62,7 +71,6 @@ from tests.integration.test_p015_p1_money_replay_postgres import (  # noqa: F401
     _forget_the_route_cache,
     _debts,
     _install,
-    _prepare_locks,
     _record_plans,
     _run_record,
     _runner,
@@ -80,12 +88,15 @@ ADMIN = {"X-Admin-Token": settings.ADMIN_TOKEN}
 
 
 class _PatchGate:
-    """Holds ONE PATCH at its session commit: UPDATE flushed, owner lock held, nothing committed."""
+    """Holds ONE admin request at its session commit: its row writes flushed (their row locks held),
+    nothing committed. `pid` is that request's backend, recorded at the gate (019 stage 5, `T1909`: the
+    probe of the actual wait names the blocker)."""
 
     def __init__(self) -> None:
         self.armed = False
         self.reached = asyncio.Event()
         self.release = asyncio.Event()
+        self.pid: int | None = None
 
 
 @pytest_asyncio.fixture
@@ -99,6 +110,7 @@ async def admin_api(factory):
                 original_commit = session.commit
 
                 async def gated_commit():
+                    gate.pid = int(await session.scalar(text("SELECT pg_backend_pid()")))
                     gate.reached.set()
                     await gate.release.wait()
                     await original_commit()
@@ -124,7 +136,12 @@ async def _deactivate(client, code: str):
 
 
 async def _advisory_waiter_exists(timeout: float = 5.0) -> bool:
-    """A backend of THIS database is waiting on an advisory lock. Observed on its own connection."""
+    """A backend of THIS database is waiting on an advisory lock. Observed on its own connection.
+
+    No race of this module uses it since 019 stage 5 (`T1909`): the admin paths take no advisory lock,
+    so no waiter behind them is advisory. Kept for its importer outside this module
+    (`test_p015_step5b_criterion_b_postgres.py`), where a clearing may still queue on the equivalent lock.
+    """
     from tests.conftest import TestingSessionLocal
 
     loop = asyncio.get_running_loop()
@@ -144,6 +161,88 @@ async def _advisory_waiter_exists(timeout: float = 5.0) -> bool:
             if loop.time() > deadline:
                 return False
             await asyncio.sleep(0.02)
+
+
+_ROW_WAITS = frozenset({"transactionid", "tuple"})
+
+_ADVISORY_MODES_SQL = text(
+    "SELECT mode FROM pg_locks WHERE locktype = 'advisory' AND granted AND pid = :pid "
+    "AND database = (SELECT oid FROM pg_database WHERE datname = current_database()) "
+    "AND classid = :namespace AND objid = :objid AND objsubid = 2 ORDER BY mode"
+)
+
+
+async def _waiters_behind(blocker_pid: int, *, timeout: float = 5.0) -> list[tuple[int, str]]:
+    """(pid, locktype) of every backend queued on a lock `blocker_pid` holds, polled until one appears.
+
+    `pg_locks` (the ungranted lock) joined with `pg_blocking_pids` (the dependency), on an observer
+    connection of its own (`tests/p019_locks_off.blocked_by`). Empty after `timeout` means: nobody waited.
+    """
+    from tests.conftest import TestingSessionLocal
+    from tests.p019_locks_off import blocked_by
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    async with TestingSessionLocal() as observer:
+        while True:
+            waiting = await blocked_by(observer, blocker_pid)
+            if waiting or loop.time() > deadline:
+                return waiting
+            await asyncio.sleep(0.02)
+
+
+def _assert_row_wait(waiting: list[tuple[int, str]], *, what: str, behind: str) -> int:
+    """Exactly one backend waits, on a ROW or TRANSACTION lock of `behind`; returns its pid."""
+
+    assert waiting, f"{what} did not queue behind {behind}: it can finish while {behind} is still open"
+    pids = {pid for pid, _locktype in waiting}
+    assert len(pids) == 1, f"premise: more than one backend queued behind {behind}: {waiting}"
+    assert {locktype for _pid, locktype in waiting} <= _ROW_WAITS, (
+        f"{what} waits behind {behind}, but not on a row/transaction lock: {waiting}"
+    )
+    return next(iter(pids))
+
+
+async def _advisory_modes(pid: int, equivalent_id) -> list[str]:
+    """The modes of the equivalent advisory lock `pid` holds right now: `ShareLock` for the shared holders
+    (payment, tick, inject), `ExclusiveLock` for the clearing, `[]` for everyone else (admin, reaction)."""
+    from app.core.money_boundary import _EQUIVALENT_OWNER_LOCK_NAMESPACE
+    from tests.conftest import TestingSessionLocal
+
+    params = {
+        "pid": pid,
+        "namespace": _EQUIVALENT_OWNER_LOCK_NAMESPACE,
+        "objid": MoneyBoundary._equivalent_owner_lock_key(equivalent_id) & 0xFFFFFFFF,
+    }
+    async with TestingSessionLocal() as observer:
+        modes = (await observer.execute(_ADVISORY_MODES_SQL, params)).scalars().all()
+        await observer.rollback()
+    return [str(mode) for mode in modes]
+
+
+def _retries_on_40001(caplog, event: str) -> list[str]:
+    """The retry records of `event` (`payment.attempt_retry`, `clearing.attempt_retry`) caused by 40001.
+
+    The payment logs `pgcode=40001`, the clearing the list of codes it classified (`pgcode=['40001']`).
+    """
+    return [
+        r.getMessage()
+        for r in caplog.records
+        if f"event={event} " in r.getMessage()
+        and ("pgcode=40001" in r.getMessage() or "pgcode=['40001']" in r.getMessage())
+    ]
+
+
+async def _clearing_transactions(factory, seed) -> int:  # noqa: F811 - `factory` is a fixture name
+    async with factory() as verify:
+        return int(
+            await verify.scalar(
+                select(func.count(Transaction.id)).where(
+                    Transaction.type == "CLEARING",
+                    Transaction.initiator_id.in_(seed["participant_ids"]),
+                )
+            )
+        )
 
 
 def _assert_stop_refusal(exc: BaseException, code: str) -> None:
@@ -168,23 +267,25 @@ async def _is_active(factory, equivalent_id) -> bool:
 
 
 @pytest.mark.asyncio
-async def test_a_stop_arriving_between_prepare_and_commit_waits_for_the_payment(
-    factory, admin_api, monkeypatch
+async def test_a_stop_arriving_between_the_binding_and_the_money_phase_answers_first_and_the_payment_is_refused(
+    factory, admin_api, monkeypatch, caplog
 ) -> None:
-    """The payment is between its prepare and its commit phase; the deactivating PATCH arrives.
+    """The payment has bound (holds the equivalent lock SHARED) but not yet read the stop; the PATCH arrives.
 
-    UNTIL 019 STAGE 3 this was `test_a_payment_prepared_before_the_stop_and_waiting_behind_it_is_refused`:
-    the payment's `PREPARED` was durable and the owner lock released with it, so the PATCH could take
-    the lock between the two phases, and the commit then waited behind the PATCH and was refused
-    through the `FOR SHARE` serialization failure. Since stage 3 (`T1904`) the payment is ONE
-    transaction that holds the owner lock from `prepare` to its commit, so that schedule no longer
-    exists - the spec's "third behaviour change", established by the implemented order. What the T1544
-    contract needs from this schedule still holds and is asserted: the PATCH waits (measured: an
-    advisory waiter while the payment is held), the payment commits BEFORE the PATCH returns, and once
-    the PATCH has returned `200` the stop is in force - the next payment is refused.
+    HISTORY OF THIS SCHEDULE. Until 019 stage 3 it was `test_a_payment_prepared_before_the_stop_and_waiting_
+    behind_it_is_refused`: a durable `PREPARED` released the owner lock between the phases, the PATCH took
+    it, and the commit was refused through the `FOR SHARE` serialization failure. Stages 3-4 held the owner
+    lock EXCLUSIVELY from the binding phase to the commit, and the PATCH took it too, so the PATCH waited
+    and the payment committed first (`..._waits_for_the_payment`). Since stage 5 (`T1909`) the payment
+    holds the equivalent lock SHARED and the PATCH takes none: the payment holds nothing the PATCH needs
+    until its `FOR SHARE` read of the row, so the PATCH ANSWERS FIRST and the payment is REFUSED - the
+    other of the two outcomes T1544 allows, reached the way the manifest (`t1901-manifest.md` 5.5, rows
+    :192-:245) planned it: the payment's snapshot predates the PATCH, its `FOR SHARE` meets 40001, `pay()`
+    retries on a fresh snapshot, and the stop refuses the admitted payment (stored `ABORTED`).
 
-    RED if the payment released its owner lock before its commit (the PATCH would return while the
-    payment is held, and the payment would then commit after the stop), or if the PATCH took none.
+    RED if the money phase read the stop without `FOR SHARE` (its stale snapshot says active and it commits
+    after the PATCH answered), or if the PATCH waited on the payment's shared lock (the PATCH would not
+    answer while the payment is parked).
     """
     client, _gate = admin_api
     world = await _seed(factory)
@@ -194,13 +295,17 @@ async def test_a_stop_arriving_between_prepare_and_commit_waits_for_the_payment(
 
     prepared = asyncio.Event()
     release_commit = asyncio.Event()
+    payment_pid: list[int] = []
     original_commit = PaymentService._apply_payment
 
-    # 019 stage 4: the barrier stands at the entry of the payment's money phase (after the binding
-    # phase took the owner lock), where `PaymentEngine.commit` was entered before direct execution.
+    # The barrier stands at the entry of the payment's money phase: the binding phase has taken the
+    # equivalent lock (shared) and read the capacities; the stop has not been read yet. The first attempt
+    # waits here; the retry passes through.
     async def _commit_after_barrier(self, declaration, **kwargs):
-        prepared.set()
-        await release_commit.wait()
+        if not prepared.is_set():
+            payment_pid.append(int(await self.session.scalar(text("SELECT pg_backend_pid()"))))
+            prepared.set()
+            await release_commit.wait()
         return await original_commit(self, declaration, **kwargs)
 
     monkeypatch.setattr(PaymentService, "_apply_payment", _commit_after_barrier)
@@ -219,31 +324,34 @@ async def test_a_stop_arriving_between_prepare_and_commit_waits_for_the_payment(
     completed: list[str] = []
     payment = patch = None
     try:
-        payment = asyncio.create_task(_pay(tx_id))
-        payment.add_done_callback(lambda _t: completed.append("payment"))
-        await asyncio.wait_for(prepared.wait(), timeout=20)
-        # One transaction: nothing of the payment is visible to anyone else yet.
-        assert await _transactions(factory, world) == {}, "premise: the payment is durable before its commit"
+        with caplog.at_level(logging.WARNING):
+            payment = asyncio.create_task(_pay(tx_id))
+            payment.add_done_callback(lambda _t: completed.append("payment"))
+            await asyncio.wait_for(prepared.wait(), timeout=20)
+            # One transaction: nothing of the payment is visible to anyone else yet.
+            assert await _transactions(factory, world) == {}, "premise: the payment is durable before its commit"
+            assert await _advisory_modes(payment_pid[0], world.equivalent.id) == ["ShareLock"], (
+                "premise: the parked payment does not hold the equivalent lock shared"
+            )
 
-        patch = asyncio.create_task(_deactivate(client, code))
-        patch.add_done_callback(lambda _t: completed.append("patch"))
-        assert await _advisory_waiter_exists(), (
-            "the PATCH did not wait on the owner lock the prepared payment holds"
+            patch = asyncio.create_task(_deactivate(client, code))
+            patch.add_done_callback(lambda _t: completed.append("patch"))
+            resp = await asyncio.wait_for(patch, timeout=20)
+            assert resp.status_code == 200, resp.text
+            assert not payment.done(), "premise: the payment was not parked while the PATCH ran"
+            assert completed == ["patch"], completed
+
+            release_commit.set()
+            with pytest.raises(ConflictException) as refused_first:
+                await asyncio.wait_for(payment, timeout=30)
+
+        _assert_stop_refusal(refused_first.value, code)
+        retries = _retries_on_40001(caplog, "payment.attempt_retry")
+        assert len(retries) == 1, (
+            f"premise: the refusal did not come through the payment's FOR SHARE 40001 and one retry: {retries}"
         )
-        assert not patch.done()
-
-        release_commit.set()
-        result = await asyncio.wait_for(payment, timeout=30)
-        resp = await asyncio.wait_for(patch, timeout=20)
-        assert resp.status_code == 200, resp.text
-
-        assert result.status == "COMMITTED", result
-        assert completed == ["payment", "patch"], completed
-        assert await _debts(factory, world) == {
-            (world.sender.pid, world.receiver.pid): _OPENING + Decimal("10.00")
-        }
-        assert await _transactions(factory, world) == {tx_id: "COMMITTED"}
-        assert await _prepare_locks(factory, world) == 0
+        assert await _debts(factory, world) == {(world.sender.pid, world.receiver.pid): _OPENING}
+        assert await _transactions(factory, world) == {tx_id: "ABORTED"}
         assert await _is_active(factory, world.equivalent.id) is False
 
         # After the PATCH returned, the stop is in force.
@@ -262,60 +370,83 @@ async def test_a_stop_arriving_between_prepare_and_commit_waits_for_the_payment(
         _forget_the_route_cache(world)
 
 
-# ── clearing <-> PATCH: the PATCH's owner lock ───────────────────────────────────────────────
+# ── clearing <-> PATCH: the clearing's `FOR SHARE` against the PATCH's UPDATE ──────────────────
 
 
 @pytest.mark.asyncio
 async def test_a_deactivating_patch_waits_for_a_clearing_that_already_read_the_flag(
     factory, admin_api, monkeypatch
 ) -> None:
-    """Clearing holds its owner lock, has read `True`, and pauses before mutating.
+    """Clearing holds its exclusive equivalent lock, has read `True` `FOR SHARE` and locked its cycle rows,
+    and pauses before mutating (at its auto-clearing policy check, the first step after the cycle's
+    `FOR UPDATE`).
 
-    The PATCH must stay pending until the clearing commits. RED if the PATCH takes no owner lock, if
-    clearing takes none, or if clearing releases its lock before its commit: the PATCH then returns
-    while clearing is paused, and clearing commits money after the operator was told `200`.
+    The PATCH must stay pending until the clearing commits: its `UPDATE` queues on the CLEARING'S
+    transaction (measured in `pg_locks`, blocker named by `pg_blocking_pids`), holding no advisory lock
+    itself. THE ORDER `["clearing", "patch"]` is the order of COMMIT against ANSWER, read at the answer:
+    when the PATCH response arrives, the clearing's transaction is already visible. (Until `T1909` it was
+    read from task completion; the clearing now lets the PATCH go at its commit and still releases its
+    pinned connection afterwards, so task order no longer means commit order.)
+
+    RED if the clearing read the flag without `FOR SHARE` or released the row before its commit: the PATCH
+    then returns while the clearing is paused, and the clearing commits money after the operator was
+    told `200`.
     """
     from tests.conftest import TestingSessionLocal
 
     client, _gate = admin_api
     seed = await _seed_interlock_case()
     clearing_session = TestingSessionLocal()
-    completed: list[str] = []
     paused = asyncio.Event()
     release_clearing = asyncio.Event()
+    clearing_pid: list[int] = []
     clearing = patch = None
     try:
         await _use_serializable(clearing_session)
         service = ClearingService(clearing_session)
-        original_locked_pairs = service._locked_pairs_for_equivalent
+        original_policy = service._cycle_respects_auto_clearing
 
-        async def _pause_before_mutation(equivalent_id):
-            pairs = await original_locked_pairs(equivalent_id)
-            paused.set()
-            await release_clearing.wait()
-            return pairs
+        # Execution only: this stand calls `execute_clearing_with_amount` directly, so detection (the
+        # other caller of the policy check) never runs here.
+        async def _pause_before_mutation(debts):
+            respects = await original_policy(debts)
+            if not paused.is_set():
+                clearing_pid.append(int(await service.session.scalar(text("SELECT pg_backend_pid()"))))
+                paused.set()
+                await release_clearing.wait()
+            return respects
 
-        monkeypatch.setattr(service, "_locked_pairs_for_equivalent", _pause_before_mutation)
+        monkeypatch.setattr(service, "_cycle_respects_auto_clearing", _pause_before_mutation)
+
+        async def _patch_then_look():
+            resp = await _deactivate(client, seed["equivalent_code"])
+            return resp, await _clearing_transactions(factory, seed)
 
         clearing = asyncio.create_task(service.execute_clearing_with_amount(seed["cycle"]))
-        clearing.add_done_callback(lambda _t: completed.append("clearing"))
         await asyncio.wait_for(paused.wait(), timeout=20)
+        assert await _advisory_modes(clearing_pid[0], seed["equivalent_id"]) == ["ExclusiveLock"], (
+            "premise: the parked clearing does not hold its exclusive equivalent lock"
+        )
 
-        patch = asyncio.create_task(_deactivate(client, seed["equivalent_code"]))
-        patch.add_done_callback(lambda _t: completed.append("patch"))
-        assert await _advisory_waiter_exists(), (
-            "the PATCH did not wait on the clearing's owner lock: it can return while clearing is "
-            "still about to commit"
+        patch = asyncio.create_task(_patch_then_look())
+        patch_pid = _assert_row_wait(
+            await _waiters_behind(clearing_pid[0]), what="the PATCH", behind="the clearing"
+        )
+        assert await _advisory_modes(patch_pid, seed["equivalent_id"]) == [], (
+            "the PATCH holds the equivalent advisory lock: since T1909 the row is its whole protocol"
         )
         assert not patch.done()
 
         release_clearing.set()
         amount = await asyncio.wait_for(clearing, timeout=20)
-        resp = await asyncio.wait_for(patch, timeout=20)
+        resp, clearings_at_answer = await asyncio.wait_for(patch, timeout=20)
 
         assert amount == Decimal("30.00000000"), "premise: the clearing did not run to its commit"
         assert resp.status_code == 200, resp.text
-        assert completed == ["clearing", "patch"], completed
+        order = ["clearing", "patch"] if clearings_at_answer == 1 else ["patch", "clearing"]
+        assert order == ["clearing", "patch"], (
+            f"the PATCH answered before the clearing's commit was visible ({clearings_at_answer} CLEARING)"
+        )
         assert await _is_active(factory, seed["equivalent_id"]) is False
     finally:
         release_clearing.set()
@@ -336,11 +467,17 @@ async def test_a_deactivating_patch_waits_for_a_clearing_that_already_read_the_f
 async def test_a_clearing_that_waited_behind_the_patch_refuses_in_its_fresh_snapshot(
     factory, admin_api, caplog
 ) -> None:
-    """The PATCH holds the owner lock with `False` flushed; clearing waits; the PATCH commits.
+    """The PATCH holds the row with `False` flushed; the clearing queues on it; the PATCH commits.
 
-    RED if clearing's post-lock rollback is removed or moved, or its read is taken before it: the
-    clearing then reads `True` from the snapshot it took while waiting, and clears the cycle after the
-    PATCH returned.
+    The clearing takes its exclusive equivalent lock (nobody holds it), rolls back to a fresh snapshot and
+    reads the flag `FOR SHARE` - which queues on the PATCH's transaction (measured: `pg_locks`
+    `transactionid`/`tuple`, blocker = the PATCH's backend, the waiter holding the exclusive equivalent
+    lock - the one order, equivalent lock -> row). The PATCH commits; the clearing's `FOR SHARE` meets
+    40001 (its snapshot predates the commit), its retry owner (`_run_attempts`) runs a fresh attempt, and
+    that attempt reads the stop and refuses.
+
+    RED if the clearing read the flag without `FOR SHARE` (it reads `True` from its stale snapshot and
+    clears the cycle after the PATCH returned), or if a conflict were not retried on a fresh snapshot.
     """
     from tests.conftest import TestingSessionLocal
 
@@ -350,25 +487,35 @@ async def test_a_clearing_that_waited_behind_the_patch_refuses_in_its_fresh_snap
     clearing = patch = None
     try:
         await _use_serializable(clearing_session)
-        gate.armed = True
-        patch = asyncio.create_task(_deactivate(client, seed["equivalent_code"]))
-        await asyncio.wait_for(gate.reached.wait(), timeout=20)
+        with caplog.at_level(logging.WARNING):
+            gate.armed = True
+            patch = asyncio.create_task(_deactivate(client, seed["equivalent_code"]))
+            await asyncio.wait_for(gate.reached.wait(), timeout=20)
 
-        clearing = asyncio.create_task(
-            ClearingService(clearing_session).execute_clearing_with_amount(seed["cycle"])
-        )
-        assert await _advisory_waiter_exists(), (
-            "premise: the clearing did not wait on the PATCH's owner lock"
-        )
-        assert not clearing.done()
+            clearing = asyncio.create_task(
+                ClearingService(clearing_session).execute_clearing_with_amount(seed["cycle"])
+            )
+            clearing_pid = _assert_row_wait(
+                await _waiters_behind(gate.pid), what="the clearing", behind="the PATCH"
+            )
+            assert await _advisory_modes(clearing_pid, seed["equivalent_id"]) == ["ExclusiveLock"], (
+                "the backend queued on the PATCH's row does not hold the clearing's exclusive lock"
+            )
+            assert await _advisory_modes(gate.pid, seed["equivalent_id"]) == [], (
+                "the PATCH holds the equivalent advisory lock: since T1909 the row is its whole protocol"
+            )
+            assert not clearing.done()
 
-        gate.release.set()
-        resp = await asyncio.wait_for(patch, timeout=20)
-        assert resp.status_code == 200, resp.text
+            gate.release.set()
+            resp = await asyncio.wait_for(patch, timeout=20)
+            assert resp.status_code == 200, resp.text
 
-        with pytest.raises(ConflictException) as refused:
-            await asyncio.wait_for(clearing, timeout=20)
+            with pytest.raises(ConflictException) as refused:
+                await asyncio.wait_for(clearing, timeout=20)
         _assert_stop_refusal(refused.value, seed["equivalent_code"])
+        assert _retries_on_40001(caplog, "clearing.attempt_retry"), (
+            "premise: the refusal did not come through the clearing's FOR SHARE 40001 and a fresh attempt"
+        )
 
         async with factory() as verify:
             debts = {
@@ -394,6 +541,8 @@ async def test_a_clearing_that_waited_behind_the_patch_refuses_in_its_fresh_snap
         }, debts
         assert clearing_transactions == 0
         assert not clearing_session.in_transaction()
+        # Not vacuous: the clearing held its exclusive session lock while it waited (asserted above), so
+        # this is the release of that lock by its cleanup - and the cleanup did not invalidate the connection.
         await _no_advisory_lock_is_held(caplog)
     finally:
         gate.release.set()
@@ -437,10 +586,11 @@ async def test_a_tick_that_waited_behind_the_patch_discards_its_attempt_and_the_
 ) -> None:
     """The PATCH-first stale-snapshot race through the real staged payment path.
 
-    The tick's money attempt waits on the PATCH's owner lock with a snapshot from before the PATCH
-    commits. Its staged commit meets `40001` on `FOR SHARE`; the attempt is discarded without
-    publishing; the fresh replay sees the stop and refuses. RED if the commit `FOR SHARE` is removed:
-    the first attempt then commits money after the PATCH returned.
+    The tick's money attempt, holding the equivalent lock shared, queues with its `FOR SHARE` on the
+    PATCH's row (measured: `pg_locks` `transactionid`/`tuple` behind the PATCH's backend) with a
+    snapshot from before the PATCH commits. Its staged commit meets `40001`; the attempt is discarded
+    without publishing; the fresh replay sees the stop and refuses. RED if the commit `FOR SHARE` is
+    removed: the first attempt then commits money after the PATCH returned.
     """
     client, gate = admin_api
     world = await _seed(factory)
@@ -461,8 +611,13 @@ async def test_a_tick_that_waited_behind_the_patch_discards_its_attempt_and_the_
             tick = asyncio.create_task(
                 asyncio.wait_for(runner.tick_real_mode(run.run_id), timeout=90.0)
             )
-            assert await _advisory_waiter_exists(), (
-                "premise: the tick's money attempt did not wait on the PATCH's owner lock"
+            tick_pid = _assert_row_wait(
+                await _waiters_behind(gate.pid, timeout=30.0),
+                what="the tick's money attempt",
+                behind="the PATCH",
+            )
+            assert await _advisory_modes(tick_pid, world.equivalent.id) == ["ShareLock"], (
+                "the tick's money attempt queued on the row without holding the equivalent lock shared"
             )
             assert not tick.done()
 
@@ -486,7 +641,6 @@ async def test_a_tick_that_waited_behind_the_patch_discards_its_attempt_and_the_
 
         assert await _debts(factory, world) == {(world.sender.pid, world.receiver.pid): _OPENING}
         assert await _transactions(factory, world) == {}
-        assert await _prepare_locks(factory, world) == 0
         # Nothing of the discarded attempt is published or counted; the replay's refusal is a rejection
         # of load, not an error of the run.
         assert sse.published("tx.updated") == 0
@@ -561,7 +715,6 @@ async def test_a_commit_guard_conflict_on_every_attempt_exhausts_the_budget_with
         assert len(exhausted) == 1, exhausted
         assert await _debts(factory, world) == {(world.sender.pid, world.receiver.pid): _OPENING}
         assert await _transactions(factory, world) == {}
-        assert await _prepare_locks(factory, world) == 0
         assert sse.published("tx.updated") == 0
         assert run.errors_total == 0
         assert run.last_error["code"] == "REAL_MODE_MONEY_CONFLICT_UNRESOLVED"
@@ -590,9 +743,10 @@ async def test_a_patch_arriving_while_a_payment_holds_the_stop_check_waits_for_t
 ) -> None:
     """Payment first, PATCH second: the payment has passed its commit check and holds its locks.
 
-    The deactivating PATCH must wait - measured in `pg_locks`, not slept - and return only after the
-    payment has committed; the next payment is then refused. Either outcome of the cutoff is allowed,
-    and this is the "money commits before the PATCH returns" one.
+    The deactivating PATCH must wait - measured in `pg_locks`, not slept: its `UPDATE` queues on the
+    PAYMENT'S transaction (the payment's `FOR SHARE`), and it holds no advisory lock - and return only
+    after the payment has committed; the next payment is then refused. Either outcome of the cutoff is
+    allowed, and this is the "money commits before the PATCH returns" one.
     """
     client, _gate = admin_api
     world = await _seed(factory)
@@ -602,11 +756,13 @@ async def test_a_patch_arriving_while_a_payment_holds_the_stop_check_waits_for_t
 
     checked = asyncio.Event()
     release_payment = asyncio.Event()
+    payment_pid: list[int] = []
     original_check = MoneyBoundary.refuse_inactive_equivalents
 
     async def _check_then_hold(self, equivalent_ids, *, row_lock):
         await original_check(self, equivalent_ids, row_lock=row_lock)
         if row_lock and not checked.is_set():
+            payment_pid.append(int(await self.session.scalar(text("SELECT pg_backend_pid()"))))
             checked.set()
             await release_payment.wait()
 
@@ -630,10 +786,18 @@ async def test_a_patch_arriving_while_a_payment_holds_the_stop_check_waits_for_t
         payment.add_done_callback(lambda _t: completed.append("payment"))
         await asyncio.wait_for(checked.wait(), timeout=20)
 
+        assert await _advisory_modes(payment_pid[0], world.equivalent.id) == ["ShareLock"], (
+            "premise: the parked payment does not hold the equivalent lock shared"
+        )
         patch = asyncio.create_task(_deactivate(client, code))
         patch.add_done_callback(lambda _t: completed.append("patch"))
-        assert await _advisory_waiter_exists(), (
-            "the PATCH did not wait for the payment that had already passed its stop check"
+        patch_pid = _assert_row_wait(
+            await _waiters_behind(payment_pid[0]),
+            what="the PATCH",
+            behind="the payment that had already passed its stop check",
+        )
+        assert await _advisory_modes(patch_pid, world.equivalent.id) == [], (
+            "the PATCH holds the equivalent advisory lock: since T1909 the row is its whole protocol"
         )
         assert not patch.done()
 
@@ -672,7 +836,8 @@ async def test_a_patch_arriving_while_a_payment_holds_the_stop_check_waits_for_t
 async def test_an_inject_that_waited_behind_the_patch_is_refused_and_writes_nothing(
     factory, admin_api, monkeypatch, caplog
 ) -> None:
-    """The inject's owner transaction waits on the PATCH's owner lock with a snapshot from before it.
+    """The inject's owner transaction, holding the equivalent lock shared, queues with its `FOR SHARE`
+    check on the PATCH's row (measured) with a snapshot from before the PATCH commits.
 
     Its `FOR SHARE` check then meets 40001, the inject owner retries on a fresh snapshot, and the
     retry refuses it: consumed as a rejection, no debt, no envelope. RED if the check at the inject owner
@@ -718,8 +883,11 @@ async def test_an_inject_that_waited_behind_the_patch_is_refused_and_writes_noth
             await asyncio.wait_for(gate.reached.wait(), timeout=20)
 
             task = asyncio.create_task(_inject())
-            assert await _advisory_waiter_exists(), (
-                "premise: the inject did not wait on the PATCH's owner lock"
+            inject_pid = _assert_row_wait(
+                await _waiters_behind(gate.pid, timeout=30.0), what="the inject", behind="the PATCH"
+            )
+            assert await _advisory_modes(inject_pid, world.equivalent.id) == ["ShareLock"], (
+                "the inject queued on the row without holding the equivalent lock shared"
             )
             assert not task.done()
 

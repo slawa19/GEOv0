@@ -5,7 +5,8 @@ import uuid
 from decimal import Decimal, InvalidOperation
 from typing import AbstractSet, Dict, List, Set
 
-from sqlalchemy import bindparam, select, and_, func, text
+from sqlalchemy import bindparam, select, and_, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import (
     AsyncConnection,
     AsyncEngine,
@@ -15,7 +16,6 @@ from sqlalchemy.ext.asyncio import (
 
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
-from app.db.models.prepare_lock import PrepareLock
 from app.db.models.transaction import Transaction
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
@@ -132,10 +132,10 @@ class ClearingService:
         already read `active`; and a clearing that reads after such an update committed meets a row
         changed since its snapshot - 40001 - and its retry (`_run_attempts`) reads the stop afresh and
         refuses. Until stage 5 this was a plain read bound by the equivalent owner lock the PATCH also
-        took; the owner lock is what stage 5 may remove, and SERIALIZABLE alone does not give this
-        order of completion (it may serialise "the clearing read `active` -> the PATCH answered -> the
-        clearing committed"). Order: the session owner lock (while it exists) -> this row -> the debt
-        rows, the same as the payment's.
+        took; since stage 5 (`T1909`) the PATCH takes no advisory lock, and SERIALIZABLE alone does not
+        give this order of completion (it may serialise "the clearing read `active` -> the PATCH answered
+        -> the clearing committed"). Order: the clearing's exclusive equivalent lock -> this row -> the
+        debt rows, the same as the payment's shared lock -> row -> debts.
         """
         try:
             await MoneyBoundary(self.session).refuse_inactive_equivalents(
@@ -152,6 +152,38 @@ class ClearingService:
                 await self._rollback_skipped_execution()
                 raise _ClearingAttemptConflict(exc) from exc
             await self._raise_unexpected_execution(exc)
+
+    async def _end_attempt_on_error(
+        self,
+        exc: Exception,
+        execution_tx_id: str,
+        *,
+        allowed_participant_pids: "AbstractSet[str] | None" = None,
+    ) -> Decimal:
+        """THE ONE CLASSIFIER of a failure inside a clearing attempt (019 stage 5, `T1909` step 3).
+
+        A transaction-level conflict (40001/40P01, `_is_retryable_concurrency_error`) anywhere in the
+        attempt ends it the same way: a committed occurrence of this execution, if the resolver finds
+        one, is the answer; otherwise the attempt is rolled back (by the resolver) and
+        `_ClearingAttemptConflict` carries the ORIGINAL error, with its SQLSTATE, to the retry owner
+        `_run_attempts`. Anything else is the sanitized unexpected failure (`E010`). Until `T1909` only
+        four call sites converted conflicts, and the policy, metadata and net-position reads went
+        straight to `E010` (5a review, P2). An unresolved COMMIT error is a conflict only when PostgreSQL
+        reported one (a rollback it performed), so an unknown commit is never retried here.
+        """
+        if self._is_retryable_concurrency_error(exc):
+            try:
+                replay_amount = await self._reconcile_committed_execution(
+                    execution_tx_id,
+                    allowed_participant_pids=allowed_participant_pids,
+                )
+            except Exception as reconciliation_error:
+                await self._raise_unexpected_execution(reconciliation_error)
+            if replay_amount is not None:
+                return replay_amount
+            raise _ClearingAttemptConflict(exc) from exc
+        await self._raise_unexpected_execution(exc)
+        raise AssertionError("unreachable")  # pragma: no cover - the call above always raises
 
     @staticmethod
     async def _drain_task(task: asyncio.Task) -> asyncio.CancelledError | None:
@@ -211,7 +243,7 @@ class ClearingService:
                 await work_session.rollback()
                 unlocked = await MoneyBoundary(
                     work_session
-                ).release_session_equivalent_owner_lock(equivalent_id)
+                ).release_exclusive_equivalent_session_lock(equivalent_id)
                 if lock_was_acquired and not unlocked:
                     logger.warning(
                         "event=clearing.interlock_unlock_unconfirmed"
@@ -1038,33 +1070,6 @@ class ClearingService:
 
         return filtered
 
-    async def _locked_pairs_for_equivalent(
-        self, equivalent_id: uuid.UUID
-    ) -> Set[frozenset[uuid.UUID]]:
-        """Return participant pairs that must not be touched by clearing.
-
-        For MVP safety we treat any active prepared payment flow `from->to` as a lock on the unordered
-        participant pair {from, to}. Clearing must not modify debts between these participants.
-        """
-        stmt = select(PrepareLock).where(PrepareLock.expires_at > func.now())
-        locks = (await self.session.execute(stmt)).scalars().all()
-
-        locked: Set[frozenset[uuid.UUID]] = set()
-        for lock in locks:
-            for flow in (lock.effects or {}).get("flows", []):
-                try:
-                    eq_id = uuid.UUID(str(flow.get("equivalent")))
-                    if eq_id != equivalent_id:
-                        continue
-                    from_id = uuid.UUID(str(flow.get("from")))
-                    to_id = uuid.UUID(str(flow.get("to")))
-                except Exception:
-                    continue
-
-                locked.add(frozenset({from_id, to_id}))
-
-        return locked
-
     async def find_cycles(
         self,
         equivalent_code: str,
@@ -1168,7 +1173,6 @@ class ClearingService:
         sql_cycles: List[List[Dict]] = []
         use_sql = isinstance(self.session, AsyncSession)
         if use_sql and max_depth >= 3:
-            locked_pairs = await self._locked_pairs_for_equivalent(equivalent.id)
             cycles: List[List[Dict]] = []
             try:
                 cycles = await self.find_triangles_sql(
@@ -1176,22 +1180,6 @@ class ClearingService:
                     allowed_participant_ids=allowed_ids,
                     precision=equivalent.precision,
                 )
-                if cycles and locked_pairs:
-                    filtered: List[List[Dict]] = []
-                    for cycle in cycles:
-                        skip = False
-                        for edge in cycle:
-                            try:
-                                debtor_id = uuid.UUID(str(edge.get("debtor")))
-                                creditor_id = uuid.UUID(str(edge.get("creditor")))
-                            except Exception:
-                                continue
-                            if frozenset({debtor_id, creditor_id}) in locked_pairs:
-                                skip = True
-                                break
-                        if not skip:
-                            filtered.append(cycle)
-                    cycles = filtered
 
                 # BOTH lengths, unconditionally, whenever the depth asks for both (T1210-bis
                 # finding A).  The previous gate ran quadrangles only when the filtered
@@ -1208,22 +1196,6 @@ class ClearingService:
                         allowed_participant_ids=allowed_ids,
                         precision=equivalent.precision,
                     )
-                    if cycles and locked_pairs:
-                        filtered = []
-                        for cycle in cycles:
-                            skip = False
-                            for edge in cycle:
-                                try:
-                                    debtor_id = uuid.UUID(str(edge.get("debtor")))
-                                    creditor_id = uuid.UUID(str(edge.get("creditor")))
-                                except Exception:
-                                    continue
-                                if frozenset({debtor_id, creditor_id}) in locked_pairs:
-                                    skip = True
-                                    break
-                            if not skip:
-                                filtered.append(cycle)
-                        cycles = filtered
 
                 cycles = self._deduplicate_cycles(cycles)
 
@@ -1305,15 +1277,6 @@ class ClearingService:
             conditions.append(Debt.creditor_id.in_(allowed_ids))
         stmt = select(Debt).where(and_(*conditions))
         all_debts = (await self.session.execute(stmt)).scalars().all()
-
-        # Exclude edges that are involved in active prepared payments.
-        locked_pairs = await self._locked_pairs_for_equivalent(equivalent.id)
-        if locked_pairs:
-            all_debts = [
-                d
-                for d in all_debts
-                if frozenset({d.debtor_id, d.creditor_id}) not in locked_pairs
-            ]
 
         adjacency: Dict[uuid.UUID, List[Debt]] = {}
         for d in all_debts:
@@ -1453,7 +1416,8 @@ class ClearingService:
         # MERGE, not pick.  Reached only when `max_depth` exceeds the SQL detectors' reach, so
         # `sql_cycles` is a partial answer by construction and the DFS one is partial too (it
         # abandons a branch at its first cycle and stops at fifty).  Both sides have already
-        # been through the lock filter and `_filter_cycles_by_auto_clearing_policy_sql`, so the
+        # been through `_filter_cycles_by_auto_clearing_policy_sql` (the reservation filter left with
+        # `prepare_locks`, 019 stage 5), so the
         # union needs no further admission check - only de-duplication, which is by debt-id set
         # and therefore blind to which detector produced the edge, and to the order the edges
         # come in.  `sql_cycles` is empty whenever the SQL path found nothing or raised -
@@ -1504,8 +1468,9 @@ class ClearingService:
         (`expunge_all`), and the next attempt re-reads the committed-occurrence row, the stop/hold, the
         cycle rows `FOR UPDATE` and their amounts - never a savepoint rollback, which would keep the
         stale SERIALIZABLE snapshot. On the PostgreSQL interlock path the attempts share the pinned
-        connection and its session lock (stage 5, part b, `T1909`, decides that lock); each attempt is
-        still its own transaction and snapshot.
+        connection and its EXCLUSIVE equivalent session lock (019 stage 5, `T1909`), held from before the
+        first attempt's snapshot through the last attempt's commit resolution; each attempt is still its
+        own transaction and snapshot.
 
         THE BUDGET is the one a payment has (no new setting): at most `COMMIT_RETRY_ATTEMPTS` attempts,
         with the same exponential backoff and jitter (`COMMIT_RETRY_BASE_DELAY_MS`,
@@ -1573,7 +1538,12 @@ class ClearingService:
         *,
         allowed_participant_pids: "AbstractSet[str] | None" = None,
     ) -> Decimal | None:
-        """Execute one clearing attempt inside the shared payment owner domain.
+        """Execute one clearing under the EXCLUSIVE equivalent lock, with its retry owner (019 stage 5, `T1909`).
+
+        The exclusive lock is taken on a pinned connection BEFORE the authoritative snapshot - it waits for
+        the payments, staged phases and injects holding the lock shared - then the acquisition transaction
+        is rolled back so the first attempt's snapshot is newer than everything it waited for, and the lock is
+        held through every attempt and released (or the connection invalidated) at the end.
 
         `allowed_participant_pids` is the run perimeter (2026-08-22 / p010, `F-010-3`).  It is
         carried through EVERY path into `_execute_clearing_with_amount` on purpose: a single
@@ -1727,7 +1697,7 @@ class ClearingService:
             try:
                 await MoneyBoundary(
                     work_session
-                ).acquire_session_equivalent_owner_lock(equivalent_id)
+                ).acquire_exclusive_equivalent_session_lock(equivalent_id)
                 lock_was_acquired = True
             except Exception as exc:
                 if "55P03" in self._postgres_error_codes(exc):
@@ -1837,20 +1807,9 @@ class ClearingService:
                 execution_tx_id, allowed_participant_pids=allowed_participant_pids
             )
         except Exception as exc:
-            if self._is_retryable_concurrency_error(exc):
-                try:
-                    replay_amount = await self._reconcile_committed_execution(
-                        execution_tx_id,
-                        allowed_participant_pids=allowed_participant_pids,
-                    )
-                except Exception as reconciliation_error:
-                    await self._raise_unexpected_execution(reconciliation_error)
-                if replay_amount is not None:
-                    return replay_amount
-                # No committed occurrence answers the conflict: the attempt is rolled back (by the
-                # resolver) and the retry owner runs the whole execution again (`_run_attempts`).
-                raise _ClearingAttemptConflict(exc) from exc
-            await self._raise_unexpected_execution(exc)
+            return await self._end_attempt_on_error(
+                exc, execution_tx_id, allowed_participant_pids=allowed_participant_pids
+            )
         if replay_amount is not None:
             await self._rollback_skipped_execution()
             return replay_amount
@@ -1864,11 +1823,12 @@ class ClearingService:
             await self._rollback_skipped_execution()
             raise
         except Exception as exc:
-            await self._raise_unexpected_execution(exc)
+            return await self._end_attempt_on_error(
+                exc, execution_tx_id, allowed_participant_pids=allowed_participant_pids
+            )
 
         if interlocked_equivalent_id is not None:
-            # T1544, the binding read: this session rolled back after taking the owner lock, so its
-            # snapshot is newer than any deactivating PATCH that held that lock. After the
+            # T1544, the binding read, `FOR SHARE` through the commit (see the method). After the
             # committed-execution shortcut above (an already-durable clearing stays reported), before
             # the Debt rows are locked and before any new execution work.
             await self._refuse_if_equivalent_inactive({interlocked_equivalent_id})
@@ -1884,20 +1844,9 @@ class ClearingService:
                 .all()
             )
         except Exception as exc:
-            if self._is_retryable_concurrency_error(exc):
-                try:
-                    replay_amount = await self._reconcile_committed_execution(
-                        execution_tx_id,
-                        allowed_participant_pids=allowed_participant_pids,
-                    )
-                except Exception as reconciliation_error:
-                    await self._raise_unexpected_execution(reconciliation_error)
-                if replay_amount is not None:
-                    return replay_amount
-                # No committed occurrence answers the conflict: the attempt is rolled back (by the
-                # resolver) and the retry owner runs the whole execution again (`_run_attempts`).
-                raise _ClearingAttemptConflict(exc) from exc
-            await self._raise_unexpected_execution(exc)
+            return await self._end_attempt_on_error(
+                exc, execution_tx_id, allowed_participant_pids=allowed_participant_pids
+            )
 
         if len(debts) != len(debt_ids):
             # A concurrent owner may have committed this exact occurrence while
@@ -1908,7 +1857,9 @@ class ClearingService:
                     allowed_participant_pids=allowed_participant_pids,
                 )
             except Exception as exc:
-                await self._raise_unexpected_execution(exc)
+                return await self._end_attempt_on_error(
+                    exc, execution_tx_id, allowed_participant_pids=allowed_participant_pids
+                )
             if replay_amount is not None:
                 await self._rollback_skipped_execution()
                 return replay_amount
@@ -1965,35 +1916,13 @@ class ClearingService:
             clear_amount,
         )
 
-        # Reject cycles that touch any edge reserved by active PrepareLocks.
-        try:
-            locked_pairs = await self._locked_pairs_for_equivalent(
-                debts[0].equivalent_id
-            )
-        except Exception as exc:
-            await self._raise_unexpected_execution(exc)
-        if locked_pairs:
-            for d in debts:
-                pair = frozenset({d.debtor_id, d.creditor_id})
-                if pair in locked_pairs:
-                    logger.info("event=clearing.skip_locked cycle_len=%s", len(cycle))
-                    try:
-                        CLEARING_EVENTS_TOTAL.labels(
-                            event="execute", result="skip_locked"
-                        ).inc()
-                    except Exception:
-                        logger.debug(
-                            "event=clearing.metrics_inc_failed metric=CLEARING_EVENTS_TOTAL label=execute.skip_locked",
-                            exc_info=True,
-                        )
-                    await self._rollback_skipped_execution()
-                    return None
-
         # FIX-017: enforce auto_clearing policy on every edge in the cycle.
         try:
             respects_auto_clearing = await self._cycle_respects_auto_clearing(debts)
         except Exception as exc:
-            await self._raise_unexpected_execution(exc)
+            return await self._end_attempt_on_error(
+                exc, execution_tx_id, allowed_participant_pids=allowed_participant_pids
+            )
         if not respects_auto_clearing:
             logger.info("event=clearing.skip_policy cycle_len=%s", len(cycle))
             try:
@@ -2038,7 +1967,9 @@ class ClearingService:
                 )
                 pid_by_id = {p.id: p.pid for p in participants}
         except Exception as exc:
-            await self._raise_unexpected_execution(exc)
+            return await self._end_attempt_on_error(
+                exc, execution_tx_id, allowed_participant_pids=allowed_participant_pids
+            )
 
         # 012, second round.  THE PAYLOAD AMOUNT IS A REPRESENTATION, NOT A STORAGE FORMAT, and
         # that was checked before it was changed rather than assumed.  `transactions.payload` is
@@ -2098,7 +2029,9 @@ class ClearingService:
                     pid, debts[0].equivalent_id
                 )
         except Exception as exc:
-            await self._raise_unexpected_execution(exc)
+            return await self._end_attempt_on_error(
+                exc, execution_tx_id, allowed_participant_pids=allowed_participant_pids
+            )
 
         checkpoint_before = None
         try:
@@ -2106,7 +2039,14 @@ class ClearingService:
                 self.session,
                 equivalent_id=debts[0].equivalent_id,
             )
-        except Exception:
+        except Exception as exc:
+            if isinstance(exc, DBAPIError):
+                # A database error has aborted the transaction: swallowing it would lose its SQLSTATE
+                # behind the next statement's 25P02 (`T1909` step 3). Best effort stays best effort only
+                # for a failure that leaves the transaction usable.
+                return await self._end_attempt_on_error(
+                    exc, execution_tx_id, allowed_participant_pids=allowed_participant_pids
+                )
             logger.warning(
                 "event=clearing.checkpoint_before_failed",
                 exc_info=True,
@@ -2197,7 +2137,9 @@ class ClearingService:
                         self.session,
                         equivalent_id=debts[0].equivalent_id,
                     )
-                except Exception:
+                except Exception as exc:
+                    if isinstance(exc, DBAPIError):
+                        raise  # the transaction is aborted: the handler below classifies it (`T1909`)
                     logger.warning(
                         "event=clearing.checkpoint_after_failed",
                         exc_info=True,
@@ -2303,20 +2245,9 @@ class ClearingService:
             return clear_amount
 
         except Exception as exc:
-            if self._is_retryable_concurrency_error(exc):
-                try:
-                    replay_amount = await self._reconcile_committed_execution(
-                        execution_tx_id,
-                        allowed_participant_pids=allowed_participant_pids,
-                    )
-                except Exception as reconciliation_error:
-                    await self._raise_unexpected_execution(reconciliation_error)
-                if replay_amount is not None:
-                    return replay_amount
-                # No committed occurrence answers the conflict: the attempt is rolled back (by the
-                # resolver) and the retry owner runs the whole execution again (`_run_attempts`).
-                raise _ClearingAttemptConflict(exc) from exc
-            await self._raise_unexpected_execution(exc)
+            return await self._end_attempt_on_error(
+                exc, execution_tx_id, allowed_participant_pids=allowed_participant_pids
+            )
 
     async def auto_clear(self, equivalent_code: str, *, max_depth: int = 6) -> int:
         """

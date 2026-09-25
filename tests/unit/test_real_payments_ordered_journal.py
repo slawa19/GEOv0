@@ -40,7 +40,7 @@ def _no_database_owner_locks(monkeypatch):
         return None
 
     monkeypatch.setattr(
-        PaymentService, "acquire_staged_equivalent_owner_locks", _no_owner_locks
+        PaymentService, "acquire_shared_equivalent_locks", _no_owner_locks
     )
 
 
@@ -218,7 +218,7 @@ async def test_executor_preacquires_complete_sorted_equivalent_owner_set(
 
     monkeypatch.setattr(
         PaymentService,
-        "acquire_staged_equivalent_owner_locks",
+        "acquire_shared_equivalent_locks",
         _acquire_owner,
         raising=False,
     )

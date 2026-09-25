@@ -1,5 +1,4 @@
 import uuid
-from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -42,13 +41,6 @@ class _Debt:
         self.amount = amount
 
 
-class _Lock:
-    def __init__(self, participant_id: uuid.UUID, expires_at: datetime, effects: dict):
-        self.participant_id = participant_id
-        self.expires_at = expires_at
-        self.effects = effects
-
-
 class _ScalarResult:
     def __init__(self, items):
         self._items = items
@@ -83,15 +75,16 @@ class _ExecResult:
 
 
 class _Session:
-    def __init__(self, *, equivalent, trustlines, debts, locks, participants):
+    def __init__(self, *, equivalent, trustlines, debts, participants):
         self._equivalent = equivalent
         self._trustlines = trustlines
         self._debts = debts
-        self._locks = locks
         self._participants = participants
 
     async def execute(self, stmt):
-        # Router executes three SELECTs (trustlines, debts, prepare locks). We route by model name.
+        # Router reads equivalents, trustlines, debts and participants. We route by model name. Any
+        # other query - in particular a read of the removed `prepare_locks` reservations (programme
+        # 019 stage 5, T1909) - is refused below instead of being answered.
         froms = getattr(stmt, "_from_obj", None) or []
         model_name = None
         if froms:
@@ -104,8 +97,6 @@ class _Session:
             return _ExecResult(self._trustlines)
         if model_name == "debts" or "FROM debts" in text:
             return _ExecResult(self._debts)
-        if "prepare_locks" in text or "FROM prepare_locks" in text:
-            return _ExecResult(self._locks)
         if "FROM participants" in text:
             return _ExecResult(self._participants)
 
@@ -113,7 +104,10 @@ class _Session:
 
 
 @pytest.mark.asyncio
-async def test_build_graph_subtracts_reserved_capacity_and_respects_policy():
+async def test_build_graph_capacity_is_the_limit_and_respects_policy():
+    """Edge capacity is `limit - debt + reverse debt`; since programme 019 stage 5 (T1909) no
+    reservation is subtracted, because REST payments hold none. The reserved-capacity half this test
+    once carried (100 - 30 = 70) was the removed `prepare_locks` contract."""
     a = uuid.uuid4()
     b = uuid.uuid4()
     c = uuid.uuid4()
@@ -139,19 +133,6 @@ async def test_build_graph_subtracts_reserved_capacity_and_respects_policy():
     # No debts.
     debts = []
 
-    # Active lock reserves 30 on flow A->B.
-    effects = {
-        "flows": [
-            {
-                "from": str(a),
-                "to": str(b),
-                "equivalent": str(equivalent.id),
-                "amount": "30",
-            }
-        ]
-    }
-    lock = _Lock(participant_id=a, expires_at=datetime.now(timezone.utc) + timedelta(seconds=60), effects=effects)
-
     participants = [
         _ParticipantRow(a, "A"),
         _ParticipantRow(b, "B"),
@@ -161,7 +142,6 @@ async def test_build_graph_subtracts_reserved_capacity_and_respects_policy():
         equivalent=equivalent,
         trustlines=[tl_b_a, tl_c_b],
         debts=debts,
-        locks=[lock],
         participants=participants,
     )
 
@@ -169,8 +149,8 @@ async def test_build_graph_subtracts_reserved_capacity_and_respects_policy():
     await router.build_graph(code)
     graph = router.graph
 
-    # Capacity reduced by reserved amount.
-    assert graph["A"]["B"] == Decimal("70")
+    # Capacity is the whole limit: no debts, and nothing reserved.
+    assert graph["A"]["B"] == Decimal("100")
 
     # Intermediate policy: node C can_be_intermediate=False for edge B->C?
     # Given TL C->B enables edge B->C. That edge should exist, but path A->B->C should be disallowed

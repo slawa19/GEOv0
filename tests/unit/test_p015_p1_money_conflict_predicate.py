@@ -160,6 +160,12 @@ def test_a_non_transient_sqlstate_is_not_a_money_conflict() -> None:
     (`engine.py:458`). Nothing that broad belongs here: the money boundary cannot tell which unique
     violation it is looking at, and a unique violation that is replayed blindly is a write the
     database has already refused.
+
+    019 stage 5 (`T1909`, precondition 1): the predicate now passes a 23505 whose STRUCTURED constraint
+    name is `uq_debts_debtor_creditor_equivalent` (`is_debt_pair_collision`; the concurrent-insert
+    reproducers are `tests/integration/test_p019_debt_pair_insert_race_is_retried_postgres.py`). This
+    error names no constraint, so it is still refused - which is the counter-check that the new branch
+    reads the name and not the code.
     """
 
     class _Orig(Exception):
