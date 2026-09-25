@@ -58,6 +58,20 @@ class Edge:
     consent: object = True  # the trust line's `policy.auto_clearing` value
 
 
+MISSING_KEY = "<p020:missing-key>"
+NULL_POLICY = "<p020:null-policy>"
+
+
+def policy_for(consent: object):
+    """The trust line's `policy` for an `Edge.consent`: a value, a policy without the key, or no policy."""
+
+    if consent == MISSING_KEY:
+        return {"can_be_intermediate": True}
+    if consent == NULL_POLICY:
+        return None
+    return {"auto_clearing": consent}
+
+
 def ring(pids: Sequence[str], amounts: Sequence[str], ids: Sequence[uuid.UUID]) -> list[Edge]:
     """A closed cycle pids[0] -> pids[1] -> ... -> pids[0]; one amount and one debt id per edge."""
 
@@ -114,7 +128,7 @@ async def seed_graph(session, code: str, edges: Sequence[Edge], *, precision: in
                 to_participant_id=participant_uuid(e.debtor),
                 equivalent_id=eq.id,
                 limit=Decimal("1000000"),
-                policy={"auto_clearing": e.consent},
+                policy=policy_for(e.consent),
                 status=e.status,
             )
         )
