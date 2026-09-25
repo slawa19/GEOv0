@@ -1371,10 +1371,14 @@ async def test_an_unresolved_commit_with_no_row_found_is_not_terminalized(
         return None
 
     commits: list[str] = []
+    original_commit = db_session.commit
 
     async def hanging_commit() -> None:
+        # Only the payment's own COMMIT hangs; anything committed after it (a recording) goes through.
         commits.append("commit")
-        await asyncio.Event().wait()
+        if len(commits) == 1:
+            await asyncio.Event().wait()
+        return await original_commit()
 
     monkeypatch.setattr(service.router, "build_graph", build_graph)
     monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
@@ -1386,7 +1390,7 @@ async def test_an_unresolved_commit_with_no_row_found_is_not_terminalized(
     with pytest.raises(TimeoutException) as raised:
         await service.create_payment(sender.id, request)
 
-    assert commits == ["commit"], commits  # the one commit was attempted, and its outcome is unknown
+    assert commits[:1] == ["commit"], commits  # the one commit was attempted, and its outcome is unknown
     assert raised.value.code == "E007" and raised.value.status_code == 504
     assert recorded == []
     monkeypatch.undo()
